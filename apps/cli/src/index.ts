@@ -42,7 +42,7 @@ import { runSpendCommand } from "./spend.js";
 import { isTagCommand, tagResourceHelp } from "./tags.js";
 import { isTaskCommand, runTaskCommand, taskHelp } from "./tasks.js";
 import { runTeamCommand, teamHelp } from "./teams.js";
-import { terminalText } from "./terminal-text.js";
+import { terminalLines, terminalText } from "./terminal-text.js";
 import { runDownCommand, runLogsCommand, runUpCommand } from "./up.js";
 import { resetVersionSkewWarning, SUPERTAG_VERSION } from "./version.js";
 import { runVersionCommand } from "./version-command.js";
@@ -750,7 +750,7 @@ export function formatCliFailure(
         (flag) => !commandArgs.some((arg) => arg === flag || arg.startsWith(`${flag}=`)),
       );
       const detail = !usageError
-        ? terminalText(message)
+        ? terminalLines(message)
         : missing.length > 0
           ? `Missing required flag${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}`
           : "Invalid command arguments";
@@ -760,7 +760,8 @@ export function formatCliFailure(
       return "SuperTag failed: Invalid command arguments\nRun supertag --help for available commands.\n";
     }
   }
-  return `SuperTag failed: ${terminalText(message)}\n`;
+  // JSON callers read one line from stderr; people read the message's own line breaks.
+  return `SuperTag failed: ${json ? terminalText(message) : terminalLines(message)}\n`;
 }
 
 export function cliFailureExitCode(error: unknown): number {

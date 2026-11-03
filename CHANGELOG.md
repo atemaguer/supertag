@@ -20,6 +20,7 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- Multi-line CLI errors, such as invalid manifests and `supertag.yaml` problems, keep their line breaks instead of printing as one line; `--output json` still prints one line. `supertag init` without a harness lists install and sign-in steps with a link to the sign-in docs.
 - `supertag apply` and `diff` now apply a Workspace's `mcp`, `skills`, and `skillCatalog`; before, they reported the manifest as configured and silently dropped those fields.
 - The Cursor harness redacts encoded keys and MCP secrets before truncation, strips control and invisible format characters, leaves split workspace inputs unaltered except for exact key redaction, keeps late runner errors, rejects unknown MCP events, and reports a rejected `CURSOR_API_KEY` consistently.
 

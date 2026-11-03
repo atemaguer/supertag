@@ -31,6 +31,18 @@ describe("newcomer-facing CLI output", () => {
     expect(cliFailureExitCode(error)).toBe(130);
   });
 
+  it("keeps a multi-line failure's line breaks for people and one line for JSON", () => {
+    const error = new Error(
+      "Invalid manifests:\n  org.yaml document 1: bad\u001b[31m\n  org.yaml document 2: bad",
+    );
+    expect(formatCliFailure(error, ["apply"])).toBe(
+      "SuperTag failed: Invalid manifests:\n  org.yaml document 1: bad [31m\n  org.yaml document 2: bad\n",
+    );
+    expect(formatCliFailure(error, ["apply", "--output", "json"])).toBe(
+      "SuperTag failed: Invalid manifests:   org.yaml document 1: bad [31m   org.yaml document 2: bad\n",
+    );
+  });
+
   it("preserves ordinary CLI failure details", () => {
     const error = new Error("No Control Plane is available");
 

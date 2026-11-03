@@ -10,6 +10,11 @@ export function terminalText(value: string): string {
     .replace(/(\p{M}{2})\p{M}+/gu, "$1 ");
 }
 
+/** Filter each line for a terminal but keep the line breaks, so multi-line messages stay readable. */
+export function terminalLines(value: string): string {
+  return value.split(/\r?\n/u).map(terminalText).join("\n");
+}
+
 /** Preserve renderer-owned JSON indentation while filtering values for a terminal. */
 export function terminalJson(value: unknown, human: boolean): string {
   const json = JSON.stringify(value, null, 2);

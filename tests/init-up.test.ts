@@ -277,7 +277,7 @@ describe("supertag init", () => {
   it("checks for a harness first and changes nothing when none is installed", async () => {
     const root = await repository(context, "app");
     await expect(initialize({ cwd: root, yes: true })).rejects.toThrow(
-      /No harness is available[\s\S]*npm install -g @anthropic-ai\/claude-code[\s\S]*npm install -g @openai\/codex[\s\S]*Cursor {7}Set CURSOR_API_KEY[\s\S]*npm install -g opencode-ai[\s\S]*Then run supertag init again\./,
+      /No harness is available[\s\S]*npm install -g @anthropic-ai\/claude-code[\s\S]*npm install -g @openai\/codex[\s\S]*Cursor {7}Add CURSOR_API_KEY[\s\S]*npm install -g opencode-ai[\s\S]*Then run supertag init again\./,
     );
     // Even before it checks for a terminal.
     await expect(initialize({ cwd: root, interactive: false })).rejects.toThrow(

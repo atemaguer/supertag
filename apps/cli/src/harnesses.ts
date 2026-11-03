@@ -140,14 +140,17 @@ async function isCursorAgentAlias(path: string | undefined): Promise<boolean> {
   return version !== undefined && cursorName(version.stdout);
 }
 
+const SIGN_IN_DOCS =
+  "https://github.com/atemaguer/supertag/blob/main/docs/operations/requirements.md#choose-and-sign-in-to-a-harness";
+
 /** The message shown when no harness is available. */
 export function noHarnessMessage(): string {
   return `No harness is available on this machine. SuperTag runs Tasks through Claude Code, Codex, Cursor, or OpenCode.
-Install or configure one, then run this command again:
-  Claude Code  npm install -g @anthropic-ai/claude-code
-  Codex        npm install -g @openai/codex
-  Cursor       Set CURSOR_API_KEY in the Worker Host environment
-  OpenCode     npm install -g opencode-ai
-${HARNESSES.map(harnessSignInInstructions).join("\n")}
-SuperTag looks for claude, codex, and opencode on PATH. Cursor is detected through CURSOR_API_KEY, cursor-agent, or an agent binary verified as Cursor.`;
+Install one and sign in:
+  Claude Code  npm install -g @anthropic-ai/claude-code, then run claude to sign in
+  Codex        npm install -g @openai/codex, then codex -c 'cli_auth_credentials_store="file"' login
+  Cursor       Add CURSOR_API_KEY to ~/.supertag/.env, using a key from https://cursor.com/dashboard/api
+  OpenCode     npm install -g opencode-ai, then set your provider's API key
+Sign-in details: ${SIGN_IN_DOCS}
+SuperTag looks for claude, codex, and opencode on PATH, and for Cursor through CURSOR_API_KEY or cursor-agent.`;
 }
