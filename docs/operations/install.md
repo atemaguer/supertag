@@ -35,7 +35,7 @@ application after building, replacing the path with your checkout.
 supertag --version
 ```
 
-The version is `0.2.0-alpha.3`.
+The version is `0.2.0-alpha.4`.
 
 ## Match the CLI and the Control Plane
 
@@ -53,9 +53,9 @@ supertag version
 ```
 
 ```text
-CLI version: 0.2.0-alpha.3
+CLI version: 0.2.0-alpha.4
 Control Plane: https://supertag.example.com
-Control Plane version: 0.2.0-alpha.3
+Control Plane version: 0.2.0-alpha.4
 Compatibility: supported (same version)
 ```
 

@@ -49,8 +49,8 @@ service.
 
 ## 1. Install the Python SDK
 
-The SDK's Python distribution is named `supertag`. This checkout documents version `0.2.0a3`,
-Python's spelling of `0.2.0-alpha.3`.
+The SDK's Python distribution is named `supertag`. This checkout documents version `0.2.0a4`,
+Python's spelling of `0.2.0-alpha.4`.
 
 Install it from your [repository checkout](../operations/install.md), not from a package index.
 From the root of the checkout:
@@ -65,7 +65,7 @@ Confirm the installed version:
 python -c "from importlib.metadata import version; print(version('supertag'))"
 ```
 
-It prints `0.2.0a3`.
+It prints `0.2.0a4`.
 
 ## 2. Write the Worker
 

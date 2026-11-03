@@ -9,6 +9,8 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.2.0-alpha.4] - 2026-11-03
+
 ### Added
 
 - A public roadmap (`ROADMAP.md`); contributor skills for coding agents are now tracked in `.claude/skills` (shared with `.agents/skills`).

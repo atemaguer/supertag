@@ -1,6 +1,6 @@
 {
   "name": "supertag-ai",
-  "version": "0.2.0-alpha.3",
+  "version": "0.2.0-alpha.4",
   "description": "Define outcomes, not tasks: SuperTag runs AI engineering teams that deliver them.",
   "type": "module",
   "license": "Apache-2.0",
