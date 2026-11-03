@@ -1,0 +1,50 @@
+name: Bug report
+description: Something in SuperTag doesn't work as the docs describe.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Thanks for reporting. Don't include credentials, tokens, or private repository content.
+        Report security issues through SECURITY.md instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, and what you saw instead.
+      placeholder: |
+        I ran `supertag create objective ...` and expected ..., but ...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: The smallest set of commands or manifests that shows the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: Error messages, `supertag ps`, or `supertag describe task ID` output. Redact secrets.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: SuperTag version
+      description: Output of `supertag --version`, or the commit you built from.
+    validations:
+      required: true
+  - type: dropdown
+    id: harness
+    attributes:
+      label: Harness
+      multiple: true
+      options: [Claude Code, Codex, Cursor, OpenCode, Custom, Not applicable]
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Node.js version, and where Tasks run (local, e2b, Modal).
+      placeholder: macOS 26, Node 22.22, local

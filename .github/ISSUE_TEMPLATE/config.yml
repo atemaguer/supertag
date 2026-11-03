@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/atemaguer/supertag/security/advisories/new
+    about: Report vulnerabilities privately, not in a public issue.
+  - name: Documentation
+    url: https://github.com/atemaguer/supertag/blob/main/docs/README.md
+    about: Guides, concepts, and reference for using SuperTag.

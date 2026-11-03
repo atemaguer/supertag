@@ -1,7 +1,8 @@
 # Contributing to SuperTag
 
 Thank you for helping build SuperTag. The project is early, so clear problems,
-small changes, and honest test results are especially valuable.
+small changes, and honest test results are especially valuable. Everyone taking part follows the
+[code of conduct](CODE_OF_CONDUCT.md).
 
 ## Ways to contribute
 
@@ -368,14 +369,13 @@ supertag setup surface slack --help
 
 The version must match `packages/supertag-ai/package.json`. Setup help must print readable local
 paths for the guide and manifest. `pnpm --filter supertag-ai test:package` checks these bundled
-resources in addition to the CLI and SDK interfaces. The resulting archive may be shared with
-authorized testers; it does not publish a package or change repository access.
+resources in addition to the CLI and SDK interfaces. The resulting archive is for local testing;
+building it does not publish a package.
 
-Before advertising a public installation, maintainers must choose and authorize the repository
-and documentation visibility and publish the matching package or release assets. Verify the
-installer, versioned archive, checksums, and documentation from an unauthenticated environment;
-only then replace the preview installation instructions. Release tooling existing in this repository
-does not establish that a release has been published.
+The docs install SuperTag from a clone until a matching package is published to npm and PyPI.
+Before changing the install instructions to a package, publish it and verify the installer,
+versioned archive, checksums, and documentation from a clean environment. Release tooling in this
+repository does not mean a release has been published.
 
 ## Live Modal native mounts
 
