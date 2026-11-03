@@ -1,0 +1,496 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/atemaguer/supertag/main/spec/common.schema.json",
+  "title": "SuperTag common wire types",
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "jsonObject": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "workerProfileRef": {
+      "type": "object",
+      "required": ["id", "revision"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "revision": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "additionalProperties": true
+    },
+    "actor": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": ["bot", "user", "unknown"]
+        }
+      },
+      "additionalProperties": true
+    },
+    "resourceRef": {
+      "type": "object",
+      "required": ["uri"],
+      "properties": {
+        "uri": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/jsonObject"
+        },
+        "artifactId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "path": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "additionalProperties": true
+    },
+    "artifactRef": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/resourceRef"
+        },
+        {
+          "type": "object",
+          "required": ["id"],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "name": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "sessionStateRef": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/resourceRef"
+        },
+        {
+          "type": "object",
+          "required": ["id", "format"],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "format": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        }
+      ]
+    },
+    "resourceMetadata": {
+      "type": "object",
+      "required": ["id", "resourceVersion", "createdAt", "updatedAt"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resourceVersion": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/timestamp"
+        }
+      },
+      "additionalProperties": true
+    },
+    "resourceEnvelope": {
+      "type": "object",
+      "required": ["apiVersion", "kind", "metadata", "spec", "status"],
+      "properties": {
+        "apiVersion": {
+          "const": "supertag/v1"
+        },
+        "kind": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "metadata": {
+          "$ref": "#/$defs/resourceMetadata"
+        },
+        "spec": {
+          "$ref": "#/$defs/jsonObject"
+        },
+        "status": {
+          "$ref": "#/$defs/jsonObject"
+        }
+      },
+      "additionalProperties": true
+    },
+    "taskReference": {
+      "type": "object",
+      "required": ["provider", "resourceType", "reference", "relationship"],
+      "properties": {
+        "provider": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "surfaceAccountId": {
+          "type": "string"
+        },
+        "resourceType": {
+          "enum": [
+            "artifact",
+            "channel",
+            "file",
+            "issue",
+            "project",
+            "pull-request",
+            "repository",
+            "thread"
+          ]
+        },
+        "resourceId": {
+          "type": "string"
+        },
+        "reference": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "relationship": {
+          "enum": ["changed", "inspected", "mentioned", "originated-in", "produced"]
+        }
+      },
+      "additionalProperties": true
+    },
+    "taskResult": {
+      "type": "object",
+      "required": [
+        "summary",
+        "decisions",
+        "changes",
+        "unresolved",
+        "findings",
+        "references",
+        "artifacts"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["text"],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "status": {
+                "enum": ["accepted", "proposed"]
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["summary"],
+            "properties": {
+              "summary": {
+                "type": "string"
+              },
+              "reference": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "unresolved": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "findings": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/taskFinding"
+          }
+        },
+        "fixedFindings": {
+          "type": "array",
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/taskFindingReference"
+          }
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/taskReference"
+          }
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifactSelection"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "taskFinding": {
+      "description": "A review finding as a Worker reports it. The Control Plane assigns id and status when it records the result, so a Worker may omit them and any id, status, reason, fixedBy, closedBy, or closedAt it sends is ignored. Stored results and Task history carry the assigned values.",
+      "type": "object",
+      "required": ["severity", "summary"],
+      "properties": {
+        "id": {
+          "description": "Ignored on submission; assigned by the Control Plane, such as F1."
+        },
+        "severity": {
+          "enum": ["high", "medium", "low"]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "location": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "status": {
+          "description": "Ignored on submission; every recorded finding starts open."
+        },
+        "reason": {
+          "description": "Ignored on submission."
+        },
+        "fixedBy": {
+          "description": "Ignored on submission; set when the finding is closed as fixed."
+        },
+        "closedBy": {
+          "description": "Ignored on submission; set when the finding is closed."
+        },
+        "closedAt": {
+          "description": "Ignored on submission; set when the finding is closed."
+        }
+      },
+      "additionalProperties": false
+    },
+    "taskFindingReference": {
+      "type": "object",
+      "required": ["taskId", "findingId"],
+      "properties": {
+        "taskId": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "findingId": { "type": "string", "pattern": "^F[1-9][0-9]{0,2}$" }
+      },
+      "additionalProperties": false
+    },
+    "taskHistoryEntry": {
+      "type": "object",
+      "required": ["taskId", "sessionId", "tagId", "result", "completedAt"],
+      "properties": {
+        "taskId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "tagId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "result": {
+          "$ref": "#/$defs/taskResult"
+        },
+        "completedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "requestText": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "taskExecutionRequirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requires": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "version"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        },
+        "prefers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "version"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        },
+        "profile": {
+          "$ref": "#/$defs/workerProfileRef"
+        },
+        "harness": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "description": "The model the Worker passes to its harness. Placement requires a profile that advertises it.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "effort": {
+          "description": "Reasoning effort. SuperTag sets low when neither the Tag nor its Roles set an effort; a self-escalation can raise it between Attempts of one Task. Harnesses without an effort option ignore it and record that on the Task Attempt.",
+          "enum": ["low", "medium", "high"]
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "maxNativeAgents": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxReportedTokens": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "outputs": {
+          "$ref": "#/$defs/taskOutputPolicy"
+        }
+      }
+    },
+    "artifactSelection": {
+      "type": "object",
+      "required": ["artifactId", "paths"],
+      "properties": {
+        "artifactId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "taskOutputPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "directory": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "required": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "include": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "exclude": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        },
+        "git": {
+          "enum": ["reference", "capture", "ignore"]
+        },
+        "maxFiles": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        }
+      }
+    }
+  }
+}

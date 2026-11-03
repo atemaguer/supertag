@@ -1,0 +1,44 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "supertag-control-plane",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-16",
+  "containers": [
+    {
+      "class_name": "SuperTagControlPlane",
+      "image": "../docker/Dockerfile",
+      "image_build_context": "../..",
+      "instance_type": "standard-1",
+      "max_instances": 1
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CONTROL_PLANE",
+        "class_name": "SuperTagControlPlane"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["SuperTagControlPlane"]
+    }
+  ],
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+  "vars": {
+    "SUPERTAG_DEPLOYMENT_PLATFORM": "cloudflare",
+    "SUPERTAG_STATE_DIR": "/var/lib/supertag",
+    "SUPERTAG_WORKLET_TRANSPORT": "remote",
+    "SUPERTAG_DEPLOYMENT_RPC_TRANSPORT": "websocket",
+    "SUPERTAG_CREDENTIAL_VAULT": "vault",
+    "SUPERTAG_MAINTENANCE": "false",
+    "SUPERTAG_COORDINATION_URL": "https://supertag-control-plane.YOUR-SUBDOMAIN.workers.dev",
+    "VAULT_ADDR": "https://vault.example.com",
+    "SUPERTAG_VAULT_MOUNT": "secret",
+    "SUPERTAG_VAULT_PATH_PREFIX": "supertag"
+  }
+}

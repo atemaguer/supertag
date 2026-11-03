@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "customConditions": ["development"]
+  },
+  "include": [
+    "scripts/messaging-*-benchmark.ts",
+    "scripts/worklet-transport-benchmark.ts",
+    "scripts/worklet-grpc-docker-soak.ts",
+    "scripts/hosted-render-validation*.ts",
+    "scripts/check-cli-deployment.ts",
+    "scripts/cli-operator-live.ts",
+    "scripts/cross-team-delivery-*.ts",
+    "tests/fixtures/worklet-grpc-docker-soak-worker.ts"
+  ]
+}

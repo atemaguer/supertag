@@ -1,0 +1,36 @@
+{
+  "name": "@supertag/worker-transport",
+  "version": "0.2.0-alpha.3",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./mailbox-rpc": {
+      "types": "./dist/mailbox-rpc.d.ts",
+      "development": "./src/mailbox-rpc.ts",
+      "default": "./dist/mailbox-rpc.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --build --pretty false"
+  },
+  "dependencies": {
+    "@supertag/core": "workspace:*",
+    "@supertag/worker-sdk": "workspace:*",
+    "ws": "8.21.3",
+    "@bufbuild/protobuf": "2.15.0",
+    "@connectrpc/connect": "2.2.0",
+    "@connectrpc/connect-node": "2.2.0"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.1"
+  }
+}

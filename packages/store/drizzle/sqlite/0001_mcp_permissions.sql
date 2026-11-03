@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `TagPermission_mcp_target_action_key` ON `TagPermission` (`permissionSetId`,`action`,`scope`) WHERE "TagPermission"."target" = 'mcp';

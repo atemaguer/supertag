@@ -1,0 +1,299 @@
+syntax = "proto3";
+package supertag.worklet.v1;
+
+// Outbound Worker Host channel. Authentication is RPC metadata, never a frame.
+service WorkletService {
+  rpc Connect(stream ConnectRequest) returns (stream ConnectResponse);
+}
+// Deliberate migration boundary for the existing, validated extensible payload schema.
+// This is never a command envelope. Unknown versions and payloads over 3 MiB fail closed.
+message SchemaDocument {
+  uint32 version = 1;
+  bytes json = 2;
+}
+message Capability {
+  string id = 1;
+  uint32 version = 2;
+}
+message Profile {
+  string id = 1;
+  string revision = 2;
+}
+message ContextType {
+  string type = 1;
+  repeated uint32 versions = 2;
+}
+message ProfileCapabilities {
+  optional string harness = 1;
+  Profile profile = 2;
+  repeated Capability capabilities = 3;
+  repeated ContextType context_types = 4;
+  // Models the profile's harness serves; the first is its default.
+  repeated string models = 5;
+  // Reasoning efforts the harness applies: low, medium, or high.
+  repeated string efforts = 6;
+}
+// Presence distinguishes aggregate capabilities from an explicitly empty per-profile set.
+message ProfileCapabilitySet {
+  repeated ProfileCapabilities entries = 1;
+}
+message Worker {
+  string id = 1;
+  string type = 2;
+  repeated Capability capabilities = 3;
+  repeated Profile profiles = 4;
+  repeated ContextType context_types = 5;
+  optional uint32 max_concurrency = 6;
+  ProfileCapabilitySet profile_capabilities = 7;
+}
+message Hello {
+  repeated uint32 protocol_versions = 1;
+  string worklet_id = 2;
+  string worker_host_id = 3;
+  repeated Worker workers = 4;
+  uint32 descriptor_version = 5;
+  uint32 durable_protocol_version = 6;
+  optional uint32 control_protocol_version = 7;
+  // Workspace names with a checkout declared on this Worker Host; paths stay on the host.
+  repeated string workspaces = 8;
+  // Placement labels this Worker Host advertises: automatic ones such as linux, arm64,
+  // harness:codex, and workspace:NAME, plus operator-declared labels. Self-reported; the
+  // Control Plane uses them for placement, never for access.
+  repeated string labels = 9;
+}
+message Ready {
+  uint32 protocol_version = 1;
+  uint32 heartbeat_interval_ms = 2;
+  uint64 connection_generation = 3;
+}
+message Heartbeat {
+  string at = 1;
+  // Set by a Worker Host when its labels changed since hello or its last heartbeat, such as
+  // mcp:NAME becoming mcp-login:NAME when an MCP login lapses. Unset on heartbeat_ack.
+  HostLabels host_labels = 2;
+  // Set by a Worker Host when the Task Attempts its Workers run at once changed since hello or its
+  // last heartbeat, such as after supertag up applied a new concurrency. Unset on heartbeat_ack.
+  WorkerConcurrency worker_concurrency = 3;
+  DiskSpace disk_space = 4;
+  // Current changed paths for each readable, running Task Attempt on this host.
+  repeated AttemptChangedPaths changed_paths = 5;
+}
+message AttemptChangedPaths {
+  string attempt_id = 1;
+  // Repository-relative paths. At most 500 paths; renames include both names.
+  repeated string paths = 2;
+  bool truncated = 3;
+}
+message DiskSpace {
+  uint64 free_bytes = 1;
+  uint64 total_bytes = 2;
+}
+message HostLabels {
+  repeated string labels = 1;
+}
+// Task Attempts each Worker runs at once, by Worker ID.
+message WorkerConcurrency {
+  map<string, uint32> limits = 1;
+}
+message AttemptSpec {
+  string task_id = 1;
+  string attempt_id = 2;
+  SchemaDocument task_attempt_spec = 3;
+  string payload_sha256 = 4;
+}
+message Accept {
+  string request_id = 1;
+  AttemptSpec spec = 2;
+}
+message Inspect {
+  string request_id = 1;
+  string attempt_id = 2;
+}
+message Cancel {
+  string request_id = 1;
+  string attempt_id = 2;
+  optional string reason = 3;
+}
+message Events {
+  string request_id = 1;
+  string attempt_id = 2;
+  uint64 after_sequence = 3;
+}
+message Unsubscribe {
+  string request_id = 1;
+}
+message Input {
+  string text = 1;
+  // Information the Task may weigh, such as Team coordination. Uncertain acceptance is reported
+  // as unknown and never fails the Attempt.
+  bool advisory = 2;
+  // Requires a fresh ControlTake authorization at the native input boundary.
+  bool requires_input_authorization = 3;
+  // Stored peer Tag ID. Present only on advisory input; never parsed from message text.
+  optional string peer_from = 4;
+}
+// Correlated to one pending control request on this authenticated connection.
+message ControlTake {
+  string request_id = 1;
+}
+message ControlTakeResult {
+  string request_id = 1;
+  bool allowed = 2;
+}
+message Reply {
+  string request_id = 1;
+  SchemaDocument response = 2;
+}
+message Interrupt {
+  optional string reason = 1;
+}
+message Control {
+  string request_id = 1;
+  string id = 2;
+  string task_id = 3;
+  string attempt_id = 4;
+  oneof action {
+    Input input = 5;
+    Reply reply = 6;
+    Interrupt interrupt = 7;
+  }
+}
+message ControlCapabilitiesRequest {
+  string request_id = 1;
+  string task_id = 2;
+  string attempt_id = 3;
+}
+message ControlCapabilities {
+  uint32 version = 1;
+  repeated string operations = 2;
+  optional string input_mode = 3;
+}
+// Presence distinguishes no host restriction from an explicitly empty eligible set.
+message AllowedWorkerHostIds {
+  repeated string ids = 1;
+}
+message PlacementSelectionOptions {
+  optional bool requires_coordination = 1;
+  optional bool requires_surface_coordination = 2;
+  Profile compatible_profile = 3;
+  AllowedWorkerHostIds allowed_worker_host_ids = 4;
+  // An Objective owner's activation, which may use one slot beyond a Worker's max_concurrency.
+  optional bool coordination_slot = 5;
+}
+message SelectPlacement {
+  string request_id = 1;
+  SchemaDocument execution_requirements = 2;
+  SchemaDocument context_plan = 3;
+  PlacementSelectionOptions options = 4;
+}
+message PlacementReservation {
+  string id = 1;
+  string expires_at = 2;
+}
+message Placement {
+  string worker_host_id = 1;
+  string worklet_id = 2;
+  string worker_id = 3;
+  Profile worker_profile = 4;
+  PlacementReservation reservation = 5;
+}
+message ReleasePlacement {
+  string request_id = 1;
+  Placement placement = 2;
+}
+message PlacementReleaseResult {
+  bool released = 1;
+}
+enum AttemptStatus {
+  ATTEMPT_STATUS_UNSPECIFIED = 0;
+  ATTEMPT_STATUS_ACCEPTED = 1;
+  ATTEMPT_STATUS_RUNNING = 2;
+  ATTEMPT_STATUS_COMPLETED = 3;
+  ATTEMPT_STATUS_FAILED = 4;
+  ATTEMPT_STATUS_CANCELLED = 5;
+  ATTEMPT_STATUS_UNKNOWN = 6;
+}
+message AttemptReceipt {
+  string task_id = 1;
+  string attempt_id = 2;
+  string spec_digest = 3;
+  AttemptStatus status = 4;
+  optional string worker_id = 5;
+  optional uint64 last_sequence = 6;
+  optional bool cancellation_requested = 7;
+  ControlCapabilities control = 8;
+}
+message ControlAcknowledgement {
+  string id = 1;
+  string task_id = 2;
+  string attempt_id = 3;
+  string status = 4;
+  optional string reason = 5;
+}
+message Empty {}
+message DurableReply {
+  string request_id = 1;
+  oneof result {
+    AttemptReceipt receipt = 2;
+    ControlAcknowledgement control = 3;
+    ControlCapabilities capabilities = 4;
+    Empty absent = 5;
+    string error = 6;
+    Placement placement = 7;
+    Empty no_placement = 8;
+    PlacementReleaseResult placement_release = 9;
+  }
+}
+message DurableEvent {
+  string request_id = 1;
+  uint64 sequence = 2;
+  string task_id = 3;
+  string attempt_id = 4;
+  string kind = 5;
+  string at = 6;
+  SchemaDocument task_attempt_event = 7;
+}
+message DurableEnd {
+  string request_id = 1;
+  optional string error = 2;
+}
+message ProtocolError {
+  string code = 1;
+  string message = 2;
+  repeated uint32 supported_protocol_versions = 3;
+}
+message Close {
+  uint32 code = 1;
+  string reason = 2;
+}
+message ConnectRequest {
+  uint32 wire_version = 1;
+  oneof frame {
+    Hello hello = 2;
+    Heartbeat heartbeat = 3;
+    DurableReply reply = 4;
+    DurableEvent event = 5;
+    DurableEnd end = 6;
+    Close close = 7;
+    ControlTake control_take = 8;
+  }
+}
+message ConnectResponse {
+  uint32 wire_version = 1;
+  oneof frame {
+    Ready ready = 2;
+    Heartbeat heartbeat_ack = 3;
+    Accept accept = 4;
+    Inspect inspect = 5;
+    Cancel cancel = 6;
+    Events events = 7;
+    Unsubscribe unsubscribe = 8;
+    Control control = 9;
+    ControlCapabilitiesRequest control_capabilities = 10;
+    ProtocolError error = 11;
+    Close close = 12;
+    SelectPlacement select_placement = 13;
+    ReleasePlacement release_placement = 14;
+    ControlTakeResult control_take_result = 15;
+  }
+}

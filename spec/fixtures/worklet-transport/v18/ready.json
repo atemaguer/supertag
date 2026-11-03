@@ -1,0 +1,6 @@
+{
+  "type": "ready",
+  "protocolVersion": 18,
+  "heartbeatIntervalMs": 15000,
+  "connectionGeneration": 8
+}

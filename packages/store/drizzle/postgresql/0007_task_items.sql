@@ -1,0 +1,1 @@
+ALTER TABLE "TaskAssignment" ADD COLUMN "items" jsonb DEFAULT '[]'::jsonb NOT NULL;

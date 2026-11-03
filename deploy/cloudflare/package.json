@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0-alpha.3",
+  "name": "supertag-cloudflare-deployment",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "0.3.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260916.1",
+    "typescript": "5.9.3",
+    "wrangler": "4.133.0"
+  }
+}

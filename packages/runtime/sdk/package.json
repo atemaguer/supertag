@@ -1,0 +1,39 @@
+{
+  "name": "@supertag/worker-sdk",
+  "version": "0.2.0-alpha.3",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./redaction": {
+      "types": "./dist/redaction.d.ts",
+      "development": "./src/redaction.ts",
+      "default": "./dist/redaction.js"
+    },
+    "./internal/process-inventory": {
+      "types": "./dist/process-inventory.d.ts",
+      "development": "./src/process-inventory.ts",
+      "default": "./dist/process-inventory.js"
+    },
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --build --pretty false"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1131.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "@supertag/core": "workspace:*",
+    "better-sqlite3": "12.11.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "7.6.13"
+  }
+}

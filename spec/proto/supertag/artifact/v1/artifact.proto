@@ -1,0 +1,141 @@
+syntax = "proto3";
+package supertag.artifact.v1;
+
+// Per-Attempt authorization. All calls require a deadline of at most 60 seconds.
+// These messages contain metadata and grants only. Artifact bytes use direct storage/Worklet transfer.
+service ArtifactCatalogService {
+  rpc Find(FindRequest) returns (FindResponse);
+  rpc Inspect(InspectRequest) returns (InspectResponse);
+  rpc Capture(CaptureRequest) returns (CaptureResponse);
+  rpc Acquire(AcquireRequest) returns (AcquireResponse);
+  rpc Settle(SettleRequest) returns (SettleResponse);
+  rpc RecordUpload(RecordUploadRequest) returns (RecordUploadResponse);
+  rpc ResolveTransfer(ResolveTransferRequest) returns (ResolveTransferResponse);
+}
+// Worker Host authentication applies to inventory and the artifact Volume lookup. The verification key is public.
+service ArtifactHostService {
+  rpc RegisterCopies(RegisterCopiesRequest) returns (RegisterCopiesResponse);
+  rpc GetTransferKey(GetTransferKeyRequest) returns (GetTransferKeyResponse);
+  rpc GetArtifactVolume(GetArtifactVolumeRequest) returns (GetArtifactVolumeResponse);
+}
+message Entry {
+  string path = 1;
+  string uri = 2;
+  string digest = 3;
+  uint32 size_bytes = 4;
+  optional string media_type = 5;
+}
+message HarnessSession { string harness_id = 1; string id = 2; }
+message Selection { string artifact_id = 1; repeated string paths = 2; }
+message Artifact {
+  string id = 1;
+  string operation_id = 2;
+  string task_id = 3;
+  string attempt_id = 4;
+  string tag_id = 5;
+  optional string objective_id = 6;
+  string session_id = 7;
+  HarnessSession harness_session = 8;
+  string title = 9;
+  optional string summary = 10;
+  string kind = 11;
+  repeated Entry entries = 12;
+  repeated Selection inputs = 13;
+  string created_at = 14;
+}
+message Summary {
+  string id = 1;
+  string task_id = 2;
+  string attempt_id = 3;
+  string tag_id = 4;
+  optional string objective_id = 5;
+  string session_id = 6;
+  HarnessSession harness_session = 7;
+  string title = 8;
+  optional string summary = 9;
+  string kind = 10;
+  string created_at = 11;
+  uint32 entry_count = 12;
+  uint64 size_bytes = 13;
+}
+message Acquisition {
+  string id = 1;
+  string operation_id = 2;
+  string artifact_id = 3;
+  string task_id = 4;
+  string attempt_id = 5;
+  repeated string paths = 6;
+  string delivery = 7;
+  optional string destination = 8;
+  string status = 9;
+  string created_at = 10;
+  string updated_at = 11;
+}
+message FindRequest {
+  optional string query = 1;
+  optional string kind = 2;
+  optional string task_id = 3;
+  optional uint32 limit = 4;
+  optional string cursor = 5;
+}
+message FindResponse { repeated Summary artifacts = 1; optional string next_cursor = 2; }
+message InspectRequest { string artifact_id = 1; }
+message InspectResponse { Artifact artifact = 1; }
+message CaptureRequest {
+  string operation_id = 1;
+  string title = 2;
+  optional string summary = 3;
+  string kind = 4;
+  repeated Entry entries = 5;
+  HarnessSession harness_session = 6;
+}
+message CaptureResponse { Artifact artifact = 1; }
+message AcquireRequest {
+  string operation_id = 1;
+  string artifact_id = 2;
+  repeated string paths = 3;
+  string delivery = 4;
+  optional string destination = 5;
+}
+message AcquireResponse { Artifact artifact = 1; Acquisition acquisition = 2; }
+message SettleRequest { string id = 1; string status = 2; }
+message SettleResponse { Acquisition acquisition = 1; }
+// volume names the artifact Volume; volume_source is the exact source used for the write.
+// Both are required for Volume copies and omitted for host-local copies.
+message RecordUploadRequest { string digest = 1; uint32 size_bytes = 2; optional string volume = 3; optional string volume_source = 4; }
+message RecordUploadResponse {}
+message ResolveTransferRequest { string artifact_id = 1; string path = 2; }
+message TransferLocation { string worker_host_id = 1; string transfer_url = 2; string grant = 3; }
+// A copy on a Volume the consuming Worker Host maps: the source, the credential's name (never a
+// value), and the catalog-recorded key the host reads after its grant is checked.
+message TransferVolume { string volume = 1; string source = 2; optional string credential = 3; string key = 4; }
+// Where the file is held, for an error naming them when the consumer reaches no copy.
+message TransferHolders { repeated string worker_host_ids = 1; repeated string volumes = 2; }
+message ResolveTransferResponse {
+  string artifact_id = 1;
+  string path = 2;
+  string digest = 3;
+  uint32 size_bytes = 4;
+  repeated TransferLocation locations = 5;
+  string expires_at = 6;
+  repeated TransferVolume volumes = 7;
+  TransferHolders holders = 8;
+}
+message Copy { string digest = 1; uint32 size_bytes = 2; }
+message RegisterCopiesRequest {
+  string worker_host_id = 1;
+  uint64 inventory_revision = 2;
+  string transfer_base_url = 3;
+  repeated Copy copies = 4;
+}
+// Connection generation is derived from current authenticated Host state, never the request.
+message RegisterCopiesResponse {
+  bool accepted = 1;
+  uint64 connection_generation = 2;
+  uint64 inventory_revision = 3;
+}
+message GetTransferKeyRequest {}
+message GetTransferKeyResponse { string algorithm = 1; string public_key = 2; }
+// The artifact Volume the authenticated Worker Host advertises: its source and credential name.
+message GetArtifactVolumeRequest { string worker_host_id = 1; string name = 2; }
+message GetArtifactVolumeResponse { string name = 1; string source = 2; optional string credential = 3; }

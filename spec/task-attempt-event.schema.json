@@ -1,0 +1,807 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/atemaguer/supertag/main/spec/task-attempt-event.schema.json",
+  "title": "SuperTag Task Attempt Event",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/executionStarted"
+    },
+    {
+      "$ref": "#/$defs/runtimeInputsResolved"
+    },
+    {
+      "$ref": "#/$defs/outputDelta"
+    },
+    {
+      "$ref": "#/$defs/outputMessage"
+    },
+    {
+      "$ref": "#/$defs/progressUpdated"
+    },
+    {
+      "$ref": "#/$defs/result"
+    },
+    {
+      "$ref": "#/$defs/artifactCreated"
+    },
+    {
+      "$ref": "#/$defs/sessionUpdated"
+    },
+    {
+      "$ref": "#/$defs/toolCallStarted"
+    },
+    {
+      "$ref": "#/$defs/toolCallCompleted"
+    },
+    {
+      "$ref": "#/$defs/toolCallFailed"
+    },
+    {
+      "$ref": "#/$defs/approvalRequested"
+    },
+    {
+      "$ref": "#/$defs/executionCompleted"
+    },
+    {
+      "$ref": "#/$defs/executionFailed"
+    },
+    {
+      "$ref": "#/$defs/executionUncertain"
+    },
+    {
+      "$ref": "#/$defs/usageUpdated"
+    },
+    {
+      "$ref": "#/$defs/agentUpdated"
+    },
+    {
+      "$ref": "#/$defs/commandUpdated"
+    }
+  ],
+  "$defs": {
+    "base": {
+      "type": "object",
+      "required": ["taskId", "attemptId", "at", "type"],
+      "properties": {
+        "taskId": {
+          "$ref": "common.schema.json#/$defs/nonEmptyString"
+        },
+        "attemptId": {
+          "$ref": "common.schema.json#/$defs/nonEmptyString"
+        },
+        "at": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "executionStarted": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "required": ["workerId"],
+          "properties": {
+            "type": {
+              "const": "execution.started"
+            },
+            "workerId": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "runtimeInputsResolved": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "required": ["manifest"],
+          "properties": {
+            "type": {
+              "const": "runtime-inputs.resolved"
+            },
+            "manifest": {
+              "$ref": "#/$defs/runtimeInputManifest"
+            }
+          }
+        }
+      ]
+    },
+    "outputDelta": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "required": ["text"],
+          "properties": {
+            "type": {
+              "const": "output.delta"
+            },
+            "text": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "outputMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "required": ["message"],
+          "properties": {
+            "type": {
+              "const": "output.message"
+            },
+            "message": {
+              "type": "object",
+              "required": ["role", "text"],
+              "properties": {
+                "role": {
+                  "const": "teammate"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      ]
+    },
+    "progressUpdated": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "required": ["progress"],
+          "properties": {
+            "type": {
+              "const": "progress.updated"
+            },
+            "progress": {
+              "$ref": "#/$defs/taskProgress"
+            }
+          }
+        }
+      ]
+    },
+    "result": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "required": ["result"],
+          "properties": {
+            "type": {
+              "const": "result"
+            },
+            "result": {
+              "$ref": "common.schema.json#/$defs/taskResult"
+            }
+          }
+        }
+      ]
+    },
+    "artifactCreated": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "required": ["artifact"],
+          "properties": {
+            "type": {
+              "const": "artifact.created"
+            },
+            "artifact": {
+              "$ref": "common.schema.json#/$defs/artifactRef"
+            }
+          }
+        }
+      ]
+    },
+    "sessionUpdated": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "required": ["sessionState"],
+          "properties": {
+            "type": {
+              "const": "session.updated"
+            },
+            "sessionState": {
+              "$ref": "common.schema.json#/$defs/sessionStateRef"
+            }
+          }
+        }
+      ]
+    },
+    "toolCallStarted": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "required": ["call"],
+          "properties": {
+            "type": {
+              "const": "tool.call.started"
+            },
+            "call": {
+              "$ref": "#/$defs/toolCall"
+            }
+          }
+        }
+      ]
+    },
+    "toolCallCompleted": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "required": ["call"],
+          "properties": {
+            "type": {
+              "const": "tool.call.completed"
+            },
+            "call": {
+              "$ref": "#/$defs/toolCall"
+            },
+            "outcome": {
+              "type": "object",
+              "required": ["references"],
+              "properties": {
+                "references": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      ]
+    },
+    "toolCallFailed": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "required": ["call", "error"],
+          "properties": {
+            "type": {
+              "const": "tool.call.failed"
+            },
+            "call": {
+              "$ref": "#/$defs/toolCall"
+            },
+            "error": {
+              "$ref": "#/$defs/messageError"
+            }
+          }
+        }
+      ]
+    },
+    "approvalRequested": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "required": ["request"],
+          "properties": {
+            "type": {
+              "const": "approval.requested"
+            },
+            "request": {
+              "type": "object",
+              "required": ["id", "description"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": {
+                  "type": "string"
+                },
+                "data": {
+                  "$ref": "common.schema.json#/$defs/jsonObject"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      ]
+    },
+    "executionCompleted": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "execution.completed"
+            }
+          }
+        }
+      ]
+    },
+    "executionFailed": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "required": ["error"],
+          "properties": {
+            "type": {
+              "const": "execution.failed"
+            },
+            "error": {
+              "type": "object",
+              "required": ["name", "message"],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      ]
+    },
+    "executionUncertain": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "required": ["error"],
+          "properties": {
+            "type": {
+              "const": "execution.uncertain"
+            },
+            "error": {
+              "type": "object",
+              "required": ["name", "message"],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "description": "Written by a durable Worklet's Attempt journal, never by a Worker: the Attempt's receipt became unknown because of error. The Attempt may have executed and is never replayed automatically."
+        }
+      ]
+    },
+    "messageError": {
+      "type": "object",
+      "required": ["message"],
+      "properties": {
+        "message": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "taskProgress": {
+      "type": "object",
+      "required": ["summary"],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "required": ["id", "text", "status"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "status": {
+                "enum": ["active", "blocked", "completed", "pending"]
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "toolCall": {
+      "type": "object",
+      "required": [
+        "id",
+        "capabilityId",
+        "provider",
+        "binding",
+        "operation",
+        "effect",
+        "actions",
+        "resources"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "capabilityId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "binding": {
+          "type": "object",
+          "required": ["kind", "name"],
+          "properties": {
+            "kind": {
+              "enum": ["mcp-http", "mcp-stdio", "native"]
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": true
+        },
+        "operation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "effect": {
+          "enum": ["read", "write"]
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "resources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["surfaceAccountId", "scope"],
+            "properties": {
+              "surfaceAccountId": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "reference": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "arguments": {
+          "$ref": "common.schema.json#/$defs/jsonObject"
+        }
+      },
+      "additionalProperties": true
+    },
+    "runtimeEnvironmentManifest": {
+      "type": "object",
+      "required": ["id", "provider", "placement"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "placement": {
+          "enum": ["local", "remote", "managed"]
+        },
+        "guarantees": {
+          "type": "object",
+          "required": [
+            "filesystemIsolation",
+            "networkPolicy",
+            "processTreeTermination",
+            "scopedHttp"
+          ],
+          "properties": {
+            "filesystemIsolation": {
+              "enum": ["none", "sandbox"]
+            },
+            "networkPolicy": {
+              "enum": ["none", "enforced"]
+            },
+            "processTreeTermination": {
+              "type": "boolean"
+            },
+            "scopedHttp": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "provenance": {
+          "$ref": "common.schema.json#/$defs/jsonObject"
+        }
+      },
+      "additionalProperties": true
+    },
+    "runtimeInputManifest": {
+      "type": "object",
+      "required": ["workerProfile", "harness", "executionEnvironment", "inputs", "omitted"],
+      "properties": {
+        "workerProfile": {
+          "$ref": "common.schema.json#/$defs/workerProfileRef"
+        },
+        "harness": {
+          "type": "object",
+          "required": ["id", "version"],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
+        "executionEnvironment": {
+          "$ref": "#/$defs/runtimeEnvironmentManifest"
+        },
+        "harnessRuntime": {
+          "$ref": "#/$defs/runtimeEnvironmentManifest"
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/resolvedRuntimeInput"
+          }
+        },
+        "omitted": {
+          "type": "array",
+          "items": {
+            "allOf": [
+              {
+                "$ref": "#/$defs/resolvedRuntimeInput"
+              },
+              {
+                "type": "object",
+                "required": ["reason"],
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "resolvedRuntimeInput": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "sessionState",
+            "harness-specific",
+            "instruction",
+            "resource",
+            "secret",
+            "skill",
+            "tool",
+            "history",
+            "workspace"
+          ]
+        },
+        "sourceItemKey": {
+          "type": "string"
+        },
+        "resource": {
+          "$ref": "common.schema.json#/$defs/resourceRef"
+        }
+      },
+      "additionalProperties": true
+    },
+    "usageUpdated": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "required": ["usage"],
+          "properties": {
+            "type": {
+              "const": "usage.updated"
+            },
+            "usage": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "inputTokens",
+                "outputTokens",
+                "cachedInputTokens",
+                "totalTokens",
+                "complete"
+              ],
+              "properties": {
+                "inputTokens": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "outputTokens": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "cachedInputTokens": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "totalTokens": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "complete": {
+                  "type": "boolean"
+                },
+                "reportedCost": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["amountMinor", "currency"],
+                  "properties": {
+                    "amountMinor": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "currency": {
+                      "type": "string",
+                      "pattern": "^[A-Z]{3}$"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "agentUpdated": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "required": ["agent"],
+          "properties": {
+            "type": {
+              "const": "agent.updated"
+            },
+            "agent": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "status"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "parentId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "status": {
+                  "enum": ["running", "completed", "failed", "interrupted"]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "commandUpdated": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base"
+        },
+        {
+          "type": "object",
+          "required": ["command"],
+          "properties": {
+            "type": {
+              "const": "command.updated"
+            },
+            "command": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "command", "status"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "command": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "status": {
+                  "enum": ["running", "completed", "failed"]
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

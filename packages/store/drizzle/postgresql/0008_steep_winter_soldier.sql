@@ -1,0 +1,1 @@
+ALTER TABLE "ObjectiveMessage" ADD COLUMN "needsReply" boolean DEFAULT true NOT NULL;

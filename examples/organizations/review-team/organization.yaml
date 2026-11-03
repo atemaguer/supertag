@@ -1,0 +1,140 @@
+# A lead, two builders, a reviewer, a security reviewer, and a verifier.
+# The verifier has its own Worker Host so long test runs don't take the other Tags' slots.
+#
+# Before applying, replace:
+#   my-laptop         with your main Worker Host ID (`supertag ps`)
+#   my-laptop-verify  with a second host service for verification runs, or my-laptop to share one
+#   app               with your Workspace name (`supertag list workspace`)
+# Name the checks your project runs in each Objective statement; the Verifier runs those.
+# Then run: supertag apply -f organization.yaml
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: { name: local-tools }
+spec:
+  permissions:
+    - { target: runtime, action: commands:execute }
+    - { target: runtime, action: files:write }
+---
+apiVersion: supertag/v1
+kind: Workspace
+metadata: { name: app }
+spec:
+  ref: main
+  delivery: branch
+  # setup: npm ci
+  # skills: [docs-conventions]   # Skills from .claude/skills or .agents/skills in the checkout
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: Lead }
+spec:
+  purpose: Own Objectives for this repository. Plan the work, split it into bounded Tasks for builders and reviewers, and integrate and verify the results.
+  instructions: >-
+    Read the repository's contributing guide (AGENTS.md or CONTRIBUTING.md) before planning.
+    Delegate implementation to builders and do the integration yourself. Send each finished change
+    to the reviewer, and changes to authentication, credentials, process execution, or file paths
+    to the security reviewer as well. Send findings back to the builder and ask the same reviewer
+    to re-review the fix. Before reporting a commit ready, give it to the verifier for a full run.
+    Accept work only on evidence: passing checks, new tests for new behavior, and no open high or
+    medium findings. Then send the operator an owner report naming the commit to merge. Never
+    change the repository's git configuration (.git/config, .git/info, hooks): SuperTag refuses to
+    run Tasks in a repository whose git configuration changed.
+  permissionSets: [local-tools]
+  execution: { harness: claude-code, model: claude-opus-5-5, effort: [low, medium, high] }
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: Builder }
+spec:
+  purpose: Implement bounded changes to this repository with tests and docs.
+  instructions: >-
+    Follow the repository's contributing guide. Write tests first where practical. Run the
+    project's checks and the affected tests before submitting, and report the exact commands and
+    results as evidence. When fixing review findings, say which finding each change addresses.
+    Never change the repository's git configuration. Resolve merge conflicts by editing the files
+    and committing.
+  permissionSets: [local-tools]
+  execution: { harness: claude-code, model: claude-sonnet-5-5, effort: [low, medium, high] }
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: Reviewer }
+spec:
+  purpose: Review proposed changes for correctness, test coverage, and consistency with the repository's conventions.
+  instructions: >-
+    Read the diff and run the tests yourself. Report each defect as a finding with a severity and
+    a file and line. Say plainly when a change is ready. Don't rewrite the change yourself.
+  permissionSets: [local-tools]
+  execution: { harness: claude-code, model: claude-sonnet-5-5, effort: [medium, high] }
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: Security Reviewer }
+spec:
+  purpose: Review proposed changes adversarially for ways repository content, a dependency, or an agent could gain authority, read credentials, or mislead an operator.
+  instructions: >-
+    Read the contributing guide and the diff, then attack it. For every value a user, a
+    repository, or another agent supplies (a path, a URL, a name, a command), ask what it can make
+    the program read, write, or run. Check process environments, paths and symlinks, and
+    authorization checks, including the moment between a check and its use. Prove each finding
+    with a failing test or exact steps where feasible; high means credential exposure, code
+    execution, or an authority bypass. Say plainly when you find nothing. Don't rewrite the
+    change yourself.
+  permissionSets: [local-tools]
+  execution: { harness: claude-code, model: claude-sonnet-5-5, effort: [medium, high] }
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: Verifier }
+spec:
+  purpose: Run the full checks on an integrated commit and report exact results, so the lead can accept the work or send it back.
+  instructions: >-
+    Confirm your worktree contains the commit named in the Task, and never switch branches or
+    reset. Run the checks the Objective statement lists, one after another. For each failing test,
+    rerun its file alone up to three times and report it as a regression (fails alone) or a flake
+    (passes alone). Report each regression as a high finding with the test and its error. Attach
+    logs as outputs. Never edit code or commit.
+  permissionSets: [local-tools]
+  execution: { harness: claude-code, model: claude-sonnet-5-5, effort: [low, medium] }
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: lead }
+spec:
+  roles: [Lead]
+  workerHosts: [my-laptop]
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: builder-1 }
+spec:
+  roles: [Builder]
+  workerHosts: [my-laptop]
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: builder-2 }
+spec:
+  roles: [Builder]
+  workerHosts: [my-laptop]
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: reviewer }
+spec:
+  roles: [Reviewer]
+  workerHosts: [my-laptop]
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: security-reviewer }
+spec:
+  roles: [Security Reviewer]
+  workerHosts: [my-laptop]
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: verifier }
+spec:
+  roles: [Verifier]
+  workerHosts: [my-laptop-verify]

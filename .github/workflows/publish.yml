@@ -1,0 +1,55 @@
+name: Publish supertag-ai
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag whose version should be published
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-supertag-ai
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'atemaguer/supertag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: npm install --global npm@11
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter supertag-ai typecheck
+      - run: pnpm --filter supertag-ai build
+      - name: Verify release tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+        run: >-
+          node --input-type=module --eval 'import manifest from "./packages/supertag-ai/package.json" with { type: "json" };
+          if (process.env.RELEASE_TAG !== `v${manifest.version}`) throw new Error(`Release ${process.env.RELEASE_TAG}
+          does not match supertag-ai@${manifest.version}`);'
+      - name: Publish with provenance
+        working-directory: packages/supertag-ai
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [[ "$VERSION" == *-* ]]; then
+            npm publish --access public --provenance --tag next
+          else
+            npm publish --access public --provenance
+          fi

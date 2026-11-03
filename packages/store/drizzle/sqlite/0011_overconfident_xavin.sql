@@ -1,0 +1,1 @@
+ALTER TABLE `TagMessage` ADD `directTeamId` text;

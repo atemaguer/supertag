@@ -1,0 +1,86 @@
+name: Release SuperTag CLI
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to receive the CLI assets
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository == 'atemaguer/supertag'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-x64
+          - runner: ubuntu-24.04-arm
+            target: linux-arm64
+          - runner: macos-15-intel
+            target: darwin-x64
+          - runner: macos-15
+            target: darwin-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: pnpm
+      - run: npm install --global npm@11
+      - run: pnpm install --frozen-lockfile
+      - name: Verify release tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+        run: >-
+          node --input-type=module --eval 'import manifest from "./packages/supertag-ai/package.json" with { type: "json" };
+          if (process.env.RELEASE_TAG !== `v${manifest.version}`) throw new Error(`Release ${process.env.RELEASE_TAG}
+          does not match supertag-ai@${manifest.version}`);'
+      - name: Build and smoke-test distribution
+        run: |
+          printf '24.19.0\n' > .node-version
+          node scripts/package-cli-distribution.mjs \
+            --target ${{ matrix.target }} \
+            --output dist/supertag-${{ matrix.target }}.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supertag-${{ matrix.target }}
+          path: dist/supertag-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  publish:
+    if: github.repository == 'atemaguer/supertag'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: supertag-*
+          path: release-assets
+          merge-multiple: true
+      - name: Create checksums
+        working-directory: release-assets
+        run: sha256sum supertag-*.tar.gz > checksums.txt
+      - name: Add installer
+        run: cp install.sh release-assets/install.sh
+      - name: Upload CLI assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+        run: gh release upload "$RELEASE_TAG" release-assets/* --clobber

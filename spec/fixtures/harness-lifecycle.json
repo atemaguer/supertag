@@ -1,0 +1,198 @@
+{
+  "version": 1,
+  "attempt": {
+    "taskId": "task-fixture",
+    "attemptId": "attempt-fixture"
+  },
+  "cases": [
+    {
+      "name": "completed",
+      "valid": true,
+      "events": [
+        {
+          "taskId": "task-fixture",
+          "attemptId": "attempt-fixture",
+          "at": "2026-09-01T00:00:00.000Z",
+          "type": "execution.started",
+          "workerId": "fixture-worker"
+        },
+        {
+          "taskId": "task-fixture",
+          "attemptId": "attempt-fixture",
+          "at": "2026-09-01T00:00:00.000Z",
+          "type": "output.message",
+          "message": {
+            "id": "message-1",
+            "role": "teammate",
+            "text": "Done"
+          }
+        },
+        {
+          "taskId": "task-fixture",
+          "attemptId": "attempt-fixture",
+          "at": "2026-09-01T00:00:00.000Z",
+          "type": "execution.completed"
+        }
+      ]
+    },
+    {
+      "name": "failed",
+      "valid": true,
+      "events": [
+        {
+          "taskId": "task-fixture",
+          "attemptId": "attempt-fixture",
+          "at": "2026-09-01T00:00:00.000Z",
+          "type": "execution.started",
+          "workerId": "fixture-worker"
+        },
+        {
+          "taskId": "task-fixture",
+          "attemptId": "attempt-fixture",
+          "at": "2026-09-01T00:00:00.000Z",
+          "type": "execution.failed",
+          "error": {
+            "name": "Error",
+            "message": "Provider failed"
+          }
+        }
+      ]
+    },
+    {
+      "name": "duplicate-terminal",
+      "valid": false,
+      "events": [
+        {
+          "taskId": "task-fixture",
+          "attemptId": "attempt-fixture",
+          "at": "2026-09-01T00:00:00.000Z",
+          "type": "execution.started",
+          "workerId": "fixture-worker"
+        },
+        {
+          "taskId": "task-fixture",
+          "attemptId": "attempt-fixture",
+          "at": "2026-09-01T00:00:00.000Z",
+          "type": "execution.completed"
+        },
+        {
+          "taskId": "task-fixture",
+          "attemptId": "attempt-fixture",
+          "at": "2026-09-01T00:00:00.000Z",
+          "type": "execution.failed",
+          "error": {
+            "name": "Error",
+            "message": "Provider failed"
+          }
+        }
+      ]
+    },
+    {
+      "name": "after-terminal",
+      "valid": false,
+      "events": [
+        {
+          "taskId": "task-fixture",
+          "attemptId": "attempt-fixture",
+          "at": "2026-09-01T00:00:00.000Z",
+          "type": "execution.started",
+          "workerId": "fixture-worker"
+        },
+        {
+          "taskId": "task-fixture",
+          "attemptId": "attempt-fixture",
+          "at": "2026-09-01T00:00:00.000Z",
+          "type": "execution.completed"
+        },
+        {
+          "taskId": "task-fixture",
+          "attemptId": "attempt-fixture",
+          "at": "2026-09-01T00:00:00.000Z",
+          "type": "output.message",
+          "message": {
+            "id": "message-1",
+            "role": "teammate",
+            "text": "Done"
+          }
+        }
+      ]
+    },
+    {
+      "name": "wrong-identity",
+      "valid": false,
+      "events": [
+        {
+          "taskId": "task-fixture",
+          "attemptId": "attempt-fixture",
+          "at": "2026-09-01T00:00:00.000Z",
+          "type": "execution.started",
+          "workerId": "fixture-worker"
+        },
+        {
+          "taskId": "other",
+          "attemptId": "attempt-fixture",
+          "at": "2026-09-01T00:00:00.000Z",
+          "type": "output.message",
+          "message": {
+            "id": "message-1",
+            "role": "teammate",
+            "text": "Done"
+          }
+        },
+        {
+          "taskId": "task-fixture",
+          "attemptId": "attempt-fixture",
+          "at": "2026-09-01T00:00:00.000Z",
+          "type": "execution.completed"
+        }
+      ]
+    },
+    {
+      "name": "missing-start",
+      "valid": false,
+      "events": [
+        {
+          "taskId": "task-fixture",
+          "attemptId": "attempt-fixture",
+          "at": "2026-09-01T00:00:00.000Z",
+          "type": "output.message",
+          "message": {
+            "id": "message-1",
+            "role": "teammate",
+            "text": "Done"
+          }
+        },
+        {
+          "taskId": "task-fixture",
+          "attemptId": "attempt-fixture",
+          "at": "2026-09-01T00:00:00.000Z",
+          "type": "execution.completed"
+        }
+      ]
+    },
+    {
+      "name": "missing-terminal",
+      "valid": false,
+      "events": [
+        {
+          "taskId": "task-fixture",
+          "attemptId": "attempt-fixture",
+          "at": "2026-09-01T00:00:00.000Z",
+          "type": "execution.started",
+          "workerId": "fixture-worker"
+        },
+        {
+          "taskId": "task-fixture",
+          "attemptId": "attempt-fixture",
+          "at": "2026-09-01T00:00:00.000Z",
+          "type": "output.message",
+          "message": {
+            "id": "message-1",
+            "role": "teammate",
+            "text": "Done"
+          }
+        }
+      ]
+    }
+  ]
+}

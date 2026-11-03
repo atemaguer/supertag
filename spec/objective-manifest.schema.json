@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/atemaguer/supertag/main/spec/objective-manifest.schema.json",
+  "title": "SuperTag Objective manifest",
+  "description": "A declared Objective, applied with supertag apply -f or from the objectives map of supertag.yaml. metadata.name is the Objective ID. Like the project file, it rejects unknown fields so typos fail early. Status is observed, never declared.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "supertag/v1" },
+    "kind": { "const": "Objective" },
+    "metadata": {
+      "type": "object",
+      "required": ["name"],
+      "properties": { "name": { "type": "string", "minLength": 1 } }
+    },
+    "spec": { "$ref": "#/$defs/spec" }
+  },
+  "$defs": {
+    "spec": {
+      "description": "owner, outcome, ongoing, workspaces, and observe are fixed once the Objective exists; apply refuses a change to them. deadline, budget increases, runtimeActions, and teams change in place.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "outcome"],
+      "properties": {
+        "owner": {
+          "description": "The owner Tag's name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "outcome": {
+          "description": "One natural-language statement: the result, how success is verified, what must not change, and when to ask a person.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000
+        },
+        "ongoing": {
+          "description": "A continuing responsibility that only an operator can end.",
+          "type": "boolean"
+        },
+        "workspaces": {
+          "description": "Names of existing Workspaces the Objective's Tasks may work in.",
+          "type": "array",
+          "maxItems": 16,
+          "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$" }
+        },
+        "observe": {
+          "description": "IDs of Team channels (Workstreams; a channel ID is its Team ID) whose posts reach the owner for assessment.",
+          "type": "array",
+          "maxItems": 16,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "budget": {
+          "description": "The allocation limit. With currency, it caps provider-reported cost; it can only increase after creation.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["minor"],
+          "properties": {
+            "minor": { "type": "integer", "minimum": 0 },
+            "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+          }
+        },
+        "deadline": {
+          "description": "An ISO timestamp.",
+          "type": "string",
+          "minLength": 1
+        },
+        "runtimeActions": {
+          "description": "Runtime actions, such as files:write, for Tasks accepted afterwards. Omitted: what the owner's Permission Sets allow at creation. A list narrows that set.",
+          "type": "array",
+          "maxItems": 50,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "teams": {
+          "description": "Team name to Team. A declared Team's ID is OBJECTIVE:NAME; leadership is reserved for the owner's own Team.",
+          "type": "object",
+          "propertyNames": { "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$" },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["lead"],
+            "properties": {
+              "lead": { "type": "string", "minLength": 1 },
+              "members": {
+                "type": "array",
+                "maxItems": 100,
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "maxConcurrency": { "type": "integer", "minimum": 1, "maximum": 1000 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,21 @@
+version: v2
+plugins:
+  - local: protoc-gen-es
+    out: packages/runtime/environments/shared-execution/src/gen
+    types:
+      - supertag.environment.v1
+    opt:
+      - target=ts
+      - import_extension=js
+  - local: protoc-gen-es
+    out: packages/runtime/transport/src/gen
+    types:
+      - supertag.worklet.v1
+      - supertag.session.v1
+      - supertag.artifact.v1
+      - supertag.mailbox.v1
+      - supertag.authority.v1
+      - supertag.coordination.v1
+    opt:
+      - target=ts
+      - import_extension=js

@@ -1,0 +1,1 @@
+ALTER TABLE `ObjectiveMessage` ADD `needsReply` integer DEFAULT true NOT NULL;

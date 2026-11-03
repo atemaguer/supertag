@@ -1,0 +1,435 @@
+import { parseArgs } from "node:util";
+import { stringify as stringifyYaml } from "yaml";
+import { runApprovalCommand } from "./approvals.js";
+import { runArtifactCommand } from "./artifacts.js";
+import { ControlPlaneClient, type ControlPlaneTarget } from "./control-plane-client.js";
+import { runCoordinateCommand } from "./coordination.js";
+import { runTagMessagingCommand } from "./messaging.js";
+import { money } from "./money.js";
+import { runObjectiveCommand } from "./objectives.js";
+import { runTeamCommand } from "./teams.js";
+import { terminalText } from "./terminal-text.js";
+import { workerHarnessNames } from "./worker-harness-names.js";
+import { runWorkstreamCommand } from "./workstreams.js";
+
+const paths: Record<string, string> = {
+  tag: "tags",
+  role: "roles",
+  "permission-set": "permission-sets",
+  "context-set": "context-sets",
+  volume: "volumes",
+  workspace: "workspaces",
+  surface: "surface-accounts",
+  "worker-host": "worker-hosts",
+  "worker-profile": "worker-profiles",
+  "auth-key": "auth-keys",
+  "operator-token": "operator-tokens",
+  task: "tasks",
+  session: "sessions",
+};
+const kinds = new Set([
+  ...Object.keys(paths),
+  "objective",
+  "team",
+  "workstream",
+  "workstream-post",
+  "message",
+  "mailbox-grant",
+  "inbox",
+  "approval",
+  "artifact",
+]);
+
+type Row = Record<string, unknown>;
+const record = (value: unknown): Row =>
+  value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Row) : {};
+const items = (value: unknown): unknown[] => {
+  if (Array.isArray(value)) return value;
+  const object = record(value);
+  for (const key of [
+    "items",
+    "objectives",
+    "teams",
+    "requests",
+    "messages",
+    "grants",
+    "workstreams",
+    "posts",
+    "artifacts",
+  ])
+    if (Array.isArray(object[key])) return object[key] as unknown[];
+  return [];
+};
+const field = (row: Row, key: string): unknown =>
+  key.split(".").reduce<unknown>((value, segment) => record(value)[segment], row);
+const display = (value: unknown): string =>
+  value === undefined || value === null
+    ? "-"
+    : Array.isArray(value)
+      ? value.map(display).join(", ") || "-"
+      : typeof value === "object"
+        ? JSON.stringify(value)
+        : terminalText(String(value));
+
+const columns: Record<string, readonly [string, string][]> = {
+  tag: [
+    ["NAME", "metadata.name"],
+    ["ROLES", "spec.roles"],
+    ["HARNESS / MODEL", "status.execution"],
+    ["WORKER HOSTS", "spec.workerHosts"],
+    ["TASK", "status.busyTask"],
+  ],
+  "worker-host": [
+    ["NAME", "metadata.name"],
+    ["CONNECTION", "status.connectionStatus"],
+    ["HARNESSES", "status.workers"],
+    ["RUNNING / CAPACITY", "status.runningTaskAttempts"],
+  ],
+  task: [
+    ["ID", "metadata.id"],
+    ["STATUS", "status.phase"],
+    ["TAG", "spec.tagId"],
+    ["OBJECTIVE", "status.assignment.objectiveId"],
+  ],
+  session: [
+    ["ID", "metadata.id"],
+    ["STATUS", "status.phase"],
+    ["TAG", "spec.tagId"],
+    ["LAST INTERACTION", "status.lastInteractionAt"],
+  ],
+  objective: [
+    ["ID", "id"],
+    ["STATUS", "status"],
+    ["OWNER", "ownerTagId"],
+    ["SPEND / BUDGET", "spentMinor"],
+    ["DEADLINE", "deadline"],
+  ],
+  team: [
+    ["ID", "id"],
+    ["NAME", "name"],
+    ["STATUS", "status"],
+    ["LEAD", "leadTagId"],
+    ["OBJECTIVE", "objectiveId"],
+  ],
+  role: [
+    ["NAME", "metadata.name"],
+    ["PURPOSE", "spec.purpose"],
+    ["TAGS", "status.assignedTags"],
+  ],
+  "permission-set": [
+    ["NAME", "metadata.name"],
+    ["BINDINGS", "status.bindings"],
+    ["STATE", "status.phase"],
+  ],
+  "context-set": [
+    ["NAME", "metadata.name"],
+    ["ITEMS", "spec.items"],
+    ["BINDINGS", "status.bindings"],
+  ],
+  volume: [
+    ["NAME", "metadata.name"],
+    ["SOURCE", "spec.source"],
+    ["CREDENTIAL", "spec.credential"],
+  ],
+  workspace: [
+    ["NAME", "metadata.name"],
+    ["SOURCE", "spec.source"],
+    ["DELIVERY", "spec.delivery"],
+    ["WORKER HOSTS", "status.workerHosts"],
+  ],
+  surface: [
+    ["NAME", "metadata.name"],
+    ["PROVIDER", "spec.provider"],
+    ["STATE", "status.phase"],
+  ],
+  "worker-profile": [
+    ["NAME", "metadata.name"],
+    ["HARNESS", "spec.harness"],
+    ["MODEL", "spec.model"],
+  ],
+  "auth-key": [
+    ["NAME", "metadata.name"],
+    ["STATE", "status.phase"],
+    ["EXPIRES", "spec.expiresAt"],
+  ],
+  "operator-token": [
+    ["NAME", "metadata.name"],
+    ["STATE", "status.phase"],
+    ["CREATED", "metadata.createdAt"],
+  ],
+  approval: [
+    ["ID", "id"],
+    ["STATUS", "status"],
+    ["KIND", "kind"],
+    ["TASK", "taskId"],
+    ["SUMMARY", "summary"],
+  ],
+  artifact: [
+    ["ID", "metadata.id"],
+    ["TASK", "spec.taskId"],
+    ["CREATED", "metadata.createdAt"],
+    ["FILES", "spec.entries"],
+    ["LOCATIONS", "status.locations"],
+  ],
+  message: [
+    ["ID", "id"],
+    ["TYPE", "type"],
+    ["FROM", "senderTagId"],
+    ["TIME", "createdAt"],
+  ],
+  "mailbox-grant": [
+    ["ID", "id"],
+    ["SENDER", "senderTagId"],
+    ["RECIPIENT", "recipientTagId"],
+    ["TYPES", "types"],
+  ],
+  workstream: [
+    ["ID", "id"],
+    ["TITLE", "title"],
+    ["OBJECTIVE", "objectiveId"],
+    ["OWNER", "ownerTagId"],
+  ],
+  "workstream-post": [
+    ["SEQUENCE", "sequence"],
+    ["AUTHOR", "authorTagId"],
+    ["TYPE", "type"],
+    ["TO", "to"],
+    ["TIME", "createdAt"],
+    ["MESSAGE", "body"],
+  ],
+};
+
+export function renderListTable(kind: string, value: unknown): string {
+  const rows = items(value).map(record);
+  const selected = columns[kind] ?? [
+    ["NAME / ID", "metadata.name"],
+    ["STATUS", "status.phase"],
+    ["DETAIL", "spec"],
+  ];
+  const headings = selected.map(([heading]) => heading);
+  const cells = rows.map((row) =>
+    selected
+      .map(([, key], index) => {
+        const raw = field(row, key);
+        if (kind === "workstream-post" && key === "authorTagId" && raw === null) return "system";
+        if (index === 0 && raw === undefined)
+          return display(row["id"] ?? record(row["metadata"])["id"] ?? row["name"]);
+        if (kind === "objective" && key === "spentMinor") {
+          // Without a currency the budget counts allocation units, never money.
+          const currency =
+            typeof row["budgetCurrency"] === "string" ? row["budgetCurrency"] : undefined;
+          const amount = (minor: number) =>
+            currency === undefined ? `${minor} units` : money(minor, currency);
+          // A money budget caps provider-reported spend; spentMinor counts allocations.
+          const reported = field(row, "limitState.reportedSpend.amountMinor");
+          const used = currency !== undefined && typeof reported === "number" ? reported : raw;
+          const spent = typeof used === "number" ? amount(used) : "-";
+          const limit = row["budgetLimitMinor"];
+          return typeof limit === "number" ? `${spent} / ${amount(limit)}` : spent;
+        }
+        if (kind === "tag" && key === "status.execution") {
+          const execution = record(raw);
+          return display([execution["harness"], execution["model"]].filter(Boolean));
+        }
+        if (kind === "artifact" && key === "spec.entries")
+          return Array.isArray(raw) ? String(raw.length) : "-";
+        if (kind === "artifact" && key === "status.locations") {
+          const places = (Array.isArray(raw) ? raw : []).map((entry) => {
+            const location = record(entry);
+            if (location["kind"] === "volume") return `Volume ${display(location["volume"])}`;
+            const notes = [
+              location["removed"] ? "removed" : "",
+              location["ephemeral"] ? "ephemeral" : "",
+            ];
+            const note = notes.filter(Boolean).join(", ");
+            return `${display(location["workerHostId"])}${note ? ` (${note})` : ""}`;
+          });
+          const text = places.length ? places.join(", ") : "no recorded copy";
+          return field(row, "status.ephemeralOnly") === true ? `${text}; ephemeral only` : text;
+        }
+        if (kind === "worker-host" && key === "status.workers")
+          return display(
+            Array.isArray(raw) ? raw.flatMap((worker) => workerHarnessNames(record(worker))) : raw,
+          );
+        return display(raw);
+      })
+      .map(terminalText),
+  );
+  const widths = headings.map((heading, index) =>
+    Math.max(heading.length, ...cells.map((row) => row[index]?.length ?? 0)),
+  );
+  const line = (row: readonly string[]) =>
+    row
+      .map((cell, index) => (index === row.length - 1 ? cell : cell.padEnd(widths[index] ?? 0)))
+      .join("  ");
+  return `${[line(headings), ...cells.map(line)].join("\n")}\n`;
+}
+
+export async function runListCommand(
+  target: ControlPlaneTarget,
+  args: readonly string[],
+): Promise<string> {
+  const [kind, ...rest] = args;
+  if (!kind) throw new Error("Usage: supertag list KIND [--output text|json|yaml]");
+  if (!kinds.has(kind)) {
+    const singular = kind.endsWith("s") ? kind.slice(0, -1) : "";
+    if (kinds.has(singular))
+      throw new Error(`Unknown list kind ${kind}; did you mean \`list ${singular}\`?`);
+    throw new Error(`Unknown list kind: ${kind}`);
+  }
+  const outputIndex = rest.findIndex((arg) => arg === "--output" || arg.startsWith("--output="));
+  const output =
+    outputIndex < 0
+      ? "text"
+      : rest[outputIndex]?.includes("=")
+        ? rest[outputIndex]?.split("=")[1]
+        : rest[outputIndex + 1];
+  if (output !== "text" && output !== "json" && output !== "yaml")
+    throw new Error("--output must be text, json, or yaml");
+  const options = rest.filter(
+    (_, index) =>
+      index !== outputIndex &&
+      (outputIndex < 0 || rest[outputIndex]?.includes("=") || index !== outputIndex + 1),
+  );
+  const client = new ControlPlaneClient(target);
+  let value: unknown;
+  if (kind in paths) {
+    if (options.length) throw new Error(`Usage: supertag list ${kind} [--output text|json|yaml]`);
+    value = await client.request(`/api/v1/${paths[kind]}`);
+  } else {
+    let response: string;
+    if (kind === "objective") {
+      const parsed = parseArgs({
+        args: options,
+        options: { owner: { type: "string" }, limit: { type: "string" } },
+        strict: true,
+      });
+      response = await runObjectiveCommand(target, [
+        "list",
+        ...(parsed.values.owner ? ["--owner", parsed.values.owner] : []),
+        ...(parsed.values.limit ? ["--limit", parsed.values.limit] : []),
+      ]);
+    } else if (kind === "team") response = await runTeamCommand(target, ["list", ...options]);
+    else if (kind === "approval")
+      response = await runApprovalCommand(target, ["list", ...options, "--output", "json"]);
+    else if (kind === "inbox") {
+      // Inbox items carry a question, a decision maker, and an action; a table would drop them.
+      if (output === "text")
+        return runCoordinateCommand(target, ["inbox", ...options, "--output", "text"], {
+          operatorList: true,
+        });
+      response = await runCoordinateCommand(target, ["inbox", ...options, "--output", "json"], {
+        operatorList: true,
+      });
+    } else if (kind === "artifact") response = await runArtifactCommand(client, "list", options);
+    else if (kind === "workstream") {
+      const { values } = parseArgs({
+        args: options,
+        options: { tag: { type: "string" }, limit: { type: "string" } },
+        strict: true,
+      });
+      response = await runWorkstreamCommand(target, [
+        "list",
+        ...(values.tag ? [values.tag] : []),
+        ...(values.limit ? ["--limit", values.limit] : []),
+      ]);
+    } else if (kind === "workstream-post") {
+      const { values } = parseArgs({
+        args: options,
+        options: {
+          workstream: { type: "string" },
+          limit: { type: "string" },
+          "after-sequence": { type: "string" },
+        },
+        strict: true,
+      });
+      response = await runWorkstreamCommand(target, [
+        "posts",
+        values.workstream ?? "",
+        ...(values.limit ? ["--limit", values.limit] : []),
+        ...(values["after-sequence"] ? ["--after-sequence", values["after-sequence"]] : []),
+      ]);
+    } else {
+      const { values } = parseArgs({
+        args: options,
+        options: { mailbox: { type: "string" }, limit: { type: "string" } },
+        strict: true,
+      });
+      response = await runTagMessagingCommand(target, [
+        kind === "message" ? "messages" : "grants",
+        values.mailbox ?? "",
+        ...(values.limit ? ["--limit", values.limit] : []),
+      ]);
+    }
+    value = JSON.parse(response);
+  }
+  if (output === "text" && (kind === "objective" || kind === "team" || kind === "workstream")) {
+    // Text tables name Tags; JSON and YAML keep the IDs the API returns.
+    const names = new Map(
+      items(await client.request("/api/v1/tags"))
+        .map(record)
+        .map((tag) => [field(tag, "metadata.id"), field(tag, "metadata.name")]),
+    );
+    const key = kind === "team" ? "leadTagId" : "ownerTagId";
+    value = {
+      items: items(value).map((item) => {
+        const row = record(item);
+        return { ...row, [key]: names.get(row[key]) ?? row[key] };
+      }),
+    };
+  }
+  if (output === "text" && (kind === "tag" || kind === "worker-host")) {
+    const tasks = items(await client.request("/api/v1/tasks"));
+    const running = tasks
+      .map(record)
+      .filter((task) => field(task, "status.attempt.phase") === "running");
+    value = {
+      items: items(value).map((item) => {
+        const row = record(item);
+        const status = record(row["status"]);
+        if (kind === "tag") {
+          const task = running.find(
+            (candidate) => field(candidate, "spec.tagId") === field(row, "metadata.id"),
+          );
+          return {
+            ...row,
+            status: {
+              ...status,
+              busyTask: task ? field(task, "metadata.id") : "idle",
+            },
+          };
+        }
+        const workers = Array.isArray(status["workers"]) ? status["workers"].map(record) : [];
+        const hostId = field(row, "metadata.id");
+        const capacity = new Map<string, number>();
+        const usage = new Map<string, number>();
+        for (const worker of workers) {
+          const harness = workerHarnessNames(worker).join(", ");
+          capacity.set(
+            harness,
+            (capacity.get(harness) ?? 0) +
+              (typeof worker["maxConcurrency"] === "number" ? worker["maxConcurrency"] : 1),
+          );
+          const active = running.filter(
+            (task) =>
+              field(task, "status.attempt.workerHostId") === hostId &&
+              field(task, "status.attempt.workerId") === worker["id"],
+          );
+          usage.set(harness, (usage.get(harness) ?? 0) + active.length);
+        }
+        const summary = [...capacity]
+          .map(([harness, slots]) => `${harness} ${usage.get(harness) ?? 0}/${slots}`)
+          .join(", ");
+        return {
+          ...row,
+          status: { ...status, runningTaskAttempts: summary || "0/0" },
+        };
+      }),
+    };
+  }
+  return output === "json"
+    ? `${JSON.stringify(value, null, 2)}\n`
+    : output === "yaml"
+      ? stringifyYaml(value)
+      : renderListTable(kind, value);
+}

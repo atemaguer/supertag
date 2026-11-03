@@ -1,0 +1,1 @@
+ALTER TABLE "TaskAttempt" ADD COLUMN "mountOutputManifests" jsonb;

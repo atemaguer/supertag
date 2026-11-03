@@ -1,0 +1,69 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
+  },
+  "references": [
+    {
+      "path": "../../deploy/shared"
+    },
+    {
+      "path": "../../packages/surfaces/sdk"
+    },
+    {
+      "path": "../../packages/surfaces/slack"
+    },
+    {
+      "path": "../../packages/surfaces/lark"
+    },
+    {
+      "path": "../../packages/surfaces/teams"
+    },
+    {
+      "path": "../../packages/surfaces/github"
+    },
+    {
+      "path": "../../packages/surfaces/linear"
+    },
+    {
+      "path": "../../packages/core"
+    },
+    {
+      "path": "../../packages/control-plane"
+    },
+    {
+      "path": "../../packages/store"
+    },
+    {
+      "path": "../../packages/runtime/harnesses/claude-code"
+    },
+    {
+      "path": "../../packages/runtime/harnesses/codex"
+    },
+    {
+      "path": "../../packages/runtime/harnesses/cursor"
+    },
+    {
+      "path": "../../packages/runtime/resources/github"
+    },
+    {
+      "path": "../../packages/runtime/sdk"
+    },
+    {
+      "path": "../../packages/runtime/transport"
+    },
+    {
+      "path": "../../packages/runtime/harnesses/opencode"
+    },
+    {
+      "path": "../../packages/runtime/environments/e2b"
+    },
+    {
+      "path": "../../packages/runtime/environments/modal"
+    }
+  ],
+  "include": ["src/**/*.ts"]
+}

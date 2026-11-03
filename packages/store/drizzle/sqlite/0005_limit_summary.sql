@@ -1,0 +1,1 @@
+ALTER TABLE `TaskAssignment` ADD `limitSummaryActivation` integer DEFAULT false NOT NULL;

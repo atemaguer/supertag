@@ -1,0 +1,32 @@
+# Roadmap
+
+SuperTag is in alpha. This page lists what we're working on and what we're considering, not
+promises with dates. Shipped changes are in the [changelog](CHANGELOG.md), and how SuperTag works
+today is in the [documentation](docs/README.md).
+
+## Now
+
+- **A recorded walkthrough.** One reproducible Objective, run end to end on a real repository:
+  a feature that crosses two Teams, a shared interface between them, reviewed changes, an approval
+  you keep, and an interruption the team recovers from.
+- **Cursor as a full builder.** Cursor Tasks run, edit, and use SuperTag's tools today. Its
+  sandbox still finds an older Node.js and can't download a project's pinned package manager, so a
+  Cursor builder can't yet run a Node project's whole check on its own.
+- **First-run experience.** Installing, running `supertag init`, and getting a team's first result
+  on a clean machine without help.
+
+## Next
+
+- **Packages.** Publish the CLI and SDKs to npm and PyPI, so installing doesn't need a clone.
+- **More sandbox providers.** Split execution runs on Modal today; e2b needs live validation.
+
+## Considering
+
+- **Optional host binding.** Let Tags run on any Worker Host that accepts them, and let a
+  Workspace choose a local or remote runtime.
+- **Scratch Workspaces.** An empty repository for Tags whose work has no codebase, such as
+  research or planning.
+- **Retention.** Keep the database small on long-running deployments by expiring saved harness
+  sessions of finished work.
+
+Have a use case these don't cover? Open an issue. See [CONTRIBUTING.md](CONTRIBUTING.md).

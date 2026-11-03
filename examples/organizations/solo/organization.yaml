@@ -1,0 +1,73 @@
+# A lead and two builders on one machine, all on Claude Code.
+#
+# Before applying, replace:
+#   my-laptop  with your Worker Host ID (the host name `supertag ps` shows)
+#   app        with your Workspace name (`supertag list workspace`)
+# Then run: supertag apply -f organization.yaml
+apiVersion: supertag/v1
+kind: PermissionSet
+metadata: { name: local-tools }
+spec:
+  # Let Tasks edit files and run commands in their own worktree.
+  permissions:
+    - { target: runtime, action: commands:execute }
+    - { target: runtime, action: files:write }
+---
+apiVersion: supertag/v1
+kind: Workspace
+metadata: { name: app }
+spec:
+  ref: main # Task branches start here
+  delivery: branch # each Task's work lands on its own branch
+  # setup: npm ci   # runs in each new worktree before the Task starts
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: Lead }
+spec:
+  purpose: Own Objectives for this repository. Plan the work, split it into bounded Tasks for builders, and integrate and verify the results.
+  instructions: >-
+    Read the repository's contributing guide (AGENTS.md or CONTRIBUTING.md) before planning.
+    Delegate implementation to builders and do the integration yourself. Accept a builder's work
+    when its evidence shows the project's checks and the tests for its change passing, including
+    new tests for new behavior. When the Objective's items are integrated and checked, send the
+    operator an owner report naming the commit to merge. Keep the Objective statement's
+    constraints. Never change the repository's git configuration (.git/config, .git/info, hooks):
+    SuperTag refuses to run Tasks in a repository whose git configuration changed. Resolve merge
+    conflicts by editing the files and committing.
+  permissionSets: [local-tools]
+  execution: { harness: claude-code, model: claude-opus-5-5, effort: [low, medium, high] }
+---
+apiVersion: supertag/v1
+kind: Role
+metadata: { name: Builder }
+spec:
+  purpose: Implement bounded changes to this repository with tests and docs.
+  instructions: >-
+    Follow the repository's contributing guide. Write tests first where practical. Run the
+    project's checks and the affected tests before submitting, and report the exact commands and
+    results as evidence. Never change the repository's git configuration. Resolve merge conflicts
+    by editing the files and committing.
+  permissionSets: [local-tools]
+  execution: { harness: claude-code, model: claude-sonnet-5-5, effort: [low, medium, high] }
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: lead }
+spec:
+  roles: [Lead]
+  workerHosts: [my-laptop]
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: builder-1 }
+spec:
+  roles: [Builder]
+  workerHosts: [my-laptop]
+---
+apiVersion: supertag/v1
+kind: Tag
+metadata: { name: builder-2 }
+spec:
+  roles: [Builder]
+  workerHosts: [my-laptop]

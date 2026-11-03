@@ -1,0 +1,26 @@
+{
+  "name": "@supertag/worker-cursor",
+  "version": "0.2.0-alpha.3",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --build --pretty false"
+  },
+  "dependencies": {
+    "@cursor/sdk": "1.0.37",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "@supertag/core": "workspace:*",
+    "@supertag/worker-sdk": "workspace:*"
+  }
+}

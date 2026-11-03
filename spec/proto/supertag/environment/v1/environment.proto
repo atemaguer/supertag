@@ -1,0 +1,124 @@
+syntax = "proto3";
+package supertag.environment.v1;
+
+// All requests authenticate with bearer metadata. Accepted operations belong to
+// an access, not a connection. A stream deadline never cancels a process.
+service ExecutionEnvironmentService {
+  rpc IssueAccess(IssueAccessRequest) returns (IssueAccessResponse);
+  rpc ReleaseAccess(ReleaseAccessRequest) returns (ReleaseAccessResponse);
+  rpc RevokeAccess(RevokeAccessRequest) returns (RevokeAccessResponse);
+  rpc Execute(ExecuteRequest) returns (OperationReceipt);
+  rpc InspectOperation(InspectOperationRequest) returns (OperationReceipt);
+  rpc WatchProcess(WatchProcessRequest) returns (stream ProcessSnapshot);
+}
+
+// Admin bearer plus x-supertag-grant-token metadata supplies the new access
+// credential. Credentials are never fields of resource or operation messages.
+message IssueAccessRequest {
+  uint32 protocol_version = 1;
+  string access_id = 2;
+  string task_id = 3;
+  string attempt_id = 4;
+  string tag_id = 5;
+  uint64 ttl_ms = 6;
+}
+message IssueAccessResponse {
+  uint32 protocol_version = 1;
+  string access_id = 2;
+  string environment_id = 3;
+  string incarnation_id = 4;
+  string expires_at = 5;
+  string root_directory = 6;
+}
+message ReleaseAccessRequest { string access_id = 1; }
+message ReleaseAccessResponse { string access_id = 1; }
+message RevokeAccessRequest { string access_id = 1; }
+message RevokeAccessResponse { string access_id = 1; }
+
+// Same ID and exact payload returns the durable receipt. A conflict is rejected.
+// No automatic transport fallback is permitted after Execute is sent.
+message ExecuteRequest {
+  string operation_id = 1;
+  oneof operation {
+    WriteFile write_file = 2;
+    WriteFile stage_file = 3;
+    ReadFile read_file = 4;
+    StartProcess start_process = 5;
+    WriteProcessInput write_process_input = 6;
+    CloseProcessInput close_process_input = 7;
+    SignalProcess signal_process = 8;
+  }
+}
+message WriteFile {
+  string path = 1;
+  bytes content = 2;
+  optional bool exclusive = 3;
+  optional uint32 mode = 4;
+}
+message ReadFile { string path = 1; uint64 maximum_bytes = 2; }
+message StartProcess {
+  string command = 1;
+  repeated string args = 2;
+  optional string cwd = 3;
+  // Execution-scoped environment, including explicitly staged credentials.
+  // Do not log or persist this map; the journal stores only a request digest.
+  map<string, string> environment = 4;
+  optional string stdin = 5;
+  optional bool stream_input = 6;
+  optional uint64 timeout_ms = 7;
+}
+message WriteProcessInput { string process_id = 1; bytes content = 2; }
+message CloseProcessInput { string process_id = 1; }
+message SignalProcess { string process_id = 1; optional string signal = 2; }
+message InspectOperationRequest { string operation_id = 1; }
+
+enum OperationStatus {
+  OPERATION_STATUS_UNSPECIFIED = 0;
+  OPERATION_STATUS_ACCEPTED = 1;
+  OPERATION_STATUS_RUNNING = 2;
+  OPERATION_STATUS_COMPLETED = 3;
+  OPERATION_STATUS_FAILED = 4;
+  OPERATION_STATUS_UNCERTAIN = 5;
+}
+message OperationReceipt {
+  string operation_id = 1;
+  OperationStatus status = 2;
+  optional string process_id = 3;
+  optional string error = 4;
+  oneof result {
+    FileWritten file_written = 5;
+    FileContent file_content = 6;
+    InputWritten input_written = 7;
+    InputClosed input_closed = 8;
+    ProcessSignalled process_signalled = 9;
+    ProcessResult process_result = 10;
+  }
+}
+message FileWritten { uint64 bytes = 1; bool created = 2; }
+message FileContent { bytes content = 1; uint64 bytes = 2; }
+message InputWritten { uint64 bytes = 1; }
+message InputClosed { bool closed = 1; }
+message ProcessSignalled { bool signalled = 1; }
+message ProcessResult {
+  optional sint32 exit_code = 1;
+  optional string signal = 2;
+  string stdout = 3;
+  string stderr = 4;
+}
+// Reconnect from the last processed cursor. A gap or cursor ahead of the
+// journal is an error; the client must inspect rather than fabricate output.
+message WatchProcessRequest { string process_id = 1; uint64 after_sequence = 2; }
+enum OutputStream {
+  OUTPUT_STREAM_UNSPECIFIED = 0;
+  OUTPUT_STREAM_STDOUT = 1;
+  OUTPUT_STREAM_STDERR = 2;
+}
+message ProcessChunk { uint64 sequence = 1; OutputStream stream = 2; string text = 3; }
+message ProcessSnapshot {
+  string process_id = 1;
+  OperationStatus status = 2;
+  repeated ProcessChunk chunks = 3;
+  uint64 next_cursor = 4;
+  optional ProcessResult result = 5;
+  optional string error = 6;
+}

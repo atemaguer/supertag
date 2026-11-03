@@ -1,0 +1,493 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/atemaguer/supertag/main/spec/supertag-yaml.schema.json",
+  "title": "SuperTag services (supertag.yaml)",
+  "description": "The services that run SuperTag on a machine, like a compose file: at most one control-plane service and any number of host services. supertag up reads ~/.supertag/supertag.yaml or the files -f names; later files merge over earlier ones. Strings may use ${VAR}, ${VAR:-default}, ${VAR:?message}, and $$ for a literal $. Resources stay Kubernetes-style manifests; a control-plane service may reference or embed them with provision. Secret values never belong here: fields that take a secret name an entry in secrets. Unlike wire schemas, it rejects unknown fields so typos fail early; keys that start with x- are ignored.",
+  "type": ["object", "null"],
+  "additionalProperties": false,
+  "patternProperties": { "^x-": {} },
+  "properties": {
+    "version": {
+      "description": "Format version. Optional; absent means 1.",
+      "enum": [1, "1"]
+    },
+    "name": {
+      "description": "Instance name. Labels service units (ai.supertag.NAME.SERVICE on launchd, supertag-NAME-SERVICE.service on systemd), logs, and supertag ps. Defaults to supertag.",
+      "$ref": "#/$defs/name"
+    },
+    "services": {
+      "description": "Service name to service. Without services, supertag up runs one control-plane service named control-plane.",
+      "type": "object",
+      "propertyNames": { "anyOf": [{ "$ref": "#/$defs/name" }, { "pattern": "^x-" }] },
+      "patternProperties": { "^x-": {} },
+      "additionalProperties": {
+        "oneOf": [{ "$ref": "#/$defs/controlPlane" }, { "$ref": "#/$defs/host" }]
+      }
+    },
+    "secrets": {
+      "description": "Secret name to source. Values are read when a service starts and are never written to supertag.yaml, logs, supertag config output, or service units.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/name" },
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["environment"],
+            "properties": {
+              "environment": {
+                "description": "An environment variable, read from the process environment, then env_file.",
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["file"],
+            "properties": {
+              "file": {
+                "description": "A file holding the value, relative to this file or starting with ~.",
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        ]
+      }
+    },
+    "env_file": {
+      "description": "Files of KEY=value lines loaded before interpolation, relative to this file. Defaults to .env beside this file when it exists. The process environment takes precedence.",
+      "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }]
+    }
+  },
+  "$defs": {
+    "volumeCredentials": {
+      "description": "Volume credential name to an environment or file secret reference for S3/R2, or { path: DIR } consent for a file:// Volume.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/name" },
+      "additionalProperties": {
+        "anyOf": [
+          { "$ref": "#/properties/secrets/additionalProperties" },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path"],
+            "properties": { "path": { "type": "string", "minLength": 1 } }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["modal-secret"],
+            "properties": {
+              "modal-secret": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["modal-oidc-role"],
+            "properties": {
+              "modal-oidc-role": {
+                "type": "string",
+                "pattern": "^arn:aws(-us-gov|-cn)?:iam::[0-9]{12}:role/[A-Za-z0-9_+=,.@/-]+$"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+    },
+    "hostModels": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      ]
+    },
+    "endpoint": {
+      "description": "Compose short port syntax: \"PORT\" or \"IP:PORT\".",
+      "oneOf": [
+        { "type": "string", "pattern": "^(?:(\\[[^\\]]+\\]|[^:]+):)?\\d{1,5}$" },
+        { "type": "integer", "minimum": 0, "maximum": 65535 }
+      ]
+    },
+    "restart": {
+      "description": "unless-stopped installs a per-user service unit (launchd on macOS, systemd on Linux) that keeps the service running after restarts. Defaults to no.",
+      "enum": ["no", "unless-stopped"]
+    },
+    "dependsOn": {
+      "description": "Services started, and found healthy, before this one.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/name" }
+    },
+    "controlPlane": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": { "^x-": {} },
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "control-plane" },
+        "ports": {
+          "description": "Where the API Server listens. Defaults to [\"127.0.0.1:3434\"]. SUPERTAG_GATEWAY_HOST overrides the address and SUPERTAG_GATEWAY_PORT the port; with SUPERTAG_DEPLOYMENT_PLATFORM set, PORT also sets the port.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": { "$ref": "#/$defs/endpoint" }
+        },
+        "url": {
+          "description": "Public base URL that hosts and coordination links use. Defaults to http://127.0.0.1:PORT. SUPERTAG_COORDINATION_URL overrides it.",
+          "type": "string",
+          "pattern": "^https?://\\S+$"
+        },
+        "database": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "description": "file:PATH for SQLite (relative to this file), or postgresql://USER@HOST/DATABASE without a password. Defaults to SQLite at supertag.db in the state directory. SUPERTAG_DATABASE_URL overrides it.",
+              "type": "string",
+              "pattern": "^(file:.+|postgres(ql)?://([^:@/]+@)?[^@/]+(/.*)?)$"
+            },
+            "password": {
+              "description": "A secret name; its value becomes PGPASSWORD for the Control Plane process unless PGPASSWORD is already set.",
+              "$ref": "#/$defs/name"
+            }
+          }
+        },
+        "credentials": {
+          "description": "Where surface credentials live: file (credentials.json in the state directory, the default) or vault://MOUNT/PREFIX for HashiCorp Vault KV v2 with VAULT_ADDR and VAULT_TOKEN in the environment. SUPERTAG_CREDENTIAL_VAULT overrides it.",
+          "type": "string",
+          "pattern": "^(file|vault://[^/\\s]+(/\\S+)?)$"
+        },
+        "notify": {
+          "description": "Slack channel or user that receives new inbox items. SUPERTAG_OPERATOR_CHANNEL overrides it.",
+          "type": "string",
+          "pattern": "^slack:([A-Z0-9]+/)?[CGDUW][A-Z0-9]{2,}$"
+        },
+        "logging": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "level": {
+              "description": "info by default. trace adds RPC lifecycle events, as SUPERTAG_RPC_TRACE=1 does.",
+              "enum": ["error", "warn", "info", "debug", "trace"]
+            },
+            "format": {
+              "description": "text (default) or json lines.",
+              "enum": ["text", "json"]
+            },
+            "audit": {
+              "description": "Where management audit events go: stderr (the service log, default) or a file path for JSON lines. The file's directory must exist.",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cert": {
+              "description": "Certificate file for the hosts.grpc listener.",
+              "type": "string"
+            },
+            "key": { "description": "Key file for the hosts.grpc listener.", "type": "string" },
+            "ca": {
+              "description": "CA file that host services in this file trust, as SUPERTAG_WORKLET_TLS_CA_FILE.",
+              "type": "string"
+            }
+          }
+        },
+        "hosts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "grpc": {
+              "description": "A Worklet gRPC listener for Worker Hosts. Without it, hosts connect over WebSocket at url. SUPERTAG_WORKLET_GRPC_PORT overrides the port.",
+              "$ref": "#/$defs/endpoint"
+            }
+          }
+        },
+        "operators": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "file": {
+              "description": "JSON file of scoped coordination operator credentials, as SUPERTAG_COORDINATION_OPERATORS_FILE. Operator Tokens cover most uses.",
+              "type": "string"
+            }
+          }
+        },
+        "restart": { "$ref": "#/$defs/restart" },
+        "depends_on": { "$ref": "#/$defs/dependsOn" },
+        "provision": {
+          "description": "Resources the Control Plane starts with: manifest files or directories (relative to this file), or inline manifests. On every supertag up, missing resources are created and existing ones are never changed or deleted. They are recorded under the apply set provision.",
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "type": "string", "minLength": 1 },
+              {
+                "type": "object",
+                "required": ["apiVersion", "kind", "metadata"],
+                "properties": {
+                  "apiVersion": { "const": "supertag/v1" },
+                  "kind": { "type": "string" },
+                  "metadata": { "type": "object" },
+                  "spec": {}
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": { "^x-": {} },
+      "required": ["type", "harnesses"],
+      "properties": {
+        "type": { "const": "host" },
+        "control-plane": {
+          "description": "The control-plane service in this file (the default when there is one), or a shared Control Plane's http(s) URL.",
+          "type": "string",
+          "minLength": 1
+        },
+        "auth-key": {
+          "description": "A secret name holding a one-time Auth Key, for a URL control-plane only. Used until the host has a stored credential, then ignored.",
+          "$ref": "#/$defs/name"
+        },
+        "harnesses": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["claude-code", "codex", "cursor", "opencode"] }
+        },
+        "allow-unsandboxed-commands": {
+          "description": "Harnesses from harnesses that may run Tasks granted commands:execute without an enforceable command boundary. Their commands run as you. Codex sandboxes commands and is never listed.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["claude-code", "cursor", "opencode"] }
+        },
+        "models": {
+          "description": "Models each harness serves: one model, or a list whose first is the default. Tasks that name a model run only on hosts that offer it. opencode requires one as provider/model.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "claude-code": { "$ref": "#/$defs/hostModels" },
+            "codex": { "$ref": "#/$defs/hostModels" },
+            "cursor": { "$ref": "#/$defs/hostModels" },
+            "opencode": { "$ref": "#/$defs/hostModels" }
+          }
+        },
+        "workspaces": {
+          "description": "Workspace name to an absolute or ~ path of a git checkout. A host in the same file as its Control Plane creates missing Workspace resources with defaults.",
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/name" },
+          "additionalProperties": { "type": "string", "pattern": "^(/|~$|~/)" }
+        },
+        "volume-credentials": {
+          "description": "Volume credential name to a host-only reference. Values stay on this Worker Host.",
+          "$ref": "#/$defs/volumeCredentials"
+        },
+        "artifact-volume": {
+          "description": "Volume this host stores the artifacts its Tasks capture on, instead of its state directory. Map its credential in volume-credentials. No Workspace may mount it.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+        },
+        "local-mount-root": {
+          "description": "Existing directory that every local Workspace mount destination must sit under. Without it, local mounts are refused.",
+          "type": "string",
+          "minLength": 1
+        },
+        "labels": {
+          "description": "Placement labels this host advertises, such as gpu.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "mcp": {
+          "description": "MCP servers this host provides over HTTP, by name. Each is advertised as the placement label mcp:NAME. auth names where a credential comes from; never the credential itself. stdio servers (command) are not supported yet.",
+          "type": "object",
+          "propertyNames": { "pattern": "^[a-z0-9][a-z0-9_-]{0,58}$" },
+          "additionalProperties": { "$ref": "#/$defs/mcpServer" }
+        },
+        "concurrency": {
+          "description": "Task Attempts each harness Worker on this host runs at once. Default: 2.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "depends_on": { "$ref": "#/$defs/dependsOn" },
+        "restart": { "$ref": "#/$defs/restart" }
+      }
+    },
+    "mcpServer": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": { "^x-": {} },
+      "oneOf": [
+        { "required": ["url"], "not": { "required": ["preset"] } },
+        { "required": ["preset"], "not": { "required": ["url"] } }
+      ],
+      "properties": {
+        "type": { "const": "http" },
+        "url": {
+          "description": "The server's http(s) URL. Not allowed with a preset, which uses its official URL.",
+          "type": "string",
+          "pattern": "^https?://"
+        },
+        "preset": {
+          "description": "SuperTag's preset for a provider's official server.",
+          "enum": ["github", "slack"]
+        },
+        "auth": { "$ref": "#/$defs/mcpAuth" }
+      }
+    },
+    "mcpAuth": {
+      "description": "How SuperTag authenticates to the server: exactly one form.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bearer"],
+          "properties": { "bearer": { "$ref": "#/$defs/mcpCredentialReference" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["headers"],
+          "properties": {
+            "headers": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": { "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$" },
+              "additionalProperties": { "$ref": "#/$defs/mcpCredentialReference" }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["githubApp"],
+          "properties": {
+            "githubApp": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["appId", "installationId", "privateKey"],
+              "properties": {
+                "appId": {
+                  "oneOf": [
+                    { "type": "integer", "minimum": 1 },
+                    { "type": "string", "pattern": "^[0-9]+$" }
+                  ]
+                },
+                "installationId": {
+                  "oneOf": [
+                    { "type": "integer", "minimum": 1 },
+                    { "type": "string", "pattern": "^[0-9]+$" }
+                  ]
+                },
+                "privateKey": { "$ref": "#/$defs/mcpCredentialReference" }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["clientCredentials"],
+          "properties": {
+            "clientCredentials": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["clientId"],
+              "oneOf": [{ "required": ["clientSecret"] }, { "required": ["assertionKey"] }],
+              "properties": {
+                "clientId": {
+                  "oneOf": [
+                    { "type": "string", "minLength": 1 },
+                    { "$ref": "#/$defs/mcpCredentialReference" }
+                  ]
+                },
+                "clientSecret": { "$ref": "#/$defs/mcpCredentialReference" },
+                "assertionKey": { "$ref": "#/$defs/mcpCredentialReference" },
+                "scope": { "type": "string", "minLength": 1 },
+                "tokenUrl": { "$ref": "#/$defs/mcpTokenUrl" }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["helper"],
+          "properties": {
+            "helper": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["oauth"],
+          "properties": {
+            "oauth": {
+              "oneOf": [
+                { "const": true },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["refreshToken"],
+                  "properties": {
+                    "refreshToken": { "$ref": "#/$defs/mcpCredentialReference" },
+                    "tokenUrl": { "$ref": "#/$defs/mcpTokenUrl" }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "mcpTokenUrl": {
+      "description": "The authorization server's token endpoint, trusted when it is not on the MCP server's own origin.",
+      "type": "string",
+      "pattern": "^(https://|http://(localhost|127\\.0\\.0\\.1|\\[::1\\])[:/])\\S+$"
+    },
+    "mcpCredentialReference": {
+      "description": "Where a credential comes from: an environment variable, a file, or an entry in secrets.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["env"],
+          "properties": { "env": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["file"],
+          "properties": { "file": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["secretRef"],
+          "properties": { "secretRef": { "$ref": "#/$defs/name" } }
+        }
+      ]
+    }
+  }
+}

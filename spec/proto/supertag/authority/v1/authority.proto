@@ -1,0 +1,10 @@
+syntax = "proto3";
+package supertag.authority.v1;
+
+// Exchanges an old, signed execution credential only while its exact durable
+// Attempt is being recovered. Bearer metadata is not Worker Host authority.
+service ExecutionAuthorityService {
+  rpc Rebind(RebindRequest) returns (RebindResponse);
+}
+message RebindRequest {}
+message RebindResponse { string token = 1; }

@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/atemaguer/supertag/main/spec/objective.schema.json",
+  "title": "Experimental Objective v1",
+  "type": "object",
+  "required": [
+    "id",
+    "outcome",
+    "ownerTagId",
+    "status",
+    "revision",
+    "completionSummary",
+    "createdAt",
+    "updatedAt"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "outcome": {
+      "description": "One natural-language statement: the result, how success is verified, what must not change, and when to ask a person.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8000
+    },
+    "ownerTagId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "description": "Only an operator's cancellation request sets cancelled; status updates cannot. completed and cancelled are terminal.",
+      "enum": ["working", "blocked", "ready_for_review", "completed", "cancelled"]
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "completionSummary": {
+      "description": "The completion assessment. While status is ready_for_review, the owner's assessment, which approval uses as the completion summary.",
+      "type": ["string", "null"]
+    },
+    "warnings": {
+      "description": "Returned only by creation. Conditions that would hold the Objective's Tasks, such as an owner Tag with no connected Worker Host. Creation still succeeds.",
+      "type": "array",
+      "readOnly": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "dryRun": {
+      "description": "Returned only by a dry-run creation, which validates and warns but stores nothing.",
+      "const": true,
+      "readOnly": true
+    },
+    "cancelledAt": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "readOnly": true,
+      "description": "When an operator cancelled the Objective."
+    },
+    "cancellationReason": {
+      "type": ["string", "null"],
+      "maxLength": 2000,
+      "readOnly": true,
+      "description": "The operator's reason for cancelling, when one was given."
+    },
+    "workspaces": {
+      "description": "Named Workspaces the Objective's Tasks may work in. With exactly one, Tasks use it by default; with several, a lead chooses one per Task. An Objective created from a collaboration surface gets those of its Tag location, or a subset its creator names.",
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+      }
+    },
+    "runtimeActions": {
+      "description": "Runtime actions, such as files:write, the Objective's Tasks may receive. Created without a list, it holds the actions the owner Tag's Permission Sets allowed at creation; a list only narrows that set. An Objective created from a collaboration surface gets the invoking Task's runtime actions. Later Permission Set changes do not rewrite it; operators replace it with an update.",
+      "type": "array",
+      "maxItems": 50,
+      "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+    },
+    "budgetLimitMinor": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Maximum organizational allocation in operator-defined minor units."
+    },
+    "budgetCurrency": {
+      "type": ["string", "null"],
+      "pattern": "^[A-Z]{3}$",
+      "description": "Optional uppercase three-letter denomination. With a currency, budgetLimitMinor also caps provider-reported cost across the Objective."
+    },
+    "deadline": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "New Tasks and continuations stop at the deadline. Running Task Attempts keep authority for a 15-minute grace period. Operators may move it, including after it passed."
+    },
+    "limitState": {
+      "type": "object",
+      "readOnly": true,
+      "description": "Control Plane observations of the budget and deadline: provider-reported spend, warnings raised, budget exhaustion, and deadline passage. Each entry names the limit it was observed against.",
+      "additionalProperties": true
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "executionStartedAt": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "readOnly": true,
+      "description": "Set by successful start_objective admission; enables Objective mailbox consumption."
+    },
+    "surfaceTaskId": {
+      "type": ["string", "null"],
+      "readOnly": true
+    },
+    "surfaceSessionId": {
+      "type": ["string", "null"],
+      "readOnly": true
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["budgetCurrency"],
+        "properties": { "budgetCurrency": { "type": "string" } }
+      },
+      "then": {
+        "required": ["budgetLimitMinor"],
+        "properties": { "budgetLimitMinor": { "type": "integer" } }
+      }
+    }
+  ],
+  "additionalProperties": true
+}

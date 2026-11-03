@@ -1,0 +1,42 @@
+{
+  "name": "@supertag/cli",
+  "version": "0.2.0-alpha.3",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "supertag": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "dev": "tsx --conditions=development src/index.ts",
+    "typecheck": "tsc --build --pretty false"
+  },
+  "dependencies": {
+    "@connectrpc/connect": "2.2.0",
+    "@inquirer/prompts": "8.5.2",
+    "@larksuiteoapi/lark-mcp": "0.5.1",
+    "@supertag/surface-github": "workspace:*",
+    "@supertag/surface-lark": "workspace:*",
+    "@supertag/surface-linear": "workspace:*",
+    "@supertag/surface-sdk": "workspace:*",
+    "@supertag/surface-slack": "workspace:*",
+    "@supertag/surface-teams": "workspace:*",
+    "@supertag/core": "workspace:*",
+    "@supertag/control-plane": "workspace:*",
+    "@supertag/store": "workspace:*",
+    "@supertag/worker-claude-code": "workspace:*",
+    "@supertag/worker-codex": "workspace:*",
+    "@supertag/worker-cursor": "workspace:*",
+    "@supertag/worker-environment-e2b": "workspace:*",
+    "@supertag/worker-environment-modal": "workspace:*",
+    "@supertag/worker-github": "workspace:*",
+    "@supertag/worker-sdk": "workspace:*",
+    "@supertag/worker-transport": "workspace:*",
+    "yaml": "2.8.1",
+    "@supertag/worker-opencode": "workspace:*",
+    "@supertag/deployment": "workspace:*"
+  }
+}

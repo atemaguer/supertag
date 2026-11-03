@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/atemaguer/supertag/main/spec/resource-envelope.schema.json",
+  "title": "SuperTag control-plane resource envelope",
+  "$ref": "common.schema.json#/$defs/resourceEnvelope"
+}

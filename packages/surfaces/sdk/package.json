@@ -1,0 +1,28 @@
+{
+  "name": "@supertag/surface-sdk",
+  "version": "0.2.0-alpha.3",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --build --pretty false"
+  },
+  "dependencies": {
+    "@supertag/core": "workspace:*",
+    "@types/mdast": "4.0.4",
+    "mdast-util-from-markdown": "2.0.3",
+    "mdast-util-gfm": "3.1.0",
+    "mdast-util-to-markdown": "2.1.2",
+    "micromark-extension-gfm": "3.0.0"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "name": "@supertag/store",
+  "version": "0.2.0-alpha.3",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "drizzle"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "db:check": "drizzle-kit check --config drizzle.sqlite.config.ts && drizzle-kit check --config drizzle.postgresql.config.ts && node ../../scripts/check-migration-journals.mjs",
+    "db:generate": "drizzle-kit generate --config drizzle.sqlite.config.ts && drizzle-kit generate --config drizzle.postgresql.config.ts",
+    "db:migrate": "node scripts/migrate.mjs",
+    "db:migrate:postgresql": "drizzle-kit migrate --config drizzle.postgresql.config.ts",
+    "db:migrate:sqlite": "drizzle-kit migrate --config drizzle.sqlite.config.ts",
+    "typecheck": "tsc --build --pretty false"
+  },
+  "dependencies": {
+    "@supertag/core": "workspace:*",
+    "better-sqlite3": "12.11.1",
+    "drizzle-orm": "0.45.2",
+    "pg": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "7.6.13",
+    "@types/pg": "8.20.1",
+    "drizzle-kit": "0.31.10"
+  }
+}

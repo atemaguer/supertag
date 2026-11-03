@@ -1,0 +1,30 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {
+      "@supertag/surface-github": ["../surfaces/github/src/index.ts"],
+      "@supertag/surface-lark": ["../surfaces/lark/src/index.ts"],
+      "@supertag/surface-linear": ["../surfaces/linear/src/index.ts"],
+      "@supertag/surface-sdk": ["../surfaces/sdk/src/index.ts"],
+      "@supertag/surface-slack": ["../surfaces/slack/src/index.ts"],
+      "@supertag/surface-teams": ["../surfaces/teams/src/index.ts"],
+      "@supertag/core": ["../core/src/index.ts"],
+      "@supertag/control-plane": ["../control-plane/src/index.ts"],
+      "@supertag/store": ["../store/src/index.ts"],
+      "@supertag/worker-claude-code": ["../runtime/harnesses/claude-code/src/index.ts"],
+      "@supertag/worker-codex": ["../runtime/harnesses/codex/src/index.ts"],
+      "@supertag/worker-cursor": ["../runtime/harnesses/cursor/src/index.ts"],
+      "@supertag/worker-environment-e2b": ["../runtime/environments/e2b/src/index.ts"],
+      "@supertag/worker-environment-shared-execution": [
+        "../runtime/environments/shared-execution/src/index.ts"
+      ],
+      "@supertag/worker-github": ["../runtime/resources/github/src/index.ts"],
+      "@supertag/worker-sdk": ["../runtime/sdk/src/index.ts"],
+      "@supertag/worker-transport": ["../runtime/transport/src/index.ts"],
+      "@supertag/worker-opencode": ["../runtime/harnesses/opencode/src/index.ts"],
+      "@supertag/worker-environment-modal": ["../runtime/environments/modal/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "tsup.config.ts"]
+}

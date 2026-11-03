@@ -1,0 +1,1 @@
+ALTER TABLE "Objective" ADD COLUMN "pausedAt" text;

@@ -1,0 +1,25 @@
+{
+  "name": "@supertag/surface-linear",
+  "version": "0.2.0-alpha.3",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --build --pretty false"
+  },
+  "dependencies": {
+    "@supertag/surface-sdk": "workspace:*",
+    "@supertag/core": "workspace:*",
+    "zod": "4.4.3"
+  }
+}

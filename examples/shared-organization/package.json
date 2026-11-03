@@ -1,0 +1,24 @@
+{
+  "version": "0.2.0-alpha.3",
+  "name": "supertag-shared-organization-example",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.18.1"
+  },
+  "dependencies": {
+    "supertag-ai": "^0.2.0-alpha.1"
+  },
+  "scripts": {
+    "bootstrap": "node organization.mjs bootstrap",
+    "start": "node organization.mjs start",
+    "status": "node organization.mjs status",
+    "cleanup": "node organization.mjs cleanup",
+    "worker:claude": "node worker.mjs claude",
+    "worker:codex": "node worker.mjs codex",
+    "verify": "node verify.mjs"
+  },
+  "optionalDependencies": {
+    "modal": "0.10.0"
+  }
+}

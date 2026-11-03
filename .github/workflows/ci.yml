@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  protocol-conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+          cache-dependency-path: tests/fixtures/go-worklet/go.sum
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm proto:check
+      # The protobuf contract may break freely until the first release; restore
+      # `pnpm proto:breaking "$BASE_SHA" --self-test` against the release tag then.
+      - run: pnpm test:proto:python
+      - run: pnpm test:proto:go
+
+  compatibility:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vitest run tests/spec tests/remote-worker-transport.test.ts tests/package-public-api.test.ts
+
+  python-sdk:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install "./sdks/python[dev]"
+      - run: ruff check sdks/python
+      - run: pytest sdks/python/tests
+
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: supertag_test
+          POSTGRES_USER: supertag
+          # Not a common word: Workers redact credential values from errors wherever they appear.
+          POSTGRES_PASSWORD: ci-pg-Q7v4mZ2x
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U supertag -d supertag_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      SUPERTAG_POSTGRES_URL: postgresql://supertag:ci-pg-Q7v4mZ2x@localhost:5432/supertag_test
+      SUPERTAG_SIMULATION_OUTPUT_DIR: ${{ github.workspace }}/.supertag/simulation-artifacts
+      # tsup bundles declarations in a worker that outgrows Node's default heap on runners.
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The job discards this database, and PostgreSQL suites create and drop one per test. On
+      # the runner's disk each fsync makes that cost seconds per test, so skip durability here.
+      - run: >-
+          docker exec ${{ job.services.postgres.id }}
+          psql -U supertag -d supertag_test -v ON_ERROR_STOP=1
+          -c "COMMENT ON DATABASE supertag_test IS 'supertag-test-server'"
+          -c "ALTER SYSTEM SET fsync = off"
+          -c "ALTER SYSTEM SET synchronous_commit = off"
+          -c "ALTER SYSTEM SET full_page_writes = off"
+          -c "SELECT pg_reload_conf()"
+      - run: mkdir -p .supertag
+      - run: pnpm --filter @supertag/store db:migrate:sqlite
+        env:
+          SUPERTAG_DATABASE_URL: file:${{ github.workspace }}/.supertag/supertag.db
+      - run: pnpm --filter @supertag/store db:migrate:postgresql
+      - run: pnpm check
+      - run: node --test scripts/with-test-postgres.test.mjs
+      - run: pnpm test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: objective-simulation
+          path: .supertag/simulation-artifacts
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+      - run: pnpm build
+      - run: pnpm --filter supertag-ai test:package
+      - run: pnpm test:cli-deployment
