@@ -23,8 +23,12 @@ jobs:
   publish:
     if: github.repository == 'atemaguer/supertag'
     runs-on: ubuntu-latest
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.release_tag }}
       - uses: pnpm/action-setup@v4
         with:
           version: 11.18.0
@@ -35,8 +39,8 @@ jobs:
           cache: pnpm
       - run: npm install --global npm@11
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter supertag-ai typecheck
       - run: pnpm --filter supertag-ai build
+      - run: pnpm --filter supertag-ai typecheck
       - name: Verify release tag
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
