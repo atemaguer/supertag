@@ -187,7 +187,11 @@ supertag --version
 ```
 
 If npm's global prefix is not writable, run `npm config set prefix ~/.local` first and add
-`~/.local/bin` to your `PATH`.
+`~/.local/bin` to your `PATH`. Without Node.js, install the standalone CLI instead:
+
+```sh
+curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
+```
 
 The npm package includes the CLI, SDK, and bundled documentation. See
 [installation and version matching](docs/operations/install.md) for PATH setup and removal.
