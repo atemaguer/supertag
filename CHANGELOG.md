@@ -9,6 +9,10 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Changed
+
+- Document standalone CLI installation alongside npm, including version selection, installation paths, upgrades, and removal.
+
 ## [0.2.0-alpha.5] - 2026-11-03
 
 ### Changed
