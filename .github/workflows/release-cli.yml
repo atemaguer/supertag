@@ -30,8 +30,12 @@ jobs:
           - runner: macos-15
             target: darwin-arm64
     runs-on: ${{ matrix.runner }}
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.release_tag }}
       - uses: pnpm/action-setup@v4
         with:
           version: 11.18.0
