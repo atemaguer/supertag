@@ -109,8 +109,9 @@ try {
       environment,
     )) {
     }
-    if (!selectedCommand?.includes("vendor"))
-      throw new Error("Packaged Codex must resolve its pinned native CLI");
+    // Tasks run the Codex CLI installed on PATH, never a copy bundled with the SDK.
+    if (selectedCommand === undefined || selectedCommand.includes("node_modules"))
+      throw new Error(`Packaged Codex must run the installed codex CLI, not ${selectedCommand}`);
   } finally {
     if (previousKey === undefined) delete process.env.CODEX_API_KEY;
     else process.env.CODEX_API_KEY = previousKey;
