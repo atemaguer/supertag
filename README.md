@@ -181,21 +181,17 @@ usually through a coding harness. On your laptop, `supertag init` sets up both. 
 
 ### 1. Install SuperTag
 
-```sh
-npm install -g supertag-ai
-supertag --version
-```
-
-If npm's global prefix is not writable, run `npm config set prefix ~/.local` first and add
-`~/.local/bin` to your `PATH`, or use the installer script, which keeps SuperTag in its own
-directory:
+You need [Node.js and npm](docs/operations/requirements.md#system-and-tools) on macOS or Linux. Install the CLI with the installer script:
 
 ```sh
 curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
+supertag --version
 ```
 
-The npm package includes the CLI, SDK, and bundled documentation. See
-[installation and version matching](docs/operations/install.md) for PATH setup and removal.
+It installs SuperTag in `~/.local/share/supertag` and links `supertag` into `~/.local/bin`; add
+that directory to your `PATH` if it isn't already. To install with npm instead, run
+`npm install -g supertag-ai`. See [installation and version matching](docs/operations/install.md)
+for versions, upgrades, and removal.
 
 ### 2. Set up your repository
 

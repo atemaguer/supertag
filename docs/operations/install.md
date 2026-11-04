@@ -11,34 +11,14 @@ space, and sign-in for a **harness**, the connection to an agent system such as 
 Cursor needs an API key that you generate in Cursor's dashboard; see
 [Cursor setup](requirements.md#cursor-setup-and-limits).
 
-## 1. Install the CLI from npm
+## 1. Install the CLI with the installer script
 
-```sh
-npm install -g supertag-ai
-supertag --version
-```
-
-The current release is `0.2.0-alpha.6`. The package includes the CLI, SDK, and bundled
-documentation. A SuperTag source checkout is not required.
-
-Ensure npm's global prefix's `bin` directory is on your PATH; `npm prefix --global` prints
-that prefix. If it is not writable, run `npm config set prefix ~/.local` before installing,
-then add `~/.local/bin` to your `PATH` (for example,
-`export PATH="$HOME/.local/bin:$PATH"` in your shell startup file).
-
-To install this exact release on another host:
-
-```sh
-npm install -g supertag-ai@0.2.0-alpha.6
-```
-
-## Or use the installer script
-
-The installer script installs the same npm package into its own directory, without changing npm's
-global prefix. It needs Node.js 22.13.0 or newer and npm, and works on macOS and Linux:
+The installer script installs SuperTag's npm package into its own directory, without changing
+npm's global prefix. It needs Node.js 22.13.0 or newer and npm, and works on macOS and Linux:
 
 ```sh
 curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
+supertag --version
 ```
 
 It installs SuperTag under `~/.local/share/supertag`, with the `supertag` command in
@@ -48,11 +28,33 @@ To choose the locations or a version, set these before `sh`:
 
 | Variable | Default |
 | --- | --- |
-| `SUPERTAG_VERSION` | `latest`; for example, `0.2.0-alpha.6` installs that release |
+| `SUPERTAG_VERSION` | The release the script came from; for example, `0.2.0-alpha.6` installs that release |
 | `SUPERTAG_INSTALL_ROOT` | `~/.local/share/supertag` |
 | `SUPERTAG_BIN_DIR` | `~/.local/bin` |
 
 Applications that embed the SDK still install it from npm or PyPI.
+
+## Or install the CLI from npm
+
+```sh
+npm install -g supertag-ai
+supertag --version
+```
+
+The current release is `0.2.0-alpha.6`. The package includes the CLI, SDK, and bundled
+documentation. A SuperTag source checkout is not required.
+
+npm also downloads the Claude Code and Codex CLI copies that the vendor SDKs bundle, which
+SuperTag doesn't use; the installer script leaves them out. Ensure npm's global prefix's `bin`
+directory is on your PATH; `npm prefix --global` prints that prefix. If it is not writable, run `npm config set prefix ~/.local` before installing,
+then add `~/.local/bin` to your `PATH` (for example,
+`export PATH="$HOME/.local/bin:$PATH"` in your shell startup file).
+
+To install this exact release on another host:
+
+```sh
+npm install -g supertag-ai@0.2.0-alpha.6
+```
 
 ## Install the TypeScript SDK
 

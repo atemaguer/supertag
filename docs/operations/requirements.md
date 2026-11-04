@@ -23,7 +23,7 @@ Check this page before [installing SuperTag](install.md).
 - **Disk space for dependencies and your work.** Allow about 1 GB for the installed package, plus
   space for repositories, Task outputs, and logs. With `npm install -g`, npm also downloads the
   Claude Code and Codex CLI copies that the vendor SDKs bundle, about 520 MB more on macOS arm64.
-  SuperTag doesn't use them, and the [installer script](install.md#or-use-the-installer-script)
+  SuperTag doesn't use them, and the [installer script](install.md#1-install-the-cli-with-the-installer-script)
   removes them.
 
 The small bridge that runs MCP tools inside a sandbox has a separate runtime minimum, enforced
