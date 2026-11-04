@@ -23,15 +23,15 @@ Python Worker dependencies are declared separately in [pyproject.toml](pyproject
 Install the published SDK from PyPI. Pin this prerelease explicitly:
 
 ```sh
-python -m pip install 'supertag==0.2.0a5'
+python -m pip install 'supertag==0.2.0a6'
 ```
 
 Install either harness integration, or both:
 
 ```sh
-python -m pip install 'supertag[codex]==0.2.0a5'
-python -m pip install 'supertag[agents]==0.2.0a5'
-python -m pip install 'supertag[codex,agents]==0.2.0a5'
+python -m pip install 'supertag[codex]==0.2.0a6'
+python -m pip install 'supertag[agents]==0.2.0a6'
+python -m pip install 'supertag[codex,agents]==0.2.0a6'
 ```
 
 The distribution and import namespace both use the product name:

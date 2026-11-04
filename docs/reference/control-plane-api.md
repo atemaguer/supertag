@@ -504,8 +504,8 @@ and the message names the field, such as `Unknown field: start`.
 ### Versions
 
 Every response, including errors and `/healthz`, carries a `SuperTag-Version` header with the
-Control Plane's release, such as `0.2.0-alpha.5`. `GET /healthz` needs no credential and returns
-`{"ok": true, "version": "0.2.0-alpha.5"}`. The CLI sends its own release in
+Control Plane's release, such as `0.2.0-alpha.6`. `GET /healthz` needs no credential and returns
+`{"ok": true, "version": "0.2.0-alpha.6"}`. The CLI sends its own release in
 `SuperTag-Client-Version`. The supported pairs are in
 [CLI and Control Plane versions](api-stability.md#cli-and-control-plane-versions).
 

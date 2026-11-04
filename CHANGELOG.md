@@ -9,6 +9,8 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.2.0-alpha.6] - 2026-11-04
+
 ### Changed
 
 - Claude Code and Codex Tasks run the `claude` and `codex` CLIs you install instead of copies bundled with the vendor SDKs. `supertag init` and host startup check that each is installed and at least the version SuperTag's SDK targets, and name the upgrade command when it isn't.
