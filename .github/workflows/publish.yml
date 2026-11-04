@@ -51,9 +51,5 @@ jobs:
       - name: Publish with provenance
         working-directory: packages/supertag-ai
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          if [[ "$VERSION" == *-* ]]; then
-            npm publish --access public --provenance --tag next
-          else
-            npm publish --access public --provenance
-          fi
+          # Until a stable 1.0 exists, each alpha is the release users should get by default.
+          npm publish --access public --provenance --tag latest

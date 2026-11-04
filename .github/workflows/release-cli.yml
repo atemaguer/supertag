@@ -24,8 +24,13 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Check the installer
-        run: sh -n install.sh
+      - name: Pin the installer to this release
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+        run: |
+          sed -i "s/^RELEASE_DEFAULT_VERSION=\"latest\"$/RELEASE_DEFAULT_VERSION=\"${RELEASE_TAG#v}\"/" install.sh
+          grep -q "^RELEASE_DEFAULT_VERSION=\"${RELEASE_TAG#v}\"$" install.sh
+          sh -n install.sh
       - name: Upload install.sh
         env:
           GH_TOKEN: ${{ github.token }}

@@ -5,7 +5,9 @@
 set -eu
 
 PACKAGE="${SUPERTAG_PACKAGE:-supertag-ai}"
-REQUESTED_VERSION="${SUPERTAG_VERSION:-latest}"
+# Release builds replace "latest" with their own version, so each release installs itself.
+RELEASE_DEFAULT_VERSION="latest"
+REQUESTED_VERSION="${SUPERTAG_VERSION:-$RELEASE_DEFAULT_VERSION}"
 MINIMUM_NODE="22.13.0"
 
 fail() {

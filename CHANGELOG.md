@@ -9,6 +9,10 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Fixed
+
+- Each release's `install.sh` installs that release's version, and alpha releases publish to npm's `latest` tag, so the installer and `npm install -g supertag-ai` get the current alpha.
+
 ## [0.2.0-alpha.6] - 2026-11-04
 
 ### Changed
