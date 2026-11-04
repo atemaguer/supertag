@@ -21,6 +21,11 @@ today is in the [documentation](docs/README.md).
 
 ## Considering
 
+- **A separately scaled Gateway.** Route client, surface, and Task traffic through a stateless
+  Gateway tier that scales horizontally, with Worker Hosts pulling their work from it. The Control
+  Plane would keep scheduling, policy, and the record, without sitting on every request. A
+  single-process setup on one machine would work as it does today.
+
 - **Optional host binding.** Let Tags run on any Worker Host that accepts them, and let a
   Workspace choose a local or remote runtime.
 - **Scratch Workspaces.** An empty repository for Tags whose work has no codebase, such as
