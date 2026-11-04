@@ -6,7 +6,7 @@ export { checkCodexSignIn } from "./sign-in.js";
 import { constants } from "node:fs";
 import { access, open, readFile, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { McpToolCallItem, ThreadEvent, TodoListItem } from "@openai/codex-sdk";
 import {
@@ -68,6 +68,11 @@ import {
   type WorkerProfile,
   type WorkspaceResolverRegistry,
 } from "@supertag/worker-sdk";
+import {
+  checkInstalledCli,
+  type InstalledCliCheck,
+  type InstalledCliRequirement,
+} from "@supertag/worker-sdk/installed-cli";
 import { type CodexAppServerExecution, startCodexAppServer } from "./app-server.js";
 import { codexArtifactSources } from "./artifact-sources.js";
 import { codexCommandStatus } from "./command-activity.js";
@@ -428,19 +433,10 @@ export class CodexHarness implements Harness {
       executionEnvironment,
     );
     const native = this.#executionMode === "app-server" || environment.placement === "local";
-    const source = !this.#enforceMcpPolicy
-      ? "injected"
-      : environment.placement !== "local" || this.#command !== "codex"
-        ? "configured"
-        : "bundled";
+    const source = !this.#enforceMcpPolicy ? "injected" : "configured";
     let version: string | undefined;
-    if (source === "bundled") {
-      const sdk = createRequire(import.meta.resolve("@openai/codex-sdk"));
-      const manifest = JSON.parse(
-        await readFile(sdk.resolve("@openai/codex/package.json"), "utf8"),
-      ) as { version?: string };
-      if (typeof manifest.version === "string") version = manifest.version;
-    }
+    if (source === "configured" && environment.placement === "local" && this.#command === "codex")
+      version = (await installedCodex()).version;
     return {
       capabilities: {
         ...(await this.describe()),
@@ -813,11 +809,8 @@ export class CodexHarness implements Harness {
             : (process.env["CODEX_API_KEY"] ?? process.env["OPENAI_API_KEY"]);
         const executable =
           runtime.placement === "local" && request.command === "codex"
-            ? await bundledCodex()
-            : {
-                command: request.command,
-                path: undefined,
-              };
+            ? await installedCodex()
+            : { command: request.command };
         const processEnvironment = {
           ...minimalProcessEnvironment(process.env),
           ...(request.outputDirectory === undefined
@@ -829,9 +822,6 @@ export class CodexHarness implements Harness {
           CODEX_HOME: home,
           ...(apiKey ? { CODEX_API_KEY: apiKey } : {}),
           ...codexMcpRuntimeEnvironment(request.mcpServers),
-          ...(executable.path
-            ? { PATH: [executable.path, process.env["PATH"]].filter(Boolean).join(delimiter) }
-            : {}),
         };
         const requestedLimits = input.attempt.execution.limits;
         if (requestedLimits?.maxNativeAgents !== undefined && requestedLimits.maxNativeAgents !== 0)
@@ -1844,50 +1834,36 @@ function assertCodexEventSucceeded(event: ThreadEvent): void {
   if (event.type === "error") throw new HarnessProviderError(`Codex SDK failed: ${event.message}`);
 }
 
-/** Resolve the CLI shipped by the pinned SDK, never an unrelated local PATH binary. */
-/** The Codex executable bundled with SuperTag, falling back to codex on PATH. */
-export async function bundledCodexCommand(): Promise<string> {
-  try {
-    return (await bundledCodex()).command;
-  } catch {
-    return "codex";
-  }
+/** The Codex CLI SuperTag needs: the user's own install, at least the version the pinned SDK targets. */
+export async function codexCliRequirement(): Promise<InstalledCliRequirement> {
+  const sdk = createRequire(import.meta.resolve("@openai/codex-sdk"));
+  const manifest = JSON.parse(
+    await readFile(sdk.resolve("@openai/codex/package.json"), "utf8"),
+  ) as {
+    version?: unknown;
+  };
+  if (typeof manifest.version !== "string" || !manifest.version)
+    throw new Error("The pinned Codex SDK has no CLI version");
+  return {
+    name: "Codex",
+    command: "codex",
+    minimumVersion: manifest.version,
+    install: "Install or upgrade it with: npm install -g @openai/codex",
+  };
 }
 
-async function bundledCodex(): Promise<{ command: string; path: string; version: string }> {
-  const os = process.platform === "android" ? "linux" : process.platform;
-  const cpu = process.arch === "x64" ? "x86_64" : process.arch === "arm64" ? "aarch64" : undefined;
-  const target =
-    os === "linux"
-      ? "unknown-linux-musl"
-      : os === "darwin"
-        ? "apple-darwin"
-        : os === "win32"
-          ? "pc-windows-msvc"
-          : undefined;
-  if (!cpu || !target) throw new Error("Unsupported bundled Codex platform");
-  const sdk = createRequire(import.meta.resolve("@openai/codex-sdk"));
-  const manifestPath = sdk.resolve("@openai/codex/package.json");
-  const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as { version?: unknown };
-  if (typeof manifest.version !== "string" || !manifest.version)
-    throw new Error("Pinned Codex package has no version");
-  const codex = createRequire(manifestPath);
-  const platform = codex.resolve(`@openai/codex-${os}-${process.arch}/package.json`);
-  const root = join(dirname(platform), "vendor", `${cpu}-${target}`);
-  const binary = os === "win32" ? "codex.exe" : "codex";
-  for (const [bin, path] of [
-    ["bin", "codex-path"],
-    ["codex", "path"],
-  ] as const) {
-    const command = join(root, bin, binary);
-    if (
-      await stat(command)
-        .then((s) => s.isFile())
-        .catch(() => false)
-    )
-      return { command, path: join(root, path), version: manifest.version };
-  }
-  throw new Error("Pinned Codex binary missing; install the SDK optional platform dependencies");
+/** Whether the Codex CLI on PATH is installed and new enough. */
+export async function checkCodexCli(
+  options: Parameters<typeof checkInstalledCli>[1] = {},
+): Promise<InstalledCliCheck> {
+  return checkInstalledCli(await codexCliRequirement(), options);
+}
+
+/** The installed Codex CLI's path and version; fails with install guidance when it can't run Tasks. */
+export async function installedCodex(): Promise<{ command: string; version: string }> {
+  const check = await checkCodexCli();
+  if (check.status !== "ok") throw new HarnessProviderError(check.message);
+  return { command: check.path, version: check.version };
 }
 
 async function codexCliVersion(
@@ -1941,8 +1917,8 @@ async function* codexProcessEvents(
       : (process.env["CODEX_API_KEY"] ?? process.env["OPENAI_API_KEY"]);
   const executable =
     environment.placement === "local" && request.command === "codex"
-      ? await bundledCodex()
-      : { command: request.command, path: undefined };
+      ? await installedCodex()
+      : { command: request.command };
   const env: Record<string, string> = {
     ...minimalProcessEnvironment(process.env),
     ...(request.outputDirectory === undefined
@@ -1955,7 +1931,6 @@ async function* codexProcessEvents(
     ...(apiKey ? { CODEX_API_KEY: apiKey } : {}),
     ...codexMcpRuntimeEnvironment(request.mcpServers),
   };
-  if (executable.path) env["PATH"] = [executable.path, env["PATH"]].filter(Boolean).join(delimiter);
   const sandbox = codexSandboxAllowance(request.sandboxMode, request.runtimeActions);
   const sandboxMode = codexSandboxMode(sandbox);
   const commonGitDir =

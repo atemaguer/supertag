@@ -32,18 +32,18 @@ To install this exact release on another host:
 npm install -g supertag-ai@0.2.0-alpha.5
 ```
 
-## Or install the standalone CLI
+## Or use the installer script
 
-To use SuperTag without installing Node.js, download the standalone CLI for macOS or Linux on
-x64 or arm64. It bundles its own Node.js runtime:
+The installer script installs the same npm package into its own directory, without changing npm's
+global prefix. It needs Node.js 22.13.0 or newer and npm, and works on macOS and Linux:
 
 ```sh
 curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
 ```
 
-The installer downloads the archive for your system from the latest GitHub release, checks it
-against the release's `checksums.txt`, and installs it under `~/.local/share/supertag`, with the
-`supertag` command in `~/.local/bin`. Add `~/.local/bin` to your `PATH` if it isn't already.
+It installs SuperTag under `~/.local/share/supertag`, with the `supertag` command in
+`~/.local/bin`, and removes the Claude Code and Codex CLI copies that the vendor SDKs bundle,
+since SuperTag runs the CLIs you install. Add `~/.local/bin` to your `PATH` if it isn't already.
 To choose the locations or a version, set these before `sh`:
 
 | Variable | Default |
@@ -52,8 +52,7 @@ To choose the locations or a version, set these before `sh`:
 | `SUPERTAG_INSTALL_ROOT` | `~/.local/share/supertag` |
 | `SUPERTAG_BIN_DIR` | `~/.local/bin` |
 
-The standalone CLI runs the Control Plane and built-in Workers like the npm package. Applications
-that embed the SDK still install it from npm or PyPI.
+Applications that embed the SDK still install it from npm or PyPI.
 
 ## Install the TypeScript SDK
 
@@ -86,8 +85,8 @@ for optional Codex and OpenAI Agents integrations.
 
 ## Upgrade
 
-Install the target version with the same npm and pip commands above, or run the standalone
-installer again. For a Compose deployment,
+Install the target version with the same npm and pip commands above, or run the installer
+script again. For a Compose deployment,
 follow the [upgrade procedure](control-plane.md#upgrade-a-compose-deployment) to back up state
 and coordinate the connected Worker Hosts. Source contributors can use
 [CONTRIBUTING.md](../../CONTRIBUTING.md) to build and link uncommitted changes.
@@ -163,7 +162,7 @@ Stop local services with `supertag down`, then remove the global package:
 npm uninstall -g supertag-ai
 ```
 
-For the standalone CLI, remove its files instead:
+If you used the installer script, remove its files instead:
 
 ```sh
 rm -rf ~/.local/share/supertag ~/.local/bin/supertag

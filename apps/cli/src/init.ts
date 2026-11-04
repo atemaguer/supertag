@@ -14,9 +14,9 @@ import {
 } from "./control-plane-client.js";
 import { CONTROL_PLANE_API_VERSION, type TagResource } from "./control-plane-resources.js";
 import {
-  detectHarnesses,
   HARNESS_COMMANDS,
   harnessSignInInstructions,
+  inspectHarnesses,
   noHarnessMessage,
   probeHarnessSignIn,
 } from "./harnesses.js";
@@ -140,9 +140,12 @@ export async function initialize(options: InitOptions = {}): Promise<InitResult>
   const write = options.write ?? ((text: string) => process.stdout.write(text));
   const yes = options.yes === true;
   // First, before any question or side effect: a harness must be installed.
-  const installed = await detectHarnesses();
+  const { found: installed, problems } = await inspectHarnesses();
   if (installed.length === 0)
-    throw new Error(`${noHarnessMessage()}\nThen run supertag init again.`);
+    throw new Error(
+      `${[...problems, noHarnessMessage()].join("\n")}\nThen run supertag init again.`,
+    );
+  for (const problem of problems) write(`${problem}\n`);
   if (yes && installed.length === 1 && installed[0] === "opencode")
     throw new Error(
       "OpenCode is the only harness on this machine, and it needs a model. Run supertag init in a terminal, without --yes, to enter one as provider/model, or install Claude Code or Codex.",
@@ -955,7 +958,9 @@ Sets up SuperTag on this machine for the git repository in the current directory
 Control Plane, this machine as a Worker Host, and a lead Tag.
 
 init first checks for a harness (claude, codex, or opencode on PATH; Cursor through
-CURSOR_API_KEY, cursor-agent, or an agent binary verified as Cursor) and stops with
+CURSOR_API_KEY, cursor-agent, or an agent binary verified as Cursor). Claude Code and Codex Tasks
+run those installed CLIs, so each must be at least the version SuperTag's SDK targets; an older
+one is reported with its upgrade command and not offered. init stops with
 install guidance, before asking or changing anything, if there is none. It then asks, with the
 default in [brackets]:
   1. Control Plane: its port [3434] and database [SQLite in the state directory]. An occupied

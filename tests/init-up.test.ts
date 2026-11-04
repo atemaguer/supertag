@@ -274,6 +274,17 @@ describe("supertag init", () => {
     expect(await readFile(path, "utf8")).toBe(original);
   });
 
+  it("names an installed Claude Code or Codex that is too old and changes nothing", async () => {
+    const root = await repository(context, "app");
+    await writeFile(join(context.bin, "codex"), '#!/bin/sh\necho "codex-cli 0.1.0"\n', {
+      mode: 0o755,
+    });
+    await expect(initialize({ cwd: root, yes: true })).rejects.toThrow(
+      /Codex 0\.1\.0 is older than \d+\.\d+\.\d+, the oldest version SuperTag supports\. Install or upgrade it with: npm install -g @openai\/codex[\s\S]*No harness is available/,
+    );
+    await expect(stat(context.state)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("checks for a harness first and changes nothing when none is installed", async () => {
     const root = await repository(context, "app");
     await expect(initialize({ cwd: root, yes: true })).rejects.toThrow(

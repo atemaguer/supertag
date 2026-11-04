@@ -1,17 +1,7 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readlink,
-  realpath,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readlink, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 const installer = resolve("install.sh");
@@ -26,65 +16,95 @@ afterEach(async () => {
 });
 
 describe("install.sh", () => {
-  it("verifies and installs the matching release archive", async () => {
-    const fixture = await releaseFixture("1.2.3");
+  it("installs the npm package with the system's Node.js and links the command", async () => {
+    const fixture = await packageFixture("1.2.3");
     const result = await runInstaller(fixture);
 
+    expect(result.stderr).not.toContain("SuperTag installer:");
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Installed SuperTag 1.2.3");
+    expect(result.stdout).toContain("then run supertag init");
     expect(await readlink(join(fixture.bin, "supertag"))).toBe(
-      join(await realpath(fixture.installRoot), "versions/1.2.3/bin/supertag"),
-    );
-    expect(await readFile(join(fixture.installRoot, "versions/1.2.3/VERSION"), "utf8")).toBe(
-      "1.2.3\n",
+      join(await realpath(fixture.installRoot), "versions/1.2.3/node_modules/.bin/supertag"),
     );
   });
 
-  it("refuses an archive whose checksum does not match", async () => {
-    const fixture = await releaseFixture("1.2.3");
-    await writeFile(
-      join(fixture.downloadRoot, "checksums.txt"),
-      `${"0".repeat(64)}  ${fixture.asset}\n`,
+  it("removes the Claude Code and Codex CLIs the vendor SDKs bundle", async () => {
+    const fixture = await packageFixture("1.2.3");
+    expect((await runInstaller(fixture)).code).toBe(0);
+    const modules = join(
+      fixture.installRoot,
+      "versions/1.2.3/node_modules/supertag-ai/node_modules",
     );
+    for (const bundled of [
+      "@openai/codex-darwin-arm64",
+      "@anthropic-ai/claude-agent-sdk-linux-x64",
+    ])
+      await expect(stat(join(modules, bundled))).rejects.toMatchObject({ code: "ENOENT" });
+    // Packages that only share a prefix stay.
+    expect((await stat(join(modules, "@openai/codex-sdk"))).isDirectory()).toBe(true);
+  });
 
-    const result = await runInstaller(fixture);
-
+  it("refuses to install without a new enough Node.js", async () => {
+    const fixture = await packageFixture("1.2.3");
+    const old = join(fixture.root, "old-node");
+    await mkdir(old);
+    await writeFile(join(old, "node"), "#!/bin/sh\necho v20.11.0\n");
+    await chmod(join(old, "node"), 0o755);
+    const result = await runInstaller(fixture, `${old}:${process.env["PATH"] ?? ""}`);
     expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain("checksum verification failed");
+    expect(result.stderr).toContain("Node.js 20.11.0 is older than 22.13.0");
   });
 });
 
-async function releaseFixture(version: string) {
+/** A packed package named supertag-ai whose bin prints its version, bundling fake vendor CLIs. */
+async function packageFixture(version: string) {
   const root = await mkdtemp(join(tmpdir(), "supertag-installer-test-"));
   temporaryDirectories.push(root);
-  const downloadRoot = join(root, "release");
-  const archiveRoot = join(root, "archive/supertag");
-  const installRoot = join(root, "install");
-  const bin = join(root, "bin");
-  const asset = "supertag-darwin-arm64.tar.gz";
-  await mkdir(join(archiveRoot, "bin"), { recursive: true });
-  await mkdir(downloadRoot, { recursive: true });
-  await writeFile(join(archiveRoot, "VERSION"), `${version}\n`);
+  const source = join(root, "package");
+  const bundled = [
+    "@openai/codex-darwin-arm64",
+    "@anthropic-ai/claude-agent-sdk-linux-x64",
+    "@openai/codex-sdk",
+  ];
+  await mkdir(join(source, "bin"), { recursive: true });
+  for (const name of bundled) {
+    const directory = join(source, "node_modules", name);
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, "package.json"), JSON.stringify({ name, version: "1.0.0" }));
+  }
   await writeFile(
-    join(archiveRoot, "bin/supertag"),
-    `#!/bin/sh\nif [ "\${1:-}" = "--version" ]; then printf '${version}\\n'; exit 0; fi\nexit 0\n`,
+    join(source, "package.json"),
+    JSON.stringify({
+      name: "supertag-ai",
+      version,
+      bin: { supertag: "bin/supertag.js" },
+      dependencies: Object.fromEntries(bundled.map((name) => [name, "1.0.0"])),
+      bundleDependencies: bundled,
+    }),
   );
-  await chmod(join(archiveRoot, "bin/supertag"), 0o755);
-  await run("tar", ["-czf", join(downloadRoot, asset), "-C", join(root, "archive"), "supertag"]);
-  const archive = await readFile(join(downloadRoot, asset));
-  const checksum = createHash("sha256").update(archive).digest("hex");
-  await writeFile(join(downloadRoot, "checksums.txt"), `${checksum}  ${asset}\n`);
-  return { asset, bin, downloadRoot, installRoot };
+  await writeFile(
+    join(source, "bin/supertag.js"),
+    `#!/usr/bin/env node\nconsole.log(${JSON.stringify(version)});\n`,
+  );
+  await chmod(join(source, "bin/supertag.js"), 0o755);
+  const packed = await run("npm", ["pack", "--silent", "--pack-destination", root], {}, source);
+  const tarball = join(root, packed.stdout.trim().split("\n").at(-1) ?? "");
+  return {
+    root,
+    tarball,
+    bin: join(root, "bin"),
+    installRoot: join(root, "install"),
+  };
 }
 
-async function runInstaller(fixture: Awaited<ReturnType<typeof releaseFixture>>) {
+async function runInstaller(fixture: Awaited<ReturnType<typeof packageFixture>>, path?: string) {
   return run("sh", [installer], {
-    SUPERTAG_ARCH: "arm64",
     SUPERTAG_BIN_DIR: fixture.bin,
-    SUPERTAG_DOWNLOAD_ROOT: `file://${fixture.downloadRoot}`,
     SUPERTAG_INSTALL_ROOT: fixture.installRoot,
-    SUPERTAG_OS: "darwin",
-    SUPERTAG_VERSION: "1.2.3",
+    SUPERTAG_PACKAGE_SOURCE: fixture.tarball,
+    npm_config_cache: join(fixture.root, "npm-cache"),
+    ...(path === undefined ? {} : { PATH: path }),
   });
 }
 
@@ -92,9 +112,11 @@ function run(
   command: string,
   args: readonly string[],
   environment: Readonly<Record<string, string>> = {},
+  cwd: string = dirname(installer),
 ): Promise<{ readonly code: number | null; readonly stderr: string; readonly stdout: string }> {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, {
+      cwd,
       env: { ...process.env, ...environment },
       stdio: ["ignore", "pipe", "pipe"],
     });

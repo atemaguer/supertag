@@ -11,7 +11,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Changed
 
-- Document standalone CLI installation alongside npm, including version selection, installation paths, upgrades, and removal.
+- Claude Code and Codex Tasks run the `claude` and `codex` CLIs you install instead of copies bundled with the vendor SDKs. `supertag init` and host startup check that each is installed and at least the version SuperTag's SDK targets, and name the upgrade command when it isn't.
+- The installer script (`install.sh`) installs the npm package with your Node.js 22.13 or newer and npm, and removes the bundled Claude Code and Codex CLI copies; releases no longer attach per-platform archives with their own Node.js.
+- Document the installer script alongside npm, including version selection, installation paths, upgrades, and removal.
 
 ## [0.2.0-alpha.5] - 2026-11-03
 

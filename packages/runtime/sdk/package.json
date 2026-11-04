@@ -9,6 +9,11 @@
       "development": "./src/redaction.ts",
       "default": "./dist/redaction.js"
     },
+    "./installed-cli": {
+      "types": "./dist/installed-cli.d.ts",
+      "development": "./src/installed-cli.ts",
+      "default": "./dist/installed-cli.js"
+    },
     "./internal/process-inventory": {
       "types": "./dist/process-inventory.d.ts",
       "development": "./src/process-inventory.ts",

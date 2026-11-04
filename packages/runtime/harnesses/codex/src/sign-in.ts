@@ -46,7 +46,12 @@ export async function checkCodexSignIn(
     if (controller.signal.aborted) return false;
     const home = join(directory, ".codex");
     const apiKey = await prepareCodexHome(home, environment);
+    const codexPath =
+      options.createCodex === undefined
+        ? (await import("./index.js").then(({ installedCodex }) => installedCodex())).command
+        : undefined;
     const codex = (options.createCodex ?? ((config) => new Codex(config)))({
+      ...(codexPath === undefined ? {} : { codexPathOverride: codexPath }),
       ...(apiKey ? { apiKey } : {}),
       env: { ...minimalProcessEnvironment(environment), CODEX_HOME: home },
       config: {

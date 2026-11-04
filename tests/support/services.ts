@@ -113,7 +113,8 @@ export async function freePort(): Promise<number> {
 export async function fakeHarness(context: ServicesContext, ...commands: string[]) {
   for (const command of commands) {
     const path = join(context.bin, command);
-    await writeFile(path, "#!/bin/sh\nexit 0\n");
+    // Report a version above any minimum, like a current install.
+    await writeFile(path, '#!/bin/sh\n[ "$1" = "--version" ] && echo "99.0.0"\nexit 0\n');
     await chmod(path, 0o755);
   }
 }

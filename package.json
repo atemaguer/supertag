@@ -21,7 +21,6 @@
     "db:migrate": "pnpm --filter @supertag/store db:migrate",
     "dev": "pnpm --filter @supertag/cli dev",
     "postinstall": "pnpm db:generate",
-    "package:cli": "node scripts/package-cli-distribution.mjs",
     "start": "node apps/cli/dist/index.js",
     "supertag": "pnpm --filter @supertag/cli dev",
     "test": "node scripts/with-test-postgres.mjs node_modules/vitest/vitest.mjs run",

@@ -19,9 +19,15 @@ export async function checkClaudeCodeSignIn(
   let session: ReturnType<typeof query> | undefined;
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 30_000);
   try {
+    const executable =
+      options.queryAgent === undefined
+        ? (await import("./index.js").then(({ installedClaudeCode }) => installedClaudeCode()))
+            .command
+        : undefined;
     session = (options.queryAgent ?? query)({
       prompt: "Reply with OK only.",
       options: {
+        ...(executable === undefined ? {} : { pathToClaudeCodeExecutable: executable }),
         cwd: directory,
         abortController: controller,
         ...(options.model === undefined ? {} : { model: options.model }),

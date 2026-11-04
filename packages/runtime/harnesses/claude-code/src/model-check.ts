@@ -20,12 +20,21 @@ export async function checkClaudeCodeModels(
   let session: ReturnType<typeof query> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
+    const executable =
+      options.queryAgent === undefined
+        ? (await import("./index.js").then(({ installedClaudeCode }) => installedClaudeCode()))
+            .command
+        : undefined;
     session = (options.queryAgent ?? query)({
       // Streaming input that never sends a message: the session answers control requests only.
       prompt: (async function* () {
         await new Promise<never>(() => undefined);
       })(),
-      options: { settingSources: [], maxTurns: 1 },
+      options: {
+        settingSources: [],
+        maxTurns: 1,
+        ...(executable === undefined ? {} : { pathToClaudeCodeExecutable: executable }),
+      },
     });
     const listed = await Promise.race([
       session.supportedModels(),

@@ -289,6 +289,8 @@ export interface RunHostOptions {
   readonly write?: (text: string) => void;
   /** Checks each harness's configured models once at startup; replaceable for tests. */
   readonly checkModels?: HostModelCheck;
+  /** Checks the installed Claude Code and Codex CLIs; defaults to finding them on PATH. */
+  readonly checkCli?: HostCliCheck;
 }
 
 export type HostModelCheckResult =
@@ -350,6 +352,35 @@ export async function checkHostModels(
   if (failures.length > 0)
     throw new Error(
       `Host service models are not available: ${failures.join(" ")} Change models in supertag.yaml and run supertag up again.`,
+    );
+}
+
+/** Checks one harness's installed CLI; resolves to a message when the host can't use it. */
+export type HostCliCheck = (harness: "claude-code" | "codex") => Promise<string | undefined>;
+
+export const defaultHostCliCheck: HostCliCheck = async (harness) => {
+  const { checkHarnessCli } = await import("./harnesses.js");
+  const check = await checkHarnessCli(harness);
+  return check.status === "ok" ? undefined : check.message;
+};
+
+/**
+ * Claude Code and Codex Tasks run the CLI installed on this machine, so a host service that serves
+ * either fails to start when its CLI is missing or older than SuperTag supports.
+ */
+export async function checkHostCliTools(
+  service: Pick<HostService, "name" | "harnesses">,
+  check: HostCliCheck,
+): Promise<void> {
+  const failures: string[] = [];
+  for (const harness of service.harnesses)
+    if (harness === "claude-code" || harness === "codex") {
+      const failure = await check(harness);
+      if (failure !== undefined) failures.push(failure);
+    }
+  if (failures.length > 0)
+    throw new Error(
+      `Host service ${service.name} can't run its harnesses:\n  ${failures.join("\n  ")}\nInstall or upgrade them, or remove them from harnesses in supertag.yaml, then run supertag up again.`,
     );
 }
 
@@ -473,6 +504,7 @@ export async function runHostService(options: RunHostOptions): Promise<void> {
     if (credential.notice) notice(credential.notice);
     if (await resumeIfDrained(service.name, target.managementUrl, credential))
       notice(`Resumed Worker Host ${credential.workerHostId}: it takes new Task Attempts again.`);
+    await checkHostCliTools(service, options.checkCli ?? defaultHostCliCheck);
     await checkHostModels(service, options.checkModels ?? defaultHostModelCheck, notice);
     for (const harness of unsandboxedWithoutOptIn(service))
       notice(

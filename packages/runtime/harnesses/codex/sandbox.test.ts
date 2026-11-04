@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { afterAll, describe, expect, it } from "vitest";
 import { type ResolutionContext, WorkspaceEnvironmentResolver } from "../../sdk/src/index.js";
 import * as codexAppServer from "./src/app-server.js";
-import { bundledCodexCommand } from "./src/index.js";
+import { installedCodex } from "./src/index.js";
 import {
   codexPermissionProfileArguments,
   codexPermissionProfileConfig,
@@ -149,7 +149,7 @@ function canApplySandbox(): boolean {
 
 // Runs the bundled Codex CLI's own sandbox (macOS Seatbelt) with the exact
 // configuration the Worker passes, then probes loopback and external sockets.
-describe.runIf(canApplySandbox())("bundled Codex loopback sandbox", () => {
+describe.runIf(canApplySandbox())("installed Codex loopback sandbox", () => {
   const probe = `
 import net from "node:net";
 const result = {};
@@ -172,8 +172,7 @@ console.log(JSON.stringify(result));
 `;
 
   async function sandboxed(actions: readonly string[], profile: boolean) {
-    const command = await bundledCodexCommand();
-    if (command === "codex") throw new Error("Bundled Codex binary is unavailable");
+    const { command } = await installedCodex();
     const root = await mkdtemp(join(tmpdir(), "supertag-codex-sandbox-"));
     roots.push(root);
     await mkdir(join(root, "home"));
@@ -191,8 +190,7 @@ console.log(JSON.stringify(result));
   }
 
   it("lets the profile write a granted output directory outside the workspace", async () => {
-    const command = await bundledCodexCommand();
-    if (command === "codex") throw new Error("Bundled Codex binary is unavailable");
+    const { command } = await installedCodex();
     const root = await mkdtemp(join(tmpdir(), "supertag-codex-sandbox-"));
     // :workspace already allows the temporary directory, so probe outside it.
     const output = await mkdtemp(join(homedir(), ".supertag-codex-output-"));
@@ -337,8 +335,7 @@ describe("Codex sandbox and the shared git directory", () => {
   it.runIf(canApplySandbox())(
     "denies the Codex sandbox writes to the repository config, worktree config, and info/attributes",
     async () => {
-      const command = await bundledCodexCommand();
-      if (command === "codex") throw new Error("Bundled Codex binary is unavailable");
+      const { command } = await installedCodex();
       const attempt = await taskWorktree();
       const home = join(attempt.base, "codex-home");
       await mkdir(home);

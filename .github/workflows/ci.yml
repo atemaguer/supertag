@@ -118,6 +118,8 @@ jobs:
         env:
           SUPERTAG_DATABASE_URL: file:${{ github.workspace }}/.supertag/supertag.db
       - run: pnpm --filter @supertag/store db:migrate:postgresql
+      # SuperTag runs the user's installed Claude Code and Codex, so real-harness tests need them.
+      - run: node scripts/install-harness-clis.mjs
       - run: pnpm check
       - run: node --test scripts/with-test-postgres.test.mjs
       - run: pnpm test

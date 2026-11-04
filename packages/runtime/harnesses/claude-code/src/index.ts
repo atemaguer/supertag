@@ -2,7 +2,6 @@ export { checkClaudeCodeSignIn } from "./sign-in.js";
 
 import { createHash } from "node:crypto";
 import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -80,6 +79,11 @@ import {
   type WorkerProfile,
   type WorkspaceResolverRegistry,
 } from "@supertag/worker-sdk";
+import {
+  checkInstalledCli,
+  type InstalledCliCheck,
+  type InstalledCliRequirement,
+} from "@supertag/worker-sdk/installed-cli";
 import { z } from "zod/v4";
 import { claudeCodeArtifactSources } from "./artifact-sources.js";
 import { ClaudeLiveInput, claudeQuery, isClaudeFinalResult } from "./query.js";
@@ -357,24 +361,10 @@ export class ClaudeCodeHarness implements Harness {
       throw new Error(
         "Claude Code requires a local Worker Host runtime; set harnessRuntime to a local provider for remote execution",
       );
-    const source = !this.#enforceMcpPolicy
-      ? "injected"
-      : this.#executable !== undefined
-        ? "configured"
-        : "bundled";
+    const source = !this.#enforceMcpPolicy ? "injected" : "configured";
     let version: string | undefined;
-    if (source === "bundled") {
-      const manifest = JSON.parse(
-        await readFile(
-          join(
-            dirname(fileURLToPath(import.meta.resolve("@anthropic-ai/claude-agent-sdk"))),
-            "package.json",
-          ),
-          "utf8",
-        ),
-      ) as { version?: string };
-      if (typeof manifest.version === "string") version = manifest.version;
-    }
+    if (source === "configured" && this.#executable === undefined)
+      version = (await installedClaudeCode()).version;
     return {
       capabilities: {
         ...(await this.describe()),
@@ -1105,6 +1095,10 @@ export async function* runClaudeCode(
     return;
   }
   const sdkQuery = queryAgent ?? query;
+  // The SDK runs the user's installed Claude Code; an injected query brings its own.
+  const claudeExecutable =
+    request.executable ??
+    (queryAgent === undefined ? (await installedClaudeCode()).command : undefined);
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(new Error("Claude Code timed out")),
@@ -1152,9 +1146,7 @@ export async function* runClaudeCode(
       ...(request.maxBudgetUsd === undefined ? {} : { maxBudgetUsd: request.maxBudgetUsd }),
       ...(request.model === undefined ? {} : { model: request.model }),
       ...(request.effort === undefined ? {} : { effort: request.effort }),
-      ...(request.executable === undefined
-        ? {}
-        : { pathToClaudeCodeExecutable: request.executable }),
+      ...(claudeExecutable === undefined ? {} : { pathToClaudeCodeExecutable: claudeExecutable }),
       settingSources: [],
       strictMcpConfig: true,
       mcpServers: {
@@ -1406,25 +1398,40 @@ async function closeClaudeMcpConnections(
     });
 }
 
-function bundledClaudeExecutable(): string {
-  const platform = globalThis.process.platform;
-  const architecture = globalThis.process.arch;
-  const report = platform === "linux" ? globalThis.process.report.getReport() : undefined;
-  const musl =
-    report !== undefined &&
-    !(report as { header?: { glibcVersionRuntime?: string } }).header?.glibcVersionRuntime;
-  const suffix = `${platform}-${architecture}${musl ? "-musl" : ""}`;
-  const sdk = createRequire(import.meta.resolve("@anthropic-ai/claude-agent-sdk"));
-  try {
-    return sdk.resolve(
-      `@anthropic-ai/claude-agent-sdk-${suffix}/${platform === "win32" ? "claude.exe" : "claude"}`,
-    );
-  } catch (error) {
-    throw new Error(
-      "Bundled Claude executable is unavailable for this host; configure executable explicitly",
-      { cause: error },
-    );
-  }
+/** The Claude Code CLI SuperTag needs: the user's own install, at least the version the pinned SDK targets. */
+export async function claudeCodeCliRequirement(): Promise<InstalledCliRequirement> {
+  const manifest = JSON.parse(
+    await readFile(
+      join(
+        dirname(fileURLToPath(import.meta.resolve("@anthropic-ai/claude-agent-sdk"))),
+        "package.json",
+      ),
+      "utf8",
+    ),
+  ) as { claudeCodeVersion?: unknown };
+  if (typeof manifest.claudeCodeVersion !== "string" || !manifest.claudeCodeVersion)
+    throw new Error("The pinned Claude Agent SDK names no Claude Code version");
+  return {
+    name: "Claude Code",
+    command: "claude",
+    minimumVersion: manifest.claudeCodeVersion,
+    install:
+      "Install it with: npm install -g @anthropic-ai/claude-code, or upgrade an install with: claude update",
+  };
+}
+
+/** Whether the Claude Code CLI on PATH is installed and new enough. */
+export async function checkClaudeCodeCli(
+  options: Parameters<typeof checkInstalledCli>[1] = {},
+): Promise<InstalledCliCheck> {
+  return checkInstalledCli(await claudeCodeCliRequirement(), options);
+}
+
+/** The installed Claude Code CLI's path and version; fails with install guidance when it can't run Tasks. */
+export async function installedClaudeCode(): Promise<{ command: string; version: string }> {
+  const check = await checkClaudeCodeCli();
+  if (check.status !== "ok") throw new HarnessProviderError(check.message);
+  return { command: check.path, version: check.version };
 }
 
 /** Colocated local runs use an owned CLI process; split runs use the host SDK. */
@@ -1479,7 +1486,7 @@ async function* runClaudeCodeProcess(
   const allowedTools = claudeAllowedTools(request);
   const process = await runtime.spawn(
     {
-      command: request.executable ?? bundledClaudeExecutable(),
+      command: request.executable ?? (await installedClaudeCode()).command,
       cwd: request.runtimeDirectory,
       args: [
         "--print",

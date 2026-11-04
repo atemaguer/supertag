@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { ExecutionEnvironment } from "@supertag/worker-sdk";
 import { expect, it, vi } from "vitest";
 
-import { runCodex } from "./src/index.js";
+import { installedCodex, runCodex } from "./src/index.js";
 
 it("overrides native delegation even with conflicting user and workspace configuration", async () => {
   const directory = await mkdtemp(join(tmpdir(), "codex-delegation-"));
@@ -78,7 +78,8 @@ it("overrides native delegation even with conflicting user and workspace configu
       ]),
     );
     expect(captured?.environment).toMatchObject({ CODEX_HOME: attemptHome });
-    expect(captured?.command).toContain("vendor");
+    // Tasks run the user's installed Codex CLI, not a copy bundled with the SDK.
+    expect(captured?.command).toBe((await installedCodex()).command);
     expect(captured?.streamOutput).toBe(true);
     expect(await readFile(join(userHome, "config.toml"), "utf8")).toBe(config);
   } finally {

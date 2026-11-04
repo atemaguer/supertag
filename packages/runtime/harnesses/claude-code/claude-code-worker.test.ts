@@ -2580,7 +2580,7 @@ it("resolves placement-specific session support and validates profile configurat
     environments: environmentAccesses(testEnvironment(fixtureWorkspace)),
   });
   expect(local.capabilities.sessions).toEqual({ resume: true, export: true, scope: "portable" });
-  expect(local.runtime?.source).toBe("bundled");
+  expect(local.runtime?.source).toBe("configured");
   expect(local.runtime?.version).toMatch(/^\d+\./);
   await expect(
     harness.resolve({

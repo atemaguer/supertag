@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
+import { checkInstalledCli, type InstalledCliCheck } from "@supertag/worker-sdk/installed-cli";
 import type { WorkletHarness } from "./worker.js";
 
 export const HARNESSES: readonly WorkletHarness[] = ["claude-code", "codex", "cursor", "opencode"];
@@ -24,7 +25,19 @@ export async function detectHarnesses(
   path: string | undefined = process.env["PATH"],
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): Promise<readonly WorkletHarness[]> {
+  return (await inspectHarnesses(path, environment)).found;
+}
+
+/**
+ * Usable harnesses, plus why an installed one can't be used. Claude Code and Codex run the user's
+ * own CLI, so each must be installed and at least the version SuperTag's SDK targets.
+ */
+export async function inspectHarnesses(
+  path: string | undefined = process.env["PATH"],
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): Promise<{ readonly found: readonly WorkletHarness[]; readonly problems: readonly string[] }> {
   const found: WorkletHarness[] = [];
+  const problems: string[] = [];
   for (const harness of HARNESSES) {
     if (harness === "cursor") {
       if (
@@ -33,9 +46,26 @@ export async function detectHarnesses(
         (await isCursorAgentAlias(path))
       )
         found.push(harness);
+    } else if (harness === "claude-code" || harness === "codex") {
+      const check = await checkHarnessCli(harness, { path, environment });
+      if (check.status === "ok") found.push(harness);
+      else if (check.status !== "missing") problems.push(check.message);
     } else if (await isOnPath(HARNESS_COMMANDS[harness], path)) found.push(harness);
   }
-  return found;
+  return { found, problems };
+}
+
+/** Checks the installed CLI a harness runs: present on PATH and new enough. */
+export async function checkHarnessCli(
+  harness: "claude-code" | "codex",
+  options: Parameters<typeof checkInstalledCli>[1] = {},
+): Promise<InstalledCliCheck> {
+  if (harness === "codex") {
+    const { codexCliRequirement } = await import("@supertag/worker-codex");
+    return checkInstalledCli(await codexCliRequirement(), options);
+  }
+  const { claudeCodeCliRequirement } = await import("@supertag/worker-claude-code");
+  return checkInstalledCli(await claudeCodeCliRequirement(), options);
 }
 
 /** Exact local Worker credential lookup, shared with Task Attempt error translation. */

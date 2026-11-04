@@ -111,6 +111,20 @@ Worker tool credentials are separate secrets.
 
 ## 6. Match a specific symptom
 
+### Claude Code or Codex is missing or too old
+
+SuperTag runs the `claude` and `codex` CLIs installed on the Worker Host, and each must be at least
+the version SuperTag's SDK targets. `supertag init` and `supertag up` stop with a message such as
+`Codex 0.150.0 is older than 0.156.0, the oldest version SuperTag supports` and the command to fix
+it:
+
+- **Claude Code:** `claude update`, or `npm install -g @anthropic-ai/claude-code`.
+- **Codex:** `npm install -g @openai/codex`.
+
+Install the CLI as the OS user that runs the host, so it is on that user's `PATH`, then run the
+command again. To stop serving a harness instead, remove it from the host service's `harnesses` in
+`supertag.yaml`. See [harness requirements](../operations/requirements.md#choose-and-sign-in-to-a-harness).
+
 ### A harness is not signed in
 
 `supertag init` labels each installed harness `signed in` or `not signed in` at selection.

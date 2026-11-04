@@ -120,6 +120,6 @@ export async function checkCodexModels(
 }
 
 async function codexCommand(): Promise<string> {
-  const { bundledCodexCommand } = await import("./index.js");
-  return bundledCodexCommand();
+  const { installedCodex } = await import("./index.js");
+  return (await installedCodex()).command;
 }

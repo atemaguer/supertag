@@ -20,11 +20,11 @@ Check this page before [installing SuperTag](install.md).
 - **macOS or Linux.** Restarting background services uses launchd on macOS and systemd user
   services on Linux. Native Windows is not a supported alpha installation target; in particular,
   SuperTag does not implement a Windows service manager. Use a Linux host for that workflow.
-- **Disk space for native dependencies and your work.** Allow at least 2 GB for the installed package
-  and dependencies, plus space for repositories, Task outputs, and logs. Dependencies bundle
-  Codex and Claude Agent SDK platform binaries. A macOS arm64 checkout measured 1.1 GiB in
-  `node_modules`, including 311 MiB for the Codex platform package and 207 MiB for Claude's.
-  Platform and package versions change the total.
+- **Disk space for dependencies and your work.** Allow about 1 GB for the installed package, plus
+  space for repositories, Task outputs, and logs. With `npm install -g`, npm also downloads the
+  Claude Code and Codex CLI copies that the vendor SDKs bundle, about 520 MB more on macOS arm64.
+  SuperTag doesn't use them, and the [installer script](install.md#or-use-the-installer-script)
+  removes them.
 
 The small bridge that runs MCP tools inside a sandbox has a separate runtime minimum, enforced
 when SuperTag prepares that sandbox. See [MCP tools](../guides/mcp-tools.md#5-connect-from-the-execution-environment-when-the-server-lives-there).
@@ -36,12 +36,16 @@ Prepare at least one harness on the Worker Host. Claude Code, Codex, and OpenCod
 CLIs on `PATH`; Cursor uses its bundled SDK and does not need `cursor-agent`. Sign in as the
 same OS user that runs the host.
 
-| Harness | Command on PATH | Sign-in |
-| --- | --- | --- |
-| [Claude Code](https://code.claude.com/docs/en/setup) | `claude` | Run `claude` and follow its sign-in prompt. |
-| [Codex](https://developers.openai.com/codex/cli/) | `codex` | Run `codex -c 'cli_auth_credentials_store="file"' login` so Tasks can use the sign-in file. On macOS, a Keychain-only login is not copied to Tasks. |
-| [Cursor](https://cursor.com/docs/sdk/typescript.md) | None | Generate an API key and set `CURSOR_API_KEY` for the host service; see [Cursor setup](#cursor-setup-and-limits). Signing in to the Cursor app or `cursor-agent` is not enough. |
-| [OpenCode](https://opencode.ai/docs/) | `opencode` | Set your selected provider's API-key environment variable for the **Worklet** process, the program that connects the Worker Host to the Control Plane, such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. |
+SuperTag runs the Claude Code and Codex CLIs you install, so keep them current. Each needs at
+least the version SuperTag's SDK targets. `supertag init` and `supertag up` check the installed
+version and stop with the upgrade command when it is older.
+
+| Harness | Command on PATH | Minimum version | Sign-in |
+| --- | --- | --- | --- |
+| [Claude Code](https://code.claude.com/docs/en/setup) | `claude` | 2.1.280. Install with `npm install -g @anthropic-ai/claude-code`; upgrade with `claude update`. | Run `claude` and follow its sign-in prompt. |
+| [Codex](https://developers.openai.com/codex/cli/) | `codex` | 0.156.0. Install or upgrade with `npm install -g @openai/codex`. | Run `codex -c 'cli_auth_credentials_store="file"' login` so Tasks can use the sign-in file. On macOS, a Keychain-only login is not copied to Tasks. |
+| [Cursor](https://cursor.com/docs/sdk/typescript.md) | None | None | Generate an API key and set `CURSOR_API_KEY` for the host service; see [Cursor setup](#cursor-setup-and-limits). Signing in to the Cursor app or `cursor-agent` is not enough. |
+| [OpenCode](https://opencode.ai/docs/) | `opencode` | None | Set your selected provider's API-key environment variable for the **Worklet** process, the program that connects the Worker Host to the Control Plane, such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. |
 
 For provider API credentials, use provider environment variables or SuperTag's masked prompts;
 never put lasting credentials in command flags. Sign-in detection is local and best effort; a
