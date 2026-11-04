@@ -24,6 +24,13 @@
   <a href="LICENSE">Apache 2.0</a>
 </p>
 
+```sh
+curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
+cd your-repo && supertag init
+```
+
+<sub>macOS or Linux with <a href="docs/operations/requirements.md">Node.js</a> and Claude Code, Codex, Cursor, or OpenCode.</sub>
+
 <p>
   <img src="assets/images/supertag-meet-the-tags.png" alt="Meet the Tags — nine SuperTag mascots with round and elongated builds, colorful jackets, hats, and glasses" width="900" height="360">
 </p>
