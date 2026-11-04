@@ -17,7 +17,6 @@ today is in the [documentation](docs/README.md).
 
 ## Next
 
-- **Packages.** Publish the CLI and SDKs to npm and PyPI, so installing doesn't need a clone.
 - **More sandbox providers.** Split execution runs on Modal today; e2b needs live validation.
 
 ## Considering

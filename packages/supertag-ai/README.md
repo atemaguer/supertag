@@ -1,39 +1,114 @@
 # supertag-ai
 
-This package is the command-line interface and extension SDK for SuperTag. With SuperTag, you define
-outcomes instead of tasks, and an AI engineering team delivers them.
+**Define outcomes, not tasks. An AI engineering team delivers them.**
 
-Start with [the bundled core concepts](dist/docs/concepts/README.md)
-before choosing an SDK extension point.
+SuperTag is open infrastructure for running autonomous AI engineering teams on your models,
+harnesses, and machines. Describe an outcome with success criteria, a budget, a deadline, and the
+approvals you want to keep. A team plans the work, runs it in parallel, reviews results, and brings
+you the decisions that need you.
 
-SuperTag calls each AI actor a **Tag**. A **Task** is one assignment accepted for that Tag. A
-**Worker** completes the Task, and an optional **harness** connects the Worker to an agent system.
-A **Role** describes an enduring responsibility held by a Tag. The **Control Plane** is the service
-that stores and coordinates the organization. A **Worker Host** is a machine or sandbox where work
-runs, and a **Worklet** connects that host to the Control Plane. An **execution environment**
-provides the files, processes, and network used by a harness. A **collaboration surface** links SuperTag to an
-external work tool. This SDK lets applications extend each of these boundaries.
+Each team member is a **Tag**: a persistent AI identity with its own responsibilities and permissions.
+An **Objective** records the outcome the team works toward. A **Team** is a group of Tags with a lead,
+and a **Task** is one assignment accepted by a Tag. Objectives and their history survive individual
+agent sessions and restarts.
 
-Security and governance use the same resource model. Context Sets select reusable knowledge,
-Permission Sets select allowed actions, and each Task carries its recorded policy into execution.
+For example: “People can invite teammates to a workspace and choose their role. Done when the
+end-to-end tests pass and the API docs cover it. Ask me before changing the database schema.”
+A lead Tag can coordinate builders and reviewers across that work while you steer the outcome.
 
-Install the CLI from npm:
+This package contains the **CLI and TypeScript extension SDK**. It is the only public SuperTag npm
+package; applications use its public entry points rather than private workspace packages.
+
+[Documentation](https://github.com/atemaguer/supertag/blob/main/docs/README.md) ·
+[Repository](https://github.com/atemaguer/supertag) ·
+[First Team walkthrough](https://github.com/atemaguer/supertag/blob/main/docs/guides/first-team.md) ·
+[Changelog](https://github.com/atemaguer/supertag/blob/main/CHANGELOG.md)
+
+## Install the CLI
+
+Use Node.js 22.13.0 or newer on macOS or Linux:
 
 ```sh
 npm install -g supertag-ai
 supertag --version
 ```
 
-For SDK use, add the package to your application:
+No SuperTag source checkout is required. If npm's global prefix is not writable, follow the
+[installation guide](https://github.com/atemaguer/supertag/blob/main/docs/operations/install.md)
+for a user-owned prefix and PATH setup. SuperTag is in alpha; the
+[API stability policy](https://github.com/atemaguer/supertag/blob/main/docs/reference/api-stability.md)
+describes compatibility and which extension interfaces are stable enough to build on.
+
+## Get a first result
+
+Start in a git repository with at least one commit. Install and sign in to the coding harnesses
+you want to use before setup; a **harness** connects a Worker to an agent system such as Codex or
+Claude Code. Cursor uses an API key rather than the Cursor app's sign-in. See
+[requirements and harness sign-in](https://github.com/atemaguer/supertag/blob/main/docs/operations/requirements.md).
+
+```sh
+cd /path/to/your/repository
+supertag init
+supertag ps
+```
+
+`init` sets up a local **Control Plane**, the service that stores your organization and schedules
+work, and connects your machine as a **Worker Host**, which provides execution capacity. A
+**Worker** completes a Task, and a **Worklet** connects its host to the Control Plane.
+
+Keep the default lead Tag name `lead`. Replace `YOUR_WORKSPACE` below with the Workspace name
+printed by setup; a **Workspace** connects a repository to SuperTag.
+
+```sh
+supertag create objective first-reply --owner lead --workspace YOUR_WORKSPACE \
+  --budget-minor 1000 --budget-currency USD \
+  --outcome 'Create SUPERTAG-HELLO.md containing exactly: Hello from SuperTag. Done when the file exists and you have checked its contents. Do this yourself without delegating; change no other files.'
+supertag watch objective first-reply
+supertag describe objective first-reply
+```
+
+Work arrives on a separate git branch for you to review. Use the branch and review commands printed
+by `describe objective`; your original checkout stays on its current branch. Stopping `watch` does
+not stop the work. `supertag down` stops the local services, and `supertag up` starts them again.
+
+Next, [add a builder and run your first Team](https://github.com/atemaguer/supertag/blob/main/docs/guides/first-team.md).
+You can also give your coding agent the
+[operator skill](https://github.com/atemaguer/supertag/blob/main/docs/guides/coding-agent-operator.md)
+and use one conversation to create Objectives, follow progress, answer questions, and review results.
+
+## What you can use today
+
+- **Choose each Tag's coding harness.** Codex, Claude Code, Cursor, OpenCode, or a custom harness.
+  See [harness runtime](https://github.com/atemaguer/supertag/blob/main/docs/guides/harness-runtime.md)
+  for supported execution modes and credential handling.
+- **Run work where your code lives.** Use local or remote Worker Hosts, with execution adapters
+  for Modal and E2B. Supported harness/provider combinations and current limits are documented in
+  [shared execution](https://github.com/atemaguer/supertag/blob/main/docs/guides/shared-execution.md).
+- **Direct the team from your tools.** Use the CLI or API, or connect Slack, GitHub, Linear,
+  Lark/Feishu, and Microsoft Teams through
+  [collaboration surfaces](https://github.com/atemaguer/supertag/blob/main/docs/surfaces/README.md).
+- **Keep explicit authority.** A **Permission Set** lists allowed actions; a **Context Set**
+  selects reusable knowledge. Tasks retain the policy recorded when accepted. Set approval points,
+  inspect the operator inbox, and track reported usage and spend.
+- **Keep work going across interruptions.** Persistent organization state, resumable sessions,
+  durable delivery, and recorded recovery support work across sessions and hosts. See
+  [scheduling and recovery](https://github.com/atemaguer/supertag/blob/main/docs/reference/scheduling-and-recovery.md).
+
+For a team deployment, follow
+[self-hosting](https://github.com/atemaguer/supertag/blob/main/docs/guides/self-hosting.md).
+For ongoing work such as dependency upkeep or backlog triage, see
+[ongoing responsibilities](https://github.com/atemaguer/supertag/blob/main/docs/guides/ongoing-responsibilities.md).
+
+## Build with the TypeScript SDK
+
+Add the package to your application:
 
 ```sh
 npm install supertag-ai
 ```
 
-The package includes the CLI, SDK, and documentation under `dist/docs/`. See
-[the installation guide](../../docs/operations/install.md) for PATH setup and version matching.
-
-The main entry point contains Worker components and the persistent Worklet transport client:
+The package is ESM-only and includes TypeScript declarations. Its root entry point exposes the
+common Worker and Worklet building blocks:
 
 ```ts
 import {
@@ -45,85 +120,66 @@ import {
 } from "supertag-ai";
 ```
 
-Use explicit subpaths for optional implementations and lower-level extension contracts:
+Use explicit entry points for integrations and lower-level contracts:
 
-```ts
-import { type Role, tagIdSchema } from "supertag-ai/core";
-import { CoordinationClient } from "supertag-ai/coordination";
-import { type Surface } from "supertag-ai/surfaces";
-import { CodexHarness } from "supertag-ai/harnesses/codex";
-import { ClaudeCodeHarness } from "supertag-ai/harnesses/claude-code";
-import { OpenCodeHarness } from "supertag-ai/harnesses/opencode";
-import { E2BExecutionEnvironmentProvider } from "supertag-ai/environments/e2b";
-import { ModalExecutionEnvironmentProvider } from "supertag-ai/environments/modal";
-import { GitHubRepositoryWorkspaceResolver } from "supertag-ai/resources/github";
-import { ControlPlane } from "supertag-ai/control-plane";
+| Entry point | Use it for |
+| --- | --- |
+| `supertag-ai` | Worker composition, local execution, and Worklet connections |
+| `supertag-ai/core` | Domain types and resource schemas |
+| `supertag-ai/worker` | Custom Workers, harnesses, input resolution, tools, environments, and continuity |
+| `supertag-ai/transport` | Worklet transport and protocol contracts |
+| `supertag-ai/messaging` | Tag messaging, Team channels, and custom Worker consumers |
+| `supertag-ai/coordination` | Typed operator client and the redacted coordination inbox |
+| `supertag-ai/testing` | Extension conformance probes |
+| `supertag-ai/surfaces` | Custom collaboration surfaces |
+| `supertag-ai/control-plane` | Embedding the Control Plane |
+| `supertag-ai/harnesses/codex` | Codex harness |
+| `supertag-ai/harnesses/claude-code` | Claude Code harness |
+| `supertag-ai/harnesses/cursor` | Cursor harness |
+| `supertag-ai/harnesses/opencode` | OpenCode harness |
+| `supertag-ai/environments/e2b` | E2B execution adapter |
+| `supertag-ai/environments/modal` | Modal execution adapter |
+| `supertag-ai/environments/shared-execution` | Shared execution service integration |
+| `supertag-ai/resources/github` | GitHub workspace and permission-derived resource integrations |
+| `supertag-ai/spec/*` | Language-neutral wire schemas |
+
+See the [entry-point stability table](https://github.com/atemaguer/supertag/blob/main/docs/reference/api-stability.md#package-entry-points)
+before selecting an extension boundary. The
+[custom Worker guide](https://github.com/atemaguer/supertag/blob/main/docs/guides/custom-workers.md)
+and [external example](https://github.com/atemaguer/supertag/tree/main/examples/custom-worker)
+show complete implementations. To add reusable knowledge, follow
+[custom Context types](https://github.com/atemaguer/supertag/blob/main/docs/guides/custom-context.md).
+
+Custom Workers are ordinary applications run through Node.js, Bun, a container, or a process
+supervisor. The CLI launches SuperTag's built-in TypeScript Workers; it does not turn custom
+Workers into CLI subcommands. Optional execution integrations load through their explicit entry points.
+
+The installed package includes guides under `dist/docs/` and wire schemas under `dist/spec/`.
+For example, resolve a schema through `supertag-ai/spec/task-attempt-spec.schema.json`.
+To find bundled collaboration surface guides and manifests, run `supertag setup surface slack --help`.
+
+## Python Workers
+
+The matching Python SDK is published separately as `supertag` on PyPI:
+
+```sh
+python -m pip install 'supertag==0.2.0a5'
 ```
 
-The public `Role` contract describes a reusable responsibility. Operators define Roles through the
-Control Plane resource API and list them in `Tag.spec.roles`; built-in status is reported by the
-Control Plane without requiring applications to know an internal identifier.
+Pin the prerelease explicitly so pip selects the matching SDK. Python applications can compose
+custom Workers and use the Codex or OpenAI Agents harness integrations. See the
+[Python Worker guide](https://github.com/atemaguer/supertag/blob/main/docs/guides/python-workers.md)
+for installation extras, examples, and Control Plane connection details.
 
-## Public entry points
+## Contributing and support
 
-| Import | Stability | Purpose |
-| --- | --- | --- |
-| `supertag-ai` | Beta | Worker Host, Worklet, Worker, local harness runtime and execution components, and Worklet transport |
-| `supertag-ai/core` | Beta | Tag, Role, Context Set, Permission Set, Task, Session, and surface-neutral domain contracts |
-| `supertag-ai/worker` | Beta | Worker, harness, environment, Context Resolver, tool, and sessionState contracts |
-| `supertag-ai/transport` | Experimental | Persistent remote Worklet connection and protocol |
-| `supertag-ai/messaging` | Experimental | Durable Tag messaging, Team channels (Workstreams), and custom Worker consumer |
-| `supertag-ai/coordination` | Experimental | Typed operator client and redacted coordination inbox contract |
-| `supertag-ai/testing` | Beta | Reusable extension conformance probes |
-| `supertag-ai/spec/*` | Experimental | Language-neutral JSON Schemas for Worker interoperability |
-| `supertag-ai/surfaces` | Beta | Custom collaboration surface contract and Markdown pipeline |
-| `supertag-ai/control-plane` | Experimental | Embeddable Control Plane service boundary |
-| `supertag-ai/harnesses/*` | Experimental | Shipped Codex, Claude Code, and OpenCode harnesses |
-| `supertag-ai/environments/e2b` | Experimental | Shipped E2B execution environment |
-| `supertag-ai/environments/modal` | Experimental | Shipped Modal execution environment |
-| `supertag-ai/environments/shared-execution` | Experimental | Task Attempt access to a shared execution service |
-| `supertag-ai/resources/*` | Experimental | Permission-derived MCP and workspace integrations |
-
-The package is ESM-only. See [Requirements](../../docs/operations/requirements.md) for the supported Node.js runtime. The CLI includes the shipped collaboration surface and harness integrations. E2B, Modal, and shared execution are loaded only through their explicit subpaths.
-
-The CLI launches SuperTag's built-in TypeScript Workers. Applications built with the SDK keep
-their own entry point and run through `node`, `bun`, a package script, a container command, or a
-process supervisor; they do not become `supertag` subcommands.
-
-Wire schemas can be resolved directly from the installed package, for example
-`supertag-ai/spec/task-attempt-spec.schema.json`. See the
-[custom Worker and harness guide](dist/docs/guides/custom-workers.md)
-for a complete implementation and Control Plane connection walkthrough, or the
-[custom Context guide](dist/docs/guides/custom-context.md)
-to add a namespaced knowledge type without replacing the Worker.
-
-The testing entry point currently provides conformance probes for Workers,
-harnesses, collaboration surfaces, execution environments, Tool Providers, Tool Adapters,
-and Worklet transport version negotiation. The repository also contains an
-[external extension example](https://github.com/atemaguer/supertag/tree/main/examples/custom-worker)
-with custom Worker, harness, and Environment Provider implementations verified
-against the built distribution.
+Report issues or propose improvements in the
+[GitHub repository](https://github.com/atemaguer/supertag/issues). Read
+[CONTRIBUTING.md](https://github.com/atemaguer/supertag/blob/main/CONTRIBUTING.md)
+for source setup and checks, and use
+[SECURITY.md](https://github.com/atemaguer/supertag/blob/main/SECURITY.md)
+for private vulnerability reports.
 
 ## License
 
-Apache-2.0
-
-For surface-independent coordination, see the [Tag messaging guide](dist/docs/guides/tag-messaging.md).
-
-Operators can list pending Task approvals and reviews without reading Task instructions, results,
-or acceptance criteria:
-
-```ts
-const coordination = new CoordinationClient({
-  baseUrl: "https://supertag.example.com",
-  token: process.env.SUPERTAG_COORDINATION_TOKEN!,
-});
-const pending = await coordination.inbox({ objectiveId: "objective-release" });
-```
-
-The inbox is a versioned projection over existing Tasks and Teams. Each action is a partial
-`update_task` invocation with the current status fence and any fields the operator still needs to
-supply. Authority and stale-write checks run again when the update is submitted.
-
-The experimental `supertag-ai/messaging` client also creates and tracks Objectives with
-success criteria and explicit completion assessments. See the [Objective guide](../../docs/guides/objectives.md).
+[Apache-2.0](https://github.com/atemaguer/supertag/blob/main/LICENSE).

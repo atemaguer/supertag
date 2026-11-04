@@ -18,7 +18,7 @@ npm install -g supertag-ai
 supertag --version
 ```
 
-The current release is `0.2.0-alpha.4`. The package includes the CLI, SDK, and bundled
+The current release is `0.2.0-alpha.5`. The package includes the CLI, SDK, and bundled
 documentation. A SuperTag source checkout is not required.
 
 Ensure npm's global prefix's `bin` directory is on your PATH; `npm prefix --global` prints
@@ -29,7 +29,7 @@ then add `~/.local/bin` to your `PATH` (for example,
 To install this exact release on another host:
 
 ```sh
-npm install -g supertag-ai@0.2.0-alpha.4
+npm install -g supertag-ai@0.2.0-alpha.5
 ```
 
 ## Install the TypeScript SDK
@@ -43,7 +43,7 @@ npm install supertag-ai
 For a shared deployment, select the same version as the Control Plane:
 
 ```sh
-npm install supertag-ai@0.2.0-alpha.4
+npm install supertag-ai@0.2.0-alpha.5
 ```
 
 See [Custom Workers](../guides/custom-workers.md) for the public extension interfaces.
@@ -53,11 +53,11 @@ See [Custom Workers](../guides/custom-workers.md) for the public extension inter
 Python applications need Python 3.10 or newer. Install the matching SDK:
 
 ```sh
-python -m pip install 'supertag==0.2.0a4'
+python -m pip install 'supertag==0.2.0a5'
 ```
 
 The explicit version selects this prerelease; pip otherwise selects an older stable release.
-Python spells `0.2.0-alpha.4` as `0.2.0a4`. The SDK is a library; use the npm CLI above to
+Python spells `0.2.0-alpha.5` as `0.2.0a5`. The SDK is a library; use the npm CLI above to
 manage the Control Plane and built-in Workers. See [Build a Python Worker](../guides/python-workers.md)
 for optional Codex and OpenAI Agents integrations.
 
@@ -84,9 +84,9 @@ supertag version
 ```
 
 ```text
-CLI version: 0.2.0-alpha.4
+CLI version: 0.2.0-alpha.5
 Control Plane: https://supertag.example.com
-Control Plane version: 0.2.0-alpha.4
+Control Plane version: 0.2.0-alpha.5
 Compatibility: supported (same version)
 ```
 

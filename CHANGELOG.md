@@ -9,8 +9,11 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.2.0-alpha.5] - 2026-11-03
+
 ### Changed
 
+- Rewrite the npm package page around Objectives and teams, with a runnable first result, current integrations and SDK entry points, and direct documentation links.
 - Install the CLI and TypeScript SDK from npm and the Python SDK from PyPI; setup guides and operator skills no longer require a SuperTag checkout.
 
 ## [0.2.0-alpha.4] - 2026-11-03
