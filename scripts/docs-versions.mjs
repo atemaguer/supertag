@@ -1,4 +1,4 @@
-// User docs must name the current release and install from the repository, not a package archive.
+// User docs must name the current registry release, not a local package archive.
 // These pages show version pairs as illustrative examples, so their versions are not checked.
 const illustrativeVersions = new Set([
   "docs/guides/troubleshooting.md",

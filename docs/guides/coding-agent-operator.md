@@ -14,9 +14,16 @@ actors.
 
 ## Set up the operator skill
 
-First follow [Install SuperTag](../operations/install.md) to clone the repository and install
-from it. Keep that checkout: it contains the operator skill. Use the same guide's requirements
-for your runtime and signed-in coding agent.
+First follow [Install SuperTag](../operations/install.md) to install the CLI from npm.
+Use the same guide's requirements for your runtime and signed-in coding agent.
+The operator skill is a separate text file; download it from the SuperTag repository:
+
+```sh
+mkdir -p ~/.local/share/supertag-operator
+curl --fail --location \
+  https://raw.githubusercontent.com/atemaguer/supertag/main/skills/operate-supertag/SKILL.md \
+  --output ~/.local/share/supertag-operator/SKILL.md
+```
 
 In the repository you want the team to change:
 
@@ -40,7 +47,7 @@ Prefer a user-level installation outside the repository the team changes. A **Wo
 code that completes a Tag's work, and Workers can edit
 project-level agent instructions in that repository. Treat changes to `.claude/skills/` and
 `AGENTS.md` there as needing your explicit review before the agent follows them.
-Replace `~/code/supertag` below with your SuperTag checkout.
+The examples below use the skill file downloaded above.
 
 ### Claude Code
 
@@ -48,7 +55,7 @@ Install a user-level skill for all your projects:
 
 ```sh
 mkdir -p ~/.claude/skills/operate-supertag
-cp ~/code/supertag/skills/operate-supertag/SKILL.md \
+cp ~/.local/share/supertag-operator/SKILL.md \
   ~/.claude/skills/operate-supertag/SKILL.md
 ```
 
@@ -75,7 +82,7 @@ at user level so it is available across your projects:
 
 ```sh
 mkdir -p ~/.cursor/skills/operate-supertag
-cp ~/code/supertag/skills/operate-supertag/SKILL.md \
+cp ~/.local/share/supertag-operator/SKILL.md \
   ~/.cursor/skills/operate-supertag/SKILL.md
 ```
 
@@ -88,7 +95,7 @@ running Cursor as a SuperTag Worker. A Worker needs its own Cursor API key; see
 
 Give it the absolute path directly in the conversation:
 
-> Read `/absolute/path/to/supertag/skills/operate-supertag/SKILL.md` and use it to
+> Read `/absolute/path/to/supertag-operator/SKILL.md` and use it to
 > coordinate SuperTag for this repository.
 
 The agent needs permission to read that file and run the configured `supertag` CLI. If its

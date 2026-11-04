@@ -121,6 +121,10 @@ run `codex login` for Codex, run `claude` and follow its sign-in prompt for Clau
 `CURSOR_API_KEY` for Cursor, or set your provider's API-key environment variable for the OpenCode host service. See
 [harness sign-in](../operations/requirements.md#choose-and-sign-in-to-a-harness).
 
+Before completing setup, `init` prints `not signed in (the credential check did not succeed)`
+for a failed check. Change the setup to select only harnesses you have signed in to, or complete
+sign-in and run `supertag init` again.
+
 For Codex file-backed sign-in, `signed in` only checks that a credential is present and readable.
 It cannot confirm account access. Run Codex once as the host service's OS user to confirm access.
 

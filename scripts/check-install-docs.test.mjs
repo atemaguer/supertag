@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { pythonVersion } from "./docs-versions.mjs";
 
+const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 const files = [
   "README.md",
   "docs/operations/install.md",
@@ -11,31 +13,45 @@ const files = [
   "packages/supertag-ai/README.md",
 ];
 for (const file of files) {
-  test(`${file} uses repository installation`, () => {
-    const text = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
-    assert.doesNotMatch(
-      text,
-      /npm\s+(?:install|i)\s+(?:-g|--global)\s+supertag-ai\b|\.tgz\b|\barchive\b|\btarball\b|ask a maintainer|npm\s+`?latest`?/iu,
-    );
-    assert.match(text, /install:cli|\]\([^)]*operations\/install\.md/iu);
+  test(`${file} uses published CLI installation`, () => {
+    const text = read(file).split("## Contributing")[0];
+    assert.doesNotMatch(text, /pnpm install:cli|git clone|npm and PyPI packages come later/u);
+    assert.match(text, /npm install -g supertag-ai|\]\([^)]*operations\/install\.md/iu);
   });
 }
-test("only the install guide announces future packages", () => {
-  const matches = files.filter((file) =>
-    /npm and PyPI packages come later/u.test(
-      readFileSync(new URL(`../${file}`, import.meta.url), "utf8"),
-    ),
-  );
-  assert.deepEqual(matches, ["docs/operations/install.md"]);
+
+test("application guides install the published TypeScript SDK", () => {
+  for (const file of [
+    "README.md",
+    "packages/supertag-ai/README.md",
+    "docs/guides/custom-workers.md",
+    "docs/guides/modal-workers.md",
+  ]) {
+    assert.match(read(file), /npm install supertag-ai\b/u);
+    assert.doesNotMatch(read(file), /npm install \/absolute\/path\/to\/supertag/u);
+  }
 });
 
-test("docs check allows only the install guide's exact installer commands", async () => {
-  const { isInstallCommand } = await import("./docs-install-commands.mjs");
-  for (const command of ["pnpm install", "pnpm install:cli", "pnpm uninstall:cli"])
-    assert.equal(isInstallCommand("docs/operations/install.md", command), true);
-  for (const command of ["pnpm test", "pnpm install:cli-extra", "pnpm install && pnpm test"])
-    assert.equal(isInstallCommand("docs/operations/install.md", command), false);
-  assert.equal(isInstallCommand("docs/guides/workers.md", "pnpm install:cli"), false);
-  const checker = readFileSync(new URL("./check-docs.mjs", import.meta.url), "utf8");
-  assert.match(checker, /!isInstallCommand\(name, line\)/u);
+test("Python installation pins the matching PyPI prerelease", () => {
+  const version = pythonVersion(JSON.parse(read("package.json")).version);
+  for (const file of [
+    "README.md",
+    "docs/operations/install.md",
+    "docs/guides/python-workers.md",
+    "sdks/python/README.md",
+  ]) {
+    assert.ok(read(file).includes(`python -m pip install 'supertag==${version}'`), file);
+    assert.doesNotMatch(read(file), /pip install .*sdks\/python|preview is unpublished/u);
+  }
+  for (const file of ["docs/guides/python-workers.md", "sdks/python/README.md"])
+    for (const extra of ["codex", "agents", "codex,agents"])
+      assert.ok(
+        read(file).includes(`python -m pip install 'supertag[${extra}]==${version}'`),
+        file,
+      );
+});
+
+test("the user install guide keeps source-development scripts in CONTRIBUTING.md", () => {
+  assert.doesNotMatch(read("docs/operations/install.md"), /\bpnpm\s/u);
+  assert.match(read("CONTRIBUTING.md"), /pnpm install:cli/u);
 });

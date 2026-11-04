@@ -17,16 +17,21 @@ external work tool. This SDK lets applications extend each of these boundaries.
 Security and governance use the same resource model. Context Sets select reusable knowledge,
 Permission Sets select allowed actions, and each Task carries its recorded policy into execution.
 
-Install from a repository clone using [the installation guide](../../docs/operations/install.md).
-The build contains the CLI, SDK, and documentation under `dist/docs/`. Keep the clone in place.
-
-After building, add the SDK to your application from the local checkout:
+Install the CLI from npm:
 
 ```sh
-npm install /absolute/path/to/supertag/packages/supertag-ai
+npm install -g supertag-ai
+supertag --version
 ```
 
-Replace the path with your SuperTag checkout. The globally linked CLI is available as `supertag`.
+For SDK use, add the package to your application:
+
+```sh
+npm install supertag-ai
+```
+
+The package includes the CLI, SDK, and documentation under `dist/docs/`. See
+[the installation guide](../../docs/operations/install.md) for PATH setup and version matching.
 
 The main entry point contains Worker components and the persistent Worklet transport client:
 

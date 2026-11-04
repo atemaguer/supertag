@@ -44,7 +44,7 @@ and each Worker Host.
 All run the same Control Plane image; its API Server accepts the same outbound Worklet connection through the Worklet API.
 
 Docker Compose and the native option need a checkout of the repository for `deploy/compose.yaml` and
-`deploy/.env.example`. You also need the CLI ([install from a clone](../../docs/operations/install.md)) to manage the running
+`deploy/.env.example`. You also need the CLI ([install from npm](../../docs/operations/install.md)) to manage the running
 Control Plane — the checkout provides the deployment, the CLI provides management.
 
 Every option starts the Control Plane with `supertag up`. Containers and platforms run

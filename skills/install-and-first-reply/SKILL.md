@@ -21,13 +21,11 @@ explains. If port 3434 is busy, enter a different number at init's `Port` prompt
 ## 1. Install
 
 ```sh
-git clone https://github.com/atemaguer/supertag.git
-cd supertag
-pnpm install:cli
+npm install -g supertag-ai
 supertag --version
 ```
 
-Keep the checkout and follow [the installation guide](../../docs/operations/install.md)
+Follow [the installation guide](../../docs/operations/install.md)
 for PATH setup and removal.
 
 ## 2. Set up the repository

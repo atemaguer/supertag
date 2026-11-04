@@ -7,7 +7,7 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf
 test("first-run README explains sign-in and port choice before init", () => {
   const setup = read("README.md").split("### 2. Set up your repository")[1];
   const beforeInit = setup.split("\nsupertag init\n")[0];
-  assert.match(beforeInit, /codex login/u);
+  assert.match(beforeInit, /codex[^`\n]* login/u);
   assert.match(beforeInit, /claude/u);
   assert.match(beforeInit, /3434/u);
   assert.match(
@@ -16,11 +16,11 @@ test("first-run README explains sign-in and port choice before init", () => {
   );
 });
 
-test("first-run docs explain auth recovery and pinned pnpm bootstrap", () => {
+test("first-run docs explain auth recovery and npm prerequisites", () => {
   assert.match(
     read("docs/guides/troubleshooting.md"),
     /not signed in \(the credential check did not succeed\)[\s\S]*Change the setup/u,
   );
-  assert.match(read("docs/operations/requirements.md"), /npm install -g pnpm@11\.18\.0/u);
+  assert.match(read("docs/operations/requirements.md"), /\*\*npm\*\*, included with Node\.js/u);
   assert.match(read("skills/install-and-first-reply/SKILL.md"), /select only signed-in harnesses/u);
 });

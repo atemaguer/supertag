@@ -182,17 +182,14 @@ usually through a coding harness. On your laptop, `supertag init` sets up both. 
 ### 1. Install SuperTag
 
 ```sh
-npm install -g pnpm@11.18.0
-git clone https://github.com/atemaguer/supertag.git
-cd supertag
-pnpm install:cli
+npm install -g supertag-ai
 supertag --version
 ```
 
 If npm's global prefix is not writable, run `npm config set prefix ~/.local` first and add
 `~/.local/bin` to your `PATH`.
 
-Keep the checkout: the installed command links to its build. See
+The npm package includes the CLI, SDK, and bundled documentation. See
 [installation and version matching](docs/operations/install.md) for PATH setup and removal.
 
 ### 2. Set up your repository
@@ -446,11 +443,10 @@ The [documentation map](docs/README.md) organizes the rest by task and depth.
 
 Install the public extension SDK when you want to build an organizational application or implement
 a custom Worker, harness, execution environment, collaboration surface, or permission-derived resource.
-After installing from the clone above, run this in your application, replacing the path with
-your SuperTag checkout:
+Install it from npm in your application:
 
 ```sh
-npm install /absolute/path/to/supertag/packages/supertag-ai
+npm install supertag-ai
 ```
 
 ```ts
@@ -463,6 +459,14 @@ import {
 ```
 
 The package bundles SuperTag's internal runtime modules behind deliberate public entry points, so applications never depend on private workspace packages. See the [custom Worker and harness guide](docs/guides/custom-workers.md), [custom Context guide](docs/guides/custom-context.md), and [`supertag-ai` package reference](packages/supertag-ai/README.md).
+
+For Python applications, install the matching SDK from PyPI:
+
+```sh
+python -m pip install 'supertag==0.2.0a4'
+```
+
+See [Build a Python Worker](docs/guides/python-workers.md) for optional harness integrations.
 
 ## Contributing
 

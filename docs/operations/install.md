@@ -1,41 +1,72 @@
-# Install SuperTag from the repository
+# Install SuperTag
 
-Install SuperTag's CLI from a clone to run Tags, persistent AI identities with their own
-responsibilities and permissions, on your repositories. The same build provides the extension SDK
-for applications. npm and PyPI packages come later.
+Install SuperTag's CLI from npm to run Tags, persistent AI identities with their own
+responsibilities and permissions, on your repositories. The npm package also provides the
+TypeScript extension SDK. Python applications use the `supertag` SDK from PyPI.
 
 ## Before you start
 
-- Check the [requirements](requirements.md) for Node.js, pnpm, git, supported platforms, disk
-  space, and sign-in for a **harness**, the connection to an agent system such as Claude Code.
-  Cursor needs an API key that you generate in Cursor's dashboard; see [Cursor setup](requirements.md#cursor-setup-and-limits).
+Check the [requirements](requirements.md) for Node.js, npm, git, supported platforms, disk
+space, and sign-in for a **harness**, the connection to an agent system such as Claude Code.
+Cursor needs an API key that you generate in Cursor's dashboard; see
+[Cursor setup](requirements.md#cursor-setup-and-limits).
 
-## 1. Clone and install
+## 1. Install the CLI from npm
 
 ```sh
-git clone https://github.com/atemaguer/supertag.git
-cd supertag
-pnpm install:cli
+npm install -g supertag-ai
 supertag --version
 ```
 
-The installer installs dependencies, builds SuperTag, and links the CLI into npm's global
-prefix. Keep the checkout in place: the command uses its build. Ensure that prefix's `bin`
-directory is on your PATH; `npm prefix --global` prints the prefix.
-The link needs write access to that prefix. To use a directory you own, run
-`npm config set prefix ~/.local` before running the installer, then add `~/.local/bin` to your
-`PATH` (for example, `export PATH="$HOME/.local/bin:$PATH"` in your shell startup file).
+The current release is `0.2.0-alpha.4`. The package includes the CLI, SDK, and bundled
+documentation. A SuperTag source checkout is not required.
 
-For SDK use, run `npm install /absolute/path/to/supertag/packages/supertag-ai` in your
-application after building, replacing the path with your checkout.
+Ensure npm's global prefix's `bin` directory is on your PATH; `npm prefix --global` prints
+that prefix. If it is not writable, run `npm config set prefix ~/.local` before installing,
+then add `~/.local/bin` to your `PATH` (for example,
+`export PATH="$HOME/.local/bin:$PATH"` in your shell startup file).
 
-## Check that it worked
+To install this exact release on another host:
 
 ```sh
-supertag --version
+npm install -g supertag-ai@0.2.0-alpha.4
 ```
 
-The version is `0.2.0-alpha.4`.
+## Install the TypeScript SDK
+
+Add the package to your application:
+
+```sh
+npm install supertag-ai
+```
+
+For a shared deployment, select the same version as the Control Plane:
+
+```sh
+npm install supertag-ai@0.2.0-alpha.4
+```
+
+See [Custom Workers](../guides/custom-workers.md) for the public extension interfaces.
+
+## Install the Python SDK from PyPI
+
+Python applications need Python 3.10 or newer. Install the matching SDK:
+
+```sh
+python -m pip install 'supertag==0.2.0a4'
+```
+
+The explicit version selects this prerelease; pip otherwise selects an older stable release.
+Python spells `0.2.0-alpha.4` as `0.2.0a4`. The SDK is a library; use the npm CLI above to
+manage the Control Plane and built-in Workers. See [Build a Python Worker](../guides/python-workers.md)
+for optional Codex and OpenAI Agents integrations.
+
+## Upgrade
+
+Install the target version with the same npm and pip commands above. For a Compose deployment,
+follow the [upgrade procedure](control-plane.md#upgrade-a-compose-deployment) to back up state
+and coordinate the connected Worker Hosts. Source contributors can use
+[CONTRIBUTING.md](../../CONTRIBUTING.md) to build and link uncommitted changes.
 
 ## Match the CLI and the Control Plane
 
@@ -81,8 +112,8 @@ documentation site.
 ## If something goes wrong
 
 - **`supertag` is not found.** Run `npm prefix --global` and add its `bin` directory to your `PATH`.
-- **The version or commands differ from these docs.** Use the documentation in your checkout and rerun
-  the installer there after updating it.
+- **The version or commands differ from these docs.** Run `supertag --version`, then install
+  the version named by these docs. The installed package includes its own guides under `dist/docs/`.
 - **A command warns that the CLI and Control Plane versions differ.** Run `supertag version`, then
   upgrade the older side. See [Troubleshoot](../guides/troubleshooting.md#the-cli-warns-that-versions-differ).
 
@@ -102,10 +133,10 @@ their logs, `supertag down` stops them, and `supertag up` starts them again.
 
 ## Remove the CLI
 
-Stop local services with `supertag down`, then run this from the SuperTag checkout:
+Stop local services with `supertag down`, then remove the global package:
 
 ```sh
-pnpm uninstall:cli
+npm uninstall -g supertag-ai
 ```
 
-This removes the global command link. Your settings and state remain in `~/.supertag/`.
+This removes the globally installed CLI package. Your settings and state remain in `~/.supertag/`.

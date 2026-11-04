@@ -26,16 +26,8 @@ test("newly freed pages use the public vocabulary", () => {
     assert.deepEqual(checkVocabulary(path, read(path)), []);
 });
 
-test("checkout installation builds the SDK before local application installation", () => {
-  for (const path of [
-    "README.md",
-    "docs/operations/install.md",
-    "skills/install-and-first-reply/SKILL.md",
-  ])
-    assert.doesNotMatch(read(path), /^pnpm install\npnpm install:cli$/mu);
+test("Modal Workers install the published SDK", () => {
   const modal = read("docs/guides/modal-workers.md");
-  assert.match(
-    modal,
-    /install and build the checkout[\s\S]*\.\.\/operations\/install\.md[\s\S]*npm install \/absolute\/path\/to\/supertag\/packages\/supertag-ai/u,
-  );
+  assert.match(modal, /npm install supertag-ai/u);
+  assert.doesNotMatch(modal, /install and build the checkout|npm install \/absolute/u);
 });

@@ -18,14 +18,16 @@ Prefer a user-level skill outside the repository the team changes. Workers can e
 
 Confirm the selected Control Plane, lead Tag, Workspace, and user's requested outcome. A
 Workspace identifies the repository where the team works. Use `supertag --help` to verify commands
-against the installed version. If setup is missing, use the repository's
-`docs/operations/install.md`, then run `supertag init` in the target repository. Do not launch
+against the installed version. If setup is missing, follow
+[Install SuperTag](https://github.com/atemaguer/supertag/blob/main/docs/operations/install.md),
+then run `supertag init` in the target repository. Do not launch
 a second Control Plane after init has started one.
 
-When a SuperTag checkout is available, read `docs/guides/coding-agent-operator.md` for setup
-and the worked loop. Read `docs/guides/write-an-objective.md` if present; otherwise use the
-statement guidance in `docs/guides/objectives.md`. These paths are relative to that checkout,
-not the directory where this skill was installed. Ask for its location if needed.
+Read [the operator guide](https://github.com/atemaguer/supertag/blob/main/docs/guides/coding-agent-operator.md)
+for setup and the worked loop, and
+[Write an Objective](https://github.com/atemaguer/supertag/blob/main/docs/guides/write-an-objective.md)
+for statement guidance. The installed npm package also includes these guides under `dist/docs/`;
+use its documentation when operating a different release from the repository's current version.
 
 ## Turn a goal into an Objective
 

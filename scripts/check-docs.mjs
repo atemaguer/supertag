@@ -10,7 +10,6 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkDocumentationNodeVersions } from "./check-docs-node.mjs";
 import { deprecatedDocProblems } from "./docs-deprecations.mjs";
-import { isInstallCommand } from "./docs-install-commands.mjs";
 import { checkLinks, checkOrphans } from "./docs-links.mjs";
 import { versionProblems } from "./docs-versions.mjs";
 import { checkDocumentationVocabulary } from "./docs-vocabulary.mjs";
@@ -283,7 +282,6 @@ for (const file of files) {
       // The root README keeps a Contributing section, so only docs/ is checked.
       else if (
         name.startsWith("docs/") &&
-        !isInstallCommand(name, line) &&
         /(^|[\s`])(pnpm (?!add\b|dlx\b)\S+|tsx scripts\/|node scripts\/|vitest\b)/u.test(line)
       )
         problems.push(

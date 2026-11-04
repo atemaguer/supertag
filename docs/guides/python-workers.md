@@ -19,7 +19,7 @@ Python and TypeScript Workers follow the same Task lifecycle. See the
 ## Before you start
 
 - Python 3.10 or newer.
-- A [repository checkout](../operations/install.md).
+- The [SuperTag CLI](../operations/install.md), installed from npm.
 - An enrolled Worker Host and its credential. Enroll one with `supertag enroll worker-host`; see
   [Run a Worker](workers.md). This guide assumes the ID `echo-worker-host`.
 - A Tag bound to that Worker Host, so it can receive Tasks:
@@ -49,14 +49,13 @@ service.
 
 ## 1. Install the Python SDK
 
-The SDK's Python distribution is named `supertag`. This checkout documents version `0.2.0a4`,
+The SDK's Python distribution is named `supertag`. This guide documents version `0.2.0a4`,
 Python's spelling of `0.2.0-alpha.4`.
 
-Install it from your [repository checkout](../operations/install.md), not from a package index.
-From the root of the checkout:
+Install it from PyPI. Pin this prerelease explicitly so pip selects the SDK that matches the CLI:
 
 ```sh
-python -m pip install ./sdks/python
+python -m pip install 'supertag==0.2.0a4'
 ```
 
 Confirm the installed version:
@@ -65,7 +64,7 @@ Confirm the installed version:
 python -c "from importlib.metadata import version; print(version('supertag'))"
 ```
 
-It prints `0.2.0a4`.
+It reports the alpha.4 release; installed metadata may spell it `0.2.0-alpha.4`.
 
 ## 2. Write the Worker
 
@@ -249,9 +248,9 @@ The SDK provides two optional OpenAI integrations. Install the one your Worker u
 both while comparing them:
 
 ```sh
-python -m pip install './sdks/python[codex]'
-python -m pip install './sdks/python[agents]'
-python -m pip install './sdks/python[codex,agents]'
+python -m pip install 'supertag[codex]==0.2.0a4'
+python -m pip install 'supertag[agents]==0.2.0a4'
+python -m pip install 'supertag[codex,agents]==0.2.0a4'
 ```
 
 ### 2. Run the Codex or Agents SDK Worker
@@ -384,8 +383,8 @@ Use `run_worker_conformance()` to test lifecycle, identity, event ordering, and 
   that owns the credential; see [Connection rules](#connection-rules).
 - **The connection URL is rejected.** Remote hosts must use HTTPS or WSS, without credentials,
   query parameters, or a fragment; see [Connection rules](#connection-rules).
-- **`pip` cannot find `supertag`.** The preview is unpublished; install from a checkout or wheel as
-  in [step 1](#1-install-the-python-sdk).
+- **`pip` installs an older SDK.** Pin `supertag==0.2.0a4` as in
+  [step 1](#1-install-the-python-sdk). pip does not select this prerelease by default.
 - **The Worklet keeps reconnecting.** See
   [A remote Worklet keeps disconnecting](troubleshooting.md#a-remote-worklet-keeps-disconnecting).
 

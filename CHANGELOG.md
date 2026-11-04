@@ -9,6 +9,10 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Changed
+
+- Install the CLI and TypeScript SDK from npm and the Python SDK from PyPI; setup guides and operator skills no longer require a SuperTag checkout.
+
 ## [0.2.0-alpha.4] - 2026-11-03
 
 ### Added

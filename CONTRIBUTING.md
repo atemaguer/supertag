@@ -21,14 +21,18 @@ data, or local state.
 
 ## Development setup
 
-Install the tools listed in [Requirements](docs/operations/requirements.md).
+Install the tools listed in [Requirements](docs/operations/requirements.md). Source development
+also needs the pnpm version pinned by `packageManager` in the root `package.json`:
 
 ```sh
 git clone https://github.com/atemaguer/supertag.git
 cd supertag
-corepack enable
+npm install -g pnpm@11.18.0
 pnpm install
 ```
+
+To use your local build as the global CLI, run `pnpm install:cli`. Keep the checkout in place
+while it is linked. Run `pnpm uninstall:cli` to remove that global command link.
 
 ## Write documentation
 
@@ -350,10 +354,10 @@ it, set the package versions, and run the version tests in the same release comm
 pnpm exec vitest run tests/release-version.test.ts
 ```
 
-## Build an installable preview
+## Test an installable package
 
-Users install from the repository (see [Install SuperTag](docs/operations/install.md)). To test the
-packaged CLI the way a future npm release would ship it, build the actual package instead of
+Users install the published packages from npm and PyPI (see [Install SuperTag](docs/operations/install.md)).
+To test local changes in the packaged CLI, build the actual package instead of
 creating a shell shim:
 
 ```sh
@@ -372,10 +376,9 @@ paths for the guide and manifest. `pnpm --filter supertag-ai test:package` check
 resources in addition to the CLI and SDK interfaces. The resulting archive is for local testing;
 building it does not publish a package.
 
-The docs install SuperTag from a clone until a matching package is published to npm and PyPI.
-Before changing the install instructions to a package, publish it and verify the installer,
-versioned archive, checksums, and documentation from a clean environment. Release tooling in this
-repository does not mean a release has been published.
+Before updating installation instructions for a release, publish the matching npm and PyPI
+packages and verify clean registry installs, the installer, versioned CLI archives, checksums,
+and documentation. Release tooling in this repository does not mean a release has been published.
 
 ## Live Modal native mounts
 

@@ -14,16 +14,14 @@ Check this page before [installing SuperTag](install.md).
 - **Node.js 22.13.0 or newer.** The `engines.node` fields in the root
   [package.json](../../package.json) and [SDK package](../../packages/supertag-ai/package.json)
   define the supported runtime.
-- **pnpm**, using the version pinned by `packageManager` in the root package.json. Install the
-  current pin with `npm install -g pnpm@11.18.0`. If npm's global prefix is not writable, run
-  `npm config set prefix ~/.local` first and add `~/.local/bin` to your `PATH`. Use the current
-  `packageManager` value if the repository changes its pin.
+- **npm**, included with Node.js, to install the published CLI and SDK. Source-development
+  tools are listed in [CONTRIBUTING.md](../../CONTRIBUTING.md).
 - **git**, available on `PATH`, and a repository for your first Task.
 - **macOS or Linux.** Restarting background services uses launchd on macOS and systemd user
   services on Linux. Native Windows is not a supported alpha installation target; in particular,
   SuperTag does not implement a Windows service manager. Use a Linux host for that workflow.
-- **Disk space for native dependencies and your work.** Allow at least 2 GB for the checkout,
-  dependencies, and build, plus space for repositories, Task outputs, and logs. Dependencies bundle
+- **Disk space for native dependencies and your work.** Allow at least 2 GB for the installed package
+  and dependencies, plus space for repositories, Task outputs, and logs. Dependencies bundle
   Codex and Claude Agent SDK platform binaries. A macOS arm64 checkout measured 1.1 GiB in
   `node_modules`, including 311 MiB for the Codex platform package and 207 MiB for Claude's.
   Platform and package versions change the total.

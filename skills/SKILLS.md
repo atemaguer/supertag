@@ -58,7 +58,7 @@ context — it is precise, and guessing produces wrong configuration.
 
 ## Conventions
 
-The CLI is `supertag`, installed from a clone with `pnpm install:cli`; see [installation](../docs/operations/install.md). Check [Requirements](../docs/operations/requirements.md) for system tools and harness sign-in.
+The CLI is `supertag`, installed from npm with `npm install -g supertag-ai`; see [installation](../docs/operations/install.md). Check [Requirements](../docs/operations/requirements.md) for system tools and harness sign-in.
 
 Local state and credentials live in `~/.supertag`; override with `SUPERTAG_STATE_DIR`.
 `~/.supertag/supertag.yaml` lists the services `supertag up` runs on a machine, like a compose

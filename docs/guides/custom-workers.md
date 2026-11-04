@@ -46,11 +46,11 @@ reusable knowledge, follow [Add a custom Context type](custom-context.md).
 
 ## Before you start
 
-- **The SDK from your checkout.** [Install SuperTag from the repository](../operations/install.md),
-  then add the SDK to your application from that checkout:
+- **The SDK from npm.** Add the package to your application; see
+  [Install SuperTag](../operations/install.md) for runtime requirements and version matching:
 
   ```sh
-  npm install /absolute/path/to/supertag/packages/supertag-ai
+  npm install supertag-ai
   ```
 
   The examples use the main Worker API and the `supertag-ai/worker` extension contracts. See

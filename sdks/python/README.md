@@ -20,12 +20,18 @@ the same language-neutral Worker boundary as the TypeScript SDK:
 For the SuperTag CLI and Control Plane, see [Requirements](../../docs/operations/requirements.md).
 Python Worker dependencies are declared separately in [pyproject.toml](pyproject.toml).
 
+Install the published SDK from PyPI. Pin this prerelease explicitly:
+
+```sh
+python -m pip install 'supertag==0.2.0a4'
+```
+
 Install either harness integration, or both:
 
 ```sh
-python -m pip install 'supertag[codex]'
-python -m pip install 'supertag[agents]'
-python -m pip install 'supertag[codex,agents]'
+python -m pip install 'supertag[codex]==0.2.0a4'
+python -m pip install 'supertag[agents]==0.2.0a4'
+python -m pip install 'supertag[codex,agents]==0.2.0a4'
 ```
 
 The distribution and import namespace both use the product name:
@@ -41,11 +47,7 @@ from supertag import (
 )
 ```
 
-When developing this repository, install the local package instead:
-
-```sh
-python -m pip install -e './sdks/python[codex,agents]'
-```
+For source development, see [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 The SDK is a library and does not install a Worker CLI. SuperTag's built-in Codex and Claude Code
 Workers are TypeScript implementations launched with `supertag connect worklet`. A custom Python

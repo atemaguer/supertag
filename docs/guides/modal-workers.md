@@ -149,12 +149,11 @@ The rest of this page builds a custom Worker instead.
 
 ## 1. Install the package
 
-First install and build the checkout as described in
-[installation](../operations/install.md); the SDK's exports exist only after building. Then add the SDK to your Worker
-application from the local checkout:
+Install the published SDK from npm in your Worker application. See
+[installation](../operations/install.md) for runtime requirements and version matching:
 
 ```sh
-npm install /absolute/path/to/supertag/packages/supertag-ai
+npm install supertag-ai
 ```
 
 ## 2. Authenticate the Worker Host with Modal
