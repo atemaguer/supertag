@@ -1,6 +1,6 @@
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ensureLocalAdminToken,
   resolveControlPlaneTarget,
@@ -450,6 +450,11 @@ ${entries}  laptop:
 });
 
 describe("host services", () => {
+  // Host services run the Codex CLI on PATH; give each test a current fake one.
+  beforeEach(async () => {
+    await fakeHarness(context, "codex");
+  });
+
   it(
     "join the local Control Plane, restart only when changed, and stop before it",
     async () => {
@@ -857,6 +862,11 @@ secrets:
 });
 
 describe("service units", () => {
+  // Host services run the Codex CLI on PATH; give each test a current fake one.
+  beforeEach(async () => {
+    await fakeHarness(context, "codex");
+  });
+
   it(
     "install LaunchAgents for restart: unless-stopped, keep secrets out, and stop or remove them",
     async () => {
