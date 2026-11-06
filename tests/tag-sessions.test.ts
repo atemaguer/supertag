@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { surfaceTools } from "../apps/cli/src/coordination-http.js";
 import { ObjectiveController } from "../packages/control-plane/src/objective-controller.js";
@@ -17,6 +19,12 @@ import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
 import { createIsolatedPostgresDatabase } from "./support/database.js";
 
 const postgres = process.env["SUPERTAG_POSTGRES_URL"];
+const PostgresqlPool = createRequire(new URL("../packages/store/package.json", import.meta.url))(
+  "pg",
+).Pool as new (options: {
+  connectionString: string;
+  max: number;
+}) => { query(text: string): Promise<unknown>; end(): Promise<void> };
 
 function result(summary: string): TaskResult {
   return {
@@ -83,7 +91,8 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
     async function fixture() {
       const directory = await mkdtemp(join(tmpdir(), "supertag-tag-sessions-"));
       cleanups.push(() => rm(directory, { recursive: true, force: true }));
-      let url = `file:${join(directory, "state.db")}`;
+      const databasePath = join(directory, "state.db");
+      let url = `file:${databasePath}`;
       if (dialect === "postgresql") {
         if (!postgres) throw new Error("Missing PostgreSQL test database");
         const isolated = await createIsolatedPostgresDatabase(postgres);
@@ -112,7 +121,40 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         surfaceAccountId: account.id,
         scope: "channel:C1",
       });
+      const larkAccount = await store.saveSurfaceAccount({
+        provider: "lark",
+        externalAccountId: randomUUID(),
+        displayName: "Lark fixture",
+        authMethod: "simulation",
+        credentialId: randomUUID(),
+        status: "connected",
+        configuration: {},
+        verifiedAt: at,
+      });
+      const larkRoute = await store.addTagRoute({
+        tagId: tag.id,
+        surfaceAccountId: larkAccount.id,
+        scope: "chat:oc_1",
+      });
       const keyOf = (actorId: string) => sessionRequesterKey("slack", account.id, actorId);
+      /** Runs SQL directly against the fixture database, as a migration would. */
+      const execute = async (statement: string) => {
+        if (dialect === "sqlite") {
+          const database = new Database(databasePath);
+          try {
+            database.exec(statement);
+          } finally {
+            database.close();
+          }
+          return;
+        }
+        const pool = new PostgresqlPool({ connectionString: url, max: 1 });
+        try {
+          await pool.query(statement);
+        } finally {
+          await pool.end();
+        }
+      };
 
       /** A running conversation Task in its own Session, as a verified surface would admit it. */
       const conversation = async (input: {
@@ -120,16 +162,23 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         readonly text: string;
         readonly direct?: boolean;
         readonly sessionKey?: string;
+        /** Admit the message from the Lark account in a chat of this type. */
+        readonly larkChatType?: "p2p" | "group";
       }) => {
         const sessionKey = input.sessionKey ?? randomUUID();
         const thread = randomUUID();
+        const lark = input.larkChatType !== undefined;
+        const surfaceAccount = lark ? larkAccount : account;
+        const surfaceRoute = lark ? larkRoute : route;
+        const provider = lark ? "lark" : "slack";
+        const scope = lark ? "chat:oc_1" : "channel:C1";
         const event: InboundSurfaceEvent = {
           eventId: randomUUID(),
           logicalEventId: randomUUID(),
-          provider: "slack",
-          externalAccountId: account.externalAccountId,
+          provider,
+          externalAccountId: surfaceAccount.externalAccountId,
           kind: "mention",
-          scope: "channel:C1",
+          scope,
           sessionKey,
           actor: { id: input.actorId, kind: "user" },
           ...(input.direct ? { direct: true } : {}),
@@ -142,17 +191,17 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             target: { channelId: "C1", threadTs: thread },
           },
           source: {},
-          metadata: {},
+          metadata: lark ? { chatType: input.larkChatType } : {},
         };
         const authorization: SurfaceTagAuthorizationSnapshot = {
           version: 5,
           capturedAt: at,
           tag: { id: tag.id, name: tag.name },
           origin: {
-            tagRouteId: route.id,
-            surfaceAccountId: account.id,
-            provider: "slack",
-            scope: "channel:C1",
+            tagRouteId: surfaceRoute.id,
+            surfaceAccountId: surfaceAccount.id,
+            provider,
+            scope,
           },
           requester: event.actor,
           permissionSets: [],
@@ -161,8 +210,8 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         };
         const contextPlan = emptyTagContextPlan(at);
         const admitted = await store.admitInboundEvent({
-          surfaceAccountId: account.id,
-          tagRouteId: route.id,
+          surfaceAccountId: surfaceAccount.id,
+          tagRouteId: surfaceRoute.id,
           tagId: tag.id,
           authorization,
           contextPlan,
@@ -171,7 +220,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         const session = await store.openSession({
           tagId: tag.id,
           sessionKey,
-          origin: { provider: "slack", surfaceAccountId: account.id, scope: "channel:C1" },
+          origin: { provider, surfaceAccountId: surfaceAccount.id, scope },
           ...(input.direct ? { audienceActorKey: keyOf(input.actorId) } : {}),
           at: new Date().toISOString(),
         });
@@ -229,7 +278,17 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       const call = (name: string, input: Record<string, unknown>, caller: { taskId: string }) =>
         // biome-ignore lint/suspicious/noExplicitAny: assertions read the JSON tool results directly.
         controller.commandAsAttempt(name, input, caller as never) as Promise<any>;
-      return { store, tag, otherTag, keyOf, conversation, controller, call };
+      return {
+        store,
+        tag,
+        otherTag,
+        larkAccount,
+        keyOf,
+        conversation,
+        controller,
+        call,
+        execute,
+      };
     }
 
     it("keeps the audience a Session opened with", async () => {
@@ -443,6 +502,82 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       await expect(
         f.call("list_tasks", { objectiveId: shipped.id }, alice.caller),
       ).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it("hides an operator Objective that notifies a private Session from other people", async () => {
+      const f = await fixture();
+      const bobPrivate = await f.conversation({ actorId: "bob", text: "notify me", direct: true });
+      await bobPrivate.complete("Noted");
+      const notifying = await f.store.createObjective({
+        id: randomUUID(),
+        ownerTagId: f.tag.id,
+        outcome: "Bob's operator-created plan",
+        notificationTaskId: bobPrivate.task.id,
+      });
+      const alice = await f.conversation({ actorId: "alice", text: "What are you working on?" });
+      expect(
+        await tagPortfolio(f.store, {
+          tagId: f.tag.id,
+          sessionId: alice.task.sessionId,
+          requesterKey: f.keyOf("alice"),
+        }),
+      ).toBeUndefined();
+      expect(await f.call("list_objectives", {}, alice.caller)).toMatchObject({
+        total: 0,
+        objectives: [],
+      });
+      await expect(
+        f.call("read_objective", { objectiveId: notifying.id }, alice.caller),
+      ).rejects.toMatchObject({ statusCode: 404 });
+
+      const bob = await f.conversation({ actorId: "bob", text: "status?" });
+      expect(
+        await tagPortfolio(f.store, {
+          tagId: f.tag.id,
+          sessionId: bob.task.sessionId,
+          requesterKey: f.keyOf("bob"),
+        }),
+      ).toContain(notifying.id);
+      expect(await f.call("list_objectives", {}, bob.caller)).toMatchObject({
+        total: 1,
+        objectives: [{ id: notifying.id, home: { provider: "slack", scope: "channel:C1" } }],
+      });
+      await expect(
+        f.call("read_objective", { objectiveId: notifying.id }, bob.caller),
+      ).resolves.toMatchObject({ id: notifying.id });
+    });
+
+    it("backfills Lark direct-chat Sessions opened before Session audience as private", async () => {
+      const f = await fixture();
+      const direct = await f.conversation({ actorId: "ou_dm", text: "hi", larkChatType: "p2p" });
+      await direct.complete("Hello");
+      const group = await f.conversation({
+        actorId: "ou_group",
+        text: "hi",
+        larkChatType: "group",
+      });
+      await group.complete("Hello");
+      const slack = await f.conversation({ actorId: "carol", text: "hi" });
+      // Before the audience migration every Session became shared.
+      await f.execute(`UPDATE "Session" SET "audience" = 'shared', "audienceActorKey" = NULL`);
+      const backfill = await readFile(
+        new URL(
+          `../packages/store/drizzle/${dialect}/0030_session_audience_backfill.sql`,
+          import.meta.url,
+        ),
+        "utf8",
+      );
+      for (const statement of backfill.split("--> statement-breakpoint"))
+        await f.execute(statement);
+      expect(await f.store.findSessionById(direct.session.id)).toMatchObject({
+        audience: "private",
+        audienceActorKey: `lark:${f.larkAccount.id}:ou_dm`,
+      });
+      for (const shared of [group, slack]) {
+        const session = await f.store.findSessionById(shared.session.id);
+        expect(session).toMatchObject({ audience: "shared" });
+        expect(session?.audienceActorKey).toBeUndefined();
+      }
     });
 
     it("caps the portfolio at 20 lines with a count of the rest", async () => {

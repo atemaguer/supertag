@@ -21,6 +21,11 @@ import {
 import { and, asc, desc, eq, inArray, isNotNull, ne, notInArray, or, sql } from "drizzle-orm";
 
 const FIRST_REQUEST_CHARACTERS = 200;
+
+/** The Session an Objective reports from: where it was created, else its notification Task's. */
+const objectiveHomeSession = sql<
+  string | null
+>`coalesce("Objective"."surfaceSessionId", (select nt."sessionId" from "Task" nt where nt."id" = "Objective"."notificationTaskId"))`;
 const EXCERPT_CHARACTERS = 240;
 
 /**
@@ -175,7 +180,7 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
           outcome: o.outcome,
           deadline: o.deadline,
           updatedAt: o.updatedAt,
-          surfaceSessionId: o.surfaceSessionId,
+          homeSessionId: objectiveHomeSession,
         })
         .from(o)
         .where(where)
@@ -185,7 +190,7 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
       this.db.select({ total: sql`count(*)` }).from(o).where(where),
     ]);
     const homeIds = [
-      ...new Set(rows.map((row: any) => row.surfaceSessionId).filter(Boolean)),
+      ...new Set(rows.map((row: any) => row.homeSessionId).filter(Boolean)),
     ] as string[];
     const homes = new Map<string, unknown>(
       homeIds.length === 0
@@ -205,8 +210,8 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
         outcome: row.outcome,
         ...(row.deadline == null ? {} : { deadline: row.deadline }),
         updatedAt: row.updatedAt,
-        ...(row.surfaceSessionId && homes.has(row.surfaceSessionId)
-          ? { home: originLocation(homes.get(row.surfaceSessionId)) }
+        ...(row.homeSessionId && homes.has(row.homeSessionId)
+          ? { home: originLocation(homes.get(row.homeSessionId)) }
           : {}),
       })),
     };
@@ -227,9 +232,12 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
     return row as Objective | undefined;
   }
 
-  /** An Objective is as visible as its home Session; one without a home Session is shared. */
+  /**
+   * An Objective is as visible as its home Session: the Session it was created in and the Session
+   * of its notification Task. Both must be visible when both exist; one with neither is shared.
+   */
   private visibleObjective(viewer: SessionViewer): any {
-    return sql`("Objective"."surfaceSessionId" is null or exists (select 1 from "Session" home where home."id" = "Objective"."surfaceSessionId" and ${visibleSession("home", viewer)}))`;
+    return sql`(("Objective"."surfaceSessionId" is null or exists (select 1 from "Session" home where home."id" = "Objective"."surfaceSessionId" and ${visibleSession("home", viewer)})) and ("Objective"."notificationTaskId" is null or exists (select 1 from "Task" nt join "Session" home on home."id" = nt."sessionId" where nt."id" = "Objective"."notificationTaskId" and ${visibleSession("home", viewer)})))`;
   }
 }
 
