@@ -212,6 +212,9 @@ export interface InboundRoute {
   readonly tagId: string;
 }
 
+/** The one built-in SurfaceAccount that CLI conversations are recorded under. */
+const CLI_EXTERNAL_ACCOUNT_ID = "control-plane";
+
 export interface OutboundReplyHandler {
   (
     event: InboundSurfaceEvent,
@@ -1259,11 +1262,7 @@ export class ControlPlane {
     options: { readonly execution?: TaskExecutionRequirements } = {},
   ): Promise<InboundIngestResult> {
     const requested = parseTaskExecutionRequirements(options.execution ?? {});
-    if (!this.#accepting) {
-      throw new Error("Control Plane is stopped or draining and is not accepting inbound events");
-    }
-    this.#activeAdmissions += 1;
-    try {
+    return this.#admitting(async () => {
       const identity = await this.#resolveInvocationIdentity(event);
       if (identity.status === "unconfigured") {
         return {
@@ -1275,116 +1274,80 @@ export class ControlPlane {
       const { account, route, tag } = identity;
       const objectiveThread = await this.#routeObjectiveThread(event, account, route, tag);
       if (objectiveThread) return objectiveThread;
-      const workerHostBindings = await this.#store.listTagWorkerHostBindings(tag.id);
-      if (workerHostBindings.length === 0) {
-        const reason = `Tag ${tag.name} cannot accept Tasks because it has no Worker Host binding. Bind a Worker Host to the Tag, then retry.`;
-        await this.#reply?.(event, { kind: "error", markdown: reason }, account, {});
-        return {
-          status: "rejected",
-          surfaceAccountId: account.id,
-          eventId: event.eventId,
-          tagRouteId: route.id,
-          tagId: tag.id,
-          reason,
-        };
-      }
-      const conversationalSurface = event.provider === "slack" || event.provider === "lark";
-      const existingSession =
-        conversationalSurface && event.kind === "message"
-          ? await this.#store.findSessionByTagAndKey(tag.id, event.sessionKey)
-          : undefined;
-      if (
-        conversationalSurface &&
-        (event.actor.kind !== "user" ||
-          (event.kind === "message" &&
-            (existingSession === undefined ||
-              existingSession.origin["provider"] !== event.provider ||
-              existingSession.origin["surfaceAccountId"] !== account.id ||
-              existingSession.origin["scope"] !== event.scope ||
-              existingSession.origin["threadKey"] !== event.callback.threadKey)))
-      ) {
-        return {
-          status: "ignored",
-          surfaceAccountId: account.id,
-          eventId: event.eventId,
-          tagRouteId: route.id,
-          tagId: tag.id,
-        };
-      }
+      return this.#admitEvent(event, account, route, tag, requested);
+    });
+  }
 
-      const capturedAt = new Date().toISOString();
-      const roles = await resolveTagRoles(this.#store, tag.id);
-      // A surface message chooses nothing: the Tag's defaults apply unless the caller set them.
-      const { execution, selection } = resolveTaskExecution({
-        range: await tagExecutionRange(this.#store, tag, roles),
-        requested,
-        chosen: {
-          ...(requested.model === undefined ? {} : { model: requested.model }),
-          ...(requested.effort === undefined ? {} : { effort: requested.effort }),
-        },
-        subject: `Tag ${tag.name}`,
-      });
-      const [authorization, contextPlan] = await Promise.all([
-        this.#captureAuthorization(event, account, route, tag, capturedAt, roles),
-        this.#captureContextPlan(event, account, route, capturedAt, roles),
-      ]);
-
-      const admission = await this.#store.admitInboundEvent({
-        surfaceAccountId: account.id,
-        tagRouteId: route.id,
+  /**
+   * `supertag message tag`: one message from an operator to a Tag in a CLI conversation. The
+   * conversation is direct, so its Session is private to the operator, and it has no location:
+   * the synthetic origin carries no Permission or Context Set activations, so the Tag answers
+   * with its Roles only. Replies are recorded, never sent anywhere; the CLI reads them.
+   */
+  async messageTag(input: {
+    readonly tagName: string;
+    /** Stable operator identity: `admin` or `token:NAME`. */
+    readonly operatorId: string;
+    readonly session: string;
+    readonly text: string;
+  }): Promise<InboundIngestResult> {
+    return this.#admitting(async () => {
+      const tag = await this.#store.findTagByName(input.tagName);
+      if (tag === undefined || tag.status !== "active")
+        throw new Error(`Tag ${input.tagName} does not exist`);
+      const now = new Date().toISOString();
+      const account =
+        (await this.#store.findSurfaceAccount("cli", CLI_EXTERNAL_ACCOUNT_ID)) ??
+        (await this.#store.saveSurfaceAccount({
+          provider: "cli",
+          externalAccountId: CLI_EXTERNAL_ACCOUNT_ID,
+          displayName: "CLI",
+          authMethod: "operator",
+          credentialId: `surface/cli/${CLI_EXTERNAL_ACCOUNT_ID}`,
+          status: "connected",
+          configuration: {},
+          verifiedAt: now,
+        }));
+      // Not a stored TagRoute, so nothing can activate on it and it is never a location.
+      const route: TagRoute = {
+        id: `cli:${tag.id}`,
         tagId: tag.id,
-        authorization,
-        contextPlan,
-        execution,
-        event,
-        maxAttempts: this.#maxAttempts,
-      });
-      const task = await this.#openTask(admission.work);
-      if (admission.status === "duplicate") {
-        return {
-          status: "duplicate",
-          surfaceAccountId: account.id,
-          eventId: event.eventId,
-          inboundEventId: admission.work.id,
-          taskId: task.id,
-          tagRouteId: route.id,
-          tagId: tag.id,
-        };
-      }
-      await this.#appendTaskEvent(task.id, "task.admitted", {
-        tagRouteId: route.id,
-        scope: event.scope,
-        contextSetIds: contextPlan.sets.map((set) => set.id),
-        roleIds: authorization.roles?.map((entry) => entry.role.id) ?? [],
-      });
-      if (recordsSelection(selection))
-        await this.#appendTaskEvent(task.id, EXECUTION_RESOLVED_EVENT, {
-          version: 1,
-          ...selection,
-        });
-      const inputDelivery = await this.#deliverSessionInput(admission.work, task);
-      await this.#enqueuePresentation(admission.work, {
-        workerId: "control-plane",
-        presentation: "acknowledgement",
-        deliveryKey: "acknowledgement",
-        text:
-          inputDelivery === "accepted"
-            ? "Your message was accepted by the active execution in this thread."
-            : inputDelivery === "unknown"
-              ? "I could not confirm delivery to the active execution. I have kept the delivery record. Your message will be retried on the next activation if the active execution withdraws it as unread; please do not resend it while that execution is active. If it ends without resolving delivery, I will tell you to resend in a new thread."
-              : acknowledgementText(task),
-      });
-      this.#wakeTaskController?.();
-      this.#wakeDeliveryController?.();
-      return {
-        status: "accepted",
         surfaceAccountId: account.id,
-        eventId: event.eventId,
-        inboundEventId: admission.work.id,
-        taskId: task.id,
-        tagRouteId: route.id,
-        tagId: tag.id,
+        scope: "cli",
+        enabled: true,
+        workspaces: [],
+        createdAt: tag.createdAt,
+        updatedAt: tag.updatedAt,
       };
+      const eventId = randomUUID();
+      const sessionKey = `cli:${input.operatorId}:${input.session}`;
+      const event: InboundSurfaceEvent = {
+        eventId,
+        logicalEventId: eventId,
+        provider: "cli",
+        externalAccountId: CLI_EXTERNAL_ACCOUNT_ID,
+        kind: "message",
+        scope: route.scope,
+        sessionKey,
+        actor: { id: input.operatorId, displayName: input.operatorId, kind: "user" },
+        text: input.text,
+        occurredAt: now,
+        callback: { provider: "cli", mode: "cli_conversation", threadKey: sessionKey, target: {} },
+        source: { session: input.session },
+        metadata: {},
+        direct: true,
+      };
+      return this.#admitEvent(event, account, route, tag, parseTaskExecutionRequirements({}));
+    });
+  }
+
+  async #admitting(admit: () => Promise<InboundIngestResult>): Promise<InboundIngestResult> {
+    if (!this.#accepting) {
+      throw new Error("Control Plane is stopped or draining and is not accepting inbound events");
+    }
+    this.#activeAdmissions += 1;
+    try {
+      return await admit();
     } finally {
       this.#activeAdmissions -= 1;
       if (this.#activeAdmissions === 0) {
@@ -1392,6 +1355,126 @@ export class ControlPlane {
         this.#admissionsDrained = undefined;
       }
     }
+  }
+
+  async #admitEvent(
+    event: InboundSurfaceEvent,
+    account: SurfaceAccount,
+    route: TagRoute,
+    tag: Tag,
+    requested: TaskExecutionRequirements,
+  ): Promise<InboundIngestResult> {
+    const workerHostBindings = await this.#store.listTagWorkerHostBindings(tag.id);
+    if (workerHostBindings.length === 0) {
+      const reason = `Tag ${tag.name} cannot accept Tasks because it has no Worker Host binding. Bind a Worker Host to the Tag, then retry.`;
+      if (event.provider !== "cli")
+        await this.#reply?.(event, { kind: "error", markdown: reason }, account, {});
+      return {
+        status: "rejected",
+        surfaceAccountId: account.id,
+        eventId: event.eventId,
+        tagRouteId: route.id,
+        tagId: tag.id,
+        reason,
+      };
+    }
+    const conversationalSurface = event.provider === "slack" || event.provider === "lark";
+    const existingSession =
+      conversationalSurface && event.kind === "message"
+        ? await this.#store.findSessionByTagAndKey(tag.id, event.sessionKey)
+        : undefined;
+    if (
+      conversationalSurface &&
+      (event.actor.kind !== "user" ||
+        (event.kind === "message" &&
+          (existingSession === undefined ||
+            existingSession.origin["provider"] !== event.provider ||
+            existingSession.origin["surfaceAccountId"] !== account.id ||
+            existingSession.origin["scope"] !== event.scope ||
+            existingSession.origin["threadKey"] !== event.callback.threadKey)))
+    ) {
+      return {
+        status: "ignored",
+        surfaceAccountId: account.id,
+        eventId: event.eventId,
+        tagRouteId: route.id,
+        tagId: tag.id,
+      };
+    }
+
+    const capturedAt = new Date().toISOString();
+    const roles = await resolveTagRoles(this.#store, tag.id);
+    // A surface message chooses nothing: the Tag's defaults apply unless the caller set them.
+    const { execution, selection } = resolveTaskExecution({
+      range: await tagExecutionRange(this.#store, tag, roles),
+      requested,
+      chosen: {
+        ...(requested.model === undefined ? {} : { model: requested.model }),
+        ...(requested.effort === undefined ? {} : { effort: requested.effort }),
+      },
+      subject: `Tag ${tag.name}`,
+    });
+    const [authorization, contextPlan] = await Promise.all([
+      this.#captureAuthorization(event, account, route, tag, capturedAt, roles),
+      this.#captureContextPlan(event, account, route, capturedAt, roles),
+    ]);
+
+    const admission = await this.#store.admitInboundEvent({
+      surfaceAccountId: account.id,
+      tagRouteId: route.id,
+      tagId: tag.id,
+      authorization,
+      contextPlan,
+      execution,
+      event,
+      maxAttempts: this.#maxAttempts,
+    });
+    const task = await this.#openTask(admission.work);
+    if (admission.status === "duplicate") {
+      return {
+        status: "duplicate",
+        surfaceAccountId: account.id,
+        eventId: event.eventId,
+        inboundEventId: admission.work.id,
+        taskId: task.id,
+        tagRouteId: route.id,
+        tagId: tag.id,
+      };
+    }
+    await this.#appendTaskEvent(task.id, "task.admitted", {
+      tagRouteId: route.id,
+      scope: event.scope,
+      contextSetIds: contextPlan.sets.map((set) => set.id),
+      roleIds: authorization.roles?.map((entry) => entry.role.id) ?? [],
+    });
+    if (recordsSelection(selection))
+      await this.#appendTaskEvent(task.id, EXECUTION_RESOLVED_EVENT, {
+        version: 1,
+        ...selection,
+      });
+    const inputDelivery = await this.#deliverSessionInput(admission.work, task);
+    await this.#enqueuePresentation(admission.work, {
+      workerId: "control-plane",
+      presentation: "acknowledgement",
+      deliveryKey: "acknowledgement",
+      text:
+        inputDelivery === "accepted"
+          ? "Your message was accepted by the active execution in this thread."
+          : inputDelivery === "unknown"
+            ? "I could not confirm delivery to the active execution. I have kept the delivery record. Your message will be retried on the next activation if the active execution withdraws it as unread; please do not resend it while that execution is active. If it ends without resolving delivery, I will tell you to resend in a new thread."
+            : acknowledgementText(task),
+    });
+    this.#wakeTaskController?.();
+    this.#wakeDeliveryController?.();
+    return {
+      status: "accepted",
+      surfaceAccountId: account.id,
+      eventId: event.eventId,
+      inboundEventId: admission.work.id,
+      taskId: task.id,
+      tagRouteId: route.id,
+      tagId: tag.id,
+    };
   }
 
   /**
@@ -2436,6 +2519,17 @@ export class ControlPlane {
       const account = await this.#store.findSurfaceAccountById(outbound.surfaceAccountId);
       if (account === undefined) {
         throw new Error(`Surface account ${outbound.surfaceAccountId} no longer exists`);
+      }
+      if (account.provider === "cli") {
+        // The CLI reads its conversation's replies from the Control Plane; nothing is sent.
+        const completed = await this.#store.completeOutboundReply({
+          outboundReplyId: outbound.id,
+          leaseOwner: this.#instanceId,
+          revision: outbound.revision,
+          deliveredAt: new Date().toISOString(),
+        });
+        if (!completed) this.#wakeDeliveryController?.();
+        return true;
       }
       if (
         outbound.deliveryKey.startsWith("task-budget:") ||

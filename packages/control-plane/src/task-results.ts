@@ -81,6 +81,7 @@ export function taskReferencesFromOrigin(
   event: InboundSurfaceEvent,
   surfaceAccountId: string,
 ): readonly TaskReference[] {
+  if (event.provider === "cli") return [];
   if (event.provider === "github") {
     const repositoryId = textValue(event.source["repositoryId"]) ?? scopeId(event.scope);
     const repository =

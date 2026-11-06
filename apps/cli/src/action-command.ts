@@ -38,6 +38,7 @@ export function normalizeActionFirstCommand(args: readonly string[]): string[] {
   if (action === "start" && resource === "objective") return ["objective", "start", ...rest];
   if (action === "watch" && resource === "objective") return ["objective", "watch", ...rest];
   if (action === "message" && resource === "objective") return ["objective", "message", ...rest];
+  if (action === "message" && resource === "tag") return ["tag", "message", ...rest];
 
   if (resource === "auth-key" && (action === "create" || action === "revoke"))
     return ["auth-key", action, ...rest];

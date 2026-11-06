@@ -3348,7 +3348,12 @@ export class DrizzleStore implements Store {
   async listSurfaceAccounts(): Promise<readonly SurfaceAccount[]> {
     const t = this.#tables.surfaceAccounts;
     return (
-      await this.#db.select().from(t).where(eq(t.status, "connected")).orderBy(asc(t.createdAt))
+      await this.#db
+        .select()
+        .from(t)
+        // The built-in CLI conversation account is not a connected surface.
+        .where(and(eq(t.status, "connected"), ne(t.provider, "cli")))
+        .orderBy(asc(t.createdAt))
     ).map(surfaceAccountFromRow);
   }
   async retireSurfaceAccount(id: string): Promise<SurfaceAccount | undefined> {
@@ -5406,6 +5411,7 @@ function parseTaskReferenceRelationship(value: string): TaskReference["relations
 }
 function parseSurfaceProvider(value: string): SurfaceProvider {
   if (
+    value === "cli" ||
     value === "github" ||
     value === "lark" ||
     value === "linear" ||

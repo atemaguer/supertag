@@ -75,7 +75,14 @@ export type TagId = z.infer<typeof tagIdSchema>;
 
 export type DatabaseProvider = "sqlite" | "postgresql";
 
-export type SurfaceProvider = "github" | "lark" | "linear" | "slack" | "teams";
+/** A collaboration surface that a SurfaceAccount connects. */
+export type ConnectedSurfaceProvider = "github" | "lark" | "linear" | "slack" | "teams";
+
+/**
+ * Where a conversation happens: a connected surface, or `cli` for `supertag message tag`, which
+ * the Control Plane answers itself without an external delivery.
+ */
+export type SurfaceProvider = "cli" | ConnectedSurfaceProvider;
 
 /** Immutable reference to one revision of a Worker execution profile. */
 export interface WorkerProfileRef {
@@ -923,6 +930,7 @@ export interface InboundEventActor {
 export interface CallbackRoute {
   readonly provider: SurfaceProvider;
   readonly mode:
+    | "cli_conversation"
     | "github_issue_comment"
     | "lark_thread"
     | "linear_issue_comment"
@@ -951,6 +959,8 @@ export interface InboundSurfaceEvent {
   readonly callback: CallbackRoute;
   readonly source: Readonly<Record<string, string>>;
   readonly metadata: Readonly<Record<string, string | number | boolean | null>>;
+  /** A direct conversation with one person, such as a direct chat or a CLI conversation. */
+  readonly direct?: boolean;
 }
 
 export type DurableInboundEventStatus = "completed" | "failed" | "pending" | "processing";
