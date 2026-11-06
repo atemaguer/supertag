@@ -7830,12 +7830,13 @@ const DELTA_PASSTHROUGH_EVENTS: ReadonlySet<TaskAttemptEvent["type"]> = new Set(
   "agent.updated",
 ]);
 const MAX_HELD_DELTA_RUN = 4_096;
-const REDACTION_MARKER = "[REDACTED]";
 
 /**
  * Per-event redaction cannot see a secret split across output deltas. Consecutive deltas are
- * redacted as one text, and the tail a later delta could still complete into a match is held
- * back until the next delta, or emitted as a last delta before the event that ends them.
+ * joined as raw text, and the raw tail a later delta could still complete into a match is held
+ * back until the next delta, or emitted redacted as a last delta before the event that ends
+ * them. Only raw text is ever redacted, so a pattern that fired on part of a credential never
+ * hides the rest of it from the next pass.
  */
 async function* redactTaskAttemptEvents(
   events: AsyncIterable<TaskAttemptEvent>,
@@ -7857,10 +7858,10 @@ async function* redactTaskAttemptEvents(
   try {
     for await (const event of events) {
       if (event.type === "output.delta") {
-        const text = redact(`${held?.text ?? ""}${event.text}`, false);
-        const start = heldDeltaStart(text, redactionSpan(redaction.values));
-        if (start > 0) yield delta(event, text.slice(0, start));
-        held = { ...event, text: text.slice(start) };
+        const raw = `${held?.text ?? ""}${event.text}`;
+        const { emit, start } = splitDeltaText(raw, redactionSpan(redaction.values), redact);
+        if (emit) yield delta(event, emit);
+        held = { ...event, text: raw.slice(start) };
         continue;
       }
       if (!DELTA_PASSTHROUGH_EVENTS.has(event.type)) yield* release();
@@ -7873,12 +7874,40 @@ async function* redactTaskAttemptEvents(
   yield* release();
 }
 
-/** Where the held tail of redacted delta text starts; everything before it is final. */
+/**
+ * Splits joined raw delta text into the redacted text that is final and the raw offset where
+ * the held tail starts. A cut is final only when redacting the text before it agrees with
+ * redacting the whole text, so no match the joined text completes straddles the cut.
+ */
+function splitDeltaText(
+  raw: string,
+  span: number,
+  redact: (text: string, structural?: boolean) => string,
+): { emit: string; start: number } {
+  const start = heldDeltaStart(raw, span);
+  if (start === 0) return { emit: "", start };
+  const whole = redact(raw, false);
+  const emit = redact(raw.slice(0, start), false);
+  if (whole.startsWith(emit)) return { emit, start };
+  // A match crosses the cut. Hold more of the run when the bound allows; past it, the whole
+  // text is redacted as one so everything it already completes stays masked.
+  let floor = Math.max(0, raw.length - Math.max(0, span - 1) - MAX_HELD_DELTA_RUN);
+  const unit = raw.charCodeAt(floor - 1);
+  if (unit >= 0xd800 && unit <= 0xdbff) floor--;
+  if (start > floor) {
+    if (floor === 0) return { emit: "", start: 0 };
+    const earlier = redact(raw.slice(0, floor), false);
+    if (whole.startsWith(earlier)) return { emit: earlier, start: floor };
+  }
+  return { emit: whole, start: raw.length };
+}
+
+/** Where the held raw tail of joined delta text starts; everything before it is final. */
 function heldDeltaStart(text: string, span: number): number {
   const least = Math.max(0, text.length - Math.max(0, span - 1));
   // A whitespace-free run can still grow into a URL credential, an encoded secret, or a longer
   // word, and a Basic credential needs its scheme: hold each whole, up to a bound that keeps
-  // re-redaction linear. A tail that starts after whitespace splits no marker or surrogate pair.
+  // re-redaction linear. A tail that starts after whitespace splits no surrogate pair.
   let start = least;
   while (start > 0 && !/\s/u.test(text[start - 1] ?? "")) start--;
   const scheme = /\bBasic\s+$/iu.exec(text.slice(Math.max(0, start - 64), start));
@@ -7886,9 +7915,6 @@ function heldDeltaStart(text: string, span: number): number {
   const bound = least - MAX_HELD_DELTA_RUN;
   if (start >= bound) return start;
   start = bound;
-  const marker = text.lastIndexOf(REDACTION_MARKER, start);
-  if (marker !== -1 && marker < start && marker + REDACTION_MARKER.length > start)
-    start = marker + REDACTION_MARKER.length;
   const unit = text.charCodeAt(start - 1);
   return unit >= 0xd800 && unit <= 0xdbff ? start - 1 : start;
 }

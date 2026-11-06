@@ -38,7 +38,7 @@ import {
   type WorkerDescriptor,
   type WorkerProfile,
 } from "./src/index.ts";
-import { redactText } from "./src/redaction.ts";
+import { redactText, sensitiveEnvironmentValues } from "./src/redaction.ts";
 
 describe("Worker", () => {
   it.each(["expiry", "release", "abort"] as const)(
@@ -1519,6 +1519,64 @@ describe("Worker", () => {
     }
     const silent = await run([]);
     expect(silent.some((event) => event.type === "output.delta")).toBe(false);
+  });
+
+  it("never feeds a partial match back into the next delta's redaction", async () => {
+    const known = ["hunter2abcdefXYZ", "prefix-key-1", "prefix-key-1-and-longer"];
+    const reply = [
+      "Authorization: Basic dXNlcjpwYXNzd29yZA== done.",
+      "See https://x.io/a?token=abcdefghij end.",
+      "Then hunter2abcdefXYZ and hunter2 alone.",
+      "Last prefix-key-1-and-longer, prefix-key-1.",
+    ].join(" ");
+    vi.stubEnv("DELTA_TEST_PASSWORD", "hunter2");
+    try {
+      const values = [...sensitiveEnvironmentValues(process.env), ...known];
+      const expected = redactText(reply, values);
+      for (const fragment of ["cjpwYXNz", "cdefghij", "abcdefXYZ", "and-longer", "hunter2"])
+        expect(expected).not.toContain(fragment);
+      for (const size of [1, 2, 5]) {
+        const pieces = Array.from({ length: Math.ceil(reply.length / size) }, (_, index) =>
+          reply.slice(index * size, (index + 1) * size),
+        );
+        const events = await collectTaskAttemptEvents(
+          createWorker({
+            id: "redacting-worker",
+            profiles: [profile()],
+            harnesses: [
+              {
+                id: "test-harness",
+                describe: async () => ({
+                  sessions: { resume: false, export: false, scope: "none" as const },
+                  id: "test-harness",
+                  version: "1",
+                  inputKinds: [],
+                  streaming: true,
+                  cancellation: true,
+                  sessionPersistence: "none",
+                }),
+                plan: async () => emptyLaunchPlan,
+                start: async () => ({
+                  async *run() {
+                    for (const text of pieces) yield { type: "output.delta" as const, text };
+                    yield { type: "output.message" as const, text: reply, final: true };
+                  },
+                  async close() {},
+                }),
+              },
+            ],
+            environments: [new LocalExecutionEnvironmentProvider()],
+            redactValues: known,
+          }).execute(taskAttemptSpec({ id: "research", revision: "3" })),
+        );
+        expect(events.at(-1)?.type, JSON.stringify(events)).toBe("execution.completed");
+        const deltas = events.flatMap((event) => (event.type === "output.delta" ? [event] : []));
+        expect(deltas.map((event) => event.text).join("")).toBe(expected);
+        expect(deltas.every((event) => event.text.length > 0)).toBe(true);
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it.each([
