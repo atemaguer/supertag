@@ -59,11 +59,16 @@ environments without one. See [overlap warning rules](../reference/mailbox.md#ov
 
 ## Same Session: automatic
 
-A thread or work item anchors a Session. New Tasks automatically receive bounded history
-entries derived from earlier completed Tasks in that Session.
+A thread or work item anchors a Session. Each Session maps to one native harness session, and a
+new Task resumes it whenever the harness can load it. For example, Alice asks a question in a
+thread, and Bob follows up in the same thread an hour later. Bob's Task continues Alice's native
+conversation, even if an operator changed the Tag's permissions in between. Bob's Task runs under
+the new permissions; the transcript keeps what the thread already saw.
 
-When compatible, the execution system may also restore its native conversation from stored Session state. This can
-make continuation richer, but stored Task results remain the source for bounded history replay.
+When no usable native state exists, such as on the first turn, after a switch to another harness,
+or after a failed turn, the new Task receives bounded history entries derived from earlier
+completed Tasks in that Session instead. Stored Task results remain the source for that replay. See
+[Session](tasks.md#session).
 
 ## Across Sessions: one Tag, one memory
 

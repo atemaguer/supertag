@@ -289,15 +289,16 @@ for (const provider of ["sqlite", "postgresql"] as const) {
         expect(stored[0]?.status).toBe("stored");
       });
 
-      it("enforces Session identity, current policy, and reference metadata", async () => {
+      it("enforces Session identity and reference metadata, not earlier policy", async () => {
         const f = await fixture();
         const a = await f.work();
         await a.client.save(a.state);
         await a.finish();
         const foreign = await f.work({ sessionKey: "unrelated" });
         await expect(foreign.client.load(a.state.ref)).resolves.toBeUndefined();
+        // Each Task Attempt runs under its own admitted policy, so a policy change still resumes.
         const b = await f.work({ changedPolicy: true });
-        await expect(b.client.load(a.state.ref)).resolves.toBeUndefined();
+        await expect(b.client.load(a.state.ref)).resolves.toEqual(a.state);
         await expect(b.client.load({ ...a.state.ref, uri: "another" })).resolves.toBeUndefined();
         await expect(b.client.load({ ...a.state.ref, format: "another" })).resolves.toBeUndefined();
         await b.client.save(b.state);
@@ -309,7 +310,7 @@ for (const provider of ["sqlite", "postgresql"] as const) {
       });
 
       it.each(["role", "reply destination"] as const)(
-        "rejects native resume after changing the %s without changing permissions",
+        "resumes natively across a %s change only when the reply audience is unchanged",
         async (change) => {
           const f = await fixture();
           const a = await f.work();
@@ -322,8 +323,15 @@ for (const provider of ["sqlite", "postgresql"] as const) {
           expect(b.task.authorizationSnapshot.resources).toEqual(
             a.task.authorizationSnapshot.resources,
           );
+          if (change === "role") {
+            await expect(
+              new SessionContinuity(f.store).readTask(b.task, b.attempt.id),
+            ).resolves.toEqual(a.state.ref);
+            await expect(b.client.load(a.state.ref)).resolves.toEqual(a.state);
+            return;
+          }
           await expect(
-            new SessionContinuity(f.store).readTask(b.task, profile, b.attempt.id),
+            new SessionContinuity(f.store).readTask(b.task, b.attempt.id),
           ).resolves.toBeUndefined();
           await expect(b.client.load(a.state.ref)).resolves.toBeUndefined();
         },

@@ -209,6 +209,14 @@ A harness must declare `sessions` with boolean `resume` and `export` fields and 
 `scope` of `none`, `local`, `environment`, or `portable`. A harness without session
 support declares `{ resume: false, export: false, scope: "none" }`.
 
+A harness that resumes receives the Session's prior state and the bounded history replay
+together in `continuity`; `resolveHarnessContinuity` picks one. Resume only state the harness
+can load where it runs, such as the same SuperTag Session, Tag, and working directory. Do not
+reject state because the Worker Profile revision, permissions, or tools changed. Pass the current
+Task's tools and permissions on every turn instead. When the harness resumes, leave the replay out
+of its prompt. When it cannot, use the replay. The built-in Claude Code, Codex, and Cursor
+harnesses resume; OpenCode always replays.
+
 A harness declares its `inputKinds`, runtime placements, continuity mechanisms,
 and whether it supports separate runtime and workspace execution environments.
 Unsupported required input or an unsupported split fails before provisioning.

@@ -136,7 +136,12 @@ import {
   resolveTagRoles,
   tagExecutionRange,
 } from "./roles.js";
-import { SessionContinuity } from "./session-continuity.js";
+import {
+  profileHarness,
+  SessionContinuity,
+  type SessionPlacementChoice,
+  sessionPlacement,
+} from "./session-continuity.js";
 import {
   isSurfaceFailure,
   type PreparedSurfaceOutcome,
@@ -1794,15 +1799,26 @@ export class ControlPlane {
         const placement = await this.#placement(pendingTask, workerHostBindings);
         await this.#recordSurfacePlacement(pendingTask, placement);
         if (placement.status === "unmet") return false;
-        const compatibleProfile = await this.#sessionContinuity.preferredProfile(
-          candidate,
-          pendingTask,
-        );
-        for (const tier of placement.tiers) {
+        const preferred = await this.#sessionContinuity.preferredProfile(candidate, pendingTask);
+        const descriptor = preferred ? await describeWorklet(this.#worklet) : undefined;
+        const tiers = placement.tiers.map((tier) => ({
+          allowedWorkerHostIds: tier.allowedWorkerHostIds,
+          requirements: withRequiredCapabilities(pendingTask.execution, tier.requires),
+        }));
+        // The Session constraint is decided once across every tier, so a later tier that can
+        // resume the Session wins over an earlier one that could only replay it.
+        const sessionTiers: readonly SessionPlacementChoice[] =
+          preferred && descriptor
+            ? sessionPlacement(descriptor, tiers, candidate.contextPlan, preferred)
+            : tiers.map((tier) => ({ requirements: tier.requirements }));
+        for (const [index, tier] of tiers.entries()) {
+          const sessionTier = sessionTiers[index];
+          if (sessionTier === undefined) continue;
+          const { requirements, compatibleProfile } = sessionTier;
           selectedPlacement = await this.#executionAffinity.select(
             this.#worklet,
             pendingTask.tagId,
-            withRequiredCapabilities(pendingTask.execution, tier.requires),
+            requirements,
             candidate.contextPlan,
             {
               allowedWorkerHostIds: tier.allowedWorkerHostIds,
@@ -2177,7 +2193,6 @@ export class ControlPlane {
     attempt: TaskAttempt,
   ): Promise<TaskAttemptSpec> {
     const text = work.event.text?.trim();
-    const sessionState = await this.#sessionContinuity.read(work, task, attempt.workerProfile);
     const persistence = await this.objectives.sessionPersistence(task, attempt);
     const workerHostBindings = await this.#store.listTagWorkerHostBindings(task.tagId);
     if (workerHostBindings.length === 0)
@@ -2191,6 +2206,12 @@ export class ControlPlane {
       );
     const selectedPlacement = executionPlacementSnapshot(attempt.workerSnapshot);
     const descriptor = await (this.#worklet ? describeWorklet(this.#worklet) : undefined);
+    // Native state resumes on any profile of the harness that produced it.
+    const sessionState = await this.#sessionContinuity.read(
+      work,
+      task,
+      descriptor ? profileHarness(descriptor.host.workers, attempt.workerProfile) : undefined,
+    );
     const supportsSurfaceCoordination = descriptor?.host.workers.some(
       (worker) =>
         descriptorSupportsSurfaceCoordination(worker, attempt.workerProfile) &&

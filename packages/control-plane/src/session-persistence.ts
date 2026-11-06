@@ -68,11 +68,7 @@ export class SessionPersistence {
       if (!state || state.sessionId !== task.sessionId || !isDeepStrictEqual(state.ref, ref))
         return null;
       if (state.attemptId !== attempt.id) {
-        const admitted = await new SessionContinuity(this.store).readTask(
-          task,
-          attempt.workerProfile,
-          attempt.id,
-        );
+        const admitted = await new SessionContinuity(this.store).readTask(task, attempt.id);
         if (admitted?.id !== ref.id) return null;
       }
       await this.execution(token);

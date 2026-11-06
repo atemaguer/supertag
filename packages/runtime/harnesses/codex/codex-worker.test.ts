@@ -1587,8 +1587,9 @@ describe("Codex harness composition", () => {
     expect(output.prompt).toContain("Earlier answer from this Session");
   });
 
-  it("starts fresh when the admitted manager capability changes", async () => {
+  it("resumes across manager tool scope and definition changes in exec mode", async () => {
     let authorizedScope = "objective:one";
+    let operation = "assign_task";
     const toolProviders = new ToolProviderRegistry([
       {
         provider: "supertag",
@@ -1605,7 +1606,7 @@ describe("Codex harness composition", () => {
                 provider: "supertag",
                 operations: [
                   {
-                    name: "assign_task",
+                    name: operation,
                     effect: "write" as const,
                     actions: ["tasks:assign"],
                     inputSchema: {
@@ -1669,8 +1670,23 @@ describe("Codex harness composition", () => {
       }),
     );
 
-    expect(terminalOutputText(second)).toBe("fresh");
-    expect(runner.mock.calls[1]?.[0].resumeThreadId).toBeUndefined();
+    // Each call is authorized against the current Task; the thread keeps only its tool definitions.
+    expect(terminalOutputText(second)).toBe("resumed");
+    const resumed = second.find((event) => event.type === "session.updated");
+    if (resumed?.type !== "session.updated") throw new Error("sessionState was not captured");
+
+    // Exec mode configures Harness-runtime MCP servers on every turn, so a new definition resumes too.
+    operation = "cancel_task";
+    const third = await collectTaskAttemptEvents(
+      worker.execute({
+        ...withSession(taskAttemptSpec("Another question"), "session-manager"),
+        taskId: "task-manager-3",
+        attemptId: "attempt-manager-3",
+        session: { id: "session-manager", sessionState: resumed.sessionState },
+      }),
+    );
+    expect(terminalOutputText(third)).toBe("resumed");
+    expect(runner.mock.calls[2]?.[0].resumeThreadId).toBe("thread-manager");
   });
 
   it("does not replay same-Session work after a native resume", async () => {

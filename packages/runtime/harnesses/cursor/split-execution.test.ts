@@ -577,7 +577,7 @@ it("disposes the executor when start fails after creating it", async () => {
   expect(executor.dispose).toHaveBeenCalledOnce();
 });
 
-it("separates split sessions from colocated ones in toolSignature", async () => {
+it("separates split sessions from colocated ones", async () => {
   const { dir, context, runtime } = await fixture();
   const resumed: (string | undefined)[] = [];
   const runner: CursorRunner = async function* (request) {
@@ -627,11 +627,13 @@ it("separates split sessions from colocated ones in toolSignature", async () => 
   expect(resumed.at(-1)).toBeUndefined();
 });
 
-it("includes the executor's tool names in the split signature", async () => {
+it("resumes a split session when the executor's tool set changes", async () => {
   const { dir, context, runtime } = await fixture();
   const resumed: (string | undefined)[] = [];
+  const toolSets: string[][] = [];
   const runner: CursorRunner = async function* (request) {
     resumed.push(request.resumeAgentId);
+    toolSets.push((request.splitTools ?? []).map((tool) => tool.name));
     for (const name of ["agents.ndjson", "runs.ndjson", "run_events.ndjson", "checkpoints.ndjson"])
       await writeFile(
         join(request.storeDirectory, name),
@@ -671,9 +673,12 @@ it("includes the executor's tool names in the split signature", async () => {
     await execution.close();
     return state;
   };
+  // Each turn passes the current tools again, so a narrower permission still resumes.
   const writable = await run(["files:write"]);
   await run([], writable);
-  expect(resumed.at(-1)).toBeUndefined();
+  expect(resumed.at(-1)).toMatch(/^agent-/);
+  // The resumed turn gets only the tools its own Task admits.
+  expect(toolSets.at(-1)).toEqual(["read"]);
   await run(["files:write"], writable);
   expect(resumed.at(-1)).toMatch(/^agent-/);
 });

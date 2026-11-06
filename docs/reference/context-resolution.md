@@ -44,9 +44,19 @@ requires no Context Set. Each `TaskHistoryEntry` contains `taskId`, `sessionId`,
 `requestText`, a bounded `result`, and `completedAt`. It is an execution input projection of the
 stored Task, not a separately published resource.
 
-Compatible native harness session state may resume richer conversation state. A session state is
-reusable only when the audience, authorization, Role instructions and bindings, Context Plan, Worker Profile, and workspace
-security envelope remain compatible. Bounded Session history is the canonical fallback.
+Each Session maps to one native harness session. The Control Plane offers a Session's latest
+resumable native state when the Tag, the Session, and the reply audience match, and the selected
+Worker Profile runs the harness that produced it. The harness then checks that it can load the
+state where it runs. Authorization, Role instructions, the Context Plan, the Worker Profile
+revision, the workspace plan, and execution settings do not gate a resume. Each Task Attempt
+receives the tools and permissions admitted for its own Task.
+
+The history entries above are the fallback. A harness that resumes native state omits them from
+its prompt. It includes them when no state was offered, when it rejects the offered state, or when
+the predecessor Task Attempt failed for a reason other than its spending limit. A Task Attempt
+stopped by its spending limit resumes after the allocation is renewed. A resume that fails while running fails its Task Attempt, so
+the next Task Attempt replays. Earlier tool output stays in a resumed transcript after a permission is removed; it grants no new
+access.
 
 ## Cross-Session artifact selection
 

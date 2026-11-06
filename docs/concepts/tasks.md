@@ -71,9 +71,20 @@ Slack thread, GitHub issue, Linear issue, Lark chat thread, Teams channel
 thread, or CLI conversation. Replies in an established Session do not need to mention `@SuperTag`
 again.
 
-Continuity within a Session is automatic and limited to that conversation. A new Task receives
-bounded history entries from earlier completed Tasks in the Session. A compatible agent system may also resume its
-own conversation state, but SuperTag does not depend on that shortcut.
+Continuity within a Session is automatic and limited to that conversation. Each Session maps to one
+native harness session. A new Task resumes that native session whenever the harness can load it: the
+same Tag, the same Session, the same harness, and the same reply audience. A different profile of
+the same harness, or a newer revision of it, can resume too.
+
+Resuming carries the conversation, not authority. Each Task runs under the permissions, Context
+Sets, workspace, and tools admitted for that Task, so a policy change applies on the next turn.
+One tradeoff follows. If an operator removes a permission, earlier tool output stays in the resumed
+transcript, such as a file read under the old permission. It grants no new access, but it is not
+erased. The transcript holds only what people in that same conversation already saw.
+
+When there is no usable native state, the Task receives bounded history entries from earlier
+completed Tasks in the Session instead. This replay covers a first turn, a switch to another
+harness, lost state, and a turn that failed for a reason other than its spending limit. A Task never receives the replay alongside a resume.
 
 Different threads remain different Sessions, even when they invoke the same Tag. They still share
 one memory: each conversation sees the Tag's open Objectives, and the Tag can search and read its
@@ -191,8 +202,8 @@ Task execution flag. Worklet profile flags describe available execution recipes.
 
 The Control Plane freezes the selected profile on the Task Attempt before execution. Recovery observes
 that same Task Attempt and selection; it does not choose another Worker Profile for accepted work.
-Native session state compatibility may still require matching execution profiles even though
-Sessions themselves have no profile binding.
+Sessions have no profile binding. A Session's native state prefers the profile that produced it,
+and any profile of the same harness can resume it.
 
 ### Cancelling assigned work
 
@@ -208,12 +219,15 @@ try to accept its own running work to signal completion.
 
 The Control Plane remembers a selected profile for each Tag and set of execution
 requirements. Later Tasks prefer that profile while it remains eligible and has
-capacity. Context support and native session state compatibility are checked again;
-permissions continue to be enforced by normal admission and execution.
+capacity. Context support is checked again; permissions continue to be enforced by normal
+admission and execution.
 
 If the cached profile is unavailable or no longer compatible, scheduling selects
-another eligible profile and updates the cache. A native session state restriction
-still takes precedence: work waits if no compatible profile is available.
+another eligible profile and updates the cache. A Session with native state takes precedence. Its
+Task prefers the profile that produced the state while that profile can run the Task, then
+another profile of the same harness. Either way, the Task waits for that profile's capacity rather
+than switch harness. When no profile of that harness can run the Task, scheduling picks any
+eligible profile, and the Task continues from the replayed history.
 
 This is an in-memory scheduling preference, not a Tag binding or a reservation.
 The cache holds at most 1,000 selections, expires each selection after five minutes,

@@ -664,13 +664,16 @@ describe("Control Plane durable lifecycle", () => {
     ["changed compatibility", { compatibility: "sha256:unrelated" }],
   ])(
     "does not fall back to older native state when the latest Session state has %s",
-    async (_, metadataOverride) => {
+    async (change, metadataOverride) => {
       const fixture = await createFixture();
       let executions = 0;
       const worker = testWorker(async (spec) => {
         executions += 1;
         if (executions === 3) {
-          expect(spec.session?.sessionState).toBeUndefined();
+          // A Worker Profile revision does not gate native resume; the latest state still resumes.
+          if (change === "changed profile")
+            expect(spec.session?.sessionState).toMatchObject({ id: "sessionState-2" });
+          else expect(spec.session?.sessionState).toBeUndefined();
           expect(spec.session?.history).toHaveLength(2);
           return { text: "continued from history" };
         }
@@ -808,7 +811,7 @@ describe("Control Plane durable lifecycle", () => {
     }
   });
 
-  it("invalidates native continuity when the admitted permission envelope changes", async () => {
+  it("keeps native continuity when the admitted permission envelope changes", async () => {
     const fixture = await createFixture();
     const sessionState: SessionStateRef = {
       id: "native-session-1",
@@ -816,17 +819,24 @@ describe("Control Plane durable lifecycle", () => {
       uri: "supertag://worker-sessionStates/native-session-1",
     };
     let execution = 0;
+    let resumed = false;
     const worker = testWorker(async (spec) => {
       execution += 1;
       if (execution === 1) return { text: "authorized first turn", sessionState };
-      expect(spec.workerProfile).toEqual({ id: "other", revision: "1" });
-      expect(spec.session?.sessionState).toBeUndefined();
+      // The next turn resumes on the producing profile, under the new admitted policy.
+      expect(spec.workerProfile).toEqual({ id: "default", revision: "1" });
+      expect(spec.session?.sessionState).toEqual(sessionState);
+      expect(spec.authorization.permissionSets).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: "expanded-access" })]),
+      );
+      // History still travels as the fallback in case the harness cannot load the state.
       expect(spec.session?.history).toEqual([
         expect.objectContaining({
           result: expect.objectContaining({ summary: "authorized first turn" }),
         }),
       ]);
-      return { text: "fresh after authorization changed" };
+      resumed = true;
+      return { text: "resumed after authorization changed" };
     });
     const selectable: Worklet = {
       ...worker,
@@ -850,10 +860,8 @@ describe("Control Plane durable lifecycle", () => {
           },
         };
       },
-      selectExecution: async (_requirements, _plan, options) => {
-        expect(options?.compatibleProfile).toBeUndefined();
-        return { id: execution === 0 ? "default" : "other", revision: "1" };
-      },
+      selectExecution: async (_requirements, _plan, options) =>
+        options?.compatibleProfile ?? { id: execution === 0 ? "default" : "other", revision: "1" },
     };
     const controlPlane = fixture.controlPlane({
       worklet: selectable,
@@ -898,6 +906,7 @@ describe("Control Plane durable lifecycle", () => {
       }),
     );
     await vi.waitFor(() => expect(worker.execute).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(resumed).toBe(true));
     await controlPlane.stop();
   });
 
