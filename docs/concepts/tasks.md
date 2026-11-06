@@ -92,6 +92,21 @@ other Sessions when a question needs them. A Session is **shared** or **private*
 conversation: a direct chat or a person's CLI conversation is private to that person. See
 [across Sessions](multiplayer.md#across-sessions-one-tag-one-memory).
 
+A conversation can hand longer work to a **work Session**. A work Session is a Session of the same
+Tag whose parent is the conversation that started it. It runs one Task, with an instruction the Tag
+wrote, under the permissions, Context Sets, and workspace of the conversation Task that started it,
+never more. It has its own native harness session, so its tool output stays out of the
+conversation, and it inherits the conversation's audience. A work Session can't start more work
+Sessions or create, attach, or start an Objective. At most four run at once per conversation;
+later ones wait.
+
+When a work Session's Task completes, fails, or is cancelled, its conversation gets one report turn:
+a new Task in the conversation Session that resumes the conversation's native session. It carries
+the work Session's title, status, and result, and the Tag reports it to the person where the
+conversation took place: the Slack thread, the issue, or the CLI conversation. SuperTag records
+each report once, even across a restart. The report turn has the starting Task's permissions and
+can't create or attach an Objective, because no person asked for one.
+
 An Objective started in a conversation reports back there: its questions, progress, approval
 notices, and completion. That conversation is the Objective's home Session. The work itself runs in
 the Objective's own Tasks, so planning and tool output stay out of the thread.

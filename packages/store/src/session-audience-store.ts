@@ -17,6 +17,9 @@ import {
   type SurfaceProvider,
   TagMessagingError,
   type TagObjectiveSummary,
+  type TaskStatus,
+  type WorkSessionSummary,
+  workSessionReportDeliveryId,
 } from "@supertag/core";
 import { and, asc, desc, eq, inArray, isNotNull, ne, notInArray, or, sql } from "drizzle-orm";
 
@@ -47,6 +50,7 @@ export function sessionFromRow(row: any): Session {
     state: "open",
     audience: sessionAudience(row.audience),
     ...(row.audienceActorKey == null ? {} : { audienceActorKey: row.audienceActorKey }),
+    ...(row.parentSessionId == null ? {} : { parentSessionId: row.parentSessionId }),
     lastInteractionAt: row.lastInteractionAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -230,6 +234,91 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
       )
       .limit(1);
     return row as Objective | undefined;
+  }
+
+  async listWorkSessions(parentSessionId: string): Promise<readonly WorkSessionSummary[]> {
+    const s = this.tables.sessions;
+    const rows = await this.db
+      .select({
+        id: s.id,
+        origin: s.origin,
+        createdAt: s.createdAt,
+        taskId: sql`(select lt."id" from "Task" lt where lt."sessionId" = "Session"."id" order by lt."createdAt" desc, lt."id" desc limit 1)`,
+        taskStatus: sql`(select lt."status" from "Task" lt where lt."sessionId" = "Session"."id" order by lt."createdAt" desc, lt."id" desc limit 1)`,
+      })
+      .from(s)
+      .where(eq(s.parentSessionId, parentSessionId))
+      .orderBy(desc(s.createdAt), desc(s.id))
+      .limit(200);
+    return rows.toReversed().map((row: any) => {
+      const origin = jsonRecord(row.origin, "session origin");
+      return {
+        sessionId: row.id,
+        title: typeof origin["title"] === "string" ? origin["title"] : "",
+        ...(typeof origin["startedByTaskId"] === "string"
+          ? { startedByTaskId: origin["startedByTaskId"] }
+          : {}),
+        createdAt: row.createdAt,
+        ...(typeof row.taskId === "string" && typeof row.taskStatus === "string"
+          ? { task: { id: row.taskId, status: row.taskStatus as TaskStatus } }
+          : {}),
+      };
+    });
+  }
+
+  async latestSessionTaskStatuses(
+    sessionIds: readonly string[],
+  ): Promise<ReadonlyMap<string, TaskStatus>> {
+    if (sessionIds.length === 0) return new Map();
+    const s = this.tables.sessions;
+    const statuses = new Map<string, TaskStatus>();
+    for (let offset = 0; offset < sessionIds.length; offset += 500) {
+      const rows = await this.db
+        .select({
+          id: s.id,
+          status: sql`(select lt."status" from "Task" lt where lt."sessionId" = "Session"."id" order by lt."createdAt" desc, lt."id" desc limit 1)`,
+        })
+        .from(s)
+        .where(inArray(s.id, [...sessionIds.slice(offset, offset + 500)]));
+      for (const row of rows)
+        if (typeof row.status === "string") statuses.set(row.id, row.status as TaskStatus);
+    }
+    return statuses;
+  }
+
+  async listUnreportedWorkTasks(limit: number): Promise<readonly string[]> {
+    const t = this.tables.tasks,
+      s = this.tables.sessions;
+    const rows = await this.db
+      .select({ id: t.id })
+      .from(t)
+      .innerJoin(s, eq(s.id, t.sessionId))
+      .where(
+        and(
+          isNotNull(s.parentSessionId),
+          inArray(t.status, ["completed", "failed", "cancelled"]),
+          sql`not exists (select 1 from "DurableInboundEvent" r where r."deliveryId" = 'session-report:' || ${t.id})`,
+        ),
+      )
+      .orderBy(asc(t.updatedAt), asc(t.id))
+      .limit(limit);
+    return rows.map((row: any) => row.id);
+  }
+
+  async findWorkSessionReport(
+    workTaskId: string,
+  ): Promise<{ readonly inboundEventId: string; readonly taskId?: string } | undefined> {
+    const i = this.tables.durableInboundEvents,
+      t = this.tables.tasks;
+    const [row] = await this.db
+      .select({ inboundEventId: i.id, taskId: t.id })
+      .from(i)
+      .leftJoin(t, eq(t.inboundEventId, i.id))
+      .where(eq(i.deliveryId, workSessionReportDeliveryId(workTaskId)))
+      .limit(1);
+    return row === undefined
+      ? undefined
+      : { inboundEventId: row.inboundEventId, ...(row.taskId ? { taskId: row.taskId } : {}) };
   }
 
   /**

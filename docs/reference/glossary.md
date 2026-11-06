@@ -25,8 +25,11 @@ whole system rather than another first-class resource.
   [the task concepts](../concepts/tasks.md).
 - <a id="session"></a>**Session** — a group of Tasks from the same conversation. All of a Tag's Sessions share
   its open Objectives and can read each other, except a private Session, such as a direct chat or a
-  CLI conversation, which only its one person's Sessions can read. See
-  [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-one-memory).
+  CLI conversation, which only its one person's Sessions can read. A work Session is a Session a
+  conversation started for longer work; its parent is that conversation, and its result returns
+  there as a report. See
+  [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-one-memory) and
+  [Session](../concepts/tasks.md#session).
 - <a id="team"></a>**Team** — a group of Tags with a shared responsibility, lead, and capacity boundary. See
   [Team rules](coordination.md#team-rules).
 - <a id="finding"></a>**finding** — one problem a reviewer reports in a Task result, with a severity of high, medium,

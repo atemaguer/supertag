@@ -11,6 +11,12 @@ import { DispatchErrorReporter } from "./dispatch-errors.js";
 import { ObjectiveMessages } from "./objective-messages.js";
 import { SESSION_INPUT_COMMAND_PREFIX, withdrawSessionInput } from "./session-input-withdrawal.js";
 import { conversationViewer, tagPortfolio } from "./tag-sessions.js";
+import {
+  internalTurnMessages,
+  type StartSessionRequest,
+  sessionReportEvent,
+  workSessionEvent,
+} from "./work-sessions.js";
 
 export type {
   ObjectiveConversationMessage,
@@ -71,6 +77,7 @@ import {
   SESSION_INPUT_ACK_TIMEOUT_MS,
   sessionRequesterKey,
   TagMessagingError,
+  WORK_SESSION_MAX_RUNNING,
 } from "@supertag/core";
 import type {
   SurfacePresentation,
@@ -169,6 +176,8 @@ export type {
   TaskExecutionPlacementReport,
 } from "./task-execution-report.js";
 
+/** How often the task controller looks for finished work Sessions still owed a report turn. */
+const WORK_REPORT_SWEEP_INTERVAL_MS = 10_000;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_LEASE_DURATION_MS = 5 * 60_000;
 const DEFAULT_RETRY_BASE_MS = 1_000;
@@ -361,6 +370,8 @@ export class ControlPlane {
   readonly #heldSurfaceTasks = new Set<string>();
   readonly #surfaceJournalReplays = new Map<string, Promise<void>>();
   readonly #replyStreams = new ReplyStreams();
+  /** Work Session executions running beside the task controller loop. */
+  readonly #backgroundRuns = new Set<Promise<void>>();
   #accepting = false;
   #running = false;
   #stopping = false;
@@ -374,6 +385,7 @@ export class ControlPlane {
   readonly #objectiveMessages: ObjectiveMessages;
   readonly #operatorChannel: OperatorChannelNotifications | undefined;
   #lastBudgetNotificationScan = 0;
+  #lastWorkReportSweep = 0;
   #lastOperatorChannelScan = 0;
   #operatorInboxRevision = 0;
   #scannedOperatorInboxRevision = -1;
@@ -523,6 +535,9 @@ export class ControlPlane {
       });
       this.#wakeDeliveryController?.();
     });
+    this.objectives.setSessionStarter((task, inbound, request) =>
+      this.#startWorkSession(task, inbound, request),
+    );
     this.objectives.setLostWorkerHostResolver((attempt) =>
       this.#removeLostEphemeralWorkerHost(attempt, EPHEMERAL_WORKER_HOST_GRACE_MS),
     );
@@ -1140,6 +1155,7 @@ export class ControlPlane {
       await this.#appendTaskEvent(task.id, "task.cancelled", { reason: "operator-request" });
       if (task.inboundEventId !== null)
         await this.#finishReplyStream(task.id, task.inboundEventId, "cancelled");
+      await this.#reportWorkSession(task.id);
       this.#wakeDeliveryController?.();
       this.#markOperatorInboxChanged();
       return { accepted: true, task: cancelled };
@@ -1186,6 +1202,8 @@ export class ControlPlane {
     }, EPHEMERAL_WORKER_HOST_SWEEP_INTERVAL_MS);
     this.#ephemeralSweepTimer.unref();
     this.#taskControllerLoop = this.#runTaskController();
+    // A report turn a stop or crash cut off is admitted now; admission is idempotent.
+    void this.#reportFinishedWorkSessions();
     if (this.#reply !== undefined || this.#operatorChannel !== undefined) {
       this.#deliveryControllerLoop = this.#runDeliveryController();
     }
@@ -1272,6 +1290,8 @@ export class ControlPlane {
     options: { readonly execution?: TaskExecutionRequirements } = {},
   ): Promise<InboundIngestResult> {
     const requested = parseTaskExecutionRequirements(options.execution ?? {});
+    if (event.internal !== undefined)
+      throw new Error("Only SuperTag admits work Session and report turns");
     return this.#admitting(async () => {
       const identity = await this.#resolveInvocationIdentity(event);
       if (identity.status === "unconfigured") {
@@ -1745,6 +1765,7 @@ export class ControlPlane {
         }
       }
     } finally {
+      await Promise.allSettled([...this.#backgroundRuns]);
       this.#taskControllerDrained = true;
       this.#wakeDeliveryController?.();
     }
@@ -1772,6 +1793,8 @@ export class ControlPlane {
 
   async #reconcileNextTask(): Promise<boolean> {
     const claim = this.#claimInput();
+    if (Date.now() - this.#lastWorkReportSweep >= WORK_REPORT_SWEEP_INTERVAL_MS)
+      await this.#reportFinishedWorkSessions();
     const candidate = await this.#store.peekNextInboundEvent({ now: claim.now });
     if (candidate === undefined) {
       this.#dispatchFailures.inbound = 0;
@@ -1863,252 +1886,282 @@ export class ControlPlane {
       return true;
     }
     if (!selectedPlacement || !this.#worklet) throw new Error("Selected Worker is missing");
-    let task: Task | undefined;
-    let attempt: TaskAttempt | undefined;
-    let executionController: AbortController | undefined;
-    let durableExecution = false;
-    let leaseRenewalTimer: NodeJS.Timeout | undefined;
-    const workerEvents: WorkerTaskAttemptEvent[] = [];
-    let lastProgressText: string | undefined;
-    try {
-      const account = await this.#store.findSurfaceAccountById(work.surfaceAccountId);
-      if (account === undefined) {
-        throw new Error(`Surface account ${work.surfaceAccountId} no longer exists`);
-      }
-      await this.#onInboundEvent?.(work.event, account, {
-        tagRouteId: work.tagRouteId,
-        tagId: work.tagId,
-      });
+    const placed = selectedPlacement;
+    const worklet = this.#worklet;
+    const pending = pendingTask;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const execute = async (): Promise<void> => {
+      let task: Task | undefined;
+      let attempt: TaskAttempt | undefined;
+      let executionController: AbortController | undefined;
+      let durableExecution = false;
+      let leaseRenewalTimer: NodeJS.Timeout | undefined;
+      const workerEvents: WorkerTaskAttemptEvent[] = [];
+      let lastProgressText: string | undefined;
+      try {
+        const account = await this.#store.findSurfaceAccountById(work.surfaceAccountId);
+        if (account === undefined) {
+          throw new Error(`Surface account ${work.surfaceAccountId} no longer exists`);
+        }
+        await this.#onInboundEvent?.(work.event, account, {
+          tagRouteId: work.tagRouteId,
+          tagId: work.tagId,
+        });
 
-      task = await this.#openTask(work);
-      const priorAttempts = await this.#store.listTaskAttempts(task.id);
-      const prior = priorAttempts.toSorted((a, b) => b.attemptNumber - a.attemptNumber)[0];
-      // A removed ephemeral host cannot report again, so its Attempt counts as stopped.
-      const lostWorkerHostId =
-        prior?.workerSnapshot["durableExecution"] === true &&
-        (prior.status === "running" || prior.status === "failed")
-          ? await this.#removeLostEphemeralWorkerHost(prior, 0)
-          : undefined;
-      if (prior !== undefined && lostWorkerHostId !== undefined && prior.status === "running")
-        await this.#appendTaskEvent(
-          task.id,
-          "task.worker-host-removed",
-          { version: 1, workerHostId: lostWorkerHostId, requeued: true },
-          prior.id,
-        );
-      if (prior?.workerSnapshot["durableExecution"] === true && lostWorkerHostId === undefined) {
-        attempt = prior;
-        if (
-          "inspect" in this.#worklet &&
-          typeof this.#worklet.inspect === "function" &&
-          "events" in this.#worklet &&
-          typeof this.#worklet.events === "function"
-        )
-          await this.#replaySurfaceAttemptJournal(
+        task = await this.#openTask(work);
+        const priorAttempts = await this.#store.listTaskAttempts(task.id);
+        const prior = priorAttempts.toSorted((a, b) => b.attemptNumber - a.attemptNumber)[0];
+        // A removed ephemeral host cannot report again, so its Attempt counts as stopped.
+        const lostWorkerHostId =
+          prior?.workerSnapshot["durableExecution"] === true &&
+          (prior.status === "running" || prior.status === "failed")
+            ? await this.#removeLostEphemeralWorkerHost(prior, 0)
+            : undefined;
+        if (prior !== undefined && lostWorkerHostId !== undefined && prior.status === "running")
+          await this.#appendTaskEvent(
             task.id,
+            "task.worker-host-removed",
+            { version: 1, workerHostId: lostWorkerHostId, requeued: true },
             prior.id,
-            this.#worklet as DurableWorklet,
-          ).catch((error) => this.#reportDispatchError(error));
-        throw new UncertainExecutionError(prior.id);
-      }
-      const history = (
-        await this.#store.listTaskHistory({
-          sessionId: task.sessionId,
-          tagId: task.tagId,
-          excludeTaskId: task.id,
-          limit: MAX_SESSION_HISTORY_TASKS,
-        })
-      )
-        .toReversed()
-        .map(boundedTaskHistory);
-      if (task.status === "pending")
-        task = await this.#store.refreshPendingTaskSessionHistory(task.id, history);
-      durableExecution = await supportsDurableExecution(
-        this.#worklet,
-        selectedPlacement.workerProfile,
-        task.contextPlan,
-      );
-      attempt = await this.#openTaskAttempt(work, task, durableExecution, selectedPlacement);
-      // Only CLI conversations have a reader for the live reply.
-      if (work.event.provider === "cli") this.#replyStreams.open(task.id, attempt.attemptNumber);
-      executionController = new AbortController();
-      this.#activeTaskControllers.set(task.id, executionController);
-      leaseRenewalTimer = setInterval(
-        () => {
-          const now = new Date();
-          void this.#store
-            .renewInboundEventLease({
-              inboundEventId: work.id,
-              leaseOwner: this.#instanceId,
-              now: now.toISOString(),
-              leaseExpiresAt: new Date(now.getTime() + this.#leaseDurationMs).toISOString(),
-            })
-            .then((renewed) => {
-              if (!renewed && !executionController?.signal.aborted) {
-                executionController?.abort(new AssignmentLeaseLostError(work.id));
-              }
-            })
-            .catch((error: unknown) => {
-              this.#reportDispatchError(error);
-            });
-        },
-        Math.max(10, Math.floor(this.#leaseDurationMs / 3)),
-      );
-      leaseRenewalTimer.unref();
-      const executionTaskId = task.id;
-      const executionAttemptId = attempt.id;
-      for await (const event of executeWorkletAttempt(
-        this.#worklet,
-        await this.#taskAttemptSpec(work, task, attempt),
-        executionController.signal,
-        durableExecution,
-        durableExecution
-          ? (entry) => this.#recordWorkerJournalEvent(executionTaskId, executionAttemptId, entry)
-          : undefined,
-        undefined,
-        (receipt) =>
-          recordAttemptWorkerReceipt(this.#store, executionTaskId, executionAttemptId, receipt),
-      )) {
-        workerEvents.push(event);
-        this.#replyStreams.event(task.id, event);
-        if (!durableExecution) await this.#recordWorkerEvent(task.id, attempt.id, event);
-        if (event.type === "progress.updated" && (await this.#supportsReplyReplacement(work))) {
-          const text = taskProgressText(event.progress);
-          if (text !== lastProgressText) {
-            lastProgressText = text;
-            await this.#enqueuePresentation(work, {
-              workerId: this.#worklet.id,
-              presentation: "status",
-              deliveryKey: "progress",
-              text,
-            });
-            this.#wakeDeliveryController?.();
+          );
+        if (prior?.workerSnapshot["durableExecution"] === true && lostWorkerHostId === undefined) {
+          attempt = prior;
+          if (
+            "inspect" in worklet &&
+            typeof worklet.inspect === "function" &&
+            "events" in worklet &&
+            typeof worklet.events === "function"
+          )
+            await this.#replaySurfaceAttemptJournal(
+              task.id,
+              prior.id,
+              worklet as DurableWorklet,
+            ).catch((error) => this.#reportDispatchError(error));
+          throw new UncertainExecutionError(prior.id);
+        }
+        const history = (
+          await this.#store.listTaskHistory({
+            sessionId: task.sessionId,
+            tagId: task.tagId,
+            excludeTaskId: task.id,
+            limit: MAX_SESSION_HISTORY_TASKS,
+          })
+        )
+          .toReversed()
+          .map(boundedTaskHistory);
+        if (task.status === "pending")
+          task = await this.#store.refreshPendingTaskSessionHistory(task.id, history);
+        durableExecution = await supportsDurableExecution(
+          worklet,
+          placed.workerProfile,
+          task.contextPlan,
+        );
+        attempt = await this.#openTaskAttempt(work, task, durableExecution, placed);
+        // Only CLI conversations have a reader for the live reply.
+        if (work.event.provider === "cli") this.#replyStreams.open(task.id, attempt.attemptNumber);
+        executionController = new AbortController();
+        this.#activeTaskControllers.set(task.id, executionController);
+        leaseRenewalTimer = setInterval(
+          () => {
+            const now = new Date();
+            void this.#store
+              .renewInboundEventLease({
+                inboundEventId: work.id,
+                leaseOwner: this.#instanceId,
+                now: now.toISOString(),
+                leaseExpiresAt: new Date(now.getTime() + this.#leaseDurationMs).toISOString(),
+              })
+              .then((renewed) => {
+                if (!renewed && !executionController?.signal.aborted) {
+                  executionController?.abort(new AssignmentLeaseLostError(work.id));
+                }
+              })
+              .catch((error: unknown) => {
+                this.#reportDispatchError(error);
+              });
+          },
+          Math.max(10, Math.floor(this.#leaseDurationMs / 3)),
+        );
+        leaseRenewalTimer.unref();
+        const executionTaskId = task.id;
+        const executionAttemptId = attempt.id;
+        for await (const event of executeWorkletAttempt(
+          worklet,
+          await this.#taskAttemptSpec(work, task, attempt),
+          executionController.signal,
+          durableExecution,
+          durableExecution
+            ? (entry) => this.#recordWorkerJournalEvent(executionTaskId, executionAttemptId, entry)
+            : undefined,
+          undefined,
+          (receipt) =>
+            recordAttemptWorkerReceipt(this.#store, executionTaskId, executionAttemptId, receipt),
+        )) {
+          workerEvents.push(event);
+          markStarted();
+          this.#replyStreams.event(task.id, event);
+          if (!durableExecution) await this.#recordWorkerEvent(task.id, attempt.id, event);
+          if (
+            event.type === "progress.updated" &&
+            work.event.internal?.kind !== "work_session" &&
+            (await this.#supportsReplyReplacement(work))
+          ) {
+            const text = taskProgressText(event.progress);
+            if (text !== lastProgressText) {
+              lastProgressText = text;
+              await this.#enqueuePresentation(work, {
+                workerId: worklet.id,
+                presentation: "status",
+                deliveryKey: "progress",
+                text,
+              });
+              this.#wakeDeliveryController?.();
+            }
           }
         }
-      }
-      const outputFailure = workspaceMountOutputFailure(workerEvents);
-      if (outputFailure) throw new Error(outputFailure);
-      const responseText = terminalOutputText(workerEvents);
-      const workerId = executionWorkerId(workerEvents) ?? this.#worklet.id;
-      const completedAt = new Date().toISOString();
-      const result = buildTaskResult(work, responseText, workerEvents);
-      preparedOutcome = {
-        taskId: task.id,
-        attemptId: attempt.id,
-        status: "completed",
-        outcome: { responseLength: responseText.length },
-        workerId,
-        responseText: finalResultText(responseText, result),
-        completedAt,
-        result,
-      };
-      try {
-        await this.#surfaceSettlement.prepare(preparedOutcome, work.id, this.#instanceId);
-      } catch (error) {
-        // A rejected output is terminal validation, not a persistence outage to retry.
-        if (error instanceof ArtifactCatalogError) preparedOutcome = undefined;
-        throw error;
-      }
-      outcomePersisted = true;
-      await this.#sessionContinuity
-        .save(work, task, attempt.workerProfile, workerEvents, completedAt)
-        .catch((error) => this.#reportDispatchError(error));
-      await this.#commitSurfaceOutcome(work, preparedOutcome);
-    } catch (error) {
-      if (preparedOutcome) {
-        // Never reinterpret an observed outcome as a new execution failure. If
-        // intent persistence failed, retry it before allowing lease recovery.
-        await this.#retainSurfaceOutcome(work, preparedOutcome, error, outcomePersisted);
-        return true;
-      }
-      if (executionController?.signal.reason instanceof AssignmentLeaseLostError) {
-        this.#reportDispatchError(executionController.signal.reason);
-        return true;
-      }
-      if (task !== undefined && attempt !== undefined && executionController?.signal.aborted) {
+        const outputFailure = workspaceMountOutputFailure(workerEvents);
+        if (outputFailure) throw new Error(outputFailure);
+        const responseText = terminalOutputText(workerEvents);
+        const workerId = executionWorkerId(workerEvents) ?? worklet.id;
         const completedAt = new Date().toISOString();
-        const cancelled: SurfaceOutcome = {
+        const result = buildTaskResult(work, responseText, workerEvents);
+        preparedOutcome = {
           taskId: task.id,
           attemptId: attempt.id,
-          status: "cancelled",
-          outcome: { reason: "operator-request" },
-          workerId: this.#worklet?.id ?? "control-plane",
-          responseText: durableExecution
-            ? "Cancellation requested; the Worker may still be cleaning up."
-            : "I stopped working on this.",
+          status: "completed",
+          outcome: { responseLength: responseText.length },
+          workerId,
+          responseText: finalResultText(responseText, result),
           completedAt,
-          ...(durableExecution
-            ? { sessionBlockReason: "Cancellation cleanup has not been confirmed" }
+          result,
+        };
+        try {
+          await this.#surfaceSettlement.prepare(preparedOutcome, work.id, this.#instanceId);
+        } catch (error) {
+          // A rejected output is terminal validation, not a persistence outage to retry.
+          if (error instanceof ArtifactCatalogError) preparedOutcome = undefined;
+          throw error;
+        }
+        outcomePersisted = true;
+        await this.#sessionContinuity
+          .save(work, task, attempt.workerProfile, workerEvents, completedAt)
+          .catch((error) => this.#reportDispatchError(error));
+        await this.#commitSurfaceOutcome(work, preparedOutcome);
+      } catch (error) {
+        if (preparedOutcome) {
+          // Never reinterpret an observed outcome as a new execution failure. If
+          // intent persistence failed, retry it before allowing lease recovery.
+          await this.#retainSurfaceOutcome(work, preparedOutcome, error, outcomePersisted);
+          return;
+        }
+        if (executionController?.signal.reason instanceof AssignmentLeaseLostError) {
+          this.#reportDispatchError(executionController.signal.reason);
+          return;
+        }
+        if (task !== undefined && attempt !== undefined && executionController?.signal.aborted) {
+          const completedAt = new Date().toISOString();
+          const cancelled: SurfaceOutcome = {
+            taskId: task.id,
+            attemptId: attempt.id,
+            status: "cancelled",
+            outcome: { reason: "operator-request" },
+            workerId: worklet?.id ?? "control-plane",
+            responseText: durableExecution
+              ? "Cancellation requested; the Worker may still be cleaning up."
+              : "I stopped working on this.",
+            completedAt,
+            ...(durableExecution
+              ? { sessionBlockReason: "Cancellation cleanup has not been confirmed" }
+              : {}),
+          };
+          try {
+            await this.#surfaceSettlement.prepare(cancelled, work.id, this.#instanceId);
+            outcomePersisted = true;
+            await this.#commitSurfaceOutcome(work, cancelled);
+          } catch (settlementError) {
+            await this.#retainSurfaceOutcome(work, cancelled, settlementError, outcomePersisted);
+          }
+          return;
+        }
+        const budgetExhausted = workerEvents.some(
+          (event) =>
+            event.type === "execution.failed" &&
+            event.error.name === "ExecutionBudgetExceededError",
+        );
+        const failure = externalWriteFailure(error, workerEvents);
+        // An ephemeral host that stayed away past the observer's reconnect grace is removed; its
+        // interrupted Attempt counts as stopped and the Task retries elsewhere. Persistent hosts
+        // keep the stricter rule: unknown execution is never replayed automatically.
+        const lostWorkerHostId =
+          error instanceof UncertainExecutionError &&
+          attempt !== undefined &&
+          !workerEvents.some((event) => event.type === "execution.completed")
+            ? await this.#removeLostEphemeralWorkerHost(attempt, 0).catch((lookupError) => {
+                this.#reportDispatchError(lookupError);
+                return undefined;
+              })
+            : undefined;
+        const uncertain =
+          lostWorkerHostId === undefined &&
+          (error instanceof UncertainExecutionError ||
+            (durableExecution &&
+              !workerEvents.some(
+                (event) =>
+                  event.type === "execution.failed" || event.type === "execution.completed",
+              )));
+        const now = new Date();
+        const failed: SurfaceFailureOutcome = {
+          taskId: task?.id ?? pending.id,
+          ...(attempt ? { attemptId: attempt.id } : {}),
+          claimAttemptCount: work.attemptCount,
+          error: errorMessage(failure),
+          retryable:
+            !budgetExhausted &&
+            failure === error &&
+            !(error instanceof ArtifactCatalogError) &&
+            (!durableExecution || lostWorkerHostId !== undefined) &&
+            !uncertain &&
+            !workerEvents.some((event) => event.type === "execution.completed") &&
+            workspaceMountOutputFailure(workerEvents) === undefined,
+          retryAt: new Date(now.getTime() + this.#retryDelay(work.attemptCount)).toISOString(),
+          failedAt: now.toISOString(),
+          workerId: worklet?.id ?? "control-plane",
+          responseText: budgetExhausted
+            ? "Execution stopped because its budget was exhausted. Completed work remains recorded; additional execution requires an authorized allocation. " +
+              failureText(failure)
+            : failureText(failure),
+          ...(uncertain
+            ? { sessionBlockReason: "Execution completion could not be confirmed" }
             : {}),
         };
         try {
-          await this.#surfaceSettlement.prepare(cancelled, work.id, this.#instanceId);
+          await this.#surfaceSettlement.prepare(failed, work.id, this.#instanceId);
           outcomePersisted = true;
-          await this.#commitSurfaceOutcome(work, cancelled);
+          await this.#commitSurfaceOutcome(work, failed);
         } catch (settlementError) {
-          await this.#retainSurfaceOutcome(work, cancelled, settlementError, outcomePersisted);
+          await this.#retainSurfaceOutcome(work, failed, settlementError, outcomePersisted);
         }
-        return true;
+        this.#reportDispatchError(failure);
+      } finally {
+        if (leaseRenewalTimer !== undefined) clearInterval(leaseRenewalTimer);
+        if (task !== undefined) this.#activeTaskControllers.delete(task.id);
+        markStarted();
       }
-      const budgetExhausted = workerEvents.some(
-        (event) =>
-          event.type === "execution.failed" && event.error.name === "ExecutionBudgetExceededError",
-      );
-      const failure = externalWriteFailure(error, workerEvents);
-      // An ephemeral host that stayed away past the observer's reconnect grace is removed; its
-      // interrupted Attempt counts as stopped and the Task retries elsewhere. Persistent hosts
-      // keep the stricter rule: unknown execution is never replayed automatically.
-      const lostWorkerHostId =
-        error instanceof UncertainExecutionError &&
-        attempt !== undefined &&
-        !workerEvents.some((event) => event.type === "execution.completed")
-          ? await this.#removeLostEphemeralWorkerHost(attempt, 0).catch((lookupError) => {
-              this.#reportDispatchError(lookupError);
-              return undefined;
-            })
-          : undefined;
-      const uncertain =
-        lostWorkerHostId === undefined &&
-        (error instanceof UncertainExecutionError ||
-          (durableExecution &&
-            !workerEvents.some(
-              (event) => event.type === "execution.failed" || event.type === "execution.completed",
-            )));
-      const now = new Date();
-      const failed: SurfaceFailureOutcome = {
-        taskId: task?.id ?? pendingTask.id,
-        ...(attempt ? { attemptId: attempt.id } : {}),
-        claimAttemptCount: work.attemptCount,
-        error: errorMessage(failure),
-        retryable:
-          !budgetExhausted &&
-          failure === error &&
-          !(error instanceof ArtifactCatalogError) &&
-          (!durableExecution || lostWorkerHostId !== undefined) &&
-          !uncertain &&
-          !workerEvents.some((event) => event.type === "execution.completed") &&
-          workspaceMountOutputFailure(workerEvents) === undefined,
-        retryAt: new Date(now.getTime() + this.#retryDelay(work.attemptCount)).toISOString(),
-        failedAt: now.toISOString(),
-        workerId: this.#worklet?.id ?? "control-plane",
-        responseText: budgetExhausted
-          ? "Execution stopped because its budget was exhausted. Completed work remains recorded; additional execution requires an authorized allocation. " +
-            failureText(failure)
-          : failureText(failure),
-        ...(uncertain ? { sessionBlockReason: "Execution completion could not be confirmed" } : {}),
-      };
-      try {
-        await this.#surfaceSettlement.prepare(failed, work.id, this.#instanceId);
-        outcomePersisted = true;
-        await this.#commitSurfaceOutcome(work, failed);
-      } catch (settlementError) {
-        await this.#retainSurfaceOutcome(work, failed, settlementError, outcomePersisted);
-      }
-      this.#reportDispatchError(failure);
-    } finally {
-      if (leaseRenewalTimer !== undefined) clearInterval(leaseRenewalTimer);
-      if (task !== undefined) this.#activeTaskControllers.delete(task.id);
+    };
+    if (work.event.internal?.kind === "work_session") {
+      // A work Session runs beside conversation turns: dispatch waits only until it has started,
+      // so the conversation and its report turns stay responsive while the work runs.
+      const running: Promise<void> = execute()
+        .catch((error: unknown) => this.#reportDispatchError(error))
+        .finally(() => this.#backgroundRuns.delete(running));
+      this.#backgroundRuns.add(running);
+      await Promise.race([started, running]);
+      return true;
     }
+    await execute();
     return true;
   }
 
@@ -2128,6 +2181,8 @@ export class ControlPlane {
     if (status !== "pending") {
       await this.#appendTaskEvent(outcome.taskId, `task.${status}`, result);
       await this.#finishReplyStream(outcome.taskId, work.id, status);
+      if (work.event.internal?.kind === "work_session")
+        await this.#reportWorkSession(outcome.taskId);
       this.#wakeDeliveryController?.();
       this.#markOperatorInboxChanged();
     }
@@ -2226,11 +2281,22 @@ export class ControlPlane {
       supportsSurfaceCoordination && work.event.actor.kind === "user"
         ? await this.objectives.surfaceCoordination(task, attempt)
         : undefined;
-    // Every conversation with surface coordination sees the Tag's open Objectives.
+    const internal = work.event.internal;
+    // Every conversation with surface coordination sees the Tag's open Objectives, and a
+    // conversation also sees the work Sessions it started.
     const portfolio =
       coordination === undefined
         ? undefined
-        : await tagPortfolio(this.#store, conversationViewer(task, work));
+        : await tagPortfolio(this.#store, conversationViewer(task, work), {
+            ...(internal?.kind === "work_session"
+              ? {}
+              : { workSessions: await this.#store.listWorkSessions(task.sessionId) }),
+            startSessions: internal === undefined,
+          });
+    const turn =
+      internal === undefined
+        ? undefined
+        : internalTurnMessages(internal, text, task.sessionId, coordination !== undefined);
     const workspaceEvents =
       task.workspacePlan.status === "workspace" ? await this.#store.listTaskEvents(task.id) : [];
     const branchPin =
@@ -2265,7 +2331,14 @@ export class ControlPlane {
           ...(portfolio === undefined
             ? []
             : [{ id: `${task.id}:portfolio`, role: "system" as const, text: portfolio }]),
-          ...(text === undefined || text.length === 0
+          // An internal turn's prompt comes from SuperTag or the Tag, never from a person.
+          ...(turn === undefined
+            ? []
+            : [
+                { id: `${task.id}:${internal?.kind}`, role: "system" as const, text: turn.system },
+                { id: work.event.eventId, role: "requester" as const, text: turn.prompt },
+              ]),
+          ...(turn !== undefined || text === undefined || text.length === 0
             ? []
             : [
                 {
@@ -2406,9 +2479,148 @@ export class ControlPlane {
     if (cursor !== throughSequence) throw new UncertainExecutionError(attemptId);
   }
 
+  /**
+   * `start_session`: opens a work Session of the conversation and admits its one Task under the
+   * starting turn's admitted authorization, context plan, execution requirements and Workspace
+   * plan. It returns at once; the Task queues behind the conversation's running work Sessions.
+   */
+  async #startWorkSession(
+    conversation: Task,
+    starting: DurableInboundEvent,
+    request: StartSessionRequest,
+  ): Promise<{
+    readonly sessionId: string;
+    readonly title: string;
+    readonly status: "started" | "queued";
+  }> {
+    if (!this.#accepting)
+      throw new TagMessagingError(503, "The Control Plane is not accepting new work now");
+    const running = (await this.#store.listWorkSessions(conversation.sessionId)).filter(
+      (session) => session.task?.status === "running",
+    ).length;
+    const admission = await this.#store.admitInboundEvent({
+      surfaceAccountId: starting.surfaceAccountId,
+      tagRouteId: starting.tagRouteId,
+      tagId: starting.tagId,
+      authorization: starting.authorization,
+      contextPlan: starting.contextPlan,
+      execution: starting.execution,
+      event: workSessionEvent(
+        starting,
+        conversation.id,
+        conversation.sessionId,
+        request,
+        new Date().toISOString(),
+      ),
+      maxAttempts: this.#maxAttempts,
+    });
+    const task = await this.#openTask(admission.work);
+    await this.#appendTaskEvent(task.id, "task.admitted", {
+      tagRouteId: starting.tagRouteId,
+      scope: starting.event.scope,
+      startedByTaskId: conversation.id,
+      parentSessionId: conversation.sessionId,
+    });
+    this.#wakeTaskController?.();
+    return {
+      sessionId: task.sessionId,
+      title: request.title,
+      status: running >= WORK_SESSION_MAX_RUNNING ? "queued" : "started",
+    };
+  }
+
+  /** Admits the report turns that finished work Sessions are still owed. */
+  async #reportFinishedWorkSessions(): Promise<void> {
+    this.#lastWorkReportSweep = Date.now();
+    try {
+      for (const taskId of await this.#store.listUnreportedWorkTasks(20))
+        await this.#reportWorkSession(taskId);
+    } catch (error) {
+      this.#reportDispatchError(error);
+    }
+  }
+
+  /**
+   * A finished work Session Task's report turn: a new Task in the conversation Session, under
+   * the starting turn's admitted authorization, that replies where that turn replied. Its event
+   * id is the delivery key, so a repeat after a restart is a duplicate admission, not a report.
+   */
+  async #reportWorkSession(workTaskId: string): Promise<void> {
+    try {
+      const task = await this.#store.findTaskById(workTaskId);
+      if (
+        !task?.inboundEventId ||
+        (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled")
+      )
+        return;
+      const work = await this.#store.findInboundEventById(task.inboundEventId);
+      const internal = work?.event.internal;
+      if (!work || internal?.kind !== "work_session") return;
+      const startingTask = await this.#store.findTaskById(internal.startedByTaskId);
+      const starting = startingTask?.inboundEventId
+        ? await this.#store.findInboundEventById(startingTask.inboundEventId)
+        : undefined;
+      if (!startingTask || !starting)
+        throw new Error(`Work Session ${task.sessionId} has no conversation turn to report to`);
+      const final = await this.#store.findOutboundReply(work.id, "final");
+      const admission = await this.#store.admitInboundEvent({
+        surfaceAccountId: starting.surfaceAccountId,
+        tagRouteId: starting.tagRouteId,
+        tagId: starting.tagId,
+        authorization: starting.authorization,
+        contextPlan: starting.contextPlan,
+        execution: starting.execution,
+        event: sessionReportEvent(
+          starting,
+          {
+            startedByTaskId: startingTask.id,
+            workSessionId: task.sessionId,
+            workTaskId: task.id,
+            title: internal.title,
+            status: task.status,
+            result: final?.text ?? task.result?.summary ?? "",
+          },
+          new Date().toISOString(),
+        ),
+        maxAttempts: this.#maxAttempts,
+      });
+      if (admission.status === "duplicate") return;
+      const report = await this.#openTask(admission.work);
+      await this.#appendTaskEvent(report.id, "task.admitted", {
+        tagRouteId: starting.tagRouteId,
+        scope: starting.event.scope,
+        reportsTaskId: task.id,
+        workSessionId: task.sessionId,
+      });
+      this.#wakeTaskController?.();
+    } catch (error) {
+      this.#reportDispatchError(error);
+    }
+  }
+
   /** Opens the durable Task for one accepted unit of user intent. */
   async #openTask(work: DurableInboundEvent): Promise<Task> {
     const now = new Date().toISOString();
+    const internal = work.event.internal;
+    // An internal turn keeps the Workspace plan its starting conversation turn was admitted with.
+    const starting = internal
+      ? await this.#store.findTaskById(internal.startedByTaskId)
+      : undefined;
+    if (internal && starting?.tagId !== work.tagId)
+      throw new Error(`Task ${internal.startedByTaskId} that started this turn does not exist`);
+    // A work Session belongs to its conversation's audience: private to the same person or shared.
+    const parent =
+      internal?.kind === "work_session"
+        ? await this.#store.findSessionById(internal.parentSessionId)
+        : undefined;
+    if (internal?.kind === "work_session" && parent?.tagId !== work.tagId)
+      throw new Error(`Conversation Session ${internal.parentSessionId} does not exist`);
+    const audienceActorKey =
+      parent !== undefined
+        ? parent.audienceActorKey
+        : work.event.direct === true
+          ? sessionRequesterKey(work.event.provider, work.surfaceAccountId, work.event.actor.id)
+          : undefined;
     const session = await this.#store.openSession({
       tagId: work.tagId,
       sessionKey: work.event.sessionKey,
@@ -2417,17 +2629,13 @@ export class ControlPlane {
         surfaceAccountId: work.surfaceAccountId,
         scope: work.event.scope,
         threadKey: work.event.callback.threadKey,
+        ...(internal?.kind === "work_session"
+          ? { title: internal.title, startedByTaskId: internal.startedByTaskId }
+          : {}),
       },
       // A direct conversation is private to its one person; the first open fixes the audience.
-      ...(work.event.direct === true
-        ? {
-            audienceActorKey: sessionRequesterKey(
-              work.event.provider,
-              work.surfaceAccountId,
-              work.event.actor.id,
-            ),
-          }
-        : {}),
+      ...(audienceActorKey === undefined ? {} : { audienceActorKey }),
+      ...(parent === undefined ? {} : { parentSessionId: parent.id }),
       at: now,
     });
     const sessionHistory = (
@@ -2460,7 +2668,8 @@ export class ControlPlane {
         },
         occurredAt: work.event.occurredAt,
       },
-      workspacePlan: captureWorkspacePlan(work.event, work.authorization),
+      workspacePlan:
+        starting?.workspacePlan ?? captureWorkspacePlan(work.event, work.authorization),
       sessionHistory,
       authorizationSnapshot: work.authorization,
       contextPlan: work.contextPlan,
@@ -2587,8 +2796,9 @@ export class ControlPlane {
       if (account === undefined) {
         throw new Error(`Surface account ${outbound.surfaceAccountId} no longer exists`);
       }
-      if (account.provider === "cli") {
-        // The CLI reads its conversation's replies from the Control Plane; nothing is sent.
+      if (account.provider === "cli" || outbound.event.internal?.kind === "work_session") {
+        // The CLI reads its conversation's replies from the Control Plane, and a work Session's
+        // result returns to its conversation as a report turn; nothing is sent.
         const completed = await this.#store.completeOutboundReply({
           outboundReplyId: outbound.id,
           leaseOwner: this.#instanceId,

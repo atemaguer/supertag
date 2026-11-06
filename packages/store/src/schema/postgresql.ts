@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
   bigint,
   boolean,
@@ -506,6 +507,10 @@ export const sessions = pgTable(
     state: text("state").notNull(),
     audience: text("audience").notNull().default("shared"),
     audienceActorKey: text("audienceActorKey"),
+    /** The conversation Session that started this work Session; null for a conversation. */
+    parentSessionId: text("parentSessionId").references((): AnyPgColumn => sessions.id, {
+      onDelete: "cascade",
+    }),
     lastInteractionAt: text("lastInteractionAt").notNull(),
     createdAt: text("createdAt").notNull(),
     updatedAt: text("updatedAt").notNull(),
@@ -513,6 +518,7 @@ export const sessions = pgTable(
   (table) => [
     uniqueIndex("Session_tagId_sessionKey_key").on(table.tagId, table.sessionKey),
     index("Session_lastInteractionAt_idx").on(table.lastInteractionAt),
+    index("Session_parentSessionId_idx").on(table.parentSessionId),
   ],
 );
 

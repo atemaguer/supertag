@@ -135,6 +135,7 @@ import {
   recordTaskFindings,
   SESSION_INPUT_ACK_TIMEOUT_MS,
   SKILL_CONTEXT_TYPE,
+  WORK_SESSION_MAX_RUNNING,
 } from "@supertag/core";
 import type Database from "better-sqlite3";
 import {
@@ -2442,6 +2443,9 @@ export class DrizzleStore implements Store {
             audience: "private",
             audienceActorKey: required(input.audienceActorKey, "Session audience key"),
           }),
+      ...(input.parentSessionId === undefined
+        ? {}
+        : { parentSessionId: required(input.parentSessionId, "Parent Session id") }),
       lastInteractionAt: input.at,
       createdAt: input.at,
       updatedAt: input.at,
@@ -2508,6 +2512,26 @@ export class DrizzleStore implements Store {
     ...args: Parameters<SessionAudienceStore["findVisibleObjective"]>
   ): ReturnType<SessionAudienceStore["findVisibleObjective"]> {
     return this.#sessionAudience().findVisibleObjective(...args);
+  }
+  listWorkSessions(
+    ...args: Parameters<SessionAudienceStore["listWorkSessions"]>
+  ): ReturnType<SessionAudienceStore["listWorkSessions"]> {
+    return this.#sessionAudience().listWorkSessions(...args);
+  }
+  latestSessionTaskStatuses(
+    ...args: Parameters<SessionAudienceStore["latestSessionTaskStatuses"]>
+  ): ReturnType<SessionAudienceStore["latestSessionTaskStatuses"]> {
+    return this.#sessionAudience().latestSessionTaskStatuses(...args);
+  }
+  listUnreportedWorkTasks(
+    ...args: Parameters<SessionAudienceStore["listUnreportedWorkTasks"]>
+  ): ReturnType<SessionAudienceStore["listUnreportedWorkTasks"]> {
+    return this.#sessionAudience().listUnreportedWorkTasks(...args);
+  }
+  findWorkSessionReport(
+    ...args: Parameters<SessionAudienceStore["findWorkSessionReport"]>
+  ): ReturnType<SessionAudienceStore["findWorkSessionReport"]> {
+    return this.#sessionAudience().findWorkSessionReport(...args);
   }
   #sessionAudience(): DrizzleSessionAudienceStore {
     return new DrizzleSessionAudienceStore(this.#db, this.#tables, this.provider);
@@ -5621,6 +5645,8 @@ function inboundIsDue(table: DynamicTable, now: string): any {
     sql`not exists (select 1 from "InboundControlDelivery" c where c."inboundEventId" = ${table.id} and c."status" not in ('rejected','withdrawn'))`,
     sql`not exists (select 1 from "DurableInboundEvent" predecessor where predecessor."tagId" = ${table.tagId} and predecessor."sessionKey" = ${table.sessionKey} and predecessor."id" <> ${table.id} and (predecessor."status" = 'processing' or (predecessor."status" = 'pending' and predecessor."admissionOrder" < ${table.admissionOrder})))`,
     sql`not exists (select 1 from "InboundControlDelivery" c join "DurableInboundEvent" i on i."id" = c."inboundEventId" where i."tagId" = ${table.tagId} and i."sessionKey" = ${table.sessionKey} and c."status" in ('dispatching','unknown'))`,
+    // A conversation runs at most WORK_SESSION_MAX_RUNNING work Sessions at once; the rest queue.
+    sql`not exists (select 1 from "Session" ws where ws."tagId" = ${table.tagId} and ws."sessionKey" = ${table.sessionKey} and ws."parentSessionId" is not null and (select count(*) from "DurableInboundEvent" r join "Session" rs on rs."tagId" = r."tagId" and rs."sessionKey" = r."sessionKey" where rs."parentSessionId" = ws."parentSessionId" and r."status" = 'processing' and r."id" <> ${table.id}) >= ${WORK_SESSION_MAX_RUNNING})`,
     or(
       and(
         eq(table.status, "pending"),
