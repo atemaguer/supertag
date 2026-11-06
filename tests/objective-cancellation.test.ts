@@ -250,6 +250,14 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           },
           owner,
         );
+        // The completion summary reports to the Objective's home Session.
+        expect(f.reports).toEqual([
+          {
+            objectiveId: f.objective.id,
+            text: `Objective ${f.objective.id} is completed: Shipped`,
+            deliveryKey: expect.stringMatching(/^objective-report:/u),
+          },
+        ]);
         expect(await f.store.getTaskAssignment(followup.taskId)).toMatchObject({
           status: "cancelled",
           result: {
