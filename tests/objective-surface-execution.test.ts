@@ -68,9 +68,12 @@ it("turns human surface requests into objective execution and routes durable pro
             "read_session",
             "list_objectives",
           ]);
-          // The portfolio lists the Tag's open Objectives once there is one.
+          // The portfolio always tells the Tag it can recall other conversations, and lists its
+          // open Objectives once there is one.
           const prompt = JSON.stringify(request);
-          if (surfaceExecutions === 1) expect(prompt).not.toContain("Tag portfolio");
+          expect(prompt).toContain("search_sessions, list_sessions and read_session");
+          if (surfaceExecutions === 1)
+            expect(prompt).toContain("this Tag owns no open Objectives you can see");
           else {
             expect(prompt).toContain("Tag portfolio");
             expect(prompt).toContain(`- ${objectiveId} [`);

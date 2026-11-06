@@ -470,7 +470,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       expect(portfolio).toContain(
         `- ${shipped.id} [working, deadline 2030-01-01T00:00:00.000Z] Ship the release notes (from slack channel:C1)`,
       );
-      expect(portfolio).toContain("list_sessions, search_sessions and read_session");
+      expect(portfolio).toContain("search_sessions, list_sessions and read_session");
       for (const absent of [hidden.id, done.id, cancelled.id, foreign.id])
         expect(portfolio).not.toContain(absent);
       // The same person sees their own private Objective from another conversation.
@@ -521,7 +521,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           sessionId: alice.task.sessionId,
           requesterKey: f.keyOf("alice"),
         }),
-      ).toBeUndefined();
+      ).toContain("owns no open Objectives");
       expect(await f.call("list_objectives", {}, alice.caller)).toMatchObject({
         total: 0,
         objectives: [],
@@ -606,7 +606,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           sessionId: alice.task.sessionId,
           requesterKey: f.keyOf("alice"),
         }),
-      ).toBeUndefined();
+      ).toContain("owns no open Objectives");
     });
   });
 }
