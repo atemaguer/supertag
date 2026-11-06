@@ -63,7 +63,18 @@ it("turns human surface requests into objective execution and routes durable pro
             "read_commitments",
             "start_objective",
             "instruct_objective",
+            "list_sessions",
+            "search_sessions",
+            "read_session",
+            "list_objectives",
           ]);
+          // The portfolio lists the Tag's open Objectives once there is one.
+          const prompt = JSON.stringify(request);
+          if (surfaceExecutions === 1) expect(prompt).not.toContain("Tag portfolio");
+          else {
+            expect(prompt).toContain("Tag portfolio");
+            expect(prompt).toContain(`- ${objectiveId} [`);
+          }
           const forbidden = await client
             .callTool({ name: "approve_task", arguments: { taskId: "approval" } })
             .catch(() => undefined);

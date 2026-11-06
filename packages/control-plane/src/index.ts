@@ -10,6 +10,7 @@ import { isSchedulingEvent } from "./capacity-wait.js";
 import { DispatchErrorReporter } from "./dispatch-errors.js";
 import { ObjectiveMessages } from "./objective-messages.js";
 import { SESSION_INPUT_COMMAND_PREFIX, withdrawSessionInput } from "./session-input-withdrawal.js";
+import { conversationViewer, tagPortfolio } from "./tag-sessions.js";
 
 export type {
   ObjectiveConversationMessage,
@@ -68,6 +69,7 @@ import {
   parseTaskExecutionRequirements,
   parseWorkerHostName,
   SESSION_INPUT_ACK_TIMEOUT_MS,
+  sessionRequesterKey,
   TagMessagingError,
 } from "@supertag/core";
 import type {
@@ -2079,6 +2081,11 @@ export class ControlPlane {
       supportsSurfaceCoordination && work.event.actor.kind === "user"
         ? await this.objectives.surfaceCoordination(task, attempt)
         : undefined;
+    // Every conversation with surface coordination sees the Tag's open Objectives.
+    const portfolio =
+      coordination === undefined
+        ? undefined
+        : await tagPortfolio(this.#store, conversationViewer(task, work));
     const workspaceEvents =
       task.workspacePlan.status === "workspace" ? await this.#store.listTaskEvents(task.id) : [];
     const branchPin =
@@ -2109,17 +2116,21 @@ export class ControlPlane {
           source: work.event.source,
           metadata: work.event.metadata,
         },
-        messages:
-          text === undefined || text.length === 0
+        messages: [
+          ...(portfolio === undefined
+            ? []
+            : [{ id: `${task.id}:portfolio`, role: "system" as const, text: portfolio }]),
+          ...(text === undefined || text.length === 0
             ? []
             : [
                 {
                   id: work.event.eventId,
-                  role: "requester",
+                  role: "requester" as const,
                   text,
                   actor: work.event.actor,
                 },
-              ],
+              ]),
+        ],
       },
       authorization: work.authorization,
       ...(coordination === undefined ? {} : { coordination }),
@@ -2257,6 +2268,16 @@ export class ControlPlane {
         scope: work.event.scope,
         threadKey: work.event.callback.threadKey,
       },
+      // A direct conversation is private to its one person; the first open fixes the audience.
+      ...(work.event.direct === true
+        ? {
+            audienceActorKey: sessionRequesterKey(
+              work.event.provider,
+              work.surfaceAccountId,
+              work.event.actor.id,
+            ),
+          }
+        : {}),
       at: now,
     });
     const sessionHistory = (

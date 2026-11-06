@@ -16,6 +16,7 @@ import type { OperatorNotificationStore } from "./operator-notification.js";
 import type { OperatorTokenStore } from "./operator-token.js";
 import type { ResourceManagementStore } from "./resource-management.js";
 import type { RoleStore } from "./role.js";
+import type { SessionAudience, SessionAudienceStore } from "./session-audience.js";
 import type { SessionInputStore } from "./session-input.js";
 import type { SessionStatePersistence } from "./session-state.js";
 import type { SpendStore } from "./spend.js";
@@ -53,6 +54,7 @@ export * from "./operator-notification.js";
 export * from "./operator-token.js";
 export * from "./resource-management.js";
 export * from "./role.js";
+export * from "./session-audience.js";
 export * from "./session-input.js";
 export * from "./session-state.js";
 export * from "./spend.js";
@@ -572,6 +574,9 @@ export interface Session {
   readonly sessionKey: string;
   readonly origin: JsonRecord;
   readonly state: "open";
+  readonly audience: SessionAudience;
+  /** The requester key that owns a private Session (`sessionRequesterKey`); absent when shared. */
+  readonly audienceActorKey?: string;
   readonly lastInteractionAt: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -585,6 +590,11 @@ export interface OpenSessionInput {
   readonly tagId: string;
   readonly sessionKey: string;
   readonly origin: JsonRecord;
+  /**
+   * Makes a new Session private to this requester key. Absent: shared. Only the first open sets
+   * the audience; later opens of the same Session never change it.
+   */
+  readonly audienceActorKey?: string;
   readonly at: string;
 }
 
@@ -848,6 +858,8 @@ export interface TaskHistoryFilter {
     readonly scope: string;
   }[];
   readonly createdAfter?: string;
+  /** Only Tasks completed strictly before this time. */
+  readonly completedBefore?: string;
   readonly limit?: number;
 }
 
@@ -929,6 +941,11 @@ export interface InboundSurfaceEvent {
   readonly scope: string;
   readonly sessionKey: string;
   readonly actor: InboundEventActor;
+  /**
+   * True when the conversation is a direct one with one person, such as a Lark direct chat or a
+   * person's CLI conversation. Its Session is then private to that requester.
+   */
+  readonly direct?: boolean;
   readonly text?: string;
   readonly occurredAt: string;
   readonly callback: CallbackRoute;
@@ -1186,6 +1203,7 @@ export interface Store
     RoleStore,
     TeamStore,
     TaskAssignmentStore,
+    SessionAudienceStore,
     SessionInputStore,
     SessionStatePersistence,
     WorkerHostStore,

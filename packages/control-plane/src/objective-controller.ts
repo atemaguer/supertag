@@ -162,6 +162,12 @@ import {
 } from "./roles.js";
 import { SessionContinuity } from "./session-continuity.js";
 import { RESUME_GRACE_MS, SuspendDetector, type SystemWake } from "./suspend-detector.js";
+import {
+  conversationViewer,
+  isTagSessionTool,
+  TAG_SESSION_TOOLS,
+  tagSessionCommand,
+} from "./tag-sessions.js";
 import { TeamLiveDeliveryDispatcher, withdrawTeamLiveInput } from "./team-live-delivery.js";
 import { confirmWaitCleanup } from "./wait-cleanup.js";
 import { describeWorklet } from "./worklet-descriptor.js";
@@ -348,6 +354,12 @@ type ObjectivePersistence = Pick<
   | "getTagMessage"
   | "recheckOwnerDeliveryMessage"
   | "getSurfaceObjective"
+  | "listVisibleSessions"
+  | "findVisibleSession"
+  | "searchVisibleSessions"
+  | "listVisibleOpenObjectives"
+  | "findVisibleObjective"
+  | "listTaskHistory"
   | "getTeam"
   | "getWorkstream"
   | "listTaskAssignmentFollowups"
@@ -679,6 +691,7 @@ export class ObjectiveController {
         "read_commitments",
         "start_objective",
         "instruct_objective",
+        ...TAG_SESSION_TOOLS,
       ];
     const current = await this.revalidateCaller(caller);
     const core = [
@@ -3278,6 +3291,8 @@ export class ObjectiveController {
     const { task, inbound } = await this.surfaceState(caller.taskId, caller.attemptId);
     if (name === "request_action_approval")
       return this.approvals.requestAction(await this.approvalCaller(caller), input);
+    if (isTagSessionTool(name))
+      return tagSessionCommand(this.store, name, input, conversationViewer(task, inbound));
     const command = parseSurfaceObjectiveCommand(inbound.event);
     if (name === "attach_objective") {
       mailboxObject(input, ["objectiveId"]);
@@ -3345,9 +3360,24 @@ export class ObjectiveController {
       input,
       name === "read_commitments" ? ["objectiveId", "limit", "offset"] : ["objectiveId"],
     );
-    const objective = await this.store.getSurfaceObjective(task.id);
+    const bound = await this.store.getSurfaceObjective(task.id);
+    // read_objective also reaches any other Objective of the Tag this conversation may see.
+    const objective =
+      name === "read_objective" &&
+      input["objectiveId"] !== undefined &&
+      input["objectiveId"] !== bound?.id
+        ? await this.store.findVisibleObjective(
+            conversationViewer(task, inbound),
+            mailboxText(input["objectiveId"], "objectiveId"),
+          )
+        : bound;
     if (!objective || (input["objectiveId"] !== undefined && input["objectiveId"] !== objective.id))
-      throw new TagMessagingError(404, "No matching Objective is bound to this surface");
+      throw new TagMessagingError(
+        404,
+        name === "read_objective"
+          ? "No matching Objective is visible to this conversation"
+          : "No matching Objective is bound to this surface",
+      );
     if (name === "select_objective") return objective;
     if (name === "read_objective") {
       const assignments = await this.store.listTaskAssignments(objective.id);

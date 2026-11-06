@@ -175,6 +175,7 @@ export function normalizeLarkEvent(
     scope: larkChatScope(event.message.chat_id),
     sessionKey: `lark:${options.appId}:${event.message.chat_id}:${rootMessageId}`,
     actor: { id: actorId, kind: "user" },
+    ...(isDirectMessage ? { direct: true } : {}),
     text,
     occurredAt: larkOccurredAt(event.create_time),
     callback: {

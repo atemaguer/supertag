@@ -1,0 +1,2 @@
+ALTER TABLE `Session` ADD `audience` text DEFAULT 'shared' NOT NULL;--> statement-breakpoint
+ALTER TABLE `Session` ADD `audienceActorKey` text;
