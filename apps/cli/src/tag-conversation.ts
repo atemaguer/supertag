@@ -10,6 +10,7 @@ export interface TagMessageRecord {
   readonly session: string;
   readonly sessionId: string;
   readonly taskId: string;
+  readonly joinedTaskId?: string;
   readonly status: "waiting" | "replied";
   readonly reply?: { readonly presentation: string; readonly text: string };
 }

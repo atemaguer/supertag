@@ -31,6 +31,7 @@ import type {
   TagMessagingGrant,
   TagPermission,
   TagPermissionSet,
+  Task,
   TaskAssignment,
   VolumeSpec,
   WorkspaceSpec,
@@ -3313,6 +3314,8 @@ interface TagMessageRecord {
   readonly session: string;
   readonly sessionId: string;
   readonly taskId: string;
+  /** The running Task this message was delivered into, when it joined one instead of starting. */
+  readonly joinedTaskId?: string;
   readonly status: "waiting" | "replied";
   /** The Tag's final reply: its result, or the error that ended the Task. */
   readonly reply?: { readonly presentation: string; readonly text: string };
@@ -3392,10 +3395,7 @@ async function handleTagMessage(
     );
     return;
   }
-  const reply =
-    task.inboundEventId === null
-      ? undefined
-      : await context.store.findOutboundReply(task.inboundEventId, "final");
+  const { reply, joinedTaskId } = await tagMessageReply(context.store, task);
   const record: TagMessageRecord = {
     apiVersion: CONTROL_PLANE_API_VERSION,
     kind: "TagMessage",
@@ -3403,12 +3403,41 @@ async function handleTagMessage(
     session: sessionKey.slice(prefix.length),
     sessionId: task.sessionId,
     taskId: task.id,
+    ...(joinedTaskId === undefined ? {} : { joinedTaskId }),
     status: reply === undefined ? "waiting" : "replied",
     ...(reply === undefined
       ? {}
       : { reply: { presentation: reply.presentation, text: reply.text } }),
   };
   writeJson(context.response, method === "POST" ? 201 : 200, record);
+}
+
+/**
+ * The reply that answers one CLI message. A message sent while an earlier Task in the Session
+ * still runs is delivered into that Task, so the answer is that Task's final reply; a delivery
+ * whose outcome is unknown is answered by the error notice recorded for it.
+ */
+async function tagMessageReply(
+  store: ControlPlaneApiRequestContext["store"],
+  task: Task,
+): Promise<{
+  readonly reply?: { readonly presentation: string; readonly text: string };
+  readonly joinedTaskId?: string;
+}> {
+  if (task.inboundEventId === null) return {};
+  const own = await store.findOutboundReply(task.inboundEventId, "final");
+  if (own !== undefined) return { reply: own };
+  const unresolved = await store.findOutboundReply(task.inboundEventId, "session-input-unresolved");
+  if (unresolved !== undefined) return { reply: unresolved };
+  const reason = task.outcome?.["reason"];
+  const targetTaskId = task.outcome?.["targetTaskId"];
+  if (reason !== "input-accepted" || typeof targetTaskId !== "string") return {};
+  const target = await store.findTaskById(targetTaskId);
+  const reply =
+    target?.inboundEventId === null || target === undefined
+      ? undefined
+      : await store.findOutboundReply(target.inboundEventId, "final");
+  return { joinedTaskId: targetTaskId, ...(reply === undefined ? {} : { reply }) };
 }
 
 /** A stored account in manifest form, as field management compares it. */

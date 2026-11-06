@@ -10,7 +10,7 @@ import {
   runTagConversationCommand,
   type TagMessageRecord,
 } from "../apps/cli/src/tag-conversation.ts";
-import { LocalWorklet, StaticWorker } from "../packages/runtime/sdk/src/index.ts";
+import { LocalWorklet, StaticWorker, type Worklet } from "../packages/runtime/sdk/src/index.ts";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.ts";
 import { createIsolatedPostgresDatabase } from "./support/database.ts";
 
@@ -159,4 +159,139 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       ).rejects.toThrow("Tag missing does not exist");
     });
   });
+
+  describe.skipIf(dialect === "postgresql" && !postgres)(
+    `message tag into a running Task (${dialect})`,
+    () => {
+      it("answers a message the running Task accepted with that Task's reply", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "supertag-tag-conversation-input-"));
+        const isolated =
+          dialect === "postgresql"
+            ? await createIsolatedPostgresDatabase(postgres as string)
+            : undefined;
+        const databaseUrl = isolated?.url ?? `file:${join(directory, "supertag.db")}`;
+        await migrateDatabase({ url: databaseUrl });
+        vi.stubEnv("SUPERTAG_STATE_DIR", join(directory, "server"));
+        let release!: () => void;
+        const blocked = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        let started = 0;
+        const received: string[] = [];
+        const worklet: Worklet = {
+          id: "input-worklet",
+          describe: async () => ({
+            id: "input-worklet",
+            protocolVersion: 1,
+            host: {
+              id: "input-host",
+              workers: [
+                {
+                  profileCapabilities: [
+                    {
+                      profile: { id: "default", revision: "1" },
+                      capabilities: [],
+                      contextTypes: [],
+                    },
+                  ],
+                  id: "input-worker",
+                  type: "deterministic",
+                  profiles: [{ id: "default", revision: "1" }],
+                  capabilities: [],
+                  contextTypes: [],
+                  maxConcurrency: 2,
+                },
+              ],
+            },
+          }),
+          controlCapabilities: async () => ({
+            version: 1,
+            operations: ["input"],
+            inputMode: "queue",
+          }),
+          control: async (command) => {
+            received.push(command.type === "input" ? command.text : "unexpected");
+            return {
+              id: command.id,
+              taskId: command.taskId,
+              attemptId: command.attemptId,
+              status: "accepted",
+            };
+          },
+          async *execute(spec) {
+            started += 1;
+            const identity = {
+              taskId: spec.taskId,
+              attemptId: spec.attemptId,
+              at: new Date().toISOString(),
+            };
+            yield { ...identity, type: "execution.started", workerId: "input-worker" };
+            await blocked;
+            const summary = `Answered ${received.length + 1} messages.`;
+            yield {
+              ...identity,
+              type: "output.message",
+              message: { role: "teammate", text: summary },
+            };
+            yield {
+              ...identity,
+              type: "result",
+              result: {
+                summary,
+                decisions: [],
+                changes: [],
+                unresolved: [],
+                findings: [],
+                references: [],
+                artifacts: [],
+              },
+            };
+            yield { ...identity, type: "execution.completed" };
+          },
+        };
+        const runtime = await startControlPlaneRuntime({
+          host: "127.0.0.1",
+          port: 0,
+          databaseUrl,
+          adminToken: ADMIN,
+          worklet,
+        });
+        const store = new DrizzleStore({ url: databaseUrl });
+        try {
+          await store.connect();
+          const tag = await store.createTag({ name: "planner" });
+          await store.bindTagWorkerHost(tag.id, "input-host");
+          const client = new ControlPlaneClient({ url: runtime.url, token: ADMIN });
+          const first = await client.request<TagMessageRecord>("/api/v1/tags/planner/messages", {
+            method: "POST",
+            body: JSON.stringify({ text: "Inspect the project", session: "work" }),
+          });
+          expect(first.status).toBe("waiting");
+          await vi.waitFor(() => expect(started).toBe(1));
+          const second = runTagConversationCommand(
+            { url: runtime.url, token: ADMIN },
+            ["planner", "Also inspect the tests", "--session", "work", "--output", "json"],
+            { intervalMs: 10, timeoutMs: 20_000 },
+          );
+          await vi.waitFor(() => expect(received).toHaveLength(1));
+          expect(received[0]).toContain("Also inspect the tests");
+          release();
+          const record = JSON.parse(await second) as TagMessageRecord;
+          expect(record).toMatchObject({
+            joinedTaskId: first.taskId,
+            status: "replied",
+            reply: { presentation: "final-result", text: "Answered 2 messages." },
+          });
+          expect(record.taskId).not.toBe(first.taskId);
+          expect(started).toBe(1);
+        } finally {
+          await store.disconnect();
+          await runtime.close();
+          await isolated?.cleanup();
+          await rm(directory, { recursive: true, force: true });
+          vi.unstubAllEnvs();
+        }
+      });
+    },
+  );
 }
