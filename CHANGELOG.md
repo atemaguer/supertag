@@ -18,6 +18,7 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- A Task copy of a git repository holds only what git considers part of it: tracked files and untracked files that are not ignored. Ignored entries such as `node_modules`, a Python `.venv`, or a `.env` file stay on the Worker Host, so a repository with a virtualenv no longer fails with "symbolic link ... points outside the workspace", and copies are much smaller.
 - Each release's `install.sh` installs that release's version, and alpha releases publish to npm's `latest` tag, so the installer and `npm install -g supertag-ai` get the current alpha.
 
 ## [0.2.0-alpha.6] - 2026-11-04

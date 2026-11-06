@@ -14,11 +14,14 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import {
   type CapabilityIdentifier,
+  childPath,
   type EnvironmentGuarantees,
   type EnvironmentPlan,
   type ExecutionEnvironment,
   type ExecutionEnvironmentProvider,
   type ExecutionEnvironmentSpec,
+  type LocalResourceFilter,
+  localResourceFilter,
   PROCESS_INPUT_STREAMING_CAPABILITY,
   PROCESS_OUTPUT_STREAMING_CAPABILITY,
   type ProcessHandle,
@@ -319,7 +322,8 @@ class SharedExecutionEnvironment implements ExecutionEnvironment {
       const source = new URL(mount.source.uri);
       if (source.protocol !== "file:")
         throw new Error("Shared execution source mounts must use file: resources");
-      await this.#stageLocalSource(fileURLToPath(source), mount.destination);
+      const path = fileURLToPath(source);
+      await this.#stageLocalSource(path, mount.destination, await localResourceFilter(path), "");
     }
     for (const file of plan.files) {
       const expected = Buffer.from(file.content);
@@ -337,13 +341,24 @@ class SharedExecutionEnvironment implements ExecutionEnvironment {
     }
   }
 
-  async #stageLocalSource(source: string, destination: string): Promise<void> {
+  async #stageLocalSource(
+    source: string,
+    destination: string,
+    include: LocalResourceFilter | undefined,
+    path: string,
+  ): Promise<void> {
+    if (include !== undefined && !include(path)) return;
     const metadata = await lstat(source);
     if (metadata.isSymbolicLink())
       throw new Error("Shared execution staging rejects symbolic links");
     if (metadata.isDirectory()) {
       for (const child of await readdir(source))
-        await this.#stageLocalSource(join(source, child), posix.join(destination, child));
+        await this.#stageLocalSource(
+          join(source, child),
+          posix.join(destination, child),
+          include,
+          childPath(path, child),
+        );
       return;
     }
     if (!metadata.isFile() || metadata.size > this.maximumReadBytes)

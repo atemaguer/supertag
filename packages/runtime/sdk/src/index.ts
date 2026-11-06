@@ -3,6 +3,7 @@ import {
   redactEventDiagnostics,
   redactResultDiagnostics,
 } from "./event-redaction.js";
+import { type LocalResourceFilter, localResourceFilter } from "./local-resource-filter.js";
 import {
   listLocalOutputFiles,
   type OutputFileEntry,
@@ -23,6 +24,11 @@ import { findingsFromOutput } from "./result-findings.js";
 import { HttpSessionStateStore } from "./session-state-store.js";
 import { assertLocalWorkspacePlanPaths } from "./workspace-mount-paths.js";
 
+export {
+  childPath,
+  type LocalResourceFilter,
+  localResourceFilter,
+} from "./local-resource-filter.js";
 export { HttpSessionStateStore } from "./session-state-store.js";
 export {
   createSplitExecutionBridge,
@@ -6965,7 +6971,8 @@ class LocalProcessEnvironment implements HarnessRuntime, ExecutionEnvironment {
     const readOnlyMounts: string[] = [];
     for (const mount of plan.mounts) {
       const source = localFileResourcePath(mount.source);
-      const links = await inspectLocalResource(source);
+      const include = await localResourceFilter(source);
+      const links = await inspectLocalResource(source, include);
       const destination = this.resolvePath(mount.destination);
       await mkdir(dirname(destination), { recursive: true });
       const status = await lstat(source);
@@ -6974,7 +6981,9 @@ class LocalProcessEnvironment implements HarnessRuntime, ExecutionEnvironment {
         recursive: status.isDirectory(),
         errorOnExist: true,
         force: false,
-        filter: async (path) => !(await lstat(path)).isSymbolicLink(),
+        filter: async (path) =>
+          (include === undefined || include(relative(source, path))) &&
+          !(await lstat(path)).isSymbolicLink(),
       });
       for (const link of links) await symlink(link.target, join(destination, link.path));
       if (mount.readOnly) readOnlyMounts.push(destination);
@@ -7514,15 +7523,20 @@ interface LocalResourceLink {
  * Checks a local resource before it is copied and returns its symbolic links. A link whose target
  * stays inside the resource is kept, rewritten relative to the link, because repositories commonly
  * track such links. A link that leaves the resource is rejected, so a copy can never expose files
- * outside the source the Task was given.
+ * outside the source the Task was given. Entries the filter leaves out, such as a repository's
+ * ignored files, are neither checked nor copied.
  */
-async function inspectLocalResource(root: string): Promise<readonly LocalResourceLink[]> {
+async function inspectLocalResource(
+  root: string,
+  include?: LocalResourceFilter,
+): Promise<readonly LocalResourceLink[]> {
   const rootStatus = await lstat(root);
   if (rootStatus.isSymbolicLink())
     throw new Error(`Workspace resource contains symbolic link ${root}`);
   const roots = [root, await realpath(root)];
   const links: LocalResourceLink[] = [];
   const visit = async (path: string): Promise<void> => {
+    if (include !== undefined && !include(relative(root, path))) return;
     const status = await lstat(path);
     if (status.isSymbolicLink()) {
       const target = resolve(dirname(path), await readlink(path));

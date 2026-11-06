@@ -20,6 +20,11 @@ import type {
   ProcessResult,
   ProcessSpec,
 } from "./index.js";
+import {
+  childPath,
+  type LocalResourceFilter,
+  localResourceFilter,
+} from "./local-resource-filter.js";
 import type { OutputFileEntry, OutputFileQuery } from "./output-files.js";
 import {
   ExecutionCleanupError,
@@ -276,7 +281,8 @@ class SandboxEnvironment implements ExecutionEnvironment {
       if (url.protocol !== "file:")
         throw new Error("Sandbox staging requires resolved file: resources");
       const destination = this.resolvePath(mount.destination);
-      await stage(this.sandbox, fileURLToPath(url), destination);
+      const source = fileURLToPath(url);
+      await stage(this.sandbox, source, destination, await localResourceFilter(source), "");
       if (mount.readOnly) readonlyPaths.push(destination);
     }
     for (const file of plan.files) {
@@ -468,14 +474,27 @@ class SandboxEnvironment implements ExecutionEnvironment {
     await this.#disposing;
   }
 }
-async function stage(sandbox: SandboxInstance, source: string, destination: string): Promise<void> {
+async function stage(
+  sandbox: SandboxInstance,
+  source: string,
+  destination: string,
+  include: LocalResourceFilter | undefined,
+  path: string,
+): Promise<void> {
+  if (include !== undefined && !include(path)) return;
   const stat = await lstat(source);
   if (stat.isSymbolicLink())
     throw new Error(`Workspace resource contains unsupported symbolic link ${source}`);
   if (stat.isDirectory()) {
     await sandbox.mkdir(destination);
     for (const name of await readdir(source))
-      await stage(sandbox, join(source, name), posix.join(destination, name));
+      await stage(
+        sandbox,
+        join(source, name),
+        posix.join(destination, name),
+        include,
+        childPath(path, name),
+      );
     return;
   }
   if (!stat.isFile()) throw new Error("Unsupported workspace entry");

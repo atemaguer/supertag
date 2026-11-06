@@ -1319,6 +1319,57 @@ describe("Worker", () => {
     }
   });
 
+  it("stages only what git considers part of a repository", async () => {
+    const { access, mkdtemp, mkdir, rm, symlink, writeFile } = await import("node:fs/promises");
+    const { execFileSync } = await import("node:child_process");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { pathToFileURL } = await import("node:url");
+    const directory = await mkdtemp(join(tmpdir(), "supertag-stage-git-"));
+    const source = join(directory, "repository");
+    await mkdir(join(source, "src"), { recursive: true });
+    await writeFile(join(source, ".gitignore"), ".venv/\nnode_modules/\n.env\n");
+    await writeFile(join(source, "src", "app.ts"), "tracked");
+    execFileSync("git", ["init", "-q", source]);
+    execFileSync("git", ["-C", source, "add", "."]);
+    // Untracked but not ignored: part of the work in progress, so it is staged.
+    await writeFile(join(source, "notes.md"), "untracked");
+    // Ignored: a virtualenv link leaving the repository, dependencies, and a local secret.
+    await mkdir(join(source, ".venv", "bin"), { recursive: true });
+    await symlink(process.execPath, join(source, ".venv", "bin", "python"));
+    await mkdir(join(source, "node_modules", "left-pad"), { recursive: true });
+    await writeFile(join(source, "node_modules", "left-pad", "index.js"), "ignored");
+    await writeFile(join(source, ".env"), "SECRET=1");
+    const provider = new LocalExecutionEnvironmentProvider();
+    const environment = await provider.provision({
+      task: { ...taskAttemptSpec(), attemptId: "attempt-git-filter" },
+      profile: { ...profile(), ref: { id: "static", revision: "1" } },
+      plan: emptyEnvironmentPlan(),
+    });
+    try {
+      await environment.prepare({
+        ...emptyEnvironmentPlan(),
+        mounts: [
+          {
+            source: { uri: pathToFileURL(source).href },
+            destination: "workspace",
+            readOnly: false,
+          },
+        ],
+      });
+      await expect(environment.read("workspace/src/app.ts")).resolves.toBe("tracked");
+      await expect(environment.read("workspace/notes.md")).resolves.toBe("untracked");
+      await expect(environment.read("workspace/.gitignore")).resolves.toContain(".venv/");
+      const staged = environment.resolvePath("workspace");
+      await access(join(staged, ".git"));
+      for (const ignored of [".venv", "node_modules", ".env"])
+        await expect(access(join(staged, ignored))).rejects.toThrow();
+    } finally {
+      await environment.dispose("completed");
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("does not inherit unrelated Worker Host secrets into local child processes", async () => {
     vi.stubEnv("SUPERTAG_SENTINEL_SECRET", "host-secret-must-not-cross");
     const provider = new LocalExecutionEnvironmentProvider();
