@@ -116,11 +116,15 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         const settle = (objective: Objective) =>
           (
             controlPlane.objectives as unknown as {
-              settleCompletedObjective(objective: Objective): Promise<void>;
+              settleCompletedObjective(
+                objective: Objective,
+                options: { readonly report: boolean },
+              ): Promise<void>;
             }
-          ).settleCompletedObjective(objective);
+          ).settleCompletedObjective(objective, { report: true });
         const completionReplies = () => replies.filter((text) => text.includes("is completed"));
         return {
+          controlPlane,
           store,
           owner,
           homeTaskId: admission.taskId,
@@ -159,6 +163,35 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         expect(await f.store.findOutboundReply(f.inboundEventId, key)).toMatchObject({
           id: outbound?.id,
         });
+      });
+
+      it("posts nothing more when an operator updates a completed Objective", async () => {
+        const f = await fixture();
+        const objective = await f.store.createObjective({
+          id: randomUUID(),
+          ownerTagId: f.owner.id,
+          outcome: "Ship the release",
+          notificationTaskId: f.homeTaskId,
+        });
+        const completed = await f.complete(objective, "Released");
+        await expect.poll(() => f.completionReplies().length, { timeout: 5000 }).toBe(1);
+
+        const updated = (await f.controlPlane.objectives.command("update_objective", {
+          objectiveId: objective.id,
+          expectedRevision: completed.revision,
+          runtimeActions: [],
+        })) as Objective;
+        expect(updated.status).toBe("completed");
+        expect(updated.revision).toBeGreaterThan(completed.revision);
+        const again = (await f.controlPlane.objectives.command("update_objective", {
+          objectiveId: objective.id,
+          expectedRevision: updated.revision,
+          status: "completed",
+          completionSummary: "Released again",
+        })) as Objective;
+        expect(again.status).toBe("completed");
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        expect(f.completionReplies()).toHaveLength(1);
       });
 
       it("completes an Objective that has no reporting destination", async () => {

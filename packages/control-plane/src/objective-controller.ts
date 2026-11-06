@@ -872,24 +872,28 @@ export class ObjectiveController {
       undefined,
       { operatorId: principal.operatorId },
     );
-    await this.settleCompletedObjective(completed);
+    await this.settleCompletedObjective(completed, { report: true });
     return completed;
   }
 
   /**
    * Completion already succeeded; leftovers the scheduler retries must not fail the request. The
-   * completion summary posts once to the Objective's home Session; the delivery key names the
-   * completing revision, so a repeated settle posts nothing and a reopened Objective's next
-   * completion posts again.
+   * completion summary posts once to the Objective's home Session, only when this update moved the
+   * Objective into completed: a later update to a completed Objective settles leftovers but posts
+   * nothing. The delivery key names the completing revision, so a retried settle posts nothing and
+   * a reopened Objective's next completion posts again.
    */
-  private async settleCompletedObjective(objective: Objective): Promise<void> {
+  private async settleCompletedObjective(
+    objective: Objective,
+    { report }: { readonly report: boolean },
+  ): Promise<void> {
     try {
       await this.settleClosedObjective(objective);
       this.clearSwallowed({ objectiveId: objective.id });
     } catch (error) {
       this.reportSwallowed(error, { objectiveId: objective.id });
     }
-    if (this.surfaceReporter)
+    if (report && this.surfaceReporter)
       await this.surfaceReporter(
         objective.id,
         objectiveCompletionNotice(objective),
@@ -2650,6 +2654,7 @@ export class ObjectiveController {
       case "update_objective": {
         const { objectiveId: _id, ...rest } = input;
         const update = parseObjectiveStatus(rest);
+        const previous = await this.store.getObjective(objectiveId);
         // An operator's new runtime actions stay within the owner's Permission Sets; Tags are
         // refused by the store.
         const bounded =
@@ -2660,7 +2665,7 @@ export class ObjectiveController {
                 runtimeActions: (
                   await resolveOwnerObjectiveRuntimeActions(this.store, {
                     objectiveId,
-                    ownerTagId: (await this.store.getObjective(objectiveId)).ownerTagId,
+                    ownerTagId: previous.ownerTagId,
                     requested: update.runtimeActions,
                   })
                 ).runtimeActions,
@@ -2680,7 +2685,8 @@ export class ObjectiveController {
             ? { taskId: caller.taskId, attemptCount: caller.attemptCount }
             : { operatorId: principal?.operatorId ?? "administrative-api" },
         );
-        if (updated.status === "completed") await this.settleCompletedObjective(updated);
+        if (updated.status === "completed")
+          await this.settleCompletedObjective(updated, { report: previous.status !== "completed" });
         return updated;
       }
       case "send_message": {
