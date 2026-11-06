@@ -3838,6 +3838,62 @@ it.each([
   },
 );
 
+it("streams a one-shot run's root reply text as output deltas", async () => {
+  const delta = (text: string, parent: string | null = null, type = "text_delta") => ({
+    type: "stream_event",
+    parent_tool_use_id: parent,
+    event: {
+      type: "content_block_delta",
+      index: 0,
+      delta: type === "text_delta" ? { type, text } : { type, thinking: text },
+    },
+  });
+  let args: readonly string[] = [];
+  const environment: ExecutionEnvironment = {
+    ...testEnvironment(fixtureWorkspace),
+    spawn: async (spec) => {
+      args = spec.args ?? [];
+      return {
+        output: (async function* () {
+          for (const line of [
+            delta("Hello, "),
+            delta("hidden", null, "thinking_delta"),
+            delta("subagent text", "tool-1"),
+            delta("world."),
+            { type: "result", subtype: "success", result: "Hello, world." },
+          ])
+            yield { stream: "stdout" as const, text: `${JSON.stringify(line)}\n` };
+        })(),
+        wait: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+        kill: () => {},
+      };
+    },
+  };
+  const events = [];
+  for await (const event of runClaudeCode(
+    {
+      prompt: "Greet",
+      runtimeDirectory: fixtureWorkspace,
+      workspace: fixtureWorkspace,
+      timeoutMs: 60_000,
+      executable: "fake-claude",
+      mcpServers: [],
+      runtimeActions: [],
+    },
+    environment,
+    environment,
+  ))
+    events.push(event);
+  expect(args).toContain("--include-partial-messages");
+  expect(
+    events.filter((event) => event.type === "output.delta" || event.type === "output.message"),
+  ).toEqual([
+    { type: "output.delta", text: "Hello, " },
+    { type: "output.delta", text: "world." },
+    { type: "output.message", text: "Hello, world.", final: true },
+  ]);
+});
+
 it("does not claim an empty one-shot result", async () => {
   const claimFinalResponse = vi.fn(() => true);
   const environment: ExecutionEnvironment = {

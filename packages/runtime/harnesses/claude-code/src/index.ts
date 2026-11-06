@@ -1513,6 +1513,7 @@ async function* runClaudeCodeProcess(
           : []),
         "--output-format",
         "stream-json",
+        "--include-partial-messages",
         "--verbose",
         ...(request.resumeSessionId === undefined ? [] : ["--resume", request.resumeSessionId]),
         "--setting-sources",
@@ -1589,6 +1590,7 @@ async function* runClaudeCodeProcess(
           readonly commands: readonly NativeCommandActivity[];
           readonly usage?: ExecutionUsage;
           readonly result?: SDKMessage;
+          readonly delta?: string;
         }
       | undefined => {
       if (!line.trim()) return undefined;
@@ -1609,6 +1611,8 @@ async function* runClaudeCodeProcess(
         sessionId = messageSessionId;
         request.onSessionId?.(sessionId);
       }
+      const delta = signal?.aborted ? undefined : claudeTextDelta(message);
+      if (delta !== undefined) return { commands: [], delta };
       const progress = claudeTaskProgress(message, progressItems);
       const usage = reportedUsage(message);
       return {
@@ -1627,6 +1631,7 @@ async function* runClaudeCodeProcess(
         while (newline !== -1) {
           if (newline > 1024 * 1024) throw new Error("Claude CLI event exceeds 1 MiB limit");
           const parsed = parse(buffered.slice(0, newline));
+          if (parsed?.delta !== undefined) yield { type: "output.delta", text: parsed.delta };
           if (parsed?.progress !== undefined)
             yield { type: "progress.updated", progress: parsed.progress };
           for (const command of parsed?.commands ?? []) yield { type: "command.updated", command };

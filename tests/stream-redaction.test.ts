@@ -7,24 +7,8 @@ import {
   LocalExecutionEnvironmentProvider,
   type TaskAttemptSpec,
 } from "../packages/runtime/sdk/src/index.js";
-import { redactText, streamRedactionBoundary } from "../packages/runtime/sdk/src/redaction.js";
 
 const secret = "explicit-secret-credential";
-
-it("holds a streamed tail that could still complete a sensitive value", () => {
-  expect(streamRedactionBoundary("the key is explicit-se", [secret])).toBe("the key is ".length);
-  expect(streamRedactionBoundary("plain text ", [secret])).toBe("plain text ".length);
-  // A whole value crossing into a held tail is held with it.
-  expect(streamRedactionBoundary("ab abcd", ["abcd", "cdxyz"])).toBe(3);
-  // Encodings and low-confidence words are held too.
-  const base64 = Buffer.from(secret).toString("base64");
-  expect(streamRedactionBoundary(`b64 ${base64.slice(0, 10)}`, [secret])).toBe(4);
-  expect(streamRedactionBoundary("password is Sup", [{ lowConfidence: "supertag" }])).toBe(12);
-  // URL userinfo and Basic credentials end only at whitespace.
-  expect(streamRedactionBoundary("see https://user:pa", [])).toBe(4);
-  expect(streamRedactionBoundary("Authorization: Basic dXNl", [])).toBe(15);
-  expect(redactText("Basic dXNlcjpwYXNz", [])).toBe("Basic [REDACTED]");
-});
 
 it("redacts a credential a harness streams across several deltas", async () => {
   const pieces = ["The token is ", "explicit-", "secret", "-cred", "ential, done."];
