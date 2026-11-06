@@ -22,6 +22,7 @@ import {
   objectiveAdmissionBlocker,
   objectiveCancellationNotice,
   objectiveClosed,
+  objectiveCompletionNotice,
   objectiveDeadlineGraceMs,
   objectiveDeadlineNotices,
   objectiveDeadlineStopsRunning,
@@ -875,7 +876,12 @@ export class ObjectiveController {
     return completed;
   }
 
-  /** Completion already succeeded; leftovers the scheduler retries must not fail the request. */
+  /**
+   * Completion already succeeded; leftovers the scheduler retries must not fail the request. The
+   * completion summary posts once to the Objective's home Session; the delivery key names the
+   * completing revision, so a repeated settle posts nothing and a reopened Objective's next
+   * completion posts again.
+   */
   private async settleCompletedObjective(objective: Objective): Promise<void> {
     try {
       await this.settleClosedObjective(objective);
@@ -883,6 +889,14 @@ export class ObjectiveController {
     } catch (error) {
       this.reportSwallowed(error, { objectiveId: objective.id });
     }
+    if (this.surfaceReporter)
+      await this.surfaceReporter(
+        objective.id,
+        objectiveCompletionNotice(objective),
+        objectiveReportKey(objective.id, `objective-completed:${objective.revision}`),
+      ).catch(() => {
+        // An Objective without a verified surface destination is still completed.
+      });
   }
 
   /**
