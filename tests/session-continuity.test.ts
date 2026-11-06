@@ -184,15 +184,15 @@ it("places a Session on its producing profile, then its harness, then anywhere",
   const preferred = { workerProfile: profile, harnessId: "claude-code" };
   const bumped = { id: "native", revision: "2" };
   const codex = { id: "codex", revision: "1" };
+  const one = (allowedWorkerHostIds: string[]) => [{ allowedWorkerHostIds, requirements: {} }];
   expect(
     sessionPlacement(
       descriptor([worker("w", [{ profile, harness: "claude-code" }])]),
-      ["host"],
-      {},
+      one(["host"]),
       plan,
       preferred,
     ),
-  ).toEqual({ requirements: {}, compatibleProfile: profile });
+  ).toEqual([{ requirements: {}, compatibleProfile: profile }]);
   expect(
     sessionPlacement(
       descriptor([
@@ -201,30 +201,98 @@ it("places a Session on its producing profile, then its harness, then anywhere",
           { profile: codex, harness: "codex" },
         ]),
       ]),
-      ["host"],
-      {},
+      one(["host"]),
       plan,
       preferred,
     ),
-  ).toEqual({ requirements: { harness: "claude-code" } });
+  ).toEqual([{ requirements: { harness: "claude-code" } }]);
   expect(
     sessionPlacement(
       descriptor([worker("w", [{ profile: codex, harness: "codex" }])]),
-      ["host"],
-      {},
+      one(["host"]),
       plan,
       preferred,
     ),
-  ).toEqual({ requirements: {} });
+  ).toEqual([{ requirements: {} }]);
   expect(
     sessionPlacement(
       descriptor([worker("w", [{ profile, harness: "claude-code" }])]),
-      ["other-host"],
-      {},
+      one(["other-host"]),
       plan,
       preferred,
     ),
-  ).toEqual({ requirements: {} });
+  ).toEqual([{ requirements: {} }]);
+});
+
+it("decides a Session's placement across every tier before trying the first", () => {
+  const plan = { version: 7 as const, capturedAt: at, sets: [] };
+  const worker = (id: string, entries: { profile: typeof profile; harness: string }[]) => ({
+    id,
+    profiles: entries.map((entry) => entry.profile),
+    profileCapabilities: entries.map((entry) => ({
+      ...entry,
+      capabilities: [],
+      contextTypes: [],
+    })),
+  });
+  const descriptor = (workers: ReturnType<typeof worker>[]) =>
+    ({ id: "worklet", protocolVersion: 1, host: { id: "worklet", workers } }) as never;
+  const preferred = { workerProfile: profile, harnessId: "claude-code" };
+  const bumped = { id: "native", revision: "2" };
+  const codex = { id: "codex", revision: "1" };
+  const clone = { allowedWorkerHostIds: ["clone"], requirements: {} };
+  const tiers = [{ allowedWorkerHostIds: ["in-place"], requirements: {} }, clone];
+  // Only the second tier has the producing profile: the first tier must not replay on codex.
+  expect(
+    sessionPlacement(
+      descriptor([
+        worker("in-place/w", [{ profile: codex, harness: "codex" }]),
+        worker("clone/w", [{ profile, harness: "claude-code" }]),
+      ]),
+      tiers,
+      plan,
+      preferred,
+    ),
+  ).toEqual([
+    { requirements: {}, compatibleProfile: profile },
+    { requirements: {}, compatibleProfile: profile },
+  ]);
+  // Only the second tier has the producing harness: both tiers are narrowed to it.
+  expect(
+    sessionPlacement(
+      descriptor([
+        worker("in-place/w", [{ profile: codex, harness: "codex" }]),
+        worker("clone/w", [{ profile: bumped, harness: "claude-code" }]),
+      ]),
+      tiers,
+      plan,
+      preferred,
+    ),
+  ).toEqual([
+    { requirements: { harness: "claude-code" } },
+    { requirements: { harness: "claude-code" } },
+  ]);
+  // A tier that requires another harness cannot resume, so it is skipped.
+  expect(
+    sessionPlacement(
+      descriptor([
+        worker("in-place/w", [{ profile: codex, harness: "codex" }]),
+        worker("clone/w", [{ profile: bumped, harness: "claude-code" }]),
+      ]),
+      [{ allowedWorkerHostIds: ["in-place"], requirements: { harness: "codex" } }, clone],
+      plan,
+      preferred,
+    ),
+  ).toEqual([undefined, { requirements: { harness: "claude-code" } }]);
+  // No tier has the harness: every tier is unconstrained and the Session replays.
+  expect(
+    sessionPlacement(
+      descriptor([worker("in-place/w", [{ profile: codex, harness: "codex" }])]),
+      tiers,
+      plan,
+      preferred,
+    ),
+  ).toEqual([{ requirements: {} }, { requirements: {} }]);
 });
 
 it("finds the harness a Worker advertises for a profile", () => {

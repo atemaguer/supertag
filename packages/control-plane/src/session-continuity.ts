@@ -237,40 +237,71 @@ export function profileHarness(
   return undefined;
 }
 
+/** One placement tier's Session constraint; `undefined` skips the tier. */
+export type SessionPlacementChoice =
+  | {
+      readonly requirements: TaskExecutionRequirements;
+      readonly compatibleProfile?: WorkerProfileRef;
+    }
+  | undefined;
+
+/** One placement tier: the hosts it allows and the requirements it adds. */
+export interface SessionPlacementTier {
+  readonly allowedWorkerHostIds: readonly string[];
+  readonly requirements: TaskExecutionRequirements;
+}
+
 /**
- * Narrows placement to the profile that produced the Session's native state or, when that
- * profile cannot run the Task on the allowed hosts, to another profile of the same harness. A
- * matching but busy profile waits for capacity, since another harness could only replay. With
- * no match, placement is unconstrained and the Session continues from replay.
+ * Narrows placement to the profile that produced the Session's native state or, when no tier
+ * can run that profile, to another profile of the same harness. The decision is made once
+ * across every tier, so an earlier tier without the harness cannot replay the Session while a
+ * later tier could resume it. A matching but busy profile waits for capacity, since another
+ * harness could only replay. With no match in any tier, placement is unconstrained and the
+ * Session continues from replay. A tier that cannot satisfy the decision returns `undefined`
+ * and is skipped.
  */
 export function sessionPlacement(
   descriptor: WorkletDescriptor,
-  allowedWorkerHostIds: readonly string[],
-  requirements: TaskExecutionRequirements,
+  tiers: readonly SessionPlacementTier[],
   contextPlan: TagContextPlan,
   preferred: { readonly workerProfile: WorkerProfileRef; readonly harnessId: string },
-): {
-  readonly requirements: TaskExecutionRequirements;
-  readonly compatibleProfile?: WorkerProfileRef;
-} {
-  const workers = descriptor.host.workers.filter((worker) =>
-    allowedWorkerHostIds.some(
-      (workerHostId) =>
-        descriptor.host.id === workerHostId || worker.id.startsWith(`${workerHostId}/`),
-    ),
-  );
+): readonly SessionPlacementChoice[] {
+  const tierWorkers = (tier: SessionPlacementTier) =>
+    descriptor.host.workers.filter((worker) =>
+      tier.allowedWorkerHostIds.some(
+        (workerHostId) =>
+          descriptor.host.id === workerHostId || worker.id.startsWith(`${workerHostId}/`),
+      ),
+    );
   const compatibleProfile = preferred.workerProfile;
-  if (compatibleDescriptorWorkers(workers, requirements, contextPlan, { compatibleProfile }).length)
-    return { requirements, compatibleProfile };
   if (
-    requirements.profile ||
-    (requirements.harness && requirements.harness !== preferred.harnessId)
+    tiers.some(
+      (tier) =>
+        compatibleDescriptorWorkers(tierWorkers(tier), tier.requirements, contextPlan, {
+          compatibleProfile,
+        }).length > 0,
+    )
   )
-    return { requirements };
-  const sameHarness = { ...requirements, harness: preferred.harnessId };
-  return compatibleDescriptorWorkers(workers, sameHarness, contextPlan).length
-    ? { requirements: sameHarness }
-    : { requirements };
+    return tiers.map((tier) => ({ requirements: tier.requirements, compatibleProfile }));
+  const sameHarness = (tier: SessionPlacementTier): TaskExecutionRequirements | undefined =>
+    tier.requirements.profile ||
+    (tier.requirements.harness && tier.requirements.harness !== preferred.harnessId)
+      ? undefined
+      : { ...tier.requirements, harness: preferred.harnessId };
+  if (
+    tiers.some((tier) => {
+      const requirements = sameHarness(tier);
+      return (
+        requirements !== undefined &&
+        compatibleDescriptorWorkers(tierWorkers(tier), requirements, contextPlan).length > 0
+      );
+    })
+  )
+    return tiers.map((tier) => {
+      const requirements = sameHarness(tier);
+      return requirements === undefined ? undefined : { requirements };
+    });
+  return tiers.map((tier) => ({ requirements: tier.requirements }));
 }
 
 /** The authority a running Attempt was admitted with; live input must not change it. */

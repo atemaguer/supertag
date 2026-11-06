@@ -136,7 +136,12 @@ import {
   resolveTagRoles,
   tagExecutionRange,
 } from "./roles.js";
-import { profileHarness, SessionContinuity, sessionPlacement } from "./session-continuity.js";
+import {
+  profileHarness,
+  SessionContinuity,
+  type SessionPlacementChoice,
+  sessionPlacement,
+} from "./session-continuity.js";
 import {
   isSurfaceFailure,
   type PreparedSurfaceOutcome,
@@ -1796,18 +1801,20 @@ export class ControlPlane {
         if (placement.status === "unmet") return false;
         const preferred = await this.#sessionContinuity.preferredProfile(candidate, pendingTask);
         const descriptor = preferred ? await describeWorklet(this.#worklet) : undefined;
-        for (const tier of placement.tiers) {
-          const tierRequirements = withRequiredCapabilities(pendingTask.execution, tier.requires);
-          const { requirements, compatibleProfile } =
-            preferred && descriptor
-              ? sessionPlacement(
-                  descriptor,
-                  tier.allowedWorkerHostIds,
-                  tierRequirements,
-                  candidate.contextPlan,
-                  preferred,
-                )
-              : { requirements: tierRequirements, compatibleProfile: undefined };
+        const tiers = placement.tiers.map((tier) => ({
+          allowedWorkerHostIds: tier.allowedWorkerHostIds,
+          requirements: withRequiredCapabilities(pendingTask.execution, tier.requires),
+        }));
+        // The Session constraint is decided once across every tier, so a later tier that can
+        // resume the Session wins over an earlier one that could only replay it.
+        const sessionTiers: readonly SessionPlacementChoice[] =
+          preferred && descriptor
+            ? sessionPlacement(descriptor, tiers, candidate.contextPlan, preferred)
+            : tiers.map((tier) => ({ requirements: tier.requirements }));
+        for (const [index, tier] of tiers.entries()) {
+          const sessionTier = sessionTiers[index];
+          if (sessionTier === undefined) continue;
+          const { requirements, compatibleProfile } = sessionTier;
           selectedPlacement = await this.#executionAffinity.select(
             this.#worklet,
             pendingTask.tagId,
