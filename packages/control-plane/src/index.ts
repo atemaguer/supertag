@@ -136,7 +136,7 @@ import {
   resolveTagRoles,
   tagExecutionRange,
 } from "./roles.js";
-import { SessionContinuity } from "./session-continuity.js";
+import { profileHarness, SessionContinuity, sessionPlacement } from "./session-continuity.js";
 import {
   isSurfaceFailure,
   type PreparedSurfaceOutcome,
@@ -1794,15 +1794,24 @@ export class ControlPlane {
         const placement = await this.#placement(pendingTask, workerHostBindings);
         await this.#recordSurfacePlacement(pendingTask, placement);
         if (placement.status === "unmet") return false;
-        const compatibleProfile = await this.#sessionContinuity.preferredProfile(
-          candidate,
-          pendingTask,
-        );
+        const preferred = await this.#sessionContinuity.preferredProfile(candidate, pendingTask);
+        const descriptor = preferred ? await describeWorklet(this.#worklet) : undefined;
         for (const tier of placement.tiers) {
+          const tierRequirements = withRequiredCapabilities(pendingTask.execution, tier.requires);
+          const { requirements, compatibleProfile } =
+            preferred && descriptor
+              ? sessionPlacement(
+                  descriptor,
+                  tier.allowedWorkerHostIds,
+                  tierRequirements,
+                  candidate.contextPlan,
+                  preferred,
+                )
+              : { requirements: tierRequirements, compatibleProfile: undefined };
           selectedPlacement = await this.#executionAffinity.select(
             this.#worklet,
             pendingTask.tagId,
-            withRequiredCapabilities(pendingTask.execution, tier.requires),
+            requirements,
             candidate.contextPlan,
             {
               allowedWorkerHostIds: tier.allowedWorkerHostIds,
@@ -2177,7 +2186,6 @@ export class ControlPlane {
     attempt: TaskAttempt,
   ): Promise<TaskAttemptSpec> {
     const text = work.event.text?.trim();
-    const sessionState = await this.#sessionContinuity.read(work, task, attempt.workerProfile);
     const persistence = await this.objectives.sessionPersistence(task, attempt);
     const workerHostBindings = await this.#store.listTagWorkerHostBindings(task.tagId);
     if (workerHostBindings.length === 0)
@@ -2191,6 +2199,12 @@ export class ControlPlane {
       );
     const selectedPlacement = executionPlacementSnapshot(attempt.workerSnapshot);
     const descriptor = await (this.#worklet ? describeWorklet(this.#worklet) : undefined);
+    // Native state resumes on any profile of the harness that produced it.
+    const sessionState = await this.#sessionContinuity.read(
+      work,
+      task,
+      descriptor ? profileHarness(descriptor.host.workers, attempt.workerProfile) : undefined,
+    );
     const supportsSurfaceCoordination = descriptor?.host.workers.some(
       (worker) =>
         descriptorSupportsSurfaceCoordination(worker, attempt.workerProfile) &&

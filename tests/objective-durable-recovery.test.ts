@@ -493,11 +493,7 @@ for (const dialect of ["sqlite", "postgresql"] as const)
             const renewedTask = await store.findTaskById(id);
             if (!renewedTask) throw new Error("Missing renewed Task");
             expect(
-              await new SessionContinuity(store).readTask(
-                renewedTask,
-                attempt.workerProfile,
-                nextAttempt.id,
-              ),
+              await new SessionContinuity(store).readTask(renewedTask, nextAttempt.id),
             ).toMatchObject({ id: `native-${id}` });
             expect((await store.findSessionState(`native-${id}`))?.data).toEqual({
               nativeId: "durable-budget-conversation",

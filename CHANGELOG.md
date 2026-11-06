@@ -17,6 +17,10 @@ within the pre-1.0 compatibility policy described in
 - `supertag message tag` shows the Tag's reply as it is written, with a line for each command the Tag runs; Ctrl-C stops showing it without cancelling the Task. `GET /api/v1/tags/NAME/messages/TASK_ID/stream` serves the reply as an AI SDK UI message stream, and reply text is no longer stored as one Task event per piece.
 - An Objective started in a conversation posts its completion summary there.
 
+### Changed
+
+- A Session resumes its native harness session whenever the harness can load it: the same Tag, Session, harness, and reply audience. Permission, Role, Context Set, workspace, execution, and Worker Profile revision changes no longer force a fresh session; each turn still runs under its own Task's permissions and tools. Earlier tool output stays in the resumed transcript after a permission is removed, but grants no new access. Bounded Session history replays only when no native state can resume, and never alongside a resume.
+
 ### Fixed
 
 - A Task copy of a git repository holds only what git considers part of it: tracked files and untracked files that are not ignored. Ignored entries such as `node_modules`, a Python `.venv`, or a `.env` file stay on the Worker Host, so a repository with a virtualenv no longer fails with "symbolic link ... points outside the workspace", and copies are much smaller.

@@ -5039,10 +5039,7 @@ Do not end this activation with a summary alone.${previous ? ` Your previous res
         result,
         ...(waiting && receipt.status !== "failed"
           ? {
-              waitSessionCompatibility: await this.waitSessionCompatibility(
-                task.taskId,
-                attempt.workerProfile,
-              ),
+              waitSessionCompatibility: await this.waitSessionCompatibility(task.taskId),
             }
           : {}),
         terminalAttempt: {
@@ -5068,10 +5065,7 @@ Do not end this activation with a summary alone.${previous ? ` Your previous res
           store: this.store,
           task,
           attemptId: attempt.id,
-          waitSessionCompatibility: await this.waitSessionCompatibility(
-            task.taskId,
-            attempt.workerProfile,
-          ),
+          waitSessionCompatibility: await this.waitSessionCompatibility(task.taskId),
           leaseOwner: this.instanceId,
           isStopping: () => this.stopping,
           onError: this.onError,
@@ -5164,12 +5158,9 @@ Do not end this activation with a summary alone.${previous ? ` Your previous res
     });
   }
 
-  private async waitSessionCompatibility(
-    taskId: string,
-    profile: import("@supertag/core").WorkerProfileRef,
-  ): Promise<string | undefined> {
+  private async waitSessionCompatibility(taskId: string): Promise<string | undefined> {
     const task = await this.store.findTaskById(taskId);
-    return task ? new SessionContinuity(this.store).compatibility(task, profile) : undefined;
+    return task ? new SessionContinuity(this.store).compatibility(task) : undefined;
   }
 
   /** A completed execution may still submit invalid output; retry only persistence failures. */
@@ -5312,7 +5303,7 @@ Do not end this activation with a summary alone.${previous ? ` Your previous res
       const ownerWake = startsOwnerWake(task, objective);
       const sessionState = ownerWake
         ? undefined
-        : await new SessionContinuity(this.store).readTask(existing, workerProfile, attempt.id);
+        : await new SessionContinuity(this.store).readTask(existing, attempt.id);
       // Rebuild through the same authorized read as the agent tool on every activation,
       // including native Session resumes. Persisted conversation history is not live work.
       const currentWork = await this.dispatchCommand(
@@ -5614,10 +5605,7 @@ Do not end this activation with a summary alone.${previous ? ` Your previous res
             store: this.store,
             task,
             attemptId: attempt.id,
-            waitSessionCompatibility: await this.waitSessionCompatibility(
-              task.taskId,
-              attempt.workerProfile,
-            ),
+            waitSessionCompatibility: await this.waitSessionCompatibility(task.taskId),
             leaseOwner: this.instanceId,
             isStopping: () => this.stopping,
             onError: this.onError,

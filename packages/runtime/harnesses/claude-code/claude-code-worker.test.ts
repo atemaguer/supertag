@@ -1255,6 +1255,89 @@ describe("Claude Code harness composition", () => {
     expect(captured?.prompt).toContain("newly admitted cross-session history");
   });
 
+  it("resumes across a profile revision and tool change with only the current tools", async () => {
+    const captured: (ClaudeCodeRunCapture & { readonly mcpServers?: readonly unknown[] })[] = [];
+    const sessionState = claudeSessionStateRef("018f52f0-635a-7b4f-9678-d3a4a6108c31");
+    const runner = vi.fn(async function* (request: ClaudeCodeRunCapture) {
+      captured.push(request);
+      yield { type: "output.message" as const, text: "done" };
+      yield { type: "session.updated" as const, sessionState };
+    });
+    const harness = new ClaudeCodeHarness({ workspace: fixtureWorkspace, runner });
+    const sessionStateStore = new InMemorySessionStateStore();
+    const tool: RuntimeInput = {
+      id: "internal-stdio",
+      kind: "tool",
+      required: true,
+      capability: {
+        id: "internal:lookup",
+        provider: "internal",
+        operations: [{ name: "lookup", effect: "read", actions: ["lookup:read"] }],
+        authorization: {
+          provider: "internal",
+          resources: [{ surfaceAccountId: "internal-1", scope: "service:lookup" }],
+        },
+      },
+      binding: {
+        kind: "mcp-stdio",
+        name: "local_tools",
+        command: "/opt/supertag/tools-server",
+        args: ["--stdio"],
+      },
+    };
+    const first: TaskAttemptSpec = {
+      ...taskAttemptSpec("First turn"),
+      session: { id: "session-1" },
+    };
+    const firstInput = harnessExecutionContext({
+      attempt: first,
+      sessionStateStore,
+      inputs: [tool],
+      continuity: { sessionId: "session-1" },
+    });
+    const firstRun = await harness.start(
+      await harness.plan(firstInput),
+      environmentAccesses(testEnvironment(fixtureWorkspace)),
+      firstInput,
+    );
+    for await (const _event of firstRun.run()) {
+      // Archive a state produced with a tool and profile revision 1.
+    }
+    expect(captured[0]?.mcpServers).toHaveLength(1);
+    const priorSessionState = await firstRun.sessionState?.();
+
+    const replayInput = historyInput("session-continuity:session-1", "same-session replay");
+    const next: TaskAttemptSpec = {
+      ...taskAttemptSpec("Next turn"),
+      workerProfile: { ...first.workerProfile, revision: `${first.workerProfile.revision}-next` },
+      session: { id: "session-1" },
+    };
+    const nextInput = harnessExecutionContext({
+      attempt: next,
+      sessionStateStore,
+      inputs: [replayInput],
+      continuity: {
+        sessionId: "session-1",
+        ...(priorSessionState ? { priorSessionState } : {}),
+        replayInput,
+      },
+    });
+    const nextRun = await harness.start(
+      await harness.plan(nextInput),
+      environmentAccesses(testEnvironment(fixtureWorkspace)),
+      nextInput,
+    );
+    for await (const _event of nextRun.run()) {
+      // Resume under the next Task's policy.
+    }
+
+    expect(captured[1]?.resumeSessionId).toBe("018f52f0-635a-7b4f-9678-d3a4a6108c31");
+    expect(captured[1]?.prompt).not.toContain("<supertag-history>");
+    expect(captured[1]?.prompt).not.toContain("same-session replay");
+    // The resumed turn gets the next Task's tools, not the earlier turn's.
+    expect(captured[1]?.mcpServers ?? []).toHaveLength(0);
+  });
+
   it("re-prompts once when a resumed session ends empty before the model runs", async () => {
     const sessionState = claudeSessionStateRef("018f52f0-635a-7b4f-9678-d3a4a6108c31");
     const zeroUsage = {

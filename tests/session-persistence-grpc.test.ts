@@ -299,23 +299,28 @@ for (const provider of ["sqlite", "postgresql"] as const) {
         await expect(foreign.client.load(a.state.ref)).resolves.toBeUndefined();
       });
 
-      it.each(["permissions", "role", "reply destination"] as const)(
-        "checks %s before restoring another Attempt's native state",
+      it.each(["permissions", "role"] as const)(
+        "restores another Attempt's native state across a %s change",
         async (change) => {
           const f = await fixture();
           const a = await f.work();
           await a.client.save(a.state);
           await a.finish();
           const b = await f.work(
-            change === "permissions"
-              ? { changedPolicy: true }
-              : change === "role"
-                ? { roleRevision: 2 }
-                : { callbackThread: "other" },
+            change === "permissions" ? { changedPolicy: true } : { roleRevision: 2 },
           );
-          await expect(b.client.load(a.state.ref)).resolves.toBeUndefined();
+          await expect(b.client.load(a.state.ref)).resolves.toEqual(a.state);
         },
       );
+
+      it("checks the reply destination before restoring another Attempt's native state", async () => {
+        const f = await fixture();
+        const a = await f.work();
+        await a.client.save(a.state);
+        await a.finish();
+        const b = await f.work({ callbackThread: "other" });
+        await expect(b.client.load(a.state.ref)).resolves.toBeUndefined();
+      });
 
       it("rejects revoked credentials and changed reference metadata", async () => {
         const f = await fixture();

@@ -1,6 +1,5 @@
 export { checkClaudeCodeSignIn } from "./sign-in.js";
 
-import { createHash } from "node:crypto";
 import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -237,7 +236,6 @@ interface StoredClaudeSessionState {
   readonly workspaceKey: string;
   readonly transcript?: string;
   readonly transcripts?: readonly ClaudeTranscript[];
-  readonly toolSignature?: string;
 }
 
 function storedClaudeSessionState(
@@ -264,7 +262,6 @@ function storedClaudeSessionState(
     workerProfileId: data["workerProfileId"] as string,
     workerProfileRevision: data["workerProfileRevision"] as string,
     workspaceKey: data["workspaceKey"] as string,
-    ...(typeof data["toolSignature"] === "string" ? { toolSignature: data["toolSignature"] } : {}),
     ...(typeof data["transcript"] === "string" ? { transcript: data["transcript"] } : {}),
   };
 }
@@ -400,22 +397,6 @@ export class ClaudeCodeHarness implements Harness {
     return { inputId: input.id, client, transport: input.binding.kind };
   }
 
-  #toolSignature(inputs: readonly ToolInput[]): string {
-    return createHash("sha256")
-      .update(
-        JSON.stringify(
-          inputs.map((input) => ({
-            id: input.id,
-            audience: input.audience,
-            capability: input.capability,
-            route: this.#mcpRoute(input),
-            name: input.binding.name,
-          })),
-        ),
-      )
-      .digest("hex");
-  }
-
   async plan(input: ExecutionContext): Promise<HarnessPlan> {
     const mcpRoutes = input.tools.map((tool) => this.#mcpRoute(tool));
     assertUniqueMcpServerNames(input.tools.map((tool) => ({ name: tool.binding.name })));
@@ -505,7 +486,7 @@ export class ClaudeCodeHarness implements Harness {
           normalizeQuestion(latestRequesterMessage(input.attempt)),
           resumable === undefined || replayInput === undefined
             ? allContributions
-            : allContributions.filter((runtimeInput) => runtimeInput !== replayInput),
+            : allContributions.filter((runtimeInput) => runtimeInput.id !== replayInput.id),
         ),
         ...(workspaceAttachments.length
           ? [
@@ -923,6 +904,8 @@ export class ClaudeCodeHarness implements Harness {
     if (continuity.mode !== "resume") return undefined;
     const ref = continuity.sessionState;
     const stored = storedClaudeSessionState(await input.sessionStateStore.load(ref));
+    // Resume whenever this state can be loaded here. Profile revisions and tools are not part of
+    // the check: each turn starts with the tools and permissions admitted for its own Task.
     if (
       stored === undefined ||
       (this.#enforceMcpPolicy &&
@@ -932,11 +915,6 @@ export class ClaudeCodeHarness implements Harness {
       stored.ref.format !== ref.format ||
       stored.supertagSessionId !== continuity.sessionId ||
       stored.tagId !== input.attempt.tag.id ||
-      stored.workerProfileId !== input.attempt.workerProfile.id ||
-      stored.workerProfileRevision !== input.attempt.workerProfile.revision ||
-      (input.tools.length > 0 && stored.toolSignature !== this.#toolSignature(input.tools)) ||
-      (stored.toolSignature !== undefined &&
-        stored.toolSignature !== this.#toolSignature(input.tools)) ||
       stored.workspaceKey !== claudeWorkspaceKey(input, this.#workspace)
     ) {
       return undefined;
@@ -992,7 +970,6 @@ export class ClaudeCodeHarness implements Harness {
         workerProfileId: input.attempt.workerProfile.id,
         workerProfileRevision: input.attempt.workerProfile.revision,
         workspaceKey: claudeWorkspaceKey(input, this.#workspace),
-        toolSignature: this.#toolSignature(input.tools),
       },
     });
     return ref;
@@ -2264,21 +2241,14 @@ function metadataEnvironment(value: unknown, label: string): Readonly<Record<str
   );
 }
 
+/**
+ * Where Claude runs, which decides where it finds a transcript to resume. The Workspace's
+ * repository and revision are not part of it: each turn works in its own admitted Workspace.
+ */
 function claudeWorkspaceKey(input: ExecutionContext, configuredWorkspace: string): string {
   const workspace = input.workspace;
   if (workspace === undefined) return `fixed:${configuredWorkspace}`;
-  const repository = textProvenanceValue(workspace.source.provenance?.["repository"]);
-  return JSON.stringify({
-    mountPath: workspace.mountPath,
-    ...(repository === undefined ? {} : { repository }),
-    ...(workspace.source.digest === undefined
-      ? { uri: workspace.source.uri }
-      : { digest: workspace.source.digest }),
-  });
-}
-
-function textProvenanceValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+  return JSON.stringify({ mountPath: workspace.mountPath });
 }
 
 type ClaudeProgressItem = NonNullable<TaskProgress["items"]>[number];

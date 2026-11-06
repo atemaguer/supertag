@@ -367,39 +367,30 @@ function promptForTask(input: ExecutionContext, workspace: string, resumed: bool
   ].join("\n\n");
 }
 
+/**
+ * Where Cursor runs. The Workspace's repository and revision are not part of it: each turn works
+ * in its own admitted Workspace.
+ */
 function workspaceKey(input: ExecutionContext, configured: string): string {
   const workspace = input.workspace;
-  return workspace
-    ? JSON.stringify({
-        uri: workspace.source.uri,
-        digest: workspace.source.digest,
-        mountPath: workspace.mountPath,
-      })
-    : `fixed:${configured}`;
+  return workspace ? JSON.stringify({ mountPath: workspace.mountPath }) : `fixed:${configured}`;
 }
 
-function toolSignature(tools: readonly ToolInput[], splitTools?: readonly string[]): string {
-  const signature = tools.map((tool) => ({
-    id: tool.id,
-    audience: tool.audience,
-    capability: tool.capability.id,
-    binding: tool.binding.name,
-  }));
-  // A colocated session has native tool history that a split run cannot honor, and the other
-  // way around, so split mode and its workspace tool set are part of the signature.
-  return JSON.stringify(
-    splitTools === undefined ? signature : { split: [...splitTools].sort(), tools: signature },
-  );
+/**
+ * A colocated session has native tool history that a split run cannot honor, and the other way
+ * around, so split mode decides whether a state can resume. The admitted tools do not: each turn
+ * passes the current Task's tools and restrictions again on resume.
+ */
+function executionMode(splitTools?: readonly string[]): string {
+  return splitTools === undefined ? "colocated" : "split";
 }
 
 interface StoredCursorState {
   readonly portable: PortableCursorSessionState;
   readonly sessionId: string;
   readonly tagId: string;
-  readonly workerProfileId: string;
-  readonly workerProfileRevision: string;
   readonly workspaceKey: string;
-  readonly toolSignature: string;
+  readonly executionMode: string;
 }
 
 async function resumableState(
@@ -416,23 +407,20 @@ async function resumableState(
   if (stored?.harnessId !== "cursor" || stored.ref.uri !== continuity.sessionState.uri)
     return undefined;
   const data = stored.data;
+  // Resume whenever this state can be loaded here; the profile revision is not part of it.
   if (
     data["sessionId"] !== continuity.sessionId ||
     data["tagId"] !== input.attempt.tag.id ||
-    data["workerProfileId"] !== input.attempt.workerProfile.id ||
-    data["workerProfileRevision"] !== input.attempt.workerProfile.revision ||
     data["workspaceKey"] !== workspaceKey(input, configuredWorkspace) ||
-    data["toolSignature"] !== toolSignature(input.tools, splitTools)
+    data["executionMode"] !== executionMode(splitTools)
   )
     return undefined;
   return {
     portable: validatePortableCursorSessionState(data["portable"]),
     sessionId: data["sessionId"] as string,
     tagId: data["tagId"] as string,
-    workerProfileId: data["workerProfileId"] as string,
-    workerProfileRevision: data["workerProfileRevision"] as string,
     workspaceKey: data["workspaceKey"] as string,
-    toolSignature: data["toolSignature"] as string,
+    executionMode: data["executionMode"] as string,
   };
 }
 
@@ -848,7 +836,7 @@ export class CursorHarness implements Harness {
                     workerProfileId: input.attempt.workerProfile.id,
                     workerProfileRevision: input.attempt.workerProfile.revision,
                     workspaceKey: workspaceKey(input, configuredWorkspace),
-                    toolSignature: toolSignature(input.tools, splitToolNames),
+                    executionMode: executionMode(splitToolNames),
                   },
                 });
               } catch {

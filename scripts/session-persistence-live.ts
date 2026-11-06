@@ -287,7 +287,7 @@ async function runProbe(cleanups: Array<() => Promise<unknown>>) {
         workerSnapshot: {},
         startedAt: now,
       });
-      const prior = await new SessionContinuity(store).readTask(task, profile, attempt.id);
+      const prior = await new SessionContinuity(store).readTask(task, attempt.id);
       if (phase === "resumed") assert(prior, "No compatible native state selected");
       const persistence = await authority.sessionPersistence(task, attempt);
       assert(persistence);

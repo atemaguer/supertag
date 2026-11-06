@@ -565,7 +565,7 @@ export class CodexHarness implements Harness {
     const inputs =
       resumable === undefined || replayInput === undefined
         ? allContributions
-        : allContributions.filter((runtimeInput) => runtimeInput !== replayInput);
+        : allContributions.filter((runtimeInput) => runtimeInput.id !== replayInput.id);
     const metadata: CodexLaunchMetadata = {
       sandboxMode: this.#sandboxMode,
       prompt: [
@@ -1179,13 +1179,14 @@ export class CodexHarness implements Harness {
     if (continuity.mode !== "resume") return undefined;
     const ref = continuity.sessionState;
     const stored = storedCodexSessionState(await input.sessionStateStore.load(ref));
+    // Resume whenever this thread can be loaded here. The profile revision and the tools' admitted
+    // authority are not part of the check; only the dynamic tool definitions a thread fixes when
+    // it starts are, because thread/resume cannot replace them.
     if (
       stored === undefined ||
       stored.ref.uri !== ref.uri ||
       stored.sessionId !== continuity.sessionId ||
       stored.tagId !== input.attempt.tag.id ||
-      stored.workerProfileId !== input.attempt.workerProfile.id ||
-      stored.workerProfileRevision !== input.attempt.workerProfile.revision ||
       stored.workspaceKey !== codexWorkspaceKey(input, this.#workspace) ||
       stored.toolSignature !== this.#toolSignature(input.tools)
     ) {
@@ -1461,63 +1462,43 @@ function describeSelectedWorkspace(inputs: readonly RuntimeInput[]): string {
   return ` The selected workspace is an immutable snapshot of ${identity}; cite that repository and commit when it materially helps the answer.`;
 }
 
+/**
+ * Where Codex runs. The Workspace's repository and revision are not part of it: each turn works
+ * in its own admitted Workspace.
+ */
 function codexWorkspaceKey(input: ExecutionContext, configuredWorkspace: string): string {
   const workspace = input.workspace;
   if (workspace === undefined) return `fixed:${configuredWorkspace}`;
-  const repository = textProvenanceValue(workspace.source.provenance?.["repository"]);
-  return JSON.stringify({
-    mountPath: workspace.mountPath,
-    ...(repository === undefined ? {} : { repository }),
-    ...(workspace.source.digest === undefined
-      ? { uri: workspace.source.uri }
-      : { digest: workspace.source.digest }),
-  });
+  return JSON.stringify({ mountPath: workspace.mountPath });
 }
 
+/**
+ * The dynamic tool definitions a Codex thread fixes at thread/start. Harness-runtime MCP servers
+ * are configured per turn and each call is authorized against the current Task, so neither they
+ * nor a tool's admitted resources and actions are part of it.
+ */
 function toolSignature(inputs: readonly RuntimeInput[], routes: readonly CodexMcpRoute[]): string {
   return canonicalJsonStringify(
     inputs
       .filter(
-        (input): input is Extract<RuntimeInput, { readonly kind: "tool" }> => input.kind === "tool",
+        (input): input is Extract<RuntimeInput, { readonly kind: "tool" }> =>
+          input.kind === "tool" &&
+          routes.find((route) => route.inputId === input.id)?.client !== "harness-runtime",
       )
       .map((input) => ({
         id: input.id,
-        client: routes.find((route) => route.inputId === input.id)?.client,
-        capability: {
-          id: input.capability.id,
-          provider: input.capability.provider,
-          authorization: {
-            provider: input.capability.authorization.provider,
-            resources: input.capability.authorization.resources
-              .map((resource) => ({
-                surfaceAccountId: resource.surfaceAccountId,
-                scope: resource.scope,
-                ...(resource.reference === undefined ? {} : { reference: resource.reference }),
-              }))
-              .toSorted((left, right) =>
-                `${left.surfaceAccountId}:${left.scope}:${left.reference ?? ""}`.localeCompare(
-                  `${right.surfaceAccountId}:${right.scope}:${right.reference ?? ""}`,
-                ),
-              ),
-          },
-          operations: input.capability.operations
-            .map((operation) => ({
-              name: operation.name,
-              effect: operation.effect,
-              actions: operation.actions.toSorted(),
-              ...(operation.inputSchema === undefined
-                ? {}
-                : { inputSchema: operation.inputSchema }),
-              ...(operation.resourceArgumentPolicies === undefined
-                ? {}
-                : { resourceArgumentPolicies: operation.resourceArgumentPolicies }),
-            }))
-            .toSorted((left, right) => left.name.localeCompare(right.name)),
-        },
-        binding: { kind: input.binding.kind, name: input.binding.name },
+        audience: input.audience,
+        provider: input.capability.provider,
+        operations: input.capability.operations
+          .map((operation) => ({
+            name: operation.name,
+            ...(operation.inputSchema === undefined ? {} : { inputSchema: operation.inputSchema }),
+          }))
+          .toSorted((left, right) => left.name.localeCompare(right.name)),
+        binding: input.binding.name,
       }))
       .toSorted((left, right) =>
-        `${left.id}:${left.binding.name}`.localeCompare(`${right.id}:${right.binding.name}`),
+        `${left.id}:${left.binding}`.localeCompare(`${right.id}:${right.binding}`),
       ),
   );
 }

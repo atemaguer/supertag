@@ -3,10 +3,18 @@ import {
   canResumeSessionAfterInput,
   type DurableInboundEvent,
   type Store,
+  type TagContextPlan,
   type Task,
+  type TaskExecutionRequirements,
   type WorkerProfileRef,
 } from "@supertag/core";
-import type { SessionStateRef, TaskAttemptEvent } from "@supertag/worker-sdk";
+import {
+  compatibleDescriptorWorkers,
+  type SessionStateRef,
+  type TaskAttemptEvent,
+  type WorkerDescriptor,
+  type WorkletDescriptor,
+} from "@supertag/worker-sdk";
 
 type Persistence = Pick<
   Store,
@@ -20,63 +28,75 @@ type Persistence = Pick<
   | "hasUnconfirmedTeamLiveDelivery"
 >;
 
-/** Session-owned native state with explicit, policy-compatible recovery boundaries. */
+/**
+ * Each SuperTag Session maps to one native harness session. Its latest native state resumes for
+ * the same Tag, Session and reply audience, on the harness that produced it; that harness's own
+ * state check is the final gate. Permissions, Roles, Context Sets, the Workspace plan and
+ * execution settings are not part of the gate: every turn runs under the policy and tools
+ * admitted for its own Task, so resuming never carries earlier authority forward.
+ */
 export class SessionContinuity {
   constructor(private readonly store: Persistence) {}
 
+  /**
+   * Live input joins an Attempt that is already running under the active Task's authority, so it
+   * also requires the same admitted policy, not only the same Session audience.
+   */
   acceptsInput(
     active: { work: DurableInboundEvent; task: Task; workerProfile: WorkerProfileRef },
     incoming: { work: DurableInboundEvent; task: Task },
   ): boolean {
     return (
       incoming.task.surfaceObjectiveId === active.task.surfaceObjectiveId &&
-      stableJson(incoming.task.execution) === stableJson(active.task.execution) &&
-      sessionCompatibility(incoming.task, active.workerProfile, surfaceAudience(incoming.work)) ===
-        sessionCompatibility(active.task, active.workerProfile, surfaceAudience(active.work)) &&
+      stableJson(admittedPolicy(incoming.task)) === stableJson(admittedPolicy(active.task)) &&
+      sessionCompatibility(incoming.task, surfaceAudience(incoming.work)) ===
+        sessionCompatibility(active.task, surfaceAudience(active.work)) &&
       stableJson(incoming.work.event.callback.target) ===
         stableJson(active.work.event.callback.target)
     );
   }
 
+  /** The profile, and its harness, that produced the Session's latest resumable state. */
   async preferredProfile(
     _work: DurableInboundEvent,
     task: Task,
-  ): Promise<WorkerProfileRef | undefined> {
-    for await (const state of this.latest(task)) {
-      if (
-        state.workerProfile &&
-        state.compatibility === (await this.compatibility(task, state.workerProfile))
-      )
-        return state.workerProfile;
-    }
-    return undefined;
+  ): Promise<{ readonly workerProfile: WorkerProfileRef; readonly harnessId: string } | undefined> {
+    const state = await this.#latestCompatible(task);
+    return state?.workerProfile
+      ? { workerProfile: state.workerProfile, harnessId: state.harnessId }
+      : undefined;
   }
 
   async read(
     _work: DurableInboundEvent,
     task: Task,
-    profile: WorkerProfileRef,
+    harnessId?: string,
   ): Promise<SessionStateRef | undefined> {
-    return this.readTask(task, profile);
+    return this.readTask(task, undefined, harnessId);
   }
 
+  /**
+   * The Session's latest resumable native state. Given a harness, state another harness produced
+   * is not offered. Any profile of the same harness may resume it.
+   */
   async readTask(
     task: Task,
-    profile: WorkerProfileRef,
     activeAttemptId?: string,
+    harnessId?: string,
   ): Promise<SessionStateRef | undefined> {
-    const compatibility = await this.compatibility(task, profile);
+    const state = await this.#latestCompatible(task, activeAttemptId);
+    if (!state || (harnessId !== undefined && state.harnessId !== harnessId)) return undefined;
+    return state.ref as unknown as SessionStateRef;
+  }
+
+  async #latestCompatible(task: Task, activeAttemptId?: string) {
+    const compatibility = await this.compatibility(task);
     if (!compatibility) return undefined;
     for await (const state of this.latest(task, activeAttemptId)) {
-      if (
-        state.workerProfile?.id === profile.id &&
-        state.workerProfile.revision === profile.revision &&
-        state.compatibility ===
-          (state.compatibility?.startsWith("budget:")
-            ? `budget:${await this.compatibility(withoutBudgetLimits(task), profile)}`
-            : compatibility)
-      )
-        return state.ref as unknown as SessionStateRef;
+      const stored = state.compatibility?.startsWith("budget:")
+        ? state.compatibility.slice("budget:".length)
+        : state.compatibility;
+      if (stored === compatibility) return state;
     }
     return undefined;
   }
@@ -123,10 +143,7 @@ export class SessionContinuity {
     const state = await this.store.findSessionState(updated.sessionState.id);
     if (!state || stableJson(state.ref) !== stableJson(updated.sessionState))
       throw new Error("Native Session state was not durably archived");
-    const compatibility = await this.compatibility(
-      exhausted ? withoutBudgetLimits(task) : task,
-      profile,
-    );
+    const compatibility = await this.compatibility(task);
     if (!compatibility) throw new Error("Native Session audience is unavailable");
     await this.store.promoteSessionState({
       id: state.id,
@@ -137,15 +154,15 @@ export class SessionContinuity {
     });
   }
 
-  async compatibility(task: Task, profile: WorkerProfileRef): Promise<string | undefined> {
+  async compatibility(task: Task): Promise<string | undefined> {
     // Read the immutable admitted audience for every caller, including execution-only HTTP loads.
     if (task.inboundEventId) {
       const work = await this.store.findInboundEventById(task.inboundEventId);
       if (!work || work.tagId !== task.tagId) return undefined;
-      return sessionCompatibility(task, profile, surfaceAudience(work));
+      return sessionCompatibility(task, surfaceAudience(work));
     }
     if (task.authorizationSnapshot.version === 5) return undefined;
-    return sessionCompatibility(task, profile);
+    return sessionCompatibility(task);
   }
 
   private async *latest(task: Task, activeAttemptId?: string) {
@@ -183,35 +200,95 @@ export class SessionContinuity {
   }
 }
 
-/** Hash policy, not changing prompts, timestamps or derived conversation history. */
+/**
+ * Hash only what makes saved native state unsafe to resume: the Tag, the Session and the reply
+ * audience. Policy, prompts, timestamps and derived conversation history are not part of it.
+ */
 export function sessionCompatibility(
   task: Task,
-  workerProfile: WorkerProfileRef,
   replyAudience?: Readonly<Record<string, unknown>>,
 ): string {
-  const authorization = task.authorizationSnapshot;
   return `sha256:${createHash("sha256")
     .update(
       stableJson({
-        version: 3,
+        version: 4,
         tagId: task.tagId,
         sessionId: task.sessionId,
-        workerProfile,
-        audience: authorization.origin,
+        audience: task.authorizationSnapshot.origin,
         replyAudience,
-        roles: authorization.roles ?? [],
-        permissionSets: authorization.permissionSets,
-        resources: authorization.resources,
-        runtimeActions: authorization.runtimeActions,
-        // Omitted when absent, so Sessions without MCP grants keep their compatibility.
-        ...(authorization.mcp === undefined ? {} : { mcp: authorization.mcp }),
-        contextSets: task.contextPlan.sets,
-        workspace: task.workspacePlan,
-        execution: task.execution,
       }),
     )
     .digest("hex")}`;
 }
+
+/** The harness a Worker advertises for a profile, if any. */
+export function profileHarness(
+  workers: readonly WorkerDescriptor[],
+  profile: WorkerProfileRef,
+): string | undefined {
+  for (const worker of workers)
+    for (const entry of worker.profileCapabilities ?? [])
+      if (
+        entry.harness !== undefined &&
+        entry.profile.id === profile.id &&
+        entry.profile.revision === profile.revision
+      )
+        return entry.harness;
+  return undefined;
+}
+
+/**
+ * Narrows placement to the profile that produced the Session's native state or, when that
+ * profile cannot run the Task on the allowed hosts, to another profile of the same harness. A
+ * matching but busy profile waits for capacity, since another harness could only replay. With
+ * no match, placement is unconstrained and the Session continues from replay.
+ */
+export function sessionPlacement(
+  descriptor: WorkletDescriptor,
+  allowedWorkerHostIds: readonly string[],
+  requirements: TaskExecutionRequirements,
+  contextPlan: TagContextPlan,
+  preferred: { readonly workerProfile: WorkerProfileRef; readonly harnessId: string },
+): {
+  readonly requirements: TaskExecutionRequirements;
+  readonly compatibleProfile?: WorkerProfileRef;
+} {
+  const workers = descriptor.host.workers.filter((worker) =>
+    allowedWorkerHostIds.some(
+      (workerHostId) =>
+        descriptor.host.id === workerHostId || worker.id.startsWith(`${workerHostId}/`),
+    ),
+  );
+  const compatibleProfile = preferred.workerProfile;
+  if (compatibleDescriptorWorkers(workers, requirements, contextPlan, { compatibleProfile }).length)
+    return { requirements, compatibleProfile };
+  if (
+    requirements.profile ||
+    (requirements.harness && requirements.harness !== preferred.harnessId)
+  )
+    return { requirements };
+  const sameHarness = { ...requirements, harness: preferred.harnessId };
+  return compatibleDescriptorWorkers(workers, sameHarness, contextPlan).length
+    ? { requirements: sameHarness }
+    : { requirements };
+}
+
+/** The authority a running Attempt was admitted with; live input must not change it. */
+function admittedPolicy(task: Task): unknown {
+  const authorization = task.authorizationSnapshot;
+  return {
+    roles: authorization.roles ?? [],
+    permissionSets: authorization.permissionSets,
+    resources: authorization.resources,
+    runtimeActions: authorization.runtimeActions,
+    mcp: authorization.mcp,
+    approvals: authorization.approvals,
+    contextSets: task.contextPlan.sets,
+    workspace: task.workspacePlan,
+    execution: task.execution,
+  };
+}
+
 function surfaceAudience(work: DurableInboundEvent): Readonly<Record<string, unknown>> {
   return {
     provider: work.event.provider,
@@ -258,18 +335,4 @@ function validRef(value: Readonly<Record<string, unknown>>): boolean {
   } catch {
     return false;
   }
-}
-
-/** A renewed spending allocation changes no tool authority or execution topology. */
-function withoutBudgetLimits(task: Task): Task {
-  const {
-    maxReportedTokens: _tokens,
-    maxReportedCost: _cost,
-    ...limits
-  } = task.execution.limits ?? {};
-  const { limits: _limits, ...execution } = task.execution;
-  return {
-    ...task,
-    execution: { ...execution, ...(Object.keys(limits).length ? { limits } : {}) },
-  };
 }
