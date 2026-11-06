@@ -21,6 +21,7 @@
     "@supertag/surface-sdk": "workspace:*",
     "@supertag/core": "workspace:*",
     "@supertag/worker-sdk": "workspace:*",
-    "pino": "10.3.1"
+    "pino": "10.3.1",
+    "resumable-stream": "2.2.13"
   }
 }

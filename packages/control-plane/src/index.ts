@@ -128,6 +128,7 @@ import {
 } from "./operator-channel.js";
 import { outboundPresentationPolicy } from "./outbound-presentation.js";
 import { detectOverlapWarnings } from "./overlap-warnings.js";
+import { ReplyStreams } from "./reply-streams.js";
 import {
   capturePermissionBundle,
   ensureBuiltInRoles,
@@ -354,6 +355,7 @@ export class ControlPlane {
   /** Surface Tasks whose placement is held for an unsandboxed harness; their hold is recorded. */
   readonly #heldSurfaceTasks = new Set<string>();
   readonly #surfaceJournalReplays = new Map<string, Promise<void>>();
+  readonly #replyStreams = new ReplyStreams();
   #accepting = false;
   #running = false;
   #stopping = false;
@@ -1131,6 +1133,8 @@ export class ControlPlane {
         return { accepted: false, task: (await this.#store.findTaskById(task.id)) ?? task };
       await this.#appendTaskEvent(task.id, "task.cancellation-requested", {});
       await this.#appendTaskEvent(task.id, "task.cancelled", { reason: "operator-request" });
+      if (task.inboundEventId !== null)
+        await this.#finishReplyStream(task.id, task.inboundEventId, "cancelled");
       this.#wakeDeliveryController?.();
       this.#markOperatorInboxChanged();
       return { accepted: true, task: cancelled };
@@ -1213,6 +1217,7 @@ export class ControlPlane {
     this.#taskControllerLoop = undefined;
     this.#deliveryControllerLoop = undefined;
     this.#drainPromise = undefined;
+    this.#replyStreams.close();
     await this.#store.disconnect();
     this.#dispatchErrors.flush();
   }
@@ -1908,6 +1913,8 @@ export class ControlPlane {
         task.contextPlan,
       );
       attempt = await this.#openTaskAttempt(work, task, durableExecution, selectedPlacement);
+      // Only CLI conversations have a reader for the live reply.
+      if (work.event.provider === "cli") this.#replyStreams.open(task.id, attempt.attemptNumber);
       executionController = new AbortController();
       this.#activeTaskControllers.set(task.id, executionController);
       leaseRenewalTimer = setInterval(
@@ -1947,6 +1954,7 @@ export class ControlPlane {
           recordAttemptWorkerReceipt(this.#store, executionTaskId, executionAttemptId, receipt),
       )) {
         workerEvents.push(event);
+        this.#replyStreams.event(task.id, event);
         if (!durableExecution) await this.#recordWorkerEvent(task.id, attempt.id, event);
         if (event.type === "progress.updated" && (await this.#supportsReplyReplacement(work))) {
           const text = taskProgressText(event.progress);
@@ -2103,9 +2111,42 @@ export class ControlPlane {
       );
     if (status !== "pending") {
       await this.#appendTaskEvent(outcome.taskId, `task.${status}`, result);
+      await this.#finishReplyStream(outcome.taskId, work.id, status);
       this.#wakeDeliveryController?.();
       this.#markOperatorInboxChanged();
     }
+  }
+
+  /** Ends a conversation Task's live reply with the final reply it recorded. */
+  async #finishReplyStream(
+    taskId: string,
+    inboundEventId: string,
+    status: "completed" | "failed" | "cancelled",
+  ): Promise<void> {
+    const reply = await this.#store
+      .findOutboundReply(inboundEventId, "final")
+      .catch((error: unknown) => {
+        this.#reportDispatchError(error);
+        return undefined;
+      });
+    this.#replyStreams.finish(taskId, {
+      status,
+      ...(reply === undefined
+        ? {}
+        : { reply: { presentation: reply.presentation, text: reply.text } }),
+    });
+  }
+
+  /**
+   * The live reply of a running conversation Task as Server-Sent Events, after the part numbered
+   * `after` or only parts still to come; undefined when the Task has no running reply stream, so
+   * the caller reads the record.
+   */
+  streamTaskReply(
+    taskId: string,
+    after: number | "now" = 0,
+  ): Promise<ReadableStream<string> | undefined> {
+    return this.#replyStreams.read(taskId, after);
   }
 
   async #retainSurfaceOutcome(
@@ -2258,7 +2299,9 @@ export class ControlPlane {
     if (output) await this.#store.recordTaskAttemptMountOutputManifests(taskId, attemptId, output);
     const { taskId: _workerTaskId, attemptId: _workerAttemptId, type, at, ...data } = event;
     const eventType = type.startsWith("execution.") ? type : `execution.${type}`;
-    await this.#appendTaskEvent(taskId, eventType, { at, ...data }, attemptId);
+    // Reply text reaches readers through the reply stream; the result keeps the final text.
+    if (type !== "output.delta")
+      await this.#appendTaskEvent(taskId, eventType, { at, ...data }, attemptId);
     await this.#withdrawSessionInput({ ...event, taskId, attemptId });
   }
 
@@ -2290,6 +2333,9 @@ export class ControlPlane {
     const eventType = type.startsWith("execution.") ? type : `execution.${type}`;
     // Before the journal cursor moves past it, so recovery repeats a withdrawal a crash cut off.
     await this.#withdrawSessionInput(entry.event);
+    // Reply text is not stored. Replay starts after the last stored entry, so a crash repeats only
+    // the deltas after it, and they change nothing.
+    if (type === "output.delta") return;
     await this.#store.appendTaskEvent({
       taskId,
       attemptId,

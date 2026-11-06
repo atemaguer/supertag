@@ -20,8 +20,9 @@ Use this for questions and small requests. To give a Tag an outcome to own, crea
 supertag message tag planner 'What are you working on?'
 ```
 
-The command waits for the reply and prints it. To send a longer message, pass `-` and write it to
-standard input:
+The command shows the reply as the Tag writes it. In a terminal, a dim line such as
+`· running: ls src` marks each command the Tag starts. The command exits when the reply is
+complete. To send a longer message, pass `-` and write it to standard input:
 
 ```sh
 supertag message tag planner - < question.md
@@ -58,17 +59,24 @@ Your conversation appears as a Session with the key `cli:<you>:<conversation>`.
   location's Permission Sets or Context Sets apply.
 - **The Tag remembers its other conversations.** It sees its open Objectives and can search its
   shared Sessions, such as Slack threads and GitHub issues, when a question needs them.
-- `--output json` prints the message record, with the Session, the Task, and the reply.
+- `--output json` waits for the reply and prints the message record, with the Session, the Task,
+  and the reply.
+- **Ctrl-C stops showing the reply, not the work.** The Tag keeps working. The command prints the
+  `supertag describe task` command that follows the Task.
 
 ## If something goes wrong
 
-- **The command stops waiting after 10 minutes.** The Tag is still working. Follow the Task with
-  the `supertag describe task` command the message prints. Its reply stays in the conversation, so
-  your next message there sees it.
+- **The command stops waiting after 10 minutes without progress.** The Tag is still working. Follow
+  the Task with the `supertag describe task` command the message prints. Its reply stays in the
+  conversation, so your next message there sees it.
 - **A message sent while the Tag is still replying.** If the Tag's harness accepts input while it
   works, your message joins the running reply, and the command prints that reply. Otherwise the
   message waits its turn.
 - **`Tag NAME does not exist`.** Check the name with `supertag list tag`.
+
+## Reference
+
+- [CLI conversation routes and the reply stream](../reference/control-plane-api.md#cli-conversations-experimental)
 
 ## Next
 

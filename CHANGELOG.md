@@ -14,6 +14,7 @@ within the pre-1.0 compatibility policy described in
 - A Tag's conversations share one memory. Every conversation sees the Tag's open Objectives, and the Tag can list, search, and read its other Sessions with `list_sessions`, `search_sessions`, and `read_session`. `list_objectives` and `read_objective` reach any Objective the Tag owns.
 - Sessions are `shared` or `private`. A Lark direct chat or a CLI conversation is private to its one person; existing Lark direct-chat Sessions become private when you migrate.
 - `supertag message tag NAME TEXT [--session NAME]` talks to a Tag from the terminal in a private conversation, with the Tag's Roles' permissions only.
+- `supertag message tag` shows the Tag's reply as it is written, with a line for each command the Tag runs; Ctrl-C stops showing it without cancelling the Task. `GET /api/v1/tags/NAME/messages/TASK_ID/stream` serves the reply as an AI SDK UI message stream, and reply text is no longer stored as one Task event per piece.
 - An Objective started in a conversation posts its completion summary there.
 
 ### Fixed

@@ -398,8 +398,23 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     }
     const target = await resolveControlPlaneTarget(selection.controlPlaneOverride);
     if (target === undefined) throw controlPlaneRequiredError();
-    process.stdout.write(await runTagConversationCommand(target, commandArgs));
-    return 0;
+    // Ctrl-C stops showing the reply without cancelling the Task.
+    const detach = new AbortController();
+    const stop = () => detach.abort();
+    process.once("SIGINT", stop);
+    try {
+      process.stdout.write(
+        await runTagConversationCommand(target, commandArgs, {
+          signal: detach.signal,
+          write: (text) => process.stdout.write(text),
+          warn: (text) => process.stderr.write(text),
+          interactive: process.stdout.isTTY === true,
+        }),
+      );
+    } finally {
+      process.removeListener("SIGINT", stop);
+    }
+    return detach.signal.aborted ? 130 : 0;
   }
   if (command === "tag") {
     if (

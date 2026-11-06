@@ -35,6 +35,7 @@
     "@supertag/worker-github": "workspace:*",
     "@supertag/worker-sdk": "workspace:*",
     "@supertag/worker-transport": "workspace:*",
+    "eventsource-parser": "4.1.3",
     "yaml": "2.8.1",
     "@supertag/worker-opencode": "workspace:*",
     "@supertag/deployment": "workspace:*"

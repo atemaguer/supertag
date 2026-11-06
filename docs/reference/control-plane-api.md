@@ -532,6 +532,45 @@ administrative audit log remains planned.
 
 See [Credential storage](credential-storage.md) for the server-side vault and client-side operator credential boundaries.
 
+## CLI conversations (Experimental)
+
+`supertag message tag` uses three routes. Each accepts the admin token or an Operator Token, and
+each caller sees only its own conversations; another caller's message returns `404`.
+
+```text
+POST /api/v1/tags/:name/messages
+GET  /api/v1/tags/:name/messages/:taskId
+GET  /api/v1/tags/:name/messages/:taskId/stream
+```
+
+`POST` sends `{"text": "...", "session": "NAME"}` and returns a `TagMessage` record. `GET` on the
+message returns the record, with `reply` once the Tag has answered.
+
+The `stream` route follows the reply as it is written. It answers with Server-Sent Events in the
+[AI SDK UI message stream protocol](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol) and the
+header `x-vercel-ai-ui-message-stream: v1`. Each event is one `data:` line with a JSON part and an
+`id:` line numbering it; the last event is `data: [DONE]`.
+
+| Part | Carries |
+| --- | --- |
+| `start` | The message, with the Task ID as `messageId`. |
+| `text-start`, `text-delta`, `text-end` | The Tag's reply text as its harness writes it. |
+| `data-activity` | A command or tool call starting and ending, or a retry in a new Task Attempt. |
+| `finish` | `messageMetadata.reply`, the final reply with its `presentation` and `text`. |
+| `error` | `errorText`, the error that ended the Task. |
+
+- **Resume.** Pass `?resumeAt=N` or a `Last-Event-ID: N` header to receive only the parts after
+  part `N` of a running reply.
+- **Finished replies.** When the Task has finished, or has no running stream, the route sends the
+  stored reply as one complete message.
+- **Joined messages.** A message that joined a running Task follows that Task's reply from the
+  moment it joined.
+- **Waiting.** Until the Task starts, the response stays open and sends a comment line every 15
+  seconds.
+
+Reply text reaches readers only through this stream. The Task's events record its command and tool
+activity and its result, not each piece of text.
+
 ## Tag messaging administration (Experimental)
 
 `/api/v1/tag-messaging/*` manages directional messaging grants, issues and revokes
