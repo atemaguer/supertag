@@ -66,6 +66,7 @@ import type {
   RetryOutboundReplyInput,
   RoleStore,
   Session,
+  SessionAudienceStore,
   SessionInputStore,
   SessionListFilter,
   SessionStatePersistence,
@@ -174,6 +175,7 @@ import { DrizzleResourceManagementStore } from "./resource-management-store.js";
 import { DrizzleRoleStore, storedExecution } from "./role-store.js";
 import * as postgresql from "./schema/postgresql.js";
 import * as sqlite from "./schema/sqlite.js";
+import { DrizzleSessionAudienceStore, sessionFromRow } from "./session-audience-store.js";
 import { DrizzleSessionStateStore } from "./session-state-store.js";
 import { DrizzleSpendStore } from "./spend-store.js";
 import { openSqliteDatabase } from "./sqlite-connection.js";
@@ -2434,6 +2436,12 @@ export class DrizzleStore implements Store {
       sessionKey,
       origin: input.origin,
       state: "open",
+      ...(input.audienceActorKey === undefined
+        ? { audience: "shared" }
+        : {
+            audience: "private",
+            audienceActorKey: required(input.audienceActorKey, "Session audience key"),
+          }),
       lastInteractionAt: input.at,
       createdAt: input.at,
       updatedAt: input.at,
@@ -2474,6 +2482,35 @@ export class DrizzleStore implements Store {
         )
         .orderBy(desc(t.lastInteractionAt), asc(t.id))
     ).map(sessionFromRow);
+  }
+
+  listVisibleSessions(
+    ...args: Parameters<SessionAudienceStore["listVisibleSessions"]>
+  ): ReturnType<SessionAudienceStore["listVisibleSessions"]> {
+    return this.#sessionAudience().listVisibleSessions(...args);
+  }
+  findVisibleSession(
+    ...args: Parameters<SessionAudienceStore["findVisibleSession"]>
+  ): ReturnType<SessionAudienceStore["findVisibleSession"]> {
+    return this.#sessionAudience().findVisibleSession(...args);
+  }
+  searchVisibleSessions(
+    ...args: Parameters<SessionAudienceStore["searchVisibleSessions"]>
+  ): ReturnType<SessionAudienceStore["searchVisibleSessions"]> {
+    return this.#sessionAudience().searchVisibleSessions(...args);
+  }
+  listVisibleOpenObjectives(
+    ...args: Parameters<SessionAudienceStore["listVisibleOpenObjectives"]>
+  ): ReturnType<SessionAudienceStore["listVisibleOpenObjectives"]> {
+    return this.#sessionAudience().listVisibleOpenObjectives(...args);
+  }
+  findVisibleObjective(
+    ...args: Parameters<SessionAudienceStore["findVisibleObjective"]>
+  ): ReturnType<SessionAudienceStore["findVisibleObjective"]> {
+    return this.#sessionAudience().findVisibleObjective(...args);
+  }
+  #sessionAudience(): DrizzleSessionAudienceStore {
+    return new DrizzleSessionAudienceStore(this.#db, this.#tables, this.provider);
   }
 
   async openTask(input: OpenTaskInput): Promise<Task> {
@@ -2584,6 +2621,8 @@ export class DrizzleStore implements Store {
       conditions.push(sql`${t.id} <> ${required(filter.excludeTaskId, "Excluded Task id")}`);
     if (filter.createdAfter !== undefined)
       conditions.push(gte(t.endedAt, required(filter.createdAfter, "Task history start time")));
+    if (filter.completedBefore !== undefined)
+      conditions.push(lt(t.endedAt, required(filter.completedBefore, "Task history end time")));
     const pg = this.provider === "postgresql";
     const references = pg
       ? sql`jsonb_array_elements(coalesce(${t.result}->'references', '[]'::jsonb)) as r(value)`
@@ -3309,7 +3348,12 @@ export class DrizzleStore implements Store {
   async listSurfaceAccounts(): Promise<readonly SurfaceAccount[]> {
     const t = this.#tables.surfaceAccounts;
     return (
-      await this.#db.select().from(t).where(eq(t.status, "connected")).orderBy(asc(t.createdAt))
+      await this.#db
+        .select()
+        .from(t)
+        // The built-in CLI conversation account is not a connected surface.
+        .where(and(eq(t.status, "connected"), ne(t.provider, "cli")))
+        .orderBy(asc(t.createdAt))
     ).map(surfaceAccountFromRow);
   }
   async retireSurfaceAccount(id: string): Promise<SurfaceAccount | undefined> {
@@ -4755,19 +4799,6 @@ function tagContextActivationFromRow(row: any): TagContextActivation {
   };
 }
 
-function sessionFromRow(row: any): Session {
-  if (row.state !== "open") throw new Error(`Unsupported session state: ${row.state}`);
-  return {
-    id: row.id,
-    tagId: row.tagId,
-    sessionKey: row.sessionKey,
-    origin: record(row.origin, "session origin"),
-    state: "open",
-    lastInteractionAt: row.lastInteractionAt,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
 function taskFromRow(row: any): Task {
   return {
     id: row.id,
@@ -5380,6 +5411,7 @@ function parseTaskReferenceRelationship(value: string): TaskReference["relations
 }
 function parseSurfaceProvider(value: string): SurfaceProvider {
   if (
+    value === "cli" ||
     value === "github" ||
     value === "lark" ||
     value === "linear" ||

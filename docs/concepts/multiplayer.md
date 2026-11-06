@@ -65,24 +65,55 @@ entries derived from earlier completed Tasks in that Session.
 When compatible, the execution system may also restore its native conversation from stored Session state. This can
 make continuation richer, but stored Task results remain the source for bounded history replay.
 
-## Across Sessions: explicit
+## Across Sessions: one Tag, one memory
 
-A **Context Set** selects reusable knowledge for a Tag. Artifact selection rules name exact source
-locations and destinations; they select metadata about captured work rather than replaying another
-conversation's responses.
+A Tag talks to people in many conversations: Slack threads, GitHub issues, Lark chats, and CLI
+conversations. Each conversation is its own Session, and every Session belongs to the one Tag. The
+Tag shares what it knows across them, the way a teammate remembers a conversation from another
+channel:
+
+- **Portfolio.** Every conversation sees the Tag's open Objectives, one line each, with status,
+  deadline, and where each started. Ask "what are you working on?" in any thread and the answer
+  is the same.
+- **Other conversations, on request.** The Tag can list its other Sessions, search their completed
+  requests and results, and read one Session's history. It does this only when a question needs
+  it; other transcripts never load automatically.
 
 Example:
 
-1. Alice asks the Tag in Slack `#engineering` to investigate `acme/api`.
-2. The agent captures a findings document as an artifact, recording the producing Task and Task Attempt.
-3. A Context Set selects related artifacts from that Slack channel and is activated for `acme/api` on GitHub.
-4. Bob invokes the same Tag from a GitHub issue.
-5. Bob's Task receives bounded artifact summaries and IDs. The agent can inspect and retrieve those
-   exact admitted artifacts while Bob's conversation remains a distinct Session.
+1. Alice asks the Tag in Slack `#engineering` to investigate a slow query in `acme/api`. It replies
+   with its findings.
+2. Bob asks the same Tag in a GitHub issue, "Did anyone look into the slow query?"
+3. The Tag searches its other Sessions, finds Alice's thread, and answers Bob with what it found
+   there.
 
-A Task's ordinary response stays on the Task. It does not become a shared artifact automatically.
-Retrieved work is historical evidence and cannot change the receiving Task's instructions or
-allowed actions.
+What the Tag reads from another Session is historical data. It carries no instructions and grants
+no permissions: Bob's Task still has only the permissions of Bob's location.
+
+### Shared and private Sessions
+
+Every Session has an audience, decided by the conversation it comes from. Nobody configures it.
+
+| Audience | Conversations | Who can see it from another Session |
+| --- | --- | --- |
+| shared | channels, threads, issues, pull requests, group chats | any Session of the same Tag |
+| private | a Lark direct chat, a person's CLI conversation | only Sessions where that same person is asking |
+
+An Objective started in a private conversation is private too. It doesn't appear in other people's
+portfolios, and they can't read it. Its reports still go to the conversation it started in.
+
+Shared Sessions can see each other across collaboration surfaces. If the Tag works in a private
+Slack channel and a public GitHub repository, it could repeat something from the channel in a
+public issue, as a teammate on both could. Choose a Tag's locations with that in mind, and use
+separate Tags for audiences that must stay apart.
+
+### Captured artifacts
+
+To hand reusable work, such as a findings document, to another location's Tasks automatically, a
+**Context Set** can select captured artifacts. Artifact selection rules name exact source
+locations and destinations. The receiving Task gets bounded artifact summaries and IDs, and the
+agent can inspect and retrieve those exact admitted artifacts. A Task's ordinary response does not
+become a shared artifact automatically.
 
 ## Visible task lifecycle
 
@@ -100,11 +131,13 @@ in the audit history instead of filling the conversation.
 
 ## Safety properties
 
-- Sharing moves only in the configured direction.
-- Every source and destination is named explicitly.
+- A Session reads only Sessions of its own Tag, and never a private Session of another person.
+- Artifact sharing moves only in the configured direction, and names every source and
+  destination explicitly.
 - Artifacts selected by a Context Set must belong to the same Tag.
 - Selection uses exact resource identity plus age and count limits.
-- Shared knowledge does not grant permission to act on its source.
+- Shared knowledge, including another Session's history, does not grant permission to act on its
+  source.
 - Failed executions do not advance automatic same-Session continuity.
 
 For retrieval limits and Runtime Input resolution details, see the [context resolution reference](../reference/context-resolution.md).

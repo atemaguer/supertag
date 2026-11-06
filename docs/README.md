@@ -40,6 +40,7 @@ Follow this order on your first visit:
 | Run and inspect work from the terminal | [CLI operator walkthrough](operations/cli.md) |
 | Understand the main ideas | [Core concepts](concepts/README.md) |
 | Choose how to direct an AI engineering team | [The interaction model](concepts/interaction-model.md) |
+| Ask a Tag a question from your terminal | [Talk to a Tag from the CLI](guides/talk-to-a-tag.md) |
 | Give several Tags a shared outcome | [Coordinate Tasks toward an Objective](guides/objective-coordination.md) |
 | Keep a Tag responsible as conditions change | [Maintain an ongoing responsibility](guides/ongoing-responsibilities.md) |
 | Understand progress, blockers, and results | [Check an Objective's progress](guides/objective-overview.md) |
@@ -128,6 +129,7 @@ Choose the tool your team already uses:
 - [Coordinate Tasks toward an Objective](guides/objective-coordination.md)
 - [Organize Tags into Teams](guides/teams.md)
 - [Coordinate in a Team channel](guides/workstreams.md)
+- [Talk to a Tag from the CLI](guides/talk-to-a-tag.md)
 - [Send messages between Tags](guides/tag-messaging.md)
 - [Maintain an ongoing responsibility](guides/ongoing-responsibilities.md)
 - [Check an Objective's progress](guides/objective-overview.md)

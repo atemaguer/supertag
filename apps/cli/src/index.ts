@@ -39,6 +39,7 @@ import { runPsCommand } from "./ps.js";
 import { isResourceCommand, runResourceCommand } from "./resources.js";
 import { setupSurface } from "./setup.js";
 import { runSpendCommand } from "./spend.js";
+import { runTagConversationCommand, tagConversationHelp } from "./tag-conversation.js";
 import { isTagCommand, tagResourceHelp } from "./tags.js";
 import { isTaskCommand, runTaskCommand, taskHelp } from "./tasks.js";
 import { runTeamCommand, teamHelp } from "./teams.js";
@@ -390,6 +391,16 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     process.stdout.write(await runTagMessagingCommand(target, commandArgs));
     return 0;
   }
+  if (command === "tag" && provider === "message") {
+    if (commandArgs.includes("--help") || commandArgs.includes("-h")) {
+      process.stdout.write(tagConversationHelp());
+      return 0;
+    }
+    const target = await resolveControlPlaneTarget(selection.controlPlaneOverride);
+    if (target === undefined) throw controlPlaneRequiredError();
+    process.stdout.write(await runTagConversationCommand(target, commandArgs));
+    return 0;
+  }
   if (command === "tag") {
     if (
       provider === undefined ||
@@ -564,6 +575,7 @@ Direct and inspect work:
   supertag get objective ID
   supertag describe objective ID [--output text|json] [--team ID] [--limit N] [--offset N]
   supertag message objective ID TEXT|- [--reopen] [--reply-to MESSAGE_ID] [--output text|json]
+  supertag message tag NAME TEXT|- [--session NAME] [--output text|json]
   supertag approve objective ID
   supertag update objective ID --status STATUS [--revision N]
   supertag update objective ID [--revision N] [--deadline ISO] [--budget-minor N] [--runtime-action ACTION ...]

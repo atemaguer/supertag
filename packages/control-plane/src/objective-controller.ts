@@ -22,6 +22,7 @@ import {
   objectiveAdmissionBlocker,
   objectiveCancellationNotice,
   objectiveClosed,
+  objectiveCompletionNotice,
   objectiveDeadlineGraceMs,
   objectiveDeadlineNotices,
   objectiveDeadlineStopsRunning,
@@ -162,6 +163,12 @@ import {
 } from "./roles.js";
 import { SessionContinuity } from "./session-continuity.js";
 import { RESUME_GRACE_MS, SuspendDetector, type SystemWake } from "./suspend-detector.js";
+import {
+  conversationViewer,
+  isTagSessionTool,
+  TAG_SESSION_TOOLS,
+  tagSessionCommand,
+} from "./tag-sessions.js";
 import { TeamLiveDeliveryDispatcher, withdrawTeamLiveInput } from "./team-live-delivery.js";
 import { confirmWaitCleanup } from "./wait-cleanup.js";
 import { describeWorklet } from "./worklet-descriptor.js";
@@ -348,6 +355,12 @@ type ObjectivePersistence = Pick<
   | "getTagMessage"
   | "recheckOwnerDeliveryMessage"
   | "getSurfaceObjective"
+  | "listVisibleSessions"
+  | "findVisibleSession"
+  | "searchVisibleSessions"
+  | "listVisibleOpenObjectives"
+  | "findVisibleObjective"
+  | "listTaskHistory"
   | "getTeam"
   | "getWorkstream"
   | "listTaskAssignmentFollowups"
@@ -679,6 +692,7 @@ export class ObjectiveController {
         "read_commitments",
         "start_objective",
         "instruct_objective",
+        ...TAG_SESSION_TOOLS,
       ];
     const current = await this.revalidateCaller(caller);
     const core = [
@@ -871,18 +885,35 @@ export class ObjectiveController {
       undefined,
       { operatorId: principal.operatorId },
     );
-    await this.settleCompletedObjective(completed);
+    await this.settleCompletedObjective(completed, { report: true });
     return completed;
   }
 
-  /** Completion already succeeded; leftovers the scheduler retries must not fail the request. */
-  private async settleCompletedObjective(objective: Objective): Promise<void> {
+  /**
+   * Completion already succeeded; leftovers the scheduler retries must not fail the request. The
+   * completion summary posts once to the Objective's home Session, only when this update moved the
+   * Objective into completed: a later update to a completed Objective settles leftovers but posts
+   * nothing. The delivery key names the completing revision, so a retried settle posts nothing and
+   * a reopened Objective's next completion posts again.
+   */
+  private async settleCompletedObjective(
+    objective: Objective,
+    { report }: { readonly report: boolean },
+  ): Promise<void> {
     try {
       await this.settleClosedObjective(objective);
       this.clearSwallowed({ objectiveId: objective.id });
     } catch (error) {
       this.reportSwallowed(error, { objectiveId: objective.id });
     }
+    if (report && this.surfaceReporter)
+      await this.surfaceReporter(
+        objective.id,
+        objectiveCompletionNotice(objective),
+        objectiveReportKey(objective.id, `objective-completed:${objective.revision}`),
+      ).catch(() => {
+        // An Objective without a verified surface destination is still completed.
+      });
   }
 
   /**
@@ -2636,6 +2667,7 @@ export class ObjectiveController {
       case "update_objective": {
         const { objectiveId: _id, ...rest } = input;
         const update = parseObjectiveStatus(rest);
+        const previous = await this.store.getObjective(objectiveId);
         // An operator's new runtime actions stay within the owner's Permission Sets; Tags are
         // refused by the store.
         const bounded =
@@ -2646,7 +2678,7 @@ export class ObjectiveController {
                 runtimeActions: (
                   await resolveOwnerObjectiveRuntimeActions(this.store, {
                     objectiveId,
-                    ownerTagId: (await this.store.getObjective(objectiveId)).ownerTagId,
+                    ownerTagId: previous.ownerTagId,
                     requested: update.runtimeActions,
                   })
                 ).runtimeActions,
@@ -2666,7 +2698,8 @@ export class ObjectiveController {
             ? { taskId: caller.taskId, attemptCount: caller.attemptCount }
             : { operatorId: principal?.operatorId ?? "administrative-api" },
         );
-        if (updated.status === "completed") await this.settleCompletedObjective(updated);
+        if (updated.status === "completed")
+          await this.settleCompletedObjective(updated, { report: previous.status !== "completed" });
         return updated;
       }
       case "send_message": {
@@ -3278,6 +3311,8 @@ export class ObjectiveController {
     const { task, inbound } = await this.surfaceState(caller.taskId, caller.attemptId);
     if (name === "request_action_approval")
       return this.approvals.requestAction(await this.approvalCaller(caller), input);
+    if (isTagSessionTool(name))
+      return tagSessionCommand(this.store, name, input, conversationViewer(task, inbound));
     const command = parseSurfaceObjectiveCommand(inbound.event);
     if (name === "attach_objective") {
       mailboxObject(input, ["objectiveId"]);
@@ -3345,9 +3380,24 @@ export class ObjectiveController {
       input,
       name === "read_commitments" ? ["objectiveId", "limit", "offset"] : ["objectiveId"],
     );
-    const objective = await this.store.getSurfaceObjective(task.id);
+    const bound = await this.store.getSurfaceObjective(task.id);
+    // read_objective also reaches any other Objective of the Tag this conversation may see.
+    const objective =
+      name === "read_objective" &&
+      input["objectiveId"] !== undefined &&
+      input["objectiveId"] !== bound?.id
+        ? await this.store.findVisibleObjective(
+            conversationViewer(task, inbound),
+            mailboxText(input["objectiveId"], "objectiveId"),
+          )
+        : bound;
     if (!objective || (input["objectiveId"] !== undefined && input["objectiveId"] !== objective.id))
-      throw new TagMessagingError(404, "No matching Objective is bound to this surface");
+      throw new TagMessagingError(
+        404,
+        name === "read_objective"
+          ? "No matching Objective is visible to this conversation"
+          : "No matching Objective is bound to this surface",
+      );
     if (name === "select_objective") return objective;
     if (name === "read_objective") {
       const assignments = await this.store.listTaskAssignments(objective.id);

@@ -23,7 +23,10 @@ whole system rather than another first-class resource.
   [the coordination reference](coordination.md).
 - <a id="task"></a>**Task** — one request or assignment accepted for a Tag under a recorded policy. See
   [the task concepts](../concepts/tasks.md).
-- <a id="session"></a>**Session** — a group of Tasks from the same conversation.
+- <a id="session"></a>**Session** — a group of Tasks from the same conversation. All of a Tag's Sessions share
+  its open Objectives and can read each other, except a private Session, such as a direct chat or a
+  CLI conversation, which only its one person's Sessions can read. See
+  [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-one-memory).
 - <a id="team"></a>**Team** — a group of Tags with a shared responsibility, lead, and capacity boundary. See
   [Team rules](coordination.md#team-rules).
 - <a id="finding"></a>**finding** — one problem a reviewer reports in a Task result, with a severity of high, medium,

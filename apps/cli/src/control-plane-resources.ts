@@ -347,7 +347,11 @@ export type SessionResource = ControlPlaneResource<
     readonly sessionKey: string;
     readonly origin: JsonRecord;
   },
-  { readonly phase: Session["state"]; readonly lastInteractionAt: string }
+  {
+    readonly phase: Session["state"];
+    readonly audience: Session["audience"];
+    readonly lastInteractionAt: string;
+  }
 >;
 
 export type WorkerHostResource = ControlPlaneResource<
@@ -1458,7 +1462,11 @@ export function sessionResource(session: Session): SessionResource {
       sessionKey: session.sessionKey,
       origin: session.origin,
     },
-    status: { phase: session.state, lastInteractionAt: session.lastInteractionAt },
+    status: {
+      phase: session.state,
+      audience: session.audience,
+      lastInteractionAt: session.lastInteractionAt,
+    },
   };
 }
 

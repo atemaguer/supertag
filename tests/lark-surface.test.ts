@@ -99,6 +99,16 @@ describe("Lark surface", () => {
     expect(larkChatScope(" oc_engineering ")).toBe("chat:oc_engineering");
   });
 
+  it("marks a direct chat as a direct conversation", () => {
+    expect(
+      normalize({
+        ...initialMessage,
+        message: { ...initialMessage.message, chat_type: "p2p", mentions: [] },
+      }),
+    ).toMatchObject({ direct: true, kind: "mention" });
+    expect(normalize(initialMessage)).not.toHaveProperty("direct");
+  });
+
   it("accepts non-mentioned thread replies but ignores unaddressed top-level group messages", () => {
     const followUp: LarkInboundMessageEvent = {
       ...initialMessage,
@@ -307,6 +317,47 @@ describe("Lark surface", () => {
         "lark:cli_supertag:oc_engineering:om_root",
         "lark:cli_supertag:oc_engineering:om_root",
       ]);
+
+      // A direct chat opens a Session private to its one person; a group chat stays shared.
+      await store.addTagRoute({
+        tagId: tag.id,
+        surfaceAccountId: account.id,
+        scope: larkChatScope("oc_direct"),
+      });
+      const direct = normalize({
+        ...initialMessage,
+        event_id: "event-lark-direct",
+        message: {
+          ...initialMessage.message,
+          message_id: "om_direct",
+          chat_id: "oc_direct",
+          chat_type: "p2p",
+          content: JSON.stringify({ text: "Just between us" }),
+          mentions: [],
+        },
+      });
+      if (direct === undefined) throw new Error("Expected Lark direct event");
+      await expect(controlPlane.ingestSurfaceEvent(direct)).resolves.toMatchObject({
+        status: "accepted",
+      });
+      await vi.waitFor(() => expect(replies).toHaveLength(6));
+      const sessions = await store.listSessions({ tagId: tag.id });
+      expect(
+        sessions.find((session) => session.sessionKey === "lark:cli_supertag:oc_direct:om_direct"),
+      ).toMatchObject({
+        audience: "private",
+        audienceActorKey: `lark:${account.id}:ou_requester`,
+      });
+      expect(
+        sessions.find(
+          (session) => session.sessionKey === "lark:cli_supertag:oc_engineering:om_root",
+        ),
+      ).toMatchObject({ audience: "shared" });
+      expect(
+        sessions.find(
+          (session) => session.sessionKey === "lark:cli_supertag:oc_engineering:om_root",
+        )?.audienceActorKey,
+      ).toBeUndefined();
     } finally {
       await controlPlane.stop();
       await rm(directory, { recursive: true, force: true });

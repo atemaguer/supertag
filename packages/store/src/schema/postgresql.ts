@@ -504,6 +504,8 @@ export const sessions = pgTable(
     sessionKey: text("sessionKey").notNull(),
     origin: json("origin").notNull(),
     state: text("state").notNull(),
+    audience: text("audience").notNull().default("shared"),
+    audienceActorKey: text("audienceActorKey"),
     lastInteractionAt: text("lastInteractionAt").notNull(),
     createdAt: text("createdAt").notNull(),
     updatedAt: text("updatedAt").notNull(),

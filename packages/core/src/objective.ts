@@ -566,6 +566,22 @@ export function objectiveCancellationNotice(
     : `An operator cancelled Objective ${objective.id}.\nIts open Tasks were cancelled; no new work will start for it.`;
 }
 
+/** A completion report quotes at most this many characters of the completion summary. */
+export const OBJECTIVE_COMPLETION_NOTICE_SUMMARY_LIMIT = 1500;
+
+/** The status report a completed Objective posts to its home Session. */
+export function objectiveCompletionNotice(
+  objective: Pick<Objective, "id" | "completionSummary">,
+): string {
+  const summary = objective.completionSummary?.trim();
+  if (!summary) return `Objective ${objective.id} is completed.`;
+  const quoted =
+    summary.length > OBJECTIVE_COMPLETION_NOTICE_SUMMARY_LIMIT
+      ? `${summary.slice(0, OBJECTIVE_COMPLETION_NOTICE_SUMMARY_LIMIT - 1)}…`
+      : summary;
+  return `Objective ${objective.id} is completed: ${quoted}`;
+}
+
 /** At most this many changed Tasks are named in a resume summary; the rest are counted. */
 export const OBJECTIVE_RESUME_SUMMARY_TASKS = 10;
 

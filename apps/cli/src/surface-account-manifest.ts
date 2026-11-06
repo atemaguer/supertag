@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { SurfaceProvider, SurfaceSecretReference } from "@supertag/core";
+import type { ConnectedSurfaceProvider, SurfaceSecretReference } from "@supertag/core";
 import { verifyGitHubAppAccount, verifyGitHubTokenAccount } from "@supertag/surface-github";
 import { verifyLarkAccount } from "@supertag/surface-lark";
 import { verifyLinearAccount } from "@supertag/surface-linear";
@@ -17,7 +17,7 @@ import { verifyTeamsAccount } from "@supertag/surface-teams";
  */
 export interface SurfaceAccountManifest {
   readonly name: string;
-  readonly provider: SurfaceProvider;
+  readonly provider: ConnectedSurfaceProvider;
   readonly displayName?: string;
   /** Canonical: defaults filled in, URLs normalized. */
   readonly configuration: Readonly<Record<string, string>>;
@@ -26,7 +26,7 @@ export interface SurfaceAccountManifest {
 
 /** The manifest-form spec field management compares: no values, only references. */
 export interface SurfaceAccountManifestSpec {
-  readonly provider: SurfaceProvider;
+  readonly provider: ConnectedSurfaceProvider;
   readonly displayName?: string;
   readonly configuration: Readonly<Record<string, string>>;
   readonly secrets: Readonly<Record<string, SurfaceSecretReference>>;
@@ -52,7 +52,7 @@ interface ProviderShape {
   readonly allSecrets: readonly string[];
 }
 
-const SHAPES: Readonly<Record<SurfaceProvider, ProviderShape>> = {
+const SHAPES: Readonly<Record<ConnectedSurfaceProvider, ProviderShape>> = {
   slack: {
     options: { transport: ["socket", "http"] },
     requiredOptions: () => [],
@@ -97,7 +97,7 @@ const SHAPES: Readonly<Record<SurfaceProvider, ProviderShape>> = {
   },
 };
 
-export function isSurfaceProvider(value: unknown): value is SurfaceProvider {
+export function isSurfaceProvider(value: unknown): value is ConnectedSurfaceProvider {
   return typeof value === "string" && (PROVIDERS as readonly string[]).includes(value);
 }
 
@@ -150,7 +150,7 @@ export function manifestSpec(manifest: SurfaceAccountManifest): SurfaceAccountMa
 
 /** Provider options with defaults filled in and API URLs normalized, so equal inputs compare equal. */
 export function canonicalConfiguration(
-  provider: SurfaceProvider,
+  provider: ConnectedSurfaceProvider,
   value: unknown,
 ): Record<string, string> {
   if (!isRecord(value)) throw new Error("SurfaceAccount spec.configuration must be a mapping");
@@ -202,7 +202,7 @@ export function canonicalConfiguration(
 }
 
 function parseSecretReferences(
-  provider: SurfaceProvider,
+  provider: ConnectedSurfaceProvider,
   configuration: Record<string, string>,
   value: unknown,
 ): Record<string, SurfaceSecretReference> {
@@ -387,7 +387,7 @@ export async function verifySurfaceAccount(
 
 /** The stored account's options in manifest form, recovered from what verification recorded. */
 export function declaredConfiguration(account: {
-  readonly provider: SurfaceProvider;
+  readonly provider: ConnectedSurfaceProvider;
   readonly authMethod: string;
   readonly externalAccountId: string;
   readonly configuration: Readonly<Record<string, unknown>>;

@@ -67,17 +67,26 @@ an execution machine does not erase the Task.
 ## Session
 
 A Session groups the Tasks that belong to one native conversation, such as a
-Slack thread, GitHub issue, Linear issue, Lark chat thread, or Teams channel
-thread. Replies in an established Session do not need to mention `@SuperTag`
+Slack thread, GitHub issue, Linear issue, Lark chat thread, Teams channel
+thread, or CLI conversation. Replies in an established Session do not need to mention `@SuperTag`
 again.
 
 Continuity within a Session is automatic and limited to that conversation. A new Task receives
 bounded history entries from earlier completed Tasks in the Session. A compatible agent system may also resume its
 own conversation state, but SuperTag does not depend on that shortcut.
 
-Different threads remain different Sessions, even when they invoke the same
-Tag. Capture reusable outputs as [artifacts](../reference/artifacts.md), then use a Context Set
-to select relevant artifacts across those boundaries.
+Different threads remain different Sessions, even when they invoke the same Tag. They still share
+one memory: each conversation sees the Tag's open Objectives, and the Tag can search and read its
+other Sessions when a question needs them. A Session is **shared** or **private**, depending on its
+conversation: a direct chat or a person's CLI conversation is private to that person. See
+[across Sessions](multiplayer.md#across-sessions-one-tag-one-memory).
+
+An Objective started in a conversation reports back there: its questions, progress, approval
+notices, and completion. That conversation is the Objective's home Session. The work itself runs in
+the Objective's own Tasks, so planning and tool output stay out of the thread.
+
+You can also talk to a Tag from a terminal with `supertag message tag`. See
+[Talk to a Tag from the CLI](../guides/talk-to-a-tag.md).
 
 ## Task Attempt
 

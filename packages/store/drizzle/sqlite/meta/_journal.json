@@ -204,6 +204,20 @@
       "when": 1791363947964,
       "tag": "0028_attempt_mount_writes",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1793995059896,
+      "tag": "0029_safe_white_tiger",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1793995802722,
+      "tag": "0030_session_audience_backfill",
+      "breakpoints": true
     }
   ]
 }

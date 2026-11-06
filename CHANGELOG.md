@@ -9,6 +9,13 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Added
+
+- A Tag's conversations share one memory. Every conversation sees the Tag's open Objectives, and the Tag can list, search, and read its other Sessions with `list_sessions`, `search_sessions`, and `read_session`. `list_objectives` and `read_objective` reach any Objective the Tag owns.
+- Sessions are `shared` or `private`. A Lark direct chat or a CLI conversation is private to its one person; existing Lark direct-chat Sessions become private when you migrate.
+- `supertag message tag NAME TEXT [--session NAME]` talks to a Tag from the terminal in a private conversation, with the Tag's Roles' permissions only.
+- An Objective started in a conversation posts its completion summary there.
+
 ### Fixed
 
 - Each release's `install.sh` installs that release's version, and alpha releases publish to npm's `latest` tag, so the installer and `npm install -g supertag-ai` get the current alpha.

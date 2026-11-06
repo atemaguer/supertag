@@ -17,6 +17,7 @@ import type {
   AddTagPermissionInput,
   AnyArtifactTransferGrantClaims,
   AuthKey,
+  ConnectedSurfaceProvider,
   ExecutionSettings,
   GatewayCredentialVault,
   ManagedResourceKind,
@@ -30,6 +31,7 @@ import type {
   TagMessagingGrant,
   TagPermission,
   TagPermissionSet,
+  Task,
   TaskAssignment,
   VolumeSpec,
   WorkspaceSpec,
@@ -1533,6 +1535,18 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
     return;
   }
 
+  const tagMessageMatch = /^\/api\/v1\/tags\/([^/]+)\/messages(?:\/([^/]+))?$/u.exec(url.pathname);
+  if (tagMessageMatch?.[1] !== undefined) {
+    await handleTagMessage(
+      context,
+      decodeURIComponent(tagMessageMatch[1]),
+      tagMessageMatch[2] === undefined ? undefined : decodeURIComponent(tagMessageMatch[2]),
+      // The admin token is one operator; each Operator Token is another.
+      authentication.kind === "break-glass" ? "admin" : authentication.principal.operatorId,
+    );
+    return;
+  }
+
   if (context.request.method === "POST" && url.pathname === "/api/v1/tags") {
     const options = managedWriteOptions(url);
     const body = await readJsonBody(context.request);
@@ -1825,13 +1839,14 @@ interface ResolvedTagLocation {
 }
 
 /** Scope fields per provider, spelled as the camelCase `--add-location` flags. */
-const LOCATION_SCOPES: Readonly<Record<SurfaceProvider, readonly (readonly string[])[]>> = {
-  slack: [["channelId"]],
-  lark: [["chatId"]],
-  teams: [["teamId", "channelId"]],
-  github: [["repo"], ["repoId"]],
-  linear: [["team"], ["teamId"]],
-};
+const LOCATION_SCOPES: Readonly<Record<ConnectedSurfaceProvider, readonly (readonly string[])[]>> =
+  {
+    slack: [["channelId"]],
+    lark: [["chatId"]],
+    teams: [["teamId", "channelId"]],
+    github: [["repo"], ["repoId"]],
+    linear: [["team"], ["teamId"]],
+  };
 
 function parseDesiredTag(value: unknown): DesiredTag {
   if (
@@ -1916,7 +1931,7 @@ function parseTagLocation(value: unknown, index: number): DesiredTagLocation {
   const provider = value["provider"];
   if (typeof provider !== "string" || !Object.hasOwn(LOCATION_SCOPES, provider))
     throw new Error(`${field}.provider must be slack, github, lark, linear, or teams`);
-  const alternatives = LOCATION_SCOPES[provider as SurfaceProvider];
+  const alternatives = LOCATION_SCOPES[provider as ConnectedSurfaceProvider];
   const scopeFields = new Set(alternatives.flat());
   const allowed = new Set([
     "provider",
@@ -3291,12 +3306,147 @@ async function applySurfaceAccountManifest(
   writeJson(context.response, existing === undefined ? 201 : 200, surfaceAccountResource(account));
 }
 
+/** One message in an operator's CLI conversation with a Tag, and the Tag's reply once recorded. */
+interface TagMessageRecord {
+  readonly apiVersion: typeof CONTROL_PLANE_API_VERSION;
+  readonly kind: "TagMessage";
+  readonly tag: string;
+  readonly session: string;
+  readonly sessionId: string;
+  readonly taskId: string;
+  /** The running Task this message was delivered into, when it joined one instead of starting. */
+  readonly joinedTaskId?: string;
+  readonly status: "waiting" | "replied";
+  /** The Tag's final reply: its result, or the error that ended the Task. */
+  readonly reply?: { readonly presentation: string; readonly text: string };
+}
+
+const TAG_CONVERSATION_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
+
+/**
+ * `POST /api/v1/tags/NAME/messages` sends one message in the operator's CLI conversation;
+ * `GET /api/v1/tags/NAME/messages/TASK_ID` reads it back with the reply once there is one.
+ * A conversation is private: only the operator who sent the message reads it here.
+ */
+async function handleTagMessage(
+  context: ControlPlaneApiRequestContext,
+  tagName: string,
+  taskId: string | undefined,
+  operatorId: string,
+): Promise<void> {
+  const method = taskId === undefined ? "POST" : "GET";
+  if (context.request.method !== method) {
+    writeStatusError(context.response, 405, "MethodNotAllowed", `Use ${method} for this path`);
+    return;
+  }
+  const tag = await context.store.findTagByName(tagName);
+  if (tag === undefined) {
+    writeStatusError(context.response, 404, "NotFound", `Tag ${tagName} does not exist`);
+    return;
+  }
+  const prefix = `cli:${operatorId}:`;
+  if (taskId === undefined) {
+    const body = await readJsonBody(context.request);
+    const text = isRecord(body) && typeof body["text"] === "string" ? body["text"].trim() : "";
+    const session = isRecord(body) && body["session"] !== undefined ? body["session"] : "default";
+    if (!text) {
+      writeStatusError(context.response, 400, "BadRequest", "The message is empty");
+      return;
+    }
+    if (typeof session !== "string" || !TAG_CONVERSATION_NAME.test(session)) {
+      writeStatusError(
+        context.response,
+        400,
+        "BadRequest",
+        "A session name is 1 to 64 letters, digits, '.', '_' or '-', starting with a letter or digit",
+      );
+      return;
+    }
+    if (!context.controlPlane.isAccepting) {
+      writeJson(context.response, 503, { error: "control_plane_draining" });
+      return;
+    }
+    const result = await context.controlPlane.messageTag({
+      tagName: tag.name,
+      operatorId,
+      session,
+      text,
+    });
+    if (result.taskId === undefined) {
+      writeStatusError(
+        context.response,
+        409,
+        "Conflict",
+        result.reason ?? `Tag ${tag.name} did not accept the message`,
+      );
+      return;
+    }
+    taskId = result.taskId;
+  }
+  const task = await context.store.findTaskById(taskId);
+  const origin = isRecord(task?.trigger["origin"]) ? task.trigger["origin"] : undefined;
+  const sessionKey = typeof origin?.["sessionKey"] === "string" ? origin["sessionKey"] : "";
+  if (task === undefined || task.tagId !== tag.id || !sessionKey.startsWith(prefix)) {
+    writeStatusError(
+      context.response,
+      404,
+      "NotFound",
+      `Task ${taskId} is not a message in your conversations with Tag ${tag.name}`,
+    );
+    return;
+  }
+  const { reply, joinedTaskId } = await tagMessageReply(context.store, task);
+  const record: TagMessageRecord = {
+    apiVersion: CONTROL_PLANE_API_VERSION,
+    kind: "TagMessage",
+    tag: tag.name,
+    session: sessionKey.slice(prefix.length),
+    sessionId: task.sessionId,
+    taskId: task.id,
+    ...(joinedTaskId === undefined ? {} : { joinedTaskId }),
+    status: reply === undefined ? "waiting" : "replied",
+    ...(reply === undefined
+      ? {}
+      : { reply: { presentation: reply.presentation, text: reply.text } }),
+  };
+  writeJson(context.response, method === "POST" ? 201 : 200, record);
+}
+
+/**
+ * The reply that answers one CLI message. A message sent while an earlier Task in the Session
+ * still runs is delivered into that Task, so the answer is that Task's final reply; a delivery
+ * whose outcome is unknown is answered by the error notice recorded for it.
+ */
+async function tagMessageReply(
+  store: ControlPlaneApiRequestContext["store"],
+  task: Task,
+): Promise<{
+  readonly reply?: { readonly presentation: string; readonly text: string };
+  readonly joinedTaskId?: string;
+}> {
+  if (task.inboundEventId === null) return {};
+  const own = await store.findOutboundReply(task.inboundEventId, "final");
+  if (own !== undefined) return { reply: own };
+  const unresolved = await store.findOutboundReply(task.inboundEventId, "session-input-unresolved");
+  if (unresolved !== undefined) return { reply: unresolved };
+  const reason = task.outcome?.["reason"];
+  const targetTaskId = task.outcome?.["targetTaskId"];
+  if (reason !== "input-accepted" || typeof targetTaskId !== "string") return {};
+  const target = await store.findTaskById(targetTaskId);
+  const reply =
+    target?.inboundEventId === null || target === undefined
+      ? undefined
+      : await store.findOutboundReply(target.inboundEventId, "final");
+  return { joinedTaskId: targetTaskId, ...(reply === undefined ? {} : { reply }) };
+}
+
 /** A stored account in manifest form, as field management compares it. */
 function storedSurfaceAccountSpec(account: SurfaceAccount): SurfaceAccountManifestSpec {
+  if (account.provider === "cli") throw new Error("The CLI conversation account is built in");
   return {
     provider: account.provider,
     displayName: account.displayName,
-    configuration: declaredConfiguration(account),
+    configuration: declaredConfiguration({ ...account, provider: account.provider }),
     secrets: account.secretReferences ?? {},
   };
 }
