@@ -53,7 +53,8 @@ receives the tools and permissions admitted for its own Task.
 
 The history entries above are the fallback. A harness that resumes native state omits them from
 its prompt. It includes them when no state was offered, when it rejects the offered state, or when
-the predecessor Task Attempt failed. A resume that fails while running fails its Task Attempt, so
+the predecessor Task Attempt failed for a reason other than its spending limit. A Task Attempt
+stopped by its spending limit resumes after the allocation is renewed. A resume that fails while running fails its Task Attempt, so
 the next Task Attempt replays. Earlier tool output stays in a resumed transcript after a permission is removed; it grants no new
 access.
 

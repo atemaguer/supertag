@@ -84,7 +84,7 @@ erased. The transcript holds only what people in that same conversation already 
 
 When there is no usable native state, the Task receives bounded history entries from earlier
 completed Tasks in the Session instead. This replay covers a first turn, a switch to another
-harness, lost state, and a failed turn. A Task never receives the replay alongside a resume.
+harness, lost state, and a turn that failed for a reason other than its spending limit. A Task never receives the replay alongside a resume.
 
 Different threads remain different Sessions, even when they invoke the same Tag. They still share
 one memory: each conversation sees the Tag's open Objectives, and the Tag can search and read its
