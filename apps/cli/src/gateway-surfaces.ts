@@ -117,6 +117,14 @@ interface GatewaySurfaceBinding {
 
 /** Exhaustive composition of supported providers; no implicit fallback provider. */
 const bindings: Readonly<Record<SurfaceProvider, GatewaySurfaceBinding>> = {
+  // The Control Plane records CLI conversation replies itself; nothing is posted anywhere.
+  cli: {
+    label: "CLI",
+    capabilities: { replacement: false },
+    async reply() {
+      throw new Error("CLI conversation replies are recorded by the Control Plane");
+    },
+  },
   slack: {
     label: "Slack",
     capabilities: slackReplyCapabilities,

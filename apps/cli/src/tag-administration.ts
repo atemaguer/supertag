@@ -452,6 +452,7 @@ export class TagNotFoundError extends Error {
 }
 
 const SUPPORTED_ACTIONS: Readonly<Record<SurfaceProvider, readonly string[]>> = {
+  cli: [],
   slack: [],
   lark: ["messages:read", "messages:send", "messages:reply"],
   github: ["contents:read", "pull-requests:create"],

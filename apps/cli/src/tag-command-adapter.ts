@@ -1111,6 +1111,8 @@ function surfaceTarget(provider: SurfaceProvider, values: ScopedValues): Surface
       return values["team-id"] === undefined
         ? { ...common, provider, teamName: values.team ?? "" }
         : { ...common, provider, teamId: values["team-id"] };
+    case "cli":
+      throw new Error("A CLI conversation is not a location");
   }
 }
 
