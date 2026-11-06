@@ -67,8 +67,8 @@ describe("ReplyStreams", () => {
       expect(all.map(({ frame: _frame, ...part }) => part)).toEqual([
         { type: "start", messageId: "task-1" },
         { type: "text-start", id: "text-1" },
-        { type: "text-delta", id: "text-1", delta: "Look" },
-        { type: "text-delta", id: "text-1", delta: "ing." },
+        // Deltas arriving together share one part.
+        { type: "text-delta", id: "text-1", delta: "Looking." },
         { type: "text-end", id: "text-1" },
         {
           type: "data-activity",
@@ -87,13 +87,12 @@ describe("ReplyStreams", () => {
         },
         { type: "[DONE]" },
       ]);
-      expect(all.slice(0, -1).map((part) => part.frame)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+      expect(all.slice(0, -1).map((part) => part.frame)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
       expect(parts(await readAll(resumed)).map((part) => part.frame ?? part.type)).toEqual([
         6,
         7,
         8,
         9,
-        10,
         "[DONE]",
       ]);
       // A finished stream is gone; readers use the stored reply.
@@ -128,18 +127,50 @@ describe("ReplyStreams", () => {
     }
   });
 
-  it("stops buffering text past its cap but still finishes", async () => {
+  it("bounds the frames it keeps, dropping text and activity, but still finishes", async () => {
     const streams = new ReplyStreams();
     try {
       streams.open("task-1", 1);
       const reader = await streams.read("task-1");
-      const chunk = "x".repeat(256 * 1024);
+      const chunk = "x".repeat(1024 * 1024);
       for (let index = 0; index < 8; index += 1)
         streams.event("task-1", { ...identity, type: "output.delta", text: chunk });
+      streams.event("task-1", {
+        ...identity,
+        type: "command.updated",
+        command: { id: "c1", command: "ls", status: "running" },
+      });
+      streams.open("task-1", 2);
       streams.finish("task-1", { status: "completed" });
-      const received = parts(await readAll(reader));
-      expect(received.filter((part) => part.type === "text-delta")).toHaveLength(4);
-      expect(received.at(-2)).toMatchObject({ type: "finish" });
+      const text = await readAll(reader);
+      expect(text.length).toBeLessThanOrEqual(4 * 1024 * 1024 + 1024);
+      const received = parts(text);
+      expect(received.filter((part) => part.type === "text-delta")).toHaveLength(3);
+      expect(received.map((part) => part.type).slice(-5)).toEqual([
+        "text-delta",
+        "text-end",
+        "data-activity",
+        "finish",
+        "[DONE]",
+      ]);
+      expect(received.at(-3)).toMatchObject({ data: { kind: "retry", attempt: 2 } });
+    } finally {
+      streams.close();
+    }
+  });
+
+  it("batches token-sized deltas into larger parts", async () => {
+    const streams = new ReplyStreams();
+    try {
+      streams.open("task-1", 1);
+      const reader = await streams.read("task-1");
+      for (let index = 0; index < 1000; index += 1)
+        streams.event("task-1", { ...identity, type: "output.delta", text: "ab" });
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      streams.event("task-1", { ...identity, type: "output.delta", text: "!" });
+      streams.finish("task-1", { status: "completed" });
+      const deltas = parts(await readAll(reader)).filter((part) => part.type === "text-delta");
+      expect(deltas.map((part) => part["delta"])).toEqual(["ab".repeat(1000), "!"]);
     } finally {
       streams.close();
     }
@@ -333,8 +364,11 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       await resuming.close();
       expect(resumed[0]).toMatchObject({ frame: 4, type: "text-end" });
       expect(
-        resumed.filter((part) => part.type === "text-delta").map((part) => part["delta"]),
-      ).toEqual(["All ", "clean."]);
+        resumed
+          .filter((part) => part.type === "text-delta")
+          .map((part) => part["delta"])
+          .join(""),
+      ).toBe("All clean.");
       expect(resumed.at(-2)).toMatchObject({
         type: "finish",
         messageMetadata: {

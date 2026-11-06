@@ -6,8 +6,14 @@ import {
   type Subscriber,
 } from "resumable-stream/generic";
 
-/** Reply text one stream buffers before it stops sending deltas; it still sends its finish. */
-const MAX_BUFFERED_TEXT = 1024 * 1024;
+/**
+ * Characters of frames one stream keeps, which every reader replays. Past it the stream drops text
+ * and activity but still sends its text ends, retries, and finish; readers then read the record.
+ */
+const MAX_STREAM_CHARACTERS = 4 * 1024 * 1024;
+/** Deltas arriving within this window, up to `MAX_DELTA_CHARACTERS`, share one text-delta part. */
+const DELTA_WINDOW_MS = 25;
+const MAX_DELTA_CHARACTERS = 4096;
 /** How long a finished stream still answers "done" before readers fall back to the stored reply. */
 const FINISHED_TTL_SECONDS = 60;
 /** A stream that hears nothing this long ends without a finish; readers then read the record. */
@@ -25,11 +31,16 @@ export type ReplyStreamEnd =
   | { readonly status: "failed"; readonly reply?: StreamedReply };
 
 interface OpenStream {
+  readonly taskId: string;
   readonly controller: ReadableStreamDefaultController<string>;
   readonly ready: Promise<void>;
   attemptNumber: number;
   frames: number;
-  bufferedText: number;
+  characters: number;
+  /** Set once the stream reached its size bound; later text and activity are dropped. */
+  truncated: boolean;
+  pendingText: string;
+  pendingTimer: NodeJS.Timeout | undefined;
   textId: string | undefined;
   textBlocks: number;
   lastEventAt: number;
@@ -65,10 +76,11 @@ export class ReplyStreams {
       if (attemptNumber === existing.attemptNumber) return;
       existing.attemptNumber = attemptNumber;
       this.#endText(existing);
-      this.#write(existing, {
-        type: "data-activity",
-        data: { kind: "retry", attempt: attemptNumber },
-      });
+      this.#write(
+        existing,
+        { type: "data-activity", data: { kind: "retry", attempt: attemptNumber } },
+        true,
+      );
       return;
     }
     let controller!: ReadableStreamDefaultController<string>;
@@ -83,17 +95,21 @@ export class ReplyStreams {
       .then((own) => own?.cancel())
       .catch(() => undefined);
     const stream: OpenStream = {
+      taskId,
       controller,
       ready,
       attemptNumber,
       frames: 0,
-      bufferedText: 0,
+      characters: 0,
+      truncated: false,
+      pendingText: "",
+      pendingTimer: undefined,
       textId: undefined,
       textBlocks: 0,
       lastEventAt: Date.now(),
     };
     this.#streams.set(taskId, stream);
-    this.#write(stream, { type: "start", messageId: taskId });
+    this.#write(stream, { type: "start", messageId: taskId }, true);
   }
 
   /** Forwards one Worker event: text deltas, and command and tool activity. */
@@ -101,14 +117,15 @@ export class ReplyStreams {
     const stream = this.#streams.get(taskId);
     if (!stream) return;
     if (event.type === "output.delta") {
-      if (!event.text || stream.bufferedText >= MAX_BUFFERED_TEXT) return;
-      stream.bufferedText += event.text.length;
-      if (stream.textId === undefined) {
-        stream.textBlocks += 1;
-        stream.textId = `text-${stream.textBlocks}`;
-        this.#write(stream, { type: "text-start", id: stream.textId });
+      if (!event.text || stream.truncated) return;
+      stream.lastEventAt = Date.now();
+      // A harness may send a token per delta; batching them keeps the kept frames mostly text.
+      stream.pendingText += event.text;
+      if (stream.pendingText.length >= MAX_DELTA_CHARACTERS) this.#flushText(stream);
+      else if (stream.pendingTimer === undefined) {
+        stream.pendingTimer = setTimeout(() => this.#flushText(stream), DELTA_WINDOW_MS);
+        stream.pendingTimer.unref();
       }
-      this.#write(stream, { type: "text-delta", id: stream.textId, delta: event.text });
       return;
     }
     const activity = activityPart(event);
@@ -123,15 +140,16 @@ export class ReplyStreams {
     if (!stream) return;
     this.#endText(stream);
     if (end.status === "failed")
-      this.#write(stream, {
-        type: "error",
-        errorText: end.reply?.text ?? "The Task failed",
-      });
+      this.#write(stream, { type: "error", errorText: end.reply?.text ?? "The Task failed" }, true);
     else
-      this.#write(stream, {
-        type: "finish",
-        messageMetadata: { status: end.status, ...(end.reply ? { reply: end.reply } : {}) },
-      });
+      this.#write(
+        stream,
+        {
+          type: "finish",
+          messageMetadata: { status: end.status, ...(end.reply ? { reply: end.reply } : {}) },
+        },
+        true,
+      );
     this.#close(taskId, stream);
   }
 
@@ -145,6 +163,8 @@ export class ReplyStreams {
   ): Promise<ReadableStream<string> | undefined> {
     const stream = this.#streams.get(taskId);
     if (!stream) return undefined;
+    // Text already received counts as sent before now.
+    if (after === "now") this.#flushText(stream);
     const skip = after === "now" ? stream.frames : after;
     await stream.ready;
     const live = await this.#context.resumeExistingStream(taskId).catch(() => undefined);
@@ -164,19 +184,49 @@ export class ReplyStreams {
       if (stream.lastEventAt < cutoff) this.#close(taskId, stream);
   }
 
+  #flushText(stream: OpenStream): void {
+    clearTimeout(stream.pendingTimer);
+    stream.pendingTimer = undefined;
+    const delta = stream.pendingText;
+    stream.pendingText = "";
+    if (!delta || this.#streams.get(stream.taskId) !== stream) return;
+    if (stream.textId === undefined) {
+      const id = `text-${stream.textBlocks + 1}`;
+      if (!this.#write(stream, { type: "text-start", id })) return;
+      stream.textBlocks += 1;
+      stream.textId = id;
+    }
+    this.#write(stream, { type: "text-delta", id: stream.textId, delta });
+  }
+
   #endText(stream: OpenStream): void {
+    this.#flushText(stream);
     if (stream.textId === undefined) return;
-    this.#write(stream, { type: "text-end", id: stream.textId });
+    this.#write(stream, { type: "text-end", id: stream.textId }, true);
     stream.textId = undefined;
   }
 
-  #write(stream: OpenStream, part: Record<string, unknown>): void {
+  /**
+   * Enqueues one part unless it would pass the stream's size bound. Essential parts (start, text
+   * ends, retries, and the finish) are always sent; each is small and bounded in number.
+   */
+  #write(stream: OpenStream, part: Record<string, unknown>, essential = false): boolean {
+    if (!essential && stream.truncated) return false;
+    const frame = `id: ${stream.frames + 1}\ndata: ${JSON.stringify(part)}\n\n`;
+    if (!essential && stream.characters + frame.length > MAX_STREAM_CHARACTERS) {
+      stream.truncated = true;
+      return false;
+    }
     stream.frames += 1;
+    stream.characters += frame.length;
     stream.lastEventAt = Date.now();
-    stream.controller.enqueue(`id: ${stream.frames}\ndata: ${JSON.stringify(part)}\n\n`);
+    stream.controller.enqueue(frame);
+    return true;
   }
 
   #close(taskId: string, stream: OpenStream): void {
+    clearTimeout(stream.pendingTimer);
+    stream.pendingTimer = undefined;
     this.#streams.delete(taskId);
     stream.controller.enqueue("data: [DONE]\n\n");
     stream.controller.close();

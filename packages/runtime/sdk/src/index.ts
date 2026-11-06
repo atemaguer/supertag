@@ -15,6 +15,7 @@ import {
   type SensitiveValue,
   sensitiveEnvironmentValues,
   sensitiveFieldValues,
+  streamRedactionBoundary,
   uniqueSensitiveValues,
 } from "./redaction.js";
 
@@ -7822,14 +7823,33 @@ function assertToolAudienceIsolation(
     throw new Error("Harness cannot isolate manager-only tools from native subagents");
 }
 
+/**
+ * Redacts each event leaving execution. Output deltas are redacted over the joined reply text: a
+ * delta's tail that later text could still complete into a sensitive value is held and sent with
+ * the next delta, or before the next other event, so a credential split across deltas is masked.
+ */
 async function* redactTaskAttemptEvents(
   events: AsyncIterable<TaskAttemptEvent>,
   redaction: { values: readonly SensitiveValue[] },
 ): AsyncIterable<TaskAttemptEvent> {
-  for await (const event of events)
-    yield redactEventDiagnostics(event, (text, structural) =>
+  const redact = (event: TaskAttemptEvent) =>
+    redactEventDiagnostics(event, (text, structural) =>
       redactText(text, redaction.values, structural),
     );
+  let held: (TaskAttemptEvent & { type: "output.delta" }) | undefined;
+  for await (const event of events) {
+    if (event.type === "output.delta") {
+      const text = (held?.text ?? "") + event.text;
+      const boundary = streamRedactionBoundary(text, redaction.values);
+      held = boundary < text.length ? { ...event, text: text.slice(boundary) } : undefined;
+      if (boundary > 0) yield redact({ ...event, text: text.slice(0, boundary) });
+      continue;
+    }
+    if (held) yield redact(held);
+    held = undefined;
+    yield redact(event);
+  }
+  if (held) yield redact(held);
 }
 
 function redactHarnessEvent<T extends HarnessEvent>(

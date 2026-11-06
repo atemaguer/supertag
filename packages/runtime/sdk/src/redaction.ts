@@ -266,6 +266,80 @@ export function uniqueSensitiveValues(
     .map(([, item]) => item);
 }
 
+/** The encodings of a resolved credential that `redactText` masks wherever they appear. */
+function credentialVariants(value: string): string[] {
+  return [
+    value,
+    encodeURIComponent(value.toWellFormed()),
+    JSON.stringify(value).slice(1, -1),
+    Buffer.from(value).toString("base64"),
+    Buffer.from(value).toString("base64").replace(/=+$/u, ""),
+    Buffer.from(value).toString("base64url"),
+  ];
+}
+
+/**
+ * How much of streamed `text` can be redacted and sent now: the leading part that text still to
+ * come can no longer join into something `redactText` masks. Text split across stream pieces is
+ * redacted one piece at a time, so a credential split across pieces would otherwise pass. The rest
+ * is held: a trailing start of a sensitive value or one of its encodings, any sensitive value that
+ * crosses into that tail, a trailing `Basic` credential, and a trailing URL-like run, whose
+ * userinfo or credential query value ends only at whitespace.
+ */
+export function streamRedactionBoundary(
+  text: string,
+  sensitiveValues: readonly SensitiveValue[],
+): number {
+  const lower = text.toLowerCase();
+  const patterns = [
+    ...uniqueSensitiveValues(
+      sensitiveValues.flatMap((value) =>
+        typeof value === "string" ? credentialVariants(value) : [],
+      ),
+    ).map((value) => ({ value, text })),
+    // Low-confidence words match case-insensitively and only as whole words.
+    ...sensitiveValues.flatMap((value) =>
+      typeof value === "string" || !value.lowConfidence
+        ? []
+        : [{ value: value.lowConfidence.toLowerCase(), text: lower }],
+    ),
+  ].filter(({ value }) => value.length > 0);
+  let boundary = text.length;
+  for (const { value, text: haystack } of patterns) {
+    // The earliest trailing position whose rest begins this value, or is all of it.
+    const first = value[0] as string;
+    for (
+      let start = haystack.indexOf(first, Math.max(0, haystack.length - value.length));
+      start !== -1 && start < boundary;
+      start = haystack.indexOf(first, start + 1)
+    )
+      if (value.startsWith(haystack.slice(start))) {
+        boundary = start;
+        break;
+      }
+  }
+  const run = /\S*$/u.exec(text);
+  if (run && /[/\\?&#@]/u.test(run[0])) boundary = Math.min(boundary, run.index);
+  const basic =
+    /\bbasic(?:\s+[a-z\d+/_-]*=*)?$/iu.exec(text) ?? /\b(?:b|ba|bas|basi)$/iu.exec(text);
+  if (basic) boundary = Math.min(boundary, basic.index);
+  // A whole value crossing the boundary must be held with the tail it runs into.
+  for (let moved = true; moved; ) {
+    moved = false;
+    for (const { value, text: haystack } of patterns)
+      for (
+        let start = haystack.indexOf(value);
+        start !== -1 && start < boundary;
+        start = haystack.indexOf(value, start + 1)
+      )
+        if (start + value.length > boundary) {
+          boundary = start;
+          moved = true;
+        }
+  }
+  return boundary;
+}
+
 export function redactText(
   text: string,
   sensitiveValues: readonly SensitiveValue[],
@@ -276,19 +350,7 @@ export function redactText(
   const low = structural
     ? []
     : sensitiveValues.flatMap((value) => (typeof value === "string" ? [] : [value.lowConfidence]));
-  const substringValues: string[] = [];
-  for (const value of high) {
-    const variants = [
-      value,
-      encodeURIComponent(value.toWellFormed()),
-      JSON.stringify(value).slice(1, -1),
-      Buffer.from(value).toString("base64"),
-      Buffer.from(value).toString("base64").replace(/=+$/u, ""),
-      Buffer.from(value).toString("base64url"),
-    ];
-    substringValues.push(...variants);
-  }
-  const values = uniqueSensitiveValues(substringValues);
+  const values = uniqueSensitiveValues(high.flatMap(credentialVariants));
   const escapePattern = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   const highPattern = values.length
     ? new RegExp(values.map(escapePattern).join("|"), "gu")
