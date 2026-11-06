@@ -266,6 +266,31 @@ export function uniqueSensitiveValues(
     .map(([, item]) => item);
 }
 
+/** The encoded forms in which a resolved credential is recognized as a substring. */
+function encodedForms(value: string): string[] {
+  return [
+    value,
+    encodeURIComponent(value.toWellFormed()),
+    JSON.stringify(value).slice(1, -1),
+    Buffer.from(value).toString("base64"),
+    Buffer.from(value).toString("base64").replace(/=+$/u, ""),
+    Buffer.from(value).toString("base64url"),
+  ];
+}
+
+/**
+ * The longest text `redactText` matches for a known value. A stream that holds back one fewer
+ * character than this, plus its unfinished whitespace-free run (which bounds URL credentials,
+ * escaped forms, and word matches), never emits part of a secret its next chunk completes.
+ */
+export function redactionSpan(sensitiveValues: readonly SensitiveValue[]): number {
+  let span = 0;
+  for (const value of sensitiveValues)
+    for (const form of typeof value === "string" ? encodedForms(value) : [value.lowConfidence])
+      span = Math.max(span, form.length);
+  return span;
+}
+
 export function redactText(
   text: string,
   sensitiveValues: readonly SensitiveValue[],
@@ -276,19 +301,7 @@ export function redactText(
   const low = structural
     ? []
     : sensitiveValues.flatMap((value) => (typeof value === "string" ? [] : [value.lowConfidence]));
-  const substringValues: string[] = [];
-  for (const value of high) {
-    const variants = [
-      value,
-      encodeURIComponent(value.toWellFormed()),
-      JSON.stringify(value).slice(1, -1),
-      Buffer.from(value).toString("base64"),
-      Buffer.from(value).toString("base64").replace(/=+$/u, ""),
-      Buffer.from(value).toString("base64url"),
-    ];
-    substringValues.push(...variants);
-  }
-  const values = uniqueSensitiveValues(substringValues);
+  const values = uniqueSensitiveValues(high.flatMap(encodedForms));
   const escapePattern = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   const highPattern = values.length
     ? new RegExp(values.map(escapePattern).join("|"), "gu")

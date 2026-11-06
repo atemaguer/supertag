@@ -909,6 +909,71 @@ describe("Claude Code harness composition", () => {
     }
   });
 
+  it("streams the root agent's reply text from Agent SDK partial messages", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supertag-claude-sdk-"));
+    const session = "018f52f0-635a-7b4f-9678-d3a4a6108c31";
+    let options: Record<string, unknown> | undefined;
+    const streamEvent = (event: unknown, parent: string | null = null) => ({
+      type: "stream_event",
+      event,
+      parent_tool_use_id: parent,
+      uuid: "stream",
+      session_id: session,
+    });
+    const delta = (delta: unknown, parent?: string | null) =>
+      streamEvent({ type: "content_block_delta", index: 0, delta }, parent);
+    const fakeQuery = ((params: { readonly options?: Record<string, unknown> }) => {
+      options = params.options;
+      return (async function* () {
+        yield streamEvent({
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "text" },
+        });
+        yield delta({ type: "thinking_delta", thinking: "private reasoning" });
+        yield delta({ type: "text_delta", text: "Hello, " });
+        yield delta({ type: "input_json_delta", partial_json: '{"command":"ls"}' });
+        yield delta({ type: "text_delta", text: "subagent text" }, "tool-1");
+        yield delta({ type: "text_delta", text: "" });
+        yield delta({ type: "text_delta", text: "world." });
+        yield streamEvent({ type: "content_block_stop", index: 0 });
+        yield { type: "result", subtype: "success", result: "Hello, world.", session_id: session };
+      })();
+    }) as unknown as typeof import("@anthropic-ai/claude-agent-sdk").query;
+    const environment = {
+      id: "local:test",
+      placement: "local",
+      rootDirectory: root,
+      resolvePath: (path: string) => join(root, path),
+    } as ExecutionEnvironment;
+    try {
+      const events = [];
+      for await (const event of runClaudeCode(
+        {
+          prompt: "Greet",
+          mcpServers: [],
+          runtimeDirectory: fixtureWorkspace,
+          workspace: fixtureWorkspace,
+          timeoutMs: 1_000,
+          runtimeActions: [],
+        },
+        environment,
+        environment,
+        undefined,
+        fakeQuery,
+      ))
+        events.push(event);
+      expect(options?.["includePartialMessages"]).toBe(true);
+      expect(events.filter((event) => event.type !== "session.updated")).toEqual([
+        { type: "output.delta", text: "Hello, " },
+        { type: "output.delta", text: "world." },
+        { type: "output.message", text: "Hello, world.", final: true },
+      ]);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   it("retains reported cost when the Claude provider budget stops SDK execution", async () => {
     const fakeQuery = (() =>
       (async function* () {
@@ -3772,6 +3837,62 @@ it.each([
     expect(claimFinalResponse).toHaveBeenCalledOnce();
   },
 );
+
+it("streams a one-shot run's root reply text as output deltas", async () => {
+  const delta = (text: string, parent: string | null = null, type = "text_delta") => ({
+    type: "stream_event",
+    parent_tool_use_id: parent,
+    event: {
+      type: "content_block_delta",
+      index: 0,
+      delta: type === "text_delta" ? { type, text } : { type, thinking: text },
+    },
+  });
+  let args: readonly string[] = [];
+  const environment: ExecutionEnvironment = {
+    ...testEnvironment(fixtureWorkspace),
+    spawn: async (spec) => {
+      args = spec.args ?? [];
+      return {
+        output: (async function* () {
+          for (const line of [
+            delta("Hello, "),
+            delta("hidden", null, "thinking_delta"),
+            delta("subagent text", "tool-1"),
+            delta("world."),
+            { type: "result", subtype: "success", result: "Hello, world." },
+          ])
+            yield { stream: "stdout" as const, text: `${JSON.stringify(line)}\n` };
+        })(),
+        wait: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+        kill: () => {},
+      };
+    },
+  };
+  const events = [];
+  for await (const event of runClaudeCode(
+    {
+      prompt: "Greet",
+      runtimeDirectory: fixtureWorkspace,
+      workspace: fixtureWorkspace,
+      timeoutMs: 60_000,
+      executable: "fake-claude",
+      mcpServers: [],
+      runtimeActions: [],
+    },
+    environment,
+    environment,
+  ))
+    events.push(event);
+  expect(args).toContain("--include-partial-messages");
+  expect(
+    events.filter((event) => event.type === "output.delta" || event.type === "output.message"),
+  ).toEqual([
+    { type: "output.delta", text: "Hello, " },
+    { type: "output.delta", text: "world." },
+    { type: "output.message", text: "Hello, world.", final: true },
+  ]);
+});
 
 it("does not claim an empty one-shot result", async () => {
   const claimFinalResponse = vi.fn(() => true);

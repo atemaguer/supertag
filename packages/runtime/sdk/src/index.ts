@@ -11,6 +11,7 @@ import {
   prepareLocalOutputDirectory,
 } from "./output-files.js";
 import {
+  redactionSpan,
   redactText,
   type SensitiveValue,
   sensitiveEnvironmentValues,
@@ -7822,14 +7823,100 @@ function assertToolAudienceIsolation(
     throw new Error("Harness cannot isolate manager-only tools from native subagents");
 }
 
+// Status that can arrive while a message streams; anything else ends the message's deltas.
+const DELTA_PASSTHROUGH_EVENTS: ReadonlySet<TaskAttemptEvent["type"]> = new Set([
+  "usage.updated",
+  "progress.updated",
+  "agent.updated",
+]);
+const MAX_HELD_DELTA_RUN = 4_096;
+
+/**
+ * Per-event redaction cannot see a secret split across output deltas. Consecutive deltas are
+ * joined as raw text, and the raw tail a later delta could still complete into a match is held
+ * back until the next delta, or emitted redacted as a last delta before the event that ends
+ * them. Only raw text is ever redacted, so a pattern that fired on part of a credential never
+ * hides the rest of it from the next pass.
+ */
 async function* redactTaskAttemptEvents(
   events: AsyncIterable<TaskAttemptEvent>,
   redaction: { values: readonly SensitiveValue[] },
 ): AsyncIterable<TaskAttemptEvent> {
-  for await (const event of events)
-    yield redactEventDiagnostics(event, (text, structural) =>
-      redactText(text, redaction.values, structural),
-    );
+  const redact = (text: string, structural?: boolean) =>
+    redactText(text, redaction.values, structural);
+  let held: Extract<TaskAttemptEvent, { type: "output.delta" }> | undefined;
+  const delta = (
+    event: Extract<TaskAttemptEvent, { type: "output.delta" }>,
+    text: string,
+  ): TaskAttemptEvent => ({ ...redactEventDiagnostics({ ...event, text: "" }, redact), text });
+  // Values resolved since the tail was held apply to it too.
+  const release = () => {
+    const tail = held;
+    held = undefined;
+    return tail?.text ? [delta(tail, redact(tail.text, false))] : [];
+  };
+  try {
+    for await (const event of events) {
+      if (event.type === "output.delta") {
+        const raw = `${held?.text ?? ""}${event.text}`;
+        const { emit, start } = splitDeltaText(raw, redactionSpan(redaction.values), redact);
+        if (emit) yield delta(event, emit);
+        held = { ...event, text: raw.slice(start) };
+        continue;
+      }
+      if (!DELTA_PASSTHROUGH_EVENTS.has(event.type)) yield* release();
+      yield redactEventDiagnostics(event, redact);
+    }
+  } catch (error) {
+    yield* release();
+    throw error;
+  }
+  yield* release();
+}
+
+/**
+ * Splits joined raw delta text into the redacted text that is final and the raw offset where
+ * the held tail starts. A cut is final only when redacting the text before it agrees with
+ * redacting the whole text, so no match the joined text completes straddles the cut.
+ */
+function splitDeltaText(
+  raw: string,
+  span: number,
+  redact: (text: string, structural?: boolean) => string,
+): { emit: string; start: number } {
+  const start = heldDeltaStart(raw, span);
+  if (start === 0) return { emit: "", start };
+  const whole = redact(raw, false);
+  const emit = redact(raw.slice(0, start), false);
+  if (whole.startsWith(emit)) return { emit, start };
+  // A match crosses the cut. Hold more of the run when the bound allows; past it, the whole
+  // text is redacted as one so everything it already completes stays masked.
+  let floor = Math.max(0, raw.length - Math.max(0, span - 1) - MAX_HELD_DELTA_RUN);
+  const unit = raw.charCodeAt(floor - 1);
+  if (unit >= 0xd800 && unit <= 0xdbff) floor--;
+  if (start > floor) {
+    if (floor === 0) return { emit: "", start: 0 };
+    const earlier = redact(raw.slice(0, floor), false);
+    if (whole.startsWith(earlier)) return { emit: earlier, start: floor };
+  }
+  return { emit: whole, start: raw.length };
+}
+
+/** Where the held raw tail of joined delta text starts; everything before it is final. */
+function heldDeltaStart(text: string, span: number): number {
+  const least = Math.max(0, text.length - Math.max(0, span - 1));
+  // A whitespace-free run can still grow into a URL credential, an encoded secret, or a longer
+  // word, and a Basic credential needs its scheme: hold each whole, up to a bound that keeps
+  // re-redaction linear. A tail that starts after whitespace splits no surrogate pair.
+  let start = least;
+  while (start > 0 && !/\s/u.test(text[start - 1] ?? "")) start--;
+  const scheme = /\bBasic\s+$/iu.exec(text.slice(Math.max(0, start - 64), start));
+  if (scheme) start -= scheme[0].length;
+  const bound = least - MAX_HELD_DELTA_RUN;
+  if (start >= bound) return start;
+  start = bound;
+  const unit = text.charCodeAt(start - 1);
+  return unit >= 0xd800 && unit <= 0xdbff ? start - 1 : start;
 }
 
 function redactHarnessEvent<T extends HarnessEvent>(

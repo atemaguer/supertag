@@ -1210,6 +1210,8 @@ export async function* runClaudeCode(
       },
       ...(executionBridge === undefined ? {} : { toolAliases: executionBridge.aliases }),
       permissionMode: "dontAsk",
+      // Root text deltas stream the reply as it is written; the final result still decides it.
+      includePartialMessages: true,
       env: {
         ...minimalProcessEnvironment(process.env, [
           "ANTHROPIC_API_KEY",
@@ -1297,6 +1299,11 @@ export async function* runClaudeCode(
         if (!controller.signal.aborted)
           for (const command of claudeCommandUpdates(message, runningCommands))
             yield { type: "command.updated", command };
+        const delta = claudeTextDelta(message);
+        if (delta !== undefined && !controller.signal.aborted) {
+          yield { type: "output.delta", text: delta };
+          continue;
+        }
         const usage = reportedUsage(message);
         // The query claims the result with the Worker at receipt, before SDK delivery or any
         // session/progress events above can yield control and let cancellation arrive.
@@ -1365,6 +1372,14 @@ export async function* runClaudeCode(
       await closeClaudeMcpConnections(connections, executionFailures);
     }
   }
+}
+
+/** The root agent's reply text as it streams; never thinking, tool input, or subagent text. */
+function claudeTextDelta(message: SDKMessage): string | undefined {
+  if (message.type !== "stream_event" || message.parent_tool_use_id !== null) return undefined;
+  const event = message.event;
+  if (event.type !== "content_block_delta" || event.delta.type !== "text_delta") return undefined;
+  return event.delta.text || undefined;
 }
 
 /** Colocated local runs may use the owned CLI; split runs always use the SDK on the host. */
@@ -1498,6 +1513,7 @@ async function* runClaudeCodeProcess(
           : []),
         "--output-format",
         "stream-json",
+        "--include-partial-messages",
         "--verbose",
         ...(request.resumeSessionId === undefined ? [] : ["--resume", request.resumeSessionId]),
         "--setting-sources",
@@ -1574,6 +1590,7 @@ async function* runClaudeCodeProcess(
           readonly commands: readonly NativeCommandActivity[];
           readonly usage?: ExecutionUsage;
           readonly result?: SDKMessage;
+          readonly delta?: string;
         }
       | undefined => {
       if (!line.trim()) return undefined;
@@ -1594,6 +1611,8 @@ async function* runClaudeCodeProcess(
         sessionId = messageSessionId;
         request.onSessionId?.(sessionId);
       }
+      const delta = signal?.aborted ? undefined : claudeTextDelta(message);
+      if (delta !== undefined) return { commands: [], delta };
       const progress = claudeTaskProgress(message, progressItems);
       const usage = reportedUsage(message);
       return {
@@ -1612,6 +1631,7 @@ async function* runClaudeCodeProcess(
         while (newline !== -1) {
           if (newline > 1024 * 1024) throw new Error("Claude CLI event exceeds 1 MiB limit");
           const parsed = parse(buffered.slice(0, newline));
+          if (parsed?.delta !== undefined) yield { type: "output.delta", text: parsed.delta };
           if (parsed?.progress !== undefined)
             yield { type: "progress.updated", progress: parsed.progress };
           for (const command of parsed?.commands ?? []) yield { type: "command.updated", command };
