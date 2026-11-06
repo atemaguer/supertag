@@ -197,6 +197,8 @@ interface ControlPlaneApiRequestContext extends ControlPlaneApiServerDependencie
   readonly request: IncomingMessage;
   readonly response: ServerResponse;
   readonly rpcSnapshot: () => RpcTelemetrySnapshot;
+  /** Aborted when the API Server drains, so long-lived responses such as reply streams end. */
+  readonly draining: AbortSignal;
 }
 
 const CONTROL_PLANE_BREAK_GLASS_PRINCIPAL: CoordinationOperatorPrincipal = {
@@ -213,6 +215,7 @@ export class ControlPlaneApiServer {
   #workletGrpc: Promise<Awaited<ReturnType<typeof startWorkletGrpcServer>>> | undefined;
   #acceptingManagement = false;
   #acceptingInternal = false;
+  #draining = new AbortController();
 
   constructor(dependencies: ControlPlaneApiServerDependencies) {
     this.#dependencies = dependencies;
@@ -223,6 +226,7 @@ export class ControlPlaneApiServer {
 
   start(): void {
     if (this.#acceptingManagement || this.#acceptingInternal) return;
+    if (this.#draining.signal.aborted) this.#draining = new AbortController();
     this.#acceptingManagement = true;
     this.#acceptingInternal = true;
     try {
@@ -316,6 +320,7 @@ export class ControlPlaneApiServer {
   /** Fence new HTTP work without disconnecting Worklets needed to drain accepted Tasks. */
   beginDrain(): void {
     this.#acceptingManagement = false;
+    this.#draining.abort();
   }
 
   /** Fence execution APIs only after every accepted Task has stopped using them. */
@@ -383,6 +388,7 @@ export class ControlPlaneApiServer {
         request,
         response,
         rpcSnapshot: () => this.#rpcTelemetry.snapshot(),
+        draining: this.#draining.signal,
       };
       if (internal) {
         await handleInternalApiRequest(context, url);
@@ -1535,7 +1541,9 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
     return;
   }
 
-  const tagMessageMatch = /^\/api\/v1\/tags\/([^/]+)\/messages(?:\/([^/]+))?$/u.exec(url.pathname);
+  const tagMessageMatch = /^\/api\/v1\/tags\/([^/]+)\/messages(?:\/([^/]+)(\/stream)?)?$/u.exec(
+    url.pathname,
+  );
   if (tagMessageMatch?.[1] !== undefined) {
     await handleTagMessage(
       context,
@@ -1543,6 +1551,7 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
       tagMessageMatch[2] === undefined ? undefined : decodeURIComponent(tagMessageMatch[2]),
       // The admin token is one operator; each Operator Token is another.
       authentication.kind === "break-glass" ? "admin" : authentication.principal.operatorId,
+      tagMessageMatch[3] === undefined ? undefined : url,
     );
     return;
   }
@@ -3325,7 +3334,8 @@ const TAG_CONVERSATION_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 
 /**
  * `POST /api/v1/tags/NAME/messages` sends one message in the operator's CLI conversation;
- * `GET /api/v1/tags/NAME/messages/TASK_ID` reads it back with the reply once there is one.
+ * `GET /api/v1/tags/NAME/messages/TASK_ID` reads it back with the reply once there is one, and
+ * `GET /api/v1/tags/NAME/messages/TASK_ID/stream` follows the reply as it is written.
  * A conversation is private: only the operator who sent the message reads it here.
  */
 async function handleTagMessage(
@@ -3333,6 +3343,7 @@ async function handleTagMessage(
   tagName: string,
   taskId: string | undefined,
   operatorId: string,
+  streamUrl?: URL,
 ): Promise<void> {
   const method = taskId === undefined ? "POST" : "GET";
   if (context.request.method !== method) {
@@ -3395,6 +3406,10 @@ async function handleTagMessage(
     );
     return;
   }
+  if (streamUrl !== undefined) {
+    await streamTagMessage(context, task, streamResumePoint(context, streamUrl));
+    return;
+  }
   const { reply, joinedTaskId } = await tagMessageReply(context.store, task);
   const record: TagMessageRecord = {
     apiVersion: CONTROL_PLANE_API_VERSION,
@@ -3410,6 +3425,125 @@ async function handleTagMessage(
       : { reply: { presentation: reply.presentation, text: reply.text } }),
   };
   writeJson(context.response, method === "POST" ? 201 : 200, record);
+}
+
+/** How often a reply stream rechecks a message that has neither a running stream nor a reply. */
+const TAG_MESSAGE_STREAM_WAIT_MS = 250;
+/** A comment line this often keeps idle proxies from closing a quiet reply stream. */
+const TAG_MESSAGE_STREAM_KEEPALIVE_MS = 15_000;
+
+/** The last part a resuming reader saw, from `resumeAt` or the `Last-Event-ID` header. */
+function streamResumePoint(context: ControlPlaneApiRequestContext, url: URL): number {
+  const header = context.request.headers["last-event-id"];
+  const value = url.searchParams.get("resumeAt") ?? (typeof header === "string" ? header : "0");
+  const after = Number(value);
+  return Number.isSafeInteger(after) && after > 0 ? after : 0;
+}
+
+/**
+ * Serves one CLI message's reply as an AI SDK UI message stream over Server-Sent Events. A
+ * running Task's live stream resumes after part `after`; a message that joined a running Task
+ * follows that Task. A finished Task, or one without a live stream, sends its stored reply as one
+ * complete message. Until either exists, the response waits.
+ */
+async function streamTagMessage(
+  context: ControlPlaneApiRequestContext,
+  task: Task,
+  after: number,
+): Promise<void> {
+  const { response } = context;
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-store",
+    connection: "keep-alive",
+    "x-accel-buffering": "no",
+    "x-vercel-ai-ui-message-stream": "v1",
+  });
+  const closed = new AbortController();
+  const close = () => closed.abort();
+  response.once("close", close);
+  context.draining.addEventListener("abort", close, { once: true });
+  const keepalive = setInterval(
+    () => response.write(": keepalive\n\n"),
+    TAG_MESSAGE_STREAM_KEEPALIVE_MS,
+  );
+  keepalive.unref();
+  try {
+    while (!closed.signal.aborted) {
+      const current = (await context.store.findTaskById(task.id)) ?? task;
+      const { reply, joinedTaskId } = await tagMessageReply(context.store, current);
+      if (reply !== undefined) {
+        response.write(completeReplyStream(current.id, reply));
+        return;
+      }
+      // A joined message follows its Task from now on; earlier parts answered earlier messages.
+      const live = await context.controlPlane.streamTaskReply(
+        joinedTaskId ?? current.id,
+        joinedTaskId !== undefined && after === 0 ? "now" : after,
+      );
+      if (live !== undefined) {
+        await pipeReplyStream(live, response, closed.signal);
+        return;
+      }
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, TAG_MESSAGE_STREAM_WAIT_MS);
+        closed.signal.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            resolve(undefined);
+          },
+          { once: true },
+        );
+      });
+    }
+  } finally {
+    clearInterval(keepalive);
+    response.off("close", close);
+    context.draining.removeEventListener("abort", close);
+    response.end();
+  }
+}
+
+/** Copies a live reply stream to the response until it ends or the reader goes away. */
+async function pipeReplyStream(
+  live: ReadableStream<string>,
+  response: ServerResponse,
+  closed: AbortSignal,
+): Promise<void> {
+  const reader = live.getReader();
+  const cancel = () => void reader.cancel().catch(() => undefined);
+  closed.addEventListener("abort", cancel, { once: true });
+  try {
+    while (!closed.aborted) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      if (value) response.write(value);
+    }
+  } finally {
+    closed.removeEventListener("abort", cancel);
+    cancel();
+  }
+}
+
+/** A stored reply as one complete UI message stream: its text, then its finish or error. */
+function completeReplyStream(
+  messageId: string,
+  reply: { readonly presentation: string; readonly text: string },
+): string {
+  const parts: Record<string, unknown>[] = [{ type: "start", messageId }];
+  if (reply.presentation === "error") parts.push({ type: "error", errorText: reply.text });
+  else
+    parts.push(
+      { type: "text-start", id: "text-1" },
+      { type: "text-delta", id: "text-1", delta: reply.text },
+      { type: "text-end", id: "text-1" },
+      {
+        type: "finish",
+        messageMetadata: { reply: { presentation: reply.presentation, text: reply.text } },
+      },
+    );
+  return `${parts.map((part, index) => `id: ${index + 1}\ndata: ${JSON.stringify(part)}\n\n`).join("")}data: [DONE]\n\n`;
 }
 
 /**
