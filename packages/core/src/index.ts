@@ -959,8 +959,6 @@ export interface InboundSurfaceEvent {
   readonly callback: CallbackRoute;
   readonly source: Readonly<Record<string, string>>;
   readonly metadata: Readonly<Record<string, string | number | boolean | null>>;
-  /** A direct conversation with one person, such as a direct chat or a CLI conversation. */
-  readonly direct?: boolean;
 }
 
 export type DurableInboundEventStatus = "completed" | "failed" | "pending" | "processing";

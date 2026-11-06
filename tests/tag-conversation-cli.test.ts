@@ -122,6 +122,10 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         sessionKey: "cli:admin:plan",
       });
       expect(inbound?.authorization.permissionSets).toEqual([]);
+      // The Session is private to the operator who holds the conversation.
+      const session = await store.findSessionById(second.sessionId);
+      expect(session).toMatchObject({ audience: "private" });
+      expect(session?.audienceActorKey).toMatch(/^cli:.+:admin$/u);
       await vi.waitFor(async () =>
         expect((await store.findOutboundReply(task?.inboundEventId ?? "", "final"))?.status).toBe(
           "delivered",
