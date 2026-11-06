@@ -38,6 +38,7 @@ import {
   type WorkerDescriptor,
   type WorkerProfile,
 } from "./src/index.ts";
+import { redactText } from "./src/redaction.ts";
 
 describe("Worker", () => {
   it.each(["expiry", "release", "abort"] as const)(
@@ -1447,6 +1448,77 @@ describe("Worker", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it("redacts a secret split across output deltas without losing or reordering text", async () => {
+    const secret = "delta-secret-must-not-cross";
+    const reply = `Found ${secret}, then ${secret}. Cloned https://user:url-password-x@example.test and more.`;
+    const streamingHarness = (pieces: readonly string[]): Harness => ({
+      id: "test-harness",
+      describe: async () => ({
+        sessions: { resume: false, export: false, scope: "none" as const },
+        id: "test-harness",
+        version: "1",
+        inputKinds: [],
+        streaming: true,
+        cancellation: true,
+        sessionPersistence: "none",
+      }),
+      plan: async () => emptyLaunchPlan,
+      start: async () => ({
+        async *run() {
+          for (const [index, text] of pieces.entries()) {
+            yield { type: "output.delta" as const, text };
+            // Usage may arrive while a message streams; it must not release the held tail.
+            if (index === 1)
+              yield {
+                type: "usage.updated" as const,
+                usage: {
+                  inputTokens: 1,
+                  outputTokens: 1,
+                  cachedInputTokens: 0,
+                  totalTokens: 2,
+                  complete: false,
+                },
+              };
+          }
+          yield { type: "output.message" as const, text: reply, final: true };
+        },
+        async close() {},
+      }),
+    });
+    const run = async (pieces: readonly string[]) =>
+      collectTaskAttemptEvents(
+        createWorker({
+          id: "redacting-worker",
+          profiles: [profile()],
+          harnesses: [streamingHarness(pieces)],
+          environments: [new LocalExecutionEnvironmentProvider()],
+          redactValues: [secret],
+        }).execute(taskAttemptSpec({ id: "research", revision: "3" })),
+      );
+    // The joined deltas read exactly as the whole reply redacted at once.
+    const expected = redactText(reply, [secret]);
+    expect(expected).not.toContain(secret);
+    for (const size of [1, 3, 7, 50]) {
+      const pieces = Array.from({ length: Math.ceil(reply.length / size) }, (_, index) =>
+        reply.slice(index * size, (index + 1) * size),
+      );
+      const events = await run(pieces);
+      expect(events.at(-1)?.type, JSON.stringify(events)).toBe("execution.completed");
+      const deltas = events.flatMap((event) => (event.type === "output.delta" ? [event] : []));
+      expect(JSON.stringify(events)).not.toContain(secret);
+      expect(JSON.stringify(events)).not.toContain("url-password");
+      for (const fragment of ["delta-secret", "secret-must", "must-not-cross"])
+        expect(deltas.some((event) => event.text.includes(fragment))).toBe(false);
+      expect(deltas.every((event) => event.text.length > 0)).toBe(true);
+      expect(deltas.map((event) => event.text).join("")).toBe(expected);
+      // Every delta precedes the message that ends them.
+      const message = events.findIndex((event) => event.type === "output.message");
+      expect(events.findLastIndex((event) => event.type === "output.delta")).toBeLessThan(message);
+    }
+    const silent = await run([]);
+    expect(silent.some((event) => event.type === "output.delta")).toBe(false);
   });
 
   it.each([

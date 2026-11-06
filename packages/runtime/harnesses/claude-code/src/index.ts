@@ -1210,6 +1210,8 @@ export async function* runClaudeCode(
       },
       ...(executionBridge === undefined ? {} : { toolAliases: executionBridge.aliases }),
       permissionMode: "dontAsk",
+      // Root text deltas stream the reply as it is written; the final result still decides it.
+      includePartialMessages: true,
       env: {
         ...minimalProcessEnvironment(process.env, [
           "ANTHROPIC_API_KEY",
@@ -1297,6 +1299,11 @@ export async function* runClaudeCode(
         if (!controller.signal.aborted)
           for (const command of claudeCommandUpdates(message, runningCommands))
             yield { type: "command.updated", command };
+        const delta = claudeTextDelta(message);
+        if (delta !== undefined && !controller.signal.aborted) {
+          yield { type: "output.delta", text: delta };
+          continue;
+        }
         const usage = reportedUsage(message);
         // The query claims the result with the Worker at receipt, before SDK delivery or any
         // session/progress events above can yield control and let cancellation arrive.
@@ -1365,6 +1372,14 @@ export async function* runClaudeCode(
       await closeClaudeMcpConnections(connections, executionFailures);
     }
   }
+}
+
+/** The root agent's reply text as it streams; never thinking, tool input, or subagent text. */
+function claudeTextDelta(message: SDKMessage): string | undefined {
+  if (message.type !== "stream_event" || message.parent_tool_use_id !== null) return undefined;
+  const event = message.event;
+  if (event.type !== "content_block_delta" || event.delta.type !== "text_delta") return undefined;
+  return event.delta.text || undefined;
 }
 
 /** Colocated local runs may use the owned CLI; split runs always use the SDK on the host. */
