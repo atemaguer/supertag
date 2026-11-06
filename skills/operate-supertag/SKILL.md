@@ -113,6 +113,10 @@ The trap removes the private file even if the command fails.
 Replace `MESSAGE_ID` with the pending question's ID. Check the JSON `repliedToMessageId` against
 that ID. If the command rejects the ID, reread the inbox before replying.
 
+To ask a Tag something outside an Objective, such as what it is working on, use
+`supertag message tag TAG - --session NAME --output json` with the same private-file pattern. The
+conversation is private to your operator credential and uses only the Tag's Roles' permissions.
+
 Answer routine implementation questions only when the user's own instructions already settle
 them. Ask the user about scope changes, new commands or configuration, merges, spending increases,
 recorded approval requests, permission or credential grants, cancellation, or unresolved competing

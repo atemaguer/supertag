@@ -243,8 +243,9 @@ supertag coordinate read_objective --input inspect.json
 
    > @SuperTag objective attach OBJECTIVE_ID
 
-**Check:** the owner reports progress back to the original thread, and assignments awaiting
-approval post a notice there. Approve them with [step 6](#6-approve-the-task).
+**Check:** the owner reports progress back to the original thread, assignments awaiting
+approval post a notice there, and the completion summary posts there when the Objective
+completes. Approve them with [step 6](#6-approve-the-task).
 
 Rules:
 
@@ -268,6 +269,9 @@ Rules:
   arbitrary Objective.
 - The binding persists across Control Plane restarts and applies to Tasks accepted afterward. A
   Task already accepted without an Objective stays unbound.
+- In any conversation, the Tag sees its open Objectives and can read any of them it owns, but it
+  starts, instructs, or attaches only the Objective bound to that conversation. Objectives started
+  in a private conversation stay out of other people's conversations.
 - A chat message saying "approved" does not approve a Task.
 - Internal Teams coordinate through assignments, Team channels, and Mailboxes without creating a
   surface channel for each Team.

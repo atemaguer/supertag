@@ -76,7 +76,11 @@ hosts. None of these resources becomes a separate actor.
   and a lifecycle.
 - **Workstream** is a Team's channel. Every Team has exactly one, created with the Team and sharing its ID. Its owner, participants, title, and Objective are read from the Team; it has no status or revision of its own. Posts in it are typed and may be addressed to Tags in the Team. Unread posts and direct messages reach each Tag's next Task Attempt once, in its activation digest.
 - **Mailbox** holds durable messages for a Tag or for an Objective’s operator. It supports communication across Teams, the organizational chain, and the operator.
-- **Session** preserves automatic continuity for one Tag conversation.
+- **Session** preserves automatic continuity for one Tag conversation. Its audience is `shared`
+  or `private`, derived from the conversation: a direct chat or a CLI conversation is private to
+  its one person, and reported as `status.audience`. A Tag's conversation Tasks can list, search, and read its shared Sessions and
+  their own person's private ones. See
+  [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-one-memory).
 - **Task** records one durable assignment from a surface or internal delegation. Its result can
   carry [findings](coordination.md#review-findings): problems a reviewer reported about the Task,
   each with a severity and status. A finding is part of the result, not a separate resource.
