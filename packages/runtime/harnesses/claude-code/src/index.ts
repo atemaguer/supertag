@@ -1719,7 +1719,7 @@ export function claudeCodeInformationRetrievalPrompt(
 
 Use the current workspace when it provides relevant evidence. ${localPolicy}${externalTools} If the available evidence or authority is insufficient, say what is missing instead of guessing or widening the action.
 
-Return one concise, standalone answer suitable for a ${task.input.origin.surface} thread. Mention useful file paths or symbols, but omit hidden reasoning and tool logs. ${CHANGE_SUMMARY_INSTRUCTION} ${findingsInstruction(task)}${extra}${history}${skills}
+Return one concise, standalone answer suitable for a ${task.input.origin.surface} thread. Mention useful file paths or symbols, but omit hidden reasoning and tool logs. ${changeInstruction(task)}${findingsInstruction(task)}${extra}${history}${skills}
 
 User question:
 ${question}`;
@@ -2581,4 +2581,12 @@ function profileConfiguration(input: ExecutionContext): {
  */
 function findingsInstruction(task: TaskAttemptSpec): string {
   return task.coordination?.scope === "surface" ? "" : FINDINGS_INSTRUCTION;
+}
+
+/**
+ * The `Change:` line becomes the commit subject when a Workspace delivers the Task's edits. A Task
+ * with nothing to commit, such as a conversation, report or update turn, is not asked for it.
+ */
+function changeInstruction(task: TaskAttemptSpec): string {
+  return task.workspacePlan?.status === "workspace" ? `${CHANGE_SUMMARY_INSTRUCTION} ` : "";
 }

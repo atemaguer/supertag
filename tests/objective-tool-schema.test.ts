@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { coordinationTools, surfaceTools } from "../apps/cli/src/coordination-http.js";
+import { SURFACE_COORDINATION_OPERATIONS } from "../packages/runtime/sdk/src/index.js";
 
 const coordinationNames = [
   "read_objective",
@@ -316,4 +317,11 @@ it("lets owners look up Tags by name before staffing or creating one", () => {
   expect(description("update_team")).toContain("Tag names or IDs");
   expect(description("assign_task")).toContain("Tag name or ID");
   expect(description("send_message")).toContain("a Tag name or ID");
+});
+
+it("lets a Worker expose every conversation tool the Control Plane defines", () => {
+  // A tool the Worker's list leaves out never reaches a real harness, even when the turn gets it.
+  expect([...SURFACE_COORDINATION_OPERATIONS].sort()).toEqual(
+    surfaceTools.map((tool) => tool.name).sort(),
+  );
 });

@@ -1388,7 +1388,7 @@ export function codexInformationRetrievalPrompt(
 
 Answer the user's request using evidence from the current workspace.${workspaceEvidence} Inspect the relevant source files before answering when the request depends on code. ${localChanges}${externalTools} If the available evidence or authority is insufficient, say what is missing instead of guessing or widening the action.
 
-Return a concise, standalone answer suitable for posting directly into a ${task.input.origin.surface} thread. Mention useful file paths or symbols, but do not include hidden reasoning, tool logs, preambles, or a description of your process. ${CHANGE_SUMMARY_INSTRUCTION} ${findingsInstruction(task)}${additionalInstructions}${historyContext}
+Return a concise, standalone answer suitable for posting directly into a ${task.input.origin.surface} thread. Mention useful file paths or symbols, but do not include hidden reasoning, tool logs, preambles, or a description of your process. ${changeInstruction(task)}${findingsInstruction(task)}${additionalInstructions}${historyContext}
 
 ${packagedContext}
 
@@ -2387,4 +2387,12 @@ function validatedUsageBaselines(value: unknown): CodexAppServerExecution["threa
  */
 function findingsInstruction(task: TaskAttemptSpec): string {
   return task.coordination?.scope === "surface" ? "" : FINDINGS_INSTRUCTION;
+}
+
+/**
+ * The `Change:` line becomes the commit subject when a Workspace delivers the Task's edits. A Task
+ * with nothing to commit, such as a conversation, report or update turn, is not asked for it.
+ */
+function changeInstruction(task: TaskAttemptSpec): string {
+  return task.workspacePlan?.status === "workspace" ? `${CHANGE_SUMMARY_INSTRUCTION} ` : "";
 }
