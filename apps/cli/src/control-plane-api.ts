@@ -22,6 +22,7 @@ import type {
   GatewayCredentialVault,
   ManagedResourceKind,
   Role,
+  Session,
   Store,
   SurfaceAccount,
   SurfaceProvider,
@@ -1437,7 +1438,7 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
     writeJson(
       context.response,
       200,
-      resourceList((await context.store.listSessions()).map(sessionResource)),
+      resourceList(await sessionResources(context.store, await context.store.listSessions())),
     );
     return;
   }
@@ -1537,7 +1538,8 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
       writeJson(context.response, 404, { error: "not_found", message: "Session does not exist" });
       return;
     }
-    writeJson(context.response, 200, sessionResource(session));
+    const [resource] = await sessionResources(context.store, [session]);
+    writeJson(context.response, 200, resource);
     return;
   }
 
@@ -3328,6 +3330,21 @@ interface TagMessageRecord {
   readonly status: "waiting" | "replied";
   /** The Tag's final reply: its result, or the error that ended the Task. */
   readonly reply?: { readonly presentation: string; readonly text: string };
+  /** Work Sessions this message's turn started, and the report turn each one is owed. */
+  readonly startedSessions?: readonly StartedWorkSession[];
+}
+
+/** A work Session a message started: its Task's status and, once written, its report. */
+interface StartedWorkSession {
+  readonly id: string;
+  readonly title: string;
+  /** The work Session's Task, which `.../messages/TASK_ID/stream` follows. */
+  readonly taskId?: string;
+  readonly status: string;
+  readonly reportStatus: "waiting" | "replied";
+  /** The conversation turn that reports the work Session's result. */
+  readonly reportTaskId?: string;
+  readonly report?: { readonly presentation: string; readonly text: string };
 }
 
 const TAG_CONVERSATION_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
@@ -3396,7 +3413,15 @@ async function handleTagMessage(
   }
   const task = await context.store.findTaskById(taskId);
   const origin = isRecord(task?.trigger["origin"]) ? task.trigger["origin"] : undefined;
-  const sessionKey = typeof origin?.["sessionKey"] === "string" ? origin["sessionKey"] : "";
+  let sessionKey = typeof origin?.["sessionKey"] === "string" ? origin["sessionKey"] : "";
+  // A work Session's Task is readable where its conversation is: only by that operator.
+  if (task !== undefined && !sessionKey.startsWith(prefix) && method === "GET") {
+    const session = await context.store.findSessionById(task.sessionId);
+    const parent = session?.parentSessionId
+      ? await context.store.findSessionById(session.parentSessionId)
+      : undefined;
+    if (parent !== undefined) sessionKey = parent.sessionKey;
+  }
   if (task === undefined || task.tagId !== tag.id || !sessionKey.startsWith(prefix)) {
     writeStatusError(
       context.response,
@@ -3411,6 +3436,7 @@ async function handleTagMessage(
     return;
   }
   const { reply, joinedTaskId } = await tagMessageReply(context.store, task);
+  const startedSessions = await startedWorkSessions(context.store, task);
   const record: TagMessageRecord = {
     apiVersion: CONTROL_PLANE_API_VERSION,
     kind: "TagMessage",
@@ -3423,6 +3449,7 @@ async function handleTagMessage(
     ...(reply === undefined
       ? {}
       : { reply: { presentation: reply.presentation, text: reply.text } }),
+    ...(startedSessions.length === 0 ? {} : { startedSessions }),
   };
   writeJson(context.response, method === "POST" ? 201 : 200, record);
 }
@@ -3551,6 +3578,35 @@ function completeReplyStream(
  * still runs is delivered into that Task, so the answer is that Task's final reply; a delivery
  * whose outcome is unknown is answered by the error notice recorded for it.
  */
+/** The work Sessions a message's turn started, oldest first, with their reports. */
+async function startedWorkSessions(
+  store: ControlPlaneApiRequestContext["store"],
+  task: Task,
+): Promise<readonly StartedWorkSession[]> {
+  const started = (await store.listWorkSessions(task.sessionId)).filter(
+    (session) => session.startedByTaskId === task.id,
+  );
+  return Promise.all(
+    started.map(async (session) => {
+      const found = session.task ? await store.findWorkSessionReport(session.task.id) : undefined;
+      const report = found
+        ? await store.findOutboundReply(found.inboundEventId, "final")
+        : undefined;
+      return {
+        id: session.sessionId,
+        title: session.title,
+        ...(session.task ? { taskId: session.task.id } : {}),
+        status: session.task?.status ?? "pending",
+        reportStatus: report === undefined ? ("waiting" as const) : ("replied" as const),
+        ...(found?.taskId ? { reportTaskId: found.taskId } : {}),
+        ...(report === undefined
+          ? {}
+          : { report: { presentation: report.presentation, text: report.text } }),
+      };
+    }),
+  );
+}
+
 async function tagMessageReply(
   store: ControlPlaneApiRequestContext["store"],
   task: Task,
@@ -3572,6 +3628,15 @@ async function tagMessageReply(
       ? undefined
       : await store.findOutboundReply(target.inboundEventId, "final");
   return { joinedTaskId: targetTaskId, ...(reply === undefined ? {} : { reply }) };
+}
+
+/** Sessions as resources, each with the status of its latest Task. */
+async function sessionResources(
+  store: ControlPlaneApiRequestContext["store"],
+  sessions: readonly Session[],
+) {
+  const statuses = await store.latestSessionTaskStatuses(sessions.map((session) => session.id));
+  return sessions.map((session) => sessionResource(session, statuses.get(session.id)));
 }
 
 /** A stored account in manifest form, as field management compares it. */

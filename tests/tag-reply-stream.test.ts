@@ -438,11 +438,12 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       release();
       const rest = await command;
       expect(written.join("") + rest).toBe(
-        "Checking \n\u001b[2m· running: pnpm lint\u001b[22m\nAll clean.\n",
+        // The turn's in-between text is not shown; its activity is, then the final reply.
+        "\u001b[2m· running: pnpm lint\u001b[22m\nAll clean.\n",
       );
     });
 
-    it("prints plain streamed text when not on a terminal, and detaches on request", async () => {
+    it("prints only the final reply when not on a terminal, and detaches on request", async () => {
       const written: string[] = [];
       const warned: string[] = [];
       const detach = new AbortController();
@@ -455,7 +456,9 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           signal: detach.signal,
         },
       );
-      await vi.waitFor(() => expect(written.join("")).toBe("Checking "));
+      await vi.waitFor(async () =>
+        expect((await store.listTasks()).map((task) => task.status)).toContain("running"),
+      );
       detach.abort();
       await expect(command).resolves.toBe("");
       expect(warned.join("")).toMatch(/keeps working on task\/.+supertag describe task/u);

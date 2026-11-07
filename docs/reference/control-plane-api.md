@@ -91,8 +91,8 @@ The response has `asOf`, `workerHosts`, `tags`, and `objectives`:
 - Each Worker Host has `id`, `phase`, `running`, `capacity`, `coordinationCapacity`, and
   `harnesses`. Each harness entry has `harness`, `running`, `capacity`, and
   `coordinationCapacity`. `running` counts all running Task Attempts. `capacity` includes
-  regular slots and any owner-only coordination slots; `coordinationCapacity` counts only
-  those owner-only slots. For example, four regular slots and one coordination slot show
+  regular slots and any coordination slots; `coordinationCapacity` counts only
+  those coordination slots. For example, four regular slots and one coordination slot show
   `running: 5`, `capacity: 5`, and `coordinationCapacity: 1` when full. Revoked hosts are
   left out.
 - Each Tag that is not retired has `id`, `name`, and `runningTaskIds`. An empty list means the
@@ -545,6 +545,12 @@ GET  /api/v1/tags/:name/messages/:taskId/stream
 
 `POST` sends `{"text": "...", "session": "NAME"}` and returns a `TagMessage` record. `GET` on the
 message returns the record, with `reply` once the Tag has answered.
+
+When the message's turn started work Sessions, the record lists them in `startedSessions`, oldest
+first. Each entry has the Session `id`, its `title`, the work Session's `taskId` and its `status`,
+and `reportStatus`: `waiting`, or `replied` with `reportTaskId` and the report turn's `report`
+(`presentation` and `text`). `GET` and `stream` also accept a work Session's `taskId`, for the
+operator whose conversation started it; its stream carries the work Session's activity.
 
 The `stream` route follows the reply as it is written. It answers with Server-Sent Events in the
 [AI SDK UI message stream protocol](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol) and the

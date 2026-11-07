@@ -80,7 +80,9 @@ hosts. None of these resources becomes a separate actor.
   or `private`, derived from the conversation: a direct chat or a CLI conversation is private to
   its one person, and reported as `status.audience`. A Tag's conversation Tasks can list, search, and read its shared Sessions and
   their own person's private ones. See
-  [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-one-memory).
+  [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-one-memory). A [work Session](../concepts/tasks.md#session)
+  reports its conversation as read-only `spec.parentSessionId`; `status.latestTaskStatus` is the
+  status of a Session's latest Task.
 - **Task** records one durable assignment from a surface or internal delegation. Its result can
   carry [findings](coordination.md#review-findings): problems a reviewer reported about the Task,
   each with a severity and status. A finding is part of the result, not a separate resource.

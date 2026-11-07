@@ -103,12 +103,14 @@ Set it with `concurrency` on a [host service](supertag-yaml.md#host-concurrency)
 A host service takes a changed `concurrency` without a restart. It reports the new limit to the
 Control Plane at once, and scheduling uses it from then on.
 
-Each Worker also has one **coordination slot** beyond its concurrency. Only an Objective owner's
-activation may use it, so the owner starts even when delegated Tasks fill every slot. Other
-Tasks start only while fewer Task Attempts than the concurrency run. For example, a Worker with
+Each Worker also has one **coordination slot** beyond its concurrency. An Objective owner's
+activation and a conversation's turn, including its report turns, may use it. The owner starts
+even when delegated Tasks fill every slot, and a conversation still answers while its work
+Sessions fill them. Other Tasks, work Sessions included, start only while fewer Task Attempts than
+the concurrency run. A work Session that can't start doesn't hold back conversation turns. For example, a Worker with
 concurrency 1 runs one builder Task and an owner activation together. A Worker with concurrency 4
 runs four builder Tasks and an owner activation.
-`supertag status` includes that owner-only slot in its capacity. It shows `5/5` for this
+`supertag status` includes that coordination slot in its capacity. It shows `5/5` for this
 example and labels the additional slot, so the five running Task Attempts do not appear to
 exceed capacity.
 

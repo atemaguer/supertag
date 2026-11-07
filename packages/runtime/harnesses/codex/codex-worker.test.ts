@@ -746,6 +746,20 @@ describe("Codex harness composition", () => {
     expect(() => assertConformance(report)).not.toThrow();
   });
 
+  it("does not ask a conversation turn for finding lines", () => {
+    const spec = taskAttemptSpec("Review it.");
+    const conversation = {
+      ...spec,
+      coordination: {
+        controlPlaneUrl: "http://127.0.0.1:1",
+        token: "t",
+        scope: "surface" as const,
+      },
+    };
+    expect(codexInformationRetrievalPrompt(conversation)).not.toContain(FINDINGS_INSTRUCTION);
+    expect(codexInformationRetrievalPrompt(spec)).toContain(FINDINGS_INSTRUCTION);
+  });
+
   it("asks Codex reviewers for findings and parses them from the result", async () => {
     let observed = "";
     const runner = vi.fn(async function* ({ prompt }: { readonly prompt: string }) {

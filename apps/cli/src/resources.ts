@@ -1284,10 +1284,21 @@ function describeSession(
   tagName?: string,
 ): string {
   const status = isRecord(resource.status) ? resource.status : {};
+  const spec = isRecord(resource.spec) ? resource.spec : {};
+  const origin = isRecord(spec["origin"]) ? spec["origin"] : {};
   const lines = [
     `Session: ${show(resource.metadata["id"])}`,
     `Tag: ${tagName ?? "unknown Tag"}`,
+    ...(typeof spec["parentSessionId"] === "string"
+      ? [
+          `Work Session: ${show(origin["title"])}`,
+          `Parent: supertag describe session ${shellArg(spec["parentSessionId"])}`,
+        ]
+      : []),
     `Phase: ${show(status["phase"])}`,
+    ...(status["latestTaskStatus"] === undefined
+      ? []
+      : [`Latest Task: ${show(status["latestTaskStatus"])}`]),
     `Last interaction: ${show(status["lastInteractionAt"])}`,
     `Native archives returned: ${states.length} (up to 100)`,
   ];
