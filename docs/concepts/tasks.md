@@ -99,9 +99,9 @@ more. It has its own native harness session, so its tool output stays out of the
 conversation, and it inherits the conversation's audience. It
 [sees only its own work](#what-a-work-session-sees). A work Session can't start more work
 Sessions or create, attach, or start an Objective. At most four run at once per conversation;
-later ones wait. One conversation Task starts at most four, or its `maxNativeAgents` when lower,
-and each gets an equal share of that Task's reported token and cost limits. A conversation holds at
-most eight unfinished work Sessions.
+later ones wait. One conversation Task starts or continues at most four, or its `maxNativeAgents`
+when lower, and they [share its budget](#how-work-sessions-share-a-budget). A conversation holds
+at most eight unfinished work Sessions.
 
 When a work Session's Task completes, fails, or is cancelled, its conversation gets one report turn:
 a new Task in the conversation Session that resumes the conversation's native session. It carries
@@ -168,6 +168,19 @@ Each continued Task gets the next branch, such as `supertag/session/0f3c2a9e-2`,
 the work Session's latest commits, so it sees the earlier edits. The report turn names the branch,
 so the Tag can tell the person where the changes are. The conversation turns themselves keep their
 own workspace. Editing still needs `files:write`.
+
+### How work Sessions share a budget
+
+A conversation Task and the work Tasks it starts or continues share one budget: that Task's
+reported token and cost limits. Each new work Task gets an equal share of what is left. What is
+left is the limit minus what the conversation Task reported so far, and minus the allowances of
+the work Tasks it already started. For example, a Task limited to 10,000 tokens that reported
+6,000 gives its first work Task 1,000, a quarter of the 4,000 left. When less than one token or
+one minor unit of currency, such as a cent, is left, SuperTag refuses `start_session` and `continue_session`, and the Tag does the
+work in its own turn. `continue_session` draws from the turn that continues the work Session, not
+the one that started it. A Task without reported limits passes none on. Report and update turns
+sit outside the budget: each runs under a fixed tenth of the starting Task's limits, so a result
+reaches the person even when the budget is spent.
 
 ## Task Attempt
 

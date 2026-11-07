@@ -6,6 +6,7 @@ import {
   type InternalTurn,
   mailboxObject,
   mailboxText,
+  type SpendReport,
   type Store,
   type TagAuthorizationSnapshot,
   TagMessagingError,
@@ -268,30 +269,105 @@ export function workSessionsPerTurn(execution: TaskExecutionRequirements): numbe
     : Math.min(WORK_SESSION_MAX_PER_TURN, agents);
 }
 
+/** What a conversation turn's own Task Attempts have reported so far. */
+export interface ReportedTurnSpend {
+  readonly tokens: number;
+  /** In the currency of the turn's `maxReportedCost`. */
+  readonly costMinor: number;
+}
+
+/** A conversation turn's reported spend from a spend report over its Task alone. */
+export function reportedTurnSpend(
+  report: SpendReport,
+  execution: TaskExecutionRequirements,
+): ReportedTurnSpend {
+  const currency = execution.limits?.maxReportedCost?.currency;
+  let tokens = 0;
+  let costMinor = 0;
+  for (const group of report.groups) {
+    tokens += group.reportedTokens ?? 0;
+    if (currency !== undefined) costMinor += group.reportedCostByCurrency?.[currency] ?? 0;
+  }
+  return { tokens, costMinor };
+}
+
 /**
- * A work Task's execution requirements: the starting turn's, with its reported token and cost
- * limits split into equal shares among the work Sessions the turn may start. All of a turn's work
- * Sessions together spend no more than the turn's own limits allow.
+ * A work Task's execution requirements. A conversation turn and the work Tasks it starts or
+ * continues share one budget: the turn's reported token and cost limits. A new work Task gets
+ * what is left of them, the limit minus the turn's reported spend so far and the allowances of
+ * the work Tasks the turn already admitted, split equally among the work Tasks the turn may still
+ * admit. Undefined when less than one token or one minor unit is left for it. A turn without
+ * reported limits passes its requirements on unchanged.
  */
 export function workSessionExecution(
+  execution: TaskExecutionRequirements,
+  spent: ReportedTurnSpend,
+  admitted: readonly TaskExecutionRequirements[],
+): TaskExecutionRequirements | undefined {
+  const limits = execution.limits;
+  if (limits?.maxReportedTokens === undefined && limits?.maxReportedCost === undefined)
+    return execution;
+  const slots = Math.max(1, workSessionsPerTurn(execution) - admitted.length);
+  const share = (limit: number, own: number, held: (other: TaskExecutionRequirements) => number) =>
+    Math.floor((limit - own - admitted.reduce((total, other) => total + held(other), 0)) / slots);
+  const tokens =
+    limits.maxReportedTokens === undefined
+      ? undefined
+      : share(
+          limits.maxReportedTokens,
+          spent.tokens,
+          (other) => other.limits?.maxReportedTokens ?? 0,
+        );
+  const cost =
+    limits.maxReportedCost === undefined
+      ? undefined
+      : share(
+          limits.maxReportedCost.amountMinor,
+          spent.costMinor,
+          (other) => other.limits?.maxReportedCost?.amountMinor ?? 0,
+        );
+  if ((tokens !== undefined && tokens < 1) || (cost !== undefined && cost < 1)) return undefined;
+  return {
+    ...execution,
+    limits: {
+      ...limits,
+      ...(tokens === undefined ? {} : { maxReportedTokens: tokens }),
+      ...(cost === undefined || limits.maxReportedCost === undefined
+        ? {}
+        : { maxReportedCost: { ...limits.maxReportedCost, amountMinor: cost } }),
+    },
+  };
+}
+
+/** Report and update turns each run under this fraction of the starting turn's reported limits. */
+const SESSION_TURN_LIMIT_DIVISOR = 10;
+
+/**
+ * A report or update turn's execution requirements: the starting turn's, with a fixed tenth of
+ * its reported token and cost limits, and at least one token or minor unit. These turns are
+ * outside the turn's budget, so a work Session's result reaches the person even when the turn
+ * and its work Tasks spent all of it.
+ */
+export function sessionTurnExecution(
   execution: TaskExecutionRequirements,
 ): TaskExecutionRequirements {
   const limits = execution.limits;
   if (limits === undefined) return execution;
-  const shares = Math.max(1, workSessionsPerTurn(execution));
+  const tenth = (limit: number) =>
+    Math.min(limit, Math.max(1, Math.floor(limit / SESSION_TURN_LIMIT_DIVISOR)));
   return {
     ...execution,
     limits: {
       ...limits,
       ...(limits.maxReportedTokens === undefined
         ? {}
-        : { maxReportedTokens: Math.max(1, Math.floor(limits.maxReportedTokens / shares)) }),
+        : { maxReportedTokens: tenth(limits.maxReportedTokens) }),
       ...(limits.maxReportedCost === undefined
         ? {}
         : {
             maxReportedCost: {
               ...limits.maxReportedCost,
-              amountMinor: Math.floor(limits.maxReportedCost.amountMinor / shares),
+              amountMinor: tenth(limits.maxReportedCost.amountMinor),
             },
           }),
     },

@@ -19,10 +19,12 @@ import {
   type ContinueSessionRequest,
   continuedWorkSessionEvent,
   internalTurnMessages,
+  reportedTurnSpend,
   SESSION_UPDATE_SKIPPED_EVENT,
   type StartSessionRequest,
   samePermissions,
   sessionReportEvent,
+  sessionTurnExecution,
   sessionUpdateEvent,
   WORK_SESSION_ASKED_EVENT,
   workSessionBranch,
@@ -2599,7 +2601,7 @@ export class ControlPlane {
   }> {
     const verb = "start" in request ? "start" : "continue";
     // Work Sessions are parallel agents of the starting turn: a turn starts at most its share,
-    // none when its maxNativeAgents is 0, and they split its reported token and cost limits.
+    // none when its maxNativeAgents is 0, and they spend from its reported token and cost limits.
     // A retired Tag admits no new work, even work a running turn asks for.
     if ((await this.#store.findTagById(conversation.tagId))?.status !== "active")
       throw new TagMessagingError(
@@ -2682,6 +2684,34 @@ export class ControlPlane {
         409,
         `This conversation already has ${WORK_SESSION_MAX_OPEN} unfinished work Sessions; wait for one to finish`,
       );
+    // The turn and every work Task it admits share the turn's reported limits.
+    const limits = starting.execution.limits;
+    const execution =
+      limits?.maxReportedTokens === undefined && limits?.maxReportedCost === undefined
+        ? starting.execution
+        : workSessionExecution(
+            starting.execution,
+            reportedTurnSpend(
+              await this.#store.readSpend({ taskIds: [conversation.id] }),
+              starting.execution,
+            ),
+            (
+              await Promise.all(
+                sessions
+                  .filter((session) => startedBy(session) === conversation.id)
+                  .map((session) =>
+                    session.task === undefined
+                      ? undefined
+                      : this.#store.findTaskById(session.task.id),
+                  ),
+              )
+            ).flatMap((task) => (task === undefined ? [] : [task.execution])),
+          );
+    if (execution === undefined)
+      throw new TagMessagingError(
+        409,
+        `This turn and the work Sessions it started already spent or hold all of its token and cost limits, so it cannot ${verb} a work Session; finish the work in this turn`,
+      );
     const running = sessions.filter((session) => session.task?.status === "running").length;
     // A new work Session edits one of the conversation's Workspaces on its own branch; a continued
     // one keeps the Workspace it started in.
@@ -2702,7 +2732,7 @@ export class ControlPlane {
       tagId: starting.tagId,
       authorization: starting.authorization,
       contextPlan: starting.contextPlan,
-      execution: workSessionExecution(starting.execution),
+      execution,
       event:
         "start" in request
           ? workSessionEvent(
@@ -2908,7 +2938,7 @@ export class ControlPlane {
         tagId: starting.tagId,
         authorization: starting.authorization,
         contextPlan: starting.contextPlan,
-        execution: starting.execution,
+        execution: sessionTurnExecution(starting.execution),
         event: sessionUpdateEvent(
           starting,
           {
@@ -2985,7 +3015,7 @@ export class ControlPlane {
         tagId: starting.tagId,
         authorization: starting.authorization,
         contextPlan: starting.contextPlan,
-        execution: starting.execution,
+        execution: sessionTurnExecution(starting.execution),
         event: sessionReportEvent(
           starting,
           {
