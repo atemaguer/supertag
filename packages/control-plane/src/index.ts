@@ -12,6 +12,7 @@ import { isSchedulingEvent } from "./capacity-wait.js";
 import { sessionWorkspaceBranches, workerEvents } from "./dependency-branches.js";
 import { DispatchErrorReporter } from "./dispatch-errors.js";
 import { ObjectiveMessages } from "./objective-messages.js";
+import { repositoryReferences, unambiguousRepositoryReference } from "./repository-references.js";
 import { SESSION_INPUT_COMMAND_PREFIX, withdrawSessionInput } from "./session-input-withdrawal.js";
 import { conversationViewer, tagPortfolio } from "./tag-sessions.js";
 import {
@@ -3553,12 +3554,21 @@ function captureWorkspacePlan(
     .sort((left, right) =>
       (left.reference ?? left.scope).localeCompare(right.reference ?? right.scope),
     );
-  const requested = repositoryReferences(event.text ?? "");
+  const mentioned = repositoryReferences(event.text ?? "");
   if (choices.length === 0) {
+    // Only a reference that must be a repository refuses; a mentioned path is ordinary text.
+    const requested = mentioned.filter(unambiguousRepositoryReference);
     return requested.length === 0
       ? { version: 1, status: "none" }
       : { version: 1, status: "unavailable", requested };
   }
+  // A request is a reference to one of the Tag's repositories, or one that must be a repository;
+  // a mention that may be a path, such as src/index.ts, is ordinary text.
+  const requested = mentioned.filter(
+    (reference) =>
+      unambiguousRepositoryReference(reference) ||
+      choices.some((choice) => choice.reference?.toLowerCase() === reference),
+  );
 
   if (event.provider === "github") {
     const origin = choices.find(
@@ -3588,12 +3598,6 @@ function captureWorkspacePlan(
     return { version: 1, status: "selected", selectedBy: "default", target: onlyChoice };
   }
   return { version: 1, status: "selection-required", choices };
-}
-
-function repositoryReferences(text: string): readonly string[] {
-  return [...text.matchAll(/(?:^|[\s(`])([a-z0-9_.-]+\/[a-z0-9_.-]+)(?=$|[\s),.:;!?])/gi)].flatMap(
-    (match) => (match[1] === undefined ? [] : [match[1].toLowerCase()]),
-  );
 }
 
 function acknowledgementText(task: Task): string {
