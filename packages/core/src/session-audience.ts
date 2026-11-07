@@ -115,6 +115,8 @@ export type InternalTurn =
       readonly parentSessionId: string;
       readonly title: string;
       readonly continued?: true;
+      /** The Workspace the work Session edits, on its own branch; absent without one. */
+      readonly workspace?: string;
     }
   | {
       /** The conversation turn that reports a finished work Session's result. */
@@ -129,6 +131,8 @@ export type InternalTurn =
       readonly result: string;
       /** The question the work Task asked, when `waiting`. */
       readonly question?: string;
+      /** SuperTag's account of where the work Task's Workspace changes are, when it had one. */
+      readonly delivery?: string;
     };
 
 /** One work Session a conversation started, with its latest Task. */

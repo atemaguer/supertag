@@ -62,13 +62,14 @@ it("advertises ask and continue_session with bounded input", () => {
   });
 });
 
-it("advertises start_session with bounded title and instruction", () => {
+it("advertises start_session with bounded title and instruction and an optional Workspace", () => {
   const tool = surfaceTools.find((candidate) => candidate.name === "start_session");
   expect(tool?.inputSchema).toEqual({
     type: "object",
     properties: {
       title: { type: "string", minLength: 1, maxLength: 120 },
       instruction: { type: "string", minLength: 1, maxLength: 8000 },
+      workspace: { type: "string", pattern: "^[a-z0-9][a-z0-9_-]{0,62}$" },
     },
     required: ["title", "instruction"],
     additionalProperties: false,

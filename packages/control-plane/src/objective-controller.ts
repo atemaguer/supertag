@@ -13,6 +13,7 @@ import {
   mailboxObject,
   mailboxText,
   mergeApprovalRequirements,
+  namedWorkspacePlan,
   normalizeTaskItems,
   type Objective,
   type ObjectiveLimitCandidate,
@@ -3970,20 +3971,7 @@ export class ObjectiveController {
     if (chosen === undefined) return { version: 1, status: "none" };
     const workspace = await this.store.findWorkspaceByName(chosen);
     if (!workspace) throw new TagMessagingError(409, `Workspace ${chosen} no longer exists`);
-    return {
-      version: 1,
-      status: "workspace",
-      workspace: workspace.name,
-      ...(workspace.source === undefined ? {} : { source: workspace.source }),
-      ...(workspace.ref === undefined ? {} : { ref: workspace.ref }),
-      branch: taskWorkspaceBranch(objective.id, taskId),
-      delivery: workspace.delivery,
-      ...(workspace.setup === undefined ? {} : { setup: workspace.setup }),
-      ...(workspace.mcp === undefined ? {} : { mcp: workspace.mcp }),
-      ...(workspace.skills === undefined ? {} : { skills: workspace.skills }),
-      ...(workspace.skillCatalog === undefined ? {} : { skillCatalog: workspace.skillCatalog }),
-      ...(workspace.mounts === undefined ? {} : { mounts: workspace.mounts }),
-    };
+    return namedWorkspacePlan(workspace, taskWorkspaceBranch(objective.id, taskId));
   }
 
   /** Enrolled Worker Hosts and their labels, including an embedded Worklet's own host. */
