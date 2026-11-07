@@ -763,7 +763,8 @@ worktree, the Task result names no branch, and a retry starts afresh from the ba
 The Worker commits every change to a tracked file and every untracked file that git does not
 ignore, except well-known generated paths that are never source: `__pycache__/`, `*.pyc`, `*.pyo`,
 `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `.tox/`, `.venv/`, `*.egg-info/`, `.coverage`,
-`.coverage.*`, `htmlcov/`, `node_modules/`, `.next/`, and `.DS_Store`, at any depth. A repository
+`.coverage.*`, `htmlcov/`, `node_modules/`, `.next/`, and `.DS_Store`, at any depth. A symlink
+with one of these directory names, such as a shared `.venv`, is left out too. A repository
 without a `.gitignore` therefore gets no test caches or installed packages on its Task branch. The
 list only skips untracked files: a file already committed under one of these paths, such as a
 vendored `node_modules/vendor.js`, is committed when a Task changes it. The list also wins over a

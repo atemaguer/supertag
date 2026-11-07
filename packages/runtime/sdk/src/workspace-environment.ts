@@ -832,22 +832,28 @@ export const SAFE_DIFF = ["--no-ext-diff", "--no-textconv"] as const;
  * wins over a `.gitignore` negation such as `!keep.pyc`, so commit such a file once to keep it
  * tracked. `dist/` and `build/` are absent because some repositories commit their builds.
  */
+const GENERATED_DIRECTORIES = [
+  "__pycache__",
+  ".pytest_cache",
+  ".mypy_cache",
+  ".ruff_cache",
+  ".tox",
+  ".venv",
+  "*.egg-info",
+  "htmlcov",
+  "node_modules",
+  ".next",
+] as const;
+
+const GENERATED_FILES = ["*.pyc", "*.pyo", ".coverage", ".coverage.*", ".DS_Store"] as const;
+
+/**
+ * Each directory appears twice: `<dir>/**` matches a real directory's files, and the bare
+ * `<dir>` matches a symlink of that name, which git stages as one entry.
+ */
 const GENERATED_PATHS = [
-  "**/__pycache__/**",
-  "**/*.pyc",
-  "**/*.pyo",
-  "**/.pytest_cache/**",
-  "**/.mypy_cache/**",
-  "**/.ruff_cache/**",
-  "**/.tox/**",
-  "**/.venv/**",
-  "**/*.egg-info/**",
-  "**/.coverage",
-  "**/.coverage.*",
-  "**/htmlcov/**",
-  "**/node_modules/**",
-  "**/.next/**",
-  "**/.DS_Store",
+  ...GENERATED_DIRECTORIES.flatMap((directory) => [`**/${directory}`, `**/${directory}/**`]),
+  ...GENERATED_FILES.map((file) => `**/${file}`),
 ] as const;
 
 /**

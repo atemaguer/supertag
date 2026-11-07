@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -738,6 +738,10 @@ describe("Git worktree Workspace resolver", () => {
       "keep.pyc",
     ])
       await writeFile(join(path, file), "generated\n");
+    // A symlinked environment, such as a shared `.venv` or `node_modules`, is one staged entry.
+    await mkdir(join(path, "web"));
+    await symlink(tmpdir(), join(path, ".venv"));
+    await symlink(tmpdir(), join(path, "web", "node_modules"));
     await writeFile(join(path, "src", "real.py"), "print('real')\n");
     await writeFile(join(path, "node_modules", "vendor.js"), "v2\n");
     await rm(join(path, "obsolete.txt"));
