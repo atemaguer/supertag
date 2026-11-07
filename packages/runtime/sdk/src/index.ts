@@ -2111,8 +2111,6 @@ export const SURFACE_COORDINATION_OPERATIONS = [
   "start_session",
   "continue_session",
   "ask",
-  "message_parent",
-  "skip_reply",
 ] as const;
 
 class CoordinationInputProvider implements RuntimeInputProvider {

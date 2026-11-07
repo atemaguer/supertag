@@ -32,8 +32,6 @@ export interface StartedWorkSession {
   readonly question?: string;
   /** Approval notices for the work Task's pending approval requests. */
   readonly approvals?: readonly { readonly requestId: string; readonly text: string }[];
-  /** What the Tag told the person from the work Task's progress notes; silent ones are absent. */
-  readonly updates?: readonly { readonly text: string }[];
   /** Why a decision on a request the work Task waited on did not continue the work Session. */
   readonly notContinued?: string;
   readonly reportStatus: "waiting" | "replied";
@@ -84,8 +82,8 @@ The Tag answers with its Roles' permissions only; no location's Permission or Co
 While no bound Worker Host can run the turn, it shows "· waiting: REASON" once, such as
 "· waiting: no bound Worker Host provides MCP server notes".
 When the Tag hands work to work Sessions, it shows "· working: TITLE" for each one and stays
-until the Tag reports each result in the conversation. When the Tag passes on a work Session's
-progress note, it shows "· update: TITLE" and what the Tag said. A work Session that needs you shows
+until the Tag reports each result in the conversation. In a terminal, while a work Session works,
+it shows each command it runs as "· running: COMMAND". A work Session that needs you shows
 "· waiting on you: TITLE" and the Tag's question; answer it with your next message. A work
 Session that needs an approval shows "· approval needed: TITLE" and the request, then
 "· waiting for approval: TITLE" and the Tag's report. Decide it with supertag approve request or
@@ -314,14 +312,6 @@ async function followWorkSessions(
           shown.add(`approval:${approval.requestId}`);
           options.write(
             `· approval needed: ${terminalText(session.title)}\n${terminalLines(approval.text.trimEnd())}\n`,
-          );
-        }
-        // What the Tag said about the work Session's progress notes, each once, before its report.
-        for (const [index, update] of (session.updates ?? []).entries()) {
-          if (shown.has(`update:${session.taskId}:${index}`)) continue;
-          shown.add(`update:${session.taskId}:${index}`);
-          options.write(
-            `· update: ${terminalText(session.title)}\n${terminalLines(update.text.trimEnd())}\n`,
           );
         }
         const reportKey = `report:${session.taskId ?? session.id}`;

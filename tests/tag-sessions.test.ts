@@ -295,7 +295,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       };
     }
 
-    it("gives a work Session only ask and message_parent, and an update turn reads and skip_reply", async () => {
+    it("gives a work Session only ask", async () => {
       const f = await fixture();
       const parent = await f.conversation({ actorId: "alice", text: "Plan the launch" });
       const work = await f.conversation({
@@ -308,10 +308,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           title: "launch probe",
         },
       });
-      expect(await f.controller.coordinationActions(work.caller)).toEqual([
-        "ask",
-        "message_parent",
-      ]);
+      expect(await f.controller.coordinationActions(work.caller)).toEqual(["ask"]);
       // A direct call to a read is refused too, not only left out of the tool list.
       for (const name of [
         "list_sessions",
@@ -323,61 +320,10 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         "list_tasks",
         "read_commitments",
         "start_session",
-        "skip_reply",
       ])
         await expect(
           f.call(name, name === "search_sessions" ? { query: "launch" } : {}, work.caller),
         ).rejects.toMatchObject({ statusCode: 403, message: expect.stringContaining("sees only") });
-
-      const update = await f.conversation({
-        actorId: "alice",
-        text: "(update)",
-        internal: {
-          kind: "session_update",
-          startedByTaskId: parent.task.id,
-          workSessionId: work.session.id,
-          workTaskId: work.task.id,
-          title: "launch probe",
-          sequence: 1,
-          text: "Halfway there",
-        },
-      });
-      const updateTools = await f.controller.coordinationActions(update.caller);
-      expect(updateTools).toEqual([
-        "select_objective",
-        "read_objective",
-        "list_tasks",
-        "read_commitments",
-        "list_sessions",
-        "search_sessions",
-        "read_session",
-        "list_objectives",
-        "skip_reply",
-      ]);
-      await expect(f.call("message_parent", { text: "hi" }, update.caller)).rejects.toMatchObject({
-        statusCode: 403,
-      });
-      await expect(
-        f.call("start_session", { title: "t", instruction: "i" }, update.caller),
-      ).rejects.toMatchObject({ statusCode: 403 });
-      await expect(f.call("skip_reply", {}, update.caller)).resolves.toMatchObject({
-        status: "skipped",
-      });
-      // Repeating it records the skip once.
-      await f.call("skip_reply", {}, update.caller);
-      expect(
-        (await f.store.listTaskEvents(update.task.id)).filter(
-          (event) => event.type === "session_update.skipped",
-        ),
-      ).toHaveLength(1);
-      // Only an update turn may stay silent, and only a work Session messages its conversation.
-      await expect(f.call("skip_reply", {}, parent.caller)).rejects.toMatchObject({
-        statusCode: 403,
-      });
-      await expect(f.call("message_parent", { text: "hi" }, parent.caller)).rejects.toMatchObject({
-        statusCode: 403,
-      });
-      expect(await f.controller.coordinationActions(parent.caller)).not.toContain("skip_reply");
     });
 
     it("keeps the audience a Session opened with", async () => {

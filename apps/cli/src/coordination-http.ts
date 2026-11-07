@@ -8,10 +8,8 @@ import {
   TagMessagingError,
   WORK_SESSION_INSTRUCTION_MAX,
   WORK_SESSION_MAX_RUNNING,
-  WORK_SESSION_MAX_UPDATES,
   WORK_SESSION_QUESTION_MAX,
   WORK_SESSION_TITLE_MAX,
-  WORK_SESSION_UPDATE_MAX,
   WORKSTREAM_POST_MAX_BODY,
   WORKSTREAM_POST_MAX_REFERENCE,
   WORKSTREAM_POST_MAX_REFERENCES,
@@ -722,7 +720,7 @@ const surfaceDefinitions = [
   ],
   [
     "start_session",
-    `Start a work Session for work that takes more than a quick answer, such as research, multi-step tool use or edits. Give a short title and a self-contained instruction with everything it needs: the work Session sees only its own work, not this conversation or the Tag's other Sessions and Objectives. It runs as its own Task with this conversation's permissions, never more, and cannot start Sessions or change Objectives. When this conversation has a Workspace, the work Session commits its edits to its own branch there and later Tasks of it build on them; with several Workspaces, name one in workspace. Returns the new Session's id at once. Tell the person briefly that you started it and end your turn; it may send notes while it works, and when it finishes you get a turn here to report the result. At most ${WORK_SESSION_MAX_RUNNING} run at once per conversation; later ones wait.`,
+    `Start a work Session for work that takes more than a quick answer, such as research, multi-step tool use or edits. Give a short title and a self-contained instruction with everything it needs: the work Session sees only its own work, not this conversation or the Tag's other Sessions and Objectives. It runs as its own Task with this conversation's permissions, never more, and cannot start Sessions or change Objectives. When this conversation has a Workspace, the work Session commits its edits to its own branch there and later Tasks of it build on them; with several Workspaces, name one in workspace. Returns the new Session's id at once. Tell the person briefly that you started it and end your turn; when it finishes or asks the person a question, you get a turn here to report it. At most ${WORK_SESSION_MAX_RUNNING} run at once per conversation; later ones wait.`,
     ["title", "instruction"],
   ],
   [
@@ -734,16 +732,6 @@ const surfaceDefinitions = [
     "ask",
     `Ask the person a question this work Session cannot go on without: one concise question with what you need decided or supplied. SuperTag records it and ends this Task waiting on the person; the conversation asks them, and their answer continues this work Session as its next Task. After ask succeeds, end your turn at once with a brief final reply and no further tool call.`,
     ["question"],
-  ],
-  [
-    "message_parent",
-    `Send this work Session's conversation a short note while you keep working, such as a finding the person should hear before the result. It does not wait: the Tag gets a turn in the conversation with your note and decides whether and how to tell the person. At most ${WORK_SESSION_MAX_UPDATES} per Task; put everything else in your final result. To stop until the person answers, use ask instead.`,
-    ["text"],
-  ],
-  [
-    "skip_reply",
-    "End this update turn without posting anything, when the work Session's note does not need the person's attention. After it succeeds, end your turn at once with no further tool call.",
-    [],
   ],
 ] as const;
 const sessionToolLimit = { type: "integer", minimum: 1, maximum: SESSION_TOOL_MAX_RESULTS };
@@ -791,8 +779,6 @@ const surfaceProperties: Readonly<Record<string, Readonly<Record<string, unknown
     message: { type: "string", minLength: 1, maxLength: WORK_SESSION_INSTRUCTION_MAX },
   },
   ask: { question: { type: "string", minLength: 1, maxLength: WORK_SESSION_QUESTION_MAX } },
-  message_parent: { text: { type: "string", minLength: 1, maxLength: WORK_SESSION_UPDATE_MAX } },
-  skip_reply: {},
 };
 export const surfaceTools = surfaceDefinitions.map(([name, description, required]) => ({
   name,

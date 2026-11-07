@@ -2391,7 +2391,7 @@ function findingsInstruction(task: TaskAttemptSpec): string {
 
 /**
  * The `Change:` line becomes the commit subject when a Workspace delivers the Task's edits. A Task
- * with nothing to commit, such as a conversation, report or update turn, is not asked for it.
+ * with nothing to commit, such as a conversation or report turn, is not asked for it.
  */
 function changeInstruction(task: TaskAttemptSpec): string {
   return task.workspacePlan?.status === "workspace" ? `${CHANGE_SUMMARY_INSTRUCTION} ` : "";

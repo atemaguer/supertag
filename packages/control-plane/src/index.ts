@@ -29,11 +29,9 @@ import {
   internalTurnMessages,
   reportedTurnSpend,
   resumedWorkSessionExecution,
-  SESSION_UPDATE_SKIPPED_EVENT,
   type StartSessionRequest,
   samePermissions,
   sessionReportEvent,
-  sessionUpdateEvent,
   WORK_SESSION_ASKED_EVENT,
   workSessionBranch,
   workSessionDelivery,
@@ -108,7 +106,6 @@ import {
   TagMessagingError,
   WORK_SESSION_MAX_OPEN,
   WORK_SESSION_MAX_RUNNING,
-  WORK_SESSION_MAX_UPDATES,
   WORK_SESSION_NOT_CONTINUED_EVENT,
   workSessionApprovalDeliveryId,
 } from "@supertag/core";
@@ -414,7 +411,7 @@ export class ControlPlane {
   /** Work Session executions running beside the task controller loop. */
   readonly #backgroundRuns = new Set<Promise<void>>();
   readonly #workSessionStarts = new Map<string, Promise<void>>();
-  /** Per work Task: its message_parent notes and its report admission run one at a time. */
+  /** Per work Task: its approval notice, continuation and report admission run one at a time. */
   readonly #workTaskTurns = new Map<string, Promise<void>>();
   #accepting = false;
   #running = false;
@@ -573,8 +570,6 @@ export class ControlPlane {
         this.#oneWorkTaskTurn(task.id, () =>
           this.#postWorkSessionApproval(task, inbound, requestId),
         ),
-      messageParent: (task, inbound, text) =>
-        this.#oneWorkTaskTurn(task.id, () => this.#messageParent(task, inbound, text)),
       approvalDecided: (request) =>
         this.#oneWorkTaskTurn(request.taskId, () =>
           this.#continueDecidedWorkSession(request.taskId),
@@ -1347,7 +1342,7 @@ export class ControlPlane {
   ): Promise<InboundIngestResult> {
     const requested = parseTaskExecutionRequirements(options.execution ?? {});
     if (event.internal !== undefined)
-      throw new Error("Only SuperTag admits work Session, report and update turns");
+      throw new Error("Only SuperTag admits work Session and report turns");
     return this.#admitting(async () => {
       const identity = await this.#resolveInvocationIdentity(event);
       if (identity.status === "unconfigured") {
@@ -1681,7 +1676,7 @@ export class ControlPlane {
     const active = await this.#store.findActiveSessionAttempt(work.id);
     if (!active?.task.inboundEventId) return undefined;
     const original = await this.#store.findInboundEventById(active.task.inboundEventId);
-    // An internal turn (a work Session's Task, a report or an update turn) is not a conversation
+    // An internal turn (a work Session's Task or a report turn) is not a conversation
     // turn: a person's message waits for its own Task, which may start work and answer them.
     if (
       !original ||
@@ -2079,11 +2074,10 @@ export class ControlPlane {
           markStarted();
           this.#replyStreams.event(task.id, event);
           if (!durableExecution) await this.#recordWorkerEvent(task.id, attempt.id, event);
-          // A work Session posts nowhere, and an update turn may post nothing at all.
+          // A work Session posts nowhere.
           if (
             event.type === "progress.updated" &&
             work.event.internal?.kind !== "work_session" &&
-            work.event.internal?.kind !== "session_update" &&
             (await this.#supportsReplyReplacement(work))
           ) {
             const text = taskProgressText(event.progress);
@@ -2136,14 +2130,6 @@ export class ControlPlane {
                 .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))
                 .map((request) => request.id)
             : [];
-        // An update turn that called skip_reply ends with an empty final reply, which posts
-        // nothing; its result keeps what the Tag wrote.
-        const skipped =
-          work.event.internal?.kind === "session_update" &&
-          (await this.#store.listTaskEvents(task.id)).some(
-            (event) =>
-              event.type === SESSION_UPDATE_SKIPPED_EVENT && event.attemptId === attempt?.id,
-          );
         preparedOutcome = {
           taskId: task.id,
           attemptId: attempt.id,
@@ -2152,10 +2138,9 @@ export class ControlPlane {
             responseLength: responseText.length,
             ...(typeof asked === "string" ? { question: asked } : {}),
             ...(approvals.length === 0 ? {} : { approvals }),
-            ...(skipped ? { skipped: true } : {}),
           },
           workerId,
-          responseText: skipped ? "" : finalResultText(responseText, result),
+          responseText: finalResultText(responseText, result),
           completedAt,
           result,
         };
@@ -2939,9 +2924,8 @@ export class ControlPlane {
   }
 
   /**
-   * Runs one work Task's `message_parent` admissions and its report admission one at a time, so
-   * a note admitted while the Task runs is queued before its report, and a note that arrives
-   * once the Task has finished is dropped.
+   * Runs one work Task's approval notice, approval continuation and report admission one at a
+   * time, so a notice posted while the Task runs is queued before its report.
    */
   async #oneWorkTaskTurn<T>(workTaskId: string, admit: () => Promise<T>): Promise<T> {
     const previous = this.#workTaskTurns.get(workTaskId) ?? Promise.resolve();
@@ -2956,101 +2940,6 @@ export class ControlPlane {
     } finally {
       if (this.#workTaskTurns.get(workTaskId) === settled) this.#workTaskTurns.delete(workTaskId);
     }
-  }
-
-  /**
-   * `message_parent`: a running work Session Task's note to its conversation, admitted as an
-   * update turn there under the starting turn's admitted authorization, replying where that turn
-   * replied. Its event id is the delivery key per work Task and sequence, so each note is
-   * admitted once, and at most `WORK_SESSION_MAX_UPDATES` per work Task. A note with the same
-   * text as one the Task already sent, as a retried Attempt sends, admits nothing.
-   */
-  async #messageParent(
-    task: Task,
-    work: DurableInboundEvent,
-    text: string,
-  ): Promise<{ readonly status: "sent" | "dropped"; readonly next: string }> {
-    const internal = work.event.internal;
-    if (internal?.kind !== "work_session")
-      throw new TagMessagingError(403, "Only a work Session messages its conversation");
-    if (!this.#accepting)
-      throw new TagMessagingError(503, "The Control Plane is not accepting new work now");
-    // A retired Tag takes no more turns.
-    if ((await this.#store.findTagById(task.tagId))?.status !== "active")
-      throw new TagMessagingError(
-        409,
-        "This Tag is no longer active, so its conversation takes no update",
-      );
-    // A note after the Task finished would follow its report; the report already says it all.
-    if (
-      (await this.#store.findTaskById(task.id))?.status !== "running" ||
-      (await this.#store.findWorkSessionReport(task.id)) !== undefined
-    )
-      return {
-        status: "dropped",
-        next: "This Task has finished, so the note was not sent; its result reaches the conversation.",
-      };
-    const startingTask = await this.#store.findTaskById(internal.startedByTaskId);
-    const starting = startingTask?.inboundEventId
-      ? await this.#store.findInboundEventById(startingTask.inboundEventId)
-      : undefined;
-    if (!startingTask || !starting)
-      throw new Error(`Work Session ${task.sessionId} has no conversation turn to message`);
-    const updates = await this.#store.listWorkSessionUpdates(task.id);
-    // A retried Attempt redoes the work and sends its notes again; a note this Task already
-    // sent is not sent twice, so the person sees it once and the retry keeps its cap.
-    for (const update of updates) {
-      const sent = (await this.#store.findInboundEventById(update.inboundEventId))?.event.internal;
-      if (sent?.kind === "session_update" && sent.text === text)
-        return {
-          status: "sent",
-          next: "This Task already sent this note, so it was not sent again. Keep working; put everything else in your final result.",
-        };
-    }
-    const used = updates.length;
-    for (let sequence = used + 1; sequence <= WORK_SESSION_MAX_UPDATES; sequence++) {
-      const admission = await this.#store.admitInboundEvent({
-        surfaceAccountId: starting.surfaceAccountId,
-        tagRouteId: starting.tagRouteId,
-        tagId: starting.tagId,
-        authorization: starting.authorization,
-        contextPlan: starting.contextPlan,
-        execution: starting.execution,
-        event: sessionUpdateEvent(
-          starting,
-          {
-            startedByTaskId: startingTask.id,
-            workSessionId: task.sessionId,
-            workTaskId: task.id,
-            title: internal.title,
-            sequence,
-            text,
-          },
-          new Date().toISOString(),
-        ),
-        maxAttempts: this.#maxAttempts,
-      });
-      // Another Control Plane took this sequence; the next one is free.
-      if (admission.status === "duplicate") continue;
-      const update = await this.#openTask(admission.work);
-      await this.#appendTaskEvent(update.id, "task.admitted", {
-        tagRouteId: starting.tagRouteId,
-        scope: starting.event.scope,
-        updatesTaskId: task.id,
-        workSessionId: task.sessionId,
-        sequence,
-      });
-      this.#wakeTaskController?.();
-      const left = WORK_SESSION_MAX_UPDATES - sequence;
-      return {
-        status: "sent",
-        next: `Keep working. The Tag decides whether to tell the person. ${left === 0 ? "This Task may send no more notes" : `This Task may send ${left} more note${left === 1 ? "" : "s"}`}; put everything else in your final result.`,
-      };
-    }
-    throw new TagMessagingError(
-      409,
-      `This Task already sent ${WORK_SESSION_MAX_UPDATES} notes with message_parent, the most one Task may send; put the rest in your final result`,
-    );
   }
 
   async #reportWorkSessionNow(workTaskId: string): Promise<void> {

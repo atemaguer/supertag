@@ -3349,8 +3349,6 @@ interface StartedWorkSession {
   readonly question?: string;
   /** The approval notices posted to this conversation for the Task's pending approval requests. */
   readonly approvals?: readonly { readonly requestId: string; readonly text: string }[];
-  /** What the Tag told the person from the Task's progress notes, oldest first; silent ones are absent. */
-  readonly updates?: readonly { readonly text: string }[];
   /** Why a decision on a request the Task waited on did not continue the work Session. */
   readonly notContinued?: string;
   readonly reportStatus: "waiting" | "replied";
@@ -3628,7 +3626,6 @@ async function startedWorkSessions(
         ? await store.findOutboundReply(found.inboundEventId, "final")
         : undefined;
       const approvals = await workSessionApprovals(store, task, session.task);
-      const updates = session.task ? await workSessionUpdates(store, session.task.id) : [];
       const notContinued =
         session.task && task.inboundEventId
           ? await store.findOutboundReply(
@@ -3643,7 +3640,6 @@ async function startedWorkSessions(
         status: workSessionWaiting(session) ? "waiting" : (session.task?.status ?? "pending"),
         ...(session.task?.question === undefined ? {} : { question: session.task.question }),
         ...(approvals.length === 0 ? {} : { approvals }),
-        ...(updates.length === 0 ? {} : { updates }),
         ...(notContinued === undefined ? {} : { notContinued: notContinued.text }),
         reportStatus: report === undefined ? ("waiting" as const) : ("replied" as const),
         ...(found?.taskId ? { reportTaskId: found.taskId } : {}),
@@ -3653,21 +3649,6 @@ async function startedWorkSessions(
       };
     }),
   );
-}
-
-/**
- * The replies the update turns for a work Session Task's progress notes posted, oldest first. An
- * update turn that stayed silent posted nothing, so it is absent.
- */
-async function workSessionUpdates(
-  store: ControlPlaneApiRequestContext["store"],
-  workTaskId: string,
-): Promise<readonly { readonly text: string }[]> {
-  const updates = await store.listWorkSessionUpdates(workTaskId);
-  const replies = await Promise.all(
-    updates.map((update) => store.findOutboundReply(update.inboundEventId, "final")),
-  );
-  return replies.flatMap((reply) => (reply?.text.trim() ? [{ text: reply.text }] : []));
 }
 
 /**

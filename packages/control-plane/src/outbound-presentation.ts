@@ -34,15 +34,10 @@ export function outboundPresentationPolicy(
 
 /**
  * Replies SuperTag records but sends nowhere: a work Session's own replies, whose result returns
- * to its conversation as a report turn, and the empty final reply of an update turn that stayed
- * silent with skip_reply.
+ * to its conversation as a report turn.
  */
-export function sentNowhere(reply: Pick<OutboundReply, "event" | "deliveryKey" | "text">): boolean {
-  const kind = reply.event.internal?.kind;
-  return (
-    kind === "work_session" ||
-    (kind === "session_update" && reply.deliveryKey === "final" && reply.text.trim() === "")
-  );
+export function sentNowhere(reply: Pick<OutboundReply, "event">): boolean {
+  return reply.event.internal?.kind === "work_session";
 }
 
 function digest(value: string): string {

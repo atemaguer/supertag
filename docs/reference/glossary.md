@@ -27,7 +27,7 @@ whole system rather than another first-class resource.
   its open Objectives and can read each other, except a private Session, such as a direct chat or a
   CLI conversation, which only its one person's Sessions can read. A work Session is a Session a
   conversation started for longer work; its parent is that conversation, it sees only its own
-  work, and its progress notes and result return there through the Tag. See
+  work, and its result returns there through the Tag. See
   [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-one-memory) and
   [Session](../concepts/tasks.md#session).
 - <a id="team"></a>**Team** — a group of Tags with a shared responsibility, lead, and capacity boundary. See

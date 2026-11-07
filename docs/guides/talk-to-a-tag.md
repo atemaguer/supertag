@@ -56,20 +56,11 @@ The export is slow because it loads every invoice before filtering. Filtering in
 cuts it from 40 s to 2 s. Want me to make that change?
 ```
 
-In a terminal, dim lines such as `· running: rg invoice` show what each work Session does. When
-a work Session finishes, the Tag gets a turn in your conversation to report the result in its
-own words. The command exits when every work Session it started has reported.
-
-A work Session can also send the conversation a progress note while it works. The Tag decides
-whether you need to hear it. When it passes one on, the command prints it under
-`· update: TITLE`; when it stays silent, nothing prints:
-
-```text
-· working: Investigate slow billing export
-· update: Investigate slow billing export
-It loads every invoice before filtering; I'm checking whether the query can filter instead.
-· done: Investigate slow billing export
-```
+In a terminal, dim lines such as `· running: rg invoice` show what each work Session does. They
+are how you follow its progress; the Tag doesn't post progress of its own. The Tag speaks again
+when a work Session finishes or waits: it gets a turn in your conversation to report the result,
+or what the work Session waits for, in its own words. The command exits when every work Session it started
+has reported.
 
 Ctrl-C stops following, not the work. The report still arrives in the conversation, and your next
 message there sees it.
@@ -157,8 +148,7 @@ under `PARENT`. `STATUS` shows the latest Task's status: `pending`, `running`, `
 - **Your conversation uses only MCP servers its Worker Hosts declare.** Work Sessions also get the
   servers their Workspace provides; see [MCP server placement](../reference/iam.md#placement).
 - **A work Session sees only its own work.** It can't read your conversation, the Tag's other
-  Sessions, or its Objectives, so the Tag gives it everything it needs when it starts it. It
-  sends at most three progress notes per Task, and only the Tag decides what reaches you.
+  Sessions, or its Objectives, so the Tag gives it everything it needs when it starts it.
 - **A work Session commits its edits to its own branch.** When the Tag's Worker Hosts declare a
   Workspace, the work Session edits it and the Worker commits to a branch such as
   `supertag/session/0f3c2a9e`. Your checkout stays on its branch. The report names the branch, and
@@ -184,7 +174,7 @@ under `PARENT`. `STATUS` shows the latest Task's status: `pending`, `running`, `
   Session, the Task, the reply, and `startedSessions`: each work Session the message started or
   continued, with its status and report. A work Session waiting on you has status `waiting` and
   its `question`; one waiting for approval lists `approvals`, and the command returns there.
-  `updates` lists what the Tag said about progress notes; a silent one isn't listed. While no bound Worker Host can run the turn, `waiting` says why.
+  While no bound Worker Host can run the turn, `waiting` says why.
 - **Ctrl-C stops showing the reply, not the work.** The Tag keeps working. The command prints the
   `supertag describe task` command that follows the Task.
 

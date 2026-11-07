@@ -181,13 +181,9 @@ import {
   ASK_TOOL,
   CONTINUE_SESSION_TOOL,
   type ContinueSessionRequest,
-  MESSAGE_PARENT_TOOL,
   parseAsk,
   parseContinueSession,
-  parseMessageParent,
   parseStartSession,
-  SESSION_UPDATE_SKIPPED_EVENT,
-  SKIP_REPLY_TOOL,
   START_SESSION_TOOL,
   type StartSessionRequest,
   WORK_SESSION_ASKED_EVENT,
@@ -195,7 +191,7 @@ import {
 import { describeWorklet } from "./worklet-descriptor.js";
 
 /** The only tools a work Session Task gets: it reads nothing outside itself. */
-const WORK_SESSION_TOOLS: readonly string[] = [ASK_TOOL, MESSAGE_PARENT_TOOL];
+const WORK_SESSION_TOOLS: readonly string[] = [ASK_TOOL];
 
 /** What the Control Plane does for work Session tools; installed by the Control Plane. */
 export interface WorkSessionHandlers {
@@ -214,8 +210,6 @@ export interface WorkSessionHandlers {
    * its next Task, with the decision. Any other request continues nothing.
    */
   approvalDecided(request: ApprovalRequest): Promise<void>;
-  /** `message_parent`: admits an update turn with the note into the work Task's conversation. */
-  messageParent(task: Task, inbound: DurableInboundEvent, text: string): Promise<unknown>;
 }
 
 import { workspaceMcpDigest, workspaceMcpPin } from "./workspace-mcp-digest.js";
@@ -743,13 +737,11 @@ export class ObjectiveController {
         "read_commitments",
         ...TAG_SESSION_TOOLS,
       ];
-      // Work Sessions, report and update turns are internal turns: no human command, no new
-      // work. A work Session reads nothing outside itself: it only asks the person or notes
-      // progress to its conversation. Only a conversation turn answers it, and only an update
-      // turn may end without a reply.
+      // Work Sessions and report turns are internal turns: no human command, no new work. A
+      // work Session reads nothing outside itself: it only asks the person. Only a conversation
+      // turn answers it.
       const turn = await this.surfaceTurnKind(caller.taskId);
       if (turn === "work_session") return WORK_SESSION_TOOLS;
-      if (turn === "session_update") return [...reads, SKIP_REPLY_TOOL];
       if (turn !== "conversation") return reads;
       return [
         "create_objective",
@@ -3416,40 +3408,8 @@ export class ObjectiveController {
     if (internal === "work_session" && !WORK_SESSION_TOOLS.includes(name))
       throw new TagMessagingError(
         403,
-        "A work Session sees only its own work: it cannot read other Sessions or Objectives, start or continue Sessions, or change Objectives. Use ask or message_parent",
+        "A work Session sees only its own work: it cannot read other Sessions or Objectives, start or continue Sessions, or change Objectives. Use ask",
       );
-    if (name === MESSAGE_PARENT_TOOL) {
-      if (internal !== "work_session")
-        throw new TagMessagingError(403, "Only a work Session messages its conversation");
-      const text = parseMessageParent(input);
-      if (!this.workSessions)
-        throw new TagMessagingError(503, "Work Sessions are unavailable on this Control Plane");
-      return this.workSessions.messageParent(task, inbound, text);
-    }
-    if (name === SKIP_REPLY_TOOL) {
-      if (internal !== "session_update")
-        throw new TagMessagingError(
-          403,
-          "Only an update turn may end without a reply; answer the person in your reply",
-        );
-      mailboxObject(input, []);
-      if (
-        !(await this.store.listTaskEvents(task.id)).some(
-          (event) =>
-            event.type === SESSION_UPDATE_SKIPPED_EVENT && event.attemptId === caller.attemptId,
-        )
-      )
-        await this.store.appendTaskEvent({
-          taskId: task.id,
-          attemptId: caller.attemptId,
-          type: SESSION_UPDATE_SKIPPED_EVENT,
-          payload: { version: 1 },
-        });
-      return {
-        status: "skipped",
-        next: "End your turn now with no further tool call. Nothing from this turn is posted to the person.",
-      };
-    }
     if (isTagSessionTool(name))
       return tagSessionCommand(this.store, name, input, conversationViewer(task, inbound));
     if (
@@ -3465,9 +3425,7 @@ export class ObjectiveController {
     )
       throw new TagMessagingError(
         403,
-        internal === "session_update"
-          ? "An update turn cannot start or continue Sessions or change Objectives"
-          : "A report turn cannot start or continue Sessions or change Objectives",
+        "A report turn cannot start or continue Sessions or change Objectives",
       );
     if (name === ASK_TOOL) {
       if (inbound.event.internal?.kind !== "work_session")

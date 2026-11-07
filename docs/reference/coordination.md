@@ -421,8 +421,6 @@ and hand work to [work Sessions](../concepts/tasks.md#session):
 | `start_session` | `title` (up to 120 characters), `instruction` (up to 8,000), optional `workspace` | Starts a work Session |
 | `continue_session` | `sessionId`, `message` (up to 8,000 characters) | Starts a work Session's next Task |
 | `ask` | `question` (up to 2,000 characters) | Ends a work Session's Task waiting on the person |
-| `message_parent` | `text` (up to 2,000 characters) | Sends the conversation a progress note without waiting |
-| `skip_reply` | none | Ends an update turn without posting anything |
 
 `limit` is at most 20. A conversation sees a Session of its Tag that is shared, or private to the
 same person. Session reads return history, not instructions, and grant no authority. One
@@ -437,18 +435,13 @@ doesn't get, not only leaves it out of the list.
 | --- | --- |
 | A person's message | `create_objective`, `attach_objective`, the reads below, `start_objective`, `instruct_objective`, `start_session`, `continue_session` |
 | Report turn: a work Session's result | Reads: `select_objective`, `read_objective`, `list_tasks`, `read_commitments`, `list_sessions`, `search_sessions`, `read_session`, `list_objectives` |
-| Update turn: a work Session's progress note | The same reads, and `skip_reply` |
-| Work Session Task | `ask`, `message_parent` |
+| Work Session Task | `ask` |
 
 - A work Session sees only its own work. It gets none of the reads, and no portfolio: the system
   message that lists the Tag's open Objectives.
-- `message_parent {text}` sends the conversation a note of 1 to 2000 characters and doesn't wait.
-  Each note admits one update turn, once, even across a restart. A note with the same text as one
-  the work Task already sent, as a retried Task Attempt sends, admits nothing. A work Task sends
-  at most 3 across all its Task Attempts; SuperTag refuses the fourth. A note that arrives after
-  the work Task finished is dropped, so the update turns of a Task always come before its report.
-- `skip_reply` ends an update turn without posting anything, on any collaboration surface or in
-  the CLI conversation.
+- Nothing a work Session writes is posted to its conversation while it runs; only SuperTag's
+  [approval notice](#a-work-session-waiting-on-approval) posts mid-run. Its Task's activity stream
+  shows progress; the report turn speaks when the Task finishes or waits.
 - A work Session's Task ends done or waiting: on the answer to `ask {question}`, which
   `continue_session` passes on, or on [approval](#a-work-session-waiting-on-approval), whose
   decision continues it by itself. See
@@ -472,7 +465,7 @@ every work Task it starts or continues:
   turn's limit; see [a work Session waiting on approval](#a-work-session-waiting-on-approval).
 - Each Task's harness enforces its own limit. Spend the turn reports after it admits a work Task
   counts only against the work Tasks it admits later.
-- Report and update turns run outside the budget, each under the starting turn's full limits.
+- Report turns run outside the budget, each under the starting turn's full limits.
 - A turn without these limits passes none on.
 
 ### Identity and preconditions

@@ -114,19 +114,9 @@ export function workSessionApprovalDeliveryId(workTaskId: string): string {
  */
 export const WORK_SESSION_NOT_CONTINUED_EVENT = "work_session.not-continued";
 
-/** Progress notes one work Session Task may send its conversation with `message_parent`. */
-export const WORK_SESSION_MAX_UPDATES = 3;
-/** The text of one `message_parent` note. */
-export const WORK_SESSION_UPDATE_MAX = 2_000;
-
-/** The durable delivery id of a work Task's `sequence`th update turn, numbered from 1. */
-export function workSessionUpdateDeliveryId(workTaskId: string, sequence: number): string {
-  return `session-update:${workTaskId}:${sequence}`;
-}
-
 /**
  * A turn SuperTag admits itself into a Session. It is never a human message: its text is the
- * Tag's own instruction (`work_session`) or absent (`session_report`, `session_update`), it
+ * Tag's own instruction (`work_session`) or absent (`session_report`), it
  * carries no explicit human command, and it runs under the starting conversation turn's admitted
  * authorization.
  */
@@ -164,21 +154,6 @@ export type InternalTurn =
       readonly approvals?: readonly string[];
       /** SuperTag's account of where the work Task's Workspace changes are, when it had one. */
       readonly delivery?: string;
-    }
-  | {
-      /**
-       * The conversation turn for a running work Session Task's `message_parent` note: the Tag
-       * tells the person what helps them, or posts nothing.
-       */
-      readonly kind: "session_update";
-      readonly startedByTaskId: string;
-      readonly workSessionId: string;
-      readonly workTaskId: string;
-      readonly title: string;
-      /** The note's number among the work Task's notes, from 1. */
-      readonly sequence: number;
-      /** The note: the work Session's own text, bounded by `WORK_SESSION_UPDATE_MAX`. */
-      readonly text: string;
     };
 
 /** One work Session a conversation started, with its latest Task. */
@@ -261,14 +236,6 @@ export interface SessionAudienceStore {
   findWorkSessionReport(
     workTaskId: string,
   ): Promise<{ readonly inboundEventId: string; readonly taskId?: string } | undefined>;
-  /** The update turns admitted for a work Session's Task, by sequence, with their Tasks once opened. */
-  listWorkSessionUpdates(workTaskId: string): Promise<
-    readonly {
-      readonly sequence: number;
-      readonly inboundEventId: string;
-      readonly taskId?: string;
-    }[]
-  >;
 }
 
 /** What a Session's Tasks say about it in a list: its latest status and how it began. */

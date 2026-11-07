@@ -557,9 +557,7 @@ While the work Session's Task has pending approval requests, `approvals` lists e
 `requestId` and the notice `text` posted to the conversation. A decision continues the work
 Session, and the entry then reports its next Task. When a decision can't continue it, because the
 Tag's permissions changed or its limits are spent, `notContinued` carries the notice that says so,
-and `status` is the Task's own. `updates` lists the `text` of each reply the Tag posted
-from the Task's progress notes, oldest first; an update turn that stayed silent isn't listed.
-`GET` and `stream` also accept a work Session's `taskId`,
+and `status` is the Task's own. `GET` and `stream` also accept a work Session's `taskId`,
 for the operator whose conversation started it; its stream carries the work Session's activity.
 
 The `stream` route follows the reply as it is written. It answers with Server-Sent Events in the

@@ -124,14 +124,11 @@ read the Tag's other Sessions or Objectives. Its own history comes from its nati
 the Tag's instruction has to carry everything else it needs. Information passes between work
 Sessions only through the conversation.
 
-While it works, a work Session's Task can send its conversation up to three short progress notes
-with `message_parent`. It doesn't wait for an answer. Each note gets one **update turn** in the
-conversation, which resumes the conversation's native session like a report turn. The note is the
-work Session's own text, so it grants nothing. The Tag tells the person only what helps them, in
-its own voice, or posts nothing at all. Nothing a work Session writes reaches a person without a
-Tag turn. If the work Session's Task is retried, a note it already sent isn't sent again, and the
-retry counts against the same three. An update turn has the same tools as a report turn. A note sent before the work Task
-finished comes before its report; a note that arrives after that is dropped.
+Nothing a work Session writes is posted while it works; the only thing posted mid-run is
+SuperTag's own [approval notice](#when-a-work-session-needs-the-person). Its Task streams its
+activity, and `supertag message tag` in a terminal shows that activity as the work runs. The Tag
+speaks when the work Session finishes or waits, in a report turn. Nothing a work Session writes
+reaches a person without a Tag turn.
 
 ### When a work Session needs the person
 
@@ -199,7 +196,7 @@ the work Tasks it already started. For example, a Task limited to 10,000 tokens 
 tenth of the limit, in tokens and in cost, to do anything before it runs out. When its share is
 smaller, SuperTag refuses `start_session` and `continue_session`, and the Tag does the work in its
 own turn. `continue_session` draws from the turn that continues the work Session, not the one that
-started it. A Task without reported limits passes none on. Report and update turns sit outside the
+started it. A Task without reported limits passes none on. Report turns sit outside the
 budget and run under the starting Task's full limits, so a result reaches the person even when the
 budget is spent.
 
