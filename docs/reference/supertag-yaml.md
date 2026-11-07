@@ -537,7 +537,8 @@ SuperTag's per-Task policy proxy. See [MCP server tools](iam.md#mcp-server-tools
 The host advertises each server as the [placement label](resource-model.md#worker-host-labels)
 `mcp:NAME`, such as `mcp:sentry`. A Task whose grants name `sentry` runs only on bound hosts that
 provide it, and so does a Tag whose `runsOn` lists `mcp:sentry`. When none does, `supertag describe
-task` names the missing server. The `labels` key, `supertag connect worklet --label`, and Auth Keys
+task` names the missing server. A Task without a Workspace, such as a conversation turn, needs only
+granted servers that some bound host declares; see [MCP server placement](iam.md#placement). The `labels` key, `supertag connect worklet --label`, and Auth Keys
 cannot declare `mcp:` labels; declare the server under `mcp` instead.
 
 A server name is 1-59 lowercase letters, digits, hyphens, or underscores. Each server takes these
@@ -667,7 +668,8 @@ When the token endpoint refuses a refresh with HTTP 400 or 401, SuperTag marks t
 the credential store. The host then advertises the placement label `mcp-login:NAME` instead of
 `mcp:NAME`. A connected host sends the changed labels with its next heartbeat, without
 reconnecting. Tasks whose granted tools need the server stay queued;
-they do not fail. `supertag describe objective` explains the hold, and the operator inbox shows an
+they do not fail. `supertag describe objective` explains the hold, `supertag describe task` shows
+`Waiting: MCP server NAME needs a login on its Worker Host`, and the operator inbox shows an
 `mcp_login` item. SuperTag creates no manager follow-up Task for this hold. After a new login,
 the host advertises `mcp:NAME` again with its next heartbeat and the Task runs. The `labels` key, Tag `runsOn`, and Auth Key labels cannot declare `mcp-login:` labels.
 

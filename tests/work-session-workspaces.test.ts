@@ -42,6 +42,14 @@ it("numbers a work Session's branches after its short id", () => {
   expect(workSessionBranch(id, "supertag/session/0f3c2a9e-2")).toBe("supertag/session/0f3c2a9e-3");
 });
 
+interface WorkletOptions {
+  readonly failFirstWork?: boolean;
+  /** The first work Task writes nothing, as when it only asks the person. */
+  readonly emptyFirstWork?: boolean;
+  /** This many first work Tasks find their requested branch already taken by another branch. */
+  readonly occupiedWorkBranches?: number;
+}
+
 for (const dialect of ["sqlite", "postgresql"] as const) {
   describe.skipIf(dialect === "postgresql" && !postgres)(
     `work Session Workspaces (${dialect})`,
@@ -60,11 +68,10 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       }[];
 
       /** A Tag Worklet whose work Tasks run a real Worker on a Workspace worktree. */
-      function worklet(
-        workspaces: readonly string[],
-        options: { readonly failFirstWork?: boolean } = {},
-      ): Worklet {
+      function worklet(workspaces: readonly string[], options: WorkletOptions = {}): Worklet {
         let failWork = options.failFirstWork === true;
+        let skipWrite = options.emptyFirstWork === true;
+        let occupied = options.occupiedWorkBranches ?? 0;
         const root = join(checkout, "..", `${checkout.split("/").at(-1)}-worktrees`);
         cleanups.push(() => rm(root, { recursive: true, force: true }));
         let files: string[] = [];
@@ -78,6 +85,12 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           ]),
           runner: async function* (request: { readonly workspace: string }) {
             files = (await readdir(request.workspace)).filter((name) => name.endsWith(".txt"));
+            // A Task that only asks the person edits nothing.
+            if (skipWrite) {
+              skipWrite = false;
+              yield { type: "output.message" as const, text: "Which file should I write?" };
+              return;
+            }
             const next = files.includes("first.txt") ? "second.txt" : "first.txt";
             await writeFile(join(request.workspace, next), `${next}\n`);
             yield { type: "output.message" as const, text: `Wrote ${next}.` };
@@ -126,6 +139,10 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             if (kind === "work" && spec.workspacePlan.status === "workspace") {
               const workerProfile = (await worker.describe()).profiles[0];
               if (!workerProfile) throw new Error("The Worker has no profile");
+              if (occupied > 0) {
+                occupied -= 1;
+                git(checkout, "branch", spec.workspacePlan.branch, "main");
+              }
               const failing = failWork;
               failWork = false;
               for await (const event of worker.execute({ ...spec, workerProfile })) {
@@ -191,10 +208,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         };
       }
 
-      async function start(
-        workspaces: readonly string[],
-        options: { readonly failFirstWork?: boolean } = {},
-      ) {
+      async function start(workspaces: readonly string[], options: WorkletOptions = {}) {
         const directory = await mkdtemp(join(tmpdir(), "supertag-session-workspaces-"));
         cleanups.push(() => rm(directory, { recursive: true, force: true }));
         let databaseUrl = `file:${join(directory, "supertag.db")}`;
@@ -319,6 +333,87 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             ).toContain(`starts from the work Session's earlier branch ${branch}, so it already`),
           { timeout: 20_000 },
         );
+      });
+
+      it("gives the Session's branch to its first Task that commits, after one that asked", async () => {
+        await start(["app"], { emptyFirstWork: true });
+        const record = await send("work:Fix readme");
+        const started = record.startedSessions?.[0];
+        if (!started?.taskId) throw new Error("missing work Session");
+        const branch = workSessionBranch(started.id);
+        expect((await store.findTaskById(started.taskId))?.workspacePlan).toMatchObject({
+          branch,
+        });
+        // The first Task committed nothing, so its Worker removed the branch.
+        expect(git(checkout, "branch", "--list", branch)).toBe("");
+
+        const waitForTasks = (count: number) =>
+          vi.waitFor(
+            async () => {
+              const tasks = await store.listTasks({ sessionId: started.id });
+              expect(tasks).toHaveLength(count);
+              expect(tasks[0]?.status).toBe("completed");
+            },
+            { timeout: 20_000 },
+          );
+        await send(`continue:${started.id}|Answer: first.txt`);
+        await waitForTasks(2);
+        const [second] = await store.listTasks({ sessionId: started.id });
+        // The Task that does the work gets the Session's branch, and starts from the base.
+        expect(second?.workspacePlan).toMatchObject({ workspace: "app", branch });
+        const work = seen.filter((entry) => entry.kind === "work");
+        expect(work[1]?.spec.workspacePlan).not.toHaveProperty("dependencyBranches");
+        expect(git(checkout, "show", `${branch}:first.txt`)).toBe("first.txt");
+        const head = git(checkout, "rev-parse", branch);
+
+        // The next Task is numbered after it and builds on it.
+        await send(`continue:${started.id}|Answer: go on`);
+        await waitForTasks(3);
+        const [third] = await store.listTasks({ sessionId: started.id });
+        expect(third?.workspacePlan).toMatchObject({ branch: `${branch}-2` });
+        expect(seen.filter((entry) => entry.kind === "work")[2]?.spec.workspacePlan).toMatchObject({
+          dependencyBranches: [{ taskId: second?.id, branch, head }],
+        });
+        expect(git(checkout, "show", `${branch}-2:second.txt`)).toBe("second.txt");
+      });
+
+      it("numbers branches after the requested name when the Worker took another", async () => {
+        await start(["app"], { occupiedWorkBranches: 2 });
+        const record = await send("work:Fix readme");
+        const started = record.startedSessions?.[0];
+        if (!started?.taskId) throw new Error("missing work Session");
+        const branch = workSessionBranch(started.id);
+        const waitForTasks = (count: number) =>
+          vi.waitFor(
+            async () => {
+              const tasks = await store.listTasks({ sessionId: started.id });
+              expect(tasks).toHaveLength(count);
+              expect(tasks[0]?.status).toBe("completed");
+            },
+            { timeout: 20_000 },
+          );
+        await send(`continue:${started.id}|Answer: go on`);
+        await waitForTasks(2);
+        const [second] = await store.listTasks({ sessionId: started.id });
+        expect(second?.workspacePlan).toMatchObject({ branch: `${branch}-2` });
+        // Both Workers fell back to hash-suffixed names, since the requested ones were taken.
+        const delivered = seen
+          .filter((entry) => entry.kind === "work")
+          .map((entry) => entry.spec.workspacePlan);
+        expect(delivered[1]).toMatchObject({
+          dependencyBranches: [
+            { branch: expect.stringMatching(new RegExp(`^${branch}-[0-9a-f]{8}$`, "u")) },
+          ],
+        });
+        await send(`continue:${started.id}|Answer: more`);
+        await waitForTasks(3);
+        const [third] = await store.listTasks({ sessionId: started.id });
+        expect(third?.workspacePlan).toMatchObject({ branch: `${branch}-3` });
+        expect(seen.filter((entry) => entry.kind === "work")[2]?.spec.workspacePlan).toMatchObject({
+          dependencyBranches: [
+            { branch: expect.stringMatching(new RegExp(`^${branch}-2-[0-9a-f]{8}$`, "u")) },
+          ],
+        });
       });
 
       it("pins a retried work Session Task to its own branch and head", async () => {

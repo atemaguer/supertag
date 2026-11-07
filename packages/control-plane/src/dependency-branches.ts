@@ -68,12 +68,26 @@ export async function sessionWorkspaceBranches(
   const earlier = (
     await store.listTasks({ tagId: task.tagId, sessionId: task.sessionId, limit: 100 })
   ).filter((other) => other.id !== task.id && other.createdAt <= task.createdAt);
-  for (const other of earlier) {
+  const delivered = await latestSessionDelivery(store, earlier, plan);
+  return delivered === undefined ? [] : [delivered];
+}
+
+/**
+ * The latest of a work Session's `tasks`, newest first, that delivered commits in `plan`'s
+ * Workspace, and where. A Task that delivered nothing, such as one that only asked the person,
+ * has no branch to build on or number after.
+ */
+export async function latestSessionDelivery(
+  store: Pick<DependencyBranchStore, "listTaskEvents">,
+  tasks: readonly Task[],
+  plan: Pick<TaskNamedWorkspacePlan, "workspace">,
+): Promise<TaskWorkspaceDependencyBranch | undefined> {
+  for (const other of tasks) {
     const events = workerEvents(await store.listTaskEvents(other.id));
     const delivered = deliveredWorkspaceBranch(other, events, plan);
-    if (delivered !== undefined) return [delivered];
+    if (delivered !== undefined) return delivered;
   }
-  return [];
+  return undefined;
 }
 
 /**
@@ -95,7 +109,7 @@ export function workerEvents(events: readonly TaskEvent[]): readonly TaskEvent[]
 function deliveredWorkspaceBranch(
   task: Task,
   events: readonly TaskEvent[],
-  plan: TaskNamedWorkspacePlan,
+  plan: Pick<TaskNamedWorkspacePlan, "workspace">,
   attemptId?: string,
 ): TaskWorkspaceDependencyBranch | undefined {
   const source = task.workspacePlan;

@@ -52,6 +52,7 @@ export * from "./objective-limits.js";
 export * from "./objective-mailbox.js";
 export * from "./operator-notification.js";
 export * from "./operator-token.js";
+export * from "./placement-hold.js";
 export * from "./resource-management.js";
 export * from "./role.js";
 export * from "./session-audience.js";
@@ -1019,10 +1020,12 @@ export interface ClaimDueWorkInput {
   readonly leaseExpiresAt: string;
 }
 
-export interface PeekDueWorkInput {
+export interface ListDueWorkInput {
   readonly now: string;
-  /** Skip work Sessions' Tasks: the next due turn of a conversation or other surface Session. */
-  readonly excludeWorkSessions?: boolean;
+  /** At most this many events, oldest first. */
+  readonly limit: number;
+  /** Only events ordered after this one, to page past an earlier batch. */
+  readonly after?: Pick<DurableInboundEvent, "availableAt" | "admissionOrder">;
 }
 
 export interface ClaimDueInboundEventInput extends ClaimDueWorkInput {
@@ -1402,7 +1405,12 @@ export interface Store
   retireSurfaceAccount(id: string): Promise<SurfaceAccount | undefined>;
   findInboundEventById(id: string): Promise<DurableInboundEvent | undefined>;
   admitInboundEvent(input: AdmitInboundEventInput): Promise<AdmitInboundEventResult>;
-  peekNextInboundEvent(input: PeekDueWorkInput): Promise<DurableInboundEvent | undefined>;
+  /**
+   * Due inbound events, oldest first. Each Session has at most one: an event is due only once
+   * every earlier event of its Session finished, and a work Session only while its conversation
+   * runs fewer than the most work Sessions at once.
+   */
+  listDueInboundEvents(input: ListDueWorkInput): Promise<readonly DurableInboundEvent[]>;
   /** Claims execution work or prepared settlement recovery; only execution claims increment attemptCount. */
   claimDueInboundEvent(input: ClaimDueInboundEventInput): Promise<DurableInboundEvent | undefined>;
   renewInboundEventLease(input: RenewInboundEventLeaseInput): Promise<boolean>;

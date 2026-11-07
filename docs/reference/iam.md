@@ -238,10 +238,22 @@ values compare exactly: `repository:ACME/api` does not match `repository:acme/ap
 
 ### Placement
 
-A Task needs every server its grants name. SuperTag places it only on a bound Worker Host with the
-label `mcp:NAME` for each one. When no bound host provides a server, the Task waits, and
-`supertag describe task` names the missing server. A Worker that receives a Task for a server its
-host does not provide fails the Task Attempt before the harness starts.
+Which granted servers a Task needs depends on whether it has a Workspace:
+
+| Task | Needs |
+| --- | --- |
+| With a Workspace, such as a work Session Task | Every server its grants name. A server comes from the host, which carries the label `mcp:NAME`, or from the Workspace's [`spec.mcp`](../guides/workspaces.md#select-repository-mcp-servers). |
+| Without a Workspace, such as a conversation turn | Only the granted servers a bound Worker Host declares. |
+
+A conversation turn stays light. A granted server that no bound host declares, such as one only a
+Workspace's `.mcp.json` provides, is not available in that turn. Its grants are left out of the
+Task Attempt, so the harness gets no tool for an absent server. The Tag's work Sessions that get
+that Workspace use the server. A host server whose login lapsed still counts as declared, so the
+turn waits for `supertag mcp login NAME`.
+
+When no bound host provides a needed server, the Task waits. `supertag describe task` shows
+`Waiting: no bound Worker Host provides MCP server NAME`. A Worker that receives a Task for a
+server it cannot provide fails the Task Attempt before the harness starts.
 
 ## Tool resolution and adaptation
 

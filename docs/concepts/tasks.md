@@ -164,10 +164,16 @@ CLI conversation has no location, so it uses the Workspaces that the Tag's Worke
 With one Workspace the work Session uses it. With several, the Tag names one when it starts the
 work Session. With none, the work Session runs without a Workspace, like its conversation.
 
-Each continued Task gets the next branch, such as `supertag/session/0f3c2a9e-2`, and starts from
-the work Session's latest commits, so it sees the earlier edits. The report turn names the branch,
-so the Tag can tell the person where the changes are. The conversation turns themselves keep their
-own workspace. Editing still needs `files:write`.
+A work Session numbers its branches by the Tasks that commit. The first Task that commits gets
+`supertag/session/0f3c2a9e`, even when an earlier Task only asked the person and committed
+nothing. Each later Task gets the next branch, such as `supertag/session/0f3c2a9e-2`, and starts
+from the work Session's latest commits, so it sees the earlier edits. The report turn names the
+branch, so the Tag can tell the person where the changes are. The conversation turns themselves
+keep their own workspace. Editing still needs `files:write`.
+
+A work Session with a Workspace also gets the MCP servers the Workspace provides. Its conversation's
+turns use only MCP servers that the Tag's Worker Hosts declare; see
+[MCP server placement](../reference/iam.md#placement).
 
 ### How work Sessions share a budget
 

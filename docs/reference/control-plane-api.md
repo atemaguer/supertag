@@ -544,7 +544,9 @@ GET  /api/v1/tags/:name/messages/:taskId/stream
 ```
 
 `POST` sends `{"text": "...", "session": "NAME"}` and returns a `TagMessage` record. `GET` on the
-message returns the record, with `reply` once the Tag has answered.
+message returns the record, with `reply` once the Tag has answered. While no bound Worker Host can
+run the turn, `waiting` says why in one line, such as
+`no bound Worker Host provides MCP server notes`; it is absent once the turn can be placed.
 
 When the message's turn started or continued work Sessions, the record lists them in
 `startedSessions`, oldest first. Each entry has the Session `id`, its `title`, the work Session's

@@ -228,6 +228,23 @@ These limits are fixed defaults:
 | Claude Code turns | No SuperTag cap; Claude Code's own limits apply. A Worker Profile's `maxTurns` configuration still sets one. |
 | Unsatisfiable execution limits | Refused at assignment, naming the limits the Tag's connected profiles enforce. |
 
+## Conversation turn order
+
+Each turn of a conversation or work Session is a Task. The Control Plane dispatches due turns
+oldest first:
+
+- A Session's next turn waits until its earlier turns finish, so a turn never overtakes an earlier
+  one of the same Session.
+- A turn that no bound host can run now waits without holding back other Sessions' turns, of the
+  same Tag or another. Each pass tries due turns until one runs, however many wait ahead of it.
+- A conversation runs at most four work Sessions at once; the rest wait their turn.
+- A waiting turn records why, once each time the reason changes. `supertag describe task` shows
+  it as `Waiting: REASON`, and `supertag message tag` prints `· waiting: REASON`. The reason clears
+  once a host can run the turn, also after a Control Plane restart.
+
+For example, a turn in Slack thread A waits for an MCP server login. A later message in thread B,
+for the same Tag or another, runs at once. A second message in thread A waits behind the first.
+
 ## Leases and unknown outcomes
 
 A **lease** is the time-limited claim the Control Plane records for the owner running a Task. An

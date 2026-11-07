@@ -129,7 +129,9 @@ import {
   dispatchedWorkspacePlan,
   placeTask,
   taskPlacementLabels,
+  undeclaredMcpServers,
   volumeMountRequirements,
+  withoutMcpServers,
   withRequiredCapabilities,
   workspaceMcpServers,
 } from "./label-placement.js";
@@ -4277,16 +4279,21 @@ export class ObjectiveController {
           this.store,
           executionTask.workspacePlan,
         );
+        const boundWorkerHostIds = workerHostBindings.map((binding) => binding.workerHostId);
+        // A Task without a Workspace needs only the granted servers its bound hosts declare.
+        const undeclaredMcp = undeclaredMcpServers(
+          executionTask.authorizationSnapshot,
+          executionTask.workspacePlan,
+          boundWorkerHostIds,
+          placementHosts,
+        );
+        const authorization = withoutMcpServers(executionTask.authorizationSnapshot, undeclaredMcp);
         const placement = await placeTask(
-          workerHostBindings.map((binding) => binding.workerHostId),
-          taskPlacementLabels(
-            await runsOn(executionTask.tagId),
-            executionTask.authorizationSnapshot,
-            workspaceMcp,
-          ),
+          boundWorkerHostIds,
+          taskPlacementLabels(await runsOn(executionTask.tagId), authorization, workspaceMcp),
           executionTask.workspacePlan,
           () => Promise.resolve(placementHosts),
-          workspaceMcpServers(executionTask.authorizationSnapshot, workspaceMcp),
+          workspaceMcpServers(authorization, workspaceMcp),
           { ...commandPlacement(executionTask), mounts: mountRequirements },
         );
         if (placement.status === "unmet") {
@@ -4441,6 +4448,7 @@ export class ObjectiveController {
           allowedWorkerHostIds,
           selection,
           coordinationSlot,
+          undeclaredMcp,
         )
           .catch(this.onError)
           .finally(() => this.active.delete(task.taskId));
@@ -5384,6 +5392,8 @@ Do not end this activation with a summary alone.${previous ? ` Your previous res
     allowedWorkerHostIds: readonly string[],
     selection: { readonly selectedAt: string; readonly durationMs: number },
     coordinationSlot: boolean,
+    /** Granted MCP servers this Task goes without; see `undeclaredMcpServers`. */
+    undeclaredMcp: readonly string[],
   ) {
     let attempt: import("@supertag/core").TaskAttempt | undefined;
     const events: TaskAttemptEvent[] = [];
@@ -5650,7 +5660,7 @@ Do not end this activation with a summary alone.${previous ? ` Your previous res
           ...(sessionState ? { sessionState } : {}),
           history: existing.sessionHistory,
         },
-        authorization: existing.authorizationSnapshot,
+        authorization: withoutMcpServers(existing.authorizationSnapshot, undeclaredMcp),
         contextPlan: existing.contextPlan,
         workspacePlan:
           existing.workspacePlan.status === "workspace"

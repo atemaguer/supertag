@@ -12,6 +12,7 @@ import {
   mcpServerLabel,
   mcpServerOfLabel,
   mcpServerOfLoginLabel,
+  mcpServersOfGrants,
   missingWorkerHostLabels,
   parseVolumeSource,
   type TagAuthorizationSnapshot,
@@ -124,6 +125,53 @@ export function taskPlacementLabels(
     (label) => !workspaceMcp.includes(label.slice("mcp:".length)),
   );
   return servers.length === 0 ? runsOn : [...new Set([...runsOn, ...servers])];
+}
+
+/**
+ * The granted MCP servers a Task without a Workspace goes without: those no bound Worker Host
+ * declares, either as `mcp:NAME` or, while its login lapsed, as `mcp-login:NAME`. A conversation
+ * turn needs only servers declared on hosts; a server only a Workspace's `.mcp.json` provides
+ * serves the work Sessions and Objective Tasks that get that Workspace. A Task with a Workspace
+ * goes without none of its granted servers.
+ */
+export function undeclaredMcpServers(
+  authorization: Pick<TagAuthorizationSnapshot, "mcp"> | undefined,
+  plan: Pick<TaskWorkspacePlan, "status">,
+  boundWorkerHostIds: readonly string[],
+  hosts: readonly Pick<WorkerHost, "id" | "labels">[],
+): readonly string[] {
+  if (plan.status === "workspace") return [];
+  const granted = mcpServersOfGrants(authorization?.mcp);
+  if (granted.length === 0) return [];
+  const bound = new Set(boundWorkerHostIds);
+  const declared = new Set(
+    hosts
+      .filter((host) => bound.has(host.id))
+      .flatMap((host) =>
+        host.labels.flatMap(
+          (label) => mcpServerOfLabel(label) ?? mcpServerOfLoginLabel(label) ?? [],
+        ),
+      ),
+  );
+  return granted.filter((server) => !declared.has(server));
+}
+
+/**
+ * The authorization a Task Attempt is dispatched with when it goes without `servers`: their
+ * grants are left out, so the harness is offered no tool of an absent server, while every other
+ * grant still passes through the Worker's policy proxy. The stored snapshot is unchanged.
+ */
+export function withoutMcpServers<T extends Pick<TagAuthorizationSnapshot, "mcp">>(
+  authorization: T,
+  servers: readonly string[],
+): T {
+  if (servers.length === 0 || authorization.mcp === undefined) return authorization;
+  return {
+    ...authorization,
+    mcp: authorization.mcp.filter(
+      (grant) => !servers.some((server) => grant.action.startsWith(`${server}/`)),
+    ),
+  };
 }
 
 /** The granted MCP servers a Task's Workspace provides. */

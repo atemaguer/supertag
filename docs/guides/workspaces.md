@@ -369,7 +369,10 @@ retry start from a newer base commit with a changed `.mcp.json`. Start a new Tas
 changed configuration.
 
 Granted tools run through the Task's policy proxy, and these servers are available on any host
-that can check out or clone the Workspace. A selected server cannot share a name with a host
+that can check out or clone the Workspace. Only Tasks with the Workspace get them. A conversation
+turn has no Workspace, so it runs without a server only the Workspace provides; the Tag hands that
+work to a work Session, which gets the Workspace. See
+[MCP server placement](../reference/iam.md#placement). A selected server cannot share a name with a host
 service MCP server; the Task stops with an error if the names collide. The proxy keeps header
 values on the host and strips them if the server redirects to another origin. Keep secrets in
 environment variables rather than in `.mcp.json`.

@@ -97,7 +97,8 @@ supertag events task TASK_ID
 
 - No Task usually means collaboration surface delivery, mention detection, account
   selection, or Tag routing failed.
-- A pending Task usually means no compatible Worker Host is ready.
+- A pending Task usually means no compatible Worker Host is ready. See
+  [A Tag stops answering](#a-tag-stops-answering).
 - A failed **Task Attempt**, one execution of a Task, includes a bounded error in its events. Check
   authentication for the **harness** (the coding agent that runs the Task, such as Codex or Claude
   Code), workspace access, Context Resolver support, and Worker-local
@@ -319,6 +320,38 @@ than your CLI.
 The warning never goes to stdout, so `--output json` stays parseable. To silence it, for example
 in CI, set `SUPERTAG_NO_VERSION_WARNING=1`. The supported pairs are in
 [CLI and Control Plane versions](../reference/api-stability.md#cli-and-control-plane-versions).
+
+### A Tag stops answering
+
+A message gets no reply, and its Task stays pending. The Tag's turn is waiting for a Worker Host.
+`supertag message tag` prints the reason once, and `supertag describe task` shows it:
+
+```text
+· waiting: no bound Worker Host provides MCP server notes
+```
+
+```sh
+supertag describe task TASK_ID
+```
+
+```text
+Last scheduling check: incompatible at 2026-11-07T09:14:02.118Z
+Waiting: no bound Worker Host provides MCP server notes.
+Unmet requirements: labels:mcp:notes
+```
+
+Fix what the reason names:
+
+| Reason | Fix |
+| --- | --- |
+| `no bound Worker Host provides MCP server NAME` | Add the server to a bound host service's `mcp` map in `supertag.yaml` and run `supertag up`. See [host MCP servers](../reference/supertag-yaml.md#host-mcp-servers). |
+| `MCP server NAME needs a login on its Worker Host` | Run `supertag mcp login NAME` on that host. |
+| `no bound Worker Host has labels ...` | Connect a host with those labels, or change the Tag's `runsOn`. See [Worker Host labels](../reference/resource-model.md#worker-host-labels). |
+| `the Tag has no Worker Host binding` | List a host in the Tag manifest's `spec.workerHosts` and apply it. |
+
+A conversation turn needs only MCP servers a bound host declares. A server only a Workspace
+provides never holds a turn; see [MCP server placement](../reference/iam.md#placement). A waiting
+turn holds back only later turns of its own conversation, never other conversations.
 
 ### A Tag cannot send a message to another Tag
 

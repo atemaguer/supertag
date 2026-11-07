@@ -376,7 +376,7 @@ it("wakes the surface scheduler after wait cleanup returns operator input to pen
     await store.connect();
     const tag = await store.createTag({ name: "Builder" });
     // Hold dispatch during receipt setup; restore real selection before cleanup.
-    const peek = vi.spyOn(store, "peekNextInboundEvent").mockResolvedValue(undefined);
+    const peek = vi.spyOn(store, "listDueInboundEvents").mockResolvedValue([]);
     await store.bindTagWorkerHost(tag.id, "host");
     await plane.start();
     const account = await plane.setupSurfaceAccount({
@@ -476,7 +476,7 @@ it("wakes the surface scheduler after wait cleanup returns operator input to pen
 
     await vi.waitFor(() => expect(peek).toHaveBeenCalled());
     // The scheduler has observed no pending input and is sleeping for 60 seconds.
-    await vi.waitFor(async () => expect(await peek.mock.results.at(-1)?.value).toBeUndefined());
+    await vi.waitFor(async () => expect(await peek.mock.results.at(-1)?.value).toEqual([]));
     peek.mockRestore();
     const receipt: AttemptInspection = {
       taskId: task.taskId,

@@ -129,6 +129,8 @@ under `PARENT`. `STATUS` shows the latest Task's status: `pending`, `running`, `
 - **A work Session has the conversation's permissions, never more.** It runs with the same
   permissions as the message that started it. It can't start more work Sessions or
   create Objectives. A work Session started from your private conversation is private to you too.
+- **Your conversation uses only MCP servers its Worker Hosts declare.** Work Sessions also get the
+  servers their Workspace provides; see [MCP server placement](../reference/iam.md#placement).
 - **A work Session sees only its own work.** It can't read your conversation, the Tag's other
   Sessions, or its Objectives, so the Tag gives it everything it needs when it starts it. It
   sends at most three progress notes per Task, and only the Tag decides what reaches you.
@@ -157,12 +159,17 @@ under `PARENT`. `STATUS` shows the latest Task's status: `pending`, `running`, `
   Session, the Task, the reply, and `startedSessions`: each work Session the message started or
   continued, with its status and report. A work Session waiting on you has status `waiting` and
   its `question`, and one waiting for approval lists the notices in `approvals`. `updates` lists
-  what the Tag said about the work Session's progress notes; a silent one isn't listed.
+  what the Tag said about the work Session's progress notes; a silent one isn't listed. While no
+  bound Worker Host can run the turn, `waiting` says why.
 - **Ctrl-C stops showing the reply, not the work.** The Tag keeps working. The command prints the
   `supertag describe task` command that follows the Task.
 
 ## If something goes wrong
 
+- **The command prints `· waiting: REASON` and no reply.** No Worker Host bound to the Tag can run
+  your turn yet, for example `· waiting: no bound Worker Host provides MCP server notes`. The
+  command prints the reason once and keeps waiting; the turn starts when the reason is fixed. See
+  [A Tag stops answering](troubleshooting.md#a-tag-stops-answering).
 - **The command stops waiting after 10 minutes without progress.** The Tag is still working. Follow
   the Task with the `supertag describe task` command the message prints. Its reply stays in the
   conversation, so your next message there sees it.
