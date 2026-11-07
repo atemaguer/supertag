@@ -93,7 +93,7 @@ conversation: a direct chat or a person's CLI conversation is private to that pe
 [across Sessions](multiplayer.md#across-sessions-one-tag-one-memory).
 
 A conversation can hand longer work to a **work Session**. A work Session is a Session of the same
-Tag whose parent is the conversation that started it. It runs one Task, with an instruction the Tag
+Tag whose parent is the conversation that started it. Its first Task runs an instruction the Tag
 wrote, under the permissions, Context Sets, and workspace of the conversation Task that started it,
 never more. It has its own native harness session, so its tool output stays out of the
 conversation, and it inherits the conversation's audience. A work Session can't start more work
@@ -115,6 +115,25 @@ the Objective's own Tasks, so planning and tool output stay out of the thread.
 
 You can also talk to a Tag from a terminal with `supertag message tag`. See
 [Talk to a Tag from the CLI](../guides/talk-to-a-tag.md).
+
+### When a work Session needs the person
+
+A work Session never waits for a person inside a running Task. When it needs a decision or a
+fact, it asks with `ask`, and its Task completes **waiting on you**. The report turn puts the
+question to the person, and the conversation lists the work Sessions still waiting. When the person
+answers, a later conversation Task passes the answer on with `continue_session`. That starts the
+work Session's next Task, which resumes the work Session's own native session. The answer is the
+Tag's relay of what the person said, so it grants nothing. The next Task runs under the continuing
+conversation Task's permissions and counts against its limits. If the conversation's permissions
+changed since the work Session last ran, the Tag starts a new work Session instead. Only the
+conversation that started a work Session can continue it, and only once it has stopped running
+and its report turn has run.
+
+When a work Session's Task requests approval for an action, the approval notice posts to the
+conversation, because the work Session itself posts nowhere. On the CLI, `supertag message tag`
+prints it. The notice names the action and the
+`supertag approve request` and `supertag deny request` commands that decide it. A chat message
+never approves an action.
 
 ## Task Attempt
 

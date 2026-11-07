@@ -17,6 +17,7 @@ within the pre-1.0 compatibility policy described in
 - `supertag message tag` shows the Tag's reply as it is written, with a line for each command the Tag runs; Ctrl-C stops showing it without cancelling the Task. `GET /api/v1/tags/NAME/messages/TASK_ID/stream` serves the reply as an AI SDK UI message stream, and reply text is no longer stored as one Task event per piece.
 - An Objective started in a conversation posts its completion summary there.
 - A conversation hands longer work to work Sessions with `start_session`: each runs as its own Session and Task with the conversation's permissions and audience, at most four at once and four per message, sharing that message's token and cost limits, and its result returns to the conversation as a report from the Tag. `supertag message tag` follows them until each reports, `supertag list session` shows `PARENT` and `STATUS`, and a Session reports `spec.parentSessionId` and `status.latestTaskStatus`.
+- A work Session asks the person with `ask` instead of waiting inside its Task: the Task completes waiting on the person, the Tag puts the question in the conversation, and the conversation lists the work Sessions still waiting. The Tag passes the answer on with `continue_session`, which starts the work Session's next Task under the current message's permissions and limits. A work Session's approval notice posts to its conversation. `supertag message tag` shows `· waiting on you: TITLE`, and `startedSessions` gains status `waiting` with the `question`.
 
 ### Changed
 

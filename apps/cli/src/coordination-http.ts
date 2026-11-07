@@ -8,6 +8,7 @@ import {
   TagMessagingError,
   WORK_SESSION_INSTRUCTION_MAX,
   WORK_SESSION_MAX_RUNNING,
+  WORK_SESSION_QUESTION_MAX,
   WORK_SESSION_TITLE_MAX,
   WORKSTREAM_POST_MAX_BODY,
   WORKSTREAM_POST_MAX_REFERENCE,
@@ -722,6 +723,16 @@ const surfaceDefinitions = [
     `Start a work Session for work that takes more than a quick answer, such as research, multi-step tool use or edits. Give a short title and a self-contained instruction; the work Session runs it as its own Task with this conversation's permissions and Workspace, never more, and cannot start Sessions or change Objectives. Returns the new Session's id at once. Tell the person briefly that you started it and end your turn; when it finishes you get a turn here to report the result. At most ${WORK_SESSION_MAX_RUNNING} run at once per conversation; later ones wait.`,
     ["title", "instruction"],
   ],
+  [
+    "continue_session",
+    `Pass the person's answer to a work Session of this conversation that asked them a question, or give a finished one a follow-up: starts that Session's next Task with your message, resuming where it stopped, under this turn's permissions, never more. Only for work Sessions this conversation started that are not running. Tell the person briefly and end your turn; its result returns here as a later turn. Counts against the same limits as start_session.`,
+    ["sessionId", "message"],
+  ],
+  [
+    "ask",
+    `Ask the person a question this work Session cannot go on without: one concise question with what you need decided or supplied. SuperTag records it and ends this Task waiting on the person; the conversation asks them, and their answer continues this work Session as its next Task. After ask succeeds, end your turn at once with a brief final reply and no further tool call.`,
+    ["question"],
+  ],
 ] as const;
 const sessionToolLimit = { type: "integer", minimum: 1, maximum: SESSION_TOOL_MAX_RESULTS };
 const surfaceProperties: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
@@ -762,6 +773,11 @@ const surfaceProperties: Readonly<Record<string, Readonly<Record<string, unknown
     title: { type: "string", minLength: 1, maxLength: WORK_SESSION_TITLE_MAX },
     instruction: { type: "string", minLength: 1, maxLength: WORK_SESSION_INSTRUCTION_MAX },
   },
+  continue_session: {
+    sessionId: { type: "string", minLength: 1, maxLength: 200 },
+    message: { type: "string", minLength: 1, maxLength: WORK_SESSION_INSTRUCTION_MAX },
+  },
+  ask: { question: { type: "string", minLength: 1, maxLength: WORK_SESSION_QUESTION_MAX } },
 };
 export const surfaceTools = surfaceDefinitions.map(([name, description, required]) => ({
   name,

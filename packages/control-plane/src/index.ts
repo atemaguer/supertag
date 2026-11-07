@@ -6,15 +6,20 @@ import {
   workspaceBranchHeadPin,
   workspaceBranchPin,
 } from "@supertag/core";
+import { workSessionApprovalNotice } from "./approvals.js";
 import { isSchedulingEvent } from "./capacity-wait.js";
 import { DispatchErrorReporter } from "./dispatch-errors.js";
 import { ObjectiveMessages } from "./objective-messages.js";
 import { SESSION_INPUT_COMMAND_PREFIX, withdrawSessionInput } from "./session-input-withdrawal.js";
 import { conversationViewer, tagPortfolio } from "./tag-sessions.js";
 import {
+  type ContinueSessionRequest,
+  continuedWorkSessionEvent,
   internalTurnMessages,
   type StartSessionRequest,
+  samePermissions,
   sessionReportEvent,
+  WORK_SESSION_ASKED_EVENT,
   workSessionEvent,
   workSessionExecution,
   workSessionsPerTurn,
@@ -55,6 +60,7 @@ import type {
   TaskWorkspacePlan,
   WorkerHost,
   WorkerHostObservationResult,
+  WorkSessionSummary,
 } from "@supertag/core";
 import {
   ARTIFACT_CONTEXT_TYPE,
@@ -523,25 +529,15 @@ export class ControlPlane {
         : undefined;
       if (!anchor?.inboundEventId)
         throw new Error("Objective has no verified reporting destination");
-      const existing = await this.#store.findOutboundReply(anchor.inboundEventId, deliveryKey);
-      if (existing) {
-        if (existing.text !== text)
-          throw new Error("Report key already used for different content");
-        return;
-      }
-      await this.#store.enqueueOutboundReply({
-        inboundEventId: anchor.inboundEventId,
-        workerId: "objective-controller",
-        presentation: "status",
-        deliveryKey,
-        text,
-        createdAt: new Date().toISOString(),
-      });
-      this.#wakeDeliveryController?.();
+      await this.#postNoticeOnce(anchor.inboundEventId, deliveryKey, text);
     });
-    this.objectives.setSessionStarter((task, inbound, request) =>
-      this.#startWorkSession(task, inbound, request),
-    );
+    this.objectives.setWorkSessionHandlers({
+      start: (task, inbound, request) => this.#startWorkSession(task, inbound, { start: request }),
+      continue: (task, inbound, request) =>
+        this.#startWorkSession(task, inbound, { continue: request }),
+      approvalNotice: (task, inbound, requestId) =>
+        this.#postWorkSessionApproval(task, inbound, requestId),
+    });
     this.objectives.setLostWorkerHostResolver((attempt) =>
       this.#removeLostEphemeralWorkerHost(attempt, EPHEMERAL_WORKER_HOST_GRACE_MS),
     );
@@ -2053,11 +2049,22 @@ export class ControlPlane {
         const workerId = executionWorkerId(workerEvents) ?? worklet.id;
         const completedAt = new Date().toISOString();
         const result = buildTaskResult(work, responseText, workerEvents);
+        // A work Session Task that asked the person completes waiting on them, with its question.
+        const asked =
+          work.event.internal?.kind === "work_session"
+            ? (await this.#store.listTaskEvents(task.id)).findLast(
+                (event) =>
+                  event.type === WORK_SESSION_ASKED_EVENT && event.attemptId === attempt?.id,
+              )?.payload?.["question"]
+            : undefined;
         preparedOutcome = {
           taskId: task.id,
           attemptId: attempt.id,
           status: "completed",
-          outcome: { responseLength: responseText.length },
+          outcome: {
+            responseLength: responseText.length,
+            ...(typeof asked === "string" ? { question: asked } : {}),
+          },
           workerId,
           responseText: finalResultText(responseText, result),
           completedAt,
@@ -2506,14 +2513,18 @@ export class ControlPlane {
   }
 
   /**
-   * `start_session`: opens a work Session of the conversation and admits its one Task under the
-   * starting turn's admitted authorization, context plan, execution requirements and Workspace
-   * plan. It returns at once; the Task queues behind the conversation's running work Sessions.
+   * `start_session` opens a work Session of the conversation and admits its first Task;
+   * `continue_session` admits the next Task of one of the conversation's finished work Sessions.
+   * Either Task runs under the starting turn's admitted authorization, context plan, execution
+   * requirements and Workspace plan, and counts against that turn's work Session bounds. It
+   * returns at once; the Task queues behind the conversation's running work Sessions.
    */
   async #startWorkSession(
     conversation: Task,
     starting: DurableInboundEvent,
-    request: StartSessionRequest,
+    request:
+      | { readonly start: StartSessionRequest }
+      | { readonly continue: ContinueSessionRequest },
   ): Promise<{
     readonly sessionId: string;
     readonly title: string;
@@ -2521,7 +2532,8 @@ export class ControlPlane {
   }> {
     if (!this.#accepting)
       throw new TagMessagingError(503, "The Control Plane is not accepting new work now");
-    // One conversation's start_session calls run one at a time, so the bounds below hold.
+    // One conversation's start_session and continue_session calls run one at a time, so the
+    // bounds below hold.
     const previous = this.#workSessionStarts.get(conversation.sessionId) ?? Promise.resolve();
     const run = previous.then(() => this.#startWorkSessionNow(conversation, starting, request));
     const settled = run.then(
@@ -2540,31 +2552,89 @@ export class ControlPlane {
   async #startWorkSessionNow(
     conversation: Task,
     starting: DurableInboundEvent,
-    request: StartSessionRequest,
+    request:
+      | { readonly start: StartSessionRequest }
+      | { readonly continue: ContinueSessionRequest },
   ): Promise<{
     readonly sessionId: string;
     readonly title: string;
     readonly status: "started" | "queued";
   }> {
+    const verb = "start" in request ? "start" : "continue";
     // Work Sessions are parallel agents of the starting turn: a turn starts at most its share,
     // none when its maxNativeAgents is 0, and they split its reported token and cost limits.
     // A retired Tag admits no new work, even work a running turn asks for.
     if ((await this.#store.findTagById(conversation.tagId))?.status !== "active")
       throw new TagMessagingError(
         409,
-        "This Tag is no longer active, so it cannot start a work Session",
+        `This Tag is no longer active, so it cannot ${verb} a work Session`,
       );
     const perTurn = workSessionsPerTurn(starting.execution);
     if (perTurn === 0)
       throw new TagMessagingError(
         403,
-        "This turn may not run parallel agents (maxNativeAgents is 0), so it cannot start a work Session; do the work in this turn",
+        `This turn may not run parallel agents (maxNativeAgents is 0), so it cannot ${verb} a work Session; do the work in this turn`,
       );
     const sessions = await this.#store.listWorkSessions(conversation.sessionId);
-    if (sessions.filter((session) => session.startedByTaskId === conversation.id).length >= perTurn)
+    // The turn continuing a work Session is its latest Task's starter, so this counts each work
+    // Task this turn started once: a turn never continues a work Session it ran itself.
+    const startedBy = (session: WorkSessionSummary) =>
+      session.task?.startedByTaskId ?? session.startedByTaskId;
+    let previous: { readonly work: DurableInboundEvent; readonly title: string } | undefined;
+    if ("continue" in request) {
+      const target = sessions.find((session) => session.sessionId === request.continue.sessionId);
+      if (target?.task === undefined)
+        throw new TagMessagingError(
+          404,
+          "No work Session of this conversation has that id; continue_session continues only work Sessions this conversation started",
+        );
+      if (target.task.status === "pending" || target.task.status === "running")
+        throw new TagMessagingError(
+          409,
+          "That work Session is still working; its report comes back here when it finishes",
+        );
+      // A cancelled work Session was stopped on purpose; only a new work Session resumes the work.
+      if (target.task.status === "cancelled")
+        throw new TagMessagingError(
+          409,
+          "That work Session was cancelled; start a new work Session if the work should continue",
+        );
+      if (startedBy(target) === conversation.id)
+        throw new TagMessagingError(
+          409,
+          "This turn already ran that work Session; pass the person's answer from a later message",
+        );
+      // Continue only after the latest Task's report turn has run: that turn put its result or
+      // question to the person, so a later report never asks a question already answered.
+      const report = await this.#store.findWorkSessionReport(target.task.id);
+      const reportTask = report?.taskId ? await this.#store.findTaskById(report.taskId) : undefined;
+      if (
+        reportTask === undefined ||
+        reportTask.status === "pending" ||
+        reportTask.status === "running"
+      )
+        throw new TagMessagingError(
+          409,
+          "That work Session's report has not reached this conversation yet; continue it after its report turn",
+        );
+      const latest = await this.#store.findTaskById(target.task.id);
+      const work = latest?.inboundEventId
+        ? await this.#store.findInboundEventById(latest.inboundEventId)
+        : undefined;
+      if (!latest || work?.event.internal?.kind !== "work_session")
+        throw new Error(`Work Session ${target.sessionId} has no admitted Task`);
+      // Never broader than the work Session ran with, nor than this turn may act.
+      if (!samePermissions(work.authorization, starting.authorization))
+        throw new TagMessagingError(
+          409,
+          "This conversation's permissions changed since that work Session last ran, so it cannot continue under them; start a new work Session instead",
+        );
+      previous = { work, title: target.title };
+    }
+    if (sessions.filter((session) => startedBy(session) === conversation.id).length >= perTurn)
       throw new TagMessagingError(
         409,
-        `This turn already started ${perTurn} work Session${perTurn === 1 ? "" : "s"}, the most one turn may start`,
+        `This turn already started ${perTurn} work Session Task${perTurn === 1 ? "" : "s"}, the most one turn may start`,
       );
     if (
       sessions.filter(
@@ -2576,6 +2646,8 @@ export class ControlPlane {
         `This conversation already has ${WORK_SESSION_MAX_OPEN} unfinished work Sessions; wait for one to finish`,
       );
     const running = sessions.filter((session) => session.task?.status === "running").length;
+    const at = new Date().toISOString();
+    const title = "start" in request ? request.start.title : (previous?.title ?? "");
     const admission = await this.#store.admitInboundEvent({
       surfaceAccountId: starting.surfaceAccountId,
       tagRouteId: starting.tagRouteId,
@@ -2583,13 +2655,18 @@ export class ControlPlane {
       authorization: starting.authorization,
       contextPlan: starting.contextPlan,
       execution: workSessionExecution(starting.execution),
-      event: workSessionEvent(
-        starting,
-        conversation.id,
-        conversation.sessionId,
-        request,
-        new Date().toISOString(),
-      ),
+      event:
+        "start" in request
+          ? workSessionEvent(starting, conversation.id, conversation.sessionId, request.start, at)
+          : continuedWorkSessionEvent(
+              previous?.work as DurableInboundEvent,
+              starting,
+              conversation.id,
+              conversation.sessionId,
+              title,
+              request.continue.message,
+              at,
+            ),
       maxAttempts: this.#maxAttempts,
     });
     const task = await this.#openTask(admission.work);
@@ -2598,13 +2675,55 @@ export class ControlPlane {
       scope: starting.event.scope,
       startedByTaskId: conversation.id,
       parentSessionId: conversation.sessionId,
+      ...("continue" in request ? { continued: true } : {}),
     });
     this.#wakeTaskController?.();
     return {
       sessionId: task.sessionId,
-      title: request.title,
+      title,
       status: running >= WORK_SESSION_MAX_RUNNING ? "queued" : "started",
     };
+  }
+
+  /**
+   * A work Session Task's pending approval request, posted where its conversation turn replies:
+   * the work Session itself posts nowhere. The request id is the delivery key, so it posts once.
+   */
+  async #postWorkSessionApproval(
+    task: Task,
+    work: DurableInboundEvent,
+    requestId: string,
+  ): Promise<void> {
+    const internal = work.event.internal;
+    if (internal?.kind !== "work_session") return;
+    const [request, starting] = await Promise.all([
+      this.objectives.getApprovalRequest(requestId),
+      this.#store.findTaskById(internal.startedByTaskId),
+    ]);
+    if (request?.taskId !== task.id || !starting?.inboundEventId) return;
+    await this.#postNoticeOnce(
+      starting.inboundEventId,
+      `approval:${request.id}`,
+      workSessionApprovalNotice(internal.title, request),
+    );
+  }
+
+  /** Posts a status notice on an inbound event's thread once per delivery key. */
+  async #postNoticeOnce(inboundEventId: string, deliveryKey: string, text: string): Promise<void> {
+    const existing = await this.#store.findOutboundReply(inboundEventId, deliveryKey);
+    if (existing) {
+      if (existing.text !== text) throw new Error("Report key already used for different content");
+      return;
+    }
+    await this.#store.enqueueOutboundReply({
+      inboundEventId,
+      workerId: "objective-controller",
+      presentation: "status",
+      deliveryKey,
+      text,
+      createdAt: new Date().toISOString(),
+    });
+    this.#wakeDeliveryController?.();
   }
 
   /** Admits the report turns that finished work Sessions are still owed. */
@@ -2643,6 +2762,7 @@ export class ControlPlane {
       // A retired Tag takes no more turns; its work Session's result stays on the Session.
       if ((await this.#store.findTagById(task.tagId))?.status !== "active") return;
       const final = await this.#store.findOutboundReply(work.id, "final");
+      const question = task.status === "completed" ? task.outcome?.["question"] : undefined;
       const admission = await this.#store.admitInboundEvent({
         surfaceAccountId: starting.surfaceAccountId,
         tagRouteId: starting.tagRouteId,
@@ -2657,8 +2777,10 @@ export class ControlPlane {
             workSessionId: task.sessionId,
             workTaskId: task.id,
             title: internal.title,
-            status: task.status,
             result: final?.text ?? task.result?.summary ?? "",
+            ...(typeof question === "string"
+              ? { status: "waiting" as const, question }
+              : { status: task.status }),
           },
           new Date().toISOString(),
         ),

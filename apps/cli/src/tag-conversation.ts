@@ -18,7 +18,10 @@ export interface TagMessageRecord {
   readonly joinedTaskId?: string;
   readonly status: "waiting" | "replied";
   readonly reply?: TagReply;
-  /** Work Sessions this message's turn started, each with its report once the Tag wrote it. */
+  /**
+   * Work Sessions this message's turn started or continued, each with its report once the Tag
+   * wrote it.
+   */
   readonly startedSessions?: readonly StartedWorkSession[];
 }
 
@@ -26,7 +29,11 @@ export interface StartedWorkSession {
   readonly id: string;
   readonly title: string;
   readonly taskId?: string;
+  /** The work Task's status, or `waiting` when it completed by asking the person `question`. */
   readonly status: string;
+  readonly question?: string;
+  /** Approval notices for the work Task's pending approval requests. */
+  readonly approvals?: readonly { readonly requestId: string; readonly text: string }[];
   readonly reportStatus: "waiting" | "replied";
   readonly reportTaskId?: string;
   readonly report?: TagReply;
@@ -69,7 +76,8 @@ continues the same Session, so the Tag sees the earlier messages and replies.
 The conversation is private to you: the admin token and each Operator Token have their own.
 The Tag answers with its Roles' permissions only; no location's Permission or Context Sets apply.
 When the Tag hands work to work Sessions, it shows "· working: TITLE" for each one and stays
-until the Tag reports each result in the conversation.
+until the Tag reports each result in the conversation. A work Session that needs you shows
+"· waiting on you: TITLE" and the Tag's question; answer it with your next message.
 Ctrl-C stops showing the reply; the Tag keeps working, and supertag describe task shows it.
 A report still arrives in the conversation, and your next message there sees it.
 --output json waits and prints the message record with the reply and the work Sessions' reports.
@@ -251,14 +259,24 @@ async function followWorkSessions(
   try {
     const reported = await awaitReports(record, (current) => {
       for (const session of current.startedSessions ?? []) {
+        // A status reply posts nowhere on the CLI, so the approval notice prints here, once.
+        for (const approval of session.approvals ?? []) {
+          if (shown.has(`approval:${approval.requestId}`)) continue;
+          shown.add(`approval:${approval.requestId}`);
+          options.write(
+            `· approval needed: ${terminalText(session.title)}\n${terminalLines(approval.text.trimEnd())}\n`,
+          );
+        }
         if (session.report === undefined || shown.has(session.id)) continue;
         shown.add(session.id);
         const ended =
           session.status === "completed"
             ? "done"
-            : session.status === "failed"
-              ? "failed"
-              : "stopped";
+            : session.status === "waiting"
+              ? "waiting on you"
+              : session.status === "failed"
+                ? "failed"
+                : "stopped";
         options.write(
           `· ${ended}: ${terminalText(session.title)}\n${terminalLines(session.report.text.trimEnd())}\n`,
         );

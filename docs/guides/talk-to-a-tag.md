@@ -63,6 +63,34 @@ own words. The command exits when every work Session it started has reported.
 Ctrl-C stops following, not the work. The report still arrives in the conversation, and your next
 message there sees it.
 
+## 4. Answer a work Session's question
+
+A work Session that needs a decision from you stops and asks. The command shows it waiting on you,
+then the Tag's question:
+
+```text
+$ supertag message tag planner 'Move the billing export to the new cluster.' --session billing
+I'm starting the move and will report back here.
+· working: Move billing export
+· waiting on you: Move billing export
+Which region should the new cluster use: eu-west or us-east?
+```
+
+Answer with your next message in the same conversation. The Tag passes your answer to the work
+Session, which picks up where it stopped, and the command follows it again:
+
+```text
+$ supertag message tag planner 'eu-west' --session billing
+I've passed that on.
+· working: Move billing export
+· done: Move billing export
+The billing export now runs on the eu-west cluster.
+```
+
+If a work Session needs approval for an action, `supertag message tag` prints the notice under
+`· approval needed: TITLE`, and on Slack and other surfaces it posts to your conversation. Decide it with `supertag approve request ID` or `supertag deny request ID --reason TEXT`; a message
+to the Tag doesn't approve anything.
+
 ## Check that it worked
 
 ```sh
@@ -93,9 +121,14 @@ status: `pending`, `running`, `completed`, `failed`, or `cancelled`.
   agents (`maxNativeAgents: 0`) starts none.
 - **A message you send while the Tag reports a work Session gets its own turn.** It isn't added to
   the report.
+- **Only your conversation can answer its work Sessions.** The Tag continues a work Session only
+  after it stops running and the Tag has reported it, with your current message's permissions. A continued work Session counts
+  against the same limits as a new one. If the Tag's permissions changed since the work Session
+  last ran, the Tag starts a new work Session instead.
 - `--output json` waits for the reply and every report, and prints one message record with the
-  Session, the Task, the reply, and `startedSessions`: each work Session with its status and
-  report.
+  Session, the Task, the reply, and `startedSessions`: each work Session the message started or
+  continued, with its status and report. A work Session waiting on you has status `waiting` and
+  its `question`, and one waiting for approval lists the notices in `approvals`.
 - **Ctrl-C stops showing the reply, not the work.** The Tag keeps working. The command prints the
   `supertag describe task` command that follows the Task.
 
