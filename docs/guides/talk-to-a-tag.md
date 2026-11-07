@@ -99,8 +99,10 @@ The billing export now runs on the eu-west cluster.
 ```
 
 If a work Session needs approval for an action, `supertag message tag` prints the notice under
-`· approval needed: TITLE`, and on Slack and other surfaces it posts to your conversation. Decide it with `supertag approve request ID` or `supertag deny request ID --reason TEXT`; a message
-to the Tag doesn't approve anything.
+`· approval needed: TITLE`, and on Slack and other surfaces it posts to your conversation. The
+notice names the permission that requires approval, in SuperTag's words; `supertag list approval`
+shows the request in full. Decide it with `supertag approve request ID` or
+`supertag deny request ID --reason TEXT`; a message to the Tag doesn't approve anything.
 
 ## Check that it worked
 

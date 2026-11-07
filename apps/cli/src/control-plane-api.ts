@@ -3648,7 +3648,7 @@ async function workSessionApprovals(
   const requests = await store.listApprovalRequests({
     taskId: work.id,
     status: "pending",
-    limit: 10,
+    limit: 100,
   });
   const notices = await Promise.all(
     requests.map(async (request) => {

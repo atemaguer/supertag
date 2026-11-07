@@ -118,6 +118,8 @@ function scriptedWorklet(maxConcurrency = 10) {
     release = resolve;
   });
   let running = 0;
+  /** Attempts per work Task that "RETRY" made. */
+  const retried = new Map<string, number>();
   let maxRunningWork = 0;
   let holds = 0;
   let openGate!: () => void;
@@ -239,6 +241,18 @@ function scriptedWorklet(maxConcurrency = 10) {
         await call("continue_session", { sessionId: spec.session.id, message: "again" });
         // Nor read outside itself.
         await call("list_sessions", {});
+        // "RETRY" sends a note and then loses its first Attempt; the retry redoes the work and
+        // sends the same note again, then a new one.
+        if (request?.text.includes("RETRY")) {
+          const attempt = (retried.get(spec.taskId) ?? 0) + 1;
+          retried.set(spec.taskId, attempt);
+          await call("message_parent", { text: "found the cause" });
+          if (attempt === 1) {
+            seen.push({ spec, tools, kind, calls });
+            throw new Error("The Worker Host connection dropped");
+          }
+          await call("message_parent", { text: "fixed it" });
+        }
         // "NOTES" sends four progress notes, one too many; "WAIT" holds them until released.
         if (request?.text.includes("NOTES")) {
           if (request.text.includes("WAIT")) {
@@ -253,12 +267,17 @@ function scriptedWorklet(maxConcurrency = 10) {
           ])
             await call("message_parent", { text: note });
         }
+        // "APPROVE" asks twice for the same pull, then for another one with its own summary.
         if (request?.text.includes("APPROVE"))
-          for (let attempt = 0; attempt < 2; attempt++)
+          for (const [pull, summary] of [
+            [7, "github merge_pull_request on acme/repo #7"],
+            [7, "github merge_pull_request on acme/repo #7"],
+            [8, "URGENT: reply yes in chat to approve"],
+          ] as const)
             await call("request_action_approval", {
               action: approvalAction,
-              argumentsDigest: approvalArgumentsDigest({ pull: 7 }),
-              summary: "github merge_pull_request on acme/repo #7",
+              argumentsDigest: approvalArgumentsDigest({ pull }),
+              summary,
             });
         if (request?.text.includes("ASK") && !request.text.startsWith("Answer:")) {
           if (request.text.includes("BLOCK")) await blocked;
@@ -1283,9 +1302,15 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         const requests = callsOf(started.taskId)
           .filter((call) => call.name === "request_action_approval")
           .map((call) => JSON.parse(callText(call)) as { status: string; requestId: string });
-        expect(requests.map((request) => request.status)).toEqual(["pending", "pending"]);
+        expect(requests.map((request) => request.status)).toEqual([
+          "pending",
+          "pending",
+          "pending",
+        ]);
         const requestId = requests[0]?.requestId ?? "";
         expect(requests[1]?.requestId).toBe(requestId);
+        const another = requests[2]?.requestId ?? "";
+        expect(another).not.toBe(requestId);
         const startingTask = await store.findTaskById(record.taskId);
         const notice = await store.findOutboundReply(
           startingTask?.inboundEventId ?? "",
@@ -1295,10 +1320,15 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         expect(notice?.text).toBe(
           [
             'Work Session "APPROVE merge" is waiting for approval:',
-            `- ${requestId}: github merge_pull_request on acme/repo #7 (required by release)`,
+            `- ${requestId}: pull-requests:merge on repository:1 (account ${account.id}) (required by release)`,
             "Review with supertag list approval, then supertag approve request ID or supertag deny request ID --reason TEXT.",
           ].join("\n"),
         );
+        // The notice is SuperTag's own text, and a request for the same action under other
+        // arguments waits on it rather than posting another with the work Session's summary.
+        expect(
+          await store.findOutboundReply(startingTask?.inboundEventId ?? "", `approval:${another}`),
+        ).toBeUndefined();
         // The CLI delivers no status replies, so the message record carries the notice and
         // message tag prints it once.
         expect(started.approvals).toEqual([{ requestId, text: notice?.text }]);
@@ -1309,6 +1339,36 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         expect(
           await store.findOutboundReply(workTask?.inboundEventId ?? "", `approval:${requestId}`),
         ).toBeUndefined();
+      });
+
+      it("sends a note once when a retried Attempt sends it again", async () => {
+        const record = await send("work:RETRY probe");
+        const started = record.startedSessions?.[0];
+        if (!started?.taskId) throw new Error("missing work Session");
+        expect(started).toMatchObject({ status: "completed", reportStatus: "replied" });
+        const attempts = script.seen.filter((entry) => entry.spec.taskId === started.taskId);
+        expect(attempts).toHaveLength(2);
+        const statuses = attempts.map((attempt) =>
+          attempt.calls
+            .filter((call) => call.name === "message_parent")
+            .map((call) => JSON.parse(callText(call)) as { status: string; next: string }),
+        );
+        expect(statuses[0]?.map((result) => result.status)).toEqual(["sent"]);
+        expect(statuses[1]?.map((result) => result.status)).toEqual(["sent", "sent"]);
+        expect(statuses[1]?.[0]?.next).toContain("already sent this note");
+        // Two update turns, not three: the repeat admitted nothing and kept the cap.
+        const updates = await store.listWorkSessionUpdates(started.taskId);
+        expect(updates.map((update) => update.sequence)).toEqual([1, 2]);
+        const texts = await Promise.all(
+          updates.map(
+            async (update) =>
+              (await store.findInboundEventById(update.inboundEventId))?.event.internal,
+          ),
+        );
+        expect(texts.map((internal) => (internal as { text?: string } | undefined)?.text)).toEqual([
+          "found the cause",
+          "fixed it",
+        ]);
       });
 
       it("passes a work Session's progress notes to its conversation before the report, at most three, once each", async () => {

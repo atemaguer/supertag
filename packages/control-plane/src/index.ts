@@ -40,6 +40,7 @@ export type {
 } from "./objective-overview.js";
 
 import type {
+  ApprovalRequest,
   CapturedArtifactSummary,
   DurableInboundEvent,
   GatewayCredentialVault,
@@ -76,7 +77,9 @@ import {
   AUTH_KEY_LOOKUP_LENGTH,
   AUTH_KEY_PREFIX,
   type AuthKey,
+  approvalRequirementFor,
   authKeyLookupId,
+  canonicalJson,
   effectiveWorkerHostLabels,
   isAuthKeySecret,
   isOperatorTokenSecret,
@@ -547,7 +550,9 @@ export class ControlPlane {
       continue: (task, inbound, request) =>
         this.#startWorkSession(task, inbound, { continue: request }),
       approvalNotice: (task, inbound, requestId) =>
-        this.#postWorkSessionApproval(task, inbound, requestId),
+        this.#oneWorkTaskTurn(task.id, () =>
+          this.#postWorkSessionApproval(task, inbound, requestId),
+        ),
       messageParent: (task, inbound, text) =>
         this.#oneWorkTaskTurn(task.id, () => this.#messageParent(task, inbound, text)),
     });
@@ -2740,7 +2745,8 @@ export class ControlPlane {
 
   /**
    * A work Session Task's pending approval request, posted where its conversation turn replies:
-   * the work Session itself posts nowhere. The request id is the delivery key, so it posts once.
+   * the work Session itself posts nowhere. The request id is the delivery key, so it posts once,
+   * and a Task posts one notice per admitted requirement while its requests are pending.
    */
   async #postWorkSessionApproval(
     task: Task,
@@ -2754,10 +2760,36 @@ export class ControlPlane {
       this.#store.findTaskById(internal.startedByTaskId),
     ]);
     if (request?.taskId !== task.id || !starting?.inboundEventId) return;
+    const requirementOf = (candidate: ApprovalRequest) => {
+      const action = candidate.actions[0];
+      return action === undefined
+        ? undefined
+        : approvalRequirementFor(task.authorizationSnapshot.approvals, action);
+    };
+    const requirement = requirementOf(request);
+    if (requirement === undefined) return;
+    // One notice per admitted requirement while its requests wait: the work Session picks each
+    // request's arguments, so a new request for the same action waits on the notice already
+    // posted rather than posting another.
+    const key = canonicalJson(requirement);
+    for (const other of await this.#store.listApprovalRequests({
+      taskId: task.id,
+      status: "pending",
+      limit: 500,
+    })) {
+      if (other.id === request.id) continue;
+      const covered = requirementOf(other);
+      if (
+        covered !== undefined &&
+        canonicalJson(covered) === key &&
+        (await this.#store.findOutboundReply(starting.inboundEventId, `approval:${other.id}`))
+      )
+        return;
+    }
     await this.#postNoticeOnce(
       starting.inboundEventId,
       `approval:${request.id}`,
-      workSessionApprovalNotice(internal.title, request),
+      workSessionApprovalNotice(internal.title, request, requirement),
     );
   }
 
@@ -2823,7 +2855,8 @@ export class ControlPlane {
    * `message_parent`: a running work Session Task's note to its conversation, admitted as an
    * update turn there under the starting turn's admitted authorization, replying where that turn
    * replied. Its event id is the delivery key per work Task and sequence, so each note is
-   * admitted once, and at most `WORK_SESSION_MAX_UPDATES` per work Task.
+   * admitted once, and at most `WORK_SESSION_MAX_UPDATES` per work Task. A note with the same
+   * text as one the Task already sent, as a retried Attempt sends, admits nothing.
    */
   async #messageParent(
     task: Task,
@@ -2856,7 +2889,18 @@ export class ControlPlane {
       : undefined;
     if (!startingTask || !starting)
       throw new Error(`Work Session ${task.sessionId} has no conversation turn to message`);
-    const used = (await this.#store.listWorkSessionUpdates(task.id)).length;
+    const updates = await this.#store.listWorkSessionUpdates(task.id);
+    // A retried Attempt redoes the work and sends its notes again; a note this Task already
+    // sent is not sent twice, so the person sees it once and the retry keeps its cap.
+    for (const update of updates) {
+      const sent = (await this.#store.findInboundEventById(update.inboundEventId))?.event.internal;
+      if (sent?.kind === "session_update" && sent.text === text)
+        return {
+          status: "sent",
+          next: "This Task already sent this note, so it was not sent again. Keep working; put everything else in your final result.",
+        };
+    }
+    const used = updates.length;
     for (let sequence = used + 1; sequence <= WORK_SESSION_MAX_UPDATES; sequence++) {
       const admission = await this.#store.admitInboundEvent({
         surfaceAccountId: starting.surfaceAccountId,

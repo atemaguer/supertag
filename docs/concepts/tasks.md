@@ -129,7 +129,8 @@ with `message_parent`. It doesn't wait for an answer. Each note gets one **updat
 conversation, which resumes the conversation's native session like a report turn. The note is the
 work Session's own text, so it grants nothing. The Tag tells the person only what helps them, in
 its own voice, or posts nothing at all. Nothing a work Session writes reaches a person without a
-Tag turn. An update turn has the same tools as a report turn. A note sent before the work Task
+Tag turn. If the work Session's Task is retried, a note it already sent isn't sent again, and the
+retry counts against the same three. An update turn has the same tools as a report turn. A note sent before the work Task
 finished comes before its report; a note that arrives after that is dropped.
 
 ### When a work Session needs the person
@@ -147,9 +148,11 @@ and its report turn has run.
 
 When a work Session's Task requests approval for an action, the approval notice posts to the
 conversation, because the work Session itself posts nowhere. On the CLI, `supertag message tag`
-prints it. The notice names the action and the
-`supertag approve request` and `supertag deny request` commands that decide it. A chat message
-never approves an action.
+prints it. The notice is SuperTag's own text: it names the request, the permission that requires
+approval, and the `supertag approve request` and `supertag deny request` commands that decide it.
+It leaves out the work Session's own description of the request, which `supertag list approval`
+shows. A work Session's Task gets one notice per permission while its requests wait, however many
+it makes. A chat message never approves an action.
 
 ### Where a work Session's edits go
 

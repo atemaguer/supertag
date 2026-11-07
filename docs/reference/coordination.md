@@ -541,8 +541,9 @@ direct call to a tool the turn doesn't get, not only leaves it out of the list.
 - A work Session sees only its own work. It gets none of the reads, and no portfolio: the system
   message that lists the Tag's open Objectives.
 - `message_parent {text}` sends the conversation a note of 1 to 2000 characters and doesn't wait.
-  Each note admits one update turn, once, even across a restart. A work Task sends at most 3;
-  SuperTag refuses the fourth. A note that arrives after the work Task finished is dropped, so the
+  Each note admits one update turn, once, even across a restart. A note with the same text as one
+  the work Task already sent, as a retried Task Attempt sends, admits nothing. A work Task sends
+  at most 3 across all its Task Attempts; SuperTag refuses the fourth. A note that arrives after the work Task finished is dropped, so the
   update turns of a Task always come before its report.
 - `skip_reply` ends an update turn without posting anything, on any collaboration surface or in
   the CLI conversation.
