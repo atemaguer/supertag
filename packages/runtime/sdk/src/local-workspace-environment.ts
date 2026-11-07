@@ -28,6 +28,7 @@ import {
 } from "./volume-copy.js";
 import {
   assertWorkspaceMountSupport,
+  COMMIT_STAGING,
   exists,
   type FinalizedWork,
   type PreparedWorkspace,
@@ -477,8 +478,9 @@ export class LocalWorkspaceEnvironment implements WorkspaceEnvironment {
   }
 
   /**
-   * Commits whatever the Attempt left, for every outcome. `add -A` never stages files matched by
-   * `.gitignore`. Hooks, signing, and host git config never apply.
+   * Commits whatever the Attempt left, for every outcome, staged by {@link COMMIT_STAGING}: never
+   * files the repository ignores, nor untracked generated paths. Hooks, signing, and host git
+   * config never apply.
    */
   async finalize(
     environment: ExecutionEnvironment,
@@ -492,7 +494,7 @@ export class LocalWorkspaceEnvironment implements WorkspaceEnvironment {
       const status = await host.run(tree, ["status", "--porcelain", "--untracked-files=all"]);
       let committed = false;
       if (status.trim()) {
-        await host.run(tree, ["add", "-A"]);
+        for (const args of COMMIT_STAGING) await host.run(tree, args);
         const staged = await host.run(tree, ["diff", ...SAFE_DIFF, "--cached", "--name-only"]);
         if (staged.trim()) {
           await host.run(tree, [

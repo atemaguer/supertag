@@ -491,7 +491,8 @@ function validateImageCommand(
         }
       }
     }
-    for (const match of arg.matchAll(/(?<![\w.~-])\/(?:[\w.~-]+(?:\/[\w.~-]+)*)/gu)) {
+    // A `*` before the slash marks a glob such as a git pathspec, not a path.
+    for (const match of arg.matchAll(/(?<![\w.~*-])\/(?:[\w.~-]+(?:\/[\w.~-]+)*)/gu)) {
       const path = match[0];
       if (path === "/dev/null") continue;
       validateSandboxPath(root, path);
