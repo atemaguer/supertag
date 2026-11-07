@@ -1308,7 +1308,7 @@ function describeSession(
     );
   lines.push(
     states.some((state) => state["status"] === "resumable")
-      ? "A resumable archive is recorded; reuse still requires compatible Task, profile, and workspace inputs."
+      ? "A resumable archive is recorded; a later Task of this Session resumes it with the same harness, reply audience, and workspace."
       : "No resumable native archive was returned.",
     "Native archives preserve conversation state, not workspace files. Archive contents are omitted.",
   );

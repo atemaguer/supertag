@@ -201,8 +201,8 @@ closes only when the reviewer that reported it confirms the fix in a later revie
 operator closes it. See [review findings](../reference/coordination.md#review-findings).
 There is no separate handoff resource created for every response.
 
-For automatic conversation continuity, SuperTag derives bounded history entries from completed
-Tasks in the same Session. These entries exclude hidden reasoning, credentials, and raw tool logs.
+When a Task can't resume its Session's native harness session, SuperTag derives bounded history
+entries from up to five earlier completed Tasks in that Session. These entries exclude hidden reasoning, credentials, and raw tool logs.
 They are historical context, not new instructions or permission grants.
 
 Reusable work is saved explicitly in the [artifact catalog](../reference/artifacts.md), with its

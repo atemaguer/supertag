@@ -231,8 +231,6 @@ interface StoredClaudeSessionState {
   readonly claudeSessionId: string;
   readonly supertagSessionId: string;
   readonly tagId: string;
-  readonly workerProfileId: string;
-  readonly workerProfileRevision: string;
   readonly workspaceKey: string;
   readonly transcript?: string;
   readonly transcripts?: readonly ClaudeTranscript[];
@@ -247,8 +245,6 @@ function storedClaudeSessionState(
     data["claudeSessionId"],
     data["supertagSessionId"],
     data["tagId"],
-    data["workerProfileId"],
-    data["workerProfileRevision"],
     data["workspaceKey"],
   ];
   if (!values.every((value) => typeof value === "string" && value.length > 0)) return undefined;
@@ -259,8 +255,6 @@ function storedClaudeSessionState(
     claudeSessionId: data["claudeSessionId"] as string,
     supertagSessionId: data["supertagSessionId"] as string,
     tagId: data["tagId"] as string,
-    workerProfileId: data["workerProfileId"] as string,
-    workerProfileRevision: data["workerProfileRevision"] as string,
     workspaceKey: data["workspaceKey"] as string,
     ...(typeof data["transcript"] === "string" ? { transcript: data["transcript"] } : {}),
   };
@@ -967,8 +961,6 @@ export class ClaudeCodeHarness implements Harness {
         ...native,
         supertagSessionId,
         tagId: input.attempt.tag.id,
-        workerProfileId: input.attempt.workerProfile.id,
-        workerProfileRevision: input.attempt.workerProfile.revision,
         workspaceKey: claudeWorkspaceKey(input, this.#workspace),
       },
     });

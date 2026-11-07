@@ -1,10 +1,6 @@
 import { parseArgs } from "node:util";
 import { EventSourceParserStream } from "eventsource-parser/stream";
-import {
-  ControlPlaneClient,
-  ControlPlaneRequestError,
-  type ControlPlaneTarget,
-} from "./control-plane-client.js";
+import { ControlPlaneClient, type ControlPlaneTarget } from "./control-plane-client.js";
 import { takeOutputFlag } from "./output-flag.js";
 import { terminalLines, terminalText } from "./terminal-text.js";
 
@@ -58,7 +54,10 @@ export interface TagConversationOptions {
   readonly intervalMs?: number;
   /** Aborting detaches from the reply; the Tag keeps working. */
   readonly signal?: AbortSignal;
-  /** Receives streamed reply text as it arrives; without it, the text is part of the result. */
+  /**
+   * Receives the output as it is shown: activity lines, the final reply, and work Session lines.
+   * Without it, the output is part of the result.
+   */
   readonly write?: (text: string) => void;
   /** Receives the follow-up notice after a detach. */
   readonly warn?: (text: string) => void;
@@ -70,7 +69,8 @@ export function tagConversationHelp(): string {
   return `Usage:
   supertag message tag NAME TEXT|- [--session NAME] [--output text|json]
 
-Sends TEXT (or standard input for -) to the Tag as you and shows its reply as it is written.
+Sends TEXT (or standard input for -) to the Tag as you, shows a line for each command the Tag
+runs, then its reply.
 --session names the conversation; without it the conversation is default. The same name
 continues the same Session, so the Tag sees the earlier messages and replies.
 The conversation is private to you: the admin token and each Operator Token have their own.
@@ -78,7 +78,7 @@ The Tag answers with its Roles' permissions only; no location's Permission or Co
 When the Tag hands work to work Sessions, it shows "· working: TITLE" for each one and stays
 until the Tag reports each result in the conversation. A work Session that needs you shows
 "· waiting on you: TITLE" and the Tag's question; answer it with your next message.
-Ctrl-C stops showing the reply; the Tag keeps working, and supertag describe task shows it.
+Ctrl-C stops following; the Tag keeps working, and supertag describe task shows it.
 A report still arrives in the conversation, and your next message there sees it.
 --output json waits and prints the message record with the reply and the work Sessions' reports.
 `;
@@ -170,22 +170,15 @@ export async function runTagConversationCommand(
     if (options.write) options.write(chunk);
   };
   let streamed: StreamedReply | undefined;
+  // A conversation turn's text includes what the Tag says between tool calls; show only its
+  // activity while it runs, then the final reply, as a teammate's message.
   if (record.status !== "replied")
-    try {
-      // A conversation turn's text includes what the Tag says between tool calls; show only its
-      // activity while it runs, then the final reply, as a teammate's message.
-      streamed = await streamReply(client, `${messagePath}/stream`, {
-        idleMs: timeoutMs,
-        interactive: options.interactive === true,
-        text: false,
-        write,
-        ...(options.signal === undefined ? {} : { signal: options.signal }),
-      });
-    } catch (error) {
-      // A Control Plane without reply streams; read the record instead.
-      if (!(error instanceof ControlPlaneRequestError) || ![404, 405].includes(error.status))
-        throw error;
-    }
+    streamed = await streamReply(client, `${messagePath}/stream`, {
+      idleMs: timeoutMs,
+      interactive: options.interactive === true,
+      write,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    });
   if (streamed?.ended === "detached") return detached();
   if (streamed?.ended === "idle") throw notReplied();
   let reply = record.reply ?? streamed?.reply;
@@ -194,13 +187,10 @@ export async function runTagConversationCommand(
     if (replied === undefined) return detached();
     reply = replied.reply;
   }
-  const lineBreak = printed === "" || printed.endsWith("\n") ? "" : "\n";
   const finalText = reply?.text ?? "";
-  if (reply?.presentation === "error") {
-    write(lineBreak);
+  if (reply?.presentation === "error")
     throw new Error(`Tag ${terminalText(name)} could not answer: ${finalText}`);
-  }
-  write(`${lineBreak}${terminalLines(finalText.trimEnd())}\n`);
+  write(`${terminalLines(finalText.trimEnd())}\n`);
   const followed = await followWorkSessions(
     client,
     tagPath,
@@ -246,7 +236,6 @@ async function followWorkSessions(
               streamReply(client, `${tagPath}/${encodeURIComponent(session.taskId)}/stream`, {
                 idleMs: options.idleMs,
                 interactive: true,
-                text: false,
                 indent: true,
                 ...(sessions.length > 1 ? { label: session.title } : {}),
                 write: options.write,
@@ -293,15 +282,13 @@ async function followWorkSessions(
 }
 
 interface StreamedReply {
-  /** Reply text the stream carried, as written. */
-  readonly text: string;
   readonly reply?: TagReply;
   readonly ended: "finished" | "closed" | "detached" | "idle";
 }
 
 /**
- * Follows one message's reply stream: text deltas as they arrive and, interactively, one line per
- * command or tool the Tag starts. Ends at the stream's finish or error part.
+ * Follows one message's reply stream: interactively, one line per command or tool the Tag starts,
+ * and the final reply from its finish or error part, where it ends.
  */
 async function streamReply(
   client: ControlPlaneClient,
@@ -309,8 +296,6 @@ async function streamReply(
   options: {
     readonly idleMs: number;
     readonly interactive: boolean;
-    /** Print text deltas; a followed work Session shows only its activity. */
-    readonly text?: boolean;
     /** Names the work Session an activity line belongs to. */
     readonly label?: string;
     /** Indents activity lines under a work Session's "working" line. */
@@ -325,7 +310,7 @@ async function streamReply(
     ended ??= "detached";
     abort.abort();
   };
-  if (options.signal?.aborted) return { text: "", ended: "detached" };
+  if (options.signal?.aborted) return { ended: "detached" };
   options.signal?.addEventListener("abort", detach, { once: true });
   let idle: NodeJS.Timeout | undefined;
   const awake = () => {
@@ -336,17 +321,10 @@ async function streamReply(
     }, options.idleMs);
     idle.unref();
   };
-  let text = "";
-  let atLineStart = true;
-  const write = (chunk: string) => {
-    if (!chunk) return;
-    options.write(chunk);
-    atLineStart = chunk.endsWith("\n");
-  };
   try {
     awake();
     const response = await client.stream(path, abort.signal);
-    if (response.body === null) return { text, ended: "closed" };
+    if (response.body === null) return { ended: "closed" };
     const events = response.body
       .pipeThrough(new TextDecoderStream())
       .pipeThrough(new EventSourceParserStream());
@@ -355,26 +333,21 @@ async function streamReply(
       if (event.data === "[DONE]") break;
       const part = parsePart(event.data);
       if (part === undefined) continue;
-      if (part.type === "text-delta" && typeof part["delta"] === "string") {
-        text += part["delta"];
-        if (options.text !== false) write(terminalLines(part["delta"]));
-      } else if (part.type === "data-activity" && options.interactive) {
+      if (part.type === "data-activity" && options.interactive) {
         const line = activityLine(part["data"]);
         if (line !== undefined) {
-          if (!atLineStart) write("\n");
           const shown = options.label === undefined ? line : `${options.label} ${line}`;
-          write(
+          options.write(
             `\u001b[2m${options.indent === true ? "  " : ""}${terminalText(shown)}\u001b[22m\n`,
           );
         }
       } else if (part.type === "error") {
         const errorText = typeof part["errorText"] === "string" ? part["errorText"] : "";
-        return { text, reply: { presentation: "error", text: errorText }, ended: "finished" };
+        return { reply: { presentation: "error", text: errorText }, ended: "finished" };
       } else if (part.type === "finish") {
         const metadata = isRecord(part["messageMetadata"]) ? part["messageMetadata"] : {};
         const reply = metadata["reply"];
         return {
-          text,
           ...(isRecord(reply) &&
           typeof reply["presentation"] === "string" &&
           typeof reply["text"] === "string"
@@ -384,9 +357,9 @@ async function streamReply(
         };
       }
     }
-    return { text, ended: ended ?? "closed" };
+    return { ended: ended ?? "closed" };
   } catch (error) {
-    if (ended !== undefined) return { text, ended };
+    if (ended !== undefined) return { ended };
     throw error;
   } finally {
     clearTimeout(idle);

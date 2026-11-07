@@ -833,8 +833,6 @@ export class CursorHarness implements Harness {
                     portable: portable as unknown as Record<string, unknown>,
                     sessionId: input.continuity.sessionId,
                     tagId: input.attempt.tag.id,
-                    workerProfileId: input.attempt.workerProfile.id,
-                    workerProfileRevision: input.attempt.workerProfile.revision,
                     workspaceKey: workspaceKey(input, configuredWorkspace),
                     executionMode: executionMode(splitToolNames),
                   },

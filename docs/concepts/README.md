@@ -32,8 +32,9 @@ Mailbox: direct delivery to one Tag
 ## Start with the actor
 
 A [Tag](tags.md) is a persistent AI identity with its own responsibilities and permissions. You
-assign work to a Tag by name. Each assignment runs as a new harness session, and the Tag is what
-persists across those sessions: its configuration, its open assignments, and their results. People
+assign work to a Tag by name. A Tag talks to people in many conversations, each its own Session with
+its own harness session, and works on assignments that each start a new one. The Tag is what
+persists across them: its configuration, its Sessions, its open assignments, and their results. People
 may experience a Tag as a teammate in Slack or another shared tool, but the Tag exists independently
 of that tool.
 

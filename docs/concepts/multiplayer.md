@@ -5,8 +5,9 @@ and platforms under explicit rules**.
 
 Multiplayer interaction lets several people direct the same **Tag** and continue its approved work
 across the tools their team uses. A Tag is a persistent AI identity with its own responsibilities
-and permissions. Each assignment runs as a new harness session, and the Tag is what persists across
-those sessions: its configuration, its open assignments, and their results. A shared Tag can appear
+and permissions. Each conversation is its own Session with its own harness session, and the Tag is
+what persists across them: its configuration, its Sessions, its open assignments, and their results.
+A shared Tag can appear
 in a channel as an AI teammate. A Slack-native experience like [Claude
 Tag](https://www.anthropic.com/news/introducing-claude-tag) is a recognizable example of this
 product pattern. It preserves useful outcomes when the person asking for work did not directly
@@ -77,9 +78,10 @@ conversations. Each conversation is its own Session, and every Session belongs t
 Tag shares what it knows across them, the way a teammate remembers a conversation from another
 channel:
 
-- **Portfolio.** Every conversation sees the Tag's open Objectives, one line each, with status,
-  deadline, and where each started. Ask "what are you working on?" in any thread and the answer
-  is the same.
+- **Portfolio.** Every conversation turn sees the Tag's open Objectives, one line each, with
+  status, deadline, and where each started. It also sees that conversation's work Sessions that
+  are running, queued, or waiting on you. Ask "what are you working on?" in any thread and the
+  Objectives are the same.
 - **Other conversations, on request.** The Tag can list its other Sessions, search their completed
   requests and results, and read one Session's history. It does this only when a question needs
   it; other transcripts never load automatically.
