@@ -1024,6 +1024,8 @@ export interface ListDueWorkInput {
   readonly now: string;
   /** At most this many events, oldest first. */
   readonly limit: number;
+  /** Only events ordered after this one, to page past an earlier batch. */
+  readonly after?: Pick<DurableInboundEvent, "availableAt" | "admissionOrder">;
 }
 
 export interface ClaimDueInboundEventInput extends ClaimDueWorkInput {

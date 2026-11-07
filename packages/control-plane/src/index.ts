@@ -397,7 +397,11 @@ export class ControlPlane {
   readonly #startedAt = new Date().toISOString();
   readonly #activeTaskControllers = new Map<string, AbortController>();
   /** Surface Tasks whose placement is held for an unsandboxed harness; their hold is recorded. */
-  readonly #heldSurfaceTasks = new Set<string>();
+  /**
+   * Surface Tasks whose placement hold this process recorded (true) or found clear (false). A
+   * Task's entry goes once it is claimed.
+   */
+  readonly #surfaceHolds = new Map<string, boolean>();
   readonly #surfaceJournalReplays = new Map<string, Promise<void>>();
   readonly #replyStreams = new ReplyStreams();
   /** Work Session executions running beside the task controller loop. */
@@ -641,10 +645,11 @@ export class ControlPlane {
    * be placed. A reason is written only when it changes, never on every dispatch pass.
    */
   async #recordSurfacePlacement(task: Task, placement: TaskPlacement): Promise<void> {
-    if (placement.status === "eligible" && !this.#heldSurfaceTasks.has(task.id)) return;
+    // A hold recorded before a restart, or by another Control Plane, is read once per process.
+    if (placement.status === "eligible" && this.#surfaceHolds.get(task.id) === false) return;
     const latest = (await this.#store.listTaskEvents(task.id)).findLast(isSchedulingEvent);
     if (placement.status === "eligible") {
-      this.#heldSurfaceTasks.delete(task.id);
+      this.#surfaceHolds.set(task.id, false);
       if (latest?.type === "task.scheduling-incompatible")
         await this.#appendTaskEvent(task.id, "task.scheduling-compatible", {
           version: 1,
@@ -652,7 +657,7 @@ export class ControlPlane {
         });
       return;
     }
-    this.#heldSurfaceTasks.add(task.id);
+    this.#surfaceHolds.set(task.id, true);
     const payload = {
       version: 1,
       status: "incompatible",
@@ -1838,16 +1843,22 @@ export class ControlPlane {
     const claim = this.#claimInput();
     if (Date.now() - this.#lastWorkReportSweep >= WORK_REPORT_SWEEP_INTERVAL_MS)
       await this.#reportFinishedWorkSessions();
-    const candidates = await this.#store.listDueInboundEvents({
-      now: claim.now,
-      limit: DISPATCH_CANDIDATES_PER_TICK,
-    });
-    if (candidates.length === 0) this.#dispatchFailures.inbound = 0;
     // An event that cannot be placed now waits without holding back the events behind it. Each
     // Session has at most one due event, so no event overtakes an earlier one of its Session.
-    for (const candidate of candidates)
-      if ((await this.#reconcileInboundEvent(candidate, claim)) === true) return true;
-    return false;
+    // Pages run until one event runs or every due event was tried.
+    let after: DurableInboundEvent | undefined;
+    for (let page = 0; ; page++) {
+      const candidates = await this.#store.listDueInboundEvents({
+        now: claim.now,
+        limit: DISPATCH_CANDIDATES_PER_TICK,
+        ...(after === undefined ? {} : { after }),
+      });
+      if (page === 0 && candidates.length === 0) this.#dispatchFailures.inbound = 0;
+      for (const candidate of candidates)
+        if ((await this.#reconcileInboundEvent(candidate, claim)) === true) return true;
+      if (candidates.length < DISPATCH_CANDIDATES_PER_TICK) return false;
+      after = candidates.at(-1);
+    }
   }
 
   /** Places, claims and runs one due inbound event; "unplaced" when no Worker can take it now. */
@@ -1930,6 +1941,7 @@ export class ControlPlane {
     if (work === undefined) {
       return false;
     }
+    this.#surfaceHolds.delete(pendingTask.id);
     try {
       // The prior owner may have prepared its outcome after our preflight read
       // but before lease takeover. Re-read under the newly acquired authority.
@@ -3177,9 +3189,17 @@ export class ControlPlane {
         `Workspace ${name} no longer exists; start a new work Session`,
       );
     // Branches are numbered after the latest Task that delivered commits, so one that only
-    // asked the person leaves the next name to the Task that does the work.
+    // asked the person leaves the next name to the Task that does the work. The number follows
+    // the branch that Task requested, not a hash-suffixed name its Worker fell back to.
     const delivered = await latestSessionDelivery(this.#store, tasks, { workspace: name });
-    return namedWorkspacePlan(workspace, workSessionBranch(sessionId, delivered?.branch));
+    const deliveredPlan = tasks.find((task) => task.id === delivered?.taskId)?.workspacePlan;
+    return namedWorkspacePlan(
+      workspace,
+      workSessionBranch(
+        sessionId,
+        deliveredPlan?.status === "workspace" ? deliveredPlan.branch : delivered?.branch,
+      ),
+    );
   }
 
   async #openTaskAttempt(

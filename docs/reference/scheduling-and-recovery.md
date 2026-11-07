@@ -236,10 +236,11 @@ oldest first:
 - A Session's next turn waits until its earlier turns finish, so a turn never overtakes an earlier
   one of the same Session.
 - A turn that no bound host can run now waits without holding back other Sessions' turns, of the
-  same Tag or another. Each pass tries up to 50 due turns.
+  same Tag or another. Each pass tries due turns until one runs, however many wait ahead of it.
 - A conversation runs at most four work Sessions at once; the rest wait their turn.
 - A waiting turn records why, once each time the reason changes. `supertag describe task` shows
-  it as `Waiting: REASON`, and `supertag message tag` prints `· waiting: REASON`.
+  it as `Waiting: REASON`, and `supertag message tag` prints `· waiting: REASON`. The reason clears
+  once a host can run the turn, also after a Control Plane restart.
 
 For example, a turn in Slack thread A waits for an MCP server login. A later message in thread B,
 for the same Tag or another, runs at once. A second message in thread A waits behind the first.

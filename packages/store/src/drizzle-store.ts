@@ -144,6 +144,7 @@ import {
   asc,
   desc,
   eq,
+  gt,
   gte,
   inArray,
   isNotNull,
@@ -3978,7 +3979,20 @@ export class DrizzleStore implements Store {
     const rows = await this.#db
       .select()
       .from(t)
-      .where(inboundIsDue(t, input.now))
+      .where(
+        and(
+          inboundIsDue(t, input.now),
+          input.after === undefined
+            ? undefined
+            : or(
+                gt(t.availableAt, input.after.availableAt),
+                and(
+                  eq(t.availableAt, input.after.availableAt),
+                  gt(t.admissionOrder, input.after.admissionOrder),
+                ),
+              ),
+        ),
+      )
       .orderBy(asc(t.availableAt), asc(t.admissionOrder))
       .limit(input.limit);
     return rows.map(inboundFromRow);

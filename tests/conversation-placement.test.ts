@@ -257,3 +257,124 @@ it("tells a CLI conversation once why its turn waits, then answers", async () =>
     await rm(directory, { recursive: true, force: true });
   }
 }, 30000);
+
+/** A Control Plane on `store` with one local Worker Host, and a Slack account to send through. */
+async function slackControlPlane(store: DrizzleStore, directory: string, id: string) {
+  const controlPlane = new ControlPlane({
+    store,
+    credentialVault: new FileGatewayCredentialVault(join(directory, "vault.json")),
+    worklet: new LocalWorklet(`${id}-worklet`, `${id}-host`, [new StaticWorker()]),
+    reply: async () => {},
+    dispatch: { pollIntervalMs: 5 },
+  });
+  await controlPlane.start();
+  const account = await controlPlane.setupSurfaceAccount({
+    provider: "slack",
+    externalAccountId: `T-${id}`,
+    displayName: id,
+    authMethod: "slack-socket-mode",
+    configuration: {},
+    secrets: { botToken: "fake", appToken: "fake" },
+  });
+  const send = async (channel: string, thread: string, eventId: string) =>
+    (
+      await controlPlane.ingestSurfaceEvent({
+        eventId,
+        logicalEventId: eventId,
+        provider: "slack",
+        externalAccountId: `T-${id}`,
+        kind: "mention",
+        scope: `channel:${channel}`,
+        sessionKey: `slack:T-${id}:${channel}:${thread}`,
+        actor: { id: "U1", kind: "user" },
+        text: "Say hello",
+        occurredAt: new Date().toISOString(),
+        callback: {
+          provider: "slack",
+          mode: "slack_thread",
+          threadKey: `T-${id}|${channel}|${thread}`,
+          target: { channelId: channel, threadTs: thread },
+        },
+        source: {},
+        metadata: {},
+      })
+    ).taskId as string;
+  return { controlPlane, account, send };
+}
+
+it("reaches a placeable turn behind more unplaceable turns than one page holds", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "supertag-many-held-"));
+  const url = `file:${join(directory, "state.db")}`;
+  await migrateDatabase({ url });
+  const store = new DrizzleStore({ url });
+  const { controlPlane, account, send } = await slackControlPlane(store, directory, "many");
+  try {
+    // A Tag whose runsOn labels no bound host carries: every one of its threads waits.
+    const stuck = await store.createTag({ name: "Stuck" });
+    const ready = await store.createTag({ name: "Ready" });
+    for (const tag of [stuck, ready]) await store.bindTagWorkerHost(tag.id, "many-host");
+    await store.setTagRunsOn(stuck.id, ["gpu"]);
+    await store.addTagRoute({ tagId: stuck.id, surfaceAccountId: account.id, scope: "channel:S" });
+    await store.addTagRoute({ tagId: ready.id, surfaceAccountId: account.id, scope: "channel:R" });
+    for (let thread = 0; thread < 60; thread++) await send("S", `${thread}`, `s${thread}`);
+    const answered = await send("R", "1", "ready");
+    await expect
+      .poll(async () => (await store.findTaskById(answered))?.status, { timeout: 10_000 })
+      .toBe("completed");
+    // Every waiting turn was tried, and each still waits.
+    const waiting = await store.listTasks({ tagId: stuck.id, limit: 100 });
+    expect(waiting).toHaveLength(60);
+    expect(waiting.every((task) => task.status === "pending")).toBe(true);
+  } finally {
+    await controlPlane.stop();
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 30000);
+
+it("ends a hold recorded before a restart once the Task can be placed", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "supertag-hold-restart-"));
+  const url = `file:${join(directory, "state.db")}`;
+  await migrateDatabase({ url });
+  const store = new DrizzleStore({ url });
+  const first = await slackControlPlane(store, directory, "restart");
+  const tag = await store.createTag({ name: "Gpu" });
+  await store.bindTagWorkerHost(tag.id, "restart-host");
+  await store.setTagRunsOn(tag.id, ["gpu"]);
+  await store.addTagRoute({
+    tagId: tag.id,
+    surfaceAccountId: first.account.id,
+    scope: "channel:G",
+  });
+  const taskId = await first.send("G", "1", "gpu");
+  let reader = store;
+  const scheduling = async () =>
+    (await reader.listTaskEvents(taskId))
+      .filter((event) => event.type.startsWith("task.scheduling-"))
+      .map((event) => event.type);
+  await expect.poll(scheduling, { timeout: 5000 }).toEqual(["task.scheduling-incompatible"]);
+  await first.controlPlane.stop();
+  // The next Control Plane process knows nothing of the hold the first one recorded.
+  const restarted = new DrizzleStore({ url });
+  await restarted.setTagRunsOn(tag.id, []);
+  const second = new ControlPlane({
+    store: restarted,
+    credentialVault: new FileGatewayCredentialVault(join(directory, "vault.json")),
+    worklet: new LocalWorklet("restart-worklet", "restart-host", [new StaticWorker()]),
+    reply: async () => {},
+    dispatch: { pollIntervalMs: 5 },
+  });
+  try {
+    await second.start();
+    reader = restarted;
+    await expect
+      .poll(async () => (await restarted.findTaskById(taskId))?.status, { timeout: 10_000 })
+      .toBe("completed");
+    expect(await scheduling()).toEqual([
+      "task.scheduling-incompatible",
+      "task.scheduling-compatible",
+    ]);
+  } finally {
+    await second.stop();
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 30000);
