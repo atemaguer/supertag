@@ -3344,6 +3344,8 @@ interface StartedWorkSession {
   /** The Task's status, or `waiting` when it completed by asking the person `question`. */
   readonly status: string;
   readonly question?: string;
+  /** The approval notices posted to this conversation for the Task's pending approval requests. */
+  readonly approvals?: readonly { readonly requestId: string; readonly text: string }[];
   readonly reportStatus: "waiting" | "replied";
   /** The conversation turn that reports the work Session's result. */
   readonly reportTaskId?: string;
@@ -3596,12 +3598,14 @@ async function startedWorkSessions(
       const report = found
         ? await store.findOutboundReply(found.inboundEventId, "final")
         : undefined;
+      const approvals = await workSessionApprovals(store, task, session.task);
       return {
         id: session.sessionId,
         title: session.title,
         ...(session.task ? { taskId: session.task.id } : {}),
         status: workSessionWaiting(session) ? "waiting" : (session.task?.status ?? "pending"),
         ...(session.task?.question === undefined ? {} : { question: session.task.question }),
+        ...(approvals.length === 0 ? {} : { approvals }),
         reportStatus: report === undefined ? ("waiting" as const) : ("replied" as const),
         ...(found?.taskId ? { reportTaskId: found.taskId } : {}),
         ...(report === undefined
@@ -3610,6 +3614,33 @@ async function startedWorkSessions(
       };
     }),
   );
+}
+
+/**
+ * The approval notices a work Session Task's pending approval requests posted to the conversation
+ * turn that started it. The CLI delivers no status replies, so the message record carries them.
+ */
+async function workSessionApprovals(
+  store: ControlPlaneApiRequestContext["store"],
+  turn: Task,
+  work: { readonly id: string } | undefined,
+): Promise<readonly { readonly requestId: string; readonly text: string }[]> {
+  if (!turn.inboundEventId || work === undefined) return [];
+  const requests = await store.listApprovalRequests({
+    taskId: work.id,
+    status: "pending",
+    limit: 10,
+  });
+  const notices = await Promise.all(
+    requests.map(async (request) => {
+      const notice = await store.findOutboundReply(
+        turn.inboundEventId as string,
+        `approval:${request.id}`,
+      );
+      return notice === undefined ? [] : [{ requestId: request.id, text: notice.text }];
+    }),
+  );
+  return notices.flat();
 }
 
 async function tagMessageReply(

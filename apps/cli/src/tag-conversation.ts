@@ -32,6 +32,8 @@ export interface StartedWorkSession {
   /** The work Task's status, or `waiting` when it completed by asking the person `question`. */
   readonly status: string;
   readonly question?: string;
+  /** Approval notices for the work Task's pending approval requests. */
+  readonly approvals?: readonly { readonly requestId: string; readonly text: string }[];
   readonly reportStatus: "waiting" | "replied";
   readonly reportTaskId?: string;
   readonly report?: TagReply;
@@ -257,6 +259,14 @@ async function followWorkSessions(
   try {
     const reported = await awaitReports(record, (current) => {
       for (const session of current.startedSessions ?? []) {
+        // A status reply posts nowhere on the CLI, so the approval notice prints here, once.
+        for (const approval of session.approvals ?? []) {
+          if (shown.has(`approval:${approval.requestId}`)) continue;
+          shown.add(`approval:${approval.requestId}`);
+          options.write(
+            `· approval needed: ${terminalText(session.title)}\n${terminalLines(approval.text.trimEnd())}\n`,
+          );
+        }
         if (session.report === undefined || shown.has(session.id)) continue;
         shown.add(session.id);
         const ended =

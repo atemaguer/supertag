@@ -126,10 +126,12 @@ work Session's next Task, which resumes the work Session's own native session. T
 Tag's relay of what the person said, so it grants nothing. The next Task runs under the continuing
 conversation Task's permissions and counts against its limits. If the conversation's permissions
 changed since the work Session last ran, the Tag starts a new work Session instead. Only the
-conversation that started a work Session can continue it, and only when it isn't running.
+conversation that started a work Session can continue it, and only once it has stopped running
+and its report turn has run.
 
 When a work Session's Task requests approval for an action, the approval notice posts to the
-conversation, because the work Session itself posts nowhere. The notice names the action and the
+conversation, because the work Session itself posts nowhere. On the CLI, `supertag message tag`
+prints it. The notice names the action and the
 `supertag approve request` and `supertag deny request` commands that decide it. A chat message
 never approves an action.
 

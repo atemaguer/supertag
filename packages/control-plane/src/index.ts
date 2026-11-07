@@ -2598,6 +2598,19 @@ export class ControlPlane {
           409,
           "This turn already ran that work Session; pass the person's answer from a later message",
         );
+      // Continue only after the latest Task's report turn has run: that turn put its result or
+      // question to the person, so a later report never asks a question already answered.
+      const report = await this.#store.findWorkSessionReport(target.task.id);
+      const reportTask = report?.taskId ? await this.#store.findTaskById(report.taskId) : undefined;
+      if (
+        reportTask === undefined ||
+        reportTask.status === "pending" ||
+        reportTask.status === "running"
+      )
+        throw new TagMessagingError(
+          409,
+          "That work Session's report has not reached this conversation yet; continue it after its report turn",
+        );
       const latest = await this.#store.findTaskById(target.task.id);
       const work = latest?.inboundEventId
         ? await this.#store.findInboundEventById(latest.inboundEventId)

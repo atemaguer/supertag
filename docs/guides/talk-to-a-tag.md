@@ -87,8 +87,8 @@ I've passed that on.
 The billing export now runs on the eu-west cluster.
 ```
 
-If a work Session needs approval for an action, the approval notice posts to your conversation.
-Decide it with `supertag approve request ID` or `supertag deny request ID --reason TEXT`; a message
+If a work Session needs approval for an action, `supertag message tag` prints the notice under
+`· approval needed: TITLE`, and on Slack and other surfaces it posts to your conversation. Decide it with `supertag approve request ID` or `supertag deny request ID --reason TEXT`; a message
 to the Tag doesn't approve anything.
 
 ## Check that it worked
@@ -122,13 +122,13 @@ status: `pending`, `running`, `completed`, `failed`, or `cancelled`.
 - **A message you send while the Tag reports a work Session gets its own turn.** It isn't added to
   the report.
 - **Only your conversation can answer its work Sessions.** The Tag continues a work Session only
-  when it isn't running, with your current message's permissions. A continued work Session counts
+  after it stops running and the Tag has reported it, with your current message's permissions. A continued work Session counts
   against the same limits as a new one. If the Tag's permissions changed since the work Session
   last ran, the Tag starts a new work Session instead.
 - `--output json` waits for the reply and every report, and prints one message record with the
   Session, the Task, the reply, and `startedSessions`: each work Session the message started or
   continued, with its status and report. A work Session waiting on you has status `waiting` and
-  its `question`.
+  its `question`, and one waiting for approval lists the notices in `approvals`.
 - **Ctrl-C stops showing the reply, not the work.** The Tag keeps working. The command prints the
   `supertag describe task` command that follows the Task.
 
