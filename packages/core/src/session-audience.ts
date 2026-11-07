@@ -81,6 +81,14 @@ export const WORK_SESSION_TITLE_MAX = 120;
 export const WORK_SESSION_INSTRUCTION_MAX = 8_000;
 /** Work Sessions of one conversation that run at once; later ones queue. */
 export const WORK_SESSION_MAX_RUNNING = 4;
+/**
+ * Work Sessions one conversation turn may start. Together they share that turn's reported token
+ * and cost limits: each gets an equal share, so the turn's work never spends more than the turn
+ * itself may. A turn whose `maxNativeAgents` is lower starts at most that many; 0 starts none.
+ */
+export const WORK_SESSION_MAX_PER_TURN = 4;
+/** Unfinished (running or queued) work Sessions one conversation may hold. */
+export const WORK_SESSION_MAX_OPEN = 8;
 /** The bounded result text a report turn carries back to the conversation. */
 export const WORK_SESSION_REPORT_RESULT_MAX = 4_000;
 

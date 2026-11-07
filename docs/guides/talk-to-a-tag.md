@@ -87,7 +87,12 @@ status: `pending`, `running`, `completed`, `failed`, or `cancelled`.
 - **A work Session has the conversation's permissions, never more.** It runs with the same
   permissions and workspace as the message that started it. It can't start more work Sessions or
   create Objectives. A work Session started from your private conversation is private to you too.
-- **At most four work Sessions run at once per conversation.** Later ones wait their turn.
+- **At most four work Sessions run at once per conversation.** Later ones wait their turn. One
+  message starts at most four, and a conversation holds at most eight unfinished. Together, the work
+  Sessions of one message share its token and cost limits. A message whose limits allow no parallel
+  agents (`maxNativeAgents: 0`) starts none.
+- **A message you send while the Tag reports a work Session gets its own turn.** It isn't added to
+  the report.
 - `--output json` waits for the reply and every report, and prints one message record with the
   Session, the Task, the reply, and `startedSessions`: each work Session with its status and
   report.

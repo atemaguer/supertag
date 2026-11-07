@@ -16,6 +16,8 @@ import {
   type StartSessionRequest,
   sessionReportEvent,
   workSessionEvent,
+  workSessionExecution,
+  workSessionsPerTurn,
 } from "./work-sessions.js";
 
 export type {
@@ -77,6 +79,7 @@ import {
   SESSION_INPUT_ACK_TIMEOUT_MS,
   sessionRequesterKey,
   TagMessagingError,
+  WORK_SESSION_MAX_OPEN,
   WORK_SESSION_MAX_RUNNING,
 } from "@supertag/core";
 import type {
@@ -372,6 +375,7 @@ export class ControlPlane {
   readonly #replyStreams = new ReplyStreams();
   /** Work Session executions running beside the task controller loop. */
   readonly #backgroundRuns = new Set<Promise<void>>();
+  readonly #workSessionStarts = new Map<string, Promise<void>>();
   #accepting = false;
   #running = false;
   #stopping = false;
@@ -1635,8 +1639,11 @@ export class ControlPlane {
     const active = await this.#store.findActiveSessionAttempt(work.id);
     if (!active?.task.inboundEventId) return undefined;
     const original = await this.#store.findInboundEventById(active.task.inboundEventId);
+    // An internal turn (a work Session's Task or a report turn) is not a conversation turn: a
+    // person's message waits for its own Task, which may start work and answer them.
     if (
       !original ||
+      original.event.internal !== undefined ||
       !this.#sessionContinuity.acceptsInput(
         { work: original, task: active.task, workerProfile: active.attempt.workerProfile },
         { work, task },
@@ -1800,6 +1807,23 @@ export class ControlPlane {
       this.#dispatchFailures.inbound = 0;
       return false;
     }
+    const outcome = await this.#reconcileInboundEvent(candidate, claim);
+    if (outcome !== "unplaced" || candidate.event.internal?.kind !== "work_session")
+      return outcome === true;
+    // A work Session that has no free Worker slot waits without holding back the conversation
+    // turns behind it, which may use the Worker's coordination slot.
+    const turn = await this.#store.peekNextInboundEvent({
+      now: claim.now,
+      excludeWorkSessions: true,
+    });
+    return turn !== undefined && (await this.#reconcileInboundEvent(turn, claim)) === true;
+  }
+
+  /** Places, claims and runs one due inbound event; "unplaced" when no Worker can take it now. */
+  async #reconcileInboundEvent(
+    candidate: DurableInboundEvent,
+    claim: { readonly leaseOwner: string; readonly now: string; readonly leaseExpiresAt: string },
+  ): Promise<boolean | "unplaced"> {
     // A Surface Attempt this Control Plane runs keeps its lease through a suspend grace; its
     // renewal timer extends the lease, so do not reclaim it as abandoned meanwhile.
     if (candidate.status === "processing" && this.objectives.surfaceLeaseCurrent(candidate))
@@ -1821,7 +1845,7 @@ export class ControlPlane {
         // Labels narrow the bound hosts; with none eligible the Task waits for one to connect.
         const placement = await this.#placement(pendingTask, workerHostBindings);
         await this.#recordSurfacePlacement(pendingTask, placement);
-        if (placement.status === "unmet") return false;
+        if (placement.status === "unmet") return "unplaced";
         const preferred = await this.#sessionContinuity.preferredProfile(candidate, pendingTask);
         const descriptor = preferred ? await describeWorklet(this.#worklet) : undefined;
         const tiers = placement.tiers.map((tier) => ({
@@ -1846,12 +1870,13 @@ export class ControlPlane {
             {
               allowedWorkerHostIds: tier.allowedWorkerHostIds,
               ...(compatibleProfile === undefined ? {} : { compatibleProfile }),
+              ...(conversationSlot(candidate) ? { coordinationSlot: true } : {}),
             },
           );
           if (selectedPlacement) break;
         }
         this.#dispatchFailures.inbound = 0;
-        if (!selectedPlacement) return false;
+        if (!selectedPlacement) return "unplaced";
       }
     } catch (error) {
       this.#dispatchFailures.inbound++;
@@ -2368,6 +2393,7 @@ export class ControlPlane {
       placement: {
         allowedWorkerHostIds: placement.tiers.flatMap((tier) => tier.allowedWorkerHostIds),
         ...(selectedPlacement === undefined ? {} : selectedPlacement),
+        ...(conversationSlot(work) ? { coordinationSlot: true } : {}),
       },
       session: {
         id: task.sessionId,
@@ -2495,16 +2521,62 @@ export class ControlPlane {
   }> {
     if (!this.#accepting)
       throw new TagMessagingError(503, "The Control Plane is not accepting new work now");
-    const running = (await this.#store.listWorkSessions(conversation.sessionId)).filter(
-      (session) => session.task?.status === "running",
-    ).length;
+    // One conversation's start_session calls run one at a time, so the bounds below hold.
+    const previous = this.#workSessionStarts.get(conversation.sessionId) ?? Promise.resolve();
+    const run = previous.then(() => this.#startWorkSessionNow(conversation, starting, request));
+    const settled = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#workSessionStarts.set(conversation.sessionId, settled);
+    try {
+      return await run;
+    } finally {
+      if (this.#workSessionStarts.get(conversation.sessionId) === settled)
+        this.#workSessionStarts.delete(conversation.sessionId);
+    }
+  }
+
+  async #startWorkSessionNow(
+    conversation: Task,
+    starting: DurableInboundEvent,
+    request: StartSessionRequest,
+  ): Promise<{
+    readonly sessionId: string;
+    readonly title: string;
+    readonly status: "started" | "queued";
+  }> {
+    // Work Sessions are parallel agents of the starting turn: a turn starts at most its share,
+    // none when its maxNativeAgents is 0, and they split its reported token and cost limits.
+    const perTurn = workSessionsPerTurn(starting.execution);
+    if (perTurn === 0)
+      throw new TagMessagingError(
+        403,
+        "This turn may not run parallel agents (maxNativeAgents is 0), so it cannot start a work Session; do the work in this turn",
+      );
+    const sessions = await this.#store.listWorkSessions(conversation.sessionId);
+    if (sessions.filter((session) => session.startedByTaskId === conversation.id).length >= perTurn)
+      throw new TagMessagingError(
+        409,
+        `This turn already started ${perTurn} work Session${perTurn === 1 ? "" : "s"}, the most one turn may start`,
+      );
+    if (
+      sessions.filter(
+        (session) => session.task?.status === "running" || session.task?.status === "pending",
+      ).length >= WORK_SESSION_MAX_OPEN
+    )
+      throw new TagMessagingError(
+        409,
+        `This conversation already has ${WORK_SESSION_MAX_OPEN} unfinished work Sessions; wait for one to finish`,
+      );
+    const running = sessions.filter((session) => session.task?.status === "running").length;
     const admission = await this.#store.admitInboundEvent({
       surfaceAccountId: starting.surfaceAccountId,
       tagRouteId: starting.tagRouteId,
       tagId: starting.tagId,
       authorization: starting.authorization,
       contextPlan: starting.contextPlan,
-      execution: starting.execution,
+      execution: workSessionExecution(starting.execution),
       event: workSessionEvent(
         starting,
         conversation.id,
@@ -3535,6 +3607,15 @@ function externalWriteFailure(error: unknown, events: readonly WorkerTaskAttempt
     started.call.operation,
     errorMessage(error),
   );
+}
+
+/**
+ * Conversation and report turns may use each Worker's coordination slot, one beyond its
+ * maxConcurrency, so running work Sessions never leave the conversation without a Worker. Work
+ * Session Tasks use ordinary slots only.
+ */
+function conversationSlot(work: DurableInboundEvent): boolean {
+  return work.event.internal?.kind !== "work_session";
 }
 
 class ExternalActionReconciliationError extends Error {

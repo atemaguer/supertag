@@ -286,18 +286,25 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
     return statuses;
   }
 
+  /**
+   * Finished work Session Tasks without a report turn. The scan starts from work Sessions (indexed
+   * by parent), and the report lookup uses the inbound event's (surface account, delivery id) key:
+   * a report turn is admitted under the same surface account as the work Task it reports.
+   */
   async listUnreportedWorkTasks(limit: number): Promise<readonly string[]> {
     const t = this.tables.tasks,
-      s = this.tables.sessions;
+      s = this.tables.sessions,
+      w = this.tables.durableInboundEvents;
     const rows = await this.db
       .select({ id: t.id })
-      .from(t)
-      .innerJoin(s, eq(s.id, t.sessionId))
+      .from(s)
+      .innerJoin(t, eq(t.sessionId, s.id))
+      .innerJoin(w, eq(w.id, t.inboundEventId))
       .where(
         and(
           isNotNull(s.parentSessionId),
           inArray(t.status, ["completed", "failed", "cancelled"]),
-          sql`not exists (select 1 from "DurableInboundEvent" r where r."deliveryId" = 'session-report:' || ${t.id})`,
+          sql`not exists (select 1 from "DurableInboundEvent" r where r."surfaceAccountId" = ${w.surfaceAccountId} and r."deliveryId" = 'session-report:' || ${t.id})`,
         ),
       )
       .orderBy(asc(t.updatedAt), asc(t.id))
@@ -310,11 +317,24 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
   ): Promise<{ readonly inboundEventId: string; readonly taskId?: string } | undefined> {
     const i = this.tables.durableInboundEvents,
       t = this.tables.tasks;
+    // The report shares the work Task's surface account, so both lookups use an index.
+    const [work] = await this.db
+      .select({ surfaceAccountId: i.surfaceAccountId })
+      .from(t)
+      .innerJoin(i, eq(i.id, t.inboundEventId))
+      .where(eq(t.id, workTaskId))
+      .limit(1);
+    if (work === undefined) return undefined;
     const [row] = await this.db
       .select({ inboundEventId: i.id, taskId: t.id })
       .from(i)
       .leftJoin(t, eq(t.inboundEventId, i.id))
-      .where(eq(i.deliveryId, workSessionReportDeliveryId(workTaskId)))
+      .where(
+        and(
+          eq(i.surfaceAccountId, work.surfaceAccountId),
+          eq(i.deliveryId, workSessionReportDeliveryId(workTaskId)),
+        ),
+      )
       .limit(1);
     return row === undefined
       ? undefined

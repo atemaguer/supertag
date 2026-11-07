@@ -59,6 +59,7 @@ import type {
   OutboundPresentation,
   OutboundReply,
   OutboundReplyStatus,
+  PeekDueWorkInput,
   RecordTaskAttemptWorkerInput,
   RenewInboundEventLeaseInput,
   ResourceManagementStore,
@@ -3964,16 +3965,21 @@ export class DrizzleStore implements Store {
     return this.claimDueInboundEvent({ ...input, inboundEventId: candidate.id });
   }
 
-  async peekNextInboundEvent(input: {
-    readonly now: string;
-  }): Promise<DurableInboundEvent | undefined> {
+  async peekNextInboundEvent(input: PeekDueWorkInput): Promise<DurableInboundEvent | undefined> {
     required(input.now, "Current time");
     const t = this.#tables.durableInboundEvents;
     const candidate = (
       await this.#db
         .select()
         .from(t)
-        .where(inboundIsDue(t, input.now))
+        .where(
+          and(
+            inboundIsDue(t, input.now),
+            input.excludeWorkSessions === true
+              ? sql`not exists (select 1 from "Session" ws where ws."tagId" = ${t.tagId} and ws."sessionKey" = ${t.sessionKey} and ws."parentSessionId" is not null)`
+              : undefined,
+          ),
+        )
         .orderBy(asc(t.availableAt), asc(t.admissionOrder))
         .limit(1)
     )[0];

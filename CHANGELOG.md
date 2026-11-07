@@ -16,7 +16,7 @@ within the pre-1.0 compatibility policy described in
 - `supertag message tag NAME TEXT [--session NAME]` talks to a Tag from the terminal in a private conversation, with the Tag's Roles' permissions only.
 - `supertag message tag` shows the Tag's reply as it is written, with a line for each command the Tag runs; Ctrl-C stops showing it without cancelling the Task. `GET /api/v1/tags/NAME/messages/TASK_ID/stream` serves the reply as an AI SDK UI message stream, and reply text is no longer stored as one Task event per piece.
 - An Objective started in a conversation posts its completion summary there.
-- A conversation hands longer work to work Sessions with `start_session`: each runs as its own Session and Task with the conversation's permissions and audience, at most four at once, and its result returns to the conversation as a report from the Tag. `supertag message tag` follows them until each reports, `supertag list session` shows `PARENT` and `STATUS`, and a Session reports `spec.parentSessionId` and `status.latestTaskStatus`.
+- A conversation hands longer work to work Sessions with `start_session`: each runs as its own Session and Task with the conversation's permissions and audience, at most four at once and four per message, sharing that message's token and cost limits, and its result returns to the conversation as a report from the Tag. `supertag message tag` follows them until each reports, `supertag list session` shows `PARENT` and `STATUS`, and a Session reports `spec.parentSessionId` and `status.latestTaskStatus`.
 
 ### Changed
 

@@ -91,8 +91,8 @@ The response has `asOf`, `workerHosts`, `tags`, and `objectives`:
 - Each Worker Host has `id`, `phase`, `running`, `capacity`, `coordinationCapacity`, and
   `harnesses`. Each harness entry has `harness`, `running`, `capacity`, and
   `coordinationCapacity`. `running` counts all running Task Attempts. `capacity` includes
-  regular slots and any owner-only coordination slots; `coordinationCapacity` counts only
-  those owner-only slots. For example, four regular slots and one coordination slot show
+  regular slots and any coordination slots; `coordinationCapacity` counts only
+  those coordination slots. For example, four regular slots and one coordination slot show
   `running: 5`, `capacity: 5`, and `coordinationCapacity: 1` when full. Revoked hosts are
   left out.
 - Each Tag that is not retired has `id`, `name`, and `runningTaskIds`. An empty list means the

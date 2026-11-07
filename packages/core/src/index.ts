@@ -1021,6 +1021,8 @@ export interface ClaimDueWorkInput {
 
 export interface PeekDueWorkInput {
   readonly now: string;
+  /** Skip work Sessions' Tasks: the next due turn of a conversation or other surface Session. */
+  readonly excludeWorkSessions?: boolean;
 }
 
 export interface ClaimDueInboundEventInput extends ClaimDueWorkInput {

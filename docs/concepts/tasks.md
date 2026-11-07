@@ -98,7 +98,9 @@ wrote, under the permissions, Context Sets, and workspace of the conversation Ta
 never more. It has its own native harness session, so its tool output stays out of the
 conversation, and it inherits the conversation's audience. A work Session can't start more work
 Sessions or create, attach, or start an Objective. At most four run at once per conversation;
-later ones wait.
+later ones wait. One conversation Task starts at most four, or its `maxNativeAgents` when lower,
+and each gets an equal share of that Task's reported token and cost limits. A conversation holds at
+most eight unfinished work Sessions.
 
 When a work Session's Task completes, fails, or is cancelled, its conversation gets one report turn:
 a new Task in the conversation Session that resumes the conversation's native session. It carries

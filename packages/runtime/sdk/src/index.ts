@@ -627,8 +627,9 @@ export interface TaskAttemptSpec {
     readonly workerId?: string;
     readonly reservation?: import("./execution-selection.js").WorkletPlacementReservation;
     /**
-     * An Objective owner's activation. It may use the Worker's coordination slot, one slot beyond
-     * maxConcurrency that delegated work never uses, so the owner starts when builders fill it.
+     * An Objective owner's activation or a conversation turn. It may use the Worker's coordination
+     * slot, one slot beyond maxConcurrency that delegated work and work Sessions never use, so it
+     * starts when they fill the Worker.
      */
     readonly coordinationSlot?: boolean;
   };
