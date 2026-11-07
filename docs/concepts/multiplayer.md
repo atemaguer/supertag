@@ -99,7 +99,9 @@ no permissions: Bob's Task still has only the permissions of Bob's location.
 
 A conversation can also start work Sessions for longer work. Each one has the conversation's
 audience and permissions, and its result comes back to the conversation as a report from the Tag.
-See [Session](tasks.md#session).
+A work Session is the exception to one memory: it sees only its own work. It gets no portfolio
+and can't list, search, or read other Sessions. What one work Session learns reaches another only
+through the conversation. See [Session](tasks.md#session).
 
 ### Shared and private Sessions
 

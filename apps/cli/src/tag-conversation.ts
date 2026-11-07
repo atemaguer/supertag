@@ -30,6 +30,8 @@ export interface StartedWorkSession {
   readonly question?: string;
   /** Approval notices for the work Task's pending approval requests. */
   readonly approvals?: readonly { readonly requestId: string; readonly text: string }[];
+  /** What the Tag told the person from the work Task's progress notes; silent ones are absent. */
+  readonly updates?: readonly { readonly text: string }[];
   readonly reportStatus: "waiting" | "replied";
   readonly reportTaskId?: string;
   readonly report?: TagReply;
@@ -76,7 +78,8 @@ continues the same Session, so the Tag sees the earlier messages and replies.
 The conversation is private to you: the admin token and each Operator Token have their own.
 The Tag answers with its Roles' permissions only; no location's Permission or Context Sets apply.
 When the Tag hands work to work Sessions, it shows "· working: TITLE" for each one and stays
-until the Tag reports each result in the conversation. A work Session that needs you shows
+until the Tag reports each result in the conversation. When the Tag passes on a work Session's
+progress note, it shows "· update: TITLE" and what the Tag said. A work Session that needs you shows
 "· waiting on you: TITLE" and the Tag's question; answer it with your next message.
 Ctrl-C stops following; the Tag keeps working, and supertag describe task shows it.
 A report still arrives in the conversation, and your next message there sees it.
@@ -254,6 +257,14 @@ async function followWorkSessions(
           shown.add(`approval:${approval.requestId}`);
           options.write(
             `· approval needed: ${terminalText(session.title)}\n${terminalLines(approval.text.trimEnd())}\n`,
+          );
+        }
+        // What the Tag said about the work Session's progress notes, each once, before its report.
+        for (const [index, update] of (session.updates ?? []).entries()) {
+          if (shown.has(`update:${session.taskId}:${index}`)) continue;
+          shown.add(`update:${session.taskId}:${index}`);
+          options.write(
+            `· update: ${terminalText(session.title)}\n${terminalLines(update.text.trimEnd())}\n`,
           );
         }
         if (session.report === undefined || shown.has(session.id)) continue;

@@ -552,7 +552,9 @@ latest `taskId` and its `status`, and `reportStatus`: `waiting`, or `replied` wi
 and the report turn's `report` (`presentation` and `text`). `status` is `waiting` when the Task
 completed by asking the person a question, and the entry then carries the `question`. While the
 work Session's Task has pending approval requests, `approvals` lists each one's `requestId` and the
-notice `text` posted to the conversation. `GET` and `stream` also accept a work Session's `taskId`,
+notice `text` posted to the conversation. `updates` lists the `text` of each reply the Tag posted
+from the Task's progress notes, oldest first; an update turn that stayed silent isn't listed.
+`GET` and `stream` also accept a work Session's `taskId`,
 for the operator whose conversation started it; its stream carries the work Session's activity.
 
 The `stream` route follows the reply as it is written. It answers with Server-Sent Events in the
