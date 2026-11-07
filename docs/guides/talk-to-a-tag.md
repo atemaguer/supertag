@@ -113,8 +113,14 @@ status: `pending`, `running`, `completed`, `failed`, or `cancelled`.
 - **The Tag remembers its other conversations.** It sees its open Objectives and can search its
   shared Sessions, such as Slack threads and GitHub issues, when a question needs them.
 - **A work Session has the conversation's permissions, never more.** It runs with the same
-  permissions and workspace as the message that started it. It can't start more work Sessions or
+  permissions as the message that started it. It can't start more work Sessions or
   create Objectives. A work Session started from your private conversation is private to you too.
+- **A work Session commits its edits to its own branch.** When the Tag's Worker Hosts declare a
+  Workspace, the work Session edits it and the Worker commits to a branch such as
+  `supertag/session/0f3c2a9e`. Your checkout stays on its branch. The report names the branch, and
+  a continued work Session builds on it in the next branch, `supertag/session/0f3c2a9e-2`. With
+  several Workspaces, the Tag picks one when it starts the work Session. See
+  [where a work Session's edits go](../concepts/tasks.md#where-a-work-sessions-edits-go).
 - **At most four work Sessions run at once per conversation.** Later ones wait their turn. One
   message starts at most four, and a conversation holds at most eight unfinished. Together, the work
   Sessions of one message share its token and cost limits. A message whose limits allow no parallel

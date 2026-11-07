@@ -720,7 +720,7 @@ const surfaceDefinitions = [
   ],
   [
     "start_session",
-    `Start a work Session for work that takes more than a quick answer, such as research, multi-step tool use or edits. Give a short title and a self-contained instruction; the work Session runs it as its own Task with this conversation's permissions and Workspace, never more, and cannot start Sessions or change Objectives. Returns the new Session's id at once. Tell the person briefly that you started it and end your turn; when it finishes you get a turn here to report the result. At most ${WORK_SESSION_MAX_RUNNING} run at once per conversation; later ones wait.`,
+    `Start a work Session for work that takes more than a quick answer, such as research, multi-step tool use or edits. Give a short title and a self-contained instruction; the work Session runs it as its own Task with this conversation's permissions, never more, and cannot start Sessions or change Objectives. When this conversation has a Workspace, the work Session commits its edits to its own branch there and later Tasks of it build on them; with several Workspaces, name one in workspace. Returns the new Session's id at once. Tell the person briefly that you started it and end your turn; when it finishes you get a turn here to report the result. At most ${WORK_SESSION_MAX_RUNNING} run at once per conversation; later ones wait.`,
     ["title", "instruction"],
   ],
   [
@@ -772,6 +772,7 @@ const surfaceProperties: Readonly<Record<string, Readonly<Record<string, unknown
   start_session: {
     title: { type: "string", minLength: 1, maxLength: WORK_SESSION_TITLE_MAX },
     instruction: { type: "string", minLength: 1, maxLength: WORK_SESSION_INSTRUCTION_MAX },
+    workspace: { type: "string", pattern: "^[a-z0-9][a-z0-9_-]{0,62}$" },
   },
   continue_session: {
     sessionId: { type: "string", minLength: 1, maxLength: 200 },

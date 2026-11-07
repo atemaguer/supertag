@@ -1,5 +1,5 @@
 import { posix } from "node:path";
-import type { TaskReference } from "./index.js";
+import type { TaskNamedWorkspacePlan, TaskReference } from "./index.js";
 import { TagMessagingError } from "./mailbox.js";
 import { MAX_MOUNT_MAX_BYTES } from "./mount-manifest.js";
 
@@ -655,6 +655,24 @@ export function gitRefComponent(value: string): string {
   if (safe.endsWith(".lock")) safe = safe.slice(0, -".lock".length);
   if (safe === value && safe.length > 0) return safe;
   return `${safe.slice(0, 80) || "id"}-${fnv1a(value)}`;
+}
+
+/** A Task's plan for `workspace` with branch candidate `branch`, captured at admission. */
+export function namedWorkspacePlan(workspace: Workspace, branch: string): TaskNamedWorkspacePlan {
+  return {
+    version: 1,
+    status: "workspace",
+    workspace: workspace.name,
+    ...(workspace.source === undefined ? {} : { source: workspace.source }),
+    ...(workspace.ref === undefined ? {} : { ref: workspace.ref }),
+    branch,
+    delivery: workspace.delivery,
+    ...(workspace.setup === undefined ? {} : { setup: workspace.setup }),
+    ...(workspace.mcp === undefined ? {} : { mcp: workspace.mcp }),
+    ...(workspace.skills === undefined ? {} : { skills: workspace.skills }),
+    ...(workspace.skillCatalog === undefined ? {} : { skillCatalog: workspace.skillCatalog }),
+    ...(workspace.mounts === undefined ? {} : { mounts: workspace.mounts }),
+  };
 }
 
 /**

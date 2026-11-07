@@ -94,8 +94,8 @@ conversation: a direct chat or a person's CLI conversation is private to that pe
 
 A conversation can hand longer work to a **work Session**. A work Session is a Session of the same
 Tag whose parent is the conversation that started it. Its first Task runs an instruction the Tag
-wrote, under the permissions, Context Sets, and workspace of the conversation Task that started it,
-never more. It has its own native harness session, so its tool output stays out of the
+wrote, under the permissions and Context Sets of the conversation Task that started it, never
+more. It has its own native harness session, so its tool output stays out of the
 conversation, and it inherits the conversation's audience. A work Session can't start more work
 Sessions or create, attach, or start an Objective. At most four run at once per conversation;
 later ones wait. One conversation Task starts at most four, or its `maxNativeAgents` when lower,
@@ -134,6 +134,21 @@ conversation, because the work Session itself posts nowhere. On the CLI, `supert
 prints it. The notice names the action and the
 `supertag approve request` and `supertag deny request` commands that decide it. A chat message
 never approves an action.
+
+### Where a work Session's edits go
+
+A work Session keeps its edits the way an Objective Task does. It works in a Workspace the
+conversation has, and the Worker commits its changes to the work Session's own branch, such as
+`supertag/session/0f3c2a9e`. The conversation's Workspaces are the ones its location attaches, as
+for [an Objective created there](../reference/resource-model.md#objectives-from-a-location). A
+CLI conversation has no location, so it uses the Workspaces that the Tag's Worker Hosts declare.
+With one Workspace the work Session uses it. With several, the Tag names one when it starts the
+work Session. With none, the work Session runs without a Workspace, like its conversation.
+
+Each continued Task gets the next branch, such as `supertag/session/0f3c2a9e-2`, and starts from
+the work Session's latest commits, so it sees the earlier edits. The report turn names the branch,
+so the Tag can tell the person where the changes are. The conversation turns themselves keep their
+own workspace. Editing still needs `files:write`.
 
 ## Task Attempt
 

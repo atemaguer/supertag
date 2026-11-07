@@ -3,13 +3,16 @@ export { explainHarnessSignIn } from "./harness-signin.js";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   coordinationInboxOccurrence,
+  namedWorkspacePlan,
   workspaceBranchHeadPin,
   workspaceBranchPin,
 } from "@supertag/core";
 import { workSessionApprovalNotice } from "./approvals.js";
 import { isSchedulingEvent } from "./capacity-wait.js";
+import { sessionWorkspaceBranches, workerEvents } from "./dependency-branches.js";
 import { DispatchErrorReporter } from "./dispatch-errors.js";
 import { ObjectiveMessages } from "./objective-messages.js";
+import { repositoryReferences, unambiguousRepositoryReference } from "./repository-references.js";
 import { SESSION_INPUT_COMMAND_PREFIX, withdrawSessionInput } from "./session-input-withdrawal.js";
 import { conversationViewer, tagPortfolio } from "./tag-sessions.js";
 import {
@@ -20,9 +23,12 @@ import {
   samePermissions,
   sessionReportEvent,
   WORK_SESSION_ASKED_EVENT,
+  workSessionBranch,
+  workSessionDelivery,
   workSessionEvent,
   workSessionExecution,
   workSessionsPerTurn,
+  workSessionWorkspace,
 } from "./work-sessions.js";
 
 export type {
@@ -2330,7 +2336,9 @@ export class ControlPlane {
         ? undefined
         : internalTurnMessages(internal, text, task.sessionId, coordination !== undefined);
     const workspaceEvents =
-      task.workspacePlan.status === "workspace" ? await this.#store.listTaskEvents(task.id) : [];
+      task.workspacePlan.status === "workspace"
+        ? workerEvents(await this.#store.listTaskEvents(task.id))
+        : [];
     const branchPin =
       task.workspacePlan.status === "workspace"
         ? workspaceBranchPin(workspaceEvents, task.workspacePlan.workspace)
@@ -2344,6 +2352,13 @@ export class ControlPlane {
       task.workspacePlan.status === "workspace" && task.workspacePlan.mcp?.length
         ? workspaceMcpPin(await this.#store.listTaskAttempts(task.id))
         : undefined;
+    // A continued work Session Task starts from the work Session's earlier commits.
+    const sessionBranches =
+      task.workspacePlan.status === "workspace" &&
+      internal?.kind === "work_session" &&
+      internal.continued === true
+        ? await sessionWorkspaceBranches(this.#store, task, task.workspacePlan)
+        : [];
     return {
       version: 2,
       taskId: task.id,
@@ -2393,6 +2408,7 @@ export class ControlPlane {
               ...(branchPin === undefined ? {} : { branch: branchPin, branchPin }),
               ...(branchPinHead === undefined ? {} : { branchPinHead }),
               ...(mcpPin === undefined ? {} : { mcpPin }),
+              ...(sessionBranches.length === 0 ? {} : { dependencyBranches: sessionBranches }),
             }
           : task.workspacePlan,
       workerProfile: attempt.workerProfile,
@@ -2646,6 +2662,17 @@ export class ControlPlane {
         `This conversation already has ${WORK_SESSION_MAX_OPEN} unfinished work Sessions; wait for one to finish`,
       );
     const running = sessions.filter((session) => session.task?.status === "running").length;
+    // A new work Session edits one of the conversation's Workspaces on its own branch; a continued
+    // one keeps the Workspace it started in.
+    const workspace =
+      "start" in request
+        ? await workSessionWorkspace(
+            this.#store,
+            (await this.describeWorklet().catch(() => undefined))?.host,
+            starting,
+            request.start.workspace,
+          )
+        : undefined;
     const at = new Date().toISOString();
     const title = "start" in request ? request.start.title : (previous?.title ?? "");
     const admission = await this.#store.admitInboundEvent({
@@ -2657,7 +2684,17 @@ export class ControlPlane {
       execution: workSessionExecution(starting.execution),
       event:
         "start" in request
-          ? workSessionEvent(starting, conversation.id, conversation.sessionId, request.start, at)
+          ? workSessionEvent(
+              starting,
+              conversation.id,
+              conversation.sessionId,
+              {
+                title: request.start.title,
+                instruction: request.start.instruction,
+                ...(workspace === undefined ? {} : { workspace }),
+              },
+              at,
+            )
           : continuedWorkSessionEvent(
               previous?.work as DurableInboundEvent,
               starting,
@@ -2763,6 +2800,18 @@ export class ControlPlane {
       if ((await this.#store.findTagById(task.tagId))?.status !== "active") return;
       const final = await this.#store.findOutboundReply(work.id, "final");
       const question = task.status === "completed" ? task.outcome?.["question"] : undefined;
+      const basedOn =
+        task.workspacePlan.status === "workspace" && internal.continued === true
+          ? (await sessionWorkspaceBranches(this.#store, task, task.workspacePlan)).at(-1)?.branch
+          : undefined;
+      const delivery =
+        task.workspacePlan.status === "workspace"
+          ? workSessionDelivery(
+              task,
+              workerEvents(await this.#store.listTaskEvents(task.id)),
+              basedOn,
+            )
+          : undefined;
       const admission = await this.#store.admitInboundEvent({
         surfaceAccountId: starting.surfaceAccountId,
         tagRouteId: starting.tagRouteId,
@@ -2781,6 +2830,7 @@ export class ControlPlane {
             ...(typeof question === "string"
               ? { status: "waiting" as const, question }
               : { status: task.status }),
+            ...(delivery === undefined ? {} : { delivery }),
           },
           new Date().toISOString(),
         ),
@@ -2871,13 +2921,40 @@ export class ControlPlane {
         occurredAt: work.event.occurredAt,
       },
       workspacePlan:
-        starting?.workspacePlan ?? captureWorkspacePlan(work.event, work.authorization),
+        internal?.kind === "work_session" && internal.workspace !== undefined
+          ? await this.#workSessionPlan(work, internal.workspace, session.id)
+          : (starting?.workspacePlan ?? captureWorkspacePlan(work.event, work.authorization)),
       sessionHistory,
       authorizationSnapshot: work.authorization,
       contextPlan: work.contextPlan,
       createdAt: work.createdAt,
     });
     return task;
+  }
+
+  /**
+   * A work Session Task's plan for its Workspace: the plan it was opened with, or a new one on
+   * the work Session's next branch, after the branch of the Session's latest Task.
+   */
+  async #workSessionPlan(
+    work: DurableInboundEvent,
+    name: string,
+    sessionId: string,
+  ): Promise<TaskWorkspacePlan> {
+    const tasks = await this.#store.listTasks({ tagId: work.tagId, sessionId, limit: 100 });
+    const opened = tasks.find((task) => task.inboundEventId === work.id);
+    if (opened) return opened.workspacePlan;
+    const workspace = await this.#store.findWorkspaceByName(name);
+    if (!workspace)
+      throw new TagMessagingError(
+        409,
+        `Workspace ${name} no longer exists; start a new work Session`,
+      );
+    const latest = tasks[0]?.workspacePlan;
+    return namedWorkspacePlan(
+      workspace,
+      workSessionBranch(sessionId, latest?.status === "workspace" ? latest.branch : undefined),
+    );
   }
 
   async #openTaskAttempt(
@@ -3477,12 +3554,21 @@ function captureWorkspacePlan(
     .sort((left, right) =>
       (left.reference ?? left.scope).localeCompare(right.reference ?? right.scope),
     );
-  const requested = repositoryReferences(event.text ?? "");
+  const mentioned = repositoryReferences(event.text ?? "");
   if (choices.length === 0) {
+    // Only a reference that must be a repository refuses; a mentioned path is ordinary text.
+    const requested = mentioned.filter(unambiguousRepositoryReference);
     return requested.length === 0
       ? { version: 1, status: "none" }
       : { version: 1, status: "unavailable", requested };
   }
+  // A request is a reference to one of the Tag's repositories, or one that must be a repository;
+  // a mention that may be a path, such as src/index.ts, is ordinary text.
+  const requested = mentioned.filter(
+    (reference) =>
+      unambiguousRepositoryReference(reference) ||
+      choices.some((choice) => choice.reference?.toLowerCase() === reference),
+  );
 
   if (event.provider === "github") {
     const origin = choices.find(
@@ -3512,12 +3598,6 @@ function captureWorkspacePlan(
     return { version: 1, status: "selected", selectedBy: "default", target: onlyChoice };
   }
   return { version: 1, status: "selection-required", choices };
-}
-
-function repositoryReferences(text: string): readonly string[] {
-  return [...text.matchAll(/(?:^|[\s(`])([a-z0-9_.-]+\/[a-z0-9_.-]+)(?=$|[\s),.:;!?])/gi)].flatMap(
-    (match) => (match[1] === undefined ? [] : [match[1].toLowerCase()]),
-  );
 }
 
 function acknowledgementText(task: Task): string {
