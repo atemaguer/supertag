@@ -758,8 +758,18 @@ worktree: it runs `setup` again on the base commit, then checks out that branch.
 AI-authored commits, so its package scripts and lockfile changes never run on the Worker Host. A
 kept worktree is reused without running `setup` again. A Task Attempt that made no commits, such as a
 review, leaves no branch whatever its outcome: the Worker deletes the empty branch with the
-worktree, the Task result names no branch, and a retry starts afresh from the base. The Worker commits with `git add -A`, so files
-that `.gitignore` matches are never committed.
+worktree, the Task result names no branch, and a retry starts afresh from the base.
+
+The Worker commits every change to a tracked file and every untracked file that git does not
+ignore, except well-known generated paths that are never source: `__pycache__/`, `*.pyc`, `*.pyo`,
+`.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `.tox/`, `.venv/`, `*.egg-info/`, `.coverage`,
+`.coverage.*`, `htmlcov/`, `node_modules/`, `.next/`, and `.DS_Store`, at any depth. A repository
+without a `.gitignore` therefore gets no test caches or installed packages on its Task branch. The
+list only skips untracked files: a file already committed under one of these paths, such as a
+vendored `node_modules/vendor.js`, is committed when a Task changes it. The list also wins over a
+`.gitignore` negation such as `!keep.pyc`; commit such a file yourself to track it. `dist/` and
+`build/` are not on the list, because some repositories commit them; ignore them in `.gitignore`
+when yours does not.
 
 Files on a remote sandbox or ephemeral Worker Host are lost when it stops. See
 [What survives when a sandbox or host dies](../concepts/persistence.md).

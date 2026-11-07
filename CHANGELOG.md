@@ -28,6 +28,7 @@ within the pre-1.0 compatibility policy described in
 ### Fixed
 
 - A Task copy of a git repository holds only what git considers part of it: tracked files and untracked files that are not ignored. Ignored entries such as `node_modules`, a Python `.venv`, or a `.env` file stay on the Worker Host, so a repository with a virtualenv no longer fails with "symbolic link ... points outside the workspace", and copies are much smaller.
+- A Task's commit leaves out untracked build and cache files that are never source, such as `__pycache__/`, `*.pyc`, `.pytest_cache/`, `node_modules/`, `.venv/`, and `.DS_Store`, even when the repository has no `.gitignore`. A work Session that ran pytest no longer commits `.pyc` files. Files already tracked under those paths are still committed when they change.
 - Conversation, work Session, and report turns are not asked for `Finding:` lines; only Objective Tasks report findings, so review lines no longer appear in replies.
 - A path in a message, such as `src/index.ts` or `__pycache__/`, is ordinary text. Only an `owner/repo` that follows GitHub's owner rules selects a repository, so such a message no longer fails as a disallowed GitHub repository or drops the default repository.
 - Each release's `install.sh` installs that release's version, and alpha releases publish to npm's `latest` tag, so the installer and `npm install -g supertag-ai` get the current alpha.
