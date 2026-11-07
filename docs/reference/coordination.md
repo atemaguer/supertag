@@ -462,13 +462,12 @@ every work Task it starts or continues:
   reported spend so far, across its Task Attempts. `held` is the sum of the limits of the work
   Tasks the turn already admitted, whatever they spent. `slots` is the number of work Tasks the
   turn may still admit.
-- SuperTag refuses `start_session` and `continue_session` with 409 when that leaves less than one
-  token or one minor unit.
+- SuperTag refuses `start_session` and `continue_session` with 409 when that limit is under
+  `max(1, floor(limit / 10))`, in tokens or in cost.
 - `continue_session` draws from the continuing turn.
 - Each Task's harness enforces its own limit. Spend the turn reports after it admits a work Task
   counts only against the work Tasks it admits later.
-- Report and update turns run outside the budget, each under a tenth of the starting turn's limits,
-  rounded down and at least 1.
+- Report and update turns run outside the budget, each under the starting turn's full limits.
 - A turn without these limits passes none on.
 
 ### Identity and preconditions

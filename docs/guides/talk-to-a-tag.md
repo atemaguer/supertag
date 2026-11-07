@@ -143,7 +143,8 @@ under `PARENT`. `STATUS` shows the latest Task's status: `pending`, `running`, `
   limits allow no parallel agents (`maxNativeAgents: 0`) starts none.
 - **A message and its work Sessions share one budget.** When the message has token or cost limits,
   each work Session it starts or continues gets an equal share of what the message hasn't spent or
-  given out yet. Once nothing is left, the Tag does the work in its own reply. See
+  given out yet. Once a share would be under a tenth of the message's limits, the Tag does the work
+  in its own reply. See
   [how work Sessions share a budget](../concepts/tasks.md#how-work-sessions-share-a-budget).
 - **A message you send while the Tag reports a work Session gets its own turn.** It isn't added to
   the report.

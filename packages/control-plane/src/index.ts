@@ -24,7 +24,6 @@ import {
   type StartSessionRequest,
   samePermissions,
   sessionReportEvent,
-  sessionTurnExecution,
   sessionUpdateEvent,
   WORK_SESSION_ASKED_EVENT,
   workSessionBranch,
@@ -2710,7 +2709,7 @@ export class ControlPlane {
     if (execution === undefined)
       throw new TagMessagingError(
         409,
-        `This turn and the work Sessions it started already spent or hold all of its token and cost limits, so it cannot ${verb} a work Session; finish the work in this turn`,
+        `This turn and the work Sessions it started already spent or hold too much of its token and cost limits to ${verb} a useful work Session; finish the work in this turn`,
       );
     const running = sessions.filter((session) => session.task?.status === "running").length;
     // A new work Session edits one of the conversation's Workspaces on its own branch; a continued
@@ -2938,7 +2937,7 @@ export class ControlPlane {
         tagId: starting.tagId,
         authorization: starting.authorization,
         contextPlan: starting.contextPlan,
-        execution: sessionTurnExecution(starting.execution),
+        execution: starting.execution,
         event: sessionUpdateEvent(
           starting,
           {
@@ -3015,7 +3014,7 @@ export class ControlPlane {
         tagId: starting.tagId,
         authorization: starting.authorization,
         contextPlan: starting.contextPlan,
-        execution: sessionTurnExecution(starting.execution),
+        execution: starting.execution,
         event: sessionReportEvent(
           starting,
           {

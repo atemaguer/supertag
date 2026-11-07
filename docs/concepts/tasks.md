@@ -175,12 +175,13 @@ A conversation Task and the work Tasks it starts or continues share one budget: 
 reported token and cost limits. Each new work Task gets an equal share of what is left. What is
 left is the limit minus what the conversation Task reported so far, and minus the allowances of
 the work Tasks it already started. For example, a Task limited to 10,000 tokens that reported
-6,000 gives its first work Task 1,000, a quarter of the 4,000 left. When less than one token or
-one minor unit of currency, such as a cent, is left, SuperTag refuses `start_session` and `continue_session`, and the Tag does the
-work in its own turn. `continue_session` draws from the turn that continues the work Session, not
-the one that started it. A Task without reported limits passes none on. Report and update turns
-sit outside the budget: each runs under a fixed tenth of the starting Task's limits, so a result
-reaches the person even when the budget is spent.
+6,000 gives its first work Task 1,000, a quarter of the 4,000 left. A work Task needs at least a
+tenth of the limit, in tokens and in cost, to do anything before it runs out. When its share is
+smaller, SuperTag refuses `start_session` and `continue_session`, and the Tag does the work in its
+own turn. `continue_session` draws from the turn that continues the work Session, not the one that
+started it. A Task without reported limits passes none on. Report and update turns sit outside the
+budget and run under the starting Task's full limits, so a result reaches the person even when the
+budget is spent.
 
 ## Task Attempt
 

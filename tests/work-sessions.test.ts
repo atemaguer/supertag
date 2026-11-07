@@ -17,7 +17,6 @@ import { SessionContinuity } from "../packages/control-plane/src/session-continu
 import { tagPortfolio } from "../packages/control-plane/src/tag-sessions.ts";
 import {
   internalTurnMessages,
-  sessionTurnExecution,
   workSessionEvent,
   workSessionExecution,
   workSessionsPerTurn,
@@ -914,31 +913,33 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         const limitsOf = async (taskId: string | undefined) =>
           (await store.findTaskById(taskId ?? ""))?.execution.limits;
 
-        // A turn that already spent 6,000 of 10,000 tokens and 300 of 400 cents leaves the rest
+        // A turn that already spent 6,000 of 10,000 tokens and 300 of 500 cents leaves the rest
         // to the four work Tasks it may still admit, a quarter each, and each admission draws
         // from what is left.
-        const limited = await turn("spend:6000|work:a|b", 10_000, 400);
+        const limited = await turn("spend:6000|work:a|b", 10_000, 500);
         const [a, b] = limited.startedSessions ?? [];
         expect(await limitsOf(a?.taskId)).toEqual({
           maxReportedTokens: 1_000,
-          maxReportedCost: { amountMinor: 25, currency: "USD" },
+          maxReportedCost: { amountMinor: 50, currency: "USD" },
         });
         expect(await limitsOf(b?.taskId)).toEqual({
           maxReportedTokens: 1_000,
-          maxReportedCost: { amountMinor: 25, currency: "USD" },
+          maxReportedCost: { amountMinor: 50, currency: "USD" },
         });
-        // Report turns run outside the budget, under a fixed tenth of the turn's limits.
+        // Report turns run outside the budget, under the turn's full limits: a resumed
+        // conversation pays for its whole context on its first model call.
         expect(await limitsOf(a?.reportTaskId)).toEqual({
-          maxReportedTokens: 1_000,
-          maxReportedCost: { amountMinor: 40, currency: "USD" },
+          maxReportedTokens: 10_000,
+          maxReportedCost: { amountMinor: 500, currency: "USD" },
         });
 
-        // Nothing left: the turn spent all but one token, so it starts nothing.
-        const spent = await turn("spend:9999|work:c", 10_000, 1_000);
+        // Too little left: a 250-token share is above zero but under a tenth of the limit, so
+        // the turn starts nothing and does the work itself.
+        const spent = await turn("spend:9000|work:c", 10_000, 1_000);
         expect(spent.startedSessions ?? []).toEqual([]);
         expect(callsOf(spent.taskId)[0]?.result["isError"]).toBe(true);
         expect(callText(callsOf(spent.taskId)[0])).toContain(
-          "already spent or hold all of its token and cost limits",
+          "already spent or hold too much of its token and cost limits",
         );
 
         // continue_session draws from the continuing turn, not the turn that started the work.
@@ -1659,7 +1660,7 @@ describe("work Session limits and report text", () => {
     for (const spent of [
       none,
       { tokens: 3_000, costMinor: 40 },
-      { tokens: 9_000, costMinor: 200 },
+      { tokens: 6_000, costMinor: 100 },
     ]) {
       const admitted: (typeof execution)[] = [];
       for (;;) {
@@ -1676,13 +1677,20 @@ describe("work Session limits and report text", () => {
           admitted.reduce((sum, task) => sum + task.limits.maxReportedCost.amountMinor, 0),
       ).toBeLessThanOrEqual(250);
     }
-    // A turn that spent most of its limits gives only the remainder.
-    expect(workSessionExecution(execution, { tokens: 9_000, costMinor: 50 }, [])).toMatchObject({
-      limits: { maxReportedTokens: 250, maxReportedCost: { amountMinor: 50 } },
+    // A turn that spent half its limits gives only the remainder.
+    expect(workSessionExecution(execution, { tokens: 5_000, costMinor: 50 }, [])).toMatchObject({
+      limits: { maxReportedTokens: 1_250, maxReportedCost: { amountMinor: 50 } },
     });
-    // Nothing left, in tokens or in cost: no work Task.
+    // A share at exactly a tenth of the limit is still given.
+    expect(workSessionExecution(execution, { tokens: 6_000, costMinor: 150 }, [])).toMatchObject({
+      limits: { maxReportedTokens: 1_000, maxReportedCost: { amountMinor: 25 } },
+    });
+    // Nothing left, or a share above zero but under a tenth of the limit, in tokens or in cost:
+    // no work Task.
     expect(workSessionExecution(execution, { tokens: 9_997, costMinor: 0 }, [])).toBeUndefined();
     expect(workSessionExecution(execution, { tokens: 0, costMinor: 247 }, [])).toBeUndefined();
+    expect(workSessionExecution(execution, { tokens: 9_000, costMinor: 0 }, [])).toBeUndefined();
+    expect(workSessionExecution(execution, { tokens: 0, costMinor: 160 }, [])).toBeUndefined();
     expect(
       workSessionExecution({ limits: { maxNativeAgents: 2, maxReportedTokens: 9 } }, none, [])
         ?.limits,
@@ -1694,25 +1702,6 @@ describe("work Session limits and report text", () => {
     expect(
       workSessionExecution({ limits: { maxNativeAgents: 1 } }, { tokens: 99, costMinor: 9 }, []),
     ).toEqual({ limits: { maxNativeAgents: 1 } });
-  });
-
-  it("runs report and update turns under a fixed tenth of the starting turn's limits", () => {
-    expect(
-      sessionTurnExecution({
-        limits: {
-          maxNativeAgents: 2,
-          maxReportedTokens: 10_000,
-          maxReportedCost: { amountMinor: 5, currency: "USD" },
-        },
-      }),
-    ).toEqual({
-      limits: {
-        maxNativeAgents: 2,
-        maxReportedTokens: 1_000,
-        maxReportedCost: { amountMinor: 1, currency: "USD" },
-      },
-    });
-    expect(sessionTurnExecution({ harness: "codex" })).toEqual({ harness: "codex" });
   });
 
   it("keeps the result out of the system message and cannot close its data block", () => {

@@ -291,13 +291,17 @@ export function reportedTurnSpend(
   return { tokens, costMinor };
 }
 
+/** A work Task's share must be at least this fraction of the turn's reported limit. */
+const WORK_SESSION_MIN_SHARE_DIVISOR = 10;
+
 /**
  * A work Task's execution requirements. A conversation turn and the work Tasks it starts or
  * continues share one budget: the turn's reported token and cost limits. A new work Task gets
  * what is left of them, the limit minus the turn's reported spend so far and the allowances of
  * the work Tasks the turn already admitted, split equally among the work Tasks the turn may still
- * admit. Undefined when less than one token or one minor unit is left for it. A turn without
- * reported limits passes its requirements on unchanged.
+ * admit. Undefined when that share is under a tenth of the turn's limit, in tokens or in cost,
+ * because a work Task that small would stop on its first model call; the turn then does the work
+ * itself. A turn without reported limits passes its requirements on unchanged.
  */
 export function workSessionExecution(
   execution: TaskExecutionRequirements,
@@ -326,7 +330,15 @@ export function workSessionExecution(
           spent.costMinor,
           (other) => other.limits?.maxReportedCost?.amountMinor ?? 0,
         );
-  if ((tokens !== undefined && tokens < 1) || (cost !== undefined && cost < 1)) return undefined;
+  const tooSmall = (share: number | undefined, limit: number | undefined) =>
+    share !== undefined &&
+    limit !== undefined &&
+    share < Math.max(1, Math.floor(limit / WORK_SESSION_MIN_SHARE_DIVISOR));
+  if (
+    tooSmall(tokens, limits.maxReportedTokens) ||
+    tooSmall(cost, limits.maxReportedCost?.amountMinor)
+  )
+    return undefined;
   return {
     ...execution,
     limits: {
@@ -335,41 +347,6 @@ export function workSessionExecution(
       ...(cost === undefined || limits.maxReportedCost === undefined
         ? {}
         : { maxReportedCost: { ...limits.maxReportedCost, amountMinor: cost } }),
-    },
-  };
-}
-
-/** Report and update turns each run under this fraction of the starting turn's reported limits. */
-const SESSION_TURN_LIMIT_DIVISOR = 10;
-
-/**
- * A report or update turn's execution requirements: the starting turn's, with a fixed tenth of
- * its reported token and cost limits, and at least one token or minor unit. These turns are
- * outside the turn's budget, so a work Session's result reaches the person even when the turn
- * and its work Tasks spent all of it.
- */
-export function sessionTurnExecution(
-  execution: TaskExecutionRequirements,
-): TaskExecutionRequirements {
-  const limits = execution.limits;
-  if (limits === undefined) return execution;
-  const tenth = (limit: number) =>
-    Math.min(limit, Math.max(1, Math.floor(limit / SESSION_TURN_LIMIT_DIVISOR)));
-  return {
-    ...execution,
-    limits: {
-      ...limits,
-      ...(limits.maxReportedTokens === undefined
-        ? {}
-        : { maxReportedTokens: tenth(limits.maxReportedTokens) }),
-      ...(limits.maxReportedCost === undefined
-        ? {}
-        : {
-            maxReportedCost: {
-              ...limits.maxReportedCost,
-              amountMinor: tenth(limits.maxReportedCost.amountMinor),
-            },
-          }),
     },
   };
 }
