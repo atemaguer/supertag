@@ -2548,6 +2548,12 @@ export class ControlPlane {
   }> {
     // Work Sessions are parallel agents of the starting turn: a turn starts at most its share,
     // none when its maxNativeAgents is 0, and they split its reported token and cost limits.
+    // A retired Tag admits no new work, even work a running turn asks for.
+    if ((await this.#store.findTagById(conversation.tagId))?.status !== "active")
+      throw new TagMessagingError(
+        409,
+        "This Tag is no longer active, so it cannot start a work Session",
+      );
     const perTurn = workSessionsPerTurn(starting.execution);
     if (perTurn === 0)
       throw new TagMessagingError(
@@ -2634,6 +2640,8 @@ export class ControlPlane {
         : undefined;
       if (!startingTask || !starting)
         throw new Error(`Work Session ${task.sessionId} has no conversation turn to report to`);
+      // A retired Tag takes no more turns; its work Session's result stays on the Session.
+      if ((await this.#store.findTagById(task.tagId))?.status !== "active") return;
       const final = await this.#store.findOutboundReply(work.id, "final");
       const admission = await this.#store.admitInboundEvent({
         surfaceAccountId: starting.surfaceAccountId,
