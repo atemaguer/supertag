@@ -67,6 +67,7 @@ it("turns human surface requests into objective execution and routes durable pro
             "search_sessions",
             "read_session",
             "list_objectives",
+            "start_session",
           ]);
           // The portfolio always tells the Tag it can recall other conversations, and lists its
           // open Objectives once there is one.

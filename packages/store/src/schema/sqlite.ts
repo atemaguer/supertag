@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import {
   index,
   integer,
@@ -502,6 +503,10 @@ export const sessions = sqliteTable(
     state: text("state").notNull(),
     audience: text("audience").notNull().default("shared"),
     audienceActorKey: text("audienceActorKey"),
+    /** The conversation Session that started this work Session; null for a conversation. */
+    parentSessionId: text("parentSessionId").references((): AnySQLiteColumn => sessions.id, {
+      onDelete: "cascade",
+    }),
     lastInteractionAt: text("lastInteractionAt").notNull(),
     createdAt: text("createdAt").notNull(),
     updatedAt: text("updatedAt").notNull(),
@@ -509,6 +514,7 @@ export const sessions = sqliteTable(
   (table) => [
     uniqueIndex("Session_tagId_sessionKey_key").on(table.tagId, table.sessionKey),
     index("Session_lastInteractionAt_idx").on(table.lastInteractionAt),
+    index("Session_parentSessionId_idx").on(table.parentSessionId),
   ],
 );
 

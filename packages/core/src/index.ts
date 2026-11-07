@@ -16,7 +16,7 @@ import type { OperatorNotificationStore } from "./operator-notification.js";
 import type { OperatorTokenStore } from "./operator-token.js";
 import type { ResourceManagementStore } from "./resource-management.js";
 import type { RoleStore } from "./role.js";
-import type { SessionAudience, SessionAudienceStore } from "./session-audience.js";
+import type { InternalTurn, SessionAudience, SessionAudienceStore } from "./session-audience.js";
 import type { SessionInputStore } from "./session-input.js";
 import type { SessionStatePersistence } from "./session-state.js";
 import type { SpendStore } from "./spend.js";
@@ -584,6 +584,8 @@ export interface Session {
   readonly audience: SessionAudience;
   /** The requester key that owns a private Session (`sessionRequesterKey`); absent when shared. */
   readonly audienceActorKey?: string;
+  /** The conversation Session that started this work Session; absent for a conversation. */
+  readonly parentSessionId?: string;
   readonly lastInteractionAt: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -602,6 +604,8 @@ export interface OpenSessionInput {
    * the audience; later opens of the same Session never change it.
    */
   readonly audienceActorKey?: string;
+  /** Records the conversation Session that started a new work Session. Only the first open sets it. */
+  readonly parentSessionId?: string;
   readonly at: string;
 }
 
@@ -954,6 +958,11 @@ export interface InboundSurfaceEvent {
    * person's CLI conversation. Its Session is then private to that requester.
    */
   readonly direct?: boolean;
+  /**
+   * Set only on turns SuperTag admits itself, never by a surface: a work Session's Task and the
+   * report turn that brings its result back to the conversation. See `InternalTurn`.
+   */
+  readonly internal?: InternalTurn;
   readonly text?: string;
   readonly occurredAt: string;
   readonly callback: CallbackRoute;
@@ -1012,6 +1021,8 @@ export interface ClaimDueWorkInput {
 
 export interface PeekDueWorkInput {
   readonly now: string;
+  /** Skip work Sessions' Tasks: the next due turn of a conversation or other surface Session. */
+  readonly excludeWorkSessions?: boolean;
 }
 
 export interface ClaimDueInboundEventInput extends ClaimDueWorkInput {

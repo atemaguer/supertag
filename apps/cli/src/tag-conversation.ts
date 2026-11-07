@@ -18,6 +18,18 @@ export interface TagMessageRecord {
   readonly joinedTaskId?: string;
   readonly status: "waiting" | "replied";
   readonly reply?: TagReply;
+  /** Work Sessions this message's turn started, each with its report once the Tag wrote it. */
+  readonly startedSessions?: readonly StartedWorkSession[];
+}
+
+export interface StartedWorkSession {
+  readonly id: string;
+  readonly title: string;
+  readonly taskId?: string;
+  readonly status: string;
+  readonly reportStatus: "waiting" | "replied";
+  readonly reportTaskId?: string;
+  readonly report?: TagReply;
 }
 
 interface TagReply {
@@ -30,6 +42,8 @@ interface TagReply {
  * without a new part. Fixed, not configurable.
  */
 const REPLY_TIMEOUT_MS = 10 * 60_000;
+/** How long `message tag` follows the work Sessions a turn started. Fixed, not configurable. */
+const WORK_TIMEOUT_MS = 60 * 60_000;
 const POLL_INTERVAL_MS = 1000;
 
 export interface TagConversationOptions {
@@ -54,8 +68,11 @@ Sends TEXT (or standard input for -) to the Tag as you and shows its reply as it
 continues the same Session, so the Tag sees the earlier messages and replies.
 The conversation is private to you: the admin token and each Operator Token have their own.
 The Tag answers with its Roles' permissions only; no location's Permission or Context Sets apply.
+When the Tag hands work to work Sessions, it shows "· working: TITLE" for each one and stays
+until the Tag reports each result in the conversation.
 Ctrl-C stops showing the reply; the Tag keeps working, and supertag describe task shows it.
---output json waits and prints the message record with the reply.
+A report still arrives in the conversation, and your next message there sees it.
+--output json waits and prints the message record with the reply and the work Sessions' reports.
 `;
 }
 
@@ -107,10 +124,35 @@ export async function runTagConversationCommand(
     return current;
   };
 
+  const workTimeoutMs = options.timeoutMs ?? WORK_TIMEOUT_MS;
+  const detachedFromWork = () => {
+    options.warn?.(
+      `\nStopped following the work; Tag ${terminalText(name)} keeps working, and each report will arrive in the ${record.session} conversation, so your next message there sees it.\n`,
+    );
+    return "";
+  };
+  /** Rereads the message until every work Session it started has a report, or time runs out. */
+  const awaitReports = async (
+    current: TagMessageRecord,
+    onRecord: (record: TagMessageRecord) => void,
+  ): Promise<TagMessageRecord | undefined> => {
+    const deadline = Date.now() + workTimeoutMs;
+    for (;;) {
+      onRecord(current);
+      const sessions = current.startedSessions ?? [];
+      if (sessions.every((session) => session.reportStatus === "replied")) return current;
+      if (Date.now() >= deadline) return current;
+      if (!(await pause(options.intervalMs ?? POLL_INTERVAL_MS, options.signal))) return undefined;
+      current = await client.request<TagMessageRecord>(messagePath);
+    }
+  };
+
   if (output.json) {
     const replied = await poll(Date.now() + timeoutMs);
     if (replied === undefined) return detached();
-    return `${JSON.stringify(replied, null, 2)}\n`;
+    const reported = await awaitReports(replied, () => {});
+    if (reported === undefined) return detachedFromWork();
+    return `${JSON.stringify(reported, null, 2)}\n`;
   }
 
   let printed = "";
@@ -149,11 +191,89 @@ export async function runTagConversationCommand(
   }
   const shown = streamed?.text.trim() ?? "";
   // The streamed text usually ends with the final reply; repeat the reply only when it does not.
-  const remainder =
+  write(
     finalText.trim() !== "" && shown.endsWith(finalText.trim())
       ? lineBreak
-      : `${lineBreak}${shown === "" ? "" : "\n"}${terminalLines(finalText.trimEnd())}\n`;
-  return options.write ? remainder : `${printed}${remainder}`;
+      : `${lineBreak}${shown === "" ? "" : "\n"}${terminalLines(finalText.trimEnd())}\n`,
+  );
+  const followed = await followWorkSessions(
+    client,
+    tagPath,
+    await client.request<TagMessageRecord>(messagePath),
+    awaitReports,
+    { idleMs: workTimeoutMs, interactive: options.interactive === true, write },
+  );
+  if (followed === "detached") return detachedFromWork();
+  if (followed === "timeout")
+    options.warn?.(
+      `\nTag ${terminalText(name)} is still working; each report will arrive in the ${record.session} conversation.\n`,
+    );
+  return options.write ? "" : printed;
+}
+
+/**
+ * After the turn's reply, follows the work Sessions it started: a line per Session, their
+ * activity on a terminal, and each report turn's text as it arrives.
+ */
+async function followWorkSessions(
+  client: ControlPlaneClient,
+  tagPath: string,
+  record: TagMessageRecord,
+  awaitReports: (
+    current: TagMessageRecord,
+    onRecord: (record: TagMessageRecord) => void,
+  ) => Promise<TagMessageRecord | undefined>,
+  options: {
+    readonly idleMs: number;
+    readonly interactive: boolean;
+    readonly write: (text: string) => void;
+  },
+): Promise<"done" | "detached" | "timeout"> {
+  const sessions = record.startedSessions ?? [];
+  if (sessions.length === 0) return "done";
+  for (const session of sessions) options.write(`· working: ${terminalText(session.title)}\n`);
+  const following = new AbortController();
+  const activity = options.interactive
+    ? sessions.flatMap((session) =>
+        session.taskId === undefined || session.reportStatus === "replied"
+          ? []
+          : [
+              streamReply(client, `${tagPath}/${encodeURIComponent(session.taskId)}/stream`, {
+                idleMs: options.idleMs,
+                interactive: true,
+                text: false,
+                ...(sessions.length > 1 ? { label: session.title } : {}),
+                write: options.write,
+                signal: following.signal,
+              }).catch(() => undefined),
+            ],
+      )
+    : [];
+  const shown = new Set<string>();
+  try {
+    const reported = await awaitReports(record, (current) => {
+      for (const session of current.startedSessions ?? []) {
+        if (session.report === undefined || shown.has(session.id)) continue;
+        shown.add(session.id);
+        const ended =
+          session.status === "completed"
+            ? "done"
+            : session.status === "failed"
+              ? "failed"
+              : "stopped";
+        options.write(
+          `· ${ended}: ${terminalText(session.title)}\n${terminalLines(session.report.text.trimEnd())}\n`,
+        );
+      }
+    });
+    if (reported === undefined) return "detached";
+    return (reported.startedSessions ?? []).every((session) => session.reportStatus === "replied")
+      ? "done"
+      : "timeout";
+  } finally {
+    following.abort();
+    await Promise.all(activity);
+  }
 }
 
 interface StreamedReply {
@@ -173,6 +293,10 @@ async function streamReply(
   options: {
     readonly idleMs: number;
     readonly interactive: boolean;
+    /** Print text deltas; a followed work Session shows only its activity. */
+    readonly text?: boolean;
+    /** Names the work Session an activity line belongs to. */
+    readonly label?: string;
     readonly write: (text: string) => void;
     readonly signal?: AbortSignal;
   },
@@ -215,12 +339,13 @@ async function streamReply(
       if (part === undefined) continue;
       if (part.type === "text-delta" && typeof part["delta"] === "string") {
         text += part["delta"];
-        write(terminalLines(part["delta"]));
+        if (options.text !== false) write(terminalLines(part["delta"]));
       } else if (part.type === "data-activity" && options.interactive) {
         const line = activityLine(part["data"]);
         if (line !== undefined) {
           if (!atLineStart) write("\n");
-          write(`\u001b[2m${terminalText(line)}\u001b[22m\n`);
+          const shown = options.label === undefined ? line : `${options.label} ${line}`;
+          write(`\u001b[2m${options.text === false ? "  " : ""}${terminalText(shown)}\u001b[22m\n`);
         }
       } else if (part.type === "error") {
         const errorText = typeof part["errorText"] === "string" ? part["errorText"] : "";

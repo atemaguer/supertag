@@ -5,6 +5,7 @@ import {
   type CoordinationInboxPage,
   coordinationInboxMessage,
   currentUncertainAttempt,
+  type DurableInboundEvent,
   effectiveWorkerHostLabels,
   type InternalTagAuthorizationSnapshot,
   leadershipTeamId,
@@ -171,6 +172,11 @@ import {
 } from "./tag-sessions.js";
 import { TeamLiveDeliveryDispatcher, withdrawTeamLiveInput } from "./team-live-delivery.js";
 import { confirmWaitCleanup } from "./wait-cleanup.js";
+import {
+  parseStartSession,
+  START_SESSION_TOOL,
+  type StartSessionRequest,
+} from "./work-sessions.js";
 import { describeWorklet } from "./worklet-descriptor.js";
 import { workspaceMcpDigest, workspaceMcpPin } from "./workspace-mcp-digest.js";
 import {
@@ -613,6 +619,19 @@ export class ObjectiveController {
   ) {
     this.surfaceReporter = reporter;
   }
+  private sessionStarter:
+    | ((task: Task, inbound: DurableInboundEvent, request: StartSessionRequest) => Promise<unknown>)
+    | undefined;
+  /** Opens a work Session for `start_session`; the Control Plane admits its Task. */
+  setSessionStarter(
+    starter: (
+      task: Task,
+      inbound: DurableInboundEvent,
+      request: StartSessionRequest,
+    ) => Promise<unknown>,
+  ) {
+    this.sessionStarter = starter;
+  }
   private readonly wakeTaskController: (() => void) | undefined;
   constructor(
     private readonly store: ObjectivePersistence,
@@ -682,18 +701,25 @@ export class ObjectiveController {
     return this.active.size;
   }
   async coordinationActions(caller: CoordinationCaller): Promise<readonly string[]> {
-    if (isSurfaceCoordinationCaller(caller))
-      return [
-        "create_objective",
-        "attach_objective",
+    if (isSurfaceCoordinationCaller(caller)) {
+      const reads = [
         "select_objective",
         "read_objective",
         "list_tasks",
         "read_commitments",
-        "start_objective",
-        "instruct_objective",
         ...TAG_SESSION_TOOLS,
       ];
+      // Work Sessions and report turns are internal turns: no human command, no new work.
+      if (await this.internalSurfaceTurn(caller.taskId)) return reads;
+      return [
+        "create_objective",
+        "attach_objective",
+        ...reads,
+        "start_objective",
+        "instruct_objective",
+        START_SESSION_TOOL,
+      ];
+    }
     const current = await this.revalidateCaller(caller);
     const core = [
       "read_objective",
@@ -1090,6 +1116,14 @@ export class ObjectiveController {
       controlPlaneUrl: this.controlPlaneUrl,
       token: `${body}.${createHmac("sha256", this.secret).update(body).digest("base64url")}`,
     };
+  }
+  /** Whether a surface Task is a turn SuperTag admitted itself; unknown Tasks count as internal. */
+  private async internalSurfaceTurn(taskId: string): Promise<boolean> {
+    const task = await this.store.findTaskById(taskId);
+    const inbound = task?.inboundEventId
+      ? await this.store.findInboundEventById(task.inboundEventId)
+      : undefined;
+    return inbound === undefined || inbound.event.internal !== undefined;
   }
   private async surfaceState(taskId: string, attemptId: string) {
     const state = await this.surfaceExecutionState(taskId, attemptId);
@@ -3313,6 +3347,28 @@ export class ObjectiveController {
       return this.approvals.requestAction(await this.approvalCaller(caller), input);
     if (isTagSessionTool(name))
       return tagSessionCommand(this.store, name, input, conversationViewer(task, inbound));
+    if (
+      inbound.event.internal !== undefined &&
+      [
+        "create_objective",
+        "attach_objective",
+        "start_objective",
+        "instruct_objective",
+        START_SESSION_TOOL,
+      ].includes(name)
+    )
+      throw new TagMessagingError(
+        403,
+        inbound.event.internal.kind === "work_session"
+          ? "A work Session cannot start Sessions or change Objectives"
+          : "A report turn cannot start Sessions or change Objectives",
+      );
+    if (name === START_SESSION_TOOL) {
+      const request = parseStartSession(input);
+      if (!this.sessionStarter)
+        throw new TagMessagingError(503, "Work Sessions are unavailable on this Control Plane");
+      return this.sessionStarter(task, inbound, request);
+    }
     const command = parseSurfaceObjectiveCommand(inbound.event);
     if (name === "attach_objective") {
       mailboxObject(input, ["objectiveId"]);

@@ -40,13 +40,38 @@ supertag message tag planner 'Which step is riskiest?' --session billing
 
 The second message sees the first, and the Tag's reply to it.
 
+## 3. Follow longer work
+
+The Tag answers a quick question directly. For work that takes longer, such as research, several
+tool calls, or edits, it starts a **work Session**: a new Session of the same Tag that runs the
+work as its own Task. The Tag replies briefly that it started, and the command stays to follow
+the work:
+
+```text
+$ supertag message tag planner 'Find out why the billing export is slow.' --session billing
+I'm looking into the billing export now and will report back here.
+· working: Investigate slow billing export
+· done: Investigate slow billing export
+The export is slow because it loads every invoice before filtering. Filtering in the query
+cuts it from 40 s to 2 s. Want me to make that change?
+```
+
+In a terminal, dim lines such as `· running: rg invoice` show what each work Session does. When
+a work Session finishes, the Tag gets a turn in your conversation to report the result in its
+own words. The command exits when every work Session it started has reported.
+
+Ctrl-C stops following, not the work. The report still arrives in the conversation, and your next
+message there sees it.
+
 ## Check that it worked
 
 ```sh
 supertag list session
 ```
 
-Your conversation appears as a Session with the key `cli:<you>:<conversation>`.
+Your conversation appears as a Session with the key `cli:<you>:<conversation>`. A work Session
+it started shows the conversation's Session ID under `PARENT`, and `STATUS` shows its Task's
+status: `pending`, `running`, `completed`, `failed`, or `cancelled`.
 `supertag get session ID` reports `status.audience: private`, and
 `supertag describe session ID` shows its Tasks.
 
@@ -59,8 +84,18 @@ Your conversation appears as a Session with the key `cli:<you>:<conversation>`.
   location's Permission Sets or Context Sets apply.
 - **The Tag remembers its other conversations.** It sees its open Objectives and can search its
   shared Sessions, such as Slack threads and GitHub issues, when a question needs them.
-- `--output json` waits for the reply and prints the message record, with the Session, the Task,
-  and the reply.
+- **A work Session has the conversation's permissions, never more.** It runs with the same
+  permissions and workspace as the message that started it. It can't start more work Sessions or
+  create Objectives. A work Session started from your private conversation is private to you too.
+- **At most four work Sessions run at once per conversation.** Later ones wait their turn. One
+  message starts at most four, and a conversation holds at most eight unfinished. Together, the work
+  Sessions of one message share its token and cost limits. A message whose limits allow no parallel
+  agents (`maxNativeAgents: 0`) starts none.
+- **A message you send while the Tag reports a work Session gets its own turn.** It isn't added to
+  the report.
+- `--output json` waits for the reply and every report, and prints one message record with the
+  Session, the Task, the reply, and `startedSessions`: each work Session with its status and
+  report.
 - **Ctrl-C stops showing the reply, not the work.** The Tag keeps working. The command prints the
   `supertag describe task` command that follows the Task.
 

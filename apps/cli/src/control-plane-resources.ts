@@ -29,6 +29,7 @@ import type {
   TagPermissionSet,
   TagRoute,
   Task,
+  TaskStatus,
   Volume,
   WorkerHost,
   Workspace,
@@ -346,10 +347,14 @@ export type SessionResource = ControlPlaneResource<
     readonly tagId: string;
     readonly sessionKey: string;
     readonly origin: JsonRecord;
+    /** The conversation Session that started this work Session; read-only. */
+    readonly parentSessionId?: string;
   },
   {
     readonly phase: Session["state"];
     readonly audience: Session["audience"];
+    /** The status of the Session's latest Task. */
+    readonly latestTaskStatus?: TaskStatus;
     readonly lastInteractionAt: string;
   }
 >;
@@ -1447,7 +1452,7 @@ function placementReservationStatus(
   };
 }
 
-export function sessionResource(session: Session): SessionResource {
+export function sessionResource(session: Session, latestTaskStatus?: TaskStatus): SessionResource {
   return {
     apiVersion: CONTROL_PLANE_API_VERSION,
     kind: "Session",
@@ -1461,10 +1466,14 @@ export function sessionResource(session: Session): SessionResource {
       tagId: session.tagId,
       sessionKey: session.sessionKey,
       origin: session.origin,
+      ...(session.parentSessionId === undefined
+        ? {}
+        : { parentSessionId: session.parentSessionId }),
     },
     status: {
       phase: session.state,
       audience: session.audience,
+      ...(latestTaskStatus === undefined ? {} : { latestTaskStatus }),
       lastInteractionAt: session.lastInteractionAt,
     },
   };
