@@ -461,6 +461,8 @@ export function describeTask(
     );
     if (scheduling["status"] === "waiting" && isRecord(scheduling["wait"]))
       lines.push(...describeSchedulingWait(scheduling["wait"]));
+    if (scheduling["status"] === "incompatible" && typeof scheduling["reason"] === "string")
+      lines.push(`Waiting: ${scheduling["reason"]}.`);
     if (ids(scheduling["unmetRequirements"]))
       lines.push(`Unmet requirements: ${ids(scheduling["unmetRequirements"])}`);
     lines.push(...unsandboxedCommandHoldsOf(scheduling).map(unsandboxedCommandsReason));

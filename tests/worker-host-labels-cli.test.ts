@@ -288,11 +288,13 @@ describe("Worker Host label commands", () => {
           status: "incompatible",
           observedAt: "2026-10-02T00:00:00.000Z",
           unmetRequirements: ["labels:mcp:sentry"],
+          reason: "no bound Worker Host provides MCP server sentry",
         },
       },
     };
     const client = { request: async () => task } as unknown as ControlPlaneClient;
     const text = await runResourceCommand(client, "describe", ["task", "task-2"]);
+    expect(text).toContain("Waiting: no bound Worker Host provides MCP server sentry.");
     expect(text).toContain("No bound Worker Host has labels: mcp:sentry.");
     expect(text).toContain(
       "No bound Worker Host provides MCP server sentry. Add it to a host service's mcp map in supertag.yaml",

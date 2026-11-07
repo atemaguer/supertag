@@ -210,9 +210,9 @@ export async function workSessionWorkspace(
 }
 
 /**
- * A work Session Task's branch candidate: `supertag/session/<short Session id>` for its first
- * Task, and the next numbered branch after `previous` for each continued Task, which starts from
- * the work Session's earlier commits.
+ * A work Session Task's branch candidate: `supertag/session/<short Session id>` until a Task of
+ * the Session delivers commits, then the next numbered branch after `previous`, the branch of the
+ * Session's latest Task that delivered commits, which the new Task starts from.
  */
 export function workSessionBranch(sessionId: string, previous?: string): string {
   const base = `supertag/session/${sessionId.replace(/[^A-Za-z0-9]/gu, "").slice(0, 8) || "work"}`;

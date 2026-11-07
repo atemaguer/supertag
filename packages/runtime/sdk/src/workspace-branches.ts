@@ -155,6 +155,29 @@ export class WorkspaceBranches {
         ))
     )
       return plan;
+    // A name whose earlier owners each held no commits, so their branches were deleted, holds no
+    // work: a work Session's next Task may take it over. A retry of such an owner starts afresh
+    // from the base anyway, on a newly allocated name.
+    const requested = plan.branch.toLowerCase();
+    const emptyOwners = Object.entries(records).filter(
+      ([id, owner]) => id !== taskId && owner.branch.toLowerCase() === requested,
+    );
+    if (
+      recorded === undefined &&
+      emptyOwners.length > 0 &&
+      emptyOwners.every(([, owner]) => owner.head === "deleted") &&
+      !refs.some((ref) => ref.toLowerCase() === requested)
+    ) {
+      // Rewrite the stored records as read, so other entries keep their stored form.
+      const file = await this.#file(repository);
+      const stored = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+      for (const [id] of emptyOwners) {
+        delete records[id];
+        delete stored[id];
+      }
+      await writeFile(`${file}.tmp`, JSON.stringify(stored), { mode: 0o600 });
+      await rename(`${file}.tmp`, file);
+    }
     const occupied = new Set(
       [...refs, ...Object.values(records).map((owner) => owner.branch)].map((branch) =>
         branch.toLowerCase(),

@@ -9,7 +9,11 @@ import {
 } from "@supertag/core";
 import { workSessionApprovalNotice } from "./approvals.js";
 import { isSchedulingEvent } from "./capacity-wait.js";
-import { sessionWorkspaceBranches, workerEvents } from "./dependency-branches.js";
+import {
+  latestSessionDelivery,
+  sessionWorkspaceBranches,
+  workerEvents,
+} from "./dependency-branches.js";
 import { DispatchErrorReporter } from "./dispatch-errors.js";
 import { ObjectiveMessages } from "./objective-messages.js";
 import { repositoryReferences, unambiguousRepositoryReference } from "./repository-references.js";
@@ -142,7 +146,9 @@ import {
   placeTask,
   type TaskPlacement,
   taskPlacementLabels,
+  undeclaredMcpServers,
   volumeMountRequirements,
+  withoutMcpServers,
   withRequiredCapabilities,
   workspaceMcpServers,
 } from "./label-placement.js";
@@ -200,6 +206,8 @@ export type {
 
 /** How often the task controller looks for finished work Sessions still owed a report turn. */
 const WORK_REPORT_SWEEP_INTERVAL_MS = 10_000;
+/** How many due inbound events one dispatch pass tries, oldest first, before it waits. */
+const DISPATCH_CANDIDATES_PER_TICK = 50;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_LEASE_DURATION_MS = 5 * 60_000;
 const DEFAULT_RETRY_BASE_MS = 1_000;
@@ -603,12 +611,23 @@ export class ControlPlane {
     const hosts = await this.listWorkerHosts();
     const workspaceMcp =
       task.workspacePlan?.status === "workspace" ? task.workspacePlan.mcp : undefined;
+    const boundWorkerHostIds = bindings.map((binding) => binding.workerHostId);
+    // A Task without a Workspace needs only the granted servers its bound hosts declare.
+    const authorization = withoutMcpServers(
+      task.authorizationSnapshot,
+      undeclaredMcpServers(
+        task.authorizationSnapshot,
+        task.workspacePlan,
+        boundWorkerHostIds,
+        hosts,
+      ),
+    );
     return placeTask(
-      bindings.map((binding) => binding.workerHostId),
-      taskPlacementLabels(tag?.runsOn ?? [], task.authorizationSnapshot, workspaceMcp),
+      boundWorkerHostIds,
+      taskPlacementLabels(tag?.runsOn ?? [], authorization, workspaceMcp),
       task.workspacePlan,
       () => Promise.resolve(hosts),
-      workspaceMcpServers(task.authorizationSnapshot, workspaceMcp),
+      workspaceMcpServers(authorization, workspaceMcp),
       {
         ...commandPlacement(task),
         mounts: await volumeMountRequirements(this.#store, task.workspacePlan),
@@ -617,14 +636,12 @@ export class ControlPlane {
   }
 
   /**
-   * Records why a surface Task cannot be placed when the reason is the host's to fix, so
-   * `supertag describe task` shows it, and records the hold's end once the Task can be placed.
+   * Records why a surface Task cannot be placed, so `supertag describe task` and
+   * `supertag message tag` show what it waits for, and records the hold's end once the Task can
+   * be placed. A reason is written only when it changes, never on every dispatch pass.
    */
   async #recordSurfacePlacement(task: Task, placement: TaskPlacement): Promise<void> {
-    const held = placement.status === "unmet" ? placement.unsandboxedCommands : undefined;
-    const refusals = placement.status === "unmet" ? placement.workspaceRefusals : undefined;
-    if (held === undefined && refusals === undefined && !this.#heldSurfaceTasks.has(task.id))
-      return;
+    if (placement.status === "eligible" && !this.#heldSurfaceTasks.has(task.id)) return;
     const latest = (await this.#store.listTaskEvents(task.id)).findLast(isSchedulingEvent);
     if (placement.status === "eligible") {
       this.#heldSurfaceTasks.delete(task.id);
@@ -635,15 +652,19 @@ export class ControlPlane {
         });
       return;
     }
-    if (held === undefined && refusals === undefined) return;
     this.#heldSurfaceTasks.add(task.id);
     const payload = {
       version: 1,
       status: "incompatible",
       unmetRequirements: [placement.requirement],
       candidates: [],
-      ...(held === undefined ? {} : { unsandboxedCommands: held }),
-      ...(refusals === undefined ? {} : { workspaceRefusals: refusals }),
+      ...(placement.mcpLogins === undefined ? {} : { mcpLogins: placement.mcpLogins }),
+      ...(placement.unsandboxedCommands === undefined
+        ? {}
+        : { unsandboxedCommands: placement.unsandboxedCommands }),
+      ...(placement.workspaceRefusals === undefined
+        ? {}
+        : { workspaceRefusals: placement.workspaceRefusals }),
       execution: task.execution,
     };
     if (
@@ -1817,21 +1838,16 @@ export class ControlPlane {
     const claim = this.#claimInput();
     if (Date.now() - this.#lastWorkReportSweep >= WORK_REPORT_SWEEP_INTERVAL_MS)
       await this.#reportFinishedWorkSessions();
-    const candidate = await this.#store.peekNextInboundEvent({ now: claim.now });
-    if (candidate === undefined) {
-      this.#dispatchFailures.inbound = 0;
-      return false;
-    }
-    const outcome = await this.#reconcileInboundEvent(candidate, claim);
-    if (outcome !== "unplaced" || candidate.event.internal?.kind !== "work_session")
-      return outcome === true;
-    // A work Session that has no free Worker slot waits without holding back the conversation
-    // turns behind it, which may use the Worker's coordination slot.
-    const turn = await this.#store.peekNextInboundEvent({
+    const candidates = await this.#store.listDueInboundEvents({
       now: claim.now,
-      excludeWorkSessions: true,
+      limit: DISPATCH_CANDIDATES_PER_TICK,
     });
-    return turn !== undefined && (await this.#reconcileInboundEvent(turn, claim)) === true;
+    if (candidates.length === 0) this.#dispatchFailures.inbound = 0;
+    // An event that cannot be placed now waits without holding back the events behind it. Each
+    // Session has at most one due event, so no event overtakes an earlier one of its Session.
+    for (const candidate of candidates)
+      if ((await this.#reconcileInboundEvent(candidate, claim)) === true) return true;
+    return false;
   }
 
   /** Places, claims and runs one due inbound event; "unplaced" when no Worker can take it now. */
@@ -1856,7 +1872,13 @@ export class ControlPlane {
       if (!preparedOutcome) {
         if (!this.#worklet) return false;
         const workerHostBindings = await this.#store.listTagWorkerHostBindings(pendingTask.tagId);
-        if (workerHostBindings.length === 0) return false;
+        if (workerHostBindings.length === 0) {
+          await this.#recordSurfacePlacement(pendingTask, {
+            status: "unmet",
+            requirement: "tag.workerHostBindings",
+          });
+          return "unplaced";
+        }
         // Labels narrow the bound hosts; with none eligible the Task waits for one to connect.
         const placement = await this.#placement(pendingTask, workerHostBindings);
         await this.#recordSurfacePlacement(pendingTask, placement);
@@ -2419,7 +2441,15 @@ export class ControlPlane {
               ]),
         ],
       },
-      authorization: work.authorization,
+      authorization: withoutMcpServers(
+        work.authorization,
+        undeclaredMcpServers(
+          work.authorization,
+          task.workspacePlan,
+          workerHostBindings.map((binding) => binding.workerHostId),
+          await this.listWorkerHosts(),
+        ),
+      ),
       ...(coordination === undefined ? {} : { coordination }),
       contextPlan: work.contextPlan,
       workspacePlan:
@@ -3146,11 +3176,10 @@ export class ControlPlane {
         409,
         `Workspace ${name} no longer exists; start a new work Session`,
       );
-    const latest = tasks[0]?.workspacePlan;
-    return namedWorkspacePlan(
-      workspace,
-      workSessionBranch(sessionId, latest?.status === "workspace" ? latest.branch : undefined),
-    );
+    // Branches are numbered after the latest Task that delivered commits, so one that only
+    // asked the person leaves the next name to the Task that does the work.
+    const delivered = await latestSessionDelivery(this.#store, tasks, { workspace: name });
+    return namedWorkspacePlan(workspace, workSessionBranch(sessionId, delivered?.branch));
   }
 
   async #openTaskAttempt(

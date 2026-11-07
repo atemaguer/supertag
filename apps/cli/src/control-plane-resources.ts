@@ -42,6 +42,7 @@ import {
   executionRange,
   operatorTokenOperatorId,
   operatorTokenPhase,
+  placementHoldReason,
   SELF_ESCALATED_EVENT,
   type StoredOpenTaskFindings,
   storedOpenTaskFindings,
@@ -1394,6 +1395,10 @@ export async function taskResourceFromStore(
                   (item): item is string => typeof item === "string",
                 )
               : [],
+            ...(scheduling.type === "task.scheduling-incompatible" &&
+            placementHoldReason(scheduling.payload) !== undefined
+              ? { reason: placementHoldReason(scheduling.payload) }
+              : {}),
             ...(scheduling.type === "task.scheduling-incompatible" &&
             unsandboxedCommandHoldsOf(scheduling.payload).length > 0
               ? { unsandboxedCommands: unsandboxedCommandHoldsOf(scheduling.payload) }

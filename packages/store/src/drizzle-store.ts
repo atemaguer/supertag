@@ -46,6 +46,7 @@ import type {
   InboundEventActor,
   InboundSurfaceEvent,
   JsonRecord,
+  ListDueWorkInput,
   LiveMount,
   MountManifest,
   MountOutputManifest,
@@ -59,7 +60,6 @@ import type {
   OutboundPresentation,
   OutboundReply,
   OutboundReplyStatus,
-  PeekDueWorkInput,
   RecordTaskAttemptWorkerInput,
   RenewInboundEventLeaseInput,
   ResourceManagementStore,
@@ -3965,30 +3965,23 @@ export class DrizzleStore implements Store {
   }
 
   async claimNextInboundEvent(input: ClaimDueWorkInput): Promise<DurableInboundEvent | undefined> {
-    const candidate = await this.peekNextInboundEvent({ now: input.now });
+    const [candidate] = await this.listDueInboundEvents({ now: input.now, limit: 1 });
     if (candidate === undefined) return undefined;
     return this.claimDueInboundEvent({ ...input, inboundEventId: candidate.id });
   }
 
-  async peekNextInboundEvent(input: PeekDueWorkInput): Promise<DurableInboundEvent | undefined> {
+  async listDueInboundEvents(input: ListDueWorkInput): Promise<readonly DurableInboundEvent[]> {
     required(input.now, "Current time");
+    if (!Number.isSafeInteger(input.limit) || input.limit < 1)
+      throw new Error("limit must be a positive integer");
     const t = this.#tables.durableInboundEvents;
-    const candidate = (
-      await this.#db
-        .select()
-        .from(t)
-        .where(
-          and(
-            inboundIsDue(t, input.now),
-            input.excludeWorkSessions === true
-              ? sql`not exists (select 1 from "Session" ws where ws."tagId" = ${t.tagId} and ws."sessionKey" = ${t.sessionKey} and ws."parentSessionId" is not null)`
-              : undefined,
-          ),
-        )
-        .orderBy(asc(t.availableAt), asc(t.admissionOrder))
-        .limit(1)
-    )[0];
-    return candidate === undefined ? undefined : inboundFromRow(candidate);
+    const rows = await this.#db
+      .select()
+      .from(t)
+      .where(inboundIsDue(t, input.now))
+      .orderBy(asc(t.availableAt), asc(t.admissionOrder))
+      .limit(input.limit);
+    return rows.map(inboundFromRow);
   }
 
   async claimDueInboundEvent(

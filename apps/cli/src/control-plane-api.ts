@@ -60,6 +60,7 @@ import {
   parseWorkspaceName,
   parseWorkspaceNames,
   parseWorkspaceSpec,
+  placementHoldReason,
   TAG_MESSAGE_TYPES,
   TagMessagingError,
   workSessionWaiting,
@@ -3329,6 +3330,8 @@ interface TagMessageRecord {
   /** The running Task this message was delivered into, when it joined one instead of starting. */
   readonly joinedTaskId?: string;
   readonly status: "waiting" | "replied";
+  /** Why the turn has not started, while no bound Worker Host can run it. */
+  readonly waiting?: string;
   /** The Tag's final reply: its result, or the error that ended the Task. */
   readonly reply?: { readonly presentation: string; readonly text: string };
   /** Work Sessions this message's turn started, and the report turn each one is owed. */
@@ -3444,6 +3447,7 @@ async function handleTagMessage(
   }
   const { reply, joinedTaskId } = await tagMessageReply(context.store, task);
   const startedSessions = await startedWorkSessions(context.store, task);
+  const waiting = reply === undefined ? await placementHold(context.store, task) : undefined;
   const record: TagMessageRecord = {
     apiVersion: CONTROL_PLANE_API_VERSION,
     kind: "TagMessage",
@@ -3453,12 +3457,33 @@ async function handleTagMessage(
     taskId: task.id,
     ...(joinedTaskId === undefined ? {} : { joinedTaskId }),
     status: reply === undefined ? "waiting" : "replied",
+    ...(waiting === undefined ? {} : { waiting }),
     ...(reply === undefined
       ? {}
       : { reply: { presentation: reply.presentation, text: reply.text } }),
     ...(startedSessions.length === 0 ? {} : { startedSessions }),
   };
   writeJson(context.response, method === "POST" ? 201 : 200, record);
+}
+
+/**
+ * Why a pending Task waits for placement, from its latest scheduling event, or undefined when it
+ * is not held. The Control Plane records a reason only when it changes.
+ */
+async function placementHold(
+  store: ControlPlaneApiRequestContext["store"],
+  task: Task,
+): Promise<string | undefined> {
+  if (task.status !== "pending") return undefined;
+  const latest = (await store.listTaskEvents(task.id)).findLast(
+    (event) =>
+      event.type === "task.scheduling-incompatible" ||
+      event.type === "task.scheduling-compatible" ||
+      event.type === "task.scheduling-waiting",
+  );
+  return latest?.type === "task.scheduling-incompatible"
+    ? placementHoldReason(latest.payload)
+    : undefined;
 }
 
 /** How often a reply stream rechecks a message that has neither a running stream nor a reply. */

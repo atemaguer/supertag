@@ -13,6 +13,8 @@ export interface TagMessageRecord {
   readonly taskId: string;
   readonly joinedTaskId?: string;
   readonly status: "waiting" | "replied";
+  /** Why the turn has not started, while no bound Worker Host can run it. */
+  readonly waiting?: string;
   readonly reply?: TagReply;
   /**
    * Work Sessions this message's turn started or continued, each with its report once the Tag
@@ -77,6 +79,8 @@ runs, then its reply.
 continues the same Session, so the Tag sees the earlier messages and replies.
 The conversation is private to you: the admin token and each Operator Token have their own.
 The Tag answers with its Roles' permissions only; no location's Permission or Context Sets apply.
+While no bound Worker Host can run the turn, it shows "· waiting: REASON" once, such as
+"· waiting: no bound Worker Host provides MCP server notes".
 When the Tag hands work to work Sessions, it shows "· working: TITLE" for each one and stays
 until the Tag reports each result in the conversation. When the Tag passes on a work Session's
 progress note, it shows "· update: TITLE" and what the Tag said. A work Session that needs you shows
@@ -175,13 +179,37 @@ export async function runTagConversationCommand(
   let streamed: StreamedReply | undefined;
   // A conversation turn's text includes what the Tag says between tool calls; show only its
   // activity while it runs, then the final reply, as a teammate's message.
-  if (record.status !== "replied")
-    streamed = await streamReply(client, `${messagePath}/stream`, {
-      idleMs: timeoutMs,
-      interactive: options.interactive === true,
-      write,
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-    });
+  if (record.status !== "replied") {
+    // Until the reply stream sends its first part, say once why the turn has not started.
+    const started = new AbortController();
+    const shownWaiting = new Set<string>();
+    const showWaiting = (current: TagMessageRecord) => {
+      if (current.waiting === undefined || shownWaiting.has(current.waiting)) return;
+      shownWaiting.add(current.waiting);
+      write(`· waiting: ${terminalText(current.waiting)}\n`);
+    };
+    showWaiting(record);
+    const watching = (async () => {
+      while (await pause(options.intervalMs ?? POLL_INTERVAL_MS, started.signal)) {
+        const current = await client.request<TagMessageRecord>(messagePath).catch(() => undefined);
+        if (started.signal.aborted) return;
+        if (current !== undefined) showWaiting(current);
+        if (current?.status === "replied") return;
+      }
+    })();
+    try {
+      streamed = await streamReply(client, `${messagePath}/stream`, {
+        idleMs: timeoutMs,
+        interactive: options.interactive === true,
+        write,
+        onPart: () => started.abort(),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+      });
+    } finally {
+      started.abort();
+      await watching;
+    }
+  }
   if (streamed?.ended === "detached") return detached();
   if (streamed?.ended === "idle") throw notReplied();
   let reply = record.reply ?? streamed?.reply;
@@ -312,6 +340,8 @@ async function streamReply(
     /** Indents activity lines under a work Session's "working" line. */
     readonly indent?: boolean;
     readonly write: (text: string) => void;
+    /** Called for each part the stream sends. */
+    readonly onPart?: () => void;
     readonly signal?: AbortSignal;
   },
 ): Promise<StreamedReply> {
@@ -344,6 +374,7 @@ async function streamReply(
       if (event.data === "[DONE]") break;
       const part = parsePart(event.data);
       if (part === undefined) continue;
+      options.onPart?.();
       if (part.type === "data-activity" && options.interactive) {
         const line = activityLine(part["data"]);
         if (line !== undefined) {
