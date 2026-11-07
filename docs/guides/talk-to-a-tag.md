@@ -74,7 +74,7 @@ It loads every invoice before filtering; I'm checking whether the query can filt
 Ctrl-C stops following, not the work. The report still arrives in the conversation, and your next
 message there sees it.
 
-## 4. Answer a work Session's question
+## 4. Answer a work Session's question or approval
 
 A work Session that needs a decision from you stops and asks. The command shows it waiting on you,
 then the Tag's question:
@@ -98,11 +98,36 @@ I've passed that on.
 The billing export now runs on the eu-west cluster.
 ```
 
-If a work Session needs approval for an action, `supertag message tag` prints the notice under
-`· approval needed: TITLE`, and on Slack and other surfaces it posts to your conversation. The
-notice names the permission that requires approval, in SuperTag's words; `supertag list approval`
-shows the request in full. Decide it with `supertag approve request ID` or
-`supertag deny request ID --reason TEXT`; a message to the Tag doesn't approve anything.
+If a work Session needs approval for an action, it stops and waits for your decision, the way it
+waits for an answer. `supertag message tag` prints the notice under `· approval needed: TITLE`,
+and on Slack and other surfaces it posts to your conversation. The notice names the permission
+that requires approval, in SuperTag's words. The Tag then tells you briefly what the work Session
+waits for:
+
+```text
+$ supertag message tag planner 'Resolve the Sentry issue for the export timeout.' --session billing
+I'm resolving the issue and will report back here.
+· working: Resolve export timeout issue
+· approval needed: Resolve export timeout issue
+Work Session "Resolve export timeout issue" is waiting for approval:
+- 6f0d2c1e-8a4b-4f7e-9c3d-2b5a1e7f9d40: MCP sentry/update_issue (required by sentry-triage)
+Review with supertag list approval, then supertag approve request ID or supertag deny request ID --reason TEXT.
+The work Session continues on its own once you decide.
+· waiting for approval: Resolve export timeout issue
+It's waiting for your approval to update the Sentry issue.
+```
+
+`supertag list approval` shows the request in full. Decide it with
+`supertag approve request ID` or `supertag deny request ID --reason TEXT`; a message to the Tag
+doesn't approve anything, and you don't need to message the Tag after deciding. Either decision
+continues the work Session as its next Task. An approval lets it retry the same action once; a
+denial gives it your reason, so it can try another way or report back. Its report then reaches
+your conversation like any other. `supertag message tag` keeps following a work Session that
+waits for approval, so decide from another terminal; the command then prints `· working:` again,
+then `· done:` or the next wait. If the Tag's permissions changed while the work Session waited,
+or the turn's limits are spent, the decision doesn't continue it: the command prints
+`· not continued: TITLE` and why. Start a new work Session after a permission change, or send a
+message to continue it after the limits ran out.
 
 ## Check that it worked
 
@@ -158,9 +183,8 @@ under `PARENT`. `STATUS` shows the latest Task's status: `pending`, `running`, `
 - `--output json` waits for the reply and every report, and prints one message record with the
   Session, the Task, the reply, and `startedSessions`: each work Session the message started or
   continued, with its status and report. A work Session waiting on you has status `waiting` and
-  its `question`, and one waiting for approval lists the notices in `approvals`. `updates` lists
-  what the Tag said about the work Session's progress notes; a silent one isn't listed. While no
-  bound Worker Host can run the turn, `waiting` says why.
+  its `question`; one waiting for approval lists `approvals`, and the command returns there.
+  `updates` lists what the Tag said about progress notes; a silent one isn't listed. While no bound Worker Host can run the turn, `waiting` says why.
 - **Ctrl-C stops showing the reply, not the work.** The Tag keeps working. The command prints the
   `supertag describe task` command that follows the Task.
 
@@ -176,6 +200,9 @@ under `PARENT`. `STATUS` shows the latest Task's status: `pending`, `running`, `
 - **A message sent while the Tag is still replying.** If the Tag's harness accepts input while it
   works, your message joins the running reply, and the command prints that reply. Otherwise the
   message waits its turn.
+- **`The requesting Task already finished; request expired`.** The work Session no longer waits
+  on that request: it moved on to a later Task, or its Task ended without waiting on it. If the
+  work Session still needs the action, its next call creates a new request and notice.
 - **`Tag NAME does not exist`.** Check the name with `supertag list tag`.
 
 ## Reference

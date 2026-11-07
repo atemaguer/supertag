@@ -125,14 +125,21 @@ assigned to it.
 | Shell commands and file writes inside a harness | Not checked per action yet; only through Task admission |
 
 The Worker fails closed. A gated call without a reachable Control Plane is not forwarded. The
-call returns "approval pending" with the request ID, and the Tag can continue other work
-or wait for the decision.
+call returns "approval pending" with the request ID. In an Objective Task, the Tag can continue
+other work or wait for the decision. A work Session's Task ends waiting on the request instead,
+and the decision continues the work Session as its next Task, unless the Tag's permissions changed
+while it waited.
+
+A pending request expires when its Task finishes without waiting on it. A work Session's request
+stays pending while the work Session waits on it: its Task completed listing the request, and no
+later Task of that work Session started. See
+[a work Session waiting on approval](coordination.md#a-work-session-waiting-on-approval).
 
 A decision chooses its scope:
 
 | Scope | Effect |
 | --- | --- |
-| `once` | Allows one call with the same Task, action, and arguments digest |
+| `once` | Allows one call with the same Task, action, and arguments digest. For a work Session, any Task of that work Session matches, so the retry in its next Task runs |
 | `objective` | Allows every matching action in the Objective, optionally until a time |
 
 An Objective-scope approval of a runtime action also admits later Tasks in that Objective

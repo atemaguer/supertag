@@ -191,6 +191,70 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         expect((await f.store.readCoordinationInbox({ kind: "approval" })).items).toEqual([]);
       });
 
+      it("matches an action across the covering Tasks and records the caller's Task", async () => {
+        const f = await fixture();
+        const action = {
+          target: "surface" as const,
+          action: "pull_request.merge",
+          surfaceAccountId: "github-account",
+          scope: "acme/app",
+        };
+        const request = (taskId: string, coveringTaskIds?: readonly string[]) =>
+          f.store.requestActionApproval({
+            objectiveId: null,
+            taskId,
+            attemptId: `${taskId}-attempt`,
+            requestingTagId: f.worker.id,
+            kind: "surface-action",
+            actions: [action],
+            argumentsDigest: `sha256:${"b".repeat(64)}`,
+            summary: "Merge pull request 42",
+            ruleSources: ["release"],
+            approvers: [],
+            ...(coveringTaskIds === undefined ? {} : { coveringTaskIds }),
+          });
+        const first = await request("work-task-1");
+        expect(first).toMatchObject({ status: "pending", created: true });
+        // Without covering Tasks, another Task's request is not this one's.
+        const other = await request("work-task-2");
+        expect(other).toMatchObject({ status: "pending", created: true });
+        expect(other.request.id).not.toBe(first.request.id);
+        await f.store.expireApprovalRequest(other.request.id);
+        await f.store.decideApprovalRequest({
+          id: first.request.id,
+          decision: "approve",
+          scope: "once",
+          decidedBy: "admin",
+          decidedByKind: "operator",
+        });
+        // The next Task of the same work Session consumes the once approval its Task waited on.
+        const retried = await request("work-task-3", ["work-task-1", "work-task-2", "work-task-3"]);
+        expect(retried).toMatchObject({ status: "granted", via: "once" });
+        expect(retried.request.id).toBe(first.request.id);
+        // Consumed once; the next call asks again, recorded on the calling Task.
+        const again = await request("work-task-3", ["work-task-1", "work-task-2", "work-task-3"]);
+        expect(again).toMatchObject({ status: "pending", created: true });
+        expect(again.request.taskId).toBe("work-task-3");
+        // A pending or denied request of a covering Task is found too.
+        expect(await request("work-task-4", ["work-task-3", "work-task-4"])).toMatchObject({
+          status: "pending",
+          created: false,
+          request: { id: again.request.id },
+        });
+        await f.store.decideApprovalRequest({
+          id: again.request.id,
+          decision: "deny",
+          reason: "Not this one",
+          decidedBy: "admin",
+          decidedByKind: "operator",
+        });
+        // A denial holds for every later Task of the work Session too.
+        expect(await request("work-task-4", ["work-task-3", "work-task-4"])).toMatchObject({
+          status: "denied",
+          request: { id: again.request.id },
+        });
+      });
+
       it("omits requests whose Task already finished", async () => {
         const f = await fixture();
         await f.store.admitTaskAssignment(f.assignment("finished-task"));

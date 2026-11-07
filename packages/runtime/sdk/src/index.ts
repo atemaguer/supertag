@@ -2938,6 +2938,11 @@ type ApprovalChannel = (request: {
   readonly status: "granted" | "pending" | "denied";
   readonly requestId?: string;
   readonly reason?: string;
+  /**
+   * What the caller does next while the request is pending, when the Control Plane decides it:
+   * a work Session's Task ends waiting on the approval instead of waiting in the turn.
+   */
+  readonly next?: string;
 }>;
 const approvalChannels = new Map<string, ApprovalChannel>();
 
@@ -2978,6 +2983,8 @@ function coordinationApprovalChannel(
     const parsed = JSON.parse(text) as Awaited<ReturnType<ApprovalChannel>>;
     if (!["granted", "pending", "denied"].includes(parsed.status))
       throw new Error("invalid approval status");
+    if (parsed.next !== undefined && typeof parsed.next !== "string")
+      throw new Error("invalid approval guidance");
     return parsed;
   };
 }
@@ -3256,7 +3263,7 @@ async function askApprovalChannel(
       `Approval request ${result.requestId ?? ""} for ${operationName} was denied${result.reason ? `: ${result.reason}` : ""}. The call was not made. Choose another approach.`,
     );
   return deniedMcpResult(
-    `Approval pending: ${operationName} (${described}) requires approval, request ${result.requestId ?? "unknown"}. The call was not made. Continue other work, or use wait_for with mailbox: true to wait for the decision, then retry the same call.`,
+    `Approval pending: ${operationName} (${described}) requires approval, request ${result.requestId ?? "unknown"}. The call was not made. ${result.next ?? "Continue other work, or use wait_for with mailbox: true to wait for the decision, then retry the same call."}`,
   );
 }
 

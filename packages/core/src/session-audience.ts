@@ -99,6 +99,21 @@ export function workSessionReportDeliveryId(workTaskId: string): string {
   return `session-report:${workTaskId}`;
 }
 
+/**
+ * The durable delivery id of the one Task that continues a work Session after its Task `workTaskId`
+ * ended waiting on approval requests and one of them was decided.
+ */
+export function workSessionApprovalDeliveryId(workTaskId: string): string {
+  return `work-session-approval:${workTaskId}`;
+}
+
+/**
+ * The Task event a work Session Task gets when a decided approval request it waited on could not
+ * continue the Session: its permissions changed, or its starting turn's budget is spent. The Task
+ * then waits on nothing.
+ */
+export const WORK_SESSION_NOT_CONTINUED_EVENT = "work_session.not-continued";
+
 /** Progress notes one work Session Task may send its conversation with `message_parent`. */
 export const WORK_SESSION_MAX_UPDATES = 3;
 /** The text of one `message_parent` note. */
@@ -136,12 +151,17 @@ export type InternalTurn =
       readonly workSessionId: string;
       readonly workTaskId: string;
       readonly title: string;
-      /** `waiting`: the work Task completed after `ask`, so the work Session waits on the person. */
+      /**
+       * `waiting`: the work Task completed after `ask` or on a pending approval request, so the
+       * work Session waits on the person's answer or on the decision.
+       */
       readonly status: "cancelled" | "completed" | "failed" | "waiting";
       /** The work Task's result text, bounded by `WORK_SESSION_REPORT_RESULT_MAX`. */
       readonly result: string;
       /** The question the work Task asked, when `waiting`. */
       readonly question?: string;
+      /** The approval requests the work Task waits on, when `waiting`. */
+      readonly approvals?: readonly string[];
       /** SuperTag's account of where the work Task's Workspace changes are, when it had one. */
       readonly delivery?: string;
     }
@@ -176,12 +196,23 @@ export interface WorkSessionSummary {
     readonly startedByTaskId?: string;
     /** The question this Task asked with `ask`; a completed Task with one waits on the person. */
     readonly question?: string;
+    /**
+     * The approval requests this Task ended waiting on; a completed Task with some waits on
+     * their decision and continues on its own once one is decided.
+     */
+    readonly approvals?: readonly string[];
   };
 }
 
-/** Whether a work Session's latest Task completed by asking the person a question. */
+/**
+ * Whether a work Session's latest Task completed waiting: on the person's answer to its question,
+ * or on the decision of an approval request. A Task ends either done or waiting.
+ */
 export function workSessionWaiting(session: WorkSessionSummary): boolean {
-  return session.task?.status === "completed" && session.task.question !== undefined;
+  return (
+    session.task?.status === "completed" &&
+    (session.task.question !== undefined || (session.task.approvals?.length ?? 0) > 0)
+  );
 }
 
 export interface SessionAudienceStore {
@@ -213,11 +244,19 @@ export interface SessionAudienceStore {
   sessionTaskSummaries(
     sessionIds: readonly string[],
   ): Promise<ReadonlyMap<string, SessionTaskSummary>>;
+  /** The ids of a Session's Tasks, oldest first: the last one is its latest Task. */
+  listSessionTaskIds(sessionId: string): Promise<readonly string[]>;
   /**
    * Finished Tasks of work Sessions whose report turn has not been admitted yet, oldest first.
    * Admitting the report with `workSessionReportDeliveryId` removes a Task from this list.
    */
   listUnreportedWorkTasks(limit: number): Promise<readonly string[]>;
+  /**
+   * Completed work Session Tasks of active Tags, oldest first, that are still their Session's latest Task, ended
+   * waiting on an approval request that has since been decided, and were neither continued with
+   * `workSessionApprovalDeliveryId` nor marked `WORK_SESSION_NOT_CONTINUED_EVENT`.
+   */
+  listDecidedWorkSessionWaits(limit: number): Promise<readonly string[]>;
   /** The report turn admitted for a work Session's Task, and its Task once opened. */
   findWorkSessionReport(
     workTaskId: string,

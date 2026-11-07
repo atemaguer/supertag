@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
+  type ApprovalRequest,
   ArtifactCatalogError,
   buildCommitmentView,
   type CoordinationInboxPage,
@@ -208,6 +209,11 @@ export interface WorkSessionHandlers {
   ): Promise<unknown>;
   /** Posts a work Session Task's pending approval request to its conversation, once. */
   approvalNotice(task: Task, inbound: DurableInboundEvent, requestId: string): Promise<void>;
+  /**
+   * An action request was decided: continue the work Session whose Task ended waiting on it as
+   * its next Task, with the decision. Any other request continues nothing.
+   */
+  approvalDecided(request: ApprovalRequest): Promise<void>;
   /** `message_parent`: admits an update turn with the note into the work Task's conversation. */
   messageParent(task: Task, inbound: DurableInboundEvent, text: string): Promise<unknown>;
 }
@@ -464,6 +470,7 @@ type ObjectivePersistence = Pick<
   | "withdrawArtifactPublication"
   | "reconcileObjectiveObservations"
   | "wakeWaitingTaskAssignments"
+  | "listSessionTaskIds"
 > &
   TeamHistoryPersistence;
 
@@ -657,6 +664,7 @@ export class ObjectiveController {
   /** Opens and continues work Sessions and posts their approval notices; see WorkSessionHandlers. */
   setWorkSessionHandlers(handlers: WorkSessionHandlers) {
     this.workSessions = handlers;
+    this.approvals.setDecisionListener((request) => handlers.approvalDecided(request));
   }
   private readonly wakeTaskController: (() => void) | undefined;
   constructor(
@@ -3386,15 +3394,21 @@ export class ObjectiveController {
     const { task, inbound } = await this.surfaceState(caller.taskId, caller.attemptId);
     if (name === "request_action_approval") {
       const result = await this.approvals.requestAction(await this.approvalCaller(caller), input);
-      // A work Session's own replies post nowhere, so its conversation gets the notice.
+      // A work Session's own replies post nowhere, so its conversation gets the notice, and its
+      // Task ends waiting on the request: the decision continues the Session as its next Task.
       if (
         inbound.event.internal?.kind === "work_session" &&
         result.status === "pending" &&
         result.requestId !== undefined
-      )
+      ) {
         await this.workSessions
           ?.approvalNotice(task, inbound, result.requestId)
           .catch((error: unknown) => this.onError(error));
+        return {
+          ...result,
+          next: `End your turn now with a brief final reply and no further tool call. This Task ends waiting on approval of request ${result.requestId}: the conversation has been told. When the request is approved or denied, this work Session continues as its next Task with the decision; an approved call succeeds when you retry it then.`,
+        };
+      }
       return result;
     }
     const internal = inbound.event.internal?.kind;

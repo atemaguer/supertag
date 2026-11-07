@@ -7,7 +7,11 @@ import {
   workspaceBranchHeadPin,
   workspaceBranchPin,
 } from "@supertag/core";
-import { workSessionApprovalNotice } from "./approvals.js";
+import {
+  approvalDecisionText,
+  workSessionApprovalNotice,
+  workSessionNotContinuedNotice,
+} from "./approvals.js";
 import { isSchedulingEvent } from "./capacity-wait.js";
 import {
   latestSessionDelivery,
@@ -24,6 +28,7 @@ import {
   continuedWorkSessionEvent,
   internalTurnMessages,
   reportedTurnSpend,
+  resumedWorkSessionExecution,
   SESSION_UPDATE_SKIPPED_EVENT,
   type StartSessionRequest,
   samePermissions,
@@ -104,6 +109,8 @@ import {
   WORK_SESSION_MAX_OPEN,
   WORK_SESSION_MAX_RUNNING,
   WORK_SESSION_MAX_UPDATES,
+  WORK_SESSION_NOT_CONTINUED_EVENT,
+  workSessionApprovalDeliveryId,
 } from "@supertag/core";
 import type {
   SurfacePresentation,
@@ -568,6 +575,10 @@ export class ControlPlane {
         ),
       messageParent: (task, inbound, text) =>
         this.#oneWorkTaskTurn(task.id, () => this.#messageParent(task, inbound, text)),
+      approvalDecided: (request) =>
+        this.#oneWorkTaskTurn(request.taskId, () =>
+          this.#continueDecidedWorkSession(request.taskId),
+        ),
     });
     this.objectives.setLostWorkerHostResolver((attempt) =>
       this.#removeLostEphemeralWorkerHost(attempt, EPHEMERAL_WORKER_HOST_GRACE_MS),
@@ -1383,17 +1394,7 @@ export class ControlPlane {
           configuration: {},
           verifiedAt: now,
         }));
-      // Not a stored TagRoute, so nothing can activate on it and it is never a location.
-      const route: TagRoute = {
-        id: `cli:${tag.id}`,
-        tagId: tag.id,
-        surfaceAccountId: account.id,
-        scope: "cli",
-        enabled: true,
-        workspaces: [],
-        createdAt: tag.createdAt,
-        updatedAt: tag.updatedAt,
-      };
+      const route = cliTagRoute(tag, account);
       const eventId = randomUUID();
       const sessionKey = `cli:${input.operatorId}:${input.session}`;
       const event: InboundSurfaceEvent = {
@@ -2104,7 +2105,8 @@ export class ControlPlane {
         const workerId = executionWorkerId(workerEvents) ?? worklet.id;
         const completedAt = new Date().toISOString();
         const result = buildTaskResult(work, responseText, workerEvents);
-        // A work Session Task that asked the person completes waiting on them, with its question.
+        // A work Session Task completes either done or waiting: on the person, with the question
+        // it asked, or on the approval requests it left pending, which a decision continues.
         const asked =
           work.event.internal?.kind === "work_session"
             ? (await this.#store.listTaskEvents(task.id)).findLast(
@@ -2112,6 +2114,28 @@ export class ControlPlane {
                   event.type === WORK_SESSION_ASKED_EVENT && event.attemptId === attempt?.id,
               )?.payload?.["question"]
             : undefined;
+        // The requests this Attempt was told to end its turn on, while pending or decided but
+        // unused: a decision that lands while the Task still runs reaches no tool call, so the
+        // Task waits on it too, and the continuation after completion carries it.
+        const approvals =
+          work.event.internal?.kind === "work_session"
+            ? (
+                await this.#store.listApprovalRequests({
+                  taskId: task.id,
+                  kind: "surface-action",
+                  limit: 500,
+                })
+              )
+                .filter(
+                  (request) =>
+                    request.attemptId === attempt?.id &&
+                    (request.status === "pending" ||
+                      request.status === "denied" ||
+                      (request.status === "approved" && request.consumedAt === null)),
+                )
+                .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))
+                .map((request) => request.id)
+            : [];
         // An update turn that called skip_reply ends with an empty final reply, which posts
         // nothing; its result keeps what the Tag wrote.
         const skipped =
@@ -2127,6 +2151,7 @@ export class ControlPlane {
           outcome: {
             responseLength: responseText.length,
             ...(typeof asked === "string" ? { question: asked } : {}),
+            ...(approvals.length === 0 ? {} : { approvals }),
             ...(skipped ? { skipped: true } : {}),
           },
           workerId,
@@ -2883,11 +2908,18 @@ export class ControlPlane {
   }
 
   /** Admits the report turns that finished work Sessions are still owed. */
+  /**
+   * Admits the report turns that finished work Sessions are still owed, and continues the work
+   * Sessions whose waited-on approval request was decided without continuing them, as after a
+   * restart or a failed admission.
+   */
   async #reportFinishedWorkSessions(): Promise<void> {
     this.#lastWorkReportSweep = Date.now();
     try {
       for (const taskId of await this.#store.listUnreportedWorkTasks(20))
         await this.#reportWorkSession(taskId);
+      for (const taskId of await this.#store.listDecidedWorkSessionWaits(20))
+        await this.#oneWorkTaskTurn(taskId, () => this.#continueDecidedWorkSession(taskId));
     } catch (error) {
       this.#reportDispatchError(error);
     }
@@ -2899,7 +2931,11 @@ export class ControlPlane {
    * id is the delivery key, so a repeat after a restart is a duplicate admission, not a report.
    */
   async #reportWorkSession(workTaskId: string): Promise<void> {
-    await this.#oneWorkTaskTurn(workTaskId, () => this.#reportWorkSessionNow(workTaskId));
+    await this.#oneWorkTaskTurn(workTaskId, async () => {
+      await this.#reportWorkSessionNow(workTaskId);
+      // A request decided before the Task's outcome was committed continues the Session now.
+      await this.#continueDecidedWorkSession(workTaskId);
+    });
   }
 
   /**
@@ -3038,6 +3074,10 @@ export class ControlPlane {
       if ((await this.#store.findTagById(task.tagId))?.status !== "active") return;
       const final = await this.#store.findOutboundReply(work.id, "final");
       const question = task.status === "completed" ? task.outcome?.["question"] : undefined;
+      const approvals =
+        task.status === "completed" && Array.isArray(task.outcome?.["approvals"])
+          ? task.outcome["approvals"].filter((id): id is string => typeof id === "string")
+          : [];
       const basedOn =
         task.workspacePlan.status === "workspace" && internal.continued === true
           ? (await sessionWorkspaceBranches(this.#store, task, task.workspacePlan)).at(-1)?.branch
@@ -3065,8 +3105,12 @@ export class ControlPlane {
             workTaskId: task.id,
             title: internal.title,
             result: final?.text ?? task.result?.summary ?? "",
-            ...(typeof question === "string"
-              ? { status: "waiting" as const, question }
+            ...(typeof question === "string" || approvals.length > 0
+              ? {
+                  status: "waiting" as const,
+                  ...(typeof question === "string" ? { question } : {}),
+                  ...(approvals.length === 0 ? {} : { approvals }),
+                }
               : { status: task.status }),
             ...(delivery === undefined ? {} : { delivery }),
           },
@@ -3086,6 +3130,159 @@ export class ControlPlane {
     } catch (error) {
       this.#reportDispatchError(error);
     }
+  }
+
+  /**
+   * Continues a work Session whose latest Task completed waiting on approval requests, once one
+   * of them is decided: the next Task of that Session, with the decisions as its message. It runs
+   * under the waiting Task's admitted authorization only while the Tag's current permissions are
+   * the same, as `continue_session` requires, and draws from the waiting Task's share of the
+   * starting turn's budget. When either check fails, the conversation is told, and the Task waits
+   * on nothing. Its event id is keyed by the waiting Task, so the decision listener, the report
+   * path and the sweep continue it once between them. Runs in the waiting Task's turn, after its
+   * report admission.
+   */
+  async #continueDecidedWorkSession(taskId: string): Promise<void> {
+    try {
+      if (!this.#accepting) return;
+      const task = await this.#store.findTaskById(taskId);
+      const waitedOn = task?.outcome?.["approvals"];
+      if (
+        !task?.inboundEventId ||
+        task.status !== "completed" ||
+        !Array.isArray(waitedOn) ||
+        waitedOn.length === 0
+      )
+        return;
+      const work = await this.#store.findInboundEventById(task.inboundEventId);
+      const internal = work?.event.internal;
+      if (!work || internal?.kind !== "work_session") return;
+      if ((await this.#store.listSessionTaskIds(task.sessionId)).at(-1) !== task.id) return;
+      // A retired Tag takes no more turns; its work Session stays where it stopped.
+      if ((await this.#store.findTagById(task.tagId))?.status !== "active") return;
+      const decided = (
+        await Promise.all(
+          waitedOn
+            .filter((id): id is string => typeof id === "string")
+            .map((id) => this.objectives.getApprovalRequest(id)),
+        )
+      ).filter(
+        (request): request is ApprovalRequest =>
+          request !== undefined &&
+          request.taskId === task.id &&
+          (request.status === "denied" ||
+            (request.status === "approved" && request.consumedAt === null)),
+      );
+      if (decided.length === 0) return;
+      if (
+        (await this.#store.listTaskEvents(task.id)).some(
+          (event) => event.type === WORK_SESSION_NOT_CONTINUED_EVENT,
+        )
+      )
+        return;
+      // The waiting Task's report reaches the conversation before the Session goes on.
+      await this.#reportWorkSessionNow(task.id);
+      const startingTask = await this.#store.findTaskById(internal.startedByTaskId);
+      const starting = startingTask?.inboundEventId
+        ? await this.#store.findInboundEventById(startingTask.inboundEventId)
+        : undefined;
+      if (!startingTask || !starting)
+        throw new Error(`Work Session ${task.sessionId} has no conversation turn to report to`);
+      // A conversation holds a bounded number of unfinished work Sessions; the sweep continues
+      // this one once another finishes.
+      const open = (await this.#store.listWorkSessions(internal.parentSessionId)).filter(
+        (session) => session.task?.status === "running" || session.task?.status === "pending",
+      ).length;
+      if (open >= WORK_SESSION_MAX_OPEN) return;
+      const stop = async (reason: "permissions" | "budget") => {
+        await this.#appendTaskEvent(task.id, WORK_SESSION_NOT_CONTINUED_EVENT, {
+          requestIds: decided.map((request) => request.id),
+          reason,
+        });
+        await this.#postNoticeOnce(
+          starting.id,
+          `approval-continue:${task.id}`,
+          workSessionNotContinuedNotice(internal.title, decided, reason),
+        );
+      };
+      // Never broader than the Tag may act now: a decision does not revive revoked permissions.
+      const current = await this.#currentAuthorization(starting);
+      if (current === undefined || !samePermissions(work.authorization, current)) {
+        await stop("permissions");
+        return;
+      }
+      const execution = resumedWorkSessionExecution(
+        startingTask.execution,
+        work.execution,
+        reportedTurnSpend(await this.#store.readSpend({ taskIds: [task.id] }), work.execution),
+      );
+      if (execution === undefined) {
+        await stop("budget");
+        return;
+      }
+      const resumed = continuedWorkSessionEvent(
+        work,
+        work,
+        internal.startedByTaskId,
+        internal.parentSessionId,
+        internal.title,
+        decided.map(approvalDecisionText).join("\n\n"),
+        new Date().toISOString(),
+      );
+      const eventId = workSessionApprovalDeliveryId(task.id);
+      const admission = await this.#store.admitInboundEvent({
+        surfaceAccountId: work.surfaceAccountId,
+        tagRouteId: work.tagRouteId,
+        tagId: work.tagId,
+        authorization: work.authorization,
+        contextPlan: work.contextPlan,
+        execution,
+        event: { ...resumed, eventId, logicalEventId: eventId },
+        maxAttempts: this.#maxAttempts,
+      });
+      if (admission.status === "duplicate") return;
+      const next = await this.#openTask(admission.work);
+      await this.#appendTaskEvent(next.id, "task.admitted", {
+        tagRouteId: work.tagRouteId,
+        scope: work.event.scope,
+        startedByTaskId: internal.startedByTaskId,
+        parentSessionId: internal.parentSessionId,
+        continued: true,
+        approvalRequestId: decided[0]?.id,
+      });
+      this.#wakeTaskController?.();
+    } catch (error) {
+      this.#reportDispatchError(error);
+    }
+  }
+
+  /**
+   * The authorization an inbound event would be admitted with now, for comparing with the one it
+   * was admitted with; undefined when its route, surface account or Tag is gone.
+   */
+  async #currentAuthorization(
+    inbound: DurableInboundEvent,
+  ): Promise<TagAuthorizationSnapshot | undefined> {
+    const [account, stored, tag] = await Promise.all([
+      this.#store.findSurfaceAccountById(inbound.surfaceAccountId),
+      this.#store.findTagRouteById(inbound.tagRouteId),
+      this.#store.findTagById(inbound.tagId),
+    ]);
+    if (!account || !tag) return undefined;
+    const route =
+      stored ??
+      (account.provider === "cli" && inbound.tagRouteId === cliTagRoute(tag, account).id
+        ? cliTagRoute(tag, account)
+        : undefined);
+    if (!route) return undefined;
+    return this.#captureAuthorization(
+      inbound.event,
+      account,
+      route,
+      tag,
+      new Date().toISOString(),
+      await resolveTagRoles(this.#store, tag.id),
+    );
   }
 
   /** Opens the durable Task for one accepted unit of user intent. */
@@ -3900,6 +4097,23 @@ function taskWorkspaceLabel(plan: TaskWorkspacePlan): string | undefined {
   if (plan.status === "unavailable") return plan.requested.join(", ");
   if (plan.status === "workspace") return `Workspace ${plan.workspace} (branch ${plan.branch})`;
   return undefined;
+}
+
+/**
+ * The route of a Tag's CLI conversations. Not a stored TagRoute, so nothing can activate on it and
+ * it is never a location.
+ */
+function cliTagRoute(tag: Tag, account: SurfaceAccount): TagRoute {
+  return {
+    id: `cli:${tag.id}`,
+    tagId: tag.id,
+    surfaceAccountId: account.id,
+    scope: "cli",
+    enabled: true,
+    workspaces: [],
+    createdAt: tag.createdAt,
+    updatedAt: tag.updatedAt,
+  };
 }
 
 function authorizationResource(

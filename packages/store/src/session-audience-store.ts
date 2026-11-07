@@ -20,7 +20,9 @@ import {
   type TagObjectiveSummary,
   type TaskStatus,
   WORK_SESSION_MAX_UPDATES,
+  WORK_SESSION_NOT_CONTINUED_EVENT,
   type WorkSessionSummary,
+  workSessionApprovalDeliveryId,
   workSessionReportDeliveryId,
   workSessionUpdateDeliveryId,
 } from "@supertag/core";
@@ -253,13 +255,33 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
       .where(eq(s.parentSessionId, parentSessionId))
       .orderBy(desc(s.createdAt), desc(s.id))
       .limit(200);
-    // Each latest Task's starting turn (from its admitted event) and the question it asked.
+    // Each latest Task's starting turn (from its admitted event), and the question or approval
+    // requests it ended waiting on.
     const t = this.tables.tasks,
       i = this.tables.durableInboundEvents;
     const taskIds = rows
       .map((row: any) => row.taskId)
       .filter((id: unknown) => typeof id === "string");
-    const details = new Map<string, { startedByTaskId?: string; question?: string }>(
+    // A Task whose decided request could not continue its Session waits on no approval any more.
+    const notContinued = new Set<string>(
+      taskIds.length === 0
+        ? []
+        : (
+            await this.db
+              .select({ taskId: this.tables.taskEvents.taskId })
+              .from(this.tables.taskEvents)
+              .where(
+                and(
+                  inArray(this.tables.taskEvents.taskId, taskIds),
+                  eq(this.tables.taskEvents.type, WORK_SESSION_NOT_CONTINUED_EVENT),
+                ),
+              )
+          ).map((row: any) => row.taskId as string),
+    );
+    const details = new Map<
+      string,
+      { startedByTaskId?: string; question?: string; approvals?: readonly string[] }
+    >(
       taskIds.length === 0
         ? []
         : (
@@ -270,7 +292,15 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
               .where(inArray(t.id, taskIds))
           ).map((row: any) => {
             const internal = optionalRecord(optionalRecord(row.event)?.["internal"]);
-            const question = optionalRecord(row.outcome)?.["question"];
+            const outcome = optionalRecord(row.outcome);
+            const question = outcome?.["question"];
+            const approvals = notContinued.has(row.id)
+              ? []
+              : Array.isArray(outcome?.["approvals"])
+                ? (outcome["approvals"] as unknown[]).filter(
+                    (id): id is string => typeof id === "string",
+                  )
+                : [];
             return [
               row.id,
               {
@@ -278,6 +308,7 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
                   ? { startedByTaskId: internal["startedByTaskId"] }
                   : {}),
                 ...(typeof question === "string" ? { question } : {}),
+                ...(approvals.length === 0 ? {} : { approvals }),
               },
             ];
           }),
@@ -302,6 +333,16 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
           : {}),
       };
     });
+  }
+
+  async listSessionTaskIds(sessionId: string): Promise<readonly string[]> {
+    const t = this.tables.tasks;
+    const rows = await this.db
+      .select({ id: t.id })
+      .from(t)
+      .where(eq(t.sessionId, sessionId))
+      .orderBy(asc(t.createdAt), asc(t.id));
+    return rows.map((row: any) => row.id as string);
   }
 
   async sessionTaskSummaries(
@@ -349,6 +390,34 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
           isNotNull(s.parentSessionId),
           inArray(t.status, ["completed", "failed", "cancelled"]),
           sql`not exists (select 1 from "DurableInboundEvent" r where r."surfaceAccountId" = ${w.surfaceAccountId} and r."deliveryId" = 'session-report:' || ${t.id})`,
+        ),
+      )
+      .orderBy(asc(t.updatedAt), asc(t.id))
+      .limit(limit);
+    return rows.map((row: any) => row.id);
+  }
+
+  async listDecidedWorkSessionWaits(limit: number): Promise<readonly string[]> {
+    const t = this.tables.tasks,
+      s = this.tables.sessions,
+      w = this.tables.durableInboundEvents;
+    const rows = await this.db
+      .select({ id: t.id })
+      .from(s)
+      .innerJoin(t, eq(t.sessionId, s.id))
+      .innerJoin(w, eq(w.id, t.inboundEventId))
+      .where(
+        and(
+          isNotNull(s.parentSessionId),
+          eq(t.status, "completed"),
+          // Decided and not yet used: a denial, or a once approval nobody consumed. The Task's
+          // outcome names the request, so it waited on it.
+          sql`exists (select 1 from "ApprovalRequest" a where a."taskId" = ${t.id} and a."kind" = 'surface-action' and a."objectiveId" is null and (a."status" = 'denied' or (a."status" = 'approved' and a."consumedAt" is null)) and cast(${t.outcome} as text) like '%"' || a."id" || '"%')`,
+          sql`not exists (select 1 from "Task" n where n."sessionId" = ${t.sessionId} and (n."createdAt" > ${t.createdAt} or (n."createdAt" = ${t.createdAt} and n."id" > ${t.id})))`,
+          sql`not exists (select 1 from "DurableInboundEvent" r where r."surfaceAccountId" = ${w.surfaceAccountId} and r."deliveryId" = ${workSessionApprovalDeliveryId("")} || ${t.id})`,
+          sql`not exists (select 1 from "TaskEvent" e where e."taskId" = ${t.id} and e."type" = ${WORK_SESSION_NOT_CONTINUED_EVENT})`,
+          // A retired Tag takes no more turns.
+          sql`exists (select 1 from "Tag" g where g."id" = ${t.tagId} and g."status" = 'active')`,
         ),
       )
       .orderBy(asc(t.updatedAt), asc(t.id))

@@ -2520,6 +2520,16 @@ export class DrizzleStore implements Store {
   ): ReturnType<SessionAudienceStore["listWorkSessions"]> {
     return this.#sessionAudience().listWorkSessions(...args);
   }
+  listSessionTaskIds(
+    ...args: Parameters<SessionAudienceStore["listSessionTaskIds"]>
+  ): ReturnType<SessionAudienceStore["listSessionTaskIds"]> {
+    return this.#sessionAudience().listSessionTaskIds(...args);
+  }
+  listDecidedWorkSessionWaits(
+    ...args: Parameters<SessionAudienceStore["listDecidedWorkSessionWaits"]>
+  ): ReturnType<SessionAudienceStore["listDecidedWorkSessionWaits"]> {
+    return this.#sessionAudience().listDecidedWorkSessionWaits(...args);
+  }
   sessionTaskSummaries(
     ...args: Parameters<SessionAudienceStore["sessionTaskSummaries"]>
   ): ReturnType<SessionAudienceStore["sessionTaskSummaries"]> {

@@ -236,6 +236,7 @@ describe("target: mcp grants through the per-Task policy proxy", () => {
     const pending = await update({ id: "1", status: "resolved" });
     expect(pending.isError).toBe(true);
     expect(pending.content[0]?.text).toContain("Approval pending");
+    expect(pending.content[0]?.text).toContain("use wait_for with mailbox: true");
     expect(asked[0]?.action).toEqual({
       target: "mcp",
       action: "fake/update_issue",
@@ -255,6 +256,30 @@ describe("target: mcp grants through the per-Task policy proxy", () => {
       status: "resolved",
       id: "1",
     });
+  });
+
+  it("tells the caller what to do next when the Control Plane says so", async () => {
+    const upstream = await startFakeMcpServer();
+    const next =
+      "End your turn now with a brief final reply and no further tool call. This Task ends waiting on approval of request r1.";
+    const [input] = await resolveTools(
+      upstream.url,
+      [{ action: "fake/update_issue" }],
+      undefined,
+      [mcpApproval("fake/update_issue")],
+      approvalTransport(new Set(), [], next),
+    );
+    const client = await connectThroughProxy(input as ToolInput);
+    const pending = (await client.callTool({
+      name: "update_issue",
+      arguments: { id: "1" },
+    })) as DeniedResult & { content: { text: string }[] };
+    expect(pending.isError).toBe(true);
+    expect(pending.content[0]?.text).toContain("Approval pending: update_issue");
+    expect(pending.content[0]?.text).toContain("request r1. The call was not made.");
+    expect(pending.content[0]?.text.endsWith(next)).toBe(true);
+    expect(pending.content[0]?.text).not.toContain("wait_for");
+    expect(upstream.calls).not.toHaveBeenCalled();
   });
 
   it("applies a resource-scoped approval requirement, and to calls with no resource", async () => {
@@ -620,6 +645,7 @@ async function resolveTools(
 function approvalTransport(
   approved: ReadonlySet<string>,
   asked: { action: unknown; argumentsDigest: string }[],
+  next?: string,
 ): typeof fetch {
   return (async (_url: unknown, init?: RequestInit) => {
     const rpc = JSON.parse(String(init?.body)) as {
@@ -632,7 +658,18 @@ function approvalTransport(
       JSON.stringify({
         jsonrpc: "2.0",
         id: rpc.id,
-        result: { content: [{ type: "text", text: JSON.stringify({ status, requestId: "r1" }) }] },
+        result: {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                status,
+                requestId: "r1",
+                ...(next === undefined || status !== "pending" ? {} : { next }),
+              }),
+            },
+          ],
+        },
       }),
       { headers: { "content-type": "application/json" } },
     );

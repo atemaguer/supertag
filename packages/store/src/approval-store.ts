@@ -52,10 +52,19 @@ export class DrizzleApprovalRequestStore implements ApprovalRequestStore {
         const grant = yield* self.objectiveGrant(tx, values.objectiveId, action, now);
         if (grant) return { status: "granted" as const, via: "objective" as const, request: grant };
       }
+      // A work Session matches across its Tasks, so its next Task's retry finds the decision.
+      const covering = input.coveringTaskIds?.length
+        ? [
+            ...new Set([
+              values.taskId,
+              ...input.coveringTaskIds.map((id) => mailboxText(id, "taskId")),
+            ]),
+          ]
+        : [values.taskId];
       const rows = (yield tx
         .select()
         .from(t)
-        .where(and(eq(t.taskId, values.taskId), eq(t.kind, values.kind)))
+        .where(and(inArray(t.taskId, covering), eq(t.kind, values.kind)))
         .orderBy(desc(t.createdAt), desc(t.id))) as any[];
       const matching = rows.filter(
         (row) =>
@@ -82,6 +91,8 @@ export class DrizzleApprovalRequestStore implements ApprovalRequestStore {
       }
       const pending = matching.find((row) => row.status === "pending");
       if (pending) return { status: "pending" as const, request: fromRow(pending), created: false };
+      // A denial holds for every covered Task: a work Session that retries a denied action, in
+      // this Task or a later one, gets the same answer; new work takes a new work Session.
       const latest = matching[0];
       if (latest?.status === "denied")
         return { status: "denied" as const, request: fromRow(latest) };

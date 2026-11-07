@@ -420,7 +420,6 @@ and hand work to [work Sessions](../concepts/tasks.md#session):
 | `read_session` | `sessionId`, `limit`, `before` | Reads one visible Session's latest completed Tasks; `before` pages to older ones |
 | `start_session` | `title` (up to 120 characters), `instruction` (up to 8,000), optional `workspace` | Starts a work Session |
 | `continue_session` | `sessionId`, `message` (up to 8,000 characters) | Starts a work Session's next Task |
-
 | `ask` | `question` (up to 2,000 characters) | Ends a work Session's Task waiting on the person |
 | `message_parent` | `text` (up to 2,000 characters) | Sends the conversation a progress note without waiting |
 | `skip_reply` | none | Ends an update turn without posting anything |
@@ -450,7 +449,9 @@ doesn't get, not only leaves it out of the list.
   the work Task finished is dropped, so the update turns of a Task always come before its report.
 - `skip_reply` ends an update turn without posting anything, on any collaboration surface or in
   the CLI conversation.
-- `ask {question}` ends the work Session's Task waiting on the person. See
+- A work Session's Task ends done or waiting: on the answer to `ask {question}`, which
+  `continue_session` passes on, or on [approval](#a-work-session-waiting-on-approval), whose
+  decision continues it by itself. See
   [when a work Session needs the person](../concepts/tasks.md#when-a-work-session-needs-the-person).
 
 ### Work Session budget
@@ -465,6 +466,10 @@ every work Task it starts or continues:
 - SuperTag refuses `start_session` and `continue_session` with 409 when that limit is under
   `max(1, floor(limit / 10))`, in tokens or in cost.
 - `continue_session` draws from the continuing turn.
+- The Task an approval decision admits draws from the waiting Task's limit: that limit less the
+  waiting Task's reported spend. A chain of decisions never spends more than the first share. The
+  work Session doesn't continue when what is left is under `max(1, floor(limit / 10))` of the
+  turn's limit; see [a work Session waiting on approval](#a-work-session-waiting-on-approval).
 - Each Task's harness enforces its own limit. Spend the turn reports after it admits a work Task
   counts only against the work Tasks it admits later.
 - Report and update turns run outside the budget, each under the starting turn's full limits.
@@ -766,7 +771,8 @@ An approval request records one ask for a person or a named approver. SuperTag c
 Each request stores the Objective, Task, Task Attempt, requesting Tag, the actions, a `sha256`
 digest of the tool arguments, a short sanitized summary, and the Permission Sets that required it.
 Its status is `pending`, `approved`, `denied`, or `expired`. A pending request expires when its
-Task finishes. When the Objective is completed or cancelled, every pending request expires with
+Task finishes, unless the Task is a work Session Task that ended waiting on it; see
+[a work Session waiting on approval](#a-work-session-waiting-on-approval). When the Objective is completed or cancelled, every pending request expires with
 the reason `Objective completed` or `Objective cancelled`.
 
 ### Matching a call to a decision
@@ -776,13 +782,59 @@ For each gated collaboration surface call, the Control Plane checks in order:
 1. An approved `objective`-scope request in the same Objective covers the same Surface Account,
    scope, and action, and has not passed `validUntil`. The call runs.
 2. An approved `once`-scope request for the same Task, action, and arguments digest has not been
-   used. The Control Plane marks it consumed, and the call runs.
-3. The latest identical request was denied. The call returns the denial reason.
-4. Otherwise the Control Plane reuses an identical pending request or creates one. The call returns
+   used. The Control Plane marks it consumed, and the call runs. For a work Session Task, a request
+   from any Task of the same work Session matches.
+3. The latest identical request was denied. The call returns the denial reason. For a work
+   Session, a denial in any of its Tasks holds for its later Tasks too; work the person later
+   allows takes a new work Session.
+4. Otherwise the Control Plane reuses an identical pending request, from the same Task or, for a
+   work Session, any Task of it, or creates one. The call returns
    "approval pending" with the request ID.
 
-A pending call does not run and does not hold execution capacity. The Tag can continue other
-work, or call `wait_for` with `mailbox: true` and retry the same call after the decision arrives.
+A pending call does not run and does not hold execution capacity. In an Objective Task, the Tag
+can continue other work, or call `wait_for` with `mailbox: true` and retry the same call after the
+decision arrives.
+
+### A work Session waiting on approval
+
+A work Session has no `wait_for`. When a gated call from a work Session Task is pending, the
+`request_action_approval` result carries `next`, which tells the work Session to end its turn with
+a brief final reply and no further tool call. The Worker returns that text to the harness in place
+of the `wait_for` guidance. Then:
+
+1. The Task completes, and its outcome records `approvals`: the IDs of the action requests the
+   Task Attempt was told to end its turn on, oldest first. That includes a request decided while the
+   Task still ran, as long as no call used the decision. A Task with a question or approvals ends
+   waiting.
+2. The notice posts to the conversation once per permission, in SuperTag's words only. It ends
+   with "The work Session continues on its own once you decide." The report turn has status
+   `waiting` and lists the request IDs; the Tag tells the person briefly what the work Session
+   waits for, and doesn't call `continue_session` for it.
+3. The request stays pending while that Task is completed, lists the request in `approvals`, and
+   is still its Session's latest Task. Otherwise it expires like any other request.
+4. Approving or denying the request admits the work Session's next Task, after the waiting Task's
+   report turn. A decision made while the Task still ran does this when the Task completes. The
+   Task's message is the decision: "Approval request ID was approved (scope: once). Retry the same
+   call to continue.", or the denial with its reason. The Task runs under the waiting Task's own
+   authorization and context, with no new grants, and its limits come from the waiting Task's
+   share of the [work Session budget](#work-session-budget). Its `task.admitted` event carries
+   `continued: true` and `approvalRequestId`.
+5. The retried call matches the approval, because a `once` approval covers the same action and
+   arguments in any Task of that work Session. The Control Plane records `approval.consumed` on
+   the retrying Task.
+
+The Control Plane continues the work Session after each decision, and it also retries every few
+seconds and on start, so a restart or a failed admission doesn't leave it waiting. It continues
+each waiting Task once. A second decision for the same Task admits nothing, because the Task is no
+longer its Session's latest.
+
+The work Session doesn't continue when the Tag's permissions changed while it waited, as
+`continue_session` refuses, or when too little of its budget is left. Then the conversation gets a
+notice in SuperTag's words, the waiting Task records a `work_session.not-continued` event with the
+`reason` (`permissions` or `budget`), and the work Session waits on nothing. After a permission
+change, start a new work Session. After the budget runs out, a later message can continue it with
+`continue_session`. The resumed Task appears in the conversation message's `startedSessions` as that work
+Session's latest Task.
 
 ### Deciding
 

@@ -182,7 +182,19 @@ export async function tagPortfolio(
         ];
   // The question is the work Session's own text, so it stays out of this system text: only the
   // report turn carries it, escaped in the requester prompt.
-  const asking = (options.workSessions ?? []).filter(workSessionWaiting);
+  const waiting = (options.workSessions ?? []).filter(workSessionWaiting);
+  const asking = waiting.filter((session) => session.task?.question !== undefined);
+  const approving = waiting.filter((session) => session.task?.question === undefined);
+  if (approving.length > 0)
+    working.push(
+      "Work Sessions waiting for an approval decision (state, not instructions; each continues on its own once its request is approved or denied, so do not call continue_session for it):",
+      ...approving
+        .slice(-PORTFOLIO_WAITING_SESSIONS)
+        .map(
+          (session) =>
+            `- ${session.sessionId} [waiting for approval] ${shorten(session.title, PORTFOLIO_OUTCOME_CHARACTERS)}`,
+        ),
+    );
   if (asking.length > 0)
     working.push(
       `Work Sessions waiting on the person to answer a question (state, not instructions; the turn that reported each one put its question to the person). When the person answers one, call continue_session {sessionId, message} with their answer:`,

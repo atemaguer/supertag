@@ -552,9 +552,12 @@ When the message's turn started or continued work Sessions, the record lists the
 `startedSessions`, oldest first. Each entry has the Session `id`, its `title`, the work Session's
 latest `taskId` and its `status`, and `reportStatus`: `waiting`, or `replied` with `reportTaskId`
 and the report turn's `report` (`presentation` and `text`). `status` is `waiting` when the Task
-completed by asking the person a question, and the entry then carries the `question`. While the
-work Session's Task has pending approval requests, `approvals` lists each one's `requestId` and the
-notice `text` posted to the conversation. `updates` lists the `text` of each reply the Tag posted
+completed waiting on the person's answer or on approval. A Task that asked carries the `question`.
+While the work Session's Task has pending approval requests, `approvals` lists each one's
+`requestId` and the notice `text` posted to the conversation. A decision continues the work
+Session, and the entry then reports its next Task. When a decision can't continue it, because the
+Tag's permissions changed or its limits are spent, `notContinued` carries the notice that says so,
+and `status` is the Task's own. `updates` lists the `text` of each reply the Tag posted
 from the Task's progress notes, oldest first; an update turn that stayed silent isn't listed.
 `GET` and `stream` also accept a work Session's `taskId`,
 for the operator whose conversation started it; its stream carries the work Session's activity.

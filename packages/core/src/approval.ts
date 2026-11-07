@@ -94,6 +94,12 @@ export interface CreateApprovalRequestInput {
   readonly summary: string;
   readonly ruleSources: readonly string[];
   readonly approvers: readonly string[];
+  /**
+   * For an action request: the Tasks whose requests the action matches, in place of `taskId`
+   * alone. A work Session passes all of its Tasks, so a once-scope approval its Task waited on
+   * covers the retried action in the Session's next Task. A new request still records `taskId`.
+   */
+  readonly coveringTaskIds?: readonly string[];
 }
 
 export type ActionApprovalResult =

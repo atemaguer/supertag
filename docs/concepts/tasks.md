@@ -135,7 +135,8 @@ finished comes before its report; a note that arrives after that is dropped.
 
 ### When a work Session needs the person
 
-A work Session never waits for a person inside a running Task. When it needs a decision or a
+A work Session's Task ends in one of two ways: done, or waiting. It waits on an answer from the
+person or on an approval, never inside a running Task. When it needs a decision or a
 fact, it asks with `ask`, and its Task completes **waiting on you**. The report turn puts the
 question to the person, and the conversation lists the work Sessions still waiting. When the person
 answers, a later conversation Task passes the answer on with `continue_session`. That starts the
@@ -146,13 +147,26 @@ changed since the work Session last ran, the Tag starts a new work Session inste
 conversation that started a work Session can continue it, and only once it has stopped running
 and its report turn has run.
 
-When a work Session's Task requests approval for an action, the approval notice posts to the
+When a work Session's Task calls an action that needs approval, the call doesn't run. The Task
+ends, completed and **waiting on approval** of that request. The approval notice posts to the
 conversation, because the work Session itself posts nowhere. On the CLI, `supertag message tag`
 prints it. The notice is SuperTag's own text: it names the request, the permission that requires
 approval, and the `supertag approve request` and `supertag deny request` commands that decide it.
-It leaves out the work Session's own description of the request, which `supertag list approval`
-shows. A work Session's Task gets one notice per permission while its requests wait, however many
-it makes. A chat message never approves an action.
+It says the work Session continues on its own once the person decides. It leaves out the work
+Session's own description of the request, which `supertag list approval` shows. A work Session's
+Task gets one notice per permission while its requests wait, however many it makes. The report
+turn tells the person briefly what the work Session waits for. A chat message never approves an
+action.
+
+The request stays pending while the work Session waits on it. A decision starts the work
+Session's next Task without a conversation turn, and that Task carries the decision. It runs under
+the waiting Task's own permissions and context, and spends what is left of the waiting Task's
+limits: the person approved that exact action, so nothing broadens. After an approval, the next
+Task retries the call and it runs, once. After a denial, the next Task gets the reason and can try
+another way or report back. Its report reaches the conversation like any other. A decision made
+while the Task still runs takes effect when it completes. If the Tag's permissions changed while
+the work Session waited, or its limits are spent, the work Session doesn't continue, and the
+conversation is told why.
 
 ### Where a work Session's edits go
 

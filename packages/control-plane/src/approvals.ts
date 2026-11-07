@@ -18,6 +18,7 @@ import {
   sanitizeApprovalText,
   type TagApprovalRequirement,
   TagMessagingError,
+  type Task,
   type TaskAssignment,
 } from "@supertag/core";
 
@@ -29,12 +30,14 @@ type ApprovalPersistence = Pick<
   | "expireApprovalRequest"
   | "findObjectiveApprovalGrant"
   | "findTagById"
+  | "findInboundEventById"
   | "findTaskById"
   | "getApprovalRequest"
   | "getObjective"
   | "getSurfaceObjective"
   | "getTaskAssignment"
   | "listApprovalRequests"
+  | "listSessionTaskIds"
   | "listTagPermissionSets"
   | "listTagPermissions"
   | "listTaskAttempts"
@@ -66,6 +69,31 @@ export interface ApprovalSummary {
 const TERMINAL_ASSIGNMENT = ["accepted", "rejected", "cancelled", "failed"];
 const TERMINAL_TASK = ["completed", "failed", "cancelled"];
 
+/** Called once an action request is decided. */
+export type ApprovalDecisionListener = (request: ApprovalRequest) => Promise<void>;
+
+/** What a decided request tells its requester: the decision, its scope, and what to do next. */
+export function approvalDecisionText(
+  request: Pick<ApprovalRequest, "id" | "kind" | "status" | "scope" | "validUntil" | "reason">,
+): string {
+  const approved = request.status === "approved";
+  return [
+    `Approval request ${request.id} was ${request.status}${
+      approved && request.scope
+        ? ` (scope: ${request.scope}${request.validUntil ? ` until ${request.validUntil}` : ""})`
+        : ""
+    }.`,
+    request.reason ? `Reason: ${request.reason}` : "",
+    approved
+      ? request.kind === "surface-action"
+        ? "Retry the same call to continue."
+        : ""
+      : "Choose another approach or explain why the action is needed.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 /**
  * Durable approval lifecycle for `approval: required` permissions: request, match an existing
  * decision, decide, and notify. Deterministic; no natural-language policy is evaluated here.
@@ -75,6 +103,12 @@ export class ApprovalCoordinator {
     private readonly store: ApprovalPersistence,
     private readonly onError: (error: unknown) => void = () => {},
   ) {}
+
+  private decisionListener: ApprovalDecisionListener | undefined;
+  /** Resumes the work Session a decided action request kept waiting; set by the Control Plane. */
+  setDecisionListener(listener: ApprovalDecisionListener) {
+    this.decisionListener = listener;
+  }
 
   /** Runtime approvals a Task admission must hold for, after existing Objective-scope grants. */
   async taskAdmission(
@@ -167,7 +201,23 @@ export class ApprovalCoordinator {
         ? input["summary"]
         : describeApprovalAction(action),
     );
+    // A work Session's next Task retries the action its previous Task waited on, so the action
+    // matches requests across the Session's Tasks. Earlier Tasks' requests nobody waits on any
+    // more expire first, so the retry never waits on one of them.
+    const sessionTaskIds = await this.workSessionTaskIds(task);
+    if (sessionTaskIds !== undefined)
+      for (const taskId of sessionTaskIds) {
+        if (taskId === caller.taskId) continue;
+        for (const stale of await this.store.listApprovalRequests({
+          taskId,
+          kind: "surface-action",
+          status: "pending",
+          limit: 500,
+        }))
+          if (await this.taskFinished(stale)) await this.store.expireApprovalRequest(stale.id);
+      }
     const result = await this.store.requestActionApproval({
+      ...(sessionTaskIds === undefined ? {} : { coveringTaskIds: sessionTaskIds }),
       objectiveId: caller.objectiveId,
       taskId: caller.taskId,
       attemptId: caller.attemptId,
@@ -413,17 +463,14 @@ export class ApprovalCoordinator {
       ? await this.store.getObjective(request.objectiveId)
       : undefined;
     const verb = input.decision === "approve" ? "approved" : "denied";
-    const text = [
-      `Approval request ${request.id} was ${verb}${scope ? ` (scope: ${scope}${input.validUntil ? ` until ${input.validUntil}` : ""})` : ""}.`,
-      input.reason ? `Reason: ${input.reason}` : "",
-      input.decision === "approve"
-        ? request.kind === "surface-action"
-          ? "Retry the same call to continue."
-          : ""
-        : "Choose another approach or explain why the action is needed.",
-    ]
-      .filter(Boolean)
-      .join("\n");
+    const text = approvalDecisionText({
+      id: request.id,
+      kind: request.kind,
+      status: verb,
+      scope: scope ?? null,
+      validUntil: input.validUntil ?? null,
+      reason: input.reason ?? null,
+    });
     const decided = await this.store.decideApprovalRequest({
       id: request.id,
       decision: input.decision,
@@ -458,6 +505,13 @@ export class ApprovalCoordinator {
       input.decision === "approve" ? "approval.approved" : "approval.denied",
       eventPayload(decided),
     );
+    // Best effort: the Control Plane's sweep continues a waiting work Session this misses.
+    if (request.kind === "surface-action" && this.decisionListener)
+      try {
+        await this.decisionListener(decided);
+      } catch (error) {
+        this.onError(error);
+      }
     if (request.kind === "task" && objective) {
       const change =
         input.decision === "approve"
@@ -522,6 +576,11 @@ export class ApprovalCoordinator {
     return (await this.store.getTaskAssignment(request.taskId))?.assignedTagId;
   }
 
+  /**
+   * Whether a request can no longer be used because its Task finished. A work Session Task that
+   * completed waiting on the request has not: the request stays pending while the Task is its
+   * Session's latest, and its decision continues the Session in the next Task.
+   */
   private async taskFinished(request: ApprovalRequest): Promise<boolean> {
     if (request.kind === "plan") return false;
     if (request.objectiveId) {
@@ -529,7 +588,21 @@ export class ApprovalCoordinator {
       if (assignment) return TERMINAL_ASSIGNMENT.includes(assignment.status);
     }
     const task = await this.store.findTaskById(request.taskId);
-    return !task || TERMINAL_TASK.includes(task.status);
+    if (!task) return true;
+    if (!TERMINAL_TASK.includes(task.status)) return false;
+    if (request.objectiveId || task.status !== "completed") return true;
+    const approvals = task.outcome?.["approvals"];
+    if (!Array.isArray(approvals) || !approvals.includes(request.id)) return true;
+    const sessionTaskIds = await this.workSessionTaskIds(task);
+    return sessionTaskIds?.at(-1) !== task.id;
+  }
+
+  /** A work Session Task's Session's Task ids, oldest first; undefined for any other Task. */
+  private async workSessionTaskIds(task: Task): Promise<readonly string[] | undefined> {
+    if (!task.inboundEventId) return undefined;
+    const inbound = await this.store.findInboundEventById(task.inboundEventId);
+    if (inbound?.event.internal?.kind !== "work_session") return undefined;
+    return this.store.listSessionTaskIds(task.sessionId);
   }
 
   private async event(
@@ -583,6 +656,25 @@ export function workSessionApprovalNotice(
     `Work Session ${JSON.stringify(title)} is waiting for approval:`,
     `- ${request.id}: ${describeApprovalRequirement(requirement)} (required by ${requirement.permissionSets.join(", ")})`,
     approvalReviewHint(request.objectiveId ?? undefined),
+    "The work Session continues on its own once you decide.",
+  ].join("\n");
+}
+
+/**
+ * Tells the conversation that a decision on a request its work Session waited on did not continue
+ * the work Session, in fixed SuperTag words: the work Session's own text never appears here.
+ */
+export function workSessionNotContinuedNotice(
+  title: string,
+  requests: readonly Pick<ApprovalRequest, "id" | "status">[],
+  reason: "permissions" | "budget",
+): string {
+  const decided = requests.map((request) => `${request.id} (${request.status})`).join(", ");
+  return [
+    `Work Session ${JSON.stringify(title)} did not continue after approval request ${decided} was decided:`,
+    reason === "permissions"
+      ? "this conversation's permissions changed since it last ran. Start a new work Session if the work should go on."
+      : "the turn that started it has too little of its token and cost limits left. Send a new message to continue it.",
   ].join("\n");
 }
 

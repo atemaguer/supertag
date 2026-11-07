@@ -3351,6 +3351,8 @@ interface StartedWorkSession {
   readonly approvals?: readonly { readonly requestId: string; readonly text: string }[];
   /** What the Tag told the person from the Task's progress notes, oldest first; silent ones are absent. */
   readonly updates?: readonly { readonly text: string }[];
+  /** Why a decision on a request the Task waited on did not continue the work Session. */
+  readonly notContinued?: string;
   readonly reportStatus: "waiting" | "replied";
   /** The conversation turn that reports the work Session's result. */
   readonly reportTaskId?: string;
@@ -3627,6 +3629,13 @@ async function startedWorkSessions(
         : undefined;
       const approvals = await workSessionApprovals(store, task, session.task);
       const updates = session.task ? await workSessionUpdates(store, session.task.id) : [];
+      const notContinued =
+        session.task && task.inboundEventId
+          ? await store.findOutboundReply(
+              task.inboundEventId,
+              `approval-continue:${session.task.id}`,
+            )
+          : undefined;
       return {
         id: session.sessionId,
         title: session.title,
@@ -3635,6 +3644,7 @@ async function startedWorkSessions(
         ...(session.task?.question === undefined ? {} : { question: session.task.question }),
         ...(approvals.length === 0 ? {} : { approvals }),
         ...(updates.length === 0 ? {} : { updates }),
+        ...(notContinued === undefined ? {} : { notContinued: notContinued.text }),
         reportStatus: report === undefined ? ("waiting" as const) : ("replied" as const),
         ...(found?.taskId ? { reportTaskId: found.taskId } : {}),
         ...(report === undefined

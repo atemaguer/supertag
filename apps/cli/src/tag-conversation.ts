@@ -34,6 +34,8 @@ export interface StartedWorkSession {
   readonly approvals?: readonly { readonly requestId: string; readonly text: string }[];
   /** What the Tag told the person from the work Task's progress notes; silent ones are absent. */
   readonly updates?: readonly { readonly text: string }[];
+  /** Why a decision on a request the work Task waited on did not continue the work Session. */
+  readonly notContinued?: string;
   readonly reportStatus: "waiting" | "replied";
   readonly reportTaskId?: string;
   readonly report?: TagReply;
@@ -84,10 +86,17 @@ While no bound Worker Host can run the turn, it shows "· waiting: REASON" once,
 When the Tag hands work to work Sessions, it shows "· working: TITLE" for each one and stays
 until the Tag reports each result in the conversation. When the Tag passes on a work Session's
 progress note, it shows "· update: TITLE" and what the Tag said. A work Session that needs you shows
-"· waiting on you: TITLE" and the Tag's question; answer it with your next message.
+"· waiting on you: TITLE" and the Tag's question; answer it with your next message. A work
+Session that needs an approval shows "· approval needed: TITLE" and the request, then
+"· waiting for approval: TITLE" and the Tag's report. Decide it with supertag approve request or
+supertag deny request in another terminal: the work Session continues on its own, and this command
+shows "· working: TITLE" again, then its next report. When the decision cannot continue it,
+because the Tag's permissions changed or the turn's limits are spent, it shows
+"· not continued: TITLE" and why.
 Ctrl-C stops following; the Tag keeps working, and supertag describe task shows it.
 A report still arrives in the conversation, and your next message there sees it.
---output json waits and prints the message record with the reply and the work Sessions' reports.
+--output json waits and prints the message record with the reply and the work Sessions' reports;
+it returns at a report that waits for approval, so you can decide the request.
 `;
 }
 
@@ -146,16 +155,20 @@ export async function runTagConversationCommand(
     );
     return "";
   };
-  /** Rereads the message until every work Session it started has a report, or time runs out. */
+  /**
+   * Rereads the message until every work Session it started is `done` by the given test, or time
+   * runs out.
+   */
   const awaitReports = async (
     current: TagMessageRecord,
     onRecord: (record: TagMessageRecord) => void,
+    done: (session: StartedWorkSession) => boolean = settled,
   ): Promise<TagMessageRecord | undefined> => {
     const deadline = Date.now() + workTimeoutMs;
     for (;;) {
       onRecord(current);
       const sessions = current.startedSessions ?? [];
-      if (sessions.every((session) => session.reportStatus === "replied")) return current;
+      if (sessions.every(done)) return current;
       if (Date.now() >= deadline) return current;
       if (!(await pause(options.intervalMs ?? POLL_INTERVAL_MS, options.signal))) return undefined;
       current = await client.request<TagMessageRecord>(messagePath);
@@ -165,7 +178,13 @@ export async function runTagConversationCommand(
   if (output.json) {
     const replied = await poll(Date.now() + timeoutMs);
     if (replied === undefined) return detached();
-    const reported = await awaitReports(replied, () => {});
+    // The record returns once each work Session reported, including one waiting on approval,
+    // so a caller can decide the request; the decision continues the work Session on its own.
+    const reported = await awaitReports(
+      replied,
+      () => {},
+      (session) => session.reportStatus === "replied",
+    );
     if (reported === undefined) return detachedFromWork();
     return `${JSON.stringify(reported, null, 2)}\n`;
   }
@@ -257,28 +276,38 @@ async function followWorkSessions(
 ): Promise<"done" | "detached" | "timeout"> {
   const sessions = record.startedSessions ?? [];
   if (sessions.length === 0) return "done";
-  for (const session of sessions) options.write(`· working: ${terminalText(session.title)}\n`);
   const following = new AbortController();
-  const activity = options.interactive
-    ? sessions.flatMap((session) =>
-        session.taskId === undefined || session.reportStatus === "replied"
-          ? []
-          : [
-              streamReply(client, `${tagPath}/${encodeURIComponent(session.taskId)}/stream`, {
-                idleMs: options.idleMs,
-                interactive: true,
-                indent: true,
-                ...(sessions.length > 1 ? { label: session.title } : {}),
-                write: options.write,
-                signal: following.signal,
-              }).catch(() => undefined),
-            ],
-      )
-    : [];
+  const activity: Promise<unknown>[] = [];
+  // Each work Session's Task being followed. A decision on its approval request continues the
+  // Session as its next Task, which shows "working" again and then its own report.
+  const followedTasks = new Map<string, string | undefined>();
+  const follow = (session: StartedWorkSession, count: number) => {
+    const known = followedTasks.has(session.id);
+    const previous = followedTasks.get(session.id);
+    if (known && previous === session.taskId) return;
+    followedTasks.set(session.id, session.taskId);
+    // A Session that had no Task yet is still the same piece of work.
+    if (!known || previous !== undefined)
+      options.write(`· working: ${terminalText(session.title)}\n`);
+    if (!options.interactive || session.taskId === undefined || session.reportStatus === "replied")
+      return;
+    activity.push(
+      streamReply(client, `${tagPath}/${encodeURIComponent(session.taskId)}/stream`, {
+        idleMs: options.idleMs,
+        interactive: true,
+        indent: true,
+        ...(count > 1 ? { label: session.title } : {}),
+        write: options.write,
+        signal: following.signal,
+      }).catch(() => undefined),
+    );
+  };
   const shown = new Set<string>();
   try {
     const reported = await awaitReports(record, (current) => {
-      for (const session of current.startedSessions ?? []) {
+      const started = current.startedSessions ?? [];
+      for (const session of started) follow(session, started.length);
+      for (const session of started) {
         // A status reply posts nowhere on the CLI, so the approval notice prints here, once.
         for (const approval of session.approvals ?? []) {
           if (shown.has(`approval:${approval.requestId}`)) continue;
@@ -295,13 +324,16 @@ async function followWorkSessions(
             `· update: ${terminalText(session.title)}\n${terminalLines(update.text.trimEnd())}\n`,
           );
         }
-        if (session.report === undefined || shown.has(session.id)) continue;
-        shown.add(session.id);
+        const reportKey = `report:${session.taskId ?? session.id}`;
+        if (session.report === undefined || shown.has(reportKey)) continue;
+        shown.add(reportKey);
         const ended =
           session.status === "completed"
             ? "done"
             : session.status === "waiting"
-              ? "waiting on you"
+              ? session.question === undefined
+                ? "waiting for approval"
+                : "waiting on you"
               : session.status === "failed"
                 ? "failed"
                 : "stopped";
@@ -309,15 +341,32 @@ async function followWorkSessions(
           `· ${ended}: ${terminalText(session.title)}\n${terminalLines(session.report.text.trimEnd())}\n`,
         );
       }
+      // A decision that could not continue the work Session ends the wait; say why, once.
+      for (const session of current.startedSessions ?? []) {
+        if (session.notContinued === undefined || shown.has(`stopped:${session.taskId}`)) continue;
+        shown.add(`stopped:${session.taskId}`);
+        options.write(
+          `· not continued: ${terminalText(session.title)}\n${terminalLines(session.notContinued.trimEnd())}\n`,
+        );
+      }
     });
     if (reported === undefined) return "detached";
-    return (reported.startedSessions ?? []).every((session) => session.reportStatus === "replied")
-      ? "done"
-      : "timeout";
+    return (reported.startedSessions ?? []).every(settled) ? "done" : "timeout";
   } finally {
     following.abort();
     await Promise.all(activity);
   }
+}
+
+/**
+ * Whether a work Session needs no more following: its Task's report arrived, and the Task does
+ * not wait on an approval decision only. Deciding the request continues the Session as its next
+ * Task, so a Session waiting on approval stays followed; one waiting on a question waits for the
+ * person's next message.
+ */
+function settled(session: StartedWorkSession): boolean {
+  if (session.reportStatus !== "replied") return false;
+  return !(session.status === "waiting" && session.question === undefined);
 }
 
 interface StreamedReply {
