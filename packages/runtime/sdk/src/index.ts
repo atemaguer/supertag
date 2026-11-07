@@ -2091,6 +2091,30 @@ function recoveryAwareCoordinationFetch(
   };
 }
 
+/**
+ * Every conversation-side coordination tool a Worker may expose. The Control Plane decides which a
+ * turn gets; a tool missing here never reaches the harness, so this lists all of them.
+ */
+export const SURFACE_COORDINATION_OPERATIONS = [
+  "create_objective",
+  "attach_objective",
+  "select_objective",
+  "start_objective",
+  "read_objective",
+  "list_tasks",
+  "read_commitments",
+  "instruct_objective",
+  "list_sessions",
+  "search_sessions",
+  "read_session",
+  "list_objectives",
+  "start_session",
+  "continue_session",
+  "ask",
+  "message_parent",
+  "skip_reply",
+] as const;
+
 class CoordinationInputProvider implements RuntimeInputProvider {
   readonly id = "supertag-coordination";
   readonly scope = "custom" as const;
@@ -2151,23 +2175,7 @@ class CoordinationInputProvider implements RuntimeInputProvider {
             ],
           },
           operations: (surface
-            ? [
-                "create_objective",
-                "attach_objective",
-                "select_objective",
-                "start_objective",
-                "read_objective",
-                "list_tasks",
-                "read_commitments",
-                "instruct_objective",
-                "list_sessions",
-                "search_sessions",
-                "read_session",
-                "list_objectives",
-                "start_session",
-                "continue_session",
-                "ask",
-              ]
+            ? [...SURFACE_COORDINATION_OPERATIONS]
             : [
                 "read_objective",
                 "read_team",

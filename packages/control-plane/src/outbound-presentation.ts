@@ -32,6 +32,19 @@ export function outboundPresentationPolicy(
   };
 }
 
+/**
+ * Replies SuperTag records but sends nowhere: a work Session's own replies, whose result returns
+ * to its conversation as a report turn, and the empty final reply of an update turn that stayed
+ * silent with skip_reply.
+ */
+export function sentNowhere(reply: Pick<OutboundReply, "event" | "deliveryKey" | "text">): boolean {
+  const kind = reply.event.internal?.kind;
+  return (
+    kind === "work_session" ||
+    (kind === "session_update" && reply.deliveryKey === "final" && reply.text.trim() === "")
+  );
+}
+
 function digest(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }

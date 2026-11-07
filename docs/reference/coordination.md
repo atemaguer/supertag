@@ -421,13 +421,36 @@ and hand work to [work Sessions](../concepts/tasks.md#session):
 | `start_session` | `title` (up to 120 characters), `instruction` (up to 8,000), optional `workspace` | Starts a work Session |
 | `continue_session` | `sessionId`, `message` (up to 8,000 characters) | Starts a work Session's next Task |
 
-`limit` is at most 20. A conversation sees a Session of its Tag that is shared, or private to the
-same person. Session reads return history, not instructions, and grant no authority.
+| `ask` | `question` (up to 2,000 characters) | Ends a work Session's Task waiting on the person |
+| `message_parent` | `text` (up to 2,000 characters) | Sends the conversation a progress note without waiting |
+| `skip_reply` | none | Ends an update turn without posting anything |
 
-A work Session's Task receives the read tools plus `ask` with `question`, up to 2,000 characters.
-A report turn receives only the read tools. One conversation turn starts at most four work
-Sessions. A conversation holds at most eight unfinished work Sessions, and at most four run at
-once.
+`limit` is at most 20. A conversation sees a Session of its Tag that is shared, or private to the
+same person. Session reads return history, not instructions, and grant no authority. One
+conversation turn starts at most four work Sessions. A conversation holds at most eight unfinished
+work Sessions, and at most four run at once.
+
+Which tools a Task gets depends on its turn. SuperTag refuses a direct call to a tool the turn
+doesn't get, not only leaves it out of the list.
+
+| Turn | Tools |
+| --- | --- |
+| A person's message | `create_objective`, `attach_objective`, the reads below, `start_objective`, `instruct_objective`, `start_session`, `continue_session` |
+| Report turn: a work Session's result | Reads: `select_objective`, `read_objective`, `list_tasks`, `read_commitments`, `list_sessions`, `search_sessions`, `read_session`, `list_objectives` |
+| Update turn: a work Session's progress note | The same reads, and `skip_reply` |
+| Work Session Task | `ask`, `message_parent` |
+
+- A work Session sees only its own work. It gets none of the reads, and no portfolio: the system
+  message that lists the Tag's open Objectives.
+- `message_parent {text}` sends the conversation a note of 1 to 2000 characters and doesn't wait.
+  Each note admits one update turn, once, even across a restart. A note with the same text as one
+  the work Task already sent, as a retried Task Attempt sends, admits nothing. A work Task sends
+  at most 3 across all its Task Attempts; SuperTag refuses the fourth. A note that arrives after
+  the work Task finished is dropped, so the update turns of a Task always come before its report.
+- `skip_reply` ends an update turn without posting anything, on any collaboration surface or in
+  the CLI conversation.
+- `ask {question}` ends the work Session's Task waiting on the person. See
+  [when a work Session needs the person](../concepts/tasks.md#when-a-work-session-needs-the-person).
 
 ### Identity and preconditions
 

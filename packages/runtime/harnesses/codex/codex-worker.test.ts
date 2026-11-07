@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
+  CHANGE_SUMMARY_INSTRUCTION,
   ContextResolverRegistry,
   collectTaskAttemptEvents,
   EXECUTION_WARNING_SUMMARY,
@@ -744,6 +745,22 @@ describe("Codex harness composition", () => {
 
     expect(report.passed).toBe(true);
     expect(() => assertConformance(report)).not.toThrow();
+  });
+
+  it("asks for a Change line only when a Workspace commits the Task's edits", () => {
+    const spec = taskAttemptSpec("Edit it.");
+    expect(codexInformationRetrievalPrompt(spec)).not.toContain(CHANGE_SUMMARY_INSTRUCTION);
+    const committing = {
+      ...spec,
+      workspacePlan: {
+        version: 1,
+        status: "workspace",
+        workspace: "app",
+        branch: "b",
+        delivery: "branch",
+      },
+    } as unknown as typeof spec;
+    expect(codexInformationRetrievalPrompt(committing)).toContain(CHANGE_SUMMARY_INSTRUCTION);
   });
 
   it("does not ask a conversation turn for finding lines", () => {

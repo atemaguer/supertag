@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
+  CHANGE_SUMMARY_INSTRUCTION,
   ContextResolverRegistry,
   collectTaskAttemptEvents,
   ExecutionCleanupError,
@@ -141,6 +142,22 @@ describe("Claude Code harness composition", () => {
 
     expect(report.passed).toBe(true);
     expect(() => assertConformance(report)).not.toThrow();
+  });
+
+  it("asks for a Change line only when a Workspace commits the Task's edits", () => {
+    const spec = taskAttemptSpec("Edit it.");
+    expect(claudeCodeInformationRetrievalPrompt(spec)).not.toContain(CHANGE_SUMMARY_INSTRUCTION);
+    const committing = {
+      ...spec,
+      workspacePlan: {
+        version: 1,
+        status: "workspace",
+        workspace: "app",
+        branch: "b",
+        delivery: "branch",
+      },
+    } as unknown as typeof spec;
+    expect(claudeCodeInformationRetrievalPrompt(committing)).toContain(CHANGE_SUMMARY_INSTRUCTION);
   });
 
   it("does not ask a conversation turn for finding lines", () => {

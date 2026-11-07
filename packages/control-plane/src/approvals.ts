@@ -560,14 +560,28 @@ function approvalReviewHint(objectiveId?: string): string {
   return `Review with supertag list approval${objectiveId === undefined ? "" : ` --objective ${objectiveId}`}, then supertag approve request ID or supertag deny request ID --reason TEXT.`;
 }
 
+/** The admitted requirement a request falls under, in fixed SuperTag words. */
+function describeApprovalRequirement(requirement: TagApprovalRequirement): string {
+  if (requirement.target === "runtime") return `runtime ${requirement.action}`;
+  if (requirement.target === "mcp")
+    return `MCP ${requirement.action}${requirement.resource === undefined ? "" : ` on ${requirement.resource}`}`;
+  return `${requirement.action} on ${requirement.scope} (account ${requirement.surfaceAccountId})`;
+}
+
 /**
- * The notice a work Session's pending approval request posts to its conversation. A chat message
- * never decides it; the approval commands do.
+ * The notice a work Session's pending approval request posts to its conversation. It names the
+ * Tag's admitted requirement the request falls under, never the work Session's own summary: no
+ * text a work Session writes reaches a person without a Tag turn. A chat message never decides
+ * it; the approval commands do, and `supertag list approval` shows the request in full.
  */
-export function workSessionApprovalNotice(title: string, request: ApprovalRequest): string {
+export function workSessionApprovalNotice(
+  title: string,
+  request: ApprovalRequest,
+  requirement: TagApprovalRequirement,
+): string {
   return [
     `Work Session ${JSON.stringify(title)} is waiting for approval:`,
-    approvalRequestLine(request),
+    `- ${request.id}: ${describeApprovalRequirement(requirement)} (required by ${requirement.permissionSets.join(", ")})`,
     approvalReviewHint(request.objectiveId ?? undefined),
   ].join("\n");
 }
