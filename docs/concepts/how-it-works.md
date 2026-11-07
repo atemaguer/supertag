@@ -146,8 +146,10 @@ Worker crash, lost Worklet connection, or collaboration surface failure does not
 work. See [Scheduling and interrupted execution](../reference/scheduling-and-recovery.md) for how
 the Control Plane picks a Worker Host and what happens when execution is interrupted.
 
-Each Task stores its request, response, and result. Later Tasks in the same Session receive bounded
-history derived from completed Tasks automatically. Reusable outputs are explicitly captured as
+Each Task stores its request, response, and result. A later Task in the same Session resumes that
+Session's native harness session. When no usable native state exists, it receives bounded history
+derived from completed Tasks instead. Every conversation also sees the Tag's open Objectives and
+can search the Tag's other Sessions on request. Reusable outputs are explicitly captured as
 artifacts. Context Sets can select permitted artifact metadata across Sessions, people, channels,
 and platforms without merging the underlying conversations.
 

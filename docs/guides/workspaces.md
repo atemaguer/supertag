@@ -17,7 +17,9 @@ stay inside that copy.
 
 ## How it works
 
-Each local Task gets its own git worktree on branch `supertag/<objective>/<task>`. A worktree is
+Each local Task of an Objective gets its own git worktree on branch `supertag/<objective>/<task>`.
+A work Session's Tasks use `supertag/session/<id>`, then `supertag/session/<id>-2` and so on; see
+[where a work Session's edits go](../concepts/tasks.md#where-a-work-sessions-edits-go). A worktree is
 a second working directory of the same repository, so nothing is copied. The harness, such as
 Claude Code, Codex, or OpenCode, edits files there directly. A prepared environment provider
 starts a separate sandbox for each Task. After each **Task Attempt**, one execution of a Task, the
@@ -425,10 +427,12 @@ supertag connect worklet --worklet-url http://127.0.0.1:3435 --worker-host lapto
 ```
 
 Repeat `--workspace NAME=PATH` for more Workspaces. The host tells the Control Plane only the
-names; the paths stay on the host. An unnamed `--workspace PATH` keeps its earlier meaning: a
-folder that Tasks without a Workspace may inspect as a copy. The copy keeps symbolic links whose
-target stays inside the folder. A link that points outside it fails the Task Attempt, so a copy
-never exposes other files on the host.
+names; the paths stay on the host. An unnamed `--workspace PATH` names a folder that Tasks
+without a Workspace may inspect as a copy. For the top level of a git repository, the copy holds
+tracked files, untracked files that git does not ignore, and `.git`. Ignored entries such as
+`node_modules/`, `.venv/`, and `.env` stay on the host. Any other folder is copied whole. The copy
+keeps symbolic links whose target stays inside the folder. A copied link that points outside it
+fails the Task Attempt, so a copy never exposes other files on the host.
 
 Check which hosts declare a checkout:
 

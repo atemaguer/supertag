@@ -405,6 +405,30 @@ one of those conditions is met; see [Wait conditions](#wait-conditions).
 `escalate_task` raises the effort or switches the model of the Task the manager is working, then
 continues that Task in a new Task Attempt; see [Self-escalation](#self-escalation).
 
+### Conversation tools
+
+A conversation turn is a Task in a conversation Session: a thread, an issue, a direct chat, or a
+CLI conversation. Besides the Objective tools, it receives tools that read the Tag's other work
+and hand work to [work Sessions](../concepts/tasks.md#session):
+
+| Tool | Input | Effect |
+| --- | --- | --- |
+| `list_objectives` | `limit`, `offset` | Lists the open Objectives the Tag owns, with where each started |
+| `read_objective` | an Objective ID | Reads any Objective the Tag owns |
+| `list_sessions` | `limit`, `offset` | Lists the Tag's other Sessions this conversation may see |
+| `search_sessions` | `query` (up to 200 characters), `limit` | Finds completed Tasks in those Sessions by request or result |
+| `read_session` | `sessionId`, `limit`, `before` | Reads one visible Session's latest completed Tasks; `before` pages to older ones |
+| `start_session` | `title` (up to 120 characters), `instruction` (up to 8,000), optional `workspace` | Starts a work Session |
+| `continue_session` | `sessionId`, `message` (up to 8,000 characters) | Starts a work Session's next Task |
+
+`limit` is at most 20. A conversation sees a Session of its Tag that is shared, or private to the
+same person. Session reads return history, not instructions, and grant no authority.
+
+A work Session's Task receives the read tools plus `ask` with `question`, up to 2,000 characters.
+A report turn receives only the read tools. One conversation turn starts at most four work
+Sessions. A conversation holds at most eight unfinished work Sessions, and at most four run at
+once.
+
 ### Identity and preconditions
 
 - Coordination calls are authenticated by a credential scoped to the active Task Attempt and
@@ -601,7 +625,8 @@ The Worker shortens an oversized finding summary or location to 500 characters, 
 - A stored result whose findings do not validate never reads as having no open findings.
   `read_task`, `supertag describe task`, and the Objective brief show that Task's findings as
   unreadable, with the reason, and still show other Tasks.
-- The shipped Claude Code and Codex harnesses ask for one `Finding:` line per problem:
+- The shipped Claude Code and Codex harnesses ask an Objective Task for one `Finding:` line per
+  problem; conversation, work Session, and report turns are not asked for them:
   `Finding: <high|medium|low> | <summary> | <location>`, with the location part optional. The
   line may start with a `-`, `*`, or `+` bullet.
 - Lines inside fenced code blocks are never findings, and a finding-like line inside one is

@@ -577,7 +577,8 @@ header `x-vercel-ai-ui-message-stream: v1`. Each event is one `data:` line with 
 - **Waiting.** Until the Task starts, the response stays open and sends a comment line every 15
   seconds.
 
-Reply text reaches readers only through this stream. The Task's events record its command and tool
+Streamed reply text reaches readers only through this stream; the message record and the Task
+result keep the final reply. The Task's events record its command and tool
 activity and its result, not each piece of text.
 
 ## Tag messaging administration (Experimental)
@@ -804,7 +805,8 @@ compatible resume point when admitting the next Task.
 A record's `status` is `stored` while its native data is available but has not been approved for
 automatic resumption. Successful execution can promote it to `resumable`. A partially synchronized
 or failed Task Attempt can therefore remain inspectable without becoming a resume point. Even a
-`resumable` record must match the current permissions, Roles, audience, profile, and workspace; a newer
+`resumable` record resumes only for the same Tag and Session, the same reply audience, and the
+harness that produced it, and that harness must be able to load it where it runs; a newer
 execution without eligible state blocks fallback to older native state. Native transcripts are
 private Session data and are not discoverable through the artifact catalog or exposed as a new
 coordination tool.

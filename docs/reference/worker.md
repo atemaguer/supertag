@@ -292,6 +292,12 @@ for await (const chunk of stream) yield { type: "output.delta", text: chunk };
 yield { type: "output.message", text: fullText };
 ```
 
+The Worker redacts deltas as one text. It joins consecutive `output.delta` chunks, holds back a
+tail that a later chunk could complete into a credential, and emits that tail redacted before the
+next event that ends the run. `usage.updated`, `progress.updated`, and `agent.updated` do not end
+it. Chunk boundaries are not preserved. The Control Plane relays deltas to the reply stream and
+does not store them.
+
 Each `usage.updated` event carries **cumulative** usage for the Task Attempt, not an increment.
 The Control Plane uses the latest valid report and never sums reports. `inputTokens`,
 `outputTokens`, `cachedInputTokens`, and `totalTokens` must be non-negative integers. `complete`
@@ -834,8 +840,9 @@ isolation or network enforcement by default; see [Guarantees](#guarantees).
 
 **Session portability.** Portable session state contains bounded thread transcripts, not
 host-local directory references. Restoration into a fresh environment preserves native thread
-identity and updates workspace context. Session, Tag, profile, and workspace identity must still
-match. Credentials, configuration, and workspace artifacts are excluded; configure authentication
+identity and updates workspace context. The Session, Tag, and workspace must still match, and so
+must the dynamic tool definitions the thread started with; the Worker Profile revision does not
+need to match. Credentials, configuration, and workspace artifacts are excluded; configure authentication
 and transfer artifacts separately. Keep Session storage available to the replacement Worker and
 protect it as conversation data. Portability does not imply compatibility with arbitrary Codex
 versions. Codex session state format version 2 records the manager tool surface. Version 1 state
@@ -1926,8 +1933,10 @@ A harness reports `usage.updated` with cumulative counts; the Control Plane keep
 report. After cancellation the Worker accepts only `usage.updated` from the harness. See
 [harness events](#harness-events).
 
-The Control Plane persists the event stream under the Task Attempt and separately records
-Task/Task Attempt lifecycle events. A separate durable egress loop asks the Gateway to deliver a short,
+The Control Plane persists the event stream under the Task Attempt, except `output.delta`: reply
+text reaches readers through the reply stream
+([CLI conversations](control-plane-api.md#cli-conversations-experimental)), and `output.message`
+and the result keep the final text. It separately records Task/Task Attempt lifecycle events. A separate durable egress loop asks the Gateway to deliver a short,
 human acknowledgement while execution remains active. On Slack, the terminal result or error edits
 that acknowledgement in place, so retries and internal execution phases do not create thread noise.
 Task IDs, Worker details, and artifact catalog identities remain available through authenticated operational

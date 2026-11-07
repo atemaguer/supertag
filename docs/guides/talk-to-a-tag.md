@@ -20,9 +20,9 @@ Use this for questions and small requests. To give a Tag an outcome to own, crea
 supertag message tag planner 'What are you working on?'
 ```
 
-The command shows the reply as the Tag writes it. In a terminal, a dim line such as
-`· running: ls src` marks each command the Tag starts. The command exits when the reply is
-complete. To send a longer message, pass `-` and write it to standard input:
+While the Tag works, the command shows the commands it runs, then prints its reply. In a
+terminal, a dim line such as `· running: ls src` marks each command the Tag starts. The command
+exits when the reply is complete. To send a longer message, pass `-` and write it to standard input:
 
 ```sh
 supertag message tag planner - < question.md

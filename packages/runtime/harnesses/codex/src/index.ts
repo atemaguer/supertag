@@ -228,8 +228,6 @@ interface StoredCodexSessionState {
   readonly usageBaselines?: CodexAppServerExecution["threadUsage"];
   readonly sessionId: string;
   readonly tagId: string;
-  readonly workerProfileId: string;
-  readonly workerProfileRevision: string;
   readonly workspaceKey: string;
   readonly toolSignature: string;
 }
@@ -243,8 +241,6 @@ function storedCodexSessionState(
     data["threadId"],
     data["sessionId"],
     data["tagId"],
-    data["workerProfileId"],
-    data["workerProfileRevision"],
     data["workspaceKey"],
     data["toolSignature"],
   ];
@@ -265,8 +261,6 @@ function storedCodexSessionState(
       : { usageBaselines: validatedUsageBaselines(data["usageBaselines"]) }),
     sessionId: data["sessionId"] as string,
     tagId: data["tagId"] as string,
-    workerProfileId: data["workerProfileId"] as string,
-    workerProfileRevision: data["workerProfileRevision"] as string,
     workspaceKey: data["workspaceKey"] as string,
     toolSignature: data["toolSignature"] as string,
   };
@@ -1219,8 +1213,6 @@ export class CodexHarness implements Harness {
         ...(usageBaselines === undefined ? {} : { usageBaselines }),
         sessionId,
         tagId: input.attempt.tag.id,
-        workerProfileId: input.attempt.workerProfile.id,
-        workerProfileRevision: input.attempt.workerProfile.revision,
         workspaceKey: codexWorkspaceKey(input, this.#workspace),
         toolSignature: this.#toolSignature(input.tools),
       },

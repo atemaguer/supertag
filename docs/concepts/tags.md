@@ -4,8 +4,9 @@
 
 A **Tag** is a persistent AI identity with its own responsibilities and permissions. For example, a
 reviewer Tag is responsible for reviewing changes and may read the repository but not edit it. You
-assign work to a Tag by name. Each assignment runs as a new harness session, and the Tag is what
-persists across those sessions: its configuration, its open assignments, and their results. SuperTag
+assign work to a Tag by name. A Tag talks to people in many conversations, each its own Session with
+its own harness session, and works on assignments that each start a new one. The Tag is what
+persists across them: its configuration, its Sessions, its open assignments, and their results. SuperTag
 calls each accepted request or assignment a **Task**, and the place where a Tag receives internal
 messages its **Mailbox**. When people call on the Tag from Slack or another shared tool, they
 experience it as an AI teammate. The same Tag can work across several tools without losing its

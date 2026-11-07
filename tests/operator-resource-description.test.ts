@@ -75,7 +75,7 @@ it("summarizes native archive metadata without exposing archived content", async
     .mockResolvedValueOnce({ items: [] });
   const output = await runResourceCommand(api, "describe", ["session", "session/a"]);
   expect(request).toHaveBeenCalledWith("/api/v1/sessions/session%2Fa/states");
-  expect(output).toContain("reuse still requires compatible");
+  expect(output).toContain("a later Task of this Session resumes it");
   expect(output).not.toContain("never render transcript");
 });
 it("quotes operator follow-up commands safely and distinguishes empty bindings", async () => {
