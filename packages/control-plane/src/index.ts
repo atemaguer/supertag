@@ -2335,7 +2335,9 @@ export class ControlPlane {
         ? undefined
         : internalTurnMessages(internal, text, task.sessionId, coordination !== undefined);
     const workspaceEvents =
-      task.workspacePlan.status === "workspace" ? await this.#store.listTaskEvents(task.id) : [];
+      task.workspacePlan.status === "workspace"
+        ? workerEvents(await this.#store.listTaskEvents(task.id))
+        : [];
     const branchPin =
       task.workspacePlan.status === "workspace"
         ? workspaceBranchPin(workspaceEvents, task.workspacePlan.workspace)

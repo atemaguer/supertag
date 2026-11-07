@@ -60,7 +60,11 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       }[];
 
       /** A Tag Worklet whose work Tasks run a real Worker on a Workspace worktree. */
-      function worklet(workspaces: readonly string[]): Worklet {
+      function worklet(
+        workspaces: readonly string[],
+        options: { readonly failFirstWork?: boolean } = {},
+      ): Worklet {
+        let failWork = options.failFirstWork === true;
         const root = join(checkout, "..", `${checkout.split("/").at(-1)}-worktrees`);
         cleanups.push(() => rm(root, { recursive: true, force: true }));
         let files: string[] = [];
@@ -122,8 +126,16 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             if (kind === "work" && spec.workspacePlan.status === "workspace") {
               const workerProfile = (await worker.describe()).profiles[0];
               if (!workerProfile) throw new Error("The Worker has no profile");
-              for await (const event of worker.execute({ ...spec, workerProfile })) yield event;
+              const failing = failWork;
+              failWork = false;
+              for await (const event of worker.execute({ ...spec, workerProfile })) {
+                // A failing first Attempt commits its edits, then fails before completing.
+                if (failing && (event.type === "result" || event.type === "execution.completed"))
+                  continue;
+                yield event;
+              }
               seen.push({ kind, spec, results: [], files });
+              if (failing) throw new Error("The Worker Host went away");
               return;
             }
             const identity = { taskId: spec.taskId, attemptId: spec.attemptId };
@@ -179,7 +191,10 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         };
       }
 
-      async function start(workspaces: readonly string[]) {
+      async function start(
+        workspaces: readonly string[],
+        options: { readonly failFirstWork?: boolean } = {},
+      ) {
         const directory = await mkdtemp(join(tmpdir(), "supertag-session-workspaces-"));
         cleanups.push(() => rm(directory, { recursive: true, force: true }));
         let databaseUrl = `file:${join(directory, "supertag.db")}`;
@@ -202,7 +217,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           port: 0,
           databaseUrl,
           adminToken: ADMIN,
-          worklet: worklet(workspaces),
+          worklet: worklet(workspaces, options),
         });
         cleanups.push(async () => {
           await runtime?.close();
@@ -293,6 +308,28 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         expect(git(checkout, "show", `${branch}-2:first.txt`)).toBe("first.txt");
         expect(git(checkout, "show", `${branch}-2:second.txt`)).toBe("second.txt");
         expect(git(checkout, "merge-base", "--is-ancestor", head, `${branch}-2`)).toBe("");
+      });
+
+      it("pins a retried work Session Task to its own branch and head", async () => {
+        await start(["app"], { failFirstWork: true });
+        const record = await send("work:Fix readme");
+        const started = record.startedSessions?.[0];
+        const taskId = started?.taskId;
+        if (!started || !taskId) throw new Error("missing work Session");
+        const branch = workSessionBranch(started.id);
+        await vi.waitFor(
+          async () => expect((await store.findTaskById(taskId))?.status).toBe("completed"),
+          { timeout: 20_000 },
+        );
+        const work = seen.filter((entry) => entry.kind === "work");
+        expect(work).toHaveLength(2);
+        // The retry names the branch and head the first Attempt committed, so a Worker Host
+        // without that branch adopts it instead of starting again from the base.
+        const retried = work[1]?.spec.workspacePlan as { branchPinHead?: string } | undefined;
+        expect(retried).toMatchObject({ branch, branchPin: branch });
+        expect(retried?.branchPinHead).toMatch(/^[0-9a-f]{40}/u);
+        const pinned = retried?.branchPinHead ?? "";
+        expect(git(checkout, "merge-base", "--is-ancestor", pinned, branch)).toBe("");
       });
 
       it("asks for a choice among several Workspaces and validates it", async () => {
