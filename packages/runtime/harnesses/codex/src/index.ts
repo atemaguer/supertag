@@ -1396,7 +1396,7 @@ export function codexInformationRetrievalPrompt(
 
 Answer the user's request using evidence from the current workspace.${workspaceEvidence} Inspect the relevant source files before answering when the request depends on code. ${localChanges}${externalTools} If the available evidence or authority is insufficient, say what is missing instead of guessing or widening the action.
 
-Return a concise, standalone answer suitable for posting directly into a ${task.input.origin.surface} thread. Mention useful file paths or symbols, but do not include hidden reasoning, tool logs, preambles, or a description of your process. ${CHANGE_SUMMARY_INSTRUCTION} ${FINDINGS_INSTRUCTION}${additionalInstructions}${historyContext}
+Return a concise, standalone answer suitable for posting directly into a ${task.input.origin.surface} thread. Mention useful file paths or symbols, but do not include hidden reasoning, tool logs, preambles, or a description of your process. ${CHANGE_SUMMARY_INSTRUCTION} ${findingsInstruction(task)}${additionalInstructions}${historyContext}
 
 ${packagedContext}
 
@@ -2387,4 +2387,12 @@ function validatedUsageBaselines(value: unknown): CodexAppServerExecution["threa
     }
   }
   return value as CodexAppServerExecution["threadUsage"];
+}
+
+/**
+ * Review findings are parsed for Objective managers to accept. A person in a conversation reads
+ * the reply itself, so conversation, work Session and report turns are not asked for those lines.
+ */
+function findingsInstruction(task: TaskAttemptSpec): string {
+  return task.coordination?.scope === "surface" ? "" : FINDINGS_INSTRUCTION;
 }

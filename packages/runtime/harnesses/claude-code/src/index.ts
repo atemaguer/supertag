@@ -1727,7 +1727,7 @@ export function claudeCodeInformationRetrievalPrompt(
 
 Use the current workspace when it provides relevant evidence. ${localPolicy}${externalTools} If the available evidence or authority is insufficient, say what is missing instead of guessing or widening the action.
 
-Return one concise, standalone answer suitable for a ${task.input.origin.surface} thread. Mention useful file paths or symbols, but omit hidden reasoning and tool logs. ${CHANGE_SUMMARY_INSTRUCTION} ${FINDINGS_INSTRUCTION}${extra}${history}${skills}
+Return one concise, standalone answer suitable for a ${task.input.origin.surface} thread. Mention useful file paths or symbols, but omit hidden reasoning and tool logs. ${CHANGE_SUMMARY_INSTRUCTION} ${findingsInstruction(task)}${extra}${history}${skills}
 
 User question:
 ${question}`;
@@ -2581,4 +2581,12 @@ function profileConfiguration(input: ExecutionContext): {
       throw new Error(`Invalid Harness configuration field: ${key}`);
   }
   return config as { model?: string; timeoutMs?: number; maxTurns?: number };
+}
+
+/**
+ * Review findings are parsed for Objective managers to accept. A person in a conversation reads
+ * the reply itself, so conversation, work Session and report turns are not asked for those lines.
+ */
+function findingsInstruction(task: TaskAttemptSpec): string {
+  return task.coordination?.scope === "surface" ? "" : FINDINGS_INSTRUCTION;
 }

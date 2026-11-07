@@ -164,9 +164,12 @@ export async function runTagConversationCommand(
   let streamed: StreamedReply | undefined;
   if (record.status !== "replied")
     try {
+      // A conversation turn's text includes what the Tag says between tool calls; show only its
+      // activity while it runs, then the final reply, as a teammate's message.
       streamed = await streamReply(client, `${messagePath}/stream`, {
         idleMs: timeoutMs,
         interactive: options.interactive === true,
+        text: false,
         write,
         ...(options.signal === undefined ? {} : { signal: options.signal }),
       });
@@ -189,13 +192,7 @@ export async function runTagConversationCommand(
     write(lineBreak);
     throw new Error(`Tag ${terminalText(name)} could not answer: ${finalText}`);
   }
-  const shown = streamed?.text.trim() ?? "";
-  // The streamed text usually ends with the final reply; repeat the reply only when it does not.
-  write(
-    finalText.trim() !== "" && shown.endsWith(finalText.trim())
-      ? lineBreak
-      : `${lineBreak}${shown === "" ? "" : "\n"}${terminalLines(finalText.trimEnd())}\n`,
-  );
+  write(`${lineBreak}${terminalLines(finalText.trimEnd())}\n`);
   const followed = await followWorkSessions(
     client,
     tagPath,
@@ -242,6 +239,7 @@ async function followWorkSessions(
                 idleMs: options.idleMs,
                 interactive: true,
                 text: false,
+                indent: true,
                 ...(sessions.length > 1 ? { label: session.title } : {}),
                 write: options.write,
                 signal: following.signal,
@@ -297,6 +295,8 @@ async function streamReply(
     readonly text?: boolean;
     /** Names the work Session an activity line belongs to. */
     readonly label?: string;
+    /** Indents activity lines under a work Session's "working" line. */
+    readonly indent?: boolean;
     readonly write: (text: string) => void;
     readonly signal?: AbortSignal;
   },
@@ -345,7 +345,9 @@ async function streamReply(
         if (line !== undefined) {
           if (!atLineStart) write("\n");
           const shown = options.label === undefined ? line : `${options.label} ${line}`;
-          write(`\u001b[2m${options.text === false ? "  " : ""}${terminalText(shown)}\u001b[22m\n`);
+          write(
+            `\u001b[2m${options.indent === true ? "  " : ""}${terminalText(shown)}\u001b[22m\n`,
+          );
         }
       } else if (part.type === "error") {
         const errorText = typeof part["errorText"] === "string" ? part["errorText"] : "";
