@@ -2799,9 +2799,17 @@ export class ControlPlane {
       if ((await this.#store.findTagById(task.tagId))?.status !== "active") return;
       const final = await this.#store.findOutboundReply(work.id, "final");
       const question = task.status === "completed" ? task.outcome?.["question"] : undefined;
+      const basedOn =
+        task.workspacePlan.status === "workspace" && internal.continued === true
+          ? (await sessionWorkspaceBranches(this.#store, task, task.workspacePlan)).at(-1)?.branch
+          : undefined;
       const delivery =
         task.workspacePlan.status === "workspace"
-          ? workSessionDelivery(task, workerEvents(await this.#store.listTaskEvents(task.id)))
+          ? workSessionDelivery(
+              task,
+              workerEvents(await this.#store.listTaskEvents(task.id)),
+              basedOn,
+            )
           : undefined;
       const admission = await this.#store.admitInboundEvent({
         surfaceAccountId: starting.surfaceAccountId,

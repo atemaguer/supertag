@@ -308,6 +308,17 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         expect(git(checkout, "show", `${branch}-2:first.txt`)).toBe("first.txt");
         expect(git(checkout, "show", `${branch}-2:second.txt`)).toBe("second.txt");
         expect(git(checkout, "merge-base", "--is-ancestor", head, `${branch}-2`)).toBe("");
+        // Its report says the new branch already holds the earlier branch's changes.
+        await vi.waitFor(
+          () =>
+            expect(
+              seen
+                .filter((entry) => entry.kind === "report")
+                .flatMap((entry) => entry.spec.input.messages.map((message) => message.text))
+                .join("\n"),
+            ).toContain(`starts from the work Session's earlier branch ${branch}, so it already`),
+          { timeout: 20_000 },
+        );
       });
 
       it("pins a retried work Session Task to its own branch and head", async () => {

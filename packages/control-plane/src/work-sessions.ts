@@ -200,7 +200,11 @@ export function workSessionBranch(sessionId: string, previous?: string): string 
  * SuperTag's account of where a finished work Task's Workspace changes are, from the Worker's
  * recorded delivery; undefined for a Task without a Workspace.
  */
-export function workSessionDelivery(task: Task, events: readonly TaskEvent[]): string | undefined {
+export function workSessionDelivery(
+  task: Task,
+  events: readonly TaskEvent[],
+  basedOn?: string,
+): string | undefined {
   if (task.workspacePlan.status !== "workspace") return undefined;
   const delivered = taskDelivery({
     workspacePlan: task.workspacePlan,
@@ -220,7 +224,12 @@ export function workSessionDelivery(task: Task, events: readonly TaskEvent[]): s
       : workspace.delivery === "patch" && delivered?.patches[0] !== undefined
         ? ` Its patch is the output file ${delivered.patches[0].path}.`
         : "";
-  return `Its changes are committed to branch ${workspace.branch} of Workspace ${workspace.name} (head ${workspace.head.slice(0, 12)}${files}).${where}`;
+  // A continued Task's branch starts from the Session's earlier branch, so it holds all the work.
+  const stacked =
+    basedOn === undefined
+      ? ""
+      : ` That branch starts from the work Session's earlier branch ${basedOn}, so it already contains those changes; it is the one to review or merge.`;
+  return `Its changes are committed to branch ${workspace.branch} of Workspace ${workspace.name} (head ${workspace.head.slice(0, 12)}${files}).${stacked}${where}`;
 }
 
 /**
