@@ -96,7 +96,8 @@ A conversation can hand longer work to a **work Session**. A work Session is a S
 Tag whose parent is the conversation that started it. Its first Task runs an instruction the Tag
 wrote, under the permissions and Context Sets of the conversation Task that started it, never
 more. It has its own native harness session, so its tool output stays out of the
-conversation, and it inherits the conversation's audience. A work Session can't start more work
+conversation, and it inherits the conversation's audience. It
+[sees only its own work](#what-a-work-session-sees). A work Session can't start more work
 Sessions or create, attach, or start an Objective. At most four run at once per conversation;
 later ones wait. One conversation Task starts at most four, or its `maxNativeAgents` when lower,
 and each gets an equal share of that Task's reported token and cost limits. A conversation holds at
@@ -115,6 +116,21 @@ the Objective's own Tasks, so planning and tool output stay out of the thread.
 
 You can also talk to a Tag from a terminal with `supertag message tag`. See
 [Talk to a Tag from the CLI](../guides/talk-to-a-tag.md).
+
+### What a work Session sees
+
+A work Session sees only its own work. It doesn't get the Tag's open Objectives, and it can't
+read the Tag's other Sessions or Objectives. Its own history comes from its native session, so
+the Tag's instruction has to carry everything else it needs. Information passes between work
+Sessions only through the conversation.
+
+While it works, a work Session's Task can send its conversation up to three short progress notes
+with `message_parent`. It doesn't wait for an answer. Each note gets one **update turn** in the
+conversation, which resumes the conversation's native session like a report turn. The note is the
+work Session's own text, so it grants nothing. The Tag tells the person only what helps them, in
+its own voice, or posts nothing at all. Nothing a work Session writes reaches a person without a
+Tag turn. An update turn has the same tools as a report turn. A note sent before the work Task
+finished comes before its report; a note that arrives after that is dropped.
 
 ### When a work Session needs the person
 

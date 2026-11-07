@@ -525,6 +525,30 @@ Task owns delivery. A busy recipient processes the message when execution capaci
 available. Incoming messages in a started Objective can also create coordination Tasks; see
 [automatic coordination Tasks](mailbox.md#automatic-coordination-tasks).
 
+### Conversation tools
+
+A Task in a conversation Session, such as a Slack thread or a CLI conversation, gets a different
+tool set from an Objective Task. Which tools it gets depends on its turn. SuperTag refuses a
+direct call to a tool the turn doesn't get, not only leaves it out of the list.
+
+| Turn | Tools |
+| --- | --- |
+| A person's message | `create_objective`, `attach_objective`, the reads below, `start_objective`, `instruct_objective`, `start_session`, `continue_session` |
+| Report turn: a work Session's result | Reads: `select_objective`, `read_objective`, `list_tasks`, `read_commitments`, `list_sessions`, `search_sessions`, `read_session`, `list_objectives` |
+| Update turn: a work Session's progress note | The same reads, and `skip_reply` |
+| Work Session Task | `ask`, `message_parent` |
+
+- A work Session sees only its own work. It gets none of the reads, and no portfolio: the system
+  message that lists the Tag's open Objectives.
+- `message_parent {text}` sends the conversation a note of 1 to 2000 characters and doesn't wait.
+  Each note admits one update turn, once, even across a restart. A work Task sends at most 3;
+  SuperTag refuses the fourth. A note that arrives after the work Task finished is dropped, so the
+  update turns of a Task always come before its report.
+- `skip_reply` ends an update turn without posting anything, on any collaboration surface or in
+  the CLI conversation.
+- `ask {question}` ends the work Session's Task waiting on the person. See
+  [when a work Session needs the person](../concepts/tasks.md#when-a-work-session-needs-the-person).
+
 ## Review and acceptance
 
 - A successful execution submits a result. It does not accept the assignment or complete the

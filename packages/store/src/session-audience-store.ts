@@ -19,8 +19,10 @@ import {
   TagMessagingError,
   type TagObjectiveSummary,
   type TaskStatus,
+  WORK_SESSION_MAX_UPDATES,
   type WorkSessionSummary,
   workSessionReportDeliveryId,
+  workSessionUpdateDeliveryId,
 } from "@supertag/core";
 import { and, asc, desc, eq, inArray, isNotNull, ne, notInArray, or, sql } from "drizzle-orm";
 
@@ -381,6 +383,42 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
     return row === undefined
       ? undefined
       : { inboundEventId: row.inboundEventId, ...(row.taskId ? { taskId: row.taskId } : {}) };
+  }
+
+  async listWorkSessionUpdates(workTaskId: string): Promise<
+    readonly {
+      readonly sequence: number;
+      readonly inboundEventId: string;
+      readonly taskId?: string;
+    }[]
+  > {
+    const i = this.tables.durableInboundEvents,
+      t = this.tables.tasks;
+    // Updates share the work Task's surface account, like its report.
+    const [work] = await this.db
+      .select({ surfaceAccountId: i.surfaceAccountId })
+      .from(t)
+      .innerJoin(i, eq(i.id, t.inboundEventId))
+      .where(eq(t.id, workTaskId))
+      .limit(1);
+    if (work === undefined) return [];
+    const ids = Array.from({ length: WORK_SESSION_MAX_UPDATES }, (_, index) =>
+      workSessionUpdateDeliveryId(workTaskId, index + 1),
+    );
+    const rows = await this.db
+      .select({ deliveryId: i.deliveryId, inboundEventId: i.id, taskId: t.id })
+      .from(i)
+      .leftJoin(t, eq(t.inboundEventId, i.id))
+      .where(and(eq(i.surfaceAccountId, work.surfaceAccountId), inArray(i.deliveryId, ids)));
+    return rows
+      .map((row: any) => ({
+        sequence: ids.indexOf(row.deliveryId) + 1,
+        inboundEventId: row.inboundEventId as string,
+        ...(row.taskId ? { taskId: row.taskId as string } : {}),
+      }))
+      .sort(
+        (left: { sequence: number }, right: { sequence: number }) => left.sequence - right.sequence,
+      );
   }
 
   /**

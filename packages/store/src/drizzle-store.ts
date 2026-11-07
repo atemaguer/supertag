@@ -2534,6 +2534,11 @@ export class DrizzleStore implements Store {
   ): ReturnType<SessionAudienceStore["findWorkSessionReport"]> {
     return this.#sessionAudience().findWorkSessionReport(...args);
   }
+  listWorkSessionUpdates(
+    ...args: Parameters<SessionAudienceStore["listWorkSessionUpdates"]>
+  ): ReturnType<SessionAudienceStore["listWorkSessionUpdates"]> {
+    return this.#sessionAudience().listWorkSessionUpdates(...args);
+  }
   #sessionAudience(): DrizzleSessionAudienceStore {
     return new DrizzleSessionAudienceStore(this.#db, this.#tables, this.provider);
   }

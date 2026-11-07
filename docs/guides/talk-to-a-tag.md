@@ -60,6 +60,17 @@ In a terminal, dim lines such as `· running: rg invoice` show what each work Se
 a work Session finishes, the Tag gets a turn in your conversation to report the result in its
 own words. The command exits when every work Session it started has reported.
 
+A work Session can also send the conversation a progress note while it works. The Tag decides
+whether you need to hear it. When it passes one on, the command prints it under
+`· update: TITLE`; when it stays silent, nothing prints:
+
+```text
+· working: Investigate slow billing export
+· update: Investigate slow billing export
+It loads every invoice before filtering; I'm checking whether the query can filter instead.
+· done: Investigate slow billing export
+```
+
 Ctrl-C stops following, not the work. The report still arrives in the conversation, and your next
 message there sees it.
 
@@ -116,6 +127,9 @@ under `PARENT`. `STATUS` shows the latest Task's status: `pending`, `running`, `
 - **A work Session has the conversation's permissions, never more.** It runs with the same
   permissions as the message that started it. It can't start more work Sessions or
   create Objectives. A work Session started from your private conversation is private to you too.
+- **A work Session sees only its own work.** It can't read your conversation, the Tag's other
+  Sessions, or its Objectives, so the Tag gives it everything it needs when it starts it. It
+  sends at most three progress notes per Task, and only the Tag decides what reaches you.
 - **A work Session commits its edits to its own branch.** When the Tag's Worker Hosts declare a
   Workspace, the work Session edits it and the Worker commits to a branch such as
   `supertag/session/0f3c2a9e`. Your checkout stays on its branch. The report names the branch, and
@@ -135,7 +149,8 @@ under `PARENT`. `STATUS` shows the latest Task's status: `pending`, `running`, `
 - `--output json` waits for the reply and every report, and prints one message record with the
   Session, the Task, the reply, and `startedSessions`: each work Session the message started or
   continued, with its status and report. A work Session waiting on you has status `waiting` and
-  its `question`, and one waiting for approval lists the notices in `approvals`.
+  its `question`, and one waiting for approval lists the notices in `approvals`. `updates` lists
+  what the Tag said about the work Session's progress notes; a silent one isn't listed.
 - **Ctrl-C stops showing the reply, not the work.** The Tag keeps working. The command prints the
   `supertag describe task` command that follows the Task.
 
