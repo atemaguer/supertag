@@ -2593,6 +2593,12 @@ export class ControlPlane {
           409,
           "That work Session is still working; its report comes back here when it finishes",
         );
+      // A cancelled work Session was stopped on purpose; only a new work Session resumes the work.
+      if (target.task.status === "cancelled")
+        throw new TagMessagingError(
+          409,
+          "That work Session was cancelled; start a new work Session if the work should continue",
+        );
       if (startedBy(target) === conversation.id)
         throw new TagMessagingError(
           409,

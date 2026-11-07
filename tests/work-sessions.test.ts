@@ -698,6 +698,10 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         await start();
         await new Promise((resolve) => setTimeout(resolve, 300));
         expect(script.seen.filter((entry) => entry.kind === "report")).toHaveLength(6);
+        // A cancelled work Session stays stopped: the Tag cannot continue it.
+        const resumed = await send(`continue:${done[5]?.id}|Answer: keep going`);
+        expect(callsOf(resumed.taskId)[0]?.result["isError"]).toBe(true);
+        expect(callText(callsOf(resumed.taskId)[0])).toContain("was cancelled");
         expect(await store.listUnreportedWorkTasks(20)).toEqual([]);
       });
 
