@@ -212,7 +212,25 @@ function scriptedWorklet(maxConcurrency = 10) {
       };
       let text = "";
       if (kind === "conversation") {
-        const message = request?.text ?? "";
+        let message = request?.text ?? "";
+        // "spend:N|REST" reports N tokens and N/20 cents of spend first, then handles REST.
+        const spend = /^spend:(\d+)\|/u.exec(message);
+        if (spend) {
+          const tokens = Number(spend[1]);
+          yield {
+            ...identity,
+            type: "usage.updated",
+            usage: {
+              inputTokens: tokens,
+              outputTokens: 0,
+              cachedInputTokens: 0,
+              totalTokens: tokens,
+              complete: false,
+              reportedCost: { amountMinor: Math.floor(tokens / 20), currency: "USD" },
+            },
+          };
+          message = message.slice(spend[0].length);
+        }
         if (message.startsWith("work:")) {
           for (const title of message.slice(5).split("|"))
             await call("start_session", { title, instruction: `Investigate ${title}` });
@@ -843,6 +861,98 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         await start();
         await new Promise((resolve) => setTimeout(resolve, 300));
         expect(script.seen.filter((entry) => entry.kind === "report")).toHaveLength(1);
+      });
+
+      it("counts a turn's work Sessions against the turn's own token and cost limits", async () => {
+        const first = await send("hello");
+        const startingTask = await store.findTaskById(first.taskId);
+        const starting = await store.findInboundEventById(startingTask?.inboundEventId ?? "");
+        if (!startingTask || !starting) throw new Error("missing conversation turn");
+        /** Admits a conversation turn with reported limits, as an embedder's surface would. */
+        const turn = async (text: string, maxReportedTokens: number, amountMinor: number) => {
+          const at = new Date().toISOString();
+          const eventId = `limited:${text}`;
+          const execution = {
+            limits: { maxReportedTokens, maxReportedCost: { amountMinor, currency: "USD" } },
+          };
+          const admitted = await store.admitInboundEvent({
+            surfaceAccountId: starting.surfaceAccountId,
+            tagRouteId: starting.tagRouteId,
+            tagId: starting.tagId,
+            authorization: starting.authorization,
+            contextPlan: starting.contextPlan,
+            execution,
+            event: { ...starting.event, eventId, logicalEventId: eventId, text, occurredAt: at },
+          });
+          const task = await store.openTask({
+            inboundEventId: admitted.work.id,
+            tagId: starting.tagId,
+            sessionId: startingTask.sessionId,
+            execution,
+            actor: starting.event.actor,
+            trigger: startingTask.trigger,
+            requestText: text,
+            workspacePlan: startingTask.workspacePlan,
+            sessionHistory: [],
+            authorizationSnapshot: starting.authorization,
+            contextPlan: starting.contextPlan,
+            createdAt: at,
+          });
+          let record: TagMessageRecord | undefined;
+          await vi.waitFor(
+            async () => {
+              record = await read(task.id);
+              expect(record.status).toBe("replied");
+              for (const session of record.startedSessions ?? [])
+                expect(session.reportStatus).toBe("replied");
+            },
+            { timeout: 20_000, interval: 50 },
+          );
+          return record as TagMessageRecord;
+        };
+        const limitsOf = async (taskId: string | undefined) =>
+          (await store.findTaskById(taskId ?? ""))?.execution.limits;
+
+        // A turn that already spent 6,000 of 10,000 tokens and 300 of 500 cents leaves the rest
+        // to the four work Tasks it may still admit, a quarter each, and each admission draws
+        // from what is left.
+        const limited = await turn("spend:6000|work:a|b", 10_000, 500);
+        const [a, b] = limited.startedSessions ?? [];
+        expect(await limitsOf(a?.taskId)).toEqual({
+          maxReportedTokens: 1_000,
+          maxReportedCost: { amountMinor: 50, currency: "USD" },
+        });
+        expect(await limitsOf(b?.taskId)).toEqual({
+          maxReportedTokens: 1_000,
+          maxReportedCost: { amountMinor: 50, currency: "USD" },
+        });
+        // Report turns run outside the budget, under the turn's full limits: a resumed
+        // conversation pays for its whole context on its first model call.
+        expect(await limitsOf(a?.reportTaskId)).toEqual({
+          maxReportedTokens: 10_000,
+          maxReportedCost: { amountMinor: 500, currency: "USD" },
+        });
+
+        // Too little left: a 250-token share is above zero but under a tenth of the limit, so
+        // the turn starts nothing and does the work itself.
+        const spent = await turn("spend:9000|work:c", 10_000, 1_000);
+        expect(spent.startedSessions ?? []).toEqual([]);
+        expect(callsOf(spent.taskId)[0]?.result["isError"]).toBe(true);
+        expect(callText(callsOf(spent.taskId)[0])).toContain(
+          "already spent or hold too much of its token and cost limits",
+        );
+
+        // continue_session draws from the continuing turn, not the turn that started the work.
+        const continued = await turn(`spend:1000|continue:${a?.id}|Answer: go on`, 2_000, 400);
+        expect(callsOf(continued.taskId)[0]?.result["isError"]).toBeUndefined();
+        expect(await limitsOf(continued.startedSessions?.[0]?.taskId)).toEqual({
+          maxReportedTokens: 250,
+          maxReportedCost: { amountMinor: 87, currency: "USD" },
+        });
+
+        // A turn without reported limits passes nothing on.
+        const unlimited = await send("work:d");
+        expect(await limitsOf(unlimited.startedSessions?.[0]?.taskId)).toBeUndefined();
       });
 
       it("lets one turn start at most four work Sessions", async () => {
@@ -1529,26 +1639,69 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
 }
 
 describe("work Session limits and report text", () => {
-  it("splits the starting turn's reported limits among the work Sessions it may start", () => {
+  it("gives each work Task what is left of the starting turn's reported limits", () => {
     expect(workSessionsPerTurn({})).toBe(4);
     expect(workSessionsPerTurn({ limits: { maxNativeAgents: 2 } })).toBe(2);
     expect(workSessionsPerTurn({ limits: { maxNativeAgents: 0 } })).toBe(0);
-    expect(
-      workSessionExecution({
-        harness: "codex",
-        limits: {
-          maxReportedTokens: 10_000,
-          maxReportedCost: { amountMinor: 250, currency: "USD" },
-        },
-      }),
-    ).toEqual({
+    const execution = {
+      harness: "codex",
+      limits: {
+        maxReportedTokens: 10_000,
+        maxReportedCost: { amountMinor: 250, currency: "USD" },
+      },
+    };
+    const none = { tokens: 0, costMinor: 0 };
+    expect(workSessionExecution(execution, none, [])).toEqual({
       harness: "codex",
       limits: { maxReportedTokens: 2_500, maxReportedCost: { amountMinor: 62, currency: "USD" } },
     });
+    // However much the turn spent, its spend and its work Tasks' allowances never exceed its
+    // limits.
+    for (const spent of [
+      none,
+      { tokens: 3_000, costMinor: 40 },
+      { tokens: 6_000, costMinor: 100 },
+    ]) {
+      const admitted: (typeof execution)[] = [];
+      for (;;) {
+        const next = workSessionExecution(execution, spent, admitted);
+        if (next === undefined || admitted.length === 4) break;
+        admitted.push(next as typeof execution);
+      }
+      expect(admitted.length).toBeGreaterThan(0);
+      expect(
+        spent.tokens + admitted.reduce((sum, task) => sum + task.limits.maxReportedTokens, 0),
+      ).toBeLessThanOrEqual(10_000);
+      expect(
+        spent.costMinor +
+          admitted.reduce((sum, task) => sum + task.limits.maxReportedCost.amountMinor, 0),
+      ).toBeLessThanOrEqual(250);
+    }
+    // A turn that spent half its limits gives only the remainder.
+    expect(workSessionExecution(execution, { tokens: 5_000, costMinor: 50 }, [])).toMatchObject({
+      limits: { maxReportedTokens: 1_250, maxReportedCost: { amountMinor: 50 } },
+    });
+    // A share at exactly a tenth of the limit is still given.
+    expect(workSessionExecution(execution, { tokens: 6_000, costMinor: 150 }, [])).toMatchObject({
+      limits: { maxReportedTokens: 1_000, maxReportedCost: { amountMinor: 25 } },
+    });
+    // Nothing left, or a share above zero but under a tenth of the limit, in tokens or in cost:
+    // no work Task.
+    expect(workSessionExecution(execution, { tokens: 9_997, costMinor: 0 }, [])).toBeUndefined();
+    expect(workSessionExecution(execution, { tokens: 0, costMinor: 247 }, [])).toBeUndefined();
+    expect(workSessionExecution(execution, { tokens: 9_000, costMinor: 0 }, [])).toBeUndefined();
+    expect(workSessionExecution(execution, { tokens: 0, costMinor: 160 }, [])).toBeUndefined();
     expect(
-      workSessionExecution({ limits: { maxNativeAgents: 2, maxReportedTokens: 9 } }).limits,
+      workSessionExecution({ limits: { maxNativeAgents: 2, maxReportedTokens: 9 } }, none, [])
+        ?.limits,
     ).toEqual({ maxNativeAgents: 2, maxReportedTokens: 4 });
-    expect(workSessionExecution({ harness: "codex" })).toEqual({ harness: "codex" });
+    // No reported limits: unchanged, whatever the turn spent.
+    expect(workSessionExecution({ harness: "codex" }, { tokens: 99, costMinor: 9 }, [])).toEqual({
+      harness: "codex",
+    });
+    expect(
+      workSessionExecution({ limits: { maxNativeAgents: 1 } }, { tokens: 99, costMinor: 9 }, []),
+    ).toEqual({ limits: { maxNativeAgents: 1 } });
   });
 
   it("keeps the result out of the system message and cannot close its data block", () => {

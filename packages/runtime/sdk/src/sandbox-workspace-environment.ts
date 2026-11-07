@@ -47,6 +47,7 @@ import {
 } from "./workspace-bundles.js";
 import {
   assertWorkspaceMountSupport,
+  COMMIT_STAGING,
   type DevcontainerCommand,
   type DevcontainerSubset,
   type FinalizedWork,
@@ -1068,7 +1069,7 @@ const CHECKOUT_SCRIPT = [
 ].join("\n");
 
 /**
- * Commits every change git does not ignore, then bundles `base..HEAD` under the Task branch when
+ * Commits every change {@link COMMIT_STAGING} stages, then bundles `base..HEAD` under the Task branch when
  * the head moved. Prints `committed`, `head`, and `bundle` lines.
  */
 const FINALIZE_SCRIPT = [
@@ -1077,7 +1078,7 @@ const FINALIZE_SCRIPT = [
   'cd "$SUPERTAG_WORKSPACE"',
   "committed=0",
   'if [ -n "$(g status --porcelain --untracked-files=all)" ]; then',
-  "  g add -A",
+  ...COMMIT_STAGING.map((args) => `  g ${args.map(shellQuote).join(" ")}`),
   "  if ! g diff --cached --quiet --no-ext-diff; then",
   '    g -c user.name="$SUPERTAG_AUTHOR_NAME" -c user.email="$SUPERTAG_AUTHOR_EMAIL" commit --no-verify -q -m "$SUPERTAG_MESSAGE"',
   "    committed=1",

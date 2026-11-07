@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -713,6 +713,48 @@ describe("Git worktree Workspace resolver", () => {
     expect(git(recreated, "rev-parse", "HEAD")).toBe(completed?.head);
     expect(continued?.source.provenance?.["base"]).toBe(base);
     expect(await readFile(setupLog, "utf8")).toBe("run\nrun\n");
+  });
+
+  it("leaves untracked generated paths out of the commit, but commits tracked files under them", async () => {
+    await mkdir(join(checkout, "node_modules"));
+    await writeFile(join(checkout, "node_modules", "vendor.js"), "v1\n");
+    await writeFile(join(checkout, "obsolete.txt"), "old\n");
+    await writeFile(join(checkout, ".gitignore"), "*.pyc\n!keep.pyc\n");
+    git(checkout, "add", "-A");
+    git(checkout, "commit", "--quiet", "-m", "Vendor");
+    const workspacePlan = plan({ setup: undefined });
+    const input = await resolver().resolve(context(task(workspacePlan)));
+    const path = fileURLToPath(input?.source.uri ?? "");
+    for (const directory of ["__pycache__", "src/__pycache__", "node_modules/a", "pkg.egg-info"])
+      await mkdir(join(path, directory), { recursive: true });
+    for (const file of [
+      "__pycache__/x.pyc",
+      "src/__pycache__/y.cpython-313.pyc",
+      "node_modules/a/index.js",
+      ".DS_Store",
+      "src/.DS_Store",
+      "pkg.egg-info/PKG-INFO",
+      ".coverage",
+      "keep.pyc",
+    ])
+      await writeFile(join(path, file), "generated\n");
+    // A symlinked environment, such as a shared `.venv` or `node_modules`, is one staged entry.
+    await mkdir(join(path, "web"));
+    await symlink(tmpdir(), join(path, ".venv"));
+    await symlink(tmpdir(), join(path, "web", "node_modules"));
+    await writeFile(join(path, "src", "real.py"), "print('real')\n");
+    await writeFile(join(path, "node_modules", "vendor.js"), "v2\n");
+    await rm(join(path, "obsolete.txt"));
+
+    const delivered = await resolver().finalize(task(workspacePlan), "failed");
+    expect(delivered?.committed).toBe(true);
+    // The built-in exclusion wins over the repository's `!keep.pyc` negation for untracked files.
+    expect(git(path, "show", "--name-status", "--format=", "HEAD").split("\n").sort()).toEqual([
+      "A\tsrc/real.py",
+      "D\tobsolete.txt",
+      "M\tnode_modules/vendor.js",
+    ]);
+    expect(await stat(join(path, "__pycache__", "x.pyc")).then(() => true)).toBe(true);
   });
 
   it("keeps the submitted summary out of the subject, in the body, with the Task trailer", async () => {

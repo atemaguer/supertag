@@ -6,6 +6,7 @@ import {
   type InternalTurn,
   mailboxObject,
   mailboxText,
+  type SpendReport,
   type Store,
   type TagAuthorizationSnapshot,
   TagMessagingError,
@@ -268,32 +269,84 @@ export function workSessionsPerTurn(execution: TaskExecutionRequirements): numbe
     : Math.min(WORK_SESSION_MAX_PER_TURN, agents);
 }
 
+/** What a conversation turn's own Task Attempts have reported so far. */
+export interface ReportedTurnSpend {
+  readonly tokens: number;
+  /** In the currency of the turn's `maxReportedCost`. */
+  readonly costMinor: number;
+}
+
+/** A conversation turn's reported spend from a spend report over its Task alone. */
+export function reportedTurnSpend(
+  report: SpendReport,
+  execution: TaskExecutionRequirements,
+): ReportedTurnSpend {
+  const currency = execution.limits?.maxReportedCost?.currency;
+  let tokens = 0;
+  let costMinor = 0;
+  for (const group of report.groups) {
+    tokens += group.reportedTokens ?? 0;
+    if (currency !== undefined) costMinor += group.reportedCostByCurrency?.[currency] ?? 0;
+  }
+  return { tokens, costMinor };
+}
+
+/** A work Task's share must be at least this fraction of the turn's reported limit. */
+const WORK_SESSION_MIN_SHARE_DIVISOR = 10;
+
 /**
- * A work Task's execution requirements: the starting turn's, with its reported token and cost
- * limits split into equal shares among the work Sessions the turn may start. All of a turn's work
- * Sessions together spend no more than the turn's own limits allow.
+ * A work Task's execution requirements. A conversation turn and the work Tasks it starts or
+ * continues share one budget: the turn's reported token and cost limits. A new work Task gets
+ * what is left of them, the limit minus the turn's reported spend so far and the allowances of
+ * the work Tasks the turn already admitted, split equally among the work Tasks the turn may still
+ * admit. Undefined when that share is under a tenth of the turn's limit, in tokens or in cost,
+ * because a work Task that small would stop on its first model call; the turn then does the work
+ * itself. A turn without reported limits passes its requirements on unchanged.
  */
 export function workSessionExecution(
   execution: TaskExecutionRequirements,
-): TaskExecutionRequirements {
+  spent: ReportedTurnSpend,
+  admitted: readonly TaskExecutionRequirements[],
+): TaskExecutionRequirements | undefined {
   const limits = execution.limits;
-  if (limits === undefined) return execution;
-  const shares = Math.max(1, workSessionsPerTurn(execution));
+  if (limits?.maxReportedTokens === undefined && limits?.maxReportedCost === undefined)
+    return execution;
+  const slots = Math.max(1, workSessionsPerTurn(execution) - admitted.length);
+  const share = (limit: number, own: number, held: (other: TaskExecutionRequirements) => number) =>
+    Math.floor((limit - own - admitted.reduce((total, other) => total + held(other), 0)) / slots);
+  const tokens =
+    limits.maxReportedTokens === undefined
+      ? undefined
+      : share(
+          limits.maxReportedTokens,
+          spent.tokens,
+          (other) => other.limits?.maxReportedTokens ?? 0,
+        );
+  const cost =
+    limits.maxReportedCost === undefined
+      ? undefined
+      : share(
+          limits.maxReportedCost.amountMinor,
+          spent.costMinor,
+          (other) => other.limits?.maxReportedCost?.amountMinor ?? 0,
+        );
+  const tooSmall = (share: number | undefined, limit: number | undefined) =>
+    share !== undefined &&
+    limit !== undefined &&
+    share < Math.max(1, Math.floor(limit / WORK_SESSION_MIN_SHARE_DIVISOR));
+  if (
+    tooSmall(tokens, limits.maxReportedTokens) ||
+    tooSmall(cost, limits.maxReportedCost?.amountMinor)
+  )
+    return undefined;
   return {
     ...execution,
     limits: {
       ...limits,
-      ...(limits.maxReportedTokens === undefined
+      ...(tokens === undefined ? {} : { maxReportedTokens: tokens }),
+      ...(cost === undefined || limits.maxReportedCost === undefined
         ? {}
-        : { maxReportedTokens: Math.max(1, Math.floor(limits.maxReportedTokens / shares)) }),
-      ...(limits.maxReportedCost === undefined
-        ? {}
-        : {
-            maxReportedCost: {
-              ...limits.maxReportedCost,
-              amountMinor: Math.floor(limits.maxReportedCost.amountMinor / shares),
-            },
-          }),
+        : { maxReportedCost: { ...limits.maxReportedCost, amountMinor: cost } }),
     },
   };
 }

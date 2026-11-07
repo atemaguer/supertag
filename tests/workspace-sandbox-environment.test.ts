@@ -918,6 +918,44 @@ describe.each<Provider>(["e2b", "modal"])("%s Workspace environment", (provider)
     await fresh.dispose("completed");
   }, 60_000);
 
+  it("leaves untracked generated paths out of a sandbox commit", async () => {
+    const { scratch, environment } = await setup();
+    const repository = await conformanceLikeRepository(join(scratch, "source"));
+    const prepared = await environment.prepare(await defineFor(repository, scratch));
+    const branch = "supertag/test/generated";
+    const task = await environment.start(prepared, {
+      taskId: "generated",
+      attemptId: "generated",
+      branch,
+      base: repository.trusted,
+      head: repository.trusted,
+      plan: PLAN,
+    });
+    try {
+      await task.prepare({
+        ...PLAN,
+        files: [
+          { path: "__pycache__/x.pyc", content: "generated\n" },
+          { path: "node_modules/a/index.js", content: "generated\n" },
+          { path: ".DS_Store", content: "generated\n" },
+          { path: "src/real.py", content: "print('real')\n" },
+        ],
+      });
+      const work = await environment.finalize(task, {
+        message: "Work",
+        author: { name: "SuperTag", email: "supertag@localhost" },
+      });
+      expect(work.committed).toBe(true);
+      if (!work.objects) throw new Error("The sandbox returned no objects");
+      await importReturned(repository.path, branch, work.objects.bundle);
+      expect(await git(repository.path, "show", "--name-only", "--format=", branch)).toBe(
+        "src/real.py",
+      );
+    } finally {
+      await task.dispose("completed");
+    }
+  }, 60_000);
+
   it("sends providers bundles, never source credentials or MCP secrets", async () => {
     const { world, scratch, environment } = await setup();
     const canary = `canary-${Math.random().toString(36).slice(2)}`;

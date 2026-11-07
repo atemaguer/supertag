@@ -428,7 +428,8 @@ and hand work to [work Sessions](../concepts/tasks.md#session):
 `limit` is at most 20. A conversation sees a Session of its Tag that is shared, or private to the
 same person. Session reads return history, not instructions, and grant no authority. One
 conversation turn starts at most four work Sessions. A conversation holds at most eight unfinished
-work Sessions, and at most four run at once.
+work Sessions, and at most four run at once. One turn and its work Tasks share
+[one budget](#work-session-budget).
 
 Which tools a Task gets depends on its turn. SuperTag refuses a direct call to a tool the turn
 doesn't get, not only leaves it out of the list.
@@ -451,6 +452,23 @@ doesn't get, not only leaves it out of the list.
   the CLI conversation.
 - `ask {question}` ends the work Session's Task waiting on the person. See
   [when a work Session needs the person](../concepts/tasks.md#when-a-work-session-needs-the-person).
+
+### Work Session budget
+
+A conversation turn's `execution.limits.maxReportedTokens` and `maxReportedCost` cover the turn and
+every work Task it starts or continues:
+
+- A new work Task's limit is `floor((limit - reported - held) / slots)`. `reported` is the turn's
+  reported spend so far, across its Task Attempts. `held` is the sum of the limits of the work
+  Tasks the turn already admitted, whatever they spent. `slots` is the number of work Tasks the
+  turn may still admit.
+- SuperTag refuses `start_session` and `continue_session` with 409 when that limit is under
+  `max(1, floor(limit / 10))`, in tokens or in cost.
+- `continue_session` draws from the continuing turn.
+- Each Task's harness enforces its own limit. Spend the turn reports after it admits a work Task
+  counts only against the work Tasks it admits later.
+- Report and update turns run outside the budget, each under the starting turn's full limits.
+- A turn without these limits passes none on.
 
 ### Identity and preconditions
 

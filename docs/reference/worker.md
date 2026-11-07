@@ -1165,7 +1165,7 @@ bundle pack contains exactly the objects added after `base`. It requires
 one advertised ref and verifies that `head` descends from `base`. It moves only the Task branch
 ref after validation.
 Patch, branch, and pull-request results read that ref and return a `WorkspaceDeliveryRecord`.
-`finalize` must skip ignored files, and `refuse` must name each unsupported property.
+`finalize` must skip ignored files and untracked generated paths, as described in [Workspace commits](#workspace-commits), and `refuse` must name each unsupported property.
 
 ### Remote Workspace environments
 
@@ -1482,15 +1482,16 @@ support them, such as Btrfs or XFS on Linux, and full copies elsewhere, includin
 
 ### Workspace commits
 
-After the harness finishes, including after failure or cancellation, the Worker runs `git add -A`
-and commits any changes to the Task branch as `SuperTag <supertag@localhost>` with `--no-verify`.
+After the harness finishes, including after failure or cancellation, the Worker runs
+`git add --update`, then `git add --all` with a `:(exclude,glob)` pathspec for each built-in
+generated path listed in [Workspaces](../guides/workspaces.md#where-files-live), and commits any changes to the Task branch as `SuperTag <supertag@localhost>` with `--no-verify`.
 The Claude Code and Codex harnesses are asked to end a result that changed files with a line such
 as `Change: Add pause and resume for Objectives`, an imperative summary of at most 72 characters.
 That line becomes the commit subject. Without a usable one, the Task title, the first line of its
 instruction, supplies the subject, capped at 72 characters. The harness summary goes in the commit
 body. Without an instruction, the subject is `Update task <id>`. Title Tasks by the change they
 make, not by item or round numbers. Each commit includes a `SuperTag-Task: <id>`
-trailer. Files matched by `.gitignore` are never staged. It then records a `progress.updated` event
+trailer. Files matched by `.gitignore` are never staged. A file already tracked under a generated path is staged when it changes. It then records a `progress.updated` event
 with the branch, base, head, and changed-file count; it omits the branch when the Worker deleted it.
 Its item ids, such as `workspace-head`, are reserved: the Worker drops them from harness progress.
 A review of the Task is pinned to this recorded head, not to a change the harness reported. For a completed Task Attempt it also adds a

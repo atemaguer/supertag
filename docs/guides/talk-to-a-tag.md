@@ -139,15 +139,20 @@ under `PARENT`. `STATUS` shows the latest Task's status: `pending`, `running`, `
   several Workspaces, the Tag picks one when it starts the work Session. See
   [where a work Session's edits go](../concepts/tasks.md#where-a-work-sessions-edits-go).
 - **At most four work Sessions run at once per conversation.** Later ones wait their turn. One
-  message starts at most four, and a conversation holds at most eight unfinished. Together, the work
-  Sessions of one message share its token and cost limits. A message whose limits allow no parallel
-  agents (`maxNativeAgents: 0`) starts none.
+  message starts at most four, and a conversation holds at most eight unfinished. A message whose
+  limits allow no parallel agents (`maxNativeAgents: 0`) starts none.
+- **A message and its work Sessions share one budget.** When the message has token or cost limits,
+  each work Session it starts or continues gets an equal share of what the message hasn't spent or
+  given out yet. Once a share would be under a tenth of the message's limits, the Tag does the work
+  in its own reply. See
+  [how work Sessions share a budget](../concepts/tasks.md#how-work-sessions-share-a-budget).
 - **A message you send while the Tag reports a work Session gets its own turn.** It isn't added to
   the report.
 - **Only your conversation can answer its work Sessions.** The Tag continues a work Session only
-  after it stops running and the Tag has reported it, with your current message's permissions. A continued work Session counts
-  against the same limits as a new one. If the Tag's permissions changed since the work Session
-  last ran, the Tag starts a new work Session instead.
+  after it stops running and the Tag has reported it, with your current message's permissions. A
+  continued work Session counts against your current message's limits, like a new one. If the
+  Tag's permissions changed since the work Session last ran, the Tag starts a new work Session
+  instead.
 - `--output json` waits for the reply and every report, and prints one message record with the
   Session, the Task, the reply, and `startedSessions`: each work Session the message started or
   continued, with its status and report. A work Session waiting on you has status `waiting` and
