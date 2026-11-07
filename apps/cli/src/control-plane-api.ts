@@ -62,6 +62,7 @@ import {
   parseWorkspaceSpec,
   TAG_MESSAGE_TYPES,
   TagMessagingError,
+  workSessionWaiting,
 } from "@supertag/core";
 import type { VerifiedSurfaceAccount } from "@supertag/surface-sdk";
 import {
@@ -3340,7 +3341,9 @@ interface StartedWorkSession {
   readonly title: string;
   /** The work Session's Task, which `.../messages/TASK_ID/stream` follows. */
   readonly taskId?: string;
+  /** The Task's status, or `waiting` when it completed by asking the person `question`. */
   readonly status: string;
+  readonly question?: string;
   readonly reportStatus: "waiting" | "replied";
   /** The conversation turn that reports the work Session's result. */
   readonly reportTaskId?: string;
@@ -3583,8 +3586,9 @@ async function startedWorkSessions(
   store: ControlPlaneApiRequestContext["store"],
   task: Task,
 ): Promise<readonly StartedWorkSession[]> {
+  // A message follows each work Session whose latest Task its turn started or continued.
   const started = (await store.listWorkSessions(task.sessionId)).filter(
-    (session) => session.startedByTaskId === task.id,
+    (session) => (session.task?.startedByTaskId ?? session.startedByTaskId) === task.id,
   );
   return Promise.all(
     started.map(async (session) => {
@@ -3596,7 +3600,8 @@ async function startedWorkSessions(
         id: session.sessionId,
         title: session.title,
         ...(session.task ? { taskId: session.task.id } : {}),
-        status: session.task?.status ?? "pending",
+        status: workSessionWaiting(session) ? "waiting" : (session.task?.status ?? "pending"),
+        ...(session.task?.question === undefined ? {} : { question: session.task.question }),
         reportStatus: report === undefined ? ("waiting" as const) : ("replied" as const),
         ...(found?.taskId ? { reportTaskId: found.taskId } : {}),
         ...(report === undefined

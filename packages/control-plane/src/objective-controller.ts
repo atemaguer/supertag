@@ -173,11 +173,32 @@ import {
 import { TeamLiveDeliveryDispatcher, withdrawTeamLiveInput } from "./team-live-delivery.js";
 import { confirmWaitCleanup } from "./wait-cleanup.js";
 import {
+  ASK_TOOL,
+  CONTINUE_SESSION_TOOL,
+  type ContinueSessionRequest,
+  parseAsk,
+  parseContinueSession,
   parseStartSession,
   START_SESSION_TOOL,
   type StartSessionRequest,
+  WORK_SESSION_ASKED_EVENT,
 } from "./work-sessions.js";
 import { describeWorklet } from "./worklet-descriptor.js";
+
+/** What the Control Plane does for work Session tools; installed by the Control Plane. */
+export interface WorkSessionHandlers {
+  /** `start_session`: opens a work Session of the conversation and admits its Task. */
+  start(task: Task, inbound: DurableInboundEvent, request: StartSessionRequest): Promise<unknown>;
+  /** `continue_session`: admits the next Task of one of the conversation's work Sessions. */
+  continue(
+    task: Task,
+    inbound: DurableInboundEvent,
+    request: ContinueSessionRequest,
+  ): Promise<unknown>;
+  /** Posts a work Session Task's pending approval request to its conversation, once. */
+  approvalNotice(task: Task, inbound: DurableInboundEvent, requestId: string): Promise<void>;
+}
+
 import { workspaceMcpDigest, workspaceMcpPin } from "./workspace-mcp-digest.js";
 import {
   workspaceLiveMounts,
@@ -619,18 +640,10 @@ export class ObjectiveController {
   ) {
     this.surfaceReporter = reporter;
   }
-  private sessionStarter:
-    | ((task: Task, inbound: DurableInboundEvent, request: StartSessionRequest) => Promise<unknown>)
-    | undefined;
-  /** Opens a work Session for `start_session`; the Control Plane admits its Task. */
-  setSessionStarter(
-    starter: (
-      task: Task,
-      inbound: DurableInboundEvent,
-      request: StartSessionRequest,
-    ) => Promise<unknown>,
-  ) {
-    this.sessionStarter = starter;
+  private workSessions: WorkSessionHandlers | undefined;
+  /** Opens and continues work Sessions and posts their approval notices; see WorkSessionHandlers. */
+  setWorkSessionHandlers(handlers: WorkSessionHandlers) {
+    this.workSessions = handlers;
   }
   private readonly wakeTaskController: (() => void) | undefined;
   constructor(
@@ -709,8 +722,11 @@ export class ObjectiveController {
         "read_commitments",
         ...TAG_SESSION_TOOLS,
       ];
-      // Work Sessions and report turns are internal turns: no human command, no new work.
-      if (await this.internalSurfaceTurn(caller.taskId)) return reads;
+      // Work Sessions and report turns are internal turns: no human command, no new work. Only a
+      // work Session asks the person, and only a conversation turn answers it.
+      const turn = await this.surfaceTurnKind(caller.taskId);
+      if (turn === "work_session") return [...reads, ASK_TOOL];
+      if (turn !== "conversation") return reads;
       return [
         "create_objective",
         "attach_objective",
@@ -718,6 +734,7 @@ export class ObjectiveController {
         "start_objective",
         "instruct_objective",
         START_SESSION_TOOL,
+        CONTINUE_SESSION_TOOL,
       ];
     }
     const current = await this.revalidateCaller(caller);
@@ -794,6 +811,11 @@ export class ObjectiveController {
       tagId: caller.assignedTagId,
       objectiveId: caller.objectiveId,
     };
+  }
+
+  /** One approval request by id, for notices. */
+  getApprovalRequest(id: string) {
+    return this.approvals.get(id);
   }
 
   /** Operator listing of approval requests, scoped like the coordination inbox. */
@@ -1117,13 +1139,16 @@ export class ObjectiveController {
       token: `${body}.${createHmac("sha256", this.secret).update(body).digest("base64url")}`,
     };
   }
-  /** Whether a surface Task is a turn SuperTag admitted itself; unknown Tasks count as internal. */
-  private async internalSurfaceTurn(taskId: string): Promise<boolean> {
+  /** A surface Task's turn: a conversation turn or one SuperTag admitted itself; unknown if neither. */
+  private async surfaceTurnKind(
+    taskId: string,
+  ): Promise<"conversation" | "work_session" | "session_report" | "unknown"> {
     const task = await this.store.findTaskById(taskId);
     const inbound = task?.inboundEventId
       ? await this.store.findInboundEventById(task.inboundEventId)
       : undefined;
-    return inbound === undefined || inbound.event.internal !== undefined;
+    if (inbound === undefined) return "unknown";
+    return inbound.event.internal?.kind ?? "conversation";
   }
   private async surfaceState(taskId: string, attemptId: string) {
     const state = await this.surfaceExecutionState(taskId, attemptId);
@@ -3343,8 +3368,19 @@ export class ObjectiveController {
     caller: SurfaceCoordinationCaller,
   ): Promise<unknown> {
     const { task, inbound } = await this.surfaceState(caller.taskId, caller.attemptId);
-    if (name === "request_action_approval")
-      return this.approvals.requestAction(await this.approvalCaller(caller), input);
+    if (name === "request_action_approval") {
+      const result = await this.approvals.requestAction(await this.approvalCaller(caller), input);
+      // A work Session's own replies post nowhere, so its conversation gets the notice.
+      if (
+        inbound.event.internal?.kind === "work_session" &&
+        result.status === "pending" &&
+        result.requestId !== undefined
+      )
+        await this.workSessions
+          ?.approvalNotice(task, inbound, result.requestId)
+          .catch((error: unknown) => this.onError(error));
+      return result;
+    }
     if (isTagSessionTool(name))
       return tagSessionCommand(this.store, name, input, conversationViewer(task, inbound));
     if (
@@ -3355,19 +3391,49 @@ export class ObjectiveController {
         "start_objective",
         "instruct_objective",
         START_SESSION_TOOL,
+        CONTINUE_SESSION_TOOL,
       ].includes(name)
     )
       throw new TagMessagingError(
         403,
         inbound.event.internal.kind === "work_session"
-          ? "A work Session cannot start Sessions or change Objectives"
-          : "A report turn cannot start Sessions or change Objectives",
+          ? "A work Session cannot start or continue Sessions or change Objectives"
+          : "A report turn cannot start or continue Sessions or change Objectives",
       );
-    if (name === START_SESSION_TOOL) {
-      const request = parseStartSession(input);
-      if (!this.sessionStarter)
+    if (name === ASK_TOOL) {
+      if (inbound.event.internal?.kind !== "work_session")
+        throw new TagMessagingError(
+          403,
+          "Only a work Session asks with ask; in a conversation, ask the person in your reply",
+        );
+      const question = parseAsk(input);
+      if (
+        (await this.store.listTaskEvents(task.id)).some(
+          (event) =>
+            event.type === WORK_SESSION_ASKED_EVENT && event.attemptId === caller.attemptId,
+        )
+      )
+        throw new TagMessagingError(
+          409,
+          "This Task already asked its question; end your turn now with a brief final reply",
+        );
+      await this.store.appendTaskEvent({
+        taskId: task.id,
+        attemptId: caller.attemptId,
+        type: WORK_SESSION_ASKED_EVENT,
+        payload: { version: 1, question },
+      });
+      return {
+        status: "asked",
+        next: "End your turn now with a brief final reply and no further tool call. This Task ends waiting on the person: the conversation asks them, and their answer continues this work Session as its next Task.",
+      };
+    }
+    if (name === START_SESSION_TOOL || name === CONTINUE_SESSION_TOOL) {
+      if (!this.workSessions)
         throw new TagMessagingError(503, "Work Sessions are unavailable on this Control Plane");
-      return this.sessionStarter(task, inbound, request);
+      return name === START_SESSION_TOOL
+        ? this.workSessions.start(task, inbound, parseStartSession(input))
+        : this.workSessions.continue(task, inbound, parseContinueSession(input));
     }
     const command = parseSurfaceObjectiveCommand(inbound.event);
     if (name === "attach_objective") {

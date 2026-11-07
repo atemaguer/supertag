@@ -250,6 +250,35 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
       .where(eq(s.parentSessionId, parentSessionId))
       .orderBy(desc(s.createdAt), desc(s.id))
       .limit(200);
+    // Each latest Task's starting turn (from its admitted event) and the question it asked.
+    const t = this.tables.tasks,
+      i = this.tables.durableInboundEvents;
+    const taskIds = rows
+      .map((row: any) => row.taskId)
+      .filter((id: unknown) => typeof id === "string");
+    const details = new Map<string, { startedByTaskId?: string; question?: string }>(
+      taskIds.length === 0
+        ? []
+        : (
+            await this.db
+              .select({ id: t.id, outcome: t.outcome, event: i.event })
+              .from(t)
+              .innerJoin(i, eq(i.id, t.inboundEventId))
+              .where(inArray(t.id, taskIds))
+          ).map((row: any) => {
+            const internal = optionalRecord(optionalRecord(row.event)?.["internal"]);
+            const question = optionalRecord(row.outcome)?.["question"];
+            return [
+              row.id,
+              {
+                ...(typeof internal?.["startedByTaskId"] === "string"
+                  ? { startedByTaskId: internal["startedByTaskId"] }
+                  : {}),
+                ...(typeof question === "string" ? { question } : {}),
+              },
+            ];
+          }),
+    );
     return rows.toReversed().map((row: any) => {
       const origin = jsonRecord(row.origin, "session origin");
       return {
@@ -260,7 +289,13 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
           : {}),
         createdAt: row.createdAt,
         ...(typeof row.taskId === "string" && typeof row.taskStatus === "string"
-          ? { task: { id: row.taskId, status: row.taskStatus as TaskStatus } }
+          ? {
+              task: {
+                id: row.taskId,
+                status: row.taskStatus as TaskStatus,
+                ...details.get(row.taskId),
+              },
+            }
           : {}),
       };
     });
@@ -373,6 +408,13 @@ function jsonRecord(value: unknown, label: string): JsonRecord {
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
     throw new Error(`Persisted ${label} is invalid`);
   return parsed as JsonRecord;
+}
+
+function optionalRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  const parsed = typeof value === "string" ? (JSON.parse(value) as unknown) : value;
+  return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+    ? (parsed as Readonly<Record<string, unknown>>)
+    : undefined;
 }
 
 function originLocation(value: unknown): { provider?: SurfaceProvider; scope?: string } {

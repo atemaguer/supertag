@@ -91,6 +91,8 @@ export const WORK_SESSION_MAX_PER_TURN = 4;
 export const WORK_SESSION_MAX_OPEN = 8;
 /** The bounded result text a report turn carries back to the conversation. */
 export const WORK_SESSION_REPORT_RESULT_MAX = 4_000;
+/** The question a work Session Task may put to the person with `ask`. */
+export const WORK_SESSION_QUESTION_MAX = 2_000;
 
 /** The durable delivery id of the one report turn for a work Session's Task. */
 export function workSessionReportDeliveryId(workTaskId: string): string {
@@ -104,11 +106,15 @@ export function workSessionReportDeliveryId(workTaskId: string): string {
  */
 export type InternalTurn =
   | {
-      /** The one Task of a work Session started by `start_session`. */
+      /**
+       * A work Session's Task: its first, started by `start_session`, or a later one started by
+       * `continue_session` (`continued`), whose text is the Tag's relay of the person's answer.
+       */
       readonly kind: "work_session";
       readonly startedByTaskId: string;
       readonly parentSessionId: string;
       readonly title: string;
+      readonly continued?: true;
     }
   | {
       /** The conversation turn that reports a finished work Session's result. */
@@ -117,19 +123,35 @@ export type InternalTurn =
       readonly workSessionId: string;
       readonly workTaskId: string;
       readonly title: string;
-      readonly status: "cancelled" | "completed" | "failed";
+      /** `waiting`: the work Task completed after `ask`, so the work Session waits on the person. */
+      readonly status: "cancelled" | "completed" | "failed" | "waiting";
       /** The work Task's result text, bounded by `WORK_SESSION_REPORT_RESULT_MAX`. */
       readonly result: string;
+      /** The question the work Task asked, when `waiting`. */
+      readonly question?: string;
     };
 
-/** One work Session a conversation started, with its Task. */
+/** One work Session a conversation started, with its latest Task. */
 export interface WorkSessionSummary {
   readonly sessionId: string;
   readonly title: string;
+  /** The conversation turn that started the work Session. */
   readonly startedByTaskId?: string;
   readonly createdAt: string;
-  /** The work Session's Task: the latest Task of the Session. */
-  readonly task?: { readonly id: string; readonly status: TaskStatus };
+  /** The work Session's latest Task. */
+  readonly task?: {
+    readonly id: string;
+    readonly status: TaskStatus;
+    /** The conversation turn that started this Task, with `start_session` or `continue_session`. */
+    readonly startedByTaskId?: string;
+    /** The question this Task asked with `ask`; a completed Task with one waits on the person. */
+    readonly question?: string;
+  };
+}
+
+/** Whether a work Session's latest Task completed by asking the person a question. */
+export function workSessionWaiting(session: WorkSessionSummary): boolean {
+  return session.task?.status === "completed" && session.task.question !== undefined;
 }
 
 export interface SessionAudienceStore {

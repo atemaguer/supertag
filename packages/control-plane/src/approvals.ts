@@ -365,12 +365,9 @@ export class ApprovalCoordinator {
       const shown = requests.slice(0, 10);
       const text = [
         `${requests.length} approval request${requests.length === 1 ? " is" : "s are"} waiting in Objective ${objectiveId}:`,
-        ...shown.map(
-          (request) =>
-            `- ${request.id}: ${request.summary}${request.ruleSources.length ? ` (required by ${request.ruleSources.join(", ")})` : ""}`,
-        ),
+        ...shown.map(approvalRequestLine),
         ...(requests.length > shown.length ? [`…and ${requests.length - shown.length} more.`] : []),
-        `Review with supertag list approval --objective ${objectiveId}, then supertag approve request ID or supertag deny request ID --reason TEXT.`,
+        approvalReviewHint(objectiveId),
       ].join("\n");
       const key = `approval-digest:${createHash("sha256")
         .update(JSON.stringify([objectiveId, requests.map((request) => request.id)]))
@@ -552,6 +549,27 @@ export class ApprovalCoordinator {
       this.onError(error);
     }
   }
+}
+
+/** One pending request in a notice: its id, the action it names, and the sets that require it. */
+function approvalRequestLine(request: ApprovalRequest): string {
+  return `- ${request.id}: ${request.summary}${request.ruleSources.length ? ` (required by ${request.ruleSources.join(", ")})` : ""}`;
+}
+
+function approvalReviewHint(objectiveId?: string): string {
+  return `Review with supertag list approval${objectiveId === undefined ? "" : ` --objective ${objectiveId}`}, then supertag approve request ID or supertag deny request ID --reason TEXT.`;
+}
+
+/**
+ * The notice a work Session's pending approval request posts to its conversation. A chat message
+ * never decides it; the approval commands do.
+ */
+export function workSessionApprovalNotice(title: string, request: ApprovalRequest): string {
+  return [
+    `Work Session ${JSON.stringify(title)} is waiting for approval:`,
+    approvalRequestLine(request),
+    approvalReviewHint(request.objectiveId ?? undefined),
+  ].join("\n");
 }
 
 function boundedText(value: unknown, field: string, maximum: number): string {
