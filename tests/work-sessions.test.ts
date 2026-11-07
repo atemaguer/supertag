@@ -555,7 +555,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         const nextTask = await store.findTaskById(next.taskId);
         expect(nextTask?.sessionHistory.map((entry) => entry.taskId)).toContain(report?.id);
 
-        // list session shows the parent and the latest Task status.
+        // list session shows the Tag's name, a title, the parent and the latest Task status.
         vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
           output.push(String(chunk));
           return true;
@@ -565,16 +565,26 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         output.length = 0;
         await expect(main(["list", "session"])).resolves.toBe(0);
         const table = output.join("");
-        expect(table.split("\n")[0]).toMatch(/ID\s+TAG\s+PARENT\s+STATUS\s+LAST INTERACTION/u);
+        expect(table.split("\n")[0]).toMatch(
+          /ID\s+TAG\s+TITLE\s+PARENT\s+STATUS\s+LAST INTERACTION/u,
+        );
         const row = table.split("\n").find((line) => line.startsWith(started.id));
         expect(row).toContain(record.sessionId);
         expect(row).toContain("completed");
+        expect(row).toContain("planner");
+        expect(row).toContain(started.title);
+        // A conversation is titled by its first request.
+        const conversationRow = table.split("\n").find((line) => line.startsWith(record.sessionId));
+        expect(conversationRow).toContain("planner");
+        expect(conversationRow).not.toMatch(/^\S+\s+-\s/u);
         const resource = await client().request<{
           spec: Record<string, unknown>;
           status: Record<string, unknown>;
         }>(`/api/v1/sessions/${started.id}`);
         expect(resource.spec["parentSessionId"]).toBe(record.sessionId);
         expect(resource.status["latestTaskStatus"]).toBe("completed");
+        expect(resource.status["tag"]).toBe("planner");
+        expect(resource.status["title"]).toBe(started.title);
       });
 
       it("prints the acknowledgement, then each work Session and its report", async () => {

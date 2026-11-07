@@ -3671,8 +3671,21 @@ async function sessionResources(
   store: ControlPlaneApiRequestContext["store"],
   sessions: readonly Session[],
 ) {
-  const statuses = await store.latestSessionTaskStatuses(sessions.map((session) => session.id));
-  return sessions.map((session) => sessionResource(session, statuses.get(session.id)));
+  const summaries = await store.sessionTaskSummaries(sessions.map((session) => session.id));
+  const tags = new Map(
+    (
+      await Promise.all(
+        [...new Set(sessions.map((session) => session.tagId))].map((id) => store.findTagById(id)),
+      )
+    ).flatMap((tag) => (tag === undefined ? [] : [[tag.id, tag.name] as const])),
+  );
+  return sessions.map((session) => {
+    const tag = tags.get(session.tagId);
+    return sessionResource(session, {
+      ...summaries.get(session.id),
+      ...(tag === undefined ? {} : { tag }),
+    });
+  });
 }
 
 /** A stored account in manifest form, as field management compares it. */

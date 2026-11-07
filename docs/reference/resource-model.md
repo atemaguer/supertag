@@ -82,7 +82,8 @@ hosts. None of these resources becomes a separate actor.
   their own person's private ones. See
   [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-one-memory). A [work Session](../concepts/tasks.md#session)
   reports its conversation as read-only `spec.parentSessionId`; `status.latestTaskStatus` is the
-  status of a Session's latest Task.
+  status of a Session's latest Task, `status.tag` the Tag's name, and `status.title` a work
+  Session's title or a conversation's first request.
 - **Task** records one durable assignment from a surface or internal delegation. Its result can
   carry [findings](coordination.md#review-findings): problems a reviewer reported about the Task,
   each with a severity and status. A finding is part of the result, not a separate resource.

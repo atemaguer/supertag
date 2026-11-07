@@ -97,9 +97,10 @@ to the Tag doesn't approve anything.
 supertag list session
 ```
 
-Your conversation appears as a Session with the key `cli:<you>:<conversation>`. A work Session
-it started shows the conversation's Session ID under `PARENT`, and `STATUS` shows its Task's
-status: `pending`, `running`, `completed`, `failed`, or `cancelled`.
+Your conversation appears as a Session with the key `cli:<you>:<conversation>`, titled by your
+first message. A work Session it started shows its own title, and the conversation's Session ID
+under `PARENT`. `STATUS` shows the latest Task's status: `pending`, `running`, `completed`,
+`failed`, or `cancelled`.
 `supertag get session ID` reports `status.audience: private`, and
 `supertag describe session ID` shows its Tasks.
 

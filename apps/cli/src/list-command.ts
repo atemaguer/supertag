@@ -93,7 +93,8 @@ const columns: Record<string, readonly [string, string][]> = {
   ],
   session: [
     ["ID", "metadata.id"],
-    ["TAG", "spec.tagId"],
+    ["TAG", "status.tag"],
+    ["TITLE", "status.title"],
     ["PARENT", "spec.parentSessionId"],
     ["STATUS", "status.latestTaskStatus"],
     ["LAST INTERACTION", "status.lastInteractionAt"],

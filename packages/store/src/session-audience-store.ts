@@ -13,6 +13,7 @@ import {
   type SessionPage,
   type SessionSearchHit,
   type SessionSummary,
+  type SessionTaskSummary,
   type SessionViewer,
   type SurfaceProvider,
   TagMessagingError,
@@ -301,24 +302,30 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
     });
   }
 
-  async latestSessionTaskStatuses(
+  async sessionTaskSummaries(
     sessionIds: readonly string[],
-  ): Promise<ReadonlyMap<string, TaskStatus>> {
+  ): Promise<ReadonlyMap<string, SessionTaskSummary>> {
     if (sessionIds.length === 0) return new Map();
     const s = this.tables.sessions;
-    const statuses = new Map<string, TaskStatus>();
+    const summaries = new Map<string, SessionTaskSummary>();
     for (let offset = 0; offset < sessionIds.length; offset += 500) {
       const rows = await this.db
         .select({
           id: s.id,
           status: sql`(select lt."status" from "Task" lt where lt."sessionId" = "Session"."id" order by lt."createdAt" desc, lt."id" desc limit 1)`,
+          firstRequest: sql`(select substr(ft."requestText", 1, 200) from "Task" ft where ft."sessionId" = "Session"."id" order by ft."createdAt" asc, ft."id" asc limit 1)`,
         })
         .from(s)
         .where(inArray(s.id, [...sessionIds.slice(offset, offset + 500)]));
       for (const row of rows)
-        if (typeof row.status === "string") statuses.set(row.id, row.status as TaskStatus);
+        summaries.set(row.id, {
+          ...(typeof row.status === "string" ? { latestTaskStatus: row.status as TaskStatus } : {}),
+          ...(typeof row.firstRequest === "string" && row.firstRequest.trim()
+            ? { firstRequest: row.firstRequest }
+            : {}),
+        });
     }
-    return statuses;
+    return summaries;
   }
 
   /**

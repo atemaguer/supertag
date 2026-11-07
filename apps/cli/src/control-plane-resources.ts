@@ -353,6 +353,10 @@ export type SessionResource = ControlPlaneResource<
   {
     readonly phase: Session["state"];
     readonly audience: Session["audience"];
+    /** The Tag's name. */
+    readonly tag?: string;
+    /** A work Session's title, or how a conversation began: its first request, shortened. */
+    readonly title?: string;
     /** The status of the Session's latest Task. */
     readonly latestTaskStatus?: TaskStatus;
     readonly lastInteractionAt: string;
@@ -1452,7 +1456,16 @@ function placementReservationStatus(
   };
 }
 
-export function sessionResource(session: Session, latestTaskStatus?: TaskStatus): SessionResource {
+export function sessionResource(
+  session: Session,
+  summary: {
+    readonly tag?: string;
+    readonly latestTaskStatus?: TaskStatus;
+    readonly firstRequest?: string;
+  } = {},
+): SessionResource {
+  const title = sessionTitle(session, summary.firstRequest);
+  const { latestTaskStatus } = summary;
   return {
     apiVersion: CONTROL_PLANE_API_VERSION,
     kind: "Session",
@@ -1473,6 +1486,8 @@ export function sessionResource(session: Session, latestTaskStatus?: TaskStatus)
     status: {
       phase: session.state,
       audience: session.audience,
+      ...(summary.tag === undefined ? {} : { tag: summary.tag }),
+      ...(title === undefined ? {} : { title }),
       ...(latestTaskStatus === undefined ? {} : { latestTaskStatus }),
       lastInteractionAt: session.lastInteractionAt,
     },
@@ -1815,4 +1830,15 @@ function schedulingWaitStatus(payload: JsonRecord | undefined): JsonRecord {
         : [],
     })),
   };
+}
+
+/** A work Session's own title; otherwise the first request, on one line and at most 60 characters. */
+function sessionTitle(session: Session, firstRequest: string | undefined): string | undefined {
+  const own = session.origin["title"];
+  if (typeof own === "string" && own.trim()) return own.trim();
+  const request = firstRequest?.replace(/\s+/gu, " ").trim();
+  if (request) return request.length > 60 ? `${request.slice(0, 59).trimEnd()}…` : request;
+  // A CLI conversation is named by its session name.
+  const key = session.sessionKey.match(/^cli:[^:]+:(.+)$/u)?.[1];
+  return key;
 }

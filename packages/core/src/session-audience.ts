@@ -183,10 +183,10 @@ export interface SessionAudienceStore {
   findVisibleObjective(viewer: SessionViewer, objectiveId: string): Promise<Objective | undefined>;
   /** The work Sessions a conversation Session started, oldest first, at most 200 of the newest. */
   listWorkSessions(parentSessionId: string): Promise<readonly WorkSessionSummary[]>;
-  /** The status of each Session's latest Task, for the Sessions that have one. */
-  latestSessionTaskStatuses(
+  /** Each Session's latest Task status and first request (its first 200 characters), when it has Tasks. */
+  sessionTaskSummaries(
     sessionIds: readonly string[],
-  ): Promise<ReadonlyMap<string, TaskStatus>>;
+  ): Promise<ReadonlyMap<string, SessionTaskSummary>>;
   /**
    * Finished Tasks of work Sessions whose report turn has not been admitted yet, oldest first.
    * Admitting the report with `workSessionReportDeliveryId` removes a Task from this list.
@@ -196,4 +196,10 @@ export interface SessionAudienceStore {
   findWorkSessionReport(
     workTaskId: string,
   ): Promise<{ readonly inboundEventId: string; readonly taskId?: string } | undefined>;
+}
+
+/** What a Session's Tasks say about it in a list: its latest status and how it began. */
+export interface SessionTaskSummary {
+  readonly latestTaskStatus?: TaskStatus;
+  readonly firstRequest?: string;
 }

@@ -2519,10 +2519,10 @@ export class DrizzleStore implements Store {
   ): ReturnType<SessionAudienceStore["listWorkSessions"]> {
     return this.#sessionAudience().listWorkSessions(...args);
   }
-  latestSessionTaskStatuses(
-    ...args: Parameters<SessionAudienceStore["latestSessionTaskStatuses"]>
-  ): ReturnType<SessionAudienceStore["latestSessionTaskStatuses"]> {
-    return this.#sessionAudience().latestSessionTaskStatuses(...args);
+  sessionTaskSummaries(
+    ...args: Parameters<SessionAudienceStore["sessionTaskSummaries"]>
+  ): ReturnType<SessionAudienceStore["sessionTaskSummaries"]> {
+    return this.#sessionAudience().sessionTaskSummaries(...args);
   }
   listUnreportedWorkTasks(
     ...args: Parameters<SessionAudienceStore["listUnreportedWorkTasks"]>
