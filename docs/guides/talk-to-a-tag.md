@@ -165,7 +165,8 @@ supertag list session
 
 Your conversation appears as a Session with the key `cli:<you>:<conversation>`, titled by your
 first message. A work Session it started shows its own title, and the conversation's Session ID
-under `PARENT`. `STATUS` shows the latest Task's status: `pending`, `running`, `completed`,
+under `PARENT`. An Objective's conversation is titled `Objective ID`, and the Session that handles
+the Tag's Mailbox messages is titled `Inbox`. `STATUS` shows the latest Task's status: `pending`, `running`, `completed`,
 `failed`, or `cancelled`.
 `supertag get session ID` reports `status.audience: private`, and
 `supertag describe session ID` shows its Tasks.

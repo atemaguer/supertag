@@ -39,6 +39,8 @@ import {
   advertisesWorkspaceClone,
   authKeyPhase,
   executionRange,
+  isInboxSessionKey,
+  objectiveIdOfSessionKey,
   operatorTokenOperatorId,
   operatorTokenPhase,
   placementHoldReason,
@@ -1634,6 +1636,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function sessionTitle(session: Session, firstRequest: string | undefined): string | undefined {
   const own = session.origin["title"];
   if (typeof own === "string" && own.trim()) return own.trim();
+  // An Objective's conversation and a Tag's inbox are named for what they are, not their first turn.
+  const objectiveId = objectiveIdOfSessionKey(session.sessionKey);
+  if (objectiveId !== undefined) return `Objective ${objectiveId}`;
+  if (isInboxSessionKey(session.sessionKey)) return "Inbox";
   const request = firstRequest?.replace(/\s+/gu, " ").trim();
   if (request) return request.length > 60 ? `${request.slice(0, 59).trimEnd()}…` : request;
   // A CLI conversation is named by its session name.
