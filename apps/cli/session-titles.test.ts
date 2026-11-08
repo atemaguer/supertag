@@ -30,9 +30,9 @@ describe("Session titles", () => {
   });
 
   it("keeps a work Session's own title and a conversation's first request", () => {
-    expect(
-      sessionResource(session("work:parent:1", { title: "Add subtract" })).status.title,
-    ).toBe("Add subtract");
+    expect(sessionResource(session("work:parent:1", { title: "Add subtract" })).status.title).toBe(
+      "Add subtract",
+    );
     expect(
       sessionResource(session("slack:T1:C1:1.2"), { firstRequest: "Why is billing slow?" }).status
         .title,
