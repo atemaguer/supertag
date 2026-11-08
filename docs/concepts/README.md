@@ -2,11 +2,11 @@
 
 Start here if you want to understand SuperTag before configuring it.
 
-SuperTag lets you define outcomes instead of tasks, and an AI engineering team delivers them. You
-set an outcome: the result, how success is verified, the constraints, budget, and deadline, and
-which decisions need a person. A team plans the work, divides it, reviews each other's
-results, and keeps going until the outcome is met or it needs a person's decision. Its members
-are persistent AI identities called Tags, grouped into Teams. Together, your Teams of
+SuperTag gives engineering work a persistent owner: a Tag, a persistent AI identity with its own
+responsibilities and permissions. You talk to a Tag, or hand it an outcome: the result, how
+success is verified, the constraints, budget, and deadline, and which decisions need a person. It
+plans the work, hands pieces to other Tags on its Team, reviews what they report, and keeps going
+until the outcome is met or it needs a person's decision. Together, your Teams of
 Tags make up an **autonomous organization**: Teams may pursue different outcomes, called
 Objectives, but share one Control Plane (the service that stores and coordinates them), one set of
 rules, and one record of the work. This page calls it the organization.

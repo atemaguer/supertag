@@ -1,10 +1,11 @@
 # SuperTag documentation
 
-SuperTag lets you define outcomes instead of tasks, and an AI engineering team delivers them. You
-state an **Objective**: what done means, how it's verified, a budget, and a deadline. A team of
-**Tags** plans the work, runs it in parallel, reviews it, and comes back for the decisions you
-reserved. A Tag is a persistent AI identity with its own responsibilities and permissions. You can
-direct the team from the coding agent you already use.
+SuperTag gives engineering work a persistent owner. A **Tag** is a persistent AI identity with its
+own responsibilities and permissions. You talk to it in your terminal, in Slack, or on a GitHub
+issue; it runs the work on your coding agents, asks when a decision is yours, and returns a git
+branch to review. For bigger work you give it an **Objective**: what done means, how it's
+verified, a budget, and a deadline. It plans the work and hands pieces to the other Tags on its
+Team.
 
 A **Team** is a flat list of member Tags. Together, your Teams of Tags make up an **autonomous
 organization**: Teams may pursue different Objectives but share one Control Plane, its rules, and
@@ -17,9 +18,10 @@ an external work tool, such as Slack or GitHub.
 Follow this order on your first visit:
 
 1. [Install SuperTag](operations/install.md).
-2. [Give a Tag its first Objective](../README.md#get-started), then use the
-   [CLI walkthrough](operations/cli.md) to inspect the result. [Write an Objective](guides/write-an-objective.md)
-   explains how to state outcomes your team can verify.
+2. [Talk to your first Tag](../README.md#get-started) and hand it an Objective, then use the
+   [CLI walkthrough](operations/cli.md) to inspect the result. [Talk to a Tag](guides/talk-to-a-tag.md)
+   covers conversations, and [Write an Objective](guides/write-an-objective.md) explains how to
+   state outcomes a Tag can verify.
 3. [Add a teammate](guides/first-team.md) and put two Tags in a [Team](guides/teams.md).
    To direct SuperTag from Claude Code, Codex, or another coding agent, set up the
    [operator skill guide](guides/coding-agent-operator.md).
@@ -39,7 +41,7 @@ Follow this order on your first visit:
 | Run SuperTag from your coding agent | [Run SuperTag from your coding agent](guides/coding-agent-operator.md) |
 | Run and inspect work from the terminal | [CLI operator walkthrough](operations/cli.md) |
 | Understand the main ideas | [Core concepts](concepts/README.md) |
-| Choose how to direct an AI engineering team | [The interaction model](concepts/interaction-model.md) |
+| Choose how to direct your Tags | [The interaction model](concepts/interaction-model.md) |
 | Ask a Tag a question from your terminal | [Talk to a Tag from the CLI](guides/talk-to-a-tag.md) |
 | Give several Tags a shared outcome | [Define and complete an Objective](guides/objectives.md) |
 | Keep a Tag responsible as conditions change | [Maintain an ongoing responsibility](guides/ongoing-responsibilities.md) |

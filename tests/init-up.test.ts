@@ -372,6 +372,7 @@ describe("supertag init", () => {
       expect(text).toContain("Host service studio-mac: Enrolled as Worker Host studio-mac");
       expect(text).toContain("Bound Worker Host studio-mac to Tag lead.");
       expect(text).toMatch(/Worker Host studio-mac connected; Workers registered: local-codex\./);
+      expect(text).toContain('supertag message tag lead "');
       expect(text).toContain("supertag create objective --owner lead --workspace shop --outcome");
       expect(text).toContain("add restart: unless-stopped to both services");
       expect(text).not.toContain(await ensureLocalAdminToken());

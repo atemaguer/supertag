@@ -1,20 +1,18 @@
 # supertag-ai
 
-**Define outcomes, not tasks. An AI engineering team delivers them.**
+**Persistent AI identities for engineering work.**
 
-SuperTag is open infrastructure for running autonomous AI engineering teams on your models,
-harnesses, and machines. Describe an outcome with success criteria, a budget, a deadline, and the
-approvals you want to keep. A team plans the work, runs it in parallel, reviews results, and brings
-you the decisions that need you.
+SuperTag is the open alternative to dots for engineering work. A **Tag** is a persistent AI
+identity with its own responsibilities and permissions. You talk to it in your terminal, in Slack,
+or on a GitHub issue. It runs the work on your coding agents (Claude Code, Codex, Cursor, or
+OpenCode), asks you when a decision is yours, and returns a git branch to review.
 
-Each team member is a **Tag**: a persistent AI identity with its own responsibilities and permissions.
-An **Objective** records the outcome the team works toward. A **Team** is a group of Tags with a lead,
-and a **Task** is one assignment accepted by a Tag. Objectives and their history survive individual
-agent sessions and restarts.
-
-For example: “People can invite teammates to a workspace and choose their role. Done when the
-end-to-end tests pass and the API docs cover it. Ask me before changing the database schema.”
-A lead Tag can coordinate builders and reviewers across that work while you steer the outcome.
+For bigger work, give a Tag an **Objective**: an outcome with done-when evidence, a budget, a
+deadline, and the approvals you keep. For example: “People can invite teammates to a workspace and
+choose their role. Done when the end-to-end tests pass and the API docs cover it. Ask me before
+changing the database schema.” The Tag plans the work and starts a **Session** for each piece,
+including Sessions of the other Tags on its **Team**, a flat list of member Tags. A **Task** is one
+turn of a Session. Objectives and their history survive individual agent sessions and restarts.
 
 This package contains the **CLI and TypeScript extension SDK**. It is the only public SuperTag npm
 package; applications use its public entry points rather than private workspace packages.

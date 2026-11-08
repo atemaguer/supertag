@@ -1,16 +1,26 @@
-# How you direct an AI engineering team
+# How you direct your Tags
 
 With most coding agents, you direct work one task at a time and coordinate the parallel sessions
-yourself. SuperTag changes both: you define an outcome once, and one operator thread
-directs a team that delivers it.
+yourself. SuperTag changes both. You talk to one Tag, which keeps what it owns across sessions,
+and for bigger work you define the outcome once and the Tag delivers it with its Team.
 
 An **Objective** records that outcome and how success will be checked. A **Tag** is a persistent
 AI identity with its own responsibilities and permissions. A **Session** is one Tag's thread of
 work and a **Task** is one turn of it; a **Team** is a flat list of member Tags.
 
-For example, ask a team to move the product to usage-based billing, with a passing
-reconciliation suite and an independent review. This model is useful when delivery needs several pieces of work, reviews, or
-execution environments. A short question or a small edit can stay in one coding-agent session.
+For example, ask a Tag to move the product to usage-based billing, with a passing
+reconciliation suite and an independent review. An Objective is useful when delivery needs several
+pieces of work, reviews, or execution environments. A short question or a small edit can stay in a
+conversation with the Tag.
+
+## Talk to a Tag
+
+A conversation with a Tag is a Session of its own, in your terminal with `supertag message tag`, in
+a Slack thread, or on a GitHub issue. A quick question gets an answer. For longer work the Tag
+starts a work Session, tells you, and reports the result back in the same conversation. When the
+work needs you, the question or approval appears there too, and your next message continues the
+conversation. The Tag sees its open Objectives in every conversation, so you can ask how one is
+going from anywhere. See [Talk to a Tag](../guides/talk-to-a-tag.md).
 
 ## Declare an outcome, then steer the work
 
@@ -39,12 +49,13 @@ or sandbox supplying execution capacity. A **Worker** completes a Task there, us
 system such as a coding harness. Work can span hosts and harness sessions while the Objective
 and its results remain recorded. See [Define and complete an Objective](../guides/objectives.md).
 
-## Use an operator thread
+## Or use an operator thread
 
-An operator thread is a coding-agent session given SuperTag's skill instructions. It plays the
-part of a Project's coordinating conversation: it helps you turn a conversation into an Objective,
-inspect the team's progress, and relay your decisions. It is a way to operate SuperTag, rather than
-another organizational resource.
+An operator thread is a coding-agent session, in Claude Code, Codex, or Cursor, given SuperTag's
+skill instructions. It drives SuperTag through the CLI: it helps you turn a conversation into an
+Objective, inspect progress, and relay your decisions. It is a way to operate SuperTag, rather than
+another organizational resource. Unlike a conversation with a Tag, nothing brings results back
+into that thread on its own; it checks the inbox when you ask.
 
 For example, use the thread to refine the billing acceptance criteria before starting work. Later,
 ask it which results await review or why delivery has stopped. The session uses the SuperTag
@@ -67,7 +78,7 @@ describes them as follows:
 | --- | --- | --- |
 | [`/goal` in Claude Code](https://code.claude.com/docs/en/goal) | Sets a completion condition for the current session. After each turn, a model checks the condition, and Claude keeps working until it holds. | An Objective is a completion condition for a team. It lasts across sessions and machines, and budgets and approvals apply. |
 | [`/goal` in Codex](https://learn.chatgpt.com/docs/developer-commands?surface=cli) | Keeps a goal attached to the active chat while work continues. You can edit, pause, resume, or clear it. | The Objective belongs to the organization, not to one chat. |
-| [Projects in Claude Code](https://code.claude.com/docs/en/claude-projects) | One conversation starts a thread for each task and runs the threads as parallel cloud sessions that share repositories, instructions, and memory. | A conversation with a Tag can start a work Session for each longer task, up to four running at once, and the Tag reports each result back in that conversation. An operator thread plays the same coordinating role across Tags, which have their own permissions and run on the hosts you choose. |
+| [Projects in Claude Code](https://code.claude.com/docs/en/claude-projects) | One conversation starts a thread for each task and runs the threads as parallel cloud sessions that share repositories, instructions, and memory. | A conversation with a Tag can start a work Session for each longer task, up to four running at once, and the Tag reports each result back in that conversation. Each Tag has its own permissions and runs on the hosts you choose. |
 | [Projects in Cursor](https://cursor.com/docs/agent/projects) | A coordinator agent plans the work, delegates it to agents running in parallel on Cloud Agents, and returns finished work to you. | The owning Tag plans the work and starts Sessions for it, including Sessions of other Team members; they run on Worker Hosts you connect, with any supported harness. |
 
 Project capabilities change. The questions below help you compare their documented behavior with
@@ -84,8 +95,9 @@ SuperTag without assuming that the products use the same contracts.
 Choose a single session, with or without `/goal`, when you can supervise one bounded change and
 assess the result yourself.
 Choose a Project when its documented execution, review, sharing, and spending behavior meet your
-needs within the coding product you already use. Choose SuperTag when you need an AI engineering
-team with recorded ownership, work, and limits across sessions and execution environments.
+needs within the coding product you already use. Choose SuperTag when you want a persistent owner for
+engineering work, with recorded ownership, work, and limits across sessions and execution
+environments.
 
 For details, see [multiplayer continuity](multiplayer.md),
 [Worker Hosts and Workers](workers.md), and
