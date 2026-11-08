@@ -208,8 +208,15 @@ to `~/.supertag/.env`.
 not establish current process activity.`, `supertag ps` lists the Task under `Uncertain:`, or the
 operator inbox has a `task-attention` item about one. The Task Attempt may have
 executed: for example, its Worker could not confirm cleanup in time. SuperTag will not run it again
-on its own, and it keeps a Worker slot. Whoever waits on the Task has already been woken. See
+on its own, and it keeps a Worker slot. Whoever waits on the Task has already been woken. Its
+Session takes no new turn until SuperTag knows the execution stopped. See
 [Uncertain Task Attempts](../reference/scheduling-and-recovery.md#uncertain-task-attempts).
+
+First start the Worker Host again with its original state directory, if it is not running. When
+the Worker can verify cleanup itself, it records the Task Attempt as stopped on reconnect. The
+inbox item then goes away shortly after, and the Session's waiting turns run. In that case
+`supertag recover worklet` refuses with `Attempt already has a terminal receipt`; there is nothing
+left to recover.
 
 Each of those places shows the reason and the exact recover command. To recover:
 
@@ -232,7 +239,9 @@ Each of those places shows the reason and the exact recover command. To recover:
 4. Start the host again with `supertag up laptop`.
 
 To check that it worked, run `supertag describe task TASK_ID`. The Task now shows `failed`, with
-its outcome recorded as unknown, and the inbox item is gone.
+its outcome recorded as unknown, and `Execution cleanup evidence: confirmed`. The inbox item is
+gone, and the Session's waiting turns run. The Task itself never runs again; start new work if it
+should continue.
 
 ### A Worker Host stays at capacity after a forced kill
 

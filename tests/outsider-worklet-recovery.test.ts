@@ -11,6 +11,7 @@ import {
   type SurfaceTagAuthorizationSnapshot,
   type Task,
 } from "../packages/core/src/index.js";
+import { FileAttemptJournal } from "../packages/runtime/sdk/src/index.js";
 import {
   DrizzleStore,
   FileGatewayCredentialVault,
@@ -21,8 +22,9 @@ import { enrollWorkerHost } from "./support/worker-host-enrollment.js";
 /**
  * Recovery parity for the surface path. The two turns belong to one Objective Session, so the
  * second is due only once the first settles: whatever a real gRPC Worklet's abrupt death leaves
- * behind, SuperTag never replays the interrupted Attempt and never starts the next turn until
- * the interrupted one is resolved.
+ * behind, SuperTag never replays the interrupted Attempt and never starts the next turn while the
+ * interrupted one may still be executing. Once the Worker's journal shows that execution stopped,
+ * by its own terminal receipt or by an operator's recovery, the next turn runs.
  */
 for (const termination of process.env["SUPERTAG_LIVE_CLEANUP_RECOVERY"] === "1"
   ? ["SIGKILL-codex"]
@@ -283,25 +285,52 @@ for (const termination of process.env["SUPERTAG_LIVE_CLEANUP_RECOVERY"] === "1"
             : "Execution completion could not be confirmed",
         );
 
-        // Its Session takes no further turn: the next turn stays pending and never executes.
-        await new Promise((settle) => setTimeout(settle, 1000));
-        expect((await store.findInboundEventById(afterEvent))?.status).toBe("pending");
-        expect((await store.listTasks({})).some((task) => task.inboundEventId === afterEvent)).toBe(
-          false,
-        );
-        expect((await readFile(join(directory, "executions"), "utf8")).trim().split("\n")).toEqual([
-          "interrupt",
-        ]);
-
-        // Only an operator on the Worker Host can settle it; the inbox names the exact command.
-        const inbox = await store.readCoordinationInbox({ objectiveId: objective.id });
-        expect(
-          inbox.items.find(
+        const attention = async () =>
+          (await store.readCoordinationInbox({ objectiveId: objective.id })).items.find(
             (item) =>
               item.kind === "task_attention" &&
               item.evidence.some((entry) => entry.kind === "task" && entry.id === interrupt.id),
-          ),
-        ).toMatchObject({ operatorEligible: true });
+          );
+        if (termination === "SIGKILL") {
+          // The journal cannot tell whether execution stopped, so the Session takes no further
+          // turn: the next turn stays pending and never executes.
+          await new Promise((settle) => setTimeout(settle, 1000));
+          expect((await store.findInboundEventById(afterEvent))?.status).toBe("pending");
+          expect(
+            (await store.listTasks({})).some((task) => task.inboundEventId === afterEvent),
+          ).toBe(false);
+          expect(
+            (await readFile(join(directory, "executions"), "utf8")).trim().split("\n"),
+          ).toEqual(["interrupt"]);
+
+          // Only an operator on the Worker Host can settle it; the inbox names the exact command.
+          expect(await attention()).toMatchObject({ operatorEligible: true });
+
+          // The operator stops the host, records that execution stopped, and starts it again,
+          // as `supertag recover worklet --confirm-stopped` does.
+          await stopChild("SIGTERM");
+          const attemptId = (await store.listTaskAttempts(interrupt.id))[0]?.id as string;
+          const journal = new FileAttemptJournal(join(directory, "journal"));
+          await journal.initialize();
+          journal.confirmStopped(attemptId, interrupt.id, "Verified nothing still runs");
+          await journal.close();
+          await connect();
+        }
+
+        // The Worker's terminal receipt releases the Session: the next turn runs once, and the
+        // interrupted Attempt still never runs again.
+        await expect
+          .poll(async () => (await store.findInboundEventById(afterEvent))?.status, {
+            timeout: 30000,
+          })
+          .toBe("completed");
+        expect((await store.findInboundEventById(interruptEvent))?.sessionBlocked).toBe(false);
+        expect(await store.listTaskAttempts(interrupt.id)).toHaveLength(1);
+        expect((await readFile(join(directory, "executions"), "utf8")).trim().split("\n")).toEqual([
+          "interrupt",
+          "after-restart",
+        ]);
+        expect(await attention()).toBeUndefined();
       } finally {
         await stopChild("SIGKILL");
         await runtime.close();

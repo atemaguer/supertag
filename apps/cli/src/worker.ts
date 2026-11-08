@@ -1541,7 +1541,7 @@ servers and their auth or env references.
 export async function runWorkletRecoveryCommand(args: readonly string[]): Promise<void> {
   if (args.includes("--help") || args.includes("-h")) {
     process.stdout.write(
-      "Usage: supertag recover worklet --worker-id ID --task ID --attempt ID --confirm-stopped --reason TEXT [--host NAME]\n\nRun on the original Worker Host with its existing state directory. Stop the host service first\n(supertag down SERVICE), or end its supertag connect worklet process: a running host owns its\njournal. supertag ps and the operator inbox show each uncertain Attempt with this command.\nFinds the journal under workers/ID/attempt-journal or, for a host service, the\nhosts/SERVICE/attempt-journal whose stored credential matches the Attempt's Worker Host.\nRefuses ambiguous host services and names them; pass --host NAME (the host service name in\nsupertag.yaml) to select one. Symlinked journal paths are skipped.\nFirst verify all local and remote execution for this Attempt has stopped. This records your\nconfirmation and releases its reservation on reconnect; its outcome remains unknown.\n",
+      "Usage: supertag recover worklet --worker-id ID --task ID --attempt ID --confirm-stopped --reason TEXT [--host NAME]\n\nRun on the original Worker Host with its existing state directory. Stop the host service first\n(supertag down SERVICE), or end its supertag connect worklet process: a running host owns its\njournal. supertag ps and the operator inbox show each uncertain Attempt with this command.\nFinds the journal under workers/ID/attempt-journal or, for a host service, the\nhosts/SERVICE/attempt-journal whose stored credential matches the Attempt's Worker Host.\nRefuses ambiguous host services and names them; pass --host NAME (the host service name in\nsupertag.yaml) to select one. Symlinked journal paths are skipped.\nFirst verify all local and remote execution for this Attempt has stopped. This records your\nconfirmation; on reconnect SuperTag releases its reservation and lets its Session take new\nturns. Its outcome remains unknown and it never runs again.\n",
     );
     return;
   }
@@ -1579,7 +1579,7 @@ export async function runWorkletRecoveryCommand(args: readonly string[]): Promis
       `Operator ${userInfo().username} on ${hostname()} confirmed stopped execution. Reason: ${values.reason}`,
     );
     process.stdout.write(
-      `Recorded cleanup confirmation for ${receipt.attemptId}. Outcome remains unknown. Reconnect the Worklet to reconcile Control Plane state and capacity.\n`,
+      `Recorded cleanup confirmation for ${receipt.attemptId}. Outcome remains unknown. Reconnect the Worklet to reconcile Control Plane state and capacity and release its Session.\n`,
     );
   } finally {
     await journal.close();

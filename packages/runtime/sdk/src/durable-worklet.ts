@@ -381,7 +381,9 @@ export class FileAttemptJournal {
     if (!inspection || inspection.taskId !== taskId)
       throw new Error("Task and Attempt identity do not match this journal");
     if (!["unknown", "running", "accepted"].includes(inspection.status))
-      throw new Error("Attempt already has a terminal receipt");
+      throw new Error(
+        "Attempt already has a terminal receipt, so there is nothing to recover; start the host again so the Control Plane records it",
+      );
     return this.append(
       { ...inspection, status: "failed" },
       {

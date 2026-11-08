@@ -119,6 +119,7 @@ import type {
 } from "@supertag/core";
 import {
   ARTIFACT_CONTEXT_TYPE,
+  ATTEMPT_CLEANUP_BLOCK_REASONS,
   normalizeApprovers,
   parseExecutionSettings,
   parseLiveMounts,
@@ -3007,6 +3008,56 @@ export class DrizzleStore implements Store {
         ),
       );
   }
+  async listBlockedSessionAttempts(
+    input: Parameters<SessionInputStore["listBlockedSessionAttempts"]>[0],
+  ): ReturnType<SessionInputStore["listBlockedSessionAttempts"]> {
+    const i = this.#tables.durableInboundEvents,
+      t = this.#tables.tasks,
+      a = this.#tables.taskAttempts;
+    // Pages by turn ID, so turns that stay blocked cannot hide later ones from a caller that
+    // passes the last ID it saw.
+    return this.#db
+      .select({ inboundEventId: i.id, taskId: t.id, attemptId: a.id })
+      .from(i)
+      .innerJoin(t, eq(t.inboundEventId, i.id))
+      .innerJoin(a, eq(a.taskId, t.id))
+      .where(
+        and(
+          eq(i.sessionBlocked, true),
+          inArray(i.status, ["completed", "failed"]),
+          inArray(i.lastError, [...ATTEMPT_CLEANUP_BLOCK_REASONS]),
+          input.after === undefined ? undefined : gt(i.id, input.after),
+          ne(a.status, "running"),
+          sql`${a.attemptNumber} = (select max(latest."attemptNumber") from "TaskAttempt" latest where latest."taskId" = ${t.id})`,
+        ),
+      )
+      .orderBy(asc(i.id))
+      .limit(positiveLimit(input.limit));
+  }
+  async releaseInboundSession(
+    input: Parameters<SessionInputStore["releaseInboundSession"]>[0],
+  ): Promise<boolean> {
+    const i = this.#tables.durableInboundEvents;
+    const attemptId = required(input.attemptId, "Task attempt id");
+    // One conditional update: a dispatcher claiming the Session's next turn sees it either still
+    // blocked or released, and a repeat changes nothing. The turn keeps its settled status and
+    // its reason, so it never becomes due again.
+    const rows = await this.#db
+      .update(i)
+      .set({ sessionBlocked: false, updatedAt: new Date().toISOString() })
+      .where(
+        and(
+          eq(i.id, required(input.inboundEventId, "Inbound event id")),
+          eq(i.sessionBlocked, true),
+          inArray(i.status, ["completed", "failed"]),
+          // Other block reasons are resolved elsewhere, not by the Attempt stopping.
+          inArray(i.lastError, [...ATTEMPT_CLEANUP_BLOCK_REASONS]),
+          sql`exists (select 1 from "Task" bt join "TaskAttempt" ba on ba."taskId" = bt."id" where bt."inboundEventId" = ${i.id} and ba."id" = ${attemptId} and ba."status" <> 'running' and ba."attemptNumber" = (select max(la."attemptNumber") from "TaskAttempt" la where la."taskId" = bt."id"))`,
+        ),
+      )
+      .returning({ id: i.id });
+    return rows.length > 0;
+  }
   async refreshPendingTaskSessionHistory(
     taskId: string,
     sessionHistory: readonly TaskHistoryEntry[],
@@ -3729,8 +3780,9 @@ export class DrizzleStore implements Store {
           task.endedAt !== input.completedAt ||
           attempt.endedAt !== input.completedAt ||
           work.completedAt !== input.completedAt ||
-          (sessionBlockReason !== undefined &&
-            (!work.sessionBlocked || work.lastError !== sessionBlockReason)) ||
+          // The Session may since have been released once cleanup was confirmed; the turn keeps
+          // its reason either way.
+          (sessionBlockReason !== undefined && work.lastError !== sessionBlockReason) ||
           !isDeepStrictEqual(task.outcome, outcome) ||
           !isDeepStrictEqual(attempt.outcome, outcome) ||
           !reply ||

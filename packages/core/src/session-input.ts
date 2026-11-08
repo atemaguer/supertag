@@ -3,6 +3,19 @@ import type { JsonRecord, Task, TaskAttempt, TaskHistoryEntry } from "./index.js
 /** The acknowledgement window starts when the dispatch is durably prepared. */
 export const SESSION_INPUT_ACK_TIMEOUT_MS = 10_000;
 
+/** Blocks a Session while an uncertain Task Attempt's execution may still run. */
+export const EXECUTION_UNCONFIRMED_BLOCK_REASON = "Execution completion could not be confirmed";
+/** Blocks a Session while a cancelled Task Attempt may still be cleaning up. */
+export const CANCELLATION_CLEANUP_BLOCK_REASON = "Cancellation cleanup has not been confirmed";
+/**
+ * The Session block reasons that the Worker's terminal receipt for the blocking Task Attempt
+ * releases. Other reasons stay until their own resolution.
+ */
+export const ATTEMPT_CLEANUP_BLOCK_REASONS: ReadonlySet<string> = new Set([
+  EXECUTION_UNCONFIRMED_BLOCK_REASON,
+  CANCELLATION_CLEANUP_BLOCK_REASON,
+]);
+
 export interface InboundControlDelivery {
   readonly inboundEventId: string;
   readonly taskId: string;
@@ -37,6 +50,28 @@ export interface SessionInputStore {
     reason: string,
     fence?: { readonly leaseOwner: string; readonly now: string },
   ): Promise<void>;
+  /**
+   * The settled turns blocked by an `ATTEMPT_CLEANUP_BLOCK_REASONS` reason whose Task's latest
+   * Task Attempt has ended in the store, by turn ID after `after`: the Attempts whose Worker
+   * receipts can release their Sessions.
+   */
+  listBlockedSessionAttempts(input: { readonly after?: string; readonly limit: number }): Promise<
+    readonly {
+      readonly inboundEventId: string;
+      readonly taskId: string;
+      readonly attemptId: string;
+    }[]
+  >;
+  /**
+   * Releases the Session a settled turn blocked, once its caller has evidence that the turn's
+   * latest Task Attempt `attemptId` stopped executing. The turn stays settled and keeps its
+   * reason; false when it is not blocked by an `ATTEMPT_CLEANUP_BLOCK_REASONS` reason, not
+   * settled, or `attemptId` is not its latest Attempt.
+   */
+  releaseInboundSession(input: {
+    readonly inboundEventId: string;
+    readonly attemptId: string;
+  }): Promise<boolean>;
   findActiveSessionAttempt(
     inboundEventId: string,
   ): Promise<{ readonly task: Task; readonly attempt: TaskAttempt } | undefined>;

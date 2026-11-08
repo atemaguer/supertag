@@ -287,6 +287,32 @@ the Task Attempt stopped and the host reconnects, the Task fails with its outcom
 unknown, and the uncertainty clears. It also clears when the host reports the Task Attempt running or
 finished again.
 
+#### The Session waits while execution may run
+
+A Task of a Session, such as a conversation, an Objective, or a work Session, can fail because
+its Task Attempt's completion could not be confirmed. A cancelled Task can still be cleaning up.
+Either way, its Session takes no new turn while that execution may still run. Later turns,
+including ones already queued, wait.
+
+The Session resumes once the Worker Host's journal records that the Task Attempt stopped:
+
+- The Worker finished, failed, or completed cancellation on its own.
+- The Worker verified cleanup itself when it reconnected.
+- An operator ran `supertag recover worklet --confirm-stopped` and started the host again.
+
+It also resumes when the Task Attempt ran on an ephemeral Worker Host that the Control Plane
+removed after its reconnect grace. That host can never run the Task Attempt again, and the Task's
+events record `task.worker-host-removed`.
+
+Every 10 seconds the Control Plane checks the next 20 blocked Sessions, so each one is checked
+in turn. It also checks when `supertag describe task` reads the Task Attempt. The Task keeps its
+outcome and never runs again. The Session's waiting turns then run in order, and its inbox item
+goes away. `supertag describe task` shows `Execution cleanup evidence: confirmed`.
+
+A Session blocked for another reason, such as a message whose delivery to a running Task Attempt
+could not be confirmed, stays blocked. Its inbox item gives the reason and makes no promise
+that recovery releases it.
+
 ### When the Control Plane sleeps
 
 A laptop that sleeps also suspends a Control Plane that runs on it. While it sleeps, it cannot

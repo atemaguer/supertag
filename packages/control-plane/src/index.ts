@@ -124,7 +124,9 @@ import {
   type AuthKey,
   approvalRequirementFor,
   authKeyLookupId,
+  CANCELLATION_CLEANUP_BLOCK_REASON,
   canonicalJson,
+  EXECUTION_UNCONFIRMED_BLOCK_REASON,
   effectiveWorkerHostLabels,
   isAuthKeySecret,
   isOperatorTokenSecret,
@@ -478,6 +480,7 @@ export class ControlPlane {
   readonly #operatorChannel: OperatorChannelNotifications | undefined;
   #lastBudgetNotificationScan = 0;
   #lastSessionSweep = 0;
+  #blockedSessionCursor: string | undefined;
   #lastOperatorChannelScan = 0;
   #operatorInboxRevision = 0;
   #scannedOperatorInboxRevision = -1;
@@ -2183,9 +2186,7 @@ export class ControlPlane {
               ? "Cancellation requested; the Worker may still be cleaning up."
               : "I stopped working on this.",
             completedAt,
-            ...(durableExecution
-              ? { sessionBlockReason: "Cancellation cleanup has not been confirmed" }
-              : {}),
+            ...(durableExecution ? { sessionBlockReason: CANCELLATION_CLEANUP_BLOCK_REASON } : {}),
           };
           try {
             await this.#surfaceSettlement.prepare(cancelled, work.id, this.#instanceId);
@@ -2243,9 +2244,7 @@ export class ControlPlane {
             ? "Execution stopped because its budget was exhausted. Completed work remains recorded; additional execution requires an authorized allocation. " +
               failureText(failure)
             : failureText(failure),
-          ...(uncertain
-            ? { sessionBlockReason: "Execution completion could not be confirmed" }
-            : {}),
+          ...(uncertain ? { sessionBlockReason: EXECUTION_UNCONFIRMED_BLOCK_REASON } : {}),
           ...executionFailureKind(budgetExhausted, workerEvents),
         };
         try {
@@ -2288,6 +2287,11 @@ export class ControlPlane {
         `attempt.${isSurfaceFailure(outcome) ? "failed" : outcome.status}`,
         result,
         outcome.attemptId,
+      );
+    // The terminal receipt may already be recorded, as when recovery replayed the journal first.
+    if (outcome.sessionBlockReason !== undefined && outcome.attemptId)
+      await this.#releaseStoppedSession(outcome.taskId, outcome.attemptId).catch((error) =>
+        this.#reportDispatchError(error),
       );
     if (status !== "pending") {
       await this.#appendTaskEvent(outcome.taskId, `task.${status}`, result);
@@ -2635,16 +2639,139 @@ export class ControlPlane {
     let cursor = Math.max(0, ...saved.map((event) => Number(event.payload?.["journalSequence"])));
     const receipt = await durable.inspect(attemptId);
     await recordAttemptWorkerReceipt(this.#store, taskId, attemptId, receipt);
-    if (!receipt || receipt.lastSequence <= cursor) return;
-    const throughSequence = receipt.lastSequence;
-    for await (const entry of durable.events(attemptId, cursor)) {
-      if (entry.sequence <= cursor) continue;
-      if (entry.sequence !== cursor + 1) throw new UncertainExecutionError(attemptId);
-      await this.#recordWorkerJournalEvent(taskId, attemptId, entry);
-      cursor = entry.sequence;
-      if (cursor === throughSequence) break;
+    if (!receipt) return;
+    if (receipt.lastSequence > cursor) {
+      const throughSequence = receipt.lastSequence;
+      for await (const entry of durable.events(attemptId, cursor)) {
+        if (entry.sequence <= cursor) continue;
+        if (entry.sequence !== cursor + 1) throw new UncertainExecutionError(attemptId);
+        await this.#recordWorkerJournalEvent(taskId, attemptId, entry);
+        cursor = entry.sequence;
+        if (cursor === throughSequence) break;
+      }
+      if (cursor !== throughSequence) throw new UncertainExecutionError(attemptId);
     }
-    if (cursor !== throughSequence) throw new UncertainExecutionError(attemptId);
+    // A cancelled receipt journals no terminal event, so its cleanup evidence is recorded here.
+    if (
+      receipt.status === "cancelled" &&
+      !(await this.#store.listTaskEvents(taskId)).some(
+        (event) =>
+          event.attemptId === attemptId && event.type === "task.cancellation-cleanup-confirmed",
+      )
+    )
+      await this.#appendTaskEvent(
+        taskId,
+        "task.cancellation-cleanup-confirmed",
+        { version: 1, receiptStatus: receipt.status },
+        attemptId,
+      );
+    await this.#releaseStoppedSession(taskId, attemptId);
+  }
+
+  /**
+   * An uncertain or cancelled Task Attempt blocks its Session only while its execution may still
+   * run. Once the Worker's terminal receipt is recorded, or its removed ephemeral Worker Host can
+   * never run it again, the Session's later turns run; the Task keeps its outcome and is never
+   * replayed.
+   */
+  async #releaseStoppedSession(taskId: string, attemptId: string): Promise<void> {
+    const task = await this.#store.findTaskById(taskId);
+    if (task?.inboundEventId == null) return;
+    if ((await this.#store.findInboundEventById(task.inboundEventId))?.sessionBlocked !== true)
+      return;
+    const attempt = (await this.#store.listTaskAttempts(taskId)).find(
+      (candidate) => candidate.id === attemptId,
+    );
+    const events = await this.#store.listTaskEvents(taskId);
+    if (
+      attempt === undefined ||
+      (taskExecutionPlacementReport(attempt, events).cleanup !== "confirmed" &&
+        !events.some(
+          (event) => event.attemptId === attemptId && event.type === "task.worker-host-removed",
+        ))
+    )
+      return;
+    if (
+      !(await this.#store.releaseInboundSession({
+        inboundEventId: task.inboundEventId,
+        attemptId,
+      }))
+    )
+      return;
+    this.#wakeTaskController?.();
+    this.#markOperatorInboxChanged();
+  }
+
+  /**
+   * Checks a page of blocked Sessions' stopped Task Attempts each sweep, continuing after the
+   * last page so Sessions that stay blocked cannot hide later ones. A connected Worker Host's
+   * journal is replayed; a removed ephemeral Worker Host counts as evidence that its Attempt
+   * stopped.
+   */
+  async #releaseStoppedSessions(): Promise<void> {
+    const blocked = await this.#store.listBlockedSessionAttempts({
+      ...(this.#blockedSessionCursor === undefined ? {} : { after: this.#blockedSessionCursor }),
+      limit: SESSION_SWEEP_BATCH,
+    });
+    this.#blockedSessionCursor =
+      blocked.length < SESSION_SWEEP_BATCH ? undefined : blocked.at(-1)?.inboundEventId;
+    if (blocked.length === 0) return;
+    const worklet = this.#worklet;
+    const durable =
+      worklet !== undefined &&
+      "inspect" in worklet &&
+      typeof worklet.inspect === "function" &&
+      "events" in worklet &&
+      typeof worklet.events === "function"
+        ? (worklet as DurableWorklet)
+        : undefined;
+    const connected = new Set(
+      (await this.listWorkerHosts())
+        .filter((host) => host.connectionStatus === "connected")
+        .map((host) => host.id),
+    );
+    for (const { taskId, attemptId } of blocked) {
+      if (this.#activeTaskControllers.has(taskId)) continue;
+      const attempt = (await this.#store.listTaskAttempts(taskId)).find(
+        (candidate) => candidate.id === attemptId,
+      );
+      if (attempt?.workerSnapshot["durableExecution"] !== true) continue;
+      const host = attemptWorkerHostId(attempt);
+      if (host !== undefined && !connected.has(host)) {
+        await this.#releaseRemovedHostSession(taskId, attempt).catch((error) =>
+          this.#reportDispatchError(error),
+        );
+        continue;
+      }
+      if (durable === undefined || (host === undefined && connected.size === 0)) continue;
+      await this.#replaySurfaceAttemptJournal(taskId, attemptId, durable).catch((error) =>
+        this.#reportDispatchError(error),
+      );
+    }
+  }
+
+  /**
+   * An ephemeral Worker Host removed after its reconnect grace can never run or report `attempt`
+   * again, so its blocked Session is released, as the dispatcher requeues such Attempts.
+   */
+  async #releaseRemovedHostSession(taskId: string, attempt: TaskAttempt): Promise<void> {
+    const removed = await this.#removeLostEphemeralWorkerHost(
+      attempt,
+      EPHEMERAL_WORKER_HOST_GRACE_MS,
+    );
+    if (removed === undefined) return;
+    if (
+      !(await this.#store.listTaskEvents(taskId)).some(
+        (event) => event.attemptId === attempt.id && event.type === "task.worker-host-removed",
+      )
+    )
+      await this.#appendTaskEvent(
+        taskId,
+        "task.worker-host-removed",
+        { version: 1, workerHostId: removed, requeued: false },
+        attempt.id,
+      );
+    await this.#releaseStoppedSession(taskId, attempt.id);
   }
 
   /**
@@ -3163,6 +3290,7 @@ export class ControlPlane {
     });
     await step(() => this.#settleIdleObjectives());
     await step(() => this.#deliverPendingInboxes());
+    await step(() => this.#releaseStoppedSessions());
     await step(() => this.objectives.sweep());
   }
 

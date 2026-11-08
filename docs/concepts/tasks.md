@@ -387,7 +387,9 @@ and exporting its session state.
 ### When delivery is uncertain
 
 If delivery or execution completion is uncertain, SuperTag blocks further execution in that
-Session rather than retrying the message or resuming an older session state. The durable delivery
+Session rather than retrying the message or resuming an older session state. Uncertain execution
+blocks the Session only while it may still run: once its Worker Host records that it stopped, the
+Session's next turns run, and the uncertain Task still never runs again. The durable delivery
 record retains the exact target Task Attempt. If that Task Attempt later withdraws the input as
 unread before SuperTag queues a recovery notice, the message returns to the Session's next turn
 automatically. Do not resend it while that execution is active.

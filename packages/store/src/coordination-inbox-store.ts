@@ -10,6 +10,7 @@ import type {
   ReadCoordinationInboxInput,
 } from "@supertag/core";
 import {
+  ATTEMPT_CLEANUP_BLOCK_REASONS,
   COORDINATION_INBOX_KINDS,
   COORDINATION_INBOX_VERSION,
   coordinationInboxCommands,
@@ -293,8 +294,10 @@ export class DrizzleCoordinationInboxStore implements CoordinationInboxStore {
     if (wants("task_attention")) {
       const task = t.tasks,
         i = t.durableInboundEvents;
-      // A turn whose completion could not be confirmed blocks its Session: SuperTag never
-      // replays it, and only an operator on its Worker Host can recover it.
+      // A turn whose effect could not be confirmed blocks its Session: SuperTag never replays it,
+      // and the item lasts while the Session is blocked. Only a Task Attempt's execution or
+      // cancellation cleanup is released by the Worker's terminal receipt, automatic on
+      // reconnect or after an operator's recovery; the item promises that only for those.
       const blocked = (await this.db
         .select({
           task,
@@ -344,11 +347,19 @@ export class DrizzleCoordinationInboxStore implements CoordinationInboxStore {
       );
       for (const row of blocked.slice(0, COORDINATION_INBOX_CANDIDATE_SCAN_LIMIT)) {
         const attemptId = typeof row.attempt === "string" ? row.attempt : undefined;
+        const why = String(row.error ?? "Execution completion could not be confirmed").replace(
+          /[.\s]*$/u,
+          ".",
+        );
+        const releasedByReceipt =
+          attemptId !== undefined && ATTEMPT_CLEANUP_BLOCK_REASONS.has(String(row.error));
         push({
           key: `task_attention:${row.task.id}:uncertain:${attemptId ?? "none"}`,
           kind: "task_attention",
           status: "pending",
-          reason: `The Task's Attempt may have executed, so SuperTag will not replay it, and its Session takes no new turn until it is recovered. Why: ${String(row.error ?? "Execution completion could not be confirmed").replace(/[.\s]*$/u, ".")} On the Worker Host that ran it, stop the host service first (supertag down SERVICE), confirm all of the Attempt's processes and remote executions stopped, then run the recover command and start the host again.`,
+          reason: releasedByReceipt
+            ? `The Task's Attempt may have executed, so SuperTag will not replay it, and its Session takes no new turn while that execution may still run. Why: ${why} The Session resumes once its Worker Host records that the Attempt stopped, which the Worker does itself on reconnect when it can verify cleanup. Otherwise, on the Worker Host that ran it, stop the host service first (supertag down SERVICE), confirm all of the Attempt's processes and remote executions stopped, then run the recover command and start the host again. The Task keeps its outcome and never runs again.`
+            : `SuperTag could not confirm what this turn did, so it will not replay it, and its Session takes no new turn. Why: ${why}`,
           objectiveId: row.objective.id,
           nextActorTagIds: [],
           excludedActorTagIds: [],
