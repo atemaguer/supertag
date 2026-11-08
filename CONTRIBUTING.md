@@ -61,6 +61,21 @@ pnpm supertag list tag
 This runs the CLI from source through `tsx`, so it requires `pnpm install`
 first. Use it when exercising uncommitted changes.
 
+### Terminal UI (experimental)
+
+`apps/tui` is a Go terminal UI built with Bubble Tea. It is a client of the Control Plane API
+only. Build it with Go 1.26 or later, then run the CLI with no arguments in a terminal:
+
+```sh
+cd apps/tui && ./build.sh && cd ../..
+pnpm supertag
+```
+
+The CLI resolves the Control Plane and token as every command does and hands them to the binary
+on file descriptor 3. With output piped, or without a built binary, `supertag` prints help as
+before. `go test ./...` in `apps/tui` runs its tests; `SUPERTAG_TUI_E2E=1` adds an end-to-end run
+under tmux against a fake Control Plane.
+
 ## Test your change
 
 Before opening a pull request, run:

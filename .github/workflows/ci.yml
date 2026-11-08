@@ -126,3 +126,28 @@ jobs:
       - run: pnpm build
       - run: pnpm --filter supertag-ai test:package
       - run: pnpm test:cli-deployment
+
+  tui:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: apps/tui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/tui/go.mod
+          cache-dependency-path: apps/tui/go.sum
+      - run: go vet ./...
+      - run: go test ./...
+      - run: test -z "$(gofmt -l .)"
+      - run: ./build.sh
+      - run: ls -lh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supertag-tui-${{ matrix.os }}
+          path: apps/tui/dist
+          retention-days: 7

@@ -11,6 +11,7 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- An experimental terminal UI: `supertag` with no arguments, in an interactive terminal, opens a Go terminal UI that lists your Tags and streams a conversation with one, including its work Sessions. It runs from a checkout after `apps/tui/build.sh`; installed packages do not ship it yet, so there `supertag` prints help as before.
 - A Tag's conversations share one memory. Every conversation sees the Tag's open Objectives, and the Tag can list, search, and read its other Sessions with `list_sessions`, `search_sessions`, and `read_session`. `list_objectives` and `read_objective` reach any Objective the Tag owns.
 - Sessions are `shared` or `private`. A Lark direct chat or a CLI conversation is private to its one person; existing Lark direct-chat Sessions become private when you migrate.
 - `supertag message tag NAME TEXT|- [--session NAME] [--output text|json]` talks to a Tag from the terminal in a private conversation, with the Tag's Roles' permissions only.

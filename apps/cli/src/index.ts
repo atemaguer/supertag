@@ -43,6 +43,7 @@ import { isTagCommand, tagResourceHelp } from "./tags.js";
 import { isTaskCommand, runTaskCommand, taskHelp } from "./tasks.js";
 import { runTeamCommand, teamHelp } from "./teams.js";
 import { terminalLines, terminalText } from "./terminal-text.js";
+import { opensTui, runTui, tuiBuildHint } from "./tui.js";
 import { runDownCommand, runLogsCommand, runUpCommand } from "./up.js";
 import { resetVersionSkewWarning, SUPERTAG_VERSION } from "./version.js";
 import { runVersionCommand } from "./version-command.js";
@@ -66,6 +67,12 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     args: normalizeActionFirstCommand(rawSelection.args),
   };
   const [command, provider, ...commandArgs] = selection.args;
+  if (opensTui(selection.args)) {
+    const code = await runTui({ override: selection.controlPlaneOverride });
+    if (code !== undefined) return code;
+    process.stdout.write(`${helpText()}\n${tuiBuildHint() ?? ""}`);
+    return 0;
+  }
   if (command === "test" && provider === "notification") {
     if (commandArgs.includes("--help") || commandArgs.includes("-h")) {
       process.stdout.write(testNotificationHelp);
@@ -540,6 +547,7 @@ function helpText(): string {
   return `SuperTag ${CLI_VERSION}
 
 Usage:
+  supertag                                       (in a terminal: opens the terminal UI)
   supertag [--help] [--version]
   supertag [--control-plane NAME] ACTION RESOURCE [PRIMARY_TARGET] [flags]
 
