@@ -205,36 +205,6 @@ WebSocket Worklet API transport, the Codex harness, and local
 processes with a deterministic model runner. Remote harness tests use simulated environments;
 provider-backed model execution and E2B require separately configured credentials/templates.
 
-## Objective simulation
-
-For a small implementation, independent review, and revision workflow, run
-`scripts/software-objective-demo.ts`. Its default runner is deterministic; the opt-in real mode
-uses Codex with `gpt-5.6-luna` for every role.
-
-Run the deterministic Objective workload from an installed checkout:
-
-```sh
-pnpm test:simulation -- --agents 100 --seed 42 --hosts 3 --concurrency 4 --output /tmp/supertag-objective-simulation
-```
-
-The harness runner is deterministic and makes no model-provider calls. The workload uses real
-Control Plane, API Server, Gateway, Worklet, Worker, and coordination boundaries. Process spawning is simulated by default;
-add `--process-mode local` to exercise real local process spawning. Use `--timeout-ms` to set
-a run timeout. Preserve the seed and output when
-reporting a failure.
-The saved `events.jsonl` records phase timestamps, slow coordination calls, and runner errors.
-The deterministic lead processes independent result reviews together, so a busy API Server does
-not multiply one slow request by the number of delivered Tasks.
-
-For isolated scheduler regressions:
-
-```sh
-pnpm exec vitest run tests/objective-scale-controller.test.ts
-```
-
-The `scripts/messaging-*-benchmark.ts` scripts measure PostgreSQL storage, history growth,
-and Control Plane wakes without model calls.
-
 ## Documentation scope
 
 `docs/` explains how to use, operate, integrate with, and understand SuperTag.
