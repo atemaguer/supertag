@@ -27,7 +27,6 @@ export class DrizzleCoordinationMetricsStore implements CoordinationMetricsStore
 
     const [
       resources,
-      assignments,
       recovery,
       inbox,
       usage,
@@ -35,13 +34,11 @@ export class DrizzleCoordinationMetricsStore implements CoordinationMetricsStore
       agents,
       limits,
       scheduling,
-      schedulingByPriority,
       workerHosts,
       mailbox,
       replies,
     ] = await Promise.all([
       this.one(resourceSql),
-      this.one(taskAssignmentSql),
       this.one(this.recoverySql(capturedAt)),
       this.query(this.inboxSql()),
       this.one(this.usageSql()),
@@ -49,9 +46,8 @@ export class DrizzleCoordinationMetricsStore implements CoordinationMetricsStore
       this.one(this.agentSql()),
       this.one(this.limitSql()),
       this.one(this.schedulingSql(capturedAt)),
-      this.query(this.schedulingByPrioritySql()),
       this.query(workerHostSql),
-      this.one(queueSql("TagMessage", "pending", "processing")),
+      this.one(mailboxSql),
       this.one(queueSql("OutboundReply", "pending", "delivering")),
     ]);
 
@@ -73,30 +69,6 @@ export class DrizzleCoordinationMetricsStore implements CoordinationMetricsStore
       const currency = String(row["currency"] ?? "");
       if (/^[A-Z]{3}$/u.test(currency)) reportedCostByCurrency[currency] = integer(row["amount"]);
     }
-    const priorityRows = new Map(schedulingByPriority.map((row) => [String(row["priority"]), row]));
-    const byPriority = Object.fromEntries(
-      (["urgent", "high", "normal", "low"] as const).map((priority) => {
-        const row = priorityRows.get(priority) ?? {};
-        const oldestQueuedAt = timestamp(row["oldestQueuedAt"]);
-        return [
-          priority,
-          {
-            queued: integer(row["queued"]),
-            oldestQueuedAt,
-            oldestQueuedAgeSeconds:
-              oldestQueuedAt === null
-                ? null
-                : Math.max(
-                    0,
-                    Math.floor((Date.parse(capturedAt) - Date.parse(oldestQueuedAt)) / 1000),
-                  ),
-            placedAttempts: integer(row["placedAttempts"]),
-            averageQueueDurationMs: duration(row["averageQueueDurationMs"]),
-            maximumQueueDurationMs: duration(row["maximumQueueDurationMs"]),
-          },
-        ];
-      }),
-    ) as CoordinationMetricSnapshot["scheduling"]["byPriority"];
 
     return {
       capturedAt,
@@ -108,16 +80,6 @@ export class DrizzleCoordinationMetricsStore implements CoordinationMetricsStore
       contextSets: integer(resources["contextSets"]),
       sessions: integer(resources["sessions"]),
       tasks: statuses(resources, ["pending", "running", "completed", "failed", "cancelled"]),
-      taskAssignments: statuses(assignments, [
-        "queued",
-        "running",
-        "waiting",
-        "submitted",
-        "accepted",
-        "rejected",
-        "cancelled",
-        "failed",
-      ]),
       recovery: {
         unknownControlDeliveries: integer(recovery["unknownControlDeliveries"]),
         blockedSessions: integer(recovery["blockedSessions"]),
@@ -168,7 +130,6 @@ export class DrizzleCoordinationMetricsStore implements CoordinationMetricsStore
         averagePlacementDurationMs: duration(scheduling["averagePlacementDurationMs"]),
         maximumPlacementDurationMs: duration(scheduling["maximumPlacementDurationMs"]),
         admissionRejections: integer(scheduling["admissionRejections"]),
-        byPriority,
         reservations: {
           consumed: integer(scheduling["reservationsConsumed"]),
           active: integer(scheduling["reservationsActive"]),
@@ -189,7 +150,10 @@ export class DrizzleCoordinationMetricsStore implements CoordinationMetricsStore
           };
         }),
       },
-      mailbox: queue(mailbox),
+      mailbox: {
+        pending: integer(mailbox["pending"]),
+        oldestPendingAt: timestamp(mailbox["oldestPendingAt"]),
+      },
       replyDelivery: queue(replies),
     };
   }
@@ -200,25 +164,23 @@ export class DrizzleCoordinationMetricsStore implements CoordinationMetricsStore
 
   private recoverySql(asOf: string): string {
     const durable = this.jsonText('a."workerSnapshot"', "durableExecution");
-    const outcomeUnknown = this.jsonText('q."result"', "outcomeUnknown");
     const blocked = this.provider === "postgresql" ? "true" : "1";
     return `SELECT
       (SELECT count(*) FROM "InboundControlDelivery" WHERE "status" = 'unknown') AS "unknownControlDeliveries",
       (SELECT count(*) FROM (SELECT DISTINCT "tagId", "sessionKey" FROM "DurableInboundEvent" WHERE "sessionBlocked" = ${blocked}) blocked) AS "blockedSessions",
-      (SELECT count(*) FROM "TaskAssignment" q
+      (SELECT count(*) FROM "Task" t
+        JOIN "DurableInboundEvent" e ON e."id" = t."inboundEventId"
         LEFT JOIN "TaskAttempt" a ON a."id" = (
           SELECT latest."id" FROM "TaskAttempt" latest
-          WHERE latest."taskId" = q."taskId" ORDER BY latest."attemptNumber" DESC LIMIT 1
+          WHERE latest."taskId" = t."id" ORDER BY latest."attemptNumber" DESC LIMIT 1
         )
-        WHERE (q."status" = 'running' AND q."leaseExpiresAt" IS NOT NULL
-          AND q."leaseExpiresAt" <= ${literal(asOf)} AND ${durable} IN ('true', '1'))
-          OR (q."status" = 'failed' AND ${outcomeUnknown} IN ('true', '1'))
+        WHERE t."status" = 'running' AND e."status" = 'processing' AND e."leaseExpiresAt" IS NOT NULL
+          AND e."leaseExpiresAt" <= ${literal(asOf)} AND ${durable} IN ('true', '1')
       ) AS "durableExecutionsAwaitingReconciliation"`;
   }
 
   private inboxSql(): string {
-    return `SELECT 'task_approval' AS "kind", count(*) AS "count", min("updatedAt") AS "oldest" FROM "TaskAssignment" WHERE "status" = 'queued' AND "approval" = 'pending'
-      UNION ALL SELECT 'task_review', count(*), min("updatedAt") FROM "TaskAssignment" WHERE "status" = 'submitted'`;
+    return `SELECT 'approval' AS "kind", count(*) AS "count", min("createdAt") AS "oldest" FROM "ApprovalRequest" WHERE "status" = 'pending'`;
   }
 
   private usageSql(): string {
@@ -283,8 +245,8 @@ export class DrizzleCoordinationMetricsStore implements CoordinationMetricsStore
         ? 'extract(epoch FROM (a."startedAt"::timestamptz - q."createdAt"::timestamptz)) * 1000'
         : '(julianday(a."startedAt") - julianday(q."createdAt")) * 86400000';
     return `SELECT
-      (SELECT count(*) FROM "TaskAssignment" WHERE "status" = 'queued') AS "queued",
-      (SELECT min("createdAt") FROM "TaskAssignment" WHERE "status" = 'queued') AS "oldestQueuedAt",
+      (SELECT count(*) FROM "Task" WHERE "status" = 'pending') AS "queued",
+      (SELECT min("createdAt") FROM "Task" WHERE "status" = 'pending') AS "oldestQueuedAt",
       count(CASE WHEN ${placement} IS NOT NULL THEN 1 END) AS "placedAttempts",
       coalesce(avg(CASE WHEN ${placement} IS NOT NULL THEN ${queueDuration} END), 0) AS "averageQueueDurationMs",
       coalesce(max(CASE WHEN ${placement} IS NOT NULL THEN ${queueDuration} END), 0) AS "maximumQueueDurationMs",
@@ -294,23 +256,7 @@ export class DrizzleCoordinationMetricsStore implements CoordinationMetricsStore
       count(CASE WHEN ${reservation} IS NOT NULL AND ${acceptedHost} IS NOT NULL THEN 1 END) AS "reservationsConsumed",
       count(CASE WHEN ${reservation} IS NOT NULL AND ${acceptedHost} IS NULL AND ${reservationExpiry} > ${literal(asOf)} THEN 1 END) AS "reservationsActive",
       count(CASE WHEN ${reservation} IS NOT NULL AND ${acceptedHost} IS NULL AND ${reservationExpiry} <= ${literal(asOf)} THEN 1 END) AS "reservationsExpired"
-      FROM "TaskAttempt" a JOIN "TaskAssignment" q ON q."taskId" = a."taskId"`;
-  }
-
-  private schedulingByPrioritySql(): string {
-    const placement = this.jsonText('a."workerSnapshot"', "placement", "workerHostId");
-    const queueDuration =
-      this.provider === "postgresql"
-        ? 'extract(epoch FROM (a."startedAt"::timestamptz - q."createdAt"::timestamptz)) * 1000'
-        : '(julianday(a."startedAt") - julianday(q."createdAt")) * 86400000';
-    return `SELECT q."priority" AS "priority",
-      count(DISTINCT CASE WHEN q."status" = 'queued' THEN q."taskId" END) AS "queued",
-      min(CASE WHEN q."status" = 'queued' THEN q."createdAt" END) AS "oldestQueuedAt",
-      count(CASE WHEN ${placement} IS NOT NULL THEN 1 END) AS "placedAttempts",
-      coalesce(avg(CASE WHEN ${placement} IS NOT NULL THEN ${queueDuration} END), 0) AS "averageQueueDurationMs",
-      coalesce(max(CASE WHEN ${placement} IS NOT NULL THEN ${queueDuration} END), 0) AS "maximumQueueDurationMs"
-      FROM "TaskAssignment" q LEFT JOIN "TaskAttempt" a ON a."taskId" = q."taskId"
-      GROUP BY q."priority"`;
+      FROM "TaskAttempt" a JOIN "Task" q ON q."id" = a."taskId"`;
   }
 
   private jsonText(column: string, ...path: string[]): string {
@@ -345,15 +291,8 @@ const resourceSql = `SELECT
   (SELECT count(*) FROM "Task" WHERE "status" = 'failed') AS "failed",
   (SELECT count(*) FROM "Task" WHERE "status" = 'cancelled') AS "cancelled"`;
 
-const taskAssignmentSql = `SELECT count(*) AS "total",
-  sum(CASE WHEN "status" = 'queued' THEN 1 ELSE 0 END) AS "queued",
-  sum(CASE WHEN "status" = 'running' THEN 1 ELSE 0 END) AS "running",
-  sum(CASE WHEN "status" = 'waiting' THEN 1 ELSE 0 END) AS "waiting",
-  sum(CASE WHEN "status" = 'submitted' THEN 1 ELSE 0 END) AS "submitted",
-  sum(CASE WHEN "status" = 'accepted' THEN 1 ELSE 0 END) AS "accepted",
-  sum(CASE WHEN "status" = 'rejected' THEN 1 ELSE 0 END) AS "rejected",
-  sum(CASE WHEN "status" = 'cancelled' THEN 1 ELSE 0 END) AS "cancelled",
-  sum(CASE WHEN "status" = 'failed' THEN 1 ELSE 0 END) AS "failed" FROM "TaskAssignment"`;
+const mailboxSql = `SELECT count(*) AS "pending", min("createdAt") AS "oldestPendingAt"
+  FROM "TagMessage" WHERE "taskId" IS NULL`;
 
 const workerHostSql = `SELECT "id", "connectionStatus", "draining", "activeAttempts", "capacity", "availableSlots"
   FROM "WorkerHost" ORDER BY "id"`;
@@ -378,7 +317,7 @@ function statuses<T extends string>(
   ]) as Record<"total" | T, number>;
 }
 
-function queue(row: Row): CoordinationMetricSnapshot["mailbox"] {
+function queue(row: Row): CoordinationMetricSnapshot["replyDelivery"] {
   return {
     backlog: integer(row["backlog"]),
     retrying: integer(row["retrying"]),

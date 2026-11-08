@@ -465,14 +465,6 @@ def _role_instruction_inputs(spec: TaskAttemptSpec) -> tuple[InstructionInput, .
         details = [f"You are acting in the {name} Role.", f"Purpose: {purpose}"]
         if instructions.strip():
             details.append(instructions.strip())
-        if role.get("systemKey") == "org-architect":
-            details.append(
-                "An incoming mailbox message may request an organization change using action "
-                "and input. Apply this Role's policy before acting. Approve by invoking the "
-                "requested create_tag or create_team tool with the reviewed input. Then send "
-                "one concise correlated message reply to the requester using inReplyTo with "
-                "the outcome and rationale."
-            )
         inputs.append(
             InstructionInput(
                 id=f"role:{role_id}:{revision}",

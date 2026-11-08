@@ -1,27 +1,32 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: Shared dialect queries use different Drizzle query types.
 import {
   type DatabaseProvider,
+  type IdleObjective,
   type JsonRecord,
   OBJECTIVE_CLOSED_STATUSES,
   type Objective,
+  type ObjectiveSessionStore,
+  type ObjectiveSessionSummary,
   type ObjectiveStatus,
+  objectiveSessionKey,
+  SESSION_NOT_CONTINUED_EVENT,
   SESSION_SEARCH_MAX_QUERY,
   SESSION_TOOL_MAX_RESULTS,
   type Session,
   type SessionAudience,
   type SessionAudienceStore,
+  type SessionLatestTask,
   type SessionPage,
   type SessionSearchHit,
   type SessionSummary,
   type SessionTaskSummary,
   type SessionViewer,
   type SurfaceProvider,
+  sessionApprovalDeliveryId,
   TagMessagingError,
   type TagObjectiveSummary,
   type TaskStatus,
-  WORK_SESSION_NOT_CONTINUED_EVENT,
   type WorkSessionSummary,
-  workSessionApprovalDeliveryId,
   workSessionReportDeliveryId,
 } from "@supertag/core";
 import { and, asc, desc, eq, inArray, isNotNull, ne, notInArray, or, sql } from "drizzle-orm";
@@ -54,13 +59,14 @@ export function sessionFromRow(row: any): Session {
     audience: sessionAudience(row.audience),
     ...(row.audienceActorKey == null ? {} : { audienceActorKey: row.audienceActorKey }),
     ...(row.parentSessionId == null ? {} : { parentSessionId: row.parentSessionId }),
+    ...(row.objectiveId == null ? {} : { objectiveId: row.objectiveId }),
     lastInteractionAt: row.lastInteractionAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
 }
 
-export class DrizzleSessionAudienceStore implements SessionAudienceStore {
+export class DrizzleSessionAudienceStore implements SessionAudienceStore, ObjectiveSessionStore {
   constructor(
     private readonly db: any,
     private readonly tables: any,
@@ -253,64 +259,7 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
       .where(eq(s.parentSessionId, parentSessionId))
       .orderBy(desc(s.createdAt), desc(s.id))
       .limit(200);
-    // Each latest Task's starting turn (from its admitted event), and the question or approval
-    // requests it ended waiting on.
-    const t = this.tables.tasks,
-      i = this.tables.durableInboundEvents;
-    const taskIds = rows
-      .map((row: any) => row.taskId)
-      .filter((id: unknown) => typeof id === "string");
-    // A Task whose decided request could not continue its Session waits on no approval any more.
-    const notContinued = new Set<string>(
-      taskIds.length === 0
-        ? []
-        : (
-            await this.db
-              .select({ taskId: this.tables.taskEvents.taskId })
-              .from(this.tables.taskEvents)
-              .where(
-                and(
-                  inArray(this.tables.taskEvents.taskId, taskIds),
-                  eq(this.tables.taskEvents.type, WORK_SESSION_NOT_CONTINUED_EVENT),
-                ),
-              )
-          ).map((row: any) => row.taskId as string),
-    );
-    const details = new Map<
-      string,
-      { startedByTaskId?: string; question?: string; approvals?: readonly string[] }
-    >(
-      taskIds.length === 0
-        ? []
-        : (
-            await this.db
-              .select({ id: t.id, outcome: t.outcome, event: i.event })
-              .from(t)
-              .innerJoin(i, eq(i.id, t.inboundEventId))
-              .where(inArray(t.id, taskIds))
-          ).map((row: any) => {
-            const internal = optionalRecord(optionalRecord(row.event)?.["internal"]);
-            const outcome = optionalRecord(row.outcome);
-            const question = outcome?.["question"];
-            const approvals = notContinued.has(row.id)
-              ? []
-              : Array.isArray(outcome?.["approvals"])
-                ? (outcome["approvals"] as unknown[]).filter(
-                    (id): id is string => typeof id === "string",
-                  )
-                : [];
-            return [
-              row.id,
-              {
-                ...(typeof internal?.["startedByTaskId"] === "string"
-                  ? { startedByTaskId: internal["startedByTaskId"] }
-                  : {}),
-                ...(typeof question === "string" ? { question } : {}),
-                ...(approvals.length === 0 ? {} : { approvals }),
-              },
-            ];
-          }),
-    );
+    const details = await this.latestTaskDetails(rows);
     return rows.toReversed().map((row: any) => {
       const origin = jsonRecord(row.origin, "session origin");
       return {
@@ -320,17 +269,72 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
           ? { startedByTaskId: origin["startedByTaskId"] }
           : {}),
         createdAt: row.createdAt,
-        ...(typeof row.taskId === "string" && typeof row.taskStatus === "string"
-          ? {
-              task: {
-                id: row.taskId,
-                status: row.taskStatus as TaskStatus,
-                ...details.get(row.taskId),
-              },
-            }
-          : {}),
+        ...(details.has(row.taskId) ? { task: details.get(row.taskId) } : {}),
       };
     });
+  }
+
+  /**
+   * Each row's latest Task (`taskId`, `taskStatus`): the turn that started it (from its admitted
+   * event), and the question or approval requests it ended waiting on.
+   */
+  private async latestTaskDetails(
+    rows: readonly { readonly taskId?: unknown; readonly taskStatus?: unknown }[],
+  ): Promise<ReadonlyMap<unknown, SessionLatestTask>> {
+    const t = this.tables.tasks,
+      i = this.tables.durableInboundEvents,
+      e = this.tables.taskEvents;
+    const latest = rows.filter(
+      (row): row is { taskId: string; taskStatus: string } =>
+        typeof row.taskId === "string" && typeof row.taskStatus === "string",
+    );
+    const taskIds = latest.map((row) => row.taskId);
+    if (taskIds.length === 0) return new Map();
+    // A Task whose decided request could not continue its Session waits on no approval any more.
+    const notContinued = new Set<string>(
+      (
+        await this.db
+          .select({ taskId: e.taskId })
+          .from(e)
+          .where(and(inArray(e.taskId, taskIds), eq(e.type, SESSION_NOT_CONTINUED_EVENT)))
+      ).map((row: any) => row.taskId as string),
+    );
+    const found = new Map<string, Omit<SessionLatestTask, "id" | "status">>(
+      (
+        await this.db
+          .select({ id: t.id, outcome: t.outcome, event: i.event })
+          .from(t)
+          .innerJoin(i, eq(i.id, t.inboundEventId))
+          .where(inArray(t.id, taskIds))
+      ).map((row: any) => {
+        const internal = optionalRecord(optionalRecord(row.event)?.["internal"]);
+        const outcome = optionalRecord(row.outcome);
+        const question = outcome?.["question"];
+        const approvals = notContinued.has(row.id)
+          ? []
+          : Array.isArray(outcome?.["approvals"])
+            ? (outcome["approvals"] as unknown[]).filter(
+                (id): id is string => typeof id === "string",
+              )
+            : [];
+        return [
+          row.id,
+          {
+            ...(typeof internal?.["startedByTaskId"] === "string"
+              ? { startedByTaskId: internal["startedByTaskId"] }
+              : {}),
+            ...(typeof question === "string" ? { question } : {}),
+            ...(approvals.length === 0 ? {} : { approvals }),
+          },
+        ];
+      }),
+    );
+    return new Map(
+      latest.map((row) => [
+        row.taskId,
+        { id: row.taskId, status: row.taskStatus as TaskStatus, ...found.get(row.taskId) },
+      ]),
+    );
   }
 
   async listSessionTaskIds(sessionId: string): Promise<readonly string[]> {
@@ -395,7 +399,7 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
     return rows.map((row: any) => row.id);
   }
 
-  async listDecidedWorkSessionWaits(limit: number): Promise<readonly string[]> {
+  async listDecidedSessionWaits(limit: number): Promise<readonly string[]> {
     const t = this.tables.tasks,
       s = this.tables.sessions,
       w = this.tables.durableInboundEvents;
@@ -406,14 +410,18 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
       .innerJoin(w, eq(w.id, t.inboundEventId))
       .where(
         and(
-          isNotNull(s.parentSessionId),
+          or(
+            isNotNull(s.parentSessionId),
+            and(isNotNull(s.objectiveId), sql`${s.sessionKey} = 'objective:' || ${s.objectiveId}`),
+            sql`${s.sessionKey} like 'inbox:%'`,
+          ),
           eq(t.status, "completed"),
-          // Decided and not yet used: a denial, or a once approval nobody consumed. The Task's
-          // outcome names the request, so it waited on it.
-          sql`exists (select 1 from "ApprovalRequest" a where a."taskId" = ${t.id} and a."kind" = 'surface-action' and a."objectiveId" is null and (a."status" = 'denied' or (a."status" = 'approved' and a."consumedAt" is null)) and cast(${t.outcome} as text) like '%"' || a."id" || '"%')`,
+          // Decided and not yet used: a denial, an Objective-wide approval, or a once approval
+          // nobody consumed. The Task's outcome names the request, so it waited on it.
+          sql`exists (select 1 from "ApprovalRequest" a where a."taskId" = ${t.id} and a."kind" = 'surface-action' and (a."status" = 'denied' or (a."status" = 'approved' and a."consumedAt" is null)) and cast(${t.outcome} as text) like '%"' || a."id" || '"%')`,
           sql`not exists (select 1 from "Task" n where n."sessionId" = ${t.sessionId} and (n."createdAt" > ${t.createdAt} or (n."createdAt" = ${t.createdAt} and n."id" > ${t.id})))`,
-          sql`not exists (select 1 from "DurableInboundEvent" r where r."surfaceAccountId" = ${w.surfaceAccountId} and r."deliveryId" = ${workSessionApprovalDeliveryId("")} || ${t.id})`,
-          sql`not exists (select 1 from "TaskEvent" e where e."taskId" = ${t.id} and e."type" = ${WORK_SESSION_NOT_CONTINUED_EVENT})`,
+          sql`not exists (select 1 from "DurableInboundEvent" r where r."surfaceAccountId" = ${w.surfaceAccountId} and r."deliveryId" = ${sessionApprovalDeliveryId("")} || ${t.id})`,
+          sql`not exists (select 1 from "TaskEvent" e where e."taskId" = ${t.id} and e."type" = ${SESSION_NOT_CONTINUED_EVENT})`,
           // A retired Tag takes no more turns.
           sql`exists (select 1 from "Tag" g where g."id" = ${t.tagId} and g."status" = 'active')`,
         ),
@@ -421,6 +429,107 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore {
       .orderBy(asc(t.updatedAt), asc(t.id))
       .limit(limit);
     return rows.map((row: any) => row.id);
+  }
+
+  async findObjectiveOwnerSession(objectiveId: string): Promise<Session | undefined> {
+    const s = this.tables.sessions;
+    const [row] = await this.db
+      .select()
+      .from(s)
+      .where(
+        and(eq(s.objectiveId, objectiveId), eq(s.sessionKey, objectiveSessionKey(objectiveId))),
+      )
+      .limit(1);
+    return row === undefined ? undefined : sessionFromRow(row);
+  }
+
+  async listObjectiveSessions(objectiveId: string): Promise<readonly ObjectiveSessionSummary[]> {
+    const s = this.tables.sessions;
+    const rows = await this.db
+      .select({
+        id: s.id,
+        tagId: s.tagId,
+        sessionKey: s.sessionKey,
+        parentSessionId: s.parentSessionId,
+        origin: s.origin,
+        createdAt: s.createdAt,
+        taskId: sql`(select lt."id" from "Task" lt where lt."sessionId" = "Session"."id" order by lt."createdAt" desc, lt."id" desc limit 1)`,
+        taskStatus: sql`(select lt."status" from "Task" lt where lt."sessionId" = "Session"."id" order by lt."createdAt" desc, lt."id" desc limit 1)`,
+      })
+      .from(s)
+      .where(eq(s.objectiveId, objectiveId))
+      .orderBy(asc(s.createdAt), asc(s.id));
+    const details = await this.latestTaskDetails(rows);
+    const own = objectiveSessionKey(objectiveId);
+    return rows
+      .toSorted(
+        (left: any, right: any) =>
+          Number(right.sessionKey === own) - Number(left.sessionKey === own),
+      )
+      .map((row: any) => {
+        const origin = jsonRecord(row.origin, "session origin");
+        return {
+          sessionId: row.id,
+          tagId: row.tagId,
+          sessionKey: row.sessionKey,
+          ...(row.parentSessionId == null ? {} : { parentSessionId: row.parentSessionId }),
+          ...(row.parentSessionId != null && typeof origin["title"] === "string"
+            ? { title: origin["title"] }
+            : {}),
+          createdAt: row.createdAt,
+          ...(details.has(row.taskId) ? { task: details.get(row.taskId) } : {}),
+        };
+      });
+  }
+
+  async listIdleObjectives(limit: number): Promise<readonly IdleObjective[]> {
+    const o = this.tables.objectives,
+      s = this.tables.sessions,
+      t = this.tables.tasks;
+    const pg = this.provider === "postgresql";
+    const asked = pg
+      ? sql`(${t.outcome}->>'question') is not null`
+      : sql`json_extract(${t.outcome}, '$.question') is not null`;
+    const awaitsApproval = pg
+      ? sql`(jsonb_typeof(${t.outcome}->'approvals') = 'array' and jsonb_array_length(${t.outcome}->'approvals') > 0)`
+      : sql`coalesce(json_array_length(${t.outcome}, '$.approvals'), 0) > 0`;
+    const rows = await this.db
+      .select({ objectiveId: o.id, ownerTaskId: t.id })
+      .from(o)
+      .innerJoin(s, and(eq(s.objectiveId, o.id), sql`${s.sessionKey} = 'objective:' || ${o.id}`))
+      .innerJoin(
+        t,
+        sql`${t.id} = (select lt."id" from "Task" lt where lt."sessionId" = ${s.id} order by lt."createdAt" desc, lt."id" desc limit 1)`,
+      )
+      .where(
+        and(
+          eq(o.status, "working"),
+          sql`${o.pausedAt} is null`,
+          eq(o.ongoing, false),
+          inArray(t.status, ["completed", "failed"]),
+          sql`not (${asked})`,
+          sql`(not (${awaitsApproval}) or exists (select 1 from "TaskEvent" ne where ne."taskId" = ${t.id} and ne."type" = ${SESSION_NOT_CONTINUED_EVENT}))`,
+          // Nothing of the Objective is due, running or still to report.
+          sql`not exists (select 1 from "DurableInboundEvent" e join "Session" es on es."tagId" = e."tagId" and es."sessionKey" = e."sessionKey" where es."objectiveId" = ${o.id} and e."status" in ('pending', 'processing'))`,
+          sql`not exists (select 1 from "Session" ws join "Task" wt on wt."sessionId" = ws."id" join "DurableInboundEvent" wi on wi."id" = wt."inboundEventId" where ws."objectiveId" = ${o.id} and ws."parentSessionId" is not null and wt."status" in ('completed', 'failed', 'cancelled') and not exists (select 1 from "DurableInboundEvent" r where r."surfaceAccountId" = wi."surfaceAccountId" and r."deliveryId" = 'session-report:' || wt."id"))`,
+          sql`exists (select 1 from "Tag" g where g."id" = ${o.ownerTagId} and g."status" = 'active')`,
+        ),
+      )
+      .orderBy(asc(t.updatedAt), asc(o.id))
+      .limit(limit);
+    return rows.map((row: any) => ({ objectiveId: row.objectiveId, ownerTaskId: row.ownerTaskId }));
+  }
+
+  async listOpenObjectiveTaskIds(objectiveId: string): Promise<readonly string[]> {
+    const t = this.tables.tasks,
+      s = this.tables.sessions;
+    const rows = await this.db
+      .select({ id: t.id })
+      .from(t)
+      .innerJoin(s, eq(s.id, t.sessionId))
+      .where(and(eq(s.objectiveId, objectiveId), inArray(t.status, ["pending", "running"])))
+      .orderBy(asc(t.createdAt), asc(t.id));
+    return rows.map((row: any) => row.id as string);
   }
 
   async findWorkSessionReport(

@@ -73,9 +73,9 @@ export interface TagObjectiveSummary {
 }
 
 /**
- * A conversation turn may start work Sessions with `start_session`: Sessions of the same Tag
- * whose parent is the conversation Session, each running one Task with an instruction the Tag
- * wrote, under the starting turn's admitted authorization. Fixed limits.
+ * A turn of a root Session may start work Sessions with `start_session`, whose parent is that
+ * Session, each running one Task with an instruction the Tag wrote. They are Sessions of the same
+ * Tag, or, from an Objective's turn, of a member of the Objective's Team. Fixed limits.
  */
 export const WORK_SESSION_TITLE_MAX = 120;
 export const WORK_SESSION_INSTRUCTION_MAX = 8_000;
@@ -94,31 +94,94 @@ export const WORK_SESSION_REPORT_RESULT_MAX = 4_000;
 /** The question a work Session Task may put to the person with `ask`. */
 export const WORK_SESSION_QUESTION_MAX = 2_000;
 
+/** The key of the Session an Objective owns: its conversation with the owner Tag. */
+export function objectiveSessionKey(objectiveId: string): string {
+  return `objective:${objectiveId}`;
+}
+
+/** The Objective whose Session has this key, or undefined for any other Session. */
+export function objectiveIdOfSessionKey(sessionKey: string): string | undefined {
+  return sessionKey.startsWith("objective:") ? sessionKey.slice("objective:".length) : undefined;
+}
+
+/** The key of a Tag's inbox Session, whose turns handle its Mailbox messages. */
+export function inboxSessionKey(tagId: string): string {
+  return `inbox:${tagId}`;
+}
+
+/** Whether a Session key is a Tag's inbox Session. */
+export function isInboxSessionKey(sessionKey: string): boolean {
+  return sessionKey.startsWith("inbox:");
+}
+
+/** The durable delivery id of the turn that starts an Objective. */
+export function objectiveStartDeliveryId(objectiveId: string): string {
+  return `objective-start:${objectiveId}`;
+}
+
+/** The durable delivery id of an operator's message to an Objective, keyed by its idempotency key. */
+export function objectiveMessageDeliveryId(objectiveId: string, key: string): string {
+  return `objective-message:${objectiveId}:${key}`;
+}
+
+/** The durable delivery id of the one wake after the Objective's Task `ownerTaskId` ended idle. */
+export function objectiveIdleDeliveryId(ownerTaskId: string): string {
+  return `objective-idle:${ownerTaskId}`;
+}
+
+/** The durable delivery id of a SuperTag notice to an Objective, such as a budget warning. */
+export function objectiveNoticeDeliveryId(objectiveId: string, key: string): string {
+  return `objective-notice:${objectiveId}:${key}`;
+}
+
+/** The durable delivery id of the inbox turn admitted for one Mailbox message. */
+export function inboxDeliveryId(tagId: string, messageId: string): string {
+  return `inbox:${tagId}:${messageId}`;
+}
+
 /** The durable delivery id of the one report turn for a work Session's Task. */
 export function workSessionReportDeliveryId(workTaskId: string): string {
   return `session-report:${workTaskId}`;
 }
 
 /**
- * The durable delivery id of the one Task that continues a work Session after its Task `workTaskId`
- * ended waiting on approval requests and one of them was decided.
+ * The durable delivery id of the one Task that continues a Session after its Task `taskId` ended
+ * waiting on approval requests and one of them was decided. Work Sessions and Objective Sessions
+ * share it.
  */
-export function workSessionApprovalDeliveryId(workTaskId: string): string {
-  return `work-session-approval:${workTaskId}`;
+export function sessionApprovalDeliveryId(taskId: string): string {
+  return `session-approval:${taskId}`;
 }
 
 /**
- * The Task event a work Session Task gets when a decided approval request it waited on could not
- * continue the Session: its permissions changed, or its starting turn's budget is spent. The Task
- * then waits on nothing.
+ * The Task event a Task gets when a decided approval request it waited on could not continue its
+ * Session: its permissions changed, or the budget is spent. The Task then waits on nothing.
  */
-export const WORK_SESSION_NOT_CONTINUED_EVENT = "work_session.not-continued";
+export const SESSION_NOT_CONTINUED_EVENT = "session.not-continued";
+
+/** Who a `delivery` turn comes from. */
+export type DeliveryFrom =
+  | { readonly kind: "person"; readonly id: string; readonly displayName?: string }
+  | { readonly kind: "tag"; readonly tagId: string; readonly tagName: string }
+  | { readonly kind: "supertag" };
 
 /**
- * A turn SuperTag admits itself into a Session. It is never a human message: its text is the
- * Tag's own instruction (`work_session`) or absent (`session_report`), it
- * carries no explicit human command, and it runs under the starting conversation turn's admitted
- * authorization.
+ * Why a `delivery` turn runs. Objective reasons run in the Objective's Session; `inbox` runs in
+ * the recipient Tag's inbox Session.
+ */
+export type DeliveryReason =
+  | "objective_start"
+  | "objective_message"
+  | "objective_idle"
+  | "objective_notice"
+  | "approval_decision"
+  | "inbox";
+
+/**
+ * A turn SuperTag admits itself into a Session. It carries no explicit human command: a
+ * `work_session` turn's text is the Tag's own instruction, a `session_report` carries a finished
+ * work Session's result, and a `delivery` brings something from a person, a Tag or SuperTag
+ * itself to an Objective's Session or a Tag's inbox.
  */
 export type InternalTurn =
   | {
@@ -154,7 +217,35 @@ export type InternalTurn =
       readonly approvals?: readonly string[];
       /** SuperTag's account of where the work Task's Workspace changes are, when it had one. */
       readonly delivery?: string;
+    }
+  | {
+      /**
+       * One input for every delivered turn: an Objective's start, an operator's message, the idle
+       * wake, a budget or deadline notice, an approval decision, or the Tag's Mailbox messages.
+       * The text is in the event; Mailbox messages are bound when the inbox Task starts.
+       */
+      readonly kind: "delivery";
+      readonly from: DeliveryFrom;
+      readonly reason: DeliveryReason;
+      readonly objectiveId?: string;
+      /** The Task whose action caused this turn, such as the one that sent a Mailbox message. */
+      readonly startedByTaskId?: string;
     };
+
+/** A Session's latest Task, as Session lists show it. */
+export interface SessionLatestTask {
+  readonly id: string;
+  readonly status: TaskStatus;
+  /** The turn that started this Task, with `start_session` or `continue_session`. */
+  readonly startedByTaskId?: string;
+  /** The question this Task asked with `ask`; a completed Task with one waits on the answer. */
+  readonly question?: string;
+  /**
+   * The approval requests this Task ended waiting on; a completed Task with some waits on
+   * their decision and continues on its own once one is decided.
+   */
+  readonly approvals?: readonly string[];
+}
 
 /** One work Session a conversation started, with its latest Task. */
 export interface WorkSessionSummary {
@@ -164,26 +255,14 @@ export interface WorkSessionSummary {
   readonly startedByTaskId?: string;
   readonly createdAt: string;
   /** The work Session's latest Task. */
-  readonly task?: {
-    readonly id: string;
-    readonly status: TaskStatus;
-    /** The conversation turn that started this Task, with `start_session` or `continue_session`. */
-    readonly startedByTaskId?: string;
-    /** The question this Task asked with `ask`; a completed Task with one waits on the person. */
-    readonly question?: string;
-    /**
-     * The approval requests this Task ended waiting on; a completed Task with some waits on
-     * their decision and continues on its own once one is decided.
-     */
-    readonly approvals?: readonly string[];
-  };
+  readonly task?: SessionLatestTask;
 }
 
 /**
- * Whether a work Session's latest Task completed waiting: on the person's answer to its question,
- * or on the decision of an approval request. A Task ends either done or waiting.
+ * Whether a Session's latest Task completed waiting: on the answer to its question, or on the
+ * decision of an approval request. A Task ends either done or waiting.
  */
-export function workSessionWaiting(session: WorkSessionSummary): boolean {
+export function workSessionWaiting(session: { readonly task?: SessionLatestTask }): boolean {
   return (
     session.task?.status === "completed" &&
     (session.task.question !== undefined || (session.task.approvals?.length ?? 0) > 0)
@@ -226,12 +305,6 @@ export interface SessionAudienceStore {
    * Admitting the report with `workSessionReportDeliveryId` removes a Task from this list.
    */
   listUnreportedWorkTasks(limit: number): Promise<readonly string[]>;
-  /**
-   * Completed work Session Tasks of active Tags, oldest first, that are still their Session's latest Task, ended
-   * waiting on an approval request that has since been decided, and were neither continued with
-   * `workSessionApprovalDeliveryId` nor marked `WORK_SESSION_NOT_CONTINUED_EVENT`.
-   */
-  listDecidedWorkSessionWaits(limit: number): Promise<readonly string[]>;
   /** The report turn admitted for a work Session's Task, and its Task once opened. */
   findWorkSessionReport(
     workTaskId: string,
@@ -242,4 +315,51 @@ export interface SessionAudienceStore {
 export interface SessionTaskSummary {
   readonly latestTaskStatus?: TaskStatus;
   readonly firstRequest?: string;
+}
+
+/**
+ * One Session of an Objective: its own Session (`objectiveSessionKey`) or a work Session started
+ * under it, of the owner Tag or a Team member. Each has its latest Task.
+ */
+export interface ObjectiveSessionSummary {
+  readonly sessionId: string;
+  readonly tagId: string;
+  readonly sessionKey: string;
+  /** The Session that started this work Session; absent for the Objective's own Session. */
+  readonly parentSessionId?: string;
+  /** The work Session's title; absent for the Objective's own Session. */
+  readonly title?: string;
+  readonly createdAt: string;
+  readonly task?: SessionLatestTask;
+}
+
+/** An Objective whose latest own Task ended with nothing left running or waiting. */
+export interface IdleObjective {
+  readonly objectiveId: string;
+  /** The Objective Session's latest Task. */
+  readonly ownerTaskId: string;
+}
+
+/** Queries over the Sessions that belong to an Objective (`Session.objectiveId`). */
+export interface ObjectiveSessionStore {
+  /** The Objective's own Session, once its first turn was admitted. */
+  findObjectiveOwnerSession(objectiveId: string): Promise<Session | undefined>;
+  /** Every Session of the Objective, its own first, then work Sessions oldest first. */
+  listObjectiveSessions(objectiveId: string): Promise<readonly ObjectiveSessionSummary[]>;
+  /**
+   * Objectives that are `working`, not paused and not ongoing, whose own latest Task completed or
+   * failed without a question or approval requests, with no pending or processing turn in any
+   * of their Sessions and no work Session Task whose report is still to be admitted. Oldest
+   * first.
+   */
+  listIdleObjectives(limit: number): Promise<readonly IdleObjective[]>;
+  /** Pending and running Tasks of every Session of the Objective. */
+  listOpenObjectiveTaskIds(objectiveId: string): Promise<readonly string[]>;
+  /**
+   * Completed Tasks of active Tags, oldest first, of work, Objective and inbox Sessions, that
+   * are still their Session's latest Task, ended waiting on an approval request that has since
+   * been decided, and were neither continued with `sessionApprovalDeliveryId` nor marked
+   * `SESSION_NOT_CONTINUED_EVENT`.
+   */
+  listDecidedSessionWaits(limit: number): Promise<readonly string[]>;
 }

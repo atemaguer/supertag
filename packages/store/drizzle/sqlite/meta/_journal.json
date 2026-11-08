@@ -225,6 +225,27 @@
       "when": 1794007712988,
       "tag": "0031_simple_queen_noir",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1794100013933,
+      "tag": "0032_objective_coordination_references",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1794100394475,
+      "tag": "0033_tag_sessions_objectives",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1794100397497,
+      "tag": "0034_teams_and_inboxes",
+      "breakpoints": true
     }
   ]
 }

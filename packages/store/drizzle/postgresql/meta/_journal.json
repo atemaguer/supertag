@@ -225,6 +225,27 @@
       "when": 1794007713377,
       "tag": "0031_dark_violations",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1794100014436,
+      "tag": "0032_objective_coordination_references",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1794100396677,
+      "tag": "0033_tag_sessions_objectives",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1794100398397,
+      "tag": "0034_teams_and_inboxes",
+      "breakpoints": true
     }
   ]
 }

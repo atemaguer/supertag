@@ -1,6 +1,5 @@
 import {
   OBJECTIVE_BUDGET_WARNING_FRACTION,
-  type Objective,
   type ObjectiveLimitCandidate,
   type ObjectiveLimitState,
   objectiveDeadlineStopsRunning,
@@ -114,7 +113,6 @@ export function evaluateObjectiveLimits(
   }
   return {
     ...(previous.summary ? { summary: previous.summary } : {}),
-    ...(previous.summaryTaskId ? { summaryTaskId: previous.summaryTaskId } : {}),
     ...(reported && spend
       ? {
           reportedSpend: {

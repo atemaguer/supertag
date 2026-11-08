@@ -8,6 +8,7 @@ import {
   type ReadCoordinationInboxInput,
   type Store,
 } from "@supertag/core";
+import { objectiveHome } from "./objective-sessions.js";
 
 /** Messages per Objective per destination are at most one per window, except blocking approvals. */
 export const OPERATOR_CHANNEL_WINDOW_MS = 60_000;
@@ -110,33 +111,33 @@ export function configuredOperatorChannel(
 }
 
 const SURFACE_DELIVERED_KINDS = new Set<CoordinationInboxItem["kind"]>([
-  "operator_message",
-  "task_budget",
+  "question",
   "objective_budget",
   "objective_limit",
   "approval",
-  "task_approval",
 ]);
 
 /**
- * Whether the Objective's own collaboration surface thread already carries this item. The
- * Control Plane reports these kinds into the thread named by `notificationTaskId`, or else the
- * thread that created the Objective. A failed delivery there falls back to the operator channel.
+ * Whether the Objective's own collaboration surface thread already carries this item: its home
+ * thread, named by `notificationTaskId` or else the thread that created the Objective. The
+ * Objective's turns ask their questions and post their approval and limit notices there. A failed
+ * delivery there falls back to the operator channel.
  */
 export async function objectiveThreadCarries(
-  store: Pick<Store, "getObjective" | "getObjectiveSurfaceTask" | "getVerifiedSurfaceTask">,
+  store: Pick<Store, "getObjective" | "getVerifiedSurfaceTask">,
   item: CoordinationInboxItem,
 ): Promise<boolean> {
-  if (!SURFACE_DELIVERED_KINDS.has(item.kind) || item.notification?.status === "failed")
+  if (
+    !SURFACE_DELIVERED_KINDS.has(item.kind) ||
+    item.notification?.status === "failed" ||
+    item.objectiveId === null
+  )
     return false;
   try {
-    const objective = await store.getObjective(item.objectiveId);
-    const origin = await store.getObjectiveSurfaceTask(objective.id);
-    // Task approval notices go only to Objectives created from a surface.
-    if (item.kind === "task_approval" && !origin) return false;
-    const thread = objective.notificationTaskId ?? origin?.id;
-    if (!thread) return false;
-    return (await store.getVerifiedSurfaceTask(thread))?.inboundEventId !== undefined;
+    return (
+      (await objectiveHome(store, await store.getObjective(item.objectiveId), undefined)) !==
+      undefined
+    );
   } catch {
     return false;
   }
@@ -176,13 +177,11 @@ export interface OperatorChannelOptions {
 export class OperatorChannelNotifications {
   readonly #options: OperatorChannelOptions;
   readonly #now: () => Date;
-  readonly #noticesSince: string;
   readonly #itemObjectives = new Map<string, string>();
 
   constructor(options: OperatorChannelOptions) {
     this.#options = options;
     this.#now = options.now ?? (() => new Date());
-    this.#noticesSince = this.#now().toISOString();
   }
 
   /** Records messages for new items. Restarting never re-records an item already recorded. */
@@ -193,13 +192,12 @@ export class OperatorChannelNotifications {
     for (let page = 0; page < INBOX_PAGE_LIMIT; page += 1) {
       const result = await this.#options.readInbox({
         limit: 100,
-        includeNotices: true,
-        includeNoticesSince: this.#noticesSince,
         ...(cursor ? { cursor } : {}),
       });
       items.push(...result.items);
       for (const item of result.items)
-        this.#itemObjectives.set(coordinationInboxOccurrence(item), item.objectiveId);
+        if (item.objectiveId !== null)
+          this.#itemObjectives.set(coordinationInboxOccurrence(item), item.objectiveId);
       cursor = result.nextCursor;
       if (!cursor) break;
     }
@@ -213,8 +211,10 @@ export class OperatorChannelNotifications {
       const carried = await this.#options.carriedElsewhere?.(item);
       for (const destination of destinations) {
         if (carried && destination.provider === "slack") continue;
-        if (!shouldNotifyInboxItem(item)) continue;
-        const objectiveId = destination.provider === "desktop" ? "*" : item.objectiveId;
+        // Desktop messages and items without an Objective (a Tag inbox's approvals) are not
+        // batched per Objective.
+        const objectiveId =
+          destination.provider === "desktop" || item.objectiveId === null ? "*" : item.objectiveId;
         const key = JSON.stringify([destination.key, objectiveId]);
         const group = groups.get(key) ?? { destination, objectiveId, items: [] };
         group.items.push(item);
@@ -322,7 +322,6 @@ export class OperatorChannelNotifications {
       for (let page = 0; page < INBOX_PAGE_LIMIT; page += 1) {
         const result = await this.#options.readInbox({
           limit: 100,
-          includeNotices: true,
           ...(objectiveId ? { objectiveId } : {}),
           ...(cursor ? { cursor } : {}),
         });
@@ -367,14 +366,6 @@ function safeNotificationError(error: unknown): string {
   return message.replace(/https?:\/\/[^\s)]+/giu, "<redacted URL>").slice(0, 500);
 }
 
-/** The default event set excludes progress reports and ordinary reviews. */
-export function shouldNotifyInboxItem(item: CoordinationInboxItem): boolean {
-  if (item.kind === "operator_message") return true;
-  // Open high findings are projected as task_attention rows, separate from routine reviews.
-  if (item.kind === "task_review") return false;
-  return true;
-}
-
 /** A short message: what needs the operator, then the command to act. */
 export function formatOperatorNotification(
   objectiveId: string,
@@ -403,7 +394,18 @@ export function formatOperatorNotification(
 
 function formatDesktopNotification(items: readonly CoordinationInboxItem[], more = false): string {
   const objectiveIds = [...new Set(items.map((item) => item.objectiveId))];
-  if (objectiveIds.length === 1 && objectiveIds[0])
-    return formatOperatorNotification(objectiveIds[0], items, more);
-  return `SuperTag has ${items.length} ${more ? "more" : "new"} items across ${objectiveIds.length} Objectives.\n\`supertag list inbox\``;
+  const [objectiveId] = objectiveIds;
+  if (objectiveIds.length === 1 && objectiveId)
+    return formatOperatorNotification(objectiveId, items, more);
+  const [only] = items;
+  if (items.length === 1 && only && !more) {
+    const command = only.commands?.[0];
+    return [
+      `SuperTag needs you: ${coordinationInboxHeadline(only)}`,
+      ...(command ? [`\`${command}\``] : []),
+    ].join("\n");
+  }
+  return objectiveIds.includes(null)
+    ? `SuperTag has ${items.length} ${more ? "more" : "new"} items that need you.\n\`supertag list inbox\``
+    : `SuperTag has ${items.length} ${more ? "more" : "new"} items across ${objectiveIds.length} Objectives.\n\`supertag list inbox\``;
 }

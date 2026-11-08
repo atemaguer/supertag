@@ -15,7 +15,7 @@ import type {
   WithdrawArtifactApprovalInput,
 } from "@supertag/core";
 import { parseArtifactSelection, TagMessagingError } from "@supertag/core";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { includesSelection, selectedEntries } from "./artifact-selection.js";
 import { runDialectTransaction } from "./dialect-transaction.js";
 import { lockObjective } from "./objective-lock.js";
@@ -58,19 +58,19 @@ export class DrizzleArtifactPublicationStore implements ArtifactPublicationStore
   ): Promise<ArtifactPublication> {
     const definition = publicationDefinition(input);
     const approvalActor = parseActor(actor);
-    const q = this.tables.taskAssignments,
+    const tasks = this.tables.tasks,
       publications = this.tables.artifactPublicationApprovals;
     const [artifact] = await this.db
       .select()
       .from(this.tables.capturedArtifacts)
       .where(eq(this.tables.capturedArtifacts.id, definition.artifactId));
-    if (!artifact) throw new TagMessagingError(404, "Accepted artifact not found");
+    if (!artifact) throw new TagMessagingError(404, "Completed artifact not found");
     const entries = selectedEntries(artifact, definition);
     const [initial] = await this.db
-      .select({ objectiveId: q.objectiveId })
-      .from(q)
-      .where(eq(q.taskId, artifact.taskId));
-    if (!initial) throw new TagMessagingError(404, "Accepted artifact not found");
+      .select({ objectiveId: tasks.objectiveId })
+      .from(tasks)
+      .where(eq(tasks.id, artifact.taskId));
+    if (!initial?.objectiveId) throw new TagMessagingError(404, "Completed artifact not found");
     const self = this;
     return this.transaction(function* (tx) {
       const objectives = yield* self.lockObjectives(tx, [
@@ -90,28 +90,20 @@ export class DrizzleArtifactPublicationStore implements ArtifactPublicationStore
       if (definition.audienceObjectiveIds.includes(initial.objectiveId))
         throw new TagMessagingError(400, "Publication audience must name other Objectives");
 
-      const [source] = yield tx.select().from(q).where(eq(q.taskId, artifact.taskId));
-      if (!source || source.objectiveId !== initial.objectiveId || source.status !== "accepted")
-        throw new TagMessagingError(409, "Artifact source must have an accepted review");
-      if (
-        !includesSelection(source.result?.taskResult?.artifacts, definition) ||
-        !includesSelection(source.result?.reviewedArtifacts, definition) ||
-        source.result?.reviewedAttemptId !== artifact.attemptId
-      )
-        throw new TagMessagingError(409, "Selected artifact has no accepted review");
-      const reviewedByTagId = source.result?.reviewedByTagId;
-      const assessment = source.result?.assessment;
-      if (typeof reviewedByTagId !== "string" || typeof assessment !== "string")
-        throw new TagMessagingError(409, "Accepted source review provenance is incomplete");
+      const [source] = yield tx.select().from(tasks).where(eq(tasks.id, artifact.taskId));
+      if (!source || source.objectiveId !== initial.objectiveId || source.status !== "completed")
+        throw new TagMessagingError(409, "Artifact source Task must have completed");
+      if (!includesSelection(source.result?.artifacts, definition))
+        throw new TagMessagingError(409, "Selected artifact is not in the Task result");
       const attempts = self.tables.taskAttempts;
       const [attempt] = yield tx
         .select()
         .from(attempts)
-        .where(
-          and(eq(attempts.taskId, source.taskId), eq(attempts.attemptNumber, source.attemptCount)),
-        );
+        .where(eq(attempts.taskId, source.id))
+        .orderBy(desc(attempts.attemptNumber))
+        .limit(1);
       if (!attempt || attempt.id !== artifact.attemptId)
-        throw new TagMessagingError(409, "Accepted source Attempt provenance is incomplete");
+        throw new TagMessagingError(409, "Artifact is not from the Task's final Attempt");
 
       if (definition.supersedesPublicationId) {
         const superseded = yield* self.lockApproval(
@@ -119,7 +111,7 @@ export class DrizzleArtifactPublicationStore implements ArtifactPublicationStore
           publications,
           definition.supersedesPublicationId,
         );
-        if (!superseded || superseded.sourceObjectiveId !== source.objectiveId)
+        if (!superseded || superseded.sourceObjectiveId !== initial.objectiveId)
           throw new TagMessagingError(404, "Superseded publication not found");
         if (
           superseded.artifactId === definition.artifactId &&
@@ -136,16 +128,16 @@ export class DrizzleArtifactPublicationStore implements ArtifactPublicationStore
         .insert(publications)
         .values({
           id: definition.id,
-          sourceTaskId: source.taskId,
+          sourceTaskId: source.id,
           sourceObjectiveId: source.objectiveId,
           artifactId: artifact.id,
           paths: definition.paths,
           entries,
           sourceAttemptId: attempt.id,
-          sourceAttemptCount: source.attemptCount,
-          reviewedByTagId,
-          assessment,
-          acceptedAt: source.updatedAt,
+          sourceAttemptCount: attempt.attemptNumber,
+          reviewedByTagId: sourceObjective.ownerTagId,
+          assessment: source.responseText ?? source.result?.summary ?? "",
+          acceptedAt: source.endedAt ?? source.updatedAt,
           audienceObjectiveIds: definition.audienceObjectiveIds,
           approvedByKind: approvalActor.kind,
           approvedById: actorId(approvalActor),

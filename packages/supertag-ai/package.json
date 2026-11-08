@@ -87,10 +87,6 @@
       "import": "./dist/resources/github.js"
     },
     "./package.json": "./package.json",
-    "./messaging": {
-      "types": "./dist/messaging.d.ts",
-      "import": "./dist/messaging.js"
-    },
     "./harnesses/opencode": {
       "types": "./dist/harnesses/opencode.d.ts",
       "import": "./dist/harnesses/opencode.js"

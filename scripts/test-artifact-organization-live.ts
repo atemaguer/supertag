@@ -1,4 +1,4 @@
-/** Real Control Plane + Docker Worker Hosts; models own all Task delegation and completion. */
+/** Real Control Plane + Docker Worker Hosts; models own all delegation and completion. */
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -103,12 +103,9 @@ async function api(method: string, path: string, body?: object): Promise<Row> {
     req.end(body === undefined ? undefined : JSON.stringify(body));
   });
 }
-async function command(operation: string, input: object = {}) {
-  return api("POST", `/api/v1/coordination/${operation}`, { objectiveId, ...input });
-}
 async function snapshot(): Promise<Record<string, Row[]>> {
   const script =
-    "const db=require('better-sqlite3')('/state/control-plane.db',{readonly:true});const tables={assignments:'TaskAssignment',attempts:'TaskAttempt',tasks:'Task',teams:'Team',objectives:'Objective',messages:'TagMessage',hosts:'WorkerHost',events:'TaskEvent',artifacts:'CapturedArtifact',acquisitions:'ArtifactAcquisition',sessions:'SessionState'};console.log(JSON.stringify(Object.fromEntries(Object.entries(tables).map(([k,t])=>[k,db.prepare(t==='SessionState'?'SELECT id,nativeId FROM SessionState':'SELECT * FROM '+t).all()]))));";
+    "const db=require('better-sqlite3')('/state/control-plane.db',{readonly:true});const tables={sessions:'SELECT id,tagId,sessionKey,parentSessionId,objectiveId FROM Session',inbound:'SELECT id,tagId,sessionKey,status FROM DurableInboundEvent',attempts:'SELECT * FROM TaskAttempt',tasks:'SELECT * FROM Task',teams:'SELECT * FROM Team',objectives:'SELECT * FROM Objective',messages:'SELECT * FROM TagMessage',hosts:'SELECT * FROM WorkerHost',events:'SELECT * FROM TaskEvent',artifacts:'SELECT * FROM CapturedArtifact',acquisitions:'SELECT * FROM ArtifactAcquisition',sessionStates:'SELECT id,nativeId FROM SessionState'};console.log(JSON.stringify(Object.fromEntries(Object.entries(tables).map(([k,q])=>[k,db.prepare(q).all()]))));";
   return JSON.parse(
     (await run("docker", ["exec", name("control-plane"), "node", "-e", script])).stdout,
   );
@@ -326,11 +323,11 @@ try {
     }),
   );
   const context =
-    "This Objective runs on isolated Docker Worker Hosts. Files are private to each Attempt and disappear after it finishes; all inter-agent work must be read through artifact tools. Use managed outputs for reports. When delegating, set execution.profile and leave execution.outputs unset so the Worker provides its managed output directory; each agent must use its own SUPERTAG_OUTPUT_DIR. Explicit inputArtifacts require the producing Task to be submitted, accepted, or rejected. Use find_artifacts, inspect_artifact, and read_artifact to retrieve previous work, and record the producer's native harnessSession in reviews. Do not read another host's filesystem. Use coordination tools for delegation, wait_for, Task review, and Objective completion. Do not create more than six Tasks or any new Tags. Native subagents are disabled. Existing profiles: worker-a revision 1 for the owner, worker-b revision 1 for the reviewer. Never poll or sleep while waiting; arrange wait_for and finish the turn. Inspect tool schemas and read_objective to obtain IDs and current state.";
+    "This Objective runs on isolated Docker Worker Hosts. Files are private to each Attempt and disappear after it finishes; all inter-agent work must be read through artifact tools. Write reports to your own SUPERTAG_OUTPUT_DIR so the Worker preserves them as artifacts. Use find_artifacts, inspect_artifact, and read_artifact to retrieve previous work, and record the producer's native harnessSession in reviews. Do not read another host's filesystem. The Objective's conversation starts work Sessions with start_session, naming a Team member Tag with tag to delegate; each work Session's report arrives as the conversation's next turn. Complete the Objective with update_objective. Do not start more than six work Sessions. Native subagents are disabled. Never poll or sleep while waiting; end the turn. Use read_objective to obtain IDs and current state.";
   for (const [role, instructions] of [
     [
       "Delivery owner",
-      "Own the outcome: prepare evidence, obtain independent review, accept satisfactory submitted work, and complete the Objective only when its success criteria are met.",
+      "Own the outcome: prepare evidence, obtain independent review, check the review's report, and complete the Objective only when its success criteria are met.",
     ],
     [
       "Independent reviewer",
@@ -352,7 +349,10 @@ try {
       await api(
         "POST",
         "/api/v1/tags",
-        resource("Tag", "Delivery owner", { roles: ["Delivery owner"] }),
+        resource("Tag", "Delivery owner", {
+          roles: ["Delivery owner"],
+          workerHosts: ["worker-a"],
+        }),
       )
     )["metadata"],
   )["id"] as string;
@@ -361,7 +361,10 @@ try {
       await api(
         "POST",
         "/api/v1/tags",
-        resource("Tag", "Independent reviewer", { roles: ["Independent reviewer"] }),
+        resource("Tag", "Independent reviewer", {
+          roles: ["Independent reviewer"],
+          workerHosts: ["worker-b"],
+        }),
       )
     )["metadata"],
   )["id"] as string;
@@ -370,39 +373,25 @@ try {
     weeklyMinutes = 43,
     weeks = 8,
     expectedMinutes = practices * weeklyMinutes * weeks;
-  await api("POST", "/api/v1/tag-messaging/objectives", {
-    id: objectiveId,
-    ownerTagId: owner,
-    outcome: [
-      `Prepare an independently reviewed pilot recommendation for a scheduling product. Source facts: ${practices} practices, ${weeklyMinutes} minutes saved per practice per week, ${weeks} pilot weeks. Determine total minutes saved. Generate a fresh random UUID in your runtime and include it in the source report as SOURCE_NONCE: <uuid>. Produce a source report, have another Tag independently review the actual artifact and calculations, and deliver the final recommendation. Add the existing independent reviewer Tag ${reviewer} to your leadership Team so it can discover your artifacts. The independent reviewer Tag is ${reviewer}; it must execute on worker-b. Keep report contents in artifacts, not duplicated into delegated instructions or Mailbox messages. The reviewer must discover and read the source artifact through artifact tools. Obtain submitted source evidence before attaching it to independent review work. Your role supplies runtime details; organize the work yourself.`,
-      "Done when:",
-      "A source report records the evidence and correct total minutes",
-      "A different Tag reads that artifact in a separate Docker Worker Host and publishes an independent review with the producer native session ID",
-      "The owner reads and accepts the review, preserves a final recommendation artifact, and completes the Objective",
-    ].join("\n"),
-    runtimeActions: ["files:write", "commands:execute", "web:fetch"],
-    budgetLimitMinor: 100,
-  });
-  for (const [senderTagId, recipientTagId] of [
-    [owner, reviewer],
-    [reviewer, owner],
-  ])
-    await api("PUT", "/api/v1/tag-messaging/grants", {
-      senderTagId,
-      recipientTagId,
-      messageTypes: [
-        "message",
-        "result.submitted",
-        "progress.updated",
-        "delegation.requested",
-        "clarification.requested",
-      ],
-    });
-  // This is the only work request issued by the runner. All subsequent assignments are model decisions.
-  await command("start_objective", {
-    execution: { profile: { id: "worker-a", revision: "1" } },
-    maxCostMinor: 0,
-  });
+  // The only work request issued by the runner: applying the Objective starts its conversation.
+  // Every work Session after that is a model decision.
+  await api(
+    "POST",
+    "/api/v1/objectives",
+    resource("Objective", objectiveId, {
+      owner: "Delivery owner",
+      outcome: [
+        `Prepare an independently reviewed pilot recommendation for a scheduling product. Source facts: ${practices} practices, ${weeklyMinutes} minutes saved per practice per week, ${weeks} pilot weeks. Determine total minutes saved. Generate a fresh random UUID in your runtime and include it in the source report as SOURCE_NONCE: <uuid>. Produce a source report, have the Independent reviewer Tag independently review the actual artifact and calculations in a work Session of its own, and deliver the final recommendation. Keep report contents in artifacts, not duplicated into work Session instructions or messages. The reviewer must discover and read the source artifact through artifact tools. Start the review only after the source report's work Session reported. Your role supplies runtime details; organize the work yourself.`,
+        "Done when:",
+        "A source report records the evidence and correct total minutes",
+        "A different Tag reads that artifact in a separate Docker Worker Host and publishes an independent review with the producer native session ID",
+        "The owner reads the review, preserves a final recommendation artifact, and completes the Objective",
+      ].join("\n"),
+      team: { members: ["Delivery owner", "Independent reviewer"] },
+      runtimeActions: ["files:write", "commands:execute", "web:fetch"],
+      budget: { minor: 100 },
+    }),
+  );
   let state = await snapshot();
   const deadline = Date.now() + maxSeconds * 1000;
   let lastCount = -1;
@@ -419,15 +408,20 @@ try {
       lastCount = starts;
     }
     assert(starts <= maxAttempts, "Live model Attempt budget exceeded");
-    const assignments = state["assignments"] ?? [];
-    const active = assignments.some((assignment) =>
-      ["queued", "running", "waiting"].includes(String(assignment["status"])),
-    );
-    if (assignments.length && !active && state["objectives"]?.[0]?.["status"] !== "completed") {
+    const status = state["objectives"]?.[0]?.["status"];
+    assert(status !== "blocked", "The Objective's conversation blocked the Objective");
+    const active =
+      (state["tasks"] ?? []).some((task) =>
+        ["pending", "running"].includes(String(task["status"])),
+      ) ||
+      (state["inbound"] ?? []).some((event) =>
+        ["pending", "processing"].includes(String(event["status"])),
+      );
+    if ((state["tasks"] ?? []).length && !active && status !== "completed") {
       stalledSince ??= Date.now();
       assert(
         Date.now() - stalledSince < 15_000,
-        "Organization stalled with no queued, running, or waiting assignments",
+        "Organization stalled with no pending or running turns",
       );
     } else stalledSince = undefined;
     const attempts = state["attempts"] ?? [];
@@ -447,12 +441,12 @@ try {
   const evidence = {
     objectiveId,
     objectives: state["objectives"],
-    assignments: state["assignments"],
+    sessions: state["sessions"],
     attempts: attempts.map(({ workerSnapshot, ...rest }) => ({
       ...rest,
       workerHostId: json(workerSnapshot)["workerHostId"],
     })),
-    tasks: tasks.map(({ id, tagId }) => ({ id, tagId })),
+    tasks: tasks.map(({ id, tagId, sessionId, status }) => ({ id, tagId, sessionId, status })),
     artifacts,
     acquisitions,
     teams: state["teams"],
@@ -534,7 +528,7 @@ try {
       const failed = await snapshot();
       await save("failure-state.json", {
         objectives: failed["objectives"],
-        assignments: failed["assignments"],
+        sessions: failed["sessions"],
         artifacts: failed["artifacts"],
         acquisitions: failed["acquisitions"],
         attempts: failed["attempts"],

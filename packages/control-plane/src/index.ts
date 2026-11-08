@@ -3,7 +3,23 @@ export { explainHarnessSignIn } from "./harness-signin.js";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   coordinationInboxOccurrence,
+  type DeliveryFrom,
+  type DeliveryReason,
+  INBOX_MAX_HOPS,
+  INBOX_SENDS_PER_TASK,
+  inboxDeliveryId,
+  inboxSessionKey,
+  isInboxSessionKey,
   namedWorkspacePlan,
+  type Objective,
+  objectiveClosed,
+  objectiveIdleDeliveryId,
+  objectiveIdOfSessionKey,
+  objectiveMessageDeliveryId,
+  objectiveNoticeDeliveryId,
+  objectiveSessionKey,
+  objectiveStartDeliveryId,
+  type TagMessage,
   workspaceBranchHeadPin,
   workspaceBranchPin,
 } from "@supertag/core";
@@ -19,17 +35,36 @@ import {
   workerEvents,
 } from "./dependency-branches.js";
 import { DispatchErrorReporter } from "./dispatch-errors.js";
-import { ObjectiveMessages } from "./objective-messages.js";
+import {
+  idleAction,
+  inboxTurnText,
+  type ObjectiveLocation,
+  objectiveAuthorization,
+  objectiveBlockedText,
+  objectiveHome,
+  objectiveSpentMinor,
+  objectiveTurnText,
+  poolExecution,
+} from "./objective-sessions.js";
 import { repositoryReferences, unambiguousRepositoryReference } from "./repository-references.js";
+import type {
+  DelegatedStartRequest,
+  MessageObjectiveInput,
+  MessageObjectiveResult,
+  SendMessageInput,
+  SendMessageResult,
+  SessionHandlers,
+  StartSessionResult,
+} from "./session-handlers.js";
 import { SESSION_INPUT_COMMAND_PREFIX, withdrawSessionInput } from "./session-input-withdrawal.js";
 import { conversationViewer, tagPortfolio } from "./tag-sessions.js";
 import {
   type ContinueSessionRequest,
   continuedWorkSessionEvent,
+  type InternalTurnContext,
   internalTurnMessages,
   reportedTurnSpend,
   resumedWorkSessionExecution,
-  type StartSessionRequest,
   samePermissions,
   sessionReportEvent,
   WORK_SESSION_ASKED_EVENT,
@@ -46,6 +81,7 @@ export type {
   ObjectiveOverview,
   ObjectiveOverviewInput,
 } from "./objective-overview.js";
+export type { MessageObjectiveResult } from "./session-handlers.js";
 
 import type {
   ApprovalRequest,
@@ -102,12 +138,12 @@ import {
   parseTaskExecutionRequirements,
   parseWorkerHostName,
   SESSION_INPUT_ACK_TIMEOUT_MS,
+  SESSION_NOT_CONTINUED_EVENT,
+  sessionApprovalDeliveryId,
   sessionRequesterKey,
   TagMessagingError,
   WORK_SESSION_MAX_OPEN,
   WORK_SESSION_MAX_RUNNING,
-  WORK_SESSION_NOT_CONTINUED_EVENT,
-  workSessionApprovalDeliveryId,
 } from "@supertag/core";
 import type {
   SurfacePresentation,
@@ -163,14 +199,17 @@ import {
   OperatorChannelNotifications,
   type OperatorNotificationSender,
   objectiveThreadCarries,
-  shouldNotifyInboxItem,
 } from "./operator-channel.js";
-import { outboundPresentationPolicy, sentNowhere } from "./outbound-presentation.js";
+import {
+  objectiveReportKey,
+  outboundPresentationPolicy,
+  sentNowhere,
+} from "./outbound-presentation.js";
 import { detectOverlapWarnings } from "./overlap-warnings.js";
 import { ReplyStreams } from "./reply-streams.js";
 import {
+  captureInternalRoleContextPlan,
   capturePermissionBundle,
-  ensureBuiltInRoles,
   type ResolvedTagRoles,
   resolveTagRoles,
   tagExecutionRange,
@@ -208,8 +247,13 @@ export type {
   TaskExecutionPlacementReport,
 } from "./task-execution-report.js";
 
-/** How often the task controller looks for finished work Sessions still owed a report turn. */
-const WORK_REPORT_SWEEP_INTERVAL_MS = 10_000;
+/**
+ * How often the task controller sweeps Sessions: reports owed, decided approvals, idle
+ * Objectives, undelivered Mailbox messages and the Objective controller's own sweep.
+ */
+const SESSION_SWEEP_INTERVAL_MS = 10_000;
+/** How many items of each kind one Session sweep handles. */
+const SESSION_SWEEP_BATCH = 20;
 /** How many due inbound events one dispatch pass tries, oldest first, before it waits. */
 const DISPATCH_CANDIDATES_PER_TICK = 50;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
@@ -408,11 +452,17 @@ export class ControlPlane {
   readonly #surfaceHolds = new Map<string, boolean>();
   readonly #surfaceJournalReplays = new Map<string, Promise<void>>();
   readonly #replyStreams = new ReplyStreams();
-  /** Work Session executions running beside the task controller loop. */
+  /** Work Session and delivered turns running beside the task controller loop. */
   readonly #backgroundRuns = new Set<Promise<void>>();
   readonly #workSessionStarts = new Map<string, Promise<void>>();
-  /** Per work Task: its approval notice, continuation and report admission run one at a time. */
+  /** Per Task: its approval notice, continuation and report admission run one at a time. */
   readonly #workTaskTurns = new Map<string, Promise<void>>();
+  /** Per Tag: Mailbox deliveries and inbox admissions run one at a time. */
+  readonly #inboxDeliveries = new Map<string, Promise<void>>();
+  /** Objective notice keys this process already admitted; admission also deduplicates them. */
+  readonly #deliveredNotices = new Set<string>();
+  readonly #operatorNotificationTaskId: string | undefined;
+  #sweeping: Promise<void> | undefined;
   #accepting = false;
   #running = false;
   #stopping = false;
@@ -423,10 +473,9 @@ export class ControlPlane {
   #wakeTaskController: (() => void) | undefined;
   #wakeDeliveryController: (() => void) | undefined;
   readonly #budgetNotifications: BudgetNotifications;
-  readonly #objectiveMessages: ObjectiveMessages;
   readonly #operatorChannel: OperatorChannelNotifications | undefined;
   #lastBudgetNotificationScan = 0;
-  #lastWorkReportSweep = 0;
+  #lastSessionSweep = 0;
   #lastOperatorChannelScan = 0;
   #operatorInboxRevision = 0;
   #scannedOperatorInboxRevision = -1;
@@ -447,9 +496,7 @@ export class ControlPlane {
       dependencies.store,
       dependencies.worklet,
       (error) => this.#reportDispatchError(error),
-      this.#executionAffinity,
       {
-        wakeTaskController: () => this.#wakeTaskController?.(),
         systemWake: () => readSystemWake(),
         surfaceLeaseOwner: this.#instanceId,
         surfaceAttemptsRunning: () => this.#activeTaskControllers.size > 0,
@@ -457,21 +504,15 @@ export class ControlPlane {
     );
     this.objectives.setWorkspacePullRequestHandler(dependencies.pullRequests);
     this.#store = dependencies.store;
+    this.#operatorNotificationTaskId = dependencies.operatorNotificationTaskId;
     this.#audit = dependencies.audit ?? ((entry) => dependencies.store.recordAuditEntry(entry));
     this.#budgetNotifications = new BudgetNotifications(
       dependencies.store,
       dependencies.operatorNotificationTaskId,
       dependencies.reply !== undefined,
     );
-    this.#objectiveMessages = new ObjectiveMessages(
-      dependencies.store,
-      dependencies.operatorNotificationTaskId,
-      dependencies.reply !== undefined,
-    );
     this.objectives.setInboxEnricher(async (page) => {
-      const enriched = await this.#objectiveMessages.enrich(
-        await this.#budgetNotifications.enrich(page),
-      );
+      const enriched = await this.#budgetNotifications.enrich(page);
       const records = await dependencies.store.listOperatorNotificationsForItems(
         enriched.items.map(coordinationInboxOccurrence),
       );
@@ -482,7 +523,7 @@ export class ControlPlane {
           if (deliveries.length === 0) {
             if (item.notification?.status === "unconfigured")
               return { ...item, notification: { status: "not configured" as const } };
-            return item.notification || !shouldNotifyInboxItem(item)
+            return item.notification
               ? item
               : { ...item, notification: { status: "not configured" as const } };
           }
@@ -548,36 +589,25 @@ export class ControlPlane {
     this.objectives.setInboxChangeListener(() => this.#markOperatorInboxChanged());
     this.#sessionContinuity = new SessionContinuity(dependencies.store);
     this.#surfaceSettlement = new SurfaceSettlement(dependencies.store);
-    this.objectives.setSurfaceReporter(async (objectiveId, text, deliveryKey) => {
-      const objective = await this.#store.getObjective(objectiveId);
-      const origin = objective.notificationTaskId
-        ? undefined
-        : await this.#store.getObjectiveSurfaceTask(objectiveId);
-      const destination =
-        objective.notificationTaskId ?? origin?.id ?? dependencies.operatorNotificationTaskId;
-      const anchor = destination
-        ? await this.#store.getVerifiedSurfaceTask(destination)
-        : undefined;
-      if (!anchor?.inboundEventId)
-        throw new Error("Objective has no verified reporting destination");
-      await this.#postNoticeOnce(anchor.inboundEventId, deliveryKey, text);
-    });
-    this.objectives.setWorkSessionHandlers({
+    const handlers: SessionHandlers = {
       start: (task, inbound, request) => this.#startWorkSession(task, inbound, { start: request }),
       continue: (task, inbound, request) =>
         this.#startWorkSession(task, inbound, { continue: request }),
       approvalNotice: (task, inbound, requestId) =>
-        this.#oneWorkTaskTurn(task.id, () =>
-          this.#postWorkSessionApproval(task, inbound, requestId),
-        ),
+        this.#oneWorkTaskTurn(task.id, () => this.#postSessionApproval(task, inbound, requestId)),
       approvalDecided: (request) =>
-        this.#oneWorkTaskTurn(request.taskId, () =>
-          this.#continueDecidedWorkSession(request.taskId),
-        ),
-    });
-    this.objectives.setLostWorkerHostResolver((attempt) =>
-      this.#removeLostEphemeralWorkerHost(attempt, EPHEMERAL_WORKER_HOST_GRACE_MS),
-    );
+        this.#oneWorkTaskTurn(request.taskId, () => this.#continueDecidedSession(request.taskId)),
+      startObjective: (objectiveId) => this.startObjective(objectiveId),
+      messageObjective: (input) => this.messageObjective(input),
+      sendMessage: (task, input) => this.#sendMessage(task, input),
+      deliverObjectiveNotice: (objectiveId, key, text) =>
+        this.#notifyObjective({ objectiveId, key, text }),
+      postObjectiveNotice: (objectiveId, key, text) =>
+        this.#postObjectiveNotice(objectiveId, key, text),
+      cancelObjectiveTasks: (objectiveId, reason, exceptTaskId) =>
+        this.#cancelObjectiveTasks(objectiveId, reason, exceptTaskId),
+    };
+    this.objectives.setSessionHandlers(handlers);
     this.#credentialVault = dependencies.credentialVault;
     this.#onInboundEvent = dependencies.onInboundEvent;
     this.#worklet = dependencies.worklet;
@@ -719,12 +749,9 @@ export class ControlPlane {
         draining: false,
         lastSeenAt: at,
         connectedAt: at,
-        activeAttempts: this.#activeTaskControllers.size + this.objectives.activeCount,
+        activeAttempts: this.#activeTaskControllers.size,
         capacity,
-        availableSlots: Math.max(
-          0,
-          capacity - this.#activeTaskControllers.size - this.objectives.activeCount,
-        ),
+        availableSlots: Math.max(0, capacity - this.#activeTaskControllers.size),
         lastAuthenticatedAt: at,
         failedAuthenticationCount: 0,
         createdAt: at,
@@ -1099,7 +1126,7 @@ export class ControlPlane {
       try {
         await detectOverlapWarnings(
           this.#store,
-          this.objectives.liveDelivery,
+          (objectiveId, key, text) => this.#notifyObjective({ objectiveId, key, text }),
           observation.changedPaths,
         );
       } catch (error) {
@@ -1167,30 +1194,11 @@ export class ControlPlane {
 
   async requestTaskCancellation(
     taskId: string,
-    /** The operator who asked; recorded on the Task's coordination change. */
+    /** The operator who asked; recorded on the Task's cancellation request. */
     principal?: CoordinationOperatorPrincipal,
+    /** Why SuperTag cancels it, such as its Objective's cancellation. */
+    reason?: string,
   ): Promise<{ readonly accepted: boolean; readonly task: Task }> {
-    const internal = await this.#store.getTaskAssignment(taskId);
-    if (internal) {
-      if (!["queued", "running", "submitted"].includes(internal.status)) {
-        const task = await this.#store.findTaskById(taskId);
-        if (!task) throw new Error("Task not found");
-        return { accepted: false, task };
-      }
-      await this.objectives.commandAsAdministrator(
-        "update_task",
-        {
-          objectiveId: internal.objectiveId,
-          taskId,
-          expectedStatus: internal.status,
-          status: "cancelled",
-        },
-        principal,
-      );
-      const task = await this.#store.findTaskById(taskId);
-      if (!task) throw new Error("Task not found");
-      return { accepted: true, task };
-    }
     const task = await this.#store.findTaskById(taskId);
     if (task === undefined) throw new Error(`Task ${JSON.stringify(taskId)} does not exist`);
     if (task.status !== "pending" && task.status !== "running") return { accepted: false, task };
@@ -1202,7 +1210,10 @@ export class ControlPlane {
       });
       if (!cancelled)
         return { accepted: false, task: (await this.#store.findTaskById(task.id)) ?? task };
-      await this.#appendTaskEvent(task.id, "task.cancellation-requested", {});
+      await this.#appendTaskEvent(task.id, "task.cancellation-requested", {
+        ...(principal === undefined ? {} : { operatorId: principal.operatorId }),
+        ...(reason === undefined ? {} : { reason }),
+      });
       await this.#appendTaskEvent(task.id, "task.cancelled", { reason: "operator-request" });
       if (task.inboundEventId !== null)
         await this.#finishReplyStream(task.id, task.inboundEventId, "cancelled");
@@ -1212,7 +1223,10 @@ export class ControlPlane {
       return { accepted: true, task: cancelled };
     }
     if (await this.#surfaceSettlement.pending(task.id)) return { accepted: false, task };
-    await this.#appendTaskEvent(task.id, "task.cancellation-requested", {});
+    await this.#appendTaskEvent(task.id, "task.cancellation-requested", {
+      ...(principal === undefined ? {} : { operatorId: principal.operatorId }),
+      ...(reason === undefined ? {} : { reason }),
+    });
     controller.abort(new Error("Task cancelled by an operator"));
     return { accepted: true, task };
   }
@@ -1234,18 +1248,11 @@ export class ControlPlane {
       return;
     }
     await this.#store.connect();
-    try {
-      await ensureBuiltInRoles(this.#store);
-    } catch (error) {
-      await this.#store.disconnect();
-      throw error;
-    }
     this.#stopping = false;
     this.#taskControllerDrained = false;
     this.#drainPromise = undefined;
     this.#running = true;
     this.#accepting = true;
-    this.objectives.start();
     this.#ephemeralSweepTimer = setInterval(() => {
       void controlPlaneEventLoopLag
         .run("job: ephemeral Worker Host sweep", () => this.sweepEphemeralWorkerHosts())
@@ -1253,8 +1260,8 @@ export class ControlPlane {
     }, EPHEMERAL_WORKER_HOST_SWEEP_INTERVAL_MS);
     this.#ephemeralSweepTimer.unref();
     this.#taskControllerLoop = this.#runTaskController();
-    // A report turn a stop or crash cut off is admitted now; admission is idempotent.
-    void this.#reportFinishedWorkSessions();
+    // A turn a stop or crash cut off is admitted now; admission is idempotent.
+    void this.#sweepSessions();
     if (this.#reply !== undefined || this.#operatorChannel !== undefined) {
       this.#deliveryControllerLoop = this.#runDeliveryController();
     }
@@ -1275,7 +1282,6 @@ export class ControlPlane {
     this.#ephemeralSweepTimer = undefined;
     this.#drainPromise ??= (async () => {
       await this.#waitForAdmissions();
-      await this.objectives.stop();
       this.#stopping = true;
       this.#wakeTaskController?.();
       this.#wakeDeliveryController?.();
@@ -1377,18 +1383,7 @@ export class ControlPlane {
       if (tag === undefined || tag.status !== "active")
         throw new Error(`Tag ${input.tagName} does not exist`);
       const now = new Date().toISOString();
-      const account =
-        (await this.#store.findSurfaceAccount("cli", CLI_EXTERNAL_ACCOUNT_ID)) ??
-        (await this.#store.saveSurfaceAccount({
-          provider: "cli",
-          externalAccountId: CLI_EXTERNAL_ACCOUNT_ID,
-          displayName: "CLI",
-          authMethod: "operator",
-          credentialId: `surface/cli/${CLI_EXTERNAL_ACCOUNT_ID}`,
-          status: "connected",
-          configuration: {},
-          verifiedAt: now,
-        }));
+      const account = await this.#cliAccount();
       const route = cliTagRoute(tag, account);
       const eventId = randomUUID();
       const sessionKey = `cli:${input.operatorId}:${input.session}`;
@@ -1549,11 +1544,11 @@ export class ControlPlane {
   }
 
   /**
-   * A person replying in an Objective's notification thread directs that Objective. A plain
-   * thread reply becomes an operator message to the owner, like `supertag message objective`;
+   * A person replying in an Objective's home thread directs that Objective. A plain thread reply
+   * is the next turn of the Objective's conversation, like `supertag message objective`;
    * `@SuperTag approve` approves a ready_for_review result, and `@SuperTag pause` and
-   * `@SuperTag resume` pause and resume the Objective. Anyone who may create Objectives
-   * from this surface may do this. Other messages keep their ordinary Session handling.
+   * `@SuperTag resume` pause and resume the Objective. Anyone who may create Objectives from this
+   * surface may do this. Other messages keep their ordinary Session handling.
    */
   async #routeObjectiveThread(
     event: InboundSurfaceEvent,
@@ -1561,12 +1556,7 @@ export class ControlPlane {
     route: { readonly id: string; readonly scope: string },
     tag: { readonly id: string },
   ): Promise<InboundIngestResult | undefined> {
-    if (
-      (event.provider !== "slack" && event.provider !== "lark") ||
-      event.actor.kind !== "user" ||
-      !event.text?.trim()
-    )
-      return undefined;
+    if (event.actor.kind !== "user" || !event.text?.trim()) return undefined;
     const command = parseSurfaceObjectiveCommand(event);
     const directive =
       command?.kind === "approve" || command?.kind === "pause" || command?.kind === "resume"
@@ -1582,7 +1572,7 @@ export class ControlPlane {
       session.origin["threadKey"] !== event.callback.threadKey
     )
       return undefined;
-    const objective = await this.#store.findObjectiveByNotificationSession(session.id);
+    const objective = await this.#store.findObjectiveByHomeSession(session.id);
     if (!objective) return undefined;
     const principal = {
       operatorId: `${event.provider}:${event.actor.id}`,
@@ -1629,19 +1619,18 @@ export class ControlPlane {
         );
         text = `Approved. Objective ${approved.id} is completed.`;
       } else {
-        const sent = await this.objectives.messageObjective(
-          {
-            objectiveId: objective.id,
-            message: event.text,
-            idempotencyKey: `surface:${createHash("sha256").update(`${account.id}\n${event.eventId}`).digest("hex").slice(0, 40)}`,
-          },
-          principal,
-        );
+        const sent = await this.messageObjective({
+          objectiveId: objective.id,
+          text: event.text,
+          operatorId: principal.operatorId,
+          idempotencyKey: `surface:${createHash("sha256").update(`${account.id}\n${event.eventId}`).digest("hex").slice(0, 40)}`,
+          actor: event.actor,
+        });
         text = sent.duplicate
-          ? "This message was already delivered to the Objective owner."
+          ? "This message was already delivered to the Objective."
           : sent.statusChange
-            ? `Sent to the Objective owner. The Objective moved from ${sent.statusChange.from} to working.`
-            : "Sent to the Objective owner.";
+            ? `Sent to the Objective. It moved from ${sent.statusChange} to working.`
+            : "Sent to the Objective.";
       }
       await audited("succeeded");
     } catch (error) {
@@ -1837,8 +1826,8 @@ export class ControlPlane {
 
   async #reconcileNextTask(): Promise<boolean> {
     const claim = this.#claimInput();
-    if (Date.now() - this.#lastWorkReportSweep >= WORK_REPORT_SWEEP_INTERVAL_MS)
-      await this.#reportFinishedWorkSessions();
+    if (Date.now() - this.#lastSessionSweep >= SESSION_SWEEP_INTERVAL_MS)
+      await this.#sweepSessions();
     // An event that cannot be placed now waits without holding back the events behind it. Each
     // Session has at most one due event, so no event overtakes an earlier one of its Session.
     // Pages run until one event runs or every due event was tried.
@@ -1876,6 +1865,17 @@ export class ControlPlane {
     try {
       pendingTask = await this.#openTask(candidate);
       preparedOutcome = await this.#surfaceSettlement.pending(pendingTask.id);
+      // An inbox turn whose messages an earlier turn already took has nothing to do.
+      if (
+        !preparedOutcome &&
+        candidate.status === "pending" &&
+        candidate.event.internal?.kind === "delivery" &&
+        candidate.event.internal.reason === "inbox" &&
+        (await this.#store.bindInboxMessages(pendingTask.id, pendingTask.tagId)).length === 0
+      ) {
+        await this.#settleEmptyInboxTurn(pendingTask);
+        return true;
+      }
       if (!preparedOutcome) {
         if (!this.#worklet) return false;
         const workerHostBindings = await this.#store.listTagWorkerHostBindings(pendingTask.tagId);
@@ -2074,10 +2074,9 @@ export class ControlPlane {
           markStarted();
           this.#replyStreams.event(task.id, event);
           if (!durableExecution) await this.#recordWorkerEvent(task.id, attempt.id, event);
-          // A work Session posts nowhere.
           if (
             event.type === "progress.updated" &&
-            work.event.internal?.kind !== "work_session" &&
+            showsProgress(work) &&
             (await this.#supportsReplyReplacement(work))
           ) {
             const text = taskProgressText(event.progress);
@@ -2099,37 +2098,36 @@ export class ControlPlane {
         const workerId = executionWorkerId(workerEvents) ?? worklet.id;
         const completedAt = new Date().toISOString();
         const result = buildTaskResult(work, responseText, workerEvents);
-        // A work Session Task completes either done or waiting: on the person, with the question
-        // it asked, or on the approval requests it left pending, which a decision continues.
-        const asked =
-          work.event.internal?.kind === "work_session"
-            ? (await this.#store.listTaskEvents(task.id)).findLast(
-                (event) =>
-                  event.type === WORK_SESSION_ASKED_EVENT && event.attemptId === attempt?.id,
-              )?.payload?.["question"]
-            : undefined;
+        // A work Session's or an Objective's Task completes either done or waiting: with the
+        // question it asked, or on the approval requests it left pending, which a decision
+        // continues.
+        const waits = waitingTurn(work);
+        const asked = waits
+          ? (await this.#store.listTaskEvents(task.id)).findLast(
+              (event) => event.type === WORK_SESSION_ASKED_EVENT && event.attemptId === attempt?.id,
+            )?.payload?.["question"]
+          : undefined;
         // The requests this Attempt was told to end its turn on, while pending or decided but
         // unused: a decision that lands while the Task still runs reaches no tool call, so the
         // Task waits on it too, and the continuation after completion carries it.
-        const approvals =
-          work.event.internal?.kind === "work_session"
-            ? (
-                await this.#store.listApprovalRequests({
-                  taskId: task.id,
-                  kind: "surface-action",
-                  limit: 500,
-                })
+        const approvals = waits
+          ? (
+              await this.#store.listApprovalRequests({
+                taskId: task.id,
+                kind: "surface-action",
+                limit: 500,
+              })
+            )
+              .filter(
+                (request) =>
+                  request.attemptId === attempt?.id &&
+                  (request.status === "pending" ||
+                    request.status === "denied" ||
+                    (request.status === "approved" && request.consumedAt === null)),
               )
-                .filter(
-                  (request) =>
-                    request.attemptId === attempt?.id &&
-                    (request.status === "pending" ||
-                      request.status === "denied" ||
-                      (request.status === "approved" && request.consumedAt === null)),
-                )
-                .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))
-                .map((request) => request.id)
-            : [];
+              .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))
+              .map((request) => request.id)
+          : [];
         preparedOutcome = {
           taskId: task.id,
           attemptId: attempt.id,
@@ -2257,9 +2255,9 @@ export class ControlPlane {
         markStarted();
       }
     };
-    if (work.event.internal?.kind === "work_session") {
-      // A work Session runs beside conversation turns: dispatch waits only until it has started,
-      // so the conversation and its report turns stay responsive while the work runs.
+    if (work.event.internal?.kind === "work_session" || work.event.internal?.kind === "delivery") {
+      // A work Session, an Objective's turn and an inbox turn run beside conversation turns:
+      // dispatch waits only until it has started, so conversations stay responsive meanwhile.
       const running: Promise<void> = execute()
         .catch((error: unknown) => this.#reportDispatchError(error))
         .finally(() => this.#backgroundRuns.delete(running));
@@ -2287,8 +2285,21 @@ export class ControlPlane {
     if (status !== "pending") {
       await this.#appendTaskEvent(outcome.taskId, `task.${status}`, result);
       await this.#finishReplyStream(outcome.taskId, work.id, status);
+      // A work Session's pull request is ready once it completes and closed once it is cancelled.
+      if (work.event.internal?.kind === "work_session") {
+        const task = await this.#store.findTaskById(outcome.taskId);
+        if (task?.workspacePlan.status === "workspace")
+          await this.objectives
+            .settleWorkspacePullRequest(task)
+            .catch((error: unknown) => this.#reportDispatchError(error));
+      }
       if (work.event.internal?.kind === "work_session")
         await this.#reportWorkSession(outcome.taskId);
+      // A decision that landed before this Task's outcome was committed continues it now.
+      else if (waitingTurn(work))
+        await this.#oneWorkTaskTurn(outcome.taskId, () =>
+          this.#continueDecidedSession(outcome.taskId),
+        );
       this.#wakeDeliveryController?.();
       this.#markOperatorInboxChanged();
     }
@@ -2383,12 +2394,13 @@ export class ControlPlane {
             profile.revision === attempt.workerProfile.revision,
         ),
     );
+    const internal = work.event.internal;
+    // A person's message, or a turn SuperTag admitted itself, gets coordination; a bot's does not.
     const coordination =
-      supportsSurfaceCoordination && work.event.actor.kind === "user"
+      supportsSurfaceCoordination && (work.event.actor.kind === "user" || internal !== undefined)
         ? await this.objectives.surfaceCoordination(task, attempt)
         : undefined;
-    const internal = work.event.internal;
-    // Every conversation turn with surface coordination sees the Tag's open Objectives and the
+    // Every root Session turn with surface coordination sees the Tag's open Objectives and the
     // work Sessions it started. A work Session sees only its own work, so it gets no portfolio.
     const portfolio =
       coordination === undefined || internal?.kind === "work_session"
@@ -2396,11 +2408,23 @@ export class ControlPlane {
         : await tagPortfolio(this.#store, conversationViewer(task, work), {
             workSessions: await this.#store.listWorkSessions(task.sessionId),
             startSessions: internal === undefined,
+            ...(await this.#inboxSessionId(task.tagId)),
           });
+    // An inbox turn handles every Mailbox message not yet taken, bound to it when it starts.
+    const turnText =
+      internal?.kind === "delivery" && internal.reason === "inbox"
+        ? await this.#inboxText(task)
+        : text;
     const turn =
       internal === undefined
         ? undefined
-        : internalTurnMessages(internal, text, task.sessionId, coordination !== undefined);
+        : internalTurnMessages(
+            internal,
+            turnText,
+            task.sessionId,
+            coordination !== undefined,
+            await this.#internalTurnContext(work, task),
+          );
     const workspaceEvents =
       task.workspacePlan.status === "workspace"
         ? workerEvents(await this.#store.listTaskEvents(task.id))
@@ -2449,7 +2473,16 @@ export class ControlPlane {
             ? []
             : [
                 { id: `${task.id}:${internal?.kind}`, role: "system" as const, text: turn.system },
-                { id: work.event.eventId, role: "requester" as const, text: turn.prompt },
+                {
+                  id: work.event.eventId,
+                  role: "requester" as const,
+                  text: turn.prompt,
+                  // An operator's message to an Objective is theirs; other internal turns carry
+                  // no person.
+                  ...(internal?.kind === "delivery" && internal.from.kind === "person"
+                    ? { actor: work.event.actor }
+                    : {}),
+                },
               ]),
           ...(turn !== undefined || text === undefined || text.length === 0
             ? []
@@ -2603,27 +2636,25 @@ export class ControlPlane {
   }
 
   /**
-   * `start_session` opens a work Session of the conversation and admits its first Task;
-   * `continue_session` admits the next Task of one of the conversation's finished work Sessions.
-   * Either Task runs under the starting turn's admitted authorization, context plan, execution
-   * requirements and Workspace plan, and counts against that turn's work Session bounds. It
-   * returns at once; the Task queues behind the conversation's running work Sessions.
+   * `start_session` opens a work Session of a root Session and admits its first Task;
+   * `continue_session` admits the next Task of one of its finished work Sessions. A work Session
+   * of the same Tag runs under the starting turn's admitted authorization, context plan and
+   * Workspace plan. An Objective's turn may start one for a member of the Objective's Team, under
+   * that Tag's Roles narrowed to the Objective and to the starting turn. Each counts against the
+   * starting turn's work Session bounds and draws from its limits, or from the Objective's budget
+   * pool. It returns at once; the Task queues behind the Session's running work Sessions.
    */
   async #startWorkSession(
     conversation: Task,
     starting: DurableInboundEvent,
     request:
-      | { readonly start: StartSessionRequest }
+      | { readonly start: DelegatedStartRequest }
       | { readonly continue: ContinueSessionRequest },
-  ): Promise<{
-    readonly sessionId: string;
-    readonly title: string;
-    readonly status: "started" | "queued";
-  }> {
+  ): Promise<StartSessionResult> {
     if (!this.#accepting)
       throw new TagMessagingError(503, "The Control Plane is not accepting new work now");
-    // One conversation's start_session and continue_session calls run one at a time, so the
-    // bounds below hold.
+    // One Session's start_session and continue_session calls run one at a time, so the bounds
+    // below hold.
     const previous = this.#workSessionStarts.get(conversation.sessionId) ?? Promise.resolve();
     const run = previous.then(() => this.#startWorkSessionNow(conversation, starting, request));
     const settled = run.then(
@@ -2643,13 +2674,9 @@ export class ControlPlane {
     conversation: Task,
     starting: DurableInboundEvent,
     request:
-      | { readonly start: StartSessionRequest }
+      | { readonly start: DelegatedStartRequest }
       | { readonly continue: ContinueSessionRequest },
-  ): Promise<{
-    readonly sessionId: string;
-    readonly title: string;
-    readonly status: "started" | "queued";
-  }> {
+  ): Promise<StartSessionResult> {
     const verb = "start" in request ? "start" : "continue";
     // Work Sessions are parallel agents of the starting turn: a turn starts at most its share,
     // none when its maxNativeAgents is 0, and they spend from its reported token and cost limits.
@@ -2665,6 +2692,20 @@ export class ControlPlane {
         403,
         `This turn may not run parallel agents (maxNativeAgents is 0), so it cannot ${verb} a work Session; do the work in this turn`,
       );
+    const parent = await this.#store.findSessionById(conversation.sessionId);
+    if (parent?.parentSessionId !== undefined)
+      throw new TagMessagingError(
+        403,
+        `A work Session cannot ${verb} work Sessions; end your turn with the result`,
+      );
+    const objective =
+      parent?.objectiveId === undefined
+        ? undefined
+        : await this.#store.getObjective(parent.objectiveId);
+    const delegate =
+      "start" in request && request.start.tag !== undefined
+        ? await this.#delegate(conversation, objective, request.start.tag)
+        : undefined;
     const sessions = await this.#store.listWorkSessions(conversation.sessionId);
     // The turn continuing a work Session is its latest Task's starter, so this counts each work
     // Task this turn started once: a turn never continues a work Session it ran itself.
@@ -2676,7 +2717,7 @@ export class ControlPlane {
       if (target?.task === undefined)
         throw new TagMessagingError(
           404,
-          "No work Session of this conversation has that id; continue_session continues only work Sessions this conversation started",
+          "No work Session of this Session has that id; continue_session continues only work Sessions this Session started",
         );
       if (target.task.status === "pending" || target.task.status === "running")
         throw new TagMessagingError(
@@ -2692,10 +2733,10 @@ export class ControlPlane {
       if (startedBy(target) === conversation.id)
         throw new TagMessagingError(
           409,
-          "This turn already ran that work Session; pass the person's answer from a later message",
+          "This turn already ran that work Session; pass the answer from a later turn",
         );
       // Continue only after the latest Task's report turn has run: that turn put its result or
-      // question to the person, so a later report never asks a question already answered.
+      // question forward, so a later report never asks a question already answered.
       const report = await this.#store.findWorkSessionReport(target.task.id);
       const reportTask = report?.taskId ? await this.#store.findTaskById(report.taskId) : undefined;
       if (
@@ -2705,7 +2746,7 @@ export class ControlPlane {
       )
         throw new TagMessagingError(
           409,
-          "That work Session's report has not reached this conversation yet; continue it after its report turn",
+          "That work Session's report has not reached this Session yet; continue it after its report turn",
         );
       const latest = await this.#store.findTaskById(target.task.id);
       const work = latest?.inboundEventId
@@ -2713,11 +2754,18 @@ export class ControlPlane {
         : undefined;
       if (!latest || work?.event.internal?.kind !== "work_session")
         throw new Error(`Work Session ${target.sessionId} has no admitted Task`);
-      // Never broader than the work Session ran with, nor than this turn may act.
-      if (!samePermissions(work.authorization, starting.authorization))
+      // Never broader than the work Session ran with, nor than this turn may act. Another Tag's
+      // work Session compares with what that Tag may do for the Objective now.
+      const allowed =
+        work.tagId === conversation.tagId
+          ? starting.authorization
+          : objective === undefined
+            ? undefined
+            : await this.#objectiveWorkAuthorization(objective, work, starting.authorization);
+      if (allowed === undefined || !samePermissions(work.authorization, allowed))
         throw new TagMessagingError(
           409,
-          "This conversation's permissions changed since that work Session last ran, so it cannot continue under them; start a new work Session instead",
+          "The permissions changed since that work Session last ran, so it cannot continue under them; start a new work Session instead",
         );
       previous = { work, title: target.title };
     }
@@ -2733,38 +2781,33 @@ export class ControlPlane {
     )
       throw new TagMessagingError(
         409,
-        `This conversation already has ${WORK_SESSION_MAX_OPEN} unfinished work Sessions; wait for one to finish`,
+        `This Session already has ${WORK_SESSION_MAX_OPEN} unfinished work Sessions; wait for one to finish`,
       );
-    // The turn and every work Task it admits share the turn's reported limits.
-    const limits = starting.execution.limits;
+    // The Session another Tag's work runs in keeps that Tag's location.
+    const delegatedWork =
+      previous !== undefined && previous.work.tagId !== conversation.tagId
+        ? previous.work
+        : undefined;
     const execution =
-      limits?.maxReportedTokens === undefined && limits?.maxReportedCost === undefined
-        ? starting.execution
-        : workSessionExecution(
-            starting.execution,
-            reportedTurnSpend(
-              await this.#store.readSpend({ taskIds: [conversation.id] }),
-              starting.execution,
-            ),
-            (
-              await Promise.all(
-                sessions
-                  .filter((session) => startedBy(session) === conversation.id)
-                  .map((session) =>
-                    session.task === undefined
-                      ? undefined
-                      : this.#store.findTaskById(session.task.id),
-                  ),
-              )
-            ).flatMap((task) => (task === undefined ? [] : [task.execution])),
-          );
+      objective !== undefined
+        ? await this.#poolExecution(
+            objective,
+            delegate !== undefined
+              ? await this.#tagExecution(delegate)
+              : delegatedWork !== undefined
+                ? delegatedWork.execution
+                : starting.execution,
+          )
+        : await this.#turnShareExecution(conversation, starting, sessions, startedBy);
     if (execution === undefined)
       throw new TagMessagingError(
         409,
-        `This turn and the work Sessions it started already spent or hold too much of its token and cost limits to ${verb} a useful work Session; finish the work in this turn`,
+        objective !== undefined
+          ? `Objective ${objective.id} has too little of its budget left to ${verb} a work Session; finish the work in this turn, or ask an operator to raise the budget`
+          : `This turn and the work Sessions it started already spent or hold too much of its token and cost limits to ${verb} a useful work Session; finish the work in this turn`,
       );
     const running = sessions.filter((session) => session.task?.status === "running").length;
-    // A new work Session edits one of the conversation's Workspaces on its own branch; a continued
+    // A new work Session edits one of the Session's Workspaces on its own branch; a continued
     // one keeps the Workspace it started in.
     const workspace =
       "start" in request
@@ -2773,47 +2816,76 @@ export class ControlPlane {
             (await this.describeWorklet().catch(() => undefined))?.host,
             starting,
             request.start.workspace,
+            objective === undefined ? undefined : (objective.workspaces ?? []),
           )
         : undefined;
     const at = new Date().toISOString();
     const title = "start" in request ? request.start.title : (previous?.title ?? "");
-    const admission = await this.#store.admitInboundEvent({
-      surfaceAccountId: starting.surfaceAccountId,
-      tagRouteId: starting.tagRouteId,
-      tagId: starting.tagId,
-      authorization: starting.authorization,
-      contextPlan: starting.contextPlan,
-      execution,
-      event:
-        "start" in request
-          ? workSessionEvent(
-              starting,
-              conversation.id,
-              conversation.sessionId,
-              {
-                title: request.start.title,
-                instruction: request.start.instruction,
-                ...(workspace === undefined ? {} : { workspace }),
-              },
-              at,
-            )
-          : continuedWorkSessionEvent(
-              previous?.work as DurableInboundEvent,
-              starting,
-              conversation.id,
-              conversation.sessionId,
-              title,
-              request.continue.message,
-              at,
-            ),
-      maxAttempts: this.#maxAttempts,
-    });
+    const started = {
+      title,
+      instruction: "start" in request ? request.start.instruction : "",
+      ...(workspace === undefined ? {} : { workspace }),
+    };
+    let admission: Awaited<ReturnType<Store["admitInboundEvent"]>>;
+    if (delegate !== undefined && objective !== undefined) {
+      const account = await this.#cliAccount();
+      const route = cliTagRoute(delegate, account);
+      const event = workSessionEvent(
+        starting,
+        conversation.id,
+        conversation.sessionId,
+        started,
+        at,
+        { externalAccountId: CLI_EXTERNAL_ACCOUNT_ID },
+      );
+      const roles = await resolveTagRoles(this.#store, delegate.id);
+      admission = await this.#store.admitInboundEvent({
+        surfaceAccountId: account.id,
+        tagRouteId: route.id,
+        tagId: delegate.id,
+        authorization: await objectiveAuthorization(
+          this.#store,
+          objective,
+          delegate,
+          { account, route, event },
+          starting.authorization,
+        ),
+        contextPlan: await captureInternalRoleContextPlan(this.#store, roles.contextSetIds, at),
+        execution,
+        event,
+        maxAttempts: this.#maxAttempts,
+      });
+    } else {
+      const from = delegatedWork ?? starting;
+      admission = await this.#store.admitInboundEvent({
+        surfaceAccountId: from.surfaceAccountId,
+        tagRouteId: from.tagRouteId,
+        tagId: from.tagId,
+        authorization: from.authorization,
+        contextPlan: from.contextPlan,
+        execution,
+        event:
+          previous === undefined
+            ? workSessionEvent(starting, conversation.id, conversation.sessionId, started, at)
+            : continuedWorkSessionEvent(
+                previous.work,
+                starting,
+                conversation.id,
+                conversation.sessionId,
+                title,
+                "continue" in request ? request.continue.message : "",
+                at,
+              ),
+        maxAttempts: this.#maxAttempts,
+      });
+    }
     const task = await this.#openTask(admission.work);
     await this.#appendTaskEvent(task.id, "task.admitted", {
-      tagRouteId: starting.tagRouteId,
-      scope: starting.event.scope,
+      tagRouteId: admission.work.tagRouteId,
+      scope: admission.work.event.scope,
       startedByTaskId: conversation.id,
       parentSessionId: conversation.sessionId,
+      ...(task.tagId === conversation.tagId ? {} : { delegatedByTagId: conversation.tagId }),
       ...("continue" in request ? { continued: true } : {}),
     });
     this.#wakeTaskController?.();
@@ -2825,17 +2897,155 @@ export class ControlPlane {
   }
 
   /**
-   * A work Session Task's pending approval request, posted where its conversation turn replies:
-   * the work Session itself posts nowhere. The request id is the delivery key, so it posts once,
-   * and a Task posts one notice per admitted requirement while its requests are pending.
+   * The Tag `start_session {tag}` names, when it is another Tag: allowed only from an Objective's
+   * own turn, for an active member of the Objective's Team bound to a Worker Host.
    */
-  async #postWorkSessionApproval(
+  async #delegate(
+    conversation: Task,
+    objective: Objective | undefined,
+    name: string,
+  ): Promise<Tag | undefined> {
+    const tag = (await this.#store.findTagByName(name)) ?? (await this.#store.findTagById(name));
+    if (tag?.status !== "active") throw new TagMessagingError(404, `Tag ${name} does not exist`);
+    if (tag.id === conversation.tagId) return undefined;
+    if (objective === undefined)
+      throw new TagMessagingError(
+        403,
+        "Only an Objective's turn may start a work Session for another Tag; omit tag",
+      );
+    const team =
+      objective.teamId === null ? undefined : await this.#store.getTeam(objective.teamId);
+    if (team === undefined)
+      throw new TagMessagingError(
+        409,
+        `Objective ${objective.id} names no Team, so its work Sessions run on this Tag; omit tag`,
+      );
+    if (!team.memberTagIds.includes(tag.id))
+      throw new TagMessagingError(
+        403,
+        `Tag ${tag.name} is not a member of Team ${team.name}; members: ${(
+          await Promise.all(team.memberTagIds.map((id) => this.#store.findTagById(id)))
+        )
+          .flatMap((member) => (member?.status === "active" ? [member.name] : []))
+          .join(", ")}`,
+      );
+    if ((await this.#store.listTagWorkerHostBindings(tag.id)).length === 0)
+      throw new TagMessagingError(
+        409,
+        `Tag ${tag.name} cannot accept Tasks because it has no Worker Host binding`,
+      );
+    return tag;
+  }
+
+  /** A conversation turn's work Task share of the turn's reported token and cost limits. */
+  async #turnShareExecution(
+    conversation: Task,
+    starting: DurableInboundEvent,
+    sessions: readonly WorkSessionSummary[],
+    startedBy: (session: WorkSessionSummary) => string | undefined,
+  ): Promise<TaskExecutionRequirements | undefined> {
+    // The turn and every work Task it admits share the turn's reported limits.
+    const limits = starting.execution.limits;
+    if (limits?.maxReportedTokens === undefined && limits?.maxReportedCost === undefined)
+      return starting.execution;
+    return workSessionExecution(
+      starting.execution,
+      reportedTurnSpend(
+        await this.#store.readSpend({ taskIds: [conversation.id] }),
+        starting.execution,
+      ),
+      (
+        await Promise.all(
+          sessions
+            .filter((session) => startedBy(session) === conversation.id)
+            .map((session) =>
+              session.task === undefined ? undefined : this.#store.findTaskById(session.task.id),
+            ),
+        )
+      ).flatMap((task) => (task === undefined ? [] : [task.execution])),
+    );
+  }
+
+  /** The Tag's default execution requirements, for a turn nobody chose a model or effort for. */
+  async #tagExecution(tag: Tag, roles?: ResolvedTagRoles): Promise<TaskExecutionRequirements> {
+    return resolveTaskExecution({
+      range: await tagExecutionRange(this.#store, tag, roles),
+      requested: parseTaskExecutionRequirements({}),
+      chosen: {},
+      subject: `Tag ${tag.name}`,
+    }).execution;
+  }
+
+  /** `base`, capped at what the Objective's budget has left; undefined once the pool is spent. */
+  async #poolExecution(
+    objective: Objective,
+    base: TaskExecutionRequirements,
+  ): Promise<TaskExecutionRequirements | undefined> {
+    if (
+      objective.budgetLimitMinor === null ||
+      objective.budgetLimitMinor === undefined ||
+      !objective.budgetCurrency
+    )
+      return base;
+    return poolExecution(
+      objective,
+      objectiveSpentMinor(objective, await this.#store.readSpend({ objectiveIds: [objective.id] })),
+      base,
+    );
+  }
+
+  /**
+   * What the Tag of a work Session under an Objective may do for it now: the Objective's
+   * authorization for that Tag at the work Session's location, narrowed to `ceiling` for another
+   * Tag's work. Undefined when the Tag or its location is gone.
+   */
+  async #objectiveWorkAuthorization(
+    objective: Objective,
+    work: DurableInboundEvent,
+    ceiling: TagAuthorizationSnapshot,
+  ): Promise<TagAuthorizationSnapshot | undefined> {
+    const tag = await this.#store.findTagById(work.tagId);
+    const location = await this.#locationOf(work);
+    if (tag?.status !== "active" || location === undefined) return undefined;
+    return objectiveAuthorization(
+      this.#store,
+      objective,
+      tag,
+      location,
+      tag.id === objective.ownerTagId ? undefined : ceiling,
+    );
+  }
+
+  /** The account and route an inbound event was admitted under, if both still exist. */
+  async #locationOf(inbound: DurableInboundEvent): Promise<ObjectiveLocation | undefined> {
+    const [account, stored, tag] = await Promise.all([
+      this.#store.findSurfaceAccountById(inbound.surfaceAccountId),
+      this.#store.findTagRouteById(inbound.tagRouteId),
+      this.#store.findTagById(inbound.tagId),
+    ]);
+    if (!account || !tag) return undefined;
+    const route =
+      stored ??
+      (account.provider === "cli" && inbound.tagRouteId === cliTagRoute(tag, account).id
+        ? cliTagRoute(tag, account)
+        : undefined);
+    return route === undefined ? undefined : { account, route, event: inbound.event };
+  }
+
+  /**
+   * A work Session Task's pending approval request, posted where the conversation turn that
+   * started it replies: the work Session itself posts nowhere. A Task of an Objective's Sessions is
+   * left to the Objective's approval digest in its home thread, and an inbox turn's request
+   * reaches only the operator inbox. The request id is the delivery key, so it posts once, and a
+   * Task posts one notice per admitted requirement while its requests are pending.
+   */
+  async #postSessionApproval(
     task: Task,
     work: DurableInboundEvent,
     requestId: string,
   ): Promise<void> {
     const internal = work.event.internal;
-    if (internal?.kind !== "work_session") return;
+    if (internal?.kind !== "work_session" || task.objectiveId !== undefined) return;
     const [request, starting] = await Promise.all([
       this.objectives.getApprovalRequest(requestId),
       this.#store.findTaskById(internal.startedByTaskId),
@@ -2892,26 +3102,43 @@ export class ControlPlane {
     this.#wakeDeliveryController?.();
   }
 
-  /** Admits the report turns that finished work Sessions are still owed. */
   /**
-   * Admits the report turns that finished work Sessions are still owed, and continues the work
-   * Sessions whose waited-on approval request was decided without continuing them, as after a
-   * restart or a failed admission.
+   * One pass over the Sessions that need SuperTag, oldest first in each step: report turns that
+   * finished work Sessions are owed, Sessions whose waited-on approval request was decided
+   * without continuing them (as after a restart), idle Objectives, Mailbox messages no inbox turn
+   * took, then the Objective controller's own sweep. A failing step never stops the next.
    */
-  async #reportFinishedWorkSessions(): Promise<void> {
-    this.#lastWorkReportSweep = Date.now();
-    try {
-      for (const taskId of await this.#store.listUnreportedWorkTasks(20))
+  #sweepSessions(): Promise<void> {
+    this.#sweeping ??= this.#sweepSessionsNow().finally(() => {
+      this.#sweeping = undefined;
+    });
+    return this.#sweeping;
+  }
+
+  async #sweepSessionsNow(): Promise<void> {
+    this.#lastSessionSweep = Date.now();
+    const step = async (run: () => Promise<void>) => {
+      try {
+        await run();
+      } catch (error) {
+        this.#reportDispatchError(error);
+      }
+    };
+    await step(async () => {
+      for (const taskId of await this.#store.listUnreportedWorkTasks(SESSION_SWEEP_BATCH))
         await this.#reportWorkSession(taskId);
-      for (const taskId of await this.#store.listDecidedWorkSessionWaits(20))
-        await this.#oneWorkTaskTurn(taskId, () => this.#continueDecidedWorkSession(taskId));
-    } catch (error) {
-      this.#reportDispatchError(error);
-    }
+    });
+    await step(async () => {
+      for (const taskId of await this.#store.listDecidedSessionWaits(SESSION_SWEEP_BATCH))
+        await this.#oneWorkTaskTurn(taskId, () => this.#continueDecidedSession(taskId));
+    });
+    await step(() => this.#settleIdleObjectives());
+    await step(() => this.#deliverPendingInboxes());
+    await step(() => this.objectives.sweep());
   }
 
   /**
-   * A finished work Session Task's report turn: a new Task in the conversation Session, under
+   * A finished work Session Task's report turn: a new Task in the Session that started it, under
    * the starting turn's admitted authorization, that replies where that turn replied. Its event
    * id is the delivery key, so a repeat after a restart is a duplicate admission, not a report.
    */
@@ -2919,13 +3146,13 @@ export class ControlPlane {
     await this.#oneWorkTaskTurn(workTaskId, async () => {
       await this.#reportWorkSessionNow(workTaskId);
       // A request decided before the Task's outcome was committed continues the Session now.
-      await this.#continueDecidedWorkSession(workTaskId);
+      await this.#continueDecidedSession(workTaskId);
     });
   }
 
   /**
-   * Runs one work Task's approval notice, approval continuation and report admission one at a
-   * time, so a notice posted while the Task runs is queued before its report.
+   * Runs one Task's approval notice, approval continuation and report admission one at a time,
+   * so a notice posted while the Task runs is queued before its report.
    */
   async #oneWorkTaskTurn<T>(workTaskId: string, admit: () => Promise<T>): Promise<T> {
     const previous = this.#workTaskTurns.get(workTaskId) ?? Promise.resolve();
@@ -2958,9 +3185,9 @@ export class ControlPlane {
         ? await this.#store.findInboundEventById(startingTask.inboundEventId)
         : undefined;
       if (!startingTask || !starting)
-        throw new Error(`Work Session ${task.sessionId} has no conversation turn to report to`);
+        throw new Error(`Work Session ${task.sessionId} has no Session turn to report to`);
       // A retired Tag takes no more turns; its work Session's result stays on the Session.
-      if ((await this.#store.findTagById(task.tagId))?.status !== "active") return;
+      if ((await this.#store.findTagById(starting.tagId))?.status !== "active") return;
       const final = await this.#store.findOutboundReply(work.id, "final");
       const question = task.status === "completed" ? task.outcome?.["question"] : undefined;
       const approvals =
@@ -2979,13 +3206,22 @@ export class ControlPlane {
               basedOn,
             )
           : undefined;
+      // A report to an Objective draws from its budget pool like every turn of the Objective.
+      const objectiveId = objectiveIdOfSessionKey(starting.event.sessionKey);
+      const execution =
+        objectiveId === undefined
+          ? starting.execution
+          : ((await this.#poolExecution(
+              await this.#store.getObjective(objectiveId),
+              starting.execution,
+            )) ?? starting.execution);
       const admission = await this.#store.admitInboundEvent({
         surfaceAccountId: starting.surfaceAccountId,
         tagRouteId: starting.tagRouteId,
         tagId: starting.tagId,
         authorization: starting.authorization,
         contextPlan: starting.contextPlan,
-        execution: starting.execution,
+        execution,
         event: sessionReportEvent(
           starting,
           {
@@ -3022,16 +3258,17 @@ export class ControlPlane {
   }
 
   /**
-   * Continues a work Session whose latest Task completed waiting on approval requests, once one
-   * of them is decided: the next Task of that Session, with the decisions as its message. It runs
-   * under the waiting Task's admitted authorization only while the Tag's current permissions are
-   * the same, as `continue_session` requires, and draws from the waiting Task's share of the
-   * starting turn's budget. When either check fails, the conversation is told, and the Task waits
-   * on nothing. Its event id is keyed by the waiting Task, so the decision listener, the report
-   * path and the sweep continue it once between them. Runs in the waiting Task's turn, after its
-   * report admission.
+   * Continues a Session whose latest Task completed waiting on approval requests, once one of
+   * them is decided. An Objective's own Session gets the decisions as its next turn. A work
+   * Session's next Task carries them as its message, under the waiting Task's admitted
+   * authorization only while its Tag's current permissions are the same, as `continue_session`
+   * requires, and drawing from the waiting Task's share of the starting turn's budget or from the
+   * Objective's pool. When either check fails, the starting Session is told, and the Task waits on
+   * nothing. The event id is keyed by the waiting Task, so the decision listener, the report path
+   * and the sweep continue it once between them. Runs in the waiting Task's turn, after its report
+   * admission.
    */
-  async #continueDecidedWorkSession(taskId: string): Promise<void> {
+  async #continueDecidedSession(taskId: string): Promise<void> {
     try {
       if (!this.#accepting) return;
       const task = await this.#store.findTaskById(taskId);
@@ -3044,10 +3281,13 @@ export class ControlPlane {
       )
         return;
       const work = await this.#store.findInboundEventById(task.inboundEventId);
-      const internal = work?.event.internal;
-      if (!work || internal?.kind !== "work_session") return;
+      if (!work) return;
+      const internal = work.event.internal;
+      const ownObjectiveId = objectiveIdOfSessionKey(work.event.sessionKey);
+      const inbox = isInboxSessionKey(work.event.sessionKey);
+      if (internal?.kind !== "work_session" && ownObjectiveId === undefined && !inbox) return;
       if ((await this.#store.listSessionTaskIds(task.sessionId)).at(-1) !== task.id) return;
-      // A retired Tag takes no more turns; its work Session stays where it stopped.
+      // A retired Tag takes no more turns; its Session stays where it stopped.
       if ((await this.#store.findTagById(task.tagId))?.status !== "active") return;
       const decided = (
         await Promise.all(
@@ -3065,26 +3305,67 @@ export class ControlPlane {
       if (decided.length === 0) return;
       if (
         (await this.#store.listTaskEvents(task.id)).some(
-          (event) => event.type === WORK_SESSION_NOT_CONTINUED_EVENT,
+          (event) => event.type === SESSION_NOT_CONTINUED_EVENT,
         )
       )
         return;
-      // The waiting Task's report reaches the conversation before the Session goes on.
+      const decisions = decided.map(approvalDecisionText).join("\n\n");
+      if (inbox) {
+        // An inbox turn: the decision is the inbox's next turn, under the Tag's current Roles.
+        const tag = await this.#store.findTagById(task.tagId);
+        if (tag === undefined) return;
+        await this.#oneInbox(tag.id, () =>
+          this.#admitInboxDelivery(tag, {
+            eventId: sessionApprovalDeliveryId(task.id),
+            actor: { id: "supertag", displayName: "SuperTag", kind: "bot" },
+            internal: { kind: "delivery", from: { kind: "supertag" }, reason: "approval_decision" },
+            text: decisions,
+            admitted: { approvalRequestId: decided[0]?.id },
+          }),
+        );
+        return;
+      }
+      if (internal?.kind !== "work_session") {
+        // An Objective's own turn: the decision is its conversation's next turn.
+        const objective = await this.#store.getObjective(ownObjectiveId ?? "");
+        if (objectiveClosed(objective.status)) return;
+        try {
+          await this.#admitObjectiveTurn(objective, {
+            eventId: sessionApprovalDeliveryId(task.id),
+            reason: "approval_decision",
+            from: { kind: "supertag" },
+            text: decisions,
+          });
+        } catch (error) {
+          if (!(error instanceof TagMessagingError)) throw error;
+          await this.#appendTaskEvent(task.id, SESSION_NOT_CONTINUED_EVENT, {
+            requestIds: decided.map((request) => request.id),
+            reason: "budget",
+          });
+          await this.#postObjectiveNotice(
+            objective.id,
+            `approval-continue:${task.id}`,
+            `Objective ${objective.id} did not continue after approval request ${decided.map((request) => `${request.id} (${request.status})`).join(", ")} was decided: ${error.message}`,
+          );
+        }
+        return;
+      }
+      // The waiting Task's report reaches the starting Session before the work Session goes on.
       await this.#reportWorkSessionNow(task.id);
       const startingTask = await this.#store.findTaskById(internal.startedByTaskId);
       const starting = startingTask?.inboundEventId
         ? await this.#store.findInboundEventById(startingTask.inboundEventId)
         : undefined;
       if (!startingTask || !starting)
-        throw new Error(`Work Session ${task.sessionId} has no conversation turn to report to`);
-      // A conversation holds a bounded number of unfinished work Sessions; the sweep continues
-      // this one once another finishes.
+        throw new Error(`Work Session ${task.sessionId} has no Session turn to report to`);
+      // A Session holds a bounded number of unfinished work Sessions; the sweep continues this
+      // one once another finishes.
       const open = (await this.#store.listWorkSessions(internal.parentSessionId)).filter(
         (session) => session.task?.status === "running" || session.task?.status === "pending",
       ).length;
       if (open >= WORK_SESSION_MAX_OPEN) return;
       const stop = async (reason: "permissions" | "budget") => {
-        await this.#appendTaskEvent(task.id, WORK_SESSION_NOT_CONTINUED_EVENT, {
+        await this.#appendTaskEvent(task.id, SESSION_NOT_CONTINUED_EVENT, {
           requestIds: decided.map((request) => request.id),
           reason,
         });
@@ -3094,17 +3375,30 @@ export class ControlPlane {
           workSessionNotContinuedNotice(internal.title, decided, reason),
         );
       };
+      const objectiveId = objectiveIdOfSessionKey(starting.event.sessionKey);
+      const objective =
+        objectiveId === undefined ? undefined : await this.#store.getObjective(objectiveId);
+      if (objective !== undefined && objectiveClosed(objective.status)) return;
       // Never broader than the Tag may act now: a decision does not revive revoked permissions.
-      const current = await this.#currentAuthorization(starting);
+      const current =
+        objective === undefined
+          ? await this.#currentAuthorization(starting)
+          : await this.#objectiveWorkAuthorization(objective, work, starting.authorization);
       if (current === undefined || !samePermissions(work.authorization, current)) {
         await stop("permissions");
         return;
       }
-      const execution = resumedWorkSessionExecution(
-        startingTask.execution,
-        work.execution,
-        reportedTurnSpend(await this.#store.readSpend({ taskIds: [task.id] }), work.execution),
-      );
+      const execution =
+        objective === undefined
+          ? resumedWorkSessionExecution(
+              startingTask.execution,
+              work.execution,
+              reportedTurnSpend(
+                await this.#store.readSpend({ taskIds: [task.id] }),
+                work.execution,
+              ),
+            )
+          : await this.#poolExecution(objective, work.execution);
       if (execution === undefined) {
         await stop("budget");
         return;
@@ -3115,10 +3409,10 @@ export class ControlPlane {
         internal.startedByTaskId,
         internal.parentSessionId,
         internal.title,
-        decided.map(approvalDecisionText).join("\n\n"),
+        decisions,
         new Date().toISOString(),
       );
-      const eventId = workSessionApprovalDeliveryId(task.id);
+      const eventId = sessionApprovalDeliveryId(task.id);
       const admission = await this.#store.admitInboundEvent({
         surfaceAccountId: work.surfaceAccountId,
         tagRouteId: work.tagRouteId,
@@ -3152,25 +3446,580 @@ export class ControlPlane {
   async #currentAuthorization(
     inbound: DurableInboundEvent,
   ): Promise<TagAuthorizationSnapshot | undefined> {
-    const [account, stored, tag] = await Promise.all([
-      this.#store.findSurfaceAccountById(inbound.surfaceAccountId),
-      this.#store.findTagRouteById(inbound.tagRouteId),
-      this.#store.findTagById(inbound.tagId),
-    ]);
-    if (!account || !tag) return undefined;
-    const route =
-      stored ??
-      (account.provider === "cli" && inbound.tagRouteId === cliTagRoute(tag, account).id
-        ? cliTagRoute(tag, account)
-        : undefined);
-    if (!route) return undefined;
+    const location = await this.#locationOf(inbound);
+    const tag = await this.#store.findTagById(inbound.tagId);
+    if (!location || !tag) return undefined;
     return this.#captureAuthorization(
       inbound.event,
-      account,
-      route,
+      location.account,
+      location.route,
       tag,
       new Date().toISOString(),
       await resolveTagRoles(this.#store, tag.id),
+    );
+  }
+
+  /**
+   * Admits the first turn of an Objective's conversation, in its home thread. Idempotent: a
+   * repeat returns the same Task.
+   */
+  async startObjective(objectiveId: string): Promise<{ readonly taskId: string }> {
+    const objective = await this.#store.getObjective(objectiveId);
+    if (objectiveClosed(objective.status))
+      throw new TagMessagingError(409, `Objective ${objective.id} is ${objective.status}`);
+    const { task } = await this.#admitObjectiveTurn(objective, {
+      eventId: objectiveStartDeliveryId(objective.id),
+      reason: "objective_start",
+      from: { kind: "supertag" },
+      text: objectiveTurnText("objective_start", objective),
+    });
+    return { taskId: task.id };
+  }
+
+  /**
+   * An operator's message to an Objective: the next turn of its conversation, as if written in
+   * its home thread. A blocked, limited or ready_for_review Objective goes back to working. The
+   * idempotency key makes a repeat a duplicate.
+   */
+  async messageObjective(
+    input: MessageObjectiveInput & {
+      /** The person as the surface names them, when the message came from a thread. */
+      readonly actor?: InboundSurfaceEvent["actor"];
+    },
+  ): Promise<MessageObjectiveResult> {
+    const text = input.text.trim();
+    if (!text) throw new TagMessagingError(400, "message must not be empty");
+    const objective = await this.#store.getObjective(input.objectiveId);
+    if (objectiveClosed(objective.status))
+      throw new TagMessagingError(
+        409,
+        `Objective ${objective.id} is ${objective.status} and takes no more messages`,
+      );
+    const actor = input.actor ?? {
+      id: input.operatorId,
+      displayName: input.operatorId,
+      kind: "user" as const,
+    };
+    const { task, duplicate } = await this.#admitObjectiveTurn(objective, {
+      eventId: objectiveMessageDeliveryId(objective.id, input.idempotencyKey),
+      reason: "objective_message",
+      from: {
+        kind: "person",
+        id: input.operatorId,
+        ...(actor.displayName === undefined ? {} : { displayName: actor.displayName }),
+      },
+      text,
+      actor,
+    });
+    if (duplicate) return { duplicate, taskId: task.id };
+    let current = objective;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (
+        current.status !== "blocked" &&
+        current.status !== "limited" &&
+        current.status !== "ready_for_review"
+      )
+        return { duplicate, taskId: task.id };
+      try {
+        await this.#store.updateObjectiveStatus(
+          current.id,
+          { status: "working", expectedRevision: current.revision },
+          undefined,
+          undefined,
+          { operatorId: input.operatorId },
+        );
+        return { duplicate, taskId: task.id, statusChange: current.status };
+      } catch (error) {
+        if (!(error instanceof TagMessagingError) || error.statusCode !== 409) throw error;
+        current = await this.#store.getObjective(current.id);
+      }
+    }
+    return { duplicate, taskId: task.id };
+  }
+
+  /**
+   * Admits one turn of an Objective's conversation, the owner Tag's `objective:<id>` Session in
+   * the Objective's home thread, and opens its Task at admission so the Session belongs to the
+   * Objective before it is dispatched. It runs under the Objective's authorization for the owner
+   * Tag and draws from the Objective's budget pool; a spent pool refuses it.
+   */
+  async #admitObjectiveTurn(
+    objective: Objective,
+    turn: {
+      readonly eventId: string;
+      readonly reason: DeliveryReason;
+      readonly from: DeliveryFrom;
+      readonly text: string;
+      readonly actor?: InboundSurfaceEvent["actor"];
+    },
+  ): Promise<{ readonly task: Task; readonly duplicate: boolean }> {
+    if (!this.#accepting)
+      throw new TagMessagingError(503, "The Control Plane is not accepting new work now");
+    const owner = await this.#store.findTagById(objective.ownerTagId);
+    if (owner?.status !== "active")
+      throw new TagMessagingError(409, `Objective ${objective.id}'s Tag is no longer active`);
+    if ((await this.#store.listTagWorkerHostBindings(owner.id)).length === 0)
+      throw new TagMessagingError(
+        409,
+        `Tag ${owner.name} cannot accept Tasks because it has no Worker Host binding. Bind a Worker Host to the Tag, then retry.`,
+      );
+    const at = new Date().toISOString();
+    const location = await this.#objectiveLocation(objective, owner, {
+      ...turn,
+      at,
+      internal: {
+        kind: "delivery",
+        from: turn.from,
+        reason: turn.reason,
+        objectiveId: objective.id,
+      },
+    });
+    const roles = await resolveTagRoles(this.#store, owner.id);
+    const execution = await this.#poolExecution(objective, await this.#tagExecution(owner, roles));
+    if (execution === undefined)
+      throw new TagMessagingError(
+        409,
+        `Objective ${objective.id} has spent its budget; an operator can raise it with supertag update objective ${objective.id}`,
+      );
+    const admission = await this.#store.admitInboundEvent({
+      surfaceAccountId: location.account.id,
+      tagRouteId: location.route.id,
+      tagId: owner.id,
+      authorization: await objectiveAuthorization(this.#store, objective, owner, location),
+      contextPlan: await captureInternalRoleContextPlan(this.#store, roles.contextSetIds, at),
+      execution,
+      event: location.event,
+      maxAttempts: this.#maxAttempts,
+    });
+    const task = await this.#openTask(admission.work);
+    if (admission.status === "duplicate") return { task, duplicate: true };
+    await this.#appendTaskEvent(task.id, "task.admitted", {
+      tagRouteId: location.route.id,
+      scope: location.event.scope,
+      objectiveId: objective.id,
+      reason: turn.reason,
+    });
+    this.#wakeTaskController?.();
+    this.#markOperatorInboxChanged();
+    return { task, duplicate: false };
+  }
+
+  /**
+   * Where an Objective's turns run: its home thread's location with the Objective's own Session
+   * key, so the owner's replies post in that thread; or, without a home thread, the owner Tag's
+   * CLI account.
+   */
+  async #objectiveLocation(
+    objective: Objective,
+    owner: Tag,
+    turn: {
+      readonly eventId: string;
+      readonly text: string;
+      readonly at: string;
+      readonly actor?: InboundSurfaceEvent["actor"];
+      readonly internal: Extract<InboundSurfaceEvent["internal"], { readonly kind: "delivery" }>;
+    },
+  ): Promise<ObjectiveLocation> {
+    const sessionKey = objectiveSessionKey(objective.id);
+    const turnFields = {
+      eventId: turn.eventId,
+      logicalEventId: turn.eventId,
+      kind: "message" as const,
+      sessionKey,
+      actor: turn.actor ?? { id: "supertag", displayName: "SuperTag", kind: "bot" as const },
+      internal: turn.internal,
+      text: turn.text,
+      occurredAt: turn.at,
+    };
+    const home = await objectiveHome(this.#store, objective, this.#operatorNotificationTaskId);
+    const anchor = home?.inboundEventId
+      ? await this.#store.findInboundEventById(home.inboundEventId)
+      : undefined;
+    const location = anchor === undefined ? undefined : await this.#locationOf(anchor);
+    if (anchor !== undefined && location !== undefined)
+      return {
+        account: location.account,
+        route: location.route,
+        event: {
+          provider: anchor.event.provider,
+          externalAccountId: anchor.event.externalAccountId,
+          scope: anchor.event.scope,
+          callback: anchor.event.callback,
+          source: anchor.event.source,
+          metadata: anchor.event.metadata,
+          ...turnFields,
+        },
+      };
+    const account = await this.#cliAccount();
+    const route = cliTagRoute(owner, account);
+    return {
+      account,
+      route,
+      event: {
+        provider: "cli",
+        externalAccountId: CLI_EXTERNAL_ACCOUNT_ID,
+        scope: route.scope,
+        callback: { provider: "cli", mode: "cli_conversation", threadKey: sessionKey, target: {} },
+        source: {},
+        metadata: {},
+        ...turnFields,
+      },
+    };
+  }
+
+  /**
+   * The inbound event an Objective's notices are posted on: its home thread's, or for a CLI home
+   * the first turn of its own Session.
+   */
+  async #objectiveAnchor(objective: Objective): Promise<string | undefined> {
+    const home = await objectiveHome(this.#store, objective, this.#operatorNotificationTaskId);
+    if (home?.inboundEventId) return home.inboundEventId;
+    const session = await this.#store.findObjectiveOwnerSession(objective.id);
+    const first = session ? (await this.#store.listSessionTaskIds(session.id))[0] : undefined;
+    return first
+      ? ((await this.#store.findTaskById(first))?.inboundEventId ?? undefined)
+      : undefined;
+  }
+
+  /** Posts SuperTag's notice to an Objective's home thread, as its own message, once per key. */
+  async #postObjectiveNotice(objectiveId: string, key: string, text: string): Promise<void> {
+    const anchor = await this.#objectiveAnchor(await this.#store.getObjective(objectiveId));
+    if (anchor === undefined) throw new Error(`Objective ${objectiveId} has no home thread`);
+    await this.#postNoticeOnce(anchor, objectiveReportKey(objectiveId, key), text);
+  }
+
+  /** Delivers SuperTag's notice as a turn of an Objective's conversation, once per key. */
+  async #notifyObjective(input: {
+    readonly objectiveId: string;
+    readonly key: string;
+    readonly text: string;
+  }): Promise<void> {
+    const eventId = objectiveNoticeDeliveryId(input.objectiveId, input.key);
+    if (this.#deliveredNotices.has(eventId)) return;
+    const objective = await this.#store.getObjective(input.objectiveId);
+    if (objectiveClosed(objective.status)) return;
+    await this.#admitObjectiveTurn(objective, {
+      eventId,
+      reason: "objective_notice",
+      from: { kind: "supertag" },
+      text: input.text,
+    });
+    if (this.#deliveredNotices.size >= 10_000) this.#deliveredNotices.clear();
+    this.#deliveredNotices.add(eventId);
+  }
+
+  /**
+   * Cancels the open Tasks of an Objective's Sessions, except `exceptTaskId`: a pending Task is
+   * cancelled with its turn, and a running Attempt this Control Plane runs is stopped. Returns
+   * the Tasks whose cancellation was accepted.
+   */
+  async #cancelObjectiveTasks(
+    objectiveId: string,
+    reason: string,
+    exceptTaskId?: string,
+  ): Promise<readonly string[]> {
+    const cancelled: string[] = [];
+    for (const taskId of await this.#store.listOpenObjectiveTaskIds(objectiveId)) {
+      if (taskId === exceptTaskId) continue;
+      const result = await this.requestTaskCancellation(taskId, undefined, reason);
+      if (result.accepted) cancelled.push(taskId);
+    }
+    return cancelled;
+  }
+
+  /**
+   * Objectives whose latest own turn ended with nothing running and nothing asked: the first time
+   * the Objective is woken once; when that wake also ended idle, it is blocked and its home thread
+   * is told.
+   */
+  async #settleIdleObjectives(): Promise<void> {
+    for (const idle of await this.#store.listIdleObjectives(SESSION_SWEEP_BATCH)) {
+      try {
+        const objective = await this.#store.getObjective(idle.objectiveId);
+        const task = await this.#store.findTaskById(idle.ownerTaskId);
+        const inbound = task?.inboundEventId
+          ? await this.#store.findInboundEventById(task.inboundEventId)
+          : undefined;
+        if (idleAction(inbound) === "wake") {
+          await this.#admitObjectiveTurn(objective, {
+            eventId: objectiveIdleDeliveryId(idle.ownerTaskId),
+            reason: "objective_idle",
+            from: { kind: "supertag" },
+            text: objectiveTurnText("objective_idle", objective),
+          });
+          continue;
+        }
+        await this.#store.updateObjectiveStatus(objective.id, {
+          status: "blocked",
+          expectedRevision: objective.revision,
+        });
+        this.#markOperatorInboxChanged();
+        await this.#postObjectiveNotice(
+          objective.id,
+          `objective-blocked:${idle.ownerTaskId}`,
+          objectiveBlockedText(objective.id),
+        );
+      } catch (error) {
+        // A spent budget or a stale revision is settled by the limit sweep or the next pass.
+        if (!(error instanceof TagMessagingError)) this.#reportDispatchError(error);
+      }
+    }
+  }
+
+  /** Admits an inbox turn for each Tag with Mailbox messages no turn took. */
+  async #deliverPendingInboxes(): Promise<void> {
+    for (const tagId of await this.#store.listTagsWithUnboundMessages(SESSION_SWEEP_BATCH)) {
+      try {
+        const tag = await this.#store.findTagById(tagId);
+        if (tag?.status !== "active") continue;
+        const oldest = (
+          await this.#store.listTagMessageHistory(tagId, { limit: 100 })
+        ).items.findLast(
+          (message) => message.recipientTagId === tagId && message.taskId === undefined,
+        );
+        if (oldest === undefined) continue;
+        await this.#oneInbox(tagId, () => this.#admitInboxTurn(tag, oldest));
+      } catch (error) {
+        this.#reportDispatchError(error);
+      }
+    }
+  }
+
+  /**
+   * `send_message`: stores a message for another Tag and admits a turn of its inbox Session, unless
+   * one is already waiting to start, which takes this message too. Only a root Session may send,
+   * to a Tag that shares a Team with this one or accepts messages from it. A message sent from an
+   * inbox turn carries one more hop than the messages that turn handled.
+   */
+  async #sendMessage(task: Task, input: SendMessageInput): Promise<SendMessageResult> {
+    if (!this.#accepting)
+      throw new TagMessagingError(503, "The Control Plane is not accepting new work now");
+    const session = await this.#store.findSessionById(task.sessionId);
+    if (session === undefined || session.parentSessionId !== undefined)
+      throw new TagMessagingError(
+        403,
+        "A work Session cannot send messages; its result reaches the Session that started it",
+      );
+    if ((await this.#store.findTagById(task.tagId))?.status !== "active")
+      throw new TagMessagingError(409, "This Tag is no longer active, so it cannot send messages");
+    const recipient =
+      (await this.#store.findTagByName(input.to)) ?? (await this.#store.findTagById(input.to));
+    if (recipient?.status !== "active")
+      throw new TagMessagingError(404, `Tag ${input.to} does not exist`);
+    if (recipient.id === task.tagId)
+      throw new TagMessagingError(400, "A Tag cannot send a message to itself");
+    if (!(await this.#store.mayMessage(task.tagId, recipient.id)))
+      throw new TagMessagingError(
+        403,
+        `Tag ${recipient.name} does not accept messages from this Tag: they share no Team, and it has no grant for this Tag`,
+      );
+    const history = (await this.#store.listTagMessageHistory(task.tagId, { limit: 100 })).items;
+    const handled = isInboxSessionKey(session.sessionKey)
+      ? history.filter((message) => message.taskId === task.id)
+      : [];
+    const hops = handled.length === 0 ? 0 : Math.max(...handled.map((message) => message.hops)) + 1;
+    if (hops > INBOX_MAX_HOPS)
+      throw new TagMessagingError(
+        409,
+        `This message would continue a chain of messages through more than ${INBOX_MAX_HOPS} inboxes; answer in your reply instead`,
+      );
+    if (
+      input.workstreamPostId === undefined &&
+      history.filter(
+        (message) => message.sourceTaskId === task.id && message.workstreamPostId === undefined,
+      ).length >= INBOX_SENDS_PER_TASK
+    )
+      throw new TagMessagingError(
+        429,
+        `This turn already sent ${INBOX_SENDS_PER_TASK} messages, the most one turn may send`,
+      );
+    return this.#oneInbox(recipient.id, async () => {
+      const { message, admit } = await this.#store.deliverTagMessage({
+        senderTagId: task.tagId,
+        recipientTagId: recipient.id,
+        text: input.text,
+        hops,
+        ...(task.objectiveId === undefined ? {} : { objectiveId: task.objectiveId }),
+        sourceTaskId: task.id,
+        ...(input.workstreamPostId === undefined
+          ? {}
+          : { workstreamPostId: input.workstreamPostId }),
+      });
+      if (admit) await this.#admitInboxTurn(recipient, message);
+      return {
+        messageId: message.id,
+        session: inboxSessionKey(recipient.id),
+        status: admit ? "queued" : "batched",
+      };
+    });
+  }
+
+  /** Runs one Tag's Mailbox deliveries and inbox admissions one at a time. */
+  async #oneInbox<T>(tagId: string, run: () => Promise<T>): Promise<T> {
+    const previous = this.#inboxDeliveries.get(tagId) ?? Promise.resolve();
+    const current = previous.then(run);
+    const settled = current.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#inboxDeliveries.set(tagId, settled);
+    try {
+      return await current;
+    } finally {
+      if (this.#inboxDeliveries.get(tagId) === settled) this.#inboxDeliveries.delete(tagId);
+    }
+  }
+
+  /**
+   * Admits a turn of the Tag's inbox Session for a Mailbox message, in the Tag's CLI account and
+   * under its Roles only, like `supertag message tag`. The message id keys the turn, so it is
+   * admitted once; the turn takes every message waiting when it starts.
+   */
+  async #admitInboxTurn(
+    recipient: Tag,
+    message: Pick<TagMessage, "id" | "senderTagId" | "sourceTaskId">,
+  ): Promise<void> {
+    const sender = await this.#store.findTagById(message.senderTagId);
+    const senderName = sender?.name ?? message.senderTagId;
+    await this.#admitInboxDelivery(recipient, {
+      eventId: inboxDeliveryId(recipient.id, message.id),
+      actor: { id: `tag:${message.senderTagId}`, displayName: senderName, kind: "bot" },
+      internal: {
+        kind: "delivery",
+        from: { kind: "tag", tagId: message.senderTagId, tagName: senderName },
+        reason: "inbox",
+        ...(message.sourceTaskId === undefined ? {} : { startedByTaskId: message.sourceTaskId }),
+      },
+      admitted: { messageId: message.id },
+    });
+  }
+
+  /** Admits one turn of the Tag's inbox Session, once per event id. */
+  async #admitInboxDelivery(
+    recipient: Tag,
+    turn: {
+      readonly eventId: string;
+      readonly actor: InboundSurfaceEvent["actor"];
+      readonly internal: Extract<InboundSurfaceEvent["internal"], { readonly kind: "delivery" }>;
+      readonly text?: string;
+      readonly admitted: Readonly<Record<string, unknown>>;
+    },
+  ): Promise<void> {
+    if ((await this.#store.listTagWorkerHostBindings(recipient.id)).length === 0) return;
+    const account = await this.#cliAccount();
+    const route = cliTagRoute(recipient, account);
+    const sessionKey = inboxSessionKey(recipient.id);
+    const at = new Date().toISOString();
+    const event: InboundSurfaceEvent = {
+      eventId: turn.eventId,
+      logicalEventId: turn.eventId,
+      provider: "cli",
+      externalAccountId: CLI_EXTERNAL_ACCOUNT_ID,
+      kind: "message",
+      scope: route.scope,
+      sessionKey,
+      actor: turn.actor,
+      occurredAt: at,
+      callback: { provider: "cli", mode: "cli_conversation", threadKey: sessionKey, target: {} },
+      source: {},
+      metadata: {},
+      internal: turn.internal,
+      ...(turn.text === undefined ? {} : { text: turn.text }),
+    };
+    const roles = await resolveTagRoles(this.#store, recipient.id);
+    const [authorization, contextPlan] = await Promise.all([
+      this.#captureAuthorization(event, account, route, recipient, at, roles),
+      this.#captureContextPlan(event, account, route, at, roles),
+    ]);
+    const admission = await this.#store.admitInboundEvent({
+      surfaceAccountId: account.id,
+      tagRouteId: route.id,
+      tagId: recipient.id,
+      authorization,
+      contextPlan,
+      execution: await this.#tagExecution(recipient, roles),
+      event,
+      maxAttempts: this.#maxAttempts,
+    });
+    const task = await this.#openTask(admission.work);
+    if (admission.status === "duplicate") return;
+    await this.#appendTaskEvent(task.id, "task.admitted", {
+      tagRouteId: route.id,
+      scope: route.scope,
+      ...turn.admitted,
+    });
+    this.#wakeTaskController?.();
+  }
+
+  /** An inbox turn that found no message waiting ends without running. */
+  async #settleEmptyInboxTurn(task: Task): Promise<void> {
+    const cancelled = await this.#store.cancelPendingSurfaceTask({
+      taskId: task.id,
+      cancelledAt: new Date().toISOString(),
+    });
+    if (cancelled)
+      await this.#appendTaskEvent(task.id, "task.cancelled", { reason: "inbox-empty" });
+  }
+
+  /** The Mailbox messages an inbox turn handles, bound to its Task when it starts. */
+  async #inboxText(task: Task): Promise<string> {
+    const messages = await this.#store.bindInboxMessages(task.id, task.tagId);
+    const names = new Map<string, string>();
+    for (const id of new Set(messages.map((message) => message.senderTagId))) {
+      const tag = await this.#store.findTagById(id);
+      if (tag) names.set(id, tag.name);
+    }
+    return inboxTurnText(messages, names);
+  }
+
+  async #inboxSessionId(tagId: string): Promise<{ readonly inboxSessionId?: string }> {
+    const session = await this.#store.findSessionByTagAndKey(tagId, inboxSessionKey(tagId));
+    return session === undefined ? {} : { inboxSessionId: session.id };
+  }
+
+  /** What an internal turn's text needs besides the turn: its Objective and Team, or its starter. */
+  async #internalTurnContext(work: DurableInboundEvent, task: Task): Promise<InternalTurnContext> {
+    const internal = work.event.internal;
+    if (internal?.kind === "delivery" && internal.objectiveId !== undefined) {
+      const objective = await this.#store.getObjective(internal.objectiveId);
+      const team =
+        objective.teamId === null ? undefined : await this.#store.getTeam(objective.teamId);
+      if (team === undefined) return { objective };
+      const members = (
+        await Promise.all(
+          team.memberTagIds
+            .filter((id) => id !== task.tagId)
+            .map((id) => this.#store.findTagById(id)),
+        )
+      ).flatMap((tag) => (tag?.status === "active" ? [tag.name] : []));
+      return { objective, team: { name: team.name, members } };
+    }
+    if (internal?.kind === "session_report")
+      return {
+        objectiveConversation: objectiveIdOfSessionKey(work.event.sessionKey) !== undefined,
+      };
+    if (internal?.kind === "work_session") {
+      const parent = await this.#store.findSessionById(internal.parentSessionId);
+      if (parent !== undefined && parent.tagId !== task.tagId)
+        return { delegatedBy: (await this.#store.findTagById(parent.tagId))?.name ?? parent.tagId };
+    }
+    return {};
+  }
+
+  /** The one built-in SurfaceAccount that CLI conversations are recorded under. */
+  async #cliAccount(): Promise<SurfaceAccount> {
+    return (
+      (await this.#store.findSurfaceAccount("cli", CLI_EXTERNAL_ACCOUNT_ID)) ??
+      (await this.#store.saveSurfaceAccount({
+        provider: "cli",
+        externalAccountId: CLI_EXTERNAL_ACCOUNT_ID,
+        displayName: "CLI",
+        authMethod: "operator",
+        credentialId: `surface/cli/${CLI_EXTERNAL_ACCOUNT_ID}`,
+        status: "connected",
+        configuration: {},
+        verifiedAt: new Date().toISOString(),
+      }))
     );
   }
 
@@ -3178,25 +4027,45 @@ export class ControlPlane {
   async #openTask(work: DurableInboundEvent): Promise<Task> {
     const now = new Date().toISOString();
     const internal = work.event.internal;
-    // An internal turn keeps the Workspace plan its starting conversation turn was admitted with.
-    const starting = internal
-      ? await this.#store.findTaskById(internal.startedByTaskId)
-      : undefined;
-    if (internal && starting?.tagId !== work.tagId)
-      throw new Error(`Task ${internal.startedByTaskId} that started this turn does not exist`);
-    // A work Session belongs to its conversation's audience: private to the same person or shared.
+    // A work Session belongs to the Session that started it: of the same Tag, or the Objective
+    // conversation that delegated it to this Tag.
     const parent =
       internal?.kind === "work_session"
         ? await this.#store.findSessionById(internal.parentSessionId)
         : undefined;
-    if (internal?.kind === "work_session" && parent?.tagId !== work.tagId)
-      throw new Error(`Conversation Session ${internal.parentSessionId} does not exist`);
+    if (
+      internal?.kind === "work_session" &&
+      (parent === undefined || (parent.tagId !== work.tagId && parent.objectiveId === undefined))
+    )
+      throw new Error(
+        `Session ${internal.parentSessionId} that started this work Session does not exist`,
+      );
+    // A work Session or report turn keeps the Workspace plan its starting turn was admitted with.
+    const starting =
+      internal === undefined || internal.kind === "delivery"
+        ? undefined
+        : await this.#store.findTaskById(internal.startedByTaskId);
+    if (
+      internal !== undefined &&
+      internal.kind !== "delivery" &&
+      (starting === undefined ||
+        (starting.tagId !== work.tagId && parent?.objectiveId === undefined))
+    )
+      throw new Error(`Task ${internal.startedByTaskId} that started this turn does not exist`);
+    const objective =
+      internal?.kind === "delivery" && internal.objectiveId !== undefined
+        ? await this.#store.getObjective(internal.objectiveId)
+        : undefined;
+    // A work Session shares its parent's audience, an Objective's conversation its home thread's,
+    // and a direct conversation is private to its one person; the first open fixes the audience.
     const audienceActorKey =
       parent !== undefined
         ? parent.audienceActorKey
-        : work.event.direct === true
-          ? sessionRequesterKey(work.event.provider, work.surfaceAccountId, work.event.actor.id)
-          : undefined;
+        : objective !== undefined
+          ? await this.#homeAudience(work, objective)
+          : work.event.direct === true
+            ? sessionRequesterKey(work.event.provider, work.surfaceAccountId, work.event.actor.id)
+            : undefined;
     const session = await this.#store.openSession({
       tagId: work.tagId,
       sessionKey: work.event.sessionKey,
@@ -3209,9 +4078,9 @@ export class ControlPlane {
           ? { title: internal.title, startedByTaskId: internal.startedByTaskId }
           : {}),
       },
-      // A direct conversation is private to its one person; the first open fixes the audience.
       ...(audienceActorKey === undefined ? {} : { audienceActorKey }),
       ...(parent === undefined ? {} : { parentSessionId: parent.id }),
+      ...(objective === undefined ? {} : { objectiveId: objective.id }),
       at: now,
     });
     const sessionHistory = (
@@ -3247,13 +4116,43 @@ export class ControlPlane {
       workspacePlan:
         internal?.kind === "work_session" && internal.workspace !== undefined
           ? await this.#workSessionPlan(work, internal.workspace, session.id)
-          : (starting?.workspacePlan ?? captureWorkspacePlan(work.event, work.authorization)),
+          : objective !== undefined
+            ? await this.#objectivePlan(objective, session.id)
+            : (starting?.workspacePlan ?? captureWorkspacePlan(work.event, work.authorization)),
       sessionHistory,
       authorizationSnapshot: work.authorization,
       contextPlan: work.contextPlan,
       createdAt: work.createdAt,
     });
     return task;
+  }
+
+  /**
+   * The audience of an Objective's conversation when it first opens: that of the Session its
+   * home thread belongs to, so a direct conversation's Objective stays private to its person.
+   */
+  async #homeAudience(
+    work: DurableInboundEvent,
+    objective: Objective,
+  ): Promise<string | undefined> {
+    if (await this.#store.findSessionByTagAndKey(work.tagId, work.event.sessionKey))
+      return undefined;
+    const home = await objectiveHome(this.#store, objective, this.#operatorNotificationTaskId);
+    const session = home ? await this.#store.findSessionById(home.sessionId) : undefined;
+    return session?.tagId === work.tagId ? session.audienceActorKey : undefined;
+  }
+
+  /**
+   * The Workspace plan of an Objective's own turns: its one Workspace, on the Session's branch,
+   * or none when it names several or none.
+   */
+  async #objectivePlan(objective: Objective, sessionId: string): Promise<TaskWorkspacePlan> {
+    const [name, ...others] = objective.workspaces ?? [];
+    if (name === undefined || others.length > 0) return { version: 1, status: "none" };
+    const workspace = await this.#store.findWorkspaceByName(name);
+    return workspace === undefined
+      ? { version: 1, status: "none" }
+      : namedWorkspacePlan(workspace, workSessionBranch(sessionId));
   }
 
   /**
@@ -3388,7 +4287,6 @@ export class ControlPlane {
     }
     if (!this.#stopping && Date.now() - this.#lastBudgetNotificationScan >= 1000) {
       this.#lastBudgetNotificationScan = Date.now();
-      await this.#objectiveMessages.reconcile().catch((error) => this.#reportDispatchError(error));
       await this.#budgetNotifications
         .reconcile()
         .catch((error) => this.#reportDispatchError(error));
@@ -3419,20 +4317,13 @@ export class ControlPlane {
         return true;
       }
       if (
-        outbound.deliveryKey.startsWith("task-budget:") ||
-        outbound.deliveryKey.startsWith("objective-budget:") ||
-        outbound.deliveryKey.startsWith("objective-limit:")
-      ) {
-        if (!(await this.#budgetNotifications.mayDeliver(outbound)))
-          throw new Error(
-            "Operator notification was superseded, resolved, or its destination is no longer verified",
-          );
-      }
-      if (
-        outbound.deliveryKey.startsWith("operator-message:") &&
-        !(await this.#objectiveMessages.mayDeliver(outbound))
+        (outbound.deliveryKey.startsWith("objective-budget:") ||
+          outbound.deliveryKey.startsWith("objective-limit:")) &&
+        !(await this.#budgetNotifications.mayDeliver(outbound))
       )
-        throw new Error("Operator message was replied to or its notification destination changed");
+        throw new Error(
+          "Operator notification was superseded, resolved, or its destination is no longer verified",
+        );
       const policy = outboundPresentationPolicy(outbound);
       const acknowledgement = policy.useAcknowledgement
         ? await this.#store.findOutboundReply(outbound.inboundEventId, "acknowledgement")
@@ -4170,10 +5061,36 @@ function externalWriteFailure(error: unknown, events: readonly WorkerTaskAttempt
 /**
  * Conversation and report turns may use each Worker's coordination slot, one beyond its
  * maxConcurrency, so running work Sessions never leave the conversation without a Worker. Work
- * Session Tasks use ordinary slots only.
+ * Session Tasks and delivered turns use ordinary slots only.
  */
 function conversationSlot(work: DurableInboundEvent): boolean {
-  return work.event.internal?.kind !== "work_session";
+  const internal = work.event.internal;
+  return internal === undefined || internal.kind === "session_report";
+}
+
+/**
+ * Whether a turn posts its progress: a conversation's own turns do. A work Session posts nowhere,
+ * and an Objective's and the inbox's turns post only their reply.
+ */
+function showsProgress(work: DurableInboundEvent): boolean {
+  const internal = work.event.internal;
+  return (
+    internal === undefined ||
+    (internal.kind === "session_report" &&
+      objectiveIdOfSessionKey(work.event.sessionKey) === undefined)
+  );
+}
+
+/**
+ * Whether a turn ends waiting on the question it asked or on the approval requests it left
+ * pending: every turn except a conversation's own (see `sessionWaitsOnApproval`).
+ */
+function waitingTurn(work: DurableInboundEvent): boolean {
+  return (
+    work.event.internal?.kind === "work_session" ||
+    objectiveIdOfSessionKey(work.event.sessionKey) !== undefined ||
+    isInboxSessionKey(work.event.sessionKey)
+  );
 }
 
 class ExternalActionReconciliationError extends Error {
@@ -4210,16 +5127,8 @@ function executionWorkerId(events: readonly WorkerTaskAttemptEvent[]): string | 
 
 export { ArtifactCatalog } from "./artifact-catalog.js";
 export { controlPlaneEventLoopLag } from "./event-loop-lag.js";
-export { TagMailboxService, type TeamLiveDeliveryStarter } from "./mailbox.js";
 
-export {
-  type CoordinationOperatorPrincipal,
-  ObjectiveController,
-  OWNER_RESULT_GUIDANCE,
-  OWNER_STATEMENT_GUIDANCE,
-  STATEMENT_ITEMS_GUIDANCE,
-  TASK_TITLE_GUIDANCE,
-} from "./objective-controller.js";
+export { type CoordinationOperatorPrincipal, ObjectiveController } from "./objective-controller.js";
 export {
   objectiveRuntimeActionWarnings,
   resolveObjectiveRuntimeActions,

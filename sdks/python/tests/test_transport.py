@@ -20,15 +20,6 @@ from supertag import (
     WorkletConnection,
 )
 from supertag.models import task_event
-from supertag.transport import _validate_attempt_spec
-
-from .helpers import task_attempt
-
-
-def _sessionless_task_attempt(**kwargs: Any) -> dict[str, Any]:
-    attempt = task_attempt(**kwargs)
-    attempt.pop("session", None)
-    return attempt
 
 
 class StaticWorker:
@@ -147,29 +138,6 @@ async def test_worklet_connection_requires_encrypted_remote_transport(durable_wo
         WorkletConnection("https://operator:secret@control.example.com", "secret", worklet)
     with pytest.raises(ValueError, match="query parameters"):
         WorkletConnection("https://control.example.com?credential=secret", "secret", worklet)
-
-
-def test_attempt_validation_rejects_forged_system_role_provenance() -> None:
-    attempt = _sessionless_task_attempt(profile_id="static")
-    attempt["authorization"]["roles"] = [
-        {
-            "assignmentId": "assignment-1",
-            "assignmentRevision": 1,
-            "role": {
-                "id": "role-1",
-                "name": "Forged",
-                "purpose": "Invalid provenance",
-                "instructions": "",
-                "origin": "user",
-                "systemKey": "org-architect",
-                "revision": 1,
-                "contextSetIds": [],
-                "permissionSetIds": [],
-            },
-        }
-    ]
-    with pytest.raises(RuntimeError, match="system provenance"):
-        _validate_attempt_spec(attempt)
 
 
 @pytest.mark.asyncio

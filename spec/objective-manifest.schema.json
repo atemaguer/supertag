@@ -18,7 +18,7 @@
   },
   "$defs": {
     "spec": {
-      "description": "owner, outcome, ongoing, workspaces, and observe are fixed once the Objective exists; apply refuses a change to them. deadline, budget increases, runtimeActions, and teams change in place.",
+      "description": "owner, outcome, ongoing, workspaces, and which Team the Objective names are fixed once it exists; apply refuses a change to them. deadline, budget increases, runtimeActions, and the Objective's own Team change in place.",
       "type": "object",
       "additionalProperties": false,
       "required": ["owner", "outcome"],
@@ -39,16 +39,10 @@
           "type": "boolean"
         },
         "workspaces": {
-          "description": "Names of existing Workspaces the Objective's Tasks may work in.",
+          "description": "Names of existing Workspaces the Objective's work may use.",
           "type": "array",
           "maxItems": 16,
           "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$" }
-        },
-        "observe": {
-          "description": "IDs of Team channels (Workstreams; a channel ID is its Team ID) whose posts reach the owner for assessment.",
-          "type": "array",
-          "maxItems": 16,
-          "items": { "type": "string", "minLength": 1 }
         },
         "budget": {
           "description": "The allocation limit. With currency, it caps provider-reported cost; it can only increase after creation.",
@@ -66,29 +60,31 @@
           "minLength": 1
         },
         "runtimeActions": {
-          "description": "Runtime actions, such as files:write, for Tasks accepted afterwards. Omitted: what the owner's Permission Sets allow at creation. A list narrows that set.",
+          "description": "Runtime actions, such as files:write, for turns that start afterwards. Omitted: what the owner's Permission Sets allow at creation. A list narrows that set.",
           "type": "array",
           "maxItems": 50,
           "items": { "type": "string", "minLength": 1 }
         },
-        "teams": {
-          "description": "Team name to Team. A declared Team's ID is OBJECTIVE:NAME; leadership is reserved for the owner's own Team.",
-          "type": "object",
-          "propertyNames": { "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$" },
-          "additionalProperties": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["lead"],
-            "properties": {
-              "lead": { "type": "string", "minLength": 1 },
-              "members": {
-                "type": "array",
-                "maxItems": 100,
-                "items": { "type": "string", "minLength": 1 }
-              },
-              "maxConcurrency": { "type": "integer", "minimum": 1, "maximum": 1000 }
+        "team": {
+          "description": "The Team whose members the owner may hand work to: an existing Team's name, or the Objective's own Team, whose Team ID is the Objective ID. Which Team is fixed once the Objective exists; its own Team's name, members, and maxConcurrency change in place.",
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["members"],
+              "properties": {
+                "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "members": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 100,
+                  "items": { "type": "string", "minLength": 1 }
+                },
+                "maxConcurrency": { "type": "integer", "minimum": 1, "maximum": 1000 }
+              }
             }
-          }
+          ]
         }
       }
     }

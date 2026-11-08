@@ -16,10 +16,6 @@ describe("explicit Objective commands", () => {
     expect(
       parseSurfaceObjectiveCommand(event("<@U123> objective Launch product\nwithin $2,000")),
     ).toEqual({ kind: "create", outcome: "Launch product\nwithin $2,000" });
-    expect(parseSurfaceObjectiveCommand(event("@SuperTag objective attach surface:123"))).toEqual({
-      kind: "attach",
-      objectiveId: "surface:123",
-    });
   });
   it("does not treat quotes, embedded commands or ordinary replies as authorization", () => {
     for (const text of [
@@ -39,13 +35,7 @@ describe("explicit Objective commands", () => {
       ),
     ).toBeUndefined();
   });
-  it("fails closed for missing or ambiguous arguments", () => {
-    for (const text of [
-      "@SuperTag objective",
-      "@SuperTag objective attach",
-      "@SuperTag objective attach one two",
-    ]) {
-      expect(parseSurfaceObjectiveCommand(event(text))).toEqual({ kind: "invalid" });
-    }
+  it("fails closed without an outcome", () => {
+    expect(parseSurfaceObjectiveCommand(event("@SuperTag objective"))).toEqual({ kind: "invalid" });
   });
 });

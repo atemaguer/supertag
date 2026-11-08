@@ -417,12 +417,6 @@ def _validate_role_snapshot(value: Any) -> None:
     role_revision = role.get("revision")
     if type(role_revision) is not int or role_revision < 1:
         raise RuntimeError("Task Attempt Spec Role revision must be positive")
-    if role.get("origin") not in {"system", "user"}:
-        raise RuntimeError("Task Attempt Spec Role origin is invalid")
-    if (role["origin"] == "system" and role.get("systemKey") != "org-architect") or (
-        role["origin"] == "user" and "systemKey" in role
-    ):
-        raise RuntimeError("Task Attempt Spec Role system provenance is invalid")
     for field in ("contextSetIds", "permissionSetIds"):
         values = role.get(field)
         if not isinstance(values, list) or any(

@@ -28,14 +28,11 @@ export function normalizeActionFirstCommand(args: readonly string[]): string[] {
 
   if (resource === "artifact" && ["list", "get", "download"].includes(action))
     return ["artifact", action, ...rest];
-  if (action === "assign" && resource === "task") return ["task", "assign", ...rest];
   if (action === "list" && resource === "approval") return ["approval", "list", ...rest];
-  if (action === "watch" && resource === "inbox")
-    return ["coordinate", "inbox", "--watch", ...canonicalCoordination(rest)];
+  if (action === "watch" && resource === "inbox") return ["inbox", "watch", ...rest];
   if ((action === "approve" || action === "deny") && resource === "request")
     return ["approval", action, ...rest];
   if (action === "approve" && resource === "objective") return ["objective", "approve", ...rest];
-  if (action === "start" && resource === "objective") return ["objective", "start", ...rest];
   if (action === "watch" && resource === "objective") return ["objective", "watch", ...rest];
   if (action === "message" && resource === "objective") return ["objective", "message", ...rest];
   if (action === "message" && resource === "tag") return ["tag", "message", ...rest];
@@ -67,23 +64,12 @@ export function normalizeActionFirstCommand(args: readonly string[]): string[] {
         : ["objective", "list", selected.value, ...selected.rest];
     }
     if (resource === "team") return ["team", "list", ...rest];
-    if (resource === "workstream") {
-      const selected = takeOption(rest, "tag");
-      return selected.value === undefined
-        ? [...args]
-        : ["workstream", "list", selected.value, ...selected.rest];
-    }
-    if (resource === "workstream-post") {
-      const selected = takeOption(rest, "workstream");
-      return selected.value === undefined
-        ? [...args]
-        : ["workstream", "posts", selected.value, ...selected.rest];
-    }
+    if (resource === "workstream-post") return ["workstream", "posts", ...rest];
     if (resource === "message") {
       const selected = takeOption(rest, "mailbox");
       return selected.value === undefined
         ? [...args]
-        : ["tag", "messaging", "history", selected.value, ...selected.rest];
+        : ["tag", "messaging", "messages", selected.value, ...selected.rest];
     }
     if (resource === "mailbox-grant") {
       const selected = takeOption(rest, "mailbox");
@@ -91,7 +77,7 @@ export function normalizeActionFirstCommand(args: readonly string[]): string[] {
         ? [...args]
         : ["tag", "messaging", "grants", selected.value, ...selected.rest];
     }
-    if (resource === "inbox") return ["coordinate", "inbox", ...canonicalCoordination(rest)];
+    if (resource === "inbox") return ["inbox", "list", ...rest];
     if (resource === "control-plane") return ["control-plane", "list", ...rest];
     if (resource === "surface") return ["get", "surface-account", ...rest];
     if (LISTABLE_RESOURCES.has(resource)) return ["get", resource, ...rest];
@@ -103,7 +89,6 @@ export function normalizeActionFirstCommand(args: readonly string[]): string[] {
     }
     // A YAML manifest comes from the resource reader, like other declarable kinds.
     if (resource === "objective" && !wantsYaml(rest)) return ["objective", "get", ...rest];
-    if (resource === "workstream") return ["workstream", "get", ...rest];
     if (resource === "surface") return ["get", "surface-account", ...rest];
   }
   if (action === "delete" && resource === "surface") return ["delete", "surface-account", ...rest];
@@ -162,8 +147,6 @@ export function normalizeActionFirstCommand(args: readonly string[]): string[] {
     const [id, ...options] = rest;
     return id === undefined ? [...args] : ["objective", "status", id, "completed", ...options];
   }
-  if (action === "dissolve" && resource === "team") return ["team", "dissolve", ...rest];
-  if (action === "events" && resource === "team") return ["team", "history", ...rest];
   if (action === "events" && resource === "task") return ["task", "events", ...rest];
   if (action === "cancel" && resource === "task") return ["task", "cancel", ...rest];
   if (action === "cancel" && resource === "objective") return ["objective", "cancel", ...rest];
@@ -192,19 +175,9 @@ export function normalizeActionFirstCommand(args: readonly string[]): string[] {
   if (action === "grant" && resource === "mailbox") {
     const [recipient, ...options] = rest;
     const sender = takeOption(options, "sender");
-    const types = takeRepeatedOption(sender.rest, "type");
-    return recipient === undefined || sender.value === undefined || types.values.length === 0
+    return recipient === undefined || sender.value === undefined
       ? [...args]
-      : [
-          "tag",
-          "messaging",
-          "grant",
-          sender.value,
-          recipient,
-          "--types",
-          types.values.join(","),
-          ...types.rest,
-        ];
+      : ["tag", "messaging", "grant", sender.value, recipient, ...sender.rest];
   }
   if (action === "revoke" && resource === "mailbox") {
     const [recipient, ...options] = rest;
@@ -212,15 +185,6 @@ export function normalizeActionFirstCommand(args: readonly string[]): string[] {
     return recipient === undefined || sender.value === undefined
       ? [...args]
       : ["tag", "messaging", "revoke", sender.value, recipient, ...sender.rest];
-  }
-  if (action === "issue" && resource === "mailbox-credential") {
-    return ["tag", "messaging", "credential", ...rest];
-  }
-  if (action === "revoke" && resource === "mailbox-credential") {
-    return ["tag", "messaging", "revoke-credential", ...rest];
-  }
-  if (action === "prune" && resource === "mailbox") {
-    return ["tag", "messaging", "prune-bodies", ...rest];
   }
 
   if (action === "recover" && resource === "worklet") return ["worklet", "recover", ...rest];
@@ -258,14 +222,6 @@ const LISTABLE_RESOURCES = new Set([
 
 function canonicalStatus(value: string): string {
   return value.replaceAll("-", "_");
-}
-
-function canonicalCoordination(args: readonly string[]): string[] {
-  const result = [...args];
-  const index = result.indexOf("--kind");
-  const kind = result[index + 1];
-  if (index >= 0 && kind !== undefined) result[index + 1] = canonicalStatus(kind);
-  return result;
 }
 
 function wantsYaml(args: readonly string[]): boolean {

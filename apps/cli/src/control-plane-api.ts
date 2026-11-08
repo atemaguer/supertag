@@ -8,7 +8,6 @@ import {
   AuthKeyRedemptionError,
   resolveOwnerObjectiveRuntimeActions,
   SessionPersistence,
-  TagMailboxService,
   type TaskAttemptRunningCommand,
   taskAttemptRunningCommand,
 } from "@supertag/control-plane";
@@ -28,12 +27,10 @@ import type {
   SurfaceProvider,
   Tag,
   TagContextItem,
-  TagMessageType,
   TagMessagingGrant,
   TagPermission,
   TagPermissionSet,
   Task,
-  TaskAssignment,
   VolumeSpec,
   WorkspaceSpec,
 } from "@supertag/core";
@@ -44,6 +41,7 @@ import {
   DEFAULT_WORKSPACE_DELIVERY,
   normalizeApprovers,
   OPERATOR_TOKEN_PREFIX,
+  objectiveSessionKey,
   operatorTokenOperatorId,
   parseAuditQuery,
   parseAuthKeyName,
@@ -61,7 +59,6 @@ import {
   parseWorkspaceNames,
   parseWorkspaceSpec,
   placementHoldReason,
-  TAG_MESSAGE_TYPES,
   TagMessagingError,
   workSessionWaiting,
 } from "@supertag/core";
@@ -113,8 +110,7 @@ import { registerCoordinationGrpcRoutes } from "./coordination-grpc.js";
 import { handleCoordinationRequest } from "./coordination-http.js";
 import { canonicalJson, locationKey, sameValue } from "./field-management.js";
 import type { SurfaceController } from "./gateway-surfaces.js";
-import { registerMailboxGrpcRoutes } from "./mailbox-grpc.js";
-import { handleMailboxAdminRequest, handleMailboxRequest } from "./mailbox-http.js";
+import { handleMailboxAdminRequest, type MailboxAdminControlPlane } from "./mailbox-http.js";
 import {
   conflictMessage,
   type ManagedPlan,
@@ -166,7 +162,6 @@ export interface ControlPlaneOperatorCredential {
   readonly operatorId: string;
   readonly actions: readonly string[];
   readonly objectiveIds?: readonly string[];
-  readonly teamIds?: readonly string[];
   /** Retains the credential definition while immediately refusing authentication. */
   readonly revoked?: boolean;
 }
@@ -270,16 +265,6 @@ export class ControlPlaneApiServer {
         registerCoordinationGrpcRoutes(router, this.#dependencies.controlPlane.objectives, {
           beginRequest,
         });
-        registerMailboxGrpcRoutes(
-          router,
-          new TagMailboxService(
-            this.#dependencies.store,
-            this.#dependencies.controlPlane.objectives.liveDelivery,
-          ),
-          {
-            beginRequest,
-          },
-        );
         registerSessionGrpcRoutes(
           router,
           new SessionPersistence(
@@ -450,16 +435,6 @@ async function handleInternalApiRequest(
     );
     return;
   }
-  if (url.pathname.startsWith("/internal/v1/mailbox/")) {
-    await handleMailboxRequest(
-      context.request,
-      context.response,
-      url,
-      context.store,
-      context.controlPlane.objectives.liveDelivery,
-    );
-    return;
-  }
   writeJson(context.response, 404, { error: "not_found" });
 }
 
@@ -482,7 +457,7 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
     );
     return;
   }
-  const auditNote = auditManagementRequest(context, url, authentication.principal.operatorId);
+  auditManagementRequest(context, url, authentication.principal.operatorId);
 
   if (url.pathname.startsWith("/api/v1/coordination/")) {
     if (!context.controlPlane.isAccepting) {
@@ -495,7 +470,6 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
       url,
       context.controlPlane.objectives,
       authentication.principal,
-      auditNote,
     );
     return;
   }
@@ -547,16 +521,7 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
       context.response,
       url,
       context.store,
-      (objective) => context.controlPlane.objectives.objectiveRunnable(objective),
-      async (objective) => {
-        if (!context.controlPlane.isAccepting)
-          throw new TagMessagingError(503, "The Control Plane is draining; start the owner later");
-        return (await context.controlPlane.objectives.commandAsAdministrator(
-          "start_objective",
-          { objectiveId: objective.id },
-          authentication.principal,
-        )) as TaskAssignment;
-      },
+      objectiveStarter(context, "create the Objective again later to start it"),
     );
     return;
   }
@@ -666,12 +631,20 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
       );
       if (running !== null) runningCommands.set(taskId, running);
     }
+    // The latest Task of each of the Objective's Sessions carries its current findings.
     const objectiveTasks = new Map(
       await Promise.all(
-        objectives.map(
-          async (objective) =>
-            [objective.id, await context.store.listTaskAssignments(objective.id)] as const,
-        ),
+        objectives.map(async (objective) => {
+          const tasks: Task[] = [];
+          for (const session of await context.store.listObjectiveSessions(objective.id)) {
+            const task =
+              session.task === undefined
+                ? undefined
+                : await context.store.findTaskById(session.task.id);
+            if (task !== undefined) tasks.push(task);
+          }
+          return [objective.id, tasks] as const;
+        }),
       ),
     );
     writeJson(
@@ -1593,7 +1566,7 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
       readonly runsOn: readonly string[];
       readonly execution?: ExecutionSettings;
       readonly locations: readonly TagLocationSpec[];
-      readonly acceptsMessagesFrom: readonly { tag: string; types: readonly TagMessageType[] }[];
+      readonly acceptsMessagesFrom: readonly string[];
     };
     // Kept locations come from stored routes; the manifest's own are already resolved.
     const resolved = new Map<string, ResolvedTagLocation>();
@@ -1832,11 +1805,8 @@ interface DesiredTag {
   readonly execution?: ExecutionSettings | null;
   /** Absent leaves routes and their activations unmanaged; present is authoritative. */
   readonly locations?: readonly DesiredTagLocation[];
-  /** Absent leaves Mailbox grants unmanaged; present is authoritative. */
-  readonly acceptsMessagesFrom?: readonly {
-    readonly tag: string;
-    readonly types: readonly TagMessageType[];
-  }[];
+  /** Tags this Tag accepts Mailbox messages from beyond its Teams; absent leaves them unmanaged. */
+  readonly acceptsMessagesFrom?: readonly string[];
 }
 
 interface ResolvedTagLocation {
@@ -1892,35 +1862,10 @@ function parseDesiredTag(value: unknown): DesiredTag {
   const locations = spec["locations"];
   if (locations !== undefined && !Array.isArray(locations))
     throw new Error("Tag spec.locations must be an array");
-  const accepts = spec["acceptsMessagesFrom"];
-  if (accepts !== undefined && !Array.isArray(accepts))
-    throw new Error("Tag spec.acceptsMessagesFrom must be an array");
-  const grants = accepts?.map((grant: unknown, index: number) => {
-    const field = `Tag spec.acceptsMessagesFrom[${index}]`;
-    if (!isRecord(grant)) throw new Error(`${field} must be an object`);
-    const extra = Object.keys(grant).filter((key) => key !== "tag" && key !== "types");
-    if (extra.length > 0) throw new Error(`${field} contains unknown fields: ${extra.join(", ")}`);
-    const types: unknown = grant["types"];
-    if (
-      !Array.isArray(types) ||
-      types.length === 0 ||
-      types.some((type) => typeof type !== "string")
-    )
-      throw new Error(`${field}.types must list at least one message type`);
-    const unsupported = types.filter(
-      (type) => !(TAG_MESSAGE_TYPES as readonly string[]).includes(type),
-    );
-    if (unsupported.length > 0)
-      throw new Error(
-        `${field}.types contains unknown message types: ${unsupported.join(", ")}. Supported types: ${TAG_MESSAGE_TYPES.join(", ")}`,
-      );
-    return {
-      tag: requiredField(grant["tag"], `${field}.tag`),
-      types: [...new Set(types as TagMessageType[])].toSorted(),
-    };
-  });
-  if (grants && new Set(grants.map((grant) => grant.tag)).size !== grants.length)
-    throw new Error("Tag spec.acceptsMessagesFrom must list each sender Tag once");
+  const acceptsMessagesFrom = optionalNameList(
+    spec["acceptsMessagesFrom"],
+    "Tag spec.acceptsMessagesFrom",
+  );
   return {
     name: requiredString(value["metadata"]["name"], "Tag metadata.name"),
     ...(roles === undefined ? {} : { roles }),
@@ -1934,7 +1879,7 @@ function parseDesiredTag(value: unknown): DesiredTag {
             parseTagLocation(location, index),
           ),
         }),
-    ...(grants === undefined ? {} : { acceptsMessagesFrom: grants }),
+    ...(acceptsMessagesFrom === undefined ? {} : { acceptsMessagesFrom }),
   };
 }
 
@@ -2131,11 +2076,11 @@ async function applyDesiredTag(
     }
   }
   const senders = new Map<string, Tag>();
-  for (const grant of desired.acceptsMessagesFrom ?? []) {
-    if (grant.tag === desired.name) continue;
-    const sender = await store.findTagByName(grant.tag);
-    if (sender?.status !== "active") throw new Error(`Tag ${grant.tag} does not exist`);
-    senders.set(grant.tag, sender);
+  for (const name of desired.acceptsMessagesFrom ?? []) {
+    if (name === desired.name) continue;
+    const sender = await store.findTagByName(name);
+    if (sender?.status !== "active") throw new Error(`Tag ${name} does not exist`);
+    senders.set(name, sender);
   }
 
   let tag = existing ?? (await store.createTag({ name: desired.name }));
@@ -2218,36 +2163,27 @@ async function applyDesiredTag(
     }
   }
   if (desired.acceptsMessagesFrom !== undefined) {
-    // Same service call as `supertag grant mailbox`; revoking stores an empty type list.
-    const mailbox = new TagMailboxService(store);
-    const current = await recipientGrants(store, tag);
-    const wanted = new Map(
-      desired.acceptsMessagesFrom.map((grant) => [(senders.get(grant.tag) ?? tag).id, grant.types]),
-    );
-    for (const grant of current)
-      if (!wanted.has(grant.senderTagId))
-        await mailbox.setGrant({
-          senderTagId: grant.senderTagId,
-          recipientTagId: tag.id,
-          messageTypes: [],
-        });
-    for (const [senderTagId, types] of wanted) {
-      const prior = current.find((grant) => grant.senderTagId === senderTagId);
-      if (JSON.stringify(prior?.messageTypes.toSorted() ?? []) !== JSON.stringify(types))
-        await mailbox.setGrant({ senderTagId, recipientTagId: tag.id, messageTypes: types });
-    }
+    // Same store call as `supertag grant mailbox`: the list replaces the Tag's grants.
+    const wanted = desired.acceptsMessagesFrom
+      .map((name) => senders.get(name)?.id ?? tag.id)
+      .toSorted();
+    const current = (await recipientGrants(store, tag))
+      .map((grant) => grant.senderTagId)
+      .toSorted();
+    if (JSON.stringify(current) !== JSON.stringify(wanted))
+      await store.setTagMessagingGrants(tag.id, wanted);
   }
   return { tag, created: existing === undefined };
 }
 
-/** Active Mailbox grants where the Tag is the recipient. */
+/** Mailbox grants where the Tag is the recipient. */
 async function recipientGrants(
   store: Pick<Store, "listTagMessagingGrants">,
   tag: Tag,
 ): Promise<readonly TagMessagingGrant[]> {
   if (tag.status !== "active") return [];
   return (await store.listTagMessagingGrants(tag.id)).filter(
-    (grant) => grant.recipientTagId === tag.id && grant.messageTypes.length > 0,
+    (grant) => grant.recipientTagId === tag.id,
   );
 }
 
@@ -3061,7 +2997,6 @@ async function authenticateOperator(
           ...(credential.objectiveIds === undefined
             ? {}
             : { objectiveIds: credential.objectiveIds }),
-          ...(credential.teamIds === undefined ? {} : { teamIds: credential.teamIds }),
         },
       },
     };
@@ -3083,15 +3018,11 @@ export function validateCoordinationOperatorCredentials(
       credential.actions.some((action) => action !== "*" && !/^[a-z][a-z0-9_]{0,99}$/u.test(action))
     )
       throw new Error("Coordination operator actions must be non-empty command names");
-    for (const [name, values] of [
-      ["Objective", credential.objectiveIds],
-      ["Team", credential.teamIds],
-    ] as const) {
-      if (values?.some((value) => !value.trim() || value.length > 200))
-        throw new Error(`Coordination operator ${name} scope contains an invalid ID`);
-      if (values && new Set(values).size !== values.length)
-        throw new Error(`Coordination operator ${name} scope contains duplicate IDs`);
-    }
+    const objectives = credential.objectiveIds;
+    if (objectives?.some((value) => !value.trim() || value.length > 200))
+      throw new Error("Coordination operator Objective scope contains an invalid ID");
+    if (objectives && new Set(objectives).size !== objectives.length)
+      throw new Error("Coordination operator Objective scope contains duplicate IDs");
     const digest = tokenDigest(credential.token);
     if (tokens.has(digest)) throw new Error("Coordination operator tokens must be unique");
     tokens.add(digest);
@@ -3101,7 +3032,6 @@ export function validateCoordinationOperatorCredentials(
       ...(credential.objectiveIds === undefined
         ? {}
         : { objectiveIds: [...credential.objectiveIds] }),
-      ...(credential.teamIds === undefined ? {} : { teamIds: [...credential.teamIds] }),
     };
   });
 }
@@ -3130,7 +3060,7 @@ function parseCoordinationOperatorCredential(
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error(`Coordination operator credential ${index} must be an object`);
   const record = value as Record<string, unknown>;
-  const allowed = new Set(["token", "operatorId", "actions", "objectiveIds", "teamIds", "revoked"]);
+  const allowed = new Set(["token", "operatorId", "actions", "objectiveIds", "revoked"]);
   const unknown = Object.keys(record).filter((key) => !allowed.has(key));
   if (unknown.length > 0)
     throw new Error(
@@ -3138,7 +3068,7 @@ function parseCoordinationOperatorCredential(
     );
   if (typeof record["token"] !== "string" || typeof record["operatorId"] !== "string")
     throw new Error(`Coordination operator credential ${index} requires token and operatorId`);
-  const strings = (name: "actions" | "objectiveIds" | "teamIds", optional = false) => {
+  const strings = (name: "actions" | "objectiveIds", optional = false) => {
     const current = record[name];
     if (current === undefined && optional) return undefined;
     if (!Array.isArray(current) || current.some((item) => typeof item !== "string"))
@@ -3149,13 +3079,11 @@ function parseCoordinationOperatorCredential(
     throw new Error(`Coordination operator credential ${index} revoked must be a boolean`);
   const actions = strings("actions") ?? [];
   const objectiveIds = strings("objectiveIds", true);
-  const teamIds = strings("teamIds", true);
   return {
     token: record["token"],
     operatorId: record["operatorId"],
     actions,
     ...(objectiveIds === undefined ? {} : { objectiveIds }),
-    ...(teamIds === undefined ? {} : { teamIds }),
     ...(record["revoked"] === undefined ? {} : { revoked: record["revoked"] }),
   };
 }
@@ -3431,6 +3359,21 @@ async function handleTagMessage(
       ? await context.store.findSessionById(session.parentSessionId)
       : undefined;
     if (parent !== undefined) sessionKey = parent.sessionKey;
+    // An Objective's own turn is readable where its home thread is: by the operator whose CLI
+    // conversation it is, or by any operator when the Objective has no home thread.
+    if (
+      task.objectiveId !== undefined &&
+      task.inboundEventId &&
+      session?.sessionKey === objectiveSessionKey(task.objectiveId)
+    ) {
+      const callback = (await context.store.findInboundEventById(task.inboundEventId))?.event
+        .callback;
+      if (callback?.mode === "cli_conversation")
+        sessionKey =
+          callback.threadKey === session.sessionKey
+            ? `${prefix}${session.sessionKey}`
+            : callback.threadKey;
+    }
   }
   if (task === undefined || task.tagId !== tag.id || !sessionKey.startsWith(prefix)) {
     writeStatusError(
@@ -3477,9 +3420,7 @@ async function placementHold(
   if (task.status !== "pending") return undefined;
   const latest = (await store.listTaskEvents(task.id)).findLast(
     (event) =>
-      event.type === "task.scheduling-incompatible" ||
-      event.type === "task.scheduling-compatible" ||
-      event.type === "task.scheduling-waiting",
+      event.type === "task.scheduling-incompatible" || event.type === "task.scheduling-compatible",
   );
   return latest?.type === "task.scheduling-incompatible"
     ? placementHoldReason(latest.payload)
@@ -3787,6 +3728,21 @@ async function handleResourceDeletion(
   });
 }
 
+/** Starts a created Objective's conversation; refused while the Control Plane drains. */
+function objectiveStarter(
+  context: ControlPlaneApiRequestContext,
+  retry: string,
+): MailboxAdminControlPlane {
+  return {
+    runnable: (objective) => context.controlPlane.objectives.objectiveRunnable(objective),
+    start: async (objective) => {
+      if (!context.controlPlane.isAccepting)
+        throw new TagMessagingError(503, `The Control Plane is draining; ${retry}`);
+      return await context.controlPlane.startObjective(objective.id);
+    },
+  };
+}
+
 /**
  * Declarative Objectives: `POST /api/v1/objectives` applies one Objective manifest under field
  * ownership, and `GET /api/v1/objectives/ID` returns an Objective in manifest form.
@@ -3838,7 +3794,7 @@ async function handleObjectiveManifestRequest(
       });
       return;
     }
-    const objectives = context.controlPlane.objectives;
+    const starter = objectiveStarter(context, "apply again later to start the Objective");
     const result = await applyObjectiveManifest(
       {
         store: context.store,
@@ -3884,22 +3840,8 @@ async function handleObjectiveManifestRequest(
             warnings: runtime?.warnings ?? [],
           };
         },
-        start: async (objective) => {
-          if (!context.controlPlane.isAccepting)
-            throw new TagMessagingError(
-              503,
-              "The Control Plane is draining; apply again later to start the owner",
-            );
-          const task = (await objectives.commandAsAdministrator(
-            "start_objective",
-            { objectiveId: objective.id },
-            principal,
-          )) as TaskAssignment;
-          return { taskId: task.taskId, teamId: task.teamId };
-        },
-        runnable: (objective) => objectives.objectiveRunnable(objective),
-        createTeam: (input) => objectives.commandAsAdministrator("create_team", input, principal),
-        updateTeam: (input) => objectives.commandAsAdministrator("update_team", input, principal),
+        start: starter.start,
+        runnable: starter.runnable,
       },
       plan,
     );

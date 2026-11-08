@@ -1,10 +1,5 @@
 import type { ExecutionSettings } from "./execution-settings.js";
 
-/** Stable internal identifiers for Roles whose semantics are enforced by SuperTag. */
-export const ORG_ARCHITECT_ROLE_KEY = "org-architect" as const;
-
-export type SystemRoleKey = typeof ORG_ARCHITECT_ROLE_KEY;
-export type RoleOrigin = "system" | "user";
 export type RoleStatus = "active" | "retired";
 
 export interface CreateRoleInput {
@@ -18,10 +13,6 @@ export interface CreateRoleInput {
   readonly createdBy?: string;
 }
 
-export interface EnsureSystemRoleInput extends CreateRoleInput {
-  readonly systemKey: SystemRoleKey;
-}
-
 export interface Role {
   readonly id: string;
   readonly name: string;
@@ -31,8 +22,6 @@ export interface Role {
   readonly permissionSetIds: readonly string[];
   /** Default harness, models, and efforts for the Role's Tags; absent means any. */
   readonly execution?: ExecutionSettings;
-  readonly origin: RoleOrigin;
-  readonly systemKey?: SystemRoleKey;
   readonly status: RoleStatus;
   readonly revision: number;
   readonly createdBy?: string;
@@ -83,8 +72,6 @@ export interface TagRoleSnapshot {
     readonly name: string;
     readonly purpose: string;
     readonly instructions: string;
-    readonly origin: RoleOrigin;
-    readonly systemKey?: SystemRoleKey;
     readonly revision: number;
     readonly contextSetIds: readonly string[];
     readonly permissionSetIds: readonly string[];
@@ -93,10 +80,8 @@ export interface TagRoleSnapshot {
 
 export interface RoleStore {
   createRole(input: CreateRoleInput): Promise<Role>;
-  ensureSystemRole(input: EnsureSystemRoleInput): Promise<Role>;
   findRoleById(id: string): Promise<Role | undefined>;
   findRoleByName(name: string): Promise<Role | undefined>;
-  findRoleBySystemKey(systemKey: SystemRoleKey): Promise<Role | undefined>;
   listRoles(): Promise<readonly Role[]>;
   updateRole(id: string, input: UpdateRoleInput): Promise<Role>;
   assignRole(input: AssignRoleInput): Promise<RoleAssignment>;

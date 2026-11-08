@@ -1,12 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
-import type { ObjectiveOverview } from "@supertag/control-plane";
-import type {
-  CoordinationInboxItem,
-  CoordinationInboxPage,
-  Objective,
-  OperatorObjectiveMessageResult,
-} from "@supertag/core";
+import type { MessageObjectiveResult, ObjectiveOverview } from "@supertag/control-plane";
+import type { CoordinationInboxPage, Objective, Team } from "@supertag/core";
 import {
   ControlPlaneClient,
   ControlPlaneRequestError,
@@ -19,17 +14,18 @@ import { formatObjectiveOverview } from "./objective-overview.js";
 import { runObjectivePause } from "./objective-pause.js";
 import { watchObjective } from "./objective-watch.js";
 import { withCurrentRevision } from "./revision.js";
+import { followTagMessage, type TagMessageRecord } from "./tag-conversation.js";
+import { runTeamCommand } from "./teams.js";
 import { terminalText } from "./terminal-text.js";
 
 export function objectiveHelp(): string {
   return `Usage:
-  supertag create objective [ID] --outcome TEXT --owner TAG [--budget-minor N --budget-currency CODE] [--deadline ISO] [--workspace NAME ...] [--dry-run] [--no-start]
-  supertag start objective ID [--output json]
+  supertag create objective [ID] --outcome TEXT --owner TAG [--team TEAM] [--budget-minor N --budget-currency CODE] [--deadline ISO] [--runtime-action ACTION ...] [--workspace NAME ...] [--ongoing] [--dry-run]
   supertag list objective [--owner TAG] [--limit N]
   supertag get objective ID [--output yaml]
-  supertag describe objective ID [--output text|json] [--team ID] [--limit N] [--offset N]
+  supertag describe objective ID [--output text|json]
   supertag watch objective ID [--output text|json]
-  supertag message objective ID TEXT|- [--reopen] [--reply-to MESSAGE_ID] [--output text|json]
+  supertag message objective ID TEXT|- [--output text|json]
   supertag approve objective ID
   supertag update objective ID --status STATUS [--revision N]
   supertag update objective ID [--revision N] [--deadline ISO] [--budget-minor N] [--runtime-action ACTION ...]
@@ -38,39 +34,40 @@ export function objectiveHelp(): string {
   supertag pause objective ID
   supertag resume objective ID
 
-The outcome is one statement: the result, how success is verified, what must not change, and when to ask a person.
+An Objective is an outcome its owner Tag works toward in a conversation of its own, with a budget,
+a deadline, and a status. The outcome is one statement: the result, how success is verified, what
+must not change, and when to ask a person.
 Without an ID, create generates one from the outcome's first words, such as ship-sso-7f3k.
-Create also starts the owner: it forms the leadership Team and admits the owner's first
-coordination Task. Running the same create again never starts it twice. --no-start only creates
-the Objective, for operators who assign its Tasks themselves.
-start begins an Objective created with --no-start and admits the owner's first Task.
-Create prints a warning for each condition that would hold the Objective's Tasks, such as an
-owner Tag with no connected Worker Host. --dry-run checks and warns without creating or starting anything.
-Create also accepts [--runtime-action ACTION] [--observe WORKSTREAM_ID].
+Create also starts the Objective: the owner takes its first turn. Running the same create again
+never starts it twice. Create prints a warning for each condition that would hold its turns, such
+as an owner Tag with no connected Worker Host. --dry-run checks and warns without creating anything.
+--team names the Team whose members the owner may hand work to; create it first with
+supertag create team. Without it, the owner works alone.
 Runtime actions, such as files:write, default to those the owner Tag's Permission Sets allow,
 recorded at creation. Repeat --runtime-action to narrow them; actions the owner lacks are dropped
-with a warning. Update --runtime-action replaces the list for Tasks accepted afterwards.
-A budget with --budget-currency caps provider-reported cost; without one it limits Task allocations.
-Repeat --workspace to name Workspaces the Objective's Tasks may work in; each must already exist.
-Repeat --observe to select observation Workstreams. Use --ongoing for a responsibility that only an operator can end.
-message sends TEXT (or standard input for -) to the owner. It shows pending questions before
-sending. Only --reply-to MESSAGE_ID answers that pending question. An unmarked message leaves
-them pending and does not wake a blocked Objective.
-An answer moves a blocked Objective to working. A review comment moves ready_for_review back to working. A completed
-Objective needs --reopen for new direction. approve completes a ready_for_review Objective with the owner's assessment
-after its pending questions have answers.
+with a warning. Update --runtime-action replaces the list for turns that start afterwards.
+A budget with --budget-currency caps provider-reported cost for the owner and all the work it
+starts. Repeat --workspace to name Workspaces the Objective's work may use; each must already exist.
+Use --ongoing for a responsibility that only an operator can end.
+message sends TEXT (or standard input for -) to the Objective's conversation as its next turn and
+shows the owner's reply when the Objective was created from this CLI; otherwise the reply posts
+to the thread the Objective was created in. A message answers a question the owner asked, and
+moves a blocked, limited, or ready_for_review Objective back to working.
+approve completes a ready_for_review Objective with the owner's assessment.
 Update --deadline moves the deadline, including after it passed. Update --budget-minor only increases a budget.
 Updates read the current revision when --revision is omitted and retry once after an unrelated change.
 Update statuses: working, blocked, ready_for_review, completed. Only cancel sets cancelled.
-Cancel stops the Objective for good: its open Tasks are cancelled, unanswered owner questions are resolved, and no new work starts. Only operators cancel; no revision is needed, and repeating it is harmless.
-Pause holds the Objective without losing anything: no new Task, continuation, or follow-up starts,
-running Task Attempts finish, and queued work and messages wait. A paused Objective shows under
-Needs you. Resume lets work start again and wakes the owner with a summary of what changed while
-it was paused. Only operators pause and resume; repeating either is harmless.
+Cancel stops the Objective for good: its open Tasks are cancelled and nothing new starts. Only
+operators cancel; no revision is needed, and repeating it is harmless.
+Pause holds the Objective without losing anything: no new turn starts, running Task Attempts
+finish, and messages and reports wait. A paused Objective shows under Needs you. Resume lets work
+start again and gives the owner a summary of what changed while it was paused. Only operators
+pause and resume; repeating either is harmless.
 complete is for scripts; it requires --summary-file with an assessment of the outcome and supporting results.
-get --output yaml prints the Objective as a manifest. Declare ongoing responsibilities in a manifest
-or supertag.yaml and apply it: supertag apply -f FILE creates and starts each Objective and its Teams.
-describe shows the status, owner, what the Objective delivered, what needs you, and its Tasks.
+get --output yaml prints the Objective as a manifest. Declare Objectives, with a Team of their own
+or a Team name, in a manifest or supertag.yaml and apply it: supertag apply -f FILE creates and
+starts each one.
+describe shows the status, owner, what the Objective delivered, what needs you, and its work.
 watch prints one line per event until the Objective is completed or cancelled.
 Commands that change an Objective print a one-line summary; add --output json for the full record.
 `;
@@ -91,7 +88,7 @@ export async function runObjectiveCommand(
       outcome: { type: "string" },
       owner: { type: "string" },
       ongoing: { type: "boolean" },
-      observe: { type: "string", multiple: true },
+      team: { type: "string" },
       workspace: { type: "string", multiple: true },
       revision: { type: "string" },
       summary: { type: "string" },
@@ -103,12 +100,7 @@ export async function runObjectiveCommand(
       "runtime-action": { type: "string", multiple: true },
       overview: { type: "boolean" },
       output: { type: "string" },
-      team: { type: "string" },
-      offset: { type: "string" },
       "dry-run": { type: "boolean" },
-      "no-start": { type: "boolean" },
-      reopen: { type: "boolean" },
-      "reply-to": { type: "string" },
     },
   });
   const allowed =
@@ -120,11 +112,10 @@ export async function runObjectiveCommand(
           "budget-minor",
           "budget-currency",
           "runtime-action",
-          "observe",
+          "team",
           "ongoing",
           "workspace",
           "dry-run",
-          "no-start",
           "output",
         ]
       : command === "status"
@@ -139,15 +130,11 @@ export async function runObjectiveCommand(
           ]
         : command === "list"
           ? ["owner", "limit"]
-          : command === "start"
+          : command === "message" || command === "approve" || command === "watch"
             ? ["output"]
-            : command === "message"
-              ? ["reopen", "reply-to", "output"]
-              : command === "approve" || command === "watch"
-                ? ["output"]
-                : command === "get" && values.overview
-                  ? ["overview", "output", "team", "limit", "offset"]
-                  : [];
+            : command === "get" && values.overview
+              ? ["overview", "output"]
+              : [];
   if (
     Object.keys(values).some((key) => !allowed.includes(key)) ||
     (command === "status"
@@ -172,34 +159,6 @@ export async function runObjectiveCommand(
   const client = new ControlPlaneClient(target);
   const base = "/api/v1/tag-messaging/objectives";
   const id = positionals[0] ?? "";
-  if (command === "start") {
-    if (values.output === "text") throw new Error("start objective accepts only --output json");
-    const path = `${base}/${encodeURIComponent(id)}`;
-    let objective: Objective;
-    try {
-      objective = await client.request<Objective>(path);
-    } catch (error) {
-      if (error instanceof ControlPlaneRequestError && error.status === 404)
-        throw new Error(`Objective ${terminalText(id)} was not found`, { cause: error });
-      throw error;
-    }
-    if (objective.executionStartedAt)
-      throw new Error(`Objective ${terminalText(id)} has already started`);
-    const result = await client.request<unknown>("/api/v1/coordination/start_objective", {
-      method: "POST",
-      body: JSON.stringify({ objectiveId: id }),
-    });
-    if (json) return `${JSON.stringify(result, null, 2)}\n`;
-    const current = await client.request<Objective>(path);
-    const lines = [
-      `objective/${terminalText(current.id)} started; status ${terminalText(current.status)}`,
-    ];
-    if (current.deadline) lines.push(`Deadline: ${terminalText(current.deadline)}`);
-    if (current.budgetLimitMinor !== undefined && current.budgetLimitMinor !== null)
-      lines.push(`Budget: ${budgetLimit(current as unknown as Record<string, unknown>)}`);
-    lines.push(`Next: supertag describe objective ${terminalText(current.id)}`);
-    return `${lines.join("\n")}\n`;
-  }
   if (command === "watch") {
     const controller = new AbortController();
     const stop = () => controller.abort();
@@ -219,12 +178,8 @@ export async function runObjectiveCommand(
     return "";
   }
   if (command === "get" && values.overview) {
-    const query = new URLSearchParams();
-    if (values.team !== undefined) query.set("teamId", values.team);
-    if (values.limit !== undefined) query.set("limit", values.limit);
-    if (values.offset !== undefined) query.set("offset", values.offset);
     const overview = await client.request<ObjectiveOverview>(
-      `/api/v1/coordination/objectives/${encodeURIComponent(id)}/overview?${query}`,
+      `/api/v1/coordination/objectives/${encodeURIComponent(id)}/overview`,
     );
     if (json) return `${JSON.stringify(overview, null, 2)}\n`;
     const [inbox, checkouts] = await Promise.all([
@@ -244,52 +199,13 @@ export async function runObjectiveCommand(
   if (command === "message") {
     const text = positionals[1] === "-" ? await readStdin() : (positionals[1] ?? "");
     if (!text.trim()) throw new Error("The message is empty");
-    const pending: CoordinationInboxItem[] = [];
-    let cursor: string | undefined;
-    do {
-      const query = new URLSearchParams({
-        objectiveId: id,
-        kind: "operator_message",
-        limit: "100",
-      });
-      if (cursor) query.set("cursor", cursor);
-      const page = await client.request<CoordinationInboxPage>(
-        `/api/v1/coordination/inbox?${query}`,
-      );
-      pending.push(...page.items.filter((item) => item.kind === "operator_message"));
-      cursor = page.nextCursor;
-    } while (cursor);
-    for (const item of pending) {
-      const messageId = item.evidence.find((entry) => entry.kind === "message")?.id;
-      if (!messageId) continue;
-      (json ? process.stderr : process.stdout).write(
-        `Pending question ${messageId}: ${terminalText(item.message?.text ?? "(text unavailable)")}\n`,
-      );
-    }
-    const pendingIds = pending
-      .map((item) => item.evidence.find((entry) => entry.kind === "message")?.id)
-      .filter((messageId): messageId is string => messageId !== undefined);
-    let inReplyTo: string | undefined;
-    const replyTo = values["reply-to"];
-    if (replyTo !== undefined) {
-      if (!pendingIds.includes(replyTo))
-        throw new Error(
-          `${terminalText(replyTo)} is not a pending question on objective/${terminalText(id)}. Pending questions: ${pendingIds.length ? pendingIds.map(terminalText).join(", ") : "none"}`,
-        );
-      inReplyTo = replyTo;
-    }
-    const result = await client.request<OperatorObjectiveMessageResult>(
+    const result = await client.request<MessageObjectiveResult>(
       `/api/v1/coordination/objectives/${encodeURIComponent(id)}/messages`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          message: text.trim(),
-          ...(inReplyTo ? { inReplyTo } : {}),
-          ...(values.reopen ? { reopen: true } : {}),
-        }),
-      },
+      { method: "POST", body: JSON.stringify({ text: text.trim() }) },
     );
-    return json ? `${JSON.stringify(result, null, 2)}\n` : formatMessageResult(result);
+    if (json) return `${JSON.stringify(result, null, 2)}\n`;
+    process.stdout.write(formatMessageResult(id, result));
+    return followObjectiveReply(client, id, result.taskId);
   }
   if (command === "approve") {
     const objective = await client.request<Objective>(
@@ -309,7 +225,7 @@ export async function runObjectiveCommand(
       Objective & {
         warnings?: string[];
         dryRun?: boolean;
-        started?: { taskId: string; teamId: string };
+        started?: { taskId: string };
         notStarted?: string;
       }
     >(`${base}${dryRun ? "?dryRun=true" : ""}`, {
@@ -320,11 +236,7 @@ export async function runObjectiveCommand(
         ongoing: values.ongoing ?? false,
         outcome: values.outcome,
         ownerTagId: owner.metadata.id,
-        // Create also starts the owner, as start_objective does; a dry run never starts.
-        ...(dryRun || values["no-start"] === true ? {} : { start: true }),
-        ...(values.observe === undefined
-          ? {}
-          : { observations: values.observe.map((workstreamId) => ({ workstreamId })) }),
+        ...(values.team === undefined ? {} : { teamId: await teamId(client, values.team) }),
         ...(values.deadline === undefined ? {} : { deadline: values.deadline }),
         ...(values["budget-minor"] === undefined
           ? {}
@@ -342,7 +254,7 @@ export async function runObjectiveCommand(
     for (const warning of warnings) process.stderr.write(`Warning: ${terminalText(warning)}\n`);
     if (notStarted !== undefined)
       process.stderr.write(
-        `Warning: The owner was not started: ${terminalText(notStarted).replace(/\.?$/u, ".")} Once that is fixed, run this command again with ID ${terminalText(objective.id)} to start it.\n`,
+        `Warning: The Objective was not started: ${terminalText(notStarted).replace(/\.?$/u, ".")} Once that is fixed, run this command again with ID ${terminalText(objective.id)} to start it.\n`,
       );
     if (json) {
       if (dryRun)
@@ -448,21 +360,65 @@ function budgetLimit(objective: Record<string, unknown>): string {
   return typeof currency === "string" ? money(limit, currency) : `${limit} allocation units`;
 }
 
-function formatMessageResult(result: OperatorObjectiveMessageResult): string {
+function formatMessageResult(id: string, result: MessageObjectiveResult): string {
   const lines = [
-    `${result.duplicate ? "Already sent" : "Sent"} message ${result.message.id} to the owner of Objective ${result.objective.id}.`,
+    `${result.duplicate ? "Already sent" : "Sent"} to the conversation of Objective ${terminalText(id)}.`,
   ];
-  if (result.repliedToMessageId)
-    lines.push(`It answers the owner's pending message ${result.repliedToMessageId}.`);
   if (result.statusChange)
     lines.push(
-      result.statusChange.from === "completed"
-        ? "The Objective was reopened and is working again."
-        : `The Objective moved from ${result.statusChange.from} to ${result.statusChange.to}.`,
+      `The Objective moved from ${result.statusChange.replaceAll("_", " ")} back to working.`,
     );
-  if (!result.objective.executionStartedAt)
-    lines.push("The Objective has not started; the owner reads the message once it starts.");
   return `${lines.join("\n")}\n`;
+}
+
+/**
+ * Shows the owner's reply to a message, as `message tag` does, when the Objective's conversation
+ * is this operator's CLI conversation. Otherwise the reply posts to the Objective's home thread.
+ */
+async function followObjectiveReply(
+  client: ControlPlaneClient,
+  id: string,
+  taskId: string,
+): Promise<string> {
+  const objective = await client.request<Objective>(
+    `/api/v1/tag-messaging/objectives/${encodeURIComponent(id)}`,
+  );
+  const tags = await client.request<{
+    readonly items: readonly {
+      readonly metadata: { readonly id: string; readonly name?: string };
+    }[];
+  }>("/api/v1/tags");
+  const name =
+    tags.items.find((tag) => tag.metadata.id === objective.ownerTagId)?.metadata.name ??
+    objective.ownerTagId;
+  const path = `/api/v1/tags/${encodeURIComponent(name)}/messages/${encodeURIComponent(taskId)}`;
+  let record: TagMessageRecord;
+  try {
+    record = await client.request<TagMessageRecord>(path);
+  } catch (error) {
+    if (error instanceof ControlPlaneRequestError && (error.status === 403 || error.status === 404))
+      return "The reply posts to the thread the Objective was created in.\n";
+    throw error;
+  }
+  const detach = new AbortController();
+  const stop = () => detach.abort();
+  process.once("SIGINT", stop);
+  try {
+    return await followTagMessage(client, name, record, {
+      signal: detach.signal,
+      write: (text) => process.stdout.write(text),
+      warn: (text) => process.stderr.write(text),
+      interactive: process.stdout.isTTY === true,
+    });
+  } finally {
+    process.removeListener("SIGINT", stop);
+  }
+}
+
+/** A Team's ID from its name or ID. */
+async function teamId(client: ControlPlaneClient, name: string): Promise<string> {
+  const team = JSON.parse(await runTeamCommand(client, ["get", name])) as Team;
+  return team.id;
 }
 
 async function readStdin(): Promise<string> {

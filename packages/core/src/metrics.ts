@@ -1,5 +1,4 @@
 import type { CoordinationInboxKind } from "./coordination-inbox.js";
-import type { TaskAssignmentStatus, TeamTaskPriority } from "./task-assignment.js";
 
 export interface CoordinationMetricSnapshot {
   readonly capturedAt: string;
@@ -13,7 +12,6 @@ export interface CoordinationMetricSnapshot {
   readonly tasks: Readonly<
     Record<"total" | "pending" | "running" | "completed" | "failed" | "cancelled", number>
   >;
-  readonly taskAssignments: Readonly<Record<"total" | TaskAssignmentStatus, number>>;
   readonly recovery: {
     readonly unknownControlDeliveries: number;
     readonly blockedSessions: number;
@@ -38,6 +36,7 @@ export interface CoordinationMetricSnapshot {
     readonly agentLimitInterruptions: number;
   };
   readonly scheduling: {
+    /** Pending Tasks. */
     readonly queued: number;
     readonly oldestQueuedAt: string | null;
     readonly oldestQueuedAgeSeconds: number | null;
@@ -47,20 +46,6 @@ export interface CoordinationMetricSnapshot {
     readonly averagePlacementDurationMs: number;
     readonly maximumPlacementDurationMs: number;
     readonly admissionRejections: number;
-    /** Queue pressure and observed wait time for each accepted scheduling priority. */
-    readonly byPriority: Readonly<
-      Record<
-        TeamTaskPriority,
-        {
-          readonly queued: number;
-          readonly oldestQueuedAt: string | null;
-          readonly oldestQueuedAgeSeconds: number | null;
-          readonly placedAttempts: number;
-          readonly averageQueueDurationMs: number;
-          readonly maximumQueueDurationMs: number;
-        }
-      >
-    >;
     readonly reservations: {
       readonly consumed: number;
       readonly active: number;
@@ -75,11 +60,9 @@ export interface CoordinationMetricSnapshot {
       readonly utilization: number;
     }[];
   };
+  /** Mailbox messages no inbox turn has taken yet. */
   readonly mailbox: {
-    readonly backlog: number;
-    readonly retrying: number;
-    readonly retryAttempts: number;
-    readonly failed: number;
+    readonly pending: number;
     readonly oldestPendingAt: string | null;
   };
   readonly replyDelivery: {

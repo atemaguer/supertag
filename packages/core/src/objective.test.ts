@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   objectiveClosed,
+  objectiveResumeSummary,
   parseCancelObjective,
   parseCreateObjective,
   parseObjectiveStatus,
@@ -63,7 +64,7 @@ describe("Objective budget denomination", () => {
 });
 
 describe("Objective limit updates", () => {
-  it("accepts one bounded owner limit summary and keeps limited distinct from closure", () => {
+  it("accepts one bounded limit summary and keeps limited distinct from closure", () => {
     expect(
       parseObjectiveStatus({
         status: "limited",
@@ -115,5 +116,31 @@ describe("Objective statement", () => {
     expect(() => parseCreateObjective({ id: "sso", outcome: "x".repeat(8001) })).toThrow(
       "outcome must contain",
     );
+  });
+});
+
+describe("Objective Team", () => {
+  it("names an optional Team and refuses observation sources", () => {
+    expect(parseCreateObjective({ ...definition, teamId: "research" }).teamId).toBe("research");
+    expect(parseCreateObjective(definition)).not.toHaveProperty("teamId");
+    expect(() =>
+      parseCreateObjective({ ...definition, observations: [{ workstreamId: "research" }] }),
+    ).toThrow("Unknown field: observations");
+  });
+});
+
+describe("Objective resume summary", () => {
+  it("names the Tasks that changed while paused and counts those still waiting", () => {
+    const text = objectiveResumeSummary(
+      { id: "launch", updatedAt: "2026-11-07T12:00:00.000Z" },
+      "2026-11-07T10:00:00.000Z",
+      [
+        { id: "a", status: "completed", updatedAt: "2026-11-07T11:00:00.000Z" },
+        { id: "b", status: "pending", updatedAt: "2026-11-07T09:00:00.000Z" },
+      ],
+    );
+    expect(text).toContain("- a: completed");
+    expect(text).not.toContain("- b:");
+    expect(text).toContain("1 waiting Task may start now.");
   });
 });

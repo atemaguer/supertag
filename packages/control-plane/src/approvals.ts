@@ -1,51 +1,38 @@
 import { createHash } from "node:crypto";
 import {
   APPROVAL_REASON_MAX_LENGTH,
-  type ApprovalActionDescriptor,
   type ApprovalRequest,
   type ApprovalRequestStatus,
   type ApprovalScope,
-  approvalActionsMatch,
   approvalRequirementFor,
   approversAdmitOperator,
-  approversIncludeTag,
   describeApprovalAction,
+  isInboxSessionKey,
   mailboxObject,
   mailboxText,
-  mcpApprovalRequirementCovers,
+  objectiveIdOfSessionKey,
   parseApprovalActionDescriptor,
   type Store,
   sanitizeApprovalText,
   type TagApprovalRequirement,
   TagMessagingError,
   type Task,
-  type TaskAssignment,
 } from "@supertag/core";
 
 type ApprovalPersistence = Pick<
   Store,
   | "appendTaskEvent"
-  | "createApprovalRequest"
   | "decideApprovalRequest"
   | "expireApprovalRequest"
-  | "findObjectiveApprovalGrant"
-  | "findTagById"
   | "findInboundEventById"
   | "findTaskById"
   | "getApprovalRequest"
-  | "getObjective"
-  | "getSurfaceObjective"
-  | "getTaskAssignment"
   | "listApprovalRequests"
   | "listSessionTaskIds"
-  | "listTagPermissionSets"
-  | "listTagPermissions"
-  | "listTaskAttempts"
   | "requestActionApproval"
-  | "updateTaskAssignment"
 >;
 
-/** Identity of the Task whose Attempt asks for, or decides, an approval. */
+/** Identity of the Task whose Attempt asks for an approval. */
 export interface ApprovalCaller {
   readonly taskId: string;
   readonly attemptId: string | null;
@@ -66,7 +53,6 @@ export interface ApprovalSummary {
   readonly decidedLastDay: { readonly approved: number; readonly denied: number };
 }
 
-const TERMINAL_ASSIGNMENT = ["accepted", "rejected", "cancelled", "failed"];
 const TERMINAL_TASK = ["completed", "failed", "cancelled"];
 
 /** Called once an action request is decided. */
@@ -74,7 +60,7 @@ export type ApprovalDecisionListener = (request: ApprovalRequest) => Promise<voi
 
 /** What a decided request tells its requester: the decision, its scope, and what to do next. */
 export function approvalDecisionText(
-  request: Pick<ApprovalRequest, "id" | "kind" | "status" | "scope" | "validUntil" | "reason">,
+  request: Pick<ApprovalRequest, "id" | "status" | "scope" | "validUntil" | "reason">,
 ): string {
   const approved = request.status === "approved";
   return [
@@ -85,9 +71,7 @@ export function approvalDecisionText(
     }.`,
     request.reason ? `Reason: ${request.reason}` : "",
     approved
-      ? request.kind === "surface-action"
-        ? "Retry the same call to continue."
-        : ""
+      ? "Retry the same call to continue."
       : "Choose another approach or explain why the action is needed.",
   ]
     .filter(Boolean)
@@ -105,85 +89,9 @@ export class ApprovalCoordinator {
   ) {}
 
   private decisionListener: ApprovalDecisionListener | undefined;
-  /** Resumes the work Session a decided action request kept waiting; set by the Control Plane. */
+  /** Resumes the Session a decided action request kept waiting; set by the Control Plane. */
   setDecisionListener(listener: ApprovalDecisionListener) {
     this.decisionListener = listener;
-  }
-
-  /** Runtime approvals a Task admission must hold for, after existing Objective-scope grants. */
-  async taskAdmission(
-    objectiveId: string,
-    approvals: readonly TagApprovalRequirement[] | undefined,
-  ): Promise<{
-    readonly ungranted: readonly TagApprovalRequirement[];
-    readonly grants: readonly { requirement: TagApprovalRequirement; grant: ApprovalRequest }[];
-  }> {
-    const ungranted: TagApprovalRequirement[] = [];
-    const grants: { requirement: TagApprovalRequirement; grant: ApprovalRequest }[] = [];
-    for (const requirement of approvals ?? []) {
-      if (requirement.target !== "runtime") continue;
-      const grant = await this.store.findObjectiveApprovalGrant(objectiveId, {
-        target: "runtime",
-        action: requirement.action,
-      });
-      if (grant) grants.push({ requirement, grant });
-      else ungranted.push(requirement);
-    }
-    return { ungranted, grants };
-  }
-
-  /** Record the durable request for a Task admitted with pending approval. */
-  async recordTaskAdmission(
-    assignment: TaskAssignment,
-    admission: Awaited<ReturnType<ApprovalCoordinator["taskAdmission"]>>,
-    managerRequested: boolean,
-  ): Promise<void> {
-    try {
-      for (const { requirement, grant } of admission.grants)
-        await this.event(assignment.taskId, "approval.granted-by-scope", {
-          requestId: grant.id,
-          actions: [{ target: "runtime", action: requirement.action }],
-          ruleSources: requirement.permissionSets,
-          decidedBy: grant.decidedBy,
-          decidedByKind: grant.decidedByKind,
-        });
-      if (assignment.approval !== "pending") return;
-      const [existing] = await this.store.listApprovalRequests({
-        taskId: assignment.taskId,
-        kind: "task",
-        limit: 1,
-      });
-      if (existing) return;
-      const tag = await this.store.findTagById(assignment.assignedTagId);
-      const actions = admission.ungranted.map((requirement) => ({
-        target: "runtime" as const,
-        action: requirement.action,
-      }));
-      const request = await this.store.createApprovalRequest({
-        objectiveId: assignment.objectiveId,
-        taskId: assignment.taskId,
-        requestingTagId: assignment.requestedByTagId,
-        kind: "task",
-        actions,
-        summary: `Start Task ${assignment.taskId} for ${tag?.name ?? assignment.assignedTagId}${
-          actions.length
-            ? ` with ${actions.map((action) => action.action).join(", ")}`
-            : " (requested by its manager)"
-        }: ${assignment.instruction}`,
-        ruleSources: [...new Set(admission.ungranted.flatMap((entry) => entry.permissionSets))],
-        approvers: [...new Set(admission.ungranted.flatMap((entry) => entry.approvers))],
-      });
-      await this.event(assignment.taskId, "approval.requested", {
-        requestId: request.id,
-        kind: request.kind,
-        actions: request.actions,
-        ruleSources: request.ruleSources,
-        heldBy: actions.length ? "permission" : "manager",
-        ...(actions.length && managerRequested ? { managerRequested: true } : {}),
-      });
-    } catch (error) {
-      this.onError(error);
-    }
   }
 
   /** Worker-side check before forwarding one surface or MCP action marked `approval: required`. */
@@ -201,10 +109,10 @@ export class ApprovalCoordinator {
         ? input["summary"]
         : describeApprovalAction(action),
     );
-    // A work Session's next Task retries the action its previous Task waited on, so the action
+    // A waiting Session's next Task retries the action its previous Task waited on, so the action
     // matches requests across the Session's Tasks. Earlier Tasks' requests nobody waits on any
     // more expire first, so the retry never waits on one of them.
-    const sessionTaskIds = await this.workSessionTaskIds(task);
+    const sessionTaskIds = await this.waitingSessionTaskIds(task);
     if (sessionTaskIds !== undefined)
       for (const taskId of sessionTaskIds) {
         if (taskId === caller.taskId) continue;
@@ -265,81 +173,6 @@ export class ApprovalCoordinator {
     };
   }
 
-  /** One request for a lead's expected plan; approval creates Objective-scope grants. */
-  async requestPlan(caller: ApprovalCaller, value: unknown) {
-    const input = mailboxObject(value, ["objectiveId", "actions", "summary"]);
-    if (!caller.objectiveId) throw new TagMessagingError(400, "Plan approval needs an Objective");
-    if (!Array.isArray(input["actions"]) || input["actions"].length === 0)
-      throw new TagMessagingError(400, "actions must list at least one expected action");
-    if (input["actions"].length > 50)
-      throw new TagMessagingError(400, "A plan approval covers at most 50 actions");
-    const actions = input["actions"].map(parseApprovalActionDescriptor);
-    const summary = boundedText(input["summary"], "summary", 2000);
-    const uncovered: ApprovalActionDescriptor[] = [];
-    for (const action of actions)
-      if (!(await this.store.findObjectiveApprovalGrant(caller.objectiveId, action)))
-        uncovered.push(action);
-    if (uncovered.length === 0)
-      return { status: "granted" as const, reason: "Every action already has an Objective grant" };
-    const rules = await this.rulesFor(uncovered);
-    const [existing] = (
-      await this.store.listApprovalRequests({
-        objectiveId: caller.objectiveId,
-        taskId: caller.taskId,
-        kind: "plan",
-        status: "pending",
-        limit: 20,
-      })
-    ).filter(
-      (request) =>
-        request.actions.length === uncovered.length &&
-        uncovered.every((action) =>
-          request.actions.some((candidate) => approvalActionsMatch(candidate, action)),
-        ),
-    );
-    if (existing) return { status: "pending" as const, requestId: existing.id };
-    const request = await this.store.createApprovalRequest({
-      objectiveId: caller.objectiveId,
-      taskId: caller.taskId,
-      attemptId: caller.attemptId,
-      requestingTagId: caller.tagId,
-      kind: "plan",
-      actions: uncovered,
-      summary,
-      ruleSources: rules.ruleSources,
-      approvers: rules.approvers,
-    });
-    await this.event(
-      caller.taskId,
-      "approval.requested",
-      {
-        requestId: request.id,
-        kind: request.kind,
-        actions: request.actions,
-        ruleSources: request.ruleSources,
-      },
-      caller.attemptId,
-    );
-    return { status: "pending" as const, requestId: request.id };
-  }
-
-  async decideAsTag(caller: ApprovalCaller, value: unknown) {
-    const input = parseDecision(value);
-    const request = await this.store.getApprovalRequest(input.requestId);
-    if (!request || request.objectiveId !== caller.objectiveId)
-      throw new TagMessagingError(404, "Approval request not found");
-    const tag = await this.store.findTagById(caller.tagId);
-    if (!tag) throw new TagMessagingError(404, "Tag not found");
-    if (request.requestingTagId === tag.id || (await this.assigneeOf(request)) === tag.id)
-      throw new TagMessagingError(403, "A Tag cannot decide its own approval request");
-    if (!approversIncludeTag(request.approvers, tag))
-      throw new TagMessagingError(
-        403,
-        "This Tag is not an approver for the Permission Sets that require this approval",
-      );
-    return this.decide(request, input, { kind: "tag", id: tag.id });
-  }
-
   async decideAsOperator(value: unknown, operatorId: string) {
     const input = parseDecision(value);
     const request = await this.store.getApprovalRequest(input.requestId);
@@ -349,33 +182,11 @@ export class ApprovalCoordinator {
         403,
         "The Permission Sets that require this approval name other operator approvers",
       );
-    return this.decide(request, input, { kind: "operator", id: operatorId });
+    return this.decide(request, input, operatorId);
   }
 
   async get(id: string) {
     return this.store.getApprovalRequest(id);
-  }
-
-  /** Mark approvals applied through the direct Task approval path as decided. */
-  async settleTaskApproved(taskId: string, operatorId: string): Promise<void> {
-    for (const request of await this.store.listApprovalRequests({
-      taskId,
-      kind: "task",
-      status: "pending",
-    })) {
-      try {
-        const decided = await this.store.decideApprovalRequest({
-          id: request.id,
-          decision: "approve",
-          scope: "once",
-          decidedBy: operatorId,
-          decidedByKind: "operator",
-        });
-        await this.event(taskId, "approval.approved", eventPayload(decided));
-      } catch (error) {
-        this.onError(error);
-      }
-    }
   }
 
   async list(filter: {
@@ -398,13 +209,10 @@ export class ApprovalCoordinator {
     );
   }
 
-  /**
-   * One digest per Objective of pending action and plan requests. Task approvals keep their
-   * existing per-Task notice. The key changes whenever the pending set changes.
-   */
+  /** One digest per Objective of pending requests. The key changes whenever the pending set changes. */
   async digests(): Promise<readonly { objectiveId: string; text: string; key: string }[]> {
     const pending = (await this.store.listApprovalRequests({ status: "pending", limit: 200 }))
-      .filter((request) => request.kind !== "task" && request.objectiveId !== null)
+      .filter((request) => request.objectiveId !== null)
       .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt));
     const byObjective = new Map<string, ApprovalRequest[]>();
     for (const request of pending) {
@@ -447,161 +255,61 @@ export class ApprovalCoordinator {
   private async decide(
     request: ApprovalRequest,
     input: ApprovalDecisionInput,
-    decider: { readonly kind: "operator" | "tag"; readonly id: string },
+    operatorId: string,
   ): Promise<ApprovalRequest> {
     if (request.status === "pending" && (await this.taskFinished(request))) {
       await this.store.expireApprovalRequest(request.id);
       throw new TagMessagingError(409, "The requesting Task already finished; request expired");
     }
-    const scope =
-      input.decision === "approve"
-        ? (input.scope ?? (request.kind === "plan" ? "objective" : "once"))
-        : undefined;
-    if (request.kind === "plan" && scope === "once")
-      throw new TagMessagingError(400, "A plan approval applies to the Objective; omit --scope");
-    const objective = request.objectiveId
-      ? await this.store.getObjective(request.objectiveId)
-      : undefined;
-    const verb = input.decision === "approve" ? "approved" : "denied";
-    const text = approvalDecisionText({
-      id: request.id,
-      kind: request.kind,
-      status: verb,
-      scope: scope ?? null,
-      validUntil: input.validUntil ?? null,
-      reason: input.reason ?? null,
-    });
+    const scope = input.decision === "approve" ? (input.scope ?? "once") : undefined;
     const decided = await this.store.decideApprovalRequest({
       id: request.id,
       decision: input.decision,
       ...(scope === undefined ? {} : { scope }),
       ...(input.validUntil === undefined ? {} : { validUntil: input.validUntil }),
       ...(input.reason === undefined ? {} : { reason: input.reason }),
-      decidedBy: decider.id,
-      decidedByKind: decider.kind,
-      ...(objective
-        ? {
-            message: {
-              senderTagId: decider.kind === "tag" ? decider.id : objective.ownerTagId,
-              ...(decider.kind === "operator" ? { operatorId: decider.id } : {}),
-              body: {
-                message: text.slice(0, 8000),
-                approval: {
-                  requestId: request.id,
-                  decision: verb,
-                  kind: request.kind,
-                  taskId: request.taskId,
-                  scope: scope ?? null,
-                  validUntil: input.validUntil ?? null,
-                  reason: input.reason ?? null,
-                },
-              },
-            },
-          }
-        : {}),
+      decidedBy: operatorId,
+      decidedByKind: "operator",
     });
     await this.event(
       request.taskId,
       input.decision === "approve" ? "approval.approved" : "approval.denied",
       eventPayload(decided),
     );
-    // Best effort: the Control Plane's sweep continues a waiting work Session this misses.
-    if (request.kind === "surface-action" && this.decisionListener)
+    // Best effort: the Control Plane's sweep continues a waiting Session this misses.
+    if (this.decisionListener)
       try {
         await this.decisionListener(decided);
       } catch (error) {
         this.onError(error);
       }
-    if (request.kind === "task" && objective) {
-      const change =
-        input.decision === "approve"
-          ? { expectedStatus: "queued" as const, approval: "approved" as const }
-          : { expectedStatus: "queued" as const, status: "cancelled" as const };
-      try {
-        await this.store.updateTaskAssignment(request.taskId, change, objective.ownerTagId, {
-          administrator: true,
-        });
-      } catch (error) {
-        // The Task may already be approved or cancelled through the direct Task path.
-        if (!(error instanceof TagMessagingError && error.statusCode === 409)) throw error;
-      }
-    }
     return decided;
   }
 
-  private async rulesFor(actions: readonly ApprovalActionDescriptor[]) {
-    const sets = await this.store.listTagPermissionSets();
-    const ruleSources = new Set<string>();
-    const approvers = new Set<string>();
-    for (const set of sets) {
-      const permissions = await this.store.listTagPermissions({ permissionSetId: set.id });
-      const requires = permissions.some(
-        (permission) =>
-          permission.approval === "required" &&
-          actions.some((action) =>
-            permission.target === "mcp"
-              ? action.target === "mcp" &&
-                mcpApprovalRequirementCovers(
-                  {
-                    target: "mcp",
-                    action: permission.action,
-                    ...(permission.resource === undefined ? {} : { resource: permission.resource }),
-                    permissionSets: [],
-                    approvers: [],
-                  },
-                  action,
-                )
-              : approvalActionsMatch(
-                  permission.target === "runtime"
-                    ? { target: "runtime", action: permission.action }
-                    : {
-                        target: "surface",
-                        action: permission.action,
-                        surfaceAccountId: permission.surfaceAccountId,
-                        scope: permission.scope,
-                      },
-                  action,
-                ),
-          ),
-      );
-      if (!requires) continue;
-      ruleSources.add(set.name);
-      for (const approver of set.approvers ?? []) approvers.add(approver);
-    }
-    return { ruleSources: [...ruleSources], approvers: [...approvers] };
-  }
-
-  private async assigneeOf(request: ApprovalRequest): Promise<string | undefined> {
-    if (request.kind !== "task") return undefined;
-    return (await this.store.getTaskAssignment(request.taskId))?.assignedTagId;
-  }
-
   /**
-   * Whether a request can no longer be used because its Task finished. A work Session Task that
-   * completed waiting on the request has not: the request stays pending while the Task is its
-   * Session's latest, and its decision continues the Session in the next Task.
+   * Whether a request can no longer be used because its Task finished. A Task of a waiting
+   * Session that completed waiting on the request has not: the request stays pending while the
+   * Task is its Session's latest, and its decision continues the Session in the next Task.
    */
   private async taskFinished(request: ApprovalRequest): Promise<boolean> {
-    if (request.kind === "plan") return false;
-    if (request.objectiveId) {
-      const assignment = await this.store.getTaskAssignment(request.taskId);
-      if (assignment) return TERMINAL_ASSIGNMENT.includes(assignment.status);
-    }
     const task = await this.store.findTaskById(request.taskId);
     if (!task) return true;
     if (!TERMINAL_TASK.includes(task.status)) return false;
-    if (request.objectiveId || task.status !== "completed") return true;
+    if (task.status !== "completed") return true;
     const approvals = task.outcome?.["approvals"];
     if (!Array.isArray(approvals) || !approvals.includes(request.id)) return true;
-    const sessionTaskIds = await this.workSessionTaskIds(task);
+    const sessionTaskIds = await this.waitingSessionTaskIds(task);
     return sessionTaskIds?.at(-1) !== task.id;
   }
 
-  /** A work Session Task's Session's Task ids, oldest first; undefined for any other Task. */
-  private async workSessionTaskIds(task: Task): Promise<readonly string[] | undefined> {
+  /**
+   * The Task ids, oldest first, of a Session whose Tasks end waiting on approval: a work Session,
+   * an Objective's Session or a Tag's inbox. Undefined for a conversation's Task.
+   */
+  private async waitingSessionTaskIds(task: Task): Promise<readonly string[] | undefined> {
     if (!task.inboundEventId) return undefined;
     const inbound = await this.store.findInboundEventById(task.inboundEventId);
-    if (inbound?.event.internal?.kind !== "work_session") return undefined;
+    if (!inbound || !sessionWaitsOnApproval(inbound)) return undefined;
     return this.store.listSessionTaskIds(task.sessionId);
   }
 
@@ -622,6 +330,21 @@ export class ApprovalCoordinator {
       this.onError(error);
     }
   }
+}
+
+/**
+ * Whether a turn's Task ends waiting on a pending approval request, so the decision continues its
+ * Session: every turn except a conversation's own.
+ */
+export function sessionWaitsOnApproval(inbound: {
+  readonly sessionKey: string;
+  readonly event: { readonly internal?: { readonly kind: string } };
+}): boolean {
+  return (
+    inbound.event.internal?.kind === "work_session" ||
+    objectiveIdOfSessionKey(inbound.sessionKey) !== undefined ||
+    isInboxSessionKey(inbound.sessionKey)
+  );
 }
 
 /** One pending request in a notice: its id, the action it names, and the sets that require it. */

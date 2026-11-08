@@ -17,7 +17,7 @@ const credentials = {
   SUPERTAG_SHARED_EXECUTION_ADMIN_TOKEN: randomUUID(),
 };
 type Row = Record<string, unknown>;
-suite("organization collaboration through production APIs on distributed Docker Workers", () => {
+suite("Team delegation through production APIs on distributed Docker Workers", () => {
   let directory = "",
     network = "",
     image = "",
@@ -109,55 +109,17 @@ suite("organization collaboration through production APIs on distributed Docker 
         { ...credentials, WORKER_ID: host, SUPERTAG_WORKLET_CREDENTIAL: token },
       );
     }
-    const makeTag = async (label: string) =>
+    const makeTag = async (label: string, host: string) =>
       (
         await api("POST", "/api/v1/tags", {
           apiVersion: CONTROL_PLANE_API_VERSION,
           kind: "Tag",
           metadata: { name: label },
-          spec: {},
+          spec: { workerHosts: [host] },
         })
       )["metadata"] as { id: string };
-    research = (await makeTag("Research manager"))["id"];
-    reviewer = (await makeTag("Review manager"))["id"];
-    await api("POST", "/api/v1/tag-messaging/objectives", {
-      id: "pooled-objective",
-      ownerTagId: research,
-      outcome: "Independently verify one shared conclusion",
-      runtimeActions: [],
-      budgetLimitMinor: 100,
-    });
-    await command("start_objective", {
-      taskId: "organization-bootstrap",
-      execution: { profile: { id: "worker-a", revision: "1" } },
-      maxCostMinor: 0,
-    });
-    await command("update_team", {
-      teamId: "pooled-objective:leadership",
-      expectedRevision: 1,
-      name: "Research",
-    });
-    await command("create_team", {
-      id: "review-team",
-      name: "Review",
-      leadTagId: reviewer,
-      memberTagIds: [reviewer],
-      maxConcurrency: 1,
-    });
-    await eventually(async () =>
-      (await snapshot()).assignments.some(
-        (row) => row["taskId"] === "organization-bootstrap" && row["status"] === "submitted",
-      ),
-    );
-    for (const [senderTagId, recipientTagId] of [
-      [research, reviewer],
-      [reviewer, research],
-    ])
-      await api("PUT", "/api/v1/tag-messaging/grants", {
-        senderTagId,
-        recipientTagId,
-        messageTypes: ["result.submitted", "progress.updated"],
-      });
+    research = (await makeTag("Research manager", "worker-a"))["id"];
+    reviewer = (await makeTag("Review manager", "worker-b"))["id"];
   }, 180_000);
 
   afterAll(async () => {
@@ -171,7 +133,7 @@ suite("organization collaboration through production APIs on distributed Docker 
     if (directory) await rm(directory, { recursive: true, force: true });
   }, 30_000);
 
-  it("preserves Team authority and artifact admission while managers finish their Objective after a Control Plane restart", async () => {
+  it("keeps delegation and artifact acquisition within the Team while its Objective finishes after a Control Plane restart", async () => {
     onTestFailed(async () => {
       for (const container of containers) {
         const logs = await execute("docker", ["logs", "--tail", "20", container]);
@@ -179,31 +141,26 @@ suite("organization collaboration through production APIs on distributed Docker 
       }
       const debug = await snapshot();
       process.stderr.write(
-        `${JSON.stringify({ assignments: debug.assignments, failures: debug.events.filter((row) => row["type"] === "execution.failed") })}\n`,
+        `${JSON.stringify({ sessions: debug.sessions, tasks: debug.tasks.map(({ id, tagId, sessionId, status }) => ({ id, tagId, sessionId, status })), failures: debug.events.filter((row) => row["type"] === "execution.failed") })}\n`,
       );
     });
-    await command("assign_task", {
-      taskId: "review-bootstrap",
-      teamId: "review-team",
-      assignedTagId: reviewer,
-      instruction: "Receive future work through the Team Mailbox",
-      acceptanceCriteria: ["Manager ready"],
-      execution: { profile: { id: "worker-b", revision: "1" } },
-      maxCostMinor: 0,
-    });
-    await eventually(async () =>
-      (await snapshot()).assignments.some(
-        (row) => row["taskId"] === "review-bootstrap" && row["status"] === "submitted",
-      ),
-    );
-    await command("assign_task", {
-      taskId: "research-produce",
-      teamId: "pooled-objective:leadership",
-      assignedTagId: research,
-      instruction: "Produce shared evidence and coordinate independent review",
-      acceptanceCriteria: ["Artifact produced and review requested"],
-      execution: { profile: { id: "worker-a", revision: "1" } },
-      maxCostMinor: 0,
+    // Applying the manifest creates its Team and starts the Objective's conversation, which
+    // starts a work Session of its own and, after its report, delegates the review.
+    await api("POST", "/api/v1/objectives", {
+      apiVersion: CONTROL_PLANE_API_VERSION,
+      kind: "Objective",
+      metadata: { name: "pooled-objective" },
+      spec: {
+        owner: "Research manager",
+        outcome: "Independently verify one shared conclusion",
+        team: {
+          name: "Research",
+          members: ["Research manager", "Review manager"],
+          maxConcurrency: 1,
+        },
+        runtimeActions: [],
+        budget: { minor: 100 },
+      },
     });
     await eventually(async () => {
       try {
@@ -235,59 +192,53 @@ suite("organization collaboration through production APIs on distributed Docker 
     });
     await eventually(async () => {
       const state = await snapshot();
-      const failed = state.assignments.find((row) => row["status"] === "failed");
-      if (failed) throw new Error(`Manager failed: ${JSON.stringify(failed)}`);
-      // The manager can complete the Objective before its containing Attempt is
-      // settled and its incoming Mailbox message is marked processed.
+      const failed = state.tasks.find((row) => row["status"] === "failed");
+      if (failed) throw new Error(`Task failed: ${JSON.stringify(failed["id"])}`);
       return (
         state.objectives[0]?.["status"] === "completed" &&
-        state.messages.length === 3 &&
-        state.messages.every((row) => row["status"] === "processed")
+        state.tasks.every((row) => ["completed", "cancelled"].includes(String(row["status"])))
       );
     }, 100_000);
     const state = await snapshot();
-    expect(state.teams.map((row) => row["leadTagId"]).sort()).toEqual([research, reviewer].sort());
-    expect(state.objectives[0]).toMatchObject({ ownerTagId: research, status: "completed" });
-    expect(state.assignments.find((row) => row["taskId"] === "review-evidence")).toMatchObject({
-      teamId: "review-team",
-      assignedTagId: reviewer,
-      requestedByTagId: research,
-      status: "accepted",
+    const [team] = state.teams;
+    expect(state.teams).toHaveLength(1);
+    expect(team).toMatchObject({ name: "Research", maxConcurrency: 1 });
+    expect(JSON.parse(String(team?.["memberTagIds"])).sort()).toEqual([research, reviewer].sort());
+    expect(state.objectives[0]).toMatchObject({
+      ownerTagId: research,
+      teamId: team?.["id"],
+      status: "completed",
     });
-    expect(state.attempts.filter((row) => row["taskId"] === "research-produce")).toHaveLength(1);
+    const own = state.sessions.find((row) => row["sessionKey"] === "objective:pooled-objective");
+    expect(own).toMatchObject({ tagId: research, objectiveId: "pooled-objective" });
+    const work = state.sessions.filter((row) => row["parentSessionId"] === own?.["id"]);
+    expect(work.map((row) => row["tagId"]).sort()).toEqual([research, reviewer].sort());
+    expect(work.every((row) => row["objectiveId"] === "pooled-objective")).toBe(true);
+    const sessionTasks = (tagId: string) => {
+      const session = work.find((row) => row["tagId"] === tagId);
+      return state.tasks.filter((row) => row["sessionId"] === session?.["id"]);
+    };
+    const [produceTask] = sessionTasks(research);
+    const [reviewTask] = sessionTasks(reviewer);
+    expect(sessionTasks(research)).toHaveLength(1);
+    expect(sessionTasks(reviewer)).toHaveLength(1);
+    // The restart neither repeated the producing work nor started another Attempt of it.
+    expect(state.attempts.filter((row) => row["taskId"] === produceTask?.["id"])).toHaveLength(1);
     expect(
       (await execute("docker", ["exec", name("execution"), "cat", "/data/effects.txt"])).stdout,
     ).toBe("produce\n");
-    expect(state.messages).toHaveLength(3);
-    expect(state.messages.every((row) => row["status"] === "processed")).toBe(true);
-    expect(
-      state.messages.find((row) => row["idempotencyKey"] === "research-artifact"),
-    ).toMatchObject({
-      senderTagId: research,
-      recipientTagId: reviewer,
-      recipientTeamId: "review-team",
-    });
-    expect(
-      state.messages.find((row) => row["idempotencyKey"] === "review-admission-request"),
-    ).toMatchObject({
-      senderTagId: reviewer,
-      recipientTagId: research,
-      recipientTeamId: "pooled-objective:leadership",
-    });
-    const reviewTask = state.tasks.find((row) => row["id"] === "review-evidence");
-    const trigger = JSON.parse(String(reviewTask?.["trigger"]));
     const content = "Reviewed shared conclusion: the pooled result is 42.\n";
-    const digest = createHash("sha256").update(content).digest("hex");
-    expect(trigger.inputArtifacts).toEqual([
+    const digest = `sha256:${createHash("sha256").update(content).digest("hex")}`;
+    const produced = state.artifacts.find((row) => row["taskId"] === produceTask?.["id"]);
+    expect(JSON.parse(String(produced?.["entries"]))).toEqual([
+      expect.objectContaining({ path: "conclusion.txt", digest }),
+    ]);
+    expect(state.acquisitions).toEqual([
       expect.objectContaining({
-        provenance: {
-          taskId: "research-produce",
-          attemptId: expect.any(String),
-          attemptCount: 1,
-          statusAtAdmission: "submitted",
-        },
-        uri: `supertag-artifact:sha256:${digest}`,
-        digest: `sha256:${digest}`,
+        artifactId: produced?.["id"],
+        taskId: reviewTask?.["id"],
+        delivery: "read",
+        status: "delivered",
       }),
     ]);
     const authorization = JSON.parse(String(reviewTask?.["authorizationSnapshot"]));
@@ -305,9 +256,8 @@ suite("organization collaboration through production APIs on distributed Docker 
     );
     expect(permissionEvidence).toMatchObject({
       tagId: reviewer,
-      nonOwnerToolAbsent: true,
-      unadmittedArtifactStatus: 403,
-      forgedSenderDenied: true,
+      workSessionToolsLimited: true,
+      unacquiredArtifactStatus: 403,
     });
     expect(
       (await execute("docker", ["exec", name("execution"), "cat", "/data/review.txt"])).stdout,
@@ -398,27 +348,22 @@ suite("organization collaboration through production APIs on distributed Docker 
       call.end(body === undefined ? undefined : JSON.stringify(body));
     });
   }
-  async function command(name: string, input: object) {
-    return api("POST", `/api/v1/coordination/${name}`, {
-      objectiveId: "pooled-objective",
-      ...input,
-    });
-  }
   async function snapshot(): Promise<
     Record<
-      | "assignments"
+      | "sessions"
       | "attempts"
       | "tasks"
       | "teams"
       | "objectives"
-      | "messages"
       | "hosts"
-      | "events",
+      | "events"
+      | "artifacts"
+      | "acquisitions",
       Row[]
     >
   > {
     const script =
-      "const db=require('better-sqlite3')('/state/control-plane.db',{readonly:true});const tables={assignments:'TaskAssignment',attempts:'TaskAttempt',tasks:'Task',teams:'Team',objectives:'Objective',messages:'TagMessage',hosts:'WorkerHost',events:'TaskEvent'};console.log(JSON.stringify(Object.fromEntries(Object.entries(tables).map(([key,table])=>[key,db.prepare('SELECT * FROM '+table).all()]))));";
+      "const db=require('better-sqlite3')('/state/control-plane.db',{readonly:true});const tables={sessions:'Session',attempts:'TaskAttempt',tasks:'Task',teams:'Team',objectives:'Objective',hosts:'WorkerHost',events:'TaskEvent',artifacts:'CapturedArtifact',acquisitions:'ArtifactAcquisition'};console.log(JSON.stringify(Object.fromEntries(Object.entries(tables).map(([key,table])=>[key,db.prepare('SELECT * FROM '+table).all()]))));";
     return JSON.parse(
       (await execute("docker", ["exec", name("control-plane"), "node", "-e", script])).stdout,
     );

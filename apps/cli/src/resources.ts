@@ -8,7 +8,6 @@ import {
   plainCommandText,
   TASK_FINDING_SEVERITIES,
   type TaskFinding,
-  taskClaimDeclineNextStep,
   taskFindingLine,
   unsandboxedCommandHoldsOf,
   unsandboxedCommandsReason,
@@ -36,11 +35,9 @@ import {
   type SurfaceAccountManifest,
   verifySurfaceAccount,
 } from "./surface-account-manifest.js";
+import { runTeamCommand } from "./teams.js";
 import { terminalJson, terminalText } from "./terminal-text.js";
 import { workerHarnessNames } from "./worker-harness-names.js";
-
-/** Message the control plane records when an Attempt stops to register a durable wait. */
-const DURABLE_WAIT_STOP_MESSAGE = "Execution registered a durable wait";
 
 interface Resource {
   readonly apiVersion: string;
@@ -104,6 +101,9 @@ export async function runResourceCommand(
   if (command === "apply" || command === "diff") return runManifestCommand(client, command, args);
   if (command === "delete") return deleteResource(client, args);
   if (command === "watch") return watchResources(client, args);
+  // Teams are configured with their own commands; get and delete read and remove one by name.
+  if (args[0] === "team" && command === "get")
+    return runTeamCommand(client, ["get", ...args.slice(1)]);
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -137,11 +137,10 @@ export async function runResourceCommand(
         );
       return exportManifest(resource);
     }
-    // Built-in Roles exist on every Control Plane, and interactively set up Surface Accounts
-    // have no secret references, so a listing exports only resources a manifest can reproduce.
+    // Interactively set up Surface Accounts have no secret references, so a listing exports only
+    // resources a manifest can reproduce.
     const list = await client.request<ResourceList>(`/api/v1/${descriptor.path}`);
     return list.items
-      .filter((item) => !(isRecord(item.status) && item.status["builtIn"] === true))
       .filter((item) => item.kind !== "SurfaceAccount" || declaredByManifest(item))
       .map(exportManifest)
       .join("---\n");
@@ -226,6 +225,10 @@ async function deleteResource(
   });
   const [kind, name, ...rest] = positionals;
   if (kind === undefined || name === undefined || rest.length > 0) throw new Error(DELETE_USAGE);
+  if (kind === "team") {
+    if (values["dry-run"] === true) throw new Error("delete team does not accept --dry-run");
+    return runTeamCommand(client, ["delete", name]);
+  }
   const descriptor = descriptorFor(kind);
   if (descriptor.path === "objectives")
     throw new Error(
@@ -264,61 +267,19 @@ const DELETE_LABELS: Readonly<Record<string, string>> = {
   workspaces: "Workspace",
 };
 
-/** A readable view of stored observations; get remains the machine-readable resource. */
-/** Open findings by severity, highest first; nothing when the Task has none open. */
-export function describeOpenFindings(value: unknown): string[] {
+/** The Task result's findings by severity, highest first; nothing when it reported none. */
+export function describeFindings(value: unknown): string[] {
   if (!isRecord(value)) return [];
   if (typeof value["unreadable"] === "string")
-    return [`Open findings: unreadable (${value["unreadable"]})`];
+    return [`Findings: unreadable (${value["unreadable"]})`];
   const groups = TASK_FINDING_SEVERITIES.map((severity) => ({
     severity,
     findings: (Array.isArray(value[severity]) ? value[severity] : []) as TaskFinding[],
   })).filter((group) => group.findings.length > 0);
   if (!groups.length) return [];
   return [
-    `Open findings: ${groups.map((group) => `${group.findings.length} ${group.severity}`).join(", ")}`,
+    `Findings: ${groups.map((group) => `${group.findings.length} ${group.severity}`).join(", ")}`,
     ...groups.flatMap((group) => group.findings.map((finding) => `  ${taskFindingLine(finding)}`)),
-  ];
-}
-
-/** The findings a re-review confirms fixed and, once accepted, what closing each one did. */
-export function describeFindingClosures(fixed: unknown, closures: unknown): string[] {
-  const records = (value: unknown) => (Array.isArray(value) ? value.filter(isRecord) : []);
-  const reference = (item: Record<string, unknown>) =>
-    `${String(item["taskId"])} ${String(item["findingId"])}`;
-  const outcomes = records(closures);
-  if (outcomes.length)
-    return [
-      "Finding closures:",
-      ...outcomes.map(
-        (item) =>
-          `  ${reference(item)}: ${String(item["outcome"])}${
-            typeof item["reason"] === "string" ? ` (${item["reason"]})` : ""
-          }`,
-      ),
-    ];
-  const confirmed = records(fixed);
-  if (!confirmed.length) return [];
-  return [
-    "Confirms fixed (accepting closes these findings):",
-    ...confirmed.map((item) => `  ${reference(item)}`),
-  ];
-}
-
-/** Team posts and direct messages a Task received mid-Attempt as live input. */
-function describeTeamInput(
-  value: unknown,
-  tagNames: ReadonlyMap<string, string> | undefined,
-): string[] {
-  const items = Array.isArray(value) ? value.filter(isRecord) : [];
-  if (items.length === 0) return [];
-  return [
-    "Team coordination received mid-Attempt:",
-    ...items.map((item) => {
-      const sender = String(item["senderTagId"]);
-      const kind = item["itemKind"] === "post" ? "post" : "direct message";
-      return `  ${String(item["at"])}  ${String(item["itemType"])} ${kind} ${String(item["itemId"])} from ${tagNames?.get(sender) ?? sender}${item["status"] === "accepted" ? "" : item["status"] === "revoked" ? " (revoked; not delivered)" : item["status"] === "withdrawn" ? " (withdrawn: not read before the final response; the next digest carries it)" : " (uncertain; the next digest carries it)"}${item["truncated"] === true ? " (cut; read the rest with read_mailbox or read_workstream)" : ""}`;
-    }),
   ];
 }
 
@@ -332,7 +293,6 @@ export function describeTask(
 ): string {
   const spec = isRecord(resource.spec) ? resource.spec : {};
   const status = isRecord(resource.status) ? resource.status : {};
-  const assignment = isRecord(status["assignment"]) ? status["assignment"] : undefined;
   const attempt = isRecord(status["attempt"]) ? status["attempt"] : undefined;
   const id = String(resource.metadata["id"]);
   const lines = [
@@ -340,6 +300,7 @@ export function describeTask(
     `Phase: ${String(status["phase"])}`,
     `Tag: ${context.tagName ?? "unknown Tag"}`,
     `Session: ${String(spec["sessionId"])}`,
+    ...(typeof spec["objectiveId"] === "string" ? [`Objective: ${spec["objectiveId"]}`] : []),
   ];
   if (isRecord(status["execution"]))
     lines.push(...describeTaskExecution(status["execution"], context));
@@ -386,81 +347,13 @@ export function describeTask(
       }`,
     );
   lines.push(...describeTaskStorage(status["storage"], delivery, id));
-  lines.push(...describeOpenFindings(status["openFindings"]));
-  lines.push(...describeFindingClosures(status["fixedFindings"], status["findingClosures"]));
+  lines.push(...describeFindings(status["findings"]));
   const ids = (value: unknown) => (Array.isArray(value) ? value.map(String).join(", ") : "");
-  if (assignment) {
-    const uncertain = isRecord(assignment["uncertainAttempt"])
-      ? assignment["uncertainAttempt"]
-      : undefined;
-    lines.push(
-      `Objective: ${String(assignment["objectiveId"])}`,
-      `Team: ${String(assignment["teamId"])}`,
-      // An uncertain Task is still running as far as the store knows, but no one is running it.
-      `Assignment: ${uncertain ? "uncertain" : String(assignment["phase"])}`,
-      `Priority: ${String(assignment["priority"])}`,
-    );
-    if (assignment["phase"] === "queued") {
-      if (assignment["approval"] === "pending") lines.push("Waiting for approval.");
-      if (ids(assignment["dependencies"]))
-        lines.push(`Requires accepted Tasks: ${ids(assignment["dependencies"])}`);
-      lines.push(`Eligible after: ${String(assignment["availableAt"])}`);
-    }
-    const wait = isRecord(assignment["wait"]) ? assignment["wait"] : undefined;
-    if (
-      wait &&
-      wait["attemptCount"] === assignment["attemptCount"] &&
-      (assignment["phase"] === "waiting" || assignment["phase"] === "running")
-    ) {
-      if (typeof wait["registeredAt"] === "string")
-        lines.push(`Waiting since: ${wait["registeredAt"]}`);
-      if (typeof wait["reason"] === "string" && wait["reason"])
-        lines.push(`Wait reason: ${JSON.stringify(wait["reason"])}`);
-      lines.push("Recorded wait conditions:");
-      if (ids(wait["acceptedTaskIds"]))
-        lines.push(`  Accepted Tasks: ${ids(wait["acceptedTaskIds"])}`);
-      if (ids(wait["submittedTaskIds"]))
-        lines.push(`  Submitted Tasks: ${ids(wait["submittedTaskIds"])}`);
-      if (wait["mailbox"] === true) lines.push("  New mailbox message");
-      if (wait["notBefore"]) lines.push(`  Time: ${String(wait["notBefore"])}`);
-      if (isRecord(wait["workstreamPosts"]))
-        lines.push(
-          `  Workstream: ${String(wait["workstreamPosts"]["workstreamId"])} after post ${String(wait["workstreamPosts"]["afterSequence"])}`,
-        );
-      if (assignment["phase"] === "running")
-        lines.push("The wait is registered; execution has not yet settled into waiting.");
-    }
-    if (uncertain)
-      lines.push(
-        `Uncertain since: ${String(uncertain["detectedAt"])}`,
-        `Attempt ${String(uncertain["attemptId"])} may have executed, so SuperTag will not replay it. It keeps a Worker capacity slot until an operator recovers it.`,
-        `Why: ${JSON.stringify(String(uncertain["reason"]))}`,
-        `To recover, on Worker Host ${String(uncertain["workerHostId"] ?? "that ran it")}: stop the host service first (supertag down SERVICE), confirm the Attempt's processes and remote executions stopped, then run:`,
-        `  ${String(uncertain["recoverCommand"])}`,
-        "Then start the host again. The Task fails with its outcome recorded as unknown.",
-      );
-    else if (assignment["leaseExpiresAt"])
-      lines.push(`Execution lease expires: ${String(assignment["leaseExpiresAt"])}`);
-    if (
-      !uncertain &&
-      assignment["phase"] === "running" &&
-      typeof assignment["leaseExpiresAt"] === "string" &&
-      Date.parse(assignment["leaseExpiresAt"]) <= Date.now()
-    )
-      lines.push(
-        "Execution state: stalled; the recorded execution lease has expired. Recovery or reconciliation is pending. This does not prove execution stopped or that replay is safe.",
-      );
-  }
   const scheduling = isRecord(status["scheduling"]) ? status["scheduling"] : undefined;
-  if (
-    scheduling &&
-    (assignment?.["phase"] === "queued" || (!assignment && status["phase"] === "pending"))
-  ) {
+  if (scheduling && status["phase"] === "pending") {
     lines.push(
       `Last scheduling check: ${String(scheduling["status"])} at ${String(scheduling["observedAt"])}`,
     );
-    if (scheduling["status"] === "waiting" && isRecord(scheduling["wait"]))
-      lines.push(...describeSchedulingWait(scheduling["wait"]));
     if (scheduling["status"] === "incompatible" && typeof scheduling["reason"] === "string")
       lines.push(`Waiting: ${scheduling["reason"]}.`);
     if (ids(scheduling["unmetRequirements"]))
@@ -488,12 +381,12 @@ export function describeTask(
   }
   if (!attempt) {
     lines.push("No execution Attempt has been recorded.");
-    if (assignment?.["phase"] === "queued" && !scheduling && assignment["approval"] !== "pending")
+    if (status["phase"] === "pending" && !scheduling)
       lines.push(
         "No scheduling diagnosis is recorded; queue status alone does not identify a capacity or connectivity problem.",
       );
   } else {
-    lines.push(`Latest Attempt: ${String(attempt["id"])} (${attemptPhase(attempt)})`);
+    lines.push(`Latest Attempt: ${String(attempt["id"])} (${String(attempt["phase"])})`);
     // A long command and a hang look alike from events alone; show what the harness says runs.
     const command =
       attempt["phase"] === "running"
@@ -518,14 +411,8 @@ export function describeTask(
       lines.push(
         `Placement reservation: ${String(reservation["phase"])} (expires ${String(reservation["expiresAt"])})`,
       );
-    // Registering a durable wait ends the Attempt through cancellation; that is a wait, not a failure.
-    if (isRecord(attempt["failure"]) && typeof attempt["failure"]["message"] === "string") {
-      if (attempt["failure"]["message"] === DURABLE_WAIT_STOP_MESSAGE)
-        lines.push(
-          `Attempt ended to wait durably at ${String(attempt["failure"]["at"])}; this is not a failure.`,
-        );
-      else lines.push(`Recorded failure: ${JSON.stringify(attempt["failure"]["message"])}`);
-    }
+    if (isRecord(attempt["failure"]) && typeof attempt["failure"]["message"] === "string")
+      lines.push(`Recorded failure: ${JSON.stringify(attempt["failure"]["message"])}`);
     // Warnings never change the outcome; they keep non-fatal problems, such as an incomplete
     // native Session archive, visible after an otherwise completed Attempt.
     if (Array.isArray(attempt["warnings"]))
@@ -556,12 +443,6 @@ export function describeTask(
           for (const item of cleanupFailure["items"])
             if (isRecord(item) && typeof item["text"] === "string")
               lines.push(`  ${JSON.stringify(item["text"])}`);
-      } else if (assignment?.["phase"] === "waiting") {
-        lines.push(
-          placement["cleanup"] === "confirmed"
-            ? "Execution state: the assignment is waiting; prior execution cleanup is confirmed."
-            : "Execution state: the assignment is waiting, but prior execution cleanup is unconfirmed.",
-        );
       } else if (placement["cleanup"] === "confirmed") {
         lines.push("Execution state: a terminal execution event is recorded.");
       } else if (attempt["phase"] === "running") {
@@ -578,17 +459,11 @@ export function describeTask(
             : "No terminal execution event is recorded for this Attempt. Missing evidence does not prove execution stopped.",
         );
     }
-    if (
-      (status["phase"] === "cancelled" || assignment?.["phase"] === "cancelled") &&
-      placement?.["cleanup"] !== "confirmed"
-    )
+    if (status["phase"] === "cancelled" && placement?.["cleanup"] !== "confirmed")
       lines.push(
         "Cancellation is recorded, but execution cleanup is unconfirmed. This does not prove the process stopped or that Worker Host capacity was released.",
       );
-    if (
-      (status["phase"] === "cancelled" || assignment?.["phase"] === "cancelled") &&
-      attempt["phase"] === "running"
-    )
+    if (status["phase"] === "cancelled" && attempt["phase"] === "running")
       lines.push(
         "This cancelled Task still holds a Worker Host capacity slot. Reconnect the original Worklet so SuperTag can check the Attempt and release the slot if it never started or has stopped. If the outcome remains unknown, verify that all execution stopped, then use supertag recover worklet --confirm-stopped and reconnect the Worklet.",
       );
@@ -597,7 +472,6 @@ export function describeTask(
         `Last recorded event: ${String(attempt["lastEvent"]["type"])} at ${String(attempt["lastEvent"]["at"])}`,
       );
   }
-  lines.push(...describeTeamInput(status["teamInput"], context.tagNames));
   lines.push(...describeTaskAttempts(status["attempts"]));
   lines.push(...describeTaskMounts(status["attempts"]));
   lines.push(...describeTaskWrites(status["attempts"]));
@@ -610,30 +484,12 @@ export function describeTask(
     lines.push(`Session: supertag describe session ${shellArg(spec["sessionId"])}`);
   if (typeof attempt?.["workerHostId"] === "string")
     lines.push(`Host: supertag describe worker-host ${shellArg(attempt["workerHostId"])}`);
-  if (assignment?.["phase"] === "queued")
-    lines.push(
-      "Review bindings: supertag list tag",
-      "Review approvals: supertag list inbox --kind task-approval",
-    );
-  if (assignment?.["phase"] === "waiting")
-    lines.push(`Watch stored changes: supertag watch task ${shellArg(id)}`);
+  if (status["phase"] === "pending") lines.push("Review bindings: supertag list tag");
   return `${lines.map(terminalText).join("\n")}\n`;
 }
 
 /**
- * An Attempt's phase for people: one that ended to wait durably shows "ended to wait" and its
- * recorded reason; "cancelled" stays for real cancellations.
- */
-function attemptPhase(attempt: Record<string, unknown>): string {
-  const wait = attempt["endedToWait"];
-  if (!isRecord(wait)) return String(attempt["phase"]);
-  return typeof wait["reason"] === "string"
-    ? `ended to wait: ${JSON.stringify(wait["reason"])}`
-    : "ended to wait";
-}
-
-/**
- * One line per Task Attempt with its provider-reported cost, so the cost of each owner wake or
+ * One line per Task Attempt with its provider-reported cost, so the cost of each turn or
  * retry is visible. Long histories show the most recent Attempts.
  */
 function describeTaskAttempts(value: unknown): string[] {
@@ -670,7 +526,7 @@ function describeTaskAttempts(value: unknown): string[] {
       const shownCost = cost
         ? `${money(cost.amountMinor, cost.currency)}${cost.estimated ? " (estimated)" : ""}`
         : "cost not reported";
-      return `  ${String(attempt["number"])}. ${String(attempt["id"])} ${attemptPhase(attempt)}, started ${String(attempt["startedAt"])}, ${shownCost}`;
+      return `  ${String(attempt["number"])}. ${String(attempt["id"])} ${String(attempt["phase"])}, started ${String(attempt["startedAt"])}, ${shownCost}`;
     }),
   ];
 }
@@ -893,34 +749,13 @@ export function describeTaskExecution(
   const why =
     execution["source"] === "chosen"
       ? `chosen by ${chooser}`
-      : execution["source"] === "escalated"
-        ? typeof execution["escalation"] === "string"
-          ? `escalated: ${execution["escalation"]} after Task ${String(execution["escalatedFromTaskId"])} failed or was rejected`
-          : `escalation found nothing higher in the allowed range after Task ${String(execution["escalatedFromTaskId"])}`
-        : execution["source"] === "default"
-          ? "default"
-          : undefined;
-  const escalations = Array.isArray(execution["selfEscalations"])
-    ? execution["selfEscalations"].filter(isRecord)
-    : [];
-  const shownWhy = escalations.length === 0 ? why : `${why ?? "accepted"}, then self-escalated`;
+      : execution["source"] === "default"
+        ? "default"
+        : undefined;
   const lines =
-    execution["source"] === undefined &&
-    execution["harness"] === undefined &&
-    escalations.length === 0
+    execution["source"] === undefined && execution["harness"] === undefined
       ? []
-      : [`Execution: ${parts.join(", ")}${shownWhy === undefined ? "" : ` (${shownWhy})`}`];
-  for (const escalation of escalations) {
-    const by =
-      typeof escalation["byTagId"] === "string"
-        ? (context.tagNames?.get(escalation["byTagId"]) ?? "unknown Tag")
-        : "the assignee";
-    lines.push(
-      `Escalated by ${by}: ${show(escalation["change"])}${
-        typeof escalation["reason"] === "string" ? `: ${escalation["reason"]}` : ""
-      }`,
-    );
-  }
+      : [`Execution: ${parts.join(", ")}${why === undefined ? "" : ` (${why})`}`];
   const attempt = isRecord(execution["latestAttempt"]) ? execution["latestAttempt"] : undefined;
   if (attempt) {
     lines.push(
@@ -936,57 +771,6 @@ export function describeTaskExecution(
 }
 
 /** Explains a `labels:A,B` hold and how to satisfy each kind of label. */
-/**
- * Why a queued Task has not started: dependencies not yet accepted, every matching Worker
- * busy, none connected, or a declined claim with its cause.
- */
-function describeSchedulingWait(wait: Record<string, unknown>): string[] {
-  if (wait["reason"] === "claim") {
-    const claim = isRecord(wait["claim"]) ? wait["claim"] : {};
-    return [
-      `Not started: ${typeof claim["message"] === "string" ? claim["message"] : "the Control Plane declined to start the Task."}`,
-      taskClaimDeclineNextStep(typeof claim["code"] === "string" ? claim["code"] : ""),
-    ];
-  }
-  if (wait["reason"] === "dependencies") {
-    const dependencies = Array.isArray(wait["dependencies"])
-      ? wait["dependencies"].filter(isRecord)
-      : [];
-    return [
-      `Waiting for ${dependencies
-        .map(
-          (dependency) =>
-            `${String(dependency["taskId"])} (${typeof dependency["status"] === "string" ? dependency["status"] : "unavailable"})`,
-        )
-        .join(", ")}.`,
-      "The Task is not offered to a Worker until each dependency is accepted.",
-    ];
-  }
-  if (wait["reason"] !== "capacity")
-    return [
-      "Waiting for a Worker Host: no eligible host has a matching Worker connected. The Task starts when one connects.",
-    ];
-  const lines: string[] = [];
-  let spare = false;
-  for (const host of Array.isArray(wait["hosts"]) ? wait["hosts"].filter(isRecord) : []) {
-    const harnesses = Array.isArray(host["harnesses"]) ? host["harnesses"].map(String) : [];
-    const busy = Array.isArray(host["busyTaskIds"]) ? host["busyTaskIds"].map(String) : [];
-    const capacity = typeof host["capacity"] === "number" ? host["capacity"] : 0;
-    if (busy.length < capacity) spare = true;
-    lines.push(
-      `Waiting for a free ${harnesses.length ? harnesses.join(" or ") : "Worker"} slot on Worker Host ${String(host["workerHostId"])} (${busy.length} of ${capacity} busy${busy.length ? `: ${busy.join(", ")}` : ""})`,
-    );
-  }
-  if (spare)
-    lines.push(
-      "Slots not held by a running Attempt may be reserved for a starting Attempt, or the host may be draining.",
-    );
-  lines.push(
-    "The Task starts when a slot frees. To run more at once, raise concurrency for the host service in supertag.yaml, or pass --concurrency to supertag connect worklet.",
-  );
-  return lines;
-}
-
 function describeMissingLabels(labels: readonly string[]): string[] {
   const lines = [`No bound Worker Host has labels: ${labels.join(", ")}.`];
   const custom: string[] = [];
@@ -1532,7 +1316,7 @@ interface PlannedResource extends Resource {
     readonly conflicts: readonly FieldConflict[];
     /** Objectives only: changes apply cannot make, such as a new outcome. */
     readonly refusals?: readonly { readonly path: string; readonly reason: string }[];
-    /** Objectives only: applying starts the owner. */
+    /** Objectives only: applying starts the Objective. */
     readonly start?: boolean;
     /** Objectives only: why applying leaves the Objective unchanged. */
     readonly held?: string;
@@ -2040,11 +1824,8 @@ function manifestReferences(path: string, spec: unknown): readonly [ReferencePat
     const references: [ReferencePath, string][] = [];
     if (typeof spec["owner"] === "string") references.push(["tags", spec["owner"]]);
     for (const name of names(spec["workspaces"])) references.push(["workspaces", name]);
-    for (const team of Object.values(isRecord(spec["teams"]) ? spec["teams"] : {}))
-      if (isRecord(team)) {
-        if (typeof team["lead"] === "string") references.push(["tags", team["lead"]]);
-        for (const name of names(team["members"])) references.push(["tags", name]);
-      }
+    if (isRecord(spec["team"]))
+      for (const name of names(spec["team"]["members"])) references.push(["tags", name]);
     return references;
   }
   if (path !== "tags") return [];
@@ -2056,9 +1837,7 @@ function manifestReferences(path: string, spec: unknown): readonly [ReferencePat
       for (const name of names(location["contextSets"])) references.push(["context-sets", name]);
       for (const name of names(location["workspaces"])) references.push(["workspaces", name]);
     }
-  for (const grant of Array.isArray(spec["acceptsMessagesFrom"]) ? spec["acceptsMessagesFrom"] : [])
-    if (isRecord(grant) && typeof grant["tag"] === "string")
-      references.push(["tags", grant["tag"]]);
+  for (const name of names(spec["acceptsMessagesFrom"])) references.push(["tags", name]);
   return references;
 }
 
@@ -2105,7 +1884,7 @@ async function applyManifestDocuments(
       if (document.path === "tags" && isRecord(document.resource.spec)) {
         const grants = document.resource.spec["acceptsMessagesFrom"];
         for (const grant of Array.isArray(grants) ? grants : []) {
-          const sender = isRecord(grant) ? tagsInInput.get(String(grant["tag"])) : undefined;
+          const sender = tagsInInput.get(String(grant));
           if (
             !sender ||
             sender === document ||
@@ -2140,10 +1919,10 @@ async function applyManifestDocuments(
         );
       if (result.notStarted !== undefined)
         process.stderr.write(
-          `Warning: ${terminalText(label(document))}: the owner was not started: ${terminalText(result.notStarted).replace(/\.?$/u, ".")} Apply again once that is fixed to start it.\n`,
+          `Warning: ${terminalText(label(document))}: the Objective was not started: ${terminalText(result.notStarted).replace(/\.?$/u, ".")} Apply again once that is fixed to start it.\n`,
         );
       if (result.started !== undefined)
-        lines.push(`${label(document)} started its owner with Task ${result.started.taskId}\n`);
+        lines.push(`${label(document)} started with Task ${result.started.taskId}\n`);
     } catch (error) {
       const notApplied = ordered.filter((item) => !applied.includes(item));
       throw new Error(
@@ -2172,7 +1951,7 @@ function renderPlan(
     const plan = plans.get(document)?.plan;
     if (plan === undefined) continue;
     const name = `${document.resource.kind} ${document.name}`;
-    const start = plan.start === true ? ["starts the owner"] : [];
+    const start = plan.start === true ? ["starts the Objective"] : [];
     if (plan.held !== undefined) {
       rows.push({ head: `= ${name}`, details: [plan.held] });
     } else if ((plan.refusals ?? []).length > 0) {
@@ -2187,7 +1966,7 @@ function renderPlan(
         details:
           document.path === "surface-accounts"
             ? [`${surfaceProvider(document)}; apply reads and verifies its secrets`]
-            : [...describeCreation(plan.changes), ...start],
+            : start,
       });
     } else if (plan.action === "update") {
       counts.update += 1;
@@ -2251,11 +2030,6 @@ function renderPlan(
 function surfaceProvider(document: ManifestDocument): string {
   const spec = isRecord(document.resource.spec) ? document.resource.spec : {};
   return String(spec["provider"]);
-}
-
-/** A new resource lists only the entries it creates in nested maps, such as an Objective's Teams. */
-function describeCreation(changes: readonly FieldChange[]): readonly string[] {
-  return describeChanges(changes.filter((change) => /^spec\.teams\[/u.test(change.path)));
 }
 
 /** One line per changed field, grouping entries of the same list field. */
@@ -2364,18 +2138,8 @@ function objectiveManifestSpec(spec: unknown): Record<string, unknown> {
     value === false ||
     (Array.isArray(value) && value.length === 0) ||
     (isRecord(value) && Object.keys(value).length === 0);
-  const teams = Object.fromEntries(
-    Object.entries(isRecord(record["teams"]) ? record["teams"] : {}).map(([key, team]) => [
-      key,
-      isRecord(team)
-        ? Object.fromEntries(Object.entries(team).filter(([, value]) => !empty(value)))
-        : team,
-    ]),
-  );
   return Object.fromEntries(
-    Object.entries({ ...record, teams }).filter(
-      ([field, value]) => field === "runtimeActions" || !empty(value),
-    ),
+    Object.entries(record).filter(([field, value]) => field === "runtimeActions" || !empty(value)),
   );
 }
 

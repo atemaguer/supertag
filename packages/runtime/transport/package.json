@@ -8,11 +8,6 @@
       "types": "./dist/index.d.ts",
       "development": "./src/index.ts",
       "default": "./dist/index.js"
-    },
-    "./mailbox-rpc": {
-      "types": "./dist/mailbox-rpc.d.ts",
-      "development": "./src/mailbox-rpc.ts",
-      "default": "./dist/mailbox-rpc.js"
     }
   },
   "files": [

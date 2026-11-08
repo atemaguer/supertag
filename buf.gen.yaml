@@ -13,7 +13,6 @@ plugins:
       - supertag.worklet.v1
       - supertag.session.v1
       - supertag.artifact.v1
-      - supertag.mailbox.v1
       - supertag.authority.v1
       - supertag.coordination.v1
     opt:

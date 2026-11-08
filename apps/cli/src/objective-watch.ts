@@ -1,5 +1,10 @@
 import { explainHarnessSignIn, type ObjectiveOverview } from "@supertag/control-plane";
-import { type ApprovalRequest, objectiveClosed, type TaskDelivery } from "@supertag/core";
+import {
+  type ApprovalRequest,
+  objectiveClosed,
+  type TaskDelivery,
+  type WorkstreamPost,
+} from "@supertag/core";
 import type { ControlPlaneClient } from "./control-plane-client.js";
 import {
   deliverySummary,
@@ -7,6 +12,7 @@ import {
   hasDelivery,
   type LocalCheckouts,
 } from "./delivery-view.js";
+import { type ObjectiveOverviewSession, sessionLabel } from "./objective-overview.js";
 import { terminalText } from "./terminal-text.js";
 
 /** One line of an Objective's timeline. */
@@ -17,19 +23,15 @@ export interface ObjectiveTimelineEvent {
   readonly kind:
     | "objective.created"
     | "objective.status"
-    | "task.created"
+    | "session.started"
     | "task.status"
-    | "task.escalated"
     | "task.delivered"
     | "approval.requested"
     | "approval.decided"
-    | "message.owner"
-    | "message.operator"
     | "team.post"
-    | "team.direct_message"
-    | "team.live_delivery"
     | "objective.closed";
   readonly objectiveId: string;
+  readonly sessionId?: string;
   readonly taskId?: string;
   readonly message: string;
   readonly status?: string;
@@ -54,39 +56,30 @@ export interface ObjectiveWatchOptions {
   readonly checkouts?: LocalCheckouts;
 }
 
-type OverviewTask = ObjectiveOverview["tasks"][number];
-
 interface Snapshot {
   readonly objective: ObjectiveOverview["objective"] | undefined;
-  readonly tasks: ReadonlyMap<string, OverviewTask>;
+  readonly sessions: ReadonlyMap<string, ObjectiveOverviewSession>;
   readonly approvals: ReadonlyMap<string, ApprovalRequest>;
-  readonly messages: ReadonlySet<string>;
-  readonly posts: ReadonlySet<string>;
-  readonly directMessages: ReadonlySet<string>;
-  /** Live deliveries by ID and status, so a pending one prints once it is answered. */
-  readonly liveDeliveries: ReadonlySet<string>;
+  /** The last Workstream post sequence printed. */
+  readonly postSequence: number;
 }
 
 const EMPTY: Snapshot = {
   objective: undefined,
-  tasks: new Map(),
+  sessions: new Map(),
   approvals: new Map(),
-  messages: new Set(),
-  posts: new Set(),
-  directMessages: new Set(),
-  liveDeliveries: new Set(),
+  postSequence: 0,
 };
-const PAGE_LIMIT = 100;
-const MAX_PAGES = 20;
+const POST_PAGE_LIMIT = 100;
 const SETTLE_MS = 30_000;
 
 /**
  * Streams an Objective's timeline, one line per event, until the Objective is completed or
  * cancelled or the signal aborts. The first poll replays what already happened. Each poll reads
- * the Objective overview and its approval requests and prints what changed since the last one.
- * The owner can close the Objective while a Task Attempt in a Workspace is still finishing, so
- * after it closes the watch keeps polling, for at most `settleMs`, until those Tasks record their
- * delivery, and prints the summary with what they delivered.
+ * the Objective overview, its approval requests, and its Team's new Workstream posts, and prints
+ * what changed since the last one. The owner can close the Objective while a turn in a Workspace
+ * is still finishing, so after it closes the watch keeps polling, for at most `settleMs`, until
+ * those turns record their delivery, and prints the summary with what they delivered.
  */
 export async function watchObjective(
   client: Pick<ControlPlaneClient, "request">,
@@ -98,46 +91,29 @@ export async function watchObjective(
   const names = new Map<string, string>();
   while (!options.signal.aborted) {
     try {
-      const view = await readOverview(client, objectiveId);
+      const view = await client.request<ObjectiveOverview>(
+        `/api/v1/coordination/objectives/${encodeURIComponent(objectiveId)}/overview`,
+      );
       const approvals = await client
         .request<{ readonly requests: readonly ApprovalRequest[] }>(
           `/api/v1/coordination/approvals?${new URLSearchParams({ objectiveId, status: "all", limit: "100" })}`,
         )
         .then((result) => result.requests)
         .catch(() => [...prior.approvals.values()]);
+      const posts =
+        view.objective.teamId === null
+          ? []
+          : await readPosts(client, view.objective.teamId, prior.postSequence).catch(() => []);
       if (options.signal.aborted) break;
-      // The overview is a recent window, not a cursor. At its cap, intermediate
-      // coordination events may have fallen out between polls.
-      const posts = view.coordination?.posts ?? [];
-      const byTeam = new Map<string, number>();
-      for (const post of posts)
-        byTeam.set(post.workstreamId, (byTeam.get(post.workstreamId) ?? 0) + 1);
-      if (posts.length >= 200 || [...byTeam.values()].some((count) => count >= 100))
-        options.warn?.(
-          "Team post history reached the overview limit; watch may have missed posts. Read the Team channel for history.\n",
-        );
-      if ((view.coordination?.directMessages.length ?? 0) >= 200)
-        options.warn?.(
-          "Direct message history reached the overview limit; watch may have missed messages. Read Mailbox history.\n",
-        );
-      for (const [id, name] of Object.entries(view.tagNames ?? {})) names.set(id, name);
+      for (const [id, name] of Object.entries(view.tagNames)) names.set(id, name);
       const next: Snapshot = {
         objective: view.objective,
-        tasks: new Map(view.tasks.map((task) => [task.taskId, task])),
+        sessions: new Map(view.sessions.map((session) => [session.id, session])),
         approvals: new Map(approvals.map((request) => [request.id, request])),
-        messages: new Set((view.conversation ?? []).map((message) => message.id)),
-        posts: new Set((view.coordination?.posts ?? []).map((post) => post.id)),
-        directMessages: new Set(
-          (view.coordination?.directMessages ?? []).map((message) => message.id),
-        ),
-        liveDeliveries: new Set(
-          (view.coordination?.liveDeliveries ?? []).map(
-            (delivery) => `${delivery.id}:${delivery.status}`,
-          ),
-        ),
+        postSequence: Math.max(prior.postSequence, ...posts.map((post) => post.sequence)),
       };
       const tag = (id: string) => names.get(id) ?? id;
-      const events = timelineEvents(prior, next, view, tag).toSorted((a, b) =>
+      const events = timelineEvents(prior, next, view, posts, tag).toSorted((a, b) =>
         a.at.localeCompare(b.at),
       );
       for (const event of events) options.write(render(event, options.output));
@@ -162,57 +138,48 @@ export async function watchObjective(
   }
 }
 
+/** The Team's Workstream posts after `afterSequence`, oldest first. */
+async function readPosts(
+  client: Pick<ControlPlaneClient, "request">,
+  teamId: string,
+  afterSequence: number,
+): Promise<readonly WorkstreamPost[]> {
+  const posts: WorkstreamPost[] = [];
+  for (let after = afterSequence; ; ) {
+    const { items } = await client.request<{ readonly items: readonly WorkstreamPost[] }>(
+      `/api/v1/tag-messaging/workstreams/${encodeURIComponent(teamId)}/posts?${new URLSearchParams({ afterSequence: String(after), limit: String(POST_PAGE_LIMIT) })}`,
+    );
+    posts.push(...items);
+    if (items.length < POST_PAGE_LIMIT) return posts;
+    after = Math.max(after, ...items.map((post) => post.sequence));
+  }
+}
+
 /**
- * Whether a Task in a Workspace has a Task Attempt that is running or just completed, but no
+ * Whether a turn in a Workspace has a Task Attempt that is running or just completed, but no
  * recorded delivery yet. A failed or cancelled Task Attempt delivers nothing, so it is not awaited.
  */
 function awaitingDelivery(view: ObjectiveOverview): boolean {
-  return view.tasks.some((task) => {
-    if (task.workspace === null || task.delivery !== null) return false;
-    const latest = task.evidence.attempts.at(-1);
-    return latest?.status === "running" || latest?.status === "completed";
+  return view.sessions.some(({ task }) => {
+    if (task === undefined || task.workspace === null || task.delivery !== null) return false;
+    return task.attemptStatus === "running" || task.attemptStatus === "completed";
   });
 }
 
-async function readOverview(
-  client: Pick<ControlPlaneClient, "request">,
-  objectiveId: string,
-): Promise<ObjectiveOverview> {
-  const path = `/api/v1/coordination/objectives/${encodeURIComponent(objectiveId)}/overview`;
-  let view = await client.request<ObjectiveOverview>(`${path}?limit=${PAGE_LIMIT}`);
-  const tasks = [...view.tasks];
-  for (let page = 1; view.nextOffset !== null && page < MAX_PAGES; page += 1) {
-    view = await client.request<ObjectiveOverview>(
-      `${path}?limit=${PAGE_LIMIT}&offset=${view.nextOffset}`,
-    );
-    tasks.push(...view.tasks);
-  }
-  return { ...view, tasks };
-}
-
 const STATUS_WORDS: Readonly<Record<string, string>> = {
-  queued: "queued",
+  pending: "is queued",
   running: "started",
   waiting: "is waiting",
-  submitted: "submitted its result",
-  accepted: "accepted",
-  rejected: "rejected",
-  cancelled: "cancelled",
+  completed: "finished",
+  cancelled: "was cancelled",
   failed: "failed",
 };
-
-/** A failed Task whose Attempt left commits on its branch reads distinctly from a plain failure. */
-function failedAfterCommits(task: OverviewTask): boolean {
-  return (
-    task.status === "failed" &&
-    (task.explanations ?? []).some((reason) => reason.kind === "failed_after_delivering_commits")
-  );
-}
 
 function timelineEvents(
   prior: Snapshot,
   next: Snapshot,
   view: ObjectiveOverview,
+  posts: readonly WorkstreamPost[],
   tag: (id: string) => string,
 ): ObjectiveTimelineEvent[] {
   const events: ObjectiveTimelineEvent[] = [];
@@ -237,58 +204,49 @@ function timelineEvents(
       status: objective.status,
       message: `Objective is ${objective.status.replaceAll("_", " ")}${objective.status === "ready_for_review" && objective.completionSummary ? `: ${firstLine(objective.completionSummary)}` : ""}`,
     });
-  for (const task of next.tasks.values()) {
-    const old = prior.tasks.get(task.taskId);
-    const taskBase = { ...base, taskId: task.taskId };
-    if (old === undefined)
+  for (const session of next.sessions.values()) {
+    const old = prior.sessions.get(session.id);
+    const sessionBase = { ...base, sessionId: session.id };
+    const label = sessionLabel(session);
+    if (old === undefined && !session.owner)
       events.push({
-        ...taskBase,
-        at: task.timing.createdAt,
-        actor: tag(task.requestedByTagId),
-        kind: "task.created",
-        status: task.status,
-        message: `Task ${task.taskId} for ${tag(task.assignedTagId)}: ${firstLine(task.instruction)}`,
+        ...sessionBase,
+        at: session.createdAt,
+        actor: tag(session.tagId),
+        kind: "session.started",
+        message: `Started ${firstLine(label)}`,
       });
-    if (task.status !== (old?.status ?? "queued")) {
-      const reviewer = task.review.reviewedByTagId;
-      // A Task that closed itself, such as an owner activation, had no reviewer: it finished.
-      const reviewed = (task.status === "accepted" || task.status === "rejected") && !!reviewer;
-      const selfClosed = task.status === "accepted" && !reviewer;
-      const failure = task.explanations?.find((reason) => reason.kind === "execution_failed");
+    const task = session.task;
+    if (task === undefined) continue;
+    const taskBase = { ...sessionBase, taskId: task.id };
+    if (old?.task?.id !== task.id || old.task.status !== task.status) {
+      const failure = task.explanations.find((reason) => reason.kind === "execution_failed");
       events.push({
         ...taskBase,
-        at: task.timing.updatedAt,
-        actor: reviewed && reviewer ? tag(reviewer) : tag(task.assignedTagId),
+        at: task.updatedAt,
+        actor: tag(session.tagId),
         kind: "task.status",
         status: task.status,
         ...(failure ? { failure: failure.message } : {}),
         ...(failure?.failureKind ? { failureKind: failure.failureKind } : {}),
         ...(failure?.harness ? { harness: failure.harness } : {}),
-        message: `Task ${task.taskId} ${failedAfterCommits(task) ? "failed after delivering commits" : selfClosed ? "finished" : (STATUS_WORDS[task.status] ?? task.status)}${reviewed && task.review.assessment ? `: ${firstLine(task.review.assessment)}` : ""}${failure ? `: ${failure.message}` : ""}`,
+        message: `${label}: Task ${task.id} ${STATUS_WORDS[task.status] ?? task.status}${task.status === "waiting" && task.question ? `: ${firstLine(task.question)}` : ""}${failure ? `: ${failure.message}` : ""}`,
       });
     }
-    // An older Control Plane reports no self-escalations.
-    for (const escalation of (task.selfEscalations ?? []).slice(old?.selfEscalations?.length ?? 0))
-      events.push({
-        ...taskBase,
-        at: escalation.at,
-        actor: tag(escalation.byTagId || task.assignedTagId),
-        kind: "task.escalated",
-        message: `Task ${task.taskId} escalated: ${escalation.change}: ${firstLine(escalation.reason)}`,
-      });
     const delivered = hasDelivery(task.delivery) ? task.delivery : undefined;
-    const previous = hasDelivery(old?.delivery) ? old?.delivery : undefined;
+    const previous =
+      old?.task?.id === task.id && hasDelivery(old.task.delivery) ? old.task.delivery : undefined;
     if (
       delivered !== undefined &&
       (previous === undefined || deliverySummary(previous) !== deliverySummary(delivered))
     )
       events.push({
         ...taskBase,
-        at: task.timing.updatedAt,
-        actor: tag(task.assignedTagId),
+        at: task.updatedAt,
+        actor: tag(session.tagId),
         kind: "task.delivered",
         delivery: delivered,
-        message: `Task ${task.taskId} delivered ${deliverySummary(delivered)}`,
+        message: `${label}: Task ${task.id} delivered ${deliverySummary(delivered)}`,
       });
   }
   for (const request of next.approvals.values()) {
@@ -320,61 +278,14 @@ function timelineEvents(
         message: `Approval ${request.id} ${request.status}${request.reason ? `: ${firstLine(request.reason)}` : ""}`,
       });
   }
-  for (const message of view.conversation ?? []) {
-    if (prior.messages.has(message.id)) continue;
-    events.push({
-      ...base,
-      at: message.createdAt,
-      actor: message.from === "owner" ? tag(message.tagId) : "operator",
-      kind: message.from === "owner" ? "message.owner" : "message.operator",
-      message: `${message.from === "owner" ? (message.needsReply === false ? "Owner reported" : "Asked") : "Told the owner"}: "${firstLine(message.text)}"`,
-    });
-  }
-  for (const post of view.coordination?.posts ?? []) {
-    if (prior.posts.has(post.id)) continue;
+  for (const post of posts)
     events.push({
       ...base,
       at: post.createdAt,
-      actor: post.authorTagId === null ? "system" : tag(post.authorTagId),
+      actor: tag(post.authorTagId),
       kind: "team.post",
-      message: `Team ${post.workstreamId} ${post.type} post ${post.id}: ${firstLine(post.body)}`,
+      message: `Workstream post ${post.sequence}${post.to.length ? ` to ${post.to.map(tag).join(", ")}` : ""}: ${firstLine(post.body)}`,
     });
-  }
-  for (const message of view.coordination?.directMessages ?? []) {
-    if (prior.directMessages.has(message.id)) continue;
-    events.push({
-      ...base,
-      at: message.createdAt,
-      actor: tag(message.senderTagId),
-      kind: "team.direct_message",
-      message: `Direct ${message.type} message ${message.id} to ${tag(message.recipientTagId)}: ${firstLine(JSON.stringify(message.body))}`,
-    });
-  }
-  // An older Control Plane reports no live deliveries.
-  for (const delivery of view.coordination?.liveDeliveries ?? []) {
-    if (
-      delivery.status === "pending" ||
-      prior.liveDeliveries.has(`${delivery.id}:${delivery.status}`)
-    )
-      continue;
-    const item = `${delivery.itemType} ${delivery.itemKind === "post" ? "post" : "direct message"} ${delivery.itemId}`;
-    events.push({
-      ...base,
-      taskId: delivery.taskId,
-      at: delivery.updatedAt,
-      actor: tag(delivery.senderTagId),
-      kind: "team.live_delivery",
-      status: delivery.status,
-      message:
-        delivery.status === "accepted"
-          ? `Delivered ${item} live to ${tag(delivery.recipientTagId)} in Task ${delivery.taskId}`
-          : delivery.status === "revoked"
-            ? `Live delivery of ${item} to ${tag(delivery.recipientTagId)} in Task ${delivery.taskId} was revoked; it is not recorded as delivered`
-            : delivery.status === "withdrawn"
-              ? `Live delivery of ${item} to ${tag(delivery.recipientTagId)} in Task ${delivery.taskId} was withdrawn: it was not read before the final response; their next digest carries it`
-              : `Live delivery of ${item} to ${tag(delivery.recipientTagId)} in Task ${delivery.taskId} is uncertain; their next digest carries it`,
-    });
-  }
   if (objectiveClosed(objective.status) && objective.status !== prior.objective?.status)
     events.push({
       ...base,
@@ -418,13 +329,13 @@ function closing(
   const objective = view.objective;
   const lines = ["", `Objective ${objective.id} is ${objective.status}.`];
   if (objective.completionSummary) lines.push(`Result: ${objective.completionSummary}`);
-  const delivered = view.tasks.filter((task) => hasDelivery(task.delivery));
+  const delivered = view.sessions.filter((session) => hasDelivery(session.task?.delivery));
   if (delivered.length > 0) lines.push("Delivered:");
-  for (const task of delivered)
-    if (task.delivery) {
-      lines.push(`  Task ${task.taskId} (${tag(task.assignedTagId)})`);
+  for (const session of delivered)
+    if (session.task?.delivery) {
+      lines.push(`  ${sessionLabel(session)} (${tag(session.tagId)})`);
       lines.push(
-        ...formatDelivery(task.delivery, {
+        ...formatDelivery(session.task.delivery, {
           indent: "    ",
           ...(options.checkouts === undefined ? {} : { checkouts: options.checkouts }),
         }),

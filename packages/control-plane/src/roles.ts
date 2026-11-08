@@ -17,25 +17,11 @@ import {
   approvalRequirementsFromPermissions,
   executionRange,
   mcpGrantsFromPermissions,
-  ORG_ARCHITECT_ROLE_KEY,
 } from "@supertag/core";
 import {
   objectiveRuntimeActionWarnings,
   resolveObjectiveRuntimeActions,
 } from "./objective-runnable.js";
-
-export const ORG_ARCHITECT_ROLE_NAME = "Org Architect";
-
-export async function ensureBuiltInRoles(store: Store): Promise<void> {
-  await store.ensureSystemRole({
-    systemKey: ORG_ARCHITECT_ROLE_KEY,
-    name: ORG_ARCHITECT_ROLE_NAME,
-    purpose:
-      "Own the organization's structural design and decide when durable Tags and Teams should be created.",
-    instructions:
-      "Apply the configured organization-design rules to requests for new Teams and Tags. Approve durable structure only when work needs continuing ownership, authority, capacity, shared context, or a stable interface. Prefer a Task or harness-native subagent for temporary work. Workstreams are Team channels only. Record the evidence and policy revision behind each decision, then return a correlated mailbox decision to the requesting manager.",
-  });
-}
 
 export interface ResolvedTagRoles {
   readonly snapshots: readonly TagRoleSnapshot[];
@@ -274,8 +260,6 @@ function snapshot(assignment: RoleAssignment, role: Role): TagRoleSnapshot {
       name: role.name,
       purpose: role.purpose,
       instructions: role.instructions,
-      origin: role.origin,
-      ...(role.systemKey === undefined ? {} : { systemKey: role.systemKey }),
       revision: role.revision,
       contextSetIds: [...role.contextSetIds],
       permissionSetIds: [...role.permissionSetIds],

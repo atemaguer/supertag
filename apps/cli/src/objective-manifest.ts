@@ -4,6 +4,7 @@ import {
   parseCreateObjective,
   type Store,
   TagMessagingError,
+  TEAM_MAX_MEMBERS,
   type Team,
 } from "@supertag/core";
 import { type FieldChange, sameValue } from "./field-management.js";
@@ -21,11 +22,14 @@ import { money } from "./money.js";
  * is observed, never declared.
  *
  * Most of an Objective is fixed once it exists: its owner, its outcome statement, whether it is
- * ongoing, its Workspaces, and the Workstreams it observes. Owners and Tasks read those as the
- * definition of the work, so changing them in place would change work already accepted. A new
- * name creates a new Objective instead. The deadline, a larger budget, and runtime actions have
- * operator update paths, so apply changes them in place. Nested Teams are created, updated, and
- * dissolved under field ownership: apply dissolves only Teams it created and the input dropped.
+ * ongoing, its Workspaces, and which Team it names. The owner reads those as the definition of
+ * the work, so changing them in place would change work already under way. A new name creates a
+ * new Objective instead. The deadline, a larger budget, and runtime actions have operator update
+ * paths, so apply changes them in place.
+ *
+ * `team` names an existing Team, or declares the Objective's own Team in place. A declared Team
+ * has the Objective's ID as its Team ID; apply creates it with the Objective and updates its name,
+ * members, and concurrency limit afterwards.
  */
 
 export const OBJECTIVE_SPEC_FIELDS = [
@@ -33,37 +37,38 @@ export const OBJECTIVE_SPEC_FIELDS = [
   "outcome",
   "ongoing",
   "workspaces",
-  "observe",
   "budget",
   "deadline",
   "runtimeActions",
-  "teams",
+  "team",
 ] as const;
 
-const TEAM_FIELDS = ["lead", "members", "maxConcurrency"] as const;
-
-/** The Team every started Objective has; its owner leads it, and it is never declared. */
-const LEADERSHIP_TEAM = "leadership";
-
-const TEAM_KEY = /^[a-z0-9][a-z0-9_-]{0,62}$/u;
+const TEAM_FIELDS = ["name", "members", "maxConcurrency"] as const;
 
 /** Fields fixed at creation; changing one means a new Objective under a new name. */
-const FIXED_FIELDS = ["owner", "outcome", "ongoing", "workspaces", "observe"] as const;
+const FIXED_FIELDS = ["owner", "outcome", "ongoing", "workspaces"] as const;
 
 /** Optional fields that keep their value when a manifest stops setting them. */
-const RELEASED_FIELDS = new Set(["spec.deadline", "spec.budget", "spec.runtimeActions"]);
+const RELEASED_FIELDS = new Set([
+  "spec.deadline",
+  "spec.budget",
+  "spec.runtimeActions",
+  "spec.team",
+]);
 
 /** Fixed fields' defaults: no longer setting one to its default changes nothing. */
 const FIXED_DEFAULTS: Readonly<Record<string, unknown>> = {
   "spec.ongoing": false,
   "spec.workspaces": [],
-  "spec.observe": [],
 };
 
+/** A Team declared in the Objective manifest; its Team ID is the Objective's ID. */
 export interface ObjectiveTeamSpec {
-  readonly lead: string;
+  /** Defaults to the Objective's ID. */
+  readonly name?: string;
+  /** Member Tag names, sorted and distinct. */
   readonly members: readonly string[];
-  /** Optional throttle; omitted means Worker Host capacity is the only limit. */
+  /** Optional limit on turns running at once; omitted means Worker Host capacity is the limit. */
   readonly maxConcurrency?: number;
 }
 
@@ -73,11 +78,11 @@ export interface ObjectiveManifestSpec {
   readonly outcome?: string;
   readonly ongoing?: boolean;
   readonly workspaces?: readonly string[];
-  readonly observe?: readonly string[];
   readonly budget?: { readonly minor: number; readonly currency?: string };
   readonly deadline?: string;
   readonly runtimeActions?: readonly string[];
-  readonly teams?: Readonly<Record<string, ObjectiveTeamSpec>>;
+  /** An existing Team's name, or the Objective's own Team. */
+  readonly team?: string | ObjectiveTeamSpec;
 }
 
 export interface ObjectiveRefusal {
@@ -145,7 +150,7 @@ export function parseObjectiveManifest(value: unknown): {
       if (field !== "minor" && field !== "currency")
         throw new TagMessagingError(400, `spec.budget.${field} is not a budget field`);
   }
-  for (const field of ["workspaces", "observe", "runtimeActions"] as const)
+  for (const field of ["workspaces", "runtimeActions"] as const)
     if (spec[field] !== undefined && spec[field] !== null && !Array.isArray(spec[field]))
       throw new TagMessagingError(400, `spec.${field} must be a list`);
   // The Objective parser validates and normalizes exactly as creation does.
@@ -154,11 +159,6 @@ export function parseObjectiveManifest(value: unknown): {
     outcome: spec["outcome"],
     ...(spec["ongoing"] === undefined ? {} : { ongoing: spec["ongoing"] }),
     ...(spec["workspaces"] == null ? {} : { workspaces: spec["workspaces"] }),
-    ...(spec["observe"] == null
-      ? {}
-      : {
-          observations: (spec["observe"] as unknown[]).map((workstreamId) => ({ workstreamId })),
-        }),
     ...(isRecord(budget)
       ? {
           budgetLimitMinor: budget["minor"],
@@ -170,7 +170,7 @@ export function parseObjectiveManifest(value: unknown): {
   });
   if (isRecord(budget) && definition.budgetLimitMinor === null)
     throw new TagMessagingError(400, "spec.budget.minor is required");
-  const teams = parseTeams(spec["teams"]);
+  const team = parseTeam(spec["team"]);
   return {
     name: definition.id,
     spec: {
@@ -178,9 +178,6 @@ export function parseObjectiveManifest(value: unknown): {
       outcome: definition.outcome,
       ...(spec["ongoing"] === undefined ? {} : { ongoing: definition.ongoing === true }),
       ...(spec["workspaces"] == null ? {} : { workspaces: definition.workspaces ?? [] }),
-      ...(spec["observe"] == null
-        ? {}
-        : { observe: (definition.observations ?? []).map((source) => source.workstreamId) }),
       ...(definition.budgetLimitMinor == null
         ? {}
         : {
@@ -193,75 +190,62 @@ export function parseObjectiveManifest(value: unknown): {
       ...(spec["runtimeActions"] == null
         ? {}
         : { runtimeActions: actionSet(definition.runtimeActions ?? []) }),
-      ...(teams === undefined ? {} : { teams }),
+      ...(team === undefined ? {} : { team }),
     },
   };
 }
 
-function parseTeams(value: unknown): Record<string, ObjectiveTeamSpec> | undefined {
+function parseTeam(value: unknown): string | ObjectiveTeamSpec | undefined {
   if (value === undefined || value === null) return undefined;
+  if (typeof value === "string") {
+    if (!value.trim()) throw new TagMessagingError(400, "spec.team must name a Team");
+    return value.trim();
+  }
   if (!isRecord(value))
     throw new TagMessagingError(
       400,
-      "spec.teams must map Team names to lead, members, and an optional maxConcurrency",
+      "spec.team must name an existing Team, or be a map with members and optional name and maxConcurrency",
     );
-  const teams: Record<string, ObjectiveTeamSpec> = {};
-  for (const [key, team] of Object.entries(value)) {
-    const field = `spec.teams.${key}`;
-    if (!TEAM_KEY.test(key))
+  for (const field of Object.keys(value))
+    if (!(TEAM_FIELDS as readonly string[]).includes(field))
       throw new TagMessagingError(
         400,
-        `${field}: Team names use 1-63 lowercase letters, digits, hyphens, or underscores`,
+        `spec.team.${field} is not a Team field; expected ${TEAM_FIELDS.join(", ")}`,
       );
-    if (key === LEADERSHIP_TEAM)
-      throw new TagMessagingError(
-        400,
-        `${field}: leadership is the owner's own Team, formed when the Objective starts; choose another name`,
-      );
-    if (!isRecord(team))
-      throw new TagMessagingError(400, `${field} must be a map with lead and members`);
-    for (const name of Object.keys(team))
-      if (!(TEAM_FIELDS as readonly string[]).includes(name))
-        throw new TagMessagingError(
-          400,
-          `${field}.${name} is not a Team field; expected ${TEAM_FIELDS.join(", ")}`,
-        );
-    const lead = team["lead"];
-    if (typeof lead !== "string" || !lead.trim())
-      throw new TagMessagingError(400, `${field}.lead is required: the lead Tag's name`);
-    const members = team["members"] ?? [];
-    if (
-      !Array.isArray(members) ||
-      members.length > 100 ||
-      members.some((member) => typeof member !== "string" || !member.trim())
-    )
-      throw new TagMessagingError(400, `${field}.members must be a list of Tag names`);
-    const concurrency = team["maxConcurrency"];
-    if (
-      concurrency !== undefined &&
-      concurrency !== null &&
-      (!Number.isSafeInteger(concurrency) ||
-        (concurrency as number) < 1 ||
-        (concurrency as number) > 1000)
-    )
-      throw new TagMessagingError(400, `${field}.maxConcurrency must be an integer from 1 to 1000`);
-    teams[key] = {
-      lead: lead.trim(),
-      members: memberNames(
-        lead.trim(),
-        (members as string[]).map((member) => member.trim()),
-      ),
-      ...(concurrency === undefined || concurrency === null
-        ? {}
-        : { maxConcurrency: concurrency as number }),
-    };
-  }
-  return teams;
+  const name = value["name"];
+  if (
+    name !== undefined &&
+    (typeof name !== "string" || !name.trim() || name.trim().length > 200 || /\p{Cc}/u.test(name))
+  )
+    throw new TagMessagingError(400, "spec.team.name must contain 1–200 characters");
+  const members = value["members"];
+  if (
+    !Array.isArray(members) ||
+    members.length === 0 ||
+    members.length > TEAM_MAX_MEMBERS ||
+    members.some((member) => typeof member !== "string" || !member.trim())
+  )
+    throw new TagMessagingError(400, `spec.team.members must list 1–${TEAM_MAX_MEMBERS} Tag names`);
+  const concurrency = value["maxConcurrency"];
+  if (
+    concurrency !== undefined &&
+    concurrency !== null &&
+    (!Number.isSafeInteger(concurrency) ||
+      (concurrency as number) < 1 ||
+      (concurrency as number) > 1000)
+  )
+    throw new TagMessagingError(400, "spec.team.maxConcurrency must be an integer from 1 to 1000");
+  return {
+    ...(typeof name === "string" ? { name: name.trim() } : {}),
+    members: memberNames((members as string[]).map((member) => member.trim())),
+    ...(concurrency === undefined || concurrency === null
+      ? {}
+      : { maxConcurrency: concurrency as number }),
+  };
 }
 
-/** Members other than the lead, sorted and distinct; the lead is always a member. */
-function memberNames(lead: string, members: readonly string[]): string[] {
-  return [...new Set(members)].filter((member) => member !== lead).toSorted();
+function memberNames(members: readonly string[]): string[] {
+  return [...new Set(members)].toSorted();
 }
 
 function actionSet(actions: readonly string[]): string[] {
@@ -272,34 +256,47 @@ function dateText(value: unknown): unknown {
   return value instanceof Date ? value.toISOString() : value;
 }
 
-/** The Team ID of a declared Team: Team IDs are global, so each is scoped to its Objective. */
-export function declaredTeamId(objectiveId: string, key: string): string {
-  return `${objectiveId}:${key}`;
+/** The Team an Objective names, or undefined when it names none or the Team is gone. */
+async function objectiveTeam(store: Store, objective: Objective): Promise<Team | undefined> {
+  return objective.teamId === null ? undefined : store.getTeam(objective.teamId);
 }
 
-/** The stored Objective in manifest form, with its declarable Teams. */
+/** A Team by name or ID. */
+async function findTeam(store: Store, nameOrId: string): Promise<Team | undefined> {
+  return (
+    (await store.getTeam(nameOrId)) ??
+    (await store.listTeams()).find((team) => team.name === nameOrId)
+  );
+}
+
+/** The manifest form of a stored Team: inline when it is the Objective's own, else its name. */
+async function teamSpec(
+  store: Store,
+  objective: Objective,
+  team: Team,
+): Promise<string | ObjectiveTeamSpec> {
+  if (team.id !== objective.id) return team.name;
+  const members: string[] = [];
+  for (const id of team.memberTagIds) members.push((await store.findTagById(id))?.name ?? id);
+  return {
+    ...(team.name === objective.id ? {} : { name: team.name }),
+    members: memberNames(members),
+    ...(team.maxConcurrency === null ? {} : { maxConcurrency: team.maxConcurrency }),
+  };
+}
+
+/** The stored Objective in manifest form. */
 export async function objectiveManifestSpec(
   store: Store,
   objective: Objective,
-): Promise<ObjectiveManifestSpec & { readonly teams: Record<string, ObjectiveTeamSpec> }> {
+): Promise<ObjectiveManifestSpec> {
   const tagName = async (id: string) => (await store.findTagById(id))?.name ?? id;
-  const teams: Record<string, ObjectiveTeamSpec> = {};
-  for (const team of await declarableTeams(store, objective.id)) {
-    const lead = await tagName(team.leadTagId);
-    const members: string[] = [];
-    for (const id of team.memberTagIds) members.push(await tagName(id));
-    teams[team.id.slice(objective.id.length + 1)] = {
-      lead,
-      members: memberNames(lead, members),
-      ...(team.maxConcurrency === null ? {} : { maxConcurrency: team.maxConcurrency }),
-    };
-  }
+  const team = await objectiveTeam(store, objective);
   return {
     owner: await tagName(objective.ownerTagId),
     outcome: objective.outcome,
     ongoing: objective.ongoing === true,
     workspaces: [...(objective.workspaces ?? [])],
-    observe: (objective.observations ?? []).map((source) => source.workstreamId),
     ...(objective.budgetLimitMinor == null
       ? {}
       : {
@@ -310,21 +307,8 @@ export async function objectiveManifestSpec(
         }),
     ...(objective.deadline == null ? {} : { deadline: objective.deadline }),
     runtimeActions: actionSet(objective.runtimeActions ?? []),
-    teams,
+    ...(team === undefined ? {} : { team: await teamSpec(store, objective, team) }),
   };
-}
-
-/** Active Teams of an Objective whose IDs follow the declared form `OBJECTIVE:NAME`. */
-async function declarableTeams(store: Store, objectiveId: string): Promise<readonly Team[]> {
-  const prefix = `${objectiveId}:`;
-  return (await store.listTeams(objectiveId)).filter(
-    (team) =>
-      team.status === "active" &&
-      team.objectiveId === objectiveId &&
-      team.id.startsWith(prefix) &&
-      TEAM_KEY.test(team.id.slice(prefix.length)) &&
-      team.id.slice(prefix.length) !== LEADERSHIP_TEAM,
-  );
 }
 
 /** Plans one Objective manifest under field ownership without writing anything. */
@@ -373,23 +357,10 @@ export async function planObjectiveManifest(
     for (const change of managed.merge.changes) {
       const reason = closed
         ? `Objective ${objective.id} is completed and cannot change; give the declaration a new name to create a new Objective`
-        : changeRefusal(change, current, objective, input.name);
+        : changeRefusal(change, current, input.name);
       if (reason !== undefined) refusals.push({ path: change.path, reason });
     }
-    for (const change of managed.merge.changes) {
-      const key = teamKey(change.path);
-      if (key === undefined || change.action !== "add" || closed) continue;
-      const prior = await store.getTeam(declaredTeamId(objective.id, key)).catch(() => undefined);
-      if (prior !== undefined)
-        refusals.push({
-          path: change.path,
-          reason:
-            prior.status === "dissolved"
-              ? `Team ${prior.id} was dissolved, and dissolved Teams cannot return; give the Team a new name`
-              : `Team ${prior.id} exists but is not declarable here; give the Team a new name`,
-        });
-    }
-  }
+  } else refusals.push(...(await newTeamRefusals(store, input.name, input.spec.team)));
   return {
     name: input.name,
     ...(objective === undefined ? {} : { objective }),
@@ -441,11 +412,11 @@ function specOf(changes: readonly FieldChange[]): Record<string, unknown> {
 function changeRefusal(
   change: FieldChange,
   current: ObjectiveManifestSpec,
-  objective: Objective,
   name: string,
 ): string | undefined {
   const field = change.path.slice("spec.".length);
   if (isFixedPath(change.path)) return fixedReason(field, name);
+  if (field === "team") return teamChangeRefusal(change, name);
   if (field === "budget") {
     const before = current.budget;
     const after = change.after as ObjectiveManifestSpec["budget"];
@@ -453,11 +424,7 @@ function changeRefusal(
       return "an Objective created without a budget cannot gain one; give the declaration a new name to create a new Objective";
     if ((after?.currency ?? null) !== (before.currency ?? null))
       return "a budget's currency cannot change";
-    if (
-      after === undefined ||
-      after.minor <= before.minor ||
-      after.minor < objective.spentMinor + objective.reservedMinor
-    )
+    if (after === undefined || after.minor <= before.minor)
       return `a budget can only increase above its current limit, ${before.currency ? money(before.minor, before.currency) : `${before.minor} allocation units`}`;
   }
   return undefined;
@@ -478,8 +445,59 @@ function fixedConflictsRefused(plan: ManagedPlan): ManagedPlan {
     : { ...plan, merge: { ...plan.merge, conflicts } };
 }
 
-function teamKey(path: string): string | undefined {
-  return /^spec\.teams\[(.+)\]$/su.exec(path)?.[1];
+/**
+ * The Team an Objective names is fixed; only its own declared Team's name, members, and limit
+ * change in place.
+ */
+function teamChangeRefusal(change: FieldChange, name: string): string | undefined {
+  if (change.action === "change" && isRecord(change.before) && isRecord(change.after))
+    return undefined;
+  return change.action === "add"
+    ? "an Objective created without a Team cannot gain one; give the declaration a new name to create a new Objective"
+    : fixedReason("team", name);
+}
+
+/** Why a new Objective's `team` cannot be created as declared, if it cannot. */
+async function newTeamRefusals(
+  store: Store,
+  objectiveId: string,
+  team: ObjectiveManifestSpec["team"],
+): Promise<ObjectiveRefusal[]> {
+  if (team === undefined) return [];
+  if (typeof team === "string")
+    return (await findTeam(store, team)) === undefined
+      ? [
+          {
+            path: "spec.team",
+            reason: `Team ${team} does not exist; create it with supertag create team ${team} --member TAG, or declare the Team in place`,
+          },
+        ]
+      : [];
+  const name = team.name ?? objectiveId;
+  const own = await store.getTeam(objectiveId);
+  const named = (await store.listTeams()).find((candidate) => candidate.name === name);
+  if (named !== undefined && named.id !== objectiveId)
+    return [
+      {
+        path: "spec.team",
+        reason: `a Team named ${name} already exists; name it with team: ${name} to work with it, or give the declared Team another name`,
+      },
+    ];
+  if (own === undefined) return [];
+  // A Team left by an earlier apply that stopped before creating the Objective is resumed.
+  const members = await Promise.all(
+    own.memberTagIds.map(async (id) => (await store.findTagById(id))?.name ?? id),
+  );
+  return own.name === name &&
+    sameValue(memberNames(members), team.members) &&
+    own.maxConcurrency === (team.maxConcurrency ?? null)
+    ? []
+    : [
+        {
+          path: "spec.team",
+          reason: `Team ${objectiveId} already exists with other members; give the declaration a new name to create a new Objective`,
+        },
+      ];
 }
 
 /** The machine-readable plan for a dry run. */
@@ -505,7 +523,8 @@ export interface ObjectiveApplyResult {
   readonly objective: Objective;
   readonly created: boolean;
   readonly warnings: readonly string[];
-  readonly started?: { readonly taskId: string; readonly teamId: string };
+  /** The Objective's first turn, when apply started it. */
+  readonly started?: { readonly taskId: string };
   readonly notStarted?: string;
 }
 
@@ -525,18 +544,15 @@ export interface ObjectiveApplyDependencies {
       readonly runtimeActions?: readonly string[];
     },
   ) => Promise<{ readonly objective: Objective; readonly warnings: readonly string[] }>;
-  readonly start: (
-    objective: Objective,
-  ) => Promise<{ readonly taskId: string; readonly teamId: string }>;
+  /** Admits the Objective's first turn. */
+  readonly start: (objective: Objective) => Promise<{ readonly taskId: string }>;
   readonly runnable?: (objective: Objective) => Promise<{ readonly reasons: readonly string[] }>;
-  readonly createTeam: (input: Record<string, unknown>) => Promise<unknown>;
-  readonly updateTeam: (input: Record<string, unknown>) => Promise<unknown>;
 }
 
 /**
- * Carries out a plan with no refusals or conflicts: creates or updates the Objective, starts its
- * owner when the plan says so, then creates and updates declared Teams before dissolving the
- * ones the input dropped. A failure stops the write; applying again resumes it.
+ * Carries out a plan with no refusals or conflicts: creates the declared Team and the Objective,
+ * or updates them, then starts the Objective when the plan says so. A failure stops the write;
+ * applying again resumes it.
  */
 export async function applyObjectiveManifest(
   dependencies: ObjectiveApplyDependencies,
@@ -546,22 +562,36 @@ export async function applyObjectiveManifest(
   const spec = plan.managed.spec as ObjectiveManifestSpec;
   const tagId = async (name: string, field: string) => {
     const tag = await store.findTagByName(name);
-    if (!tag) throw new TagMessagingError(400, `${field}: Tag ${name} does not exist`);
+    if (tag?.status !== "active")
+      throw new TagMessagingError(400, `${field}: Tag ${name} does not exist`);
     return tag.id;
   };
+  const memberIds = (team: ObjectiveTeamSpec) =>
+    Promise.all(team.members.map((name) => tagId(name, "spec.team.members")));
   let objective = plan.objective;
   const warnings: string[] = [];
   let created = false;
   if (objective === undefined) {
+    let teamId: string | undefined;
+    if (typeof spec.team === "string") teamId = (await findTeam(store, spec.team))?.id;
+    else if (spec.team !== undefined) {
+      teamId = plan.name;
+      if ((await store.getTeam(plan.name)) === undefined)
+        await store.createTeam({
+          id: plan.name,
+          name: spec.team.name ?? plan.name,
+          memberTagIds: await memberIds(spec.team),
+          ...(spec.team.maxConcurrency === undefined
+            ? {}
+            : { maxConcurrency: spec.team.maxConcurrency }),
+        });
+    }
     const result = await dependencies.create(
       {
         id: plan.name,
         outcome: spec.outcome,
         ...(spec.ongoing === undefined ? {} : { ongoing: spec.ongoing }),
         ...(spec.workspaces === undefined ? {} : { workspaces: spec.workspaces }),
-        ...(spec.observe === undefined
-          ? {}
-          : { observations: spec.observe.map((workstreamId) => ({ workstreamId })) }),
         ...(spec.budget === undefined
           ? {}
           : {
@@ -572,6 +602,7 @@ export async function applyObjectiveManifest(
             }),
         ...(spec.deadline === undefined ? {} : { deadline: spec.deadline }),
         ...(spec.runtimeActions === undefined ? {} : { runtimeActions: spec.runtimeActions }),
+        ...(teamId === undefined ? {} : { teamId }),
       },
       await tagId(spec.owner ?? "", "spec.owner"),
     );
@@ -591,6 +622,19 @@ export async function applyObjectiveManifest(
         change.budgetLimitMinor = (item.after as { minor: number }).minor;
       if (item.path === "spec.runtimeActions")
         change.runtimeActions = item.after as readonly string[];
+      if (item.path === "spec.team" && objective.teamId !== null) {
+        const team = item.after as ObjectiveTeamSpec;
+        const current = await store.getTeam(objective.teamId);
+        if (current === undefined)
+          throw new TagMessagingError(409, `Team ${objective.teamId} no longer exists`);
+        await store.updateTeam(current.id, {
+          expectedRevision: current.revision,
+          name: team.name ?? objective.id,
+          memberTagIds: await memberIds(team),
+          // A manifest that stops setting the limit removes it.
+          maxConcurrency: team.maxConcurrency ?? null,
+        });
+      }
     }
     if (Object.keys(change).length > 0) {
       const result = await dependencies.update(objective, change);
@@ -609,7 +653,6 @@ export async function applyObjectiveManifest(
       if (!(error instanceof TagMessagingError)) throw error;
       notStarted = error.message;
     }
-  await reconcileTeams(dependencies, objective, plan.managed, tagId);
   return {
     objective,
     created,
@@ -617,64 +660,6 @@ export async function applyObjectiveManifest(
     ...(started === undefined ? {} : { started }),
     ...(notStarted === undefined ? {} : { notStarted }),
   };
-}
-
-async function reconcileTeams(
-  dependencies: ObjectiveApplyDependencies,
-  objective: Objective,
-  plan: ManagedPlan,
-  tagId: (name: string, field: string) => Promise<string>,
-): Promise<void> {
-  const changes = plan.merge.changes.filter((change) => teamKey(change.path) !== undefined);
-  const members = async (key: string, team: ObjectiveTeamSpec) => ({
-    leadTagId: await tagId(team.lead, `spec.teams.${key}.lead`),
-    memberTagIds: await Promise.all(
-      team.members.map((name) => tagId(name, `spec.teams.${key}.members`)),
-    ),
-  });
-  const current = async (id: string) =>
-    (await dependencies.store.getTeam(id)) as { readonly revision: number };
-  // Creating and updating first leaves room for work to move before any Team dissolves.
-  for (const change of changes.filter((item) => item.action !== "remove")) {
-    const key = teamKey(change.path) as string;
-    const team = change.after as ObjectiveTeamSpec;
-    const id = declaredTeamId(objective.id, key);
-    if (change.action === "add")
-      await dependencies.createTeam({
-        objectiveId: objective.id,
-        id,
-        name: key,
-        ...(await members(key, team)),
-        ...(team.maxConcurrency === undefined ? {} : { maxConcurrency: team.maxConcurrency }),
-      });
-    else
-      await dependencies.updateTeam({
-        objectiveId: objective.id,
-        teamId: id,
-        expectedRevision: (await current(id)).revision,
-        ...(await members(key, team)),
-        // A manifest that stops setting a throttle removes it.
-        maxConcurrency: team.maxConcurrency ?? null,
-      });
-  }
-  for (const change of changes.filter((item) => item.action === "remove")) {
-    const id = declaredTeamId(objective.id, teamKey(change.path) as string);
-    const team = await dependencies.store.getTeam(id).catch(() => undefined);
-    if (team === undefined || team.status === "dissolved") continue;
-    try {
-      await dependencies.updateTeam({
-        objectiveId: objective.id,
-        teamId: id,
-        expectedRevision: team.revision,
-        status: "dissolved",
-      });
-    } catch (error) {
-      throw new TagMessagingError(
-        error instanceof TagMessagingError ? error.statusCode : 409,
-        `Team ${id} left the input but could not be dissolved: ${error instanceof Error ? error.message : String(error)}. Apply again once that is resolved`,
-      );
-    }
-  }
 }
 
 /** The stored Objective as a resource: its manifest spec and observed status. */

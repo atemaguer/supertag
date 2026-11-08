@@ -1094,8 +1094,6 @@ export async function* runClaudeCode(
         connection,
       );
     }
-    // Live background subagents and commands, replaced by each background_tasks_changed message.
-    const backgroundTasks = new Map<string, string>();
     executionBridge = splitExecution
       ? createClaudeSplitExecutionBridge(request, executionEnvironment, controller.signal)
       : undefined;
@@ -1154,21 +1152,6 @@ export async function* runClaudeCode(
                       hookEventName: "PreToolUse",
                       permissionDecision: "deny",
                       permissionDecisionReason: "This MCP connection belongs to the root agent.",
-                    },
-                  };
-                // A durable wait or escalation stops this Attempt, which discards the process's background
-                // subagents and commands. Refuse it until they finish or are stopped.
-                if (
-                  hook.hook_event_name === "PreToolUse" &&
-                  !hook.agent_id &&
-                  /^mcp__.+__(wait_for|escalate_task)$/.test(hook.tool_name) &&
-                  backgroundTasks.size > 0
-                )
-                  return {
-                    hookSpecificOutput: {
-                      hookEventName: "PreToolUse",
-                      permissionDecision: "deny",
-                      permissionDecisionReason: `${hook.tool_name.replace(/^mcp__.+__/u, "")} would stop this Attempt and discard ${backgroundTasks.size} running background task(s): ${[...backgroundTasks.values()].join("; ")}. Wait for their results in this session, or stop them first. Use SuperTag Tasks for work that must outlive this Attempt.`,
                     },
                   };
                 return {};
@@ -1246,11 +1229,6 @@ export async function* runClaudeCode(
           if (finalSeen) mirrorFailedAfterFinal = true;
           else mirrorFailed = true;
           continue;
-        }
-        if (message.type === "system" && message.subtype === "background_tasks_changed") {
-          backgroundTasks.clear();
-          for (const task of message.tasks)
-            if (!task.ambient) backgroundTasks.set(task.task_id, task.description);
         }
         const messageSessionId = claudeMessageSessionId(message);
         if (messageSessionId !== undefined && sessionId !== messageSessionId) {

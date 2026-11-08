@@ -48,20 +48,14 @@ export interface SessionStatePersistence {
   }): Promise<void>;
 }
 
-/** The digest owns input that may be re-sent; its native transcript must not resume. */
+/** Whether a Session's native transcript may resume after input: not when the input was withdrawn. */
 export function canResumeSessionAfterInput(
   taskId: string,
   attemptId: string,
   events: readonly { type: string; taskId: string; attemptId?: string | null }[],
-  hasUnconfirmedDelivery: boolean,
 ): boolean {
-  return (
-    !hasUnconfirmedDelivery &&
-    !events.some(
-      (event) =>
-        event.type === "input.withdrawn" &&
-        event.taskId === taskId &&
-        event.attemptId === attemptId,
-    )
+  return !events.some(
+    (event) =>
+      event.type === "input.withdrawn" && event.taskId === taskId && event.attemptId === attemptId,
   );
 }

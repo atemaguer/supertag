@@ -2,40 +2,32 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/atemaguer/supertag/main/spec/team.schema.json",
   "title": "Team",
+  "description": "A configured set of Tags. Members may message one another and share the Team's Workstream; an Objective that names the Team may hand work to its members. Any number of Objectives may name one Team.",
   "type": "object",
   "required": [
     "id",
-    "objectiveId",
     "name",
-    "leadTagId",
     "memberTagIds",
-    "parentTeamId",
     "maxConcurrency",
-    "status",
     "revision",
     "createdAt",
     "updatedAt"
   ],
   "properties": {
-    "id": { "type": "string", "minLength": 1 },
-    "objectiveId": { "type": "string", "minLength": 1 },
+    "id": { "type": "string", "minLength": 1, "maxLength": 200 },
     "name": { "type": "string", "minLength": 1, "maxLength": 200 },
-    "leadTagId": { "type": "string", "minLength": 1 },
     "memberTagIds": {
       "type": "array",
       "items": { "type": "string", "minLength": 1 },
-      "minItems": 1,
       "maxItems": 100,
       "uniqueItems": true
     },
-    "parentTeamId": { "type": ["string", "null"] },
     "maxConcurrency": {
-      "description": "Optional throttle on running Task Attempts of this Team's own members; null means Worker Host capacity is the only limit.",
+      "description": "Turns that may run at once across the Sessions of every open Objective naming this Team; null means Worker Host capacity is the only limit.",
       "type": ["integer", "null"],
       "minimum": 1,
       "maximum": 1000
     },
-    "status": { "enum": ["active", "dissolved"] },
     "revision": { "type": "integer", "minimum": 1 },
     "createdAt": { "type": "string", "format": "date-time" },
     "updatedAt": { "type": "string", "format": "date-time" }

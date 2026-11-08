@@ -38,7 +38,7 @@ export function verifyArtifactOrganizationEvidence(input: {
     acquisitions = state["acquisitions"] ?? [],
     attempts = state["attempts"] ?? [],
     tasks = state["tasks"] ?? [],
-    assignments = state["assignments"] ?? [];
+    sessions = state["sessions"] ?? [];
   assert(
     state["objectives"]?.some(
       (objective) => objective["ownerTagId"] === owner && objective["status"] === "completed",
@@ -52,13 +52,27 @@ export function verifyArtifactOrganizationEvidence(input: {
       ),
     "Organization still has unsettled Attempts",
   );
-  const acceptedReviews = assignments.filter(
-    (assignment) =>
-      assignment["assignedTagId"] === reviewer &&
-      assignment["requestedByTagId"] === owner &&
-      assignment["status"] === "accepted",
+  // The owner's conversation is its `objective:` Session; a review it delegated is a work Session
+  // of the reviewer started under it.
+  const own = new Set(
+    sessions
+      .filter(
+        (session) =>
+          session["tagId"] === owner && String(session["sessionKey"]).startsWith("objective:"),
+      )
+      .map((session) => session["id"]),
   );
-  assert(acceptedReviews.length, "Owner did not delegate and accept independent review");
+  const acceptedReviews = tasks
+    .filter(
+      (task) =>
+        task["tagId"] === reviewer &&
+        task["status"] === "completed" &&
+        sessions.some(
+          (session) => session["id"] === task["sessionId"] && own.has(session["parentSessionId"]),
+        ),
+    )
+    .map((task) => ({ taskId: task["id"] }));
+  assert(acceptedReviews.length, "Owner did not delegate an independent review that completed");
   assert(
     new Set(attempts.map(host).filter(textId)).size >= 2,
     "Organization did not execute on two known Worker Hosts",
@@ -116,7 +130,7 @@ export function verifyArtifactOrganizationEvidence(input: {
       "Missing bidirectional delivered artifacts between known distinct Worker Hosts",
     );
 
-  // Follow one actual source -> accepted review -> final artifact chain, rather than mixing retries.
+  // Follow one actual source -> completed review -> final artifact chain, rather than mixing retries.
   for (const sourceRead of delivered) {
     const source = artifacts.find((item) => item["id"] === sourceRead["artifactId"]);
     if (
@@ -195,6 +209,6 @@ export function verifyArtifactOrganizationEvidence(input: {
     }
   }
   assert.fail(
-    "No verified consumed-source nonce and native-session chain through accepted review to a subsequent final owner recommendation",
+    "No verified consumed-source nonce and native-session chain through a completed review to a subsequent final owner recommendation",
   );
 }

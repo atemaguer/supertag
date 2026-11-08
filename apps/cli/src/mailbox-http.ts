@@ -1,9 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import {
-  resolveOwnerObjectiveRuntimeActions,
-  TagMailboxService,
-  type TeamLiveDeliveryStarter,
-} from "@supertag/control-plane";
+import { resolveOwnerObjectiveRuntimeActions } from "@supertag/control-plane";
 import {
   generateObjectiveId,
   mailboxObject,
@@ -11,11 +7,21 @@ import {
   type Objective,
   objectiveClosed,
   parseCreateObjective,
+  parseCreateTeam,
   parseObjectiveStatus,
+  parseUpdateTeam,
   type Store,
   TagMessagingError,
-  type TaskAssignment,
+  type Team,
 } from "@supertag/core";
+
+/** What the operator routes need from a running Control Plane; omitted where none runs. */
+export interface MailboxAdminControlPlane {
+  /** Admission checks for creation warnings. */
+  readonly runnable: (objective: Objective) => Promise<{ readonly reasons: readonly string[] }>;
+  /** Admits the first turn of a new Objective's conversation. */
+  readonly start: (objective: Objective) => Promise<{ readonly taskId: string }>;
+}
 
 /** Called only after administrative authentication for /api/v1/tag-messaging routes. */
 export async function handleMailboxAdminRequest(
@@ -23,161 +29,60 @@ export async function handleMailboxAdminRequest(
   response: ServerResponse,
   url: URL,
   store: Store,
-  /** Admission checks for creation warnings; omitted where no Control Plane is running. */
-  runnable?: (objective: Objective) => Promise<{ readonly reasons: readonly string[] }>,
-  /** Starts the owner, as start_objective does; omitted where no Control Plane is running. */
-  start?: (objective: Objective) => Promise<TaskAssignment>,
+  controlPlane?: MailboxAdminControlPlane,
 ): Promise<void> {
   await guarded(response, async () => {
-    const service = new TagMailboxService(store);
     const route = url.pathname.slice("/api/v1/tag-messaging".length);
-    if (route === "/objectives" || route.startsWith("/objectives/")) {
-      if (route === "/objectives" && request.method === "POST") {
-        const record = mailboxObject(await readBody(request), [
-          "id",
-          "outcome",
-          "deadline",
-          "budgetLimitMinor",
-          "budgetCurrency",
-          "runtimeActions",
-          "ownerTagId",
-          "observations",
-          "ongoing",
-          "workspaces",
-          "start",
-        ]);
-        const { ownerTagId, start: startRequested, ...definition } = record;
-        if (startRequested !== undefined && typeof startRequested !== "boolean")
-          throw new TagMessagingError(400, "start must be boolean");
-        // Like Kubernetes generateName: an omitted ID comes from the outcome's first words.
-        if (definition["id"] === undefined && typeof definition["outcome"] === "string")
-          definition["id"] = generateObjectiveId(definition["outcome"]);
-        const dryRun = url.searchParams.get("dryRun") === "true";
-        const parsed = parseCreateObjective(definition);
-        const owner = mailboxText(ownerTagId, "ownerTagId");
-        // Runtime actions resolve once against the owner's Permission Sets and are frozen into the
-        // record. A retry without them returns the existing Objective, even if grants changed since.
-        const requested =
-          definition["runtimeActions"] === undefined ? undefined : parsed.runtimeActions;
-        const prior =
-          requested === undefined
-            ? await store.getObjective(parsed.id).catch(() => undefined)
-            : undefined;
-        const runtime = await resolveOwnerObjectiveRuntimeActions(store, {
-          objectiveId: parsed.id,
-          ownerTagId: owner,
-          ...(requested === undefined ? {} : { requested }),
-        });
-        const objective = await store.createObjective(
-          {
-            ...parsed,
-            runtimeActions:
-              prior?.ownerTagId === owner ? (prior.runtimeActions ?? []) : runtime.runtimeActions,
-            ownerTagId: owner,
-          },
-          { dryRun },
-        );
-        // Warnings name conditions that would hold the Objective's Tasks or limit what they may do;
-        // creation still succeeds.
-        const warnings =
-          objective.status === "completed"
-            ? []
-            : [
-                ...(prior ? [] : runtime.warnings),
-                ...(runnable ? (await runnable(objective)).reasons : []),
-              ];
-        // `start: true` also starts the owner. Starting is idempotent, so a retried create returns
-        // the existing start Task. A condition that prevents starting leaves the Objective created.
-        let started: { readonly taskId: string; readonly teamId: string } | undefined;
-        let notStarted: string | undefined;
-        if (startRequested === true && !dryRun && start && !objectiveClosed(objective.status)) {
-          try {
-            const task = await start(objective);
-            started = { taskId: task.taskId, teamId: task.teamId };
-          } catch (error) {
-            if (!(error instanceof TagMessagingError)) throw error;
-            notStarted = error.message;
-          }
-        }
-        respond(response, 200, {
-          ...objective,
-          warnings,
-          ...(started === undefined ? {} : { started }),
-          ...(notStarted === undefined ? {} : { notStarted }),
-          ...(dryRun ? { dryRun: true } : {}),
-        });
-      } else if (route === "/objectives" && request.method === "GET") {
-        respond(response, 200, {
-          items: await store.listObjectives(
-            url.searchParams.has("tagId")
-              ? mailboxText(url.searchParams.get("tagId"), "tagId")
-              : undefined,
-            url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 100,
-            url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0,
-          ),
-        });
-      } else {
-        const match = /^\/objectives\/([^/]+)$/u.exec(route);
-        if (!match) {
-          respond(response, 404, { error: "not_found" });
-          return;
-        }
-        const id = decodeURIComponent(match[1] ?? "");
-        if (request.method === "GET") respond(response, 200, await store.getObjective(id));
-        else if (request.method === "PATCH") {
-          const update = parseObjectiveStatus(await readBody(request));
-          if (update.runtimeActions === undefined)
-            respond(response, 200, await store.updateObjectiveStatus(id, update));
-          else {
-            // A new list is bounded by the owner's Permission Sets as they are now.
-            const current = await store.getObjective(id);
-            const runtime = await resolveOwnerObjectiveRuntimeActions(store, {
-              objectiveId: id,
-              ownerTagId: current.ownerTagId,
-              requested: update.runtimeActions,
-            });
-            const updated = await store.updateObjectiveStatus(id, {
-              ...update,
-              runtimeActions: runtime.runtimeActions,
-            });
-            respond(response, 200, { ...updated, warnings: runtime.warnings });
-          }
-        } else respond(response, 404, { error: "not_found" });
-      }
-    } else if (route === "/workstreams" || route.startsWith("/workstreams/")) {
-      const match = /^\/workstreams\/([^/]+)(\/posts)?$/u.exec(route);
-      if (route === "/workstreams" && request.method === "GET") {
-        respond(response, 200, {
-          items: await store.listWorkstreams(
-            url.searchParams.has("tagId")
-              ? mailboxText(url.searchParams.get("tagId"), "tagId")
-              : undefined,
-            url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 100,
-          ),
-        });
-      } else if (!match || request.method !== "GET") {
+    if (route === "/objectives" || route.startsWith("/objectives/"))
+      await objectives(request, response, url, route, store, controlPlane);
+    else if (route === "/teams" || route.startsWith("/teams/"))
+      await teams(request, response, url, route, store);
+    else if (route.startsWith("/workstreams/")) {
+      const match = /^\/workstreams\/([^/]+)\/posts$/u.exec(route);
+      if (!match || request.method !== "GET") {
         respond(response, 404, { error: "not_found" });
-      } else if (match[2] === "/posts") {
-        const id = decodeURIComponent(match[1] ?? "");
-        respond(response, 200, {
-          items: await store.listWorkstreamPosts(id, undefined, {
-            ...(url.searchParams.has("afterSequence")
-              ? { afterSequence: Number(url.searchParams.get("afterSequence")) }
-              : {}),
-            ...(url.searchParams.has("limit")
-              ? { limit: Number(url.searchParams.get("limit")) }
-              : {}),
-          }),
-        });
-      } else {
-        respond(response, 200, await store.getWorkstream(decodeURIComponent(match[1] ?? "")));
+        return;
       }
-    } else if (request.method === "GET" && route === "/history") {
+      const team = await findTeam(store, decodeURIComponent(match[1] ?? ""));
+      respond(response, 200, {
+        items: await store.listTeamPosts(team.id, {
+          ...integerQuery(url, "afterSequence"),
+          ...integerQuery(url, "limit"),
+        }),
+      });
+    } else if (route === "/grants") {
+      if (request.method === "GET") {
+        respond(response, 200, {
+          items: await store.listTagMessagingGrants(
+            mailboxText(url.searchParams.get("tagId"), "tagId"),
+          ),
+        });
+        return;
+      }
+      if (request.method !== "PUT" && request.method !== "DELETE") {
+        respond(response, 404, { error: "not_found" });
+        return;
+      }
+      const grant = mailboxObject(await readBody(request), ["senderTagId", "recipientTagId"]);
+      const senderTagId = mailboxText(grant["senderTagId"], "senderTagId");
+      const recipientTagId = mailboxText(grant["recipientTagId"], "recipientTagId");
+      const senders = new Set(
+        (await store.listTagMessagingGrants(recipientTagId))
+          .filter((existing) => existing.recipientTagId === recipientTagId)
+          .map((existing) => existing.senderTagId),
+      );
+      const changed =
+        request.method === "PUT" ? !senders.has(senderTagId) : senders.has(senderTagId);
+      if (request.method === "PUT") senders.add(senderTagId);
+      else senders.delete(senderTagId);
+      if (changed) await store.setTagMessagingGrants(recipientTagId, [...senders].toSorted());
+      respond(response, 200, { senderTagId, recipientTagId, changed });
+    } else if (request.method === "GET" && route === "/messages") {
       for (const key of url.searchParams.keys())
         if (!["tagId", "beforeCreatedAt", "beforeId", "limit"].includes(key))
-          throw new TagMessagingError(400, "Unknown history query field");
+          throw new TagMessagingError(400, "Unknown message query field");
       if (url.searchParams.has("beforeCreatedAt") !== url.searchParams.has("beforeId"))
-        throw new TagMessagingError(400, "History cursor requires beforeCreatedAt and beforeId");
+        throw new TagMessagingError(400, "A message cursor requires beforeCreatedAt and beforeId");
       respond(
         response,
         200,
@@ -193,132 +98,190 @@ export async function handleMailboxAdminRequest(
                 },
               }
             : {}),
-          ...(url.searchParams.has("limit")
-            ? { limit: Number(url.searchParams.get("limit")) }
-            : {}),
+          ...integerQuery(url, "limit"),
         }),
       );
-    } else if (request.method === "POST" && route === "/retention") {
-      const input = mailboxObject(await readBody(request), ["before", "limit"]);
-      respond(
-        response,
-        200,
-        await store.pruneTagMessageBodies({
-          before: mailboxText(input["before"], "before"),
-          ...(input["limit"] === undefined ? {} : { limit: input["limit"] as number }),
-        }),
-      );
-    } else if (request.method === "POST" && route === "/credentials") {
-      const body = mailboxObject(await readBody(request), ["tagId"]);
-      respond(response, 201, await service.issueCredential(mailboxText(body["tagId"], "tagId")));
-    } else if (request.method === "DELETE" && /^\/credentials\/[^/]+$/u.test(route)) {
-      const removed = await store.revokeTagMailboxCredential(
-        decodeURIComponent(route.slice("/credentials/".length)),
-      );
-      respond(response, removed ? 200 : 404, { revoked: removed });
-    } else if (request.method === "PUT" && route === "/grants") {
-      await service.setGrant(await readBody(request));
-      respond(response, 200, { ok: true });
-    } else if (request.method === "GET" && (route === "/messages" || route === "/grants")) {
-      const tagId = mailboxText(url.searchParams.get("tagId"), "tagId");
-      respond(response, 200, {
-        items:
-          route === "/messages"
-            ? await store.listTagMessages(
-                tagId,
-                url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 100,
-              )
-            : await store.listTagMessagingGrants(tagId),
-      });
     } else {
       respond(response, 404, { error: "not_found" });
     }
   });
 }
 
-export async function handleMailboxRequest(
+async function objectives(
   request: IncomingMessage,
   response: ServerResponse,
   url: URL,
+  route: string,
   store: Store,
-  /** The Control Plane's live delivery of posts and messages to running teammates. */
-  live?: TeamLiveDeliveryStarter,
+  controlPlane: MailboxAdminControlPlane | undefined,
 ): Promise<void> {
-  await guarded(response, async () => {
-    const service = new TagMailboxService(store, live);
-    const auth = request.headers.authorization;
-    const token = auth?.startsWith("Bearer ") ? auth.slice(7) : undefined;
-    // Authenticate before reading a body or disclosing endpoint details.
-    await service.authenticate(token);
-    if (request.method !== "POST") {
-      respond(response, 404, { error: "not_found" });
-      return;
-    }
-    const route = url.pathname.slice("/internal/v1/mailbox".length);
-    const body = await readBody(request);
-    if (route === "/objectives/create") {
-      respond(response, 200, await service.createObjective(token, body));
-    } else if (route === "/objectives/list") {
-      respond(response, 200, { items: await service.listObjectives(token, body) });
-    } else if (route.startsWith("/objectives/")) {
-      const match = /^\/objectives\/([^/]+)\/(get|status)$/u.exec(route);
-      if (!match) {
-        respond(response, 404, { error: "not_found" });
-        return;
-      }
-      const id = decodeURIComponent(match[1] ?? "");
-      if (match[2] === "get") {
-        mailboxObject(body, []);
-        respond(response, 200, await service.getObjective(token, id));
-      } else respond(response, 200, await service.updateObjectiveStatus(token, id, body));
-    } else if (route === "/workstreams/list") {
-      respond(response, 200, { items: await service.listWorkstreams(token, body) });
-    } else if (route.startsWith("/workstreams/")) {
-      const match = /^\/workstreams\/([^/]+)\/(get|posts\/create|posts\/list)$/u.exec(route);
-      if (!match) {
-        respond(response, 404, { error: "not_found" });
-        return;
-      }
-      const id = decodeURIComponent(match[1] ?? "");
-      if (match[2] === "get") {
-        mailboxObject(body, []);
-        respond(response, 200, await service.getWorkstream(token, id));
-      } else if (match[2] === "posts/create") {
-        respond(response, 200, await service.postWorkstream(token, id, body));
-      } else {
-        respond(response, 200, { items: await service.listWorkstreamPosts(token, id, body) });
-      }
-    } else if (route === "/history") {
-      respond(response, 200, await service.history(token, body));
-    } else if (route === "/send") {
-      const result = await service.send(token, body);
-      respond(response, result.duplicate ? 200 : 201, result);
-    } else if (route === "/receive") {
-      const controller = new AbortController();
-      const abort = () => controller.abort();
-      response.once("close", abort);
+  if (route === "/objectives" && request.method === "POST") {
+    const record = mailboxObject(await readBody(request), [
+      "id",
+      "outcome",
+      "deadline",
+      "budgetLimitMinor",
+      "budgetCurrency",
+      "runtimeActions",
+      "ownerTagId",
+      "teamId",
+      "ongoing",
+      "workspaces",
+    ]);
+    const { ownerTagId, ...definition } = record;
+    // Like Kubernetes generateName: an omitted ID comes from the outcome's first words.
+    if (definition["id"] === undefined && typeof definition["outcome"] === "string")
+      definition["id"] = generateObjectiveId(definition["outcome"]);
+    const dryRun = url.searchParams.get("dryRun") === "true";
+    const parsed = parseCreateObjective(definition);
+    const owner = mailboxText(ownerTagId, "ownerTagId");
+    // Runtime actions resolve once against the owner's Permission Sets and are frozen into the
+    // record. A retry without them returns the existing Objective, even if grants changed since.
+    const requested =
+      definition["runtimeActions"] === undefined ? undefined : parsed.runtimeActions;
+    const prior =
+      requested === undefined
+        ? await store.getObjective(parsed.id).catch(() => undefined)
+        : undefined;
+    const runtime = await resolveOwnerObjectiveRuntimeActions(store, {
+      objectiveId: parsed.id,
+      ownerTagId: owner,
+      ...(requested === undefined ? {} : { requested }),
+    });
+    const objective = await store.createObjective(
+      {
+        ...parsed,
+        runtimeActions:
+          prior?.ownerTagId === owner ? (prior.runtimeActions ?? []) : runtime.runtimeActions,
+        ownerTagId: owner,
+      },
+      { dryRun },
+    );
+    // Warnings name conditions that would hold the Objective's Tasks or limit what they may do;
+    // creation still succeeds.
+    const warnings =
+      objective.status === "completed"
+        ? []
+        : [
+            ...(prior ? [] : runtime.warnings),
+            ...(controlPlane ? (await controlPlane.runnable(objective)).reasons : []),
+          ];
+    // Creating starts the Objective's conversation. Starting is idempotent, so a retried create
+    // returns the same first Task. A condition that prevents starting leaves the Objective created.
+    let started: { readonly taskId: string } | undefined;
+    let notStarted: string | undefined;
+    if (!dryRun && controlPlane && !objectiveClosed(objective.status)) {
       try {
-        const delivery = await service.receive(token, body, controller.signal);
-        respond(response, 200, { delivery: delivery ?? null });
-      } finally {
-        response.off("close", abort);
+        started = { taskId: (await controlPlane.start(objective)).taskId };
+      } catch (error) {
+        if (!(error instanceof TagMessagingError)) throw error;
+        notStarted = error.message;
       }
-    } else {
-      const match = /^\/messages\/([^/]+)\/(ack|release|renew)$/u.exec(route);
-      if (!match) {
-        respond(response, 404, { error: "not_found" });
-        return;
-      }
-      await service.settle(
-        token,
-        decodeURIComponent(match[1] ?? ""),
-        match[2] as "ack" | "release" | "renew",
-        body,
-      );
-      respond(response, 200, { ok: true });
     }
-  });
+    respond(response, 200, {
+      ...objective,
+      warnings,
+      ...(started === undefined ? {} : { started }),
+      ...(notStarted === undefined ? {} : { notStarted }),
+      ...(dryRun ? { dryRun: true } : {}),
+    });
+    return;
+  }
+  if (route === "/objectives" && request.method === "GET") {
+    respond(response, 200, {
+      items: await store.listObjectives(
+        url.searchParams.has("tagId")
+          ? mailboxText(url.searchParams.get("tagId"), "tagId")
+          : undefined,
+        url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 100,
+        url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0,
+      ),
+    });
+    return;
+  }
+  const match = /^\/objectives\/([^/]+)$/u.exec(route);
+  if (!match) {
+    respond(response, 404, { error: "not_found" });
+    return;
+  }
+  const id = decodeURIComponent(match[1] ?? "");
+  if (request.method === "GET") respond(response, 200, await store.getObjective(id));
+  else if (request.method === "PATCH") {
+    const update = parseObjectiveStatus(await readBody(request));
+    if (update.runtimeActions === undefined)
+      respond(response, 200, await store.updateObjectiveStatus(id, update));
+    else {
+      // A new list is bounded by the owner's Permission Sets as they are now.
+      const current = await store.getObjective(id);
+      const runtime = await resolveOwnerObjectiveRuntimeActions(store, {
+        objectiveId: id,
+        ownerTagId: current.ownerTagId,
+        requested: update.runtimeActions,
+      });
+      const updated = await store.updateObjectiveStatus(id, {
+        ...update,
+        runtimeActions: runtime.runtimeActions,
+      });
+      respond(response, 200, { ...updated, warnings: runtime.warnings });
+    }
+  } else respond(response, 404, { error: "not_found" });
 }
+
+async function teams(
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+  route: string,
+  store: Store,
+): Promise<void> {
+  if (route === "/teams") {
+    if (request.method === "GET") {
+      for (const key of url.searchParams.keys())
+        if (key !== "tagId") throw new TagMessagingError(400, "Unknown Team query field");
+      respond(response, 200, {
+        items: url.searchParams.has("tagId")
+          ? await store.listTeamsOfTag(mailboxText(url.searchParams.get("tagId"), "tagId"))
+          : await store.listTeams(),
+      });
+    } else if (request.method === "POST")
+      respond(response, 201, await store.createTeam(parseCreateTeam(await readBody(request))));
+    else respond(response, 404, { error: "not_found" });
+    return;
+  }
+  const match = /^\/teams\/([^/]+)$/u.exec(route);
+  if (!match) {
+    respond(response, 404, { error: "not_found" });
+    return;
+  }
+  const team = await findTeam(store, decodeURIComponent(match[1] ?? ""));
+  if (request.method === "GET") respond(response, 200, team);
+  else if (request.method === "PATCH")
+    respond(
+      response,
+      200,
+      await store.updateTeam(team.id, parseUpdateTeam(await readBody(request))),
+    );
+  else if (request.method === "DELETE")
+    respond(response, 200, { deleted: await store.deleteTeam(team.id) });
+  else respond(response, 404, { error: "not_found" });
+}
+
+/** A Team by ID, or else by name. */
+async function findTeam(store: Store, idOrName: string): Promise<Team> {
+  const team =
+    (await store.getTeam(idOrName)) ??
+    (await store.listTeams()).find((candidate) => candidate.name === idOrName);
+  if (team === undefined) throw new TagMessagingError(404, `Team ${idOrName} does not exist`);
+  return team;
+}
+
+function integerQuery(url: URL, name: string): Record<string, number> {
+  const value = url.searchParams.get(name);
+  if (value === null) return {};
+  if (!/^\d+$/u.test(value)) throw new TagMessagingError(400, `${name} must be an integer`);
+  return { [name]: Number(value) };
+}
+
 async function readBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;

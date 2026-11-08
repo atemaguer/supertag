@@ -12,8 +12,6 @@ export type {
   OutboundReplyHandler,
 } from "../../control-plane/src/index.js";
 export { ControlPlane } from "../../control-plane/src/index.js";
-export { TagMailboxService } from "../../control-plane/src/mailbox.js";
-export { ObjectiveController } from "../../control-plane/src/objective-controller.js";
 export type {
   CancelPendingSurfaceTaskInput,
   ClaimDueInboundEventInput,

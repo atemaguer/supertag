@@ -11,18 +11,20 @@ import type { TagMailboxStore } from "./mailbox.js";
 import type { CoordinationMetricsStore } from "./metrics.js";
 import type { MountManifest, MountOutputManifest } from "./mount-manifest.js";
 import type { ObjectiveStore } from "./objective.js";
-import type { ObjectiveMailboxStore } from "./objective-mailbox.js";
 import type { OperatorNotificationStore } from "./operator-notification.js";
 import type { OperatorTokenStore } from "./operator-token.js";
 import type { ResourceManagementStore } from "./resource-management.js";
 import type { RoleStore } from "./role.js";
-import type { InternalTurn, SessionAudience, SessionAudienceStore } from "./session-audience.js";
+import type {
+  InternalTurn,
+  ObjectiveSessionStore,
+  SessionAudience,
+  SessionAudienceStore,
+} from "./session-audience.js";
 import type { SessionInputStore } from "./session-input.js";
 import type { SessionStatePersistence } from "./session-state.js";
 import type { SpendStore } from "./spend.js";
-import type { TaskAssignmentStore } from "./task-assignment.js";
 import type { TeamStore } from "./team.js";
-import type { TeamLiveDeliveryStore } from "./team-live-delivery.js";
 import type { VolumeStore } from "./volume.js";
 import type { WorkerHostStore } from "./worker-host.js";
 import type { WorkspaceDelivery, WorkspaceStore } from "./workspace.js";
@@ -36,7 +38,6 @@ export * from "./auth-key.js";
 export * from "./codex-pricing.js";
 export * from "./command-activity.js";
 export * from "./command-sandbox.js";
-export * from "./commitment-view.js";
 export * from "./coordination-inbox.js";
 export * from "./cursor-pricing.js";
 export * from "./execution-settings.js";
@@ -47,9 +48,7 @@ export * from "./mcp-grant.js";
 export * from "./metrics.js";
 export * from "./mount-manifest.js";
 export * from "./objective.js";
-export * from "./objective-items.js";
 export * from "./objective-limits.js";
-export * from "./objective-mailbox.js";
 export * from "./operator-notification.js";
 export * from "./operator-token.js";
 export * from "./placement-hold.js";
@@ -60,11 +59,9 @@ export * from "./session-input.js";
 export * from "./session-state.js";
 export * from "./spend.js";
 export * from "./surface-objective-command.js";
-export * from "./task-assignment.js";
 export * from "./task-execution.js";
 export * from "./task-findings.js";
 export * from "./team.js";
-export * from "./team-live-delivery.js";
 export * from "./volume.js";
 export * from "./worker-host.js";
 export * from "./worker-host-label.js";
@@ -565,13 +562,8 @@ export interface TaskResult {
     readonly reference?: string;
   }[];
   readonly unresolved: readonly string[];
-  /** Review findings about this Task. The Control Plane assigns ids and records each as open. */
+  /** Review findings about this Task. The Control Plane assigns their ids. */
   readonly findings: readonly import("./task-findings.js").TaskFinding[];
-  /**
-   * Findings on earlier Tasks that this re-review reports fixed. They close only when a manager
-   * accepts this result, and only on Tasks whose findings this Task's Tag reported.
-   */
-  readonly fixedFindings?: readonly import("./task-findings.js").TaskFindingReference[];
   readonly references: readonly TaskReference[];
   readonly artifacts: readonly import("./artifact-catalog.js").ArtifactSelection[];
 }
@@ -585,8 +577,13 @@ export interface Session {
   readonly audience: SessionAudience;
   /** The requester key that owns a private Session (`sessionRequesterKey`); absent when shared. */
   readonly audienceActorKey?: string;
-  /** The conversation Session that started this work Session; absent for a conversation. */
+  /** The Session that started this work Session; absent for a root Session. */
   readonly parentSessionId?: string;
+  /**
+   * The Objective this Session belongs to: its own Session, or a work Session started under it.
+   * Set when the Session opens and never changed.
+   */
+  readonly objectiveId?: string;
   readonly lastInteractionAt: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -605,8 +602,13 @@ export interface OpenSessionInput {
    * the audience; later opens of the same Session never change it.
    */
   readonly audienceActorKey?: string;
-  /** Records the conversation Session that started a new work Session. Only the first open sets it. */
+  /** Records the Session that started a new work Session. Only the first open sets it. */
   readonly parentSessionId?: string;
+  /**
+   * The Objective a new Session belongs to. Without it, a work Session takes its parent's. Only
+   * the first open sets it.
+   */
+  readonly objectiveId?: string;
   readonly at: string;
 }
 
@@ -691,9 +693,9 @@ export interface TaskNamedWorkspacePlan {
    */
   readonly volumes?: readonly import("./volume.js").TaskWorkspaceVolume[];
   /**
-   * The delivered branches of the Task's accepted dependencies in this Workspace, read when the
-   * Control Plane dispatches an Attempt. A new Task branch starts from the base merged with each,
-   * in order; the Worker merges them before the harness starts.
+   * Branches earlier Tasks delivered in this Workspace, such as the work Session's previous Task,
+   * read when the Control Plane dispatches an Attempt. A new Task branch starts from the base
+   * merged with each, in order; the Worker merges them before the harness starts.
    */
   readonly dependencyBranches?: readonly TaskWorkspaceDependencyBranch[];
   /** Host-observed first-attempt pins, carried to later Attempts for fail-closed retries. */
@@ -704,7 +706,7 @@ export interface TaskNamedWorkspacePlan {
   }[];
 }
 
-/** The commit an accepted dependency's Worker recorded delivering on its Task branch. */
+/** The commit an earlier Task's Worker recorded delivering on its Task branch. */
 export interface TaskWorkspaceDependencyBranch {
   readonly taskId: string;
   readonly branch: string;
@@ -713,8 +715,8 @@ export interface TaskWorkspaceDependencyBranch {
 
 /** One durable unit of user intent admitted for a Tag within a Session. */
 export interface Task {
-  /** Objective association captured at admission or by this Task's explicit surface command. */
-  readonly surfaceObjectiveId?: string;
+  /** The Objective of the Task's Session, copied when the Task opens. */
+  readonly objectiveId?: string;
   readonly execution: TaskExecutionRequirements;
   readonly id: string;
   readonly inboundEventId: string | null;
@@ -960,8 +962,8 @@ export interface InboundSurfaceEvent {
    */
   readonly direct?: boolean;
   /**
-   * Set only on turns SuperTag admits itself, never by a surface: a work Session's Task and the
-   * report turn that brings its result back to the conversation. See `InternalTurn`.
+   * Set only on turns SuperTag admits itself, never by a surface: a work Session's Task, the
+   * report turn that brings its result back, and delivered turns. See `InternalTurn`.
    */
   readonly internal?: InternalTurn;
   readonly text?: string;
@@ -1217,14 +1219,12 @@ export interface Store
     SpendStore,
     TagMailboxStore,
     WorkstreamStore,
-    TeamLiveDeliveryStore,
     ObjectiveStore,
-    ObjectiveMailboxStore,
+    ObjectiveSessionStore,
     OperatorNotificationStore,
     ResourceManagementStore,
     RoleStore,
     TeamStore,
-    TaskAssignmentStore,
     SessionAudienceStore,
     SessionInputStore,
     SessionStatePersistence,
@@ -1244,8 +1244,8 @@ export interface Store
   listTags(filter?: TagListFilter): Promise<readonly Tag[]>;
   /**
    * Retires an active Tag in one transaction: removes its routes with their Context and
-   * Permission Set activations, Worker Host bindings, Mailbox grants in both directions, Mailbox
-   * credentials, and active Role assignments, then marks it retired. History rows keep their
+   * Permission Set activations, Worker Host bindings, Mailbox grants in both directions, and
+   * active Role assignments, then marks it retired. History rows keep their
    * reference. Refuses while the Tag has pending or running Tasks. Returns the retired Tag.
    */
   retireTag(id: string): Promise<Tag>;
@@ -1354,12 +1354,12 @@ export interface Store
     readonly paths: readonly string[];
     readonly truncated: boolean;
   }): Promise<void>;
-  /** Current reports for running Team Task Attempts, with their Workspace plans. */
+  /** Current reports for running Task Attempts of Objectives, with their Workspace plans. */
   listRunningTaskAttemptChangedPaths(): Promise<
     readonly {
       readonly attemptId: string;
       readonly taskId: string;
-      readonly teamId: string;
+      readonly objectiveId: string;
       readonly tagId: string;
       readonly workspacePlan: TaskWorkspacePlan;
       readonly paths: readonly string[];
@@ -1369,13 +1369,13 @@ export interface Store
   >;
   /** Atomically insert overlap keys, returning only keys new to this call. */
   recordOverlaps(input: {
-    readonly teamId: string;
+    readonly objectiveId: string;
     readonly firstAttemptId: string;
     readonly secondAttemptId: string;
     readonly paths: readonly string[];
   }): Promise<
     readonly {
-      readonly teamId: string;
+      readonly objectiveId: string;
       readonly lowerAttemptId: string;
       readonly higherAttemptId: string;
       readonly path: string;
@@ -1407,8 +1407,10 @@ export interface Store
   admitInboundEvent(input: AdmitInboundEventInput): Promise<AdmitInboundEventResult>;
   /**
    * Due inbound events, oldest first. Each Session has at most one: an event is due only once
-   * every earlier event of its Session finished, and a work Session only while its conversation
-   * runs fewer than the most work Sessions at once.
+   * every earlier event of its Session finished, and a work Session only while its parent runs
+   * fewer than the most work Sessions at once. An event of a Session that belongs to an Objective
+   * is due only while the Objective is not paused, completed or cancelled, and while fewer turns
+   * than its Team's `maxConcurrency` run across the Sessions of Objectives naming that Team.
    */
   listDueInboundEvents(input: ListDueWorkInput): Promise<readonly DurableInboundEvent[]>;
   /** Claims execution work or prepared settlement recovery; only execution claims increment attemptCount. */

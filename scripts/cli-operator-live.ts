@@ -62,7 +62,7 @@ const prefix = ["--import", "tsx", "--conditions=development", "apps/cli/src/ind
 const children: ChildProcess[] = [];
 const deadline = Date.now() + 600000;
 let counter = 0;
-async function cli(args: string[], override: NodeJS.ProcessEnv = env) {
+async function cli(args: string[], override: NodeJS.ProcessEnv = env, timeoutMs = 30000) {
   return new Promise<string>((done, reject) => {
     const child = spawn(process.execPath, [...prefix, ...args], {
       cwd: root,
@@ -75,7 +75,7 @@ async function cli(args: string[], override: NodeJS.ProcessEnv = env) {
     child.stderr.on("data", (x) => (err += x));
     const timer = setTimeout(
       () => child.kill("SIGKILL"),
-      Math.max(1, Math.min(30000, deadline - Date.now())),
+      Math.max(1, Math.min(timeoutMs, deadline - Date.now())),
     );
     child.once("error", reject);
     child.once("exit", (code) => {
@@ -154,7 +154,7 @@ try {
       metadata: { name: "worker" },
       spec: {
         purpose: "Bounded operator validation",
-        instructions: "Complete only the assigned Task. Do not delegate.",
+        instructions: "Do only what each message asks. Do not start work Sessions.",
         permissionSets: ["runtime"],
         contextSets: [],
       },
@@ -172,7 +172,7 @@ try {
     await cli(["apply", "-f", path]);
   }
   await cli(["update", "tag", "operator-worker", "--add-worker-host", "host"]);
-  const tag = JSON.parse(await cli(["get", "tag", "operator-worker"]));
+  await cli(["get", "tag", "operator-worker"]);
   const workerArgs = [
     "connect",
     "worklet",
@@ -201,114 +201,60 @@ try {
     const host = JSON.parse(await cli(["get", "worker-host", "host"]));
     return host.status.connectionStatus === "connected" ? true : undefined;
   });
-  await cli([
-    "create",
-    "objective",
-    "objective",
-    "--outcome",
-    "Verify operator artifact workflow",
-    "--owner",
-    "operator-worker",
-    "--criterion",
-    "Exact artifact bytes",
-    "--budget-minor",
-    "100",
-    ...["files:read", "files:write", "commands:execute"].flatMap((a) => ["--runtime-action", a]),
-  ]);
-  await cli([
-    "create",
-    "team",
-    "team",
-    "--objective",
-    "objective",
-    "--name",
-    "Validation",
-    "--lead",
-    "operator-worker",
-    "--max-concurrency",
-    "1",
-  ]);
+  /** One CLI conversation turn; waits for the reply and returns the message record. */
+  const message = async (session: string, text: string) => {
+    const record = JSON.parse(
+      await cli(
+        ["message", "tag", "operator-worker", text, "--session", session, "--output", "json"],
+        env,
+        300000,
+      ),
+    ) as { taskId: string; sessionId: string; status: string; reply?: { text: string } };
+    if (record.status !== "replied") throw new Error(`Turn in ${session} did not reply`);
+    return record;
+  };
+  /** The turn's Task, once it settled. */
+  const settled = (taskId: string) =>
+    poll(async () => {
+      const t = JSON.parse(await cli(["get", "task", taskId]));
+      if (["failed", "cancelled"].includes(t.status.phase))
+        throw new Error(`Task ${t.status.phase}`);
+      return t.status.phase === "completed" ? t : undefined;
+    });
   const secret = `CLI_${randomUUID()}`;
   await writeFile(join(workspace, "source.txt"), secret, { mode: 0o600 });
-  const instruction = join(directory, "instruction.txt");
-  await writeFile(
-    instruction,
-    "Copy ./source.txt byte-for-byte to outputs/evidence.txt. Do not append anything or modify its contents. Do not delegate. Final chat prose is unrestricted.",
+  const produced = await message(
+    "artifact",
+    'Copy ./source.txt byte-for-byte to "$SUPERTAG_OUTPUT_DIR/evidence.txt". Do not append anything or modify its contents. Do not start work Sessions. Final chat prose is unrestricted.',
   );
-  await cli([
-    "assign",
-    "task",
-    "producer",
-    "--objective",
-    "objective",
-    "--team",
-    "team",
-    "--tag",
-    tag.metadata.id,
-    "--instruction-file",
-    instruction,
-    "--criterion",
-    "Exact source bytes",
-    "--output-file",
-    "outputs/evidence.txt",
-    "--max-cost-minor",
-    "20",
-  ]);
-  const task = await poll(async () => {
-    const t = JSON.parse(await cli(["get", "task", "producer"]));
-    const p = t.status.assignment.phase;
-    if (["failed", "cancelled"].includes(p)) throw new Error(`Task ${p}`);
-    return p === "submitted" ? t : undefined;
-  });
-  await cli(["describe", "task", "producer"]);
-  await cli(["events", "task", "producer"]);
-  await cli(["list", "artifact", "--task", "producer"]);
-  const artifactId = task.status.outcome.taskResult.artifacts[0].artifactId;
+  const task = await settled(produced.taskId);
+  await cli(["describe", "task", produced.taskId]);
+  await cli(["events", "task", produced.taskId]);
+  const listed = JSON.parse(await cli(["list", "artifact", "--task", produced.taskId])) as {
+    items: { metadata: { id: string }; spec: { entries: { path: string }[] } }[];
+  };
+  const evidence = listed.items.flatMap((item) =>
+    item.spec.entries
+      .filter((entry) => entry.path.endsWith("evidence.txt"))
+      .map((entry) => ({ artifactId: item.metadata.id, path: entry.path })),
+  )[0];
+  if (!evidence) throw new Error("The turn captured no evidence.txt artifact");
+  const artifactId = evidence.artifactId;
   await cli(["get", "artifact", artifactId]);
   const output = join(directory, "download.txt");
-  await cli([
-    "download",
-    "artifact",
-    artifactId,
-    "--path",
-    "outputs/evidence.txt",
-    "--out",
-    output,
-  ]);
+  await cli(["download", "artifact", artifactId, "--path", evidence.path, "--out", output]);
   assert.equal(await readFile(output, "utf8"), secret);
+
+  // Native Session continuity: a later turn of the same conversation, on a fresh Worker process
+  // with its state and Workspace deleted, recalls what the first turn read.
   const recall = `RECALL_${randomUUID()}`;
   await writeFile(join(workspace, "challenge.txt"), recall, { mode: 0o600 });
-  const wakeAt = new Date(Date.now() + 120000).toISOString();
-  await writeFile(
-    instruction,
-    `If you already memorized the protected value in this native conversation, do not call tools; reply only with that exact remembered value. Otherwise read challenge.txt once, memorize its exact contents, then call wait_for exactly once with only notBefore set to ${wakeAt} and immediately end your turn with READY. Do not repeat the protected value in messages or files. Do not delegate.`,
-  );
-  await cli([
-    "assign",
-    "task",
+  const first = await message(
     "continuity",
-    "--objective",
-    "objective",
-    "--team",
-    "team",
-    "--tag",
-    tag.metadata.id,
-    "--instruction-file",
-    instruction,
-    "--criterion",
-    "Fresh process retains native Session",
-    "--max-cost-minor",
-    "20",
-  ]);
-  const waiting = await poll(async () => {
-    const t = JSON.parse(await cli(["get", "task", "continuity"]));
-    if (["failed", "cancelled", "submitted"].includes(t.status.assignment.phase))
-      throw new Error("Continuity did not enter waiting");
-    return t.status.assignment.phase === "waiting" && t.status.attempt.phase === "cancelled"
-      ? t
-      : undefined;
-  });
-  const sessionId = waiting.spec.sessionId;
+    "Read challenge.txt once with a shell command and memorize its exact contents. Do not repeat it in messages, files, or tool arguments. Reply only with READY. Do not start work Sessions.",
+  );
+  await settled(first.taskId);
+  const sessionId = first.sessionId;
   const before = await poll(async () => {
     const text = await cli(["describe", "session", sessionId]);
     return text.includes(": resumable; native ID ") ? text : undefined;
@@ -322,29 +268,28 @@ try {
   await mkdir(workspace, { recursive: true });
   await installCredential(credential, "host", String(workerEnv["SUPERTAG_STATE_DIR"]));
   await background(workerArgs, workerEnv, "worker-restarted");
-  const resumed = await poll(async () => {
-    const t = JSON.parse(await cli(["get", "task", "continuity"]));
-    if (["failed", "cancelled"].includes(t.status.assignment.phase))
-      throw new Error("Continuity failed after restart");
-    return t.status.assignment.phase === "submitted" ? t : undefined;
+  await poll(async () => {
+    const host = JSON.parse(await cli(["get", "worker-host", "host"]));
+    return host.status.connectionStatus === "connected" ? true : undefined;
   });
-  assert.ok(
-    resumed.status.outcome.text?.trim() === recall,
-    "Fresh process did not recall protected value",
+  const second = await message(
+    "continuity",
+    "Do not call any tool or search the filesystem. Reply only with the exact contents of challenge.txt that you memorized earlier in this conversation.",
   );
+  const resumed = await settled(second.taskId);
+  assert.ok(second.reply?.text.trim() === recall, "Fresh process did not recall protected value");
   assert.ok(
     !JSON.stringify(resumed.spec).includes(recall),
     "Protected value leaked into projected task inputs",
   );
-  assert.equal(resumed.status.attempt.number, 2);
   const after = await cli(["describe", "session", sessionId]);
   const afterIds = [...after.matchAll(/native ID ([^;]+);/g)].map((x) => x[1]);
   assert.deepEqual([...new Set(afterIds)], [beforeIds[0]]);
-  await cli(["events", "task", "continuity"]);
+  await cli(["events", "task", second.taskId]);
   report["recovery"] = {
     passed: true,
     nativeId: beforeIds[0],
-    attempts: 2,
+    turns: 2,
     workspaceAndWorkerStateDeleted: true,
     projectedInputsContainProtectedValue: false,
   };
@@ -353,7 +298,7 @@ try {
     artifactId,
     digest: createHash("sha256").update(secret).digest("hex"),
     bytes: Buffer.byteLength(secret),
-    taskPhase: task.status.assignment.phase,
+    taskPhase: task.status.phase,
     commands: counter,
   });
 } catch (error) {

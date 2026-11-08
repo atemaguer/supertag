@@ -17,8 +17,6 @@ export interface SpendUsage {
 export interface SpendGroup extends SpendUsage {
   readonly key: string;
   readonly name?: string;
-  /** Reply activation usage, already included in this group's totals. */
-  readonly postTriggered: SpendUsage;
   readonly budget?: { readonly limitMinor: number; readonly currency: string | null } | null;
 }
 
@@ -32,7 +30,7 @@ export interface SpendStore {
   readSpend(input?: {
     readonly by?: SpendGrouping;
     readonly since?: string;
-    /** Restrict aggregation to these Objectives, including their surface Tasks; an empty list returns no groups. */
+    /** Restrict aggregation to the Tasks of these Objectives' Sessions; an empty list returns no groups. */
     readonly objectiveIds?: readonly string[];
     /** Restrict aggregation to these Tasks; an empty list returns no groups. */
     readonly taskIds?: readonly string[];

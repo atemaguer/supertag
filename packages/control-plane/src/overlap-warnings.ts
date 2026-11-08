@@ -1,4 +1,5 @@
-import type { Store, TaskWorkspacePlan, WorkstreamPost } from "@supertag/core";
+import { createHash } from "node:crypto";
+import type { Store, TaskWorkspacePlan } from "@supertag/core";
 
 type ChangedPathReport = {
   readonly attemptId: string;
@@ -7,13 +8,13 @@ type ChangedPathReport = {
 };
 type OverlapStore = Pick<
   Store,
-  | "recordTaskAttemptChangedPaths"
-  | "listRunningTaskAttemptChangedPaths"
-  | "getTeam"
-  | "getTaskAssignment"
-  | "recordOverlapWarning"
+  "recordTaskAttemptChangedPaths" | "listRunningTaskAttemptChangedPaths" | "recordOverlaps"
 >;
-type LivePosts = { deliverPost(post: WorkstreamPost): void };
+/** Tells an Objective's conversation about overlapping work, once per delivery key. */
+export type OverlapNotice = (objectiveId: string, key: string, text: string) => Promise<void>;
+
+/** The most changed paths one warning names. */
+const OVERLAP_PATHS_SHOWN = 20;
 
 function repository(plan: TaskWorkspacePlan): string | undefined {
   if (plan.status === "workspace") return `workspace:${plan.workspace}`;
@@ -24,17 +25,24 @@ function repository(plan: TaskWorkspacePlan): string | undefined {
   return undefined;
 }
 
-/** Persist heartbeat reports, then publish each newly overlapping path batch once. */
+function repositoryLabel(plan: TaskWorkspacePlan): string {
+  if (plan.status === "workspace") return `Workspace ${plan.workspace}`;
+  if (plan.status === "selected") return plan.target.reference ?? plan.target.scope;
+  return "the same repository";
+}
+
+/**
+ * Persists heartbeat reports, then tells the Objective's conversation once about each newly
+ * overlapping batch of paths that two of its running Task Attempts change in the same repository.
+ */
 export async function detectOverlapWarnings(
   store: OverlapStore,
-  live: LivePosts,
+  notify: OverlapNotice,
   reports: readonly ChangedPathReport[],
 ): Promise<void> {
   for (const report of reports) await store.recordTaskAttemptChangedPaths(report);
   const rows = await store.listRunningTaskAttemptChangedPaths();
   const reported = new Set(reports.map((report) => report.attemptId));
-  const teams = new Map<string, Awaited<ReturnType<OverlapStore["getTeam"]>>>();
-  const objectives = new Map<string, string>();
   for (const current of rows) {
     if (!reported.has(current.attemptId) || current.truncated) continue;
     const currentRepo = repository(current.workspacePlan);
@@ -44,36 +52,33 @@ export async function detectOverlapWarnings(
       if (
         other.attemptId === current.attemptId ||
         other.truncated ||
-        other.teamId !== current.teamId ||
+        other.objectiveId !== current.objectiveId ||
         repository(other.workspacePlan) !== currentRepo ||
         (reported.has(other.attemptId) && other.attemptId < current.attemptId)
       )
         continue;
       const paths = other.paths.filter((path) => currentPaths.has(path));
       if (!paths.length) continue;
-      let team = teams.get(current.teamId);
-      if (team === undefined) {
-        team = await store.getTeam(current.teamId);
-        teams.set(current.teamId, team);
-      }
-      if (!team) continue;
-      let objectiveId = objectives.get(current.taskId);
-      if (!objectiveId) {
-        objectiveId = (await store.getTaskAssignment(current.taskId))?.objectiveId;
-        if (!objectiveId) continue;
-        objectives.set(current.taskId, objectiveId);
-      }
-      const post = await store.recordOverlapWarning({
-        teamId: current.teamId,
-        objectiveId,
+      const fresh = await store.recordOverlaps({
+        objectiveId: current.objectiveId,
         firstAttemptId: current.attemptId,
         secondAttemptId: other.attemptId,
-        firstTaskId: current.taskId,
-        secondTaskId: other.taskId,
         paths,
-        to: [...new Set([current.tagId, other.tagId, team.leadTagId])].sort(),
       });
-      if (post) live.deliverPost(post);
+      if (fresh.length === 0) continue;
+      const newPaths = [...new Set(fresh.map((overlap) => overlap.path))].sort();
+      const [lower, higher] = [current.attemptId, other.attemptId].sort();
+      const digest = createHash("sha256").update(newPaths.join("\n")).digest("hex").slice(0, 16);
+      const shown = newPaths.slice(0, OVERLAP_PATHS_SHOWN).join(", ");
+      const more =
+        newPaths.length > OVERLAP_PATHS_SHOWN
+          ? ` and ${newPaths.length - OVERLAP_PATHS_SHOWN} more`
+          : "";
+      await notify(
+        current.objectiveId,
+        `overlap:${lower}:${higher}:${digest}`,
+        `Tasks ${current.taskId} and ${other.taskId} of this Objective are both changing ${shown}${more} in ${repositoryLabel(current.workspacePlan)}. Coordinate them before their changes conflict: continue one work Session with what the other changes, or let one finish first.`,
+      );
     }
   }
 }

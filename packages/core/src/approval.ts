@@ -51,7 +51,7 @@ export interface ApprovalActionDescriptor {
   readonly toolName?: string;
 }
 
-export type ApprovalRequestKind = "surface-action" | "task" | "plan";
+export type ApprovalRequestKind = "surface-action";
 export type ApprovalRequestStatus = "pending" | "approved" | "denied" | "expired";
 /** Chosen by the decider: this exact request once, or every matching action in the Objective. */
 export type ApprovalScope = "once" | "objective";
@@ -121,13 +121,6 @@ export interface ApprovalRequestListFilter {
   readonly limit?: number;
 }
 
-/** A Mailbox message delivered to the requesting Tag in the decision transaction. */
-export interface ApprovalDecisionMessage {
-  readonly senderTagId: string;
-  readonly operatorId?: string;
-  readonly body: Readonly<Record<string, unknown>>;
-}
-
 export interface DecideApprovalRequestInput {
   readonly id: string;
   readonly decision: "approve" | "deny";
@@ -136,7 +129,6 @@ export interface DecideApprovalRequestInput {
   readonly reason?: string;
   readonly decidedBy: string;
   readonly decidedByKind: "operator" | "tag";
-  readonly message?: ApprovalDecisionMessage;
 }
 
 export interface ApprovalRequestStore {
@@ -153,11 +145,10 @@ export interface ApprovalRequestStore {
     action: ApprovalActionDescriptor,
     now?: string,
   ): Promise<ApprovalRequest | undefined>;
-  /** Idempotent for `task` requests: one request per Task. */
   createApprovalRequest(input: CreateApprovalRequestInput): Promise<ApprovalRequest>;
   getApprovalRequest(id: string): Promise<ApprovalRequest | undefined>;
   listApprovalRequests(filter?: ApprovalRequestListFilter): Promise<readonly ApprovalRequest[]>;
-  /** Decide a pending request and deliver the optional Mailbox message in one transaction. */
+  /** Decide a pending request. */
   decideApprovalRequest(input: DecideApprovalRequestInput): Promise<ApprovalRequest>;
   expireApprovalRequest(id: string): Promise<ApprovalRequest | undefined>;
 }

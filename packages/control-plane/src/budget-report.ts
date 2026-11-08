@@ -1,4 +1,4 @@
-import type { Objective, Task, TaskAssignment, TaskAttempt, TaskEvent } from "@supertag/core";
+import type { Objective, Task, TaskAttempt, TaskEvent } from "@supertag/core";
 import type { AppliedHarnessExecutionLimits } from "@supertag/worker-sdk";
 import {
   type TaskExecutionLimitReport,
@@ -24,16 +24,6 @@ export interface TaskAttemptBudgetReport {
 }
 
 export interface TaskBudgetReport {
-  readonly organizational: {
-    /** Null means Objective allocations are internal units rather than money. */
-    readonly currency: string | null;
-    /** Immutable allocation admitted for this Task. */
-    readonly limitMinor: number;
-    /** Amount still reserved in the Objective rather than charged. */
-    readonly reservedMinor: number;
-    /** Amount charged when execution first began. */
-    readonly chargedMinor: number;
-  };
   readonly provider: {
     /** The Task's per-Attempt provider ceiling; retries do not silently rewrite it. */
     readonly requestedCost: CurrencyAmount | null;
@@ -54,32 +44,43 @@ export interface TaskBudgetReport {
   };
 }
 
-export interface ObjectiveBudgetReport {
-  readonly organizational: {
-    readonly currency: string | null;
-    readonly limitMinor: number | null;
-    readonly reservedMinor: number;
-    readonly chargedMinor: number;
-    readonly availableMinor: number | null;
-    /** A consistency check between Objective counters and visible Task allocations. */
-    readonly visibleTasks: {
-      readonly allocatedMinor: number;
-      readonly reservedMinor: number;
-      readonly chargedMinor: number;
-      readonly reconcilesWithObjective: boolean;
-    };
+/** The Objective's one pool: every Task of its Sessions draws from it. */
+export interface ObjectivePool {
+  readonly currency: string | null;
+  readonly limitMinor: number | null;
+  /** Provider-reported cost in the pool's currency, as the limit sweep last recorded it. */
+  readonly spentMinor: number | null;
+  /** What remains of the limit; null without a limit or a currency. */
+  readonly availableMinor: number | null;
+}
+
+/** The pool as the limit sweep last measured it; null amounts without a currency. */
+export function objectivePool(
+  objective: Pick<Objective, "budgetCurrency" | "budgetLimitMinor" | "limitState">,
+): ObjectivePool {
+  const currency = objective.budgetCurrency ?? null;
+  const limitMinor = objective.budgetLimitMinor ?? null;
+  const spentMinor =
+    currency === null ? null : (objective.limitState?.reportedSpend?.amountMinor ?? 0);
+  return {
+    currency,
+    limitMinor,
+    spentMinor,
+    availableMinor: limitMinor === null || spentMinor === null ? null : limitMinor - spentMinor,
   };
+}
+
+/** Provider usage summed over Tasks, grouped without currency conversion. */
+export interface ObjectiveBudgetReport {
   readonly provider: {
-    /** Sum of one per-Attempt ceiling for each visible Task, grouped without currency conversion. */
+    /** Sum of each Attempt's requested ceiling, grouped without currency conversion. */
     readonly requestedCostByCurrency: Readonly<Record<string, number>>;
     /** Sum of applied ceilings across Attempts, grouped without currency conversion. */
     readonly appliedCostByCurrency: Readonly<Record<string, number>>;
     /** Sum of each Attempt's latest cumulative observation exactly once. */
     readonly observedCostByCurrency: Readonly<Record<string, number>>;
     readonly coverage: {
-      /** This projection includes only Tasks visible to the caller of read_objective. */
-      readonly scope: "visible_tasks";
-      readonly completeForVisibleTasks: boolean;
+      readonly complete: boolean;
       readonly completeTaskIds: readonly string[];
       readonly partialTaskIds: readonly string[];
       readonly unknownTaskIds: readonly string[];
@@ -93,12 +94,11 @@ export interface ObjectiveBudgetReport {
 
 export function taskBudgetReport(input: {
   readonly objective: Pick<Objective, "budgetCurrency">;
-  readonly assignment: TaskAssignment;
-  readonly task: Task | undefined;
+  readonly task: Task;
   readonly attempts: readonly TaskAttempt[];
   readonly events: readonly TaskEvent[];
 }): TaskBudgetReport {
-  const requestedCost = input.task?.execution.limits?.maxReportedCost ?? null;
+  const requestedCost = input.task.execution.limits?.maxReportedCost ?? null;
   const attempts = input.attempts
     .toSorted((a, b) => a.attemptNumber - b.attemptNumber)
     .map((attempt): TaskAttemptBudgetReport => {
@@ -116,7 +116,7 @@ export function taskBudgetReport(input: {
         costCoverage: attemptCostCoverage(limits, attempt.status),
       };
     });
-  const coverage = taskCostCoverage(input.assignment, requestedCost, attempts);
+  const coverage = taskCostCoverage(input.task, requestedCost, attempts);
   const currency = input.objective.budgetCurrency ?? null;
   const providerCurrencies = new Set(
     [
@@ -127,29 +127,7 @@ export function taskBudgetReport(input: {
       ]),
     ].filter((value): value is string => value !== undefined),
   );
-  const renewal = input.assignment.result?.["budgetRenewal"];
-  const previousCharged =
-    renewal &&
-    typeof renewal === "object" &&
-    !Array.isArray(renewal) &&
-    "previousChargedMinor" in renewal &&
-    typeof renewal["previousChargedMinor"] === "number"
-      ? renewal["previousChargedMinor"]
-      : 0;
-  const chargedMinor = input.assignment.chargedMinor ?? previousCharged;
   return {
-    organizational: {
-      currency,
-      limitMinor:
-        input.assignment.chargedMinor === null
-          ? chargedMinor + input.assignment.reservedMinor
-          : Math.max(chargedMinor, input.assignment.reservedMinor),
-      reservedMinor:
-        input.assignment.chargedMinor === null && input.assignment.status !== "cancelled"
-          ? input.assignment.reservedMinor
-          : 0,
-      chargedMinor,
-    },
     provider: {
       requestedCost,
       objectiveCurrencyComparison:
@@ -171,22 +149,9 @@ export function taskBudgetReport(input: {
 }
 
 export function objectiveBudgetReport(
-  objective: Pick<
-    Objective,
-    "budgetCurrency" | "budgetLimitMinor" | "reservedMinor" | "spentMinor"
-  >,
-  tasks: readonly {
-    readonly taskId: string;
-    readonly limitSummaryActivation?: boolean;
-    readonly budget: TaskBudgetReport;
-  }[],
+  objective: Pick<Objective, "budgetCurrency">,
+  tasks: readonly { readonly taskId: string; readonly budget: TaskBudgetReport }[],
 ): ObjectiveBudgetReport {
-  // The one final owner activation has a separate fixed allowance. Its provider usage remains
-  // visible on its Task, but it never consumes or inflates the exhausted Objective budget.
-  tasks = tasks.filter(({ limitSummaryActivation }) => !limitSummaryActivation);
-  const allocatedMinor = sum(tasks.map(({ budget }) => budget.organizational.limitMinor));
-  const reservedMinor = sum(tasks.map(({ budget }) => budget.organizational.reservedMinor));
-  const chargedMinor = sum(tasks.map(({ budget }) => budget.organizational.chargedMinor));
   const requestedCostByCurrency = currencyTotals(
     tasks.flatMap(({ budget }) => budget.provider.attempts.map((attempt) => attempt.requestedCost)),
   );
@@ -214,30 +179,12 @@ export function objectiveBudgetReport(
         ? ("currency_mismatch" as const)
         : ("matching" as const);
   return {
-    organizational: {
-      currency: objective.budgetCurrency ?? null,
-      limitMinor: objective.budgetLimitMinor ?? null,
-      reservedMinor: objective.reservedMinor,
-      chargedMinor: objective.spentMinor,
-      availableMinor:
-        objective.budgetLimitMinor === null || objective.budgetLimitMinor === undefined
-          ? null
-          : objective.budgetLimitMinor - objective.reservedMinor - objective.spentMinor,
-      visibleTasks: {
-        allocatedMinor,
-        reservedMinor,
-        chargedMinor,
-        reconcilesWithObjective:
-          reservedMinor === objective.reservedMinor && chargedMinor === objective.spentMinor,
-      },
-    },
     provider: {
       requestedCostByCurrency,
       appliedCostByCurrency,
       observedCostByCurrency,
       coverage: {
-        scope: "visible_tasks",
-        completeForVisibleTasks:
+        complete:
           partialTaskIds.length === 0 &&
           unknownTaskIds.length === 0 &&
           pendingTaskIds.length === 0 &&
@@ -276,7 +223,7 @@ function attemptCostCoverage(
 }
 
 function taskCostCoverage(
-  assignment: TaskAssignment,
+  task: Pick<Task, "status">,
   requested: CurrencyAmount | null,
   attempts: readonly TaskAttemptBudgetReport[],
 ): TaskBudgetReport["provider"]["coverage"] {
@@ -301,9 +248,9 @@ function taskCostCoverage(
   else if (pendingAttemptIds.length > 0) status = "pending";
   else if (attempts.length === 0)
     status =
-      assignment.status === "cancelled"
+      task.status === "cancelled"
         ? "complete"
-        : ["queued", "running", "waiting"].includes(assignment.status)
+        : task.status === "pending" || task.status === "running"
           ? "pending"
           : "unknown";
   else status = "complete";
@@ -334,8 +281,4 @@ function mergeCurrencyTotals(
     for (const [currency, amountMinor] of Object.entries(value))
       totals[currency] = (totals[currency] ?? 0) + amountMinor;
   return totals;
-}
-
-function sum(values: readonly number[]): number {
-  return values.reduce((total, value) => total + value, 0);
 }

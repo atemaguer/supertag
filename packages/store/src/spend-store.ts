@@ -110,19 +110,16 @@ export class DrizzleSpendStore {
     }
     if (input.taskIds !== undefined) conditions.push(`a."taskId" IN (${jsonList(input.taskIds)})`);
     if (input.objectiveIds !== undefined)
-      conditions.push(
-        `COALESCE(q."objectiveId", t."surfaceObjectiveId") IN (${jsonList(input.objectiveIds)})`,
-      );
+      conditions.push(`t."objectiveId" IN (${jsonList(input.objectiveIds)})`);
     const rows = await this.query(
       `SELECT a."id" AS "attemptId", a."startedAt" AS "startedAt", a."workerSnapshot" AS "workerSnapshot", t."tagId" AS "tagId", tag."name" AS "tagName",
-      COALESCE(q."objectiveId", t."surfaceObjectiveId") AS "objectiveId", o."budgetLimitMinor" AS "budgetLimitMinor",
-      o."budgetCurrency" AS "budgetCurrency", q."activationKind" AS "activationKind",
+      t."objectiveId" AS "objectiveId", o."budgetLimitMinor" AS "budgetLimitMinor",
+      o."budgetCurrency" AS "budgetCurrency",
       (SELECT e."payload" FROM "TaskEvent" e WHERE e."attemptId" = a."id" AND e."type" IN ${USAGE_TYPES}
         ORDER BY e."sequence" DESC LIMIT 1) AS "latestUsage"
       FROM "TaskAttempt" a
       JOIN "Task" t ON t."id" = a."taskId"
-      LEFT JOIN "TaskAssignment" q ON q."taskId" = a."taskId"
-      LEFT JOIN "Objective" o ON o."id" = COALESCE(q."objectiveId", t."surfaceObjectiveId")
+      LEFT JOIN "Objective" o ON o."id" = t."objectiveId"
       JOIN "Tag" tag ON tag."id" = t."tagId"
       ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}
       ORDER BY a."startedAt", a."id"`,
@@ -167,7 +164,6 @@ export class DrizzleSpendStore {
       UsageTotals & {
         key: string;
         name?: string;
-        postTriggered: UsageTotals;
         budget?: Exclude<SpendGroup["budget"], undefined>;
       }
     >();
@@ -184,7 +180,6 @@ export class DrizzleSpendStore {
           key,
           ...(by === "tag" ? { name: String(row["tagName"]) } : {}),
           ...emptyUsage(),
-          postTriggered: emptyUsage(),
           ...(by === "objective"
             ? {
                 budget:
@@ -200,52 +195,41 @@ export class DrizzleSpendStore {
         };
         groups.set(key, group);
       }
-      const targets =
-        row["activationKind"] === "team_reply" ? [group, group.postTriggered] : [group];
-      for (const group of targets) {
-        group.attempts += 1;
-        const usage = latest.get(String(row["attemptId"]));
-        let cost = usage?.reportedCost;
-        let unpricedModel = usage?.unpricedModel;
-        if (!cost && usage) {
-          const rawSnapshot = row["workerSnapshot"];
-          const snapshot = typeof rawSnapshot === "string" ? JSON.parse(rawSnapshot) : rawSnapshot;
-          if (snapshot && typeof snapshot === "object") {
-            const execution = (snapshot as Record<string, unknown>)["execution"];
-            if (execution && typeof execution === "object") {
-              const fields = execution as Record<string, unknown>;
-              if (fields["harness"] === "codex" && typeof fields["model"] === "string") {
-                cost = estimatedCodexCost(fields["model"], usage);
-                if (!cost && /^[\w.:/-]{1,200}$/u.test(fields["model"]))
-                  unpricedModel = fields["model"];
-              }
+      group.attempts += 1;
+      const usage = latest.get(String(row["attemptId"]));
+      let cost = usage?.reportedCost;
+      let unpricedModel = usage?.unpricedModel;
+      if (!cost && usage) {
+        const rawSnapshot = row["workerSnapshot"];
+        const snapshot = typeof rawSnapshot === "string" ? JSON.parse(rawSnapshot) : rawSnapshot;
+        if (snapshot && typeof snapshot === "object") {
+          const execution = (snapshot as Record<string, unknown>)["execution"];
+          if (execution && typeof execution === "object") {
+            const fields = execution as Record<string, unknown>;
+            if (fields["harness"] === "codex" && typeof fields["model"] === "string") {
+              cost = estimatedCodexCost(fields["model"], usage);
+              if (!cost && /^[\w.:/-]{1,200}$/u.test(fields["model"]))
+                unpricedModel = fields["model"];
             }
           }
         }
-        if (cost !== undefined) {
-          if (cost.estimated) group.estimatedCostAttempts += 1;
-          group.reportedCostByCurrency[cost.currency] =
-            (group.reportedCostByCurrency[cost.currency] ?? 0) + cost.amountMinor;
-        } else {
-          group.unknownCostAttempts += 1;
-          const model = unpricedModel;
-          if (model !== undefined) {
-            group.unpricedModels[model] = (group.unpricedModels[model] ?? 0) + 1;
-            group.unpricedTokens += usage?.totalTokens ?? 0;
-          }
-        }
-        if (usage !== undefined)
-          group.reportedTokens = (group.reportedTokens ?? 0) + usage.totalTokens;
-        else group.unknownTokenAttempts += 1;
       }
+      if (cost !== undefined) {
+        if (cost.estimated) group.estimatedCostAttempts += 1;
+        group.reportedCostByCurrency[cost.currency] =
+          (group.reportedCostByCurrency[cost.currency] ?? 0) + cost.amountMinor;
+      } else {
+        group.unknownCostAttempts += 1;
+        const model = unpricedModel;
+        if (model !== undefined) {
+          group.unpricedModels[model] = (group.unpricedModels[model] ?? 0) + 1;
+          group.unpricedTokens += usage?.totalTokens ?? 0;
+        }
+      }
+      if (usage !== undefined)
+        group.reportedTokens = (group.reportedTokens ?? 0) + usage.totalTokens;
+      else group.unknownTokenAttempts += 1;
     }
-    const normalize = <T extends UsageTotals>(group: T) => ({
-      ...group,
-      reportedCostByCurrency:
-        Object.keys(group.reportedCostByCurrency).length === 0
-          ? null
-          : group.reportedCostByCurrency,
-    });
     return {
       by,
       since,
@@ -253,7 +237,6 @@ export class DrizzleSpendStore {
         .sort((a, b) => a.key.localeCompare(b.key))
         .map(({ estimatedCostAttempts, unpricedModels, ...group }) => ({
           ...group,
-          postTriggered: normalize(group.postTriggered),
           ...(estimatedCostAttempts === 0 ? {} : { estimatedCostAttempts }),
           ...(Object.keys(unpricedModels).length === 0 ? {} : { unpricedModels }),
           reportedCostByCurrency:

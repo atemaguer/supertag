@@ -1,7 +1,6 @@
 import {
   isValidGitRef,
   MAX_TASK_FINDING_TEXT,
-  parseFixedTaskFindings,
   parseLiveMounts,
   parseMountManifests,
   parseMountOutputManifests,
@@ -153,15 +152,9 @@ export function decodeTaskAttemptSpec(value: unknown): TaskAttemptSpec {
         Number(assignment["assignmentRevision"]) < 1
       )
         throw new Error("Worklet protocol Role assignment revision must be positive");
-      const role = fields(assignment["role"], ["id", "name", "purpose", "instructions", "origin"]);
+      const role = fields(assignment["role"], ["id", "name", "purpose", "instructions"]);
       if (!Number.isSafeInteger(role["revision"]) || Number(role["revision"]) < 1)
         throw new Error("Worklet protocol Role revision must be positive");
-      choice(role, "origin", ["system", "user"]);
-      if (
-        (role["origin"] === "system" && role["systemKey"] !== "org-architect") ||
-        (role["origin"] === "user" && role["systemKey"] !== undefined)
-      )
-        throw new Error("Worklet protocol Role system provenance is invalid");
       items(role, "contextSetIds", stringItem);
       items(role, "permissionSetIds", stringItem);
     });
@@ -589,12 +582,10 @@ function result(value: unknown): void {
   items(record, "changes", (item) => fields(item, ["summary"]));
   items(record, "unresolved", stringItem);
   // A Worker reports each finding's severity, summary, and optional location; the Control Plane
-  // assigns its id and status, so any the Worker sends are ignored. Findings describe only this
-  // Task: unknown fields, such as another Task's id, are refused.
+  // assigns its id, so any the Worker sends is ignored. Findings describe only this Task: unknown
+  // fields, such as another Task's id, are refused.
   if (!Array.isArray(record["findings"])) throw new Error("Task result findings must be an array");
   recordTaskFindings(record["findings"]);
-  // A re-review names findings on earlier Tasks only as references; they close on acceptance.
-  parseFixedTaskFindings(record["fixedFindings"]);
   items(record, "references", (item) =>
     fields(item, ["provider", "resourceType", "reference", "relationship"]),
   );

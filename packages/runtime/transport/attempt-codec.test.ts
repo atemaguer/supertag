@@ -676,31 +676,6 @@ it.each([
       },
     },
   ],
-  [
-    "Role provenance",
-    {
-      authorization: {
-        ...baseSpec.authorization,
-        roles: [
-          {
-            assignmentId: "assignment",
-            assignmentRevision: 1,
-            role: {
-              id: "role",
-              name: "Forged",
-              purpose: "Invalid",
-              instructions: "",
-              origin: "user",
-              systemKey: "org-architect",
-              revision: 1,
-              contextSetIds: [],
-              permissionSetIds: [],
-            },
-          },
-        ],
-      },
-    },
-  ],
   ["internal origin", { authorization: { ...baseSpec.authorization, version: 4 } }],
   ["context item", { contextPlan: contextWith(null) }],
   ["context required", { contextPlan: contextWith({ ...validContextItem, required: "true" }) }],
@@ -798,7 +773,6 @@ it("accepts strictly valid result findings and refuses findings that name anothe
     severity: "high",
     summary: "The export skips tenant scoping.",
     location: "src/query.ts:42",
-    status: "open",
   };
   const event = {
     type: "result",
@@ -816,13 +790,12 @@ it("accepts strictly valid result findings and refuses findings that name anothe
     },
   };
   expect(decodeTaskAttemptEvent(event)).toEqual(event);
-  // The Control Plane assigns ids and status, so a Worker may omit them, and any it sends are
-  // ignored rather than validated.
+  // The Control Plane assigns ids, so a Worker may omit them, and any it sends are ignored
+  // rather than validated.
   for (const findings of [
     [{ severity: "high", summary: "The export skips tenant scoping." }],
     [{ severity: "low", summary: "Typo.", location: "README.md:3" }],
-    [{ ...finding, status: "accepted" }],
-    [{ ...finding, id: "not-an-id", status: "closed", reason: "Ignored" }],
+    [{ ...finding, id: "not-an-id" }],
     [finding, finding],
   ]) {
     const reported = { ...event, result: { ...event.result, findings } };
@@ -832,6 +805,7 @@ it("accepts strictly valid result findings and refuses findings that name anothe
     undefined,
     { severity: "high", summary: "Not a list." },
     [{ ...finding, taskId: "other-task" }],
+    [{ ...finding, status: "open" }],
     [{ ...finding, severity: "critical" }],
     [{ severity: "high" }],
     [{ ...finding, summary: "" }],
@@ -839,19 +813,6 @@ it("accepts strictly valid result findings and refuses findings that name anothe
   ])
     expect(() =>
       decodeTaskAttemptEvent({ ...event, result: { ...event.result, findings } }),
-    ).toThrow();
-  const reReview = {
-    ...event,
-    result: { ...event.result, fixedFindings: [{ taskId: "review", findingId: "F1" }] },
-  };
-  expect(decodeTaskAttemptEvent(reReview)).toEqual(reReview);
-  for (const fixedFindings of [
-    { taskId: "review", findingId: "F1" },
-    [{ taskId: "review" }],
-    [{ taskId: "review", findingId: "F1", status: "fixed" }],
-  ])
-    expect(() =>
-      decodeTaskAttemptEvent({ ...event, result: { ...event.result, fixedFindings } }),
     ).toThrow();
 });
 

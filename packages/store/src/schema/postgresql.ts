@@ -367,8 +367,6 @@ export const roles = pgTable(
     instructions: text("instructions").notNull(),
     /** Default harness, models, and efforts for the Role's Tags. */
     execution: json("execution"),
-    origin: text("origin").notNull(),
-    systemKey: text("systemKey"),
     status: text("status").notNull(),
     revision: integer("revision").notNull(),
     createdBy: text("createdBy"),
@@ -377,7 +375,6 @@ export const roles = pgTable(
   },
   (table) => [
     uniqueIndex("Role_name_key").on(table.name),
-    uniqueIndex("Role_systemKey_key").on(table.systemKey),
     index("Role_status_idx").on(table.status),
   ],
 );
@@ -511,6 +508,10 @@ export const sessions = pgTable(
     parentSessionId: text("parentSessionId").references((): AnyPgColumn => sessions.id, {
       onDelete: "cascade",
     }),
+    /** The Objective this Session works for; a work Session takes its parent's. Never changes. */
+    objectiveId: text("objectiveId").references((): AnyPgColumn => objectives.id, {
+      onDelete: "restrict",
+    }),
     lastInteractionAt: text("lastInteractionAt").notNull(),
     createdAt: text("createdAt").notNull(),
     updatedAt: text("updatedAt").notNull(),
@@ -519,6 +520,7 @@ export const sessions = pgTable(
     uniqueIndex("Session_tagId_sessionKey_key").on(table.tagId, table.sessionKey),
     index("Session_lastInteractionAt_idx").on(table.lastInteractionAt),
     index("Session_parentSessionId_idx").on(table.parentSessionId),
+    index("Session_objectiveId_idx").on(table.objectiveId),
   ],
 );
 
@@ -533,7 +535,7 @@ export const tasks = pgTable(
     sessionId: text("sessionId")
       .notNull()
       .references(() => sessions.id, { onDelete: "cascade" }),
-    surfaceObjectiveId: text("surfaceObjectiveId"),
+    objectiveId: text("objectiveId"),
     execution: json("execution").notNull().default({}),
     actor: json("actor").notNull(),
     trigger: json("trigger").notNull(),
@@ -600,12 +602,12 @@ export const attemptChangedPaths = pgTable("AttemptChangedPaths", {
 export const overlapWarnings = pgTable(
   "OverlapWarning",
   {
-    teamId: text("teamId").notNull(),
+    objectiveId: text("objectiveId").notNull(),
     lowerAttemptId: text("lowerAttemptId").notNull(),
     higherAttemptId: text("higherAttemptId").notNull(),
     path: text("path").notNull(),
   },
-  (t) => [primaryKey({ columns: [t.teamId, t.lowerAttemptId, t.higherAttemptId, t.path] })],
+  (t) => [primaryKey({ columns: [t.objectiveId, t.lowerAttemptId, t.higherAttemptId, t.path] })],
 );
 
 export const sessionStates = pgTable(
@@ -855,29 +857,14 @@ export const tagMessagingGrants = pgTable(
     recipientTagId: text("recipientTagId")
       .notNull()
       .references(() => tags.id, { onDelete: "cascade" }),
-    messageTypes: json("messageTypes").notNull(),
   },
   (t) => [uniqueIndex("TagMessagingGrant_pair_key").on(t.senderTagId, t.recipientTagId)],
-);
-export const tagMailboxCredentials = pgTable(
-  "TagMailboxCredential",
-  {
-    id: text("id").primaryKey(),
-    tagId: text("tagId")
-      .notNull()
-      .references(() => tags.id, { onDelete: "cascade" }),
-    tokenHash: text("tokenHash").notNull(),
-    createdAt: text("createdAt").notNull(),
-  },
-  (t) => [uniqueIndex("TagMailboxCredential_tokenHash_key").on(t.tokenHash)],
 );
 export const objectives = pgTable(
   "Objective",
   {
     id: text("id").primaryKey(),
     ongoing: boolean("ongoing").notNull().default(false),
-    observations: json("observations").notNull().default([]),
-    observationState: json("observationState").notNull().default({ cursors: {} }),
     outcome: text("outcome").notNull(),
     ownerTagId: text("ownerTagId")
       .notNull()
@@ -893,12 +880,12 @@ export const objectives = pgTable(
     surfaceSessionId: text("surfaceSessionId").references(() => sessions.id, {
       onDelete: "restrict",
     }),
+    /** The Team the owner may delegate to; several Objectives may name one Team. */
+    teamId: text("teamId").references((): AnyPgColumn => teams.id, { onDelete: "restrict" }),
     deadline: text("deadline"),
     budgetLimitMinor: integer("budgetLimitMinor"),
     budgetCurrency: text("budgetCurrency"),
     limitState: json("limitState").notNull().default({}),
-    spentMinor: integer("spentMinor").notNull().default(0),
-    reservedMinor: integer("reservedMinor").notNull().default(0),
     runtimeActions: json("runtimeActions").notNull().default([]),
     workspaces: json("workspaces").notNull().default([]),
     completionSummary: text("completionSummary"),
@@ -910,89 +897,22 @@ export const objectives = pgTable(
   },
   (t) => [
     index("Objective_owner_idx").on(t.ownerTagId),
+    index("Objective_teamId_idx").on(t.teamId),
     uniqueIndex("Objective_surfaceSessionId_key").on(t.surfaceSessionId),
   ],
-);
-/** Durable Session association; Objective origin remains the reporting anchor. */
-export const objectiveSessions = pgTable(
-  "ObjectiveSession",
-  {
-    sessionId: text("sessionId")
-      .primaryKey()
-      .references(() => sessions.id, { onDelete: "cascade" }),
-    objectiveId: text("objectiveId")
-      .notNull()
-      .references(() => objectives.id, { onDelete: "cascade" }),
-    surfaceTaskId: text("surfaceTaskId")
-      .notNull()
-      .references(() => tasks.id, { onDelete: "restrict" }),
-    createdAt: text("createdAt").notNull(),
-  },
-  (t) => [index("ObjectiveSession_objectiveId_idx").on(t.objectiveId)],
 );
 export const teams = pgTable(
   "Team",
   {
     id: text("id").primaryKey(),
-    objectiveId: text("objectiveId")
-      .notNull()
-      .references(() => objectives.id, { onDelete: "restrict" }),
-    objectiveIds: json("objectiveIds").notNull().default([]),
-    context: json("context").notNull().default({}),
-    scaling: json("scaling").notNull().default({}),
     name: text("name").notNull(),
-    leadTagId: text("leadTagId")
-      .notNull()
-      .references(() => tags.id, { onDelete: "restrict" }),
     memberTagIds: json("memberTagIds").notNull(),
-    parentTeamId: text("parentTeamId"),
     maxConcurrency: integer("maxConcurrency"),
-    status: text("status").notNull(),
     revision: integer("revision").notNull().default(1),
     createdAt: text("createdAt").notNull(),
     updatedAt: text("updatedAt").notNull(),
   },
-  (t) => [
-    index("Team_objective_idx").on(t.objectiveId),
-    index("Team_parent_idx").on(t.parentTeamId),
-  ],
-);
-/** Durable wake eligibility captured when a Team item is stored, never inferred later. */
-export const teamReplyTriggers = pgTable(
-  "TeamReplyTrigger",
-  {
-    id: text("id").primaryKey(),
-    objectiveId: text("objectiveId")
-      .notNull()
-      .references(() => objectives.id, { onDelete: "restrict" }),
-    teamId: text("teamId")
-      .notNull()
-      .references(() => teams.id, { onDelete: "restrict" }),
-    senderTagId: text("senderTagId")
-      .notNull()
-      .references(() => tags.id, { onDelete: "restrict" }),
-    recipientTagId: text("recipientTagId")
-      .notNull()
-      .references(() => tags.id, { onDelete: "restrict" }),
-    itemKind: text("itemKind").notNull(),
-    itemId: text("itemId").notNull(),
-    itemType: text("itemType").notNull(),
-    sourceTaskId: text("sourceTaskId").references(() => tasks.id, { onDelete: "restrict" }),
-    taskId: text("taskId").references(() => tasks.id, { onDelete: "restrict" }),
-    status: text("status").notNull(),
-    createdAt: text("createdAt").notNull(),
-    updatedAt: text("updatedAt").notNull(),
-  },
-  (t) => [
-    uniqueIndex("TeamReplyTrigger_item_recipient_key").on(t.itemKind, t.itemId, t.recipientTagId),
-    index("TeamReplyTrigger_status_created_idx").on(t.status, t.createdAt),
-    index("TeamReplyTrigger_recipient_objective_idx").on(
-      t.recipientTagId,
-      t.objectiveId,
-      t.createdAt,
-    ),
-    index("TeamReplyTrigger_task_idx").on(t.taskId),
-  ],
+  (t) => [uniqueIndex("Team_name_key").on(t.name)],
 );
 
 export const resourceChanges = pgTable(
@@ -1006,9 +926,6 @@ export const resourceChanges = pgTable(
     actorTagId: text("actorTagId").references(() => tags.id, { onDelete: "set null" }),
     operatorId: text("operatorId"),
     sourceTaskId: text("sourceTaskId").references(() => tasks.id, { onDelete: "set null" }),
-    sourceMessageId: text("sourceMessageId").references(() => tagMessages.id, {
-      onDelete: "set null",
-    }),
     changes: json("changes").notNull(),
     createdAt: text("createdAt").notNull(),
   },
@@ -1020,172 +937,32 @@ export const resourceChanges = pgTable(
     ),
     index("ResourceChange_resource_created_idx").on(t.resourceType, t.resourceId, t.createdAt),
     index("ResourceChange_source_task_idx").on(t.sourceTaskId),
-    index("ResourceChange_source_message_idx").on(t.sourceMessageId),
   ],
 );
-/** A Team's channel: one per Team, sharing the Team ID. Everything else is read from the Team. */
-export const workstreams = pgTable("Workstream", {
-  id: text("id")
-    .primaryKey()
-    .references(() => teams.id, { onDelete: "restrict" }),
-  createdAt: text("createdAt").notNull(),
-});
 
 export const workstreamPosts = pgTable(
   "WorkstreamPost",
   {
     id: text("id").primaryKey(),
-    workstreamId: text("workstreamId")
+    teamId: text("teamId")
       .notNull()
-      .references(() => workstreams.id, { onDelete: "restrict" }),
-    /** Null identifies a store-generated system notice; member posts require a Tag. */
-    authorTagId: text("authorTagId").references(() => tags.id, { onDelete: "restrict" }),
-    /** The Objective the post was written under; only its readers see the post. */
-    objectiveId: text("objectiveId")
+      .references(() => teams.id, { onDelete: "cascade" }),
+    authorTagId: text("authorTagId")
       .notNull()
-      .references(() => objectives.id, { onDelete: "restrict" }),
+      .references(() => tags.id, { onDelete: "restrict" }),
     sourceTaskId: text("sourceTaskId").references(() => tasks.id, { onDelete: "restrict" }),
-    type: text("type").notNull().default("note"),
     to: json("to").notNull().default([]),
     body: text("body").notNull(),
-    references: json("references").notNull(),
-    replyTo: text("replyTo"),
     sequence: integer("sequence").notNull(),
     createdAt: text("createdAt").notNull(),
+    /** `<sourceTaskId>:<sha256 of to and body>`, derived by the store. */
     idempotencyKey: text("idempotencyKey").notNull(),
   },
   (t) => [
-    // Each Objective numbers its own posts in a channel, so a sequence reveals nothing about
-    // posts written under another Objective.
-    uniqueIndex("WorkstreamPost_sequence_key").on(t.workstreamId, t.objectiveId, t.sequence),
-    uniqueIndex("WorkstreamPost_idempotency_key").on(
-      t.workstreamId,
-      t.authorTagId,
-      t.idempotencyKey,
-    ),
+    uniqueIndex("WorkstreamPost_sequence_key").on(t.teamId, t.sequence),
+    uniqueIndex("WorkstreamPost_idempotency_key").on(t.teamId, t.authorTagId, t.idempotencyKey),
   ],
 );
-
-/**
- * The Tag's digest cursor: one row per Team post or direct message delivered in an activation
- * digest, so each item reaches a Tag's activations once per Objective.
- */
-export const tagDigestDeliveries = pgTable(
-  "TagDigestDelivery",
-  {
-    tagId: text("tagId")
-      .notNull()
-      .references(() => tags.id, { onDelete: "restrict" }),
-    objectiveId: text("objectiveId")
-      .notNull()
-      .references(() => objectives.id, { onDelete: "restrict" }),
-    itemKind: text("itemKind").notNull(),
-    itemId: text("itemId").notNull(),
-    deliveredAt: text("deliveredAt").notNull(),
-  },
-  (t) => [primaryKey({ columns: [t.tagId, t.objectiveId, t.itemKind, t.itemId] })],
-);
-
-/**
- * Team posts and direct messages injected into a running Task Attempt as live input. One row per
- * recipient Attempt and item, so a shared Team post reaches each running Attempt once; rows of one Attempt and
- * sender bound the pair's injections. `accepted` rows also have a digest delivery.
- */
-export const teamLiveDeliveries = pgTable(
-  "TeamLiveDelivery",
-  {
-    id: text("id").primaryKey(),
-    objectiveId: text("objectiveId")
-      .notNull()
-      .references(() => objectives.id, { onDelete: "restrict" }),
-    teamId: text("teamId")
-      .notNull()
-      .references(() => teams.id, { onDelete: "restrict" }),
-    taskId: text("taskId")
-      .notNull()
-      .references(() => tasks.id, { onDelete: "restrict" }),
-    attemptId: text("attemptId")
-      .notNull()
-      .references(() => taskAttempts.id, { onDelete: "restrict" }),
-    senderTagId: text("senderTagId")
-      .notNull()
-      .references(() => tags.id, { onDelete: "restrict" }),
-    recipientTagId: text("recipientTagId")
-      .notNull()
-      .references(() => tags.id, { onDelete: "restrict" }),
-    itemKind: text("itemKind").notNull(),
-    itemId: text("itemId").notNull(),
-    itemType: text("itemType").notNull(),
-    status: text("status").notNull(),
-    dispatchedAt: text("dispatchedAt"),
-    truncated: boolean("truncated").notNull(),
-    createdAt: text("createdAt").notNull(),
-    updatedAt: text("updatedAt").notNull(),
-  },
-  (t) => [
-    uniqueIndex("TeamLiveDelivery_item_key").on(t.attemptId, t.itemKind, t.itemId),
-    uniqueIndex("TeamLiveDelivery_message_key")
-      .on(t.recipientTagId, t.objectiveId, t.itemId)
-      .where(sql`${t.itemKind} = 'direct_message'`),
-    index("TeamLiveDelivery_pair_idx").on(t.attemptId, t.senderTagId),
-    index("TeamLiveDelivery_objective_idx").on(t.objectiveId, t.createdAt),
-  ],
-);
-
-export const taskAssignments = pgTable(
-  "TaskAssignment",
-  {
-    taskId: text("taskId")
-      .primaryKey()
-      .references(() => tasks.id, { onDelete: "restrict" }),
-    limitSummaryActivation: boolean("limitSummaryActivation").notNull().default(false),
-    activationKind: text("activationKind"),
-    objectiveId: text("objectiveId")
-      .notNull()
-      .references(() => objectives.id, { onDelete: "restrict" }),
-    workstreamId: text("workstreamId").references(() => workstreams.id, { onDelete: "restrict" }),
-    teamId: text("teamId")
-      .notNull()
-      .references(() => teams.id, { onDelete: "restrict" }),
-    requestedByTagId: text("requestedByTagId")
-      .notNull()
-      .references(() => tags.id, { onDelete: "restrict" }),
-    assignedTagId: text("assignedTagId")
-      .notNull()
-      .references(() => tags.id, { onDelete: "restrict" }),
-    parentTaskId: text("parentTaskId"),
-    waitState: json("waitState"),
-    sourceMessageId: text("sourceMessageId").references(() => tagMessages.id, {
-      onDelete: "restrict",
-    }),
-    instruction: text("instruction").notNull(),
-    acceptanceCriteria: json("acceptanceCriteria").notNull(),
-    /** Objective statement items this Task serves, such as ["1", "3"]. */
-    items: json("items").notNull().default([]),
-    dependencies: json("dependencies").notNull(),
-    priority: text("priority").notNull().default("normal"),
-    fingerprint: text("fingerprint").notNull(),
-    status: text("status").notNull(),
-    approval: text("approval").notNull(),
-    leaseOwner: text("leaseOwner"),
-    leaseExpiresAt: text("leaseExpiresAt"),
-    /** The current Attempt's uncertainty while its Worker Host receipt is `unknown`. */
-    uncertainAttempt: json("uncertainAttempt"),
-    attemptCount: integer("attemptCount").notNull().default(0),
-    availableAt: text("availableAt").notNull(),
-    reservedMinor: integer("reservedMinor").notNull().default(0),
-    chargedMinor: integer("chargedMinor"),
-    result: json("result"),
-    createdAt: text("createdAt").notNull(),
-    updatedAt: text("updatedAt").notNull(),
-  },
-  (t) => [
-    uniqueIndex("TaskAssignment_sourceMessageId_key").on(t.sourceMessageId),
-    index("TaskAssignment_objective_status_idx").on(t.objectiveId, t.status),
-    index("TaskAssignment_team_status_idx").on(t.teamId, t.status),
-  ],
-);
-
 export const artifactUploads = pgTable(
   "ArtifactUpload",
   {
@@ -1325,7 +1102,7 @@ export const artifactPublicationApprovals = pgTable(
     id: text("id").primaryKey(),
     sourceTaskId: text("sourceTaskId")
       .notNull()
-      .references(() => taskAssignments.taskId, { onDelete: "restrict" }),
+      .references(() => tasks.id, { onDelete: "restrict" }),
     sourceObjectiveId: text("sourceObjectiveId")
       .notNull()
       .references(() => objectives.id, { onDelete: "restrict" }),
@@ -1415,6 +1192,7 @@ export const artifactApprovalAuditEvents = pgTable(
   ],
 );
 
+/** A Mailbox message. Its status is the status of the inbox Task it is bound to. */
 export const tagMessages = pgTable(
   "TagMessage",
   {
@@ -1425,92 +1203,24 @@ export const tagMessages = pgTable(
     recipientTagId: text("recipientTagId")
       .notNull()
       .references(() => tags.id, { onDelete: "restrict" }),
-    recipientTeamId: text("recipientTeamId"),
-    directTeamId: text("directTeamId"),
-    operatorId: text("operatorId"),
-    objectiveId: text("objectiveId").notNull(),
-    type: text("type").notNull(),
-    body: json("body").notNull(),
-    bodyPrunedAt: text("bodyPrunedAt"),
-    idempotencyKey: text("idempotencyKey").notNull(),
-    fingerprint: text("fingerprint").notNull(),
-    inReplyTo: text("inReplyTo"),
-    status: text("status").notNull(),
-    attemptCount: integer("attemptCount").notNull().default(0),
-    leaseToken: text("leaseToken"),
-    leaseCredentialId: text("leaseCredentialId"),
-    leaseExpiresAt: text("leaseExpiresAt"),
-    processedAt: text("processedAt"),
+    objectiveId: text("objectiveId").references(() => objectives.id, { onDelete: "restrict" }),
+    sourceTaskId: text("sourceTaskId").references(() => tasks.id, { onDelete: "restrict" }),
+    workstreamPostId: text("workstreamPostId").references(() => workstreamPosts.id, {
+      onDelete: "set null",
+    }),
+    text: text("text").notNull(),
+    hops: integer("hops").notNull().default(0),
+    /** The inbox Task that handles the message; null until a turn claims it. */
+    taskId: text("taskId").references(() => tasks.id, { onDelete: "restrict" }),
     createdAt: text("createdAt").notNull(),
-    updatedAt: text("updatedAt").notNull(),
   },
   (t) => [
-    uniqueIndex("TagMessage_sender_idempotency_key").on(t.senderTagId, t.idempotencyKey),
-    index("TagMessage_recipient_status_created_idx").on(t.recipientTagId, t.status, t.createdAt),
+    index("TagMessage_recipient_task_created_idx").on(t.recipientTagId, t.taskId, t.createdAt),
+    index("TagMessage_task_idx").on(t.taskId),
     index("TagMessage_sender_history_idx").on(t.senderTagId, t.createdAt, t.id),
     index("TagMessage_recipient_history_idx").on(t.recipientTagId, t.createdAt, t.id),
-    index("TagMessage_retention_idx").on(t.status, t.updatedAt),
-    index("TagMessage_objective_idx").on(t.objectiveId),
   ],
 );
-
-/** Internal evidence of operator input included in an owner Task Attempt. */
-export const operatorInputReceipts = pgTable(
-  "OperatorInputReceipt",
-  {
-    taskId: text("taskId")
-      .notNull()
-      .references(() => tasks.id, { onDelete: "cascade" }),
-    attemptCount: integer("attemptCount").notNull(),
-    messageId: text("messageId")
-      .notNull()
-      .references(() => tagMessages.id, { onDelete: "cascade" }),
-    seenAt: text("seenAt").notNull(),
-    handledAt: text("handledAt"),
-    handlingKind: text("handlingKind"),
-    handlingId: text("handlingId"),
-  },
-  (t) => [
-    primaryKey({ columns: [t.taskId, t.attemptCount, t.messageId] }),
-    index("OperatorInputReceipt_message_idx").on(t.messageId),
-  ],
-);
-
-export const objectiveMessages = pgTable(
-  "ObjectiveMessage",
-  {
-    id: text("id").primaryKey(),
-    objectiveId: text("objectiveId")
-      .notNull()
-      .references(() => objectives.id, { onDelete: "restrict" }),
-    senderTagId: text("senderTagId")
-      .notNull()
-      .references(() => tags.id, { onDelete: "restrict" }),
-    sourceTaskId: text("sourceTaskId")
-      .notNull()
-      .references(() => taskAssignments.taskId, { onDelete: "restrict" }),
-    type: text("type").notNull(),
-    needsReply: boolean("needsReply").notNull().default(true),
-    body: json("body").notNull(),
-    idempotencyKey: text("idempotencyKey").notNull(),
-    fingerprint: text("fingerprint").notNull(),
-    replyMessageId: text("replyMessageId").references(() => tagMessages.id, {
-      onDelete: "restrict",
-    }),
-    repliedByOperatorId: text("repliedByOperatorId"),
-    /** Set when the Objective closed before anyone replied; the message leaves the inbox. */
-    resolvedAt: text("resolvedAt"),
-    resolutionReason: text("resolutionReason"),
-    createdAt: text("createdAt").notNull(),
-    updatedAt: text("updatedAt").notNull(),
-  },
-  (t) => [
-    uniqueIndex("ObjectiveMessage_sender_key").on(t.objectiveId, t.senderTagId, t.idempotencyKey),
-    index("ObjectiveMessage_pending_idx").on(t.replyMessageId, t.createdAt, t.id),
-    index("ObjectiveMessage_objective_idx").on(t.objectiveId, t.createdAt, t.id),
-  ],
-);
-
 export const approvalRequests = pgTable(
   "ApprovalRequest",
   {
@@ -1601,8 +1311,6 @@ export const postgresqlSchema = {
   approvalRequests,
   operatorNotifications,
   operatorNotificationItems,
-  objectiveMessages,
-  operatorInputReceipts,
   artifactUploads,
   capturedArtifacts,
   artifactAcquisitions,
@@ -1610,18 +1318,11 @@ export const postgresqlSchema = {
   artifactConsumptionApprovals,
   artifactPublicationApprovals,
   objectives,
-  objectiveSessions,
   inboundControlDeliveries,
   resourceChanges,
   teams,
-  taskAssignments,
-  workstreams,
   workstreamPosts,
-  tagDigestDeliveries,
-  teamLiveDeliveries,
-  teamReplyTriggers,
   tagMessagingGrants,
-  tagMailboxCredentials,
   tagMessages,
   artifacts,
   surfaceAccounts,

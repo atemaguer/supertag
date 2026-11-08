@@ -6,16 +6,15 @@ import {
   COORDINATION_GRPC_MAX_OUTPUT_BYTES,
   CoordinationService,
   decodeCoordinationDocument,
-  ExecutionAuthorityService,
   encodeCoordinationDocument,
 } from "@supertag/worker-transport";
-import { coordinationTools, isHiddenCoordinationTool, surfaceTools } from "./coordination-http.js";
+import { isHiddenCoordinationTool, surfaceTools } from "./coordination-http.js";
 
 export function registerCoordinationGrpcRoutes(
   router: ConnectRouter,
   controller: Pick<
     ObjectiveController,
-    "authenticate" | "coordinationActions" | "commandAsAttempt" | "rebindExecutionCredential"
+    "authenticateExecution" | "coordinationActions" | "commandAsAttempt"
   >,
   options: { readonly beginRequest?: () => () => void } = {},
 ): void {
@@ -49,11 +48,9 @@ export function registerCoordinationGrpcRoutes(
     }
   }
   async function allowed(token: string | undefined) {
-    const caller = await controller.authenticate(token);
+    const caller = await controller.authenticateExecution(token);
     const actions = await controller.coordinationActions(caller);
-    const tools = (
-      "kind" in caller && caller.kind === "surface" ? surfaceTools : coordinationTools
-    ).filter((tool) => actions.includes(tool.name));
+    const tools = surfaceTools.filter((tool) => actions.includes(tool.name));
     return { caller, tools };
   }
   const limits = {
@@ -104,13 +101,6 @@ export function registerCoordinationGrpcRoutes(
         }),
     },
     limits,
-  );
-  router.service(
-    ExecutionAuthorityService,
-    {
-      rebind: (_, context) => run(context, (token) => controller.rebindExecutionCredential(token)),
-    },
-    { ...limits, readMaxBytes: 8192, writeMaxBytes: 8192 },
   );
 }
 function safeError(error: unknown): ConnectError {

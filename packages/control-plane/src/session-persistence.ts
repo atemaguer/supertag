@@ -21,11 +21,7 @@ export class SessionPersistence {
     if (!task) throw new TagMessagingError(401, "Session execution unavailable");
     const attempts = await this.store.listTaskAttempts(task.id);
     const attempt = attempts.find(
-      (item) =>
-        item.status === "running" &&
-        ("kind" in caller
-          ? item.id === caller.attemptId
-          : item.attemptNumber === caller.attemptCount),
+      (item) => item.status === "running" && item.id === caller.attemptId,
     );
     if (!attempt) throw new TagMessagingError(401, "Session execution unavailable");
     return { task, attempt };

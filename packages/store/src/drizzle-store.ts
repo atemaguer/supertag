@@ -50,7 +50,7 @@ import type {
   LiveMount,
   MountManifest,
   MountOutputManifest,
-  ObjectiveMailboxStore,
+  ObjectiveSessionStore,
   ObjectiveStore,
   OpenSessionInput,
   OpenSurfaceTaskAttemptInput,
@@ -100,7 +100,6 @@ import type {
   TagRouteListFilter,
   TagWorkerHostBinding,
   Task,
-  TaskAssignmentStore,
   TaskAttempt,
   TaskAttemptStatus,
   TaskEvent,
@@ -111,7 +110,6 @@ import type {
   TaskResult,
   TaskStatus,
   TaskWorkspacePlan,
-  TeamLiveDeliveryStore,
   TeamStore,
   VolumeStore,
   WorkerHostStore,
@@ -123,7 +121,6 @@ import {
   ARTIFACT_CONTEXT_TYPE,
   normalizeApprovers,
   parseExecutionSettings,
-  parseFixedTaskFindings,
   parseLiveMounts,
   parseMcpGrantAction,
   parseMcpGrantResource,
@@ -152,6 +149,7 @@ import {
   lt,
   lte,
   ne,
+  notInArray,
   or,
   sql,
 } from "drizzle-orm";
@@ -168,7 +166,6 @@ import { DrizzleCoordinationInboxStore } from "./coordination-inbox-store.js";
 import { DrizzleCoordinationMetricsStore } from "./coordination-metrics-store.js";
 import { runDialectTransaction } from "./dialect-transaction.js";
 import { DrizzleMailboxStore } from "./mailbox-store.js";
-import { DrizzleObjectiveMailboxStore } from "./objective-mailbox-store.js";
 import { DrizzleOperatorNotificationStore } from "./operator-notification-store.js";
 import { DrizzleOperatorTokenStore } from "./operator-token-store.js";
 import { defaultSqliteUrl } from "./paths.js";
@@ -182,9 +179,7 @@ import { DrizzleSessionAudienceStore, sessionFromRow } from "./session-audience-
 import { DrizzleSessionStateStore } from "./session-state-store.js";
 import { DrizzleSpendStore } from "./spend-store.js";
 import { openSqliteDatabase } from "./sqlite-connection.js";
-import { DrizzleTaskAssignmentStore } from "./task-assignment-store.js";
 import { nextTaskEventSequence } from "./task-event-sequence.js";
-import { DrizzleTeamLiveDeliveryStore } from "./team-live-delivery-store.js";
 import { DrizzleTeamStore } from "./team-store.js";
 import { DrizzleVolumeStore } from "./volume-store.js";
 import { DrizzleWorkerHostStore, storedLabels } from "./worker-host-store.js";
@@ -712,6 +707,14 @@ export class DrizzleStore implements Store {
   updateTeam(...args: Parameters<TeamStore["updateTeam"]>): ReturnType<TeamStore["updateTeam"]> {
     return new DrizzleTeamStore(this.#db, this.#tables, this.provider).updateTeam(...args);
   }
+  listTeamsOfTag(
+    ...args: Parameters<TeamStore["listTeamsOfTag"]>
+  ): ReturnType<TeamStore["listTeamsOfTag"]> {
+    return new DrizzleTeamStore(this.#db, this.#tables, this.provider).listTeamsOfTag(...args);
+  }
+  deleteTeam(...args: Parameters<TeamStore["deleteTeam"]>): ReturnType<TeamStore["deleteTeam"]> {
+    return new DrizzleTeamStore(this.#db, this.#tables, this.provider).deleteTeam(...args);
+  }
   applyVolume(
     ...args: Parameters<VolumeStore["applyVolume"]>
   ): ReturnType<VolumeStore["applyVolume"]> {
@@ -815,11 +818,6 @@ export class DrizzleStore implements Store {
   createRole(...args: Parameters<RoleStore["createRole"]>): ReturnType<RoleStore["createRole"]> {
     return new DrizzleRoleStore(this.#db, this.#tables, this.provider).createRole(...args);
   }
-  ensureSystemRole(
-    ...args: Parameters<RoleStore["ensureSystemRole"]>
-  ): ReturnType<RoleStore["ensureSystemRole"]> {
-    return new DrizzleRoleStore(this.#db, this.#tables, this.provider).ensureSystemRole(...args);
-  }
   findRoleById(
     ...args: Parameters<RoleStore["findRoleById"]>
   ): ReturnType<RoleStore["findRoleById"]> {
@@ -829,11 +827,6 @@ export class DrizzleStore implements Store {
     ...args: Parameters<RoleStore["findRoleByName"]>
   ): ReturnType<RoleStore["findRoleByName"]> {
     return new DrizzleRoleStore(this.#db, this.#tables, this.provider).findRoleByName(...args);
-  }
-  findRoleBySystemKey(
-    ...args: Parameters<RoleStore["findRoleBySystemKey"]>
-  ): ReturnType<RoleStore["findRoleBySystemKey"]> {
-    return new DrizzleRoleStore(this.#db, this.#tables, this.provider).findRoleBySystemKey(...args);
   }
   listRoles(...args: Parameters<RoleStore["listRoles"]>): ReturnType<RoleStore["listRoles"]> {
     return new DrizzleRoleStore(this.#db, this.#tables, this.provider).listRoles(...args);
@@ -855,196 +848,6 @@ export class DrizzleStore implements Store {
     return new DrizzleRoleStore(this.#db, this.#tables, this.provider).deactivateRoleAssignment(
       ...args,
     );
-  }
-  registerTaskAssignmentWait(
-    ...args: Parameters<TaskAssignmentStore["registerTaskAssignmentWait"]>
-  ): ReturnType<TaskAssignmentStore["registerTaskAssignmentWait"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).registerTaskAssignmentWait(...args);
-  }
-  escalateTaskAssignment(
-    ...args: Parameters<TaskAssignmentStore["escalateTaskAssignment"]>
-  ): ReturnType<TaskAssignmentStore["escalateTaskAssignment"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).escalateTaskAssignment(...args);
-  }
-  wakeWaitingTaskAssignments(): ReturnType<TaskAssignmentStore["wakeWaitingTaskAssignments"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).wakeWaitingTaskAssignments();
-  }
-  reconcileObjectiveObservations(): Promise<void> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).reconcileObjectiveObservations();
-  }
-  admitMailboxTaskAssignments(): ReturnType<TaskAssignmentStore["admitMailboxTaskAssignments"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).admitMailboxTaskAssignments();
-  }
-  getTaskAssignmentSourceMessage(
-    ...args: Parameters<TaskAssignmentStore["getTaskAssignmentSourceMessage"]>
-  ): ReturnType<TaskAssignmentStore["getTaskAssignmentSourceMessage"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).getTaskAssignmentSourceMessage(...args);
-  }
-  admitTaskAssignment(
-    ...args: Parameters<TaskAssignmentStore["admitTaskAssignment"]>
-  ): ReturnType<TaskAssignmentStore["admitTaskAssignment"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).admitTaskAssignment(...args);
-  }
-  getTaskAssignment(
-    ...args: Parameters<TaskAssignmentStore["getTaskAssignment"]>
-  ): ReturnType<TaskAssignmentStore["getTaskAssignment"]> {
-    return new DrizzleTaskAssignmentStore(this.#db, this.#tables, this.provider).getTaskAssignment(
-      ...args,
-    );
-  }
-  countActiveTaskAssignments(
-    ...args: Parameters<TaskAssignmentStore["countActiveTaskAssignments"]>
-  ): ReturnType<TaskAssignmentStore["countActiveTaskAssignments"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).countActiveTaskAssignments(...args);
-  }
-  listRunningTeamOccupants(
-    ...args: Parameters<TaskAssignmentStore["listRunningTeamOccupants"]>
-  ): ReturnType<TaskAssignmentStore["listRunningTeamOccupants"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).listRunningTeamOccupants(...args);
-  }
-  listTaskAssignments(
-    ...args: Parameters<TaskAssignmentStore["listTaskAssignments"]>
-  ): ReturnType<TaskAssignmentStore["listTaskAssignments"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).listTaskAssignments(...args);
-  }
-  listTaskAssignmentFollowups(
-    ...args: Parameters<TaskAssignmentStore["listTaskAssignmentFollowups"]>
-  ): ReturnType<TaskAssignmentStore["listTaskAssignmentFollowups"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).listTaskAssignmentFollowups(...args);
-  }
-  listClosedObjectiveLeftovers(
-    ...args: Parameters<TaskAssignmentStore["listClosedObjectiveLeftovers"]>
-  ): ReturnType<TaskAssignmentStore["listClosedObjectiveLeftovers"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).listClosedObjectiveLeftovers(...args);
-  }
-  settleClosedObjective(
-    ...args: Parameters<TaskAssignmentStore["settleClosedObjective"]>
-  ): ReturnType<TaskAssignmentStore["settleClosedObjective"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).settleClosedObjective(...args);
-  }
-  listStalledObjectiveOwnerTasks(
-    ...args: Parameters<TaskAssignmentStore["listStalledObjectiveOwnerTasks"]>
-  ): ReturnType<TaskAssignmentStore["listStalledObjectiveOwnerTasks"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).listStalledObjectiveOwnerTasks(...args);
-  }
-  deliverOwnerTaskChanges(
-    ...args: Parameters<TaskAssignmentStore["deliverOwnerTaskChanges"]>
-  ): ReturnType<TaskAssignmentStore["deliverOwnerTaskChanges"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).deliverOwnerTaskChanges(...args);
-  }
-  listPendingTaskAssignments(
-    ...args: Parameters<TaskAssignmentStore["listPendingTaskAssignments"]>
-  ): ReturnType<TaskAssignmentStore["listPendingTaskAssignments"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).listPendingTaskAssignments(...args);
-  }
-  listTaskAssignmentLimitEntries(
-    ...args: Parameters<TaskAssignmentStore["listTaskAssignmentLimitEntries"]>
-  ): ReturnType<TaskAssignmentStore["listTaskAssignmentLimitEntries"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).listTaskAssignmentLimitEntries(...args);
-  }
-  markTaskAssignmentUncertain(
-    ...args: Parameters<TaskAssignmentStore["markTaskAssignmentUncertain"]>
-  ): ReturnType<TaskAssignmentStore["markTaskAssignmentUncertain"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).markTaskAssignmentUncertain(...args);
-  }
-  claimTaskAssignmentRecovery(
-    ...args: Parameters<TaskAssignmentStore["claimTaskAssignmentRecovery"]>
-  ): ReturnType<TaskAssignmentStore["claimTaskAssignmentRecovery"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).claimTaskAssignmentRecovery(...args);
-  }
-  releaseUnacceptedTaskAssignment(
-    ...args: Parameters<TaskAssignmentStore["releaseUnacceptedTaskAssignment"]>
-  ): ReturnType<TaskAssignmentStore["releaseUnacceptedTaskAssignment"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).releaseUnacceptedTaskAssignment(...args);
-  }
-  releaseLostTaskAssignment(
-    ...args: Parameters<TaskAssignmentStore["releaseLostTaskAssignment"]>
-  ): ReturnType<TaskAssignmentStore["releaseLostTaskAssignment"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).releaseLostTaskAssignment(...args);
   }
   createAuthKey(
     ...args: Parameters<AuthKeyStore["createAuthKey"]>
@@ -1122,98 +925,10 @@ export class DrizzleStore implements Store {
       this.provider,
     ).authenticateOperatorToken(...args);
   }
-  appendTaskAssignmentJournalEvent(
-    ...args: Parameters<TaskAssignmentStore["appendTaskAssignmentJournalEvent"]>
-  ): ReturnType<TaskAssignmentStore["appendTaskAssignmentJournalEvent"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).appendTaskAssignmentJournalEvent(...args);
-  }
-  claimTaskAssignment(
-    ...args: Parameters<TaskAssignmentStore["claimTaskAssignment"]>
-  ): ReturnType<TaskAssignmentStore["claimTaskAssignment"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).claimTaskAssignment(...args);
-  }
-  recheckOwnerDeliveryMessage(
-    ...args: Parameters<TaskAssignmentStore["recheckOwnerDeliveryMessage"]>
-  ): ReturnType<TaskAssignmentStore["recheckOwnerDeliveryMessage"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).recheckOwnerDeliveryMessage(...args);
-  }
-  renewTaskAssignment(
-    ...args: Parameters<TaskAssignmentStore["renewTaskAssignment"]>
-  ): ReturnType<TaskAssignmentStore["renewTaskAssignment"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).renewTaskAssignment(...args);
-  }
-  settleTaskAssignment(
-    ...args: Parameters<TaskAssignmentStore["settleTaskAssignment"]>
-  ): ReturnType<TaskAssignmentStore["settleTaskAssignment"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).settleTaskAssignment(...args);
-  }
-  cancelTaskAssignment(
-    ...args: Parameters<TaskAssignmentStore["cancelTaskAssignment"]>
-  ): ReturnType<TaskAssignmentStore["cancelTaskAssignment"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).cancelTaskAssignment(...args);
-  }
-  approveTaskAssignment(
-    ...args: Parameters<TaskAssignmentStore["approveTaskAssignment"]>
-  ): ReturnType<TaskAssignmentStore["approveTaskAssignment"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).approveTaskAssignment(...args);
-  }
-  reviewTaskAssignment(
-    ...args: Parameters<TaskAssignmentStore["reviewTaskAssignment"]>
-  ): ReturnType<TaskAssignmentStore["reviewTaskAssignment"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).reviewTaskAssignment(...args);
-  }
-  updateTaskAssignment(
-    ...args: Parameters<TaskAssignmentStore["updateTaskAssignment"]>
-  ): ReturnType<TaskAssignmentStore["updateTaskAssignment"]> {
-    return new DrizzleTaskAssignmentStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).updateTaskAssignment(...args);
-  }
   createSurfaceObjective(
     ...args: Parameters<ObjectiveStore["createSurfaceObjective"]>
   ): ReturnType<ObjectiveStore["createSurfaceObjective"]> {
     return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).createSurfaceObjective(
-      ...args,
-    );
-  }
-  attachSurfaceObjective(
-    ...args: Parameters<ObjectiveStore["attachSurfaceObjective"]>
-  ): ReturnType<ObjectiveStore["attachSurfaceObjective"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).attachSurfaceObjective(
       ...args,
     );
   }
@@ -1231,19 +946,22 @@ export class DrizzleStore implements Store {
     const objective = await this.#first(o, eq(o.id, required(objectiveId, "Objective id")));
     return objective?.surfaceTaskId ? this.findTaskById(objective.surfaceTaskId) : undefined;
   }
-  async findObjectiveByNotificationSession(
+  async findObjectiveByHomeSession(
     sessionId: string,
-  ): ReturnType<ObjectiveStore["findObjectiveByNotificationSession"]> {
+  ): ReturnType<ObjectiveStore["findObjectiveByHomeSession"]> {
     const o = this.#tables.objectives;
     const [objective] = await this.#db
       .select()
       .from(o)
       .where(
-        sql`exists (select 1 from "Task" t where t."id" = coalesce(${o.notificationTaskId}, ${o.surfaceTaskId}) and t."sessionId" = ${required(sessionId, "Session id")})`,
+        and(
+          notInArray(o.status, ["completed", "cancelled"]),
+          sql`exists (select 1 from "Task" t where t."id" = coalesce(${o.notificationTaskId}, ${o.surfaceTaskId}) and t."sessionId" = ${required(sessionId, "Session id")})`,
+        ),
       )
       .orderBy(desc(o.updatedAt), desc(o.id))
       .limit(1);
-    return objective as Awaited<ReturnType<ObjectiveStore["findObjectiveByNotificationSession"]>>;
+    return objective ? this.getObjective(objective.id) : undefined;
   }
   getVerifiedSurfaceTask(taskId: string): ReturnType<ObjectiveStore["getVerifiedSurfaceTask"]> {
     return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).getVerifiedSurfaceTask(
@@ -1315,117 +1033,18 @@ export class DrizzleStore implements Store {
   ): ReturnType<ObjectiveStore["resumeObjective"]> {
     return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).resumeObjective(...args);
   }
-  getWorkstream(
-    ...args: Parameters<WorkstreamStore["getWorkstream"]>
-  ): ReturnType<WorkstreamStore["getWorkstream"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).getWorkstream(...args);
+  post(...args: Parameters<WorkstreamStore["post"]>): ReturnType<WorkstreamStore["post"]> {
+    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).post(...args);
   }
-  listWorkstreams(
-    ...args: Parameters<WorkstreamStore["listWorkstreams"]>
-  ): ReturnType<WorkstreamStore["listWorkstreams"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).listWorkstreams(...args);
+  listTeamPosts(
+    ...args: Parameters<WorkstreamStore["listTeamPosts"]>
+  ): ReturnType<WorkstreamStore["listTeamPosts"]> {
+    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).listTeamPosts(...args);
   }
-  readActivationDigest(
-    ...args: Parameters<WorkstreamStore["readActivationDigest"]>
-  ): ReturnType<WorkstreamStore["readActivationDigest"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).readActivationDigest(
-      ...args,
-    );
-  }
-  recordActivationDigest(
-    ...args: Parameters<WorkstreamStore["recordActivationDigest"]>
-  ): ReturnType<WorkstreamStore["recordActivationDigest"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).recordActivationDigest(
-      ...args,
-    );
-  }
-  deliverActivationDigest(
-    ...args: Parameters<WorkstreamStore["deliverActivationDigest"]>
-  ): ReturnType<WorkstreamStore["deliverActivationDigest"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).deliverActivationDigest(
-      ...args,
-    );
-  }
-  findTeamLiveDeliveryTargets(
-    ...args: Parameters<TeamLiveDeliveryStore["findTeamLiveDeliveryTargets"]>
-  ): ReturnType<TeamLiveDeliveryStore["findTeamLiveDeliveryTargets"]> {
-    return this.#teamLiveDeliveries().findTeamLiveDeliveryTargets(...args);
-  }
-  prepareTeamLiveDelivery(
-    ...args: Parameters<TeamLiveDeliveryStore["prepareTeamLiveDelivery"]>
-  ): ReturnType<TeamLiveDeliveryStore["prepareTeamLiveDelivery"]> {
-    return this.#teamLiveDeliveries().prepareTeamLiveDelivery(...args);
-  }
-  confirmTeamLiveDelivery(
-    ...args: Parameters<TeamLiveDeliveryStore["confirmTeamLiveDelivery"]>
-  ): ReturnType<TeamLiveDeliveryStore["confirmTeamLiveDelivery"]> {
-    return this.#teamLiveDeliveries().confirmTeamLiveDelivery(...args);
-  }
-  finishTeamLiveDelivery(
-    ...args: Parameters<TeamLiveDeliveryStore["finishTeamLiveDelivery"]>
-  ): ReturnType<TeamLiveDeliveryStore["finishTeamLiveDelivery"]> {
-    return this.#teamLiveDeliveries().finishTeamLiveDelivery(...args);
-  }
-  withdrawTeamLiveDelivery(
-    ...args: Parameters<TeamLiveDeliveryStore["withdrawTeamLiveDelivery"]>
-  ): ReturnType<TeamLiveDeliveryStore["withdrawTeamLiveDelivery"]> {
-    return this.#teamLiveDeliveries().withdrawTeamLiveDelivery(...args);
-  }
-  hasUnconfirmedTeamLiveDelivery(
-    ...args: Parameters<TeamLiveDeliveryStore["hasUnconfirmedTeamLiveDelivery"]>
-  ): ReturnType<TeamLiveDeliveryStore["hasUnconfirmedTeamLiveDelivery"]> {
-    return this.#teamLiveDeliveries().hasUnconfirmedTeamLiveDelivery(...args);
-  }
-  listTeamLiveDeliveries(
-    ...args: Parameters<TeamLiveDeliveryStore["listTeamLiveDeliveries"]>
-  ): ReturnType<TeamLiveDeliveryStore["listTeamLiveDeliveries"]> {
-    return this.#teamLiveDeliveries().listTeamLiveDeliveries(...args);
-  }
-  #teamLiveDeliveries() {
-    return new DrizzleTeamLiveDeliveryStore(this.#db, this.#tables, this.provider);
-  }
-  postWorkstream(
-    ...args: Parameters<WorkstreamStore["postWorkstream"]>
-  ): ReturnType<WorkstreamStore["postWorkstream"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).postWorkstream(...args);
-  }
-
-  recordOverlapWarning(
-    ...args: Parameters<WorkstreamStore["recordOverlapWarning"]>
-  ): ReturnType<WorkstreamStore["recordOverlapWarning"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).recordOverlapWarning(
-      ...args,
-    );
-  }
-  listWorkstreamPosts(
-    ...args: Parameters<WorkstreamStore["listWorkstreamPosts"]>
-  ): ReturnType<WorkstreamStore["listWorkstreamPosts"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).listWorkstreamPosts(
-      ...args,
-    );
-  }
-
-  listRecentWorkstreamPosts(
-    ...args: Parameters<WorkstreamStore["listRecentWorkstreamPosts"]>
-  ): ReturnType<WorkstreamStore["listRecentWorkstreamPosts"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).listRecentWorkstreamPosts(
-      ...args,
-    );
-  }
-
-  listOpenWorkstreamPosts(
-    ...args: Parameters<WorkstreamStore["listOpenWorkstreamPosts"]>
-  ): ReturnType<WorkstreamStore["listOpenWorkstreamPosts"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).listOpenWorkstreamPosts(
-      ...args,
-    );
-  }
-
-  // Resolve the adapter against the current database connection after reconnect.
-  setTagMessagingGrant(
-    ...args: Parameters<TagMailboxStore["setTagMessagingGrant"]>
-  ): ReturnType<TagMailboxStore["setTagMessagingGrant"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).setTagMessagingGrant(
+  setTagMessagingGrants(
+    ...args: Parameters<TagMailboxStore["setTagMessagingGrants"]>
+  ): ReturnType<TagMailboxStore["setTagMessagingGrants"]> {
+    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).setTagMessagingGrants(
       ...args,
     );
   }
@@ -1436,117 +1055,33 @@ export class DrizzleStore implements Store {
       ...args,
     );
   }
-  createTagMailboxCredential(
-    ...args: Parameters<TagMailboxStore["createTagMailboxCredential"]>
-  ): ReturnType<TagMailboxStore["createTagMailboxCredential"]> {
-    return new DrizzleMailboxStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).createTagMailboxCredential(...args);
+  mayMessage(
+    ...args: Parameters<TagMailboxStore["mayMessage"]>
+  ): ReturnType<TagMailboxStore["mayMessage"]> {
+    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).mayMessage(...args);
   }
-  findTagMailboxCredential(
-    ...args: Parameters<TagMailboxStore["findTagMailboxCredential"]>
-  ): ReturnType<TagMailboxStore["findTagMailboxCredential"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).findTagMailboxCredential(
+  deliverTagMessage(
+    ...args: Parameters<TagMailboxStore["deliverTagMessage"]>
+  ): ReturnType<TagMailboxStore["deliverTagMessage"]> {
+    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).deliverTagMessage(
       ...args,
     );
   }
-  revokeTagMailboxCredential(
-    ...args: Parameters<TagMailboxStore["revokeTagMailboxCredential"]>
-  ): ReturnType<TagMailboxStore["revokeTagMailboxCredential"]> {
-    return new DrizzleMailboxStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).revokeTagMailboxCredential(...args);
-  }
-  enqueueObjectiveMessage(
-    ...args: Parameters<ObjectiveMailboxStore["enqueueObjectiveMessage"]>
-  ): ReturnType<ObjectiveMailboxStore["enqueueObjectiveMessage"]> {
-    return new DrizzleObjectiveMailboxStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).enqueueObjectiveMessage(...args);
-  }
-  getObjectiveMessage(
-    ...args: Parameters<ObjectiveMailboxStore["getObjectiveMessage"]>
-  ): ReturnType<ObjectiveMailboxStore["getObjectiveMessage"]> {
-    return new DrizzleObjectiveMailboxStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).getObjectiveMessage(...args);
-  }
-  listObjectiveMessages(
-    ...args: Parameters<ObjectiveMailboxStore["listObjectiveMessages"]>
-  ): ReturnType<ObjectiveMailboxStore["listObjectiveMessages"]> {
-    return new DrizzleObjectiveMailboxStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).listObjectiveMessages(...args);
-  }
-  replyToObjectiveMessage(
-    ...args: Parameters<ObjectiveMailboxStore["replyToObjectiveMessage"]>
-  ): ReturnType<ObjectiveMailboxStore["replyToObjectiveMessage"]> {
-    return new DrizzleObjectiveMailboxStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).replyToObjectiveMessage(...args);
-  }
-  sendOperatorObjectiveMessage(
-    ...args: Parameters<ObjectiveMailboxStore["sendOperatorObjectiveMessage"]>
-  ): ReturnType<ObjectiveMailboxStore["sendOperatorObjectiveMessage"]> {
-    return new DrizzleObjectiveMailboxStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).sendOperatorObjectiveMessage(...args);
-  }
-  enqueueTagMessage(
-    ...args: Parameters<TagMailboxStore["enqueueTagMessage"]>
-  ): ReturnType<TagMailboxStore["enqueueTagMessage"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).enqueueTagMessage(
+  bindInboxMessages(
+    ...args: Parameters<TagMailboxStore["bindInboxMessages"]>
+  ): ReturnType<TagMailboxStore["bindInboxMessages"]> {
+    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).bindInboxMessages(
       ...args,
     );
   }
-  listOpenTeamMessages(
-    ...args: Parameters<TagMailboxStore["listOpenTeamMessages"]>
-  ): ReturnType<TagMailboxStore["listOpenTeamMessages"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).listOpenTeamMessages(
-      ...args,
-    );
-  }
-
-  recordOperatorInputReceipt(
-    ...args: Parameters<TagMailboxStore["recordOperatorInputReceipt"]>
-  ): Promise<void> {
+  listTagsWithUnboundMessages(
+    ...args: Parameters<TagMailboxStore["listTagsWithUnboundMessages"]>
+  ): ReturnType<TagMailboxStore["listTagsWithUnboundMessages"]> {
     return new DrizzleMailboxStore(
       this.#db,
       this.#tables,
       this.provider,
-    ).recordOperatorInputReceipt(...args);
-  }
-  listObjectiveTagMessageHistory(
-    ...args: Parameters<TagMailboxStore["listObjectiveTagMessageHistory"]>
-  ): ReturnType<TagMailboxStore["listObjectiveTagMessageHistory"]> {
-    return new DrizzleMailboxStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).listObjectiveTagMessageHistory(...args);
-  }
-  listUnhandledOperatorInputs(
-    ...args: Parameters<TagMailboxStore["listUnhandledOperatorInputs"]>
-  ): ReturnType<TagMailboxStore["listUnhandledOperatorInputs"]> {
-    return new DrizzleMailboxStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).listUnhandledOperatorInputs(...args);
+    ).listTagsWithUnboundMessages(...args);
   }
   listTagMessageHistory(
     ...args: Parameters<TagMailboxStore["listTagMessageHistory"]>
@@ -1555,68 +1090,8 @@ export class DrizzleStore implements Store {
       ...args,
     );
   }
-  listObjectiveOperatorMessages(
-    ...args: Parameters<TagMailboxStore["listObjectiveOperatorMessages"]>
-  ): ReturnType<TagMailboxStore["listObjectiveOperatorMessages"]> {
-    return new DrizzleMailboxStore(
-      this.#db,
-      this.#tables,
-      this.provider,
-    ).listObjectiveOperatorMessages(...args);
-  }
-  pruneTagMessageBodies(
-    ...args: Parameters<TagMailboxStore["pruneTagMessageBodies"]>
-  ): ReturnType<TagMailboxStore["pruneTagMessageBodies"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).pruneTagMessageBodies(
-      ...args,
-    );
-  }
-  listTagMessages(
-    ...args: Parameters<TagMailboxStore["listTagMessages"]>
-  ): ReturnType<TagMailboxStore["listTagMessages"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).listTagMessages(...args);
-  }
-  takeTeamDirectMessages(
-    ...args: Parameters<TagMailboxStore["takeTeamDirectMessages"]>
-  ): ReturnType<TagMailboxStore["takeTeamDirectMessages"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).takeTeamDirectMessages(
-      ...args,
-    );
-  }
-  getTagMessage(
-    ...args: Parameters<TagMailboxStore["getTagMessage"]>
-  ): ReturnType<TagMailboxStore["getTagMessage"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).getTagMessage(...args);
-  }
-  listTagMessageReplies(
-    ...args: Parameters<TagMailboxStore["listTagMessageReplies"]>
-  ): ReturnType<TagMailboxStore["listTagMessageReplies"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).listTagMessageReplies(
-      ...args,
-    );
-  }
-  listTaskPriorityMessages(
-    ...args: Parameters<TagMailboxStore["listTaskPriorityMessages"]>
-  ): ReturnType<TagMailboxStore["listTaskPriorityMessages"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).listTaskPriorityMessages(
-      ...args,
-    );
-  }
-  claimTagMessage(
-    ...args: Parameters<TagMailboxStore["claimTagMessage"]>
-  ): ReturnType<TagMailboxStore["claimTagMessage"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).claimTagMessage(...args);
-  }
-  settleTagMessage(
-    ...args: Parameters<TagMailboxStore["settleTagMessage"]>
-  ): ReturnType<TagMailboxStore["settleTagMessage"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).settleTagMessage(...args);
-  }
-  renewTagMessage(
-    ...args: Parameters<TagMailboxStore["renewTagMessage"]>
-  ): ReturnType<TagMailboxStore["renewTagMessage"]> {
-    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).renewTagMessage(...args);
-  }
+
+  // Resolve the adapter against the current database connection after reconnect.
 
   async connect(): Promise<void> {
     if (this.provider === "sqlite") {
@@ -1734,10 +1209,6 @@ export class DrizzleStore implements Store {
             eq(tables.tagMessagingGrants.recipientTagId, tagId),
           ),
         )
-        .returning();
-      yield tx
-        .delete(tables.tagMailboxCredentials)
-        .where(eq(tables.tagMailboxCredentials.tagId, tagId))
         .returning();
       // Assignments stay as inactive history rather than disappearing.
       yield tx
@@ -2448,6 +1919,13 @@ export class DrizzleStore implements Store {
       ...(input.parentSessionId === undefined
         ? {}
         : { parentSessionId: required(input.parentSessionId, "Parent Session id") }),
+      ...(input.objectiveId !== undefined
+        ? { objectiveId: required(input.objectiveId, "Objective id") }
+        : input.parentSessionId === undefined
+          ? {}
+          : {
+              objectiveId: sql`(select p."objectiveId" from "Session" p where p."id" = ${input.parentSessionId})`,
+            }),
       lastInteractionAt: input.at,
       createdAt: input.at,
       updatedAt: input.at,
@@ -2515,6 +1993,31 @@ export class DrizzleStore implements Store {
   ): ReturnType<SessionAudienceStore["findVisibleObjective"]> {
     return this.#sessionAudience().findVisibleObjective(...args);
   }
+  findObjectiveOwnerSession(
+    ...args: Parameters<ObjectiveSessionStore["findObjectiveOwnerSession"]>
+  ): ReturnType<ObjectiveSessionStore["findObjectiveOwnerSession"]> {
+    return this.#sessionAudience().findObjectiveOwnerSession(...args);
+  }
+  listObjectiveSessions(
+    ...args: Parameters<ObjectiveSessionStore["listObjectiveSessions"]>
+  ): ReturnType<ObjectiveSessionStore["listObjectiveSessions"]> {
+    return this.#sessionAudience().listObjectiveSessions(...args);
+  }
+  listIdleObjectives(
+    ...args: Parameters<ObjectiveSessionStore["listIdleObjectives"]>
+  ): ReturnType<ObjectiveSessionStore["listIdleObjectives"]> {
+    return this.#sessionAudience().listIdleObjectives(...args);
+  }
+  listOpenObjectiveTaskIds(
+    ...args: Parameters<ObjectiveSessionStore["listOpenObjectiveTaskIds"]>
+  ): ReturnType<ObjectiveSessionStore["listOpenObjectiveTaskIds"]> {
+    return this.#sessionAudience().listOpenObjectiveTaskIds(...args);
+  }
+  listDecidedSessionWaits(
+    ...args: Parameters<ObjectiveSessionStore["listDecidedSessionWaits"]>
+  ): ReturnType<ObjectiveSessionStore["listDecidedSessionWaits"]> {
+    return this.#sessionAudience().listDecidedSessionWaits(...args);
+  }
   listWorkSessions(
     ...args: Parameters<SessionAudienceStore["listWorkSessions"]>
   ): ReturnType<SessionAudienceStore["listWorkSessions"]> {
@@ -2524,11 +2027,6 @@ export class DrizzleStore implements Store {
     ...args: Parameters<SessionAudienceStore["listSessionTaskIds"]>
   ): ReturnType<SessionAudienceStore["listSessionTaskIds"]> {
     return this.#sessionAudience().listSessionTaskIds(...args);
-  }
-  listDecidedWorkSessionWaits(
-    ...args: Parameters<SessionAudienceStore["listDecidedWorkSessionWaits"]>
-  ): ReturnType<SessionAudienceStore["listDecidedWorkSessionWaits"]> {
-    return this.#sessionAudience().listDecidedWorkSessionWaits(...args);
   }
   sessionTaskSummaries(
     ...args: Parameters<SessionAudienceStore["sessionTaskSummaries"]>
@@ -2558,7 +2056,7 @@ export class DrizzleStore implements Store {
         inboundEventId: required(input.inboundEventId, "Inbound event id"),
         tagId: required(input.tagId, "Tag id"),
         sessionId: required(input.sessionId, "Session id"),
-        surfaceObjectiveId: sql`(select a."objectiveId" from "ObjectiveSession" a join "Objective" o on o."id" = a."objectiveId" join "Session" s on s."id" = a."sessionId" where a."sessionId" = ${input.sessionId} and o."ownerTagId" = ${input.tagId} and s."tagId" = ${input.tagId})`,
+        objectiveId: sql`(select s."objectiveId" from "Session" s where s."id" = ${input.sessionId})`,
         execution: parseTaskExecutionRequirements(input.execution),
         actor: input.actor,
         trigger: input.trigger,
@@ -2582,7 +2080,18 @@ export class DrizzleStore implements Store {
       })
       .onConflictDoNothing({ target: t.inboundEventId })
       .returning();
-    if (rows[0] !== undefined) return taskFromRow(rows[0]);
+    if (rows[0] !== undefined) {
+      const task = taskFromRow(rows[0]);
+      if (task.objectiveId !== undefined) {
+        // The Objective's first Task marks it started.
+        const o = this.#tables.objectives;
+        await this.#db
+          .update(o)
+          .set({ executionStartedAt: input.createdAt })
+          .where(and(eq(o.id, task.objectiveId), isNull(o.executionStartedAt)));
+      }
+      return task;
+    }
     const existing = await this.#first(t, eq(t.inboundEventId, input.inboundEventId));
     if (existing === undefined) throw new Error("Task was not persisted");
     return taskFromRow(existing);
@@ -3141,12 +2650,11 @@ export class DrizzleStore implements Store {
     const reports = this.#tables.attemptChangedPaths;
     const attempts = this.#tables.taskAttempts;
     const tasks = this.#tables.tasks;
-    const assignments = this.#tables.taskAssignments;
     const rows = await this.#db
       .select({
         attemptId: reports.attemptId,
         taskId: attempts.taskId,
-        teamId: assignments.teamId,
+        objectiveId: tasks.objectiveId,
         tagId: tasks.tagId,
         workspacePlan: tasks.workspacePlan,
         paths: reports.paths,
@@ -3156,8 +2664,7 @@ export class DrizzleStore implements Store {
       .from(reports)
       .innerJoin(attempts, eq(attempts.id, reports.attemptId))
       .innerJoin(tasks, eq(tasks.id, attempts.taskId))
-      .innerJoin(assignments, eq(assignments.taskId, tasks.id))
-      .where(eq(attempts.status, "running"))
+      .where(and(eq(attempts.status, "running"), isNotNull(tasks.objectiveId)))
       .orderBy(asc(attempts.id));
     return rows.map((row: any) => ({
       ...row,
@@ -3167,12 +2674,12 @@ export class DrizzleStore implements Store {
   }
 
   async recordOverlaps(input: {
-    readonly teamId: string;
+    readonly objectiveId: string;
     readonly firstAttemptId: string;
     readonly secondAttemptId: string;
     readonly paths: readonly string[];
   }): ReturnType<Store["recordOverlaps"]> {
-    const teamId = required(input.teamId, "Team id");
+    const objectiveId = required(input.objectiveId, "Objective id");
     const first = required(input.firstAttemptId, "First Task Attempt id");
     const second = required(input.secondAttemptId, "Second Task Attempt id");
     if (first === second) throw new Error("Overlap requires two distinct Task Attempts");
@@ -3184,10 +2691,10 @@ export class DrizzleStore implements Store {
       for (const path of paths) {
         const [row] = yield tx
           .insert(table)
-          .values({ teamId, lowerAttemptId, higherAttemptId, path })
+          .values({ objectiveId, lowerAttemptId, higherAttemptId, path })
           .onConflictDoNothing()
           .returning();
-        if (row) added.push({ teamId, lowerAttemptId, higherAttemptId, path });
+        if (row) added.push({ objectiveId, lowerAttemptId, higherAttemptId, path });
       }
       return added;
     });
@@ -3198,9 +2705,9 @@ export class DrizzleStore implements Store {
     const type = required(input.type, "Task event type");
     const createdAt = input.createdAt ?? new Date().toISOString();
     const t = this.#tables.taskEvents;
-    // Allocate under the Task's assignment-row lock, like writers inside other transactions, so a
-    // concurrent transaction never picks the same sequence. The unique constraint and a short
-    // retry still cover Tasks without an assignment row.
+    // Allocate under the Task row lock, like writers inside other transactions, so a concurrent
+    // transaction never picks the same sequence. The unique constraint and a short retry remain
+    // as a backstop.
     for (let attempt = 0; attempt < 5; attempt += 1) {
       try {
         return await runDialectTransaction(this.#db, this.provider, function* (tx: any) {
@@ -4852,7 +4359,7 @@ function taskFromRow(row: any): Task {
     inboundEventId: row.inboundEventId,
     tagId: row.tagId,
     sessionId: row.sessionId,
-    ...(row.surfaceObjectiveId == null ? {} : { surfaceObjectiveId: row.surfaceObjectiveId }),
+    ...(row.objectiveId == null ? {} : { objectiveId: row.objectiveId }),
     execution: parseTaskExecutionRequirements(row.execution),
     actor: record(row.actor, "task actor") as unknown as InboundEventActor,
     trigger: record(row.trigger, "task trigger"),
@@ -5599,10 +5106,9 @@ function taskResultFromJson(value: unknown): TaskResult {
     throw new Error("Persisted Task result is invalid");
   normalizeTaskReferences(result["references"] as unknown as readonly TaskReference[]);
   parseTaskFindings(result["findings"]);
-  parseFixedTaskFindings(result["fixedFindings"]);
   return JSON.parse(JSON.stringify(result)) as TaskResult;
 }
-/** A submitted result whose findings the Control Plane records for this Task only, as open. */
+/** A submitted result whose findings the Control Plane records for this Task only. */
 function submittedTaskResult(value: unknown): TaskResult {
   const result = record(value, "Task result");
   return taskResultFromJson({ ...result, findings: recordTaskFindings(result["findings"]) });
@@ -5675,6 +5181,10 @@ function inboundIsDue(table: DynamicTable, now: string): any {
         eq(table.status, "pending"),
         lte(table.availableAt, now),
         lt(table.attemptCount, table.maxAttempts),
+        // A turn of an Objective's Session waits while the Objective is paused or closed.
+        sql`not exists (select 1 from "Session" os join "Objective" o on o."id" = os."objectiveId" where os."tagId" = ${table.tagId} and os."sessionKey" = ${table.sessionKey} and (o."pausedAt" is not null or o."status" in ('completed','cancelled')))`,
+        // Turns across the Sessions of every Objective naming a Team stay within its maxConcurrency.
+        sql`not exists (select 1 from "Session" os join "Objective" o on o."id" = os."objectiveId" join "Team" tm on tm."id" = o."teamId" where os."tagId" = ${table.tagId} and os."sessionKey" = ${table.sessionKey} and tm."maxConcurrency" is not null and (select count(*) from "DurableInboundEvent" r join "Session" rs on rs."tagId" = r."tagId" and rs."sessionKey" = r."sessionKey" join "Objective" ro on ro."id" = rs."objectiveId" where ro."teamId" = tm."id" and r."status" = 'processing' and r."id" <> ${table.id}) >= tm."maxConcurrency")`,
       ),
       and(eq(table.status, "processing"), lte(table.leaseExpiresAt, now)),
     ),

@@ -45,7 +45,7 @@ export class ExecutionAdmissionRejectedError extends ExecutionNotAcceptedError {
 export class UncertainExecutionError extends Error {
   constructor(attemptId: string, cause?: unknown) {
     super(
-      `Attempt ${attemptId} may have executed. Inspect its durable Worklet receipt before explicit reassignment; automatic replay is disabled.`,
+      `Attempt ${attemptId} may have executed. Inspect its durable Worklet receipt before running the work again; automatic replay is disabled.`,
       cause === undefined ? undefined : { cause },
     );
     this.name = "UncertainExecutionError";
@@ -111,8 +111,8 @@ export async function* executeWorkletAttempt(
   if (receipt.status === "unknown") throw new UncertainExecutionError(spec.attemptId);
   const cancel = () => {
     if (!cancelOnAbort()) return;
-    // Forward why execution stopped, such as a registered durable wait. A bare abort carries
-    // no explanation, so it keeps the generic authority reason.
+    // Forward why execution stopped, such as a cancellation. A bare abort carries no
+    // explanation, so it keeps the generic authority reason.
     const reason =
       signal.reason instanceof Error && signal.reason.name !== "AbortError" && signal.reason.message
         ? signal.reason.message.slice(0, 500)

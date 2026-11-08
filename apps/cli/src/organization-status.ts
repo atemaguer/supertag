@@ -5,15 +5,14 @@ import {
   type SpendUsage,
   storedTaskFindings,
   type Tag,
-  type TaskAssignment,
+  type Task,
   type TaskAttempt,
 } from "@supertag/core";
 import { COORDINATION_CAPABILITY } from "@supertag/worker-sdk";
 import { ControlPlaneClient, type ControlPlaneTarget } from "./control-plane-client.js";
 import type { WorkerHostResource } from "./control-plane-resources.js";
-import { operatorDecidesInboxItem } from "./coordination.js";
 import { type DiskSpace, lowDiskWarning } from "./disk-space.js";
-import { money } from "./objective-overview.js";
+import { money } from "./money.js";
 import { takeOutputFlag } from "./output-flag.js";
 import { runningCommandText } from "./running-command.js";
 import { terminalText } from "./terminal-text.js";
@@ -63,7 +62,7 @@ export interface OrganizationStatus {
     readonly ownerTagId: string;
     readonly ownerName: string;
     readonly deadline: string | null;
-    /** Provider-reported spend in minor units, such as 1380 for $13.80. */
+    /** Provider-reported spend in minor units, such as 1380 for $13.80; 0 when none is known. */
     readonly spentMinor: number;
     readonly budgetLimitMinor: number | null;
     /** The budget's currency; null when the budget counts allocation units. */
@@ -73,7 +72,7 @@ export interface OrganizationStatus {
     /** Usage with no published model price, when present. */
     readonly unpricedAttempts?: number;
     readonly unpricedTokens?: number;
-    readonly openHighFindings?: readonly {
+    readonly highFindings?: readonly {
       readonly taskId: string;
       readonly id: string;
       readonly summary: string;
@@ -103,7 +102,8 @@ export function organizationStatus(input: {
   /** The running command of each Task whose harness reports one. */
   readonly runningCommands?: ReadonlyMap<string, TaskAttemptRunningCommand>;
   readonly objectives: readonly Objective[];
-  readonly objectiveTasks?: ReadonlyMap<string, readonly TaskAssignment[]>;
+  /** The Tasks of each Objective's Sessions, for their reported findings. */
+  readonly objectiveTasks?: ReadonlyMap<string, readonly Pick<Task, "id" | "result">[]>;
   readonly objectiveSpend?: ReadonlyMap<string, SpendUsage>;
 }): OrganizationStatus {
   const placements = input.runningAttempts.map((attempt) => ({
@@ -220,18 +220,18 @@ export function organizationStatus(input: {
         ownerTagId: objective.ownerTagId,
         ownerName: tagNames.get(objective.ownerTagId) ?? objective.ownerTagId,
         deadline: objective.deadline ?? null,
-        spentMinor: reported?.amountMinor ?? objective.spentMinor,
+        spentMinor: reported?.amountMinor ?? 0,
         budgetLimitMinor: objective.budgetLimitMinor ?? null,
         currency: objective.budgetCurrency ?? null,
         spendCurrency: reported?.currency ?? objective.budgetCurrency ?? null,
         ...(unpricedAttempts > 0
           ? { unpricedAttempts, unpricedTokens: usage?.unpricedTokens ?? 0 }
           : {}),
-        openHighFindings: (input.objectiveTasks?.get(objective.id) ?? []).flatMap((task) =>
+        highFindings: (input.objectiveTasks?.get(objective.id) ?? []).flatMap((task) =>
           storedTaskFindings(task.result)
-            .filter((finding) => finding.status === "open" && finding.severity === "high")
+            .filter((finding) => finding.severity === "high")
             .map((finding) => ({
-              taskId: task.taskId,
+              taskId: task.id,
               id: finding.id,
               summary: finding.summary,
               ...(finding.location ? { location: finding.location } : {}),
@@ -296,8 +296,8 @@ export async function runStatusCommand(
   ]);
   const items = inbox.items;
   const byObjective = new Map<string, number>();
-  for (const item of items)
-    byObjective.set(item.objectiveId, (byObjective.get(item.objectiveId) ?? 0) + 1);
+  for (const { objectiveId } of items)
+    if (objectiveId !== null) byObjective.set(objectiveId, (byObjective.get(objectiveId) ?? 0) + 1);
   const view: OrganizationStatusView = {
     ...organization,
     objectives: organization.objectives.map((objective) => ({
@@ -322,7 +322,7 @@ async function operatorInbox(client: ControlPlaneClient): Promise<{
       `/api/v1/coordination/inbox${cursor === undefined ? "" : `?${new URLSearchParams({ cursor })}`}`,
       { method: "GET" },
     );
-    items.push(...page.items.filter(operatorDecidesInboxItem));
+    items.push(...page.items.filter((item) => item.operatorEligible));
     if ((page.truncatedKinds ?? []).length > 0) truncated = true;
     cursor = page.nextCursor ?? undefined;
   } while (cursor);
@@ -373,9 +373,9 @@ export function formatOrganizationStatus(view: OrganizationStatusView, now: Date
       lines.push(
         `    unpriced; ${objective.unpricedAttempts} Task Attempts; ${objective.unpricedTokens ?? 0} tokens${objective.budgetLimitMinor !== null && objective.currency !== null ? "; budget cannot be enforced for these Task Attempts" : ""}`,
       );
-    for (const finding of objective.openHighFindings ?? [])
+    for (const finding of objective.highFindings ?? [])
       lines.push(
-        `    Open high: ${finding.taskId} ${finding.id}: ${finding.summary}${finding.location ? ` (${finding.location})` : ""}`,
+        `    High finding: ${finding.taskId} ${finding.id}: ${finding.summary}${finding.location ? ` (${finding.location})` : ""}`,
       );
   }
   lines.push(

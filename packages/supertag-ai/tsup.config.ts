@@ -40,7 +40,6 @@ export default defineConfig({
     coordination: "src/coordination.ts",
     worker: "src/worker.ts",
     transport: "src/transport.ts",
-    messaging: "src/messaging.ts",
     testing: "src/testing.ts",
     surfaces: "src/surfaces.ts",
     "control-plane": "src/control-plane.ts",

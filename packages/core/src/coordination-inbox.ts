@@ -1,24 +1,24 @@
 /** Version of the durable operator inbox projection contract. */
-export const COORDINATION_INBOX_VERSION = 7 as const;
+export const COORDINATION_INBOX_VERSION = 8 as const;
 
+/**
+ * `approval`: a pending approval request. `question`: an Objective's latest turn asked with
+ * `ask` and waits on the answer. `objective_budget` and `objective_limit`: a budget or deadline
+ * limit was reached. `task_attention`: a Task needs an operator, such as an uncertain Attempt.
+ * `mcp_login`: a Task is held until an MCP server is logged in.
+ */
 export const COORDINATION_INBOX_KINDS = [
-  "task_approval",
-  "task_review",
-  "task_budget",
-  "objective_budget",
-  "operator_message",
-  "task_attention",
-  "objective_limit",
-  "objective_ready_for_review",
-  "objective_completed",
   "approval",
+  "question",
+  "objective_budget",
+  "objective_limit",
+  "task_attention",
   "mcp_login",
 ] as const;
 export type CoordinationInboxKind = (typeof COORDINATION_INBOX_KINDS)[number];
 export type CoordinationInboxStatus = "pending";
 
 export type CoordinationInboxEvidence =
-  | { readonly kind: "message"; readonly id: string }
   | {
       readonly kind: "task";
       readonly id: string;
@@ -27,12 +27,11 @@ export type CoordinationInboxEvidence =
       readonly updatedAt: string;
     }
   | { readonly kind: "objective"; readonly id: string; readonly revision: number }
-  | { readonly kind: "team"; readonly id: string; readonly revision: number }
   | { readonly kind: "approval_request"; readonly id: string };
 
 /** A partial invocation of a public primitive plus fields the operator must still supply. */
 export interface CoordinationInboxAction {
-  readonly tool: "update_task" | "update_objective" | "send_message" | "decide_approval";
+  readonly tool: "update_objective";
   readonly arguments: Readonly<Record<string, unknown>>;
   readonly requiredInputFields: readonly string[];
 }
@@ -45,8 +44,8 @@ export interface CoordinationInboxItem {
   readonly status: CoordinationInboxStatus;
   /** Explains a responsibility needing inspection; does not authorize replay. */
   readonly reason?: string;
-  readonly objectiveId: string;
-  readonly teamId: string;
+  /** Null only for an approval requested by a Tag's inbox turn, which has no Objective. */
+  readonly objectiveId: string | null;
   readonly nextActorTagIds: readonly string[];
   readonly excludedActorTagIds: readonly string[];
   readonly operatorEligible: boolean;
@@ -55,17 +54,13 @@ export interface CoordinationInboxItem {
   readonly deadline: string | null;
   readonly evidence: readonly CoordinationInboxEvidence[];
   readonly permittedActions: readonly CoordinationInboxAction[];
-  /**
-   * The pending approval request an `approval` item stands for, or the request that holds a
-   * `task_approval` Task.
-   */
+  /** The pending approval request an `approval` item stands for. */
   readonly approval?: CoordinationInboxApproval;
   /**
-   * For an `operator_message` item read by an operator who may read the whole Objective: the
-   * owner's message text, cut to {@link COORDINATION_INBOX_MESSAGE_LIMIT} characters, and when
-   * the owner sent it.
+   * For a `question` item read by an operator who may read the whole Objective: the question,
+   * cut to {@link COORDINATION_INBOX_QUESTION_LIMIT} characters, and when it was asked.
    */
-  readonly message?: CoordinationInboxMessage;
+  readonly question?: CoordinationInboxQuestion;
   /**
    * For a `task_attention` item about a running Task whose Attempt is uncertain: the Attempt and
    * where its journal is, which name the `supertag recover worklet` command in `commands`.
@@ -73,7 +68,7 @@ export interface CoordinationInboxItem {
   readonly uncertainAttempt?: CoordinationInboxUncertainAttempt;
   /** `supertag` commands that act on the item, most direct first. */
   readonly commands?: readonly string[];
-  /** Delivery state for the existing operator or manager escalation route. */
+  /** Delivery state of the operator notification about this item. */
   readonly notification?: {
     readonly status:
       | "unconfigured"
@@ -81,7 +76,6 @@ export interface CoordinationInboxItem {
       | "delivering"
       | "delivered"
       | "failed"
-      | "manager"
       | "unavailable"
       | "not configured";
     readonly reason?: string;
@@ -98,24 +92,24 @@ export interface CoordinationInboxUncertainAttempt {
   readonly workerId?: string;
 }
 
-/** Longest owner message text an inbox item carries; longer text ends with `…`. */
-export const COORDINATION_INBOX_MESSAGE_LIMIT = 500;
+/** Longest question text an inbox item carries; longer text ends with `…`. */
+export const COORDINATION_INBOX_QUESTION_LIMIT = 500;
 
-export interface CoordinationInboxMessage {
+export interface CoordinationInboxQuestion {
   readonly text: string;
   readonly createdAt: string;
-  /** The stored message is longer than `text`; read it with `read_mailbox`. */
+  /** The question is longer than `text`; `supertag describe objective` shows it in full. */
   readonly truncated: boolean;
 }
 
-/** The bounded inbox form of an owner message body. */
-export function coordinationInboxMessage(
+/** The bounded inbox form of a question. */
+export function coordinationInboxQuestion(
   text: string,
   createdAt: string,
-): CoordinationInboxMessage {
-  const truncated = text.length > COORDINATION_INBOX_MESSAGE_LIMIT;
+): CoordinationInboxQuestion {
+  const truncated = text.length > COORDINATION_INBOX_QUESTION_LIMIT;
   return {
-    text: truncated ? `${text.slice(0, COORDINATION_INBOX_MESSAGE_LIMIT - 1)}…` : text,
+    text: truncated ? `${text.slice(0, COORDINATION_INBOX_QUESTION_LIMIT - 1)}…` : text,
     createdAt,
     truncated,
   };
@@ -123,7 +117,7 @@ export function coordinationInboxMessage(
 
 export interface CoordinationInboxApproval {
   readonly requestId: string;
-  readonly requestKind: "surface-action" | "task" | "plan";
+  readonly requestKind: "surface-action";
   readonly summary: string;
   readonly requestingTagId: string;
   readonly requestingTagName?: string;
@@ -134,7 +128,6 @@ export interface CoordinationInboxApproval {
 
 export interface CoordinationInboxFilter {
   readonly objectiveId?: string;
-  readonly teamId?: string;
   readonly kind?: CoordinationInboxKind;
   readonly status?: CoordinationInboxStatus;
   readonly nextActorId?: string;
@@ -143,13 +136,6 @@ export interface CoordinationInboxFilter {
 export interface ReadCoordinationInboxInput extends CoordinationInboxFilter {
   /** Include approval requests; false for principals that may not list them. Defaults to true. */
   readonly includeApprovals?: boolean;
-  /**
-   * Include notify-only items (Objective completion) that need no operator action. Only the
-   * notification outbox reads them; listing the inbox leaves them out unless filtered by kind.
-   */
-  readonly includeNotices?: boolean;
-  /** Only derive completion notices recorded at or after this time for notification scans. */
-  readonly includeNoticesSince?: string;
   readonly asOf?: string;
   readonly cursor?: string;
   readonly limit?: number;
@@ -191,28 +177,16 @@ export function coordinationInboxHeadline(item: CoordinationInboxItem): string {
       return approval
         ? `Approval ${approval.requestId}${approval.blocking ? " (work is waiting)" : ""}: ${summary(approval.summary)} (requested by Tag ${approval.requestingTagName ?? "unknown Tag"})`
         : "An approval request waits for a decision";
-    case "task_approval":
-      return `Task ${task ?? "?"} is held for approval${approval ? ` (request ${approval.requestId})` : ""}`;
-    case "task_review":
-      return `Task ${task ?? "?"} was submitted for review`;
-    case "task_budget":
-      return `Task ${task ?? "?"} stopped at its budget`;
+    case "question":
+      return `Objective ${item.objectiveId} waits on your answer`;
     case "objective_budget":
-      return "The Objective allocation is used up";
-    case "operator_message":
-      return "The Objective owner sent you a message";
+      return "The Objective budget is used up";
     case "task_attention":
-      if (item.key === `task_attention:objective:${item.objectiveId}:stalled`)
-        return `Objective ${item.objectiveId} needs owner attention`;
       return item.uncertainAttempt
         ? `Task ${task ?? "?"} is uncertain: Attempt ${item.uncertainAttempt.attemptId} may have executed, and only an operator on Worker Host ${item.uncertainAttempt.workerHostId ?? "unknown"} can recover it`
         : `Task ${task ?? "?"} needs attention`;
     case "objective_limit":
       return summary(item.reason ?? "A budget or deadline limit was reached");
-    case "objective_ready_for_review":
-      return `Objective ${item.objectiveId} is ready for review`;
-    case "objective_completed":
-      return `Objective ${item.objectiveId} completed`;
     case "mcp_login":
       return `Task ${task ?? "?"} is held until MCP server ${mcpLoginServerOfKey(item.key) ?? "?"} is logged in`;
   }
@@ -241,19 +215,20 @@ export function coordinationInboxCommands(
     "kind" | "key" | "objectiveId" | "evidence" | "approval" | "uncertainAttempt"
   >,
 ): string[] {
-  const objective = shellWord(item.objectiveId);
+  const objective = shellWord(item.objectiveId ?? "OBJECTIVE");
   const task = item.evidence.find((entry) => entry.kind === "task")?.id;
   const request = item.approval?.requestId;
   switch (item.kind) {
     case "approval":
-    case "task_approval":
       return request
         ? [
             `supertag approve request ${shellWord(request)}`,
             `supertag deny request ${shellWord(request)} --reason TEXT`,
           ]
-        : [`supertag list approval --objective ${objective}`];
-    case "operator_message":
+        : item.objectiveId === null
+          ? ["supertag list approval"]
+          : [`supertag list approval --objective ${objective}`];
+    case "question":
       return [`supertag message objective ${objective} TEXT`];
     case "objective_budget":
       return [`supertag update objective ${objective} --budget-minor N`];
@@ -261,27 +236,7 @@ export function coordinationInboxCommands(
       return item.key.includes(":deadline-")
         ? [`supertag update objective ${objective} --deadline ISO-8601`]
         : [`supertag update objective ${objective} --budget-minor N`];
-    case "objective_ready_for_review":
-    case "objective_completed":
-      return [`supertag describe objective ${objective}`];
-    case "task_review":
-      return task
-        ? [
-            `supertag coordinate update_task --input ${shellWord(`${task}-accept-review.json`)}`,
-            `supertag coordinate update_task --input ${shellWord(`${task}-reject-review.json`)}`,
-            `supertag describe task ${shellWord(task)}`,
-          ]
-        : [`supertag describe objective ${objective}`];
-    case "task_budget":
-      return task
-        ? [
-            `supertag coordinate update_task --input ${shellWord(`${task}-renew-budget.json`)}`,
-            `supertag describe task ${shellWord(task)}`,
-          ]
-        : [`supertag describe objective ${objective}`];
     case "task_attention":
-      if (item.key === `task_attention:objective:${item.objectiveId}:stalled`)
-        return [`supertag message objective ${objective} TEXT`];
       // Run on the Worker Host with its host service stopped; see the item's reason.
       return task && item.uncertainAttempt
         ? [

@@ -3,13 +3,8 @@ import {
   assertExecutionInRange,
   defaultExecution,
   ExecutionRangeError,
-  ExecutionUnchangedError,
-  escalateExecution,
-  escalatesExecution,
   executionRange,
-  MAX_SELF_ESCALATIONS,
   parseExecutionSettings,
-  selfEscalateExecution,
 } from "./execution-settings.js";
 import { parseTaskExecutionRequirements } from "./task-execution.js";
 
@@ -75,7 +70,6 @@ describe("execution settings", () => {
     expect(defaultExecution(executionRange(undefined, [{ effort: ["medium", "high"] }]))).toEqual({
       effort: "medium",
     });
-    expect(escalateExecution(range, defaultExecution(range)).change).toBe("effort low → medium");
   });
 
   it("defaults to the first allowed model and effort", () => {
@@ -102,69 +96,6 @@ describe("execution settings", () => {
   });
 });
 
-describe("escalation", () => {
-  const range = {
-    harness: "codex",
-    model: ["gpt-6-sol", "gpt-6-max"],
-    effort: ["medium", "high"],
-  } as const;
-
-  it("raises effort one step, then moves to the next model at the default effort", () => {
-    const first = escalateExecution(range, {
-      harness: "codex",
-      model: "gpt-6-sol",
-      effort: "medium",
-    });
-    expect(first).toEqual({
-      execution: { harness: "codex", model: "gpt-6-sol", effort: "high" },
-      change: "effort medium → high",
-    });
-    const second = escalateExecution(range, first.execution);
-    expect(second).toEqual({
-      execution: { harness: "codex", model: "gpt-6-max", effort: "medium" },
-      change: "model gpt-6-sol → gpt-6-max",
-    });
-    const third = escalateExecution(range, second.execution);
-    expect(third.change).toBe("effort medium → high");
-    const exhausted = escalateExecution(range, third.execution);
-    expect(exhausted).toEqual({ execution: third.execution });
-  });
-
-  it("goes to the highest effort when none was recorded, and stays put with one model", () => {
-    expect(escalateExecution({}, {})).toEqual({
-      execution: { effort: "high" },
-      change: "effort default → high",
-    });
-    expect(escalateExecution({ model: ["only"] }, { model: "only", effort: "high" })).toEqual({
-      execution: { model: "only", effort: "high" },
-    });
-  });
-
-  it("escalates after rejection or a work failure, never after an infrastructure failure", () => {
-    expect(escalatesExecution({ status: "rejected" })).toBe(true);
-    expect(escalatesExecution({ status: "failed", result: { error: "Tests still fail" } })).toBe(
-      true,
-    );
-    expect(escalatesExecution({ status: "accepted" })).toBe(false);
-    expect(escalatesExecution({ status: "cancelled" })).toBe(false);
-    for (const error of [
-      "You've hit your usage limit",
-      "429 Too Many Requests",
-      "Not logged in. Please run /login",
-      "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.",
-      "Execution lease expired; explicit reassignment required",
-      "Ephemeral Worker Host h1 was removed; explicit reassignment required",
-    ])
-      expect(escalatesExecution({ status: "failed", result: { error } }), error).toBe(false);
-    expect(
-      escalatesExecution({
-        status: "failed",
-        result: { error: "stopped", failureKind: "budget-exhausted" },
-      }),
-    ).toBe(false);
-  });
-});
-
 describe("Task execution model and effort", () => {
   it("parses model and effort with the other requirements", () => {
     expect(
@@ -172,44 +103,5 @@ describe("Task execution model and effort", () => {
     ).toEqual({ harness: "codex", model: "gpt-6-sol", effort: "high" });
     expect(() => parseTaskExecutionRequirements({ effort: "max" })).toThrow("low, medium, high");
     expect(() => parseTaskExecutionRequirements({ model: "" })).toThrow("model name");
-  });
-});
-
-describe("self-escalation", () => {
-  const range = {
-    harness: "codex",
-    model: ["gpt-6-sol", "gpt-6-max"],
-    effort: ["low", "medium", "high"],
-  } as const;
-  const current = { harness: "codex", model: "gpt-6-sol", effort: "low" } as const;
-
-  it("changes effort, model, or both within the range and describes the change", () => {
-    expect(selfEscalateExecution(range, current, { effort: "high" })).toEqual({
-      execution: { harness: "codex", model: "gpt-6-sol", effort: "high" },
-      change: "effort low → high",
-    });
-    expect(selfEscalateExecution(range, current, { model: "gpt-6-max", effort: "medium" })).toEqual(
-      {
-        execution: { harness: "codex", model: "gpt-6-max", effort: "medium" },
-        change: "effort low → medium, model gpt-6-sol → gpt-6-max",
-      },
-    );
-  });
-
-  it("refuses values outside the range, empty requests, and requests that change nothing", () => {
-    expect(() =>
-      selfEscalateExecution({ ...range, effort: ["low", "medium"] }, current, { effort: "high" }),
-    ).toThrow(
-      new ExecutionRangeError(
-        "This Tag does not allow effort high. Allowed: harness codex; model gpt-6-sol, gpt-6-max; effort low, medium.",
-      ),
-    );
-    expect(() => selfEscalateExecution(range, current, {})).toThrow(ExecutionRangeError);
-    expect(() => selfEscalateExecution(range, current, { effort: "low" })).toThrow(
-      new ExecutionUnchangedError(
-        "Nothing would change: this Task already runs with effort low. Allowed: harness codex; model gpt-6-sol, gpt-6-max; effort low, medium, high.",
-      ),
-    );
-    expect(MAX_SELF_ESCALATIONS).toBe(2);
   });
 });

@@ -44,7 +44,7 @@ type CatalogPersistence = ArtifactCatalogStore &
   >;
 type CatalogAuthority = Pick<
   ObjectiveController,
-  "authenticateExecution" | "authorizeArtifactSource" | "artifactDiscoveryTaskIds"
+  "authenticateExecution" | "authorizeArtifactSource"
 >;
 
 /** The catalog owns metadata and access history. It never receives cloud credentials or file bytes. */
@@ -348,10 +348,8 @@ export class ArtifactCatalog {
     const task = await this.store.findTaskById(caller.taskId);
     if (!task) throw new TagMessagingError(401, "Artifact Attempt is unavailable");
     const attempts = await this.store.listTaskAttempts(task.id);
-    const attempt = attempts.find((candidate) =>
-      "kind" in caller
-        ? candidate.id === caller.attemptId && candidate.status === "running"
-        : candidate.attemptNumber === caller.attemptCount && candidate.status === "running",
+    const attempt = attempts.find(
+      (candidate) => candidate.id === caller.attemptId && candidate.status === "running",
     );
     if (!attempt) throw new TagMessagingError(401, "Artifact Attempt is unavailable");
     return { caller, task, attempt, attemptId: attempt.id };
@@ -366,12 +364,10 @@ export class ArtifactCatalog {
     switch (name) {
       case "find": {
         keys(input, ["query", "kind", "taskId", "limit", "cursor"]);
-        const taskIds = await this.authority.artifactDiscoveryTaskIds(caller);
         const page = await this.store.listCapturedArtifacts({
-          ...("kind" in caller
+          ...(task.objectiveId === undefined
             ? { sessionId: task.sessionId }
-            : { objectiveId: caller.objectiveId }),
-          ...(taskIds === undefined ? {} : { taskIds }),
+            : { objectiveId: task.objectiveId }),
           includeArtifactIds: [...(await this.admittedSelections(task)).keys()],
           ...(input["query"] === undefined ? {} : { query: text(input["query"], "query", 1000) }),
           ...(input["kind"] === undefined ? {} : { kind: text(input["kind"], "kind") }),
@@ -426,11 +422,7 @@ export class ArtifactCatalog {
                   CommitCapturedArtifactInput["harnessSession"]
                 >,
               }),
-          ...("kind" in caller
-            ? task.surfaceObjectiveId
-              ? { objectiveId: task.surfaceObjectiveId }
-              : {}
-            : { objectiveId: caller.objectiveId }),
+          ...(task.objectiveId === undefined ? {} : { objectiveId: task.objectiveId }),
           title: text(input["title"], "title"),
           ...(input["summary"] === undefined
             ? {}

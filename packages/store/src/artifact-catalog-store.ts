@@ -109,12 +109,7 @@ export class DrizzleArtifactCatalogStore implements ArtifactCatalogStore {
       const task = yield* self.lockAttempt(tx, input.taskId, input.attemptId);
       if (task.tagId !== input.tagId || task.sessionId !== input.sessionId)
         throw new ArtifactCatalogError(409, "Artifact producer does not match Task");
-      const q = self.tables.taskAssignments;
-      const [assignment] = yield tx
-        .select({ objectiveId: q.objectiveId })
-        .from(q)
-        .where(eq(q.taskId, input.taskId));
-      if ((assignment?.objectiveId ?? task.surfaceObjectiveId ?? undefined) !== input.objectiveId)
+      if ((task.objectiveId ?? undefined) !== input.objectiveId)
         throw new ArtifactCatalogError(409, "Artifact Objective does not match Task");
       const t = self.tables.capturedArtifacts;
       const [existing] = yield tx

@@ -8,15 +8,13 @@ import { setTimeout as delay } from "node:timers/promises";
 import { parseArgs, promisify } from "node:util";
 import {
   array,
-  artifactSelection,
-  assertExactArtifactAdmission,
   assertNoSecrets,
   digest,
   hasExactLine,
+  integer,
   isToolCallStarted,
   type JsonRecord,
   nativeSessionEvidence,
-  outputText,
   readCredential,
   record,
   redactSecrets,
@@ -78,7 +76,6 @@ const { values } = parseArgs({
     "tls-ca-file": { type: "string" },
     "restart-hook": { type: "string" },
     output: { type: "string" },
-    "wake-seconds": { type: "string", default: "120" },
     "timeout-seconds": { type: "string", default: "900" },
     "codex-model": { type: "string", default: "gpt-5.6-luna" },
     "claude-model": { type: "string" },
@@ -98,7 +95,6 @@ const workletUrl = resolveWorkletUrl(management, transport, values["worklet-url"
 const tlsCaFile = values["tls-ca-file"] ? resolve(values["tls-ca-file"]) : undefined;
 if (transport === "grpc" && tlsCaFile === undefined)
   throw new Error("Hosted gRPC validation requires --tls-ca-file");
-const wakeSeconds = positiveInteger(values["wake-seconds"], "--wake-seconds");
 const timeoutMs = positiveInteger(values["timeout-seconds"], "--timeout-seconds") * 1000;
 const outputDirectory = resolve(
   values.output ?? `.supertag/hosted-render/${provider}-${transport}-${Date.now()}`,
@@ -114,14 +110,9 @@ const prefix = `render-${provider.replace("-code", "")}-${runId}`;
 const hostA = `${prefix}-host-a`;
 const hostB = `${prefix}-host-b`;
 const profileId = `${prefix}-profile`;
-const ownerName = `${prefix}-owner`;
-const objectiveId = `${prefix}-objective`;
-const teamId = `${prefix}-team`;
+const tagName = `${prefix}-tag`;
 const permissionSetName = `${prefix}-runtime`;
 const roleName = `${prefix}-worker`;
-const continuityTaskId = `${prefix}-continuity`;
-const producerTaskId = `${prefix}-producer`;
-const consumerTaskId = `${prefix}-consumer`;
 const nativeSecret = `NATIVE_${randomUUID().replaceAll("-", "")}`;
 const artifactSecret = `ARTIFACT_${randomUUID().replaceAll("-", "")}`;
 const protectedValues: string[] = [adminToken, nativeSecret, artifactSecret];
@@ -178,39 +169,17 @@ try {
     metadata: { name: roleName },
     spec: {
       purpose: "Run the bounded hosted transport and persistence validation",
-      instructions: "Follow only the assigned validation Task and do not delegate.",
+      instructions: "Do only what each message asks and do not start work Sessions.",
       permissionSets: [permissionSetName],
       contextSets: [],
     },
   });
 
-  const tagResource = await api.request("POST", "/api/v1/tags", {
+  await api.request("POST", "/api/v1/tags", {
     apiVersion: "supertag/v1",
     kind: "Tag",
-    metadata: { name: ownerName },
+    metadata: { name: tagName },
     spec: { roles: [roleName], workerHosts: [hostA, hostB] },
-  });
-  const ownerTagId = text(record(tagResource["metadata"])["id"], "owner Tag id");
-  await api.request("POST", "/api/v1/tag-messaging/objectives", {
-    id: objectiveId,
-    ownerTagId,
-    outcome: [
-      "Validate hosted gRPC or WebSocket Worklet recovery, native continuity, and artifact handoff",
-      "Done when:",
-      "A fresh Worker process resumes the exact native Session without replaying the protected value",
-      "A separate Task reads exact bytes through an admitted artifact selector",
-      "Authentication failures and reconnect generation are durably observable",
-    ].join("\n"),
-    runtimeActions: ["files:read", "files:write", "commands:execute"],
-    budgetLimitMinor: 100,
-  });
-  await command(api, "create_team", {
-    objectiveId,
-    id: teamId,
-    name: `${prefix} validation`,
-    leadTagId: ownerTagId,
-    memberTagIds: [ownerTagId],
-    maxConcurrency: 1,
   });
 
   const phaseA = join(outputDirectory, "phase-a");
@@ -227,29 +196,24 @@ try {
   workers.push(workerA);
   const hostAConnected = await waitForConnected(api, hostA, 0);
 
-  const wakeAt = new Date(Date.now() + wakeSeconds * 1000).toISOString();
-  await assign(api, {
-    taskId: continuityTaskId,
-    ownerTagId,
-    instruction: [
-      "This is a two-Attempt native Session continuity probe.",
-      "If you have already memorized the protected value in this native conversation, do not call any tool or search the filesystem; reply only with that exact remembered value.",
-      "Otherwise, read challenge.txt once with a shell command and memorize its exact contents. Do not repeat it in your answer, messages, files, or tool arguments.",
-      `Then call wait_for exactly once with only notBefore set to ${wakeAt}, and immediately end the turn with READY.`,
-      "Do not delegate, create resources, or use external services.",
-    ].join(" "),
-    acceptanceCriteria: ["Same native Session recalls the protected value on a fresh Worker"],
-  });
-  const waitingTask = await pollTask(
+  // Two turns of one conversation: the first reads the value on Host A, the second recalls it
+  // on a fresh Host B process after Host A's state and the Workspace contents are deleted.
+  const continuity = `${prefix}-continuity`;
+  const firstTurn = await converse(
     api,
-    continuityTaskId,
-    (task) => assignmentPhase(task) === "waiting",
+    continuity,
+    [
+      "This is a two-turn native Session continuity probe.",
+      "Read challenge.txt once with a shell command and memorize its exact contents. Do not repeat it in your answer, messages, files, or tool arguments.",
+      "Reply only with READY. Do not start work Sessions, create resources, or use external services.",
+    ].join(" "),
   );
-  const attemptA = taskAttempt(waitingTask);
+  const firstTask = firstTurn.task;
+  const attemptA = taskAttempt(firstTask);
   assert.equal(attemptA.workerHostId, hostA);
-  const continuitySpec = record(waitingTask["spec"], "continuity Task spec");
-  assertNoSecrets(continuitySpec, [nativeSecret], "durable Task spec before resume");
-  const sessionId = text(continuitySpec["sessionId"], "continuity Session id");
+  const continuitySpec = record(firstTask["spec"], "continuity Task spec");
+  assertNoSecrets(continuitySpec, [nativeSecret], "first turn durable Task spec");
+  const sessionId = firstTurn.sessionId;
   const firstSessionArchive = await poll(async () => {
     const body = await api.request(
       "GET",
@@ -265,12 +229,12 @@ try {
       if (JSON.stringify(detail).includes(nativeSecret)) return { body, detail };
     }
     return undefined;
-  }, "Attempt 1 native Session archive containing the protected tool result");
+  }, "first turn native Session archive containing the protected tool result");
   const firstSession = nativeSessionEvidence(firstSessionArchive.body);
-  assert.equal(firstSession.nativeIds.length, 1, "Attempt 1 must persist one native identity");
+  assert.equal(firstSession.nativeIds.length, 1, "The first turn must persist one native identity");
   assert.ok(
     JSON.stringify(firstSessionArchive.detail).includes(nativeSecret),
-    "Attempt 1 native archive does not contain the protected value read from challenge.txt",
+    "The first turn's native archive does not contain the protected value read from challenge.txt",
   );
 
   await stopWorker(workerA);
@@ -288,15 +252,6 @@ try {
   });
   workers.push(workerB1);
   const hostBInitial = await waitForConnected(api, hostB, 0);
-  assert.equal(
-    assignmentPhase(await api.request("GET", `/api/v1/tasks/${continuityTaskId}`)),
-    "waiting",
-    "Continuity Task woke before the disposable Host B process was replaced",
-  );
-  assert.ok(
-    Date.parse(wakeAt) - Date.now() >= 20_000,
-    "Continuity wake deadline left less than 20 seconds for fresh-process replacement",
-  );
   await stopWorker(workerB1);
   await waitForDisconnected(api, hostB);
   await rm(join(phaseB1, "state"), { recursive: true, force: true });
@@ -333,31 +288,28 @@ try {
     };
   }
 
-  const continuityDone = await pollTask(
+  const secondTurn = await converse(
     api,
-    continuityTaskId,
-    (task) => assignmentPhase(task) === "submitted",
+    continuity,
+    "Do not call any tool or search the filesystem. Reply only with the exact contents of challenge.txt that you memorized earlier in this conversation.",
   );
+  const continuityDone = secondTurn.task;
+  assert.equal(secondTurn.sessionId, sessionId);
   const attemptB = taskAttempt(continuityDone);
-  assert.equal(attemptB.number, 2);
   assert.equal(attemptB.workerHostId, hostB);
   assert.equal(attemptB.profile.id, profileId);
-  const recalled = outputText(continuityDone).trim();
+  const recalled = secondTurn.reply.trim();
   assert.equal(recalled, nativeSecret, "Fresh Worker did not recall the exact native value");
   const sessionEvidence = nativeSessionEvidence(
     await api.request("GET", `/api/v1/sessions/${encodeURIComponent(sessionId)}/states`),
   );
   assert.deepEqual(sessionEvidence.nativeIds, firstSession.nativeIds);
-  const continuityEvents = await taskEvents(api, continuityTaskId);
+  const continuityEvents = await taskEvents(api, secondTurn.taskId);
   const attemptBToolCalls = continuityEvents.filter(
     (event) => event["attemptId"] === attemptB.id && isToolCallStarted(event),
   ).length;
   assert.equal(attemptBToolCalls, 0, "Resumed recall used a tool");
-  const retryInputs = {
-    spec: continuityDone["spec"],
-    assignment: record(continuityDone["status"])["assignment"],
-  };
-  assertNoSecrets(retryInputs, [nativeSecret], "Attempt 2 projected durable inputs");
+  assertNoSecrets(continuityDone["spec"], [nativeSecret], "second turn projected durable inputs");
   checks.push({
     name: "fresh-process-native-session-recall",
     passed: true,
@@ -365,8 +317,8 @@ try {
     sessionId,
     nativeId: firstSession.nativeIds[0],
     stateCount: sessionEvidence.count,
-    attempt1: attemptA,
-    attempt2: attemptB,
+    firstTurnAttempt: attemptA,
+    secondTurnAttempt: attemptB,
     resumedToolCallCount: attemptBToolCalls,
     projectedTaskInputsContainedProtectedValue: false,
     fullReceivedSessionHistoryInspected: false,
@@ -377,20 +329,14 @@ try {
   await writeFile(join(continuityWorkspace, "artifact-source.txt"), artifactSecret, {
     mode: 0o600,
   });
-  await assign(api, {
-    taskId: producerTaskId,
-    ownerTagId,
-    instruction:
-      "Read ./artifact-source.txt in the current working directory first. If it is absent, report MISSING and stop; never search / or any other directory. Copy it byte-for-byte to outputs/evidence.txt. Do not append anything or modify the file contents. Your final chat response may briefly describe completion. Do not delegate or use external services.",
-    acceptanceCriteria: ["outputs/evidence.txt preserves exact source bytes"],
-    outputs: true,
-  });
-  const producer = await pollTask(
+  const artifacts = `${prefix}-artifacts`;
+  const producerTurn = await converse(
     api,
-    producerTaskId,
-    (task) => assignmentPhase(task) === "submitted",
+    artifacts,
+    'Read ./artifact-source.txt in the current working directory first. If it is absent, report MISSING and stop; never search / or any other directory. Copy it byte-for-byte to "$SUPERTAG_OUTPUT_DIR/evidence.txt". Do not append anything or modify the file contents. Your final reply may briefly describe completion. Do not start work Sessions or use external services.',
   );
-  const selection = artifactSelection(producer);
+  const producer = producerTurn.task;
+  const captured = await capturedEvidence(api, producerTurn.taskId);
   await stopWorker(workerB2);
   await waitForDisconnected(api, hostB);
   await rm(phaseB1, { recursive: true, force: true });
@@ -405,35 +351,19 @@ try {
   });
   workers.push(consumerWorker);
   const consumerHost = await waitForConnected(api, hostA, connectionGeneration(hostAConnected));
-  await assign(api, {
-    taskId: consumerTaskId,
-    ownerTagId,
-    instruction:
-      "Read the admitted evidence.txt artifact at the exact runtime input path. Reply only with its exact contents. Do not read any other file, delegate, or use external services.",
-    acceptanceCriteria: ["Reply matches the admitted immutable artifact bytes"],
-    inputArtifacts: [selection],
-  });
-  const consumer = await pollTask(
+  const consumerTurn = await converse(
     api,
-    consumerTaskId,
-    (task) => assignmentPhase(task) === "submitted",
+    artifacts,
+    "Use find_artifacts to find the evidence.txt artifact this conversation captured earlier, then read it with read_artifact. Reply only with its exact contents. Do not read any other file, start work Sessions, or use external services.",
   );
-  const consumerSpec = record(consumer["spec"], "consumer Task spec");
-  assert.deepEqual(selection.paths, ["outputs/evidence.txt"]);
-  assertExactArtifactAdmission(
-    record(consumerSpec["trigger"], "consumer Task trigger")["inputArtifacts"],
-    {
-      artifactId: selection.artifactId,
-      path: selection.paths[0] as string,
-      digest: `sha256:${digest(artifactSecret)}`,
-      sizeBytes: Buffer.byteLength(artifactSecret),
-    },
-  );
+  const consumer = consumerTurn.task;
+  assert.equal(captured.digest, `sha256:${digest(artifactSecret)}`);
+  assert.equal(captured.sizeBytes, Buffer.byteLength(artifactSecret));
   assert.ok(
-    hasExactLine(outputText(consumer), artifactSecret),
+    hasExactLine(consumerTurn.reply, artifactSecret),
     "Artifact consumer did not return the exact protected bytes on a standalone line",
   );
-  const consumerSessionId = text(consumerSpec["sessionId"], "consumer Session id");
+  const consumerSessionId = consumerTurn.sessionId;
   const consumerArchive = await poll(async () => {
     const body = await api.request(
       "GET",
@@ -449,14 +379,14 @@ try {
       if (JSON.stringify(detail).includes(artifactSecret)) return { body, detail };
     }
     return undefined;
-  }, "consumer native archive containing admitted artifact bytes");
+  }, "consumer native archive containing the artifact bytes");
   const consumerNativeEvidence = nativeSessionEvidence(consumerArchive.body);
   checks.push({
     name: "independent-artifact-byte-handoff",
     passed: true,
     valueDigest: digest(artifactSecret),
-    artifactId: selection.artifactId,
-    paths: selection.paths,
+    artifactId: captured.artifactId,
+    path: captured.path,
     producerAttempt: taskAttempt(producer),
     consumerAttempt: taskAttempt(consumer),
     freshConsumerHostId: hostA,
@@ -464,7 +394,7 @@ try {
     crossWorkerHostTransfer:
       taskAttempt(producer).workerHostId !== taskAttempt(consumer).workerHostId,
     producerWorkspaceDeletedBeforeConsumption: true,
-    admittedSelectorMatches: true,
+    capturedDigestMatches: true,
     consumerArchiveContainedArtifactBytes: true,
     consumerNativeIds: consumerNativeEvidence.nativeIds,
   });
@@ -514,42 +444,55 @@ try {
   );
 }
 
-interface AssignmentInput {
-  taskId: string;
-  ownerTagId: string;
-  instruction: string;
-  acceptanceCriteria: string[];
-  outputs?: boolean;
-  inputArtifacts?: { artifactId: string; paths: string[] }[];
+/**
+ * One turn of the Tag's CLI conversation `session`: sends `message`, waits for the reply and for
+ * the turn's Task to complete.
+ */
+async function converse(
+  apiClient: Api,
+  session: string,
+  message: string,
+): Promise<{ taskId: string; sessionId: string; reply: string; task: JsonRecord }> {
+  const path = `/api/v1/tags/${encodeURIComponent(tagName)}/messages`;
+  const sent = await apiClient.request("POST", path, { text: message, session });
+  const taskId = text(sent["taskId"], "turn Task id");
+  const replied = await poll(async () => {
+    const current = await apiClient.request("GET", `${path}/${encodeURIComponent(taskId)}`);
+    return current["status"] === "replied" ? current : undefined;
+  }, `reply to Task ${taskId}`);
+  return {
+    taskId,
+    sessionId: text(replied["sessionId"], "turn Session id"),
+    reply: text(record(replied["reply"], "turn reply")["text"], "turn reply text"),
+    task: await pollTask(apiClient, taskId),
+  };
 }
 
-async function assign(apiClient: Api, input: AssignmentInput): Promise<void> {
-  await command(apiClient, "assign_task", {
-    objectiveId,
-    taskId: input.taskId,
-    teamId,
-    assignedTagId: input.ownerTagId,
-    instruction: input.instruction,
-    acceptanceCriteria: input.acceptanceCriteria,
-    execution: {
-      profile: { id: profileId, revision: "1" },
-      ...(input.outputs
-        ? {
-            outputs: {
-              directory: "outputs",
-              required: ["outputs/evidence.txt"],
-              include: ["outputs/**"],
-            },
-          }
-        : {}),
-    },
-    ...(input.inputArtifacts ? { inputArtifacts: input.inputArtifacts } : {}),
-    maxCostMinor: 20,
-  });
-}
-
-async function command(apiClient: Api, name: string, input: JsonRecord): Promise<JsonRecord> {
-  return apiClient.request("POST", `/api/v1/coordination/${name}`, input);
+/** The one evidence.txt file the turn's Task captured, from the operator artifact catalog. */
+async function capturedEvidence(
+  apiClient: Api,
+  taskId: string,
+): Promise<{ artifactId: string; path: string; digest: string; sizeBytes: number }> {
+  const page = await apiClient.request(
+    "GET",
+    `/api/v1/artifacts?task=${encodeURIComponent(taskId)}`,
+  );
+  for (const item of array(page["items"], "artifacts").map((value) => record(value, "artifact"))) {
+    const spec = record(item["spec"], "artifact spec");
+    for (const entry of array(spec["entries"], "artifact entries").map((value) =>
+      record(value, "artifact entry"),
+    )) {
+      const path = text(entry["path"], "artifact path");
+      if (!path.endsWith("evidence.txt")) continue;
+      return {
+        artifactId: text(record(item["metadata"], "artifact metadata")["id"], "artifact id"),
+        path,
+        digest: text(entry["digest"], "artifact digest"),
+        sizeBytes: integer(entry["sizeBytes"], "artifact size"),
+      };
+    }
+  }
+  throw new Error(`Task ${taskId} captured no evidence.txt artifact`);
 }
 
 async function enrollHost(apiClient: Api, hostId: string): Promise<string> {
@@ -685,30 +628,16 @@ function connectionGeneration(host: JsonRecord): number {
   return value;
 }
 
-async function pollTask(
-  apiClient: Api,
-  taskId: string,
-  predicate: (task: JsonRecord) => boolean,
-): Promise<JsonRecord> {
+async function pollTask(apiClient: Api, taskId: string): Promise<JsonRecord> {
   return poll(async () => {
     const task = await apiClient.request("GET", `/api/v1/tasks/${encodeURIComponent(taskId)}`);
-    const phase = assignmentPhase(task);
-    if (["failed", "cancelled", "rejected"].includes(phase))
+    const phase = text(record(task["status"], "Task status")["phase"], "Task phase");
+    if (["failed", "cancelled"].includes(phase))
       throw new Error(
         `Task ${taskId} reached ${phase}: ${JSON.stringify(record(task["status"])["outcome"] ?? {})}`,
       );
-    if (predicate(task)) return task;
-    if (["submitted", "accepted"].includes(phase))
-      throw new Error(`Task ${taskId} reached ${phase} before the expected state`);
-    return undefined;
+    return phase === "completed" ? task : undefined;
   }, `Task ${taskId}`);
-}
-
-function assignmentPhase(task: JsonRecord): string {
-  return text(
-    record(record(task["status"], "Task status")["assignment"], "assignment")["phase"],
-    "assignment phase",
-  );
 }
 
 async function taskEvents(apiClient: Api, taskId: string): Promise<JsonRecord[]> {
@@ -768,8 +697,7 @@ async function poll<T>(operation: () => Promise<T | undefined>, label: string): 
       if (result !== undefined) return result;
     } catch (error) {
       lastError = error;
-      if (error instanceof Error && /reached (failed|cancelled|rejected)/u.test(error.message))
-        throw error;
+      if (error instanceof Error && /reached (failed|cancelled)/u.test(error.message)) throw error;
     }
     await delay(500);
   }

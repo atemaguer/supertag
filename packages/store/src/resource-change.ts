@@ -13,7 +13,6 @@ export interface ResourceChange {
   readonly actorTagId: string | null;
   readonly operatorId: string | null;
   readonly sourceTaskId: string | null;
-  readonly sourceMessageId: string | null;
   readonly changes: Readonly<
     Record<string, { readonly previous: unknown; readonly next: unknown }>
   >;

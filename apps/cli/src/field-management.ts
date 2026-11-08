@@ -151,24 +151,24 @@ const FIELD_MODELS: Readonly<Record<ManagedResourceKind, FieldModel>> = {
   },
   Tag: {
     scalars: ["execution"],
-    names: ["roles", "workerHosts", "runsOn"],
-    keyed: { locations: locationKey, acceptsMessagesFrom: (grant) => String(grant["tag"]) },
+    names: ["roles", "workerHosts", "runsOn", "acceptsMessagesFrom"],
+    keyed: { locations: locationKey },
   },
   // Lists are whole values here: runtime actions narrow as a set, and the rest cannot change.
+  // The Team is one value: a Team name, or the Objective's own Team with its members.
   Objective: {
     scalars: [
       "owner",
       "outcome",
       "ongoing",
       "workspaces",
-      "observe",
       "budget",
       "deadline",
       "runtimeActions",
+      "team",
     ],
     names: [],
     keyed: {},
-    maps: ["teams"],
   },
 };
 

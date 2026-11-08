@@ -38,19 +38,15 @@ import {
   advertisedWorkspaces,
   advertisesWorkspaceClone,
   authKeyPhase,
-  currentUncertainAttempt,
   executionRange,
   operatorTokenOperatorId,
   operatorTokenPhase,
   placementHoldReason,
-  SELF_ESCALATED_EVENT,
-  type StoredOpenTaskFindings,
-  storedOpenTaskFindings,
+  type StoredTaskFindingsBySeverity,
+  storedTaskFindingsBySeverity,
   type TaskDelivery,
   taskDelivery,
-  uncertainAttemptRecoverCommand,
   unsandboxedCommandHoldsOf,
-  WAIT_REGISTERED_EVENT,
   workspaceEnvironmentRefusals,
   workspacePullRequestFromEvents,
 } from "@supertag/core";
@@ -116,9 +112,6 @@ export type TagLocationSpec = {
   readonly workspaces?: readonly string[];
 };
 
-/** A Mailbox grant where the Tag is the recipient. */
-export type TagMailboxGrantSpec = { readonly tag: string; readonly types: readonly string[] };
-
 export type TagResource = ControlPlaneResource<
   "Tag",
   {
@@ -129,7 +122,8 @@ export type TagResource = ControlPlaneResource<
     /** Harness, models, and efforts this Tag allows; overrides its Roles' settings. */
     readonly execution?: ExecutionSettings;
     readonly locations: readonly TagLocationSpec[];
-    readonly acceptsMessagesFrom: readonly TagMailboxGrantSpec[];
+    /** Tags this Tag accepts Mailbox messages from beyond its Teams, by name. */
+    readonly acceptsMessagesFrom: readonly string[];
   },
   {
     readonly phase: Tag["status"];
@@ -187,7 +181,6 @@ export type RoleResource = ControlPlaneResource<
   },
   {
     readonly phase: Role["status"];
-    readonly builtIn: boolean;
     readonly assignedTags: readonly string[];
   }
 >;
@@ -253,6 +246,8 @@ export type TaskResource = ControlPlaneResource<
   {
     readonly tagId: string;
     readonly sessionId: string;
+    /** The Objective whose Session the Task belongs to. */
+    readonly objectiveId?: string;
     readonly execution: Task["execution"];
     readonly trigger: JsonRecord;
     /** The named Workspace and Task branch recorded when the Task was accepted. */
@@ -268,24 +263,8 @@ export type TaskResource = ControlPlaneResource<
     readonly startedAt?: string;
     readonly endedAt?: string;
     readonly outcome?: JsonRecord;
-    readonly assignment?: JsonRecord;
-    /** Open findings of the Task's result by severity, or why its stored findings are unreadable. */
-    readonly openFindings?: StoredOpenTaskFindings;
-    /** Findings on other Tasks this re-review result confirms fixed; acceptance closes them. */
-    readonly fixedFindings?: readonly JsonRecord[];
-    /** Team posts and direct messages delivered into this Task's running Attempts, latest 20. */
-    readonly teamInput?: readonly {
-      readonly at: string;
-      readonly attemptId: string | null;
-      readonly status: string;
-      readonly itemKind: string;
-      readonly itemId: string;
-      readonly itemType: string;
-      readonly senderTagId: string;
-      readonly truncated: boolean;
-    }[];
-    /** What accepting this re-review did with each confirmed finding, with refusal reasons. */
-    readonly findingClosures?: readonly JsonRecord[];
+    /** The Task result's findings by severity, or why its stored findings are unreadable. */
+    readonly findings?: StoredTaskFindingsBySeverity;
     readonly attempt?: JsonRecord;
     /** Every Task Attempt, oldest first, with its provider-reported cost when known. */
     readonly attempts?: readonly {
@@ -294,8 +273,6 @@ export type TaskResource = ControlPlaneResource<
       readonly phase: string;
       readonly startedAt: string;
       readonly endedAt: string | null;
-      /** Set when the Attempt ended to wait durably (or escalate), not by a real cancellation. */
-      readonly endedToWait: { readonly reason: string | null } | null;
       readonly reportedCost: {
         readonly amountMinor: number;
         readonly currency: string;
@@ -620,11 +597,8 @@ export function tagResource(
   );
   const acceptsMessagesFrom = canonicalMailboxGrants(
     organization.grants
-      .filter((grant) => grant.recipientTagId === tag.id && grant.messageTypes.length > 0)
-      .map((grant) => ({
-        tag: organization.tagNames.get(grant.senderTagId) ?? grant.senderTagId,
-        types: grant.messageTypes,
-      })),
+      .filter((grant) => grant.recipientTagId === tag.id)
+      .map((grant) => organization.tagNames.get(grant.senderTagId) ?? grant.senderTagId),
   );
   return {
     apiVersion: CONTROL_PLANE_API_VERSION,
@@ -726,12 +700,9 @@ function locationSortKey(location: TagLocationSpec): string {
   ]);
 }
 
-export function canonicalMailboxGrants(
-  grants: readonly TagMailboxGrantSpec[],
-): readonly TagMailboxGrantSpec[] {
-  return grants
-    .map((grant) => ({ tag: grant.tag, types: [...new Set(grant.types)].toSorted() }))
-    .toSorted((left, right) => left.tag.localeCompare(right.tag));
+/** Sender Tag names, distinct and sorted, so diff compares like with like. */
+export function canonicalMailboxGrants(senders: readonly string[]): readonly string[] {
+  return [...new Set(senders)].toSorted((left, right) => left.localeCompare(right));
 }
 
 export function surfaceAccountResource(account: SurfaceAccount): SurfaceAccountResource {
@@ -841,7 +812,6 @@ export function roleResource(
     },
     status: {
       phase: role.status,
-      builtIn: role.origin === "system",
       assignedTags,
     },
   };
@@ -1044,6 +1014,7 @@ export function taskResource(task: Task): TaskResource {
     spec: {
       tagId: task.tagId,
       sessionId: task.sessionId,
+      ...(task.objectiveId === undefined ? {} : { objectiveId: task.objectiveId }),
       execution: task.execution,
       trigger: task.trigger,
       ...(task.workspacePlan?.status === "workspace"
@@ -1066,46 +1037,6 @@ export function taskResource(task: Task): TaskResource {
   };
 }
 
-/**
- * A cancelled Attempt whose own Task history records a durable wait or self-escalation ended to
- * wait, not by cancellation. Returns the recorded reason, or null when it was really cancelled.
- */
-function attemptWaitEnding(
-  attempt: { readonly attemptNumber: number; readonly status: string },
-  events: readonly { readonly type: string; readonly payload?: JsonRecord | null }[],
-): { reason: string | null } | null {
-  if (attempt.status !== "cancelled") return null;
-  const ending = events.findLast(
-    (event) =>
-      ((event.type === WAIT_REGISTERED_EVENT || event.type === SELF_ESCALATED_EVENT) &&
-        event.payload?.["attemptNumber"] === attempt.attemptNumber) ||
-      (event.type === "task.cancelled" &&
-        event.payload?.["attemptCount"] === attempt.attemptNumber),
-  );
-  if (!ending || ending.type === "task.cancelled") return null;
-  const reason = ending.payload?.["reason"];
-  return {
-    reason:
-      typeof reason !== "string"
-        ? null
-        : ending.type === SELF_ESCALATED_EVENT
-          ? `escalated: ${reason}`
-          : reason,
-  };
-}
-
-/** Stored observations only: resource reads never contact a Worklet or replay execution. */
-/** A running Task's uncertain Attempt with the command that recovers it, or null. */
-function uncertainAttemptView(
-  taskId: string,
-  assignment: Parameters<typeof currentUncertainAttempt>[0],
-): JsonRecord | null {
-  const uncertain = currentUncertainAttempt(assignment);
-  return uncertain
-    ? { ...uncertain, recoverCommand: uncertainAttemptRecoverCommand(taskId, uncertain) }
-    : null;
-}
-
 export async function taskResourceFromStore(
   store: Store,
   task: Task,
@@ -1114,8 +1045,7 @@ export async function taskResourceFromStore(
     readonly storage?: boolean;
   } = {},
 ): Promise<TaskResource> {
-  const [assignment, attempts, history] = await Promise.all([
-    store.getTaskAssignment(task.id),
+  const [attempts, history] = await Promise.all([
     store.listTaskAttempts(task.id),
     store.listTaskEvents(task.id),
   ]);
@@ -1163,9 +1093,7 @@ export async function taskResourceFromStore(
   // Keep the last recorded check; describe presents it only while work is queued.
   const scheduling = events.findLast(
     (event) =>
-      event.type === "task.scheduling-incompatible" ||
-      event.type === "task.scheduling-compatible" ||
-      event.type === "task.scheduling-waiting",
+      event.type === "task.scheduling-incompatible" || event.type === "task.scheduling-compatible",
   );
   const resource = taskResource(task);
   const resolved = events.findLast((event) => event.type === "task.execution-resolved")?.payload;
@@ -1173,27 +1101,13 @@ export async function taskResourceFromStore(
     latest && isRecord(latest.workerSnapshot["execution"])
       ? latest.workerSnapshot["execution"]
       : undefined;
-  // Each self-escalation changes what the Task runs with from then on.
-  const selfEscalations = events
-    .filter((event) => event.type === SELF_ESCALATED_EVENT && isRecord(event.payload))
-    .map((event) => ({
-      at: event.createdAt,
-      byTagId: text(event.payload?.["byTagId"]),
-      change: text(event.payload?.["change"]),
-      reason: text(event.payload?.["reason"]),
-      to: isRecord(event.payload?.["to"]) ? event.payload["to"] : {},
-    }));
   const execution =
-    resolved === undefined && attemptExecution === undefined && selfEscalations.length === 0
+    resolved === undefined && attemptExecution === undefined
       ? undefined
       : {
           ...(resolved === undefined
             ? {}
             : Object.fromEntries(Object.entries(resolved).filter(([key]) => key !== "version"))),
-          ...(selfEscalations.at(-1)?.to ?? {}),
-          ...(selfEscalations.length === 0
-            ? {}
-            : { selfEscalations: selfEscalations.map(({ to: _to, ...entry }) => entry) }),
           ...(attemptExecution === undefined ? {} : { latestAttempt: attemptExecution }),
         };
   const pullRequest =
@@ -1202,81 +1116,21 @@ export async function taskResourceFromStore(
       : undefined;
   const delivery = taskDelivery({
     ...(task.workspacePlan === undefined ? {} : { workspacePlan: task.workspacePlan }),
-    result: task.result ?? assignment?.result?.["taskResult"],
+    result: task.result,
     events,
   });
   const environment = (value: typeof placement.executionEnvironment) =>
     value === null ? null : { id: value.id, provider: value.provider, placement: value.placement };
-  // A coordination Task's settled record holds Control Plane-recorded findings under taskResult;
-  // any other Task's result is the Task result itself.
-  const openFindings = storedOpenTaskFindings(
-    assignment?.result ?? (task.result ? { taskResult: task.result } : undefined),
-  );
-  const records = (value: unknown): JsonRecord[] =>
-    Array.isArray(value) ? value.filter(isRecord) : [];
-  const teamInput = events
-    .filter((event) => event.type === "task.team-input" && isRecord(event.payload))
-    .slice(-20)
-    .map((event) => ({
-      at: event.createdAt,
-      attemptId: event.attemptId ?? null,
-      status: text(event.payload?.["status"]) ?? "unknown",
-      itemKind: text(event.payload?.["itemKind"]) ?? "",
-      itemId: text(event.payload?.["itemId"]) ?? "",
-      itemType: text(event.payload?.["itemType"]) ?? "",
-      senderTagId: text(event.payload?.["senderTagId"]) ?? "",
-      truncated: event.payload?.["truncated"] === true,
-    }));
-  const reviewed = task.result ?? assignment?.result?.["taskResult"];
-  const fixedFindings = records(isRecord(reviewed) ? reviewed["fixedFindings"] : undefined);
-  const findingClosures = records(assignment?.result?.["findingClosures"]);
+  const findings = storedTaskFindingsBySeverity(task.result);
   const status: TaskResource["status"] = {
     ...resource.status,
-    ...("unreadable" in openFindings ||
-    openFindings.high.length + openFindings.medium.length + openFindings.low.length
-      ? { openFindings }
+    ...("unreadable" in findings ||
+    findings.high.length + findings.medium.length + findings.low.length
+      ? { findings }
       : {}),
-    ...(fixedFindings.length ? { fixedFindings } : {}),
-    ...(findingClosures.length ? { findingClosures } : {}),
-    ...(teamInput.length ? { teamInput } : {}),
     ...(skills.length ? { skills } : {}),
     ...(preparedWorkspace === undefined ? {} : { preparedWorkspace }),
     ...(execution === undefined ? {} : { execution }),
-    ...(assignment === undefined
-      ? {}
-      : {
-          assignment: {
-            objectiveId: assignment.objectiveId,
-            teamId: assignment.teamId,
-            phase: assignment.status,
-            approval: assignment.approval,
-            priority: assignment.priority,
-            attemptCount: assignment.attemptCount,
-            dependencies: assignment.dependencies,
-            availableAt: assignment.availableAt,
-            leaseExpiresAt: assignment.leaseExpiresAt,
-            uncertainAttempt: uncertainAttemptView(task.id, assignment),
-            admissionRejection:
-              isRecord(assignment.result) &&
-              typeof assignment.result["admissionRejected"] === "string"
-                ? assignment.result["admissionRejected"]
-                : null,
-            wait:
-              assignment.waitState === null
-                ? null
-                : {
-                    acceptedTaskIds: assignment.waitState.acceptedTaskIds,
-                    submittedTaskIds: assignment.waitState.submittedTaskIds,
-                    reason: assignment.waitState.reason,
-                    mailbox: assignment.waitState.mailbox,
-                    notBefore: assignment.waitState.notBefore,
-                    workstreamPosts: assignment.waitState.workstreamPosts ?? null,
-                    registeredAt: assignment.waitState.registeredAt,
-                    attemptCount: assignment.waitState.attemptCount,
-                    wake: assignment.waitState.wake ?? null,
-                  },
-          },
-        }),
     ...(attempts.length === 0
       ? {}
       : {
@@ -1288,7 +1142,6 @@ export async function taskResourceFromStore(
               phase: candidate.status,
               startedAt: candidate.startedAt,
               endedAt: candidate.endedAt ?? null,
-              endedToWait: attemptWaitEnding(candidate, events),
               reportedCost: taskAttemptReportedCost(candidate, events),
               ...(candidate.liveMounts === undefined ? {} : { liveMounts: candidate.liveMounts }),
               ...(candidate.mountOutputManifests === undefined
@@ -1311,7 +1164,6 @@ export async function taskResourceFromStore(
             id: latest.id,
             number: latest.attemptNumber,
             phase: latest.status,
-            endedToWait: attemptWaitEnding(latest, events),
             workerProfile: latest.workerProfile,
             durableExecution: latest.workerSnapshot["durableExecution"] === true,
             failure:
@@ -1385,11 +1237,7 @@ export async function taskResourceFromStore(
       : {
           scheduling: {
             status:
-              scheduling.type === "task.scheduling-incompatible"
-                ? "incompatible"
-                : scheduling.type === "task.scheduling-waiting"
-                  ? "waiting"
-                  : "compatible",
+              scheduling.type === "task.scheduling-incompatible" ? "incompatible" : "compatible",
             unmetRequirements: Array.isArray(scheduling.payload?.["unmetRequirements"])
               ? scheduling.payload["unmetRequirements"].filter(
                   (item): item is string => typeof item === "string",
@@ -1410,9 +1258,6 @@ export async function taskResourceFromStore(
                     (reason): reason is string => typeof reason === "string",
                   ),
                 }
-              : {}),
-            ...(scheduling.type === "task.scheduling-waiting"
-              ? { wait: schedulingWaitStatus(scheduling.payload) }
               : {}),
             observedAt: scheduling.createdAt,
             sequence: scheduling.sequence,
@@ -1783,58 +1628,6 @@ function text(value: unknown): string | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * The stored reason a queued Task is waiting: dependencies not yet accepted, busy matching
- * Workers, none connected, or a declined claim with its cause.
- */
-function schedulingWaitStatus(payload: JsonRecord | undefined): JsonRecord {
-  if (payload?.["reason"] === "claim") {
-    const claim = isRecord(payload["claim"]) ? payload["claim"] : {};
-    return {
-      reason: "claim",
-      claim: {
-        code: text(claim["code"]) ?? "unknown",
-        message: text(claim["message"]) ?? "The Control Plane declined to start the Task.",
-        ...(Array.isArray(claim["taskIds"])
-          ? {
-              taskIds: claim["taskIds"].filter((item): item is string => typeof item === "string"),
-            }
-          : {}),
-        ...(text(claim["teamId"]) === undefined ? {} : { teamId: text(claim["teamId"]) }),
-        ...(text(claim["tagId"]) === undefined ? {} : { tagId: text(claim["tagId"]) }),
-        ...(text(claim["availableAt"]) === undefined
-          ? {}
-          : { availableAt: text(claim["availableAt"]) }),
-      },
-    };
-  }
-  if (payload?.["reason"] === "dependencies")
-    return {
-      reason: "dependencies",
-      dependencies: (Array.isArray(payload["dependencies"])
-        ? payload["dependencies"].filter(isRecord)
-        : []
-      ).map((dependency) => ({
-        taskId: text(dependency["taskId"]) ?? "unknown",
-        status: text(dependency["status"]) ?? null,
-      })),
-    };
-  const hosts = Array.isArray(payload?.["hosts"]) ? payload["hosts"].filter(isRecord) : [];
-  return {
-    reason: payload?.["reason"] === "capacity" ? "capacity" : "unavailable",
-    hosts: hosts.map((host) => ({
-      workerHostId: text(host["workerHostId"]) ?? "unknown",
-      harnesses: Array.isArray(host["harnesses"])
-        ? host["harnesses"].filter((item): item is string => typeof item === "string")
-        : [],
-      capacity: typeof host["capacity"] === "number" ? host["capacity"] : 0,
-      busyTaskIds: Array.isArray(host["busyTaskIds"])
-        ? host["busyTaskIds"].filter((item): item is string => typeof item === "string")
-        : [],
-    })),
-  };
 }
 
 /** A work Session's own title; otherwise the first request, on one line and at most 60 characters. */

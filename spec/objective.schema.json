@@ -28,9 +28,13 @@
       "type": "string",
       "minLength": 1
     },
+    "teamId": {
+      "type": ["string", "null"],
+      "description": "The Team whose members the owner may hand work to; null when the owner works alone. Fixed at creation."
+    },
     "status": {
-      "description": "Only an operator's cancellation request sets cancelled; status updates cannot. completed and cancelled are terminal.",
-      "enum": ["working", "blocked", "ready_for_review", "completed", "cancelled"]
+      "description": "Only an operator's cancellation request sets cancelled; status updates cannot. limited means the budget or deadline was reached. completed and cancelled are terminal.",
+      "enum": ["working", "blocked", "limited", "ready_for_review", "completed", "cancelled"]
     },
     "revision": {
       "type": "integer",
@@ -41,7 +45,7 @@
       "type": ["string", "null"]
     },
     "warnings": {
-      "description": "Returned only by creation. Conditions that would hold the Objective's Tasks, such as an owner Tag with no connected Worker Host. Creation still succeeds.",
+      "description": "Returned only by creation. Conditions that would hold the Objective's turns, such as an owner Tag with no connected Worker Host. Creation still succeeds.",
       "type": "array",
       "readOnly": true,
       "items": {
@@ -67,7 +71,7 @@
       "description": "The operator's reason for cancelling, when one was given."
     },
     "workspaces": {
-      "description": "Named Workspaces the Objective's Tasks may work in. With exactly one, Tasks use it by default; with several, a lead chooses one per Task. An Objective created from a collaboration surface gets those of its Tag location, or a subset its creator names.",
+      "description": "Named Workspaces the Objective's work may use. With exactly one, work uses it by default; with several, the owner names one per work Session. An Objective created from a collaboration surface gets those of its Tag location, or a subset its creator names.",
       "type": "array",
       "maxItems": 16,
       "uniqueItems": true,
@@ -77,10 +81,14 @@
       }
     },
     "runtimeActions": {
-      "description": "Runtime actions, such as files:write, the Objective's Tasks may receive. Created without a list, it holds the actions the owner Tag's Permission Sets allowed at creation; a list only narrows that set. An Objective created from a collaboration surface gets the invoking Task's runtime actions. Later Permission Set changes do not rewrite it; operators replace it with an update.",
+      "description": "Runtime actions, such as files:write, the Objective's turns may receive. Created without a list, it holds the actions the owner Tag's Permission Sets allowed at creation; a list only narrows that set. An Objective created from a collaboration surface gets the invoking Task's runtime actions. Later Permission Set changes do not rewrite it; operators replace it with an update.",
       "type": "array",
       "maxItems": 50,
-      "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      }
     },
     "budgetLimitMinor": {
       "type": ["integer", "null"],
@@ -95,7 +103,7 @@
     "deadline": {
       "type": ["string", "null"],
       "format": "date-time",
-      "description": "New Tasks and continuations stop at the deadline. Running Task Attempts keep authority for a 15-minute grace period. Operators may move it, including after it passed."
+      "description": "New turns stop at the deadline. Running Task Attempts keep authority for a 15-minute grace period. Operators may move it, including after it passed."
     },
     "limitState": {
       "type": "object",
@@ -115,7 +123,7 @@
       "type": ["string", "null"],
       "format": "date-time",
       "readOnly": true,
-      "description": "Set by successful start_objective admission; enables Objective mailbox consumption."
+      "description": "When the Objective's first turn was admitted; null until it starts."
     },
     "surfaceTaskId": {
       "type": ["string", "null"],
@@ -130,11 +138,19 @@
     {
       "if": {
         "required": ["budgetCurrency"],
-        "properties": { "budgetCurrency": { "type": "string" } }
+        "properties": {
+          "budgetCurrency": {
+            "type": "string"
+          }
+        }
       },
       "then": {
         "required": ["budgetLimitMinor"],
-        "properties": { "budgetLimitMinor": { "type": "integer" } }
+        "properties": {
+          "budgetLimitMinor": {
+            "type": "integer"
+          }
+        }
       }
     }
   ],

@@ -13,8 +13,6 @@
     }
   },
   "include": [
-    "tests/ongoing-responsibility.test.ts",
-    "tests/ongoing-support.test.ts",
     "scripts/codex-native-conformance.ts",
     "scripts/server-harness-conformance.ts",
     "tests/support/server-harness-conformance.ts",

@@ -1,5 +1,5 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: Shared Drizzle operations across both dialects.
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   type ActionApprovalResult,
   APPROVAL_REASON_MAX_LENGTH,
@@ -9,7 +9,6 @@ import {
   type ApprovalRequestStore,
   approvalActionsMatch,
   type CreateApprovalRequestInput,
-  canonicalJson,
   type DatabaseProvider,
   type DecideApprovalRequestInput,
   mailboxText,
@@ -23,7 +22,7 @@ import { runDialectTransaction } from "./dialect-transaction.js";
 
 type Flow<T> = Generator<any, T, any>;
 
-const KINDS = ["surface-action", "task", "plan"] as const;
+const KINDS = ["surface-action"] as const;
 const STATUSES = ["pending", "approved", "denied", "expired"] as const;
 
 export class DrizzleApprovalRequestStore implements ApprovalRequestStore {
@@ -121,20 +120,38 @@ export class DrizzleApprovalRequestStore implements ApprovalRequestStore {
     action: ApprovalActionDescriptor,
     now: string,
   ): Flow<ApprovalRequest | undefined> {
-    return yield* findObjectiveApprovalGrantInTransaction(
-      tx,
-      this.tables,
-      objectiveId,
-      action,
-      now,
+    const t = this.tables.approvalRequests;
+    const rows = (yield tx
+      .select()
+      .from(t)
+      .where(
+        and(eq(t.objectiveId, objectiveId), eq(t.status, "approved"), eq(t.scope, "objective")),
+      )
+      .orderBy(desc(t.decidedAt), desc(t.id))) as any[];
+    const grant = rows.find(
+      (row) =>
+        (row.validUntil === null || row.validUntil > now) &&
+        Array.isArray(row.actions) &&
+        row.actions.some((candidate: ApprovalActionDescriptor) =>
+          approvalActionsMatch(candidate, action),
+        ),
     );
+    return grant ? fromRow(grant) : undefined;
   }
 
   async createApprovalRequest(input: CreateApprovalRequestInput): Promise<ApprovalRequest> {
-    const tables = this.tables;
-    return this.transaction(function* (tx) {
-      return yield* createApprovalRequestInTransaction(tx, tables, input);
-    });
+    const now = new Date().toISOString();
+    const [created] = await this.db
+      .insert(this.tables.approvalRequests)
+      .values({
+        ...requestValues(input),
+        id: randomUUID(),
+        status: "pending",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+    return fromRow(created);
   }
 
   async getApprovalRequest(id: string): Promise<ApprovalRequest | undefined> {
@@ -200,9 +217,7 @@ export class DrizzleApprovalRequestStore implements ApprovalRequestStore {
         throw new TagMessagingError(400, "validUntil must be a future ISO-8601 timestamp");
       validUntil = new Date(parsed).toISOString();
     }
-    const t = this.tables.approvalRequests,
-      m = this.tables.tagMessages,
-      tags = this.tables.tags;
+    const t = this.tables.approvalRequests;
     return this.transaction(function* (tx) {
       const [row] = yield tx.select().from(t).where(eq(t.id, id)).limit(1);
       if (!row) throw new TagMessagingError(404, "Approval request not found");
@@ -228,34 +243,6 @@ export class DrizzleApprovalRequestStore implements ApprovalRequestStore {
         .where(and(eq(t.id, id), eq(t.status, "pending")))
         .returning();
       if (!updated) throw new TagMessagingError(409, "Approval request changed; reload it");
-      if (input.message && row.objectiveId) {
-        const [recipient] = yield tx.select().from(tags).where(eq(tags.id, row.requestingTagId));
-        if (recipient?.status === "active") {
-          const body = input.message.body;
-          const idempotencyKey = `approval-decision:${id}`;
-          yield tx
-            .insert(m)
-            .values({
-              id: randomUUID(),
-              senderTagId: input.message.senderTagId,
-              recipientTagId: row.requestingTagId,
-              operatorId: input.message.operatorId ?? null,
-              objectiveId: row.objectiveId,
-              type: "message",
-              body,
-              idempotencyKey,
-              fingerprint: createHash("sha256")
-                .update(canonicalJson({ type: "message", body }))
-                .digest("hex"),
-              status: "pending",
-              attemptCount: 0,
-              createdAt: now,
-              updatedAt: now,
-            })
-            .onConflictDoNothing({ target: [m.senderTagId, m.idempotencyKey] })
-            .returning();
-        }
-      }
       return fromRow(updated);
     });
   }
@@ -272,68 +259,33 @@ export class DrizzleApprovalRequestStore implements ApprovalRequestStore {
   }
 }
 
-/** Share grant matching with admissions that must hold the Objective lock. */
-export function* findObjectiveApprovalGrantInTransaction(
+/**
+ * Expires pending approval requests when an Objective closes. The caller holds the Objective
+ * lock and runs this in the transaction that records the closing status.
+ */
+export function* expireClosedObjectiveApprovals(
   tx: any,
   tables: any,
   objectiveId: string,
-  action: ApprovalActionDescriptor,
-  now: string,
-): Flow<ApprovalRequest | undefined> {
-  const t = tables.approvalRequests;
-  const rows = (yield tx
-    .select()
-    .from(t)
-    .where(and(eq(t.objectiveId, objectiveId), eq(t.status, "approved"), eq(t.scope, "objective")))
-    .orderBy(desc(t.decidedAt), desc(t.id))) as any[];
-  const grant = rows.find(
-    (row) =>
-      (row.validUntil === null || row.validUntil > now) &&
-      Array.isArray(row.actions) &&
-      row.actions.some((candidate: ApprovalActionDescriptor) =>
-        approvalActionsMatch(candidate, action),
-      ),
-  );
-  return grant ? fromRow(grant) : undefined;
-}
-
-/** Persist the hold's request atomically with a synthesized Task. */
-export function* createApprovalRequestInTransaction(
-  tx: any,
-  tables: any,
-  input: CreateApprovalRequestInput,
-): Flow<ApprovalRequest> {
-  const values = requestValues(input);
-  const t = tables.approvalRequests;
-  if (values.kind === "task") {
-    const [existing] = yield tx
-      .select()
-      .from(t)
-      .where(and(eq(t.taskId, values.taskId), eq(t.kind, "task")))
-      .limit(1);
-    if (existing) return fromRow(existing);
-  }
-  const now = new Date().toISOString();
-  const [created] = yield tx
-    .insert(t)
-    .values({
-      ...values,
-      id: randomUUID(),
-      status: "pending",
-      createdAt: now,
-      updatedAt: now,
+  status: "completed" | "cancelled",
+  at: string,
+): Flow<void> {
+  const a = tables.approvalRequests;
+  yield tx
+    .update(a)
+    .set({
+      status: "expired",
+      decidedAt: at,
+      reason: status === "cancelled" ? "Objective cancelled" : "Objective completed",
+      updatedAt: at,
     })
+    .where(and(eq(a.objectiveId, objectiveId), eq(a.status, "pending")))
     .returning();
-  return fromRow(created);
 }
 
 function requestValues(input: CreateApprovalRequestInput) {
   if (!KINDS.includes(input.kind)) throw new TagMessagingError(400, "Unknown approval kind");
-  if (
-    !Array.isArray(input.actions) ||
-    (input.actions.length === 0 && input.kind !== "task") ||
-    input.actions.length > 50
-  )
+  if (!Array.isArray(input.actions) || input.actions.length === 0 || input.actions.length > 50)
     throw new TagMessagingError(400, "An approval request covers between 1 and 50 actions");
   const summary = sanitizeApprovalText(String(input.summary ?? ""));
   if (!summary) throw new TagMessagingError(400, "An approval request requires a summary");

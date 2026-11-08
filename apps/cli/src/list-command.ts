@@ -1,16 +1,15 @@
 import { parseArgs } from "node:util";
 import { stringify as stringifyYaml } from "yaml";
-import { runApprovalCommand } from "./approvals.js";
+import { runApprovalCommand, runInboxCommand } from "./approvals.js";
 import { runArtifactCommand } from "./artifacts.js";
 import { ControlPlaneClient, type ControlPlaneTarget } from "./control-plane-client.js";
-import { runCoordinateCommand } from "./coordination.js";
 import { runTagMessagingCommand } from "./messaging.js";
 import { money } from "./money.js";
 import { runObjectiveCommand } from "./objectives.js";
 import { runTeamCommand } from "./teams.js";
 import { terminalText } from "./terminal-text.js";
 import { workerHarnessNames } from "./worker-harness-names.js";
-import { runWorkstreamCommand } from "./workstreams.js";
+import { listWorkstreamPosts } from "./workstreams.js";
 
 const paths: Record<string, string> = {
   tag: "tags",
@@ -31,7 +30,6 @@ const kinds = new Set([
   ...Object.keys(paths),
   "objective",
   "team",
-  "workstream",
   "workstream-post",
   "message",
   "mailbox-grant",
@@ -53,7 +51,6 @@ const items = (value: unknown): unknown[] => {
     "requests",
     "messages",
     "grants",
-    "workstreams",
     "posts",
     "artifacts",
   ])
@@ -89,7 +86,7 @@ const columns: Record<string, readonly [string, string][]> = {
     ["ID", "metadata.id"],
     ["STATUS", "status.phase"],
     ["TAG", "spec.tagId"],
-    ["OBJECTIVE", "status.assignment.objectiveId"],
+    ["OBJECTIVE", "spec.objectiveId"],
   ],
   session: [
     ["ID", "metadata.id"],
@@ -103,15 +100,13 @@ const columns: Record<string, readonly [string, string][]> = {
     ["ID", "id"],
     ["STATUS", "status"],
     ["OWNER", "ownerTagId"],
-    ["SPEND / BUDGET", "spentMinor"],
+    ["SPEND / BUDGET", "limitState.reportedSpend.amountMinor"],
     ["DEADLINE", "deadline"],
   ],
   team: [
-    ["ID", "id"],
     ["NAME", "name"],
-    ["STATUS", "status"],
-    ["LEAD", "leadTagId"],
-    ["OBJECTIVE", "objectiveId"],
+    ["MEMBERS", "memberTagIds"],
+    ["MAX CONCURRENCY", "maxConcurrency"],
   ],
   role: [
     ["NAME", "metadata.name"],
@@ -175,31 +170,38 @@ const columns: Record<string, readonly [string, string][]> = {
   ],
   message: [
     ["ID", "id"],
-    ["TYPE", "type"],
     ["FROM", "senderTagId"],
+    ["TO", "recipientTagId"],
+    ["STATUS", "status"],
     ["TIME", "createdAt"],
+    ["MESSAGE", "text"],
   ],
   "mailbox-grant": [
-    ["ID", "id"],
     ["SENDER", "senderTagId"],
     ["RECIPIENT", "recipientTagId"],
-    ["TYPES", "types"],
-  ],
-  workstream: [
-    ["ID", "id"],
-    ["TITLE", "title"],
-    ["OBJECTIVE", "objectiveId"],
-    ["OWNER", "ownerTagId"],
   ],
   "workstream-post": [
     ["SEQUENCE", "sequence"],
     ["AUTHOR", "authorTagId"],
-    ["TYPE", "type"],
     ["TO", "to"],
     ["TIME", "createdAt"],
     ["MESSAGE", "body"],
   ],
 };
+
+/** Fields of each kind that hold Tag IDs, shown as names in text tables. */
+const TAG_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  objective: ["ownerTagId"],
+  team: ["memberTagIds"],
+  message: ["senderTagId", "recipientTagId"],
+  "mailbox-grant": ["senderTagId", "recipientTagId"],
+  "workstream-post": ["authorTagId", "to"],
+};
+
+function firstLine(text: string): string {
+  const line = text.trim().split(/\r?\n/u)[0]?.trim() ?? "";
+  return line.length > 80 ? `${line.slice(0, 79)}…` : line;
+}
 
 export function renderListTable(kind: string, value: unknown): string {
   const rows = items(value).map(record);
@@ -213,22 +215,20 @@ export function renderListTable(kind: string, value: unknown): string {
     selected
       .map(([, key], index) => {
         const raw = field(row, key);
-        if (kind === "workstream-post" && key === "authorTagId" && raw === null) return "system";
         if (index === 0 && raw === undefined)
           return display(row["id"] ?? record(row["metadata"])["id"] ?? row["name"]);
-        if (kind === "objective" && key === "spentMinor") {
+        if (kind === "objective" && key === "limitState.reportedSpend.amountMinor") {
           // Without a currency the budget counts allocation units, never money.
           const currency =
             typeof row["budgetCurrency"] === "string" ? row["budgetCurrency"] : undefined;
           const amount = (minor: number) =>
             currency === undefined ? `${minor} units` : money(minor, currency);
-          // A money budget caps provider-reported spend; spentMinor counts allocations.
-          const reported = field(row, "limitState.reportedSpend.amountMinor");
-          const used = currency !== undefined && typeof reported === "number" ? reported : raw;
-          const spent = typeof used === "number" ? amount(used) : "-";
+          const spent = typeof raw === "number" ? amount(raw) : "-";
           const limit = row["budgetLimitMinor"];
           return typeof limit === "number" ? `${spent} / ${amount(limit)}` : spent;
         }
+        if (kind === "message" && key === "text") return firstLine(display(raw));
+        if (kind === "workstream-post" && key === "body") return firstLine(display(raw));
         if (kind === "tag" && key === "status.execution") {
           const execution = record(raw);
           return display([execution["harness"], execution["model"]].filter(Boolean));
@@ -311,47 +311,18 @@ export async function runListCommand(
         ...(parsed.values.owner ? ["--owner", parsed.values.owner] : []),
         ...(parsed.values.limit ? ["--limit", parsed.values.limit] : []),
       ]);
-    } else if (kind === "team") response = await runTeamCommand(target, ["list", ...options]);
+    } else if (kind === "team") response = await runTeamCommand(client, ["list", ...options]);
     else if (kind === "approval")
       response = await runApprovalCommand(target, ["list", ...options, "--output", "json"]);
     else if (kind === "inbox") {
       // Inbox items carry a question, a decision maker, and an action; a table would drop them.
       if (output === "text")
-        return runCoordinateCommand(target, ["inbox", ...options, "--output", "text"], {
-          operatorList: true,
-        });
-      response = await runCoordinateCommand(target, ["inbox", ...options, "--output", "json"], {
-        operatorList: true,
-      });
+        return runInboxCommand(target, "list", [...options, "--output", "text"]);
+      response = await runInboxCommand(target, "list", [...options, "--output", "json"]);
     } else if (kind === "artifact") response = await runArtifactCommand(client, "list", options);
-    else if (kind === "workstream") {
-      const { values } = parseArgs({
-        args: options,
-        options: { tag: { type: "string" }, limit: { type: "string" } },
-        strict: true,
-      });
-      response = await runWorkstreamCommand(target, [
-        "list",
-        ...(values.tag ? [values.tag] : []),
-        ...(values.limit ? ["--limit", values.limit] : []),
-      ]);
-    } else if (kind === "workstream-post") {
-      const { values } = parseArgs({
-        args: options,
-        options: {
-          workstream: { type: "string" },
-          limit: { type: "string" },
-          "after-sequence": { type: "string" },
-        },
-        strict: true,
-      });
-      response = await runWorkstreamCommand(target, [
-        "posts",
-        values.workstream ?? "",
-        ...(values.limit ? ["--limit", values.limit] : []),
-        ...(values["after-sequence"] ? ["--after-sequence", values["after-sequence"]] : []),
-      ]);
-    } else {
+    else if (kind === "workstream-post")
+      response = JSON.stringify(await listWorkstreamPosts(client, options));
+    else {
       const { values } = parseArgs({
         args: options,
         options: { mailbox: { type: "string" }, limit: { type: "string" } },
@@ -365,18 +336,27 @@ export async function runListCommand(
     }
     value = JSON.parse(response);
   }
-  if (output === "text" && (kind === "objective" || kind === "team" || kind === "workstream")) {
+  const tagFields = TAG_FIELDS[kind];
+  if (output === "text" && tagFields !== undefined) {
     // Text tables name Tags; JSON and YAML keep the IDs the API returns.
     const names = new Map(
       items(await client.request("/api/v1/tags"))
         .map(record)
         .map((tag) => [field(tag, "metadata.id"), field(tag, "metadata.name")]),
     );
-    const key = kind === "team" ? "leadTagId" : "ownerTagId";
+    const name = (id: unknown) => names.get(id) ?? id;
     value = {
       items: items(value).map((item) => {
         const row = record(item);
-        return { ...row, [key]: names.get(row[key]) ?? row[key] };
+        return {
+          ...row,
+          ...Object.fromEntries(
+            tagFields.map((key) => [
+              key,
+              Array.isArray(row[key]) ? row[key].map(name) : name(row[key]),
+            ]),
+          ),
+        };
       }),
     };
   }

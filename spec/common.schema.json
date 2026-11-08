@@ -246,14 +246,6 @@
             "$ref": "#/$defs/taskFinding"
           }
         },
-        "fixedFindings": {
-          "type": "array",
-          "maxItems": 50,
-          "uniqueItems": true,
-          "items": {
-            "$ref": "#/$defs/taskFindingReference"
-          }
-        },
         "references": {
           "type": "array",
           "items": {
@@ -270,7 +262,7 @@
       "additionalProperties": true
     },
     "taskFinding": {
-      "description": "A review finding as a Worker reports it. The Control Plane assigns id and status when it records the result, so a Worker may omit them and any id, status, reason, fixedBy, closedBy, or closedAt it sends is ignored. Stored results and Task history carry the assigned values.",
+      "description": "A review finding as a Worker reports it. The Control Plane assigns the id when it records the result, so a Worker may omit it and any id it sends is ignored. Stored results and Task history carry the assigned id.",
       "type": "object",
       "required": ["severity", "summary"],
       "properties": {
@@ -289,31 +281,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 500
-        },
-        "status": {
-          "description": "Ignored on submission; every recorded finding starts open."
-        },
-        "reason": {
-          "description": "Ignored on submission."
-        },
-        "fixedBy": {
-          "description": "Ignored on submission; set when the finding is closed as fixed."
-        },
-        "closedBy": {
-          "description": "Ignored on submission; set when the finding is closed."
-        },
-        "closedAt": {
-          "description": "Ignored on submission; set when the finding is closed."
         }
-      },
-      "additionalProperties": false
-    },
-    "taskFindingReference": {
-      "type": "object",
-      "required": ["taskId", "findingId"],
-      "properties": {
-        "taskId": { "type": "string", "minLength": 1, "maxLength": 500 },
-        "findingId": { "type": "string", "pattern": "^F[1-9][0-9]{0,2}$" }
       },
       "additionalProperties": false
     },

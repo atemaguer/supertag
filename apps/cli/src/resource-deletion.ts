@@ -24,7 +24,7 @@ export interface DeletionPlan {
   readonly action: "retire" | "delete";
   /** Everything that still uses the resource. Any entry refuses the deletion. */
   readonly references: readonly string[];
-  /** A direct refusal, such as a built-in Role or retained artifact copies. */
+  /** A direct refusal, such as retained artifact copies. */
   readonly refusal?: string;
   /** Configuration removed along with the resource. */
   readonly removed: readonly string[];
@@ -88,7 +88,6 @@ export async function planDeletion(
       name,
       action: "retire",
       references: assigned.map((tag) => `Tag ${tag}`),
-      ...(role.origin === "system" ? { refusal: "is a built-in Role" } : {}),
       removed: [
         ...role.contextSetIds.map((id) => `reference to Context Set ${sets.context.get(id) ?? id}`),
         ...role.permissionSetIds.map(
@@ -197,31 +196,16 @@ async function planTag(
   const references: string[] = [];
   for (const objective of open)
     if (objective.ownerTagId === tag.id) references.push(`Objective ${objective.id} (owner)`);
-  const teams = new Set<string>();
-  for (const objective of open)
-    for (const team of await store.listTeams(objective.id)) {
-      if (team.status !== "active" || teams.has(team.id)) continue;
-      const role =
-        team.leadTagId === tag.id
-          ? "lead"
-          : team.memberTagIds.includes(tag.id)
-            ? "member"
-            : undefined;
-      if (role === undefined) continue;
-      teams.add(team.id);
-      references.push(`Team ${team.id} of Objective ${objective.id} (${role})`);
-    }
+  for (const team of await store.listTeamsOfTag(tag.id))
+    references.push(`Team ${team.name} (member)`);
   const listed = [
     ...(await store.listTasks({ tagId: tag.id, status: "running", limit: OPEN_TASK_LIMIT + 1 })),
     ...(await store.listTasks({ tagId: tag.id, status: "pending", limit: OPEN_TASK_LIMIT + 1 })),
   ];
   // Cancelling an Objective cancels its open Tasks, so they no longer hold the Tag.
   const tasks: typeof listed = [];
-  for (const task of listed) {
-    const objectiveId =
-      closing.size === 0 ? undefined : (await store.getTaskAssignment(task.id))?.objectiveId;
-    if (objectiveId === undefined || !closing.has(objectiveId)) tasks.push(task);
-  }
+  for (const task of listed)
+    if (task.objectiveId === undefined || !closing.has(task.objectiveId)) tasks.push(task);
   for (const task of tasks.slice(0, OPEN_TASK_LIMIT))
     references.push(`Task ${task.id} (${task.status})`);
   // An approver entry by name would pass to a new Tag that reuses the name.
@@ -258,14 +242,12 @@ async function planTag(
   const roles = new Map((await store.listRoles()).map((role) => [role.id, role.name]));
   for (const assignment of await store.listRoleAssignments({ tagId: tag.id, status: "active" }))
     removed.push(`Role ${roles.get(assignment.roleId) ?? assignment.roleId} assignment`);
-  for (const grant of await store.listTagMessagingGrants(tag.id)) {
-    if (grant.messageTypes.length === 0) continue;
+  for (const grant of await store.listTagMessagingGrants(tag.id))
     removed.push(
       grant.recipientTagId === tag.id
         ? `Mailbox grant from Tag ${await tagName(store, grant.senderTagId)}`
         : `Mailbox grant to Tag ${await tagName(store, grant.recipientTagId)}`,
     );
-  }
   removed.push(...membership);
   const authKeys = (await store.listAuthKeys())
     .filter((key) => authKeyPhase(key) === "active" && key.tagIds.includes(tag.id))

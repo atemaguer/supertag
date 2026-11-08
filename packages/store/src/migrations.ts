@@ -20,6 +20,8 @@ const MIGRATION_ADVISORY_LOCK_ID = 1_864_228_019;
 /** SQLite migrations that rebuild referenced tables and must run with foreign keys off. */
 export const SQLITE_FOREIGN_KEYS_OFF_MIGRATIONS: ReadonlySet<string> = new Set([
   "0012_team_channels",
+  "0032_objective_coordination_references",
+  "0033_tag_sessions_objectives",
 ]);
 const bundledMigrationCache = new Map<string, readonly BundledMigration[]>();
 
@@ -133,8 +135,7 @@ export function migrateSqliteDatabase(
   database.pragma(`busy_timeout = ${boundedMilliseconds(options.lockTimeoutMs, 5_000)}`);
   // SQLite ignores PRAGMA foreign_keys inside a transaction, and migrations run in one. A migration
   // that rebuilds a table other rows reference needs enforcement off, as SQLite's ALTER TABLE
-  // procedure describes, and ends with a foreign_key_check guard over the tables it rebuilds.
-  // Enforcement goes off only while such a migration is pending.
+  // procedure describes. Enforcement goes off only while such a migration is pending.
   const enforced =
     database.pragma("foreign_keys", { simple: true }) === 1 &&
     readiness.pendingTags.some((tag) => SQLITE_FOREIGN_KEYS_OFF_MIGRATIONS.has(tag));

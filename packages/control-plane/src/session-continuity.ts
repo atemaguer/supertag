@@ -25,7 +25,6 @@ type Persistence = Pick<
   | "findSessionState"
   | "listSessionStates"
   | "promoteSessionState"
-  | "hasUnconfirmedTeamLiveDelivery"
 >;
 
 /**
@@ -47,7 +46,7 @@ export class SessionContinuity {
     incoming: { work: DurableInboundEvent; task: Task },
   ): boolean {
     return (
-      incoming.task.surfaceObjectiveId === active.task.surfaceObjectiveId &&
+      incoming.task.objectiveId === active.task.objectiveId &&
       stableJson(admittedPolicy(incoming.task)) === stableJson(admittedPolicy(active.task)) &&
       sessionCompatibility(incoming.task, surfaceAudience(incoming.work)) ===
         sessionCompatibility(active.task, surfaceAudience(active.work)) &&
@@ -128,18 +127,9 @@ export class SessionContinuity {
       terminal?.type === "execution.failed" &&
       terminal.error.name === "ExecutionBudgetExceededError";
     if (terminal?.type !== "execution.completed" && !exhausted) return;
-    // The digest is authoritative for withdrawn or uncertain input. Adapters may still archive
-    // a transcript containing it; never resume that copy alongside the next activation's digest.
-    // Query the whole Attempt, not the bounded Objective delivery list used by operator views.
-    if (
-      !canResumeSessionAfterInput(
-        task.id,
-        updated.attemptId,
-        events,
-        await this.store.hasUnconfirmedTeamLiveDelivery(task.id, updated.attemptId),
-      )
-    )
-      return;
+    // Withdrawn input is not part of the saved conversation. Adapters may still archive a
+    // transcript containing it; never resume that copy.
+    if (!canResumeSessionAfterInput(task.id, updated.attemptId, events)) return;
     const state = await this.store.findSessionState(updated.sessionState.id);
     if (!state || stableJson(state.ref) !== stableJson(updated.sessionState))
       throw new Error("Native Session state was not durably archived");

@@ -14,35 +14,13 @@ export type {
   CoordinationInboxItem,
   CoordinationInboxKind,
   CoordinationInboxPage,
+  CoordinationInboxQuestion,
   CoordinationInboxStatus,
   Objective,
   ReadCoordinationInboxInput,
-  TaskAssignment,
   Team,
-  TeamScaling,
-  TeamTaskPriority,
-  UpdateTaskAssignmentInput,
-  UpdateTeamInput,
-  Workstream,
   WorkstreamPost,
-  WorkstreamPostType,
 } from "../../core/src/index.js";
-
-export type CoordinationCommandName =
-  | "assign_task"
-  | "create_tag"
-  | "create_team"
-  | "post_workstream"
-  | "read_mailbox"
-  | "read_objective"
-  | "read_task"
-  | "read_team"
-  | "read_workstream"
-  | "send_message"
-  | "update_objective"
-  | "update_task"
-  | "update_team"
-  | "wait_for";
 
 export interface CoordinationClientOptions {
   readonly baseUrl: string;
@@ -67,21 +45,10 @@ export class CoordinationClient {
     this.#fetch = options.fetch ?? globalThis.fetch;
   }
 
-  command<Result = unknown>(
-    name: CoordinationCommandName,
-    input: Readonly<Record<string, unknown>>,
-  ): Promise<Result> {
-    return this.request<Result>(`/api/v1/coordination/${name}`, {
-      method: "POST",
-      body: JSON.stringify(input),
-    });
-  }
-
   inbox(input: ReadCoordinationInboxInput = {}): Promise<CoordinationInboxPage> {
     const query = new URLSearchParams();
     for (const [name, value] of [
       ["objectiveId", input.objectiveId],
-      ["teamId", input.teamId],
       ["kind", input.kind],
       ["status", input.status],
       ["nextActorId", input.nextActorId],

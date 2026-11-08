@@ -195,7 +195,7 @@ export class ControlPlaneClient {
       const resource = await this.createTag(parseCreateTagArgs(args));
       const bindingGuidance = resource.spec.workerHosts.length
         ? ""
-        : ` Bind a Worker Host before assigning Tasks: supertag update tag ${resource.metadata.name} --add-worker-host HOST.`;
+        : ` Bind a Worker Host before it can run Tasks: supertag update tag ${resource.metadata.name} --add-worker-host HOST.`;
       return `Created Tag ${resource.metadata.name} (${resource.metadata.id}).${bindingGuidance}\n`;
     }
     if (command === "bind-worker-host" || command === "unbind-worker-host") {

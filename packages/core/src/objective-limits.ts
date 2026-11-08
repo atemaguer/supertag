@@ -21,9 +21,7 @@ export const OBJECTIVE_DEADLINE_MIN_GRACE_MS = 60_000;
  * observed against, so raising a budget or moving a deadline makes older entries inert.
  */
 export interface ObjectiveLimitState {
-  /** Identity of the one owner summary activation for the current limit transition. */
-  readonly summaryTaskId?: string;
-  /** Owner's final account of progress, open work, blockers, and the next step. */
+  /** The Objective's final account of progress, open work, blockers, and the next step. */
   readonly summary?: { readonly text: string; readonly at: string };
   readonly reportedSpend?: {
     readonly amountMinor: number;

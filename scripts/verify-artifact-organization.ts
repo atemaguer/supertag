@@ -13,9 +13,10 @@ const configuration = JSON.parse(
   await readFile(join(directory, "run.json"), "utf8").catch(() => "{}"),
 );
 const owner = evidence.objectives[0].ownerTagId as string;
-const reviewer = evidence.assignments.find((row: Row) => row["assignedTagId"] !== owner)
-  ?.assignedTagId as string;
-assert(reviewer, "Missing independent reviewer assignment");
+const reviewer = (evidence.tasks as Row[]).find((row) => row["tagId"] !== owner)?.["tagId"] as
+  | string
+  | undefined;
+assert(reviewer, "Missing an independent reviewer Task");
 const nativeSessions: Row[] = [];
 for (const name of await readdir(directory)) {
   if (!/-worker-[ab]\.log$/.test(name)) continue;

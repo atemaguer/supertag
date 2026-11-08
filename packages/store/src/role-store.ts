@@ -8,16 +8,13 @@ import {
   approvalRequirementsFromPermissions,
   type CreateRoleInput,
   type DatabaseProvider,
-  type EnsureSystemRoleInput,
   type ExecutionSettings,
   mcpGrantsFromPermissions,
-  ORG_ARCHITECT_ROLE_KEY,
   parseExecutionSettings,
   type Role,
   type RoleAssignment,
   type RoleAssignmentListFilter,
   type RoleStore,
-  type SystemRoleKey,
   type TagApprovalRequirement,
   type TagAuthorizationResource,
   type TagContextPlan,
@@ -286,21 +283,11 @@ export class DrizzleRoleStore implements RoleStore {
     return row ? yield* this.load(tx, row) : undefined;
   }
 
-  private *create(
-    tx: any,
-    input: CreateRoleInput,
-    origin: "system" | "user",
-    systemKey?: SystemRoleKey,
-  ): Flow<Role> {
+  private *create(tx: any, input: CreateRoleInput): Flow<Role> {
     const definition = roleDefinition(input);
     const existing = yield* this.find(tx, this.tables.roles.name, definition.name);
     if (existing) {
-      if (
-        existing.origin === origin &&
-        existing.systemKey === systemKey &&
-        sameDefinition(existing, definition)
-      )
-        return existing;
+      if (sameDefinition(existing, definition)) return existing;
       throw new TagMessagingError(409, `A different Role named ${definition.name} already exists`);
     }
     const contextSetIds = yield* this.refs(
@@ -325,8 +312,6 @@ export class DrizzleRoleStore implements RoleStore {
         purpose: definition.purpose,
         instructions: definition.instructions,
         execution: definition.execution ?? null,
-        origin,
-        systemKey: systemKey ?? null,
         status: "active",
         revision: 1,
         createdBy: definition.createdBy ?? null,
@@ -340,77 +325,7 @@ export class DrizzleRoleStore implements RoleStore {
   }
 
   createRole(input: CreateRoleInput): Promise<Role> {
-    return this.transaction((tx) => this.create(tx, input, "user"));
-  }
-
-  ensureSystemRole(input: EnsureSystemRoleInput): Promise<Role> {
-    systemRoleKey(input.systemKey);
-    const self = this;
-    return this.transaction(function* (tx: any): Flow<Role> {
-      const existing = yield* self.find(tx, self.tables.roles.systemKey, input.systemKey);
-      if (existing) return existing;
-      const definition = roleDefinition(input);
-      const nameCollision = yield* self.find(tx, self.tables.roles.name, definition.name);
-      // At READ COMMITTED, another bootstrap can commit between the two reads.
-      // Its matching identity is already ensured, including any customized policy.
-      if (nameCollision?.origin === "system" && nameCollision.systemKey === input.systemKey)
-        return nameCollision;
-      if (nameCollision)
-        throw new TagMessagingError(
-          409,
-          `A different Role named ${definition.name} already exists`,
-        );
-      const contextSetIds = yield* self.refs(
-        tx,
-        self.tables.tagContextSets,
-        definition.contextSetIds,
-        "Context Set",
-      );
-      const permissionSetIds = yield* self.refs(
-        tx,
-        self.tables.tagPermissionSets,
-        definition.permissionSetIds,
-        "Permission Set",
-      );
-      const at = new Date().toISOString();
-      const [created] = yield tx
-        .insert(self.tables.roles)
-        .values({
-          id: randomUUID(),
-          name: definition.name,
-          purpose: definition.purpose,
-          instructions: definition.instructions,
-          origin: "system",
-          systemKey: input.systemKey,
-          status: "active",
-          revision: 1,
-          createdBy: definition.createdBy ?? null,
-          createdAt: at,
-          updatedAt: at,
-        })
-        .onConflictDoNothing({ target: self.tables.roles.systemKey })
-        .returning();
-      if (created) {
-        yield* replaceRefs(
-          tx,
-          self.tables.roleContextSets,
-          "contextSetId",
-          created.id,
-          contextSetIds,
-        );
-        yield* replaceRefs(
-          tx,
-          self.tables.rolePermissionSets,
-          "permissionSetId",
-          created.id,
-          permissionSetIds,
-        );
-        return yield* self.load(tx, created);
-      }
-      const concurrent = yield* self.find(tx, self.tables.roles.systemKey, input.systemKey);
-      if (concurrent) return concurrent;
-      throw new TagMessagingError(409, `A different Role named ${definition.name} already exists`);
-    });
+    return this.transaction((tx) => this.create(tx, input));
   }
 
   findRoleById(id: string): Promise<Role | undefined> {
@@ -421,11 +336,6 @@ export class DrizzleRoleStore implements RoleStore {
     return this.transaction((tx) =>
       this.find(tx, this.tables.roles.name, required(name, "Role name")),
     );
-  }
-
-  findRoleBySystemKey(systemKey: SystemRoleKey): Promise<Role | undefined> {
-    systemRoleKey(systemKey);
-    return this.transaction((tx) => this.find(tx, this.tables.roles.systemKey, systemKey));
   }
 
   listRoles(): Promise<readonly Role[]> {
@@ -451,8 +361,6 @@ export class DrizzleRoleStore implements RoleStore {
       if (!prior) throw new TagMessagingError(404, "Role not found");
       if (prior.revision !== input.expectedRevision)
         throw new TagMessagingError(409, "Role revision changed; reload before updating");
-      if (prior.origin === "system" && input.status === "retired")
-        throw new TagMessagingError(403, "Built-in Roles cannot be retired");
       const next = {
         purpose: input.purpose === undefined ? prior.purpose : purpose(input.purpose),
         instructions:
@@ -696,14 +604,9 @@ function roleFromRow(
   contextSetIds: readonly string[],
   permissionSetIds: readonly string[],
 ): Role {
-  const origin = row.origin;
-  if (origin !== "system" && origin !== "user") throw new Error(`Invalid Role origin: ${origin}`);
   const status = row.status;
   if (status !== "active" && status !== "retired")
     throw new Error(`Invalid Role status: ${status}`);
-  const key = row.systemKey === null ? undefined : systemRoleKey(row.systemKey);
-  if ((origin === "system") !== (key !== undefined))
-    throw new Error(`Role ${row.id} has inconsistent system provenance`);
   return {
     id: row.id,
     name: row.name,
@@ -712,8 +615,6 @@ function roleFromRow(
     contextSetIds,
     permissionSetIds,
     ...storedExecution(row.execution),
-    origin,
-    ...(key === undefined ? {} : { systemKey: key }),
     status,
     revision: row.revision,
     ...(row.createdBy === null ? {} : { createdBy: row.createdBy }),
@@ -747,8 +648,6 @@ function roleSnapshot(assignment: RoleAssignment, role: Role): TagRoleSnapshot {
       name: role.name,
       purpose: role.purpose,
       instructions: role.instructions,
-      origin: role.origin,
-      ...(role.systemKey === undefined ? {} : { systemKey: role.systemKey }),
       revision: role.revision,
       contextSetIds: [...role.contextSetIds],
       permissionSetIds: [...role.permissionSetIds],
@@ -797,10 +696,4 @@ function required(value: unknown, label: string): string {
   if (typeof value !== "string" || !value.trim())
     throw new TagMessagingError(400, `${label} is required`);
   return value.trim();
-}
-
-function systemRoleKey(value: unknown): SystemRoleKey {
-  if (value !== ORG_ARCHITECT_ROLE_KEY)
-    throw new Error(`Unsupported system Role key: ${String(value)}`);
-  return value;
 }

@@ -287,23 +287,7 @@ async def test_created_worker_orchestrates_and_normalizes_lifecycle() -> None:
                 "name": "Security Reviewer",
                 "purpose": "Review customer data changes.",
                 "instructions": "State unresolved risk.",
-                "origin": "user",
                 "revision": 4,
-                "contextSetIds": [],
-                "permissionSetIds": [],
-            },
-        },
-        {
-            "assignmentId": "assignment-architect",
-            "assignmentRevision": 1,
-            "role": {
-                "id": "role-architect",
-                "name": "Org Architect",
-                "purpose": "Decide whether durable organization structure is warranted.",
-                "instructions": "Require a stable ownership boundary.",
-                "origin": "system",
-                "systemKey": "org-architect",
-                "revision": 3,
                 "contextSetIds": [],
                 "permissionSetIds": [],
             },
@@ -339,17 +323,12 @@ async def test_created_worker_orchestrates_and_normalizes_lifecycle() -> None:
     instructions = harness.context.by_kind("instruction")
     assert [item.id for item in instructions] == [
         "role:role-reviewer:4",
-        "role:role-architect:3",
         "instructions",
     ]
     assert instructions[0].content == (
         "You are acting in the Security Reviewer Role.\n"
         "Purpose: Review customer data changes.\n"
         "State unresolved risk."
-    )
-    assert (
-        "An incoming mailbox message may request an organization change using action and input."
-        in instructions[1].content
     )
     assert hook.values == [("task-1", "session_state-1")]
     assert provider.environment.disposed == ["completed"]

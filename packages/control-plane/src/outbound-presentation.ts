@@ -1,18 +1,14 @@
 import { createHash } from "node:crypto";
 import type { OutboundReply } from "@supertag/core";
 
-/** Stable delivery identities for Objective reports. */
+/** Stable delivery identities for SuperTag's notices in an Objective's home thread. */
 export function objectiveReportKey(objectiveId: string, idempotencyKey: string): string {
   return `objective-report:${digest(`${objectiveId}:${idempotencyKey}`)}`;
 }
 
-export function taskApprovalKey(taskId: string): string {
-  return `task-approval:${digest(taskId)}`;
-}
-
 /**
  * Interprets existing queued keys in one place. Ordinary progress replaces the
- * acknowledgement; Objective reports and approval requests are standalone.
+ * acknowledgement; Objective reports and notices are standalone.
  */
 export function outboundPresentationPolicy(
   reply: Pick<OutboundReply, "deliveryKey" | "presentation">,
@@ -21,9 +17,6 @@ export function outboundPresentationPolicy(
     reply.deliveryKey === "acknowledgement" ||
     reply.deliveryKey === "session-input-unresolved" ||
     reply.deliveryKey.startsWith("objective-report:") ||
-    reply.deliveryKey.startsWith("operator-message:") ||
-    reply.deliveryKey.startsWith("task-approval:") ||
-    reply.deliveryKey.startsWith("task-budget:") ||
     reply.deliveryKey.startsWith("objective-budget:") ||
     reply.deliveryKey.startsWith("objective-limit:");
   return {

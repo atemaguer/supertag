@@ -276,16 +276,6 @@ const ROUTES: readonly Route[] = [
     }),
   ],
   [
-    "POST",
-    // The command name is the caller's until the handler recognizes it; see noteCoordinationCommand.
-    /^\/api\/v1\/coordination\/[^/]+$/u,
-    () => ({
-      action: "coordination.command",
-      target: "Objective",
-      route: "/api/v1/coordination/{command}",
-    }),
-  ],
-  [
     undefined,
     /^\/api\/v1\/tag-messaging\/objectives(?:\/([^/]+))?$/u,
     (match) => ({
@@ -296,36 +286,23 @@ const ROUTES: readonly Route[] = [
   ],
   [
     "POST",
-    /^\/api\/v1\/tag-messaging\/retention$/u,
-    () => ({
-      action: "mailbox.prune",
-      target: "Mailbox",
-      route: "/api/v1/tag-messaging/retention",
+    /^\/api\/v1\/tag-messaging\/teams$/u,
+    () => ({ action: "team.create", target: "Team", route: "/api/v1/tag-messaging/teams" }),
+  ],
+  [
+    undefined,
+    /^\/api\/v1\/tag-messaging\/teams\/([^/]+)$/u,
+    (match, method) => ({
+      action: method === "DELETE" ? "team.delete" : "team.update",
+      target: named("Team", id(match)),
+      route: "/api/v1/tag-messaging/teams/{id}",
     }),
   ],
   [
-    "POST",
-    /^\/api\/v1\/tag-messaging\/credentials$/u,
-    () => ({
-      action: "mailbox-credential.issue",
-      target: "MailboxCredential",
-      route: "/api/v1/tag-messaging/credentials",
-    }),
-  ],
-  [
-    "DELETE",
-    /^\/api\/v1\/tag-messaging\/credentials\/([^/]+)$/u,
-    (match) => ({
-      action: "mailbox-credential.revoke",
-      target: named("MailboxCredential", id(match)),
-      route: "/api/v1/tag-messaging/credentials/{id}",
-    }),
-  ],
-  [
-    "PUT",
+    undefined,
     /^\/api\/v1\/tag-messaging\/grants$/u,
-    () => ({
-      action: "mailbox-grant.update",
+    (_match, method) => ({
+      action: method === "DELETE" ? "mailbox-grant.revoke" : "mailbox-grant.add",
       target: "Mailbox",
       route: "/api/v1/tag-messaging/grants",
     }),
@@ -354,38 +331,6 @@ export function classifyManagementRequest(method: string, url: URL): AuditNote {
     if (note !== undefined) return { ...note };
   }
   return { action: "request", target: "UnknownRoute" };
-}
-
-function coordinationAction(command: string): string {
-  if (command === "start_objective") return "objective.start";
-  if (command === "decide_approval") return "approval.decide";
-  return `coordination.${command}`;
-}
-
-/**
- * Refines a coordination command's note from its input, without recording the input. Call it only
- * with a command the handler recognized, because the command's name becomes part of the action.
- */
-export function noteCoordinationCommand(
-  note: AuditNote | undefined,
-  command: string,
-  input: Readonly<Record<string, unknown>>,
-): void {
-  if (note === undefined) return;
-  note.action = coordinationAction(command);
-  const text = (key: string) =>
-    typeof input[key] === "string" ? (input[key] as string) : undefined;
-  if (command === "decide_approval") {
-    const decision = text("decision");
-    if (decision === "approve" || decision === "deny") note.action = `approval.${decision}`;
-    note.target = named("ApprovalRequest", text("requestId"));
-    return;
-  }
-  if (text("taskId") !== undefined) note.target = named("Task", text("taskId"));
-  else if (text("workstreamId") !== undefined)
-    note.target = named("Workstream", text("workstreamId"));
-  else if (text("teamId") !== undefined) note.target = named("Team", text("teamId"));
-  else if (text("objectiveId") !== undefined) note.target = named("Objective", text("objectiveId"));
 }
 
 /**

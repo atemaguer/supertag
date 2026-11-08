@@ -1,4 +1,4 @@
-/** Deterministic manager policy using the production MCP and artifact clients. */
+/** Deterministic Objective and work Session policy using the production MCP and artifact clients. */
 import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { artifactTransferVerificationKey } from "../../apps/cli/src/artifact-transfer-key.js";
@@ -130,6 +130,12 @@ function artifactStoreFor(spec: TaskAttemptSpec): WorkletArtifactStore {
 const content = "Reviewed shared conclusion: the pooled result is 42.\n";
 const digest = createHash("sha256").update(content).digest("hex");
 const uri = `supertag-artifact:sha256:${digest}`;
+/** Work Session instructions start with one of these; the Objective's own turns never do. */
+const PRODUCE = "PRODUCE-EVIDENCE";
+const REVIEW = "REVIEW-EVIDENCE";
+/** Work Session titles, which report turns name. */
+const PRODUCE_TITLE = "Produce pooled evidence";
+const REVIEW_TITLE = "Review pooled evidence";
 const plan = {
   files: [],
   mounts: [],
@@ -137,6 +143,9 @@ const plan = {
   secretBindings: [],
   network: { mode: "unrestricted" as const },
 };
+function request(task: TaskAttemptSpec): string {
+  return task.input.messages.findLast((message) => message.role === "requester")?.text ?? "";
+}
 function toolResult(value: unknown): {
   isError?: boolean;
   content: Array<{ type: string; text?: string }>;
@@ -144,16 +153,6 @@ function toolResult(value: unknown): {
   if (!value || typeof value !== "object" || !("content" in value) || !Array.isArray(value.content))
     throw new Error("Invalid MCP result");
   return value as { isError?: boolean; content: Array<{ type: string; text?: string }> };
-}
-interface CoordinationState {
-  result: { taskResult: { artifacts: Array<{ artifactId: string; paths: string[] }> } };
-  revision: number;
-  ownerTagId: string;
-  status: string;
-  duplicate: boolean;
-  message: { id: string };
-  tasks: Array<{ taskId: string; status: string; assignedTagId: string }>;
-  teams: Array<{ id: string; leadTagId: string }>;
 }
 const harness: Harness = {
   id: "organization-fixture",
@@ -175,7 +174,7 @@ const harness: Harness = {
     return {
       runtime: plan,
       execution: plan,
-      ...(context.attempt.taskId === "research-produce"
+      ...(request(context.attempt).startsWith(PRODUCE)
         ? { outputs: [{ path: "conclusion.txt", name: "conclusion", mediaType: "text/plain" }] }
         : {}),
     };
@@ -183,40 +182,32 @@ const harness: Harness = {
   async start(_plan, environments, context) {
     const task = context.attempt;
     const coordination = task.coordination;
-    if (!coordination) throw new Error("Missing admitted manager authority");
+    if (!coordination) throw new Error("Missing admitted coordination authority");
     const tool = context.tools.find((input) => input.id === "supertag-coordination");
-    if (!tool) throw new Error("Missing manager coordination Tool Input");
+    if (!tool) throw new Error("Missing coordination Tool Input");
     const client = await connectWorkerMcpClient(tool);
     const call = async (name: string, args: Record<string, unknown> = {}) => {
       const result = toolResult(await client.callTool(name, args));
       if (result.isError) throw new Error(`${name}: ${JSON.stringify(result.content)}`);
       const blocks = result.content as Array<{ type: string; text?: string }>;
-      return JSON.parse(
-        blocks.find((block) => block.type === "text")?.text ?? "null",
-      ) as CoordinationState;
+      return JSON.parse(blocks.find((block) => block.type === "text")?.text ?? "null") as Record<
+        string,
+        unknown
+      >;
     };
+    const catalog = async (operation: string, body: unknown) =>
+      (await (
+        await artifactRequest(
+          `/internal/v1/artifacts/catalog/${operation}`,
+          coordination.token,
+          body,
+        )
+      ).json()) as Record<string, unknown>;
+    const turn = request(task);
+    const transcript = task.input.messages.map((message) => message.text).join("\n");
     return {
       async *run(signal) {
-        await call("read_team");
-        let objective = await call("read_objective");
-        await call("read_mailbox");
-        const source = task.input.messages
-          .map((message) => {
-            try {
-              return JSON.parse(message.text)?.sourceMessage;
-            } catch {
-              return undefined;
-            }
-          })
-          .find(Boolean);
-        if (["review-bootstrap", "organization-bootstrap"].includes(task.taskId)) {
-          yield {
-            type: "output.message" as const,
-            text: "Review manager available through its Team Mailbox",
-          };
-          return;
-        }
-        if (task.taskId === "research-produce") {
+        if (turn.startsWith(PRODUCE)) {
           const child = await environments.execution.spawn(
             {
               command: "node",
@@ -229,32 +220,44 @@ const harness: Harness = {
           );
           const result = await child.wait();
           if (result.exitCode !== 0) throw new Error("Research process did not complete");
-          const message = {
-            recipientTeamId: "review-team",
-            type: "result.submitted",
-            body: { sourceTaskId: task.taskId, uri, digest: `sha256:${digest}` },
-            idempotencyKey: "research-artifact",
-          };
-          const first = await call("send_message", message);
-          const duplicate = await call("send_message", message);
-          if (!duplicate.duplicate || duplicate.message.id !== first.message.id)
-            throw new Error("Mailbox retry created a duplicate");
-          yield {
-            type: "output.message" as const,
-            text: "Research artifact produced and review requested",
-          };
+          yield { type: "output.message" as const, text: "Research artifact produced" };
           return;
         }
-        if (task.taskId === "review-evidence") {
-          // The admitted input names its catalog entry; bytes come directly from the producer's host.
-          const input = task.input.attachments?.find(
-            (attachment) => attachment.digest === `sha256:${digest}`,
-          );
-          if (!input) throw new Error("Missing admitted artifact input");
-          const admitted = await artifactStoreFor(task).get(input);
+        if (turn.startsWith(REVIEW)) {
+          if (id !== "worker-b") throw new Error("The review ran outside the reviewer's host");
+          // A work Session has only ask: no Objective or messaging authority.
+          const names = client.tools.map((candidate) => candidate.name);
+          for (const name of ["update_objective", "send_message", "start_session"])
+            if (names.includes(name)) throw new Error(`A work Session received ${name}`);
+          // An Attempt credential is not a transfer grant: the producer's Worklet refuses it.
+          const denied = await fetch(`http://worker-a:8791/v1/artifacts/${digest}`, {
+            headers: { authorization: `Bearer ${coordination.token}` },
+          });
+          if (denied.status !== 403)
+            throw new Error(`Unacquired artifact access was not denied: ${denied.status}`);
+          await denied.body?.cancel();
+          // The catalog finds the Objective's artifact; bytes come directly from the producer's host.
+          const found = (await catalog("find", { query: "conclusion" }))["artifacts"] as Array<{
+            id: string;
+          }>;
+          const artifactId = found[0]?.id;
+          if (!artifactId) throw new Error("The reviewer found no Objective artifact");
+          const acquired = (await catalog("acquire", {
+            operationId: "review-read",
+            artifactId,
+            paths: ["conclusion.txt"],
+            delivery: "read",
+          })) as { acquisition: { id: string } };
+          const admitted = await artifactStoreFor(task).get({
+            uri,
+            digest: `sha256:${digest}`,
+            artifactId,
+            path: "conclusion.txt",
+          });
+          await catalog("settle", { id: acquired.acquisition.id, status: "delivered" });
           const shared = await environments.execution.read("conclusion.txt");
           if (Buffer.from(admitted).toString() !== content || shared !== content)
-            throw new Error("Admitted and shared evidence disagree");
+            throw new Error("Acquired and shared evidence disagree");
           const written = await environments.execution.spawn(
             {
               command: "node",
@@ -267,135 +270,48 @@ const harness: Harness = {
           );
           if ((await written.wait()).exitCode !== 0)
             throw new Error("Review record was not stored");
-          await call("send_message", {
-            recipientTeamId: "pooled-objective:leadership",
-            type: "result.submitted",
-            body: {
-              reviewTaskId: task.taskId,
-              uri,
-              digest: `sha256:${digest}`,
-              verdict: "accepted",
-            },
-            idempotencyKey: "review-result",
-          });
-          yield {
-            type: "output.message" as const,
-            text: "Independent review verified the admitted artifact and shared execution bytes",
-          };
-          return;
-        }
-        if (id === "worker-b") {
-          if (source?.idempotencyKey !== "research-artifact")
-            throw new Error("Unexpected Review manager message");
-          const tools = client;
-          if (tools.tools.some((tool) => tool.name === "update_objective"))
-            throw new Error("Non-owner received owner-only tool");
-          // An Attempt credential is not a transfer grant: the producer's Worklet refuses it.
-          const denied = await fetch(`http://worker-a:8791/v1/artifacts/${digest}`, {
-            headers: { authorization: `Bearer ${coordination.token}` },
-          });
-          if (denied.status !== 403)
-            throw new Error(`Unadmitted artifact access was not denied: ${denied.status}`);
-          await denied.body?.cancel();
-          const forged = await client.callTool("send_message", {
-            recipientTeamId: "pooled-objective:leadership",
-            type: "progress.updated",
-            body: {},
-            idempotencyKey: "forged-authority",
-            senderTagId: objective.ownerTagId,
-          });
-          if (!toolResult(forged).isError) throw new Error("Manager spoofed another Tag");
           await writeFile(
             "/state/permission-evidence.json",
             JSON.stringify({
-              nonOwnerToolAbsent: true,
-              unadmittedArtifactStatus: denied.status,
-              forgedSenderDenied: true,
+              workSessionToolsLimited: true,
+              unacquiredArtifactStatus: denied.status,
               tagId: task.tag.id,
               attemptId: task.attemptId,
             }),
           );
-          await call("send_message", {
-            recipientTeamId: "pooled-objective:leadership",
-            type: "progress.updated",
-            body: { request: "admit-review", sourceTaskId: "research-produce", uri },
-            inReplyTo: source.id,
-            idempotencyKey: "review-admission-request",
-          });
           yield {
             type: "output.message" as const,
-            text: "Requested an admitted artifact input without widening authority",
+            text: "Independent review verified the acquired artifact and shared execution bytes",
           };
           return;
         }
-        const tasks = objective.tasks;
-        const review = tasks.find((candidate) => candidate.taskId === "review-evidence");
-        if (!review) {
-          const produced = await call("read_task", { taskId: "research-produce" });
-          if (produced.status !== "submitted") {
-            await call("wait_for", { submittedTaskIds: ["research-produce"] });
-            yield {
-              type: "output.message" as const,
-              text: "Waiting for durable artifact submission",
-            };
-            return;
-          }
-          const peer = objective.teams.find((team: { id: string }) => team.id === "review-team");
-          await call("assign_task", {
-            taskId: "review-evidence",
-            teamId: "review-team",
-            assignedTagId: peer?.leadTagId,
-            instruction: "Verify the admitted artifact against shared execution",
-            acceptanceCriteria: ["Stored and shared evidence match"],
-            execution: { profile: { id: "worker-b", revision: "1" } },
-            inputArtifacts: [
-              { ...produced.result.taskResult.artifacts[0], requireAccepted: false },
-            ],
-            maxCostMinor: 0,
-          });
-          yield {
-            type: "output.message" as const,
-            text: "Review delegated with exact artifact provenance",
-          };
-          return;
-        }
-        if (review.status !== "submitted" && review.status !== "accepted") {
-          await call("wait_for", { submittedTaskIds: ["review-evidence"] });
-          yield { type: "output.message" as const, text: "Waiting for independent review" };
-          return;
-        }
-        for (const candidate of tasks)
-          if (candidate.status === "submitted")
-            await call("update_task", {
-              taskId: candidate.taskId,
-              expectedStatus: "submitted",
-              status: "accepted",
-              assessment:
-                candidate.taskId === "review-evidence"
-                  ? "Independent stored and shared artifact checks passed"
-                  : "Coordination responsibility completed",
-            });
-        objective = await call("read_objective");
-        try {
+        // The Objective's own turns: its start, then each work Session's report.
+        if (transcript.includes(REVIEW_TITLE)) {
+          const read = await call("read_objective");
+          const objective = (read["objective"] ?? read) as { revision: number };
           await call("update_objective", {
             status: "completed",
             expectedRevision: objective.revision,
             completionSummary:
-              "Two Team managers produced, admitted, independently reviewed, and accepted one shared result",
+              "Two Team members produced, acquired, and independently reviewed one shared result",
           });
-        } catch (error) {
-          if (!String(error).includes("unsettled")) throw error;
-          await call("wait_for", { notBefore: new Date(Date.now() + 1500).toISOString() });
-          yield {
-            type: "output.message" as const,
-            text: "Waiting for outgoing Mailbox delivery settlement",
-          };
+          yield { type: "output.message" as const, text: "Objective completed" };
           return;
         }
-        yield {
-          type: "output.message" as const,
-          text: "Objective completed with independent artifact evidence",
-        };
+        if (transcript.includes(PRODUCE_TITLE)) {
+          await call("start_session", {
+            title: REVIEW_TITLE,
+            instruction: `${REVIEW}: verify the Objective's conclusion artifact against shared execution`,
+            tag: "Review manager",
+          });
+          yield { type: "output.message" as const, text: "Review delegated" };
+          return;
+        }
+        await call("start_session", {
+          title: PRODUCE_TITLE,
+          instruction: `${PRODUCE}: produce the shared conclusion`,
+        });
+        yield { type: "output.message" as const, text: "Research started" };
       },
       async close() {
         await client.close();

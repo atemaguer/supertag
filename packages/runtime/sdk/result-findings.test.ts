@@ -18,7 +18,7 @@ const review = [
   "Change: Scope exports by tenant",
 ].join("\n");
 
-it("parses Finding lines from a harness answer as open findings", () => {
+it("parses Finding lines from a harness answer as findings", () => {
   expect(findingsFromOutput(review)).toEqual({
     findings: [
       {
@@ -26,18 +26,15 @@ it("parses Finding lines from a harness answer as open findings", () => {
         severity: "high",
         summary: "The export skips tenant scoping.",
         location: "packages/export/src/query.ts:42",
-        status: "open",
       },
-      { id: "F2", severity: "medium", summary: "Retries are unbounded.", status: "open" },
+      { id: "F2", severity: "medium", summary: "Retries are unbounded." },
       {
         id: "F3",
         severity: "low",
         summary: "README misspells ledger.",
         location: "docs/README.md:3",
-        status: "open",
       },
     ],
-    fixedFindings: [],
     malformed: ["Finding: high | Quoted example, not a finding. | x.ts:1"],
   });
 });
@@ -82,10 +79,8 @@ it("follows CommonMark fences and reports the finding lines they quote", () => {
         severity: "medium",
         summary: "Reported after the fences close.",
         location: "y.ts:4",
-        status: "open",
       },
     ],
-    fixedFindings: [],
     malformed: [
       "Finding: high | Quoted inside a quoted fence. | x.ts:1",
       "Finding: high | Still quoted: the inner fence did not close the outer one. | x.ts:2",
@@ -199,50 +194,4 @@ it("treats a fence-like line indented four or more spaces as code, not a fence",
     "Finding: low | Quoted inside a fence indented three spaces.",
     "Finding: low | Still quoted: an indented line does not close the fence.",
   ]);
-});
-
-it("parses Fixed finding lines from a re-review as references to earlier findings", () => {
-  const output = [
-    "Re-reviewed the tenant scoping fix.",
-    "Fixed finding: review-export | F1",
-    "- Fixed finding: `review-export` | `F3`",
-    "Fixed finding: review-export | F1",
-    "Fixed finding: review-export",
-    "Fixed finding: review-export | first",
-    "```text",
-    "Fixed finding: quoted | F2",
-    "```",
-  ].join("\n");
-  const parsed = findingsFromOutput(output);
-  expect(parsed.fixedFindings).toEqual([
-    { taskId: "review-export", findingId: "F1" },
-    { taskId: "review-export", findingId: "F3" },
-  ]);
-  expect(parsed.findings).toEqual([]);
-  expect(parsed.malformed).toEqual([
-    "Fixed finding: review-export",
-    "Fixed finding: review-export | first",
-  ]);
-  expect(defaultTaskResult(output).fixedFindings).toEqual(parsed.fixedFindings);
-  expect(defaultTaskResult("Done.")).not.toHaveProperty("fixedFindings");
-  expect(FINDINGS_INSTRUCTION).toContain('"Fixed finding: <Task id> | <finding id such as F1>"');
-});
-
-it("ignores Fixed finding lines in code blocks, after emphasis, or mid-line", () => {
-  const output = [
-    "Quoting the repository:",
-    "",
-    "    Fixed finding: review-export | F2",
-    "~~~",
-    "Fixed finding: review-export | F4",
-    "~~~",
-    "**Fixed finding:** review-export | F5",
-    "Note that Fixed finding: review-export | F6",
-    "   Fixed finding: review-export | F1",
-  ].join("\n");
-  expect(findingsFromOutput(output)).toEqual({
-    findings: [],
-    fixedFindings: [{ taskId: "review-export", findingId: "F1" }],
-    malformed: [],
-  });
 });

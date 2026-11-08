@@ -36,14 +36,9 @@ export function formatSpend(report: SpendReport): string {
         report.by === "objective"
           ? ` | budget ${group.budget ? (group.budget.currency ? money(group.budget.limitMinor, group.budget.currency) : `${group.budget.limitMinor} allocation units`) : "none"}`
           : "";
-      return `${terminalText(group.name ?? group.key)} | ${formatUsage(group)}${budget}\n${group.postTriggered?.attempts ? `  ${formatPostTriggeredSpend(group.postTriggered)}\n` : ""}`;
+      return `${terminalText(group.name ?? group.key)} | ${formatUsage(group)}${budget}\n`;
     })
     .join("");
-}
-
-/** A subset of the displayed total, never an additional charge. */
-export function formatPostTriggeredSpend(usage: SpendUsage): string {
-  return `Post-triggered activations (included in total) | ${formatUsage(usage)}`;
 }
 
 function formatUsage(group: SpendUsage): string {

@@ -775,14 +775,6 @@ describe("Worker", () => {
           priority: 50,
           required: true,
         }),
-        expect.objectContaining({
-          id: "role:role-architect:3",
-          content: expect.stringContaining(
-            "An incoming mailbox message may request an organization change using action and input.",
-          ),
-          priority: 50,
-          required: true,
-        }),
       ]);
       return emptyLaunchPlan;
     });
@@ -826,23 +818,7 @@ describe("Worker", () => {
                 name: "Security Reviewer",
                 purpose: "Review changes affecting customer data.",
                 instructions: "Require evidence and state unresolved risk.",
-                origin: "user",
                 revision: 4,
-                contextSetIds: [],
-                permissionSetIds: [],
-              },
-            },
-            {
-              assignmentId: "assignment-architect",
-              assignmentRevision: 1,
-              role: {
-                id: "role-architect",
-                name: "Org Architect",
-                purpose: "Decide whether durable organization structure is warranted.",
-                instructions: "Require a stable ownership boundary.",
-                origin: "system",
-                systemKey: "org-architect",
-                revision: 3,
                 contextSetIds: [],
                 permissionSetIds: [],
               },

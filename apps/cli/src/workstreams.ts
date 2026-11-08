@@ -1,65 +1,41 @@
 import { parseArgs } from "node:util";
-import { ControlPlaneClient, type ControlPlaneTarget } from "./control-plane-client.js";
+import type { ControlPlaneClient } from "./control-plane-client.js";
+import { runTeamCommand } from "./teams.js";
 
 export function workstreamHelp(): string {
   return `Usage:
-  supertag list workstream [--tag TAG] [--limit N]
-  supertag get workstream ID
-  supertag list workstream-post --workstream ID [--after-sequence N] [--limit N]
+  supertag list workstream-post --team TEAM [--after-sequence N] [--limit N]
 
-Every Team has one channel, its Workstream, created with the Team; the Workstream ID is the
-Team ID. Team members read and post in it, and the Team's Objective owner may read it.
-Without --tag, list workstream shows every Team channel the operator may read.
-Each post has a type (note, question, blocker, evidence, or decision) and the Tags it is
-addressed to. A post carries no authority. It can wake a Task waiting on the channel or
-trigger an Objective observation assessment when the channel is an observation source.
+Every Team has one Workstream: the shared record of its members' posts, which every member
+reads. A post wakes nobody; a post addressed to Tags is delivered to each of them as a Mailbox
+message. Without --after-sequence the newest posts are listed; with it, the posts after that
+sequence number, oldest first.
 `;
 }
-export async function runWorkstreamCommand(
-  target: ControlPlaneTarget,
+
+/** Lists a Team's Workstream posts; `args` are the `list workstream-post` options. */
+export async function listWorkstreamPosts(
+  client: ControlPlaneClient,
   args: readonly string[],
-): Promise<string> {
-  const [command, ...rest] = args;
-  if (command !== "list" && command !== "get" && command !== "posts")
-    throw new Error(workstreamHelp());
+): Promise<unknown> {
   const { values, positionals } = parseArgs({
-    args: [...rest],
+    args: [...args],
     allowPositionals: true,
     strict: true,
     options: {
+      team: { type: "string" },
       limit: { type: "string" },
       "after-sequence": { type: "string" },
     },
   });
-  const allowed =
-    command === "posts" ? ["limit", "after-sequence"] : command === "list" ? ["limit"] : [];
-  if (
-    Object.keys(values).some((key) => !allowed.includes(key)) ||
-    positionals.length > 1 ||
-    (positionals.length === 0 && command !== "list")
-  )
-    throw new Error(workstreamHelp());
-  const id = positionals[0] ?? "";
-  const client = new ControlPlaneClient(target);
-  const base = "/api/v1/tag-messaging/workstreams";
-  let result: unknown;
-  if (command === "list") {
-    const query = new URLSearchParams();
-    if (positionals.length === 1) {
-      const tag = await client.getTag(id);
-      if (!tag.metadata.id) throw new Error("Tag has no ID");
-      query.set("tagId", tag.metadata.id);
-    }
-    if (values.limit !== undefined) query.set("limit", values.limit);
-    result = await client.request(`${base}?${query}`);
-  } else if (command === "get") {
-    result = await client.request(`${base}/${encodeURIComponent(id)}`);
-  } else {
-    const query = new URLSearchParams();
-    if (values.limit !== undefined) query.set("limit", values.limit);
-    if (values["after-sequence"] !== undefined)
-      query.set("afterSequence", values["after-sequence"]);
-    result = await client.request(`${base}/${encodeURIComponent(id)}/posts?${query}`);
-  }
-  return `${JSON.stringify(result, null, 2)}\n`;
+  if (positionals.length > 0 || !values.team) throw new Error(workstreamHelp());
+  const team = JSON.parse(await runTeamCommand(client, ["get", values.team])) as {
+    readonly id: string;
+  };
+  const query = new URLSearchParams();
+  if (values.limit !== undefined) query.set("limit", values.limit);
+  if (values["after-sequence"] !== undefined) query.set("afterSequence", values["after-sequence"]);
+  return client.request(
+    `/api/v1/tag-messaging/workstreams/${encodeURIComponent(team.id)}/posts?${query}`,
+  );
 }

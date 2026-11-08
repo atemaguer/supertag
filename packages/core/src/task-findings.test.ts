@@ -1,33 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
-  closeTaskFinding,
-  openTaskFindingsBySeverity,
-  parseFixedTaskFindings,
+  orderedTaskFindings,
   parseTaskFinding,
-  parseTaskFindingClosure,
   parseTaskFindings,
   recordTaskFindings,
-  storedOpenTaskFindings,
   storedTaskFindings,
+  storedTaskFindingsBySeverity,
   taskFindingLine,
+  taskFindingsBySeverity,
 } from "./task-findings.js";
 
 describe("Task findings", () => {
-  it("records reported findings in order as open, with Control Plane ids", () => {
+  it("records reported findings in order, with Control Plane ids", () => {
     expect(
       recordTaskFindings([
         { severity: "high", summary: "Token leaks into logs.", location: "src/log.ts:12" },
-        // A Worker cannot choose the id, close the finding, or give it a reason or closer.
-        {
-          id: "F9",
-          severity: "low",
-          summary: "Typo.",
-          status: "fixed",
-          reason: "Already done",
-          fixedBy: "abc123",
-          closedBy: { operatorId: "forged" },
-          closedAt: "2026-01-01T00:00:00.000Z",
-        },
+        // A Worker cannot choose the id.
+        { id: "F9", severity: "low", summary: "Typo." },
       ]),
     ).toEqual([
       {
@@ -35,15 +24,14 @@ describe("Task findings", () => {
         severity: "high",
         summary: "Token leaks into logs.",
         location: "src/log.ts:12",
-        status: "open",
       },
-      { id: "F2", severity: "low", summary: "Typo.", status: "open" },
+      { id: "F2", severity: "low", summary: "Typo." },
     ]);
     expect(recordTaskFindings(undefined)).toEqual([]);
   });
 
   it("refuses a finding that names another Task or has an unknown field", () => {
-    for (const extra of [{ taskId: "other-task" }, { closedByTaskId: "t" }, { objectiveId: "o" }])
+    for (const extra of [{ taskId: "other-task" }, { status: "fixed" }, { objectiveId: "o" }])
       expect(() => recordTaskFindings([{ severity: "high", summary: "Bug.", ...extra }])).toThrow(
         /is not allowed/,
       );
@@ -68,61 +56,25 @@ describe("Task findings", () => {
     ).toThrow(/at most 50/);
   });
 
-  it("requires a reason exactly when a stored finding is accepted", () => {
+  it("validates stored identifiers and their uniqueness", () => {
     const base = { id: "F1", severity: "medium", summary: "Slow query." } as const;
-    const closed = { closedBy: { tagId: "lead" }, closedAt: "2026-10-04T12:00:00.000Z" } as const;
-    expect(
-      parseTaskFinding({ ...base, status: "accepted", reason: "Bounded by paging", ...closed }),
-    ).toEqual({
-      ...base,
-      status: "accepted",
-      reason: "Bounded by paging",
-      ...closed,
-    });
-    expect(() => parseTaskFinding({ ...base, status: "accepted", ...closed })).toThrow(
-      /requires a reason/,
-    );
-    expect(() => parseTaskFinding({ ...base, status: "open", reason: "No" })).toThrow(
-      /Only an accepted/,
-    );
-    expect(() => parseTaskFinding({ ...base, status: "closed" })).toThrow(/status/);
-    expect(() => parseTaskFinding({ ...base, id: "finding-1", status: "open" })).toThrow(/id/);
-    expect(() =>
-      parseTaskFindings([
-        { ...base, status: "open" },
-        { ...base, status: "open" },
-      ]),
-    ).toThrow(/unique/);
+    expect(parseTaskFinding(base)).toEqual(base);
+    expect(() => parseTaskFinding({ ...base, id: "finding-1" })).toThrow(/id/);
+    expect(() => parseTaskFindings([base, base])).toThrow(/unique/);
   });
 
-  it("groups open findings by severity and reads stored results", () => {
+  it("groups findings by severity and reads stored results", () => {
     const findings = [
-      { id: "F1", severity: "low", summary: "Nit.", status: "open" },
-      { id: "F2", severity: "high", summary: "Bypass.", location: "a.ts:1", status: "open" },
-      {
-        id: "F3",
-        severity: "high",
-        summary: "Fixed.",
-        status: "fixed",
-        fixedBy: "re-review",
-        closedBy: { tagId: "reviewer", taskId: "re-review" },
-        closedAt: "2026-10-04T12:00:00.000Z",
-      },
-      {
-        id: "F4",
-        severity: "medium",
-        summary: "Kept.",
-        status: "accepted",
-        reason: "Known",
-        closedBy: { operatorId: "operator" },
-        closedAt: "2026-10-04T12:00:00.000Z",
-      },
+      { id: "F1", severity: "low", summary: "Nit." },
+      { id: "F2", severity: "high", summary: "Bypass.", location: "a.ts:1" },
+      { id: "F3", severity: "high", summary: "Race." },
     ] as const;
-    const grouped = openTaskFindingsBySeverity(findings);
-    expect(grouped.high.map((finding) => finding.id)).toEqual(["F2"]);
+    const grouped = taskFindingsBySeverity(findings);
+    expect(grouped.high.map((finding) => finding.id)).toEqual(["F2", "F3"]);
     expect(grouped.medium).toEqual([]);
     expect(grouped.low.map((finding) => finding.id)).toEqual(["F1"]);
-    expect(storedTaskFindings({ text: "Done", taskResult: { findings } })).toHaveLength(4);
+    expect(orderedTaskFindings(findings).map((finding) => finding.id)).toEqual(["F2", "F3", "F1"]);
+    expect(storedTaskFindings({ text: "Done", taskResult: { findings } })).toHaveLength(3);
     expect(storedTaskFindings({ summary: "Done", findings })).toEqual([]);
     expect(storedTaskFindings({ findings, taskResult: { findings: [] } })).toEqual([]);
     expect(storedTaskFindings({ taskResult: { findings: [findings[0], { bad: true }] } })).toEqual([
@@ -130,7 +82,6 @@ describe("Task findings", () => {
         id: "F1",
         severity: "high",
         summary: "Stored Task findings are invalid; inspect and repair the Task result.",
-        status: "open",
       },
     ]);
     expect(storedTaskFindings({ taskResult: null })[0]?.severity).toBe("high");
@@ -153,15 +104,6 @@ describe("Task findings", () => {
         { severity: "high", summary: "Bug.", location: text },
       ])
         expect(() => recordTaskFindings([finding])).toThrow(/bidirectional, or invisible/);
-      expect(() =>
-        parseTaskFinding({
-          id: "F1",
-          severity: "low",
-          summary: "Kept.",
-          status: "accepted",
-          reason: text,
-        }),
-      ).toThrow(/bidirectional, or invisible/);
     }
     // Ordinary non-ASCII text, including a narrow no-break space, stays allowed.
     expect(recordTaskFindings([{ severity: "low", summary: "Café\u202f€ naïve." }])).toHaveLength(
@@ -227,11 +169,9 @@ describe("Task findings", () => {
 
   it("reads corrupt stored findings as unreadable for display", () => {
     expect(
-      storedOpenTaskFindings({
+      storedTaskFindingsBySeverity({
         taskResult: {
-          findings: [
-            { id: "F1", severity: "high", summary: "Bug.", status: "open", "x\u001b[2J": 1 },
-          ],
+          findings: [{ id: "F1", severity: "high", summary: "Bug.", "x\u001b[2J": 1 }],
         },
       }),
     ).toEqual({
@@ -239,11 +179,11 @@ describe("Task findings", () => {
         "Stored Task result findings are invalid: Task finding field x?[2J is not allowed",
     });
     expect(
-      storedOpenTaskFindings({
-        taskResult: { findings: [{ id: "F1", severity: "high", summary: "Bug.", status: "open" }] },
+      storedTaskFindingsBySeverity({
+        taskResult: { findings: [{ id: "F1", severity: "high", summary: "Bug." }] },
       }),
     ).toEqual({
-      high: [{ id: "F1", severity: "high", summary: "Bug.", status: "open" }],
+      high: [{ id: "F1", severity: "high", summary: "Bug." }],
       medium: [],
       low: [],
     });
@@ -252,120 +192,18 @@ describe("Task findings", () => {
   it("fails closed on stored findings that do not validate", () => {
     for (const findings of [
       "not a list",
-      [{ id: "F1", severity: "critical", summary: "Bug.", status: "open" }],
-      [{ id: "F1", severity: "high", summary: "Bug.", status: "open", taskId: "other" }],
-      [{ severity: "high", summary: "Missing id and status." }],
+      [{ id: "F1", severity: "critical", summary: "Bug." }],
+      [{ id: "F1", severity: "high", summary: "Bug.", taskId: "other" }],
+      [{ severity: "high", summary: "Missing id." }],
     ]) {
       expect(storedTaskFindings({ text: "Done", taskResult: { findings } })).toEqual([
-        expect.objectContaining({ id: "F1", severity: "high", status: "open" }),
+        expect.objectContaining({ id: "F1", severity: "high" }),
       ]);
-      expect(storedOpenTaskFindings({ text: "Done", taskResult: { findings } })).toEqual({
+      expect(storedTaskFindingsBySeverity({ text: "Done", taskResult: { findings } })).toEqual({
         unreadable: expect.stringMatching(/^Stored Task result findings are invalid/),
       });
       // Findings outside taskResult are never trusted.
       expect(storedTaskFindings({ summary: "Done", findings })).toEqual([]);
     }
-  });
-
-  it("requires fixedBy, closedBy, and closedAt exactly when a finding is closed", () => {
-    const base = { id: "F1", severity: "low", summary: "Nit." } as const;
-    const closedAt = "2026-10-04T12:00:00.000Z";
-    expect(() =>
-      parseTaskFinding({ ...base, status: "fixed", closedBy: { tagId: "lead" }, closedAt }),
-    ).toThrow(/requires fixedBy/);
-    expect(() =>
-      parseTaskFinding({
-        ...base,
-        status: "open",
-        closedBy: { tagId: "lead" },
-        closedAt,
-      }),
-    ).toThrow(/open Task finding has no closedBy/);
-    expect(() => parseTaskFinding({ ...base, status: "fixed", fixedBy: "abc123" })).toThrow(
-      /requires closedBy and closedAt/,
-    );
-    expect(() => parseTaskFinding({ ...base, status: "open", fixedBy: "abc123" })).toThrow(
-      /Only a fixed/,
-    );
-    for (const closedBy of [{}, { tagId: "a", operatorId: "b" }, { taskId: "t" }, "lead"])
-      expect(() =>
-        parseTaskFinding({ ...base, status: "fixed", fixedBy: "abc123", closedBy, closedAt }),
-      ).toThrow(/closedBy/);
-    expect(() =>
-      parseTaskFinding({
-        ...base,
-        status: "fixed",
-        fixedBy: "abc123",
-        closedBy: { tagId: "lead" },
-        closedAt: "yesterday",
-      }),
-    ).toThrow(/closedAt/);
-  });
-
-  it("closes one open finding and refuses missing or closed ones", () => {
-    const findings = recordTaskFindings([
-      { severity: "medium", summary: "Slow query." },
-      { severity: "low", summary: "Nit." },
-    ]);
-    const at = "2026-10-04T12:00:00.000Z";
-    const fixed = closeTaskFinding(
-      findings,
-      { id: "F1", status: "fixed", fixedBy: "abc123" },
-      { tagId: "lead" },
-      at,
-    );
-    expect(fixed[0]).toEqual({
-      id: "F1",
-      severity: "medium",
-      summary: "Slow query.",
-      status: "fixed",
-      fixedBy: "abc123",
-      closedBy: { tagId: "lead" },
-      closedAt: at,
-    });
-    expect(fixed[1]).toEqual(findings[1]);
-    expect(() =>
-      closeTaskFinding(fixed, { id: "F1", status: "accepted", reason: "No" }, { tagId: "x" }, at),
-    ).toThrow(/already closed/);
-    expect(() =>
-      closeTaskFinding(fixed, { id: "F7", status: "accepted", reason: "No" }, { tagId: "x" }, at),
-    ).toThrow(/does not exist/);
-  });
-
-  it("parses requested closures and fixed-finding references strictly", () => {
-    expect(parseTaskFindingClosure({ id: "F2", status: "fixed", fixedBy: "abc123" })).toEqual({
-      id: "F2",
-      status: "fixed",
-      fixedBy: "abc123",
-    });
-    expect(parseTaskFindingClosure({ id: "F2", status: "accepted", reason: "Known" })).toEqual({
-      id: "F2",
-      status: "accepted",
-      reason: "Known",
-    });
-    for (const invalid of [
-      { id: "F2", status: "fixed" },
-      { id: "F2", status: "accepted" },
-      { id: "F2", status: "open" },
-      { id: "F2", status: "fixed", fixedBy: "abc", reason: "x" },
-      { id: "F2", status: "fixed", fixedBy: "abc", closedBy: { operatorId: "me" } },
-      { id: "x", status: "accepted", reason: "Known" },
-    ])
-      expect(() => parseTaskFindingClosure(invalid)).toThrow();
-    expect(parseFixedTaskFindings(undefined)).toEqual([]);
-    expect(parseFixedTaskFindings([{ taskId: "review-a", findingId: "F1" }])).toEqual([
-      { taskId: "review-a", findingId: "F1" },
-    ]);
-    for (const invalid of [
-      [{ taskId: "review-a" }],
-      [{ taskId: "review-a", findingId: "1" }],
-      [{ taskId: "review-a", findingId: "F1", status: "fixed" }],
-      [
-        { taskId: "review-a", findingId: "F1" },
-        { taskId: "review-a", findingId: "F1" },
-      ],
-      { taskId: "review-a", findingId: "F1" },
-    ])
-      expect(() => parseFixedTaskFindings(invalid)).toThrow();
   });
 });

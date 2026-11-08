@@ -8,7 +8,7 @@ import {
   migrateDatabase,
 } from "@supertag/store";
 import { normalizeActionFirstCommand } from "./action-command.js";
-import { approvalHelp, runApprovalCommand } from "./approvals.js";
+import { approvalHelp, inboxHelp, runApprovalCommand, runInboxCommand } from "./approvals.js";
 import { artifactHelp, runArtifactCommand } from "./artifacts.js";
 import { auditHelp, runAuditCommand } from "./audit-command.js";
 import { authKeyHelp, isAuthKeyCommand, runAuthKeyCommand } from "./auth-keys.js";
@@ -21,7 +21,6 @@ import {
   runControlPlaneManagementCommand,
 } from "./control-plane-client.js";
 import { runControlPlaneCommand } from "./control-plane-runtime.js";
-import { coordinationHelp, runCoordinateCommand } from "./coordination.js";
 import { runDeploymentCommand } from "./deploy.js";
 import { runInitCommand } from "./init.js";
 import { runListCommand } from "./list-command.js";
@@ -54,7 +53,7 @@ import {
   runWorkerHostOperation,
   workerHostOperationHelp,
 } from "./worker-hosts.js";
-import { runWorkstreamCommand, workstreamHelp } from "./workstreams.js";
+import { listWorkstreamPosts, workstreamHelp } from "./workstreams.js";
 
 /** The CLI release; the same value the Control Plane reports in its SuperTag-Version header. */
 export const CLI_VERSION = SUPERTAG_VERSION;
@@ -306,33 +305,36 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     process.stdout.write(await runListCommand(target, rawSelection.args.slice(1)));
     return 0;
   }
-  if (command === "coordinate") {
+  if (command === "inbox") {
     if (
-      provider === undefined ||
-      provider === "--help" ||
-      provider === "-h" ||
-      commandArgs.includes("--help")
+      (provider !== "list" && provider !== "watch") ||
+      commandArgs.includes("--help") ||
+      commandArgs.includes("-h")
     ) {
-      process.stdout.write(coordinationHelp());
+      process.stdout.write(inboxHelp());
       return 0;
     }
     const target = await resolveControlPlaneTarget(selection.controlPlaneOverride);
     if (target === undefined) throw controlPlaneRequiredError();
-    process.stdout.write(
-      await runCoordinateCommand(target, [provider, ...commandArgs], {
-        operatorList: rawSelection.args[0] === "list" && rawSelection.args[1] === "inbox",
-      }),
-    );
+    process.stdout.write(await runInboxCommand(target, provider, commandArgs));
     return 0;
   }
   if (command === "team" && rawSelection.args[0] !== "team") {
-    if (provider === undefined || provider === "--help" || provider === "-h") {
+    if (
+      provider === undefined ||
+      provider === "--help" ||
+      provider === "-h" ||
+      commandArgs.includes("--help") ||
+      commandArgs.includes("-h")
+    ) {
       process.stdout.write(teamHelp());
       return 0;
     }
     const target = await resolveControlPlaneTarget(selection.controlPlaneOverride);
     if (target === undefined) throw controlPlaneRequiredError();
-    process.stdout.write(await runTeamCommand(target, [provider, ...commandArgs]));
+    process.stdout.write(
+      await runTeamCommand(new ControlPlaneClient(target), [provider, ...commandArgs]),
+    );
     return 0;
   }
   if (command === "objective") {
@@ -367,18 +369,15 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     return 0;
   }
   if (command === "workstream") {
-    if (
-      provider === undefined ||
-      provider === "--help" ||
-      provider === "-h" ||
-      commandArgs.includes("--help")
-    ) {
+    if (provider !== "posts" || commandArgs.includes("--help") || commandArgs.includes("-h")) {
       process.stdout.write(workstreamHelp());
       return 0;
     }
     const target = await resolveControlPlaneTarget(selection.controlPlaneOverride);
     if (target === undefined) throw controlPlaneRequiredError();
-    process.stdout.write(await runWorkstreamCommand(target, [provider, ...commandArgs]));
+    process.stdout.write(
+      `${JSON.stringify(await listWorkstreamPosts(new ControlPlaneClient(target), commandArgs), null, 2)}\n`,
+    );
     return 0;
   }
   if (command === "tag" && provider === "messaging") {
@@ -575,22 +574,22 @@ Configure the organization:
   supertag deactivate context-set SET --tag TAG --provider PROVIDER [provider scope flags]
   supertag activate permission-set SET --tag TAG --provider PROVIDER [provider scope flags]
   supertag deactivate permission-set SET --tag TAG --provider PROVIDER [provider scope flags]
+  supertag create team NAME --member TAG [--member TAG ...] [--max-concurrency N]
+  supertag list team
+  supertag get team NAME
+  supertag update team NAME [--member TAG ...] [--max-concurrency N] [--name TEXT] [--revision N]
+  supertag delete team NAME
   supertag apply -f manifest.yaml|DIRECTORY [--set NAME [--prune]] [--force-conflicts]
   supertag diff -f manifest.yaml|DIRECTORY [--set NAME [--prune]] [--force-conflicts]
   supertag delete tag|role|permission-set|context-set|volume|workspace|surface NAME [--dry-run]
 
 Direct and inspect work:
-  supertag assign task ID --objective ID --team ID --tag ID --instruction-file FILE|- --criterion TEXT [--criterion TEXT] [--item N] [--profile ID --profile-revision REV] [--model MODEL] [--effort low|medium|high] [--max-cost-minor N] [--output-file outputs/FILE] [--input-artifacts FILE]
-  supertag list artifact [--task ID] [--limit N] [--cursor CURSOR]
-  supertag get artifact ID
-  supertag download artifact ID --path PATH --out FILE [--output json]
-  supertag create objective [ID] --outcome TEXT --owner TAG [--budget-minor N --budget-currency CODE] [--deadline ISO] [--runtime-action ACTION ...] [--observe WORKSTREAM_ID ...] [--workspace NAME ...] [--ongoing] [--dry-run] [--no-start]
-  supertag start objective ID [--output json]
+  supertag message tag NAME TEXT|- [--session NAME] [--output text|json]
+  supertag create objective [ID] --outcome TEXT --owner TAG [--team TEAM] [--budget-minor N --budget-currency CODE] [--deadline ISO] [--runtime-action ACTION ...] [--workspace NAME ...] [--ongoing] [--dry-run]
   supertag list objective [--owner TAG] [--limit N]
   supertag get objective ID
-  supertag describe objective ID [--output text|json] [--team ID] [--limit N] [--offset N]
-  supertag message objective ID TEXT|- [--reopen] [--reply-to MESSAGE_ID] [--output text|json]
-  supertag message tag NAME TEXT|- [--session NAME] [--output text|json]
+  supertag describe objective ID [--output text|json]
+  supertag message objective ID TEXT|- [--output text|json]
   supertag approve objective ID
   supertag update objective ID --status STATUS [--revision N]
   supertag update objective ID [--revision N] [--deadline ISO] [--budget-minor N] [--runtime-action ACTION ...]
@@ -598,32 +597,25 @@ Direct and inspect work:
   supertag cancel objective ID [--reason TEXT]
   supertag pause objective ID
   supertag resume objective ID
-  supertag create team ID --objective ID --name TEXT --lead TAG [--member TAG] [--max-concurrency N] [--parent TEAM] [--max-breadth N] [--max-depth N]
-  supertag list team [--objective ID]
-  supertag events team ID --objective ID [--after-revision N] [--limit N]
-  supertag update team ID --objective ID [--revision N] [--name TEXT] [--lead TAG] [--member TAG] [--max-concurrency N] [--max-breadth N] [--max-depth N]
-  supertag dissolve team ID --objective ID [--revision N]
-  supertag list workstream --tag TAG [--limit N]
-  supertag get workstream ID
-  supertag list workstream-post --workstream ID [--after-sequence N] [--limit N]
+  supertag list workstream-post --team TEAM [--after-sequence N] [--limit N]
+  supertag list artifact [--task ID] [--limit N] [--cursor CURSOR]
+  supertag get artifact ID
+  supertag download artifact ID --path PATH --out FILE [--output json]
   supertag get|describe|events|cancel task ID
 
-Decide approvals:
+Decide what waits on you:
+  supertag list inbox [--objective ID] [--kind approval|question|objective-budget|objective-limit|task-attention|mcp-login] [--all] [--output json|text]
+  supertag watch inbox [--objective ID] [--kind KIND] [--output text|json]
   supertag list approval [--objective ID] [--status pending|approved|denied|expired|all] [--output text|json]
   supertag approve request ID [--scope once|objective] [--until ISO-8601]
   supertag deny request ID --reason TEXT
-
-Coordinate across Teams:
-  supertag grant mailbox RECIPIENT --sender SENDER --type TYPE [--type TYPE]
-  supertag revoke mailbox RECIPIENT --sender SENDER
-  supertag list message --mailbox TAG [--limit N]
-  supertag list mailbox-grant --mailbox TAG
-  supertag issue mailbox-credential TAG --out PATH
-  supertag revoke mailbox-credential ID
-  supertag prune mailbox --before TIMESTAMP [--limit N]
-  supertag list inbox [--objective ID] [--team ID] [--kind approval|task-approval|task-review|task-budget|objective-budget|operator-message|task-attention|objective-limit|mcp-login] [--all] [--output json|text]
   supertag test notification [--objective ID]
-  supertag watch inbox [--objective ID] [--team ID] [--kind KIND] [--output text|json]
+
+Let Tags message each other:
+  supertag grant mailbox RECIPIENT --sender SENDER
+  supertag revoke mailbox RECIPIENT --sender SENDER
+  supertag list mailbox-grant --mailbox TAG
+  supertag list message --mailbox TAG [--limit N]
 
 Connect services and compute:
   supertag setup surface slack|github|lark|linear|teams [provider options]
@@ -635,14 +627,6 @@ Connect services and compute:
   supertag drain|resume worker-host ID
   supertag enroll worker-host ID --out PATH      (a credential file for a custom Worker)
   supertag recover worklet --worker-id ID --task ID --attempt ID --confirm-stopped --reason TEXT [--host NAME]
-
-Coordination interfaces:
-  supertag coordinate inbox [--objective ID] [--team ID] [--kind KIND] [--output json|text]
-  supertag coordinate COMMAND --input FILE
-  supertag coordinate --help
-  Coordination commands: start_objective, read_objective, read_team, read_task, assign_task,
-  update_task, read_mailbox, send_message, read_workstream, post_workstream, wait_for,
-  update_objective, create_team, update_team, create_tag, request_approval, decide_approval
 
 Operate SuperTag:
   supertag version [--output text|json]          (CLI and Control Plane versions)
@@ -663,9 +647,11 @@ Resource list output is a text table by default; --output json|yaml gives struct
 Commands that create or change something print a one-line summary; --output json prints the record.
 delete refuses a resource that is still in use and lists what uses it. Deleting a Tag retires it:
 its history stays, it receives no more work, and its name becomes free.
-Manifests may declare Objectives with nested Teams. Applying one creates and starts it;
---prune cancels a declared Objective that left the input, keeping its history. Objectives are never deleted.
-Waiting Tasks resume automatically when their wait ends. Reconnect the original Worker Host to check interrupted work.
+Manifests may declare Objectives with a Team of their own or a Team name. Applying one creates and
+starts it; --prune cancels a declared Objective that left the input, keeping its history. Objectives
+are never deleted. Tags in a Team message each other; a grant mailbox or a Tag manifest's
+acceptsMessagesFrom lets a Tag accept messages from Tags outside its Teams.
+Reconnect the original Worker Host to check interrupted work.
 Until SuperTag confirms that work stopped, it keeps the host slot reserved to avoid running it twice.
 For temporary (ephemeral) Worker Hosts, removing the host lets interrupted work run elsewhere.
 Use recover worklet only after checking that all commands from the interrupted work have stopped.

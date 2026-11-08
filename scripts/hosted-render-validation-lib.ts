@@ -45,36 +45,6 @@ export async function readCredential(path: string): Promise<string> {
   return raw;
 }
 
-export function artifactSelection(task: JsonRecord): {
-  artifactId: string;
-  paths: string[];
-} {
-  const status = record(task["status"], "Task status");
-  const outcome = record(status["outcome"], "Task outcome");
-  const taskResult = record(outcome["taskResult"], "Task result");
-  const first = record(array(taskResult["artifacts"], "Task artifacts")[0], "Task artifact");
-  return {
-    artifactId: text(first["artifactId"], "artifactId"),
-    paths: array(first["paths"], "artifact paths").map((item) => text(item, "artifact path")),
-  };
-}
-
-export function assertExactArtifactAdmission(
-  value: unknown,
-  expected: { artifactId: string; path: string; digest: string; sizeBytes: number },
-): JsonRecord {
-  const admitted = array(value, "admitted input artifacts");
-  if (admitted.length !== 1)
-    throw new Error(`Expected one admitted input artifact, received ${admitted.length}`);
-  const entry = record(admitted[0], "admitted input artifact");
-  for (const field of ["artifactId", "path", "digest"] as const)
-    if (entry[field] !== expected[field])
-      throw new Error(`Admitted input artifact ${field} does not match the selected artifact`);
-  if (entry["sizeBytes"] !== expected.sizeBytes)
-    throw new Error("Admitted input artifact sizeBytes does not match the selected artifact");
-  return entry;
-}
-
 export function taskAttempt(task: JsonRecord): {
   id: string;
   number: number;
@@ -97,20 +67,6 @@ export function taskAttempt(task: JsonRecord): {
       revision: text(profile["revision"], "profile revision"),
     },
   };
-}
-
-export function outputText(task: JsonRecord): string {
-  const status = record(task["status"], "Task status");
-  const outcome = record(status["outcome"], "Task outcome");
-  for (const candidate of [outcome["text"], outcome["output"], outcome["message"]])
-    if (typeof candidate === "string") return candidate;
-  const taskResult = outcome["taskResult"];
-  if (typeof taskResult === "object" && taskResult !== null && !Array.isArray(taskResult)) {
-    const nested = taskResult as JsonRecord;
-    for (const candidate of [nested["text"], nested["output"], nested["message"]])
-      if (typeof candidate === "string") return candidate;
-  }
-  return JSON.stringify(outcome);
 }
 
 export function hasExactLine(value: string, expected: string): boolean {

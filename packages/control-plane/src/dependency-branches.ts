@@ -1,6 +1,5 @@
 import {
   type Task,
-  type TaskAssignment,
   type TaskEvent,
   type TaskListFilter,
   type TaskNamedWorkspacePlan,
@@ -9,49 +8,10 @@ import {
   workspaceDeliveryEvidence,
 } from "@supertag/core";
 
-/** The store reads {@link dependencyWorkspaceBranches} needs. */
-export interface DependencyBranchStore {
-  getTaskAssignment(taskId: string): Promise<TaskAssignment | undefined>;
-  findTaskById(id: string): Promise<Task | undefined>;
+/** The store reads a work Session's delivered branches need. */
+type SessionBranchStore = {
   listTaskEvents(taskId: string): Promise<readonly TaskEvent[]>;
-}
-
-/**
- * The delivered branches a dependent Task starts from: for each accepted dependency in the same
- * Workspace, in declared order, the head its Worker recorded delivering in the accepted Attempt.
- * A dependency that delivered no commits contributes its own accepted dependencies' branches, so
- * work passes through a Task that changed nothing. A dependency in another Workspace, or one not
- * accepted, contributes nothing.
- */
-export async function dependencyWorkspaceBranches(
-  store: DependencyBranchStore,
-  dependencies: readonly string[],
-  plan: TaskNamedWorkspacePlan,
-): Promise<readonly TaskWorkspaceDependencyBranch[]> {
-  const branches: TaskWorkspaceDependencyBranch[] = [];
-  const visited = new Set<string>();
-  const visit = async (taskIds: readonly string[]): Promise<void> => {
-    for (const taskId of taskIds) {
-      if (visited.has(taskId)) continue;
-      visited.add(taskId);
-      const assignment = await store.getTaskAssignment(taskId);
-      if (assignment?.status !== "accepted") continue;
-      const task = await store.findTaskById(taskId);
-      if (task === undefined) continue;
-      const reviewed = assignment.result?.["reviewedAttemptId"];
-      const delivered = deliveredWorkspaceBranch(
-        task,
-        await store.listTaskEvents(taskId),
-        plan,
-        typeof reviewed === "string" ? reviewed : undefined,
-      );
-      if (delivered !== undefined) branches.push(delivered);
-      else await visit(assignment.dependencies);
-    }
-  };
-  await visit(dependencies);
-  return branches;
-}
+};
 
 /**
  * The branch a continued work Session Task starts from: the latest earlier Task of the same work
@@ -59,7 +19,7 @@ export async function dependencyWorkspaceBranches(
  * before it, so its branch holds all of the work Session's earlier edits.
  */
 export async function sessionWorkspaceBranches(
-  store: Pick<DependencyBranchStore, "listTaskEvents"> & {
+  store: SessionBranchStore & {
     listTasks(filter: TaskListFilter): Promise<readonly Task[]>;
   },
   task: Task,
@@ -78,7 +38,7 @@ export async function sessionWorkspaceBranches(
  * has no branch to build on or number after.
  */
 export async function latestSessionDelivery(
-  store: Pick<DependencyBranchStore, "listTaskEvents">,
+  store: SessionBranchStore,
   tasks: readonly Task[],
   plan: Pick<TaskNamedWorkspacePlan, "workspace">,
 ): Promise<TaskWorkspaceDependencyBranch | undefined> {
@@ -91,8 +51,8 @@ export async function latestSessionDelivery(
 }
 
 /**
- * A conversation or work Session Task's events with the Worker event types an Objective Task
- * records: the Control Plane stores a surface Task's Worker events under an `execution.` prefix.
+ * A Task's events with the Worker's own event types: the Control Plane stores a Task's Worker
+ * events under an `execution.` prefix.
  */
 export function workerEvents(events: readonly TaskEvent[]): readonly TaskEvent[] {
   return events.map((event) =>
@@ -103,14 +63,13 @@ export function workerEvents(events: readonly TaskEvent[]): readonly TaskEvent[]
 }
 
 /**
- * The head a Task's Worker recorded delivering on the Task's own branch in `plan`'s Workspace,
- * from `attemptId` when given, or nothing when it delivered no commits there.
+ * The head a Task's Worker recorded delivering on the Task's own branch in `plan`'s Workspace, or
+ * nothing when it delivered no commits there.
  */
 function deliveredWorkspaceBranch(
   task: Task,
   events: readonly TaskEvent[],
   plan: Pick<TaskNamedWorkspacePlan, "workspace">,
-  attemptId?: string,
 ): TaskWorkspaceDependencyBranch | undefined {
   const source = task.workspacePlan;
   if (source.status !== "workspace" || source.workspace !== plan.workspace) return undefined;
@@ -118,7 +77,6 @@ function deliveredWorkspaceBranch(
   let delivered: TaskWorkspaceDependencyBranch | undefined;
   for (const event of events) {
     if (event.type !== "progress.updated") continue;
-    if (attemptId !== undefined && event.attemptId !== attemptId) continue;
     const evidence = workspaceDeliveryEvidence(event.payload);
     // A later record that shows no new commits never erases commits an earlier one proved.
     if (evidence === undefined || evidence.branch !== branch || evidence.head === evidence.base)

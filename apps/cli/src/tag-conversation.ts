@@ -116,14 +116,30 @@ export async function runTagConversationCommand(
   const text = message === "-" ? await readStdin() : message;
   if (!text.trim()) throw new Error("The message is empty");
   const client = new ControlPlaneClient(target);
+  const record = await client.request<TagMessageRecord>(
+    `/api/v1/tags/${encodeURIComponent(name)}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        text,
+        ...(values.session === undefined ? {} : { session: values.session }),
+      }),
+    },
+  );
+  return followTagMessage(client, name, record, { ...options, json: output.json });
+}
+
+/**
+ * Follows one message's turn to its reply, then the work Sessions it started, as `message tag`
+ * shows them. With `json`, waits and returns the message record instead.
+ */
+export async function followTagMessage(
+  client: ControlPlaneClient,
+  name: string,
+  record: TagMessageRecord,
+  options: TagConversationOptions & { readonly json?: boolean } = {},
+): Promise<string> {
   const tagPath = `/api/v1/tags/${encodeURIComponent(name)}/messages`;
-  const record = await client.request<TagMessageRecord>(tagPath, {
-    method: "POST",
-    body: JSON.stringify({
-      text,
-      ...(values.session === undefined ? {} : { session: values.session }),
-    }),
-  });
   const timeoutMs = options.timeoutMs ?? REPLY_TIMEOUT_MS;
   const notReplied = () =>
     new Error(
@@ -173,7 +189,7 @@ export async function runTagConversationCommand(
     }
   };
 
-  if (output.json) {
+  if (options.json === true) {
     const replied = await poll(Date.now() + timeoutMs);
     if (replied === undefined) return detached();
     // The record returns once each work Session reported, including one waiting on approval,
