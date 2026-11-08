@@ -44,11 +44,11 @@ const rpc = (name: string, args: unknown = {}) => ({
   }),
 });
 
-it("uses the existing allowed tool set and denies Host credentials, hidden tools and unsupported documents", async () => {
+it("uses the turn's allowed tool set and denies Host credentials, removed tools and unsupported documents", async () => {
   const commands = vi.fn(async (_name, value) => value);
   const baseUrl = await server((router) =>
     registerCoordinationGrpcRoutes(router, {
-      async authenticate(token) {
+      async authenticateExecution(token) {
         if (token !== "manager") throw new TagMessagingError(401, "denied");
         return { taskId: "task" } as never;
       },
@@ -56,9 +56,6 @@ it("uses the existing allowed tool set and denies Host credentials, hidden tools
         return ["read_objective", "send_message"];
       },
       commandAsAttempt: commands,
-      async rebindExecutionCredential() {
-        throw new TagMessagingError(401, "Not recovering");
-      },
     }),
   );
   const raw = createClient(CoordinationService, createGrpcTransport({ baseUrl }));
@@ -71,7 +68,7 @@ it("uses the existing allowed tool set and denies Host credentials, hidden tools
     raw.listTools({}, { ...options, headers: { authorization: "Bearer host-token" } }),
   ).rejects.toMatchObject({ code: Code.Unauthenticated });
   await expect(
-    raw.callTool({ name: "create_team", arguments: encodeCoordinationDocument({}) }, options),
+    raw.callTool({ name: "assign_task", arguments: encodeCoordinationDocument({}) }, options),
   ).rejects.toMatchObject({ code: Code.InvalidArgument });
   await expect(
     raw.callTool(
@@ -80,6 +77,19 @@ it("uses the existing allowed tool set and denies Host credentials, hidden tools
     ),
   ).rejects.toMatchObject({ code: Code.InvalidArgument });
   expect(commands).not.toHaveBeenCalled();
+  // The approval tool is never advertised, but a running Attempt may still call it.
+  await raw.callTool(
+    { name: "request_action_approval", arguments: encodeCoordinationDocument({ action: "push" }) },
+    options,
+  );
+  expect(commands).toHaveBeenCalledWith(
+    "request_action_approval",
+    { action: "push" },
+    {
+      taskId: "task",
+    },
+  );
+  commands.mockClear();
   const client = new GrpcCoordinationClient({ baseUrl, token: "manager" });
   const result = await client.fetch(
     "http://unused/internal/v1/coordination/mcp",
@@ -219,7 +229,7 @@ it("does not retry a transport-uncertain tool mutation or renew authority on cle
   });
   const client = new GrpcCoordinationClient({ baseUrl, token: "manager" });
   await expect(
-    client.fetch("http://unused/mcp", rpc("assign_task", { taskId: "stable" })),
+    client.fetch("http://unused/mcp", rpc("send_message", { to: "tag", text: "stable" })),
   ).rejects.toMatchObject({ code: Code.Unavailable });
   expect(mutations).toBe(1);
   expect((await client.fetch("http://unused/mcp", { method: "DELETE" })).status).toBe(405);
@@ -233,16 +243,13 @@ it("requires bounded deadlines and fences requests during internal drain", async
     registerCoordinationGrpcRoutes(
       router,
       {
-        async authenticate() {
+        async authenticateExecution() {
           return { taskId: "task" } as never;
         },
         async coordinationActions() {
           return ["read_objective"];
         },
         commandAsAttempt: commands,
-        async rebindExecutionCredential() {
-          return { token: "new" };
-        },
       },
       {
         beginRequest() {

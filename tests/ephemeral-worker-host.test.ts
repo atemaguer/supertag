@@ -1,16 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import Database from "better-sqlite3";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   ControlPlane,
   EPHEMERAL_WORKER_HOST_GRACE_MS,
   EPHEMERAL_WORKER_HOST_JOIN_TIMEOUT_MS,
 } from "../packages/control-plane/src/index.ts";
-import { emptyTagContextPlan, type InboundSurfaceEvent } from "../packages/core/src/index.ts";
+import type { InboundSurfaceEvent } from "../packages/core/src/index.ts";
 import type {
   AttemptReceipt,
   TaskAttemptSpec,
@@ -25,13 +23,6 @@ import {
 import { createIsolatedPostgresDatabase } from "./support/database.ts";
 
 const postgres = process.env["SUPERTAG_POSTGRES_URL"];
-const PostgresqlPool = createRequire(new URL("../packages/store/package.json", import.meta.url))(
-  "pg",
-).Pool as new (options: {
-  connectionString: string;
-  max: number;
-}) => { query(text: string, values?: unknown[]): Promise<unknown>; end(): Promise<void> };
-
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
@@ -58,24 +49,7 @@ async function fixture(dialect: "sqlite" | "postgresql", worklet?: Worklet) {
     await isolated?.cleanup();
     await rm(directory, { recursive: true, force: true });
   });
-  const sql = async (text: string, values: unknown[]) => {
-    if (dialect === "sqlite") {
-      const database = new Database(join(directory, "state.db"));
-      try {
-        database.prepare(text.replaceAll(/\$\d+/gu, "?")).run(...values);
-      } finally {
-        database.close();
-      }
-      return;
-    }
-    const pool = new PostgresqlPool({ connectionString: url, max: 1 });
-    try {
-      await pool.query(text, values);
-    } finally {
-      await pool.end();
-    }
-  };
-  return { store, controlPlane, sql };
+  return { store, controlPlane };
 }
 
 async function joinHost(
@@ -170,62 +144,6 @@ for (const dialect of ["sqlite", "postgresql"] as const)
           await controlPlane.authenticateWorkerHostCredential("runner", "anything"),
         ).toBeUndefined();
       });
-
-      it("requeues an Objective Task whose ephemeral host was removed, but not a persistent host's", async () => {
-        const worklet = idleWorklet();
-        const { store, controlPlane, sql } = await fixture(dialect, worklet);
-        // Requeue and its audit event are separate writes. Hold the latter to exercise the
-        // same ordering PostgreSQL exposes when several suites compete for the database.
-        let releaseEvent = () => {};
-        const eventGate = new Promise<void>((resolve) => {
-          releaseEvent = resolve;
-        });
-        const append = store.appendTaskEvent.bind(store);
-        const delayedEvent = vi
-          .spyOn(store, "appendTaskEvent")
-          .mockImplementation(async (input) => {
-            if (input.type === "task.worker-host-removed") await eventGate;
-            return append(input);
-          });
-        cleanups.push(async () => {
-          releaseEvent();
-          delayedEvent.mockRestore();
-        });
-        controlPlane.objectives.activateCoordination({ url: "http://127.0.0.1:9" });
-        await joinHost(controlPlane, store, { key: "ci", host: "runner", ephemeral: true });
-        await joinHost(controlPlane, store, { key: "laptop", host: "laptop", ephemeral: false });
-        const lost = await runningAssignment(store, "runner");
-        const kept = await runningAssignment(store, "laptop");
-        for (const taskId of [lost.taskId, kept.taskId])
-          await sql(`UPDATE "TaskAssignment" SET "leaseExpiresAt" = $1 WHERE "taskId" = $2`, [
-            new Date(Date.now() - 1000).toISOString(),
-            taskId,
-          ]);
-        const disconnectedAt = new Date(
-          Date.now() - EPHEMERAL_WORKER_HOST_GRACE_MS - 1000,
-        ).toISOString();
-        await connectAndDrop(store, "runner", disconnectedAt);
-        await connectAndDrop(store, "laptop", disconnectedAt);
-
-        await expect
-          .poll(async () => (await store.getTaskAssignment(lost.taskId))?.status, { timeout: 5000 })
-          .toBe("queued");
-        setImmediate(releaseEvent);
-        const attempts = await store.listTaskAttempts(lost.taskId);
-        expect(attempts[0]).toMatchObject({
-          status: "failed",
-          outcome: { workerHostRemoved: "runner" },
-        });
-        await expect
-          .poll(async () => (await store.listTaskEvents(lost.taskId)).map((event) => event.type), {
-            timeout: 5000,
-          })
-          .toContain("task.worker-host-removed");
-        expect((await store.findWorkerHostById("runner"))?.enrollmentStatus).toBe("revoked");
-        // Persistent hosts keep the stricter evidence rule: unknown execution stays reserved.
-        expect((await store.getTaskAssignment(kept.taskId))?.status).toBe("running");
-        expect((await store.listTaskAttempts(kept.taskId))[0]?.status).toBe("running");
-      });
     },
   );
 
@@ -283,61 +201,6 @@ describe("surface Tasks on ephemeral Worker Hosts", () => {
     );
 });
 
-async function runningAssignment(store: DrizzleStore, workerHostId: string) {
-  const id = randomUUID();
-  const owner = await store.createTag({ name: `owner-${id}` });
-  await store.createObjective({ id, ownerTagId: owner.id, outcome: "Keep builds green." });
-  await store.createTeam({
-    id,
-    objectiveId: id,
-    leadTagId: owner.id,
-    memberTagIds: [],
-    maxConcurrency: 1,
-    name: id,
-  });
-  const at = new Date().toISOString();
-  await store.admitTaskAssignment({
-    taskId: id,
-    objectiveId: id,
-    teamId: id,
-    requestedByTagId: owner.id,
-    assignedTagId: owner.id,
-    instruction: "Build the release",
-    acceptanceCriteria: ["Release built"],
-    execution: {},
-    authorizationSnapshot: {
-      version: 4,
-      capturedAt: at,
-      tag: { id: owner.id, name: owner.name },
-      origin: { kind: "internal", objectiveId: id, requestedByTagId: owner.id },
-      requester: { id: owner.id, kind: "user" },
-      permissionSets: [],
-      resources: [],
-      runtimeActions: [],
-    },
-    contextPlan: emptyTagContextPlan(at),
-    workspacePlan: { version: 1, status: "none" },
-  });
-  const claimed = await store.claimTaskAssignment({
-    taskId: id,
-    leaseOwner: "lost-control-plane",
-    leaseSeconds: 5,
-  });
-  if (!claimed) throw new Error("Missing claim");
-  await store.createTaskAttempt({
-    workerProfile: { id: "default", revision: "1" },
-    taskId: id,
-    attemptNumber: claimed.attemptCount,
-    workerSnapshot: {
-      durableExecution: true,
-      kind: "assignment",
-      placement: { workerHostId },
-    },
-    startedAt: at,
-  });
-  return claimed;
-}
-
 function descriptor(hostId: string): WorkletDescriptor {
   return {
     id: "test-worklet",
@@ -356,21 +219,6 @@ function descriptor(hostId: string): WorkletDescriptor {
           contextTypes: [],
         },
       ],
-    },
-  };
-}
-
-/** A Worklet with no Workers; nothing it is offered can run. */
-function idleWorklet(): Worklet {
-  return {
-    id: "idle-worklet",
-    describe: async () => ({
-      id: "idle-worklet",
-      protocolVersion: 1,
-      host: { id: "idle", workers: [] },
-    }),
-    execute: () => {
-      throw new Error("No Workers");
     },
   };
 }

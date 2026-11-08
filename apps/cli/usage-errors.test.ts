@@ -39,34 +39,34 @@ it.each([{ output: ["--output", "json"] }, { output: ["--output=json"] }])(
 );
 
 it.each([
-  { flags: [], message: "--objective is required and must not be blank" },
-  {
-    flags: [
-      "--objective",
-      "demo",
-      "--team",
-      "build",
-      "--tag",
-      "builder",
-      "--instruction-file",
-      "-",
-    ],
-    message: "At least one --criterion is required",
-  },
-])("adds task usage to $message", async ({ flags, message }) => {
+  { command: "get" as const, args: [] },
+  { command: "events" as const, args: ["  "] },
+])("adds $command task usage to an invalid invocation", async ({ command, args }) => {
   const request = vi.fn();
-  const error = await runTaskCommand({ request }, "assign", ["demo", ...flags]).catch(
-    (error: unknown) => error,
-  );
-  expect(formatCliFailure(error, ["assign", "task", "demo", ...flags])).toBe(
-    `SuperTag failed: ${message}\nUsage: ${taskHelp().split("\n")[1]?.trim()}\n`,
+  const error = await runTaskCommand({ request }, command, args).catch((error: unknown) => error);
+  expect((error as Error).message).toBe(`Usage: supertag ${command} task ID`);
+  expect(formatCliFailure(error, [command, "task", ...args])).toBe(
+    `SuperTag failed: Invalid command arguments\nUsage: supertag ${command} task ID\n`,
   );
   for (const output of [["--output", "json"], ["--output=json"]]) {
-    expect(formatCliFailure(error, ["assign", "task", "demo", ...flags, ...output])).toBe(
-      `SuperTag failed: ${message}\n`,
+    expect(formatCliFailure(error, [command, "task", ...args, ...output])).toBe(
+      `SuperTag failed: Usage: supertag ${command} task ID\n`,
     );
   }
   expect(request).not.toHaveBeenCalled();
+});
+
+it("names the Task commands that remain after the Objective controller", () => {
+  const usages = taskHelp()
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("supertag "));
+  expect(usages).toEqual([
+    "supertag get task ID",
+    "supertag describe task ID",
+    "supertag events task ID",
+    "supertag cancel task ID [--output json]",
+  ]);
 });
 
 it.each([
@@ -85,16 +85,16 @@ it.each([
 it("does not throw while reporting a missing global flag value", () => {
   expect(
     formatCliFailure(new Error("--control-plane requires a configured Control Plane name or URL"), [
-      "assign",
+      "get",
       "task",
       "demo",
       "--control-plane",
     ]),
-  ).toContain("Usage: supertag assign task ");
+  ).toContain("Usage: supertag get ");
 });
 
 it("preserves unrelated errors", () => {
-  expect(formatCliFailure(new Error("Connection refused"), ["assign", "task", "demo"])).toBe(
+  expect(formatCliFailure(new Error("Connection refused"), ["get", "task", "demo"])).toBe(
     "SuperTag failed: Connection refused\n",
   );
 });

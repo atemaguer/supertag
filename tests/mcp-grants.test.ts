@@ -74,7 +74,7 @@ describe("MCP grant actions", () => {
     "sentry/get?issue",
     "sentry/[a-z]*",
     "sentry/get_іssue",
-    "supertag-coordination/read_task",
+    "supertag-coordination/read_session",
     `sentry/${"a".repeat(129)}`,
   ])("rejects action %j", (action) => {
     expect(() => parseMcpGrantAction(action)).toThrow();

@@ -31,11 +31,10 @@ apiVersion: supertag/v1
 kind: Role
 metadata: { name: Lead }
 spec:
-  purpose: Own Objectives for this repository. Plan the work, split it into bounded Tasks for builders and the reviewer, and integrate and verify the results.
+  purpose: Own Objectives for this repository. Plan the work, split it into bounded work Sessions for builders and the reviewer, and integrate and verify the results.
   instructions: >-
     Read the repository's contributing guide (AGENTS.md or CONTRIBUTING.md) before planning.
-    Delegate implementation to builders and do the integration yourself. Send each finished change
-    to the reviewer and send its findings back to the builder. Accept work only on evidence:
+    Delegate implementation to builders with start_session, naming the builder's Tag, and do the integration yourself. Each work Session reports back to the Objective's conversation. Give each finished change to the reviewer the same way and send its findings back to the builder with continue_session. Accept work only on evidence:
     passing checks, new tests for new behavior, and no open high or medium findings. Then send the
     operator an owner report naming the commit to merge. Never change the repository's git
     configuration (.git/config, .git/info, hooks): SuperTag refuses to run Tasks in a repository

@@ -11,7 +11,8 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ObjectiveController } from "../packages/control-plane/src/objective-controller.js";
-import type { ApprovalRequest, TaskAssignment } from "../packages/core/src/index.js";
+import { objectiveAuthorization } from "../packages/control-plane/src/objective-sessions.js";
+import type { SurfaceTagAuthorizationSnapshot } from "../packages/core/src/index.js";
 import {
   HttpMcpToolProvider,
   openTaskApprovalChannel,
@@ -27,6 +28,11 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
+/**
+ * A Tag that works under an Objective, with a Permission Set whose `approval: required` entries
+ * reach its Task's authorization snapshot. Its turn is an Objective Session Task, so the gated
+ * calls run with `request_action_approval` and an operator decides them.
+ */
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "supertag-approvals-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
@@ -35,14 +41,13 @@ async function fixture() {
   const store = new DrizzleStore({ url });
   await store.connect();
   cleanups.push(() => store.disconnect());
-  const [owner, lead, worker, approver, bystander] = await Promise.all(
-    ["owner", "lead", "worker", "release-manager", "bystander"].map((name) =>
+  const [owner, worker, approver] = await Promise.all(
+    ["owner", "worker", "release-manager"].map((name) =>
       store.createTag({ name: `${name}-${randomUUID()}` }),
     ),
   );
-  if (!owner || !lead || !worker || !approver || !bystander) throw new Error("Missing Tags");
-  for (const tag of [owner, lead, worker, approver, bystander])
-    await store.bindTagWorkerHost(tag.id, "fixture");
+  if (!owner || !worker || !approver) throw new Error("Missing Tags");
+  for (const tag of [owner, worker, approver]) await store.bindTagWorkerHost(tag.id, "fixture");
   const account = await store.saveSurfaceAccount({
     provider: "github",
     externalAccountId: `github-${randomUUID()}`,
@@ -55,7 +60,7 @@ async function fixture() {
   });
   const set = await store.createTagPermissionSet({
     name: `release-${randomUUID()}`,
-    approvers: [`tag:${approver.name}`, `tag:${lead.name}`],
+    approvers: [`tag:${approver.name}`],
   });
   const surface = {
     permissionSetId: set.id,
@@ -89,106 +94,160 @@ async function fixture() {
     permissionSetIds: [set.id],
   });
   await store.assignRole({ roleId: role.id, tagId: worker.id });
+  const team = await store.createTeam({
+    id: randomUUID(),
+    name: `release-${randomUUID()}`,
+    memberTagIds: [owner.id, worker.id, approver.id],
+  });
   const objective = await store.createObjective({
     id: randomUUID(),
     ownerTagId: owner.id,
+    teamId: team.id,
     outcome: "Release the change",
     runtimeActions: ["commands:execute", "files:write"],
   });
-  const team = await store.createTeam({
-    id: randomUUID(),
-    objectiveId: objective.id,
-    name: "Release",
-    leadTagId: lead.id,
-    memberTagIds: [worker.id, approver.id, bystander.id],
-    maxConcurrency: 5,
+  const route = await store.addTagRoute({
+    tagId: worker.id,
+    surfaceAccountId: account.id,
+    scope: "repository:1",
   });
   const onError = vi.fn();
   const controller = new ObjectiveController(store, undefined, onError);
   controller.activateCoordination({ url: "http://fixture.invalid" });
-  // Attempt callers hold real leases under this controller identity, without a scheduling loop.
-  const leaseOwner = controller["instanceId"];
-  const activate = async (task: TaskAssignment) => {
-    const claimed = await store.claimTaskAssignment({ taskId: task.taskId, leaseOwner });
-    if (!claimed) throw new Error("Fixture assignment could not be claimed");
-    await store.createTaskAttempt({
+  // A waiting turn's approval notice and Session resume belong to the Control Plane; this
+  // fixture drives the controller alone, so they are recorded and not delivered.
+  const notices: string[] = [];
+  controller.setSessionHandlers({
+    approvalNotice: async (_task, _inbound, requestId) => {
+      notices.push(requestId);
+    },
+    approvalDecided: async () => {},
+  } as never);
+
+  const location = { account, route, event: { actor: { id: "supertag", kind: "bot" } } };
+  const authorization = () =>
+    objectiveAuthorization(
+      store,
+      objective,
+      worker,
+      location as never,
+    ) as Promise<SurfaceTagAuthorizationSnapshot>;
+
+  /**
+   * One running Task of the worker Tag under the Objective, with a claimed turn and a running
+   * Attempt, as a dispatched work Session Task has.
+   */
+  async function runningTask() {
+    const snapshot = await authorization();
+    const at = new Date().toISOString();
+    const sessionKey = `work:${randomUUID()}`;
+    const contextPlan = { version: 7, capturedAt: at, sets: [] } as const;
+    const admitted = await store.admitInboundEvent({
+      surfaceAccountId: account.id,
+      tagRouteId: route.id,
+      tagId: worker.id,
+      authorization: snapshot,
+      contextPlan,
+      event: {
+        eventId: randomUUID(),
+        logicalEventId: randomUUID(),
+        provider: "github",
+        externalAccountId: account.externalAccountId,
+        kind: "message",
+        scope: "repository:1",
+        sessionKey,
+        actor: { id: "supertag", displayName: "SuperTag", kind: "bot" },
+        text: "Merge the reviewed release pull request",
+        occurredAt: at,
+        callback: {
+          provider: "github",
+          mode: "github_issue_comment",
+          threadKey: sessionKey,
+          target: { repository: "acme/repo", issueNumber: 1 },
+        },
+        source: {},
+        metadata: {},
+        internal: {
+          kind: "work_session",
+          startedByTaskId: randomUUID(),
+          parentSessionId: randomUUID(),
+          title: "Merge the release",
+        },
+      },
+    });
+    const session = await store.openSession({
+      tagId: worker.id,
+      sessionKey,
+      origin: {},
+      objectiveId: objective.id,
+      at,
+    });
+    const task = await store.openTask({
+      inboundEventId: admitted.work.id,
+      tagId: worker.id,
+      sessionId: session.id,
+      execution: {},
+      actor: { id: "supertag", kind: "bot" },
+      trigger: {},
+      workspacePlan: { version: 1, status: "none" },
+      sessionHistory: [],
+      authorizationSnapshot: snapshot,
+      contextPlan,
+      createdAt: at,
+    });
+    const claimed = await store.claimDueInboundEvent({
+      inboundEventId: admitted.work.id,
+      leaseOwner: "approval-fixture",
+      now: new Date().toISOString(),
+      leaseExpiresAt: new Date(Date.now() + 600_000).toISOString(),
+    });
+    if (!claimed) throw new Error("Fixture turn could not be claimed");
+    const attempt = await store.createTaskAttempt({
       workerProfile: { id: "default", revision: "1" },
-      taskId: task.taskId,
+      taskId: task.id,
       attemptNumber: claimed.attemptCount,
       workerSnapshot: {},
       startedAt: new Date().toISOString(),
     });
-    await store.startTask({ taskId: task.taskId, startedAt: new Date().toISOString() });
-    return claimed;
-  };
-  const caller = await activate(
-    (await controller.command("assign_task", {
-      objectiveId: objective.id,
-      taskId: `lead-${randomUUID()}`,
-      teamId: team.id,
-      assignedTagId: lead.id,
-      instruction: "Coordinate the release",
-      acceptanceCriteria: ["Released"],
-    })) as TaskAssignment,
-  );
-  const assign = (assignedTagId: string, extra: Record<string, unknown> = {}) =>
-    controller.command(
-      "assign_task",
-      {
-        taskId: `task-${randomUUID()}`,
-        teamId: team.id,
-        assignedTagId,
-        instruction: "Merge the reviewed release pull request",
-        acceptanceCriteria: ["Merged"],
-        ...extra,
-      },
-      caller,
-    ) as Promise<TaskAssignment>;
-  const approveTask = async (task: TaskAssignment) => {
-    const [request] = await store.listApprovalRequests({ taskId: task.taskId, kind: "task" });
-    if (!request) throw new Error("Missing Task approval request");
-    await controller.decideApprovalRequest({ requestId: request.id, decision: "approve" });
-    return request;
-  };
+    await store.startTask({ taskId: task.id, startedAt: new Date().toISOString() });
+    return {
+      task,
+      snapshot,
+      caller: { kind: "surface" as const, taskId: task.id, attemptId: attempt.id },
+    };
+  }
+
   return {
     store,
     controller,
     owner,
-    lead,
     worker,
     approver,
-    bystander,
     account,
     set,
     objective,
     team,
-    caller,
-    activate,
-    assign,
-    approveTask,
+    notices,
+    authorization,
+    runningTask,
     onError,
   };
 }
 
 describe("approval: required on permissions", () => {
-  it("freezes approval flags and approvers into the Task authorization snapshot", async () => {
+  it("freezes approval requirements and approvers into the Task authorization snapshot", async () => {
     const f = await fixture();
-    const task = await f.assign(f.worker.id);
-    const stored = await f.store.findTaskById(task.taskId);
-    expect(stored?.authorizationSnapshot.permissionSets).toEqual([
-      {
-        id: f.set.id,
-        name: f.set.name,
-        approvers: [`tag:${f.approver.name}`, `tag:${f.lead.name}`],
-      },
+    const { snapshot } = await f.runningTask();
+    expect(snapshot.permissionSets).toEqual([
+      { id: f.set.id, name: f.set.name, approvers: [`tag:${f.approver.name}`] },
     ]);
     // Requirements are ordered by their canonical key, so `runtime` sorts before `surface`.
-    expect(stored?.authorizationSnapshot.approvals).toEqual([
+    expect(snapshot.approvals).toEqual([
       {
         target: "runtime",
         action: "commands:execute",
         permissionSets: [f.set.name],
-        approvers: [`tag:${f.approver.name}`, `tag:${f.lead.name}`].sort(),
+        approvers: [`tag:${f.approver.name}`],
       },
       {
         target: "surface",
@@ -196,148 +255,40 @@ describe("approval: required on permissions", () => {
         scope: "repository:1",
         action: "pull-requests:merge",
         permissionSets: [f.set.name],
-        approvers: [`tag:${f.approver.name}`, `tag:${f.lead.name}`].sort(),
+        approvers: [`tag:${f.approver.name}`],
       },
     ]);
     // Actions granted without approval are not listed.
-    expect(JSON.stringify(stored?.authorizationSnapshot.approvals)).not.toContain(
-      "pull-requests:create",
-    );
-    expect(JSON.stringify(stored?.authorizationSnapshot.approvals)).not.toContain("files:write");
-  });
-
-  it("holds Task admission for a runtime permission with approval required and bypasses it with an Objective grant", async () => {
-    const f = await fixture();
-    const held = await f.assign(f.worker.id, { requiresApproval: false });
-    expect(held.approval).toBe("pending");
-    const [request] = await f.store.listApprovalRequests({ taskId: held.taskId });
-    expect(request).toMatchObject({
-      kind: "task",
-      status: "pending",
-      requestingTagId: f.lead.id,
-      actions: [{ target: "runtime", action: "commands:execute" }],
-      ruleSources: [f.set.name],
-    });
-    expect((await f.store.listTaskEvents(held.taskId)).map((event) => event.type)).toContain(
-      "approval.requested",
-    );
-    await expect(
-      f.controller.listApprovalRequests({ objectiveId: f.objective.id }),
-    ).resolves.toMatchObject({ requests: [{ id: request?.id }] });
-
-    await f.controller.decideApprovalRequest({
-      requestId: request?.id,
-      decision: "approve",
-      scope: "objective",
-    });
-    expect((await f.store.getTaskAssignment(held.taskId))?.approval).toBe("approved");
-
-    const next = await f.assign(f.worker.id);
-    expect(next.approval).toBe("approved");
-    expect(await f.store.listApprovalRequests({ taskId: next.taskId })).toEqual([]);
-    const events = await f.store.listTaskEvents(next.taskId);
-    expect(
-      events.find((event) => event.type === "approval.granted-by-scope")?.payload,
-    ).toMatchObject({ requestId: request?.id, ruleSources: [f.set.name] });
-    // A Tag without the runtime permission is not held.
-    expect((await f.assign(f.bystander.id)).approval).toBe("approved");
-  });
-
-  it("records a manager-requested Task approval and settles it through the direct Task path", async () => {
-    const f = await fixture();
-    const task = await f.assign(f.bystander.id, { requiresApproval: true });
-    const [request] = await f.store.listApprovalRequests({ taskId: task.taskId });
-    expect(request).toMatchObject({ kind: "task", actions: [], ruleSources: [], approvers: [] });
-    await f.controller.command("update_task", {
-      objectiveId: f.objective.id,
-      taskId: task.taskId,
-      expectedStatus: "queued",
-      approval: "approved",
-    });
-    expect((await f.store.getApprovalRequest(request?.id ?? ""))?.status).toBe("approved");
-  });
-
-  it("lets named Tag approvers decide, refuses others and self-approval, and delivers the decision by Mailbox", async () => {
-    const f = await fixture();
-    const held = await f.assign(f.worker.id);
-    const [request] = await f.store.listApprovalRequests({ taskId: held.taskId });
-    if (!request) throw new Error("Missing request");
-    const approverCaller = await f.activate(await f.assign(f.approver.id));
-    const bystanderCaller = await f.activate(await f.assign(f.bystander.id));
-
-    expect(await f.controller.coordinationActions(approverCaller)).toContain("decide_approval");
-    expect(await f.controller.coordinationActions(bystanderCaller)).not.toContain(
-      "decide_approval",
-    );
-    expect(await f.controller.coordinationActions(f.caller)).toContain("request_approval");
-
-    await expect(
-      f.controller.command(
-        "decide_approval",
-        { requestId: request.id, decision: "approve" },
-        bystanderCaller,
-      ),
-    ).rejects.toMatchObject({ statusCode: 403 });
-    // The lead is a named approver but requested this Task.
-    await expect(
-      f.controller.command(
-        "decide_approval",
-        { requestId: request.id, decision: "approve" },
-        f.caller,
-      ),
-    ).rejects.toMatchObject({ statusCode: 403, message: expect.stringContaining("own") });
-    await expect(
-      f.controller.command(
-        "decide_approval",
-        { requestId: request.id, decision: "deny" },
-        approverCaller,
-      ),
-    ).rejects.toMatchObject({ statusCode: 400 });
-
-    const decided = (await f.controller.command(
-      "decide_approval",
-      { requestId: request.id, decision: "deny", reason: "Release freeze until Monday" },
-      approverCaller,
-    )) as ApprovalRequest;
-    expect(decided).toMatchObject({
-      status: "denied",
-      decidedBy: f.approver.id,
-      decidedByKind: "tag",
-      reason: "Release freeze until Monday",
-    });
-    expect((await f.store.getTaskAssignment(held.taskId))?.status).toBe("cancelled");
-    const messages = await f.store.listTagMessages(f.lead.id);
-    const decision = messages.find(
-      (message) =>
-        (message.body["approval"] as Record<string, unknown> | undefined)?.["requestId"] ===
-        request.id,
-    );
-    expect(JSON.stringify(decision?.body)).not.toContain(request.summary);
-    expect(decision).toMatchObject({
-      senderTagId: f.approver.id,
-      recipientTagId: f.lead.id,
-      objectiveId: f.objective.id,
-      body: {
-        approval: { decision: "denied", reason: "Release freeze until Monday", kind: "task" },
-      },
-    });
-    const events = await f.store.listTaskEvents(held.taskId);
-    expect(events.find((event) => event.type === "approval.denied")?.payload).toMatchObject({
-      decidedBy: f.approver.id,
-      decidedByKind: "tag",
-      reason: "Release freeze until Monday",
-      ruleSources: [f.set.name],
-    });
-    await expect(
-      f.controller.decideApprovalRequest({ requestId: request.id, decision: "approve" }),
-    ).rejects.toMatchObject({ statusCode: 409 });
+    expect(JSON.stringify(snapshot.approvals)).not.toContain("pull-requests:create");
+    expect(JSON.stringify(snapshot.approvals)).not.toContain("files:write");
+    // The Objective's runtime actions are the ceiling; a surface grant is not a runtime action.
+    expect(snapshot.runtimeActions).toEqual(["commands:execute", "files:write"]);
   });
 
   it("restricts operator decisions when a Permission Set names operator approvers", async () => {
     const f = await fixture();
     await f.store.setTagPermissionSetApprovers(f.set.id, ["operator:release-oncall"]);
-    const task = await f.assign(f.worker.id);
-    const [request] = await f.store.listApprovalRequests({ taskId: task.taskId });
+    const { task, caller } = await f.runningTask();
+    const requested = (await f.controller.commandAsAttempt(
+      "request_action_approval",
+      {
+        action: {
+          target: "surface",
+          surfaceAccountId: f.account.id,
+          scope: "repository:1",
+          action: "pull-requests:merge",
+        },
+        argumentsDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        summary: "Merge the release pull request",
+      },
+      caller,
+    )) as { status: string; requestId: string };
+    expect(requested.status).toBe("pending");
+    const [request] = await f.store.listApprovalRequests({ taskId: task.id });
+    expect(request).toMatchObject({
+      kind: "surface-action",
+      approvers: ["operator:release-oncall"],
+    });
     const principal = (operatorId: string) => ({ operatorId, scopes: { actions: ["*"] } });
     await expect(
       f.controller.decideApprovalRequest(
@@ -355,11 +306,9 @@ describe("approval: required on permissions", () => {
 
   it("gates surface calls in the MCP policy proxy until an approval matches", async () => {
     const f = await fixture();
-    const task = await f.assign(f.worker.id);
-    await f.approveTask(task);
-    const workerCaller = await f.activate(task);
+    const { task, caller } = await f.runningTask();
     const coordination = await startCoordination(async (name, args) =>
-      f.controller.commandAsAttempt(name, args, workerCaller),
+      f.controller.commandAsAttempt(name, args, caller),
     );
     const channel = openTaskApprovalChannel({
       coordination: {
@@ -393,10 +342,9 @@ describe("approval: required on permissions", () => {
     const first = await call("merge_pull_request", 1);
     expect(first.isError).toBe(true);
     expect(first.content[0]?.text).toContain("Approval pending");
-    expect(first.content[0]?.text).toContain("wait_for");
     expect(upstream.calls).toHaveBeenCalledTimes(1);
     const [pending] = await f.store.listApprovalRequests({
-      taskId: task.taskId,
+      taskId: task.id,
       kind: "surface-action",
     });
     if (!pending) throw new Error("Missing surface approval request");
@@ -404,6 +352,7 @@ describe("approval: required on permissions", () => {
     expect(pending).toMatchObject({
       status: "pending",
       requestingTagId: f.worker.id,
+      objectiveId: f.objective.id,
       actions: [
         {
           target: "surface",
@@ -433,7 +382,7 @@ describe("approval: required on permissions", () => {
     const other = await call("merge_pull_request", 2);
     expect(other.isError).toBe(true);
     const requests = await f.store.listApprovalRequests({
-      taskId: task.taskId,
+      taskId: task.id,
       kind: "surface-action",
       status: "pending",
     });
@@ -462,7 +411,7 @@ describe("approval: required on permissions", () => {
     expect((await call("merge_pull_request", 8)).isError).toBeFalsy();
     expect(upstream.calls).toHaveBeenCalledTimes(4);
 
-    const types = (await f.store.listTaskEvents(task.taskId)).map((event) => event.type);
+    const types = (await f.store.listTaskEvents(task.id)).map((event) => event.type);
     expect(types).toEqual(
       expect.arrayContaining([
         "approval.requested",
@@ -473,7 +422,7 @@ describe("approval: required on permissions", () => {
       ]),
     );
     const overview = await f.controller.readObjectiveOverview({ objectiveId: f.objective.id });
-    expect(overview.approvals).toMatchObject({ decidedLastDay: { approved: 3, denied: 1 } });
+    expect(overview.approvals).toMatchObject({ decidedLastDay: { approved: 2, denied: 1 } });
   });
 
   it("gates target: mcp calls by canonical arguments through the Control Plane", async () => {
@@ -489,12 +438,9 @@ describe("approval: required on permissions", () => {
       target: "mcp",
       action: "fake/get_issue",
     });
-    const task = await f.assign(f.worker.id);
-    await f.approveTask(task);
-    const workerCaller = await f.activate(task);
-    const snapshot = (await f.store.findTaskById(task.taskId))?.authorizationSnapshot;
-    expect(snapshot?.mcp).toEqual([{ action: "fake/get_issue" }, { action: "fake/update_*" }]);
-    expect(snapshot?.approvals).toEqual(
+    const { task, snapshot, caller } = await f.runningTask();
+    expect(snapshot.mcp).toEqual([{ action: "fake/get_issue" }, { action: "fake/update_*" }]);
+    expect(snapshot.approvals).toEqual(
       expect.arrayContaining([
         {
           target: "mcp",
@@ -505,7 +451,7 @@ describe("approval: required on permissions", () => {
       ]),
     );
     const coordination = await startCoordination(async (name, args) =>
-      f.controller.commandAsAttempt(name, args, workerCaller),
+      f.controller.commandAsAttempt(name, args, caller),
     );
     const upstream = await startUpstream(["get_issue", "update_issue", "delete_issue"]);
     const channel = openTaskApprovalChannel({
@@ -522,7 +468,7 @@ describe("approval: required on permissions", () => {
     }).resolve({ task: { authorization: snapshot } } as unknown as ResolutionContext);
     const [input] = withApprovalRequirements(
       bundle?.inputs ?? [],
-      snapshot?.approvals,
+      snapshot.approvals,
       () => channel.handle,
     ) as ToolInput[];
     const proxy = await startMcpPolicyProxy(input as ToolInput);
@@ -549,7 +495,7 @@ describe("approval: required on permissions", () => {
     const pending = await call("update_issue", { id: "1", status: "resolved" });
     expect(pending.content[0]?.text).toContain("Approval pending");
     const [request] = await f.store.listApprovalRequests({
-      taskId: task.taskId,
+      taskId: task.id,
       kind: "surface-action",
     });
     expect(request).toMatchObject({
@@ -592,55 +538,24 @@ describe("approval: required on permissions", () => {
     expect(upstream.calls).not.toHaveBeenCalled();
   });
 
-  it("creates one plan request whose Objective-scope approval covers every listed action", async () => {
+  it("reports pending approvals as an Objective attention item and in the digest", async () => {
     const f = await fixture();
-    const plan = (await f.controller.command(
-      "request_approval",
+    const { caller } = await f.runningTask();
+    const requested = (await f.controller.commandAsAttempt(
+      "request_action_approval",
       {
-        summary: "Run the schema migration and merge the release pull request.",
-        actions: [
-          { target: "runtime", action: "commands:execute" },
-          {
-            target: "surface",
-            surfaceAccountId: f.account.id,
-            scope: "repository:1",
-            action: "pull-requests:merge",
-          },
-        ],
+        action: {
+          target: "surface",
+          surfaceAccountId: f.account.id,
+          scope: "repository:1",
+          action: "pull-requests:merge",
+        },
+        argumentsDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        summary: "Merge the release pull request",
       },
-      f.caller,
+      caller,
     )) as { status: string; requestId: string };
-    expect(plan.status).toBe("pending");
-    const request = await f.store.getApprovalRequest(plan.requestId);
-    expect(request).toMatchObject({ kind: "plan", ruleSources: [f.set.name] });
-    // Pending action and plan requests are batched into one digest per Objective.
-    const [digest] = await f.controller["approvals"].digests();
-    expect(digest).toMatchObject({ objectiveId: f.objective.id });
-    expect(digest?.text).toContain(plan.requestId);
-    expect(digest?.text).toContain("supertag approve request ID");
-    await expect(
-      f.controller.decideApprovalRequest({
-        requestId: plan.requestId,
-        decision: "approve",
-        scope: "once",
-      }),
-    ).rejects.toMatchObject({ statusCode: 400 });
-    await expect(
-      f.controller.decideApprovalRequest({ requestId: plan.requestId, decision: "approve" }),
-    ).resolves.toMatchObject({ status: "approved", scope: "objective" });
-    expect((await f.assign(f.worker.id)).approval).toBe("approved");
-    await expect(
-      f.controller.command(
-        "request_approval",
-        { summary: "Same plan", actions: [{ target: "runtime", action: "commands:execute" }] },
-        f.caller,
-      ),
-    ).resolves.toMatchObject({ status: "granted" });
-  });
-
-  it("reports pending approvals as an Objective attention item", async () => {
-    const f = await fixture();
-    await f.assign(f.worker.id);
+    expect(requested.status).toBe("pending");
     const overview = await f.controller.readObjectiveOverview({ objectiveId: f.objective.id });
     expect(overview.approvals).toMatchObject({ pending: 1 });
     expect(overview.attention).toContainEqual(
@@ -649,6 +564,11 @@ describe("approval: required on permissions", () => {
         nextAction: expect.stringContaining(`supertag list approval --objective ${f.objective.id}`),
       }),
     );
+    const [digest] = await f.controller["approvals"].digests();
+    expect(digest).toMatchObject({ objectiveId: f.objective.id });
+    expect(digest?.text).toContain(requested.requestId);
+    // The waiting turn's notice names the same request.
+    expect(f.notices).toEqual([requested.requestId]);
   });
 });
 

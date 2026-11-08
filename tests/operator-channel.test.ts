@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AdmitTaskAssignmentInput, CoordinationInboxItem, Store } from "@supertag/core";
+import type {
+  CoordinationInboxItem,
+  Store,
+  SurfaceTagAuthorizationSnapshot,
+  Task,
+} from "@supertag/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   configuredOperatorChannel,
@@ -13,6 +18,7 @@ import {
   parseNotificationDestination,
   parseOperatorChannel,
 } from "../packages/control-plane/src/index.js";
+import { coordinationInboxOccurrence, objectiveSessionKey } from "../packages/core/src/index.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
 import { createIsolatedPostgresDatabase } from "./support/database.js";
 
@@ -37,7 +43,7 @@ describe("operator channel configuration", () => {
   });
 
   it("resolves no destination when unconfigured", async () => {
-    const item = { kind: "operator_message" } as CoordinationInboxItem;
+    const item = { kind: "question" } as CoordinationInboxItem;
     expect(
       await configuredOperatorChannel(undefined).resolveNotificationDestinations(item),
     ).toEqual([]);
@@ -70,31 +76,31 @@ describe("operator channel configuration", () => {
         getObjective: async () => ({
           id: "objective-a",
           ...(options.notificationTaskId ? { notificationTaskId: options.notificationTaskId } : {}),
+          ...(options.origin ? { surfaceTaskId: options.origin } : {}),
         }),
-        getObjectiveSurfaceTask: async () => (options.origin ? { id: options.origin } : undefined),
         getVerifiedSurfaceTask: async (id: string) =>
           options.verified === false ? undefined : { id, inboundEventId: `event-${id}` },
-      }) as unknown as Pick<
-        Store,
-        "getObjective" | "getObjectiveSurfaceTask" | "getVerifiedSurfaceTask"
-      >;
+      }) as unknown as Pick<Store, "getObjective" | "getVerifiedSurfaceTask">;
     const slackObjective = store({ origin: "surface-task" });
-    expect(await objectiveThreadCarries(slackObjective, item("operator_message"))).toBe(true);
-    expect(await objectiveThreadCarries(slackObjective, item("approval"))).toBe(true);
-    expect(await objectiveThreadCarries(slackObjective, item("task_approval"))).toBe(true);
-    // Reviews and attention items never reach the thread; a failed thread delivery falls back.
-    expect(await objectiveThreadCarries(slackObjective, item("task_review"))).toBe(false);
-    expect(await objectiveThreadCarries(slackObjective, item("task_budget", "failed"))).toBe(false);
+    // An Objective's own turns ask, and post their approval and limit notices, in its home thread.
+    for (const kind of ["question", "approval", "objective_budget", "objective_limit"] as const)
+      expect(await objectiveThreadCarries(slackObjective, item(kind)), kind).toBe(true);
+    // Attention items never reach the thread; a failed thread delivery falls back.
+    expect(await objectiveThreadCarries(slackObjective, item("task_attention"))).toBe(false);
+    expect(await objectiveThreadCarries(slackObjective, item("mcp_login"))).toBe(false);
+    expect(await objectiveThreadCarries(slackObjective, item("objective_budget", "failed"))).toBe(
+      false,
+    );
     // A CLI Objective has no thread of its own.
-    expect(await objectiveThreadCarries(store({}), item("operator_message"))).toBe(false);
-    // A chosen notification thread carries messages, but Task approval notices need an origin.
-    const chosen = store({ notificationTaskId: "chosen" });
-    expect(await objectiveThreadCarries(chosen, item("operator_message"))).toBe(true);
-    expect(await objectiveThreadCarries(chosen, item("task_approval"))).toBe(false);
+    expect(await objectiveThreadCarries(store({}), item("question"))).toBe(false);
+    // The operator's chosen notification thread is a home thread too.
+    expect(
+      await objectiveThreadCarries(store({ notificationTaskId: "chosen" }), item("question")),
+    ).toBe(true);
     expect(
       await objectiveThreadCarries(
         store({ origin: "surface-task", verified: false }),
-        item("operator_message"),
+        item("question"),
       ),
     ).toBe(false);
   });
@@ -124,44 +130,106 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         await rm(directory, { recursive: true, force: true });
       });
       const owner = await store.createTag({ name: `owner-${randomUUID()}` });
-      const worker = await store.createTag({ name: `worker-${randomUUID()}` });
+      await store.bindTagWorkerHost(owner.id, "fixture-host");
+      const team = await store.createTeam({
+        id: `team-${randomUUID().slice(0, 8)}`,
+        name: `Export ${randomUUID().slice(0, 8)}`,
+        memberTagIds: [owner.id],
+        maxConcurrency: 2,
+      });
       const objective = await store.createObjective({
         id: `objective-${randomUUID().slice(0, 8)}`,
         ownerTagId: owner.id,
         outcome: "Ship the export",
-      });
-      const team = await store.createTeam({
-        id: `team-${randomUUID().slice(0, 8)}`,
-        objectiveId: objective.id,
-        name: "Export Team",
-        leadTagId: owner.id,
-        memberTagIds: [worker.id],
-        maxConcurrency: 2,
-      });
-      const assignment = (taskId: string): AdmitTaskAssignmentInput => ({
-        taskId,
-        objectiveId: objective.id,
         teamId: team.id,
-        requestedByTagId: owner.id,
-        assignedTagId: owner.id,
-        instruction: "secret instruction",
-        acceptanceCriteria: ["done"],
-        execution: {},
-        authorizationSnapshot: {
-          version: 4,
-          capturedAt: new Date().toISOString(),
+      });
+      const account = await store.saveSurfaceAccount({
+        provider: "slack",
+        externalAccountId: `T-${randomUUID().slice(0, 8)}`,
+        displayName: "Slack",
+        authMethod: "test",
+        credentialId: "test",
+        status: "connected",
+        configuration: {},
+        verifiedAt: new Date().toISOString(),
+      });
+      const route = await store.addTagRoute({
+        tagId: owner.id,
+        surfaceAccountId: account.id,
+        scope: "channel:export",
+      });
+      const sessionKey = objectiveSessionKey(objective.id);
+      const session = await store.openSession({
+        tagId: owner.id,
+        sessionKey,
+        origin: {},
+        at: new Date().toISOString(),
+        objectiveId: objective.id,
+      });
+      /** One turn of the Objective's own Session. */
+      const ownerTask = async (): Promise<Task> => {
+        const at = new Date().toISOString();
+        const authorization: SurfaceTagAuthorizationSnapshot = {
+          version: 5,
+          capturedAt: at,
           tag: { id: owner.id, name: owner.name },
-          origin: { kind: "internal", objectiveId: objective.id, requestedByTagId: owner.id },
-          requester: { id: owner.id, kind: "bot" },
+          origin: {
+            provider: "slack",
+            surfaceAccountId: account.id,
+            tagRouteId: route.id,
+            scope: "channel:export",
+          },
+          requester: { id: "human", kind: "user" },
+          roles: [],
           permissionSets: [],
           resources: [],
           runtimeActions: [],
-        },
-        contextPlan: { version: 7, capturedAt: new Date().toISOString(), sets: [] },
-        workspacePlan: { version: 1, status: "none" },
-      });
-      await store.admitTaskAssignment(assignment("running-task"));
-      await store.claimTaskAssignment({ taskId: "running-task", leaseOwner: "test" });
+        };
+        const contextPlan = { version: 7, capturedAt: at, sets: [] } as const;
+        const id = randomUUID();
+        const event = {
+          eventId: id,
+          logicalEventId: id,
+          provider: "slack",
+          externalAccountId: account.externalAccountId,
+          kind: "message",
+          scope: "channel:export",
+          sessionKey,
+          actor: { id: "human", kind: "user" },
+          text: "Work on it",
+          occurredAt: at,
+          callback: {
+            provider: "slack",
+            mode: "slack_thread",
+            threadKey: sessionKey,
+            target: { channelId: "export", threadTs: sessionKey },
+          },
+          source: {},
+          metadata: {},
+        } as const;
+        const admitted = await store.admitInboundEvent({
+          surfaceAccountId: account.id,
+          tagRouteId: route.id,
+          tagId: owner.id,
+          authorization,
+          contextPlan,
+          event,
+        });
+        return store.openTask({
+          inboundEventId: admitted.work.id,
+          tagId: owner.id,
+          sessionId: session.id,
+          execution: {},
+          actor: event.actor,
+          trigger: {},
+          workspacePlan: { version: 1, status: "none" },
+          sessionHistory: [],
+          authorizationSnapshot: authorization,
+          contextPlan,
+          createdAt: at,
+        });
+      };
+      const running = await ownerTask();
 
       let clock = Date.now();
       const sent: { destination: NotificationDestination; text: string }[] = [];
@@ -193,33 +261,45 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           ...(options.maxAttempts === undefined ? {} : { maxAttempts: options.maxAttempts }),
         });
       };
-      const message = (key: string) =>
-        store.enqueueObjectiveMessage({
-          objectiveId: objective.id,
-          senderTagId: owner.id,
-          sourceTaskId: "running-task",
-          type: "message",
-          body: { message: `Question ${key}` },
-          idempotencyKey: key,
+      /**
+       * A Task of the Objective that needs an operator: its Workspace could not be trusted, so
+       * it failed without replay. Each call adds one more inbox item.
+       */
+      const attention = async (summary: string) => {
+        const task = await ownerTask();
+        return store.closeTask({
+          taskId: task.id,
+          status: "failed",
+          endedAt: new Date().toISOString(),
+          // The source a Worker reports with a failed Attempt settles onto the Task's outcome.
+          outcome: { error: summary, failureKind: "workspace-integrity" },
+          result: {
+            summary,
+            decisions: [],
+            changes: [],
+            unresolved: [],
+            references: [],
+            artifacts: [],
+            findings: [],
+          },
         });
-      const approval = (blocking: boolean) =>
+      };
+      const approval = () =>
         store.createApprovalRequest({
           objectiveId: objective.id,
-          taskId: "running-task",
-          ...(blocking ? { attemptId: "attempt-1" } : {}),
+          taskId: running.id,
+          attemptId: "attempt-1",
           requestingTagId: owner.id,
-          kind: blocking ? "surface-action" : "plan",
+          kind: "surface-action",
           actions: [
-            blocking
-              ? {
-                  target: "surface",
-                  action: "pull_request.merge",
-                  surfaceAccountId: "github-account",
-                  scope: "acme/app",
-                }
-              : { target: "runtime", action: "deploy" },
+            {
+              target: "surface",
+              action: "pull_request.merge",
+              surfaceAccountId: "github-account",
+              scope: "acme/app",
+            },
           ],
-          summary: blocking ? "Merge pull request 42" : "Deploy after merge",
+          summary: "Merge pull request 42",
           ruleSources: ["release"],
           approvers: [],
         });
@@ -236,7 +316,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         sent,
         send,
         channel,
-        message,
+        attention,
         approval,
         reopen,
         advance: (ms: number) => {
@@ -248,19 +328,22 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
     it("sends at most one message per Objective per window, then summarizes what waited", async () => {
       const f = await fixture();
       const notifications = f.channel();
-      await f.message("first");
+      await f.attention("first");
       expect(await notifications.reconcile()).toBe(1);
       expect(await notifications.deliverNext()).toBe(true);
       expect(f.sent).toHaveLength(1);
       expect(f.sent[0]?.destination).toEqual(CHANNEL);
-      expect(f.sent[0]?.text).toBe(
-        `Objective ${f.objective.id} needs you: The Objective owner sent you a message\n\`supertag describe objective ${f.objective.id}\``,
+      expect(f.sent[0]?.text).toMatch(
+        new RegExp(
+          `^Objective ${f.objective.id} needs you: Task [^ ]+ needs attention\\n\`supertag describe objective ${f.objective.id}\`$`,
+          "u",
+        ),
       );
-      expect(JSON.stringify(f.sent)).not.toContain("Question first");
+      expect(JSON.stringify(f.sent)).not.toContain("first");
 
       // New items inside the window wait; a second sweep never repeats the first item.
-      await f.approval(false);
-      await f.message("second");
+      await f.attention("second");
+      await f.attention("third");
       expect(await notifications.reconcile()).toBe(0);
       f.advance(OPERATOR_CHANNEL_WINDOW_MS - 1_000);
       expect(await notifications.reconcile()).toBe(0);
@@ -272,8 +355,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       expect(f.sent).toHaveLength(2);
       const summary = f.sent[1]?.text ?? "";
       expect(summary).toContain(`Objective ${f.objective.id} has 2 more items that need you:`);
-      expect(summary).toContain("Approval ");
-      expect(summary).toContain("supertag approve request ");
+      expect(summary).toContain("needs attention");
       expect(summary.split("\n").at(-1)).toBe(
         `\`supertag list inbox --objective ${f.objective.id}\``,
       );
@@ -283,10 +365,10 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
     it("sends an approval that running work waits on immediately", async () => {
       const f = await fixture();
       const notifications = f.channel();
-      await f.message("first");
+      await f.attention("first");
       await notifications.reconcile();
       await notifications.deliverNext();
-      const request = await f.approval(true);
+      const request = await f.approval();
       // Inside the window, yet delivered now, with the command to act last.
       expect(await notifications.reconcile()).toBe(1);
       expect(await notifications.deliverNext()).toBe(true);
@@ -298,13 +380,13 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
     it("does not repeat items the Objective's own thread carries", async () => {
       const f = await fixture();
       const carriedElsewhere = vi.fn(
-        async (item: CoordinationInboxItem) => item.kind === "operator_message",
+        async (item: CoordinationInboxItem) => item.kind === "task_attention",
       );
       const notifications = f.channel({ carriedElsewhere });
-      await f.message("thread");
+      await f.attention("thread");
       expect(await notifications.reconcile()).toBe(0);
       expect(carriedElsewhere).toHaveBeenCalled();
-      await f.approval(false);
+      await f.approval();
       expect(await notifications.reconcile()).toBe(1);
       await notifications.deliverNext();
       expect(f.sent).toHaveLength(1);
@@ -313,7 +395,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
 
     it("survives a restart without resending and delivers what was left", async () => {
       const f = await fixture();
-      await f.message("before-restart");
+      await f.attention("before-restart");
       expect(await f.channel().reconcile()).toBe(1);
       // The process stops before delivering. A new instance on a new connection resumes.
       const reopened = await f.reopen();
@@ -325,7 +407,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
 
       // A delivery interrupted mid-send is retried after its lease expires, not lost.
       f.advance(OPERATOR_CHANNEL_WINDOW_MS + 1_000);
-      await f.message("interrupted");
+      await f.attention("interrupted");
       await restarted.reconcile();
       const hung = vi.fn(() => new Promise<never>(() => {}));
       void f.channel({ store: reopened, sender: hung }).deliverNext();
@@ -346,7 +428,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         return f.send(destination, text);
       });
       const notifications = f.channel({ sender: flaky });
-      await f.message("retry");
+      await f.attention("retry");
       await notifications.reconcile();
       expect(await notifications.deliverNext()).toBe(true);
       expect(f.sent).toHaveLength(0);
@@ -374,7 +456,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         maxAttempts: 2,
       });
       f.advance(OPERATOR_CHANNEL_WINDOW_MS + 1_000);
-      await f.message("broken");
+      await f.attention("broken");
       expect(await broken.reconcile()).toBe(1);
       expect(await broken.deliverNext()).toBe(true);
       f.advance(1_000);
@@ -401,23 +483,24 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           return undefined;
         }),
       });
-      await f.message("status");
+      await f.attention("status");
       expect(await notifications.reconcile()).toBe(2);
       expect(await notifications.deliverNext()).toBe(true);
       expect(await notifications.deliverNext()).toBe(true);
       const page = await f.store.readCoordinationInbox();
-      const item = page.items.find((entry) => entry.kind === "operator_message");
+      const item = page.items.find((entry) => entry.kind === "task_attention");
       expect(item).toBeDefined();
-      const records = await f.store.listOperatorNotificationsForItems([item?.key ?? ""]);
-      expect(records.get(item?.key ?? "")).toHaveLength(2);
+      const occurrence = item === undefined ? "" : coordinationInboxOccurrence(item);
+      const records = await f.store.listOperatorNotificationsForItems([occurrence]);
+      expect(records.get(occurrence)).toHaveLength(2);
       expect(
         records
-          .get(item?.key ?? "")
+          .get(occurrence)
           ?.map((record) => record.status)
           .sort(),
       ).toEqual(["delivered", "pending"]);
       expect(
-        JSON.stringify(records.get(item?.key ?? "")?.map((record) => record.lastError)),
+        JSON.stringify(records.get(occurrence)?.map((record) => record.lastError)),
       ).not.toContain("hooks.example");
     });
 
@@ -430,7 +513,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           throw new Error("Desktop notification unavailable");
         }),
       });
-      await f.message("desktop-unavailable");
+      await f.attention("desktop-unavailable");
       await notifications.reconcile();
       expect(await notifications.deliverNext()).toBe(true);
       f.advance(1_000);
@@ -447,13 +530,13 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
 
     it("coalesces desktop items across Objectives into one host notification", async () => {
       const f = await fixture();
-      await f.message("seed");
+      await f.attention("seed");
       const page = await f.store.readCoordinationInbox();
-      const original = page.items.find((item) => item.kind === "operator_message");
+      const original = page.items.find((item) => item.kind === "task_attention");
       expect(original).toBeDefined();
       const items = [
-        { ...original, key: "operator_message:first", objectiveId: "first" },
-        { ...original, key: "operator_message:second", objectiveId: "second" },
+        { ...original, key: "task_attention:first", objectiveId: "first" },
+        { ...original, key: "task_attention:second", objectiveId: "second" },
       ] as CoordinationInboxItem[];
       const desktop = parseNotificationDestination("desktop");
       const sent = vi.fn(async (_destination: NotificationDestination, _text: string) => undefined);
@@ -473,8 +556,8 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
     it("does nothing when no destination is configured", async () => {
       const f = await fixture();
       const notifications = f.channel({ resolver: configuredOperatorChannel(undefined) });
-      await f.message("unconfigured");
-      await f.approval(true);
+      await f.attention("unconfigured");
+      await f.approval();
       expect(await notifications.reconcile()).toBe(0);
       expect(await notifications.deliverNext()).toBe(false);
       expect(f.send).not.toHaveBeenCalled();
@@ -482,24 +565,22 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
 
     it("drops an item resolved after it enters the outbox and before delivery", async () => {
       const f = await fixture();
-      const message = await f.message("resolved");
+      await f.attention("resolved");
       const notifications = f.channel();
       expect(await notifications.reconcile()).toBe(1);
-      await f.store.replyToObjectiveMessage({
-        messageId: message.message.id,
-        objectiveId: f.objective.id,
-        recipientTagId: f.owner.id,
-        body: { message: "Resolved" },
-        idempotencyKey: "resolved-reply",
-        operatorId: "operator",
-      });
+      // Closing the Objective settles everything that waited on it.
+      await f.store.cancelObjective(
+        f.objective.id,
+        { reason: "Superseded" },
+        { operatorId: "operator" },
+      );
       expect(await notifications.deliverNext()).toBe(true);
       expect(f.sent).toHaveLength(0);
     });
 
     it("checks only the queued notification's Objective at delivery", async () => {
       const f = await fixture();
-      await f.message("scoped-delivery");
+      await f.attention("scoped-delivery");
       const notifications = f.channel();
       await notifications.reconcile();
       const read = vi.spyOn(f.store, "readCoordinationInbox");
@@ -510,7 +591,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
 
     it("records each item occurrence once when two instances race", async () => {
       const f = await fixture();
-      await f.message("race");
+      await f.attention("race");
       const results = await Promise.all([f.channel().reconcile(), f.channel().reconcile()]);
       expect(results.reduce((sum, value) => sum + value, 0)).toBe(1);
     });

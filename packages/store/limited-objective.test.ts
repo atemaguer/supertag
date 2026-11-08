@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { objectiveSessionKey } from "@supertag/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { createIsolatedPostgresDatabase } from "../../tests/support/database.js";
-import type { AdmitTaskAssignmentInput } from "../core/src/index.js";
 import { DrizzleStore, migrateDatabase } from "./src/index.js";
 
 const postgres = process.env["SUPERTAG_POSTGRES_URL"];
@@ -33,156 +33,245 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       });
       const owner = await store.createTag({ name: `owner-${randomUUID()}` });
       const worker = await store.createTag({ name: `worker-${randomUUID()}` });
+      const team = await store.createTeam({
+        id: randomUUID(),
+        name: `Delivery ${randomUUID()}`,
+        memberTagIds: [owner.id, worker.id],
+      });
       const objective = await store.createObjective({
         id: randomUUID(),
         ownerTagId: owner.id,
         outcome: "Ship the change",
         budgetCurrency: "USD",
         budgetLimitMinor: 100,
+        teamId: team.id,
       });
-      const team = await store.createTeam({
-        id: randomUUID(),
-        objectiveId: objective.id,
-        name: "Delivery",
-        leadTagId: owner.id,
-        memberTagIds: [worker.id],
-        maxConcurrency: null,
+      const account = await store.saveSurfaceAccount({
+        provider: "slack",
+        externalAccountId: randomUUID(),
+        displayName: "Slack",
+        authMethod: "test",
+        credentialId: "test",
+        status: "connected",
+        configuration: {},
+        verifiedAt: new Date().toISOString(),
       });
-      const leadership = await store.createTeam({
-        id: `${objective.id}:leadership`,
-        objectiveId: objective.id,
-        name: "Leadership",
-        leadTagId: owner.id,
-        memberTagIds: [owner.id],
-        maxConcurrency: null,
+      const route = await store.addTagRoute({
+        tagId: owner.id,
+        surfaceAccountId: account.id,
+        scope: "channel:delivery",
       });
-      const assignment = (taskId: string, ownerTask = false): AdmitTaskAssignmentInput => ({
-        taskId,
+      const ownerSession = await store.openSession({
+        tagId: owner.id,
+        sessionKey: objectiveSessionKey(objective.id),
+        origin: {},
         objectiveId: objective.id,
-        teamId: ownerTask ? leadership.id : team.id,
-        requestedByTagId: owner.id,
-        assignedTagId: ownerTask ? owner.id : worker.id,
-        instruction: "Ship",
-        acceptanceCriteria: ["Done"],
-        execution: {},
-        maxCostMinor: 0,
-        authorizationSnapshot: {
-          version: 4,
-          capturedAt: new Date().toISOString(),
-          tag: { id: ownerTask ? owner.id : worker.id, name: ownerTask ? owner.name : worker.name },
-          origin: { kind: "internal", objectiveId: objective.id, requestedByTagId: owner.id },
+        at: new Date().toISOString(),
+      });
+      /**
+       * One turn of a Session of the Objective: the Objective's own Session, or a work Session
+       * under it when `work` names one.
+       */
+      async function turn(tagId: string, work?: string) {
+        const at = new Date().toISOString();
+        const tag = tagId === owner.id ? owner : worker;
+        const session =
+          work === undefined
+            ? ownerSession
+            : await store.openSession({
+                tagId,
+                sessionKey: `work:${ownerSession.id}:${work}`,
+                origin: {},
+                parentSessionId: ownerSession.id,
+                at,
+              });
+        const authorization = {
+          version: 5,
+          capturedAt: at,
+          tag: { id: tag.id, name: tag.name },
+          origin: {
+            tagRouteId: route.id,
+            surfaceAccountId: account.id,
+            provider: "slack",
+            scope: "channel:delivery",
+          },
           requester: { id: owner.id, kind: "bot" },
           permissionSets: [],
           resources: [],
           runtimeActions: [],
-        },
-        contextPlan: { version: 7, capturedAt: new Date().toISOString(), sets: [] },
-        workspacePlan: { version: 1, status: "none" },
-      });
-      await store.admitTaskAssignment({
-        ...assignment(`${objective.id}:start`, true),
-        startObjectiveExecution: true,
-      });
-      await store.claimTaskAssignment({ taskId: `${objective.id}:start`, leaseOwner: "start" });
-      await store.settleTaskAssignment({
-        taskId: `${objective.id}:start`,
-        leaseOwner: "start",
-        attemptCount: 1,
-        result: { text: "Delegated work" },
-      });
-      return { store, owner, objective, assignment };
+        } as const;
+        const eventId = randomUUID();
+        const admitted = await store.admitInboundEvent({
+          surfaceAccountId: account.id,
+          tagRouteId: route.id,
+          tagId,
+          authorization,
+          contextPlan: { version: 7, capturedAt: at, sets: [] },
+          event: {
+            eventId,
+            logicalEventId: eventId,
+            provider: "slack",
+            externalAccountId: account.externalAccountId,
+            kind: "message",
+            scope: "channel:delivery",
+            sessionKey: session.sessionKey,
+            actor: { id: tag.id, kind: "bot" },
+            internal:
+              work === undefined
+                ? { kind: "delivery", from: { kind: "supertag" }, reason: "objective_start" }
+                : {
+                    kind: "work_session",
+                    startedByTaskId: eventId,
+                    parentSessionId: ownerSession.id,
+                    title: work,
+                  },
+            text: "Ship",
+            occurredAt: at,
+            callback: {
+              provider: "slack",
+              mode: "slack_thread",
+              threadKey: "delivery",
+              target: { channelId: "delivery", threadTs: "delivery" },
+            },
+            source: {},
+            metadata: {},
+          },
+        });
+        const task = await store.openTask({
+          inboundEventId: admitted.work.id,
+          tagId,
+          sessionId: session.id,
+          execution: {},
+          actor: { id: tag.id, kind: "bot" },
+          trigger: { origin: "objective" },
+          workspacePlan: { version: 1, status: "none" },
+          sessionHistory: [],
+          authorizationSnapshot: authorization,
+          contextPlan: { version: 7, capturedAt: at, sets: [] },
+          createdAt: at,
+        });
+        await store.claimDueInboundEvent({
+          inboundEventId: admitted.work.id,
+          leaseOwner: "summary",
+          now: at,
+          leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        });
+        const attempt = await store.createTaskAttempt({
+          taskId: task.id,
+          attemptNumber: 1,
+          workerProfile: { id: "default", revision: "1" },
+          workerSnapshot: {},
+          startedAt: at,
+        });
+        await store.startTask({ taskId: task.id, startedAt: at });
+        return { task, attempt, inboundEventId: admitted.work.id };
+      }
+      async function finish(taskId: string) {
+        await store.closeTask({
+          taskId,
+          status: "completed",
+          endedAt: new Date().toISOString(),
+        });
+      }
+      return { store, owner, worker, objective, team, turn, finish };
     }
 
-    it("lets running work finish, admits one bounded summary, and resumes on a higher budget", async () => {
+    const spend = (amountMinor: number) => ({
+      reportedSpend: {
+        amountMinor,
+        currency: "USD",
+        unknownAttemptIds: [],
+        observedAt: new Date().toISOString(),
+      },
+    });
+
+    it("lets running work finish, then becomes limited and takes one bounded summary", async () => {
       const f = await fixture();
-      await f.store.admitTaskAssignment(f.assignment("running"));
-      await f.store.admitTaskAssignment(f.assignment("queued-before-limit"));
-      await f.store.claimTaskAssignment({ taskId: "running", leaseOwner: "worker" });
+      const running = await f.turn(f.worker.id, "ship");
+      const state = {
+        ...spend(110),
+        budgetExhausted: { limitMinor: 100, spentMinor: 110, at: new Date().toISOString() },
+        // A stale summary from an earlier limit never survives a new one.
+        summary: { text: "Stale", at: new Date().toISOString() },
+      };
       const exhausted = await f.store.recordObjectiveLimitState(
         f.objective.id,
-        {
-          reportedSpend: {
-            amountMinor: 110,
-            currency: "USD",
-            unknownAttemptIds: [],
-            observedAt: new Date().toISOString(),
-          },
-          budgetExhausted: { limitMinor: 100, spentMinor: 110, at: new Date().toISOString() },
-        },
+        state,
         f.objective.revision,
+        true,
       );
+      // Running work keeps its authority; the limit is recorded without the transition.
       expect(exhausted?.status).toBe("working");
-      if (!exhausted?.limitState) throw new Error("Exhaustion was not recorded");
-      expect(
-        await f.store.claimTaskAssignment({ taskId: "queued-before-limit", leaseOwner: "late" }),
-      ).toBeUndefined();
-      await expect(f.store.admitTaskAssignment(f.assignment("new"))).rejects.toThrow(
-        "budget exhausted",
-      );
-      expect((await f.store.getTaskAssignment("running"))?.status).toBe("running");
-      await f.store.settleTaskAssignment({
-        taskId: "running",
-        leaseOwner: "worker",
-        attemptCount: 1,
-        result: { text: "Done" },
-      });
+      expect(exhausted?.limitState?.budgetExhausted).toEqual(state.budgetExhausted);
+      if (!exhausted) throw new Error("Exhaustion was not recorded");
+
+      await f.finish(running.task.id);
       const limited = await f.store.recordObjectiveLimitState(
         f.objective.id,
-        exhausted.limitState,
+        state,
         exhausted.revision,
         true,
       );
       expect(limited?.status).toBe("limited");
+      expect(limited?.limitState?.summary).toBeUndefined();
       if (!limited) throw new Error("Objective did not become limited");
+
+      const summaryTurn = await f.turn(f.owner.id);
+      const summary =
+        "Progress: implementation done. Open: review. Blockers: budget. Next: raise budget and review.";
+      const recorded = await f.store.updateObjectiveStatus(
+        f.objective.id,
+        { status: "limited", expectedRevision: limited.revision, completionSummary: summary },
+        f.owner.id,
+        {
+          taskId: summaryTurn.task.id,
+          attemptCount: summaryTurn.attempt.attemptNumber,
+          leaseOwner: "summary",
+        },
+      );
+      expect(recorded.limitState?.summary?.text).toContain("Next: raise budget");
+      const events = (await f.store.listTaskEvents(summaryTurn.task.id)).map((event) => event.type);
+      expect(events).toContain("objective.limit-summary-recorded");
+      expect(events).not.toContain("objective.completed");
+      // One summary only.
       await expect(
-        f.store.updateObjectiveStatus(f.objective.id, {
-          budgetLimitMinor: 200,
-          expectedRevision: limited.revision,
-        }),
-      ).rejects.toThrow("final limit summary");
-      await expect(f.store.admitTaskAssignment(f.assignment("still-new"))).rejects.toThrow();
-      const summaryId = limited.limitState?.summaryTaskId;
-      if (!summaryId) throw new Error("Limit summary Task was not named");
-      await f.store.admitTaskAssignment({
-        ...f.assignment(summaryId, true),
-        limitSummaryActivation: true,
-        execution: { limits: { maxReportedTokens: 4000 } },
-      });
-      expect((await f.store.getTaskAssignment(summaryId))?.limitSummaryActivation).toBe(true);
-      await f.store.claimTaskAssignment({ taskId: summaryId, leaseOwner: "summary" });
-      const summaryAttempt = await f.store.createTaskAttempt({
-        taskId: summaryId,
-        attemptNumber: 1,
-        workerProfile: { id: "summary", revision: "1" },
-        workerSnapshot: {},
-        startedAt: new Date().toISOString(),
-      });
-      await f.store.startTask({ taskId: summaryId, startedAt: new Date().toISOString() });
+        f.store.updateObjectiveStatus(
+          f.objective.id,
+          { status: "limited", expectedRevision: recorded.revision, completionSummary: summary },
+          f.owner.id,
+        ),
+      ).rejects.toThrow("already recorded");
+    });
+
+    it("resumes on a higher budget only for an operator, and a new limit drops the summary", async () => {
+      const f = await fixture();
+      const state = {
+        ...spend(110),
+        budgetExhausted: { limitMinor: 100, spentMinor: 110, at: new Date().toISOString() },
+      };
+      const limited = await f.store.recordObjectiveLimitState(
+        f.objective.id,
+        state,
+        f.objective.revision,
+        true,
+      );
+      if (!limited) throw new Error("Objective did not become limited");
+      const summaryTurn = await f.turn(f.owner.id);
       const recorded = await f.store.updateObjectiveStatus(
         f.objective.id,
         {
           status: "limited",
           expectedRevision: limited.revision,
-          completionSummary:
-            "Progress: implementation done. Open: review. Blockers: budget. Next: raise budget and review.",
+          completionSummary: "Progress: done. Open: review. Blockers: budget. Next: raise it.",
         },
         f.owner.id,
-        { taskId: summaryId, attemptCount: 1, leaseOwner: "summary" },
+        {
+          taskId: summaryTurn.task.id,
+          attemptCount: summaryTurn.attempt.attemptNumber,
+          leaseOwner: "summary",
+        },
       );
-      expect(recorded.limitState?.summary?.text).toContain("Next: raise budget");
-      expect((await f.store.listTaskEvents(summaryId)).map((event) => event.type)).toContain(
-        "objective.limit-summary-recorded",
-      );
-      expect((await f.store.listTaskEvents(summaryId)).map((event) => event.type)).not.toContain(
-        "objective.completed",
-      );
-      await f.store.settleTaskAssignment({
-        taskId: summaryId,
-        leaseOwner: "summary",
-        attemptCount: 1,
-        terminalAttempt: { id: summaryAttempt.id, status: "completed" },
-        result: { text: "Summary recorded" },
-      });
+
       await expect(
         f.store.updateObjectiveStatus(
           f.objective.id,
@@ -196,33 +285,25 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       });
       expect(resumed.status).toBe("working");
       expect(resumed.limitState?.summary?.text).toBe(recorded.limitState?.summary?.text);
-      expect((await f.store.listStalledObjectiveOwnerTasks()).map((task) => task.taskId)).toContain(
-        summaryId,
-      );
+
+      await f.finish(summaryTurn.task.id);
       const again = await f.store.recordObjectiveLimitState(
         f.objective.id,
         {
           ...(resumed.limitState ?? {}),
+          ...spend(210),
           budgetExhausted: { limitMinor: 200, spentMinor: 210, at: new Date().toISOString() },
-          reportedSpend: {
-            amountMinor: 210,
-            currency: "USD",
-            unknownAttemptIds: [],
-            observedAt: new Date().toISOString(),
-          },
         },
         resumed.revision,
         true,
       );
-      expect(again?.limitState?.summaryTaskId).not.toBe(summaryId);
+      expect(again?.status).toBe("limited");
       expect(again?.limitState?.summary).toBeUndefined();
     });
 
-    it("persists exhaustion before transitioning when a Task claimed during the drain check", async () => {
+    it("persists exhaustion before transitioning when a turn was running during the drain check", async () => {
       const f = await fixture();
-      await f.store.admitTaskAssignment(f.assignment("claimed-during-sweep"));
-      await f.store.admitTaskAssignment(f.assignment("queued-after-claim"));
-      await f.store.claimTaskAssignment({ taskId: "claimed-during-sweep", leaseOwner: "worker" });
+      const running = await f.turn(f.worker.id, "ship");
       const state = {
         budgetExhausted: { limitMinor: 100, spentMinor: 110, at: new Date().toISOString() },
       };
@@ -234,16 +315,12 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       );
       expect(observed?.status).toBe("working");
       if (!observed) throw new Error("Exhaustion was not recorded");
-      expect(observed?.limitState?.budgetExhausted).toEqual(state.budgetExhausted);
+      expect(observed.limitState?.budgetExhausted).toEqual(state.budgetExhausted);
+      // Nothing was written at the Objective's old revision, so the sweep retries from the new one.
       expect(
-        await f.store.claimTaskAssignment({ taskId: "queued-after-claim", leaseOwner: "late" }),
+        await f.store.recordObjectiveLimitState(f.objective.id, state, f.objective.revision - 1),
       ).toBeUndefined();
-      await f.store.settleTaskAssignment({
-        taskId: "claimed-during-sweep",
-        leaseOwner: "worker",
-        attemptCount: 1,
-        result: { text: "Done" },
-      });
+      await f.finish(running.task.id);
       const limited = await f.store.recordObjectiveLimitState(
         f.objective.id,
         state,
@@ -251,22 +328,6 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         true,
       );
       expect(limited?.status).toBe("limited");
-    });
-
-    it("reserves summary Task IDs for the marked owner activation", async () => {
-      const f = await fixture();
-      await expect(
-        f.store.admitTaskAssignment(f.assignment(`${f.objective.id}:limit-summary:2`)),
-      ).rejects.toThrow("reserved");
-      await expect(
-        f.store.admitTaskAssignment(f.assignment(`${f.objective.id}:limit-summary:other`)),
-      ).rejects.toThrow("reserved");
-      await expect(
-        f.store.admitTaskAssignment({
-          ...f.assignment(`${f.objective.id}:limit-summary:2`),
-          limitSummaryActivation: true,
-        }),
-      ).rejects.toThrow("Invalid limit summary activation");
     });
 
     it("resumes a deadline-limited Objective when an operator moves the deadline", async () => {

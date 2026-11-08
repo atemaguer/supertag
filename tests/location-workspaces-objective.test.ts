@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ObjectiveController } from "../packages/control-plane/src/objective-controller.js";
+import { ControlPlane } from "../packages/control-plane/src/index.js";
 import {
   emptyTagContextPlan,
   type InboundSurfaceEvent,
@@ -11,7 +11,11 @@ import {
   type SurfaceTagAuthorizationSnapshot,
   workspacesForGitHubRepository,
 } from "../packages/core/src/index.js";
-import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
+import {
+  DrizzleStore,
+  FileGatewayCredentialVault,
+  migrateDatabase,
+} from "../packages/store/src/index.js";
 import { createIsolatedPostgresDatabase } from "./support/database.js";
 
 const postgres = process.env["SUPERTAG_POSTGRES_URL"];
@@ -88,12 +92,22 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         delivery: "branch",
       });
       await store.applyWorkspace({ name: "docs", delivery: "patch" });
-      return store;
+      // A Control Plane the fixture never dispatches with: creating an Objective from a surface
+      // turn starts its conversation, so the controller needs its Session handlers.
+      const controlPlane = new ControlPlane({
+        store,
+        credentialVault: new FileGatewayCredentialVault(join(directory, "vault.json")),
+        dispatch: { pollIntervalMs: 1_000_000 },
+      });
+      controlPlane.objectives.activateCoordination({ url: "http://127.0.0.1:3434" });
+      await controlPlane.start();
+      cleanups.push(() => controlPlane.stop());
+      return Object.assign(store, { controlPlane });
     }
 
     /** A verified human surface Task that carries `@SuperTag objective ...`. */
     async function surface(
-      store: DrizzleStore,
+      store: DrizzleStore & { readonly controlPlane: ControlPlane },
       provider: "github" | "slack",
       options: {
         readonly workspaces?: readonly string[];
@@ -102,6 +116,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         readonly runtime?: Pick<SurfaceTagAuthorizationSnapshot, "runtimeActions" | "approvals">;
       } = {},
     ) {
+      const { controlPlane } = store;
       const at = new Date().toISOString();
       const tag = await store.createTag({ name: `lead-${randomUUID().slice(0, 8)}` });
       const account = await store.saveSurfaceAccount({
@@ -209,12 +224,13 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       });
       const running = await store.findTaskById(task.id);
       if (!running) throw new Error("Missing Task");
-      const controller = new ObjectiveController(store, undefined);
-      controller.activateCoordination({ url: "http://127.0.0.1:3434" });
+      const controller = controlPlane.objectives;
       const capability = await controller.surfaceCoordination(running, attempt);
-      const caller = await controller.authenticate(capability.token);
+      if (!capability) throw new Error("Missing Attempt coordination");
+      const caller = await controller.authenticateExecution(capability.token);
+      // Creating an Objective from a surface turn also starts its own conversation.
       const create = (input: Record<string, unknown> = {}) =>
-        controller.command(
+        controller.commandAsAttempt(
           "create_objective",
           { outcome: "Ship the search page", ...input },
           caller,
@@ -223,10 +239,9 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           workspaces: string[];
           runtimeActions: string[];
           warnings: string[];
+          started?: { taskId: string };
         }>;
-      const start = () =>
-        controller.command("start_objective", {}, caller) as Promise<{ taskId: string }>;
-      return { tag, route, task: running, create, start };
+      return { tag, route, task: running, create };
     }
 
     it("gives an Objective created from a location the runtime actions its Tag may use there", async () => {
@@ -249,17 +264,19 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       const objective = await f.create();
       expect(objective.runtimeActions).toEqual(["commands:execute", "files:write"]);
       expect(objective.warnings.join("\n")).not.toContain("runtime actions");
-      // The owner's start Task inherits both, and the location's approval still holds it.
-      const started = await f.start();
-      const task = await store.findTaskById(started.taskId);
+      // The first turn of the Objective's own conversation carries the Objective's runtime
+      // actions. The location's own approval requirement does not follow: the Objective's
+      // conversation is not a conversation at that location, so only the owner Tag's Permission
+      // Sets gate its actions.
+      const startTaskId = objective.started?.taskId;
+      if (startTaskId === undefined) throw new Error(objective.warnings.join("\n"));
+      const task = await store.findTaskById(startTaskId);
+      expect(task?.objectiveId).toBe(objective.id);
       expect(task?.authorizationSnapshot.runtimeActions).toEqual([
         "commands:execute",
         "files:write",
       ]);
-      expect(task?.authorizationSnapshot.approvals).toEqual([
-        expect.objectContaining({ target: "runtime", action: "files:write" }),
-      ]);
-      expect((await store.getTaskAssignment(started.taskId))?.approval).toBe("pending");
+      expect(task?.authorizationSnapshot.approvals).toBeUndefined();
     });
 
     it("warns when the Tag may use no runtime actions at the location", async () => {

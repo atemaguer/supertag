@@ -11,7 +11,7 @@ interface TagSpec {
   readonly roles: readonly string[];
   readonly workerHosts: readonly string[];
   readonly locations: readonly Record<string, unknown>[];
-  readonly acceptsMessagesFrom: readonly { tag: string; types: readonly string[] }[];
+  readonly acceptsMessagesFrom: readonly string[];
 }
 
 const header = (kind: string, name: string) =>
@@ -49,9 +49,7 @@ const organization = `${header("Tag", "builder")}spec:
       contextSets: [eng-guidelines]
     - provider: lark
       chatId: oc_build
-  acceptsMessagesFrom:
-    - tag: reviewer
-      types: [message, result.submitted]
+  acceptsMessagesFrom: [reviewer]
 ---
 ${header("Tag", "reviewer")}spec:
   roles: [Engineer]
@@ -59,9 +57,7 @@ ${header("Tag", "reviewer")}spec:
     - provider: slack
       channelId: C0REVIEW
       contextSets: [eng-guidelines]
-  acceptsMessagesFrom:
-    - tag: builder
-      types: [delegation.requested]
+  acceptsMessagesFrom: [builder]
 ---
 ${role}---
 ${sets}`;
@@ -163,11 +159,9 @@ describe("organization manifests", () => {
           contextSets: ["eng-guidelines"],
         },
       ],
-      acceptsMessagesFrom: [{ tag: "reviewer", types: ["message", "result.submitted"] }],
+      acceptsMessagesFrom: ["reviewer"],
     });
-    expect((await tag("reviewer")).acceptsMessagesFrom).toEqual([
-      { tag: "builder", types: ["delegation.requested"] },
-    ]);
+    expect((await tag("reviewer")).acceptsMessagesFrom).toEqual(["builder"]);
 
     expect(await run("diff", "-f", path)).toBe(
       "No changes. The Control Plane matches the input.\nPlan: 0 to create, 0 to update, 0 to delete, 0 conflicts.\n",
@@ -236,9 +230,7 @@ ${header("Tag", "builder")}spec:
       contextSets: [missing-context]
 ---
 ${header("Tag", "reviewer")}spec:
-  acceptsMessagesFrom:
-    - tag: builder
-      types: [gossip]
+  acceptsMessagesFrom: [missing-sender]
 `,
     );
     const failure = main(["apply", "-f", path]);
@@ -246,7 +238,7 @@ ${header("Tag", "reviewer")}spec:
     await failure.catch((error: Error) => {
       expect(error.message).toContain("references Role Missing Role");
       expect(error.message).toContain("references Context Set missing-context");
-      expect(error.message).toContain("unknown message types: gossip");
+      expect(error.message).toContain("references Tag missing-sender");
     });
     expect(await exists("/api/v1/context-sets/eng-guidelines")).toBe(false);
     expect(await exists("/api/v1/tags/builder")).toBe(false);
@@ -362,26 +354,17 @@ ${header("Tag", "reviewer")}spec:
       "replace.yaml",
       `${header("Tag", "builder")}spec:
   roles: [Engineer]
-  acceptsMessagesFrom:
-    - tag: planner
-      types: [delegation.requested, message]
+  acceptsMessagesFrom: [planner]
 `,
     );
     await run("apply", "-f", replace);
-    expect((await tag("builder")).acceptsMessagesFrom).toEqual([
-      { tag: "planner", types: ["delegation.requested", "message"] },
-    ]);
+    expect((await tag("builder")).acceptsMessagesFrom).toEqual(["planner"]);
     // A grant made with the CLI belongs to cli and survives the next apply.
-    await run("grant", "mailbox", "builder", "--sender", "reviewer", "--type", "message");
+    await run("grant", "mailbox", "builder", "--sender", "reviewer");
     await run("apply", "-f", replace);
-    expect((await tag("builder")).acceptsMessagesFrom).toEqual([
-      { tag: "planner", types: ["delegation.requested", "message"] },
-      { tag: "reviewer", types: ["message"] },
-    ]);
+    expect([...(await tag("builder")).acceptsMessagesFrom].sort()).toEqual(["planner", "reviewer"]);
     // The reverse grant, where builder is the sender, is not builder's to manage.
-    expect((await tag("reviewer")).acceptsMessagesFrom).toEqual([
-      { tag: "builder", types: ["delegation.requested"] },
-    ]);
+    expect((await tag("reviewer")).acceptsMessagesFrom).toEqual(["builder"]);
   });
 
   it("exports apply-able YAML that diffs as unchanged", async () => {

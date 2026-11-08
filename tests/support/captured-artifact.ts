@@ -27,14 +27,13 @@ export async function captureTestArtifact(
     digest,
     sizeBytes: bytes.length,
   });
-  const assignment = await store.getTaskAssignment(taskId);
   return store.commitCapturedArtifact({
     operationId: randomUUID(),
     taskId,
     attemptId: attempt.id,
     tagId: task.tagId,
     sessionId: task.sessionId,
-    ...(assignment ? { objectiveId: assignment.objectiveId } : {}),
+    ...(task.objectiveId === undefined ? {} : { objectiveId: task.objectiveId }),
     title: "Test output",
     kind: "output",
     entries: [

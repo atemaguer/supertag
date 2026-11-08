@@ -1080,7 +1080,19 @@ export interface SettleSurfaceFailureInput {
   readonly responseText: string;
   readonly failedAt: string;
   readonly sessionBlockReason?: string;
+  /**
+   * What the Worker reported as the source of the failure, never inferred from diagnostic text.
+   * Recorded on the Attempt's and the Task's outcome so operator views can explain the failure.
+   */
+  readonly failureKind?: TaskFailureKind;
 }
+
+/** The source of a failed Task Attempt, as the Worker reported it. */
+export type TaskFailureKind =
+  | "harness"
+  | "workspace-setup"
+  | "workspace-integrity"
+  | "budget-exhausted";
 
 export interface RetryInboundEventInput {
   readonly inboundEventId: string;

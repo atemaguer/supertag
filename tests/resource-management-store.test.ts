@@ -290,22 +290,8 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       });
       await store.activateTagContextSet({ contextSetId: contextSet.id, tagRouteId: route.id });
       await store.bindTagWorkerHost(tag.id, "host-a");
-      await store.setTagMessagingGrant({
-        senderTagId: peer.id,
-        recipientTagId: tag.id,
-        messageTypes: ["message"],
-      });
-      await store.setTagMessagingGrant({
-        senderTagId: tag.id,
-        recipientTagId: peer.id,
-        messageTypes: ["message"],
-      });
-      await store.createTagMailboxCredential({
-        id: randomUUID(),
-        tagId: tag.id,
-        tokenHash: randomUUID(),
-        createdAt: new Date().toISOString(),
-      });
+      await store.setTagMessagingGrants(tag.id, [peer.id]);
+      await store.setTagMessagingGrants(peer.id, [tag.id]);
 
       const retired = await store.retireTag(tag.id);
       expect(retired).toMatchObject({ id: tag.id, name: "release", status: "retired" });
@@ -344,14 +330,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         }),
       ).rejects.toThrow("retired");
       await expect(store.assignRole({ roleId: role.id, tagId: tag.id })).rejects.toThrow();
-      await expect(
-        store.createTagMailboxCredential({
-          id: randomUUID(),
-          tagId: tag.id,
-          tokenHash: randomUUID(),
-          createdAt: new Date().toISOString(),
-        }),
-      ).rejects.toThrow();
+      await expect(store.setTagMessagingGrants(peer.id, [tag.id])).rejects.toThrow("Active Tag");
 
       // The name is free: a new Tag gets a new id, and name lookups prefer it.
       const successor = await store.createTag({ name: "release" });
@@ -386,11 +365,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         ownerTagId: lead.id,
         outcome: "Ship.",
       });
-      await store.setTagMessagingGrant({
-        senderTagId: lead.id,
-        recipientTagId: retired.id,
-        messageTypes: ["message"],
-      });
+      await store.setTagMessagingGrants(retired.id, [lead.id]);
       await store.createAuthKey({
         name: "joins-gone",
         tagIds: [retired.id],
@@ -406,22 +381,20 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         store.createObjective({ id: randomUUID(), ownerTagId: retired.id, outcome: "Ship." }),
       ).rejects.toThrow("Active Tag");
       await expect(
-        store.enqueueTagMessage({
+        store.deliverTagMessage({
           senderTagId: lead.id,
           recipientTagId: retired.id,
           objectiveId: objective.id,
-          type: "message",
-          body: { text: "hello" },
-          idempotencyKey: randomUUID(),
+          text: "hello",
+          hops: 0,
         }),
       ).rejects.toThrow("Active Tag");
+      expect(await store.mayMessage(lead.id, retired.id)).toBe(false);
       await expect(
         store.createTeam({
           id: randomUUID(),
-          objectiveId: objective.id,
-          name: "Team",
-          leadTagId: retired.id,
-          memberTagIds: [],
+          name: `Team ${randomUUID()}`,
+          memberTagIds: [retired.id],
           maxConcurrency: 1,
         }),
       ).rejects.toThrow("Active Tag");
@@ -456,15 +429,15 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           applySet: "ops",
           fields: {
             "spec.outcome": { manager: "ops", value: "Keep it." },
-            "spec.teams[crew]": {
+            "spec.team": {
               manager: "ops",
-              value: { lead: "keeper", members: [], maxConcurrency: 1 },
+              value: { name: "crew", members: ["keeper"], maxConcurrency: 1 },
             },
           },
         });
       expect(await store.findResourceManagement("Objective", "upkeep")).toMatchObject({
         applySet: "ops",
-        fields: { "spec.teams[crew]": { manager: "ops" } },
+        fields: { "spec.team": { manager: "ops" } },
       });
       const done = await store.getObjective("done");
       await store.updateObjectiveStatus("done", {

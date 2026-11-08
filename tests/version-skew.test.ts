@@ -200,7 +200,7 @@ describe("the Control Plane version header", () => {
     const response = await fetch(`${url}/api/v1/tag-messaging/objectives`, {
       method: "POST",
       headers: { authorization: `Bearer ${ADMIN}`, "content-type": "application/json" },
-      body: JSON.stringify({ outcome: "Ship it", ownerTagId: "t", start: true, rocket: 1 }),
+      body: JSON.stringify({ outcome: "Ship it", ownerTagId: "t", rocket: 1 }),
     });
     expect(response.status).toBe(400);
     expect(response.headers.get("SuperTag-Version")).toBe(SUPERTAG_VERSION);

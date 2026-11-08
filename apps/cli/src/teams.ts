@@ -124,12 +124,19 @@ export async function runTeamCommand(
     : `team/${terminalText(updated.name)} updated (revision ${updated.revision}).\n`;
 }
 
-/** A Team by name, or by ID. */
+/**
+ * A Team by name, or by ID. A Team name may contain spaces, which is not a valid identifier, so
+ * a refused lookup falls back to matching the name in the listing as a missing one does.
+ */
 async function findTeam(client: ControlPlaneClient, name: string): Promise<Team> {
   try {
     return await client.request<Team>(`${TEAMS}/${encodeURIComponent(name)}`);
   } catch (error) {
-    if (!(error instanceof ControlPlaneRequestError) || error.status !== 404) throw error;
+    if (
+      !(error instanceof ControlPlaneRequestError) ||
+      (error.status !== 404 && error.status !== 400)
+    )
+      throw error;
   }
   const { items } = await client.request<{ readonly items: readonly Team[] }>(TEAMS);
   const team = items.find((candidate) => candidate.name === name);

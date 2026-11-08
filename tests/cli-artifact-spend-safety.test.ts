@@ -129,13 +129,6 @@ it("filters unpriced models and currency fields in spend output", () => {
       {
         key: "safe",
         attempts: 1,
-        postTriggered: {
-          attempts: 1,
-          reportedCostByCurrency: { [`USD${control}`]: 45 },
-          unknownCostAttempts: 0,
-          reportedTokens: null,
-          unknownTokenAttempts: 0,
-        },
         reportedCostByCurrency: { [`USD${control}`]: 123 },
         unknownCostAttempts: 1,
         unpricedModels: { [`model${control}`]: 1 },
@@ -148,8 +141,7 @@ it("filters unpriced models and currency fields in spend output", () => {
   expect(output).toContain("no published price for model 2J  forged");
   expect(output).toContain("123 USD 2J  forged minor units");
   expect(output).toContain("100 EUR 2J  forged minor units");
-  expect(output).toContain("45 USD 2J  forged minor units");
   const lines = output.trimEnd().split("\n");
-  expect(lines).toHaveLength(2);
+  expect(lines).toHaveLength(1);
   for (const line of lines) expect(line).not.toMatch(/[\p{Cc}\p{Cf}]/u);
 });

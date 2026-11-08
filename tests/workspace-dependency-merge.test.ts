@@ -1,15 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { dependencyWorkspaceBranches } from "../packages/control-plane/src/dependency-branches.js";
-import { ObjectiveController } from "../packages/control-plane/src/objective-controller.js";
+import { sessionWorkspaceBranches } from "../packages/control-plane/src/dependency-branches.js";
+import { ControlPlane } from "../packages/control-plane/src/index.js";
 import {
-  type TaskAssignment,
   type TaskNamedWorkspacePlan,
-  taskWorkspaceBranch,
   workspaceDeliveryEvidence,
 } from "../packages/core/src/index.js";
 import { createClaudeCodeWorker } from "../packages/runtime/harnesses/claude-code/src/index.js";
@@ -20,7 +18,11 @@ import {
   WorkspaceEnvironmentResolver,
   WorkspaceResolverRegistry,
 } from "../packages/runtime/sdk/src/index.js";
-import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
+import {
+  DrizzleStore,
+  FileGatewayCredentialVault,
+  migrateDatabase,
+} from "../packages/store/src/index.js";
 import { durableTestWorklet } from "./support/durable-test-worklet.js";
 import { createRepository, git, isolateGitConfiguration } from "./support/git-repository.js";
 
@@ -62,7 +64,7 @@ describe("Dependency branch merges in Workspace setup", () => {
     version: 1,
     status: "workspace",
     workspace: "app",
-    branch: taskWorkspaceBranch("objective-1", taskId),
+    branch: "supertag/objective-1/dependent",
     delivery: "branch",
     ...overrides,
   });
@@ -317,7 +319,7 @@ describe("Dependency commits in a host-managed clone", () => {
           status: "workspace",
           workspace: "app",
           source: pathToFileURL(origin).href,
-          branch: taskWorkspaceBranch("objective-1", taskId),
+          branch: "supertag/objective-1/dependent",
           delivery: "branch",
           ...(dependencyBranches === undefined ? {} : { dependencyBranches }),
         } satisfies TaskNamedWorkspacePlan,
@@ -363,24 +365,24 @@ describe("Dependency commits in a host-managed clone", () => {
   });
 });
 
-describe("Dependent Tasks in an Objective", () => {
+describe("Later Tasks of a work Session", () => {
   const cleanups: (() => Promise<unknown> | unknown)[] = [];
   afterEach(async () => {
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   });
 
   /**
-   * An Objective whose harness writes each Task's files into its Task worktree, and records the
-   * files and commit each Task saw when its harness started.
+   * An Objective whose harness writes each turn's files into that Task's worktree, and records
+   * the files and commit the harness saw when it started.
    */
   async function fixture() {
     cleanups.push(await isolateGitConfiguration());
     const checkout = await createRepository();
-    const root = await mkdtemp(join(tmpdir(), "supertag-dependency-objective-"));
+    const root = await mkdtemp(join(tmpdir(), "supertag-session-branches-"));
     cleanups.push(() => rm(checkout, { recursive: true, force: true }));
     cleanups.push(() => rm(root, { recursive: true, force: true }));
-    const seen = new Map<string, { files: string; head: string }>();
-    const writes = new Map<string, Record<string, string>>();
+    const seen: { files: string; head: string }[] = [];
+    const writes: Record<string, string>[] = [];
     const worker = createClaudeCodeWorker({
       workspace: checkout,
       workspaceResolvers: new WorkspaceResolverRegistry([
@@ -390,18 +392,17 @@ describe("Dependent Tasks in an Objective", () => {
         }),
       ]),
       runner: async function* (request: { workspace: string }) {
-        // Task ids start with their label, and so does each Task worktree's directory name.
-        const label = basename(request.workspace).split("-")[0] as string;
-        seen.set(label, {
+        const turn = seen.length;
+        seen.push({
           files: git(request.workspace, "ls-files"),
           head: git(request.workspace, "rev-parse", "HEAD"),
         });
-        for (const [path, content] of Object.entries(writes.get(label) ?? {}))
+        for (const [path, content] of Object.entries(writes[turn] ?? {}))
           await writeFile(join(request.workspace, path), content);
         yield { type: "output.message" as const, text: "Change: Write the files" };
       } as never,
     });
-    const directory = await mkdtemp(join(tmpdir(), "supertag-dependency-state-"));
+    const directory = await mkdtemp(join(tmpdir(), "supertag-session-state-"));
     cleanups.push(() => rm(directory, { recursive: true, force: true }));
     const url = `file:${join(directory, "state.db")}`;
     await migrateDatabase({ url });
@@ -411,107 +412,166 @@ describe("Dependent Tasks in an Objective", () => {
     await store.applyWorkspace({ name: "app", ref: "main", delivery: "branch" });
     const owner = await store.createTag({ name: `owner-${randomUUID()}` });
     const member = await store.createTag({ name: `member-${randomUUID()}` });
-    for (const tag of [owner, member]) await store.bindTagWorkerHost(tag.id, "host");
+    // The owner runs nowhere, so its own conversation's turn stays held and the test drives it.
+    await store.bindTagWorkerHost(owner.id, "owner-host");
+    await store.bindTagWorkerHost(member.id, "host");
+    const team = await store.createTeam({
+      id: randomUUID(),
+      name: `delivery-${randomUUID()}`,
+      memberTagIds: [owner.id, member.id],
+      maxConcurrency: 2,
+    });
     const objective = await store.createObjective({
       id: `objective-${randomUUID().slice(0, 8)}`,
       ownerTagId: owner.id,
+      teamId: team.id,
       outcome: "Ship the change.",
       workspaces: ["app"],
     });
-    const team = await store.createTeam({
-      id: randomUUID(),
-      objectiveId: objective.id,
-      name: "Delivery",
-      leadTagId: owner.id,
-      memberTagIds: [member.id],
-      maxConcurrency: 2,
-    });
-    const controller = new ObjectiveController(
+    const controlPlane = new ControlPlane({
       store,
-      durableTestWorklet(new LocalWorklet("w", "host", [worker], { workspaces: ["app"] })),
-    );
+      credentialVault: new FileGatewayCredentialVault(join(directory, "vault.json")),
+      worklet: durableTestWorklet(new LocalWorklet("w", "host", [worker], { workspaces: ["app"] })),
+      reply: async () => undefined,
+      dispatch: { pollIntervalMs: 20 },
+    });
+    const controller = controlPlane.objectives;
     controller.activateCoordination({ url: "http://127.0.0.1:1" });
-    cleanups.push(() => controller.stop());
-    const assign = async (
-      label: string,
-      files: Record<string, string>,
-      dependencies: string[] = [],
-    ) => {
-      writes.set(label, files);
-      return (await controller.command("assign_task", {
-        objectiveId: objective.id,
-        taskId: `${label}-${randomUUID().slice(0, 8)}`,
-        teamId: team.id,
-        assignedTagId: member.id,
-        instruction: "Write the files",
-        acceptanceCriteria: ["Written"],
-        dependencies,
-      })) as TaskAssignment;
-    };
-    const settled = (taskId: string) =>
-      eventually(async () => {
-        const current = await store.getTaskAssignment(taskId);
-        return current && ["submitted", "failed"].includes(current.status) ? current : undefined;
+    await controlPlane.start();
+    cleanups.push(() => controlPlane.stop());
+    /** One running Attempt of the Objective's own conversation, as a Worker would hold it. */
+    const ownerTurn = async (taskId: string) => {
+      const task = await store.findTaskById(taskId);
+      if (!task?.inboundEventId) throw new Error("The Objective's turn has no event");
+      // The dispatcher also tries this held turn, so claim it as soon as it releases the lease.
+      const claimed = await eventually(async () =>
+        store.claimDueInboundEvent({
+          inboundEventId: task.inboundEventId as string,
+          leaseOwner: "session-branches",
+          now: new Date().toISOString(),
+          leaseExpiresAt: new Date(Date.now() + 300_000).toISOString(),
+        }),
+      );
+      await store.startTask({ taskId, startedAt: new Date().toISOString() });
+      const attempt = await store.createTaskAttempt({
+        taskId,
+        attemptNumber: claimed.attemptCount,
+        workerProfile: { id: "default", revision: "1" },
+        workerSnapshot: { workerHostId: "owner-host" },
+        startedAt: new Date().toISOString(),
       });
-    const accept = (taskId: string) =>
-      store.reviewTaskAssignment(taskId, owner.id, true, "Accepted the delivered change");
+      const running = await store.findTaskById(taskId);
+      if (!running) throw new Error("Missing owner Task");
+      const capability = await controller.surfaceCoordination(running, attempt);
+      if (!capability) throw new Error("Missing owner coordination");
+      const caller = await controller.authenticateExecution(capability.token);
+      /** Ends the turn, so the conversation can take its next one. */
+      const end = async () => {
+        await store.settleSurfaceAttempt({
+          inboundEventId: task.inboundEventId as string,
+          leaseOwner: "session-branches",
+          workerId: "owner",
+          responseText: "Started the work",
+          completedAt: new Date().toISOString(),
+          now: new Date().toISOString(),
+          taskId,
+          attemptId: attempt.id,
+          status: "completed",
+          outcome: {},
+        });
+      };
+      return { caller, end };
+    };
+    const { taskId: ownerTaskId } = await controlPlane.startObjective(objective.id);
+    const usedOwnerTasks = new Set([ownerTaskId]);
+    const start = async (files: Record<string, string>) => {
+      writes.push(files);
+      const turn = await ownerTurn(ownerTaskId);
+      const started = (await controller.commandAsAttempt(
+        "start_session",
+        { title: "Write the files", instruction: "Write the files", tag: member.name },
+        turn.caller,
+      )) as { sessionId: string };
+      await turn.end();
+      return started;
+    };
+    /**
+     * The work Session's report is the Objective's next turn; it continues the Session from
+     * there, as a review of the delivered work does.
+     */
+    const next = async (sessionId: string, files: Record<string, string>) => {
+      writes.push(files);
+      // The report turn runs and ends first; the Session is continued from the turn after it.
+      const reportTaskId = await eventually(async () => {
+        const session = await store.findObjectiveOwnerSession(objective.id);
+        if (!session) return undefined;
+        return (await store.listTasks({ sessionId: session.id })).find(
+          (task) => !usedOwnerTasks.has(task.id) && task.status === "pending",
+        )?.id;
+      });
+      usedOwnerTasks.add(reportTaskId);
+      await (await ownerTurn(reportTaskId)).end();
+      const { taskId } = await controlPlane.messageObjective({
+        objectiveId: objective.id,
+        text: "Carry-on",
+        operatorId: "operator",
+        idempotencyKey: randomUUID(),
+      });
+      usedOwnerTasks.add(taskId);
+      const turn = await ownerTurn(taskId);
+      await controller.commandAsAttempt(
+        "continue_session",
+        { sessionId, message: "Write the files" },
+        turn.caller,
+      );
+      await turn.end();
+    };
+    const tasks = (sessionId: string) =>
+      store.listTasks({ tagId: member.id, sessionId, limit: 100 });
+    const settled = (sessionId: string, count: number) =>
+      eventually(async () => {
+        const open = await tasks(sessionId);
+        return open.length === count &&
+          open.every((task) => ["completed", "failed"].includes(task.status))
+          ? open.toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))
+          : undefined;
+      });
     const delivery = async (taskId: string) =>
       (await store.listTaskEvents(taskId))
         .map((event) => workspaceDeliveryEvidence(event.payload))
         .findLast((evidence) => evidence !== undefined);
-    return { checkout, store, controller, seen, assign, settled, accept, delivery };
+    return { checkout, store, seen, start, next, settled, delivery };
   }
 
-  it("starts a Task whose dependencies are accepted from a merge of their delivered branches", async () => {
+  it("starts a work Session's next Task from the branch its earlier Task delivered", async () => {
     const f = await fixture();
-    const a = await f.assign("a", { "a.txt": "A\n" });
-    const b = await f.assign("b", { "b.txt": "B\n" });
-    const c = await f.assign("c", { "c.txt": "C\n" }, [a.taskId, b.taskId]);
-    f.controller.start();
-    for (const task of [a, b]) {
-      expect((await f.settled(task.taskId)).status).toBe("submitted");
-      await f.accept(task.taskId);
-    }
-    const [deliveredA, deliveredB] = [await f.delivery(a.taskId), await f.delivery(b.taskId)];
+    const { sessionId } = await f.start({ "a.txt": "A\n" });
+    const [first] = await f.settled(sessionId, 1);
+    expect(first?.status).toBe("completed");
+    const deliveredA = await f.delivery(first?.id as string);
     expect(deliveredA?.head).not.toBe(deliveredA?.base);
-    expect(deliveredB?.head).not.toBe(deliveredB?.base);
 
-    expect((await f.settled(c.taskId)).status).toBe("submitted");
-    // The harness started in a worktree that already held both dependencies' work.
-    const started = f.seen.get("c");
-    expect(started?.files.split("\n")).toEqual(
-      expect.arrayContaining(["README.md", "a.txt", "b.txt"]),
+    await f.next(sessionId, { "b.txt": "B\n" });
+    const [, second] = await f.settled(sessionId, 2);
+    expect(second?.status).toBe("completed");
+    // The harness started in a worktree that already held the Session's earlier work.
+    const started = f.seen[1];
+    expect(started?.files.split("\n")).toEqual(expect.arrayContaining(["README.md", "a.txt"]));
+    expect(() =>
+      git(
+        f.checkout,
+        "merge-base",
+        "--is-ancestor",
+        deliveredA?.head as string,
+        started?.head as string,
+      ),
+    ).not.toThrow();
+    // The second Task delivers only its own change, measured from where it started.
+    const deliveredB = await f.delivery(second?.id as string);
+    expect(deliveredB).toMatchObject({ base: started?.head, changedFiles: 1 });
+    expect(git(f.checkout, "diff", "--name-only", `${deliveredB?.base}..${deliveredB?.head}`)).toBe(
+      "b.txt",
     );
-    for (const head of [deliveredA?.head, deliveredB?.head])
-      expect(() =>
-        git(f.checkout, "merge-base", "--is-ancestor", head as string, started?.head as string),
-      ).not.toThrow();
-    // C delivers only its own change, measured from the merge it started at.
-    const deliveredC = await f.delivery(c.taskId);
-    expect(deliveredC).toMatchObject({ base: started?.head, changedFiles: 1 });
-    expect(git(f.checkout, "diff", "--name-only", `${deliveredC?.base}..${deliveredC?.head}`)).toBe(
-      "c.txt",
-    );
-  }, 60_000);
-
-  it("fails a dependent Task before its harness starts when the dependencies conflict", async () => {
-    const f = await fixture();
-    const a = await f.assign("a", { "shared.txt": "A\n" });
-    const b = await f.assign("b", { "shared.txt": "B\n" });
-    const c = await f.assign("c", { "c.txt": "C\n" }, [a.taskId, b.taskId]);
-    f.controller.start();
-    for (const task of [a, b]) {
-      expect((await f.settled(task.taskId)).status).toBe("submitted");
-      await f.accept(task.taskId);
-    }
-    const failed = await f.settled(c.taskId);
-    expect(failed.status).toBe("failed");
-    expect(f.seen.has("c")).toBe(false);
-    expect(failed.result).toMatchObject({ failureKind: "workspace-setup" });
-    expect(String(failed.result?.["error"])).toContain(
-      `Merging dependency ${b.taskId} (branch ${taskWorkspaceBranch(failed.objectiveId, b.taskId)} at`,
-    );
-    expect(String(failed.result?.["error"])).toContain("conflicts in shared.txt");
   }, 60_000);
 });
 
@@ -525,7 +585,7 @@ async function eventually<T>(read: () => Promise<T | undefined>, timeoutMs = 30_
   }
 }
 
-describe("Dependency branches at dispatch", () => {
+describe("Work Session branches at dispatch", () => {
   const head = (digit: string) => digit.repeat(40);
   const progress = (attemptId: string, branch: string, base: string, tip: string) => ({
     attemptId,
@@ -541,83 +601,84 @@ describe("Dependency branches at dispatch", () => {
       },
     },
   });
+  /** The Tasks of one work Session, oldest first, with the events each Attempt recorded. */
   const store = (
-    tasks: Record<
-      string,
-      {
-        status: string;
-        workspace?: string;
-        dependencies?: string[];
-        reviewedAttemptId?: string;
-        events?: ReturnType<typeof progress>[];
-      }
-    >,
+    tasks: {
+      id: string;
+      workspace?: string;
+      createdAt: string;
+      events?: ReturnType<typeof progress>[];
+    }[],
   ) => ({
-    getTaskAssignment: async (taskId: string) => {
-      const task = tasks[taskId];
-      return task === undefined
-        ? undefined
-        : ({
-            taskId,
-            status: task.status,
-            dependencies: task.dependencies ?? [],
-            result:
-              task.reviewedAttemptId === undefined
-                ? null
-                : { reviewedAttemptId: task.reviewedAttemptId },
-          } as unknown as TaskAssignment);
-    },
-    findTaskById: async (taskId: string) =>
-      ({
-        id: taskId,
-        workspacePlan: {
-          version: 1,
-          status: "workspace",
-          workspace: tasks[taskId]?.workspace ?? "app",
-          branch: `supertag/o/${taskId}`,
-          delivery: "branch",
-        },
-      }) as never,
-    listTaskEvents: async (taskId: string) => (tasks[taskId]?.events ?? []) as never,
+    // The store lists a Session's Tasks newest first.
+    listTasks: async () =>
+      tasks.toReversed().map(
+        (task) =>
+          ({
+            id: task.id,
+            tagId: "tag",
+            sessionId: "session",
+            createdAt: task.createdAt,
+            workspacePlan: {
+              version: 1,
+              status: "workspace",
+              workspace: task.workspace ?? "app",
+              branch: `supertag/session/${task.id}`,
+              delivery: "branch",
+            },
+          }) as never,
+      ),
+    listTaskEvents: async (taskId: string) =>
+      (tasks.find((task) => task.id === taskId)?.events ?? []) as never,
   });
+  const current = {
+    id: "c",
+    tagId: "tag",
+    sessionId: "session",
+    createdAt: "2026-01-04T00:00:00.000Z",
+    workspacePlan: {
+      version: 1,
+      status: "workspace",
+      workspace: "app",
+      branch: "supertag/session/c",
+      delivery: "branch",
+    },
+  } as never;
   const plan = {
     version: 1,
     status: "workspace",
     workspace: "app",
-    branch: "supertag/o/c",
+    branch: "supertag/session/c",
     delivery: "branch",
   } as const;
 
-  it("names each accepted dependency's delivered head from its reviewed Attempt, in order", async () => {
-    const branches = await dependencyWorkspaceBranches(
-      store({
-        b: {
-          status: "accepted",
-          reviewedAttemptId: "b-2",
+  it("starts from the latest earlier Task of the Session that delivered commits", async () => {
+    const branches = await sessionWorkspaceBranches(
+      store([
+        {
+          id: "a",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          events: [progress("a-1", "supertag/session/a", head("0"), head("4"))],
+        },
+        {
+          id: "b",
+          createdAt: "2026-01-02T00:00:00.000Z",
           events: [
-            progress("b-1", "supertag/o/b", head("0"), head("1")),
-            progress("b-2", "supertag/o/b", head("0"), head("2")),
-            progress("b-3", "supertag/o/b", head("0"), head("3")),
+            progress("b-1", "supertag/session/b", head("0"), head("1")),
+            progress("b-2", "supertag/session/b", head("0"), head("2")),
           ],
         },
-        a: {
-          status: "accepted",
-          reviewedAttemptId: "a-1",
-          events: [progress("a-1", "supertag/o/a", head("0"), head("4"))],
-        },
-      }),
-      ["b", "a"],
+      ]),
+      current,
       plan,
     );
-    expect(branches).toEqual([
-      { taskId: "b", branch: "supertag/o/b", head: head("2") },
-      { taskId: "a", branch: "supertag/o/a", head: head("4") },
-    ]);
+    // Newest first: the latest delivering Task already holds every earlier edit.
+    expect(branches).toEqual([{ taskId: "b", branch: "supertag/session/b", head: head("2") }]);
   });
 
-  it("uses a dependency's allocated branch from its Worker manifest", async () => {
-    const branch = "supertag/o/a-deadbeef";
-    const f = store({ a: { status: "accepted", reviewedAttemptId: "a-1" } });
+  it("uses the branch the Worker allocated in its runtime-input manifest", async () => {
+    const branch = "supertag/session/a-deadbeef";
+    const f = store([{ id: "a", createdAt: "2026-01-01T00:00:00.000Z" }]);
     f.listTaskEvents = async () =>
       [
         {
@@ -638,32 +699,35 @@ describe("Dependency branches at dispatch", () => {
         },
         progress("a-1", branch, head("0"), head("4")),
       ] as never;
-    expect(await dependencyWorkspaceBranches(f, ["a"], plan)).toEqual([
+    expect(await sessionWorkspaceBranches(f, current, plan)).toEqual([
       { taskId: "a", branch, head: head("4") },
     ]);
   });
 
-  it("passes through a dependency that delivered nothing and skips other Workspaces and unaccepted Tasks", async () => {
-    const branches = await dependencyWorkspaceBranches(
-      store({
-        empty: { status: "accepted", dependencies: ["a", "other", "open"] },
-        a: {
-          status: "accepted",
-          events: [progress("a-1", "supertag/o/a", head("0"), head("4"))],
+  it("skips a Task that delivered nothing, one in another Workspace, and the Task itself", async () => {
+    const branches = await sessionWorkspaceBranches(
+      store([
+        {
+          id: "a",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          events: [progress("a-1", "supertag/session/a", head("0"), head("4"))],
         },
-        other: {
-          status: "accepted",
+        {
+          id: "other",
           workspace: "docs",
-          events: [progress("o-1", "supertag/o/other", head("0"), head("5"))],
+          createdAt: "2026-01-02T00:00:00.000Z",
+          events: [progress("o-1", "supertag/session/other", head("0"), head("5"))],
         },
-        open: {
-          status: "submitted",
-          events: [progress("p-1", "supertag/o/open", head("0"), head("6"))],
+        { id: "asked", createdAt: "2026-01-03T00:00:00.000Z" },
+        {
+          id: "c",
+          createdAt: "2026-01-04T00:00:00.000Z",
+          events: [progress("c-1", "supertag/session/c", head("0"), head("9"))],
         },
-      }),
-      ["empty", "a"],
+      ]),
+      current,
       plan,
     );
-    expect(branches).toEqual([{ taskId: "a", branch: "supertag/o/a", head: head("4") }]);
+    expect(branches).toEqual([{ taskId: "a", branch: "supertag/session/a", head: head("4") }]);
   });
 });

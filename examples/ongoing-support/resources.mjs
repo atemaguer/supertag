@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 export const objectiveId = "ongoing-support";
+export const teamId = "support-team";
 export const resource = (kind, name, spec) => ({
   apiVersion: "supertag/v1",
   kind,
@@ -21,8 +22,21 @@ export function apiClient(url, adminToken) {
   };
   return {
     request,
-    coordinate: (name, input = {}) =>
-      request("POST", `/api/v1/coordination/${name}`, { objectiveId, ...input }),
+    /** Delivers an operator message to the Objective's conversation. */
+    message: (text, idempotencyKey) =>
+      request(
+        "POST",
+        `/api/v1/coordination/objectives/${encodeURIComponent(objectiveId)}/messages`,
+        {
+          text,
+          idempotencyKey,
+        },
+      ),
+    overview: (limit = 100) =>
+      request(
+        "GET",
+        `/api/v1/coordination/objectives/${encodeURIComponent(objectiveId)}/overview?limit=${limit}`,
+      ),
   };
 }
 export async function createOrganization(api) {
@@ -66,11 +80,26 @@ export async function createOrganization(api) {
     );
     actors[name] = { hostId, credential: enrolled.credential.token, tagId: tag.metadata.id };
   }
+  // One flat Team: the manager owns the Objective and may give work Sessions to the analyst.
+  await api.request("POST", "/api/v1/tag-messaging/teams", {
+    id: teamId,
+    name: "Support",
+    memberTagIds: [actors.manager.tagId, actors.analyst.tagId],
+    maxConcurrency: 2,
+  });
+  for (const [senderTagId, recipientTagId] of [
+    [actors.manager.tagId, actors.analyst.tagId],
+    [actors.analyst.tagId, actors.manager.tagId],
+  ])
+    await api.request("PUT", "/api/v1/tag-messaging/grants", { senderTagId, recipientTagId });
+  // Creating the Objective starts its conversation; it is ongoing, so it rests between messages.
   await api.request("POST", "/api/v1/tag-messaging/objectives", {
     id: objectiveId,
     ownerTagId: actors.manager.tagId,
+    teamId,
+    ongoing: true,
     outcome: [
-      `Maintain support responses. Team support-team, observation channel support-observations, analyst Tag ${actors.analyst.tagId}. Follow your Role, process at most two posts per page, and wait when idle.`,
+      `Maintain support responses. Incident reports arrive as operator messages in this conversation. Team ${teamId}; give proposal work to analyst Tag ${actors.analyst.tagId}. Follow your Role.`,
       "Done when:",
       ...[
         "Every valid incident is accounted for once",
@@ -80,21 +109,6 @@ export async function createOrganization(api) {
     ].join("\n"),
     runtimeActions: ["files:write", "commands:execute"],
     budgetLimitMinor: 1000,
-  });
-  await api.coordinate("create_team", {
-    id: "support-team",
-    name: "Support",
-    leadTagId: actors.manager.tagId,
-    memberTagIds: [actors.analyst.tagId],
-    maxConcurrency: 2,
-  });
-  // Observations arrive on this Team's channel. The administrator posts them as the Objective
-  // owner, so the manager leads the Team; the analyst keeps read access as a member.
-  await api.coordinate("create_team", {
-    id: "support-observations",
-    name: "Support observations",
-    leadTagId: actors.manager.tagId,
-    memberTagIds: [actors.analyst.tagId],
   });
   return actors;
 }

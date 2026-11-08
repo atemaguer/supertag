@@ -159,7 +159,7 @@ test("partial proxy startup drains successful peers and sanitizes aggregated cle
       capability: {
         id: "supertag-coordination",
         provider: "supertag",
-        operations: [{ name: "assign_task", effect: "write", actions: ["tasks:assign"] }],
+        operations: [{ name: "start_session", effect: "write", actions: ["sessions:start"] }],
         authorization: { provider: "supertag", resources: [] },
       },
       binding: {

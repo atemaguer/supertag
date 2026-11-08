@@ -19,8 +19,8 @@ suite("distributed scheduling across Docker Worker Hosts", () => {
     network = "",
     image = "",
     apiUrl = "",
-    tlsCa = "",
-    tagId = "";
+    tlsCa = "";
+  const taskIds = new Map<string, string>();
   const containers: string[] = [];
   const name = (service: string) => `${network}-${service}`;
 
@@ -87,36 +87,19 @@ suite("distributed scheduling across Docker Worker Hosts", () => {
     ])
       await enrollAndLaunch(host);
 
+    // The Tag's harness pins its turns to the general Worker Hosts.
     const tag = await api("POST", "/api/v1/tags", {
       apiVersion: CONTROL_PLANE_API_VERSION,
       kind: "Tag",
       metadata: { name: "Scheduler manager" },
-      spec: {},
+      spec: { execution: { harness: "fixture-general" } },
     });
-    tagId = String((tag["metadata"] as Row)["id"]);
+    expect(String((tag["metadata"] as Row)["id"])).not.toHaveLength(0);
     for (const hostId of ["host-a", "host-b", "host-c"])
       await api(
         "PUT",
         `/api/v1/tags/${encodeURIComponent("Scheduler manager")}/worker-hosts/${hostId}`,
       );
-    await api("POST", "/api/v1/tag-messaging/objectives", {
-      id: "scheduling-objective",
-      ownerTagId: tagId,
-      outcome: "Exercise distributed scheduling",
-      runtimeActions: [],
-      budgetLimitMinor: 100,
-    });
-    await command("start_objective", {
-      taskId: "bootstrap",
-      execution: { profile: { id: "special", revision: "1" } },
-      maxCostMinor: 0,
-    });
-    await eventually(async () => (await assignment("bootstrap"))?.["status"] === "submitted");
-    await command("update_team", {
-      teamId: "scheduling-objective:leadership",
-      expectedRevision: 1,
-      maxConcurrency: 6,
-    });
   }, 180_000);
 
   afterAll(async () => {
@@ -130,7 +113,7 @@ suite("distributed scheduling across Docker Worker Hosts", () => {
     if (directory) await rm(directory, { recursive: true, force: true });
   }, 30_000);
 
-  it("honors capacity, draining, requirements, observability, and uncertain disconnect recovery", async () => {
+  it("honors capacity, draining, observability, and uncertain disconnect recovery", async () => {
     onTestFailed(async () => {
       for (const container of containers) {
         const logs = await execute("docker", ["logs", "--tail", "30", container]).catch(
@@ -142,18 +125,17 @@ suite("distributed scheduling across Docker Worker Hosts", () => {
     });
 
     await Promise.all(
-      ["load-1", "load-2", "load-3"].map((taskId) =>
-        assign(taskId, "Run capacity probe hold=1800", {
-          profile: { id: "general", revision: "1" },
-        }),
+      ["load-1", "load-2", "load-3"].map((session) =>
+        start(session, "Run capacity probe hold=1800"),
       ),
     );
+    const loadTaskIds = ["load-1", "load-2", "load-3"].map(taskOf);
     await eventually(async () => {
       const rows = await attempts();
-      return rows.filter((row) => String(row["taskId"]).startsWith("load-")).length === 3;
+      return rows.filter((row) => loadTaskIds.includes(String(row["taskId"]))).length === 3;
     });
     const loadAttempts = (await attempts()).filter((row) =>
-      String(row["taskId"]).startsWith("load-"),
+      loadTaskIds.includes(String(row["taskId"])),
     );
     const hosts = loadAttempts.map(selectedHost);
     expect(hosts.filter((host) => host === "host-a")).toHaveLength(1);
@@ -163,8 +145,8 @@ suite("distributed scheduling across Docker Worker Hosts", () => {
     expect(loadMetrics).toMatchObject({
       values: {
         scheduling: {
-          placedAttempts: 4,
-          reservations: { consumed: 4 },
+          placedAttempts: 3,
+          reservations: { consumed: 3 },
           workerHosts: expect.arrayContaining([
             expect.objectContaining({ id: "host-a", activeAttempts: 1, utilization: 1 }),
             expect.objectContaining({ id: "host-b", activeAttempts: 2, utilization: 1 }),
@@ -173,61 +155,35 @@ suite("distributed scheduling across Docker Worker Hosts", () => {
       },
     });
     await eventually(async () =>
-      (await Promise.all(["load-1", "load-2", "load-3"].map(assignment))).every(
-        (row) => row?.["status"] === "submitted",
-      ),
+      (await Promise.all(loadTaskIds.map(taskRow))).every((row) => row?.["status"] === "completed"),
     );
 
     await api("POST", "/api/v1/worker-hosts/host-a/drain");
-    await assign("drained-placement", "Run while host-a drains hold=25", {
-      profile: { id: "general", revision: "1" },
-    });
-    await eventually(
-      async () => (await assignment("drained-placement"))?.["status"] === "submitted",
+    const drained = await start("drained-placement", "Run while host-a drains hold=25");
+    await eventually(async () => (await taskRow(drained))?.["status"] === "completed");
+    expect(selectedHost((await attempts()).find((row) => row["taskId"] === drained))).toBe(
+      "host-b",
     );
-    expect(
-      selectedHost((await attempts()).find((row) => row["taskId"] === "drained-placement")),
-    ).toBe("host-b");
 
-    await assign("incompatible", "Require unavailable hardware hold=25", {
-      requires: [{ id: "quantum", version: 1 }],
-    });
-    await eventually(async () => {
-      const resource = await api("GET", "/api/v1/tasks/incompatible");
-      return Boolean((resource["status"] as Row)?.["scheduling"]);
-    });
-    const incompatible = await api("GET", "/api/v1/tasks/incompatible");
-    expect(incompatible).toMatchObject({
-      status: {
-        phase: "pending",
-        scheduling: {
-          status: "incompatible",
-          unmetRequirements: ["execution.requires.quantum@1"],
-        },
-      },
-    });
-
-    await assign("disconnect", "Hold while Worker Host disconnects hold=15000", {
-      profile: { id: "general", revision: "1" },
-    });
+    const disconnect = await start("disconnect", "Hold while Worker Host disconnects hold=15000");
     await eventually(async () =>
       (await attempts()).some(
-        (row) => row["taskId"] === "disconnect" && selectedHost(row) === "host-b",
+        (row) => row["taskId"] === disconnect && selectedHost(row) === "host-b",
       ),
     );
     await execute("docker", ["kill", "--signal", "KILL", name("host-b")]);
     await new Promise((resolveWait) => setTimeout(resolveWait, 2500));
-    expect((await attempts()).filter((row) => row["taskId"] === "disconnect")).toHaveLength(1);
-    expect((await assignment("disconnect"))?.["status"]).toBe("running");
+    expect((await attempts()).filter((row) => row["taskId"] === disconnect)).toHaveLength(1);
+    expect((await taskRow(disconnect))?.["status"]).toBe("running");
 
-    const taskResource = await api("GET", "/api/v1/tasks/drained-placement");
+    const taskResource = await api("GET", `/api/v1/tasks/${drained}`);
     expect(taskResource).toMatchObject({
       status: {
         attempt: {
           workerHostId: "host-b",
           workletId: "host-b-worklet",
           selection: {
-            allowedWorkerHostIds: ["host-a", "host-b", "host-c"],
+            allowedWorkerHostIds: expect.arrayContaining(["host-b"]),
             reservation: { phase: "consumed" },
           },
         },
@@ -349,31 +305,31 @@ suite("distributed scheduling across Docker Worker Hosts", () => {
     });
   }
 
-  const command = (action: string, input: object) =>
-    api("POST", `/api/v1/coordination/${action}`, {
-      objectiveId: "scheduling-objective",
-      ...input,
-    });
-  const assign = (taskId: string, instruction: string, execution: object) =>
-    command("assign_task", {
-      taskId,
-      teamId: "scheduling-objective:leadership",
-      assignedTagId: tagId,
-      instruction,
-      acceptanceCriteria: ["Execution evidence recorded"],
-      execution,
-      maxCostMinor: 0,
-    });
-  async function snapshot(): Promise<{ assignments: Row[]; attempts: Row[] }> {
+  /**
+   * One turn of the Tag, in its own CLI conversation so turns run concurrently: a Session takes
+   * one turn at a time. Returns the Task id.
+   */
+  const start = async (session: string, text: string) => {
+    const record = await api(
+      "POST",
+      `/api/v1/tags/${encodeURIComponent("Scheduler manager")}/messages`,
+      { text, session },
+    );
+    const taskId = String(record["taskId"]);
+    taskIds.set(session, taskId);
+    return taskId;
+  };
+  const taskOf = (session: string) => taskIds.get(session) as string;
+  async function snapshot(): Promise<{ tasks: Row[]; attempts: Row[] }> {
     const script =
-      "const db=require('better-sqlite3')('/state/control-plane.db',{readonly:true});console.log(JSON.stringify({assignments:db.prepare('SELECT * FROM TaskAssignment').all(),attempts:db.prepare('SELECT * FROM TaskAttempt').all()}));";
+      "const db=require('better-sqlite3')('/state/control-plane.db',{readonly:true});console.log(JSON.stringify({tasks:db.prepare('SELECT * FROM Task').all(),attempts:db.prepare('SELECT * FROM TaskAttempt').all()}));";
     return JSON.parse(
       (await execute("docker", ["exec", name("control-plane"), "node", "-e", script])).stdout,
     );
   }
   const attempts = async () => (await snapshot()).attempts;
-  const assignment = async (taskId: string) =>
-    (await snapshot()).assignments.find((row) => row["taskId"] === taskId);
+  const taskRow = async (taskId: string) =>
+    (await snapshot()).tasks.find((row) => row["id"] === taskId);
 });
 
 function selectedHost(row: Row | undefined): string | undefined {

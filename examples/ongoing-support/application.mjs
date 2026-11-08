@@ -32,6 +32,14 @@ export function coordinationClient(spec) {
   };
 }
 
+/** The text of the turn SuperTag delivered: an operator message, a report, or an instruction. */
+function requestText(spec) {
+  return spec.input.messages
+    .filter((message) => message.role !== "system")
+    .map((message) => message.text)
+    .join("\n");
+}
+
 // Executable reference policy. Native mode uses the Role instructions instead of this code.
 // `artifactStore(spec)` keeps artifact bytes on this Worker Host, as worker.mjs shows.
 export function supportWorker({ name, config, artifactStore, afterApply, onError = () => {} }) {
@@ -70,8 +78,8 @@ export function supportWorker({ name, config, artifactStore, afterApply, onError
       const artifacts = artifactStore(spec);
       try {
         if (name === "analyst") {
-          const task = await call("read_task", { taskId: spec.taskId });
-          const proposal = JSON.parse(task.instruction);
+          // A work Session sees only its own work: its instruction is this turn's request.
+          const proposal = JSON.parse(requestText(spec));
           const bytes = Buffer.from(JSON.stringify(proposal));
           const ref = await artifacts.put({ bytes });
           const { artifact } = await catalog("capture", {
@@ -100,14 +108,14 @@ export function supportWorker({ name, config, artifactStore, afterApply, onError
           };
           yield {
             ...event,
-            type: "output.message",
-            message: { role: "teammate", text: "Proposal captured for manager review." },
-          };
-          yield {
-            ...event,
             type: "result",
             result: {
-              summary: "Policy proposal",
+              // The reply returns to the Objective that started this Session.
+              summary: JSON.stringify({
+                incidentId: proposal.incidentId,
+                artifactId: artifact.id,
+                digest: ref.digest,
+              }),
               decisions: [],
               changes: [],
               unresolved: [],
@@ -119,87 +127,76 @@ export function supportWorker({ name, config, artifactStore, afterApply, onError
           yield { ...event, type: "execution.completed" };
           return;
         }
-        // One page bounds delegation and review backlog. Do not move its cursor until every
-        // independent incident on the page is applied and evidenced in durable Team state.
-        let team = await call("read_team", { teamId: "support-team" });
-        const updateContext = async (change) => {
-          for (let retry = 0; retry < 3; retry++) {
-            try {
-              team = await call("update_team", {
-                teamId: team.id,
-                expectedRevision: team.revision,
-                context: change(team.context ?? {}),
-              });
-              return;
-            } catch (error) {
-              if (!error.message.includes("Team revision changed")) throw error;
-              team = await call("read_team", { teamId: team.id });
-            }
-          }
-          throw new Error(
-            "Repeated Team edits need operator attention; retain the provider receipt",
-          );
-        };
-        const cursor = team.context?.cursor ?? 0;
-        const { posts } = await call("read_workstream", {
-          workstreamId: "support-observations",
-          afterSequence: cursor,
-          limit: 2,
-        });
-        if (!posts.length) {
-          await call("wait_for", {
-            workstreamPosts: { workstreamId: "support-observations", afterSequence: cursor },
-          });
-          return;
-        }
-        const pending = [];
-        for (const post of posts) {
-          const { incidentId } = JSON.parse(post.body);
+        // The manager's own turn of the Objective's conversation. Every turn reconciles durable
+        // state: the provider's receipts and this Objective's work Sessions, titled
+        // `support:<incidentId>`. Incident reports arrive as operator messages in this turn.
+        const objective = await call("read_objective");
+        const sessions = new Map(
+          objective.sessions
+            .filter((session) => typeof session.title === "string")
+            .map((session) => [session.title, session]),
+        );
+        const incidents = [
+          ...new Set(
+            [...requestText(spec).matchAll(/"incidentId"\s*:\s*"([^"]*)"/gu)].map(
+              (match) => match[1],
+            ),
+          ),
+        ];
+        for (const incidentId of incidents)
           if (!/^[a-zA-Z0-9_-]{1,80}$/u.test(incidentId))
             throw new Error("Invalid incident observation");
-          if (Object.hasOwn(team.context?.applied ?? {}, incidentId)) continue;
-          // Inspect a stable Task first: the provider revision changes after application,
-          // so recomputing a Task ID from live provider state would duplicate recovered work.
-          const taskId = `support:${incidentId}`;
-          let task;
-          let offset = 0;
-          while (offset !== null) {
-            const objective = await call("read_objective", { offset });
-            task = objective.tasks.find((entry) => entry.taskId === taskId);
-            if (task) break;
-            offset = objective.pages.tasks.nextOffset;
-          }
-          if (!task) {
+        const applied = [];
+        // Every known incident is reconsidered, so a report wakes the review of its own Session.
+        const known = [
+          ...new Set([
+            ...incidents,
+            ...[...sessions.keys()].map((title) => title.slice("support:".length)),
+          ]),
+        ];
+        const started = [];
+        for (const incidentId of known) {
+          const title = `support:${incidentId}`;
+          const session = sessions.get(title);
+          // Inspect the stable operation first: the provider revision changes after application,
+          // so a receipt is the only proof that this incident is already done.
+          const receipt = (
+            await policyRequest(
+              config.policyUrl,
+              config.policyToken,
+              `/operation?operationId=${encodeURIComponent(title)}`,
+            )
+          ).operation;
+          if (receipt) continue;
+          if (session === undefined) {
             const policy = await policyRequest(
               config.policyUrl,
               config.policyToken,
               `/policy?incidentId=${encodeURIComponent(incidentId)}`,
             );
-            task = await call("assign_task", {
-              taskId,
-              teamId: team.id,
-              assignedTagId: config.analystTagId,
-              instruction: JSON.stringify({
-                incidentId,
-                expectedRevision: policy.revision,
-                responseMinutes: 30,
-              }),
-              acceptanceCriteria: [
-                "Capture policy.json with the requested incident, revision, and thirty-minute response.",
-              ],
-              maxCostMinor: 0,
+            const instruction = JSON.stringify({
+              incidentId,
+              expectedRevision: policy.revision,
+              responseMinutes: 30,
             });
-          } else task = await call("read_task", { taskId });
-          if (!["submitted", "accepted"].includes(task.status)) {
-            if (["failed", "cancelled", "rejected"].includes(task.status))
-              throw new Error(`Incident ${incidentId} needs operator attention: ${task.status}`);
-            pending.push(taskId);
+            started.push(
+              await call("start_session", {
+                title,
+                instruction,
+                tag: config.analystTagId,
+              }),
+            );
             continue;
           }
-          const selection = task.result?.taskResult?.artifacts?.[0];
-          if (!selection?.paths?.includes("outputs/policy.json"))
-            throw new Error("No exact policy artifact submitted");
-          const { artifact } = await catalog("inspect", { artifactId: selection.artifactId });
+          if (session.status !== "completed") continue;
+          // The Session reported: review its exact artifact before applying anything.
+          const history = await call("read_session", { sessionId: session.sessionId, limit: 10 });
+          const reply = history.entries.findLast((entry) => entry.responseText)?.responseText;
+          const request = history.entries.find((entry) => entry.requestText)?.requestText;
+          if (!reply || !request) throw new Error(`Session ${title} reported nothing to review`);
+          const reported = JSON.parse(reply);
+          const requested = JSON.parse(request);
+          const { artifact } = await catalog("inspect", { artifactId: reported.artifactId });
           await catalog("acquire", {
             operationId: `review:${artifact.id}`,
             artifactId: artifact.id,
@@ -212,50 +209,47 @@ export function supportWorker({ name, config, artifactStore, afterApply, onError
           const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
           if (digest !== entry.digest) throw new Error("Artifact digest mismatch");
           const proposal = JSON.parse(Buffer.from(bytes).toString());
-          const requested = JSON.parse(task.instruction);
           if (
             proposal.incidentId !== incidentId ||
             proposal.expectedRevision !== requested.expectedRevision ||
             proposal.responseMinutes !== 30
-          )
-            throw new Error("Proposal failed review");
-          if (task.status === "submitted")
-            await call("update_task", {
-              taskId,
-              expectedStatus: "submitted",
-              status: "accepted",
-              assessment: `Reviewed ${artifact.id}/outputs/policy.json (${digest})`,
+          ) {
+            await call("continue_session", {
+              sessionId: session.sessionId,
+              message: `The proposal does not match ${request}. Capture policy.json with exactly those fields.`,
             });
-          const applied = await applyReviewedPolicy(config.policyUrl, config.policyToken, {
+            continue;
+          }
+          const result = await applyReviewedPolicy(config.policyUrl, config.policyToken, {
             ...proposal,
-            operationId: taskId,
+            operationId: title,
             sourceArtifactId: artifact.id,
             sourceDigest: digest,
           });
-          await afterApply?.(applied, spec);
-          await updateContext((context) => ({
-            ...context,
-            applied: {
-              ...context.applied,
-              [incidentId]: {
-                ...applied.receipt,
-                recovered: applied.recovered,
-                taskId,
-                reviewedAttemptId: artifact.attemptId,
-              },
-            },
-          }));
+          await afterApply?.(result, spec);
+          applied.push({
+            incidentId,
+            ...result.receipt,
+            recovered: result.recovered,
+            sessionId: session.sessionId,
+            reviewedAttemptId: artifact.attemptId,
+          });
         }
-        if (pending.length) {
-          await call("wait_for", { submittedTaskIds: [...new Set(pending)] });
-          return;
-        }
-        const lastSequence = posts.at(-1).sequence;
-        await updateContext((context) => ({ ...context, cursor: lastSequence }));
-        // Existing posts beyond this page immediately satisfy this wait. Waiting releases the slot.
-        await call("wait_for", {
-          workstreamPosts: { workstreamId: "support-observations", afterSequence: lastSequence },
-        });
+        yield {
+          ...event,
+          type: "result",
+          result: {
+            // The reply is this Objective's record of the turn; it starts nothing new.
+            summary: JSON.stringify({ applied, started }),
+            decisions: [],
+            changes: [],
+            unresolved: [],
+            findings: [],
+            references: [],
+            artifacts: [],
+          },
+        };
+        yield { ...event, type: "execution.completed" };
       } catch (error) {
         onError(error);
         throw error;

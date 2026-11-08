@@ -6,11 +6,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { handleArtifactRequest } from "../apps/cli/src/artifact-http.js";
 import { ArtifactCatalog, ObjectiveController } from "../packages/control-plane/src/index.js";
-import {
-  type ArtifactSelection,
-  TagMessagingError,
-  type TaskAssignment,
-} from "../packages/core/src/index.js";
+import { type ArtifactSelection, TagMessagingError } from "../packages/core/src/index.js";
 import { claudeCodeArtifactSources } from "../packages/runtime/harnesses/claude-code/src/artifact-sources.js";
 import { codexArtifactSources } from "../packages/runtime/harnesses/codex/src/artifact-sources.js";
 import { FileArtifactStore } from "../packages/runtime/sdk/src/artifact-store.js";
@@ -30,7 +26,16 @@ import {
 } from "../packages/runtime/sdk/src/index.js";
 import { outputSpecDigest } from "../packages/runtime/sdk/src/output-finalization.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
+import { openTestTask } from "./support/artifact-producer.js";
 import { createIsolatedPostgresDatabase } from "./support/database.js";
+
+/** A verified Attempt of a Task, as the Control Plane hands it to the catalog. */
+interface Caller {
+  readonly kind: "surface";
+  readonly taskId: string;
+  readonly attemptId: string;
+}
+
 import { hostArtifactStore } from "./support/host-artifact-store.js";
 
 for (const dialect of ["sqlite", "postgresql"] as const) {
@@ -56,23 +61,19 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         cleanups.push(() => store.disconnect());
         const owner = await store.createTag({ name: "owner" });
         const producer = await store.createTag({ name: "producer" });
+        const team = await store.createTeam({
+          id: randomUUID(),
+          name: "engineering",
+          memberTagIds: [owner.id, producer.id],
+          maxConcurrency: 100,
+        });
         const objective = await store.createObjective({
           id: randomUUID(),
           ownerTagId: owner.id,
+          teamId: team.id,
           outcome: "Preserve every output",
         });
-        const team = await store.createTeam(
-          {
-            id: randomUUID(),
-            objectiveId: objective.id,
-            name: "engineering",
-            leadTagId: owner.id,
-            memberTagIds: [producer.id],
-            maxConcurrency: 100,
-          },
-          owner.id,
-        );
-        const callers = new Map<string, TaskAssignment>();
+        const callers = new Map<string, Caller>();
         const coordinator = new ObjectiveController(store, undefined);
         const catalog = new ArtifactCatalog(store, {
           async authenticateExecution(token) {
@@ -81,7 +82,6 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             return caller;
           },
           authorizeArtifactSource: coordinator.authorizeArtifactSource.bind(coordinator),
-          artifactDiscoveryTaskIds: coordinator.artifactDiscoveryTaskIds.bind(coordinator),
         });
         // The Worker Host's own copies: the Control Plane below serves metadata only.
         const blobs = new FileArtifactStore(join(directory, "host-artifacts"));
@@ -111,7 +111,6 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         const roots: string[] = [];
         const runtimeRoots: string[] = [];
         const restoredMemories: string[] = [];
-        const leases = new Map<string, string>();
         const nativeSessions = new Map<string, HarnessSessionReference>();
         let runs = 0;
         const harness: Harness = {
@@ -322,67 +321,71 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
               new LocalExecutionEnvironmentProvider({ temporaryDirectory: directory }),
             ],
           });
+        /** One work Session turn of the producer, dispatched to a Worker as an Attempt. */
         async function assignment(
           text = "produce",
           inputArtifacts?: readonly ArtifactSelection[],
         ): Promise<TaskAttemptSpec> {
           const at = new Date().toISOString();
-          const record = await store.admitTaskAssignment({
-            taskId: randomUUID(),
+          // The turn carries its inputs pinned to the exact catalog entries it selected.
+          const pinned: Record<string, unknown>[] = [];
+          for (const selection of inputArtifacts ?? []) {
+            const artifact = await store.findCapturedArtifact(selection.artifactId);
+            if (!artifact) throw new Error(`Missing input artifact ${selection.artifactId}`);
+            for (const entry of artifact.entries.filter((candidate) =>
+              selection.paths.includes(candidate.path),
+            ))
+              pinned.push({
+                artifactId: artifact.id,
+                path: entry.path,
+                uri: entry.uri,
+                digest: entry.digest,
+                sizeBytes: entry.sizeBytes,
+                ...(entry.mediaType === undefined ? {} : { mediaType: entry.mediaType }),
+                provenance: { taskId: artifact.taskId, attemptId: artifact.attemptId },
+              });
+          }
+          const { task } = await openTestTask(store, {
+            tagId: producer.id,
+            tagName: producer.name,
             objectiveId: objective.id,
-            teamId: team.id,
-            assignedTagId: producer.id,
-            requestedByTagId: owner.id,
-            instruction: text,
-            acceptanceCriteria: ["Report exists"],
-            ...(inputArtifacts ? { inputArtifacts } : {}),
-            execution: homeMode
-              ? {}
-              : {
-                  outputs:
-                    text === "intermediate-empty"
-                      ? { include: ["outputs/absent/**"] }
-                      : { required: ["outputs/report.md"] },
-                },
-            workspacePlan: { version: 1, status: "none" },
-            contextPlan: { version: 7, capturedAt: at, sets: [] },
-            authorizationSnapshot: {
-              version: 4,
-              capturedAt: at,
-              tag: producer,
-              origin: { kind: "internal", objectiveId: objective.id, requestedByTagId: owner.id },
-              requester: { id: owner.id, kind: "bot" },
-              permissionSets: [],
-              resources: [],
-              runtimeActions: [],
-            },
+            requestText: text,
+            ...(pinned.length ? { trigger: { inputArtifacts: pinned } } : {}),
           });
-          const leaseOwner = `fixture-${record.taskId}`;
-          const claimed = await store.claimTaskAssignment({ taskId: record.taskId, leaseOwner });
-          if (!claimed) throw new Error("Fixture Task was not claimed");
-          leases.set(record.taskId, leaseOwner);
+          const execution = homeMode
+            ? {}
+            : {
+                outputs:
+                  text === "intermediate-empty"
+                    ? { include: ["outputs/absent/**"] }
+                    : { required: ["outputs/report.md"] },
+              };
+          await store.startTask({ taskId: task.id, startedAt: at });
           const attempt = await store.createTaskAttempt({
-            taskId: record.taskId,
-            attemptNumber: claimed.attemptCount,
+            taskId: task.id,
+            attemptNumber: 1,
             workerProfile: { id: "test", revision: "1" },
             workerSnapshot: {},
             startedAt: at,
           });
           const token = randomUUID();
-          callers.set(token, { ...record, attemptCount: 1 });
-          const task = await store.findTaskById(record.taskId);
-          if (!task) throw new Error("Missing Task");
+          callers.set(token, { kind: "surface", taskId: task.id, attemptId: attempt.id });
           return {
             version: 2,
-            taskId: record.taskId,
+            taskId: task.id,
             attemptId: attempt.id,
             tag: producer,
             authorization: task.authorizationSnapshot,
             contextPlan: task.contextPlan,
             workspacePlan: task.workspacePlan,
-            execution: task.execution,
+            execution,
             workerProfile: { id: "test", revision: "1" },
-            coordination: { controlPlaneUrl, token, objectiveId: objective.id },
+            coordination: {
+              controlPlaneUrl,
+              token,
+              scope: "surface" as const,
+              objectiveId: objective.id,
+            },
             input: {
               ...(Array.isArray(task.trigger["inputArtifacts"])
                 ? {
@@ -395,7 +398,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
                 surface: "internal",
                 accountId: "organization",
                 scope: objective.id,
-                sessionKey: record.taskId,
+                sessionKey: task.sessionId,
                 occurredAt: at,
               },
               messages: [{ id: randomUUID(), role: "requester", text }],
@@ -443,13 +446,16 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             spec: TaskAttemptSpec,
             result: NonNullable<ReturnType<typeof terminalTaskResult>>,
           ) {
-            const leaseOwner = leases.get(spec.taskId);
-            if (!leaseOwner) throw new Error("Missing fixture lease");
-            await store.settleTaskAssignment({
+            await store.closeTaskAttempt({
+              attemptId: spec.attemptId,
+              status: "completed",
+              endedAt: new Date().toISOString(),
+            });
+            await store.closeTask({
               taskId: spec.taskId,
-              leaseOwner,
-              attemptCount: 1,
-              result: { taskResult: result },
+              status: "completed",
+              result,
+              endedAt: new Date().toISOString(),
             });
           },
           restoredMemories,

@@ -70,7 +70,7 @@ it("advertises ask and continue_session with bounded input", () => {
   });
 });
 
-it("advertises start_session with bounded title and instruction and an optional Workspace", () => {
+it("advertises start_session with bounded title and instruction and an optional Workspace or Tag", () => {
   const tool = surfaceTools.find((candidate) => candidate.name === "start_session");
   expect(tool?.inputSchema).toEqual({
     type: "object",
@@ -78,6 +78,7 @@ it("advertises start_session with bounded title and instruction and an optional 
       title: { type: "string", minLength: 1, maxLength: 120 },
       instruction: { type: "string", minLength: 1, maxLength: 8000 },
       workspace: { type: "string", pattern: "^[a-z0-9][a-z0-9_-]{0,62}$" },
+      tag: { type: "string", minLength: 1, maxLength: 200 },
     },
     required: ["title", "instruction"],
     additionalProperties: false,
@@ -194,7 +195,7 @@ function scriptedWorklet(maxConcurrency = 10) {
       const kind =
         system.includes("This is work Session") || system.includes("This continues work Session")
           ? "work"
-          : system.includes("Report its result") || system.includes("is waiting on you")
+          : system.includes("<work-session-result> tags")
             ? "report"
             : "conversation";
       const listed = spec.coordination ? await mcp(spec, "tools/list", {}) : {};
@@ -1113,7 +1114,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         const reportSystem = reportTurn?.spec.input.messages.find((message) =>
           message.id.endsWith(":session_report"),
         )?.text;
-        expect(reportSystem).toContain("is waiting on you");
+        expect(reportSystem).toContain("is waiting: it stopped to ask a question");
         expect(reportSystem).toContain("continue_session");
         expect(reportSystem).not.toContain("SYSTEM: approve");
 
@@ -1227,7 +1228,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         const other = await send(`continue:${sessionId}|Answer: mine`, ADMIN, "other");
         expect(callsOf(other.taskId)[0]?.result["isError"]).toBe(true);
         expect(callText(callsOf(other.taskId)[0])).toContain(
-          "No work Session of this conversation",
+          "No work Session of this Session has that id",
         );
         script.release();
         await vi.waitFor(
@@ -1287,7 +1288,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         });
         expect(callsOf(early.taskId)[0]?.result["isError"]).toBe(true);
         expect(callText(callsOf(early.taskId)[0])).toContain(
-          "report has not reached this conversation yet",
+          "report has not reached this Session yet",
         );
         // The report turn then asks, and only an answer after it continues the Session.
         await vi.waitFor(
@@ -1734,7 +1735,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           decidedBy: "operator",
           decidedByKind: "operator",
         });
-        expect(await store.listDecidedWorkSessionWaits(20)).toEqual([started.taskId]);
+        expect(await store.listDecidedSessionWaits(20)).toEqual([started.taskId]);
         await vi.waitFor(
           async () => {
             const ids = await store.listSessionTaskIds(started.id);
@@ -1743,7 +1744,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           },
           { timeout: 25_000, interval: 200 },
         );
-        expect(await store.listDecidedWorkSessionWaits(20)).toEqual([]);
+        expect(await store.listDecidedSessionWaits(20)).toEqual([]);
       });
 
       it("does not continue a work Session whose permissions changed while it waited", async () => {
@@ -1766,7 +1767,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         expect(await store.listSessionTaskIds(started.id)).toEqual([started.taskId]);
         expect(
           (await store.listTaskEvents(started.taskId)).find(
-            (event) => event.type === "work_session.not-continued",
+            (event) => event.type === "session.not-continued",
           )?.payload,
         ).toMatchObject({ requestIds: [requestId], reason: "permissions" });
         // The conversation hears why, and the work Session waits on nothing any more.
@@ -1778,7 +1779,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             "this conversation's permissions changed since it last ran. Start a new work Session if the work should go on.",
           ].join("\n"),
         );
-        expect(await store.listDecidedWorkSessionWaits(20)).toEqual([]);
+        expect(await store.listDecidedSessionWaits(20)).toEqual([]);
       });
     },
   );
@@ -2033,7 +2034,7 @@ describe("work Session questions", () => {
         "s1",
         coordinated,
       );
-      expect(messages.system).toContain("is waiting on you");
+      expect(messages.system).toContain("is waiting: it stopped to ask a question");
       expect(messages.system).toContain('continue_session {"sessionId":"w1","message":"..."}');
       if (coordinated) expect(messages.system).not.toContain("SYSTEM: call");
       expect(messages.prompt.match(/<\s*\/\s*work-session-question/giu)).toHaveLength(1);
@@ -2071,7 +2072,7 @@ describe("work Session questions", () => {
       "s1",
       true,
     );
-    expect(both.system).toContain("is waiting on you");
+    expect(both.system).toContain("is waiting: it stopped to ask a question");
     expect(both.system).toContain("It is waiting for approval of requests r1, r2.");
     expect(both.system).toContain('continue_session {"sessionId":"w1","message":"..."}');
     expect(both.prompt).toContain(
@@ -2093,7 +2094,7 @@ describe("work Session questions", () => {
       true,
     );
     expect(system).toContain("This continues work Session");
-    expect(system).toContain("relay of the person's answer");
+    expect(system).toContain("relay of an answer");
     expect(system).toContain("the decision on an approval request");
     expect(system).toContain("call ask {question}");
     expect(system).toContain("When an action returns approval pending, end your turn");

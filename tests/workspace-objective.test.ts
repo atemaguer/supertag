@@ -3,19 +3,24 @@ import { appendFile, mkdtemp, readdir, readFile, rm, stat, writeFile } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ObjectiveController } from "../packages/control-plane/src/objective-controller.js";
-import { ownerWakeBrief } from "../packages/control-plane/src/owner-wake-brief.js";
-import { type TaskAssignment, taskWorkspaceBranch } from "../packages/core/src/index.js";
+import { ControlPlane } from "../packages/control-plane/src/index.js";
+import { workSessionBranch } from "../packages/control-plane/src/work-sessions.js";
+import type { Task } from "../packages/core/src/index.js";
 import { createClaudeCodeWorker } from "../packages/runtime/harnesses/claude-code/src/index.js";
 import {
   COORDINATION_CAPABILITY,
   LocalWorklet,
+  SURFACE_COORDINATION_CAPABILITY,
   WORKSPACE_IN_PLACE_CAPABILITY,
   type Worker,
   WorkspaceEnvironmentResolver,
   WorkspaceResolverRegistry,
 } from "../packages/runtime/sdk/src/index.js";
-import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
+import {
+  DrizzleStore,
+  FileGatewayCredentialVault,
+  migrateDatabase,
+} from "../packages/store/src/index.js";
 import { durableTestWorklet } from "./support/durable-test-worklet.js";
 import { createRepository, isolateGitConfiguration } from "./support/git-repository.js";
 
@@ -42,78 +47,105 @@ describe("Objectives with Workspaces", () => {
     await store.applyWorkspace({ name: "docs", delivery: "branch" });
     const owner = await store.createTag({ name: `owner-${randomUUID()}` });
     const member = await store.createTag({ name: `member-${randomUUID()}` });
-    for (const tag of [owner, member]) await store.bindTagWorkerHost(tag.id, "host");
+    // The owner runs nowhere: its own conversation's turn stays held, so the test drives that
+    // turn's tools itself while the Worker Host runs only the work Sessions it starts.
+    await store.bindTagWorkerHost(owner.id, "owner-host");
+    await store.bindTagWorkerHost(member.id, "host");
+    const team = await store.createTeam({
+      id: randomUUID(),
+      name: `delivery-${randomUUID()}`,
+      memberTagIds: [owner.id, member.id],
+      maxConcurrency: 10,
+    });
     const objective = await store.createObjective({
       id: `objective-${randomUUID().slice(0, 8)}`,
       ownerTagId: owner.id,
+      teamId: team.id,
       outcome: "Ship the change.",
       workspaces,
     });
-    const team = await store.createTeam({
-      id: randomUUID(),
-      objectiveId: objective.id,
-      name: "Delivery",
-      leadTagId: owner.id,
-      memberTagIds: [member.id],
-      maxConcurrency: 2,
-    });
-    const controller = new ObjectiveController(
+    const controlPlane = new ControlPlane({
       store,
-      durableTestWorklet(worklet ?? new LocalWorklet("w", "host", [])),
-    );
+      credentialVault: new FileGatewayCredentialVault(join(directory, "vault.json")),
+      worklet: durableTestWorklet(worklet ?? new LocalWorklet("w", "host", [])),
+      reply: async () => undefined,
+      dispatch: { pollIntervalMs: 20 },
+    });
+    const controller = controlPlane.objectives;
     controller.activateCoordination({ url: "http://127.0.0.1:1" });
-    cleanups.push(() => controller.stop());
+    await controlPlane.start();
+    cleanups.push(() => controlPlane.stop());
+    const { taskId: ownerTaskId } = await controlPlane.startObjective(objective.id);
+    // The held owner turn, as the Control Plane would hand it to a Worker.
+    const ownerTask = await store.findTaskById(ownerTaskId);
+    if (!ownerTask?.inboundEventId) throw new Error("The Objective opened no turn");
+    const claimed = await store.claimDueInboundEvent({
+      inboundEventId: ownerTask.inboundEventId,
+      leaseOwner: "workspace-objective",
+      now: new Date().toISOString(),
+      leaseExpiresAt: new Date(Date.now() + 300_000).toISOString(),
+    });
+    if (!claimed) throw new Error("The Objective's turn was not claimable");
+    await store.startTask({ taskId: ownerTaskId, startedAt: new Date().toISOString() });
+    const ownerAttempt = await store.createTaskAttempt({
+      taskId: ownerTaskId,
+      attemptNumber: claimed.attemptCount,
+      workerProfile: { id: "default", revision: "1" },
+      workerSnapshot: { workerHostId: "owner-host" },
+      startedAt: new Date().toISOString(),
+    });
+    const running = await store.findTaskById(ownerTaskId);
+    if (!running) throw new Error("Missing owner Task");
+    const capability = await controller.surfaceCoordination(running, ownerAttempt);
+    if (!capability) throw new Error("Missing owner coordination");
+    const caller = await controller.authenticateExecution(capability.token);
+    /** `start_session` from the owner's turn: a work Session of the Team member. */
     const assign = async (extra: Record<string, unknown> = {}) => {
-      const task = (await controller.command("assign_task", {
-        objectiveId: objective.id,
-        taskId: randomUUID(),
-        teamId: team.id,
-        assignedTagId: member.id,
-        instruction: "Change the code",
-        acceptanceCriteria: ["Changed"],
-        ...extra,
-      })) as TaskAssignment;
-      return { task, plan: (await store.findTaskById(task.taskId))?.workspacePlan };
+      const started = (await controller.commandAsAttempt(
+        "start_session",
+        {
+          title: "Change the code",
+          instruction: "Change the code",
+          tag: member.name,
+          ...extra,
+        },
+        caller,
+      )) as { sessionId: string };
+      const task = (await store.listTasks({ sessionId: started.sessionId }))[0] as Task;
+      return { started, task, plan: task?.workspacePlan };
     };
-    return { store, controller, objective, assign };
+    return { store, controlPlane, controller, objective, owner, member, ownerTaskId, assign };
   }
 
-  it("defaults Tasks to the Objective's only Workspace and captures its plan at admission", async () => {
+  it("defaults a work Session to the Objective's only Workspace and pins its plan", async () => {
     const f = await fixture(["app"]);
     expect(f.objective.workspaces).toEqual(["app"]);
-    const { task, plan } = await f.assign();
+    const { started, task, plan } = await f.assign();
     expect(plan).toEqual({
       version: 1,
       status: "workspace",
       workspace: "app",
       ref: "main",
-      branch: taskWorkspaceBranch(f.objective.id, task.taskId),
+      branch: workSessionBranch(started.sessionId),
       delivery: "patch",
       setup: "pnpm install",
     });
-    expect(plan?.status === "workspace" && plan.branch).toBe(`supertag/${f.objective.id}/task`);
-    await expect(f.assign({ workspace: "docs" })).rejects.toMatchObject({
-      statusCode: 400,
-      message: "workspace must be one of this Objective's Workspaces: app",
-    });
+    expect((await f.store.findTaskById(task.id))?.objectiveId).toBe(f.objective.id);
+    await expect(f.assign({ workspace: "docs" })).rejects.toMatchObject({ statusCode: 400 });
   });
 
-  it("reserves colliding Task names concurrently and retains their plans on readmission", async () => {
+  it("gives each work Session its own branch and keeps a Task's plan once admitted", async () => {
     const f = await fixture(["app"]);
-    const ids = ["fix/readme", "fix-readme", "Fix-Readme"].map(
-      (name) => `${f.objective.id}:${name}`,
+    const sessions = await Promise.all(
+      ["Fix the readme", "fix-readme", "Fix Readme"].map((title) => f.assign({ title })),
     );
-    const results = await Promise.all(ids.map((taskId) => f.assign({ taskId })));
-    const branches = results.map(({ plan }) => plan?.status === "workspace" && plan.branch);
-    expect(new Set(branches).size).toBe(ids.length);
-    expect(branches).toContain(`supertag/${f.objective.id}/fix-readme`);
-    for (const [index, taskId] of ids.entries()) {
-      const repeated = await f.assign({ taskId });
-      expect(repeated.plan).toEqual(results[index]?.plan);
-    }
+    const branches = sessions.map(({ plan }) => plan?.status === "workspace" && plan.branch);
+    expect(new Set(branches).size).toBe(sessions.length);
+    for (const { task, plan } of sessions)
+      expect((await f.store.findTaskById(task.id))?.workspacePlan).toEqual(plan);
   });
 
-  it("pins operator mounts at admission and ignores mount input on assignment", async () => {
+  it("pins operator mounts at admission and takes no mount input from the caller", async () => {
     const f = await fixture(["app"]);
     const mounts = [
       {
@@ -133,14 +165,14 @@ describe("Objectives with Workspaces", () => {
       "Unknown field: mounts",
     );
     const { task } = await f.assign();
-    expect((await f.store.findTaskById(task.taskId))?.workspacePlan).toMatchObject({ mounts });
+    expect((await f.store.findTaskById(task.id))?.workspacePlan).toMatchObject({ mounts });
     await f.store.applyWorkspace({
       name: "app",
       source: "https://github.com/acme/app.git",
       mounts: [{ volume: "datasets", path: "/mnt/new", access: "read-only", strategy: "copy" }],
       delivery: "branch",
     });
-    expect((await f.store.findTaskById(task.taskId))?.workspacePlan).toMatchObject({ mounts });
+    expect((await f.store.findTaskById(task.id))?.workspacePlan).toMatchObject({ mounts });
   });
 
   it("captures the GitHub Skill catalog on the Task when the Workspace changes", async () => {
@@ -155,77 +187,49 @@ describe("Objectives with Workspaces", () => {
     const { task, plan } = await f.assign();
     expect(plan).toMatchObject({ skillCatalog });
     await f.store.applyWorkspace({ name: "app", delivery: "branch" });
-    expect((await f.store.findTaskById(task.taskId))?.workspacePlan).toMatchObject({
+    expect((await f.store.findTaskById(task.id))?.workspacePlan).toMatchObject({
       skillCatalog,
     });
   });
 
-  it("requires the lead to choose among several Workspaces", async () => {
+  it("requires an owner turn to choose among several Workspaces", async () => {
     const f = await fixture(["app", "docs"]);
-    expect((await f.assign()).plan).toEqual({ version: 1, status: "none" });
+    await expect(f.assign()).rejects.toMatchObject({
+      statusCode: 400,
+      message: "This Objective has several Workspaces; pass workspace, one of: app, docs",
+    });
     expect((await f.assign({ workspace: "docs" })).plan).toMatchObject({
       status: "workspace",
       workspace: "docs",
       delivery: "branch",
     });
-    const started = (await f.controller.command("start_objective", {
-      objectiveId: f.objective.id,
-      taskId: randomUUID(),
-    })) as TaskAssignment;
-    // The owner's start Task uses the Objective's first Workspace.
-    expect((await f.store.findTaskById(started.taskId))?.workspacePlan).toMatchObject({
-      status: "workspace",
-      workspace: "app",
+    // The Objective's own conversation works in no Workspace while it names several.
+    expect((await f.store.findTaskById(f.ownerTaskId))?.workspacePlan).toEqual({
+      version: 1,
+      status: "none",
     });
   });
 
-  it("gives an operator's Mailbox Task for the owner the Objective's Workspace", async () => {
-    const operatorMessage = async (f: Awaited<ReturnType<typeof fixture>>) => {
-      // With its start activation open, the owner would receive the message there instead.
-      for (const task of await f.store.listTaskAssignments(f.objective.id))
-        if (task.status === "queued")
-          await f.store.cancelTaskAssignment(task.taskId, task.assignedTagId);
-      const sent = await f.store.sendOperatorObjectiveMessage({
-        objectiveId: f.objective.id,
-        message: "Please check the build.",
-        idempotencyKey: randomUUID(),
-        operatorId: "operator",
-      });
-      await f.store.admitMailboxTaskAssignments();
-      const taskId = `message:${sent.message.id}`;
-      return { taskId, plan: (await f.store.findTaskById(taskId))?.workspacePlan };
-    };
-    // The only Workspace: the Mailbox Task gets its own Task worktree branch, not a copy.
-    const single = await fixture(["app"]);
-    await single.controller.command("start_objective", {
-      objectiveId: single.objective.id,
-      taskId: randomUUID(),
-    });
-    const only = await operatorMessage(single);
-    expect(only.plan).toEqual({
+  it("gives the Objective's own conversation its only Workspace, on one Session branch", async () => {
+    const f = await fixture(["app"]);
+    const ownerTask = await f.store.findTaskById(f.ownerTaskId);
+    expect(ownerTask?.workspacePlan).toEqual({
       version: 1,
       status: "workspace",
       workspace: "app",
       ref: "main",
-      branch: taskWorkspaceBranch(single.objective.id, only.taskId),
+      branch: workSessionBranch(ownerTask?.sessionId as string),
       delivery: "patch",
       setup: "pnpm install",
     });
-    const another = await operatorMessage(single);
-    expect(another.plan?.status === "workspace" && another.plan.branch).toMatch(
-      new RegExp(`^supertag/${single.objective.id}/message-[a-f0-9]{8}$`, "u"),
-    );
-    expect((await single.store.findTaskById(only.taskId))?.workspacePlan).toEqual(only.plan);
-    // Several Workspaces: the owner's previous Task decides.
-    const several = await fixture(["docs", "app"]);
-    await several.controller.command("start_objective", {
-      objectiveId: several.objective.id,
-      taskId: randomUUID(),
+    // An operator's message is the next turn of the same conversation, so it keeps that plan.
+    const { taskId } = await f.controlPlane.messageObjective({
+      objectiveId: f.objective.id,
+      text: "Please-check-the-build",
+      operatorId: "operator",
+      idempotencyKey: randomUUID(),
     });
-    expect((await operatorMessage(several)).plan).toMatchObject({
-      status: "workspace",
-      workspace: "docs",
-    });
+    expect((await f.store.findTaskById(taskId))?.workspacePlan).toEqual(ownerTask?.workspacePlan);
   });
 
   it("rejects a workspace on an Objective that names none, and unknown Objective Workspaces", async () => {
@@ -252,6 +256,7 @@ describe("Objectives with Workspaces", () => {
               profile: { id: "default", revision: "1" },
               capabilities: [
                 COORDINATION_CAPABILITY,
+                SURFACE_COORDINATION_CAPABILITY,
                 ...(inPlace ? [WORKSPACE_IN_PLACE_CAPABILITY] : []),
               ],
               contextTypes: [],
@@ -262,12 +267,13 @@ describe("Objectives with Workspaces", () => {
           profiles: [{ id: "default", revision: "1" }],
           capabilities: [
             COORDINATION_CAPABILITY,
+            SURFACE_COORDINATION_CAPABILITY,
             ...(inPlace ? [WORKSPACE_IN_PLACE_CAPABILITY] : []),
           ],
           contextTypes: [],
         };
       },
-      async *execute(spec, signal) {
+      async *execute(spec) {
         executions += 1;
         yield {
           type: "execution.started",
@@ -276,7 +282,12 @@ describe("Objectives with Workspaces", () => {
           at: new Date().toISOString(),
           workerId: "worker",
         };
-        await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve()));
+        yield {
+          type: "execution.completed",
+          taskId: spec.taskId,
+          attemptId: spec.attemptId,
+          at: new Date().toISOString(),
+        };
       },
     });
 
@@ -289,9 +300,8 @@ describe("Objectives with Workspaces", () => {
       }),
     );
     const { task } = await held.assign();
-    held.controller.start();
     const diagnosis = await eventually(async () =>
-      (await held.store.listTaskEvents(task.taskId)).find(
+      (await held.store.listTaskEvents(task.id)).find(
         (event) => event.type === "task.scheduling-incompatible",
       ),
     );
@@ -300,7 +310,6 @@ describe("Objectives with Workspaces", () => {
       unmetRequirements: ["labels:workspace:app"],
     });
     expect(executions).toBe(0);
-    await held.controller.stop();
 
     const served = await fixture(
       ["app"],
@@ -309,10 +318,9 @@ describe("Objectives with Workspaces", () => {
       }),
     );
     const runnable = await served.assign();
-    served.controller.start();
     await eventually(async () => executions > 0 || undefined);
     expect(
-      (await served.store.listTaskEvents(runnable.task.taskId)).some(
+      (await served.store.listTaskEvents(runnable.task.id)).some(
         (event) => event.type === "task.scheduling-incompatible",
       ),
     ).toBe(false);
@@ -334,19 +342,23 @@ describe("Objectives with Workspaces", () => {
             {
               profile: remote,
               harness: "codex",
-              capabilities: [COORDINATION_CAPABILITY],
+              capabilities: [COORDINATION_CAPABILITY, SURFACE_COORDINATION_CAPABILITY],
               contextTypes: [],
             },
             {
               profile: local,
               harness: "claude-code",
-              capabilities: [COORDINATION_CAPABILITY, WORKSPACE_IN_PLACE_CAPABILITY],
+              capabilities: [
+                COORDINATION_CAPABILITY,
+                SURFACE_COORDINATION_CAPABILITY,
+                WORKSPACE_IN_PLACE_CAPABILITY,
+              ],
               contextTypes: [],
             },
           ],
         };
       },
-      async *execute(spec, signal) {
+      async *execute(spec) {
         profiles.push(spec.workerProfile.id);
         yield {
           type: "execution.started",
@@ -355,14 +367,18 @@ describe("Objectives with Workspaces", () => {
           at: new Date().toISOString(),
           workerId: "mixed",
         };
-        await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve()));
+        yield {
+          type: "execution.completed",
+          taskId: spec.taskId,
+          attemptId: spec.attemptId,
+          at: new Date().toISOString(),
+        };
       },
     };
     const worklet = new LocalWorklet("w", "host", [mixed], { workspaces: ["app"] });
     expect((await worklet.describe()).host.labels).toContain("workspace:app");
     const f = await fixture(["app"], worklet);
     await f.assign();
-    f.controller.start();
     await eventually(async () => profiles.length > 0 || undefined);
     expect(profiles).toEqual(["z-local"]);
   });
@@ -374,14 +390,22 @@ describe("Objectives with Workspaces", () => {
           profileCapabilities: [
             {
               profile: { id: "default", revision: "1" },
-              capabilities: [COORDINATION_CAPABILITY, WORKSPACE_IN_PLACE_CAPABILITY],
+              capabilities: [
+                COORDINATION_CAPABILITY,
+                SURFACE_COORDINATION_CAPABILITY,
+                WORKSPACE_IN_PLACE_CAPABILITY,
+              ],
               contextTypes: [],
             },
           ],
           id: "worker",
           type: "test",
           profiles: [{ id: "default", revision: "1" }],
-          capabilities: [COORDINATION_CAPABILITY, WORKSPACE_IN_PLACE_CAPABILITY],
+          capabilities: [
+            COORDINATION_CAPABILITY,
+            SURFACE_COORDINATION_CAPABILITY,
+            WORKSPACE_IN_PLACE_CAPABILITY,
+          ],
           contextTypes: [],
         };
       },
@@ -395,11 +419,10 @@ describe("Objectives with Workspaces", () => {
       new LocalWorklet("w", "host", [worker], { workspaces: ["app"] }),
     );
     const { task } = await f.assign();
-    const member = (await f.store.findTaskById(task.taskId))?.tagId as string;
+    const member = (await f.store.findTaskById(task.id))?.tagId as string;
     await f.store.setTagRunsOn(member, ["macos-gpu"]);
-    f.controller.start();
     const diagnosis = await eventually(async () =>
-      (await f.store.listTaskEvents(task.taskId)).find(
+      (await f.store.listTaskEvents(task.id)).find(
         (event) => event.type === "task.scheduling-incompatible",
       ),
     );
@@ -438,27 +461,14 @@ describe("Objectives with Workspaces", () => {
     });
     const { task, plan } = await f.assign({ instruction: "Review the submitted change" });
     expect(plan).toMatchObject({ setup: "echo install failed >&2; exit 3" });
-    f.controller.start();
     const failed = await eventually(async () => {
-      const current = await f.store.getTaskAssignment(task.taskId);
+      const current = await f.store.findTaskById(task.id);
       return current?.status === "failed" ? current : undefined;
     });
     expect(harnessStarted).toBe(false);
-    expect(failed.result).toMatchObject({
+    expect(failed.outcome).toMatchObject({
       error: "Workspace setup failed (exit 3): install failed",
-      failureKind: "workspace-setup",
     });
-    const brief = ownerWakeBrief({
-      objective: f.objective,
-      task: { ...failed, taskId: "owner-activation" },
-      tasks: [failed],
-      messages: [],
-      since: null,
-    });
-    expect(brief).toContain(`Task ${task.taskId} failed`);
-    expect(brief).toContain(
-      'untrusted setup output: "Workspace setup failed (exit 3): install failed"',
-    );
   });
 
   it("fails the Task Attempt as workspace-integrity and tells the operator when the repository config changes", async () => {
@@ -493,30 +503,22 @@ describe("Objectives with Workspaces", () => {
     );
     await f.store.applyWorkspace({ name: "app", ref: "main", delivery: "branch" });
     const { task } = await f.assign();
-    f.controller.start();
     const failed = await eventually(async () => {
-      const current = await f.store.getTaskAssignment(task.taskId);
+      const current = await f.store.findTaskById(task.id);
       return current?.status === "failed" ? current : undefined;
     });
-    expect(failed.result).toMatchObject({ failureKind: "workspace-integrity" });
+
     await expect(stat(join(root, "escaped"))).rejects.toThrow();
-    expect(String(failed.result?.["error"])).toContain(
+    expect(String(failed.outcome?.["error"])).toContain(
       "Repository config changed during the Task Attempt (repository config",
     );
-    const inbox = await f.controller.readCoordinationInbox({
-      objectiveId: f.objective.id,
-      kind: "task_attention",
-    });
-    expect(inbox.items).toEqual([
-      expect.objectContaining({
-        key: `task_attention:${task.taskId}`,
-        kind: "task_attention",
-        nextActorTagIds: [],
-        operatorEligible: true,
-        reason: expect.stringContaining("repository's git config changed during its Task Attempt"),
-      }),
-    ]);
-    expect(inbox.items[0]?.reason).toContain("repository config: modified");
+    expect(failed.outcome?.["failureKind"]).toBe("workspace-integrity");
+    // The operator is told, with the Worker's own account of what changed.
+    const inbox = await f.store.readCoordinationInbox({ kind: "task_attention" });
+    expect(
+      inbox.items.map((item) => item.reason).filter((reason) => reason.includes("git config")),
+    ).toEqual([expect.stringContaining("The Worker stopped running git for this Task because")]);
+    // The Worker restored the repository before giving the Attempt up.
     expect(await readFile(join(checkout, ".git", "config"), "utf8")).not.toContain("evil");
   });
 });

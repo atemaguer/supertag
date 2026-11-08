@@ -49,9 +49,23 @@ diff` shows what changes first.
 - **Models and effort.** A Role's `execution` sets the harness, model, and allowed efforts; a
   Tag's own `execution` overrides it, as the builders in `mixed-harnesses` do. See
   [execution settings](../../docs/reference/resource-model.md#execution-settings).
-- **Team size.** Add builders by copying a Tag document with a new name.
+- **Team size.** Add builders by copying a Tag document with a new name, then list them in the
+  Objective's `team`.
 - **Permissions.** Remove `commands:execute` for Tags that should only read and edit. Claude Code
   and Cursor need `allow-unsandboxed-commands` on the host to run commands; see
   [Harnesses without a sandbox](../../docs/guides/workers.md#harnesses-without-a-sandbox).
+
+A lead hands work to another Tag only when the Objective names a Team that Tag belongs to. Declare
+that Team in the Objective itself:
+
+```yaml
+apiVersion: supertag/v1
+kind: Objective
+metadata: { name: importer }
+spec:
+  owner: lead
+  outcome: ...
+  team: { members: [lead, builder-1, builder-2, reviewer] }
+```
 
 Then give the lead its first outcome: see [Write an Objective](../../docs/guides/write-an-objective.md).

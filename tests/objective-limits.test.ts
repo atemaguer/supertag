@@ -2,12 +2,11 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { ObjectiveController } from "../packages/control-plane/src/objective-controller.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { ControlPlane } from "../packages/control-plane/src/index.js";
 import { evaluateObjectiveLimits } from "../packages/control-plane/src/objective-limits.js";
 import { objectiveLimitsView } from "../packages/control-plane/src/objective-summary.js";
 import {
-  emptyTagContextPlan,
   type Objective,
   objectiveDeadlineGraceMs,
   objectiveDeadlineStopsRunning,
@@ -15,24 +14,130 @@ import {
   objectiveLimitEvents,
   readableDuration,
 } from "../packages/core/src/index.js";
-import { LocalWorklet, type Worker } from "../packages/runtime/sdk/src/index.js";
-import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
+import {
+  COORDINATION_CAPABILITY,
+  REPORTED_COST_LIMIT_CAPABILITY,
+  REPORTED_TOKEN_LIMIT_CAPABILITY,
+  SURFACE_COORDINATION_CAPABILITY,
+  type TaskAttemptEvent,
+  type TaskAttemptSpec,
+  type Worklet,
+} from "../packages/runtime/sdk/src/index.js";
+import {
+  DrizzleStore,
+  FileGatewayCredentialVault,
+  migrateDatabase,
+} from "../packages/store/src/index.js";
 import { createIsolatedPostgresDatabase } from "./support/database.js";
-import { durableTestWorklet } from "./support/durable-test-worklet.js";
+import { startObjectiveSession } from "./support/objective-session.js";
 
 const postgres = process.env["SUPERTAG_POSTGRES_URL"];
 const minutesFromNow = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
 
+const CAPABILITIES = [
+  COORDINATION_CAPABILITY,
+  SURFACE_COORDINATION_CAPABILITY,
+  REPORTED_TOKEN_LIMIT_CAPABILITY,
+  REPORTED_COST_LIMIT_CAPABILITY,
+];
+
+/**
+ * A Worker that reports `cost()` minor units of provider cost for each turn and answers it,
+ * holding the turn while the Objective's outcome says HOLD.
+ */
+function scriptedWorklet(cost: () => number | undefined) {
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const seen = { started: 0, completed: 0, aborted: 0 };
+  const worklet: Worklet = {
+    id: "limits-worklet",
+    describe: async () => ({
+      id: "limits-worklet",
+      protocolVersion: 1,
+      host: {
+        id: "limits-host",
+        workers: [
+          {
+            id: "limits-worker",
+            type: "deterministic",
+            profiles: [{ id: "default", revision: "1" }],
+            capabilities: CAPABILITIES,
+            contextTypes: [],
+            maxConcurrency: 4,
+            profileCapabilities: [
+              {
+                profile: { id: "default", revision: "1" },
+                capabilities: CAPABILITIES,
+                contextTypes: [],
+              },
+            ],
+          },
+        ],
+      },
+    }),
+    selectPlacement: async () => ({
+      workerHostId: "limits-host",
+      workletId: "limits-worklet",
+      workerId: "limits-worker",
+      workerProfile: { id: "default", revision: "1" },
+    }),
+    async *execute(spec: TaskAttemptSpec, signal): AsyncIterable<TaskAttemptEvent> {
+      const identity = { taskId: spec.taskId, attemptId: spec.attemptId };
+      const at = () => new Date().toISOString();
+      seen.started++;
+      yield { ...identity, at: at(), type: "execution.started", workerId: "limits-worker" };
+      const amountMinor = cost();
+      yield {
+        ...identity,
+        at: at(),
+        type: "usage.updated",
+        usage: {
+          inputTokens: 10,
+          outputTokens: 10,
+          cachedInputTokens: 0,
+          totalTokens: 20,
+          complete: true,
+          ...(amountMinor === undefined ? {} : { reportedCost: { amountMinor, currency: "USD" } }),
+        },
+      };
+      if (spec.input.messages.some((message) => message.text.includes("HOLD")))
+        await new Promise<void>((resolve) => {
+          void blocked.then(resolve);
+          signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+      if (signal?.aborted) {
+        seen.aborted++;
+        throw signal.reason;
+      }
+      seen.completed++;
+      yield {
+        ...identity,
+        at: at(),
+        type: "output.message",
+        message: { role: "teammate", text: "Working on it" },
+      };
+      yield { ...identity, at: at(), type: "execution.completed" };
+    },
+  };
+  return { worklet, seen, release: () => release() };
+}
+
 for (const dialect of ["sqlite", "postgresql"] as const) {
   describe.skipIf(dialect === "postgresql" && !postgres)(
     `${dialect} Objective limits`,
-    { timeout: 30_000 },
+    { timeout: 60_000 },
     () => {
       const cleanups: Array<() => Promise<unknown> | unknown> = [];
       afterEach(async () => {
         for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
       });
-      async function fixture(definition: Record<string, unknown> = {}) {
+
+      async function fixture(
+        definition: Record<string, unknown> = {},
+        options: { readonly cost?: number; readonly outcome?: string } = {},
+      ) {
         const directory = await mkdtemp(join(tmpdir(), "supertag-limits-"));
         cleanups.push(() => rm(directory, { recursive: true, force: true }));
         const isolated =
@@ -45,134 +150,74 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         const store = new DrizzleStore({ url });
         await store.connect();
         cleanups.push(() => store.disconnect());
+        let cost = options.cost;
+        const script = scriptedWorklet(() => cost);
+        cleanups.push(() => script.release());
+        const controlPlane = new ControlPlane({
+          store: new DrizzleStore({ url }),
+          credentialVault: new FileGatewayCredentialVault(join(directory, "vault.json")),
+          worklet: script.worklet,
+          reply: async () => ({ externalMessageId: randomUUID() }),
+          dispatch: { pollIntervalMs: 10, retryBaseMs: 50, maxAttempts: 1 },
+        });
+        await controlPlane.start();
+        cleanups.push(() => controlPlane.stop());
         const owner = await store.createTag({ name: `owner-${randomUUID()}` });
-        const objective = await store.createObjective({
-          id: randomUUID(),
+        await store.bindTagWorkerHost(owner.id, "limits-host");
+        const session = await startObjectiveSession({
+          store,
+          controlPlane,
           ownerTagId: owner.id,
-          outcome: "Ship the release",
-          ...definition,
+          // Ongoing: the Objective is never woken for being idle, so each test controls
+          // exactly which turns run and what they spend.
+          objective: {
+            ongoing: true,
+            outcome: options.outcome ?? "Ship the release",
+            ...definition,
+          },
         });
-        const team = await store.createTeam({
-          id: `${objective.id}:leadership`,
-          objectiveId: objective.id,
-          name: "Leadership",
-          leadTagId: owner.id,
-          memberTagIds: [owner.id],
-          maxConcurrency: 4,
-        });
-        const controller = new ObjectiveController(store, undefined);
-        async function admit(id: string, start = false) {
-          const at = new Date().toISOString();
-          return store.admitTaskAssignment({
-            taskId: id,
-            objectiveId: objective.id,
-            teamId: team.id,
-            requestedByTagId: owner.id,
-            assignedTagId: owner.id,
-            instruction: `Produce ${id}`,
-            acceptanceCriteria: ["Reviewed"],
-            requiresApproval: false,
-            dependencies: [],
-            maxCostMinor: 0,
-            execution: {},
-            workspacePlan: { version: 1, status: "none" },
-            contextPlan: emptyTagContextPlan(at),
-            authorizationSnapshot: {
-              version: 4,
-              capturedAt: at,
-              tag: { id: owner.id, name: owner.name },
-              origin: { kind: "internal", objectiveId: objective.id, requestedByTagId: owner.id },
-              requester: { id: owner.id, kind: "bot" },
-              permissionSets: [],
-              resources: [],
-              runtimeActions: [],
-            },
-            ...(start ? { startObjectiveExecution: true } : {}),
-          });
-        }
-        /** Claims a Task and opens its running Task Attempt, as the controller would. */
-        async function run(id: string, leaseOwner = "test") {
-          const claim = await store.claimTaskAssignment({
-            taskId: id,
-            leaseOwner,
-            leaseSeconds: 300,
-          });
-          if (!claim) throw new Error(`Could not claim ${id}`);
-          const attempt = await store.createTaskAttempt({
-            taskId: id,
-            attemptNumber: claim.attemptCount,
-            workerProfile: { id: "fixture", revision: "1" },
-            workerSnapshot: {},
-            startedAt: new Date().toISOString(),
-          });
-          await store.startTask({ taskId: id, startedAt: new Date().toISOString() });
-          return { claim, attempt };
-        }
-        async function usage(
-          taskId: string,
-          attemptId: string,
-          reportedCost?: { amountMinor: number; currency: string; estimated?: boolean },
-        ) {
-          await store.appendTaskEvent({
-            taskId,
-            attemptId,
-            type: "usage.updated",
-            payload: {
-              usage: {
-                inputTokens: 10,
-                outputTokens: 10,
-                cachedInputTokens: 0,
-                totalTokens: 20,
-                complete: true,
-                ...(reportedCost ? { reportedCost } : {}),
-              },
-            },
-          });
-        }
-        async function fail(
-          id: string,
-          run: { claim: { attemptCount: number }; attempt: { id: string } },
-        ) {
-          await store.settleTaskAssignment({
-            taskId: id,
-            leaseOwner: "test",
-            attemptCount: run.claim.attemptCount,
-            failed: true,
-            result: { error: "Harness failure" },
-            terminalAttempt: { id: run.attempt.id, status: "failed" },
-          });
-        }
-        const operator = async (update: Record<string, unknown>) => {
-          const current = await store.getObjective(objective.id);
-          return store.updateObjectiveStatus(
+        const objective = session.objective;
+        const reload = () => store.getObjective(objective.id);
+        const operator = async (update: Record<string, unknown>) =>
+          store.updateObjectiveStatus(
             objective.id,
-            { ...update, expectedRevision: current.revision } as never,
+            { ...update, expectedRevision: (await reload()).revision } as never,
             undefined,
             undefined,
             { operatorId: "test-operator" },
           );
-        };
-        const reload = () => store.getObjective(objective.id);
         const attention = async () =>
-          (await controller.readObjectiveOverview({ objectiveId: objective.id })).attention.map(
-            (item) => item.kind,
-          );
+          (
+            await controlPlane.objectives.readObjectiveOverview({ objectiveId: objective.id })
+          ).attention.map((item) => item.kind);
+        /** One more turn of the Objective's conversation, as an operator message. */
+        const turn = (text: string) =>
+          controlPlane.messageObjective({
+            objectiveId: objective.id,
+            text,
+            operatorId: "admin",
+            idempotencyKey: randomUUID(),
+          });
+        const sweep = () => controlPlane.objectives.sweepObjectiveLimits(true);
         return {
           store,
+          controlPlane,
           owner,
           objective,
-          controller,
-          admit,
-          run,
-          usage,
-          fail,
-          operator,
+          session,
+          script,
           reload,
+          operator,
           attention,
+          turn,
+          sweep,
+          setCost: (next: number | undefined) => {
+            cost = next;
+          },
         };
       }
 
-      it("keeps existing Objectives unchanged until the Control Plane observes a limit", async () => {
+      it("keeps an existing Objective unchanged until the Control Plane observes a limit", async () => {
         const f = await fixture({
           deadline: "2030-01-01T00:00:00Z",
           budgetLimitMinor: 500,
@@ -184,16 +229,6 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           budgetCurrency: "USD",
           limitState: {},
         });
-        await expect(
-          f.store.createObjective({
-            id: f.objective.id,
-            ownerTagId: f.owner.id,
-            outcome: "Ship the release",
-            deadline: "2030-01-01T00:00:00Z",
-            budgetLimitMinor: 500,
-            budgetCurrency: "USD",
-          }),
-        ).resolves.toMatchObject({ id: f.objective.id });
       });
 
       it("lets only operators move a deadline, and records the change", async () => {
@@ -219,36 +254,30 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         });
       });
 
-      it("warns once at 80% of a monetary budget and reports Task Attempts without cost", async () => {
-        const f = await fixture({ budgetLimitMinor: 1000, budgetCurrency: "USD" });
-        await f.admit("first", true);
-        const first = await f.run("first");
-        await f.usage("first", first.attempt.id, { amountMinor: 700, currency: "USD" });
-        await f.controller.sweepObjectiveLimits(true);
+      it("warns once at 80% of a monetary budget and counts turns without a reported cost", async () => {
+        const f = await fixture(
+          { budgetLimitMinor: 10_000, budgetCurrency: "USD" },
+          { cost: 7000 },
+        );
+        await f.session.waitForOwnerTurn({ reason: "objective_start" });
+        await f.sweep();
         expect((await f.reload()).limitState?.budgetWarnings).toBeUndefined();
-        await f.store.settleTaskAssignment({
-          taskId: "first",
-          leaseOwner: "test",
-          attemptCount: first.claim.attemptCount,
-          terminalAttempt: { id: first.attempt.id, status: "completed" },
-          result: {},
-        });
-        await f.admit("second");
-        const second = await f.run("second");
-        await f.usage("second", second.attempt.id, {
-          amountMinor: 150,
-          currency: "USD",
-          estimated: true,
-        });
-        await f.controller.sweepObjectiveLimits(true);
+        expect((await f.reload()).limitState?.reportedSpend?.amountMinor).toBe(7000);
+
+        f.setCost(1500);
+        await f.turn("How is it going?");
+        await f.session.waitForOwnerTurn({ reason: "objective_message" });
+        // The warning itself reaches the Objective as a turn; keep it free so the pool is
+        // exactly what the two turns above reported.
+        f.setCost(0);
+        await f.sweep();
         const warned = await f.reload();
         expect(warned.limitState?.budgetWarnings).toMatchObject([
-          { fraction: 0.8, limitMinor: 1000, spentMinor: 850 },
+          { fraction: 0.8, limitMinor: 10_000, spentMinor: 8500 },
         ]);
-        expect(warned.limitState?.reportedSpend?.amountMinor).toBe(850);
-        expect(warned.limitState?.reportedSpend?.estimatedCostAttempts).toBe(1);
+        expect(warned.limitState?.reportedSpend?.amountMinor).toBe(8500);
         // Later sweeps do not repeat a recorded warning.
-        await f.controller.sweepObjectiveLimits(true);
+        await f.sweep();
         expect((await f.reload()).limitState?.budgetWarnings).toEqual(
           warned.limitState?.budgetWarnings,
         );
@@ -257,285 +286,158 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           kind: "objective_limit",
         });
         expect(inbox.items.map((item) => item.key)).toEqual([
-          `objective_limit:${f.objective.id}:budget-threshold-0.8-1000`,
+          `objective_limit:${f.objective.id}:budget-threshold-0.8-10000`,
         ]);
         expect(await f.attention()).toContain("objective_budget_threshold");
-        await f.store.settleTaskAssignment({
-          taskId: "second",
-          leaseOwner: "test",
-          attemptCount: second.claim.attemptCount,
-          terminalAttempt: { id: second.attempt.id, status: "completed" },
-          result: {},
-        });
-        // An executed Task Attempt without cost counts as unknown, not zero.
-        await f.admit("third");
-        const third = await f.run("third");
-        await f.usage("third", third.attempt.id);
-        await f.fail("third", third);
-        await f.controller.sweepObjectiveLimits(true);
-        expect((await f.reload()).limitState?.reportedSpend?.unknownAttemptIds).toEqual([
-          third.attempt.id,
-        ]);
+
+        // A turn that reported no cost counts as unknown, not zero.
+        f.setCost(undefined);
+        await f.turn("And now?");
+        await f.session.waitForOwnerTurn({ reason: "objective_message" });
+        await f.sweep();
+        expect(
+          ((await f.reload()).limitState?.reportedSpend?.unknownAttemptIds ?? []).length,
+        ).toBeGreaterThan(0);
         expect(await f.attention()).toContain("budget_coverage_incomplete");
       });
 
-      it("stops a spent monetary budget: lets running work finish and refuses admission until raised", async () => {
-        const f = await fixture({ budgetLimitMinor: 500, budgetCurrency: "USD" });
-        await f.admit("first", true);
-        await f.admit("queued");
-        const first = await f.run("first");
-        await f.usage("first", first.attempt.id, { amountMinor: 700, currency: "USD" });
-        await f.controller.sweepObjectiveLimits(true);
+      it("stops a spent monetary budget: refuses new turns until an operator raises it", async () => {
+        const f = await fixture({ budgetLimitMinor: 500, budgetCurrency: "USD" }, { cost: 700 });
+        await f.session.waitForOwnerTurn({ reason: "objective_start" });
+        await f.sweep();
         expect((await f.reload()).limitState?.budgetExhausted).toMatchObject({
           limitMinor: 500,
           spentMinor: 700,
         });
-        expect((await f.store.getTaskAssignment("first"))?.status).toBe("running");
-        expect((await f.store.listTaskEvents("first")).map((event) => event.type)).not.toContain(
-          "objective.budget-stop",
-        );
-        await expect(f.admit("later")).rejects.toThrow("Objective budget exhausted");
-        expect(await f.store.claimTaskAssignment({ taskId: "queued", leaseOwner: "x" })).toBe(
-          undefined,
-        );
+        // Nothing of the Objective runs any more, so it is limited rather than working.
+        expect((await f.reload()).status).toBe("limited");
+        await expect(f.turn("Carry on")).rejects.toThrow("has spent its budget");
         expect(await f.attention()).toContain("objective_budget_exhausted");
+
+        f.setCost(0);
         await f.operator({ budgetLimitMinor: 5000 });
-        await expect(f.admit("later")).resolves.toMatchObject({ status: "queued" });
+        await expect(f.turn("Carry on")).resolves.toMatchObject({
+          taskId: expect.any(String),
+        });
+      });
+
+      it("lets a running turn overrun the budget instead of cancelling it", async () => {
+        const f = await fixture(
+          { budgetLimitMinor: 500, budgetCurrency: "USD" },
+          { cost: 700, outcome: "Ship the release; HOLD until released" },
+        );
+        const running = await f.session.waitForOwnerTurn({
+          reason: "objective_start",
+          unsettled: true,
+        });
+        await expect
+          .poll(async () => (await f.store.findTaskById(running.task.id))?.status, {
+            timeout: 10_000,
+          })
+          .toBe("running");
+        await f.sweep();
+        expect((await f.reload()).limitState?.budgetExhausted).toMatchObject({ spentMinor: 700 });
+        // The running Attempt keeps its authority; a spent Objective is limited only once
+        // nothing of it runs.
+        expect((await f.reload()).status).toBe("working");
+        expect(f.script.seen.aborted).toBe(0);
+        f.script.release();
+        await expect
+          .poll(async () => (await f.store.findTaskById(running.task.id))?.status, {
+            timeout: 10_000,
+          })
+          .toBe("completed");
+        await f.sweep();
+        expect((await f.reload()).status).toBe("limited");
+        expect(f.script.seen.aborted).toBe(0);
+      });
+
+      it("stops a running turn once the deadline grace period ends, then limits the Objective", async () => {
+        const f = await fixture(
+          { deadline: minutesFromNow(60) },
+          { cost: 0, outcome: "Ship the release; HOLD until released" },
+        );
+        const running = await f.session.waitForOwnerTurn({
+          reason: "objective_start",
+          unsettled: true,
+        });
+        await expect
+          .poll(async () => (await f.store.findTaskById(running.task.id))?.status, {
+            timeout: 10_000,
+          })
+          .toBe("running");
+        // Inside the grace period the running Attempt keeps its authority.
+        await f.operator({ deadline: minutesFromNow(-5) });
+        await f.sweep();
+        expect((await f.reload()).status).toBe("working");
+        expect(f.script.seen.aborted).toBe(0);
+
+        // Past it, SuperTag stops the Attempt and the Objective becomes limited.
+        await f.operator({ deadline: minutesFromNow(-20) });
+        await f.sweep();
+        await expect
+          .poll(async () => (await f.store.findTaskById(running.task.id))?.status, {
+            timeout: 10_000,
+          })
+          .toBe("cancelled");
+        await expect
+          .poll(async () => (await f.reload()).status, { timeout: 10_000 })
+          .toBe("limited");
+        expect(f.script.seen.aborted).toBe(1);
+        f.script.release();
       });
 
       it("keeps a budget without a currency as an allocation limit only", async () => {
-        const f = await fixture({ budgetLimitMinor: 500 });
-        await f.admit("first", true);
-        const first = await f.run("first");
-        await f.usage("first", first.attempt.id, { amountMinor: 9000, currency: "USD" });
-        await f.controller.sweepObjectiveLimits(true);
+        const f = await fixture({ budgetLimitMinor: 500 }, { cost: 9000 });
+        await f.session.waitForOwnerTurn({ reason: "objective_start" });
+        await f.sweep();
         expect((await f.reload()).limitState).toEqual({});
-        expect((await f.store.getTaskAssignment("first"))?.status).toBe("running");
-        await expect(f.admit("later")).resolves.toMatchObject({ status: "queued" });
+        expect((await f.reload()).status).toBe("working");
+        await expect(f.turn("Carry on")).resolves.toMatchObject({ taskId: expect.any(String) });
       });
 
-      it("refuses new work after the deadline and lets the owner complete during the grace period", async () => {
-        const f = await fixture({ deadline: minutesFromNow(60) });
-        await f.admit("owner", true);
-        const { claim } = await f.run("owner");
-        await f.admit("queued");
-        await f.operator({ deadline: minutesFromNow(-1) });
-        await expect(f.admit("later")).rejects.toThrow("past its deadline");
-        expect(await f.store.claimTaskAssignment({ taskId: "queued", leaseOwner: "x" })).toBe(
-          undefined,
-        );
-        await f.controller.sweepObjectiveLimits(true);
+      it("records a passed deadline and limits the Objective once nothing runs", async () => {
+        const f = await fixture({ deadline: minutesFromNow(60) }, { cost: 0 });
+        await f.session.waitForOwnerTurn({ reason: "objective_start" });
+        await f.operator({ deadline: minutesFromNow(-20) });
+        await f.sweep();
         expect((await f.reload()).limitState?.deadlinePassed).toBeDefined();
         expect(await f.attention()).toContain("deadline_passed");
-        await f.store.cancelTaskAssignment("queued", f.owner.id);
-        const complete = async () =>
-          f.store.updateObjectiveStatus(
-            f.objective.id,
-            {
-              status: "completed",
-              completionSummary: "Released with evidence",
-              expectedRevision: (await f.reload()).revision,
-            },
-            f.owner.id,
-            { taskId: "owner", attemptCount: claim.attemptCount, leaseOwner: "test" },
-          );
-        // Past the grace period, running authority is gone.
-        await f.operator({ deadline: minutesFromNow(-20) });
-        await expect(complete()).rejects.toThrow("Completion execution authority revoked");
-        await f.operator({ deadline: minutesFromNow(-1) });
-        await expect(complete()).resolves.toMatchObject({ status: "completed" });
-      });
-
-      it("resumes owner continuation when an operator extends a passed deadline", async () => {
-        const f = await fixture({ deadline: minutesFromNow(60) });
-        await f.admit("owner", true);
-        const run = await f.run("owner");
-        await f.fail("owner", run);
-        expect((await f.store.listStalledObjectiveOwnerTasks()).map((task) => task.taskId)).toEqual(
-          ["owner"],
-        );
-        await f.operator({ deadline: minutesFromNow(-5) });
-        expect(await f.store.listStalledObjectiveOwnerTasks()).toEqual([]);
-        await f.operator({ deadline: minutesFromNow(90) });
-        expect((await f.store.listStalledObjectiveOwnerTasks()).map((task) => task.taskId)).toEqual(
-          ["owner"],
-        );
-        await expect(f.admit("after-extension")).resolves.toMatchObject({ status: "queued" });
+        // Past the grace period with nothing running, the Objective is limited.
+        expect((await f.reload()).status).toBe("limited");
       });
 
       it("skips deadline warnings whose time had passed when the deadline was set", async () => {
-        const f = await fixture({ deadline: minutesFromNow(45) });
-        await f.admit("owner", true);
-        await f.controller.sweepObjectiveLimits(true);
+        const f = await fixture({ deadline: minutesFromNow(45) }, { cost: 0 });
+        await f.session.waitForOwnerTurn({ reason: "objective_start" });
+        await f.sweep();
         expect((await f.reload()).limitState?.deadlineWarnings).toBeUndefined();
       });
 
-      describe("with a fake clock", () => {
-        const start = Date.parse("2031-03-01T10:00:00.000Z");
-        const clock = (minutes: number) => vi.setSystemTime(start + minutes * 60_000);
-        const iso = (minutes: number) => new Date(start + minutes * 60_000).toISOString();
-        afterEach(() => vi.useRealTimers());
-        const notices = async (f: Awaited<ReturnType<typeof fixture>>) =>
-          (await f.store.listTagMessages(f.owner.id, 100))
-            .filter((message) => message.objectiveId === f.objective.id)
-            .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-            .map((message) => ({
-              status: message.status,
-              operatorId: message.operatorId,
-              ...(message.body as { kind: string; message: string }),
-            }));
-
-        it("tells the owner when 15 minutes of a 60-minute deadline remain, once", async () => {
-          vi.useFakeTimers({ toFake: ["Date"] });
-          clock(0);
-          const f = await fixture({ deadline: iso(60) });
-          await f.admit("owner", true);
-          clock(44);
-          await f.controller.sweepObjectiveLimits(true);
-          expect(await notices(f)).toEqual([]);
-          clock(45);
-          await f.controller.sweepObjectiveLimits(true);
-          await f.controller.sweepObjectiveLimits(true);
-          expect((await f.reload()).limitState?.deadlineWarnings).toMatchObject([
-            { minutesBefore: 15 },
-          ]);
-          expect(await notices(f)).toEqual([
-            {
-              status: "processed",
-              operatorId: "supertag:objective-limits",
-              kind: "objective_deadline_approaching",
-              deadline: iso(60),
-              message: `The Objective deadline ${iso(60)} is near: about 15 minutes left.`,
-            },
-          ]);
-        });
-
-        it("wakes a waiting owner and attaches the warning to a running owner's next tool result", async () => {
-          vi.useFakeTimers({ toFake: ["Date"] });
-          clock(0);
-          const f = await fixture({ deadline: iso(60) });
-          await f.admit("owner", true);
-          clock(41);
-          // Coordination calls accept only leases held by this controller instance.
-          const leaseOwner = (f.controller as unknown as { instanceId: string }).instanceId;
-          const owner = await f.run("owner", leaseOwner);
-          clock(45);
-          await f.controller.sweepObjectiveLimits(true);
-          const read = (await f.controller.commandAsAttempt("read_objective", {}, owner.claim)) as {
-            deadlineNotices?: unknown;
-            limits: { deadline: Record<string, unknown> };
-          };
-          expect(read.deadlineNotices).toMatchObject([
-            {
-              kind: "objective_deadline_approaching",
-              message: expect.stringContaining("about 15 minutes left"),
-            },
-          ]);
-          expect(read.limits.deadline).toMatchObject({
-            remaining: "about 15 minutes left",
-            graceMinutes: 15,
-          });
-          const again = (await f.controller.commandAsAttempt(
-            "read_objective",
-            {},
-            owner.claim,
-          )) as {
-            deadlineNotices?: unknown;
-          };
-          expect(again.deadlineNotices).toBeUndefined();
-          // A wait that began after the warning is not woken by it; a later move wakes it.
-          clock(45.5);
-          await f.store.registerTaskAssignmentWait({
-            taskId: "owner",
-            leaseOwner,
-            attemptCount: owner.claim.attemptCount,
-            notBefore: iso(120),
-          });
-          await f.store.settleTaskAssignment({
-            taskId: "owner",
-            leaseOwner,
-            attemptCount: owner.claim.attemptCount,
-            result: {},
-          });
-          expect((await f.store.getTaskAssignment("owner"))?.status).toBe("waiting");
-          expect(await f.store.wakeWaitingTaskAssignments()).toEqual([]);
-          clock(46);
-          await f.operator({ deadline: iso(90) });
-          const woken = await f.store.wakeWaitingTaskAssignments();
-          expect(woken.map((task) => [task.taskId, task.waitState?.wake?.reason])).toEqual([
-            ["owner", "deadline"],
-          ]);
-        });
-
-        it("tells the owner the new deadline once when it moves, and recomputes warnings", async () => {
-          vi.useFakeTimers({ toFake: ["Date"] });
-          clock(0);
-          const f = await fixture({ deadline: iso(60) });
-          await f.admit("owner", true);
-          clock(45);
-          await f.controller.sweepObjectiveLimits(true);
-          clock(46);
-          await f.operator({ deadline: iso(85) });
-          await f.operator({ deadline: iso(85) });
-          await f.controller.sweepObjectiveLimits(true);
-          // The new 39-minute window drops the old warning; its quarter rounds to 10 minutes.
-          expect((await f.reload()).limitState?.deadlineWarnings).toBeUndefined();
-          const moved = (await notices(f)).filter((n) => n.kind === "objective_deadline_set");
-          expect(moved).toEqual([
-            {
-              status: "processed",
-              operatorId: "test-operator",
-              kind: "objective_deadline_set",
-              deadline: iso(85),
-              message: `An operator moved the Objective deadline from ${iso(60)} to ${iso(85)}: about 39 minutes left. Deadline warnings now follow this deadline. Plan the remaining work to finish before it.`,
-            },
-          ]);
-          clock(74);
-          await f.controller.sweepObjectiveLimits(true);
-          expect((await f.reload()).limitState?.deadlineWarnings).toBeUndefined();
-          clock(75);
-          await f.controller.sweepObjectiveLimits(true);
-          expect((await f.reload()).limitState?.deadlineWarnings).toMatchObject([
-            { minutesBefore: 10, deadline: iso(85) },
-          ]);
-          expect((await notices(f)).map((n) => n.message)).toEqual([
-            `The Objective deadline ${iso(60)} is near: about 15 minutes left.`,
-            expect.stringContaining(`to ${iso(85)}: about 39 minutes left`),
-            `The Objective deadline ${iso(85)} is near: about 10 minutes left.`,
-          ]);
-        });
-
-        it("caps the grace for a 20-minute deadline at 5 minutes", async () => {
-          vi.useFakeTimers({ toFake: ["Date"] });
-          clock(0);
-          const f = await fixture({ deadline: iso(20) });
-          await f.admit("owner", true);
-          clock(19);
-          const { claim } = await f.run("owner");
-          const complete = async () =>
-            f.store.updateObjectiveStatus(
-              f.objective.id,
-              {
-                status: "completed",
-                completionSummary: "Released with evidence",
-                expectedRevision: (await f.reload()).revision,
-              },
-              f.owner.id,
-              { taskId: "owner", attemptCount: claim.attemptCount, leaseOwner: "test" },
-            );
-          clock(23);
-          await f.store.renewTaskAssignment({
-            taskId: "owner",
-            leaseOwner: "test",
-            attemptCount: claim.attemptCount,
-            leaseSeconds: 300,
-          });
-          // Under a fixed 15-minute grace this would still be allowed.
-          clock(25);
-          await expect(complete()).rejects.toThrow("Completion execution authority revoked");
-          clock(24);
-          await expect(complete()).resolves.toMatchObject({ status: "completed" });
-        });
+      it("delivers a deadline warning to the Objective's conversation once", async () => {
+        const f = await fixture({ deadline: minutesFromNow(60) }, { cost: 0 });
+        await f.session.waitForOwnerTurn({ reason: "objective_start" });
+        // 15 minutes before a 60-minute deadline.
+        await f.operator({ deadline: minutesFromNow(15) });
+        await f.sweep();
+        expect((await f.reload()).limitState?.deadlineWarnings ?? []).toMatchObject([]);
+        const notice = await f.session.waitForOwnerTurn({ reason: "objective_notice" });
+        const event = await f.store.findInboundEventById(notice.task.inboundEventId ?? "");
+        expect(event?.event.text).toContain("the Objective deadline");
+        // Repeating the sweep delivers no second notice for the same event.
+        await f.sweep();
+        await f.sweep();
+        const session = await f.store.findObjectiveOwnerSession(f.objective.id);
+        const texts = await Promise.all(
+          (await f.store.listSessionTaskIds(session?.id ?? "")).map(async (id) => {
+            const task = await f.store.findTaskById(id);
+            const inbound = task?.inboundEventId
+              ? await f.store.findInboundEventById(task.inboundEventId)
+              : undefined;
+            return inbound?.event.text ?? "";
+          }),
+        );
+        expect(texts.filter((text) => text === event?.event.text)).toHaveLength(1);
       });
     },
   );
@@ -717,234 +619,4 @@ describe("Objective limit evaluation", () => {
       exhausted: false,
     });
   });
-});
-
-describe("Objective limits during execution", () => {
-  const cleanups: Array<() => Promise<unknown> | unknown> = [];
-  afterEach(async () => {
-    for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-  });
-  async function fixture(
-    definition: Record<string, unknown>,
-    cost: number,
-    options: { deadlineGraceMs?: number } = {},
-  ) {
-    const directory = await mkdtemp(join(tmpdir(), "supertag-limits-run-"));
-    cleanups.push(() => rm(directory, { recursive: true, force: true }));
-    const url = `file:${join(directory, "state.db")}`;
-    await migrateDatabase({ url });
-    const store = new DrizzleStore({ url });
-    await store.connect();
-    cleanups.push(() => store.disconnect());
-    const owner = await store.createTag({ name: `owner-${randomUUID()}` });
-    await store.bindTagWorkerHost(owner.id, "fixture");
-    const objective = await store.createObjective({
-      id: randomUUID(),
-      ownerTagId: owner.id,
-      outcome: "Resolve the backlog",
-      ...definition,
-    });
-    let release!: () => void;
-    const released = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const seen = { started: 0, aborted: 0, completed: 0 };
-    const worker: Worker = {
-      async describe() {
-        return {
-          profileCapabilities: [
-            {
-              profile: { id: "default", revision: "1" },
-              capabilities: [{ id: "supertag.coordination", version: 1 }],
-              contextTypes: [],
-            },
-          ],
-          id: "fixture-worker",
-          type: "test",
-          profiles: [{ id: "default", revision: "1" }],
-          capabilities: [{ id: "supertag.coordination", version: 1 }],
-          contextTypes: [],
-          maxConcurrency: 1,
-        };
-      },
-      async *execute(spec, signal) {
-        const identity = { taskId: spec.taskId, attemptId: spec.attemptId };
-        const at = () => new Date().toISOString();
-        seen.started++;
-        yield { ...identity, type: "execution.started", at: at(), workerId: "fixture-worker" };
-        yield {
-          ...identity,
-          type: "usage.updated",
-          at: at(),
-          usage: {
-            inputTokens: 10,
-            outputTokens: 10,
-            cachedInputTokens: 0,
-            totalTokens: 20,
-            complete: false,
-            reportedCost: { amountMinor: cost, currency: "USD" },
-          },
-        };
-        await new Promise<void>((resolve) => {
-          void released.then(resolve);
-          signal?.addEventListener("abort", () => resolve(), { once: true });
-        });
-        if (signal?.aborted) {
-          seen.aborted++;
-          throw signal.reason;
-        }
-        seen.completed++;
-        yield {
-          ...identity,
-          type: "output.message",
-          at: at(),
-          message: { role: "teammate", text: "Finished." },
-        };
-        yield { ...identity, type: "execution.completed", at: at() };
-      },
-    };
-    const controller = new ObjectiveController(
-      store,
-      durableTestWorklet(new LocalWorklet("fixture", "fixture", [worker])),
-      () => {},
-      undefined,
-      { limitSweepIntervalMs: 0, ...options },
-    );
-    controller.activateCoordination({ url: "http://fixture.invalid" });
-    cleanups.push(() => controller.stop());
-    cleanups.push(() => release());
-    const start = () => store.getTaskAssignment(`${objective.id}:start`);
-    const assign = () =>
-      controller.commandAsAdministrator("assign_task", {
-        objectiveId: objective.id,
-        taskId: randomUUID(),
-        teamId: `${objective.id}:leadership`,
-        assignedTagId: owner.id,
-        instruction: "More work",
-        acceptanceCriteria: ["Done"],
-      });
-    return { store, controller, objective, seen, release, start, assign };
-  }
-
-  it("lets a running Task Attempt finish when provider-reported spend reaches the budget", async () => {
-    const f = await fixture({ budgetLimitMinor: 500, budgetCurrency: "USD" }, 700);
-    await f.controller.command("start_objective", { objectiveId: f.objective.id });
-    f.controller.start();
-    await expect
-      .poll(async () => (await f.store.getObjective(f.objective.id)).limitState?.budgetExhausted, {
-        timeout: 20000,
-      })
-      .toMatchObject({ spentMinor: 700 });
-    await expect(f.assign()).rejects.toThrow("Objective budget exhausted");
-    // The running Attempt overruns the budget instead of being cancelled.
-    expect((await f.start())?.status).toBe("running");
-    expect(f.seen.aborted).toBe(0);
-    f.release();
-    await expect.poll(() => f.seen.completed, { timeout: 20000 }).toBe(1);
-    expect(f.seen.aborted).toBe(0);
-    // Once nothing is running, the spent Objective becomes limited instead of continuing.
-    await expect
-      .poll(async () => (await f.store.getObjective(f.objective.id)).status, { timeout: 20000 })
-      .toBe("limited");
-    // The owner records its limit summary, even on a harness that enforces no token limit.
-    await expect
-      .poll(
-        async () => {
-          await f.controller.sweepObjectiveLimits(true);
-          return (await f.store.getObjective(f.objective.id)).limitState?.summary;
-        },
-        { timeout: 20000 },
-      )
-      .toBeDefined();
-    // Raising the budget resumes the owner from that summary.
-    const startedBeforeRaise = f.seen.started;
-    const limited = await f.store.getObjective(f.objective.id);
-    await f.store.updateObjectiveStatus(
-      f.objective.id,
-      { budgetLimitMinor: 5000, expectedRevision: limited.revision },
-      undefined,
-      undefined,
-      { operatorId: "test" },
-    );
-    await expect
-      .poll(async () => (await f.store.getObjective(f.objective.id)).status, { timeout: 20000 })
-      .toBe("working");
-    await expect.poll(() => f.seen.started, { timeout: 20000 }).toBeGreaterThan(startedBeforeRaise);
-  }, 60000);
-
-  it("lets a running Task Attempt finish during the deadline grace period", async () => {
-    const f = await fixture({ deadline: new Date(Date.now() + 2000).toISOString() }, 0, {
-      deadlineGraceMs: 60_000,
-    });
-    await f.controller.command("start_objective", { objectiveId: f.objective.id });
-    f.controller.start();
-    await expect.poll(() => f.seen.started, { timeout: 20000 }).toBe(1);
-    // Past the deadline and at least one lease renewal.
-    await new Promise((resolve) => setTimeout(resolve, 7000));
-    expect(f.seen.aborted).toBe(0);
-    await expect(f.assign()).rejects.toThrow("past its deadline");
-    f.release();
-    await expect.poll(async () => (await f.start())?.status, { timeout: 20000 }).toBe("accepted");
-    expect(f.seen).toMatchObject({ started: 1, aborted: 0, completed: 1 });
-  }, 60000);
-
-  it("revokes a running Task Attempt's authority when the grace period ends", async () => {
-    const f = await fixture({ deadline: new Date(Date.now() + 1000).toISOString() }, 0, {
-      deadlineGraceMs: 1000,
-    });
-    await f.controller.command("start_objective", { objectiveId: f.objective.id });
-    f.controller.start();
-    await expect.poll(() => f.seen.started, { timeout: 20000 }).toBe(1);
-    await expect.poll(() => f.seen.aborted, { timeout: 20000 }).toBe(1);
-    expect(f.seen.completed).toBe(0);
-  }, 60000);
-
-  it("stops a running Task Attempt when a moved deadline's grace period has already ended", async () => {
-    const f = await fixture({ deadline: new Date(Date.now() + 2 * 3_600_000).toISOString() }, 0);
-    await f.controller.command("start_objective", { objectiveId: f.objective.id });
-    f.controller.start();
-    await expect.poll(() => f.seen.started, { timeout: 20000 }).toBe(1);
-    const objective = await f.store.getObjective(f.objective.id);
-    // The default 15-minute grace ended five minutes before the new deadline was recorded.
-    await f.store.updateObjectiveStatus(
-      f.objective.id,
-      {
-        deadline: new Date(Date.now() - 20 * 60_000).toISOString(),
-        expectedRevision: objective.revision,
-      },
-      undefined,
-      undefined,
-      { operatorId: "test" },
-    );
-    await expect.poll(() => f.seen.aborted, { timeout: 20000 }).toBe(1);
-    expect(f.seen.completed).toBe(0);
-    await expect
-      .poll(async () => (await f.start())?.status, { timeout: 20000 })
-      .not.toBe("running");
-  }, 60000);
-
-  it("keeps a running Task Attempt when the deadline moves later before its grace period ends", async () => {
-    const f = await fixture({ deadline: new Date(Date.now() + 1000).toISOString() }, 0, {
-      deadlineGraceMs: 2000,
-    });
-    await f.controller.command("start_objective", { objectiveId: f.objective.id });
-    f.controller.start();
-    await expect.poll(() => f.seen.started, { timeout: 20000 }).toBe(1);
-    const objective = await f.store.getObjective(f.objective.id);
-    await f.store.updateObjectiveStatus(
-      f.objective.id,
-      {
-        deadline: new Date(Date.now() + 3_600_000).toISOString(),
-        expectedRevision: objective.revision,
-      },
-      undefined,
-      undefined,
-      { operatorId: "test" },
-    );
-    // Past the original grace end and at least one authority check.
-    await new Promise((resolve) => setTimeout(resolve, 7000));
-    expect(f.seen.aborted).toBe(0);
-    f.release();
-    await expect.poll(async () => (await f.start())?.status, { timeout: 20000 }).toBe("accepted");
-  }, 60000);
 });

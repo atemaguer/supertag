@@ -4,16 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { taskResourceFromStore } from "../apps/cli/src/control-plane-resources.ts";
-import { ObjectiveController } from "../packages/control-plane/src/objective-controller.js";
-import type { TaskAssignment } from "../packages/core/src/index.js";
+import type { SurfaceTagAuthorizationSnapshot, Task } from "../packages/core/src/index.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
 import { createIsolatedPostgresDatabase } from "./support/database.js";
 
 const postgres = process.env["SUPERTAG_POSTGRES_URL"];
 const lists = { decisions: [], changes: [], unresolved: [], references: [], artifacts: [] };
 
-function storedFindings(task: TaskAssignment | undefined): unknown {
-  return (task?.result?.["taskResult"] as Record<string, unknown> | undefined)?.["findings"];
+function storedFindings(task: Task | undefined): unknown {
+  return (task?.result as Record<string, unknown> | undefined)?.["findings"];
 }
 
 for (const dialect of ["sqlite", "postgresql"] as const) {
@@ -27,6 +26,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
       });
 
+      /** A store, and a way to open a pending Session Task of a Tag, as an inbound message does. */
       async function fixture() {
         let url: string;
         if (dialect === "postgresql") {
@@ -43,296 +43,207 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         const store = new DrizzleStore({ url });
         await store.connect();
         cleanups.push(() => store.disconnect());
-        const owner = await store.createTag({ name: `owner-${randomUUID()}` });
-        const worker = await store.createTag({ name: `worker-${randomUUID()}` });
-        for (const tag of [owner, worker]) await store.bindTagWorkerHost(tag.id, "fixture-host");
-        const objective = await store.createObjective({
-          id: randomUUID(),
-          ownerTagId: owner.id,
-          outcome: "Review findings",
+        const tag = await store.createTag({ name: `reviewer-${randomUUID()}` });
+        await store.bindTagWorkerHost(tag.id, "fixture-host");
+        const account = await store.saveSurfaceAccount({
+          provider: "slack",
+          externalAccountId: randomUUID(),
+          displayName: "Slack",
+          authMethod: "test",
+          credentialId: "test",
+          status: "connected",
+          configuration: {},
+          verifiedAt: new Date().toISOString(),
         });
-        const team = await store.createTeam({
-          id: randomUUID(),
-          objectiveId: objective.id,
-          name: "Review",
-          leadTagId: owner.id,
-          memberTagIds: [worker.id],
-          maxConcurrency: 2,
+        const route = await store.addTagRoute({
+          tagId: tag.id,
+          surfaceAccountId: account.id,
+          scope: "channel:review",
         });
-        // No Worklet: the test claims and settles each Task itself.
-        const controller = new ObjectiveController(store, undefined);
-        await controller.command("start_objective", { objectiveId: objective.id });
-        const assign = async (instruction: string) => {
-          const task = (await controller.command("assign_task", {
-            objectiveId: objective.id,
-            taskId: randomUUID(),
-            teamId: team.id,
-            assignedTagId: worker.id,
-            instruction,
-            acceptanceCriteria: ["Findings reported"],
-          })) as TaskAssignment;
-          const claimed = await store.claimTaskAssignment({
-            taskId: task.taskId,
-            leaseOwner: "worker",
+
+        const openTask = async (sessionKey: string): Promise<Task> => {
+          const at = new Date().toISOString();
+          const authorization: SurfaceTagAuthorizationSnapshot = {
+            version: 5,
+            capturedAt: at,
+            tag: { id: tag.id, name: tag.name },
+            origin: {
+              provider: "slack",
+              surfaceAccountId: account.id,
+              tagRouteId: route.id,
+              scope: "channel:review",
+            },
+            requester: { id: "human", kind: "user" },
+            roles: [],
+            permissionSets: [],
+            resources: [],
+            runtimeActions: [],
+          };
+          const contextPlan = { version: 7, capturedAt: at, sets: [] } as const;
+          const event = {
+            eventId: randomUUID(),
+            logicalEventId: randomUUID(),
+            provider: "slack",
+            externalAccountId: account.externalAccountId,
+            kind: "message",
+            scope: "channel:review",
+            sessionKey,
+            actor: { id: "human", kind: "user" },
+            text: "Review the change",
+            occurredAt: at,
+            callback: {
+              provider: "slack",
+              mode: "slack_thread",
+              threadKey: sessionKey,
+              target: { channelId: "review", threadTs: sessionKey },
+            },
+            source: {},
+            metadata: {},
+          } as const;
+          const admitted = await store.admitInboundEvent({
+            surfaceAccountId: account.id,
+            tagRouteId: route.id,
+            tagId: tag.id,
+            authorization,
+            contextPlan,
+            event,
           });
-          if (!claimed) throw new Error("Fixture Task could not be claimed");
-          return claimed;
+          const session = await store.openSession({
+            tagId: tag.id,
+            sessionKey,
+            origin: {},
+            at,
+          });
+          return store.openTask({
+            inboundEventId: admitted.work.id,
+            tagId: tag.id,
+            sessionId: session.id,
+            execution: {},
+            actor: event.actor,
+            trigger: {},
+            workspacePlan: { version: 1, status: "none" },
+            sessionHistory: [],
+            authorizationSnapshot: authorization,
+            contextPlan,
+            createdAt: at,
+          });
         };
-        const settle = (task: TaskAssignment, findings: unknown[]) =>
-          store.settleTaskAssignment({
-            taskId: task.taskId,
-            leaseOwner: "worker",
-            attemptCount: task.attemptCount,
-            result: { text: "Reviewed", taskResult: { summary: "Reviewed", ...lists, findings } },
+
+        const close = (task: Task, findings: unknown[]) =>
+          store.closeTask({
+            taskId: task.id,
+            status: "completed",
+            endedAt: new Date().toISOString(),
+            result: {
+              summary: "Reviewed",
+              ...lists,
+              findings,
+            } as never,
           });
+
         return {
           store,
-          controller,
-          objective,
-          a: await assign("Review A"),
-          b: await assign("Review B"),
-          settle,
+          tag,
+          a: await openTask(`conversation-a-${randomUUID()}`),
+          b: await openTask(`conversation-b-${randomUUID()}`),
+          close,
         };
       }
 
-      it("records findings for the settling Task only, with Control Plane ids and open status", async () => {
+      it("records findings for the settling Task only, with Control Plane ids", async () => {
         const f = await fixture();
-        await f.settle(f.a, [
-          {
-            id: "F9",
-            severity: "medium",
-            summary: "Missing guard",
-            location: "src/a.ts:10",
-            status: "fixed",
-          },
-          {
-            severity: "high",
-            summary: "Unchecked input",
-            status: "accepted",
-            reason: "Out of scope",
-          },
+        await f.close(f.a, [
+          // The Worker's own identifier is replaced, in result order.
+          { id: "F9", severity: "medium", summary: "Missing guard", location: "src/a.ts:10" },
+          { severity: "high", summary: "Unchecked input" },
         ]);
 
         const recorded = [
-          {
-            id: "F1",
-            severity: "medium",
-            summary: "Missing guard",
-            location: "src/a.ts:10",
-            status: "open",
-          },
-          { id: "F2", severity: "high", summary: "Unchecked input", status: "open" },
+          { id: "F1", severity: "medium", summary: "Missing guard", location: "src/a.ts:10" },
+          { id: "F2", severity: "high", summary: "Unchecked input" },
         ];
-        expect(storedFindings(await f.store.getTaskAssignment(f.a.taskId))).toEqual(recorded);
-        const b = await f.store.getTaskAssignment(f.b.taskId);
-        expect(b).toMatchObject({ status: "running" });
-        expect(b?.result).toBeNull();
-
-        const detail = (await f.controller.commandAsAdministrator("read_task", {
-          objectiveId: f.objective.id,
-          taskId: f.a.taskId,
-        })) as { openFindings: unknown };
-        expect(detail.openFindings).toEqual({
-          high: [recorded[1]],
-          medium: [recorded[0]],
-          low: [],
-        });
-        const other = (await f.controller.commandAsAdministrator("read_task", {
-          objectiveId: f.objective.id,
-          taskId: f.b.taskId,
-        })) as { openFindings: unknown };
-        expect(other.openFindings).toEqual({ high: [], medium: [], low: [] });
-
-        // `supertag describe task` reads the same open findings from the store.
-        const task = await f.store.findTaskById(f.a.taskId);
-        expect(task).toBeDefined();
-        const resource = await taskResourceFromStore(f.store, task as never);
-        expect(resource.status.openFindings).toEqual({
-          high: [recorded[1]],
-          medium: [recorded[0]],
-          low: [],
-        });
+        expect(storedFindings(await f.store.findTaskById(f.a.id))).toEqual(recorded);
+        const b = await f.store.findTaskById(f.b.id);
+        expect(b).toMatchObject({ status: "pending" });
+        expect(b?.result ?? null).toBeNull();
       });
 
-      it("reads a corrupt stored findings record as unreadable instead of failing read_task", async () => {
+      it("shows a Task's stored findings grouped by severity in `describe task`", async () => {
         const f = await fixture();
-        await f.settle(f.a, [{ severity: "high", summary: "Unchecked input" }]);
-        const read = f.store.getTaskAssignment.bind(f.store);
+        await f.close(f.a, [
+          { severity: "medium", summary: "Missing guard", location: "src/a.ts:10" },
+          { severity: "high", summary: "Unchecked input" },
+        ]);
+        const resource = await taskResourceFromStore(
+          f.store,
+          (await f.store.findTaskById(f.a.id)) as Task,
+        );
+        expect(resource.status.findings).toEqual({
+          high: [{ id: "F2", severity: "high", summary: "Unchecked input" }],
+          medium: [
+            { id: "F1", severity: "medium", summary: "Missing guard", location: "src/a.ts:10" },
+          ],
+          low: [],
+        });
+        const other = await taskResourceFromStore(
+          f.store,
+          (await f.store.findTaskById(f.b.id)) as Task,
+        );
+        expect(other.status.findings).toBeUndefined();
+      });
+
+      it("reads a corrupt stored findings record as unreadable instead of failing the view", async () => {
+        const f = await fixture();
+        await f.close(f.a, [{ severity: "high", summary: "Unchecked input" }]);
+        const task = (await f.store.findTaskById(f.a.id)) as Task;
         // Simulates a record corrupted in storage: settlement itself refuses such findings.
-        f.store.getTaskAssignment = async (...args: Parameters<typeof read>) => {
-          const task = await read(...args);
-          if (task?.taskId !== f.a.taskId || !task.result) return task;
-          const taskResult = task.result["taskResult"] as Record<string, unknown>;
-          return {
-            ...task,
-            result: {
-              ...task.result,
-              taskResult: { ...taskResult, findings: [{ id: "F1", severity: "critical" }] },
-            },
-          };
-        };
-        const detail = (await f.controller.commandAsAdministrator("read_task", {
-          objectiveId: f.objective.id,
-          taskId: f.a.taskId,
-        })) as { openFindings: unknown };
-        expect(detail.openFindings).toEqual({
+        const corrupt = {
+          ...task,
+          result: { ...(task.result as object), findings: [{ id: "F1", severity: "critical" }] },
+        } as Task;
+        const resource = await taskResourceFromStore(f.store, corrupt);
+        expect(resource.status.findings).toEqual({
           unreadable:
             "Stored Task result findings are invalid: Task finding severity must be high, medium, or low",
         });
       });
 
-      it("refuses a finding that names another Task or carries an unknown severity", async () => {
+      it("refuses a finding that names a Task or carries an unknown severity", async () => {
         const f = await fixture();
         await expect(
-          f.settle(f.a, [{ severity: "high", summary: "Belongs elsewhere", taskId: f.b.taskId }]),
-        ).rejects.toMatchObject({ statusCode: 400 });
+          f.close(f.a, [{ severity: "high", summary: "Belongs elsewhere", taskId: f.b.id }]),
+        ).rejects.toThrow(/not allowed/u);
         await expect(
-          f.settle(f.a, [{ severity: "critical", summary: "Unknown severity" }]),
-        ).rejects.toMatchObject({ statusCode: 400 });
+          f.close(f.a, [{ severity: "critical", summary: "Unknown severity" }]),
+        ).rejects.toThrow(/high, medium, or low/u);
 
         for (const task of [f.a, f.b]) {
-          const stored = await f.store.getTaskAssignment(task.taskId);
-          expect(stored).toMatchObject({ status: "running", attemptCount: task.attemptCount });
-          expect(stored?.result).toBeNull();
+          const stored = await f.store.findTaskById(task.id);
+          expect(stored).toMatchObject({ status: "pending" });
+          expect(stored?.result ?? null).toBeNull();
         }
       });
 
-      it("discards top-level findings on settlement", async () => {
+      it("refuses findings that are not a list, and an empty or hidden-character summary", async () => {
         const f = await fixture();
-        await f.store.settleTaskAssignment({
-          taskId: f.a.taskId,
-          leaseOwner: "worker",
-          attemptCount: f.a.attemptCount,
-          result: {
-            text: "Reviewed",
-            findings: [{ severity: "high", summary: "Forged top-level finding" }],
-            taskResult: { summary: "Reviewed", ...lists, findings: [] },
-          },
-        });
-        const result = (await f.store.getTaskAssignment(f.a.taskId))?.result;
-        expect(result?.["findings"]).toBeUndefined();
-        expect(storedFindings(await f.store.getTaskAssignment(f.a.taskId))).toEqual([]);
-      });
-
-      it("blocks owner review and completion on an open high, naming the finding", async () => {
-        const f = await fixture();
-        await f.settle(f.a, [
-          { severity: "high", summary: "Missing authorization", location: "src/auth.ts:42" },
-        ]);
-        await f.store.reviewTaskAssignment(f.a.taskId, f.objective.ownerTagId, true, "Confirmed");
-        for (const status of ["ready_for_review", "completed"] as const)
-          await expect(
-            f.store.updateObjectiveStatus(
-              f.objective.id,
-              {
-                status,
-                expectedRevision: 1,
-                completionSummary: "Reviewed",
-              },
-              f.objective.ownerTagId,
-            ),
-          ).rejects.toThrow(`${f.a.taskId} F1: Missing authorization (src/auth.ts:42)`);
-        expect((await f.store.getObjective(f.objective.id)).status).toBe("working");
-        const overview = await f.controller.readObjectiveOverview({ objectiveId: f.objective.id });
-        expect(overview.openHighFindings).toEqual([
-          {
-            taskId: f.a.taskId,
-            id: "F1",
-            severity: "high",
-            summary: "Missing authorization",
-            location: "src/auth.ts:42",
-            status: "open",
-          },
-        ]);
-        const inbox = await f.store.readCoordinationInbox({
-          objectiveId: f.objective.id,
-          kind: "task_attention",
-        });
-        expect(
-          inbox.items.some((item) =>
-            item.reason?.includes(`${f.a.taskId} F1: Missing authorization`),
-          ),
-        ).toBe(true);
-        const cancelled = await f.store.cancelObjective(
-          f.objective.id,
-          { reason: "Operator decision" },
-          { operatorId: "operator" },
+        await expect(f.close(f.a, "F1: broken" as never)).rejects.toThrow(/must be an array/u);
+        await expect(f.close(f.a, [{ severity: "low", summary: "   " }])).rejects.toThrow(
+          /must not be empty/u,
         );
-        expect(cancelled.objective.status).toBe("cancelled");
+        await expect(
+          f.close(f.a, [{ severity: "low", summary: "Hidden​character" }]),
+        ).rejects.toThrow(/invisible characters/u);
       });
 
-      it("includes open medium and low findings in the stored completion summary", async () => {
+      it("records no findings when the result carries none", async () => {
         const f = await fixture();
-        await f.settle(f.a, [
-          { severity: "medium", summary: "Missing retry", location: "src/queue.ts:12" },
-          { severity: "low", summary: "Unclear label" },
-        ]);
-        await f.store.reviewTaskAssignment(f.a.taskId, f.objective.ownerTagId, true, "Confirmed");
-        await f.store.cancelTaskAssignment(f.b.taskId, f.objective.ownerTagId);
-        for (const task of await f.store.listTaskAssignments(f.objective.id))
-          if (
-            task.taskId !== f.a.taskId &&
-            task.taskId !== f.b.taskId &&
-            ["queued", "running", "waiting", "submitted"].includes(task.status)
-          )
-            await f.store.cancelTaskAssignment(task.taskId, f.objective.ownerTagId);
-        const completed = await f.store.updateObjectiveStatus(f.objective.id, {
-          status: "completed",
-          expectedRevision: 1,
-          completionSummary: "Done.",
-        });
-        expect(completed.completionSummary).toContain(
-          `${f.a.taskId} F1: Missing retry (src/queue.ts:12)`,
+        await f.close(f.a, []);
+        expect(storedFindings(await f.store.findTaskById(f.a.id))).toEqual([]);
+        const resource = await taskResourceFromStore(
+          f.store,
+          (await f.store.findTaskById(f.a.id)) as Task,
         );
-        expect(completed.completionSummary).toContain(`${f.a.taskId} F2: Unclear label`);
-      });
-
-      it("records open highs and the operator on direct completion and approval", async () => {
-        for (const approval of [false, true]) {
-          const f = await fixture();
-          await f.settle(f.a, [
-            { severity: "high", summary: "Missing authorization", location: "src/auth.ts:42" },
-          ]);
-          await f.store.reviewTaskAssignment(f.a.taskId, f.objective.ownerTagId, true, "Confirmed");
-          for (const task of await f.store.listTaskAssignments(f.objective.id))
-            if (["queued", "running", "waiting", "submitted"].includes(task.status))
-              await f.store.cancelTaskAssignment(task.taskId, f.objective.ownerTagId);
-          if (approval)
-            await f.store.updateObjectiveStatus(
-              f.objective.id,
-              {
-                status: "ready_for_review",
-                expectedRevision: 1,
-                completionSummary: "Owner assessment.",
-              },
-              undefined,
-              undefined,
-              { operatorId: "review-operator" },
-            );
-          const completed = approval
-            ? await f.controller.approveObjective(
-                { objectiveId: f.objective.id },
-                { operatorId: "review-operator", scopes: { actions: ["*"] } },
-              )
-            : await f.store.updateObjectiveStatus(
-                f.objective.id,
-                {
-                  status: "completed",
-                  expectedRevision: 1,
-                  completionSummary: "Operator decision.",
-                },
-                undefined,
-                undefined,
-                { operatorId: "review-operator" },
-              );
-          expect(completed.completionSummary).toContain("Operator review-operator completed");
-          expect(completed.completionSummary).toContain(
-            `${f.a.taskId} F1: Missing authorization (src/auth.ts:42)`,
-          );
-          expect((await f.store.getObjective(f.objective.id)).completionSummary).toBe(
-            completed.completionSummary,
-          );
-        }
+        expect(resource.status.findings).toBeUndefined();
       });
     },
   );

@@ -1,7 +1,3 @@
-import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   laptopPowerWarning,
@@ -17,9 +13,6 @@ import {
   SUSPEND_GAP_MS,
   SuspendDetector,
 } from "../packages/control-plane/src/suspend-detector.js";
-import { emptyTagContextPlan } from "../packages/core/src/index.js";
-import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
-import { createIsolatedPostgresDatabase } from "./support/database.js";
 
 const t0 = Date.parse("2026-10-02T20:00:00.000Z");
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -122,216 +115,77 @@ describe("suspend detection", () => {
   });
 });
 
-const postgres = process.env["SUPERTAG_POSTGRES_URL"];
+/**
+ * Surface Attempts are the only leases a suspend affects now: `renewInboundEventLease` renews a
+ * processing turn's lease without an expiry check, so after a reported wake the Control Plane's
+ * own Attempts keep their coordination authority for the grace, and nobody else's do.
+ */
+describe("Surface lease grace after a suspend", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
-/** The controller's lease identity and renewal input, read through an internal test seam. */
-const internals = (controller: ObjectiveController) =>
-  controller as unknown as {
-    readonly instanceId: string;
-    renewableSince(): { renewableSince?: string };
-  };
+  it("keeps this Control Plane's own Surface leases current after a reported wake", async () => {
+    let wake: { sleptAt: number; wokeAt: number } | undefined;
+    const controller = new ObjectiveController({} as never, undefined, () => {}, {
+      systemWake: async () => wake,
+      surfaceLeaseOwner: "surface-cp",
+      surfaceAttemptsRunning: () => true,
+    });
+    const start = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"], now: start });
+    const surfaceLease = { leaseOwner: "surface-cp", leaseExpiresAt: iso(start + 30_000) };
+    expect(controller.surfaceLeaseCurrent(surfaceLease)).toBe(true);
 
-for (const dialect of ["sqlite", "postgresql"] as const) {
-  describe.skipIf(dialect === "postgresql" && !postgres)(
-    `${dialect} lease renewal after a suspend`,
-    { timeout: 30_000 },
-    () => {
-      const cleanups: Array<() => Promise<unknown> | unknown> = [];
-      afterEach(async () => {
-        vi.useRealTimers();
-        for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-      });
+    // The host sleeps 10 seconds in, after a stall, and wakes 20 minutes later. The sweep that
+    // polls the wake runs before the clock is observed again.
+    const woke = start + 20 * 60_000;
+    wake = { sleptAt: start + 10_000, wokeAt: woke };
+    vi.setSystemTime(woke + 1_000);
+    await controller.pollSystemWake();
 
-      async function runningTask(
-        leaseOwnerFor: (store: DrizzleStore) => string = () => "cp",
-        workerSnapshot: Record<string, unknown> = {},
-      ) {
-        const directory = await mkdtemp(join(tmpdir(), "supertag-sleep-grace-"));
-        cleanups.push(() => rm(directory, { recursive: true, force: true }));
-        const isolated =
-          dialect === "postgresql"
-            ? await createIsolatedPostgresDatabase(postgres as string)
-            : undefined;
-        if (isolated) cleanups.push(isolated.cleanup);
-        const url = isolated?.url ?? `file:${join(directory, "state.db")}`;
-        await migrateDatabase({ url });
-        const store = new DrizzleStore({ url });
-        await store.connect();
-        cleanups.push(() => store.disconnect());
-        const owner = await store.createTag({ name: `owner-${randomUUID()}` });
-        const objective = await store.createObjective({
-          id: randomUUID(),
-          ownerTagId: owner.id,
-          outcome: "Ship the release",
-        });
-        const team = await store.createTeam({
-          id: `${objective.id}:leadership`,
-          objectiveId: objective.id,
-          name: "Leadership",
-          leadTagId: owner.id,
-          memberTagIds: [owner.id],
-          maxConcurrency: 4,
-        });
-        const at = new Date().toISOString();
-        await store.admitTaskAssignment({
-          taskId: "owner",
-          objectiveId: objective.id,
-          teamId: team.id,
-          requestedByTagId: owner.id,
-          assignedTagId: owner.id,
-          instruction: "Produce owner",
-          acceptanceCriteria: ["Reviewed"],
-          requiresApproval: false,
-          dependencies: [],
-          maxCostMinor: 0,
-          execution: {},
-          workspacePlan: { version: 1, status: "none" },
-          contextPlan: emptyTagContextPlan(at),
-          authorizationSnapshot: {
-            version: 4,
-            capturedAt: at,
-            tag: { id: owner.id, name: owner.name },
-            origin: { kind: "internal", objectiveId: objective.id, requestedByTagId: owner.id },
-            requester: { id: owner.id, kind: "bot" },
-            permissionSets: [],
-            resources: [],
-            runtimeActions: [],
-          },
-          startObjectiveExecution: true,
-        });
-        const claim = await store.claimTaskAssignment({
-          taskId: "owner",
-          leaseOwner: leaseOwnerFor(store),
-          leaseSeconds: 30,
-        });
-        if (!claim) throw new Error("Could not claim owner");
-        await store.createTaskAttempt({
-          taskId: "owner",
-          attemptNumber: claim.attemptCount,
-          workerProfile: { id: "fixture", revision: "1" },
-          workerSnapshot,
-          startedAt: new Date().toISOString(),
-        });
-        await store.startTask({ taskId: "owner", startedAt: new Date().toISOString() });
-        return { store, claim };
-      }
+    expect(controller.surfaceLeaseCurrent(surfaceLease)).toBe(true);
+    // Only this Control Plane's own Surface leases, valid when the host slept, get the grace.
+    expect(controller.surfaceLeaseCurrent({ ...surfaceLease, leaseOwner: "other" })).toBe(false);
+    expect(
+      controller.surfaceLeaseCurrent({ ...surfaceLease, leaseExpiresAt: iso(start + 5_000) }),
+    ).toBe(false);
+    // A lease with no owner or no expiry is never current.
+    expect(controller.surfaceLeaseCurrent({ leaseOwner: null, leaseExpiresAt: null })).toBe(false);
 
-      it("renews a lease that expired during the suspend, and only that one", async () => {
-        const { store, claim } = await runningTask();
-        const suspendedAt = new Date(Date.now() + 1_000).toISOString();
-        vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 20 * 60_000 });
-        const renew = (renewableSince?: string) =>
-          store.renewTaskAssignment({
-            taskId: "owner",
-            leaseOwner: "cp",
-            attemptCount: claim.attemptCount,
-            leaseSeconds: 30,
-            ...(renewableSince === undefined ? {} : { renewableSince }),
-          });
-        await expect(renew()).rejects.toThrow("Stale execution lease");
-        // A lease that had already expired when the suspend began stays revoked.
-        await expect(renew(new Date(Date.now() - 19 * 60_000).toISOString())).rejects.toThrow(
-          "Stale execution lease",
-        );
-        const renewed = await renew(suspendedAt);
-        expect(renewed.status).toBe("running");
-        expect(Date.parse(renewed.leaseExpiresAt ?? "")).toBeGreaterThan(Date.now());
-        // Another lease owner cannot use the grace.
-        await expect(
-          store.renewTaskAssignment({
-            taskId: "owner",
-            leaseOwner: "other",
-            attemptCount: claim.attemptCount,
-            renewableSince: suspendedAt,
-          }),
-        ).rejects.toThrow("Stale execution lease");
-      });
+    // The grace ends while the Control Plane keeps sweeping, so no later gap counts as a suspend.
+    for (let at = woke + 5_000; at <= woke + RESUME_GRACE_MS + 5_000; at += 5_000) {
+      vi.setSystemTime(at);
+      controller.suspend.observe();
+    }
+    expect(controller.surfaceLeaseCurrent(surfaceLease)).toBe(false);
+  });
 
-      it("lets the controller renew Task and Surface leases after a reported wake", async () => {
-        let wake: { sleptAt: number; wokeAt: number } | undefined;
-        let controller: ObjectiveController | undefined;
-        // The controller's own instance owns the Task lease, as when it dispatched the Attempt.
-        const { store, claim } = await runningTask((store) => {
-          controller = new ObjectiveController(store, undefined, () => {}, undefined, {
-            systemWake: async () => wake,
-            surfaceLeaseOwner: "surface-cp",
-            surfaceAttemptsRunning: () => true,
-          });
-          return internals(controller).instanceId;
-        });
-        if (!controller) throw new Error("Controller was not created");
-        const start = Date.now();
-        vi.useFakeTimers({ toFake: ["Date"], now: start });
-        const surfaceLease = { leaseOwner: "surface-cp", leaseExpiresAt: iso(start + 30_000) };
-        expect(controller.surfaceLeaseCurrent(surfaceLease)).toBe(true);
-
-        // The host sleeps 10 seconds in, after a stall, and wakes 20 minutes later. The tick
-        // that polls the wake runs before the clock is observed again.
-        const woke = start + 20 * 60_000;
-        wake = { sleptAt: start + 10_000, wokeAt: woke };
-        vi.setSystemTime(woke + 1_000);
-        await controller.pollSystemWake();
-
-        expect(controller.surfaceLeaseCurrent(surfaceLease)).toBe(true);
-        // Only this Control Plane's own Surface leases, valid when the host slept, get the grace.
-        expect(controller.surfaceLeaseCurrent({ ...surfaceLease, leaseOwner: "other" })).toBe(
-          false,
-        );
-        expect(
-          controller.surfaceLeaseCurrent({ ...surfaceLease, leaseExpiresAt: iso(start + 5_000) }),
-        ).toBe(false);
-
-        const renewableSince = internals(controller).renewableSince();
-        expect(renewableSince).toEqual({ renewableSince: iso(start + 10_000) });
-        const renewed = await store.renewTaskAssignment({
-          taskId: "owner",
-          leaseOwner: internals(controller).instanceId,
-          attemptCount: claim.attemptCount,
-          leaseSeconds: 30,
-          ...renewableSince,
-        });
-        expect(Date.parse(renewed.leaseExpiresAt ?? "")).toBeGreaterThan(Date.now());
-
-        // The grace ends while the controller keeps ticking, so no further gap counts as a suspend.
-        for (let at = woke + 5_000; at <= woke + RESUME_GRACE_MS + 5_000; at += 5_000) {
-          vi.setSystemTime(at);
-          controller.suspend.observe();
-        }
-        expect(controller.surfaceLeaseCurrent(surfaceLease)).toBe(false);
-      });
-
-      it("recovers a durable Attempt whose own observer ended, even during a grace", async () => {
-        const inspect = vi.fn(async () => undefined);
-        let controller: ObjectiveController | undefined;
-        const { store, claim } = await runningTask(
-          (store) => {
-            controller = new ObjectiveController(store, { inspect } as never, () => {});
-            return internals(controller).instanceId;
-          },
-          { durableExecution: true },
-        );
-        if (!controller) throw new Error("Controller was not created");
-        const [attempt] = await store.listTaskAttempts("owner");
-        if (!attempt) throw new Error("Attempt was not created");
-        controller.activateCoordination({ url: "http://127.0.0.1:1" });
-        const seam = controller as unknown as { running: boolean; tick(): Promise<void> };
-        seam.running = true;
-        cleanups.push(() => controller?.stop());
-        // The clock jumps past the lease, as after a settlement failure ended this controller's
-        // observer: the jump starts a grace, but nothing is left to renew the lease.
-        const start = Date.now();
-        vi.useFakeTimers({ toFake: ["Date"], now: start });
-        controller.suspend.observe();
-        vi.setSystemTime(start + 31_000);
-        expect(Date.parse(claim.leaseExpiresAt ?? "")).toBeLessThan(Date.now());
-        await seam.tick();
-        expect(internals(controller).renewableSince()).not.toEqual({});
-        // Recovery asks the host about the Attempt instead of waiting out the grace.
-        expect(inspect).toHaveBeenCalledWith(attempt.id);
-      });
-    },
-  );
-}
+  it("polls the host's wake at most every ten seconds, and only while Attempts run", async () => {
+    let reads = 0;
+    let running = true;
+    const controller = new ObjectiveController({} as never, undefined, () => {}, {
+      systemWake: async () => {
+        reads += 1;
+        return undefined;
+      },
+      surfaceLeaseOwner: "surface-cp",
+      surfaceAttemptsRunning: () => running,
+    });
+    const start = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"], now: start });
+    await controller.pollSystemWake();
+    await controller.pollSystemWake();
+    expect(reads).toBe(1);
+    vi.setSystemTime(start + 10_001);
+    await controller.pollSystemWake();
+    expect(reads).toBe(2);
+    running = false;
+    vi.setSystemTime(start + 30_000);
+    await controller.pollSystemWake();
+    expect(reads).toBe(2);
+  });
+});
 
 describe("laptop power warning in supertag ps", () => {
   const macBattery = (source: string) =>

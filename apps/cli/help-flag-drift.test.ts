@@ -18,8 +18,8 @@ it.each([
     file: "objectives",
     parserStart: "export async function runObjectiveCommand",
     parserEnd: "const allowed =",
-    allowedStart: ': command === "message"',
-    allowedEnd: ': command === "approve"',
+    allowedStart: ': command === "message" || command === "approve" || command === "watch"',
+    allowedEnd: ': command === "get"',
   },
   {
     command: "recover worklet",

@@ -48,16 +48,3 @@ The Python files mirror the JavaScript extension points:
 
 They deliberately have no custom Worker CLI wrapper; deployment can use
 `python`, a package script, a process manager, or a container entrypoint.
-
-## Internal Tag messaging
-
-`mailbox.mjs` is a separate custom application demonstrating a durable mailbox consumer.
-Follow the [Tag messaging guide](../../docs/guides/tag-messaging.md) to create credentials
-and directional grants, then run:
-
-```sh
-SUPERTAG_MAILBOX_CREDENTIAL_FILE=~/.supertag/marketing-mailbox.json node mailbox.mjs
-```
-
-It asks for clarification when a delegation request arrives; it does not accept or execute
-an objective. The example keeps its credential in host-side code.

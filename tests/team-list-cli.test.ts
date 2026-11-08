@@ -4,18 +4,19 @@ import { runTeamCommand } from "../apps/cli/src/teams.js";
 
 afterEach(() => vi.restoreAllMocks());
 
-it("lists an Objective's Teams through the Objective read", async () => {
-  const request = vi
-    .spyOn(ControlPlaneClient.prototype, "request")
-    .mockResolvedValue({ id: "ship", teams: [{ id: "ship:leadership", name: "Leadership" }] });
-  const output = await runTeamCommand({ url: "http://127.0.0.1:1", token: "t" }, [
-    "list",
-    "--objective",
-    "ship",
-  ]);
-  expect(request).toHaveBeenCalledWith("/api/v1/coordination/read_objective", {
-    method: "POST",
-    body: JSON.stringify({ objectiveId: "ship" }),
-  });
-  expect(JSON.parse(output)).toEqual([{ id: "ship:leadership", name: "Leadership" }]);
+it("lists every Team, which stands on its own rather than under an Objective", async () => {
+  const items = [
+    { id: "crew", name: "Crew", memberTagIds: ["a", "b"], maxConcurrency: 2, revision: 1 },
+  ];
+  const client = new ControlPlaneClient({ url: "http://127.0.0.1:1", token: "t" });
+  const request = vi.spyOn(client, "request").mockResolvedValue({ items });
+  expect(JSON.parse(await runTeamCommand(client, ["list"]))).toEqual({ items });
+  expect(request).toHaveBeenCalledWith("/api/v1/tag-messaging/teams");
+});
+
+it("refuses an Objective filter, which no longer selects Teams", async () => {
+  const client = new ControlPlaneClient({ url: "http://127.0.0.1:1", token: "t" });
+  await expect(runTeamCommand(client, ["list", "--objective", "ship"])).rejects.toThrow(
+    /Unknown option '--objective'/u,
+  );
 });

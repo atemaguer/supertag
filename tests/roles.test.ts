@@ -3,8 +3,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ensureBuiltInRoles } from "../packages/control-plane/src/roles.js";
-import { ORG_ARCHITECT_ROLE_KEY } from "../packages/core/src/index.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
 import { createIsolatedPostgresDatabase } from "./support/database.js";
 
@@ -34,22 +32,6 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       });
       return store;
     }
-
-    it("directs temporary work to Tasks or native subagents and keeps Workstreams as Team channels", async () => {
-      const store = await fixture();
-      await ensureBuiltInRoles(store);
-      const instructions = (await store.listRoles()).find(
-        (role) => role.systemKey === ORG_ARCHITECT_ROLE_KEY,
-      )?.instructions;
-      expect(instructions).toContain(
-        "Prefer a Task or harness-native subagent for temporary work.",
-      );
-      expect(instructions).toContain("Workstreams are Team channels only.");
-      expect(instructions).not.toContain("Prefer a Task, Workstream");
-      expect(instructions).toContain(
-        "Record the evidence and policy revision behind each decision, then return a correlated mailbox decision to the requesting manager.",
-      );
-    });
 
     it("composes reusable configuration and assigns it to a Tag", async () => {
       const store = await fixture();
@@ -114,40 +96,6 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       await expect(store.assignRole({ roleId: role.id, tagId: tag.id })).rejects.toThrow(
         /Active Role/i,
       );
-    });
-
-    it("protects built-in identity while preserving user customization", async () => {
-      const store = await fixture();
-      const definition = {
-        systemKey: ORG_ARCHITECT_ROLE_KEY,
-        name: "Org Architect",
-        purpose: "Decide whether durable organization structure is warranted.",
-        instructions: "Prefer temporary coordination when durable identity is unnecessary.",
-      } as const;
-      const bootstrapped = await Promise.all(
-        Array.from({ length: 8 }, () => store.ensureSystemRole(definition)),
-      );
-      expect(new Set(bootstrapped.map((role) => role.id))).toHaveProperty("size", 1);
-      const initial = bootstrapped[0];
-      if (!initial) throw new Error("Built-in Role was not created");
-      const customized = await store.updateRole(initial.id, {
-        expectedRevision: initial.revision,
-        instructions: "Apply the operator's examples before approving a structural change.",
-      });
-      await expect(
-        store.ensureSystemRole({
-          systemKey: ORG_ARCHITECT_ROLE_KEY,
-          name: "Org Architect",
-          purpose: "A newer shipped default must not overwrite operator policy.",
-          instructions: "new default",
-        }),
-      ).resolves.toEqual(customized);
-      await expect(
-        store.updateRole(customized.id, {
-          expectedRevision: customized.revision,
-          status: "retired",
-        }),
-      ).rejects.toThrow(/Built-in Roles cannot be retired/i);
     });
   });
 }

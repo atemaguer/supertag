@@ -10,11 +10,11 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hostMcpToolServers, MCP_PRESETS } from "../../apps/cli/src/host-mcp.ts";
+import { workSessionBranch } from "../../packages/control-plane/src/work-sessions.js";
 import {
   approvalArgumentsDigest,
   type TagApprovalRequirement,
   type TagMcpGrant,
-  taskWorkspaceBranch,
 } from "../../packages/core/src/index.ts";
 import {
   connectWorkerMcpClient,
@@ -236,7 +236,9 @@ describe("target: mcp grants through the per-Task policy proxy", () => {
     const pending = await update({ id: "1", status: "resolved" });
     expect(pending.isError).toBe(true);
     expect(pending.content[0]?.text).toContain("Approval pending");
-    expect(pending.content[0]?.text).toContain("use wait_for with mailbox: true");
+    expect(pending.content[0]?.text).toContain(
+      "Continue other work; once the request is approved, retry the same call.",
+    );
     expect(asked[0]?.action).toEqual({
       target: "mcp",
       action: "fake/update_issue",
@@ -278,7 +280,7 @@ describe("target: mcp grants through the per-Task policy proxy", () => {
     expect(pending.content[0]?.text).toContain("Approval pending: update_issue");
     expect(pending.content[0]?.text).toContain("request r1. The call was not made.");
     expect(pending.content[0]?.text.endsWith(next)).toBe(true);
-    expect(pending.content[0]?.text).not.toContain("wait_for");
+    expect(pending.content[0]?.text).not.toContain("Continue other work");
     expect(upstream.calls).not.toHaveBeenCalled();
   });
 
@@ -533,7 +535,7 @@ describe("target: mcp grants through the per-Task policy proxy", () => {
         version: 1,
         status: "workspace",
         workspace: "app",
-        branch: taskWorkspaceBranch("objective-1", "task-1"),
+        branch: workSessionBranch("task-1"),
         delivery: "branch",
         mcp: ["fake"],
       },

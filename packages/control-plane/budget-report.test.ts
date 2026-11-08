@@ -1,21 +1,13 @@
-import type { Objective, Task, TaskAssignment, TaskAttempt, TaskEvent } from "@supertag/core";
+import type { Objective, Task, TaskAttempt, TaskEvent } from "@supertag/core";
 import { describe, expect, it } from "vitest";
-import { objectiveBudgetReport, taskBudgetReport } from "./src/budget-report.js";
+import { objectiveBudgetReport, objectivePool, taskBudgetReport } from "./src/budget-report.js";
 
 const objective = {
   id: "objective",
   budgetLimitMinor: 2_000,
   budgetCurrency: "USD",
-  reservedMinor: 0,
-  spentMinor: 400,
-} as Objective;
-
-const assignment = {
-  taskId: "task",
-  status: "accepted",
-  reservedMinor: 400,
-  chargedMinor: 400,
-} as TaskAssignment;
+  limitState: { reportedSpend: { amountMinor: 400, currency: "USD", unknownAttemptIds: [] } },
+} as unknown as Objective;
 
 const task = {
   id: "task",
@@ -79,11 +71,32 @@ function usage(
   });
 }
 
+describe("the Objective's one budget pool", () => {
+  it("reports what the limit sweep last measured and what remains", () => {
+    expect(objectivePool(objective)).toEqual({
+      currency: "USD",
+      limitMinor: 2_000,
+      spentMinor: 400,
+      availableMinor: 1_600,
+    });
+  });
+  it("counts nothing spent before the first sweep, and has no pool without a currency", () => {
+    expect(objectivePool({ ...objective, limitState: null } as unknown as Objective)).toMatchObject(
+      { spentMinor: 0, availableMinor: 2_000 },
+    );
+    expect(
+      objectivePool({ ...objective, budgetCurrency: null } as unknown as Objective),
+    ).toMatchObject({ currency: null, spentMinor: null, availableMinor: null });
+    expect(
+      objectivePool({ ...objective, budgetLimitMinor: null } as unknown as Objective),
+    ).toMatchObject({ limitMinor: null, availableMinor: null });
+  });
+});
+
 describe("budget reports", () => {
-  it("keeps each Attempt's original requested allocation after renewal", () => {
+  it("keeps each Attempt's own requested allocation", () => {
     const budget = taskBudgetReport({
       objective,
-      assignment,
       task: {
         ...task,
         execution: { limits: { maxReportedCost: { amountMinor: 900, currency: "USD" } } },
@@ -102,34 +115,11 @@ describe("budget reports", () => {
       budget.provider.attempts.map((a) => a.limits.requested.maxReportedCost?.amountMinor),
     ).toEqual([300, 900]);
   });
-  it.each(["queued", "cancelled"] as const)(
-    "preserves earlier charges during %s renewed allocation",
-    (status) => {
-      const budget = taskBudgetReport({
-        objective,
-        assignment: {
-          ...assignment,
-          status,
-          reservedMinor: 200,
-          chargedMinor: null,
-          result: { budgetRenewal: { previousChargedMinor: 100 } },
-        },
-        task,
-        attempts: [],
-        events: [],
-      });
-      expect(budget.organizational).toMatchObject({
-        chargedMinor: 100,
-        reservedMinor: status === "queued" ? 200 : 0,
-        limitMinor: 300,
-      });
-    },
-  );
+
   it("sums only the latest cumulative cost once per Attempt across retries", () => {
     const attempts = [attempt("attempt-1", 1, "failed"), attempt("attempt-2", 2, "completed")];
     const budget = taskBudgetReport({
       objective,
-      assignment,
       task,
       attempts,
       events: [
@@ -141,12 +131,6 @@ describe("budget reports", () => {
       ],
     });
 
-    expect(budget.organizational).toEqual({
-      currency: "USD",
-      limitMinor: 400,
-      reservedMinor: 0,
-      chargedMinor: 400,
-    });
     expect(budget.provider).toMatchObject({
       requestedCost: { amountMinor: 300, currency: "USD" },
       objectiveCurrencyComparison: "matching",
@@ -155,27 +139,13 @@ describe("budget reports", () => {
       coverage: { status: "complete", complete: true },
     });
 
-    const aggregate = objectiveBudgetReport(objective, [{ taskId: "task", budget }]);
-    expect(aggregate).toMatchObject({
-      organizational: {
-        limitMinor: 2_000,
-        reservedMinor: 0,
-        chargedMinor: 400,
-        availableMinor: 1_600,
-        visibleTasks: {
-          allocatedMinor: 400,
-          reservedMinor: 0,
-          chargedMinor: 400,
-          reconcilesWithObjective: true,
-        },
-      },
+    expect(objectiveBudgetReport(objective, [{ taskId: "task", budget }])).toMatchObject({
       provider: {
         requestedCostByCurrency: { USD: 600 },
         appliedCostByCurrency: { USD: 600 },
         observedCostByCurrency: { USD: 175 },
         coverage: {
-          scope: "visible_tasks",
-          completeForVisibleTasks: true,
+          complete: true,
           completeTaskIds: ["task"],
           objectiveCurrencyComparison: "matching",
         },
@@ -183,13 +153,32 @@ describe("budget reports", () => {
     });
   });
 
+  it("sums every Task of the Objective's Sessions, the owner's turns included", () => {
+    const owner = taskBudgetReport({
+      objective,
+      task: { ...task, id: "owner", execution: {} } as Task,
+      attempts: [attempt("owner-1", 1, "completed")],
+      events: [usage("owner-1", 1, 25)],
+    });
+    const work = taskBudgetReport({
+      objective,
+      task: { ...task, execution: {} } as Task,
+      attempts: [attempt("work-1", 1, "completed")],
+      events: [usage("work-1", 1, 2_100)],
+    });
+    expect(
+      objectiveBudgetReport(objective, [
+        { taskId: "owner", budget: owner },
+        { taskId: "task", budget: work },
+      ]).provider.observedCostByCurrency,
+    ).toEqual({ USD: 2_125 });
+  });
+
   it("keeps missing enforcement evidence unknown without parsing failure text", () => {
-    const legacyAttempt = attempt("legacy", 1, "failed");
     const budget = taskBudgetReport({
       objective,
-      assignment,
       task,
-      attempts: [legacyAttempt],
+      attempts: [attempt("legacy", 1, "failed")],
       events: [
         event("legacy", 1, "execution.failed", {
           error: { message: "provider cost budget exceeded after $3" },
@@ -199,21 +188,15 @@ describe("budget reports", () => {
 
     expect(budget.provider).toMatchObject({
       observedCostByCurrency: {},
-      coverage: {
-        status: "unknown",
-        complete: false,
-        unknownAttemptIds: ["legacy"],
-      },
+      coverage: { status: "unknown", complete: false, unknownAttemptIds: ["legacy"] },
     });
   });
 
   it("keeps coverage unknown when the applied cost ceiling exceeds the request", () => {
-    const completed = attempt("over-applied", 1, "completed");
     const budget = taskBudgetReport({
       objective,
-      assignment,
       task,
-      attempts: [completed],
+      attempts: [attempt("over-applied", 1, "completed")],
       events: [applied("over-applied", 1, "USD", 400), usage("over-applied", 2, 100)],
     });
 
@@ -224,27 +207,18 @@ describe("budget reports", () => {
     });
     expect(budget.provider.attempts[0]).toMatchObject({
       costCoverage: "unknown",
-      limits: {
-        completeness: { applied: false, complete: false },
-        outcome: { status: "unknown" },
-      },
+      limits: { completeness: { applied: false, complete: false }, outcome: { status: "unknown" } },
     });
     expect(
       objectiveBudgetReport(objective, [{ taskId: "task", budget }]).provider.coverage,
-    ).toMatchObject({
-      completeForVisibleTasks: false,
-      unknownTaskIds: ["task"],
-    });
+    ).toMatchObject({ complete: false, unknownTaskIds: ["task"] });
   });
 
   it("treats complete observed spend as covered when no monetary ceiling was requested", () => {
-    const uncapped = { ...task, execution: {} } as Task;
-    const completed = attempt("uncapped", 1, "completed");
     const budget = taskBudgetReport({
       objective,
-      assignment,
-      task: uncapped,
-      attempts: [completed],
+      task: { ...task, execution: {} } as Task,
+      attempts: [attempt("uncapped", 1, "completed")],
       events: [usage("uncapped", 1, 90)],
     });
 
@@ -263,7 +237,6 @@ describe("budget reports", () => {
   it("reports currencyless allocation units and currency mismatches explicitly", () => {
     const internal = taskBudgetReport({
       objective: { ...objective, budgetCurrency: null } as Objective,
-      assignment,
       task,
       attempts: [],
       events: [],
@@ -273,7 +246,6 @@ describe("budget reports", () => {
 
     const mismatch = taskBudgetReport({
       objective,
-      assignment,
       task: {
         ...task,
         execution: { limits: { maxReportedCost: { amountMinor: 300, currency: "EUR" } } },
@@ -285,66 +257,36 @@ describe("budget reports", () => {
     expect(
       objectiveBudgetReport(objective, [{ taskId: "task", budget: mismatch }]).provider.coverage,
     ).toMatchObject({
-      completeForVisibleTasks: false,
+      complete: false,
       currencyMismatchTaskIds: ["task"],
       objectiveCurrencyComparison: "currency_mismatch",
     });
   });
-});
 
-it("keeps streamed token usage with no reported cost unknown rather than free", () => {
-  const budget = taskBudgetReport({
-    objective,
-    assignment,
-    task: { ...task, execution: {} },
-    attempts: [attempt("partial", 1, "completed")],
-    events: [
-      event("partial", 1, "execution.usage.updated", {
-        usage: {
-          inputTokens: 10,
-          outputTokens: 3,
-          cachedInputTokens: 0,
-          totalTokens: 13,
-          complete: false,
-        },
-      }),
-    ],
+  it("keeps streamed token usage with no reported cost unknown rather than free", () => {
+    const budget = taskBudgetReport({
+      objective,
+      task: { ...task, execution: {} } as Task,
+      attempts: [attempt("partial", 1, "completed")],
+      events: [
+        event("partial", 1, "execution.usage.updated", {
+          usage: {
+            inputTokens: 10,
+            outputTokens: 3,
+            cachedInputTokens: 0,
+            totalTokens: 13,
+            complete: false,
+          },
+        }),
+      ],
+    });
+    expect(budget.provider.coverage).toMatchObject({
+      status: "unknown",
+      complete: false,
+      unknownAttemptIds: ["partial"],
+    });
+    expect(
+      objectiveBudgetReport(objective, [{ taskId: "task", budget }]).provider.coverage.complete,
+    ).toBe(false);
   });
-  expect(budget.provider.coverage).toMatchObject({
-    status: "unknown",
-    complete: false,
-    unknownAttemptIds: ["partial"],
-  });
-  expect(
-    objectiveBudgetReport(objective, [{ taskId: "task", budget }]).provider.coverage
-      .completeForVisibleTasks,
-  ).toBe(false);
-});
-
-it("keeps the final summary activation outside the exhausted Objective budget", () => {
-  const ordinary = taskBudgetReport({
-    objective,
-    assignment,
-    task,
-    attempts: [attempt("work", 1, "completed")],
-    events: [usage("work", 1, 2100)],
-  });
-  const summary = {
-    ...ordinary,
-    provider: {
-      ...ordinary.provider,
-      observedCostByCurrency: { USD: 25 },
-    },
-  };
-  expect(
-    objectiveBudgetReport(objective, [
-      { taskId: "task", budget: ordinary },
-      { taskId: `${objective.id}:limit-summary:2`, limitSummaryActivation: true, budget: summary },
-    ]).provider.observedCostByCurrency,
-  ).toEqual({ USD: 2100 });
-  expect(
-    objectiveBudgetReport(objective, [
-      { taskId: `${objective.id}:limit-summary:unmarked`, budget: summary },
-    ]).provider.observedCostByCurrency,
-  ).toEqual({ USD: 25 });
 });

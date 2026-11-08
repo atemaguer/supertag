@@ -4,7 +4,8 @@ import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type TaskNamedWorkspacePlan, taskWorkspaceBranch } from "../packages/core/src/index.js";
+import { workSessionBranch } from "../packages/control-plane/src/work-sessions.js";
+import type { TaskNamedWorkspacePlan } from "../packages/core/src/index.js";
 import type { WorkspacePullRequestOutcome } from "../packages/runtime/sdk/src/git-workspace.js";
 import {
   deliverWorkspace,
@@ -25,7 +26,7 @@ describe("ref-based Workspace delivery", () => {
   let head: string;
   let bundle: string;
   let host: WorkspaceHost;
-  const branch = taskWorkspaceBranch("objective-1", "task-1");
+  const branch = workSessionBranch("task-1");
   const plan = (delivery: TaskNamedWorkspacePlan["delivery"]): TaskNamedWorkspacePlan => ({
     version: 1,
     status: "workspace",

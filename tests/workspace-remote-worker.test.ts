@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type TagMcpGrant, taskWorkspaceBranch } from "../packages/core/src/index.js";
+import { workSessionBranch } from "../packages/control-plane/src/work-sessions.js";
+import type { TagMcpGrant } from "../packages/core/src/index.js";
 import { E2BWorkspaceEnvironment } from "../packages/runtime/environments/e2b/src/index.ts";
 import { CodexHarness } from "../packages/runtime/harnesses/codex/src/index.ts";
 import {
@@ -352,7 +353,7 @@ describe("a Worker running a remote Workspace Task", () => {
     expect(await world.received()).not.toContain("db-canary-token");
     // The sandbox's commit came back to the host-managed clone.
     const clone = join(root, "workspaces", "app", "clone");
-    const branch = taskWorkspaceBranch("objective-1", "task-1");
+    const branch = workSessionBranch("task-1");
     expect(git(clone, "show", `refs/heads/${branch}:work.txt`)).toBe("remote");
     // Every sandbox MCP bridge confirmed its process terminated, and closing never stopped the
     // sandbox: it ran the commit and transfer after the close and stopped once, afterward.
@@ -444,7 +445,7 @@ describe("a Worker running a remote Workspace Task", () => {
     expect(calls).toContain("staged:true");
     expect(calls).toContain("exit:0");
     const clone = join(root, "workspaces", "app", "clone");
-    const branch = taskWorkspaceBranch("objective-1", "task-1");
+    const branch = workSessionBranch("task-1");
     expect(git(clone, "show", `refs/heads/${branch}:codex.txt`)).toBe("codex");
     const delivered = git(clone, "ls-tree", "-r", "--name-only", `refs/heads/${branch}`);
     expect(delivered).not.toContain(".codex");
@@ -587,7 +588,7 @@ function attemptSpec(
       status: "workspace",
       workspace: "app",
       source: SOURCE,
-      branch: taskWorkspaceBranch("objective-1", "task-1"),
+      branch: workSessionBranch("task-1"),
       delivery: "branch",
       mcp,
     },

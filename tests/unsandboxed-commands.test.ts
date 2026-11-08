@@ -307,28 +307,13 @@ it("holds a claude-code Task that runs commands until its host opts in, and runs
     await store.assignRole({ roleId: role.id, tagId });
   };
   try {
-    const lead = await store.createTag({ name: "lead" });
     const builder = await store.createTag({ name: "builder" });
     const reader = await store.createTag({ name: "reader" });
     const mixed = await store.createTag({ name: "mixed" });
     await grant(builder.id, ["commands:execute", "files:write"]);
     await grant(mixed.id, ["commands:execute", "files:write"]);
     await grant(reader.id, ["files:write"]);
-    // Tasks take their runtime actions from their Objective.
-    for (const [id, runtimeActions] of [
-      ["commands", ["commands:execute", "files:write"]],
-      ["files", ["files:write"]],
-    ] as const) {
-      await store.createObjective({ id, ownerTagId: lead.id, outcome: "Ship", runtimeActions });
-      await store.createTeam({
-        id: `${id}-team`,
-        objectiveId: id,
-        name: `Shipping ${id}`,
-        leadTagId: lead.id,
-        memberTagIds: [builder.id, reader.id, mixed.id],
-        maxConcurrency: 4,
-      });
-    }
+    // A conversation turn takes its runtime actions from the Tag's own Roles.
     runtime = await startControlPlaneRuntime({
       host: "127.0.0.1",
       port: 0,
@@ -350,42 +335,36 @@ it("holds a claude-code Task that runs commands until its host opts in, and runs
       .poll(async () => (await store.findWorkerHostById("studio"))?.labels ?? [])
       .toContain("harness:codex");
 
-    const assign = async (taskId: string, assignedTagId: string, objectiveId = "commands") => {
-      const response = await fetch(`${runtime?.url}/api/v1/coordination/assign_task`, {
+    // Each Tag takes a conversation turn, which the Control Plane must place.
+    const message = async (tagName: string) => {
+      const response = await fetch(`${runtime?.url}/api/v1/tags/${tagName}/messages`, {
         method: "POST",
         headers: { Authorization: "Bearer sandbox-admin", "Content-Type": "application/json" },
-        body: JSON.stringify({
-          objectiveId,
-          taskId,
-          teamId: `${objectiveId}-team`,
-          assignedTagId,
-          instruction: "Run the tests",
-          acceptanceCriteria: ["Tests ran"],
-        }),
+        body: JSON.stringify({ text: "Run the tests" }),
       });
-      expect(response.status, await response.text()).toBe(200);
+      const text = await response.text();
+      expect(response.status, text).toBe(201);
+      return (JSON.parse(text) as { taskId: string }).taskId;
     };
-    await assign("commands-task", builder.id);
-    await assign("files-task", reader.id, "files");
-    await assign("mixed-task", mixed.id);
+    const commandsTask = await message(builder.name);
+    const filesTask = await message(reader.name);
+    const mixedTask = await message(mixed.name);
 
     // A Task without commands:execute runs on the unsandboxed harness as before.
     await expect
-      .poll(async () => (await store.getTaskAssignment("files-task"))?.status, { timeout: 10000 })
-      .toBe("submitted");
+      .poll(async () => (await store.findTaskById(filesTask))?.status, { timeout: 10000 })
+      .toBe("completed");
     // A sandboxed Codex Worker on the same host takes the Task that runs commands.
     await expect
-      .poll(async () => (await store.getTaskAssignment("mixed-task"))?.status, { timeout: 10000 })
-      .toBe("submitted");
-    expect(observed.find((entry) => entry.spec.taskId === "mixed-task")?.workerId).toBe(
-      "local-codex",
-    );
+      .poll(async () => (await store.findTaskById(mixedTask))?.status, { timeout: 10000 })
+      .toBe("completed");
+    expect(observed.find((entry) => entry.spec.taskId === mixedTask)?.workerId).toBe("local-codex");
 
     // Without the opt-in, the claude-code Task stays queued and says why.
     await expect
       .poll(
         async () =>
-          (await store.listTaskEvents("commands-task")).findLast(
+          (await store.listTaskEvents(commandsTask)).findLast(
             (event) => event.type === "task.scheduling-incompatible",
           )?.payload,
         { timeout: 10000 },
@@ -394,9 +373,9 @@ it("holds a claude-code Task that runs commands until its host opts in, and runs
         unmetRequirements: ["allow-unsandboxed-commands:laptop"],
         unsandboxedCommands: [{ workerHostId: "laptop", harnesses: ["claude-code"] }],
       });
-    expect(observed.some((entry) => entry.spec.taskId === "commands-task")).toBe(false);
+    expect(observed.some((entry) => entry.spec.taskId === commandsTask)).toBe(false);
     const resource = await (
-      await fetch(`${runtime.url}/api/v1/tasks/commands-task`, {
+      await fetch(`${runtime.url}/api/v1/tasks/${commandsTask}`, {
         headers: { Authorization: "Bearer sandbox-admin" },
       })
     ).json();
@@ -407,11 +386,11 @@ it("holds a claude-code Task that runs commands until its host opts in, and runs
       worker("claude-code", [UNSANDBOXED_COMMANDS_CAPABILITY, COMMANDS_EXECUTE_CAPABILITY]),
     ]);
     await expect
-      .poll(async () => (await store.getTaskAssignment("commands-task"))?.status, {
+      .poll(async () => (await store.findTaskById(commandsTask))?.status, {
         timeout: 15000,
       })
-      .toBe("submitted");
-    expect(observed.find((entry) => entry.spec.taskId === "commands-task")?.workerId).toBe(
+      .toBe("completed");
+    expect(observed.find((entry) => entry.spec.taskId === commandsTask)?.workerId).toBe(
       "local-claude-code",
     );
   } finally {

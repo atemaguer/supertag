@@ -676,50 +676,6 @@ export function namedWorkspacePlan(workspace: Workspace, branch: string): TaskNa
 }
 
 /**
- * A readable Task branch candidate, at most 120 ASCII characters. Admission reserves it against
- * existing Workspace plans in one transaction; retries use the saved plan, not a new candidate.
- * IDs supply the names: omit a repeated Objective prefix and opaque UUID or digest components.
- */
-export function taskWorkspaceBranch(
-  objectiveId: string,
-  taskId: string,
-  occupiedBranches: Iterable<string> = [],
-): string {
-  const taskName = taskId.startsWith(`${objectiveId}:`)
-    ? taskId.slice(objectiveId.length + 1)
-    : taskId;
-  const readable = taskName.replace(
-    /(?:^|[:/-])(?:[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}|[a-f0-9]{32,})(?=$|[:/-])/giu,
-    "-",
-  );
-  const base = `supertag/${branchSlug(objectiveId, 40, "objective")}/${branchSlug(readable, 48, "task")}`;
-  // macOS commonly uses a case-insensitive filesystem; reserve names the same way on Linux.
-  const occupied = new Set([...occupiedBranches].map((branch) => branch.toLowerCase()));
-  if (!occupied.has(base)) return base;
-  const suffixed = `${base}-${fnv1a(`${objectiveId}\n${taskId}`)}`;
-  if (!occupied.has(suffixed)) return suffixed;
-  // A hash is only a short label, never proof of uniqueness. Also handle existing suffixed names.
-  for (let index = 2; index <= occupied.size + 2; index += 1) {
-    const candidate = `${suffixed}-${index.toString(36)}`;
-    if (!occupied.has(candidate)) return candidate;
-  }
-  throw new Error("Cannot allocate a unique Task branch");
-}
-
-function branchSlug(value: string, limit: number, fallback: string): string {
-  return (
-    value
-      .normalize("NFKD")
-      .replace(/\p{M}/gu, "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/gu, "-")
-      .replace(/^-+|-+$/gu, "")
-      .slice(0, limit)
-      .replace(/-+$/u, "") || fallback
-  );
-}
-
-/**
  * Workspace names a Worker Host advertised with its descriptor. Checkout paths never leave the
  * host; only names reach the Control Plane.
  */

@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type TaskNamedWorkspacePlan, taskWorkspaceBranch } from "../packages/core/src/index.js";
+import { workSessionBranch } from "../packages/control-plane/src/work-sessions.js";
+import type { TaskNamedWorkspacePlan } from "../packages/core/src/index.js";
 import {
   type ResolutionContext,
   type TaskAttemptSpec,
@@ -33,7 +34,7 @@ describe("Workspace git directory integrity", () => {
     version: 1,
     status: "workspace",
     workspace: "app",
-    branch: taskWorkspaceBranch("objective-1", "objective-1:task/1"),
+    branch: workSessionBranch("task-1"),
     delivery: "branch",
   };
   const task = {
@@ -137,7 +138,7 @@ describe("Workspace git directory integrity", () => {
       attemptId: "attempt-2",
       workspacePlan: {
         ...workspacePlan,
-        branch: taskWorkspaceBranch("objective-1", "objective-1:task/2"),
+        branch: workSessionBranch("task-2"),
       },
     } as TaskAttemptSpec;
     const secondInput = await first.resolver.resolve({

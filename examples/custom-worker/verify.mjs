@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TAG_MESSAGE_TYPES, TagMailboxClient, WORKSTREAM_POST_TYPES } from "supertag-ai/messaging";
 import {
   assertConformance,
   runEnvironmentConformance,
@@ -64,16 +63,6 @@ function executionContext(task) {
     extensions: [],
     sessionStateStore: new InMemorySessionStateStore(),
   };
-}
-
-if (
-  typeof TagMailboxClient.prototype.consume !== "function" ||
-  typeof TagMailboxClient.prototype.postWorkstream !== "function" ||
-  typeof TagMailboxClient.prototype.createObjective !== "function" ||
-  !TAG_MESSAGE_TYPES.includes("delegation.requested") ||
-  !WORKSTREAM_POST_TYPES.includes("blocker")
-) {
-  throw new Error("Packaged Tag messaging API is missing");
 }
 
 const journalDirectory = await mkdtemp(join(tmpdir(), "supertag-external-journal-"));

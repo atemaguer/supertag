@@ -1,12 +1,16 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, it } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
-import { emptyTagContextPlan } from "../packages/core/src/index.js";
-import { FileAttemptJournal } from "../packages/runtime/sdk/src/index.js";
+import {
+  objectiveSessionKey,
+  type SurfaceTagAuthorizationSnapshot,
+  type Task,
+} from "../packages/core/src/index.js";
 import {
   DrizzleStore,
   FileGatewayCredentialVault,
@@ -14,6 +18,12 @@ import {
 } from "../packages/store/src/index.js";
 import { enrollWorkerHost } from "./support/worker-host-enrollment.js";
 
+/**
+ * Recovery parity for the surface path. The two turns belong to one Objective Session, so the
+ * second is due only once the first settles: whatever a real gRPC Worklet's abrupt death leaves
+ * behind, SuperTag never replays the interrupted Attempt and never starts the next turn until
+ * the interrupted one is resolved.
+ */
 for (const termination of process.env["SUPERTAG_LIVE_CLEANUP_RECOVERY"] === "1"
   ? ["SIGKILL-codex"]
   : ["SIGTERM", "SIGTERM-cancelled", "SIGKILL"])
@@ -53,43 +63,105 @@ for (const termination of process.env["SUPERTAG_LIVE_CLEANUP_RECOVERY"] === "1"
           ownerTagId: tag.id,
           outcome: "Recover safely",
         });
-        const team = await store.createTeam({
-          id: "team",
-          objectiveId: objective.id,
-          leadTagId: tag.id,
-          memberTagIds: [],
-          maxConcurrency: 1,
-          name: "Recovery",
+        // The Objective has no home thread, so its turns run on the Tag's CLI account and their
+        // replies are recorded rather than sent: no surface credential is involved.
+        const account = await store.saveSurfaceAccount({
+          provider: "cli",
+          externalAccountId: "control-plane",
+          displayName: "CLI",
+          authMethod: "operator",
+          credentialId: "surface/cli/control-plane",
+          status: "connected",
+          configuration: {},
+          verifiedAt: new Date().toISOString(),
         });
-        const assign = async (taskId: string) => {
-          const at = new Date().toISOString();
-          await store.admitTaskAssignment({
-            taskId,
-            objectiveId: objective.id,
-            teamId: team.id,
-            assignedTagId: tag.id,
-            requestedByTagId: tag.id,
-            instruction:
-              termination === "SIGKILL-codex"
-                ? taskId === "interrupt"
-                  ? "Run the command sleep 120 and wait for it to finish before replying. Do not do anything else."
-                  : "Reply with exactly RECOVERY_OK. Do not run tools or delegate."
-                : taskId,
-            acceptanceCriteria: ["Complete"],
+        const route = { id: `cli:${tag.id}`, scope: "cli" };
+        const sessionKey = objectiveSessionKey(objective.id);
+        const at = new Date().toISOString();
+        const authorization: SurfaceTagAuthorizationSnapshot = {
+          version: 5,
+          capturedAt: at,
+          tag: { id: tag.id, name: tag.name },
+          origin: {
+            provider: "cli",
+            surfaceAccountId: account.id,
+            tagRouteId: route.id,
+            scope: route.scope,
+          },
+          requester: { id: "supertag", kind: "bot" },
+          roles: [],
+          permissionSets: [],
+          resources: [],
+          runtimeActions: termination === "SIGKILL-codex" ? ["commands:execute"] : [],
+        };
+
+        /** One turn of the Objective's conversation; its request text names the turn. */
+        const deliver = async (turn: "interrupt" | "after-restart") => {
+          const text =
+            termination === "SIGKILL-codex"
+              ? turn === "interrupt"
+                ? "INTERRUPT: run the command sleep 120 and wait for it to finish before replying. Do not do anything else."
+                : "Reply with exactly RECOVERY_OK. Do not run tools or delegate."
+              : turn === "interrupt"
+                ? "INTERRUPT and wait"
+                : "Reply after the restart";
+          const admitted = await store.admitInboundEvent({
+            surfaceAccountId: account.id,
+            tagRouteId: route.id,
+            tagId: tag.id,
+            authorization,
+            contextPlan: { version: 7, capturedAt: new Date().toISOString(), sets: [] },
             execution: { profile: { id: "recovery", revision: "1" } },
-            authorizationSnapshot: {
-              version: 4,
-              capturedAt: at,
-              tag: { id: tag.id, name: tag.name },
-              origin: { kind: "internal", objectiveId: objective.id, requestedByTagId: tag.id },
-              requester: { id: tag.id, kind: "user" },
-              permissionSets: [],
-              resources: [],
-              runtimeActions: termination === "SIGKILL-codex" ? ["commands:execute"] : [],
+            event: {
+              eventId: `${turn}-${randomUUID()}`,
+              logicalEventId: `${turn}-${randomUUID()}`,
+              provider: "cli",
+              externalAccountId: account.externalAccountId,
+              kind: "message",
+              scope: route.scope,
+              sessionKey,
+              actor: { id: "supertag", displayName: "SuperTag", kind: "bot" },
+              text,
+              occurredAt: new Date().toISOString(),
+              callback: {
+                provider: "cli",
+                mode: "cli_conversation",
+                threadKey: sessionKey,
+                target: {},
+              },
+              source: {},
+              metadata: {},
+              internal: {
+                kind: "delivery",
+                from: { kind: "supertag" },
+                reason: turn === "interrupt" ? "objective_start" : "objective_message",
+                objectiveId: objective.id,
+              },
             },
-            contextPlan: emptyTagContextPlan(at),
-            workspacePlan: { version: 1, status: "none" },
           });
+          return admitted.work.id;
+        };
+        /** The Task the Control Plane opened for one admitted turn. */
+        const taskOf = async (inboundEventId: string, timeout = 15000): Promise<Task> => {
+          await expect
+            .poll(
+              async () =>
+                (await store.listTasks({})).some((task) => task.inboundEventId === inboundEventId),
+              { timeout },
+            )
+            .toBe(true);
+          const task = (await store.listTasks({})).find(
+            (candidate) => candidate.inboundEventId === inboundEventId,
+          );
+          if (!task) throw new Error("Missing Task");
+          return task;
+        };
+        const cancel = async (taskId: string) => {
+          const response = await fetch(`${runtime.url}/api/v1/tasks/${taskId}/cancel`, {
+            method: "POST",
+            headers: { authorization: "Bearer test-admin" },
+          });
+          expect([200, 202]).toContain(response.status);
         };
         const connect = async () => {
           if (!runtime.workletGrpcUrl) throw new Error("Missing gRPC endpoint");
@@ -128,11 +200,14 @@ for (const termination of process.env["SUPERTAG_LIVE_CLEANUP_RECOVERY"] === "1"
             .toBe(true);
         };
         await connect();
-        await assign("interrupt");
+        const interruptEvent = await deliver("interrupt");
+        const interrupt = await taskOf(interruptEvent);
         await expect
           .poll(
             async () =>
-              (await store.listTaskEvents("interrupt")).some((e) => e.type === "execution.started"),
+              (await store.listTaskEvents(interrupt.id)).some(
+                (event) => event.type === "execution.started",
+              ),
             { timeout: 15000 },
           )
           .toBe(true);
@@ -183,108 +258,50 @@ for (const termination of process.env["SUPERTAG_LIVE_CLEANUP_RECOVERY"] === "1"
           }
         }
         // Cancel with the original observer absent, while the Worklet journals cleanup offline.
-        if (termination === "SIGTERM-cancelled") await runtime.close();
+        if (termination === "SIGTERM-cancelled") await cancel(interrupt.id);
         await stopChild(termination.startsWith("SIGKILL") ? "SIGKILL" : "SIGTERM");
-        if (termination !== "SIGTERM-cancelled") await runtime.close();
-        if (termination === "SIGTERM-cancelled")
-          await store.updateTaskAssignment(
-            "interrupt",
-            { expectedStatus: "running", status: "cancelled" },
-            tag.id,
-          );
-        await assign("after-restart");
+        await runtime.close();
+        const afterEvent = await deliver("after-restart");
         runtime = await startControlPlaneRuntime(options);
         await connect();
-        if (termination === "SIGKILL") {
-          // Abrupt death leaves an unknown outcome: never replay a possibly side-effecting Attempt.
-          await new Promise((resolve) => setTimeout(resolve, 500));
-          expect(
-            (await readFile(join(directory, "executions"), "utf8"))
-              .split("\n")
-              .filter((x) => x === "interrupt"),
-          ).toHaveLength(1);
-          await store.updateTaskAssignment(
-            "interrupt",
-            { expectedStatus: "running", status: "cancelled" },
-            tag.id,
-          );
-          // Unknown execution cannot safely be declared stopped merely by cancelling its Task.
-          expect((await store.getTaskAssignment("after-restart"))?.status).toBe("queued");
-          // Explicit recovery is allowed only offline and only after operator confirmation.
-          await stopChild("SIGKILL");
-          const journal = new FileAttemptJournal(join(directory, "journal"));
-          await journal.initialize();
-          try {
-            const attempt = (await store.listTaskAttempts("interrupt"))[0];
-            if (!attempt) throw new Error("Missing interrupted Attempt");
-            journal.confirmStopped(
-              attempt.id,
-              "interrupt",
-              "Test operator verified all fixture execution stopped",
-            );
-          } finally {
-            await journal.close();
-          }
-          await connect();
-          await expect
-            .poll(async () => (await store.getTaskAssignment("after-restart"))?.status, {
-              timeout: 15000,
-            })
-            .toBe("submitted");
-          await expect
-            .poll(
-              async () =>
-                (await store.listTaskEvents("interrupt")).some(
-                  (e) => e.type === "task.cancellation-cleanup-confirmed",
-                ),
-              { timeout: 10000 },
-            )
-            .toBe(true);
-          const evidence = (await store.listTaskEvents("interrupt")).find(
-            (e) => e.type === "task.cancellation-cleanup-confirmed",
-          );
-          expect(evidence?.payload?.["cleanupEvidence"]).toEqual([
-            expect.stringContaining("Test operator verified"),
-          ]);
-          expect(
-            (await readFile(join(directory, "executions"), "utf8")).trim().split("\n"),
-          ).toEqual(["interrupt", "after-restart"]);
-        } else {
-          await expect
-            .poll(async () => (await store.getTaskAssignment("after-restart"))?.status, {
-              timeout: termination === "SIGKILL-codex" ? 120000 : 45000,
-            })
-            .toBe("submitted");
-          if (termination === "SIGKILL-codex") {
-            expect((await store.getTaskAssignment("after-restart"))?.result?.["text"]).toContain(
-              "RECOVERY_OK",
-            );
-            expect((await store.getTaskAssignment("interrupt"))?.status).toBe("failed");
-            expect(
-              (await store.listTaskEvents("interrupt")).some(
-                (e) =>
-                  e.type === "execution.failed" &&
-                  JSON.stringify(e.payload).includes("InterruptedExecutionOutcomeUnknown"),
-              ),
-            ).toBe(true);
-          }
-          if (termination === "SIGTERM-cancelled") {
-            expect((await store.getTaskAssignment("interrupt"))?.status).toBe("cancelled");
-            await expect
-              .poll(
-                async () =>
-                  (await store.listTaskEvents("interrupt")).some(
-                    (event) => event.type === "task.cancellation-cleanup-confirmed",
-                  ),
-                { timeout: 5000 },
-              )
-              .toBe(true);
-            expect((await store.listTaskAttempts("interrupt"))[0]?.status).toBe("cancelled");
-          }
-          expect(
-            (await readFile(join(directory, "executions"), "utf8")).trim().split("\n"),
-          ).toEqual(["interrupt", "after-restart"]);
-        }
+
+        // The interrupted Attempt is recorded once and never replayed, whatever killed its host.
+        await expect
+          .poll(async () => (await store.findInboundEventById(interruptEvent))?.sessionBlocked, {
+            timeout: 30000,
+          })
+          .toBe(true);
+        expect(
+          (await readFile(join(directory, "executions"), "utf8"))
+            .split("\n")
+            .filter((line) => line === "interrupt"),
+        ).toHaveLength(1);
+        expect(await store.listTaskAttempts(interrupt.id)).toHaveLength(1);
+        expect((await store.findInboundEventById(interruptEvent))?.lastError).toContain(
+          termination === "SIGTERM-cancelled"
+            ? "Cancellation cleanup has not been confirmed"
+            : "Execution completion could not be confirmed",
+        );
+
+        // Its Session takes no further turn: the next turn stays pending and never executes.
+        await new Promise((settle) => setTimeout(settle, 1000));
+        expect((await store.findInboundEventById(afterEvent))?.status).toBe("pending");
+        expect((await store.listTasks({})).some((task) => task.inboundEventId === afterEvent)).toBe(
+          false,
+        );
+        expect((await readFile(join(directory, "executions"), "utf8")).trim().split("\n")).toEqual([
+          "interrupt",
+        ]);
+
+        // Only an operator on the Worker Host can settle it; the inbox names the exact command.
+        const inbox = await store.readCoordinationInbox({ objectiveId: objective.id });
+        expect(
+          inbox.items.find(
+            (item) =>
+              item.kind === "task_attention" &&
+              item.evidence.some((entry) => entry.kind === "task" && entry.id === interrupt.id),
+          ),
+        ).toMatchObject({ operatorEligible: true });
       } finally {
         await stopChild("SIGKILL");
         await runtime.close();

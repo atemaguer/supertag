@@ -17,18 +17,11 @@ describe("spend output", () => {
             reportedTokens: 40,
             unknownTokenAttempts: 1,
             budget: { limitMinor: 100, currency: "USD" },
-            postTriggered: {
-              attempts: 1,
-              reportedCostByCurrency: { USD: 380 },
-              unknownCostAttempts: 0,
-              reportedTokens: 10,
-              unknownTokenAttempts: 0,
-            },
           },
         ],
       }),
     ).toContain(
-      "cost $13.80; 1 unknown-cost Attempt(s): no cost reported in 1 | tokens 40; 1 unknown-token Attempt(s) | budget $1.00\n  Post-triggered activations (included in total) | 1 Attempt(s) | cost $3.80 | tokens 10",
+      "cost $13.80; 1 unknown-cost Attempt(s): no cost reported in 1 | tokens 40; 1 unknown-token Attempt(s) | budget $1.00",
     );
     expect(
       formatSpend({
@@ -37,13 +30,6 @@ describe("spend output", () => {
         groups: [
           {
             key: "empty",
-            postTriggered: {
-              attempts: 0,
-              reportedCostByCurrency: null,
-              unknownCostAttempts: 0,
-              reportedTokens: null,
-              unknownTokenAttempts: 0,
-            },
             attempts: 1,
             reportedCostByCurrency: null,
             unknownCostAttempts: 1,
@@ -61,13 +47,6 @@ describe("spend output", () => {
         groups: [
           {
             key: "tag-1",
-            postTriggered: {
-              attempts: 0,
-              reportedCostByCurrency: null,
-              unknownCostAttempts: 0,
-              reportedTokens: null,
-              unknownTokenAttempts: 0,
-            },
             name: "builder",
             attempts: 3,
             reportedCostByCurrency: null,
@@ -83,7 +62,7 @@ describe("spend output", () => {
     );
   });
 
-  it("preserves the reply subtotal in JSON output", async () => {
+  it("preserves the group usage in JSON output", async () => {
     const subtotal = {
       attempts: 1,
       reportedCostByCurrency: { USD: 5 },
@@ -94,7 +73,7 @@ describe("spend output", () => {
     const report = {
       by: "objective",
       since: null,
-      groups: [{ ...subtotal, key: "build", postTriggered: subtotal }],
+      groups: [{ ...subtotal, key: "build" }],
     };
     const request = vi.spyOn(ControlPlaneClient.prototype, "request").mockResolvedValue(report);
     try {

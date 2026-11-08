@@ -5,57 +5,41 @@ import { outboundPresentationPolicy } from "./src/outbound-presentation.js";
 
 function fixture() {
   const item: CoordinationInboxItem = {
-    projectionVersion: 7,
-    key: "task_budget:task",
-    kind: "task_budget",
+    projectionVersion: 8,
+    key: "objective_budget:objective:budget-exhausted-100",
+    kind: "objective_budget",
     status: "pending",
     objectiveId: "objective",
-    teamId: "team",
-    nextActorTagIds: ["manager"],
-    excludedActorTagIds: ["worker"],
+    nextActorTagIds: [],
+    excludedActorTagIds: [],
     operatorEligible: true,
     actionableSince: "2026-09-18T00:00:00Z",
     ageSeconds: 0,
     deadline: null,
-    evidence: [
-      {
-        kind: "task",
-        id: "task",
-        status: "failed",
-        attemptCount: 1,
-        updatedAt: "2026-09-18T00:00:00Z",
-      },
-    ],
+    evidence: [{ kind: "objective", id: "objective", revision: 1 }],
     permittedActions: [],
     redaction: { level: "metadata_only", omitted: ["result"] },
-  };
-  const task = {
-    taskId: "task",
-    objectiveId: "objective",
-    status: "failed",
-    attemptCount: 1,
-    parentTaskId: null as string | null,
-    result: { failureKind: "budget-exhausted" },
-    assignedTagId: "worker",
   };
   const objective = {
     id: "objective",
     status: "working",
     notificationTaskId: null as string | null,
+    surfaceTaskId: "origin" as string | null,
+    deadline: null as string | null,
+    budgetLimitMinor: null as number | null,
+    budgetCurrency: null as string | null,
+    limitState: null as Record<string, unknown> | null,
+    createdAt: "2026-09-17T00:00:00Z",
   };
   let reply: { status: string; text: string; deliveryKey: string } | undefined;
   const api = {
     readCoordinationInbox: vi.fn(async (query: { kind: string }) => ({
-      projectionVersion: 7 as const,
+      projectionVersion: 8 as const,
       asOf: "2026-09-18T00:00:00Z",
       items: query.kind === item.kind ? [item] : [],
       truncatedKinds: [],
     })),
-    getTaskAssignment: vi.fn(async (_id: string) => task),
-    findTagById: vi.fn(async () => ({ status: "active" })),
-    getTeam: vi.fn(async () => ({ status: "active", memberTagIds: ["manager"] })),
     getObjective: vi.fn(async () => objective),
-    getObjectiveSurfaceTask: vi.fn(async () => ({ id: "origin" }) as { id: string } | undefined),
     getVerifiedSurfaceTask: vi.fn(
       async (id: string) =>
         ({ id, inboundEventId: `inbound-${id}` }) as
@@ -69,94 +53,87 @@ function fixture() {
     }),
   };
   const notifier = new BudgetNotifications(api as unknown as Store, "default");
-  return {
-    item,
-    task,
-    objective,
-    api,
-    notifier,
-    store: api as unknown as Store,
-    getReply: () => reply,
-  };
+  return { item, objective, api, notifier, store: api as unknown as Store, getReply: () => reply };
 }
 
-describe("budget operator notifications", () => {
-  it("uses explicit verified destination without changing Objective origin", async () => {
+describe("Objective budget notices", () => {
+  it("posts the notice to the operator's chosen home thread before the Objective's own", async () => {
     const f = fixture();
     f.objective.notificationTaskId = "override";
     await f.notifier.reconcile();
     expect(f.api.getVerifiedSurfaceTask).toHaveBeenCalledWith("override");
-    expect(f.api.getObjectiveSurfaceTask).not.toHaveBeenCalled();
+    expect(f.api.getVerifiedSurfaceTask).not.toHaveBeenCalledWith("origin");
     expect(f.api.enqueueOutboundReply).toHaveBeenCalledWith(
+      // Error presentation is immutable in the outbox, so a repeated sweep posts once.
       expect.objectContaining({ inboundEventId: "inbound-override", presentation: "error" }),
     );
-    expect(f.getReply()?.text).not.toContain("secret");
-    expect(f.getReply()?.text).toContain("not approval");
+    expect(f.getReply()?.text).toContain('Objective "objective"');
+    expect(f.getReply()?.text).toContain("supertag update objective");
   });
-  it("uses the originating conversation before the deployment default", async () => {
+
+  it("falls back from the Objective's own thread to the deployment default", async () => {
     const f = fixture();
     await f.notifier.reconcile();
     expect(f.api.getVerifiedSurfaceTask).toHaveBeenCalledWith("origin");
-    f.api.getObjectiveSurfaceTask.mockResolvedValue(undefined);
+    expect(f.api.getVerifiedSurfaceTask).not.toHaveBeenCalledWith("default");
+    f.objective.surfaceTaskId = null;
     await f.notifier.reconcile();
     expect(f.api.getVerifiedSurfaceTask).toHaveBeenCalledWith("default");
   });
-  it("reports missing routes explicitly without delivering", async () => {
+
+  it("reports a CLI home as unconfigured without delivering", async () => {
     const f = fixture();
-    f.api.getObjectiveSurfaceTask.mockResolvedValue(undefined);
+    f.objective.surfaceTaskId = null;
     const notifier = new BudgetNotifications(f.store);
     expect(await notifier.describe(f.item)).toMatchObject({ status: "unconfigured" });
     await notifier.reconcile();
     expect(f.api.enqueueOutboundReply).not.toHaveBeenCalled();
   });
+
   it("fails closed for a revoked override rather than notifying a fallback", async () => {
     const f = fixture();
     f.objective.notificationTaskId = "revoked";
     f.api.getVerifiedSurfaceTask.mockRejectedValue(new Error("Revoked"));
-    expect(await f.notifier.describe(f.item)).toMatchObject({ status: "failed" });
+    // A chosen destination that no longer verifies is reported as failed, not unconfigured.
+    expect(await f.notifier.describe(f.item)).toMatchObject({
+      status: "failed",
+      reason: expect.stringContaining("could not be verified"),
+    });
     await f.notifier.reconcile();
     expect(f.api.enqueueOutboundReply).not.toHaveBeenCalled();
-    expect(f.api.getVerifiedSurfaceTask.mock.calls.every(([id]) => id === "revoked")).toBe(true);
   });
-  it("leaves a capable authorized parent to the existing manager coordination path", async () => {
+
+  it("reports an unavailable Objective and a closed one without delivering", async () => {
     const f = fixture();
-    f.task.parentTaskId = "parent";
-    f.api.getTaskAssignment.mockImplementation(async (id) =>
-      id === "parent" ? { ...f.task, status: "waiting", assignedTagId: "manager" } : f.task,
-    );
-    expect(await f.notifier.describe(f.item)).toMatchObject({ status: "manager" });
+    f.objective.status = "completed";
+    expect(await f.notifier.describe(f.item)).toMatchObject({ status: "pending" });
     await f.notifier.reconcile();
     expect(f.api.enqueueOutboundReply).not.toHaveBeenCalled();
-    f.api.getTaskAssignment.mockImplementation(async (id) =>
-      id === "parent" ? { ...f.task, assignedTagId: "manager" } : f.task,
-    );
-    await f.notifier.reconcile();
-    expect(f.api.enqueueOutboundReply).toHaveBeenCalledOnce();
+    f.api.getObjective.mockRejectedValue(new Error("gone"));
+    expect(await f.notifier.describe(f.item)).toMatchObject({ status: "failed" });
   });
-  it("uses a stable per-Attempt immutable outbox identity across restarts", async () => {
+
+  it("uses one immutable outbox identity per item and home across restarts", async () => {
     const f = fixture();
     await f.notifier.reconcile();
     const first = f.getReply()?.deliveryKey;
+    expect(first).toBe("objective-budget:objective:budget-exhausted-100:origin");
     await new BudgetNotifications(f.store, "default").reconcile();
     expect(f.api.enqueueOutboundReply.mock.calls[1]?.[0].deliveryKey).toBe(first);
     const reply = f.getReply();
     if (!reply) throw new Error("Missing notice");
     reply.status = "delivered";
     expect(await f.notifier.describe(f.item)).toEqual({ status: "delivered" });
-    f.task.attemptCount = 2;
-    await f.notifier.reconcile();
-    expect(f.api.enqueueOutboundReply.mock.calls[2]?.[0].deliveryKey).not.toBe(first);
     expect(outboundPresentationPolicy({ deliveryKey: first ?? "", presentation: "error" })).toEqual(
       { useAcknowledgement: false, waitForAcknowledgement: false },
     );
   });
-  it("revokes queued notices when routing, allocation, or Objective state changes", async () => {
+
+  it("revokes a queued notice when the home thread or the Objective changes", async () => {
     const f = fixture();
-    f.task.taskId = "task:with/segments";
     await f.notifier.reconcile();
     const deliveryKey = f.getReply()?.deliveryKey;
     if (!deliveryKey) throw new Error("Missing queued notification");
-    expect(deliveryKey).toBe("task-budget:task%3Awith%2Fsegments:1:origin");
     const outbound = { deliveryKey, inboundEventId: "inbound-origin" };
     expect(await f.notifier.mayDeliver(outbound)).toBe(true);
     expect(await f.notifier.mayDeliver({ ...outbound, inboundEventId: "wrong-inbound" })).toBe(
@@ -165,32 +142,50 @@ describe("budget operator notifications", () => {
     f.objective.notificationTaskId = "replacement";
     expect(await f.notifier.mayDeliver(outbound)).toBe(false);
     f.objective.notificationTaskId = null;
-    f.task.attemptCount = 2;
-    expect(await f.notifier.mayDeliver(outbound)).toBe(false);
-    f.task.attemptCount = 1;
-    f.task.status = "queued";
-    expect(await f.notifier.mayDeliver(outbound)).toBe(false);
-    f.task.status = "failed";
     f.objective.status = "completed";
     expect(await f.notifier.mayDeliver(outbound)).toBe(false);
     f.objective.status = "working";
     f.api.getVerifiedSurfaceTask.mockResolvedValue(undefined);
     expect(await f.notifier.mayDeliver(outbound)).toBe(false);
-    for (const key of [
-      "task-budget:old-format:hash",
-      "task-budget:%broken:1:origin",
-      "task-budget:task:NaN:origin",
-    ])
+    for (const key of ["objective-budget:old-format", "task-budget:objective:key:origin"])
       expect(await f.notifier.mayDeliver({ ...outbound, deliveryKey: key })).toBe(false);
   });
-  it("does not enqueue stale resolved rows", async () => {
+
+  it("drops a limit notice once the limit it names no longer applies", async () => {
     const f = fixture();
-    f.objective.status = "completed";
+    const limit: CoordinationInboxItem = {
+      ...f.item,
+      kind: "objective_limit",
+      key: "objective_limit:objective:deadline-60",
+      reason: "The deadline is an hour away.",
+    };
+    f.api.readCoordinationInbox.mockImplementation(async (query: { kind: string }) => ({
+      projectionVersion: 8 as const,
+      asOf: "2026-09-18T00:00:00Z",
+      items: query.kind === "objective_limit" ? [limit] : [],
+      truncatedKinds: [],
+    }));
+    expect(await f.notifier.describe(limit)).toMatchObject({ status: "pending" });
     await f.notifier.reconcile();
     expect(f.api.enqueueOutboundReply).not.toHaveBeenCalled();
-    f.objective.status = "working";
-    f.task.status = "queued";
-    await f.notifier.reconcile();
-    expect(f.api.enqueueOutboundReply).not.toHaveBeenCalled();
+    expect(
+      await f.notifier.mayDeliver({
+        deliveryKey: "objective-limit:objective:deadline-60:origin",
+        inboundEventId: "inbound-origin",
+      }),
+    ).toBe(false);
+  });
+
+  it("enriches only budget and limit items of an inbox page", async () => {
+    const f = fixture();
+    const question: CoordinationInboxItem = { ...f.item, kind: "question", key: "question:x" };
+    const page = await f.notifier.enrich({
+      projectionVersion: 8,
+      asOf: "2026-09-18T00:00:00Z",
+      items: [f.item, question],
+      truncatedKinds: [],
+    });
+    expect(page.items[0]?.notification).toMatchObject({ status: "pending" });
+    expect(page.items[1]?.notification).toBeUndefined();
   });
 });

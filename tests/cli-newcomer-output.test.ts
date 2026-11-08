@@ -74,12 +74,26 @@ it("lists the routed coordination interfaces and documented flags in root help",
   for (const entry of [
     "--worker-profile NAME",
     "--runtime-action ACTION",
-    "supertag coordinate COMMAND",
     "supertag status",
-    "read_mailbox",
-    "update_task",
+    "supertag create team NAME --member TAG",
+    "supertag grant mailbox RECIPIENT --sender SENDER",
+    "supertag list workstream-post --team TEAM",
+    "supertag message objective ID TEXT|-",
   ])
     expect(text).toContain(entry);
+  // The Objective controller's commands and tools are gone from the surface.
+  for (const removed of [
+    "supertag coordinate",
+    "supertag assign task",
+    "supertag start objective",
+    "--no-start",
+    "events team",
+    "--reply-to",
+    "read_mailbox",
+    "update_task",
+    "assign_task",
+  ])
+    expect(text).not.toContain(removed);
 });
 it("reports the public package version from a checkout", async () => {
   const { readFile } = await import("node:fs/promises");

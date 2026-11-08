@@ -85,7 +85,6 @@ at any time.
 | `supertag message objective --reply-to MESSAGE_ID` and `supertag recover worklet --host NAME` | Beta | Flag names and meaning: answer one pending question by message ID; select the host service whose journal recovery writes. Error prose is not machine-stable |
 | `supertag start objective ID [--output json]` | Beta | Starts an Objective created with `--no-start` through `start_objective`; text is for people and JSON is the structured start result |
 | `supertag message tag`, the `/api/v1/tags/:name/messages` routes and their reply stream, and the conversation tools `list_sessions`, `search_sessions`, `read_session`, `list_objectives`, `start_session`, `continue_session`, and `ask` | Experimental | Routes, message record fields including `startedSessions` and `waiting`, AI SDK UI message stream parts (`text-*`, `data-activity`, `finish`, `error`), tool names and inputs, and work Session limits (four per turn, eight unfinished per conversation, four running); output prose is not machine-stable |
-| Tag messaging HTTP v1 and `supertag-ai/messaging` | Experimental | Authenticated Tag addressing, message types, idempotency, leases, processing receipts, Team channel access and post types, and Objective definitions/completion |
 | `supertag-ai/control-plane` embedding API | Experimental | Control Plane service boundary; no persistence-schema compatibility promise |
 | Conformance helpers and test fixtures | Beta | Published assertions and fixtures; helper implementation details may change |
 | Undocumented exports, package internals, and database tables | Internal | No compatibility promise |
@@ -114,7 +113,6 @@ Each `supertag-ai` import path has its own stability level:
 | `supertag-ai/testing` | Beta | Conformance probes such as `runWorkerConformance` and `assertConformance` |
 | `supertag-ai/surfaces` | Beta | Custom collaboration surface contract and Markdown pipeline |
 | `supertag-ai/transport` | Experimental | Persistent remote Worklet connection, protocol, and gRPC adapters |
-| `supertag-ai/messaging` | Experimental | Tag messaging, Team channels, and the custom Worker consumer |
 | `supertag-ai/coordination` | Experimental | `CoordinationClient` and the redacted coordination inbox contract |
 | `supertag-ai/control-plane` | Experimental | Embeddable Control Plane service boundary |
 | `supertag-ai/spec/*` | Experimental | Language-neutral JSON Schemas and fixtures |

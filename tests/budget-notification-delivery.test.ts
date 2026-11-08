@@ -9,21 +9,25 @@ import { BudgetNotifications } from "../packages/control-plane/src/budget-notifi
 import { ControlPlane } from "../packages/control-plane/src/index.ts";
 import { ObjectiveController } from "../packages/control-plane/src/objective-controller.js";
 import {
+  objectiveSessionKey,
+  type SurfaceTagAuthorizationSnapshot,
+} from "../packages/core/src/index.ts";
+import {
   DrizzleStore,
   FileGatewayCredentialVault,
   migrateDatabase,
 } from "../packages/store/src/index.ts";
 import { createIsolatedPostgresDatabase } from "./support/database.ts";
 
+/** The notice the Objective's home thread gets when its budget is spent. */
+const NOTICE = "Its budget is used up, so it starts no new work.";
+
 const postgres = process.env["SUPERTAG_POSTGRES_URL"];
 for (const dialect of ["sqlite", "postgresql"] as const) {
-  it
-    .skipIf(dialect === "postgresql" && !postgres)
-    .each(["none", "account", "tag", "objective"] as const)(
-    `${dialect} persists Gateway budget delivery across restart, revoked=%s`,
+  it.skipIf(dialect === "postgresql" && !postgres).each(["none", "account", "tag"] as const)(
+    `${dialect} persists Gateway Objective budget delivery across restart, revoked=%s`,
     async (revocation) => {
       const revoked = revocation === "account" || revocation === "tag";
-      const objectiveBudget = revocation === "objective";
       const directory = await mkdtemp(join(tmpdir(), "supertag-budget-notice-"));
       const isolated =
         dialect === "postgresql" && postgres
@@ -55,16 +59,12 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             selectExecution: async () => undefined,
             execute,
           },
-          // Empty capacity: neither escalation nor delivery may depend on an agent turn.
+          // Empty capacity: the notice must not depend on an agent turn.
           reply: async (route, reply) => {
-            if (
-              !reply.markdown.includes("Budget decision required") &&
-              !reply.markdown.includes("Objective allocation decision required")
-            )
-              return;
+            if (!reply.markdown.includes(NOTICE)) return;
             routes.push(route);
             deliveries++;
-            expect(reply.markdown).toContain("A reply to this notification is not approval");
+            expect(reply.markdown).toContain("supertag update objective");
             if (deliveries === 1) throw new Error("Temporary surface outage");
           },
           dispatch: { pollIntervalMs: 10, retryBaseMs: 1000, maxAttempts: 3 },
@@ -83,7 +83,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         });
         const owner = await store.createTag({ name: `owner-${randomUUID()}` });
         await store.bindTagWorkerHost(owner.id, "unused-host");
-        await store.addTagRoute({
+        const route = await store.addTagRoute({
           tagId: owner.id,
           surfaceAccountId: account.id,
           scope: "channel:C1",
@@ -111,103 +111,106 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         if (!admission.taskId) throw new Error("Missing verified surface Task");
         notificationTaskId = admission.taskId;
         await controlPlane.stop();
-        const measurementId = randomUUID();
+
         const objective = await store.createObjective({
           id: randomUUID(),
           ownerTagId: owner.id,
           outcome: "Work needs a decision",
-          ...(objectiveBudget
-            ? {
-                budgetLimitMinor: 10,
-                budgetCurrency: "USD",
-                ongoing: true,
-                observations: [{ workstreamId: measurementId }],
-              }
-            : {}),
+          budgetLimitMinor: 10,
+          budgetCurrency: "USD",
         });
-        if (objectiveBudget)
-          await store.createTeam({
-            id: measurementId,
-            objectiveId: objective.id,
-            name: "Measurements",
-            leadTagId: owner.id,
-            memberTagIds: [owner.id],
-          });
-        const team = await store.createTeam({
-          id: objectiveBudget ? `${objective.id}:leadership` : randomUUID(),
-          objectiveId: objective.id,
-          name: "Leadership",
-          leadTagId: owner.id,
-          memberTagIds: [owner.id],
-          maxConcurrency: 1,
+        // One turn of the Objective's own Session marks it started, which the inbox requires.
+        // Its event is never due, so no Attempt runs: the notice never depends on an agent.
+        const at = new Date().toISOString();
+        const authorization: SurfaceTagAuthorizationSnapshot = {
+          version: 5,
+          capturedAt: at,
+          tag: { id: owner.id, name: owner.name },
+          origin: {
+            provider: "slack",
+            surfaceAccountId: account.id,
+            tagRouteId: route.id,
+            scope: "channel:C1",
+          },
+          requester: { id: "supertag", kind: "bot" },
+          roles: [],
+          permissionSets: [],
+          resources: [],
+          runtimeActions: [],
+        };
+        const contextPlan = { version: 7, capturedAt: at, sets: [] } as const;
+        const sessionKey = objectiveSessionKey(objective.id);
+        const admitted = await store.admitInboundEvent({
+          surfaceAccountId: account.id,
+          tagRouteId: route.id,
+          tagId: owner.id,
+          authorization,
+          contextPlan,
+          availableAt: new Date(Date.now() + 3_600_000).toISOString(),
+          event: {
+            eventId: randomUUID(),
+            logicalEventId: randomUUID(),
+            provider: "slack",
+            externalAccountId: "T-NOTICE",
+            kind: "message",
+            scope: "channel:C1",
+            sessionKey,
+            actor: { id: "supertag", displayName: "SuperTag", kind: "bot" },
+            text: "Work needs a decision",
+            occurredAt: at,
+            callback: {
+              provider: "slack",
+              mode: "slack_thread",
+              threadKey: "T-NOTICE|C1|1.000",
+              target: { channelId: "C1", threadTs: "1.000" },
+            },
+            source: {},
+            metadata: {},
+            internal: {
+              kind: "delivery",
+              from: { kind: "supertag" },
+              reason: "objective_start",
+              objectiveId: objective.id,
+            },
+          },
         });
-        const taskId = randomUUID();
-        await store.admitTaskAssignment({
-          taskId,
+        const session = await store.openSession({
+          tagId: owner.id,
+          sessionKey,
+          origin: {},
           objectiveId: objective.id,
-          teamId: team.id,
-          requestedByTagId: owner.id,
-          assignedTagId: owner.id,
-          instruction: "Complete work",
-          acceptanceCriteria: ["Reviewed"],
-          ...(objectiveBudget ? { startObjectiveExecution: true, maxCostMinor: 10 } : {}),
-          execution: {
-            limits: objectiveBudget
-              ? { maxReportedCost: { amountMinor: 10, currency: "USD" } }
-              : { maxReportedTokens: 1000 },
-          },
-          authorizationSnapshot: {
-            version: 4,
-            capturedAt: new Date().toISOString(),
-            tag: { id: owner.id, name: owner.name },
-            origin: { kind: "internal", objectiveId: objective.id, requestedByTagId: owner.id },
-            requester: { id: owner.id, kind: "bot" },
-            permissionSets: [],
-            resources: [],
-            runtimeActions: [],
-          },
-          contextPlan: { version: 7, capturedAt: new Date().toISOString(), sets: [] },
+          at,
+        });
+        await store.openTask({
+          inboundEventId: admitted.work.id,
+          tagId: owner.id,
+          sessionId: session.id,
+          execution: { limits: { maxReportedCost: { amountMinor: 10, currency: "USD" } } },
+          actor: { id: "supertag", kind: "bot" },
+          trigger: {},
           workspacePlan: { version: 1, status: "none" },
+          sessionHistory: [],
+          authorizationSnapshot: authorization,
+          contextPlan,
+          createdAt: at,
         });
-        await store.claimTaskAssignment({ taskId, leaseOwner: "fixture" });
-        if (objectiveBudget)
-          await store.registerTaskAssignmentWait({
-            taskId,
-            leaseOwner: "fixture",
-            attemptCount: 1,
-            mailbox: true,
-            reason: "Need new observations",
-          });
-        await store.settleTaskAssignment({
-          taskId,
-          leaseOwner: "fixture",
-          attemptCount: 1,
-          failed: !objectiveBudget,
-          result: objectiveBudget
-            ? {}
-            : {
-                failureKind: "budget-exhausted",
-                budgetExhaustion: { requiresAuthorization: true },
-              },
-        });
-        if (objectiveBudget) {
-          // Exercise the standalone fallback. An active root owner now reuses its existing
-          // activation and therefore needs no additional Objective allocation.
-          await store.cancelTaskAssignment(taskId, owner.id);
-          await store.postWorkstream({
-            workstreamId: measurementId,
-            authorTagId: owner.id,
-            body: "Changed workload",
-            idempotencyKey: "measurement",
-          });
-          await store.reconcileObjectiveObservations();
-          expect(await store.admitMailboxTaskAssignments()).toEqual([]);
-        }
+        expect((await store.getObjective(objective.id)).executionStartedAt).toBeTruthy();
+        // The limit sweep observed the pool spent.
+        const exhausted = await store.recordObjectiveLimitState(
+          objective.id,
+          { budgetExhausted: { limitMinor: 10, spentMinor: 10, at } },
+          (await store.getObjective(objective.id)).revision,
+        );
+        if (!exhausted) throw new Error("Could not record the exhausted budget");
+
         const anchor = await store.getVerifiedSurfaceTask(notificationTaskId);
         if (!anchor?.inboundEventId) throw new Error("Missing verified route");
-        const key = objectiveBudget
-          ? `objective-budget:${encodeURIComponent(objective.id)}:1:${encodeURIComponent(anchor.id)}`
-          : `task-budget:${encodeURIComponent(taskId)}:1:${encodeURIComponent(anchor.id)}`;
+        // The delivery key names the Objective, the inbox item and the home Task, so a restart
+        // or a repeated sweep posts the same notice once.
+        const key = `objective-budget:${encodeURIComponent(objective.id)}:${encodeURIComponent(
+          "budget-exhausted-10",
+        )}:${encodeURIComponent(anchor.id)}`;
+
         controlPlane = make();
         await controlPlane.start();
         await expect.poll(() => deliveries, { timeout: 5000 }).toBe(1);
@@ -268,90 +271,51 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         }
         expect(deliveries).toBe(revoked ? 1 : 2);
         if (!revoked) expect(routes[1]).toEqual(routes[0]);
-        // A fresh reconciler and Control Plane share the same immutable delivery identity.
+        // A fresh reconciler and Control Plane share the same immutable delivery identity: a
+        // repeated sweep over the same inbox item must not post the notice again.
         await new BudgetNotifications(store, notificationTaskId).reconcile();
         controlPlane = make();
         await controlPlane.start();
         await new BudgetNotifications(store, notificationTaskId).reconcile();
         await controlPlane.stop();
         expect(deliveries).toBe(revoked ? 1 : 2);
-        expect(await store.getTaskAssignment(taskId)).toMatchObject({
-          status: objectiveBudget ? "cancelled" : "failed",
-          attemptCount: 1,
-        });
-        expect((await store.findTaskById(taskId))?.execution.limits).toEqual(
-          objectiveBudget
-            ? { maxReportedCost: { amountMinor: 10, currency: "USD" } }
-            : { maxReportedTokens: 1000 },
-        );
-        expect(
-          (await store.listTaskEvents(taskId)).some(
-            (event) => event.type === "task.budget-renewed",
-          ),
-        ).toBe(false);
-        expect(await store.listTaskAttempts(taskId)).toHaveLength(0);
+        expect(await store.listTaskAttempts(admitted.work.id)).toHaveLength(0);
         expect(execute).not.toHaveBeenCalled();
-        if (objectiveBudget) {
-          const controller = new ObjectiveController(store, undefined);
-          const principal = {
-            operatorId: "budget-operator",
-            scopes: {
-              actions: ["read_coordination_inbox", "update_objective"],
-              objectiveIds: [objective.id],
-            },
-          };
-          const inbox = await controller.readCoordinationInbox(
-            { objectiveId: objective.id, kind: "objective_budget" },
-            principal,
-          );
-          expect(inbox.items).toHaveLength(1);
-          const decision = inbox.items[0]?.permittedActions[0];
-          if (!decision) throw new Error("Missing allocation decision");
-          await expect(
-            controller.commandAsAdministrator(
-              decision.tool,
-              { ...decision.arguments, budgetLimitMinor: 20 },
-              {
-                ...principal,
-                scopes: { ...principal.scopes, objectiveIds: ["another-objective"] },
-              },
-            ),
-          ).rejects.toMatchObject({ statusCode: 403 });
-          expect((await store.getObjective(objective.id)).budgetLimitMinor).toBe(10);
-          await controller.commandAsAdministrator(
-            decision.tool,
-            { ...decision.arguments, budgetLimitMinor: 20 },
-            principal,
-          );
-          expect(
-            await new BudgetNotifications(store, notificationTaskId).mayDeliver({
-              deliveryKey: key,
-              inboundEventId: anchor.inboundEventId,
-            }),
-          ).toBe(false);
-          await store.reconcileObjectiveObservations();
-          const [assessment] = await store.admitMailboxTaskAssignments();
-          if (!assessment) throw new Error("Missing resumed observation");
-          await store.claimTaskAssignment({ taskId: assessment.taskId, leaseOwner: "assessment" });
-          await store.settleTaskAssignment({
-            taskId: assessment.taskId,
-            leaseOwner: "assessment",
-            attemptCount: 1,
-            result: { text: "Measurement assessed" },
-          });
-          await store.reconcileObjectiveObservations();
-          expect(
-            (await store.getObjective(objective.id)).observationState?.cursors[measurementId],
-          ).toBe(1);
-          expect(
-            (
-              await controller.readCoordinationInbox(
-                { objectiveId: objective.id, kind: "objective_budget" },
-                principal,
-              )
-            ).items,
-          ).toEqual([]);
-        }
+
+        // The operator raises the allocation from the inbox item's own permitted action, and the
+        // notice then no longer applies to the home thread.
+        const controller = new ObjectiveController(store, undefined);
+        const principal = {
+          operatorId: "budget-operator",
+          scopes: {
+            actions: ["read_coordination_inbox", "update_objective"],
+            objectiveIds: [objective.id],
+          },
+        };
+        const inbox = await controller.readCoordinationInbox(
+          { objectiveId: objective.id, kind: "objective_budget" },
+          principal,
+        );
+        expect(inbox.items).toHaveLength(1);
+        expect(inbox.items[0]?.permittedActions[0]).toMatchObject({
+          tool: "update_objective",
+          arguments: { objectiveId: objective.id },
+          requiredInputFields: ["budgetLimitMinor"],
+        });
+        const current = await store.getObjective(objective.id);
+        await store.updateObjectiveStatus(objective.id, {
+          expectedRevision: current.revision,
+          budgetLimitMinor: 20,
+        });
+        // The observation named the old limit, so the raised budget retires it.
+        expect(
+          (
+            await controller.readCoordinationInbox(
+              { objectiveId: objective.id, kind: "objective_budget" },
+              principal,
+            )
+          ).items,
+        ).toEqual([]);
       } finally {
         await controlPlane?.stop();
         await store.disconnect();

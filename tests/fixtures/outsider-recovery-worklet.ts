@@ -13,6 +13,17 @@ import { connectWorklet } from "../../packages/runtime/transport/src/index.js";
 const [url, directory, hostId] = process.argv.slice(2) as [string, string, string];
 const credential = process.env["SUPERTAG_TEST_WORKLET_CREDENTIAL"];
 if (!credential) throw new Error("Missing test credential");
+/**
+ * Which turn the Control Plane sent. Task ids are generated, so the turn names itself in its
+ * request text: `interrupt` blocks until the Attempt is cancelled, anything else replies.
+ */
+function turnOf(spec: {
+  readonly input: { readonly messages: readonly { readonly text?: string }[] };
+}) {
+  const text = spec.input.messages.map((message) => message.text ?? "").join(" ");
+  return text.includes("INTERRUPT") ? "interrupt" : "after-restart";
+}
+
 const worker: Worker = {
   async describe() {
     return {
@@ -37,9 +48,10 @@ const worker: Worker = {
       attemptId: spec.attemptId,
       at: new Date().toISOString(),
     };
-    await appendFile(join(directory, "executions"), `${spec.taskId}\n`);
+    const turn = turnOf(spec);
+    await appendFile(join(directory, "executions"), `${turn}\n`);
     yield { ...identity, type: "execution.started", workerId: "recovery-worker" };
-    if (spec.taskId === "interrupt")
+    if (turn === "interrupt")
       await new Promise<void>((resolve) => {
         if (signal?.aborted) resolve();
         else signal?.addEventListener("abort", () => resolve(), { once: true });
@@ -74,7 +86,7 @@ if (process.env["SUPERTAG_LIVE_CLEANUP_RECOVERY"] === "1") {
     recoverExecutionCleanup: (task, attempt, digest) =>
       native.recoverExecutionCleanup?.(task, attempt, digest) ?? Promise.resolve(false),
     async *execute(spec, signal) {
-      await appendFile(join(directory, "executions"), `${spec.taskId}\n`);
+      await appendFile(join(directory, "executions"), `${turnOf(spec)}\n`);
       yield* native.execute(spec, signal);
     },
   };

@@ -324,7 +324,8 @@ export class DrizzleCoordinationInboxStore implements CoordinationInboxStore {
           and(
             eq(task.status, "failed"),
             inArray(task.objectiveId, openObjectiveIds),
-            sql`${task.result} is not null`,
+            // A failed Attempt records what the Worker reported as its source in the outcome.
+            sql`${task.outcome} is not null`,
             lte(task.updatedAt, asOf),
             filter.objectiveId === undefined ? undefined : eq(o.id, filter.objectiveId),
           ),
@@ -333,6 +334,14 @@ export class DrizzleCoordinationInboxStore implements CoordinationInboxStore {
         .limit(COORDINATION_INBOX_CANDIDATE_SCAN_LIMIT + 1)) as any[];
       truncated(blocked, ["task_attention"]);
       truncated(integrity, ["task_attention"]);
+      // The recover command names the Worker that ran the Attempt, so the item carries the
+      // Attempt's recorded Worker identity alongside its id.
+      const uncertainWorkers = await this.uncertainAttemptWorkers(
+        blocked
+          .slice(0, COORDINATION_INBOX_CANDIDATE_SCAN_LIMIT)
+          .map((row) => row.attempt)
+          .filter((id): id is string => typeof id === "string"),
+      );
       for (const row of blocked.slice(0, COORDINATION_INBOX_CANDIDATE_SCAN_LIMIT)) {
         const attemptId = typeof row.attempt === "string" ? row.attempt : undefined;
         push({
@@ -350,7 +359,14 @@ export class DrizzleCoordinationInboxStore implements CoordinationInboxStore {
             taskEvidence({ ...row.task, attemptCount: row.attemptCount }),
             objectiveEvidence(row.objective),
           ],
-          ...(attemptId === undefined ? {} : { uncertainAttempt: { attemptId } }),
+          ...(attemptId === undefined
+            ? {}
+            : {
+                uncertainAttempt: {
+                  attemptId,
+                  ...(uncertainWorkers.get(attemptId) ?? {}),
+                },
+              }),
           permittedActions: [],
           redaction: metadataOnly(["request", "result"]),
         });
@@ -359,7 +375,7 @@ export class DrizzleCoordinationInboxStore implements CoordinationInboxStore {
         0,
         COORDINATION_INBOX_CANDIDATE_SCAN_LIMIT,
       )) {
-        const result = record(row.result);
+        const result = record(row.outcome);
         if (result?.["failureKind"] !== "workspace-integrity") continue;
         push({
           key: `task_attention:${row.id}`,
@@ -476,6 +492,32 @@ export class DrizzleCoordinationInboxStore implements CoordinationInboxStore {
           }
         : {}),
     };
+  }
+
+  /**
+   * The Worker Host and Worker each Attempt recorded when it accepted the turn, read from the
+   * Attempt's Worker snapshot. Without them the inbox cannot name a runnable recover command.
+   */
+  private async uncertainAttemptWorkers(
+    attemptIds: readonly string[],
+  ): Promise<Map<string, { workerHostId?: string; workerId?: string }>> {
+    const workers = new Map<string, { workerHostId?: string; workerId?: string }>();
+    if (attemptIds.length === 0) return workers;
+    const attempts = this.tables.taskAttempts;
+    const rows = (await this.db
+      .select({ id: attempts.id, snapshot: attempts.workerSnapshot })
+      .from(attempts)
+      .where(inArray(attempts.id, [...new Set(attemptIds)]))) as any[];
+    for (const row of rows) {
+      const snapshot = record(row.snapshot) ?? {};
+      const workerHostId = snapshot["workerHostId"];
+      const workerId = snapshot["workerId"];
+      workers.set(row.id, {
+        ...(typeof workerHostId === "string" ? { workerHostId } : {}),
+        ...(typeof workerId === "string" ? { workerId } : {}),
+      });
+    }
+    return workers;
   }
 }
 

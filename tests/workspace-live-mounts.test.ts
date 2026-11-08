@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, expect, it, vi } from "vitest";
-import { taskWorkspaceBranch } from "../packages/core/src/index.js";
+import { workSessionBranch } from "../packages/control-plane/src/work-sessions.js";
 import { ModalWorkspaceEnvironment } from "../packages/runtime/environments/modal/src/index.js";
 import {
   createWorker,
@@ -181,7 +181,7 @@ it.each([
         status: "workspace" as const,
         workspace: "app",
         source,
-        branch: taskWorkspaceBranch("objective", "live"),
+        branch: workSessionBranch("live"),
         delivery: "branch" as const,
         mounts: [
           {

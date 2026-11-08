@@ -177,57 +177,6 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         controller.activateCoordination({ url: "http://127.0.0.1:3434" });
         return { store, tag, account, route, source, controller, makeTask };
       }
-      it("lets only operators select a verified notification Task without changing Objective scope", async () => {
-        const f = await fixture("slack");
-        const objective = await f.store.createSurfaceObjective({
-          taskId: f.source.task.id,
-          outcome: "Operator notifications",
-        });
-        const target = await f.makeTask({
-          sessionKey: "operator-notifications",
-          text: "hello",
-          callback: {
-            provider: "slack",
-            mode: "slack_thread",
-            threadKey: "T1|C2|2.000",
-            target: { channelId: "C2", threadTs: "2.000" },
-          },
-        });
-        await expect(
-          f.store.updateObjectiveStatus(
-            objective.id,
-            { expectedRevision: objective.revision, notificationTaskId: target.task.id },
-            f.tag.id,
-          ),
-        ).rejects.toMatchObject({ statusCode: 403 });
-        await f.controller.commandAsAdministrator("update_objective", {
-          objectiveId: objective.id,
-          expectedRevision: objective.revision,
-          notificationTaskId: target.task.id,
-        });
-        const updated = await f.store.getObjective(objective.id);
-        expect(updated).toMatchObject({
-          notificationTaskId: target.task.id,
-          surfaceTaskId: f.source.task.id,
-          surfaceSessionId: f.source.task.sessionId,
-          revision: objective.revision + 1,
-          status: objective.status,
-        });
-        expect(await f.store.getSurfaceObjective(target.task.id)).toBeUndefined();
-        expect((await f.store.getVerifiedSurfaceTask(target.task.id))?.id).toBe(target.task.id);
-        await expect(
-          f.store.updateObjectiveStatus(objective.id, {
-            expectedRevision: objective.revision,
-            notificationTaskId: null,
-          }),
-        ).rejects.toMatchObject({ statusCode: 409 });
-        const cleared = await f.store.updateObjectiveStatus(objective.id, {
-          expectedRevision: updated.revision,
-          notificationTaskId: null,
-        });
-        expect(cleared.notificationTaskId).toBeNull();
-        expect(cleared.surfaceTaskId).toBe(f.source.task.id);
-      });
       it("validates notification destinations at creation and rejects forged or bot Tasks", async () => {
         const f = await fixture();
         const definition = {
@@ -276,14 +225,8 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         await expect(
           f.controller.authenticateSessionExecution(transport.token),
         ).resolves.toMatchObject({ taskId: bot.task.id, attemptId: bot.attempt.id });
-        await expect(f.controller.authenticate(transport.token)).rejects.toThrow(
-          "cannot authorize coordination",
-        );
         await expect(f.controller.authenticateExecution(transport.token)).rejects.toThrow(
           "cannot authorize coordination",
-        );
-        await expect(f.controller.rebindExecutionCredential(transport.token)).rejects.toThrow(
-          "cannot be rebound",
         );
         const sessions = new SessionPersistence(f.store, f.controller);
         const state = {
@@ -316,7 +259,8 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           f.store.createSurfaceObjective(input),
         ]);
         expect(results[0]?.id).toBe(results[1]?.id);
-        expect(await f.store.getSurfaceObjective(earlier.task.id)).toBeUndefined();
+        // The Objective belongs to the conversation, so every Task of it reads the same one.
+        expect((await f.store.getSurfaceObjective(earlier.task.id))?.id).toBe(results[0]?.id);
         expect(results[0]).toMatchObject({
           ownerTagId: f.tag.id,
           runtimeActions: ["files:write"],
@@ -365,9 +309,9 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         const f = await fixture();
         const source = await f.makeTask({ text });
         const capability = await f.controller.surfaceCoordination(source.task, source.attempt);
-        const caller = await f.controller.authenticate(capability.token);
+        const caller = await f.controller.authenticateExecution(capability.token);
         await expect(
-          f.controller.command(
+          f.controller.commandAsAttempt(
             "create_objective",
             {
               outcome: "Validate scheduling",
@@ -377,147 +321,75 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         ).rejects.toThrow();
         expect(await f.store.getSurfaceObjective(source.task.id)).toBeUndefined();
       });
-      it("attaches an explicit same-channel Objective across threads and retains the binding on restart", async () => {
-        const f = await fixture("slack");
-        const objective = await f.store.createSurfaceObjective({
-          taskId: f.source.task.id,
-          outcome: "Bound",
-        });
-        const target = await f.makeTask({
-          text: `@SuperTag objective attach ${objective.id}`,
-          sessionKey: "another-thread",
-          callback: {
-            provider: "slack",
-            mode: "slack_thread",
-            threadKey: "T1|C1|2.000",
-            target: { channelId: "C1", threadTs: "2.000" },
-          },
-        });
-        const capability = await f.controller.surfaceCoordination(target.task, target.attempt);
-        const caller = await f.controller.authenticate(capability.token);
-        await expect(
-          f.controller.command("attach_objective", { objectiveId: objective.id }, caller),
-        ).resolves.toMatchObject({ id: objective.id });
-        await expect(
-          f.controller.command("attach_objective", { objectiveId: objective.id }, caller),
-        ).resolves.toMatchObject({ id: objective.id });
-        await expect(
-          f.controller.command("attach_objective", { objectiveId: "different" }, caller),
-        ).rejects.toThrow();
-        await expect(f.controller.command("start_objective", {}, caller)).rejects.toThrow();
-        await f.store.disconnect();
-        await f.store.connect();
-        const restarted = new ObjectiveController(f.store, undefined);
-        restarted.activateCoordination({ url: "http://127.0.0.1:3434" });
-        const nextCapability = await restarted.surfaceCoordination(target.task, target.attempt);
-        const nextCaller = await restarted.authenticate(nextCapability.token);
-        await expect(restarted.command("read_objective", {}, nextCaller)).resolves.toMatchObject({
-          id: objective.id,
-        });
-        const ordinary = await f.makeTask({
-          text: "Give me progress",
-          sessionKey: "another-thread",
-          callback: target.event.callback,
-        });
-        const ordinaryCapability = await f.controller.surfaceCoordination(
-          ordinary.task,
-          ordinary.attempt,
-        );
-        const ordinaryCaller = await f.controller.authenticate(ordinaryCapability.token);
-        await expect(f.controller.command("start_objective", {}, ordinaryCaller)).rejects.toThrow();
-
-        expect((await f.store.getObjectiveSurfaceTask(objective.id))?.id).toBe(f.source.task.id);
-        const other = await f.store.createObjective({
-          id: randomUUID(),
-          ownerTagId: f.tag.id,
-          outcome: "Other",
-        });
-        const conflict = await f.makeTask({
-          text: `@SuperTag objective attach ${other.id}`,
-          sessionKey: "another-thread",
-          callback: target.event.callback,
-        });
-        await expect(f.store.attachSurfaceObjective(conflict.task.id, other.id)).rejects.toThrow();
-        const otherTag = await f.store.createTag({ name: "Other Tag" });
-        const foreignObjective = await f.store.createObjective({
-          id: randomUUID(),
-          ownerTagId: otherTag.id,
-          outcome: "Other identity",
-        });
-        const foreignTarget = await f.makeTask({
-          text: `@SuperTag objective attach ${foreignObjective.id}`,
-          sessionKey: "third-thread",
-        });
-        await expect(
-          f.store.attachSurfaceObjective(foreignTarget.task.id, foreignObjective.id),
-        ).rejects.toThrow();
-        const foreignChannel = await f.makeTask({
-          text: `@SuperTag objective attach ${objective.id}`,
-          sessionKey: "foreign-channel",
-          scope: "channel:C2",
-          callback: {
-            provider: "slack",
-            mode: "slack_thread",
-            threadKey: "T1|C2|3.000",
-            target: { channelId: "C2", threadTs: "3.000" },
-          },
-        });
-        await expect(
-          f.store.attachSurfaceObjective(foreignChannel.task.id, objective.id),
-        ).rejects.toThrow();
-      });
       it("does not turn model-supplied owner or runtime actions into authority", async () => {
         const f = await fixture();
         const capability = await f.controller.surfaceCoordination(f.source.task, f.source.attempt);
-        const caller = await f.controller.authenticate(capability.token);
+        const caller = await f.controller.authenticateExecution(capability.token);
         for (const injected of [
           { ownerTagId: "admin" },
           { runtimeActions: ["commands:execute"] },
           { taskId: "other" },
         ]) {
           await expect(
-            f.controller.command("create_objective", { outcome: "Bound", ...injected }, caller),
-          ).rejects.toThrow();
-        }
-        expect(await f.store.getSurfaceObjective(f.source.task.id)).toBeUndefined();
-      });
-      it("denies foreign Objective selection and administrative approval or arbitrary reporting tools", async () => {
-        const f = await fixture();
-        const foreign = await f.store.createObjective({
-          id: randomUUID(),
-          ownerTagId: f.tag.id,
-          outcome: "Unlinked",
-        });
-        const capability = await f.controller.surfaceCoordination(f.source.task, f.source.attempt);
-        const caller = await f.controller.authenticate(capability.token);
-        await expect(
-          f.controller.command("select_objective", { objectiveId: foreign.id }, caller),
-        ).rejects.toThrow();
-        for (const command of ["approve_task", "report_to_surface", "set_messaging_grant"]) {
-          await expect(
-            f.controller.command(
-              command,
-              {
-                objectiveId: foreign.id,
-                taskId: "deploy",
-                text: "Approved",
-                target: { channel: "elsewhere" },
-              },
+            f.controller.commandAsAttempt(
+              "create_objective",
+              { outcome: "Bound", ...injected },
               caller,
             ),
           ).rejects.toThrow();
         }
+        expect(await f.store.getSurfaceObjective(f.source.task.id)).toBeUndefined();
+      });
+      it("gives a conversation turn only its own tools and no Objective it cannot see", async () => {
+        const f = await fixture();
+        const otherTag = await f.store.createTag({ name: "Other Tag" });
+        const foreign = await f.store.createObjective({
+          id: randomUUID(),
+          ownerTagId: otherTag.id,
+          outcome: "Unlinked",
+        });
+        const capability = await f.controller.surfaceCoordination(f.source.task, f.source.attempt);
+        const caller = await f.controller.authenticateExecution(capability.token);
+        expect(await f.controller.coordinationActions(caller)).toEqual([
+          "create_objective",
+          "start_session",
+          "continue_session",
+          "send_message",
+          "post",
+          "read_workstream",
+          "read_objective",
+          "list_sessions",
+          "search_sessions",
+          "read_session",
+          "list_objectives",
+        ]);
+        // Another Tag's Objective is never visible to this conversation.
+        await expect(
+          f.controller.commandAsAttempt("read_objective", { objectiveId: foreign.id }, caller),
+        ).rejects.toMatchObject({ statusCode: 404 });
+        // Tools of other turns, and administrative ones, are refused on this turn.
+        for (const command of ["update_objective", "ask"])
+          await expect(
+            f.controller.commandAsAttempt(command, { question: "?", status: "blocked" }, caller),
+          ).rejects.toMatchObject({
+            statusCode: 403,
+            message: "A conversation turn cannot use this tool",
+          });
+        for (const command of ["approve_task", "report_to_surface", "set_messaging_grant"])
+          await expect(
+            f.controller.commandAsAttempt(command, { objectiveId: foreign.id }, caller),
+          ).rejects.toMatchObject({ statusCode: 403 });
       });
       it("revokes surface coordination when the Attempt ends", async () => {
         const f = await fixture();
         const capability = await f.controller.surfaceCoordination(f.source.task, f.source.attempt);
-        await expect(f.controller.authenticate(capability.token)).resolves.toBeDefined();
+        await expect(f.controller.authenticateExecution(capability.token)).resolves.toBeDefined();
         await f.store.closeTaskAttempt({
           attemptId: f.source.attempt.id,
           status: "completed",
           endedAt: new Date().toISOString(),
         });
-        await expect(f.controller.authenticate(capability.token)).rejects.toThrow();
+        await expect(f.controller.authenticateExecution(capability.token)).rejects.toThrow();
       });
       it("revokes surface coordination when its inbound delivery lease closes", async () => {
         const f = await fixture();
@@ -530,7 +402,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           responseText: "Done",
           completedAt: new Date().toISOString(),
         });
-        await expect(f.controller.authenticate(capability.token)).rejects.toThrow();
+        await expect(f.controller.authenticateExecution(capability.token)).rejects.toThrow();
       });
     },
   );

@@ -25,10 +25,10 @@ apiVersion: supertag/v1
 kind: Role
 metadata: { name: Lead }
 spec:
-  purpose: Own Objectives for this repository. Plan the work, split it into bounded Tasks for builders, and integrate and verify the results.
+  purpose: Own Objectives for this repository. Plan the work, split it into bounded work Sessions for builders, and integrate and verify the results.
   instructions: >-
     Read the repository's contributing guide (AGENTS.md or CONTRIBUTING.md) before planning.
-    Delegate implementation to builders and do the integration yourself. Accept a builder's work
+    Delegate implementation to builders with start_session, naming the builder's Tag, and do the integration yourself. Each work Session reports back to the Objective's conversation. Accept a builder's work
     when its evidence shows the project's checks and the tests for its change passing, including
     new tests for new behavior. When the Objective's items are integrated and checked, send the
     operator an owner report naming the commit to merge. Keep the Objective statement's

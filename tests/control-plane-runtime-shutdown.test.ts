@@ -68,13 +68,8 @@ describe("Control Plane runtime shutdown", () => {
     vi.spyOn(worker, "execute").mockImplementation(async function* (spec, signal) {
       executionAccepted.resolve();
       await releaseExecution.promise;
-      internalApiStatus = (
-        await fetch(`${runtime.url}/internal/v1/mailbox/receive`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: "{}",
-        })
-      ).status;
+      // A draining runtime refuses a new management request rather than serving it.
+      internalApiStatus = (await fetch(`${runtime.url}/api/v1/tags`)).status;
       yield* execute(spec, signal);
     });
     const credential = await enrollWorkerHost(runtime.url, adminToken, "shutdown-host");
@@ -117,7 +112,7 @@ describe("Control Plane runtime shutdown", () => {
 
       releaseExecution.resolve();
       await close;
-      expect(internalApiStatus).toBe(401);
+      expect(internalApiStatus).toBe(503);
       expect(lifecycleRows(databasePath)).toEqual({
         inboundStatus: "completed",
         outboundStatus: "delivered",

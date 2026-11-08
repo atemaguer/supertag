@@ -10,11 +10,7 @@ import {
   type CursorRunner,
   createCursorWorker,
 } from "../packages/runtime/harnesses/cursor/src/index.js";
-import {
-  LocalWorklet,
-  type TaskAttemptSpec,
-  type Worker,
-} from "../packages/runtime/sdk/src/index.js";
+import { LocalWorklet, type Worker } from "../packages/runtime/sdk/src/index.js";
 import {
   DrizzleStore,
   FileGatewayCredentialVault,
@@ -43,23 +39,20 @@ it("runs a Cursor Task through Control Plane and Worklet with MCP, usage, resume
   let edited = "";
   let cancelPid: number | undefined;
   try {
-    const lead = await store.createTag({ name: "Cursor lead" });
-    const builder = await store.createTag({ name: "Cursor builder" });
-    await store.bindTagWorkerHost(lead.id, "cursor-host");
+    const builder = await store.createTag({ name: "builder" });
     await store.bindTagWorkerHost(builder.id, "cursor-host");
-    await store.createObjective({
-      id: "cursor-e2e",
-      ownerTagId: lead.id,
-      outcome: "Build a file",
-      runtimeActions: ["files:write", "commands:execute"],
+    // A turn takes its runtime actions from the Tag's own Roles.
+    const permissions = await store.createTagPermissionSet({ name: "cursor-runtime" });
+    for (const action of ["files:write", "commands:execute"])
+      await store.addTagPermission({ permissionSetId: permissions.id, target: "runtime", action });
+    const role = await store.createRole({
+      name: "Cursor builder",
+      purpose: "Edit files.",
+      instructions: "Edit carefully.",
+      contextSetIds: [],
+      permissionSetIds: [permissions.id],
     });
-    await store.createTeam({
-      id: "cursor-e2e:build",
-      objectiveId: "cursor-e2e",
-      name: "Build",
-      leadTagId: lead.id,
-      memberTagIds: [builder.id],
-    });
+    await store.assignRole({ roleId: role.id, tagId: builder.id });
     const runner: CursorRunner = async function* (request, _runnerRuntime, signal) {
       const server = request.mcpServers["supertag-coordination"];
       if (server?.type !== "http") throw new Error("Missing SuperTag MCP tools");
@@ -71,8 +64,8 @@ it("runs a Cursor Task through Control Plane and Worklet with MCP, usage, resume
       );
       try {
         const listed = (await client.listTools()).tools.map((tool) => tool.name);
-        expect(listed).toContain("read_objective");
-        const result = await client.callTool({ name: "read_objective", arguments: {} });
+        expect(listed).toContain("list_objectives");
+        const result = await client.callTool({ name: "list_objectives", arguments: {} });
         expect(result.isError).not.toBe(true);
         const task = harnessRequest(request.prompt).includes("Hold for cancellation")
           ? "cancel"
@@ -121,17 +114,9 @@ it("runs a Cursor Task through Control Plane and Worklet with MCP, usage, resume
             unpricedModel: "unknown-cursor-model",
           },
         };
-        if (seen.filter((entry) => entry.task === "build").length === 1) {
-          const escalation = await client.callTool({
-            name: "escalate_task",
-            arguments: { effort: "medium", reason: "Verify native Cursor resume" },
-          });
-          expect(escalation.isError).not.toBe(true);
-          return;
-        }
         yield {
           type: "output.message",
-          text: "Edited cursor-e2e.txt after calling read_objective",
+          text: "Edited cursor-e2e.txt after calling list_objectives",
           final: true,
         };
       } finally {
@@ -146,69 +131,13 @@ it("runs a Cursor Task through Control Plane and Worklet with MCP, usage, resume
       maxConcurrency: 2,
       runner,
     });
-    const mcp = async (spec: TaskAttemptSpec, name: string, args: Record<string, unknown>) => {
-      const response = await fetch(
-        `${spec.coordination?.controlPlaneUrl}/internal/v1/coordination/mcp`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${spec.coordination?.token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: 1,
-            method: "tools/call",
-            params: { name, arguments: args },
-          }),
-        },
-      );
-      const body = (await response.json()) as {
-        result?: { isError?: boolean; content: Array<{ text?: string }> };
-      };
-      if (!response.ok || body.result?.isError) throw new Error(`${name} failed`);
-      return JSON.parse(body.result?.content[0]?.text ?? "null");
-    };
-    let ownerRuns = 0;
     const worker: Worker = {
       describe: () => harness.describe(),
       controlCapabilities: (taskId, attemptId) =>
         harness.controlCapabilities?.(taskId, attemptId) ?? Promise.resolve(undefined),
       control: (command, options) =>
         harness.control?.(command, options) ?? Promise.reject(new Error("No control")),
-      async *execute(spec, signal) {
-        if (spec.tag.id === builder.id) {
-          yield* harness.execute(spec, signal);
-          return;
-        }
-        const base = {
-          taskId: spec.taskId,
-          attemptId: spec.attemptId,
-          at: new Date().toISOString(),
-        };
-        yield { ...base, type: "execution.started", workerId: "cursor-e2e" };
-        yield { ...base, type: "execution.limits.applied", requested: {}, applied: {} };
-        if (++ownerRuns === 1) {
-          for (const [taskId, instruction] of [
-            ["cursor-build", "Edit cursor-e2e.txt"],
-            ["cursor-cancel", "Hold for cancellation"],
-          ] as const)
-            await mcp(spec, "assign_task", {
-              taskId,
-              teamId: "cursor-e2e:build",
-              assignedTagId: builder.id,
-              instruction,
-              acceptanceCriteria: ["Cursor ran"],
-              execution: { harness: "cursor", model: "unknown-cursor-model" },
-            });
-        }
-        yield {
-          ...base,
-          type: "output.message",
-          message: { role: "teammate", text: "Assigned Cursor work" },
-        };
-        yield { ...base, type: "execution.completed" };
-      },
+      execute: (spec, signal) => harness.execute(spec, signal),
     };
     const worklet = new LocalWorklet("cursor-worklet", "cursor-host", [worker]);
     runtime = await startControlPlaneRuntime({
@@ -226,55 +155,61 @@ it("runs a Cursor Task through Control Plane and Worklet with MCP, usage, resume
       worklet,
       durableWorklet: durableTestWorklet(worklet),
     });
-    const admin = async (name: string, input: Record<string, unknown>) => {
-      const response = await fetch(`${runtime?.url}/api/v1/coordination/${name}`, {
+    const message = async (text: string) => {
+      const response = await fetch(`${runtime?.url}/api/v1/tags/${builder.name}/messages`, {
         method: "POST",
         headers: { Authorization: "Bearer cursor-admin", "Content-Type": "application/json" },
-        body: JSON.stringify({ objectiveId: "cursor-e2e", ...input }),
+        body: JSON.stringify({ text }),
       });
-      expect(response.status, await response.text()).toBe(200);
+      const body = await response.text();
+      expect(response.status, body).toBe(201);
+      return (JSON.parse(body) as { taskId: string }).taskId;
     };
-    await admin("start_objective", {});
-    await expect
-      .poll(async () => (await store.getTaskAssignment("cursor-build"))?.status, {
-        timeout: 20_000,
-      })
-      .toBe("submitted")
-      .catch(async (error: unknown) => {
-        throw new Error(
-          JSON.stringify({
-            task: await store.getTaskAssignment("cursor-build"),
-            events: await store.listTaskEvents("cursor-build"),
-            seen,
-            edited,
-          }),
-          { cause: error },
-        );
-      });
+    const settled = async (taskId: string, status: string) => {
+      await expect
+        .poll(async () => (await store.findTaskById(taskId))?.status, { timeout: 20_000 })
+        .toBe(status)
+        .catch(async (error: unknown) => {
+          throw new Error(
+            JSON.stringify({
+              task: await store.findTaskById(taskId),
+              events: await store.listTaskEvents(taskId),
+              seen,
+              edited,
+            }),
+            { cause: error },
+          );
+        });
+    };
+
+    // Two turns of the same conversation: the second resumes the native Cursor Session.
+    const firstBuild = await message("Edit cursor-e2e.txt");
+    await settled(firstBuild, "completed");
+    const secondBuild = await message("Edit cursor-e2e.txt again");
+    await settled(secondBuild, "completed");
     expect(seen[0]?.mcp).toBe(true);
     expect(seen.filter((entry) => entry.task === "build")).toHaveLength(2);
     expect(seen.find((entry) => entry.task === "build" && entry.resume)?.resume).toMatch(/^agent-/);
     expect(edited).toContain("written by Cursor runner");
-    const usage = (await store.listTaskEvents("cursor-build")).filter(
-      (event) => event.type === "usage.updated",
+    const usage = (await store.listTaskEvents(firstBuild)).filter(
+      (event) => event.type === "execution.usage.updated",
     );
     expect(usage.length).toBeGreaterThan(0);
     expect(JSON.stringify(usage)).toContain("unpricedModel");
-    await expect
-      .poll(async () => (await store.getTaskAssignment("cursor-cancel"))?.status, {
-        timeout: 20_000,
-      })
-      .toBe("running");
-    await admin("update_task", {
-      taskId: "cursor-cancel",
-      expectedStatus: "running",
-      status: "cancelled",
+
+    // An operator cancels a running turn, and its Worker stops the work it started.
+    const cancelTask = await message("Hold for cancellation");
+    // Cancel only once the runner holds the work, so the Worker must stop what it started.
+    await expect.poll(() => cancelPid !== undefined, { timeout: 20_000 }).toBe(true);
+    expect((await store.findTaskById(cancelTask))?.status).toBe("running");
+    const cancelResponse = await fetch(`${runtime.url}/api/v1/tasks/${cancelTask}/cancel`, {
+      method: "POST",
+      headers: { Authorization: "Bearer cursor-admin" },
     });
+    expect(cancelResponse.status, await cancelResponse.text()).toBe(202);
     await cancelled;
     await expect
-      .poll(async () => (await store.listTaskAttempts("cursor-cancel"))[0]?.status, {
-        timeout: 20_000,
-      })
+      .poll(async () => (await store.listTaskAttempts(cancelTask))[0]?.status, { timeout: 20_000 })
       .toBe("cancelled");
     expect(cancelPid).toBeGreaterThan(0);
     await expect

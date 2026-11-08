@@ -176,19 +176,27 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         const completed = await f.complete(objective, "Released");
         await expect.poll(() => f.completionReplies().length, { timeout: 5000 }).toBe(1);
 
-        const updated = (await f.controlPlane.objectives.command("update_objective", {
-          objectiveId: objective.id,
-          expectedRevision: completed.revision,
-          runtimeActions: [],
-        })) as Objective;
+        // An operator update of a completed Objective changes it without reporting again.
+        const updated = await f.store.updateObjectiveStatus(
+          objective.id,
+          { expectedRevision: completed.revision, runtimeActions: [] },
+          undefined,
+          undefined,
+          { operatorId: "operator:alice" },
+        );
         expect(updated.status).toBe("completed");
         expect(updated.revision).toBeGreaterThan(completed.revision);
-        const again = (await f.controlPlane.objectives.command("update_objective", {
-          objectiveId: objective.id,
-          expectedRevision: updated.revision,
-          status: "completed",
-          completionSummary: "Released again",
-        })) as Objective;
+        const again = await f.store.updateObjectiveStatus(
+          objective.id,
+          {
+            expectedRevision: updated.revision,
+            status: "completed",
+            completionSummary: "Released again",
+          },
+          undefined,
+          undefined,
+          { operatorId: "operator:alice" },
+        );
         expect(again.status).toBe("completed");
         await new Promise((resolve) => setTimeout(resolve, 200));
         expect(f.completionReplies()).toHaveLength(1);

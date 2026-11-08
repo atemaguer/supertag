@@ -80,7 +80,6 @@ function fixture() {
     listSessionStates,
     findSessionState: vi.fn(async () => undefined),
     promoteSessionState: vi.fn(async () => {}),
-    hasUnconfirmedTeamLiveDelivery: vi.fn(async () => false),
     findInboundEventById,
   } as unknown as Store;
   return {
@@ -424,32 +423,6 @@ it("does not promote ordinary failures even when partial state was archived", as
   ]);
   expect(f.store.promoteSessionState).not.toHaveBeenCalled();
 });
-
-it.each(["completed", "budget"] as const)(
-  "refuses %s session promotion when durable teammate delivery is unconfirmed",
-  async (terminal) => {
-    const f = fixture();
-    vi.mocked(f.store.findSessionState).mockResolvedValue({
-      ...(await f.listSessionStates())[0],
-      status: "stored",
-    } as never);
-    vi.mocked(f.store.hasUnconfirmedTeamLiveDelivery).mockResolvedValue(true);
-    await f.continuity.saveTask(f.task, profile, [
-      { type: "session.updated", taskId: f.task.id, attemptId: "first", at, sessionState: f.ref },
-      terminal === "completed"
-        ? { type: "execution.completed", taskId: f.task.id, attemptId: "first", at }
-        : {
-            type: "execution.failed",
-            taskId: f.task.id,
-            attemptId: "first",
-            at,
-            error: { name: "ExecutionBudgetExceededError", message: "Exhausted" },
-          },
-    ]);
-    expect(f.store.promoteSessionState).not.toHaveBeenCalled();
-    expect(f.store.hasUnconfirmedTeamLiveDelivery).toHaveBeenCalledWith(f.task.id, "first");
-  },
-);
 
 it("refuses promotion on a withdrawal event even without a surviving delivery record", async () => {
   const f = fixture();

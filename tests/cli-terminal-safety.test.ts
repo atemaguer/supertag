@@ -2,8 +2,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+import { runInboxCommand } from "../apps/cli/src/approvals.ts";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
-import { runCoordinateCommand } from "../apps/cli/src/coordination.ts";
 import { formatCliFailure } from "../apps/cli/src/index.ts";
 import { renderListTable } from "../apps/cli/src/list-command.ts";
 import { runObjectiveCommand } from "../apps/cli/src/objectives.ts";
@@ -167,8 +167,7 @@ it("filters inbox detail fields as well as recovery commands", async () => {
     ],
   });
   safe(
-    await runCoordinateCommand({ url: "http://127.0.0.1:1", token: "unused" }, [
-      "inbox",
+    await runInboxCommand({ url: "http://127.0.0.1:1", token: "unused" }, "list", [
       "--output",
       "text",
     ]),

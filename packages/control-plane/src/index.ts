@@ -142,6 +142,7 @@ import {
   sessionApprovalDeliveryId,
   sessionRequesterKey,
   TagMessagingError,
+  type TaskFailureKind,
   WORK_SESSION_MAX_OPEN,
   WORK_SESSION_MAX_RUNNING,
 } from "@supertag/core";
@@ -600,8 +601,8 @@ export class ControlPlane {
       startObjective: (objectiveId) => this.startObjective(objectiveId),
       messageObjective: (input) => this.messageObjective(input),
       sendMessage: (task, input) => this.#sendMessage(task, input),
-      deliverObjectiveNotice: (objectiveId, key, text) =>
-        this.#notifyObjective({ objectiveId, key, text }),
+      deliverObjectiveNotice: (objectiveId, key, text, reason) =>
+        this.#notifyObjective({ objectiveId, key, text, ...(reason ? { reason } : {}) }),
       postObjectiveNotice: (objectiveId, key, text) =>
         this.#postObjectiveNotice(objectiveId, key, text),
       cancelObjectiveTasks: (objectiveId, reason, exceptTaskId) =>
@@ -1217,6 +1218,10 @@ export class ControlPlane {
       await this.#appendTaskEvent(task.id, "task.cancelled", { reason: "operator-request" });
       if (task.inboundEventId !== null)
         await this.#finishReplyStream(task.id, task.inboundEventId, "cancelled");
+      // A cancelled work Session closes its draft pull request, as a settled Attempt's does.
+      await this.objectives
+        .settleWorkspacePullRequest(cancelled)
+        .catch((error: unknown) => this.#reportDispatchError(error));
       await this.#reportWorkSession(task.id);
       this.#wakeDeliveryController?.();
       this.#markOperatorInboxChanged();
@@ -2240,6 +2245,7 @@ export class ControlPlane {
           ...(uncertain
             ? { sessionBlockReason: "Execution completion could not be confirmed" }
             : {}),
+          ...executionFailureKind(budgetExhausted, workerEvents),
         };
         try {
           await this.#surfaceSettlement.prepare(failed, work.id, this.#instanceId);
@@ -3693,6 +3699,7 @@ export class ControlPlane {
     readonly objectiveId: string;
     readonly key: string;
     readonly text: string;
+    readonly reason?: "objective_notice" | "objective_message";
   }): Promise<void> {
     const eventId = objectiveNoticeDeliveryId(input.objectiveId, input.key);
     if (this.#deliveredNotices.has(eventId)) return;
@@ -3700,7 +3707,7 @@ export class ControlPlane {
     if (objectiveClosed(objective.status)) return;
     await this.#admitObjectiveTurn(objective, {
       eventId,
-      reason: "objective_notice",
+      reason: input.reason ?? "objective_notice",
       from: { kind: "supertag" },
       text: input.text,
     });
@@ -5043,6 +5050,28 @@ function positiveInteger(value: number | undefined, fallback: number, name: stri
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The source of a failed Attempt, taken from the name the Worker reported with its
+ * `execution.failed` event. Never inferred from diagnostic text.
+ */
+function executionFailureKind(
+  budgetExhausted: boolean,
+  events: readonly WorkerTaskAttemptEvent[],
+): { readonly failureKind?: TaskFailureKind } {
+  if (budgetExhausted) return { failureKind: "budget-exhausted" };
+  const failed = events.findLast((event) => event.type === "execution.failed");
+  switch (failed?.type === "execution.failed" ? failed.error.name : undefined) {
+    case "HarnessProviderError":
+      return { failureKind: "harness" };
+    case "WorkspaceSetupError":
+      return { failureKind: "workspace-setup" };
+    case "WorkspaceIntegrityError":
+      return { failureKind: "workspace-integrity" };
+    default:
+      return {};
+  }
 }
 
 function externalWriteFailure(error: unknown, events: readonly WorkerTaskAttemptEvent[]): unknown {

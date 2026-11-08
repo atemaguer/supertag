@@ -13,6 +13,7 @@ import {
   objectiveCompletionNotice,
   objectiveDeadlineGraceMs,
   objectiveDeadlineNotices,
+  objectiveDeadlineStopsRunning,
   objectiveHasReportedBudget,
   objectiveIdOfSessionKey,
   objectiveLimitEvents,
@@ -28,6 +29,7 @@ import {
   type Task,
   type TaskAttempt,
   type Team,
+  tagMessageText,
 } from "@supertag/core";
 import type { Worklet } from "@supertag/worker-sdk";
 import { ApprovalCoordinator, sessionWaitsOnApproval } from "./approvals.js";
@@ -888,7 +890,8 @@ export class ObjectiveController {
     this.authorizeOperatorObjective(objectiveId, principal);
     const result = await this.sessions().messageObjective({
       objectiveId,
-      text: mailboxText(input.text, "text"),
+      // Free-form prose, not an identifier: an operator message becomes the owner's next turn.
+      text: tagMessageText(input.text),
       operatorId: principal.operatorId,
       idempotencyKey:
         input.idempotencyKey === undefined
@@ -1010,7 +1013,14 @@ export class ObjectiveController {
       pausedAt,
       await this.objectiveTasks(objectiveId),
     );
-    await this.sessions().deliverObjectiveNotice(objectiveId, `resumed:${pausedAt}`, summary);
+    // A resume is SuperTag's account of what changed while the Objective was paused, not a
+    // limit notice: it arrives as the owner's next message.
+    await this.sessions().deliverObjectiveNotice(
+      objectiveId,
+      `resumed:${pausedAt}`,
+      summary,
+      "objective_message",
+    );
     return { objective, changed, summary };
   }
 
@@ -1296,16 +1306,35 @@ export class ObjectiveController {
       );
     }
     const next = evaluateObjectiveLimits(objective, now, spend);
-    const limited = objectiveShouldLimit(
-      objective,
-      next,
-      tasks,
-      now,
-      this.deadlineGraceMs ?? objectiveDeadlineGraceMs(objective),
-    );
+    const graceMs = this.deadlineGraceMs ?? objectiveDeadlineGraceMs(objective);
+    // Running Attempts keep authority only through the grace period, and only while the owner
+    // Tag is active. Past either, they are stopped so the Objective can become limited.
+    const stop = await this.runningAuthorityEnded(objective, tasks, now, graceMs);
+    if (stop) await this.sessions().cancelObjectiveTasks(objective.id, stop);
+    const limited = objectiveShouldLimit(objective, next, stop ? [] : tasks, now, graceMs);
     if (limitStateChanged(objective.limitState, next) || limited)
       await this.store.recordObjectiveLimitState(objective.id, next, objective.revision, limited);
     await this.deliverLimitNotices(objective.id);
+  }
+
+  /**
+   * Why the Objective's running Task Attempts must stop now, or undefined while they may run.
+   * Checked only when something is running, so an idle sweep reads no Tag.
+   */
+  private async runningAuthorityEnded(
+    objective: ObjectiveLimitCandidate,
+    tasks: readonly Task[],
+    now: string,
+    graceMs: number,
+  ): Promise<string | undefined> {
+    if (!tasks.some((task) => task.status === "running" || task.status === "pending"))
+      return undefined;
+    if (objectiveDeadlineStopsRunning(objective, now, graceMs))
+      return `The Objective deadline ${objective.deadline} passed and its grace period ended, so SuperTag stopped this Task.`;
+    const owner = await this.store.findTagById(objective.ownerTagId).catch(() => undefined);
+    if (owner && owner.status !== "active")
+      return `Tag ${owner.name} is ${owner.status}, so SuperTag stopped this Task of its Objective.`;
+    return undefined;
   }
 
   /** Each budget and deadline event becomes one turn of the Objective's conversation. */

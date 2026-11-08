@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   type CommitCapturedArtifactInput,
+  objectiveSessionKey,
   validateCapturedArtifactInput,
 } from "../packages/core/src/index.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
@@ -48,43 +49,101 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         outcome: "Research",
         budgetLimitMinor: 100,
       });
-      const team = await store.createTeam(
-        {
-          id: randomUUID(),
-          objectiveId: objective.id,
-          name: "Research",
-          leadTagId: owner.id,
-          memberTagIds: [],
-          maxConcurrency: 2,
-        },
-        owner.id,
-      );
+      const account = await store.saveSurfaceAccount({
+        provider: "slack",
+        externalAccountId: randomUUID(),
+        displayName: "Slack",
+        authMethod: "test",
+        credentialId: "test",
+        status: "connected",
+        configuration: {},
+        verifiedAt: new Date().toISOString(),
+      });
+      const route = await store.addTagRoute({
+        tagId: owner.id,
+        surfaceAccountId: account.id,
+        scope: "channel:research",
+      });
+      const ownerSession = await store.openSession({
+        tagId: owner.id,
+        sessionKey: objectiveSessionKey(objective.id),
+        origin: {},
+        objectiveId: objective.id,
+        at: new Date().toISOString(),
+      });
+      /** One running work Session turn of the Objective, with its first Task Attempt. */
       async function work() {
         const at = new Date().toISOString();
-        const assignment = await store.admitTaskAssignment({
-          taskId: randomUUID(),
-          objectiveId: objective.id,
-          teamId: team.id,
-          requestedByTagId: owner.id,
-          assignedTagId: owner.id,
-          instruction: "Research",
-          acceptanceCriteria: ["Report"],
-          execution: {},
-          workspacePlan: { version: 1, status: "none" },
-          authorizationSnapshot: {
-            version: 4,
-            capturedAt: at,
-            tag: { id: owner.id, name: owner.name },
-            origin: { kind: "internal", objectiveId: objective.id, requestedByTagId: owner.id },
-            requester: { id: owner.id, kind: "bot" },
-            permissionSets: [],
-            resources: [],
-            runtimeActions: [],
-          },
-          contextPlan: { version: 7, capturedAt: at, sets: [] },
+        const title = `research-${randomUUID()}`;
+        const session = await store.openSession({
+          tagId: owner.id,
+          sessionKey: `work:${ownerSession.id}:${title}`,
+          origin: {},
+          parentSessionId: ownerSession.id,
+          at,
         });
-        const task = await store.findTaskById(assignment.taskId);
-        if (!task) throw new Error("Missing admitted task");
+        const authorization = {
+          version: 5,
+          capturedAt: at,
+          tag: { id: owner.id, name: owner.name },
+          origin: {
+            tagRouteId: route.id,
+            surfaceAccountId: account.id,
+            provider: "slack",
+            scope: "channel:research",
+          },
+          requester: { id: owner.id, kind: "bot" },
+          permissionSets: [],
+          resources: [],
+          runtimeActions: [],
+        } as const;
+        const eventId = randomUUID();
+        const admitted = await store.admitInboundEvent({
+          surfaceAccountId: account.id,
+          tagRouteId: route.id,
+          tagId: owner.id,
+          authorization,
+          contextPlan: { version: 7, capturedAt: at, sets: [] },
+          event: {
+            eventId,
+            logicalEventId: eventId,
+            provider: "slack",
+            externalAccountId: account.externalAccountId,
+            kind: "message",
+            scope: "channel:research",
+            sessionKey: session.sessionKey,
+            actor: { id: owner.id, kind: "bot" },
+            internal: {
+              kind: "work_session",
+              startedByTaskId: eventId,
+              parentSessionId: ownerSession.id,
+              title,
+            },
+            text: "Research",
+            occurredAt: at,
+            callback: {
+              provider: "slack",
+              mode: "slack_thread",
+              threadKey: "research",
+              target: { channelId: "research", threadTs: "research" },
+            },
+            source: {},
+            metadata: {},
+          },
+        });
+        const task = await store.openTask({
+          inboundEventId: admitted.work.id,
+          tagId: owner.id,
+          sessionId: session.id,
+          execution: {},
+          actor: { id: owner.id, kind: "bot" },
+          trigger: { origin: "work_session" },
+          workspacePlan: { version: 1, status: "none" },
+          sessionHistory: [],
+          authorizationSnapshot: authorization,
+          contextPlan: { version: 7, capturedAt: at, sets: [] },
+          createdAt: at,
+        });
         const attempt = await store.createTaskAttempt({
           taskId: task.id,
           attemptNumber: 1,
@@ -92,12 +151,13 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           workerSnapshot: {},
           startedAt: at,
         });
+        await store.startTask({ taskId: task.id, startedAt: at });
         const input: CommitCapturedArtifactInput = {
           operationId: "capture-1",
           taskId: task.id,
           attemptId: attempt.id,
           tagId: owner.id,
-          sessionId: task.sessionId,
+          sessionId: session.id,
           objectiveId: objective.id,
           title: "PT research",
           summary: "Scheduling evidence",

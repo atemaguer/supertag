@@ -10,7 +10,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { FileArtifactStore } from "supertag-ai/worker";
 import { policyRequest } from "./policy-client.mjs";
-import { apiClient, createOrganization, objectiveId } from "./resources.mjs";
+import { apiClient, createOrganization } from "./resources.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const directory = resolve(
@@ -104,119 +104,116 @@ async function stop(child, signal = "SIGTERM") {
 }
 async function snapshot(state) {
   const api = apiClient(state.url, await secret("admin-token"));
-  const [overview, team, provider] = await Promise.all([
-    api.request("GET", `/api/v1/coordination/objectives/${objectiveId}/overview?limit=100`),
-    api.coordinate("read_team", { teamId: "support-team" }),
+  const [overview, provider] = await Promise.all([
+    api.overview(),
     policyRequest(state.policyUrl, await secret("read-token"), "/status"),
   ]);
-  const applied = team.context?.applied ?? {};
-  const needsApplication = overview.tasks
+  // The provider's receipts are the durable record of what was applied; one per incident Session.
+  const applied = Object.fromEntries(
+    Object.entries(provider.operations).map(([operationId, receipt]) => [
+      operationId.slice("support:".length),
+      receipt,
+    ]),
+  );
+  const proposals = overview.sessions.filter((session) => session.title?.startsWith("support:"));
+  const needsApplication = proposals
     .filter(
-      (task) =>
-        task.status === "accepted" &&
-        !Object.values(applied).some((entry) => entry.taskId === task.taskId),
+      (session) =>
+        session.status === "completed" && !Object.hasOwn(provider.operations, session.title),
     )
-    .map((task) => ({
-      taskId: task.taskId,
-      operationId: task.taskId,
+    .map((session) => ({
+      sessionId: session.id,
+      incidentId: session.title.slice("support:".length),
+      operationId: session.title,
       next: "Inspect the provider operation receipt before retrying this policy.",
     }));
   return {
     observedAt: new Date().toISOString(),
     mode: state.mode,
-    cursor: team.context?.cursor ?? 0,
+    incidents: Object.keys(applied),
     applied,
     needsApplication,
+    proposals,
+    conversation: overview.conversation,
     provider,
     overview,
   };
 }
 async function verify(state, report) {
   const api = apiClient(state.url, await secret("admin-token"));
-  const objective = await api.coordinate("read_objective");
-  const stream = await api.coordinate("read_workstream", {
-    workstreamId: "support-observations",
-    afterSequence: 0,
-    limit: 100,
-  });
+  const overview = report.overview;
+  // Every incident an operator reported in this conversation, in order.
+  const reported = overview.conversation
+    .filter((turn) => turn.from === "operator")
+    .flatMap((turn) => [...turn.text.matchAll(/"incidentId"\s*:\s*"([^"]*)"/gu)].map((m) => m[1]));
+  const incidents = [...new Set(reported)];
   assert(
-    stream.posts.length > 0 && stream.posts.length < 100,
+    reported.length > 0 && reported.length < 100,
     "Verifier handles 1–99 observations; extend paging for larger deployments",
   );
-  const incidents = [...new Set(stream.posts.map((post) => JSON.parse(post.body).incidentId))];
-  assert.equal(report.cursor, stream.posts.at(-1).sequence, "Unprocessed observations remain");
+  assert.deepEqual(report.needsApplication, [], "Reviewed proposals remain unapplied");
   assert.equal(
     Object.keys(report.provider.operations).length,
     incidents.length,
     "Unexpected or missing provider operations",
   );
+  const owner = overview.sessions.find((session) => session.owner);
+  assert(owner, "The Objective has no conversation");
+  assert.equal(owner.status, "completed", "The owner must finish its turn, not wait");
   // The Worker Host's copies; the Control Plane keeps only the catalog.
   const artifacts = new FileArtifactStore(join(directory, "artifacts"));
   for (const incidentId of incidents) {
-    const taskId = `support:${incidentId}`;
-    const task = objective.tasks.find((item) => item.taskId === taskId);
-    assert.equal(task?.status, "accepted", `${taskId} is not accepted`);
-    const receipt = report.provider.operations[taskId];
-    assert(receipt, `${taskId} has no provider receipt`);
-    assert(
-      task.result.taskResult.artifacts.some(
-        (item) =>
-          item.artifactId === receipt.sourceArtifactId &&
-          item.paths.includes("outputs/policy.json"),
-      ),
-      "Applied artifact was not selected by the reviewed Task",
-    );
-    const events = (await api.request("GET", `/api/v1/tasks/${encodeURIComponent(taskId)}/events`))
-      .items;
+    const operationId = `support:${incidentId}`;
+    const session = overview.sessions.find((item) => item.title === operationId);
+    assert.equal(session?.status, "completed", `${operationId} did not report`);
+    const receipt = report.provider.operations[operationId];
+    assert(receipt, `${operationId} has no provider receipt`);
+    const events = (
+      await api.request("GET", `/api/v1/tasks/${encodeURIComponent(session.task.id)}/events`)
+    ).items;
     assert(
       events.some(
         (event) =>
           event.type === "artifact.created" &&
-          event.attemptId === task.result.reviewedAttemptId &&
           event.payload?.artifact?.artifactId === receipt.sourceArtifactId &&
           event.payload.artifact.digest === receipt.sourceDigest &&
           event.payload.artifact.path === "outputs/policy.json",
       ),
-      "Applied digest has no matching captured artifact event from the reviewed Attempt",
+      "Applied digest has no matching captured artifact event from the reviewed work Session",
     );
     const bytes = await artifacts.get({
       uri: `supertag-artifact:${receipt.sourceDigest}`,
       digest: receipt.sourceDigest,
     });
     const proposal = JSON.parse(Buffer.from(bytes).toString());
-    assert.deepEqual(proposal, JSON.parse(task.instruction));
     assert.equal(proposal.incidentId, incidentId);
     assert.equal(receipt.expectedRevision, proposal.expectedRevision);
     assert.equal(receipt.responseMinutes, proposal.responseMinutes);
     assert.equal(receipt.revision, proposal.expectedRevision + 1);
-    assert.equal(report.applied[incidentId].sourceDigest, receipt.sourceDigest);
-    assert.equal(report.applied[incidentId].reviewedAttemptId, task.result.reviewedAttemptId);
   }
-  assert.equal(objective.tasks.length, incidents.length + 1, "Duplicate/unexpected assignments");
   assert.equal(
-    objective.tasks.find((task) => task.taskId === `${objectiveId}:start`)?.status,
-    "waiting",
-    "Manager must return to a durable wait before completion",
+    report.proposals.length,
+    incidents.length,
+    "Duplicate or unexpected proposal Sessions",
   );
   const evidence = {
     passed: true,
     incidents: incidents.length,
-    assignments: objective.tasks.length,
+    proposalSessions: report.proposals.length,
     recoveredResponse: report.provider.dropped,
     restartedControlPlane: state.restartedControlPlane ?? false,
     outcomes: incidents.map((incidentId) => {
-      const task = objective.tasks.find((item) => item.taskId === `support:${incidentId}`);
-      const receipt = report.provider.operations[task.taskId];
+      const session = overview.sessions.find((item) => item.title === `support:${incidentId}`);
+      const receipt = report.provider.operations[`support:${incidentId}`];
       return {
         incidentId,
-        taskId: task.taskId,
-        producingAttemptId: task.result.reviewedAttemptId,
+        sessionId: session.id,
+        taskId: session.task.id,
         artifactId: receipt.sourceArtifactId,
         digest: receipt.sourceDigest,
-        timeToAppliedMs: Date.parse(receipt.appliedAt) - Date.parse(task.createdAt),
+        timeToAppliedMs: Date.parse(receipt.appliedAt) - Date.parse(session.createdAt),
       };
     }),
-    performance: report.overview.performance,
     usage: report.overview.pageUsage,
     limits:
       "Two local Worker processes, local SQLite and policy service; not independent machines or arbitrary-provider exactly-once.",
@@ -229,11 +226,12 @@ async function verify(state, report) {
 async function observe(state, incidentId, deliveryId) {
   if (!/^[a-zA-Z0-9_-]{1,80}$/u.test(incidentId ?? "") || !deliveryId)
     throw new Error("Usage: npm run observe -- INCIDENT_ID DELIVERY_ID");
-  return apiClient(state.url, await secret("admin-token")).coordinate("post_workstream", {
-    workstreamId: "support-observations",
-    body: JSON.stringify({ incidentId }),
-    idempotencyKey: deliveryId,
-  });
+  // An observation is an operator message in the Objective's conversation; the delivery ID makes
+  // a repeated report of the same observation one turn.
+  return apiClient(state.url, await secret("admin-token")).message(
+    JSON.stringify({ incidentId }),
+    deliveryId,
+  );
 }
 async function run() {
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -352,18 +350,13 @@ async function run() {
         ),
       );
     });
-    const objective = await api.coordinate("read_objective");
-    if (!objective.tasks.some((task) => task.taskId === `${objectiveId}:start`))
-      await api.coordinate("start_objective", { maxCostMinor: 0 });
     console.log(JSON.stringify({ running: true, mode, stateDirectory: directory }));
     if (command === "demo") {
-      await waitUntil(
-        async () =>
-          (await api.coordinate("read_objective")).tasks.find(
-            (task) => task.taskId === `${objectiveId}:start`,
-          )?.status === "waiting",
-        240000,
-      );
+      // The owner's first turn runs when a Worker is available; it ends with nothing to do.
+      await waitUntil(async () => {
+        const owner = (await api.overview()).sessions.find((session) => session.owner);
+        return owner?.status === "completed";
+      }, 240000);
       if (process.env.SUPPORT_RESTART !== "0") {
         await stop(plane, "SIGKILL");
         plane = await startPlane();
@@ -373,22 +366,22 @@ async function run() {
       for (const [index, incidentId] of ["one", "one", "two", "three", "one"].entries())
         await observe(state, incidentId, `demo-${index}`);
       await waitUntil(async () => {
-        const objective = await api.coordinate("read_objective");
-        const failed = objective.tasks.find((task) =>
-          ["failed", "cancelled", "rejected"].includes(task.status),
+        const overview = await api.overview();
+        const failed = overview.sessions.find((session) =>
+          ["failed", "cancelled"].includes(session.status),
         );
         if (failed)
-          throw Object.assign(
-            new Error(
-              `Task ${failed.taskId} is ${failed.status}: ${JSON.stringify(failed.result)}`,
-            ),
-            { fatal: true },
-          );
-        const team = await api.coordinate("read_team", { teamId: "support-team" });
+          throw Object.assign(new Error(`Session ${failed.id} is ${failed.status}`), {
+            fatal: true,
+          });
+        const applied = (
+          await policyRequest(state.policyUrl, await secret("read-token"), "/status")
+        ).operations;
+        const owner = overview.sessions.find((session) => session.owner);
         return (
-          team.context?.cursor === 5 &&
-          objective.tasks.find((task) => task.taskId === `${objectiveId}:start`)?.status ===
-            "waiting"
+          ["one", "two", "three"].every((incidentId) =>
+            Object.hasOwn(applied, `support:${incidentId}`),
+          ) && owner?.status === "completed"
         );
       }, 600000);
       const report = await snapshot(state);

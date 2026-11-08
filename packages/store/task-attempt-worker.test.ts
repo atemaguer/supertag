@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type JsonRecord, type MountManifest, mountManifestDigest } from "@supertag/core";
+import {
+  type JsonRecord,
+  type MountManifest,
+  mountManifestDigest,
+  objectiveSessionKey,
+} from "@supertag/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { createIsolatedPostgresDatabase } from "../../tests/support/database.js";
 import { DrizzleStore, migrateDatabase } from "./src/index.js";
@@ -52,49 +57,96 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           ownerTagId: owner.id,
           outcome: "Bind accepted Worker identity",
         });
-        const team = await store.createTeam(
-          {
-            id: randomUUID(),
-            objectiveId: objective.id,
-            name: "Engineering",
-            leadTagId: owner.id,
-            memberTagIds: [],
-            maxConcurrency: 1,
+        const account = await store.saveSurfaceAccount({
+          provider: "slack",
+          externalAccountId: randomUUID(),
+          displayName: "Slack",
+          authMethod: "test",
+          credentialId: "test",
+          status: "connected",
+          configuration: {},
+          verifiedAt: at,
+        });
+        const route = await store.addTagRoute({
+          tagId: owner.id,
+          surfaceAccountId: account.id,
+          scope: "channel:engineering",
+        });
+        const authorization = {
+          version: 5,
+          capturedAt: at,
+          tag: { id: owner.id, name: owner.name },
+          origin: {
+            tagRouteId: route.id,
+            surfaceAccountId: account.id,
+            provider: "slack",
+            scope: "channel:engineering",
           },
-          owner.id,
-        );
-        const assignment = await store.admitTaskAssignment({
-          taskId: randomUUID(),
-          teamId: team.id,
-          objectiveId: objective.id,
-          requestedByTagId: owner.id,
-          assignedTagId: owner.id,
-          instruction: "Complete the assignment",
-          acceptanceCriteria: ["Done"],
-          execution: {},
-          workspacePlan: { version: 1, status: "none" },
+          requester: { id: owner.id, kind: "bot" },
+          permissionSets: [],
+          resources: [],
+          runtimeActions: [],
+        } as const;
+        const sessionKey = objectiveSessionKey(objective.id);
+        const admitted = await store.admitInboundEvent({
+          surfaceAccountId: account.id,
+          tagRouteId: route.id,
+          tagId: owner.id,
+          authorization,
           contextPlan: { version: 7, capturedAt: at, sets: [] },
-          authorizationSnapshot: {
-            version: 4,
-            capturedAt: at,
-            tag: { id: owner.id, name: owner.name },
-            origin: { kind: "internal", objectiveId: objective.id, requestedByTagId: owner.id },
-            requester: { id: owner.id, kind: "bot" },
-            permissionSets: [],
-            resources: [],
-            runtimeActions: [],
+          event: {
+            eventId: randomUUID(),
+            logicalEventId: randomUUID(),
+            provider: "slack",
+            externalAccountId: account.externalAccountId,
+            kind: "message",
+            scope: "channel:engineering",
+            sessionKey,
+            actor: { id: owner.id, kind: "bot" },
+            internal: { kind: "delivery", from: { kind: "supertag" }, reason: "objective_start" },
+            text: "Complete the Objective",
+            occurredAt: at,
+            callback: {
+              provider: "slack",
+              mode: "slack_thread",
+              threadKey: sessionKey,
+              target: { channelId: "engineering", threadTs: sessionKey },
+            },
+            source: {},
+            metadata: {},
           },
         });
+        const session = await store.openSession({
+          tagId: owner.id,
+          sessionKey,
+          origin: {},
+          objectiveId: objective.id,
+          at,
+        });
+        const task = await store.openTask({
+          inboundEventId: admitted.work.id,
+          tagId: owner.id,
+          sessionId: session.id,
+          execution: {},
+          actor: { id: owner.id, kind: "bot" },
+          trigger: { origin: "objective_start" },
+          workspacePlan: { version: 1, status: "none" },
+          sessionHistory: [],
+          authorizationSnapshot: authorization,
+          contextPlan: { version: 7, capturedAt: at, sets: [] },
+          createdAt: at,
+        });
+        await store.startTask({ taskId: task.id, startedAt: at });
         const attemptInput = {
-          taskId: assignment.taskId,
+          taskId: task.id,
           attemptNumber: 1,
           workerProfile: { id: "default", revision: "1" },
           workerSnapshot: snapshot,
           startedAt: at,
         };
         const attempt = await store.createTaskAttempt(attemptInput);
-        const binding = { taskId: assignment.taskId, attemptId: attempt.id, ...identity };
-        return { store, other, attempt, binding, attemptInput, team, objective, owner };
+        const binding = { taskId: task.id, attemptId: attempt.id, ...identity };
+        return { store, other, attempt, binding, attemptInput, objective, owner };
       }
 
       it("preserves the admission snapshot and does not rewrite duplicate recovery receipts", async () => {
@@ -113,7 +165,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       });
 
       it("stores the latest changed paths for a running Attempt and inserts each overlap once", async () => {
-        const { store, other, attempt } = await fixture();
+        const { store, other, attempt, objective } = await fixture();
         await store.recordTaskAttemptChangedPaths({
           attemptId: attempt.id,
           paths: ["src/old.ts", "src/new.ts"],
@@ -123,6 +175,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           expect.objectContaining({
             attemptId: attempt.id,
             taskId: attempt.taskId,
+            objectiveId: objective.id,
             paths: ["src/old.ts", "src/new.ts"],
             truncated: false,
           }),
@@ -136,20 +189,20 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           expect.objectContaining({ paths: ["src/new.ts"], truncated: true }),
         ]);
         const input = {
-          teamId: "team-a",
+          objectiveId: "objective-a",
           firstAttemptId: "attempt-b",
           secondAttemptId: "attempt-a",
           paths: ["src/new.ts", "src/old.ts"],
         };
         expect(await store.recordOverlaps(input)).toEqual([
           {
-            teamId: "team-a",
+            objectiveId: "objective-a",
             lowerAttemptId: "attempt-a",
             higherAttemptId: "attempt-b",
             path: "src/new.ts",
           },
           {
-            teamId: "team-a",
+            objectiveId: "objective-a",
             lowerAttemptId: "attempt-a",
             higherAttemptId: "attempt-b",
             path: "src/old.ts",
@@ -163,32 +216,12 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           }),
         ).toEqual([]);
         expect(
-          await other.recordOverlaps({ ...input, teamId: "team-b", paths: ["src/new.ts"] }),
+          await other.recordOverlaps({
+            ...input,
+            objectiveId: "objective-b",
+            paths: ["src/new.ts"],
+          }),
         ).toHaveLength(1);
-      });
-
-      it("atomically posts one system evidence warning for new overlap paths", async () => {
-        const { store, other, attempt, team, objective, owner } = await fixture();
-        const input = {
-          teamId: team.id,
-          objectiveId: objective.id,
-          firstAttemptId: attempt.id,
-          secondAttemptId: "other-attempt",
-          firstTaskId: attempt.taskId,
-          secondTaskId: "other-task",
-          paths: ["src/shared.ts"],
-          to: [owner.id],
-        };
-        const post = await store.recordOverlapWarning(input);
-        expect(post).toMatchObject({
-          authorTagId: null,
-          type: "evidence",
-          to: [owner.id],
-          references: [attempt.taskId, "other-task"],
-        });
-        expect(post?.body).toContain("src/shared.ts");
-        expect(await other.recordOverlapWarning(input)).toBeUndefined();
-        expect(await other.listWorkstreamPosts(team.id)).toEqual([post]);
       });
 
       it("reads a batch of Task Attempts without duplicating repeated Task IDs", async () => {

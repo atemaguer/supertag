@@ -243,7 +243,7 @@ const event = {
 
 describe("language-neutral wire schemas", () => {
   it("contains valid JSON Schema documents with resolvable references", () => {
-    expect(schemas.size).toBe(16);
+    expect(schemas.size).toBe(14);
     for (const [file, schema] of schemas) {
       expect(schema.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
       visitReferences(schema, file);
@@ -424,20 +424,25 @@ describe("language-neutral wire schemas", () => {
         outcome: "Keep dependencies current and the build green.",
         ongoing: true,
         workspaces: ["app"],
-        observe: ["releases"],
         budget: { minor: 50000, currency: "USD" },
         deadline: "2027-01-01T00:00:00Z",
         runtimeActions: ["files:write"],
-        teams: { upkeep: { lead: "maintainer", members: ["builder"], maxConcurrency: 2 } },
+        team: { name: "upkeep", members: ["maintainer", "builder"], maxConcurrency: 2 },
       },
     };
     expectValid(file, manifest);
     expectInvalid(file, { ...manifest, status: { phase: "working" } });
     expectInvalid(file, { ...manifest, spec: { ...manifest.spec, status: "completed" } });
     expectInvalid(file, { ...manifest, spec: { ...manifest.spec, budget: { minor: -1 } } });
+    // A Team is named, or declared in place with at least one member.
+    expectValid(file, { ...manifest, spec: { ...manifest.spec, team: "upkeep" } });
     expectInvalid(file, {
       ...manifest,
-      spec: { ...manifest.spec, teams: { upkeep: { lead: "maintainer", maxConcurrency: 0 } } },
+      spec: { ...manifest.spec, team: { name: "upkeep", members: [], maxConcurrency: 2 } },
+    });
+    expectInvalid(file, {
+      ...manifest,
+      spec: { ...manifest.spec, team: { name: "upkeep", members: ["a"], maxConcurrency: 0 } },
     });
   });
 
@@ -535,8 +540,6 @@ describe("language-neutral wire schemas", () => {
               name: "Org Architect",
               purpose: "Apply organization policy.",
               instructions: "Require durable ownership.",
-              origin: "system",
-              systemKey: "org-architect",
               revision: 3,
               contextSetIds: [],
               permissionSetIds: [],
@@ -630,8 +633,8 @@ describe("language-neutral wire schemas", () => {
       resultEvent([
         { severity: "high", summary: "The export skips tenant scoping.", location: "q.ts:42" },
         { severity: "low", summary: "Typo." },
-        // Ignored: the Control Plane assigns the id and status.
-        { id: "anything", severity: "medium", summary: "Slow.", status: "closed" },
+        // Ignored: the Control Plane assigns the id.
+        { id: "anything", severity: "medium", summary: "Slow." },
       ]),
     );
     for (const finding of [
@@ -639,6 +642,8 @@ describe("language-neutral wire schemas", () => {
       { severity: "critical", summary: "Unknown severity." },
       { severity: "high", summary: "" },
       { severity: "high", summary: "Names another Task.", taskId: "task-2" },
+      // Finding closure is gone, so a status is no longer a finding field.
+      { severity: "high", summary: "Closed.", status: "closed" },
     ])
       expectInvalid("task-attempt-event.schema.json", resultEvent([finding]));
     expectInvalid("task-attempt-event.schema.json", resultEvent(undefined));
@@ -808,49 +813,26 @@ function visitReferences(value: unknown, file: string): void {
   }
 }
 
-describe("Tag messaging wire response", () => {
-  it("requires identity, objective correlation, and transport state without prescribing body content", () => {
-    const message = {
-      id: "message-1",
-      senderTagId: "leadership",
-      recipientTagId: "marketing",
-      objectiveId: "launch",
-      idempotencyKey: "launch-marketing",
-      type: "delegation.requested",
-      body: { outcome: "Prepare launch messaging" },
-      status: "pending",
-      attemptCount: 0,
+describe("Workstream post schema", () => {
+  it("describes one Team post, with the Tags it wakes and its sequence", () => {
+    const post = {
+      id: "post-1",
+      teamId: "launch-team",
+      authorTagId: "marketing",
+      to: ["sales"],
+      body: "Launch messaging is drafted.",
+      sequence: 4,
       createdAt: at,
-      updatedAt: at,
     };
-    expectValid("tag-message.schema.json", message);
-    expectValid("tag-message.schema.json", { ...message, futureOptionalField: true });
-    expectInvalid("tag-message.schema.json", { ...message, type: "invented" });
-    expectInvalid("tag-message.schema.json", { ...message, status: "accepted" });
-    const { senderTagId: _sender, ...withoutSender } = message;
-    expectInvalid("tag-message.schema.json", withoutSender);
-  });
-});
-
-describe("Workstream response schema", () => {
-  it("describes a Team channel read from its Team, without status or revision", () => {
-    const stream = {
-      id: "launch-team",
-      objectiveId: "launch",
-      title: "Launch messaging",
-      ownerTagId: "marketing",
-      participantTagIds: ["marketing", "sales"],
-      createdAt: at,
-      updatedAt: at,
-    };
-    expectValid("workstream.schema.json", stream);
-    expectValid("workstream.schema.json", { ...stream, optionalFutureField: true });
-    expectInvalid("workstream.schema.json", { ...stream, participantTagIds: [] });
-    const { ownerTagId: _, ...ownerless } = stream;
-    expectInvalid("workstream.schema.json", ownerless);
+    expectValid("workstream.schema.json", post);
+    expectValid("workstream.schema.json", { ...post, to: [], optionalFutureField: true });
+    expectInvalid("workstream.schema.json", { ...post, body: "" });
+    expectInvalid("workstream.schema.json", { ...post, sequence: 0 });
+    const { teamId: _, ...teamless } = post;
+    expectInvalid("workstream.schema.json", teamless);
     const schema = schemas.get("workstream.schema.json");
-    expect(schema?.["required"]).not.toContain("status");
-    expect(schema?.["properties"]).not.toHaveProperty("revision");
+    expect(schema?.["properties"]).not.toHaveProperty("objectiveId");
+    expect(schema?.["properties"]).not.toHaveProperty("type");
   });
 });
 
@@ -914,61 +896,28 @@ describe("Objective response schema", () => {
 });
 
 describe("Team response schema", () => {
-  it("requires bounded membership, lifecycle, and revision", () => {
+  it("requires bounded membership and a revision, with no Objective and no lifecycle", () => {
     const team = {
       id: "engineering",
-      objectiveId: "launch",
       name: "Engineering",
-      leadTagId: "lead",
       memberTagIds: ["lead"],
-      parentTeamId: null,
       maxConcurrency: 4,
-      status: "active",
       revision: 1,
       createdAt: at,
       updatedAt: at,
     };
     expectValid("team.schema.json", team);
-    expectInvalid("team.schema.json", { ...team, status: "unknown" });
-    expectInvalid("team.schema.json", { ...team, memberTagIds: [] });
+    // Worker Host capacity is the only limit when no concurrency is set.
+    expectValid("team.schema.json", { ...team, maxConcurrency: null });
+    // A Team may be emptied without being deleted.
+    expectValid("team.schema.json", { ...team, memberTagIds: [] });
+    expectInvalid("team.schema.json", { ...team, memberTagIds: [""] });
     expectInvalid("team.schema.json", { ...team, maxConcurrency: 0 });
     expectInvalid("team.schema.json", { ...team, revision: 0 });
-  });
-});
-
-describe("Tag directory schema", () => {
-  it("describes list_tags results with Roles, execution, and Worker Host state", () => {
-    const tag = {
-      id: "e26b70d9-f444-451e-b4ec-e2a1c4f1bfca",
-      name: "reviewer",
-      roles: ["Reviewer"],
-      execution: { harness: "codex", model: ["gpt-6-sol"], effort: ["low", "medium", "high"] },
-      workerHosts: [{ id: "laptop", connectionStatus: "connected" }],
-      taskCounts: { objective: { running: 0, queued: 1 }, overall: { running: 1, queued: 2 } },
-    };
-    const directory = { tags: [tag], total: 1, nextOffset: null, guidance: "Reuse Tags." };
-    expectValid("tag-directory.schema.json", directory);
-    expectValid("tag-directory.schema.json", {
-      ...directory,
-      tags: [{ ...tag, roles: [], execution: {}, workerHosts: [] }],
-    });
-    expectValid("tag-directory.schema.json", {
-      ...directory,
-      tags: [{ ...tag, workerHosts: [{ id: "spare", connectionStatus: "not_joined" }] }],
-      total: 101,
-      nextOffset: 100,
-    });
-    expectInvalid("tag-directory.schema.json", { tags: [tag], total: 1 });
-    expectInvalid("tag-directory.schema.json", {
-      ...directory,
-      tags: [{ ...tag, workerHosts: [{ id: "laptop", connectionStatus: "online" }] }],
-    });
-    expectInvalid("tag-directory.schema.json", {
-      ...directory,
-      tags: [{ ...tag, execution: { effort: ["maximum"] } }],
-    });
-    const { roles: _roles, ...withoutRoles } = tag;
-    expectInvalid("tag-directory.schema.json", { ...directory, tags: [withoutRoles] });
+    const schema = schemas.get("team.schema.json");
+    expect(schema?.["properties"]).not.toHaveProperty("objectiveId");
+    expect(schema?.["properties"]).not.toHaveProperty("leadTagId");
+    expect(schema?.["properties"]).not.toHaveProperty("status");
   });
 });
 

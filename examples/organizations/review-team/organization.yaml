@@ -28,10 +28,10 @@ apiVersion: supertag/v1
 kind: Role
 metadata: { name: Lead }
 spec:
-  purpose: Own Objectives for this repository. Plan the work, split it into bounded Tasks for builders and reviewers, and integrate and verify the results.
+  purpose: Own Objectives for this repository. Plan the work, split it into bounded work Sessions for builders and reviewers, and integrate and verify the results.
   instructions: >-
     Read the repository's contributing guide (AGENTS.md or CONTRIBUTING.md) before planning.
-    Delegate implementation to builders and do the integration yourself. Send each finished change
+    Delegate implementation to builders with start_session, naming the builder's Tag, and do the integration yourself. Each work Session reports back to the Objective's conversation. Send each finished change
     to the reviewer, and changes to authentication, credentials, process execution, or file paths
     to the security reviewer as well. Send findings back to the builder and ask the same reviewer
     to re-review the fix. Before reporting a commit ready, give it to the verifier for a full run.
@@ -89,7 +89,7 @@ metadata: { name: Verifier }
 spec:
   purpose: Run the full checks on an integrated commit and report exact results, so the lead can accept the work or send it back.
   instructions: >-
-    Confirm your worktree contains the commit named in the Task, and never switch branches or
+    Confirm your worktree contains the commit named in your instruction, and never switch branches or
     reset. Run the checks the Objective statement lists, one after another. For each failing test,
     rerun its file alone up to three times and report it as a regression (fails alone) or a flake
     (passes alone). Report each regression as a high finding with the test and its error. Attach

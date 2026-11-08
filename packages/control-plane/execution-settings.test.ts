@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  attemptExecutionRecord,
-  resolveTaskExecution,
-  unsatisfiableLimits,
-} from "./src/execution-settings.js";
+import { attemptExecutionRecord, resolveTaskExecution } from "./src/execution-settings.js";
 
 const range = {
   harness: "codex",
@@ -30,20 +26,13 @@ const worker = (efforts?: readonly ("low" | "medium" | "high")[]) => ({
 });
 
 describe("Task execution resolution", () => {
-  it("lets the delegator's choice win over escalation, and escalation over defaults", () => {
-    const failed = {
-      taskId: "t1",
-      status: "failed",
-      result: { error: "Tests fail" },
-      execution: { harness: "codex", model: "gpt-6-sol", effort: "medium" as const },
-    };
+  it("lets the delegator's choice win over the Tag's defaults", () => {
     expect(
       resolveTaskExecution({
         range,
         requested: {},
-        chosen: { effort: "medium" },
+        chosen: { effort: "high" },
         chosenByTagId: "lead",
-        source: failed,
         subject: "Tag b",
       }).selection,
     ).toEqual({
@@ -51,30 +40,18 @@ describe("Task execution resolution", () => {
       chosenByTagId: "lead",
       harness: "codex",
       model: "gpt-6-sol",
-      effort: "medium",
+      effort: "high",
     });
-    expect(
-      resolveTaskExecution({ range, requested: {}, chosen: {}, source: failed, subject: "Tag b" }),
-    ).toEqual({
-      execution: { harness: "codex", model: "gpt-6-sol", effort: "high" },
+    // Without a choice the Tag's own configuration decides; nothing escalates a failed turn.
+    expect(resolveTaskExecution({ range, requested: {}, chosen: {}, subject: "Tag b" })).toEqual({
+      execution: { harness: "codex", model: "gpt-6-sol", effort: "medium" },
       selection: {
-        source: "escalated",
+        source: "default",
         harness: "codex",
         model: "gpt-6-sol",
-        effort: "high",
-        escalatedFromTaskId: "t1",
-        escalation: "effort medium → high",
+        effort: "medium",
       },
     });
-    const exhausted = resolveTaskExecution({
-      range,
-      requested: {},
-      chosen: {},
-      source: { ...failed, execution: { model: "gpt-6-max", effort: "high" } },
-      subject: "Tag b",
-    });
-    expect(exhausted.selection).toMatchObject({ source: "escalated", escalationExhausted: true });
-    expect(exhausted.execution).toMatchObject({ model: "gpt-6-max", effort: "high" });
   });
 
   it("keeps other requirements and ignores a model the delegator did not choose", () => {
@@ -86,26 +63,6 @@ describe("Task execution resolution", () => {
         subject: "Tag b",
       }).execution,
     ).toEqual({ limits: { maxNativeAgents: 0 } });
-  });
-});
-
-describe("execution limits at assignment", () => {
-  it("names unmet and satisfiable limits, and defers when no host is connected", () => {
-    const supporting = {
-      ...worker(),
-      profileCapabilities: [
-        {
-          ...worker().profileCapabilities[0],
-          capabilities: [{ id: "supertag.harness-limit.native-agents", version: 1 }],
-        },
-      ],
-    };
-    const result = unsatisfiableLimits([supporting as never], {
-      limits: { maxNativeAgents: 0, maxReportedTokens: 10 },
-    });
-    expect(result?.unmet).toEqual(["maxReportedTokens"]);
-    expect(unsatisfiableLimits([], { limits: { maxReportedTokens: 10 } })).toBeUndefined();
-    expect(unsatisfiableLimits([supporting as never], {})).toBeUndefined();
   });
 });
 

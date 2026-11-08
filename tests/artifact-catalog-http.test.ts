@@ -7,15 +7,22 @@ import { afterEach, describe, expect, it } from "vitest";
 import { handleArtifactRequest } from "../apps/cli/src/artifact-http.js";
 import { ArtifactCatalog, ObjectiveController } from "../packages/control-plane/src/index.js";
 import {
-  type AdmitTaskAssignmentInput,
   ArtifactCatalogError,
+  type JsonRecord,
   type TagContextPlan,
   TagMessagingError,
-  type TaskAssignment,
 } from "../packages/core/src/index.js";
 import type { ArtifactStore } from "../packages/runtime/sdk/src/artifact-store.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
+import { openTestTask } from "./support/artifact-producer.js";
 import { createIsolatedPostgresDatabase } from "./support/database.js";
+
+/** A verified Attempt of a Task, as the Control Plane hands it to the catalog. */
+interface Caller {
+  readonly kind: "surface";
+  readonly taskId: string;
+  readonly attemptId: string;
+}
 
 for (const dialect of ["sqlite", "postgresql"] as const) {
   describe.skipIf(dialect === "postgresql" && !process.env["SUPERTAG_POSTGRES_URL"])(
@@ -42,70 +49,56 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         const owner = await store.createTag({ name: "owner" });
         const researcher = await store.createTag({ name: "researcher" });
         const engineer = await store.createTag({ name: "engineer" });
+        const team = await store.createTeam({
+          id: randomUUID(),
+          name: "product",
+          memberTagIds: [owner.id, researcher.id, engineer.id],
+          maxConcurrency: 10,
+        });
         const objective = await store.createObjective({
           id: randomUUID(),
           ownerTagId: owner.id,
+          teamId: team.id,
           outcome: "Reuse previous work",
         });
-        const team = await store.createTeam(
-          {
-            id: randomUUID(),
-            objectiveId: objective.id,
-            name: "product",
-            leadTagId: owner.id,
-            memberTagIds: [researcher.id, engineer.id],
-            maxConcurrency: 10,
-          },
-          owner.id,
-        );
-        const callers = new Map<string, TaskAssignment>();
+        const callers = new Map<string, Caller>();
         const attempts = new Map<string, string>();
+        /**
+         * One work Session turn of a Tag with a running Attempt. Artifact visibility follows the
+         * Session boundary: a Task of an Objective reads every Session of that Objective, so an
+         * Attempt without that Objective sees nothing of it.
+         */
         async function worker(
           token: string,
           tag = engineer,
-          teamId = team.id,
-          contextPlan?: TagContextPlan,
-          inputArtifacts?: AdmitTaskAssignmentInput["inputArtifacts"],
-          targetObjectiveId = objective.id,
+          options: {
+            contextPlan?: TagContextPlan;
+            inputArtifacts?: readonly JsonRecord[];
+            objectiveId?: string | null;
+          } = {},
         ) {
-          const at = new Date().toISOString();
-          const assignment = await store.admitTaskAssignment({
-            taskId: randomUUID(),
-            objectiveId: targetObjectiveId,
-            teamId,
-            assignedTagId: tag.id,
-            requestedByTagId: owner.id,
-            ...(inputArtifacts ? { inputArtifacts } : {}),
-            instruction: "Use recorded work",
-            acceptanceCriteria: ["Evidence"],
-            execution: {},
-            workspacePlan: { version: 1, status: "none" },
-            contextPlan: contextPlan ?? { version: 7, capturedAt: at, sets: [] },
-            authorizationSnapshot: {
-              version: 4,
-              capturedAt: at,
-              tag: { id: tag.id, name: tag.name },
-              origin: {
-                kind: "internal",
-                objectiveId: targetObjectiveId,
-                requestedByTagId: owner.id,
-              },
-              requester: { id: owner.id, kind: "bot" },
-              permissionSets: [],
-              resources: [],
-              runtimeActions: [],
-            },
+          const objectiveId =
+            options.objectiveId === undefined ? objective.id : options.objectiveId;
+          const { task } = await openTestTask(store, {
+            tagId: tag.id,
+            tagName: tag.name,
+            ...(objectiveId === null ? {} : { objectiveId }),
+            ...(options.contextPlan ? { contextPlan: options.contextPlan } : {}),
+            ...(options.inputArtifacts
+              ? { trigger: { inputArtifacts: options.inputArtifacts } }
+              : {}),
+            requestText: "Use recorded work",
           });
           const attempt = await store.createTaskAttempt({
-            taskId: assignment.taskId,
+            taskId: task.id,
             attemptNumber: 1,
             workerProfile: { id: "test", revision: "1" },
             workerSnapshot: {},
-            startedAt: at,
+            startedAt: new Date().toISOString(),
           });
-          callers.set(token, { ...assignment, attemptCount: 1 });
+          callers.set(token, { kind: "surface", taskId: task.id, attemptId: attempt.id });
           attempts.set(token, attempt.id);
-          return assignment;
+          return task;
         }
         const source = await worker("writer", researcher);
         const consumer = await worker("reader");
@@ -117,8 +110,29 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             return caller;
           },
           authorizeArtifactSource: coordinator.authorizeArtifactSource.bind(coordinator),
-          artifactDiscoveryTaskIds: coordinator.artifactDiscoveryTaskIds.bind(coordinator),
         };
+        /** Completes the producing Task with the artifact in its result, as its report does. */
+        async function completeSource(artifactId: string, paths: readonly string[]) {
+          await store.closeTaskAttempt({
+            attemptId: attempts.get("writer") as string,
+            status: "completed",
+            endedAt: new Date().toISOString(),
+          });
+          await store.closeTask({
+            taskId: source.id,
+            status: "completed",
+            result: {
+              summary: "Accepted",
+              decisions: [],
+              changes: [],
+              unresolved: [],
+              findings: [],
+              references: [],
+              artifacts: [{ artifactId, paths: [...paths] }],
+            },
+            endedAt: new Date().toISOString(),
+          });
+        }
         // The producing Worker Host's copies: bytes stay here and never reach the Control Plane,
         // which records only metadata. Byte backends are exercised separately; this test covers
         // HTTP authority and persistence together.
@@ -234,6 +248,8 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           worker,
           owner,
           objective,
+          team,
+          completeSource,
           coordinator,
           host,
           hostCopies,
@@ -333,42 +349,13 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       it("withdraws publication access for already admitted files and acquisitions", async () => {
         const f = await fixture();
         const { artifact, first, second, contents } = await f.capture();
-        await f.store.claimTaskAssignment({ taskId: f.source.taskId, leaseOwner: "producer" });
-        await f.store.settleTaskAssignment({
-          taskId: f.source.taskId,
-          leaseOwner: "producer",
-          attemptCount: 1,
-          terminalAttempt: { id: f.attempts.get("writer") as string, status: "completed" },
-          result: {
-            taskResult: {
-              summary: "Accepted",
-              decisions: [],
-              changes: [],
-              unresolved: [],
-              findings: [],
-              references: [],
-              artifacts: [{ artifactId: artifact.id, paths: ["findings.md"] }],
-            },
-          },
-        });
-        await f.store.reviewTaskAssignment(f.source.taskId, f.owner.id, true, "Findings accepted");
+        await f.completeSource(artifact.id, ["findings.md"]);
         const outsider = await f.store.createTag({ name: "published-consumer" });
         const objective = await f.store.createObjective({
           id: randomUUID(),
           ownerTagId: f.owner.id,
           outcome: "Use approved evidence",
         });
-        const team = await f.store.createTeam(
-          {
-            id: randomUUID(),
-            objectiveId: objective.id,
-            name: "published-team",
-            leadTagId: outsider.id,
-            memberTagIds: [],
-            maxConcurrency: 2,
-          },
-          f.owner.id,
-        );
         const actor = { kind: "tag" as const, tagId: f.owner.id };
         const publication = await f.store.approveArtifactPublication(
           {
@@ -379,24 +366,26 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           },
           actor,
         );
-        await f.store.approveArtifactConsumption(
+        const consumption = await f.store.approveArtifactConsumption(
           { id: randomUUID(), publicationApprovalId: publication.id, objectiveId: objective.id },
           actor,
         );
-        await f.worker(
-          "published",
-          outsider,
-          team.id,
-          undefined,
-          [
+        await f.worker("published", outsider, {
+          objectiveId: objective.id,
+          inputArtifacts: [
             {
-              publicationApprovalId: publication.id,
               artifactId: artifact.id,
-              paths: ["findings.md"],
+              path: "findings.md",
+              digest: first.digest as string,
+              provenance: {
+                taskId: f.source.id,
+                attemptId: f.attempts.get("writer") as string,
+                publicationApproval: { id: publication.id, revision: publication.revision },
+                consumptionApproval: { id: consumption.id, revision: consumption.revision },
+              },
             },
           ],
-          objective.id,
-        );
+        });
         const client = f.host("published");
         expect(await client.get(first)).toEqual(contents);
         await expect(client.get(second)).rejects.toThrow("403");
@@ -452,55 +441,28 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         ).toBe("authorized");
       });
 
-      it("pins selected catalog files at admission and preserves supplied-input provenance", async () => {
+      it("admits only the files a turn's pinned inputs name, and records them as capture inputs", async () => {
         const f = await fixture();
         const { artifact, first, second, contents } = await f.capture();
-        await f.store.claimTaskAssignment({ taskId: f.source.taskId, leaseOwner: "producer" });
-        await f.store.settleTaskAssignment({
-          taskId: f.source.taskId,
-          leaseOwner: "producer",
-          attemptCount: 1,
-          terminalAttempt: { id: f.attempts.get("writer") as string, status: "completed" },
-          result: {
-            taskResult: {
-              summary: "Reviewed findings",
-              decisions: [],
-              changes: [],
-              unresolved: [],
-              findings: [],
-              references: [],
-              artifacts: [{ artifactId: artifact.id, paths: ["findings.md"] }],
-            },
-          },
-        });
-        await f.store.reviewTaskAssignment(f.source.taskId, f.owner.id, true, "Findings accepted");
+        await f.completeSource(artifact.id, ["findings.md"]);
         const outsider = await f.store.createTag({ name: "artifact-consumer" });
-        const team = await f.store.createTeam(
-          {
-            id: randomUUID(),
-            objectiveId: f.objective.id,
-            name: "consumer-team",
-            leadTagId: outsider.id,
-            memberTagIds: [],
-            maxConcurrency: 2,
-          },
-          f.owner.id,
-        );
-        const consumer = await f.worker("pinned", outsider, team.id, undefined, [
-          { artifactId: artifact.id, paths: ["findings.md"], requireAccepted: true },
-        ]);
-        const pinned = await f.store.findTaskById(consumer.taskId);
-        expect(pinned?.trigger["inputArtifacts"]).toEqual([
-          expect.objectContaining({
-            artifactId: artifact.id,
-            path: "findings.md",
-            digest: first.digest,
-            provenance: expect.objectContaining({
-              taskId: f.source.taskId,
-              attemptId: f.attempts.get("writer"),
-            }),
-          }),
-        ]);
+        // An outsider Tag on another Objective sees the artifact only through the pinned input its
+        // turn carries, and only the one file that input names.
+        const consumer = await f.worker("pinned", outsider, {
+          objectiveId: null,
+          inputArtifacts: [
+            {
+              artifactId: artifact.id,
+              path: "findings.md",
+              digest: first.digest as string,
+              provenance: {
+                taskId: f.source.id,
+                attemptId: f.attempts.get("writer") as string,
+              },
+            },
+          ],
+        });
+        expect((await f.store.findTaskById(consumer.id))?.objectiveId).toBeUndefined();
         const inspected = await f.command("inspect", { artifactId: artifact.id }, "pinned");
         expect(inspected.status).toBe(200);
         expect(inspected.body.artifact.entries.map((e: { path: string }) => e.path)).toEqual([
@@ -556,55 +518,47 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           "writer",
         );
         const outsider = await f.store.createTag({ name: "outsider" });
-        const outsideTeam = await f.store.createTeam(
-          {
-            id: randomUUID(),
-            objectiveId: f.objective.id,
-            name: "outside",
-            leadTagId: outsider.id,
-            memberTagIds: [],
-            maxConcurrency: 2,
-          },
-          f.owner.id,
-        );
         const { entries, operationId: _operation, ...metadata } = artifact;
-        await f.worker("admitted", outsider, outsideTeam.id, {
-          version: 7,
-          capturedAt: new Date().toISOString(),
-          sets: [
-            {
-              id: "shared",
-              name: "shared",
-              items: [
-                {
-                  id: "source",
-                  itemKey: "research",
-                  type: "supertag/artifacts",
-                  version: 1,
-                  required: true,
-                  config: {},
-                  snapshot: {
-                    source: {
-                      tagRouteId: "source",
-                      surfaceAccountId: "account",
-                      provider: "slack",
-                      scope: "channel:C123",
-                    },
-                    artifacts: [
-                      {
-                        ...metadata,
-                        entryCount: entries.length,
-                        sizeBytes: entries.reduce(
-                          (n: number, e: { sizeBytes: number }) => n + e.sizeBytes,
-                          0,
-                        ),
+        await f.worker("admitted", outsider, {
+          objectiveId: null,
+          contextPlan: {
+            version: 7,
+            capturedAt: new Date().toISOString(),
+            sets: [
+              {
+                id: "shared",
+                name: "shared",
+                items: [
+                  {
+                    id: "source",
+                    itemKey: "research",
+                    type: "supertag/artifacts",
+                    version: 1,
+                    required: true,
+                    config: {},
+                    snapshot: {
+                      source: {
+                        tagRouteId: "source",
+                        surfaceAccountId: "account",
+                        provider: "slack",
+                        scope: "channel:C123",
                       },
-                    ],
+                      artifacts: [
+                        {
+                          ...metadata,
+                          entryCount: entries.length,
+                          sizeBytes: entries.reduce(
+                            (n: number, e: { sizeBytes: number }) => n + e.sizeBytes,
+                            0,
+                          ),
+                        },
+                      ],
+                    },
                   },
-                },
-              ],
-            },
-          ],
+                ],
+              },
+            ],
+          },
         });
         const found = await f.command("find", { limit: 1 }, "admitted");
         expect(found.status).toBe(200);
@@ -619,7 +573,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           (await f.command("find", { query: "Unselected" }, "admitted")).body.artifacts,
         ).toEqual([]);
         expect(
-          (await f.command("find", { taskId: f.consumer.taskId }, "admitted")).body.artifacts,
+          (await f.command("find", { taskId: f.consumer.id }, "admitted")).body.artifacts,
         ).toEqual([]);
         const reader = f.host("admitted");
         await expect(reader.get(first)).rejects.toThrow("403");
@@ -653,7 +607,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         ).toBe(409);
         expect((await f.command("capture", definition, "reader")).status).toBe(409);
         expect(
-          (await f.command("capture", { ...definition, taskId: f.source.taskId }, "writer")).status,
+          (await f.command("capture", { ...definition, taskId: f.source.id }, "writer")).status,
         ).toBe(400);
         await expect(f.reader.get(first)).rejects.toThrow("403");
         f.callers.delete("writer");
@@ -685,28 +639,24 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             .status,
         ).toBe(200);
         expect(
-          (await f.store.findTaskById(f.consumer.taskId))?.trigger["inputArtifacts"],
+          (await f.store.findTaskById(f.consumer.id))?.trigger["inputArtifacts"],
         ).toBeUndefined();
         f.callers.delete("reader");
         await expect(f.reader.get(first)).rejects.toThrow("401");
       });
 
-      it("hides unrelated Team results before pagination and revokes subsequent byte access", async () => {
+      it("hides another Objective's results before pagination and revokes withdrawn byte access", async () => {
         const f = await fixture();
-        const { artifact, first } = await f.capture();
+        const { artifact, first, contents } = await f.capture();
+        await f.completeSource(artifact.id, ["findings.md"]);
         const outsider = await f.store.createTag({ name: "outsider" });
-        const team = await f.store.createTeam(
-          {
-            id: randomUUID(),
-            objectiveId: f.objective.id,
-            name: "separate",
-            leadTagId: f.owner.id,
-            memberTagIds: [outsider.id],
-            maxConcurrency: 1,
-          },
-          f.owner.id,
-        );
-        await f.worker("outsider", outsider, team.id);
+        const separate = await f.store.createObjective({
+          id: randomUUID(),
+          ownerTagId: f.owner.id,
+          outcome: "Work apart from the research",
+        });
+        // A Session of another Objective shares no artifacts, even by paging through them.
+        await f.worker("outsider", outsider, { objectiveId: separate.id });
         expect((await f.command("find", { limit: 1 }, "outsider")).body).toEqual({ artifacts: [] });
         expect((await f.command("inspect", { artifactId: artifact.id }, "outsider")).status).toBe(
           404,
@@ -714,19 +664,56 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         expect((await f.command("inspect", { artifactId: artifact.id }, "outsider")).body).toEqual(
           (await f.command("inspect", { artifactId: "absent" }, "outsider")).body,
         );
-        const acquired = await f.command("acquire", {
-          operationId: "read",
-          artifactId: artifact.id,
-          paths: ["findings.md"],
-          delivery: "read",
+        // It reads the artifact only through an approved publication, and loses the bytes as soon
+        // as the consumption approval is withdrawn, acquisition receipt or not.
+        const actor = { kind: "tag" as const, tagId: f.owner.id };
+        const publication = await f.store.approveArtifactPublication(
+          {
+            id: randomUUID(),
+            artifactId: artifact.id,
+            paths: ["findings.md"],
+            audienceObjectiveIds: [separate.id],
+          },
+          actor,
+        );
+        const consumption = await f.store.approveArtifactConsumption(
+          { id: randomUUID(), publicationApprovalId: publication.id, objectiveId: separate.id },
+          actor,
+        );
+        await f.worker("approved", outsider, {
+          objectiveId: separate.id,
+          inputArtifacts: [
+            {
+              artifactId: artifact.id,
+              path: "findings.md",
+              digest: first.digest as string,
+              provenance: {
+                taskId: f.source.id,
+                attemptId: f.attempts.get("writer") as string,
+                publicationApproval: { id: publication.id, revision: publication.revision },
+                consumptionApproval: { id: consumption.id, revision: consumption.revision },
+              },
+            },
+          ],
         });
+        const client = f.host("approved");
+        expect(await client.get(first)).toEqual(contents);
+        const acquired = await f.command(
+          "acquire",
+          {
+            operationId: "read",
+            artifactId: artifact.id,
+            paths: ["findings.md"],
+            delivery: "read",
+          },
+          "approved",
+        );
         expect(acquired.status).toBe(200);
-        f.callers.set("reader", {
-          ...(f.callers.get("reader") as TaskAssignment),
-          teamId: team.id,
-          assignedTagId: outsider.id,
-        });
-        await expect(f.reader.get(first)).rejects.toThrow("403");
+        await f.store.withdrawArtifactConsumption(
+          { id: consumption.id, expectedRevision: consumption.revision },
+          actor,
+        );
+        await expect(client.get(first)).rejects.toThrow("403");
       });
 
       it("distributes pinned research to 100 independent Attempts without rewriting Task inputs", async () => {

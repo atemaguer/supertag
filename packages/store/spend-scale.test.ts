@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { objectiveSessionKey } from "@supertag/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { createIsolatedPostgresDatabase } from "../../tests/support/database.js";
 import { DrizzleStore, migrateDatabase } from "./src/index.js";
@@ -47,45 +48,94 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           budgetLimitMinor: 1_000_000,
           budgetCurrency: "USD",
         });
-      const team = await store.createTeam({
-        id: "scale-team",
-        objectiveId: "scale-objective-0",
-        name: "Scale",
-        leadTagId: tag.id,
-        memberTagIds: [],
-        maxConcurrency: 5,
+      const account = await store.saveSurfaceAccount({
+        provider: "slack",
+        externalAccountId: "scale-account",
+        displayName: "Slack",
+        authMethod: "test",
+        credentialId: "test",
+        status: "connected",
+        configuration: {},
+        verifiedAt: "2026-10-01T00:00:00.000Z",
+      });
+      const route = await store.addTagRoute({
+        tagId: tag.id,
+        surfaceAccountId: account.id,
+        scope: "channel:scale",
       });
       const at = "2026-10-01T00:00:00.000Z";
-      await store.admitTaskAssignment({
-        taskId: "scale-template",
-        objectiveId: "scale-objective-0",
-        teamId: team.id,
-        requestedByTagId: tag.id,
-        assignedTagId: tag.id,
-        instruction: "Spend",
-        acceptanceCriteria: ["Done"],
-        execution: {},
-        authorizationSnapshot: {
-          version: 4,
-          capturedAt: at,
-          tag: { id: tag.id, name: tag.name },
-          origin: { kind: "internal", objectiveId: "scale-objective-0", requestedByTagId: tag.id },
-          requester: { id: tag.id, kind: "bot" },
-          permissionSets: [],
-          resources: [],
-          runtimeActions: [],
+      const authorization = {
+        version: 5,
+        capturedAt: at,
+        tag: { id: tag.id, name: tag.name },
+        origin: {
+          tagRouteId: route.id,
+          surfaceAccountId: account.id,
+          provider: "slack",
+          scope: "channel:scale",
         },
+        requester: { id: tag.id, kind: "bot" },
+        permissionSets: [],
+        resources: [],
+        runtimeActions: [],
+      } as const;
+      const sessionKey = objectiveSessionKey("scale-objective-0");
+      const admitted = await store.admitInboundEvent({
+        surfaceAccountId: account.id,
+        tagRouteId: route.id,
+        tagId: tag.id,
+        authorization,
         contextPlan: { version: 7, capturedAt: at, sets: [] },
+        event: {
+          eventId: "scale-event",
+          logicalEventId: "scale-event",
+          provider: "slack",
+          externalAccountId: account.externalAccountId,
+          kind: "message",
+          scope: "channel:scale",
+          sessionKey,
+          actor: { id: tag.id, kind: "bot" },
+          internal: { kind: "delivery", from: { kind: "supertag" }, reason: "objective_start" },
+          text: "Spend",
+          occurredAt: at,
+          callback: {
+            provider: "slack",
+            mode: "slack_thread",
+            threadKey: sessionKey,
+            target: { channelId: "scale", threadTs: sessionKey },
+          },
+          source: {},
+          metadata: {},
+        },
+      });
+      const session = await store.openSession({
+        tagId: tag.id,
+        sessionKey,
+        origin: {},
+        objectiveId: "scale-objective-0",
+        at,
+      });
+      const template = await store.openTask({
+        inboundEventId: admitted.work.id,
+        tagId: tag.id,
+        sessionId: session.id,
+        execution: {},
+        actor: { id: tag.id, kind: "bot" },
+        trigger: { origin: "objective_start" },
         workspacePlan: { version: 1, status: "none" },
+        sessionHistory: [],
+        authorizationSnapshot: authorization,
+        contextPlan: { version: 7, capturedAt: at, sets: [] },
+        createdAt: at,
       });
       await store.createTaskAttempt({
-        taskId: "scale-template",
+        taskId: template.id,
         attemptNumber: 1,
         workerProfile: { id: "default", revision: "1" },
         workerSnapshot: {},
         startedAt: at,
       });
-      await bulkSeed(dialect, url, join(directory, "state.db"));
+      await bulkSeed(dialect, url, join(directory, "state.db"), template.id);
 
       const started = performance.now();
       const report = await store.readSpend({ by: "objective" });
@@ -133,10 +183,15 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
 }
 
 /**
- * Clone the template Task, its assignment, and its Attempt in bulk with INSERT ... SELECT, then
- * add cumulative usage reports and unrelated events for each Attempt.
+ * Clone the template Task and its Attempt in bulk with INSERT ... SELECT, spreading the copies
+ * over the Objectives, then add cumulative usage reports and unrelated events for each Attempt.
  */
-async function bulkSeed(dialect: "sqlite" | "postgresql", url: string, file: string) {
+async function bulkSeed(
+  dialect: "sqlite" | "postgresql",
+  url: string,
+  file: string,
+  templateTaskId: string,
+) {
   const series =
     dialect === "postgresql"
       ? (count: number) => `generate_series(1, ${count}) AS n(i)`
@@ -160,7 +215,7 @@ async function bulkSeed(dialect: "sqlite" | "postgresql", url: string, file: str
     const select = names.map((name) => overrides[name] ?? `x."${name}"`).join(", ");
     await run(
       `INSERT INTO "${table}" (${names.map((name) => `"${name}"`).join(", ")})
-       SELECT ${select} FROM "${table}" x, ${series(ATTEMPTS)} WHERE x."${key}" = 'scale-template'`,
+       SELECT ${select} FROM "${table}" x, ${series(ATTEMPTS)} WHERE x."${key}" = '${templateTaskId}'`,
     );
   };
   const objective = `'scale-objective-' || (n.i % ${OBJECTIVES})`;
@@ -169,11 +224,14 @@ async function bulkSeed(dialect: "sqlite" | "postgresql", url: string, file: str
       ? `jsonb_build_object('usage', jsonb_build_object('inputTokens', 100 * ${k} + n.i, 'outputTokens', 0, 'cachedInputTokens', 0, 'totalTokens', 100 * ${k} + n.i, 'complete', true, 'reportedCost', jsonb_build_object('amountMinor', (n.i % 7) + ${k}, 'currency', 'USD')))`
       : `json_object('usage', json_object('inputTokens', 100 * ${k} + n.i, 'outputTokens', 0, 'cachedInputTokens', 0, 'totalTokens', 100 * ${k} + n.i, 'complete', json('true'), 'reportedCost', json_object('amountMinor', (n.i % 7) + ${k}, 'currency', 'USD')))`;
   const seed = async (run: (sql: string) => Promise<readonly Row[]>) => {
-    await clone("Task", "id", { id: `'scale-task-' || n.i` }, run);
     await clone(
-      "TaskAssignment",
-      "taskId",
-      { taskId: `'scale-task-' || n.i`, objectiveId: objective },
+      "Task",
+      "id",
+      {
+        id: `'scale-task-' || n.i`,
+        inboundEventId: `'scale-inbound-' || n.i`,
+        objectiveId: objective,
+      },
       run,
     );
     await clone(

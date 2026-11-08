@@ -65,10 +65,16 @@ export interface SessionHandlers {
    */
   sendMessage(task: Task, input: SendMessageInput): Promise<SendMessageResult>;
   /**
-   * Admits SuperTag's notice, such as a deadline or budget warning or the resume summary, as a
-   * turn of the Objective's conversation, once per key (`objectiveNoticeDeliveryId`).
+   * Admits SuperTag's text as a turn of the Objective's conversation, once per key
+   * (`objectiveNoticeDeliveryId`). A limit warning is an `objective_notice`; an account of what
+   * changed, such as the resume summary, is an `objective_message` from SuperTag.
    */
-  deliverObjectiveNotice(objectiveId: string, key: string, text: string): Promise<void>;
+  deliverObjectiveNotice(
+    objectiveId: string,
+    key: string,
+    text: string,
+    reason?: "objective_notice" | "objective_message",
+  ): Promise<void>;
   /** Posts SuperTag's notice, such as the completion summary, to the home thread once per key. */
   postObjectiveNotice(objectiveId: string, key: string, text: string): Promise<void>;
   /**

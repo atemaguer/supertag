@@ -1,327 +1,172 @@
 import { expect, it } from "vitest";
-import { coordinationTools, surfaceTools } from "../apps/cli/src/coordination-http.js";
+import { hiddenCoordinationTools, surfaceTools } from "../apps/cli/src/coordination-http.js";
+import {
+  INBOX_SENDS_PER_TASK,
+  OBJECTIVE_UPDATE_STATUSES,
+  TAG_MESSAGE_TEXT_MAX,
+  WORK_SESSION_INSTRUCTION_MAX,
+  WORK_SESSION_QUESTION_MAX,
+  WORK_SESSION_TITLE_MAX,
+  WORKSTREAM_POST_MAX_BODY,
+  WORKSTREAM_POST_MAX_TO,
+} from "../packages/core/src/index.js";
 import { SURFACE_COORDINATION_OPERATIONS } from "../packages/runtime/sdk/src/index.js";
 
-const coordinationNames = [
+/** Every tool a turn may be offered, in the order the Control Plane defines them. */
+const toolNames = [
+  "create_objective",
   "read_objective",
-  "read_team",
-  "read_task",
-  "list_tags",
-  "assign_task",
-  "update_task",
-  "read_mailbox",
-  "send_message",
-  "read_workstream",
-  "post_workstream",
-  "wait_for",
-  "escalate_task",
   "update_objective",
-  "create_team",
-  "update_team",
-  "create_tag",
-  "request_approval",
-  "decide_approval",
+  "list_objectives",
+  "list_sessions",
+  "search_sessions",
+  "read_session",
+  "start_session",
+  "continue_session",
+  "ask",
+  "send_message",
+  "post",
+  "read_workstream",
 ] as const;
 
-function schema(name: (typeof coordinationNames)[number]) {
-  const tool = coordinationTools.find((candidate) => candidate.name === name);
-  if (!tool) throw new Error(`Missing ${name}`);
-  return tool.inputSchema;
+interface ToolSchema {
+  readonly type: string;
+  readonly properties: Record<string, unknown>;
+  readonly required: readonly string[];
+  readonly additionalProperties: boolean;
 }
+function tool(name: (typeof toolNames)[number]) {
+  const found = surfaceTools.find((candidate) => candidate.name === name);
+  if (!found) throw new Error(`Missing ${name}`);
+  return found;
+}
+const schema = (name: (typeof toolNames)[number]) => tool(name).inputSchema as ToolSchema;
 
-it("advertises only the adopted resource and communication primitives", () => {
-  expect(coordinationTools.map((tool) => tool.name)).toEqual(coordinationNames);
+it("advertises only the Session, Objective, Mailbox and Workstream primitives", () => {
+  expect(surfaceTools.map((entry) => entry.name)).toEqual(toolNames);
+  // The Objective controller's own tool family is gone; a Tag delegates with start_session.
   for (const removed of [
-    "read_team_context",
-    "read_commitments",
+    "assign_task",
+    "update_task",
+    "read_task",
     "list_tasks",
-    "review_task",
-    "request_action_approval",
-    "send_team_message",
-    "propose_team_knowledge",
-    "propose_team_governance_transfer",
-    "propose_team_priority",
-    "report_progress",
-    "create_workstream",
-    "update_workstream",
+    "read_commitments",
+    "wait_for",
+    "escalate_task",
+    "read_mailbox",
+    "post_workstream",
+    "read_team",
+    "update_team",
+    "create_team",
+    "create_tag",
+    "list_tags",
+    "request_approval",
+    "decide_approval",
+    "select_objective",
+    "attach_objective",
+    "start_objective",
+    "instruct_objective",
   ])
-    expect(coordinationTools.some((tool) => tool.name === removed)).toBe(false);
+    expect(surfaceTools.some((entry) => entry.name === removed)).toBe(false);
 });
 
-it("keeps Task workflows composable through assign, read, and one-field updates", () => {
-  expect(schema("assign_task")).toMatchObject({
-    required: ["taskId", "teamId", "assignedTagId", "instruction", "acceptanceCriteria"],
-    additionalProperties: false,
-    properties: {
-      requiresApproval: { type: "boolean" },
-      dependencies: {
-        type: "array",
-        description: expect.stringContaining("accepted before this Task can run"),
-      },
-      inputArtifacts: {
-        type: "array",
-        maxItems: 20,
-        description: expect.stringContaining("submitted, accepted, or rejected"),
-      },
-      execution: {
-        properties: {
-          requires: { description: expect.stringContaining("does not select a Worker role") },
-          profile: { description: expect.stringContaining("exact advertised Worker Profile") },
-          limits: {
-            properties: {
-              maxReportedCost: {
-                type: "object",
-                additionalProperties: false,
-                required: ["amountMinor", "currency"],
-                properties: {
-                  amountMinor: { type: "integer", minimum: 0 },
-                  currency: { type: "string", pattern: "^[A-Z]{3}$" },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  });
-  expect(schema("assign_task").properties.dependencies.description).toContain(
-    "do not pass artifacts",
-  );
-  expect(schema("assign_task").properties.inputArtifacts.description).toContain(
-    "exact source evidence",
-  );
-  expect(schema("update_task")).toMatchObject({
-    required: ["taskId", "expectedStatus"],
-    additionalProperties: false,
-    properties: {
-      priority: { enum: ["urgent", "high", "normal", "low"] },
-      approval: { enum: ["approved"] },
-      assessment: { type: "string" },
-    },
-  });
-  expect(schema("update_task").properties.priority.description).toContain(
-    "governing lead accepts a Mailbox proposal",
-  );
-  expect(schema("update_task").properties.finding).toMatchObject({
+it("keeps request_action_approval callable by the Worker but never advertises it", () => {
+  expect(hiddenCoordinationTools).toEqual(["request_action_approval"]);
+  expect(surfaceTools.some((entry) => entry.name === "request_action_approval")).toBe(false);
+});
+
+it("delegates with start_session, to this Tag or to a Tag of the Objective's Team", () => {
+  expect(schema("start_session")).toEqual({
     type: "object",
-    oneOf: [
-      { required: ["id", "status", "fixedBy"], properties: { status: { const: "fixed" } } },
-      { required: ["id", "status", "reason"], properties: { status: { const: "accepted" } } },
-    ],
-  });
-  expect(schema("update_task").properties.finding.description).toContain("re-review");
-  expect(coordinationTools.find((tool) => tool.name === "read_task")?.description).toContain(
-    "dependency blockers",
-  );
-  expect(schema("wait_for")).toMatchObject({
-    properties: {
-      acceptedTaskIds: {
-        description: expect.stringContaining("current manager must perform"),
-      },
-      submittedTaskIds: {
-        description: expect.stringContaining("unaccepted dependency"),
-      },
-    },
-  });
-  expect(coordinationTools.find((tool) => tool.name === "wait_for")?.description).toContain(
-    "blocked on manager action",
-  );
-  expect(coordinationTools.find((tool) => tool.name === "wait_for")?.description).toContain(
-    "end the current turn immediately",
-  );
-  expect(coordinationTools.find((tool) => tool.name === "update_objective")?.description).toContain(
-    "Mailbox messages to be processed or failed",
-  );
-});
-
-it("uses one Mailbox primitive for Tag, Team, and Objective destinations", () => {
-  expect(coordinationTools.find((tool) => tool.name === "read_team")?.description).toContain(
-    "relationship-labeled authorized Mailbox destinations",
-  );
-  expect(schema("send_message")).toMatchObject({
-    required: ["body", "idempotencyKey"],
     additionalProperties: false,
-    anyOf: [
-      { required: ["recipientTagId"] },
-      { required: ["to"] },
-      { required: ["recipientTeamId"] },
-      { required: ["recipientObjectiveId"] },
-    ],
-  });
-  // type is optional (note by default for Tag messages) but must stay in the schema.
-  expect(schema("send_message").properties.type).toMatchObject({
-    enum: expect.arrayContaining([
-      "message",
-      "priority.proposed",
-      "priority.accepted",
-      "priority.declined",
-    ]),
-    description: expect.stringContaining("{taskId, priority, rationale}"),
-  });
-  expect(schema("send_message").properties.body.description).toContain("do not mutate Tasks");
-  expect(schema("send_message").properties.inReplyTo.description).toContain("correlated response");
-  expect(schema("read_mailbox").properties).toHaveProperty("limit");
-  expect(coordinationTools.find((tool) => tool.name === "send_message")?.description).toContain(
-    "recipientTagId",
-  );
-});
-
-it("places shared knowledge and governance on Team and combines Workstream reads", () => {
-  expect(schema("update_team")).toMatchObject({
-    required: ["teamId", "expectedRevision"],
+    required: ["title", "instruction"],
     properties: {
-      context: { type: "object" },
-      governingObjectiveId: { type: "string" },
+      title: { type: "string", minLength: 1, maxLength: WORK_SESSION_TITLE_MAX },
+      instruction: { type: "string", minLength: 1, maxLength: WORK_SESSION_INSTRUCTION_MAX },
+      tag: { type: "string", minLength: 1, maxLength: 200 },
+      workspace: { type: "string", pattern: "^[a-z0-9][a-z0-9_-]{0,62}$" },
     },
   });
-  expect(schema("update_team").properties.context.description).toContain("review Task");
-  expect(schema("update_team").properties.governingObjectiveId.description).toContain(
-    "Mailbox negotiation",
-  );
-  expect(schema("read_workstream").properties).toMatchObject({
-    afterSequence: { type: "integer", minimum: 0 },
-    limit: { type: "integer", minimum: 1, maximum: 100 },
-  });
-  expect(surfaceTools.some((tool) => tool.name === "create_objective")).toBe(true);
+  const description = tool("start_session").description;
+  expect(description).toContain("set tag to a Tag name or ID from the Objective's Team");
+  expect(description).toContain("draws on the Objective's budget");
+  expect(tool("continue_session").description).toContain("work Sessions that are not running");
+  expect(schema("continue_session").required).toEqual(["sessionId", "message"]);
 });
 
-it("posts typed, addressed text to a Team channel without granting authority", () => {
-  expect(schema("post_workstream")).toEqual({
+it("asks a person with one question and ends the Task waiting on the answer", () => {
+  expect(schema("ask")).toEqual({
     type: "object",
-    properties: {
-      objectiveId: { type: "string", minLength: 1 },
-      workstreamId: { type: "string", minLength: 1 },
-      body: { type: "string", minLength: 1, maxLength: 16384 },
-      type: { type: "string", enum: ["note", "question", "blocker", "evidence", "decision"] },
-      to: { type: "array", maxItems: 20, items: { type: "string", minLength: 1 } },
-      references: {
-        type: "array",
-        maxItems: 20,
-        items: { type: "string", minLength: 1, maxLength: 2000 },
-      },
-      replyTo: { type: "string", minLength: 1 },
-      idempotencyKey: { type: "string", minLength: 1 },
-    },
-    required: ["workstreamId", "body", "idempotencyKey"],
     additionalProperties: false,
+    required: ["question"],
+    properties: {
+      question: { type: "string", minLength: 1, maxLength: WORK_SESSION_QUESTION_MAX },
+    },
   });
-  const description =
-    coordinationTools.find((tool) => tool.name === "post_workstream")?.description ?? "";
-  expect(description).toContain("Team ID");
-  expect(description).toContain("carries no authority and starts no work");
+  expect(tool("ask").description).toContain("ends this Task waiting on the answer");
+});
+
+it("sends plain text to one Tag's Mailbox, with no types and no reply correlation", () => {
+  expect(schema("send_message")).toEqual({
+    type: "object",
+    additionalProperties: false,
+    required: ["to", "text"],
+    properties: {
+      to: { type: "string", minLength: 1, maxLength: 200 },
+      text: { type: "string", minLength: 1, maxLength: TAG_MESSAGE_TEXT_MAX },
+    },
+  });
+  for (const gone of ["type", "body", "inReplyTo", "idempotencyKey", "recipientTeamId"])
+    expect(schema("send_message").properties).not.toHaveProperty(gone);
+  expect(tool("send_message").description).toContain(`At most ${INBOX_SENDS_PER_TASK} per Task`);
+  expect(tool("send_message").description).toContain("handles it in a later turn of its own");
+});
+
+it("posts untyped text to the Team's Workstream and wakes only the Tags it names", () => {
+  expect(schema("post")).toEqual({
+    type: "object",
+    additionalProperties: false,
+    required: ["text"],
+    properties: {
+      text: { type: "string", minLength: 1, maxLength: WORKSTREAM_POST_MAX_BODY },
+      to: {
+        type: "array",
+        minItems: 1,
+        maxItems: WORKSTREAM_POST_MAX_TO,
+        uniqueItems: true,
+        items: { type: "string", minLength: 1, maxLength: 200 },
+      },
+    },
+  });
+  // The Team is resolved from the turn, so no team or workstream argument is advertised.
+  for (const gone of ["teamId", "workstreamId", "objectiveId", "type", "replyTo", "references"])
+    expect(schema("post").properties).not.toHaveProperty(gone);
+  expect(tool("post").description).toContain("A post wakes nobody");
   expect(Object.keys(schema("read_workstream").properties).sort()).toEqual([
     "afterSequence",
     "limit",
-    "objectiveId",
-    "workstreamId",
   ]);
+  expect(tool("read_workstream").description).toContain("does not subscribe");
 });
 
-it("keeps Mailbox messages separate from Team channels", () => {
-  expect(schema("send_message").additionalProperties).toBe(false);
-  expect(schema("send_message").properties).not.toHaveProperty("workstreamId");
-  // assign_task still names the channel that must include the assignee and requester.
-  expect(schema("assign_task").properties).toHaveProperty("workstreamId");
-});
-
-it.each(["create_team", "update_team"] as const)(
-  "advertises canonical Team scaling in %s",
-  (name) => {
-    expect(schema(name).properties.scaling).toMatchObject({
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        maxBreadth: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
-        maxDepth: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
-      },
-    });
-    expect(schema(name).properties.scaling.required).toBeUndefined();
-  },
-);
-
-it("explains observation subscriptions and alternative timer wake-ups", () => {
-  const wait = coordinationTools.find((tool) => tool.name === "wait_for");
-  expect(wait?.inputSchema).toMatchObject({
-    properties: {
-      mailbox: { description: expect.stringContaining("does not subscribe") },
-      notBefore: { description: expect.stringContaining("may wake earlier") },
-      workstreamPosts: {
-        description: expect.stringContaining("any satisfied condition"),
-        properties: {
-          afterSequence: { description: expect.stringContaining("actually processed") },
-        },
-      },
-    },
-  });
-});
-
-it("advertises pagination and detail retrieval for Objective summaries", () => {
-  expect(schema("read_objective")).toMatchObject({
-    properties: { limit: { minimum: 1, maximum: 100 }, offset: { minimum: 0 } },
-  });
-  expect(coordinationTools.find((tool) => tool.name === "read_objective")?.description).toContain(
-    "read_task",
-  );
-});
-
-it("tells actors that Tasks start at low effort and how to raise it", () => {
-  const assign = coordinationTools.find((tool) => tool.name === "assign_task");
-  expect(assign?.description).toContain("Tasks start at low reasoning effort");
-  expect(assign?.description).toContain("escalate_task");
-  expect(assign?.description).toContain(
-    "Tell assignees to clean up processes and services they start before finishing a Task.",
-  );
-  expect(schema("assign_task")).toMatchObject({
-    properties: {
-      execution: {
-        properties: {
-          effort: { description: expect.stringContaining("low unless the assignee sets another") },
-        },
-      },
-    },
-  });
-  const escalate = coordinationTools.find((tool) => tool.name === "escalate_task");
-  expect(escalate?.description).toContain("ends the current Task Attempt");
-  expect(escalate?.description).toContain("after 2 escalations");
-  expect(schema("escalate_task")).toMatchObject({
-    required: ["reason"],
-    additionalProperties: false,
-    anyOf: [{ required: ["effort"] }, { required: ["model"] }],
-    properties: {
-      effort: { enum: ["low", "medium", "high"] },
-      model: { type: "string", maxLength: 200 },
-      reason: { maxLength: 2000 },
-    },
-  });
-});
-
-it("lets owners look up Tags by name before staffing or creating one", () => {
-  expect(schema("list_tags")).toEqual({
+it("updates an Objective's status from its own conversation, with its revision", () => {
+  expect(schema("update_objective")).toEqual({
     type: "object",
-    properties: {
-      objectiveId: { type: "string" },
-      limit: { type: "integer", minimum: 1, maximum: 100 },
-      offset: { type: "integer", minimum: 0 },
-    },
-    required: [],
     additionalProperties: false,
+    required: ["status", "expectedRevision"],
+    properties: {
+      status: { type: "string", enum: OBJECTIVE_UPDATE_STATUSES },
+      expectedRevision: { type: "integer", minimum: 1 },
+      completionSummary: { type: "string", minLength: 1, maxLength: 4000 },
+    },
   });
-  const description = (name: string) =>
-    coordinationTools.find((tool) => tool.name === name)?.description ?? "";
-  expect(description("list_tags")).toContain("bound Worker Hosts with connection state");
-  expect(description("create_tag")).toContain("Check list_tags first");
-  expect(description("create_team")).toContain("Tag names or IDs");
-  expect(description("create_team")).toContain(
-    "Omit maxConcurrency unless you deliberately throttle",
-  );
-  expect(description("update_team")).toContain("Tag names or IDs");
-  expect(description("assign_task")).toContain("Tag name or ID");
-  expect(description("send_message")).toContain("a Tag name or ID");
+  expect(tool("read_objective").description).toContain("its Sessions with their latest Tasks");
+  expect(schema("read_objective").required).toEqual([]);
 });
 
 it("lets a Worker expose every conversation tool the Control Plane defines", () => {
   // A tool the Worker's list leaves out never reaches a real harness, even when the turn gets it.
   expect([...SURFACE_COORDINATION_OPERATIONS].sort()).toEqual(
-    surfaceTools.map((tool) => tool.name).sort(),
+    surfaceTools.map((entry) => entry.name).sort(),
   );
 });

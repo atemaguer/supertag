@@ -193,9 +193,8 @@ describe("Claude Code harness composition", () => {
         severity: "high",
         summary: "The query skips tenant scoping.",
         location: "src/query.ts:42",
-        status: "open",
       },
-      { id: "F2", severity: "low", summary: "A comment is stale.", status: "open" },
+      { id: "F2", severity: "low", summary: "A comment is stale." },
     ]);
   });
 
@@ -329,6 +328,7 @@ describe("Claude Code harness composition", () => {
         coordination: {
           controlPlaneUrl: "https://control-plane.example",
           token: "remote-attempt-secret",
+          scope: "surface" as const,
           objectiveId: "objective-1",
         },
       }),
@@ -353,7 +353,7 @@ describe("Claude Code harness composition", () => {
           url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/u),
           headers: { Authorization: expect.stringMatching(/^Bearer [\w-]{43}$/u) },
           policyProxy: true,
-          toolNames: expect.arrayContaining(["assign_task", "create_team"]),
+          toolNames: expect.arrayContaining(["start_session", "send_message", "post"]),
         }),
       ]);
       expect(JSON.stringify(request)).not.toContain("attempt-secret");
@@ -384,6 +384,7 @@ describe("Claude Code harness composition", () => {
           coordination: {
             controlPlaneUrl: upstream.controlPlaneUrl,
             token: "attempt-secret",
+            scope: "surface" as const,
             objectiveId: "objective-1",
           },
         }),
@@ -454,7 +455,7 @@ describe("Claude Code harness composition", () => {
                 name: "supertag-coordination",
                 url: "https://control-plane.example/internal/v1/coordination/mcp",
                 headers: { Authorization: "Bearer remote-secret" },
-                toolNames: ["assign_task"],
+                toolNames: ["start_session"],
               },
             ],
           },
@@ -3574,8 +3575,49 @@ it("emits partial SDK usage before an interruption prevents the final result", a
   expect(events.at(-1)?.type).toBe("execution.failed");
 });
 
-it("refuses a durable wait while background tasks would be discarded", async () => {
+it("keeps the root agent's MCP connections away from subagents", async () => {
   const decisions: unknown[] = [];
+  const server = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    if (body === "") {
+      // The Worker closes its session when the Attempt ends.
+      response.writeHead(200).end();
+      return;
+    }
+    const message = JSON.parse(body) as { id?: number; method: string };
+    const result =
+      message.method === "initialize"
+        ? {
+            protocolVersion: "2025-06-18",
+            capabilities: { tools: {} },
+            serverInfo: { name: "guard-fixture", version: "1" },
+          }
+        : { tools: [{ name: "inspect", inputSchema: { type: "object" } }] };
+    response.writeHead(200, {
+      "content-type": "application/json",
+      "mcp-session-id": "guard-session",
+    });
+    response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Missing fixture address");
+  const input: ToolInput = {
+    id: "guard-fixture",
+    kind: "tool",
+    required: true,
+    capability: {
+      id: "guard-fixture",
+      provider: "fixture",
+      operations: [{ name: "inspect", effect: "read", actions: [] }],
+    },
+    binding: {
+      kind: "mcp-http",
+      name: "guard_fixture",
+      url: `http://127.0.0.1:${address.port}/mcp`,
+    },
+  };
   const queryAgent = (({
     options,
   }: {
@@ -3591,7 +3633,7 @@ it("refuses a durable wait while background tasks would be discarded", async () 
             tool_name,
             tool_input: {},
             tool_use_id: "call",
-            session_id: "background",
+            session_id: "root",
             transcript_path: "",
             cwd: fixtureWorkspace,
             ...(agent_id ? { agent_id } : {}),
@@ -3599,40 +3641,45 @@ it("refuses a durable wait while background tasks would be discarded", async () 
           "call",
           { signal: new AbortController().signal },
         );
-      yield { type: "system", subtype: "init", session_id: "background" };
-      const background = (tasks: unknown[]) => ({
-        type: "system",
-        subtype: "background_tasks_changed",
-        tasks,
-        session_id: "background",
-      });
-      yield background([
-        { task_id: "a", task_type: "local_agent", description: "Fix issue 1" },
-        { task_id: "w", task_type: "monitor", description: "watcher", ambient: true },
-      ]);
-      decisions.push(await decide("mcp__supertag__wait_for"));
-      decisions.push(await decide("mcp__supertag__read_objective"));
-      decisions.push(await decide("mcp__supertag__wait_for", "child"));
-      yield background([
-        { task_id: "w", task_type: "monitor", description: "watcher", ambient: true },
-      ]);
-      decisions.push(await decide("mcp__supertag__wait_for"));
-      yield { type: "result", subtype: "success", result: "done", session_id: "background" };
+      // The root agent reaches its own MCP connection; a subagent does not.
+      decisions.push(await decide("mcp__guard_fixture__inspect"));
+      decisions.push(await decide("mcp__guard_fixture__inspect", "child"));
+      decisions.push(await decide("mcp__supertag-coordination__read_objective", "child"));
+      yield { type: "result", subtype: "success", result: "done", session_id: "root" };
     })()) as unknown as typeof import("@anthropic-ai/claude-agent-sdk").query;
-  await collectTaskAttemptEvents(
-    createClaudeCodeWorker({ workspace: fixtureWorkspace, queryAgent }).execute(
-      taskAttemptSpec("Wait"),
-    ),
-  );
-  expect(decisions[0]).toMatchObject({
+  const environment = testEnvironment(fixtureWorkspace);
+  try {
+    for await (const _event of runClaudeCode(
+      {
+        prompt: "Use the Worker's MCP tools",
+        runtimeDirectory: fixtureWorkspace,
+        workspace: fixtureWorkspace,
+        timeoutMs: 5_000,
+        maxTurns: 2,
+        mcpServers: [],
+        runtimeActions: [],
+        dynamicMcpInputs: [{ input, client: "worker-host" }],
+        toolInputs: [input],
+      },
+      environment,
+      environment,
+      undefined,
+      queryAgent,
+    )) {
+      /* Consume the client lifecycle. */
+    }
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  expect(decisions[0]).toEqual({});
+  expect(decisions[1]).toMatchObject({
     hookSpecificOutput: {
       permissionDecision: "deny",
-      permissionDecisionReason: expect.stringContaining(
-        "1 running background task(s): Fix issue 1",
-      ),
+      permissionDecisionReason: "This MCP connection belongs to the root agent.",
     },
   });
-  expect(decisions.slice(1)).toEqual([{}, {}, {}]);
+  expect(decisions[2]).toEqual({});
 });
 
 it("retains final cancellation usage without accepting late output or completion", async () => {

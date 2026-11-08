@@ -290,7 +290,7 @@ it.each(["failed", "completed"] as const)(
             id: "coordination-call",
             type: "mcp_tool_call",
             server: "coordination-tools",
-            tool: "read_team_context",
+            tool: "read_workspace_context",
             arguments: {},
           };
           const events = [
@@ -342,7 +342,7 @@ it.each(["failed", "completed"] as const)(
             capability: {
               id: "supertag.coordination",
               provider: "supertag",
-              operations: [{ name: "read_team_context", effect: "read", actions: [] }],
+              operations: [{ name: "read_workspace_context", effect: "read", actions: [] }],
               authorization: { provider: "supertag", resources: [] },
             },
             binding: {
@@ -388,7 +388,7 @@ it("attributes a completed-only MCP event using Codex's normalized server name",
               id: "coordination-call",
               type: "mcp_tool_call",
               server: "coordination_tools",
-              tool: "read_team_context",
+              tool: "read_workspace_context",
               arguments: {},
               status: "failed",
               result: null,
@@ -446,7 +446,7 @@ it("attributes a completed-only MCP event using Codex's normalized server name",
           capability: {
             id: "supertag.coordination",
             provider: "supertag",
-            operations: [{ name: "read_team_context", effect: "read", actions: [] }],
+            operations: [{ name: "read_workspace_context", effect: "read", actions: [] }],
             authorization: { provider: "supertag", resources: [] },
           },
           binding: {
@@ -796,9 +796,8 @@ describe("Codex harness composition", () => {
         severity: "high",
         summary: "The query skips tenant scoping.",
         location: "src/query.ts:42",
-        status: "open",
       },
-      { id: "F2", severity: "low", summary: "A comment is stale.", status: "open" },
+      { id: "F2", severity: "low", summary: "A comment is stale." },
     ]);
   });
 
@@ -899,6 +898,7 @@ describe("Codex harness composition", () => {
         coordination: {
           controlPlaneUrl: "https://control-plane.example",
           token: "remote-attempt-secret",
+          scope: "surface" as const,
           objectiveId: "objective-1",
         },
       }),
@@ -918,10 +918,11 @@ describe("Codex harness composition", () => {
     expect(JSON.stringify(processSpec?.environment)).toContain("remote-attempt-secret");
     expect(JSON.stringify(events)).not.toContain("remote-attempt-secret");
     expect(processSpec?.stdin).toContain("Coordinate");
-    const task = taskAttemptSpec("Coordinate");
-    expect(processSpec?.stdin).toContain(`Task ${JSON.stringify(task.taskId)}`);
-    expect(processSpec?.stdin).toContain(`Attempt ${JSON.stringify(task.attemptId)}`);
-    expect(processSpec?.stdin).toContain("Do not wait for or reassign your own Task");
+    // A conversation turn's coordination guidance reaches the Harness with the request.
+    expect(processSpec?.stdin).toContain(
+      "create_objective only for an authenticated human command",
+    );
+    expect(processSpec?.stdin).toContain("start_session hands longer work to a new work Session");
   });
 
   it("keeps local Control Plane coordination credentials behind the recovery-aware Worker proxy", async () => {
@@ -977,6 +978,7 @@ describe("Codex harness composition", () => {
         coordination: {
           controlPlaneUrl: "http://127.0.0.1:54321",
           token: "local-attempt-secret",
+          scope: "surface" as const,
           objectiveId: "objective-1",
         },
       }),
@@ -997,7 +999,7 @@ describe("Codex harness composition", () => {
           name: "supertag-coordination",
           url: "https://control-plane.example/internal/v1/coordination/mcp",
           headers: { Authorization: "Bearer attempt-secret" },
-          toolNames: expect.arrayContaining(["assign_task", "create_team"]),
+          toolNames: expect.arrayContaining(["start_session", "send_message", "post"]),
         }),
       ]);
       yield { type: "output.message" as const, text: "accidental attempt-secret" };
@@ -1009,6 +1011,7 @@ describe("Codex harness composition", () => {
         coordination: {
           controlPlaneUrl: "https://control-plane.example",
           token: "attempt-secret",
+          scope: "surface" as const,
           objectiveId: "objective-1",
         },
       }),
@@ -1620,7 +1623,7 @@ describe("Codex harness composition", () => {
 
   it("resumes across manager tool scope and definition changes in exec mode", async () => {
     let authorizedScope = "objective:one";
-    let operation = "assign_task";
+    let operation = "start_session";
     const toolProviders = new ToolProviderRegistry([
       {
         provider: "supertag",
@@ -1639,7 +1642,7 @@ describe("Codex harness composition", () => {
                   {
                     name: operation,
                     effect: "write" as const,
-                    actions: ["tasks:assign"],
+                    actions: ["sessions:start"],
                     inputSchema: {
                       type: "object",
                       properties: { taskId: { type: "string" } },

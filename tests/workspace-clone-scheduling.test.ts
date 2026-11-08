@@ -3,16 +3,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ObjectiveController } from "../packages/control-plane/src/objective-controller.js";
-import {
-  advertisesWorkspaceClone,
-  type TaskAssignment,
-  type WorkerHost,
-} from "../packages/core/src/index.js";
+import { ControlPlane } from "../packages/control-plane/src/index.js";
+import { advertisesWorkspaceClone, type WorkerHost } from "../packages/core/src/index.js";
 import { createClaudeCodeWorker } from "../packages/runtime/harnesses/claude-code/src/index.js";
 import {
   COORDINATION_CAPABILITY,
   LocalWorklet,
+  SURFACE_COORDINATION_CAPABILITY,
   type TaskAttemptSpec,
   WORKSPACE_CLONE_CAPABILITY,
   WORKSPACE_IN_PLACE_CAPABILITY,
@@ -20,7 +17,11 @@ import {
   WorkspaceEnvironmentResolver,
   WorkspaceResolverRegistry,
 } from "../packages/runtime/sdk/src/index.js";
-import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
+import {
+  DrizzleStore,
+  FileGatewayCredentialVault,
+  migrateDatabase,
+} from "../packages/store/src/index.js";
 import { durableTestWorklet } from "./support/durable-test-worklet.js";
 
 describe("Scheduling Workspace Tasks on hosts that clone", () => {
@@ -38,6 +39,7 @@ describe("Scheduling Workspace Tasks on hosts that clone", () => {
             profile: { id: "default", revision: "1" },
             capabilities: [
               COORDINATION_CAPABILITY,
+              SURFACE_COORDINATION_CAPABILITY,
               ...(capabilities.inPlace ? [WORKSPACE_IN_PLACE_CAPABILITY] : []),
               ...(capabilities.clone ? [WORKSPACE_CLONE_CAPABILITY] : []),
             ],
@@ -49,13 +51,14 @@ describe("Scheduling Workspace Tasks on hosts that clone", () => {
         profiles: [{ id: "default", revision: "1" }],
         capabilities: [
           COORDINATION_CAPABILITY,
+          SURFACE_COORDINATION_CAPABILITY,
           ...(capabilities.inPlace ? [WORKSPACE_IN_PLACE_CAPABILITY] : []),
           ...(capabilities.clone ? [WORKSPACE_CLONE_CAPABILITY] : []),
         ],
         contextTypes: [],
       };
     },
-    async *execute(spec, signal) {
+    async *execute(spec) {
       started.push(spec);
       yield {
         type: "execution.started",
@@ -64,7 +67,12 @@ describe("Scheduling Workspace Tasks on hosts that clone", () => {
         at: new Date().toISOString(),
         workerId: "worker",
       };
-      await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve()));
+      yield {
+        type: "execution.completed",
+        taskId: spec.taskId,
+        attemptId: spec.attemptId,
+        at: new Date().toISOString(),
+      };
     },
   });
 
@@ -92,19 +100,18 @@ describe("Scheduling Workspace Tasks on hosts that clone", () => {
     const member = await store.createTag({ name: `member-${randomUUID()}` });
     for (const tag of [owner, member])
       for (const host of options.bindings ?? ["host"]) await store.bindTagWorkerHost(tag.id, host);
+    const team = await store.createTeam({
+      id: randomUUID(),
+      name: `delivery-${randomUUID()}`,
+      memberTagIds: [owner.id, member.id],
+      maxConcurrency: 1,
+    });
     const objective = await store.createObjective({
       id: `objective-${randomUUID().slice(0, 8)}`,
       ownerTagId: owner.id,
+      teamId: team.id,
       outcome: "Ship the change.",
       workspaces: ["app"],
-    });
-    const team = await store.createTeam({
-      id: randomUUID(),
-      objectiveId: objective.id,
-      name: "Delivery",
-      leadTagId: owner.id,
-      memberTagIds: [member.id],
-      maxConcurrency: 1,
     });
     // Other Worker Hosts come from stored descriptors; the embedded Worklet reports its own.
     const persistence = new Proxy(store, {
@@ -114,25 +121,26 @@ describe("Scheduling Workspace Tasks on hosts that clone", () => {
         return typeof value === "function" ? value.bind(target) : value;
       },
     });
-    const controller = new ObjectiveController(persistence, durableTestWorklet(options.worklet));
-    controller.activateCoordination({ url: "http://127.0.0.1:1" });
-    cleanups.push(() => controller.stop());
-    const task = (await controller.command("assign_task", {
-      objectiveId: objective.id,
-      taskId: randomUUID(),
-      teamId: team.id,
-      assignedTagId: member.id,
-      instruction: "Change the code",
-      acceptanceCriteria: ["Changed"],
-    })) as TaskAssignment;
-    controller.start();
+    const controlPlane = new ControlPlane({
+      store: persistence,
+      credentialVault: new FileGatewayCredentialVault(join(directory, "vault.json")),
+      worklet: durableTestWorklet(options.worklet),
+      reply: async () => undefined,
+      dispatch: { pollIntervalMs: 10 },
+    });
+    controlPlane.objectives.activateCoordination({ url: "http://127.0.0.1:1" });
+    await controlPlane.start();
+    cleanups.push(() => controlPlane.stop());
+    // Starting the Objective admits the first turn of its own conversation, which carries the
+    // Objective's only Workspace.
+    const { taskId } = await controlPlane.startObjective(objective.id);
     const hold = () =>
       eventually(async () =>
-        (await store.listTaskEvents(task.taskId)).find(
+        (await store.listTaskEvents(taskId)).find(
           (event) => event.type === "task.scheduling-incompatible",
         ),
       );
-    return { store, task, hold };
+    return { store, taskId, hold };
   }
 
   it("places a Task on a host that clones when the Workspace records a source", async () => {

@@ -48,11 +48,6 @@ async function captureWithoutControlPlaneBytes(advertise: boolean) {
   await store.connect();
   const owner = await store.createTag({ name: "owner" });
   await store.bindTagWorkerHost(owner.id, "producer-host");
-  await store.createObjective({
-    id: "no-bytes",
-    ownerTagId: owner.id,
-    outcome: "Keep artifact bytes on Worker Hosts",
-  });
 
   // Distinctive bytes: a text canary and random binary, so a scan cannot match by accident.
   const canary = `artifact-canary-${randomUUID()}`;
@@ -76,6 +71,7 @@ async function captureWithoutControlPlaneBytes(advertise: boolean) {
             capabilities: [
               { id: "supertag.task-attempt.events", version: 1 },
               { id: "supertag.coordination", version: 1 },
+              { id: "supertag.coordination.surface", version: 1 },
             ],
             contextTypes: [],
           },
@@ -88,6 +84,7 @@ async function captureWithoutControlPlaneBytes(advertise: boolean) {
         capabilities: [
           { id: "supertag.task-attempt.events", version: 1 },
           { id: "supertag.coordination", version: 1 },
+          { id: "supertag.coordination.surface", version: 1 },
         ],
       };
     },
@@ -229,12 +226,14 @@ async function captureWithoutControlPlaneBytes(advertise: boolean) {
       durableWorklet: durable,
       reconnectIntervalMs: 20,
     });
-    const started = await fetch(`${controlPlaneUrl}/api/v1/coordination/start_objective`, {
+    const started = await fetch(`${controlPlaneUrl}/api/v1/tags/${owner.name}/messages`, {
       method: "POST",
       headers: { authorization: "Bearer test-admin", "content-type": "application/json" },
-      body: JSON.stringify({ objectiveId: "no-bytes" }),
+      body: JSON.stringify({ text: "Produce the artifact" }),
     });
-    expect(started.status, await started.text()).toBe(200);
+    const startedText = await started.text();
+    expect(started.status, startedText).toBe(201);
+    const taskId = (JSON.parse(startedText) as { taskId: string }).taskId;
     await expect.poll(() => attempts.length + errors.length, { timeout: 15000 }).toBe(1);
     expect(errors).toEqual([]);
     const [attempt] = attempts;
@@ -247,7 +246,7 @@ async function captureWithoutControlPlaneBytes(advertise: boolean) {
       "inline-capture": 400,
     });
     await expect
-      .poll(async () => (await store.getTaskAssignment("no-bytes:start"))?.status, {
+      .poll(async () => (await store.findTaskById(taskId))?.status, {
         timeout: 15000,
       })
       .not.toBe("running");
@@ -255,7 +254,7 @@ async function captureWithoutControlPlaneBytes(advertise: boolean) {
     // The catalog knows the artifact, its producer, and which host holds its copy.
     const admin = (path: string) =>
       fetch(`${controlPlaneUrl}${path}`, { headers: { authorization: "Bearer test-admin" } });
-    const listed = (await (await admin("/api/v1/artifacts?task=no-bytes%3Astart")).json()) as {
+    const listed = (await (await admin(`/api/v1/artifacts?task=${taskId}`)).json()) as {
       items: { metadata: { id: string }; spec: { attemptId: string; entries: unknown[] } }[];
     };
     expect(listed.items).toEqual([
@@ -277,7 +276,7 @@ async function captureWithoutControlPlaneBytes(advertise: boolean) {
         ? [expect.objectContaining({ workerHostId: "producer-host", transferBaseUrl })]
         : [],
     );
-    const task = (await (await admin("/api/v1/tasks/no-bytes%3Astart")).json()) as {
+    const task = (await (await admin(`/api/v1/tasks/${taskId}`)).json()) as {
       status: { storage: { artifacts: { locations: unknown[] }[] } };
     };
     expect(task.status.storage.artifacts).toEqual([
@@ -305,9 +304,9 @@ async function captureWithoutControlPlaneBytes(advertise: boolean) {
         status: "available",
       }),
     ).toEqual([]);
-    const disconnected = await (await admin("/api/v1/tasks/no-bytes%3Astart")).json();
+    const disconnected = await (await admin(`/api/v1/tasks/${taskId}`)).json();
     expect(disconnected.status.storage.artifacts).toEqual(task.status.storage.artifacts);
-    const disconnectedList = await (await admin("/api/v1/artifacts?task=no-bytes%3Astart")).json();
+    const disconnectedList = await (await admin(`/api/v1/artifacts?task=${taskId}`)).json();
     expect(disconnectedList.items[0].status.locations).toEqual(
       task.status.storage.artifacts[0]?.locations,
     );

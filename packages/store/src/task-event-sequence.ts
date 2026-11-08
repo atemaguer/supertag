@@ -12,12 +12,17 @@ export function* nextTaskEventSequence(
   tx: any,
   taskEvents: any,
   taskId: string,
+  /**
+   * When the event changes what the Task records, such as late usage evidence on a settled Task,
+   * the Task's `updatedAt` moves to it, so readers that cache a Task by `updatedAt` re-measure it.
+   */
+  updatedAt?: string,
 ): Generator<any, number, any> {
   const tasks = taskEvents === postgresql.taskEvents ? postgresql.tasks : sqlite.tasks;
-  // A no-op update takes the row lock on PostgreSQL; SQLite transactions are already serialized.
+  // The update takes the row lock on PostgreSQL; SQLite transactions are already serialized.
   yield tx
     .update(tasks)
-    .set({ updatedAt: sql`${tasks.updatedAt}` })
+    .set({ updatedAt: updatedAt ?? sql`${tasks.updatedAt}` })
     .where(eq(tasks.id, taskId))
     .returning({ id: tasks.id });
   const [last] = yield tx

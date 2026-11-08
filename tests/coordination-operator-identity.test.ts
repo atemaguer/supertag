@@ -15,40 +15,18 @@ it("binds coordination operators to server-side identity and least-privilege sco
     store = new DrizzleStore({ url: databaseUrl });
     await store.connect();
     const sourceOwner = await store.createTag({ name: "Source owner" });
-    const targetOwner = await store.createTag({ name: "Target owner" });
     const deniedOwner = await store.createTag({ name: "Denied owner" });
+    for (const tag of [sourceOwner, deniedOwner])
+      await store.bindTagWorkerHost(tag.id, "control-plane-static-host");
     const source = await store.createObjective({
       id: "operator-source",
       ownerTagId: sourceOwner.id,
-      outcome: "Govern the scoped Team",
-    });
-    const target = await store.createObjective({
-      id: "operator-target",
-      ownerTagId: targetOwner.id,
-      outcome: "Receive governance",
+      outcome: "Govern the scoped work",
     });
     const denied = await store.createObjective({
       id: "operator-denied",
       ownerTagId: deniedOwner.id,
       outcome: "Remain isolated",
-    });
-    const allowedTeam = await store.createTeam({
-      id: "operator-team-allowed",
-      objectiveId: source.id,
-      objectiveIds: [target.id],
-      name: "Allowed Team",
-      leadTagId: sourceOwner.id,
-      memberTagIds: [],
-      maxConcurrency: 1,
-    });
-    const deniedTeam = await store.createTeam({
-      id: "operator-team-denied",
-      objectiveId: source.id,
-      objectiveIds: [target.id],
-      name: "Denied Team",
-      leadTagId: sourceOwner.id,
-      memberTagIds: [],
-      maxConcurrency: 1,
     });
     runtime = await startControlPlaneRuntime({
       host: "127.0.0.1",
@@ -59,9 +37,8 @@ it("binds coordination operators to server-side identity and least-privilege sco
         {
           token: "scoped-reviewer-token",
           operatorId: "operator:alice",
-          actions: ["update_team", "read_coordination_inbox", "read_team_history"],
-          objectiveIds: [source.id, target.id],
-          teamIds: [allowedTeam.id],
+          actions: ["message_objective", "read_coordination_inbox"],
+          objectiveIds: [source.id],
         },
         {
           token: "revoked-reviewer-token",
@@ -77,80 +54,32 @@ it("binds coordination operators to server-side identity and least-privilege sco
       "content-type": "application/json",
       "x-operator-id": "forged-from-request",
     };
-    const update = await fetch(`${runtime.url}/api/v1/coordination/update_team`, {
-      method: "POST",
-      headers: scopedHeaders,
-      body: JSON.stringify({
-        objectiveId: source.id,
-        teamId: allowedTeam.id,
-        expectedRevision: allowedTeam.revision,
-        context: { reviewedBy: "scoped operator" },
-      }),
-    });
-    expect(update.status, await update.text()).toBe(200);
-    expect((await store.getTeam(allowedTeam.id)).context).toEqual({
-      reviewedBy: "scoped operator",
-    });
+    const message = (token: string, objectiveId: string, text: string) =>
+      fetch(`${runtime?.url}/api/v1/coordination/objectives/${objectiveId}/messages`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
 
-    const history = await fetch(
-      `${runtime.url}/api/v1/coordination/teams/${allowedTeam.id}/history?objectiveId=${source.id}`,
+    // The server's own identity is used, never the one the request claims.
+    const sent = await fetch(
+      `${runtime.url}/api/v1/coordination/objectives/${source.id}/messages`,
+      { method: "POST", headers: scopedHeaders, body: JSON.stringify({ text: "Reviewed" }) },
+    );
+    const sentText = await sent.text();
+    expect(sent.status, sentText).toBe(200);
+    const turn = await store.findTaskById((JSON.parse(sentText) as { taskId: string }).taskId);
+    expect(turn?.actor).toMatchObject({ id: "operator:alice" });
+
+    // An Objective outside the credential's scope is refused.
+    expect((await message("scoped-reviewer-token", denied.id, "Reviewed")).status).toBe(403);
+
+    // An action the credential does not carry is refused, even on an Objective it may read.
+    const forbiddenAction = await fetch(
+      `${runtime.url}/api/v1/coordination/objectives/${source.id}/overview`,
       { headers: scopedHeaders },
     );
-    const historyText = await history.text();
-    expect(history.status, historyText).toBe(200);
-    expect(JSON.parse(historyText)).toMatchObject({
-      projectionVersion: 1,
-      team: { id: allowedTeam.id, revision: 2 },
-      changes: [
-        { fromRevision: 0, toRevision: 1 },
-        {
-          fromRevision: 1,
-          toRevision: 2,
-          actorTagId: null,
-          operatorId: "operator:alice",
-          changes: {
-            context: { previous: {}, next: { reviewedBy: "scoped operator" } },
-          },
-        },
-      ],
-    });
-
-    const forbiddenHistory = await fetch(
-      `${runtime.url}/api/v1/coordination/teams/${deniedTeam.id}/history?objectiveId=${source.id}`,
-      { headers: scopedHeaders },
-    );
-    expect(forbiddenHistory.status).toBe(403);
-
-    const forbiddenAction = await fetch(`${runtime.url}/api/v1/coordination/read_objective`, {
-      method: "POST",
-      headers: scopedHeaders,
-      body: JSON.stringify({ objectiveId: source.id }),
-    });
     expect(forbiddenAction.status).toBe(403);
-
-    const forbiddenObjective = await fetch(`${runtime.url}/api/v1/coordination/update_team`, {
-      method: "POST",
-      headers: scopedHeaders,
-      body: JSON.stringify({
-        objectiveId: denied.id,
-        teamId: allowedTeam.id,
-        expectedRevision: allowedTeam.revision + 1,
-        context: {},
-      }),
-    });
-    expect(forbiddenObjective.status).toBe(403);
-
-    const forbiddenTeam = await fetch(`${runtime.url}/api/v1/coordination/update_team`, {
-      method: "POST",
-      headers: scopedHeaders,
-      body: JSON.stringify({
-        objectiveId: source.id,
-        teamId: deniedTeam.id,
-        expectedRevision: deniedTeam.revision,
-        context: {},
-      }),
-    });
-    expect(forbiddenTeam.status).toBe(403);
 
     const revoked = await fetch(
       `${runtime.url}/api/v1/coordination/inbox?objectiveId=${source.id}`,
@@ -158,28 +87,18 @@ it("binds coordination operators to server-side identity and least-privilege sco
     );
     expect(revoked.status).toBe(401);
 
-    const controlPlane = await fetch(`${runtime.url}/api/v1/status`, {
-      headers: scopedHeaders,
-    });
+    // A coordination credential is not a management credential.
+    const controlPlane = await fetch(`${runtime.url}/api/v1/status`, { headers: scopedHeaders });
     expect(controlPlane.status).toBe(403);
 
-    const breakGlass = await fetch(`${runtime.url}/api/v1/coordination/update_team`, {
-      method: "POST",
-      headers: {
-        authorization: "Bearer operator-break-glass-token",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        objectiveId: source.id,
-        teamId: deniedTeam.id,
-        expectedRevision: deniedTeam.revision,
-        context: { reviewedBy: "break glass" },
-      }),
-    });
-    expect(breakGlass.status, await breakGlass.text()).toBe(200);
-    expect((await store.getTeam(deniedTeam.id)).context).toEqual({
-      reviewedBy: "break glass",
-    });
+    // Break glass reaches the Objective the scoped credential may not.
+    const breakGlass = await message("operator-break-glass-token", denied.id, "Reviewed");
+    const breakGlassText = await breakGlass.text();
+    expect(breakGlass.status, breakGlassText).toBe(200);
+    const glassTurn = await store.findTaskById(
+      (JSON.parse(breakGlassText) as { taskId: string }).taskId,
+    );
+    expect(glassTurn?.actor).toMatchObject({ id: "control-plane-break-glass" });
   } finally {
     await runtime?.close();
     await store?.disconnect();

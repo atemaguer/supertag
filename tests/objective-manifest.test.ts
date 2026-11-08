@@ -49,15 +49,15 @@ const upkeep = (
     readonly name?: string;
     readonly outcome?: string;
     readonly extra?: string;
-    readonly teams?: string;
+    readonly team?: string;
   } = {},
 ) => `${header("Objective", options.name ?? "dependency-upkeep")}spec:
   owner: maintainer
   outcome: ${options.outcome ?? OUTCOME}
   ongoing: true
   workspaces: [app]
-${options.extra ?? ""}  teams:
-${options.teams ?? "    upkeep: { lead: maintainer, members: [builder], maxConcurrency: 2 }\n"}`;
+${options.extra ?? ""}  team: ${options.team ?? "{ name: upkeep, members: [maintainer, builder], maxConcurrency: 2 }"}
+`;
 
 interface ObjectiveRecord {
   readonly id: string;
@@ -75,10 +75,8 @@ interface ObjectiveRecord {
 interface TeamRecord {
   readonly id: string;
   readonly name: string;
-  readonly status: string;
-  readonly leadTagId: string;
   readonly memberTagIds: readonly string[];
-  readonly maxConcurrency: number;
+  readonly maxConcurrency: number | null;
 }
 
 describe("declarative Objectives", () => {
@@ -145,11 +143,11 @@ describe("declarative Objectives", () => {
   };
   const objective = (id: string) =>
     client.request<ObjectiveRecord>(`/api/v1/tag-messaging/objectives/${id}`);
-  const teams = async (id: string): Promise<readonly TeamRecord[]> => {
+  const teams = async (): Promise<readonly TeamRecord[]> => {
     const store = new DrizzleStore({ url: `file:${databasePath}` });
     await store.connect();
     try {
-      return (await store.listTeams(id)).toSorted((left, right) => left.id.localeCompare(right.id));
+      return (await store.listTeams()).toSorted((left, right) => left.id.localeCompare(right.id));
     } finally {
       await store.disconnect();
     }
@@ -161,7 +159,7 @@ describe("declarative Objectives", () => {
   it("creates and starts a declared Objective with its Teams, and re-applies as a no-op", async () => {
     const applied = await applyAll(upkeep());
     expect(applied).toContain("Objective/dependency-upkeep configured");
-    expect(applied).toMatch(/Objective\/dependency-upkeep started its owner with Task \S+/);
+    expect(applied).toMatch(/Objective\/dependency-upkeep started with Task \S+/);
     const record = await objective("dependency-upkeep");
     expect(record).toMatchObject({
       status: "working",
@@ -172,18 +170,11 @@ describe("declarative Objectives", () => {
     expect(record.executionStartedAt).not.toBeNull();
     // Runtime actions default to what the owner's Permission Sets allow.
     expect([...record.runtimeActions].sort()).toEqual(["commands:execute", "files:write"]);
-    const formed = await teams("dependency-upkeep");
-    expect(formed.map((team) => team.id)).toEqual([
-      "dependency-upkeep:leadership",
-      "dependency-upkeep:upkeep",
-    ]);
-    expect(formed[1]).toMatchObject({
-      name: "upkeep",
-      status: "active",
-      leadTagId: await tagId("maintainer"),
-      maxConcurrency: 2,
-    });
-    expect([...(formed[1]?.memberTagIds ?? [])].sort()).toEqual(
+    // One flat Team, declared in place and named by the Objective.
+    const formed = await teams();
+    expect(formed.map((team) => team.id)).toEqual(["dependency-upkeep"]);
+    expect(formed[0]).toMatchObject({ name: "upkeep", maxConcurrency: 2 });
+    expect([...(formed[0]?.memberTagIds ?? [])].sort()).toEqual(
       [await tagId("maintainer"), await tagId("builder")].sort(),
     );
 
@@ -191,7 +182,7 @@ describe("declarative Objectives", () => {
       "No changes. The Control Plane matches the input.",
     );
     const again = await applyAll(upkeep());
-    expect(again).not.toContain("started its owner");
+    expect(again).not.toContain("started with Task");
     expect((await objective("dependency-upkeep")).executionStartedAt).toBe(
       record.executionStartedAt,
     );
@@ -258,88 +249,58 @@ describe("declarative Objectives", () => {
     expect(message).toContain("Objective/dependency-upkeep: spec.outcome: outcome changed;");
     expect((await objective("dependency-upkeep")).outcome).toBe(OUTCOME);
     // A new name is a new Objective.
+    // Teams are standalone, so a second Objective names the one that exists.
     await applyAll(
-      upkeep({ name: "security-upkeep", outcome: "Keep only security patches current." }),
+      upkeep({
+        name: "security-upkeep",
+        outcome: "Keep only security patches current.",
+        team: "upkeep",
+      }),
     );
     expect((await objective("security-upkeep")).status).toBe("working");
   });
 
-  it("reconciles nested Teams under field ownership", async () => {
-    await applyAll(upkeep(), "");
-    // A Team created imperatively under the Objective is not the manifest's to dissolve.
-    await run(
-      "create",
-      "team",
-      "dependency-upkeep:manual",
-      "--objective",
-      "dependency-upkeep",
-      "--name",
-      "Manual",
-      "--lead",
-      "reviewer",
-      "--max-concurrency",
-      "1",
-    );
+  it("reconciles the declared Team in place, and refuses to change which Team it is", async () => {
+    await applyAll(upkeep());
+    // The Objective's own Team is named by the Objective; its members and limit change in place.
     const next = upkeep({
-      teams:
-        "    upkeep: { lead: builder, members: [maintainer, reviewer], maxConcurrency: 3 }\n    review: { lead: reviewer, maxConcurrency: 1 }\n",
+      team: "{ name: upkeep, members: [builder, reviewer], maxConcurrency: 3 }",
     });
     const plan = await run(
       "diff",
       "-f",
       await write("next.yaml", [organization, next].join("---\n")),
     );
-    expect(plan).toMatch(/~ Objective dependency-upkeep\s+spec\.teams: ~ upkeep, \+ review/);
+    expect(plan).toMatch(/~ Objective dependency-upkeep\s+spec\.team:/);
     await applyAll(next);
-    let current = await teams("dependency-upkeep");
-    expect(current.map((team) => [team.id, team.status])).toEqual([
-      ["dependency-upkeep:leadership", "active"],
-      ["dependency-upkeep:manual", "active"],
-      ["dependency-upkeep:review", "active"],
-      ["dependency-upkeep:upkeep", "active"],
-    ]);
-    expect(current[3]).toMatchObject({ leadTagId: await tagId("builder"), maxConcurrency: 3 });
-
-    // Dropping a declared Team dissolves it; the imperative Team stays.
-    await applyAll(upkeep({ teams: "    review: { lead: reviewer, maxConcurrency: 1 }\n" }));
-    current = await teams("dependency-upkeep");
-    expect(current.map((team) => [team.id, team.status])).toEqual([
-      ["dependency-upkeep:leadership", "active"],
-      ["dependency-upkeep:manual", "active"],
-      ["dependency-upkeep:review", "active"],
-      ["dependency-upkeep:upkeep", "dissolved"],
-    ]);
-
-    // A Team changed with the CLI belongs to cli until apply takes ownership.
-    await run(
-      "update",
-      "team",
-      "dependency-upkeep:review",
-      "--objective",
-      "dependency-upkeep",
-      "--max-concurrency",
-      "2",
+    const current = await teams();
+    expect(current.map((team) => team.id)).toEqual(["dependency-upkeep"]);
+    expect(current[0]).toMatchObject({ name: "upkeep", maxConcurrency: 3 });
+    expect([...(current[0]?.memberTagIds ?? [])].sort()).toEqual(
+      [await tagId("builder"), await tagId("reviewer")].sort(),
     );
-    const reclaim = upkeep({ teams: "    review: { lead: reviewer, maxConcurrency: 1 }\n" });
-    const reclaimPath = await write("reclaim.yaml", [organization, reclaim].join("---\n"));
-    expect(await fail("apply", "-f", reclaimPath)).toContain(
-      "Objective/dependency-upkeep: spec.teams[review] is owned by cli",
-    );
-    await run("apply", "-f", reclaimPath, "--force-conflicts");
-    expect((await teams("dependency-upkeep"))[2]).toMatchObject({ maxConcurrency: 1 });
 
-    // A dissolved Team's name cannot return.
-    const revived = upkeep({
-      teams:
-        "    review: { lead: reviewer, maxConcurrency: 1 }\n    upkeep: { lead: maintainer, maxConcurrency: 1 }\n",
-    });
+    // A manifest that stops naming the limit removes it.
+    await applyAll(upkeep({ team: "{ name: upkeep, members: [builder, reviewer] }" }));
+    expect((await teams())[0]).toMatchObject({ maxConcurrency: null });
+
+    // Which Team an Objective names is fixed once it exists.
+    await run("create", "team", "other", "--member", "reviewer");
     expect(
-      await fail("apply", "-f", await write("revived.yaml", [organization, revived].join("---\n"))),
-    ).toContain("Team dependency-upkeep:upkeep was dissolved, and dissolved Teams cannot return");
+      await fail(
+        "apply",
+        "-f",
+        await write("other.yaml", [organization, upkeep({ team: "other" })].join("---\n")),
+      ),
+    ).toContain("Objective/dependency-upkeep: spec.team: team changed;");
   });
 
   it("cancels Objectives that leave a set only with --prune, keeping their history", async () => {
-    const both = [organization, upkeep(), upkeep({ name: "docs-upkeep" })].join("---\n");
+    const both = [
+      organization,
+      upkeep(),
+      upkeep({ name: "docs-upkeep", team: "{ name: docs, members: [reviewer] }" }),
+    ].join("---\n");
     await run("apply", "-f", await write("set.yaml", both), "--set", "upkeep");
     const fewer = await write("fewer.yaml", [organization, upkeep()].join("---\n"));
     expect(await run("diff", "-f", fewer, "--set", "upkeep", "--prune")).toMatch(
@@ -379,18 +340,16 @@ describe("declarative Objectives", () => {
 `;
     const path = await write("solo.yaml", [organization, solo, declared].join("---\n"));
     const first = await run("apply", "-f", path);
-    expect(first).not.toContain("started its owner");
+    expect(first).not.toContain("started with Task");
     expect(errors.join("")).toContain(
-      "Warning: Objective/solo-upkeep: the owner was not started: Tag solo cannot accept Tasks because it has no Worker Host binding.",
+      "Warning: Objective/solo-upkeep: the Objective was not started: Tag solo cannot accept Tasks because it has no Worker Host binding.",
     );
     expect((await objective("solo-upkeep")).executionStartedAt).toBeNull();
     expect(await run("diff", "-f", path)).toMatch(
-      /~ Objective solo-upkeep\s+starts the owner\nPlan: 0 to create, 1 to update/,
+      /~ Objective solo-upkeep\s+starts the Objective\nPlan: 0 to create, 1 to update/,
     );
     await run("update", "tag", "solo", "--add-worker-host", HOST);
-    expect(await run("apply", "-f", path)).toMatch(
-      /Objective\/solo-upkeep started its owner with Task/,
-    );
+    expect(await run("apply", "-f", path)).toMatch(/Objective\/solo-upkeep started with Task/);
     expect(await run("diff", "-f", path)).toContain("No changes.");
   });
 
@@ -399,8 +358,7 @@ describe("declarative Objectives", () => {
     const declared = `${header("Objective", "temp-upkeep")}spec:
   owner: temp
   outcome: Keep the temporary branch rebased.
-  teams:
-    crew: { lead: temp, members: [builder], maxConcurrency: 1 }
+  team: { name: crew, members: [builder], maxConcurrency: 1 }
 `;
     await run(
       "apply",
@@ -429,7 +387,8 @@ describe("declarative Objectives", () => {
     expect(exported).toContain("kind: Objective");
     expect(exported).toContain("name: dependency-upkeep");
     expect(exported).toContain("owner: maintainer");
-    expect(exported).toContain("upkeep:");
+    expect(exported).toContain("team:");
+    expect(exported).toContain("name: upkeep");
     expect(exported).not.toContain("status");
     const path = await write("exported.yaml", exported);
     expect(await run("diff", "-f", path)).toContain(
@@ -446,9 +405,7 @@ describe("declarative Objectives", () => {
     expect(await fail("delete", "workspace", "app")).toBe(
       "workspace app is in use by Objective dependency-upkeep (working).",
     );
-    expect(await fail("delete", "tag", "builder")).toContain(
-      "Team dependency-upkeep:upkeep of Objective dependency-upkeep (member)",
-    );
+    expect(await fail("delete", "tag", "builder")).toContain("Team upkeep (member)");
     expect(await fail("delete", "tag", "maintainer")).toContain(
       "Objective dependency-upkeep (owner)",
     );
@@ -466,11 +423,9 @@ describe("declarative Objectives", () => {
     expect(await fail("apply", "-f", await write("bad.yaml", withStatus))).toContain(
       "spec.status: an Objective's status is observed, not declared",
     );
-    const leadership = upkeep({
-      teams: "    leadership: { lead: maintainer, maxConcurrency: 1 }\n",
-    });
-    expect(await fail("apply", "-f", await write("lead.yaml", leadership))).toContain(
-      "leadership is the owner's own Team",
-    );
+    const badTeam = upkeep({ team: "{ members: [maintainer], lead: maintainer }" });
+    expect(
+      await fail("apply", "-f", await write("lead.yaml", [organization, badTeam].join("---\n"))),
+    ).toContain("spec.team.lead is not a Team field");
   });
 });

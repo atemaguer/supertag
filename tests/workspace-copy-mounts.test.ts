@@ -13,7 +13,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type TaskNamedWorkspacePlan, taskWorkspaceBranch } from "../packages/core/src/index.js";
+import { workSessionBranch } from "../packages/control-plane/src/work-sessions.js";
+import type { TaskNamedWorkspacePlan } from "../packages/core/src/index.js";
 import {
   type ResolutionContext,
   type TaskAttemptSpec,
@@ -65,7 +66,7 @@ describe("Workspace copy mounts on a local Worker Host", () => {
     version: 1,
     status: "workspace",
     workspace: "app",
-    branch: taskWorkspaceBranch("objective-1", taskId),
+    branch: workSessionBranch(taskId),
     delivery: "branch",
     // Setup runs before the copy, so it never sees mounted content.
     setup: `if [ -e '${mountPath}' ]; then echo mounted; else echo clean; fi > setup-saw.txt`,

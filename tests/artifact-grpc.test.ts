@@ -9,15 +9,14 @@ import { registerArtifactGrpcRoutes } from "../apps/cli/src/artifact-grpc.js";
 import { artifactVolumeReader } from "../apps/cli/src/artifact-volume.js";
 import { ArtifactCatalog, ObjectiveController } from "../packages/control-plane/src/index.js";
 import {
-  type AdmitTaskAssignmentInput,
   type ArtifactAcquisition,
   type ArtifactDiscoveryPage,
   type ArtifactTransferGrantClaims,
   artifactVolumeLabel,
   type CapturedArtifact,
+  type JsonRecord,
   type TagContextPlan,
   TagMessagingError,
-  type TaskAssignment,
 } from "../packages/core/src/index.js";
 import { FileArtifactStore } from "../packages/runtime/sdk/src/index.js";
 import {
@@ -30,7 +29,15 @@ import {
   startWorkletGrpcServer,
 } from "../packages/runtime/transport/src/index.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
+import { openTestTask } from "./support/artifact-producer.js";
 import { createIsolatedPostgresDatabase } from "./support/database.js";
+
+/** A verified Attempt of a Task, as the Control Plane hands it to the catalog. */
+interface Caller {
+  readonly kind: "surface";
+  readonly taskId: string;
+  readonly attemptId: string;
+}
 
 const transportRequire = createRequire(
   new URL("../packages/runtime/transport/package.json", import.meta.url),
@@ -63,22 +70,18 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         const owner = await store.createTag({ name: "owner" });
         const researcher = await store.createTag({ name: "researcher" });
         const engineer = await store.createTag({ name: "engineer" });
+        const team = await store.createTeam({
+          id: randomUUID(),
+          name: "product",
+          memberTagIds: [owner.id, researcher.id, engineer.id],
+          maxConcurrency: 10,
+        });
         const objective = await store.createObjective({
           id: randomUUID(),
           ownerTagId: owner.id,
+          teamId: team.id,
           outcome: "Reuse previous work",
         });
-        const team = await store.createTeam(
-          {
-            id: randomUUID(),
-            objectiveId: objective.id,
-            name: "product",
-            leadTagId: owner.id,
-            memberTagIds: [researcher.id, engineer.id],
-            maxConcurrency: 10,
-          },
-          owner.id,
-        );
         for (const id of ["host-a", "host-b"]) {
           await store.enrollWorkerHost({
             id,
@@ -98,57 +101,43 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             observedAt: new Date().toISOString(),
           });
         }
-        const callers = new Map<string, TaskAssignment>();
+        const callers = new Map<string, Caller>();
         const attempts = new Map<string, string>();
+        /** One work Session turn of a Tag with a running Attempt on its Tag's Worker Host. */
         async function worker(
           token: string,
           tag = engineer,
-          teamId = team.id,
-          contextPlan?: TagContextPlan,
-          inputArtifacts?: AdmitTaskAssignmentInput["inputArtifacts"],
-          targetObjectiveId = objective.id,
+          options: {
+            contextPlan?: TagContextPlan;
+            inputArtifacts?: readonly JsonRecord[];
+            objectiveId?: string | null;
+          } = {},
         ) {
-          const at = new Date().toISOString();
-          const assignment = await store.admitTaskAssignment({
-            taskId: randomUUID(),
-            objectiveId: targetObjectiveId,
-            teamId,
-            assignedTagId: tag.id,
-            requestedByTagId: owner.id,
-            ...(inputArtifacts ? { inputArtifacts } : {}),
-            instruction: "Use recorded work",
-            acceptanceCriteria: ["Evidence"],
-            execution: {},
-            workspacePlan: { version: 1, status: "none" },
-            contextPlan: contextPlan ?? { version: 7, capturedAt: at, sets: [] },
-            authorizationSnapshot: {
-              version: 4,
-              capturedAt: at,
-              tag: { id: tag.id, name: tag.name },
-              origin: {
-                kind: "internal",
-                objectiveId: targetObjectiveId,
-                requestedByTagId: owner.id,
-              },
-              requester: { id: owner.id, kind: "bot" },
-              permissionSets: [],
-              resources: [],
-              runtimeActions: [],
-            },
+          const objectiveId =
+            options.objectiveId === undefined ? objective.id : options.objectiveId;
+          const { task } = await openTestTask(store, {
+            tagId: tag.id,
+            tagName: tag.name,
+            ...(objectiveId === null ? {} : { objectiveId }),
+            ...(options.contextPlan ? { contextPlan: options.contextPlan } : {}),
+            ...(options.inputArtifacts
+              ? { trigger: { inputArtifacts: options.inputArtifacts } }
+              : {}),
+            requestText: "Use recorded work",
           });
           const attempt = await store.createTaskAttempt({
-            taskId: assignment.taskId,
+            taskId: task.id,
             attemptNumber: 1,
             workerProfile: { id: "test", revision: "1" },
             workerSnapshot: {
               workerHostId: tag.id === researcher.id ? "host-a" : "host-b",
               connectionGeneration: 1,
             },
-            startedAt: at,
+            startedAt: new Date().toISOString(),
           });
-          callers.set(token, { ...assignment, attemptCount: 1 });
+          callers.set(token, { kind: "surface", taskId: task.id, attemptId: attempt.id });
           attempts.set(token, attempt.id);
-          return assignment;
+          return task;
         }
         const source = await worker("writer", researcher);
         const consumer = await worker("reader");
@@ -162,9 +151,6 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           authorizeArtifactSource: (
             ...args: Parameters<ObjectiveController["authorizeArtifactSource"]>
           ) => coordinator.authorizeArtifactSource(...args),
-          artifactDiscoveryTaskIds: (
-            ...args: Parameters<ObjectiveController["artifactDiscoveryTaskIds"]>
-          ) => coordinator.artifactDiscoveryTaskIds(...args),
         };
         const signed: ArtifactTransferGrantClaims[] = [];
         const grants = {
@@ -318,7 +304,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           ],
         });
         expect(f.signed[0]).toMatchObject({
-          taskId: f.consumer.taskId,
+          taskId: f.consumer.id,
           attemptId: f.attempts.get("reader"),
           recipientWorkerHostId: "host-b",
           recipientConnectionGeneration: 1,
@@ -510,7 +496,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             sizeBytes: bytes.length,
           }),
         ).toEqual([]);
-        const [writerAttempt] = await f.store.listTaskAttempts(f.source.taskId);
+        const [writerAttempt] = await f.store.listTaskAttempts(f.source.id);
         if (!writerAttempt) throw new Error("Missing writer Attempt");
         expect(
           await f.store.hasArtifactUpload({

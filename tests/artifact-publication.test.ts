@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { AdmitTaskAssignmentInput, Tag } from "../packages/core/src/index.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
+import { openTestTask } from "./support/artifact-producer.js";
 import { captureTestArtifact } from "./support/captured-artifact.js";
 import { createIsolatedPostgresDatabase } from "./support/database.js";
 
@@ -29,10 +29,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         await migrateDatabase({ url });
         const store = new DrizzleStore({ url });
         await store.connect();
-        const other = new DrizzleStore({ url });
-        await other.connect();
         cleanups.push(async () => {
-          await other.disconnect();
           await store.disconnect();
           await isolated?.cleanup();
           await rm(directory, { recursive: true, force: true });
@@ -40,7 +37,6 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         const producerOwner = await store.createTag({ name: `producer-owner-${randomUUID()}` });
         const producerWorker = await store.createTag({ name: `producer-worker-${randomUUID()}` });
         const consumerOwner = await store.createTag({ name: `consumer-owner-${randomUUID()}` });
-        const consumerWorker = await store.createTag({ name: `consumer-worker-${randomUUID()}` });
         const outsider = await store.createTag({ name: `outsider-${randomUUID()}` });
         const sourceObjective = await store.createObjective({
           id: randomUUID(),
@@ -54,122 +50,88 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           outcome: "Consume the reviewed interface",
           budgetLimitMinor: 100,
         });
-        const sourceTeam = await store.createTeam(
-          {
-            id: randomUUID(),
-            objectiveId: sourceObjective.id,
-            name: "Producer",
-            leadTagId: producerOwner.id,
-            memberTagIds: [producerWorker.id],
-            maxConcurrency: 1,
-          },
-          producerOwner.id,
-        );
-        const destinationTeam = await store.createTeam(
-          {
-            id: randomUUID(),
-            objectiveId: destinationObjective.id,
-            name: "Consumer",
-            leadTagId: consumerOwner.id,
-            memberTagIds: [consumerWorker.id],
-            maxConcurrency: 1,
-          },
-          consumerOwner.id,
-        );
-        const make = (
-          objectiveId: string,
-          teamId: string,
-          requester: Tag,
-          assignee: Tag,
-          extra: Partial<AdmitTaskAssignmentInput> = {},
-        ): AdmitTaskAssignmentInput => ({
-          taskId: randomUUID(),
-          objectiveId,
-          teamId,
-          requestedByTagId: requester.id,
-          assignedTagId: assignee.id,
-          instruction: "Produce or consume the interface",
-          acceptanceCriteria: ["Evidence is reviewable"],
-          execution: {},
-          authorizationSnapshot: {
-            version: 4,
-            capturedAt: new Date().toISOString(),
-            tag: { id: assignee.id, name: assignee.name },
-            origin: { kind: "internal", objectiveId, requestedByTagId: requester.id },
-            requester: { id: requester.id, kind: "bot" },
-            permissionSets: [],
-            resources: [],
-            runtimeActions: [],
-          },
-          contextPlan: { version: 7, capturedAt: new Date().toISOString(), sets: [] },
-          workspacePlan: { version: 1, status: "none" },
-          ...extra,
-        });
-        async function acceptedSource(seed: string) {
-          const source = await store.admitTaskAssignment(
-            make(sourceObjective.id, sourceTeam.id, producerOwner, producerWorker, {
-              instruction: `Produce interface ${seed}`,
-            }),
-          );
-          await store.claimTaskAssignment({ taskId: source.taskId, leaseOwner: seed });
+        /** A work Session turn of the producer, with a running Attempt that captured an artifact. */
+        async function producerTurn(seed: string, objectiveId = sourceObjective.id) {
+          const { task } = await openTestTask(store, {
+            tagId: producerWorker.id,
+            tagName: producerWorker.name,
+            objectiveId,
+            requestText: `Produce interface ${seed}`,
+          });
           const attempt = await store.createTaskAttempt({
-            taskId: source.taskId,
+            taskId: task.id,
             attemptNumber: 1,
             workerProfile: { id: "test", revision: "1" },
             workerSnapshot: {},
             startedAt: new Date().toISOString(),
           });
-          const captured = await captureTestArtifact(store, source.taskId, {
-            attempt,
-            content: seed,
-          });
+          const captured = await captureTestArtifact(store, task.id, { attempt, content: seed });
           const entry = captured.entries[0];
           if (!entry) throw new Error("Missing captured entry");
-          const { digest, uri } = entry;
-          await store.settleTaskAssignment({
-            taskId: source.taskId,
-            leaseOwner: seed,
-            attemptCount: 1,
-            result: {
-              taskResult: {
-                artifacts: [{ artifactId: captured.id, paths: [entry.path] }],
-              },
-            },
+          return { task, attempt, captured, entry, paths: [entry.path] };
+        }
+        /** Completes the turn with the artifact in its Task result, as a finished Session does. */
+        async function complete(
+          turn: Awaited<ReturnType<typeof producerTurn>>,
+          paths = turn.paths,
+        ) {
+          await store.closeTaskAttempt({
+            attemptId: turn.attempt.id,
+            status: "completed",
+            endedAt: new Date().toISOString(),
           });
-          await store.reviewTaskAssignment(
-            source.taskId,
-            producerOwner.id,
-            true,
-            `Internal assessment ${seed}`,
-          );
-          return { source, attempt, digest, uri, artifactId: captured.id, paths: [entry.path] };
+          await store.closeTask({
+            taskId: turn.task.id,
+            status: "completed",
+            result: {
+              summary: "Produced the interface",
+              decisions: [],
+              changes: [],
+              unresolved: [],
+              findings: [],
+              references: [],
+              artifacts: [{ artifactId: turn.captured.id, paths: [...paths] }],
+            },
+            endedAt: new Date().toISOString(),
+          });
+        }
+        /** A completed producer turn whose artifact may be published. */
+        async function completedSource(seed: string) {
+          const turn = await producerTurn(seed);
+          await complete(turn);
+          return {
+            source: turn.task,
+            attempt: turn.attempt,
+            digest: turn.entry.digest,
+            uri: turn.entry.uri,
+            artifactId: turn.captured.id,
+            paths: turn.paths,
+          };
         }
         return {
           store,
-          other,
           producerOwner,
           producerWorker,
           consumerOwner,
-          consumerWorker,
           outsider,
           sourceObjective,
           destinationObjective,
-          sourceTeam,
-          destinationTeam,
-          make,
-          acceptedSource,
+          producerTurn,
+          complete,
+          completedSource,
         };
       }
 
-      it("requires both owners and freezes only approved provenance in the consumer", async () => {
+      it("requires both owners and shows the audience nothing of the source's internals", async () => {
         const f = await fixture();
-        const artifact = await f.acceptedSource("a");
+        const artifact = await f.completedSource("a");
         const publicationInput = {
           id: randomUUID(),
           artifactId: artifact.artifactId,
           paths: artifact.paths,
           audienceObjectiveIds: [f.destinationObjective.id],
         };
+        // Only the source Objective's owner may publish.
         await expect(
           f.store.approveArtifactPublication(publicationInput, {
             kind: "tag",
@@ -186,7 +148,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             tagId: f.producerOwner.id,
           }),
         ).toEqual(publication);
-        const conflicting = await f.acceptedSource("z");
+        const conflicting = await f.completedSource("z");
         await expect(
           f.store.approveArtifactPublication(
             { ...publicationInput, artifactId: conflicting.artifactId, paths: conflicting.paths },
@@ -205,30 +167,11 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             sourceObjectiveId: f.sourceObjective.id,
           }),
         ]);
-        expect(JSON.stringify(audience)).not.toContain(artifact.source.taskId);
-        expect(JSON.stringify(audience)).not.toContain("Internal assessment");
+        expect(JSON.stringify(audience)).not.toContain(artifact.source.id);
         expect(JSON.stringify(audience)).not.toContain("approvedBy");
         expect(JSON.stringify(audience)).not.toContain(f.producerOwner.id);
 
-        const selector = {
-          publicationApprovalId: publication.id,
-          artifactId: artifact.artifactId,
-          paths: artifact.paths,
-        };
-        const beforeConsent = f.make(
-          f.destinationObjective.id,
-          f.destinationTeam.id,
-          f.consumerOwner,
-          f.consumerWorker,
-          { inputArtifacts: [selector], maxCostMinor: 25 },
-        );
-        await expect(f.store.admitTaskAssignment(beforeConsent)).rejects.toMatchObject({
-          statusCode: 404,
-        });
-        expect(await f.store.getObjective(f.destinationObjective.id)).toMatchObject({
-          reservedMinor: 0,
-        });
-
+        // Only the audience Objective's owner may consent to consume.
         const consumptionInput = {
           id: randomUUID(),
           publicationApprovalId: publication.id,
@@ -244,75 +187,34 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           kind: "tag",
           tagId: f.consumerOwner.id,
         });
-        const admitted = await f.store.admitTaskAssignment(beforeConsent);
-        const frozen = (await f.store.findTaskById(admitted.taskId))?.trigger["inputArtifacts"];
-        expect(frozen).toEqual([
-          {
-            artifactId: artifact.artifactId,
-            path: artifact.paths[0],
-            sizeBytes: 1,
-            uri: artifact.uri,
-            digest: artifact.digest,
-            mediaType: "application/json",
-            provenance: {
-              taskId: artifact.source.taskId,
-              attemptId: artifact.attempt.id,
-              attemptCount: 1,
-              statusAtAdmission: "accepted",
-              reviewedByTagId: f.producerOwner.id,
-              sourceObjectiveId: f.sourceObjective.id,
-              publicationApproval: {
-                id: publication.id,
-                revision: 1,
-                approvedAt: publication.approvedAt,
-              },
-              consumptionApproval: {
-                id: consumption.id,
-                revision: 1,
-                approvedAt: consumption.approvedAt,
-              },
-            },
-          },
+        expect(consumption).toMatchObject({
+          publicationApprovalId: publication.id,
+          objectiveId: f.destinationObjective.id,
+          status: "available",
+          revision: 1,
+        });
+        expect(await f.store.listArtifactConsumptionApprovals(f.destinationObjective.id)).toEqual([
+          consumption,
         ]);
-        expect(JSON.stringify(frozen)).not.toContain("Internal assessment");
-        expect(JSON.stringify(frozen)).not.toContain("hidden");
       });
 
-      it("rejects unreviewed sources, wrong paths, and unnamed audiences", async () => {
+      it("rejects unfinished sources, wrong paths, and unnamed audiences", async () => {
         const f = await fixture();
-        const source = await f.store.admitTaskAssignment(
-          f.make(f.sourceObjective.id, f.sourceTeam.id, f.producerOwner, f.producerWorker),
-        );
-        await f.store.claimTaskAssignment({ taskId: source.taskId, leaseOwner: "unreviewed" });
-        const attempt = await f.store.createTaskAttempt({
-          taskId: source.taskId,
-          attemptNumber: 1,
-          workerProfile: { id: "test", revision: "1" },
-          workerSnapshot: {},
-          startedAt: new Date().toISOString(),
-        });
-        const captured = await captureTestArtifact(f.store, source.taskId, { attempt });
-        await f.store.settleTaskAssignment({
-          taskId: source.taskId,
-          leaseOwner: "unreviewed",
-          attemptCount: 1,
-          result: {
-            taskResult: { artifacts: [{ artifactId: captured.id, paths: ["output.json"] }] },
-          },
-        });
+        const turn = await f.producerTurn("unfinished");
         const approval = {
           id: randomUUID(),
-          artifactId: captured.id,
+          artifactId: turn.captured.id,
           paths: ["output.json"],
           audienceObjectiveIds: [f.destinationObjective.id],
         };
+        // The source Session's turn must have completed with the artifact in its result.
         await expect(
           f.store.approveArtifactPublication(approval, {
             kind: "tag",
             tagId: f.producerOwner.id,
           }),
         ).rejects.toMatchObject({ statusCode: 409 });
-        await f.store.reviewTaskAssignment(source.taskId, f.producerOwner.id, true, "Accepted");
+        await f.complete(turn);
         await expect(
           f.store.approveArtifactPublication(
             { ...approval, paths: ["missing.json"] },
@@ -323,6 +225,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           kind: "tag",
           tagId: f.producerOwner.id,
         });
+        // The source Objective is never its own audience.
         await expect(
           f.store.approveArtifactConsumption(
             {
@@ -335,9 +238,34 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         ).rejects.toMatchObject({ statusCode: 404 });
       });
 
-      it("withdraws revisioned approvals without altering existing pins and supports replacement", async () => {
+      it("refuses an artifact that is not from the source turn's final Attempt", async () => {
         const f = await fixture();
-        const first = await f.acceptedSource("b");
+        const turn = await f.producerTurn("superseded-attempt");
+        await f.complete(turn);
+        // A later Attempt of the same turn retires the captured one's standing.
+        await f.store.createTaskAttempt({
+          taskId: turn.task.id,
+          attemptNumber: 2,
+          workerProfile: { id: "test", revision: "1" },
+          workerSnapshot: {},
+          startedAt: new Date().toISOString(),
+        });
+        await expect(
+          f.store.approveArtifactPublication(
+            {
+              id: randomUUID(),
+              artifactId: turn.captured.id,
+              paths: turn.paths,
+              audienceObjectiveIds: [f.destinationObjective.id],
+            },
+            { kind: "tag", tagId: f.producerOwner.id },
+          ),
+        ).rejects.toMatchObject({ statusCode: 409 });
+      });
+
+      it("withdraws revisioned approvals idempotently, supports replacement, and audits both", async () => {
+        const f = await fixture();
+        const first = await f.completedSource("b");
         const publication = await f.store.approveArtifactPublication(
           {
             id: randomUUID(),
@@ -355,23 +283,6 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           },
           { kind: "tag", tagId: f.consumerOwner.id },
         );
-        const originalInput = f.make(
-          f.destinationObjective.id,
-          f.destinationTeam.id,
-          f.consumerOwner,
-          f.consumerWorker,
-          {
-            inputArtifacts: [
-              {
-                publicationApprovalId: publication.id,
-                artifactId: first.artifactId,
-                paths: first.paths,
-              },
-            ],
-          },
-        );
-        const original = await f.store.admitTaskAssignment(originalInput);
-        const originalTrigger = (await f.store.findTaskById(original.taskId))?.trigger;
         const withdrawnConsent = await f.store.withdrawArtifactConsumption(
           { id: consent.id, expectedRevision: 1 },
           { kind: "tag", tagId: f.consumerOwner.id },
@@ -383,13 +294,8 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             { kind: "tag", tagId: f.consumerOwner.id },
           ),
         ).toEqual(withdrawnConsent);
-        expect(await f.store.admitTaskAssignment(originalInput)).toEqual(original);
-        expect((await f.store.findTaskById(original.taskId))?.trigger).toEqual(originalTrigger);
-        await expect(
-          f.store.admitTaskAssignment({ ...originalInput, taskId: randomUUID() }),
-        ).rejects.toMatchObject({ statusCode: 404 });
 
-        const replacementArtifact = await f.acceptedSource("c");
+        const replacementArtifact = await f.completedSource("c");
         const replacement = await f.store.approveArtifactPublication(
           {
             id: randomUUID(),
@@ -400,67 +306,18 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           },
           { kind: "tag", tagId: f.producerOwner.id },
         );
-        await f.store.approveArtifactConsumption(
-          {
-            id: randomUUID(),
-            publicationApprovalId: replacement.id,
-            objectiveId: f.destinationObjective.id,
-          },
-          { kind: "tag", tagId: f.consumerOwner.id },
-        );
-        const replacementTask = await f.store.admitTaskAssignment(
-          f.make(
-            f.destinationObjective.id,
-            f.destinationTeam.id,
-            f.consumerOwner,
-            f.consumerWorker,
-            {
-              inputArtifacts: [
-                {
-                  publicationApprovalId: replacement.id,
-                  artifactId: replacementArtifact.artifactId,
-                  paths: replacementArtifact.paths,
-                },
-              ],
-            },
-          ),
-        );
+        expect(replacement.supersedesPublicationId).toBe(publication.id);
         expect(
-          (await f.store.findTaskById(replacementTask.taskId))?.trigger["inputArtifacts"],
-        ).toEqual([
-          expect.objectContaining({
-            digest: replacementArtifact.digest,
-            provenance: expect.objectContaining({
-              publicationApproval: expect.objectContaining({ id: replacement.id }),
-            }),
-          }),
-        ]);
-        expect((await f.store.findTaskById(original.taskId))?.trigger).toEqual(originalTrigger);
+          (await f.store.listArtifactPublicationsForObjective(f.destinationObjective.id)).map(
+            (view) => view.id,
+          ),
+        ).toContain(replacement.id);
 
         const withdrawn = await f.store.withdrawArtifactPublication(
           { id: replacement.id, expectedRevision: 1 },
           { kind: "tag", tagId: f.producerOwner.id },
         );
         expect(withdrawn).toMatchObject({ status: "withdrawn", revision: 2 });
-        await expect(
-          f.store.admitTaskAssignment(
-            f.make(
-              f.destinationObjective.id,
-              f.destinationTeam.id,
-              f.consumerOwner,
-              f.consumerWorker,
-              {
-                inputArtifacts: [
-                  {
-                    publicationApprovalId: replacement.id,
-                    artifactId: replacementArtifact.artifactId,
-                    paths: replacementArtifact.paths,
-                  },
-                ],
-              },
-            ),
-          ),
-        ).rejects.toMatchObject({ statusCode: 404 });
         expect(
           await f.store.listArtifactApprovalAuditEvents({
             approvalType: "publication",
@@ -470,64 +327,15 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           expect.objectContaining({ action: "approved", revision: 1 }),
           expect.objectContaining({ action: "withdrawn", revision: 2 }),
         ]);
-      });
-
-      it("serializes withdrawal against admission with either a durable pin or no Task", async () => {
-        const f = await fixture();
-        const artifact = await f.acceptedSource("d");
-        const publication = await f.store.approveArtifactPublication(
-          {
-            id: randomUUID(),
-            artifactId: artifact.artifactId,
-            paths: artifact.paths,
-            audienceObjectiveIds: [f.destinationObjective.id],
-          },
-          { kind: "tag", tagId: f.producerOwner.id },
-        );
-        await f.store.approveArtifactConsumption(
-          {
-            id: randomUUID(),
-            publicationApprovalId: publication.id,
-            objectiveId: f.destinationObjective.id,
-          },
-          { kind: "tag", tagId: f.consumerOwner.id },
-        );
-        const input = f.make(
-          f.destinationObjective.id,
-          f.destinationTeam.id,
-          f.consumerOwner,
-          f.consumerWorker,
-          {
-            inputArtifacts: [
-              {
-                publicationApprovalId: publication.id,
-                artifactId: artifact.artifactId,
-                paths: artifact.paths,
-              },
-            ],
-          },
-        );
-        const [withdrawal, admission] = await Promise.allSettled([
-          f.store.withdrawArtifactPublication(
-            { id: publication.id, expectedRevision: 1 },
-            { kind: "tag", tagId: f.producerOwner.id },
-          ),
-          f.other.admitTaskAssignment(input),
+        expect(
+          await f.store.listArtifactApprovalAuditEvents({
+            approvalType: "consumption",
+            approvalId: consent.id,
+          }),
+        ).toEqual([
+          expect.objectContaining({ action: "approved", revision: 1 }),
+          expect.objectContaining({ action: "withdrawn", revision: 2 }),
         ]);
-        expect(withdrawal.status).toBe("fulfilled");
-        if (admission.status === "fulfilled") {
-          expect((await f.store.findTaskById(input.taskId))?.trigger["inputArtifacts"]).toEqual([
-            expect.objectContaining({
-              digest: artifact.digest,
-              provenance: expect.objectContaining({
-                publicationApproval: expect.objectContaining({ id: publication.id }),
-              }),
-            }),
-          ]);
-        } else {
-          expect(admission.reason).toMatchObject({ statusCode: 404 });
-          expect(await f.store.findTaskById(input.taskId)).toBeUndefined();
-        }
       });
     },
   );

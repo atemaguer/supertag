@@ -8,11 +8,8 @@ import { hostVolumeResolver, parseVolumeCredentialSecret } from "../apps/cli/src
 import { loadServicesFile, readVolumeCredential } from "../apps/cli/src/supertag-yaml.js";
 import { workletVolumeResolver } from "../apps/cli/src/worker.js";
 import { dispatchedWorkspacePlan } from "../packages/control-plane/src/label-placement.js";
-import {
-  type TaskNamedWorkspacePlan,
-  type TaskWorkspaceVolume,
-  taskWorkspaceBranch,
-} from "../packages/core/src/index.js";
+import { workSessionBranch } from "../packages/control-plane/src/work-sessions.js";
+import type { TaskNamedWorkspacePlan, TaskWorkspaceVolume } from "../packages/core/src/index.js";
 import {
   type ResolutionContext,
   type TaskAttemptSpec,
@@ -72,7 +69,7 @@ describe("the Worker Host's Volume resolver", () => {
       version: 1,
       status: "workspace",
       workspace: "app",
-      branch: taskWorkspaceBranch("objective-1", taskId),
+      branch: workSessionBranch(taskId),
       delivery: "branch",
       mounts: [{ volume: "datasets", path: mountPath, access: "read-only", strategy: "copy" }],
       ...(volumes === undefined ? {} : { volumes }),

@@ -13,7 +13,7 @@ interface TagSpec {
   readonly workerHosts: readonly string[];
   readonly runsOn: readonly string[];
   readonly locations: readonly Record<string, unknown>[];
-  readonly acceptsMessagesFrom: readonly { tag: string; types: readonly string[] }[];
+  readonly acceptsMessagesFrom: readonly string[];
 }
 
 const header = (kind: string, name: string) =>
@@ -53,9 +53,7 @@ const builder = `${header("Tag", "builder")}spec:
 
 const reviewer = `${header("Tag", "reviewer")}spec:
   roles: [Engineer]
-  acceptsMessagesFrom:
-    - tag: builder
-      types: [message]
+  acceptsMessagesFrom: [builder]
 `;
 
 const organization = [sets, role(), builder, reviewer].join("---\n");

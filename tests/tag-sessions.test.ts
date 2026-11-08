@@ -534,9 +534,13 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       await expect(f.call("read_objective", {}, alice.caller)).rejects.toMatchObject({
         statusCode: 404,
       });
+      // A conversation reads Objectives and Sessions; it never changes an Objective's own work.
       await expect(
-        f.call("list_tasks", { objectiveId: shipped.id }, alice.caller),
-      ).rejects.toMatchObject({ statusCode: 404 });
+        f.call("update_objective", { objectiveId: shipped.id, status: "completed" }, alice.caller),
+      ).rejects.toMatchObject({
+        statusCode: 403,
+        message: "A conversation turn cannot use this tool",
+      });
     });
 
     it("hides an operator Objective that notifies a private Session from other people", async () => {

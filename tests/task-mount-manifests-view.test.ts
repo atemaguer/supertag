@@ -23,46 +23,87 @@ it("carries each Attempt's recorded mount manifests on the Task view, listing th
   await store.connect();
   cleanups.push(() => store.disconnect());
   const owner = await store.createTag({ name: "Owner" });
-  const objective = await store.createObjective({
-    id: randomUUID(),
-    ownerTagId: owner.id,
-    outcome: "Train on datasets",
+  const account = await store.saveSurfaceAccount({
+    provider: "slack",
+    externalAccountId: randomUUID(),
+    displayName: "Slack",
+    authMethod: "test",
+    credentialId: "test",
+    status: "connected",
+    configuration: {},
+    verifiedAt: at,
   });
-  const team = await store.createTeam(
-    {
-      id: randomUUID(),
-      objectiveId: objective.id,
-      name: "Data",
-      leadTagId: owner.id,
-      memberTagIds: [],
-      maxConcurrency: 1,
+  const route = await store.addTagRoute({
+    tagId: owner.id,
+    surfaceAccountId: account.id,
+    scope: "channel:data",
+  });
+  const authorization = {
+    version: 5,
+    capturedAt: at,
+    tag: { id: owner.id, name: owner.name },
+    origin: {
+      provider: "slack",
+      surfaceAccountId: account.id,
+      tagRouteId: route.id,
+      scope: "channel:data",
     },
-    owner.id,
-  );
-  const assignment = await store.admitTaskAssignment({
-    taskId: randomUUID(),
-    teamId: team.id,
-    objectiveId: objective.id,
-    requestedByTagId: owner.id,
-    assignedTagId: owner.id,
-    instruction: "Train",
-    acceptanceCriteria: ["Done"],
+    requester: { id: "human", kind: "user" },
+    roles: [],
+    permissionSets: [],
+    resources: [],
+    runtimeActions: [],
+  } as const;
+  const contextPlan = { version: 7, capturedAt: at, sets: [] } as const;
+  const event = {
+    eventId: randomUUID(),
+    logicalEventId: randomUUID(),
+    provider: "slack",
+    externalAccountId: account.externalAccountId,
+    kind: "message",
+    scope: "channel:data",
+    sessionKey: "conversation",
+    actor: { id: "human", kind: "user" },
+    text: "Train on the datasets",
+    occurredAt: at,
+    callback: {
+      provider: "slack",
+      mode: "slack_thread",
+      threadKey: "conversation",
+      target: { channelId: "data", threadTs: "conversation" },
+    },
+    source: {},
+    metadata: {},
+  } as const;
+  const admitted = await store.admitInboundEvent({
+    surfaceAccountId: account.id,
+    tagRouteId: route.id,
+    tagId: owner.id,
+    authorization,
+    contextPlan,
+    event,
+  });
+  const session = await store.openSession({
+    tagId: owner.id,
+    sessionKey: "conversation",
+    origin: {},
+    at,
+  });
+  const opened = await store.openTask({
+    inboundEventId: admitted.work.id,
+    tagId: owner.id,
+    sessionId: session.id,
     execution: {},
+    actor: event.actor,
+    trigger: {},
     workspacePlan: { version: 1, status: "none" },
-    contextPlan: { version: 7, capturedAt: at, sets: [] },
-    authorizationSnapshot: {
-      version: 4,
-      capturedAt: at,
-      tag: { id: owner.id, name: owner.name },
-      origin: { kind: "internal", objectiveId: objective.id, requestedByTagId: owner.id },
-      requester: { id: owner.id, kind: "bot" },
-      permissionSets: [],
-      resources: [],
-      runtimeActions: [],
-    },
+    sessionHistory: [],
+    authorizationSnapshot: authorization,
+    contextPlan,
+    createdAt: at,
   });
   const attempt = await store.createTaskAttempt({
-    taskId: assignment.taskId,
+    taskId: opened.id,
     attemptNumber: 1,
     workerProfile: { id: "default", revision: "1" },
     workerSnapshot: {},
@@ -86,7 +127,7 @@ it("carries each Attempt's recorded mount manifests on the Task view, listing th
     copiedAt: at,
     objects,
   };
-  await store.recordTaskAttemptMountManifests(assignment.taskId, attempt.id, [manifest]);
+  await store.recordTaskAttemptMountManifests(opened.id, attempt.id, [manifest]);
   const liveMount = {
     volume: "live-data",
     source: "s3://datasets/prefix/",
@@ -96,8 +137,8 @@ it("carries each Attempt's recorded mount manifests on the Task view, listing th
     access: "read-only" as const,
     attachedAt: "2026-10-06T14:00:00.000Z",
   };
-  await store.recordTaskAttemptLiveMounts(assignment.taskId, attempt.id, [liveMount]);
-  const task = await store.findTaskById(assignment.taskId);
+  await store.recordTaskAttemptLiveMounts(opened.id, attempt.id, [liveMount]);
+  const task = await store.findTaskById(opened.id);
   if (!task) throw new Error("Missing Task");
   const view = await taskResourceFromStore(store, task);
   expect(view.status.attempts?.[0]?.liveMounts).toEqual([liveMount]);

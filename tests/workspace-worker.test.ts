@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type TaskNamedWorkspacePlan, taskWorkspaceBranch } from "../packages/core/src/index.js";
+import { workSessionBranch } from "../packages/control-plane/src/work-sessions.js";
+import type { TaskNamedWorkspacePlan } from "../packages/core/src/index.js";
 import { createClaudeCodeWorker } from "../packages/runtime/harnesses/claude-code/src/index.js";
 import { createCodexWorker } from "../packages/runtime/harnesses/codex/src/index.js";
 import { createCursorWorker } from "../packages/runtime/harnesses/cursor/src/index.js";
@@ -65,7 +66,7 @@ describe("Workers on in-place Workspace worktrees", () => {
     version: 1,
     status: "workspace",
     workspace: "app",
-    branch: taskWorkspaceBranch("objective-1", "task-1"),
+    branch: workSessionBranch("task-1"),
     delivery,
   });
 
@@ -327,7 +328,7 @@ describe("Workers on in-place Workspace worktrees", () => {
         event.type === "artifact.created",
     );
     expect(created?.artifact).toMatchObject({
-      name: "supertag-objective-1-task-1.patch",
+      name: "supertag-session-task1.patch",
       mediaType: "text/x-diff",
     });
     const patch = new TextDecoder().decode(await store.get(created?.artifact as never));
@@ -501,9 +502,7 @@ describe("Workers on in-place Workspace worktrees", () => {
         harness === "codex" ? createCodexWorker(options) : createClaudeCodeWorker(options);
       expect((await worker.describe()).maxConcurrency).toBe(2);
       const spec = (taskId: string) => ({
-        ...attemptSpec(harness, { ...plan(), branch: taskWorkspaceBranch("objective-1", taskId) }, [
-          "files:write",
-        ]),
+        ...attemptSpec(harness, { ...plan(), branch: workSessionBranch(taskId) }, ["files:write"]),
         taskId,
         attemptId: `${taskId}-attempt`,
       });
@@ -518,9 +517,9 @@ describe("Workers on in-place Workspace worktrees", () => {
       ]);
       expect(new Set(seen).size).toBe(2);
       for (const taskId of ["task-a", "task-b"])
-        expect(
-          git(checkout, "show", `${taskWorkspaceBranch("objective-1", taskId)}:attempt.txt`),
-        ).toMatch(/^[12]$/u);
+        expect(git(checkout, "show", `${workSessionBranch(taskId)}:attempt.txt`)).toMatch(
+          /^[12]$/u,
+        );
     });
 
   it("runs a Mailbox Task on a repository that tracks a relative symbolic link", async () => {
@@ -538,7 +537,7 @@ describe("Workers on in-place Workspace worktrees", () => {
       yield { type: "output.message" as const, text: "Assessed the message." };
     };
     const taskId = "message:7a1d5a1c-0000-4000-8000-000000000001";
-    const mailboxPlan = { ...plan(), branch: taskWorkspaceBranch("objective-1", taskId) };
+    const mailboxPlan = { ...plan(), branch: workSessionBranch(taskId) };
     const worker = createClaudeCodeWorker({
       workspace: fallback,
       workspaceResolvers: resolvers(),

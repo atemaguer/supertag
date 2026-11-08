@@ -3,7 +3,6 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import * as core from "../packages/supertag-ai/src/core.js";
 import * as modal from "../packages/supertag-ai/src/environments/modal.js";
 import * as sdk from "../packages/supertag-ai/src/index.js";
-import * as messaging from "../packages/supertag-ai/src/messaging.js";
 import * as testing from "../packages/supertag-ai/src/testing.js";
 import * as worker from "../packages/supertag-ai/src/worker.js";
 
@@ -69,32 +68,11 @@ describe("supertag-ai public API", () => {
     );
     expect(sdk).not.toHaveProperty("ModalExecutionEnvironmentProvider");
   });
-  it("exposes Tag messaging on its own experimental subpath", () => {
-    expect(messaging).toHaveProperty("TagMailboxClient");
-    expect(messaging.TAG_MAILBOX_MAX_OUTSTANDING).toBe(100);
-    expect(messaging.OBJECTIVE_STATUSES).toContain("completed");
-    expect(messaging.WORKSTREAM_POST_TYPES).toEqual([
-      "note",
-      "question",
-      "blocker",
-      "evidence",
-      "decision",
-    ]);
-    expect(messaging.WORKSTREAM_POST_MAX_TO).toBe(20);
-    expect(messaging).not.toHaveProperty("WORKSTREAM_STATUSES");
-    for (const removed of [
-      "createWorkstream",
-      "updateWorkstream",
-      "updateWorkstreamStatus",
-      "workstreamMessages",
-    ])
-      expect(messaging.TagMailboxClient.prototype).not.toHaveProperty(removed);
-    expect(messaging.TagMailboxClient.prototype).toHaveProperty("postWorkstream");
-    expect(messaging.TagMailboxClient.prototype).toHaveProperty("history");
-    expect(messaging.TagMailboxClient.prototype).toHaveProperty("workstreamPosts");
-    expect(messaging.TagMailboxClient.prototype).toHaveProperty("createObjective");
-    expect(messaging.TAG_MESSAGE_TYPES).toContain("delegation.requested");
-    expect(sdk).not.toHaveProperty("TagMailboxClient");
+  it("publishes no Tag messaging transport of its own", async () => {
+    // Mailbox messages are turns of a Tag's inbox Session; no package entry point sends them.
+    await expect(import("../packages/supertag-ai/src/messaging.js")).rejects.toThrow();
+    for (const name of ["TagMailboxClient", "TAG_MESSAGE_TYPES", "WORKSTREAM_POST_TYPES"])
+      expect(sdk).not.toHaveProperty(name);
   });
   it("keeps the default entry point focused on the Beta SDK kernel", () => {
     expect(sdk).toHaveProperty("createWorker");

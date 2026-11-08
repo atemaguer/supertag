@@ -5,11 +5,8 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  type TagMcpGrant,
-  type TaskNamedWorkspacePlan,
-  taskWorkspaceBranch,
-} from "../packages/core/src/index.js";
+import { workSessionBranch } from "../packages/control-plane/src/work-sessions.js";
+import type { TagMcpGrant, TaskNamedWorkspacePlan } from "../packages/core/src/index.js";
 import { createCodexWorker } from "../packages/runtime/harnesses/codex/src/index.js";
 import {
   HttpMcpToolProvider,
@@ -73,7 +70,7 @@ describe("Workspace MCP servers from the Task's base commit", () => {
     version: 1,
     status: "workspace",
     workspace: "app",
-    branch: taskWorkspaceBranch("objective-1", "task-1"),
+    branch: workSessionBranch("task-1"),
     delivery: "branch",
     mcp: ["local"],
     ...overrides,
@@ -272,7 +269,7 @@ function attemptSpec(grants: readonly TagMcpGrant[], runtimeActions: string[]): 
       version: 1,
       status: "workspace",
       workspace: "app",
-      branch: taskWorkspaceBranch("objective-1", "task-1"),
+      branch: workSessionBranch("task-1"),
       delivery: "branch",
       mcp: ["local"],
     },

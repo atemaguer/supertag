@@ -1,18 +1,21 @@
 # An ongoing support organization
 
 This example maintains response policies as support incidents arrive. A **Tag** is a persistent AI
-identity with its own responsibilities and permissions. Its **Role** describes its responsibility, and a **Task** records each piece of assigned
-work. A manager Tag reviews proposals from an analyst Tag and applies them to a small external
-policy service. Duplicate incident reports reuse the same Task and provider operation.
+identity with its own responsibilities and permissions. Its **Role** describes its responsibility,
+and a **Session** is one conversation it holds; a **Task** is one turn of a Session. A manager Tag
+reviews proposals from an analyst Tag and applies them to a small external policy service.
+Duplicate incident reports reuse the same work Session and provider operation.
 
 The manager runs through Claude Code; the analyst runs through Codex. Each has a separate
 **Worker Host** registration and a **Worklet**, which supervises execution. The initial layout
 uses two processes on your computer, your existing CLI subscriptions, and local tool execution.
-The **Control Plane** stores organizational state. A **Team** groups both Tags under the manager,
-and an **Objective** records the outcome they maintain. Every Team has one channel, its
-**Workstream**, whose ID is the Team ID. Incident observations arrive on the channel of a second
-Team, `support-observations`, which the manager leads. Each proposal becomes an **artifact**, an immutable capture of its output. The policy
-service records each applied change in a durable receipt that can be inspected later.
+The **Control Plane** stores organizational state. A **Team** is a flat list of Tags that may give
+each other work, and an **Objective** records the outcome they maintain. The Objective is the
+manager's own conversation: incident observations arrive in it as operator messages, and the
+manager gives each proposal to the analyst with `start_session`, naming the analyst Tag. That work
+Session reports back as a later turn of the same conversation. Each proposal becomes an
+**artifact**, an immutable capture of its output. The policy service records each applied change in
+a durable receipt that can be inspected later.
 
 ```mermaid
 sequenceDiagram
@@ -21,19 +24,18 @@ sequenceDiagram
     participant Manager as Claude manager / Host A
     participant Analyst as Codex analyst / Host B
     participant Policy as External policy service
-    User->>CP: Publish incident observations
-    CP->>Manager: Resume waiting Task
-    Manager->>CP: Read a page; assign up to two proposals
-    Manager->>CP: Wait and release execution capacity
-    CP->>Analyst: Execute proposal Task
-    Analyst->>CP: Capture policy.json and submit
-    CP->>Manager: Resume for review
-    Manager->>CP: Read exact artifact; accept Task
+    User->>CP: Message the Objective with incident observations
+    CP->>Manager: Deliver the message as the next turn
+    Manager->>CP: start_session for up to two proposals, then end the turn
+    CP->>Analyst: Run the proposal work Session
+    Analyst->>CP: Capture policy.json and reply
+    CP->>Manager: Deliver the report as the next turn
+    Manager->>CP: Read the exact artifact and review it
     Manager->>Policy: Inspect operation; apply at expected revision
     Policy--xManager: Commit receipt but lose response
     Manager->>Policy: Inspect the same operation ID
     Policy-->>Manager: Return durable receipt
-    Manager->>CP: Record receipt and advance processed cursor
+    Manager->>CP: Record the receipt in its reply
 ```
 
 ## Run it
@@ -47,10 +49,11 @@ npm install
 npm run demo
 ```
 
-The demo starts the Control Plane, policy service, and both Workers. After the manager waits for
-work, it kills and restarts the Control Plane process, then sends five observations for three
+The demo starts the Control Plane, policy service, and both Workers. After the manager's first turn
+ends, it kills and restarts the Control Plane process, then sends five observations for three
 incidents. The policy service deliberately drops its first successful write response. The verifier
-checks accepted Tasks, captured artifact bytes, provider receipts, the final observation cursor, and the manager’s return to a durable wait.
+checks the reported work Sessions, captured artifact bytes, provider receipts, and that the manager
+ended its turn with nothing left to do.
 The demo stops its processes and preserves private state and `verification.json` afterward.
 
 State defaults to `~/.supertag/examples/ongoing-support`. Use a fresh directory for another demo:
@@ -76,7 +79,7 @@ npm run verify
 ```
 
 Reuse the delivery ID when retrying an observation. A different delivery ID about the same incident
-still reuses that incident's Task. `verify` requires all observed incidents to have been applied;
+still reuses that incident's work Session. `verify` requires all observed incidents to have been applied;
 `status` is useful while work is still pending. For a clean pause, wait until status shows the manager waiting, then stop the foreground process
 with Ctrl-C. Start it again with the same state directory to reconnect Workers and resume that wait.
 Stopping during active execution can leave interrupted work requiring inspection; shutdown does
@@ -84,24 +87,24 @@ not guarantee automatic replay of external actions. A leftover
 `run.lock` after a supervisor crash must only be removed after confirming its processes have stopped.
 Do not run multiple supervisors against the same directory.
 
-`status` includes the existing Objective overview (Tasks, review, execution, and reported usage),
-provider receipts, and accepted Tasks still awaiting recorded application. A missing usage report
+`status` includes the existing Objective overview (its conversation, Sessions, execution, and
+reported usage), provider receipts, and reviewed proposals still awaiting recorded application. A missing usage report
 means unknown usage, not free execution. The verifier handles up to 99 observations; the manager
-reads the backlog in pages of two. Extend the verifier and per-incident retention before using this
+starts at most two proposal Sessions at a time. Extend the verifier and per-incident retention before using this
 as a high-volume application.
 
 ## Adapt the behavior
 
 Edit `roles/manager.md` and `roles/analyst.md` before creating a new organization.
-`resources.mjs` creates the Roles, allowed runtime actions, Tags, host bindings, and both Teams
-through the public API. These are ordinary application choices, not special built-in
+`resources.mjs` creates the Roles, allowed runtime actions, Tags, host bindings, the Team, the
+Mailbox grants, and the Objective through the public API. These are ordinary application choices, not special built-in
 SuperTag roles. The example keeps one proposal per incident; conflicting external policy changes
 require reassessment by an operator rather than automatic revision changes.
 
 Native Attempts have a three-minute deadline; Claude also has a 32-turn bound. Set
 `SUPPORT_CLAUDE_MODEL` or `SUPPORT_CODEX_MODEL` to select available models. The two-proposal limit is
-Role policy in native mode, enforced by application code in reference mode; Team concurrency is
-separately enforced by SuperTag. Allocation units are not a provider spending limit. Subscription
+Role policy in native mode, enforced by application code in reference mode; the Team's
+`maxConcurrency` is separately enforced by SuperTag. Allocation units are not a provider spending limit. Subscription
 quotas still apply. The demo stops waiting after ten minutes of backlog processing.
 
 ## What the external service guarantees

@@ -74,19 +74,20 @@ describe("Task findings", () => {
     expect(grouped.medium).toEqual([]);
     expect(grouped.low.map((finding) => finding.id)).toEqual(["F1"]);
     expect(orderedTaskFindings(findings).map((finding) => finding.id)).toEqual(["F2", "F3", "F1"]);
-    expect(storedTaskFindings({ text: "Done", taskResult: { findings } })).toHaveLength(3);
-    expect(storedTaskFindings({ summary: "Done", findings })).toEqual([]);
-    expect(storedTaskFindings({ findings, taskResult: { findings: [] } })).toEqual([]);
-    expect(storedTaskFindings({ taskResult: { findings: [findings[0], { bad: true }] } })).toEqual([
+    expect(storedTaskFindings({ summary: "Done", findings })).toHaveLength(3);
+    expect(storedTaskFindings({ summary: "Done", findings: [] })).toEqual([]);
+    expect(storedTaskFindings({ findings: [findings[0], { bad: true }] })).toEqual([
       {
         id: "F1",
         severity: "high",
         summary: "Stored Task findings are invalid; inspect and repair the Task result.",
       },
     ]);
-    expect(storedTaskFindings({ taskResult: null })[0]?.severity).toBe("high");
-    expect(storedTaskFindings({ text: "Done" })).toEqual([]);
+    // A result that is not an object at all cannot be read as "no findings".
+    expect(storedTaskFindings("not a result")[0]?.severity).toBe("high");
+    expect(storedTaskFindings({ summary: "Done" })).toEqual([]);
     expect(storedTaskFindings(null)).toEqual([]);
+    expect(storedTaskFindings(undefined)).toEqual([]);
     expect(taskFindingLine(findings[1])).toBe("F2 [high] Bypass. (a.ts:1)");
   });
 
@@ -170,9 +171,7 @@ describe("Task findings", () => {
   it("reads corrupt stored findings as unreadable for display", () => {
     expect(
       storedTaskFindingsBySeverity({
-        taskResult: {
-          findings: [{ id: "F1", severity: "high", summary: "Bug.", "x\u001b[2J": 1 }],
-        },
+        findings: [{ id: "F1", severity: "high", summary: "Bug.", "x\u001b[2J": 1 }],
       }),
     ).toEqual({
       unreadable:
@@ -180,7 +179,7 @@ describe("Task findings", () => {
     });
     expect(
       storedTaskFindingsBySeverity({
-        taskResult: { findings: [{ id: "F1", severity: "high", summary: "Bug." }] },
+        findings: [{ id: "F1", severity: "high", summary: "Bug." }],
       }),
     ).toEqual({
       high: [{ id: "F1", severity: "high", summary: "Bug." }],
@@ -196,14 +195,12 @@ describe("Task findings", () => {
       [{ id: "F1", severity: "high", summary: "Bug.", taskId: "other" }],
       [{ severity: "high", summary: "Missing id." }],
     ]) {
-      expect(storedTaskFindings({ text: "Done", taskResult: { findings } })).toEqual([
+      expect(storedTaskFindings({ summary: "Done", findings })).toEqual([
         expect.objectContaining({ id: "F1", severity: "high" }),
       ]);
-      expect(storedTaskFindingsBySeverity({ text: "Done", taskResult: { findings } })).toEqual({
+      expect(storedTaskFindingsBySeverity({ summary: "Done", findings })).toEqual({
         unreadable: expect.stringMatching(/^Stored Task result findings are invalid/),
       });
-      // Findings outside taskResult are never trusted.
-      expect(storedTaskFindings({ summary: "Done", findings })).toEqual([]);
     }
   });
 });

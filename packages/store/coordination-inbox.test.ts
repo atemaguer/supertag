@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { objectiveSessionKey } from "@supertag/core";
 import Database from "better-sqlite3";
 import { eq } from "drizzle-orm";
 import { drizzle as drizzleSqlite } from "drizzle-orm/better-sqlite3";
@@ -9,13 +10,21 @@ import { drizzle as drizzlePostgresql } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIsolatedPostgresDatabase } from "../../tests/support/database.js";
-import type { AdmitTaskAssignmentInput } from "../core/src/index.js";
 import { COORDINATION_INBOX_CANDIDATE_SCAN_LIMIT } from "./src/coordination-inbox-store.js";
 import { DrizzleStore, migrateDatabase } from "./src/index.js";
 import * as postgresqlSchema from "./src/schema/postgresql.js";
 import * as sqliteSchema from "./src/schema/sqlite.js";
 
 const postgres = process.env["SUPERTAG_POSTGRES_URL"];
+const spentState = (limitMinor: number, spentMinor: number, at: string) => ({
+  reportedSpend: {
+    amountMinor: spentMinor,
+    currency: "USD",
+    unknownAttemptIds: [],
+    observedAt: at,
+  },
+  budgetExhausted: { limitMinor, spentMinor, at },
+});
 
 for (const dialect of ["sqlite", "postgresql"] as const) {
   describe.skipIf(dialect === "postgresql" && !postgres)(
@@ -46,48 +55,149 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           await rm(directory, { recursive: true, force: true });
         });
         const owner = await store.createTag({ name: `owner-${randomUUID()}` });
-        const lead = await store.createTag({ name: `lead-${randomUUID()}` });
         const worker = await store.createTag({ name: `worker-${randomUUID()}` });
+        const team = await store.createTeam({
+          id: randomUUID(),
+          name: `Review Team ${randomUUID()}`,
+          memberTagIds: [owner.id, worker.id],
+          maxConcurrency: 1,
+        });
         const objective = await store.createObjective({
           id: randomUUID(),
           ownerTagId: owner.id,
           outcome: "Review pending Tasks",
-        });
-        const team = await store.createTeam({
-          id: randomUUID(),
-          objectiveId: objective.id,
-          name: "Review Team",
-          leadTagId: lead.id,
-          memberTagIds: [worker.id, owner.id],
-          maxConcurrency: 1,
-        });
-        const assignment = (
-          taskId: string,
-          extra: Partial<AdmitTaskAssignmentInput> = {},
-        ): AdmitTaskAssignmentInput => ({
-          taskId,
-          objectiveId: objective.id,
+          budgetCurrency: "USD",
+          budgetLimitMinor: 100,
           teamId: team.id,
-          requestedByTagId: owner.id,
-          assignedTagId: worker.id,
-          instruction: "secret instruction",
-          acceptanceCriteria: ["secret criterion"],
-          execution: {},
-          authorizationSnapshot: {
-            version: 4,
-            capturedAt: new Date().toISOString(),
-            tag: { id: worker.id, name: worker.name },
-            origin: { kind: "internal", objectiveId: objective.id, requestedByTagId: owner.id },
+        });
+        const account = await store.saveSurfaceAccount({
+          provider: "slack",
+          externalAccountId: randomUUID(),
+          displayName: "Slack",
+          authMethod: "test",
+          credentialId: "test",
+          status: "connected",
+          configuration: {},
+          verifiedAt: new Date().toISOString(),
+        });
+        const route = await store.addTagRoute({
+          tagId: owner.id,
+          surfaceAccountId: account.id,
+          scope: "channel:review",
+        });
+
+        /**
+         * One turn of a Session of an Objective: the Objective's own Session, or a work Session
+         * under it when `work` names one.
+         */
+        async function turn(
+          options: {
+            readonly objectiveId?: string;
+            readonly tagId?: string;
+            readonly work?: string;
+          } = {},
+        ) {
+          const objectiveId = options.objectiveId ?? objective.id;
+          const tagId = options.tagId ?? owner.id;
+          const tag = tagId === owner.id ? owner : worker;
+          const at = new Date().toISOString();
+          const ownerSession = await store.openSession({
+            tagId: owner.id,
+            sessionKey: objectiveSessionKey(objectiveId),
+            origin: {},
+            objectiveId,
+            at,
+          });
+          const session =
+            options.work === undefined
+              ? ownerSession
+              : await store.openSession({
+                  tagId,
+                  sessionKey: `work:${ownerSession.id}:${options.work}`,
+                  origin: {},
+                  parentSessionId: ownerSession.id,
+                  at,
+                });
+          const authorization = {
+            version: 5,
+            capturedAt: at,
+            tag: { id: tag.id, name: tag.name },
+            origin: {
+              tagRouteId: route.id,
+              surfaceAccountId: account.id,
+              provider: "slack",
+              scope: "channel:review",
+            },
             requester: { id: owner.id, kind: "bot" },
             permissionSets: [],
             resources: [],
             runtimeActions: [],
-          },
-          contextPlan: { version: 7, capturedAt: new Date().toISOString(), sets: [] },
-          workspacePlan: { version: 1, status: "none" },
-          ...extra,
-        });
-        return { url, store, reopened, owner, lead, worker, objective, team, assignment };
+          } as const;
+          const eventId = randomUUID();
+          const admitted = await store.admitInboundEvent({
+            surfaceAccountId: account.id,
+            tagRouteId: route.id,
+            tagId,
+            authorization,
+            contextPlan: { version: 7, capturedAt: at, sets: [] },
+            event: {
+              eventId,
+              logicalEventId: eventId,
+              provider: "slack",
+              externalAccountId: account.externalAccountId,
+              kind: "message",
+              scope: "channel:review",
+              sessionKey: session.sessionKey,
+              actor: { id: tag.id, kind: "bot" },
+              internal:
+                options.work === undefined
+                  ? { kind: "delivery", from: { kind: "supertag" }, reason: "objective_start" }
+                  : {
+                      kind: "work_session",
+                      startedByTaskId: eventId,
+                      parentSessionId: ownerSession.id,
+                      title: options.work,
+                    },
+              text: "secret instruction",
+              occurredAt: at,
+              callback: {
+                provider: "slack",
+                mode: "slack_thread",
+                threadKey: "review",
+                target: { channelId: "review", threadTs: "review" },
+              },
+              source: {},
+              metadata: {},
+            },
+          });
+          const task = await store.openTask({
+            inboundEventId: admitted.work.id,
+            tagId,
+            sessionId: session.id,
+            execution: {},
+            actor: { id: tag.id, kind: "bot" },
+            trigger: { origin: "objective" },
+            requestText: "secret instruction",
+            workspacePlan: { version: 1, status: "none" },
+            sessionHistory: [],
+            authorizationSnapshot: authorization,
+            contextPlan: { version: 7, capturedAt: at, sets: [] },
+            createdAt: at,
+          });
+          return { task, inboundEventId: admitted.work.id, sessionId: session.id };
+        }
+
+        /** The turn ends by asking the operator a question and waiting on the answer. */
+        async function ask(taskId: string, question: string) {
+          await store.startTask({ taskId, startedAt: new Date().toISOString() });
+          await store.closeTask({
+            taskId,
+            status: "completed",
+            endedAt: new Date().toISOString(),
+            outcome: { question },
+          });
+        }
+        return { url, store, reopened, owner, worker, objective, team, turn, ask, account, route };
       }
 
       /** A second connection for seeding history rows in bulk, bypassing the store's rules. */
@@ -110,488 +220,105 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         return { db: drizzlePostgresql(pool), tables: postgresqlSchema, close: () => pool.end() };
       }
 
-      it("projects Objective review and completion without exposing summaries", async () => {
+      it("projects an Objective's question and clears it when the Objective takes a later turn", async () => {
         const f = await fixture();
-        const review = await f.store.updateObjectiveStatus(
-          f.objective.id,
+        const asking = await f.turn();
+        await f.ask(asking.task.id, "Which export format?");
+
+        const page = await f.reopened.readCoordinationInbox({ kind: "question" });
+        expect(page.projectionVersion).toBe(8);
+        expect(page.items).toMatchObject([
           {
-            status: "ready_for_review",
-            expectedRevision: f.objective.revision,
-            completionSummary: "private review summary",
-          },
-          f.owner.id,
-        );
-        const reviewItems = (
-          await f.reopened.readCoordinationInbox({ kind: "objective_ready_for_review" })
-        ).items;
-        expect(reviewItems).toMatchObject([
-          {
-            key: `objective_ready_for_review:${f.objective.id}`,
+            key: `question:${asking.task.id}`,
+            kind: "question",
+            objectiveId: f.objective.id,
             operatorEligible: true,
-            commands: [`supertag describe objective ${f.objective.id}`],
-            redaction: { level: "metadata_only", omitted: ["outcome", "completionSummary"] },
+            question: { text: "Which export format?", truncated: false },
+            commands: [`supertag message objective ${f.objective.id} TEXT`],
+            evidence: [
+              { kind: "task", id: asking.task.id, status: "completed" },
+              { kind: "objective", id: f.objective.id },
+            ],
           },
         ]);
-        expect(JSON.stringify(reviewItems)).not.toContain("private review summary");
-        await f.store.updateObjectiveStatus(
-          f.objective.id,
-          {
-            status: "completed",
-            expectedRevision: review.revision,
-            completionSummary: "private completion summary",
-          },
-          f.owner.id,
-        );
+        // The turn's own request text stays out of the projection.
+        expect(JSON.stringify(page)).not.toContain("secret instruction");
+
+        // A work Session's question is not the Objective's; only its own Session's latest turn counts.
+        const work = await f.turn({ tagId: f.worker.id, work: "export" });
+        await f.ask(work.task.id, "Which bucket?");
         expect(
-          (await f.reopened.readCoordinationInbox({ kind: "objective_ready_for_review" })).items,
-        ).toEqual([]);
-        const completed = (await f.reopened.readCoordinationInbox({ kind: "objective_completed" }))
-          .items;
-        expect(completed).toMatchObject([
-          {
-            key: `objective_completed:${f.objective.id}`,
-            commands: [`supertag describe objective ${f.objective.id}`],
-          },
-        ]);
-        expect(JSON.stringify(completed)).not.toContain("private completion summary");
-        // Completion needs no action: the open inbox omits it; only the notification outbox reads it.
-        const open = (await f.reopened.readCoordinationInbox({})).items;
-        expect(open.some((item) => item.kind === "objective_completed")).toBe(false);
-        const notices = (await f.reopened.readCoordinationInbox({ includeNotices: true })).items;
-        expect(notices.some((item) => item.kind === "objective_completed")).toBe(true);
-        expect(
-          (
-            await f.reopened.readCoordinationInbox({
-              includeNotices: true,
-              includeNoticesSince: new Date(
-                Date.parse(completed[0]?.actionableSince ?? "") + 1,
-              ).toISOString(),
-            })
-          ).items.some((item) => item.kind === "objective_completed"),
-        ).toBe(false);
+          (await f.reopened.readCoordinationInbox({ kind: "question" })).items.map(
+            (item) => item.key,
+          ),
+        ).toEqual([`question:${asking.task.id}`]);
+
+        // Once the Objective takes a later turn, the old question is no longer the latest.
+        await f.turn();
+        expect((await f.reopened.readCoordinationInbox({ kind: "question" })).items).toEqual([]);
       });
 
-      it("lists pending owner questions on a review item", async () => {
+      it("cuts an over-long question and marks it truncated", async () => {
         const f = await fixture();
-        await f.store.admitTaskAssignment(
-          f.assignment("owner-question", { assignedTagId: f.owner.id }),
-        );
-        const { message } = await f.store.enqueueObjectiveMessage({
-          objectiveId: f.objective.id,
-          senderTagId: f.owner.id,
-          sourceTaskId: "owner-question",
-          type: "message",
-          body: { message: "Which format?\nExtra private detail" },
-          idempotencyKey: "review-question",
-        });
-        const { message: second } = await f.store.enqueueObjectiveMessage({
-          objectiveId: f.objective.id,
-          senderTagId: f.owner.id,
-          sourceTaskId: "owner-question",
-          type: "message",
-          body: { message: "Which date?" },
-          idempotencyKey: "review-question-2",
-        });
-        await f.store.updateObjectiveStatus(f.objective.id, {
-          status: "ready_for_review",
+        const asking = await f.turn();
+        await f.ask(asking.task.id, "Q".repeat(900));
+        const [item] = (await f.reopened.readCoordinationInbox({ kind: "question" })).items;
+        expect(item?.question?.truncated).toBe(true);
+        expect(item?.question?.text).toHaveLength(500);
+        expect(item?.question?.text.endsWith("…")).toBe(true);
+      });
+
+      it("projects a spent budget and a passed deadline as separate decisions", async () => {
+        const f = await fixture();
+        await f.turn(); // The Objective started; limits only apply to started Objectives.
+        const at = new Date().toISOString();
+        const past = new Date(Date.now() - 60_000).toISOString();
+        const withDeadline = await f.store.updateObjectiveStatus(f.objective.id, {
+          deadline: past,
           expectedRevision: f.objective.revision,
         });
-        const [item] = (
-          await f.reopened.readCoordinationInbox({ kind: "objective_ready_for_review" })
-        ).items;
-        expect(item?.reason).toContain("Approval waits for answers");
-        expect(item?.reason).toContain(`${message.id} (asked ${message.createdAt}): Which format?`);
-        expect(item?.reason).toContain(`${second.id} (asked ${second.createdAt}): Which date?`);
-        expect(item?.reason).toContain(
-          `supertag message objective ${f.objective.id} --reply-to ${message.id} TEXT`,
-        );
-        expect(item?.reason).not.toContain("Extra private detail");
-        await f.store.replyToObjectiveMessage({
-          messageId: message.id,
-          objectiveId: f.objective.id,
-          recipientTagId: f.owner.id,
-          body: { message: "Use the standard format" },
-          idempotencyKey: "review-answer",
-          operatorId: "operator",
-        });
-        const [afterReply] = (
-          await f.reopened.readCoordinationInbox({ kind: "objective_ready_for_review" })
-        ).items;
-        expect(afterReply?.reason).not.toContain(message.id);
-        expect(afterReply?.reason).toContain(second.id);
-      });
-
-      it("preserves database ordering across budget pages with equal timestamps and mixed-case IDs", async () => {
-        vi.useFakeTimers({ toFake: ["Date"] });
-        vi.setSystemTime(new Date());
-        const f = await fixture();
-        for (const taskId of ["a-budget", "B-budget"]) {
-          await f.store.admitTaskAssignment(f.assignment(taskId));
-          await f.store.claimTaskAssignment({ taskId, leaseOwner: "test" });
-          await f.store.settleTaskAssignment({
-            taskId,
-            leaseOwner: "test",
-            attemptCount: 1,
-            failed: true,
-            result: { failureKind: "budget-exhausted" },
-          });
-        }
-        const all = await f.store.readCoordinationInbox({ kind: "task_budget" });
-        const first = await f.store.readCoordinationInbox({ kind: "task_budget", limit: 1 });
-        expect(first.nextCursor).toBeDefined();
-        const second = await f.store.readCoordinationInbox({ cursor: first.nextCursor, limit: 1 });
-        expect([...first.items, ...second.items].map((item) => item.key)).toEqual(
-          all.items.map((item) => item.key),
-        );
-        expect(new Set([...first.items, ...second.items].map((item) => item.key)).size).toBe(2);
-        expect(second.nextCursor).toBeUndefined();
-        expect(second.asOf).toBe(first.asOf);
-      });
-      it("finds and pages budget decisions beyond unrelated scan limits", async () => {
-        const f = await fixture();
-        // Every old global candidate window would fill before the actionable rows.
-        for (let index = 0; index < 1001; index++) {
-          const unrelated = await f.store.createObjective({
-            id: randomUUID(),
-            ownerTagId: f.owner.id,
-            outcome: "Unrelated",
-          });
-          await f.store.createTeam({
-            id: randomUUID(),
-            objectiveId: unrelated.id,
-            name: "Unrelated",
-            maxConcurrency: 1,
-            leadTagId: f.owner.id,
-            memberTagIds: [],
-          });
-          const taskId = `noise-${index}`;
-          await f.store.admitTaskAssignment(f.assignment(taskId));
-          await f.store.claimTaskAssignment({ taskId, leaseOwner: "noise" });
-          await f.store.settleTaskAssignment({
-            taskId,
-            leaseOwner: "noise",
-            attemptCount: 1,
-            failed: true,
-            result: { error: "ordinary failure" },
-          });
-        }
-        const lateObjective = await f.store.createObjective({
-          id: randomUUID(),
-          ownerTagId: f.owner.id,
-          outcome: "Late budget work",
-        });
-        const lateTeam = await f.store.createTeam({
-          id: randomUUID(),
-          objectiveId: lateObjective.id,
-          name: "Late Team",
-          maxConcurrency: 1,
-          leadTagId: f.owner.id,
-          memberTagIds: [f.worker.id],
-        });
-        for (const taskId of ["budget-late-a", "budget-late-b"]) {
-          const input = f.assignment(taskId, {
-            objectiveId: lateObjective.id,
-            teamId: lateTeam.id,
-          });
-          await f.store.admitTaskAssignment({
-            ...input,
-            authorizationSnapshot: {
-              ...input.authorizationSnapshot,
-              origin: {
-                kind: "internal",
-                objectiveId: lateObjective.id,
-                requestedByTagId: f.owner.id,
-              },
-            },
-          });
-          await f.store.claimTaskAssignment({ taskId, leaseOwner: "late" });
-          await f.store.settleTaskAssignment({
-            taskId,
-            leaseOwner: "late",
-            attemptCount: 1,
-            failed: true,
-            result: { failureKind: "budget-exhausted" },
-          });
-        }
-        const first = await f.store.readCoordinationInbox({ kind: "task_budget", limit: 1 });
-        expect(first.items.map((item) => item.key)).toEqual(["task_budget:budget-late-a"]);
-        expect(first.truncatedKinds).toEqual([]);
-        expect(first.nextCursor).toBeDefined();
-        const second = await f.reopened.readCoordinationInbox({
-          cursor: first.nextCursor,
-          limit: 1,
-        });
-        expect(second.items.map((item) => item.key)).toEqual(["task_budget:budget-late-b"]);
-        expect(second.nextCursor).toBeUndefined();
-      }, 120000);
-      it("finds open work behind more finished history than the candidate scan holds", async () => {
-        const f = await fixture();
-        const history = COORDINATION_INBOX_CANDIDATE_SCAN_LIMIT + 50;
-        // One closed Objective whose Team finished more Tasks than the scan holds.
-        const closed = await f.store.createObjective({
-          id: randomUUID(),
-          ownerTagId: f.owner.id,
-          outcome: "Finished history",
-        });
-        const closedTeam = await f.store.createTeam({
-          id: randomUUID(),
-          objectiveId: closed.id,
-          name: "History Team",
-          leadTagId: f.lead.id,
-          memberTagIds: [f.worker.id],
-          maxConcurrency: 1,
-        });
-        const template = f.assignment("history-template", {
-          objectiveId: closed.id,
-          teamId: closedTeam.id,
-        });
-        await f.store.admitTaskAssignment({
-          ...template,
-          authorizationSnapshot: {
-            ...template.authorizationSnapshot,
-            origin: { kind: "internal", objectiveId: closed.id, requestedByTagId: f.owner.id },
+        const limited = await f.store.recordObjectiveLimitState(
+          f.objective.id,
+          {
+            ...(withDeadline.limitState ?? {}),
+            ...spentState(100, 110, at),
+            deadlinePassed: { deadline: past, at },
           },
-        });
-        const raw = rawDatabase(f.url);
-        try {
-          const { db, tables } = raw;
-          const old = (index: number) =>
-            new Date(Date.UTC(2026, 0, 1) + index * 1_000).toISOString();
-          const [task] = await db
-            .select()
-            .from(tables.tasks)
-            .where(eq(tables.tasks.id, "history-template"));
-          const [assignment] = await db
-            .select()
-            .from(tables.taskAssignments)
-            .where(eq(tables.taskAssignments.taskId, "history-template"));
-          const [objectiveRow] = await db
-            .select()
-            .from(tables.objectives)
-            .where(eq(tables.objectives.id, closed.id));
-          const [teamRow] = await db
-            .select()
-            .from(tables.teams)
-            .where(eq(tables.teams.id, closedTeam.id));
-          const chunks = <T>(rows: T[]): T[][] =>
-            Array.from({ length: Math.ceil(rows.length / 200) }, (_, index) =>
-              rows.slice(index * 200, index * 200 + 200),
-            );
-          const ids = Array.from({ length: history }, (_, index) => `history-${index}`);
-          for (const chunk of chunks(ids))
-            await db
-              .insert(tables.tasks)
-              .values(chunk.map((id) => ({ ...task, id, inboundEventId: null })));
-          for (const [offset, chunk] of chunks(ids).entries())
-            await db.insert(tables.taskAssignments).values(
-              chunk.map((taskId, index) => ({
-                ...assignment,
-                taskId,
-                status: "accepted",
-                createdAt: old(offset * 200 + index),
-                updatedAt: old(offset * 200 + index),
-              })),
-            );
-          await db
-            .update(tables.taskAssignments)
-            .set({ status: "accepted", updatedAt: old(0) })
-            .where(eq(tables.taskAssignments.taskId, "history-template"));
-          await db
-            .update(tables.objectives)
-            .set({ status: "completed", createdAt: old(0), updatedAt: old(0) })
-            .where(eq(tables.objectives.id, closed.id));
-          // And more cancelled Objectives, each with its Team, than the scan holds.
-          const objectiveIds = Array.from({ length: history }, () => randomUUID());
-          for (const chunk of chunks(objectiveIds)) {
-            await db.insert(tables.objectives).values(
-              chunk.map((id, index) => ({
-                ...objectiveRow,
-                id,
-                status: "cancelled",
-                createdAt: old(index),
-                updatedAt: old(index),
-              })),
-            );
-            await db.insert(tables.teams).values(
-              chunk.map((objectiveId, index) => ({
-                ...teamRow,
-                id: randomUUID(),
-                objectiveId,
-                objectiveIds: [objectiveId],
-                createdAt: old(index),
-                updatedAt: old(index),
-              })),
-            );
-          }
-        } finally {
-          await raw.close();
-        }
-        // The open item: a current Task Attempt became uncertain and holds a Worker slot.
-        const taskId = "uncertain-current";
-        await f.store.admitTaskAssignment(f.assignment(taskId));
-        if (!(await f.store.claimTaskAssignment({ taskId, leaseOwner: "lost" })))
-          throw new Error("Claim missing");
-        const attempt = await f.store.createTaskAttempt({
-          taskId,
-          attemptNumber: 1,
-          workerProfile: { id: "uncertain", revision: "1" },
-          workerSnapshot: { durableExecution: true, kind: "assignment" },
-          startedAt: new Date().toISOString(),
-        });
-        await f.store.markTaskAssignmentUncertain({
-          taskId,
-          attemptId: attempt.id,
-          reason: "Worker Host restarted",
-        });
-        const key = `task_attention:${taskId}:uncertain:${attempt.id}`;
-        for (const input of [{}, { includeNotices: true }, { kind: "task_attention" as const }]) {
-          const page = await f.reopened.readCoordinationInbox(input);
-          expect(page.truncatedKinds).toEqual([]);
-          expect(page.items.map((item) => item.key)).toContain(key);
-        }
-        // Paging one item at a time reaches it too.
-        const keys: string[] = [];
-        let cursor: string | undefined;
-        do {
-          const page = await f.reopened.readCoordinationInbox({
-            limit: 1,
-            ...(cursor ? { cursor } : {}),
-          });
-          keys.push(...page.items.map((item) => item.key));
-          cursor = page.nextCursor;
-        } while (cursor);
-        expect(keys).toContain(key);
-      }, 60000);
-      it("projects exhausted work for independent allocation decisions and removes it on renewal", async () => {
-        const f = await fixture();
-        const taskId = randomUUID();
-        await f.store.admitTaskAssignment(f.assignment(taskId, { assignedTagId: f.owner.id }));
-        await f.store.claimTaskAssignment({ taskId, leaseOwner: "budget" });
-        await f.store.settleTaskAssignment({
-          taskId,
-          leaseOwner: "budget",
-          attemptCount: 1,
-          failed: true,
-          result: { failureKind: "budget-exhausted", secret: "private budget evidence" },
-        });
-        const ordinaryId = randomUUID();
-        await f.store.admitTaskAssignment(f.assignment(ordinaryId));
-        await f.store.claimTaskAssignment({ taskId: ordinaryId, leaseOwner: "ordinary" });
-        await f.store.settleTaskAssignment({
-          taskId: ordinaryId,
-          leaseOwner: "ordinary",
-          attemptCount: 1,
-          failed: true,
-          result: { error: "ordinary failure" },
-        });
-        const page = await f.reopened.readCoordinationInbox({ kind: "task_budget" });
-        expect(page.items).toHaveLength(1);
-        expect(page.tagNames?.[f.lead.id]).toBe(f.lead.name);
-        expect(page.items[0]).toMatchObject({
-          kind: "task_budget",
-          key: `task_budget:${taskId}`,
-          nextActorTagIds: [f.lead.id],
-          excludedActorTagIds: [f.owner.id],
+          withDeadline.revision,
+        );
+        if (!limited) throw new Error("Limit state was not recorded");
+
+        const page = await f.reopened.readCoordinationInbox({});
+        const budget = page.items.find((item) => item.kind === "objective_budget");
+        expect(budget).toMatchObject({
+          objectiveId: f.objective.id,
           operatorEligible: true,
+          commands: [`supertag update objective ${f.objective.id} --budget-minor N`],
           permittedActions: [
             {
-              tool: "update_task",
-              arguments: {
-                objectiveId: f.objective.id,
-                taskId,
-                expectedStatus: "failed",
-                status: "queued",
-              },
-              requiredInputFields: ["executionLimits"],
+              tool: "update_objective",
+              arguments: { objectiveId: f.objective.id, expectedRevision: limited.revision },
+              requiredInputFields: ["budgetLimitMinor"],
             },
           ],
         });
-        expect(JSON.stringify(page)).not.toContain("private budget evidence");
-        expect(JSON.stringify(page)).not.toContain("secret instruction");
-        expect(
-          (await f.reopened.readCoordinationInbox({ kind: "task_budget", nextActorId: f.owner.id }))
-            .items,
-        ).toEqual([]);
-        expect(
-          (await f.reopened.readCoordinationInbox({ kind: "task_budget", nextActorId: f.lead.id }))
-            .items,
-        ).toHaveLength(1);
-        await f.store.updateTaskAssignment(
-          taskId,
-          {
-            expectedStatus: "failed",
-            status: "queued",
-            executionLimits: { maxReportedTokens: 1000 },
-          },
-          f.lead.id,
-        );
-        expect((await f.reopened.readCoordinationInbox({ kind: "task_budget" })).items).toEqual([]);
-      });
-      it("records exhaustion durably without reopening a completed Objective or allocating a retry", async () => {
-        const f = await fixture();
-        const taskId = randomUUID();
-        await f.store.admitTaskAssignment(
-          f.assignment(taskId, {
-            assignedTagId: f.owner.id,
-            authorizationSnapshot: {
-              ...f.assignment(taskId).authorizationSnapshot,
-              tag: { id: f.owner.id, name: f.owner.name },
-            },
-          }),
-        );
-        await f.store.claimTaskAssignment({ taskId, leaseOwner: "budget" });
-        const attempt = await f.store.createTaskAttempt({
-          taskId,
-          attemptNumber: 1,
-          workerProfile: { id: "budget", revision: "1" },
-          workerSnapshot: {},
-          startedAt: new Date().toISOString(),
-        });
-        await f.store.startTask({ taskId, startedAt: new Date().toISOString() });
-        await f.store.updateObjectiveStatus(
-          f.objective.id,
-          {
-            status: "completed",
-            expectedRevision: f.objective.revision,
-            completionSummary: "Accepted delivery finished",
-          },
-          f.owner.id,
-          { taskId, attemptCount: 1, leaseOwner: "budget" },
-        );
-        await f.store.settleTaskAssignment({
-          taskId,
-          leaseOwner: "budget",
-          attemptCount: 1,
-          failed: true,
-          terminalAttempt: { id: attempt.id, status: "failed" },
-          result: {
-            failureKind: "budget-exhausted",
-            budgetExhaustion: { attemptId: attempt.id, requiresAuthorization: true },
-          },
-        });
-        expect((await f.reopened.getObjective(f.objective.id)).status).toBe("completed");
-        expect((await f.reopened.readCoordinationInbox({ kind: "task_budget" })).items).toEqual([]);
-        expect(await f.reopened.getTaskAssignment(taskId)).toMatchObject({
-          status: "failed",
-          attemptCount: 1,
-          result: { failureKind: "budget-exhausted" },
-        });
-        expect(
-          (await f.reopened.listTaskEvents(taskId)).find(
-            (event) => event.type === "task.budget-exhausted",
-          ),
-        ).toMatchObject({ attemptId: attempt.id, payload: { requiresAuthorization: true } });
-        expect(
-          (await f.reopened.listPendingTaskAssignments()).some((task) => task.taskId === taskId),
-        ).toBe(false);
+        const deadline = page.items.find((item) => item.kind === "objective_limit");
+        expect(deadline?.reason).toContain("passed");
+        expect(deadline?.commands).toEqual([
+          `supertag update objective ${f.objective.id} --deadline ISO-8601`,
+        ]);
+        expect(deadline?.permittedActions[0]?.requiredInputFields).toEqual(["deadline"]);
+
+        // A closed Objective leaves the inbox.
+        await f.store.cancelObjective(f.objective.id, {}, { operatorId: "operator" });
+        expect((await f.reopened.readCoordinationInbox({})).items).toEqual([]);
       });
 
       it("shows a Task held for a lapsed MCP login with the login command until scheduling clears", async () => {
         const f = await fixture();
-        const heldId = randomUUID();
-        await f.store.admitTaskAssignment(f.assignment(heldId));
+        const held = await f.turn({ tagId: f.worker.id, work: "notion" });
         await f.store.appendTaskEvent({
-          taskId: heldId,
+          taskId: held.task.id,
           type: "task.scheduling-incompatible",
           payload: {
             version: 1,
@@ -604,7 +331,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         const page = await f.reopened.readCoordinationInbox({ limit: 10, kind: "mcp_login" });
         expect(page.items).toEqual([
           expect.objectContaining({
-            key: `mcp_login:${heldId}:notion`,
+            key: `mcp_login:${held.task.id}:notion`,
             kind: "mcp_login",
             operatorEligible: true,
             nextActorTagIds: [],
@@ -614,84 +341,162 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             ],
           }),
         ]);
-        expect(JSON.stringify(page)).not.toContain("secret");
+        expect(JSON.stringify(page)).not.toContain("secret instruction");
         await f.store.appendTaskEvent({
-          taskId: heldId,
+          taskId: held.task.id,
           type: "task.scheduling-compatible",
           payload: { version: 1, status: "compatible" },
         });
-        expect((await f.reopened.readCoordinationInbox({ limit: 10 })).items).toEqual([]);
+        expect(
+          (await f.reopened.readCoordinationInbox({ limit: 10, kind: "mcp_login" })).items,
+        ).toEqual([]);
       });
 
-      it("projects Task decisions as partial update_task invocations", async () => {
+      it("asks an operator to recover a turn whose completion could not be confirmed", async () => {
         const f = await fixture();
-        const approvalId = randomUUID();
-        await f.store.admitTaskAssignment(f.assignment(approvalId, { requiresApproval: true }));
-        const reviewId = randomUUID();
-        await f.store.admitTaskAssignment(f.assignment(reviewId));
-        await f.store.claimTaskAssignment({ taskId: reviewId, leaseOwner: "review" });
-        await f.store.settleTaskAssignment({
-          taskId: reviewId,
-          leaseOwner: "review",
-          attemptCount: 1,
-          result: { privateResult: "must remain hidden" },
+        const uncertain = await f.turn({ tagId: f.worker.id, work: "deploy" });
+        await f.store.claimDueInboundEvent({
+          inboundEventId: uncertain.inboundEventId,
+          leaseOwner: "lost",
+          now: new Date().toISOString(),
+          leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        });
+        await f.store.startTask({ taskId: uncertain.task.id, startedAt: new Date().toISOString() });
+        const attempt = await f.store.createTaskAttempt({
+          taskId: uncertain.task.id,
+          attemptNumber: 1,
+          workerProfile: { id: "uncertain", revision: "1" },
+          workerSnapshot: { durableExecution: true },
+          startedAt: new Date().toISOString(),
+        });
+        await f.store.blockInboundSession(uncertain.inboundEventId, "Worker Host restarted");
+
+        const page = await f.reopened.readCoordinationInbox({ kind: "task_attention" });
+        expect(page.items).toMatchObject([
+          {
+            key: `task_attention:${uncertain.task.id}:uncertain:${attempt.id}`,
+            kind: "task_attention",
+            objectiveId: f.objective.id,
+            uncertainAttempt: { attemptId: attempt.id },
+            redaction: { level: "metadata_only", omitted: ["request", "result"] },
+          },
+        ]);
+        expect(page.items[0]?.reason).toContain("Worker Host restarted");
+        expect(page.items[0]?.commands?.[0]).toContain("supertag recover worklet");
+        expect(JSON.stringify(page)).not.toContain("secret instruction");
+      });
+
+      it("preserves database ordering across pages with equal timestamps and mixed-case keys", async () => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(new Date());
+        const f = await fixture();
+        const asking = await f.turn();
+        await f.ask(asking.task.id, "Which format?");
+        const held = await f.turn({ tagId: f.worker.id, work: "notion" });
+        await f.store.appendTaskEvent({
+          taskId: held.task.id,
+          type: "task.scheduling-incompatible",
+          payload: { version: 1, status: "incompatible", mcpLogins: ["notion", "airtable"] },
         });
 
-        const page = await f.reopened.readCoordinationInbox({ limit: 10 });
-        expect(page.projectionVersion).toBe(7);
-        expect(page.items.map((item) => item.kind).sort()).toEqual([
-          "task_approval",
-          "task_review",
-        ]);
-        expect(page.items.find((item) => item.kind === "task_approval")).toMatchObject({
-          permittedActions: [
-            {
-              tool: "update_task",
-              arguments: {
-                taskId: approvalId,
-                expectedStatus: "queued",
-                approval: "approved",
-              },
-              requiredInputFields: [],
-            },
-          ],
-        });
-        expect(page.items.find((item) => item.kind === "task_review")).toMatchObject({
-          excludedActorTagIds: [f.worker.id],
-          permittedActions: [
-            {
-              tool: "update_task",
-              arguments: { expectedStatus: "submitted", status: "accepted" },
-              requiredInputFields: ["assessment"],
-            },
-            {
-              tool: "update_task",
-              arguments: { expectedStatus: "submitted", status: "rejected" },
-              requiredInputFields: ["assessment"],
-            },
-          ],
-        });
-        expect(JSON.stringify(page)).not.toContain("secret");
+        const all = await f.store.readCoordinationInbox({});
+        expect(all.items.length).toBeGreaterThan(1);
+        const keys: string[] = [];
+        let cursor: string | undefined;
+        do {
+          const page = await f.store.readCoordinationInbox({
+            limit: 1,
+            ...(cursor ? { cursor } : {}),
+          });
+          expect(page.asOf).toBe(all.asOf);
+          keys.push(...page.items.map((item) => item.key));
+          cursor = page.nextCursor;
+        } while (cursor);
+        expect(keys).toEqual(all.items.map((item) => item.key));
+        expect(new Set(keys).size).toBe(keys.length);
       });
+
+      it("finds open work behind more closed Objectives than the candidate scan holds", async () => {
+        const f = await fixture();
+        const history = COORDINATION_INBOX_CANDIDATE_SCAN_LIMIT + 50;
+        const raw = rawDatabase(f.url);
+        try {
+          const { db, tables } = raw;
+          const old = (index: number) =>
+            new Date(Date.UTC(2026, 0, 1) + index * 1_000).toISOString();
+          const [objectiveRow] = await db
+            .select()
+            .from(tables.objectives)
+            .where(eq(tables.objectives.id, f.objective.id));
+          const chunks = <T>(rows: T[]): T[][] =>
+            Array.from({ length: Math.ceil(rows.length / 200) }, (_, index) =>
+              rows.slice(index * 200, index * 200 + 200),
+            );
+          const objectiveIds = Array.from({ length: history }, () => randomUUID());
+          for (const chunk of chunks(objectiveIds))
+            await db.insert(tables.objectives).values(
+              chunk.map((id, index) => ({
+                ...objectiveRow,
+                id,
+                status: "cancelled",
+                createdAt: old(index),
+                updatedAt: old(index),
+              })),
+            );
+        } finally {
+          await raw.close();
+        }
+        const lateObjective = await f.store.createObjective({
+          id: randomUUID(),
+          ownerTagId: f.owner.id,
+          outcome: "Late question work",
+          teamId: f.team.id,
+        });
+        const asking = await f.turn();
+        await f.ask(asking.task.id, "Which format?");
+        const late = await f.turn({ objectiveId: lateObjective.id });
+        await f.ask(late.task.id, "Which bucket?");
+        for (const input of [{}, { kind: "question" as const }]) {
+          const page = await f.reopened.readCoordinationInbox(input);
+          expect(page.truncatedKinds).toEqual([]);
+          expect(page.items.map((item) => item.key)).toEqual([
+            `question:${asking.task.id}`,
+            `question:${late.task.id}`,
+          ]);
+        }
+        // And paging one at a time reaches both.
+        const first = await f.store.readCoordinationInbox({ kind: "question", limit: 1 });
+        expect(first.items.map((item) => item.key)).toEqual([`question:${asking.task.id}`]);
+        const next = await f.reopened.readCoordinationInbox({ cursor: first.nextCursor, limit: 1 });
+        expect(next.items.map((item) => item.key)).toEqual([`question:${late.task.id}`]);
+        expect(next.nextCursor).toBeUndefined();
+      }, 120_000);
 
       it("keeps filters and cursors stable", async () => {
         const f = await fixture();
-        for (let index = 0; index < 3; index += 1)
-          await f.store.admitTaskAssignment(f.assignment(randomUUID(), { requiresApproval: true }));
+        const asking = await f.turn();
+        await f.ask(asking.task.id, "Which format?");
+        const held = await f.turn({ tagId: f.worker.id, work: "notion" });
+        await f.store.appendTaskEvent({
+          taskId: held.task.id,
+          type: "task.scheduling-incompatible",
+          payload: { version: 1, status: "incompatible", mcpLogins: ["notion", "airtable"] },
+        });
         const first = await f.store.readCoordinationInbox({
           objectiveId: f.objective.id,
-          kind: "task_approval",
+          kind: "mcp_login",
           limit: 1,
         });
         expect(first.nextCursor).toBeDefined();
         const second = await f.store.readCoordinationInbox({ cursor: first.nextCursor, limit: 1 });
         expect(second.asOf).toBe(first.asOf);
+        expect(second.items[0]?.kind).toBe("mcp_login");
         expect(second.items[0]?.key).not.toBe(first.items[0]?.key);
         await expect(
-          f.store.readCoordinationInbox({
-            cursor: first.nextCursor,
-            kind: "task_review",
-          }),
+          f.store.readCoordinationInbox({ cursor: first.nextCursor, kind: "question" }),
+        ).rejects.toMatchObject({ statusCode: 400 });
+        await expect(
+          f.store.readCoordinationInbox({ kind: "objective_ready_for_review" as never }),
         ).rejects.toMatchObject({ statusCode: 400 });
       });
     },

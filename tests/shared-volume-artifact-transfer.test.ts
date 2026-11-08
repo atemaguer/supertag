@@ -13,6 +13,7 @@ import {
   DurableLocalWorklet,
   FileArtifactStore,
   FileAttemptJournal,
+  SURFACE_COORDINATION_CAPABILITY,
   type TaskAttemptSpec,
   type Worker,
 } from "../packages/runtime/sdk/src/index.js";
@@ -22,6 +23,7 @@ import {
   FileGatewayCredentialVault,
   migrateDatabase,
 } from "../packages/store/src/index.js";
+import { openTestTask } from "./support/artifact-producer.js";
 import { FakeS3 } from "./support/fake-s3.ts";
 import { hostArtifactStore } from "./support/host-artifact-store.js";
 import { enrollWorkerHost } from "./support/worker-host-enrollment.js";
@@ -73,15 +75,20 @@ it("shares an artifact between two unreachable Worker Hosts through a shared Vol
   await store.bindTagWorkerHost(producerTag.id, "producer-host");
   await store.bindTagWorkerHost(consumerTag.id, "consumer-host");
   await store.bindTagWorkerHost(isolatedTag.id, "isolated-host");
-  await store.createObjective({ id: "share", ownerTagId: producerTag.id, outcome: "Share" });
   await store.createTeam({
     id: "team",
-    objectiveId: "share",
     name: "Sharing",
-    leadTagId: producerTag.id,
-    memberTagIds: [consumerTag.id, isolatedTag.id],
+    memberTagIds: [producerTag.id, consumerTag.id, isolatedTag.id],
     maxConcurrency: 3,
   });
+  await store.createObjective({
+    id: "share",
+    ownerTagId: producerTag.id,
+    teamId: "team",
+    outcome: "Share",
+  });
+  /** Which part of the exchange each dispatched Task plays. */
+  const roles = new Map<string, "produce" | "consume" | "isolated">();
 
   const canary = `shared-volume-canary-${randomUUID()}`;
   const report = Buffer.concat([Buffer.from(canary), randomBytes(4096)]);
@@ -138,7 +145,8 @@ it("shares an artifact between two unreachable Worker Hosts through a shared Vol
     return { uri: entry.uri, digest: entry.digest, artifactId, path: entry.path };
   };
   const run = async (spec: TaskAttemptSpec) => {
-    if (spec.taskId === "produce") {
+    const role = roles.get(spec.taskId);
+    if (role === "produce") {
       const host = hostArtifactStore(volumeCopies("producer-host"), { volume: "shared" })(spec);
       for (const [name, bytes] of [
         ["report", report],
@@ -162,7 +170,7 @@ it("shares an artifact between two unreachable Worker Hosts through a shared Vol
       }
       return;
     }
-    if (spec.taskId === "consume") {
+    if (role === "consume") {
       // The consumer's own store is the shared Volume itself, so the ungranted copy is right
       // there; reading it still needs the catalog's grant.
       const host = hostArtifactStore(volumeCopies("consumer-host"), {
@@ -193,7 +201,7 @@ it("shares an artifact between two unreachable Worker Hosts through a shared Vol
         .filter((request) => request.key?.endsWith(secretHex)).length;
       return;
     }
-    if (spec.taskId === "isolated") {
+    if (role === "isolated") {
       // This host keeps copies under its state directory and maps no shared Volume.
       const host = hostArtifactStore(new FileArtifactStore(join(directory, "isolated")), {
         readVolume: artifactVolumeReader({}),
@@ -218,6 +226,7 @@ it("shares an artifact between two unreachable Worker Hosts through a shared Vol
             capabilities: [
               { id: "supertag.task-attempt.events", version: 1 },
               COORDINATION_CAPABILITY,
+              SURFACE_COORDINATION_CAPABILITY,
             ],
             contextTypes: [],
           },
@@ -227,12 +236,17 @@ it("shares an artifact between two unreachable Worker Hosts through a shared Vol
         profiles: [profile],
         contextTypes: [],
         maxConcurrency: 1,
-        capabilities: [{ id: "supertag.task-attempt.events", version: 1 }, COORDINATION_CAPABILITY],
+        capabilities: [
+          { id: "supertag.task-attempt.events", version: 1 },
+          COORDINATION_CAPABILITY,
+          SURFACE_COORDINATION_CAPABILITY,
+        ],
       };
     },
     async *execute(spec) {
       const identity = { taskId: spec.taskId, attemptId: spec.attemptId };
       const at = () => new Date().toISOString();
+      const role = roles.get(spec.taskId);
       yield { ...identity, at: at(), type: "execution.started", workerId: id };
       try {
         await run(spec);
@@ -244,10 +258,10 @@ it("shares an artifact between two unreachable Worker Hosts through a shared Vol
         ...identity,
         at: at(),
         type: "output.message",
-        message: { role: "teammate", text: `${spec.taskId} done` },
+        message: { role: "teammate", text: `${role} done` },
       };
       // The producer's result selects the report, so it can be another Task's input.
-      if (spec.taskId === "produce")
+      if (role === "produce")
         yield {
           ...identity,
           at: at(),
@@ -312,26 +326,43 @@ it("shares an artifact between two unreachable Worker Hosts through a shared Vol
         }),
       );
     }
-    const assign = async (body: Record<string, unknown>) => {
-      const response = await fetch(`${controlPlaneUrl}/api/v1/coordination/assign_task`, {
-        method: "POST",
-        headers: { authorization: "Bearer test-admin", "content-type": "application/json" },
-        body: JSON.stringify({ objectiveId: "share", teamId: "team", ...body }),
+    /** One Session turn of a Team member under the shared Objective, which dispatch picks up. */
+    const turn = async (
+      role: "produce" | "consume" | "isolated",
+      tag: { id: string; name: string },
+      inputArtifacts?: readonly Record<string, unknown>[],
+    ) => {
+      const { task } = await openTestTask(store, {
+        tagId: tag.id,
+        tagName: tag.name,
+        objectiveId: "share",
+        requestText: `${role} the report`,
+        ...(inputArtifacts ? { trigger: { inputArtifacts: [...inputArtifacts] } } : {}),
       });
-      expect(response.status, await response.text()).toBe(200);
+      roles.set(task.id, role);
+      return task.id;
     };
-    const submitted = (taskId: string) =>
+    const completed = (taskId: string) =>
       expect
-        .poll(async () => (await store.getTaskAssignment(taskId))?.status, { timeout: 20000 })
-        .toBe("submitted");
+        .poll(async () => (await store.findTaskById(taskId))?.status, { timeout: 20000 })
+        .toBe("completed");
+    /** The producer's pinned entry for one of its captured files. */
+    const pin = async (artifactId: string, path: string) => {
+      const artifact = await store.findCapturedArtifact(artifactId);
+      const entry = artifact?.entries.find((candidate) => candidate.path === path);
+      if (!artifact || !entry) throw new Error(`Missing ${path} of artifact ${artifactId}`);
+      return {
+        artifactId,
+        path,
+        uri: entry.uri,
+        digest: entry.digest,
+        sizeBytes: entry.sizeBytes,
+        provenance: { taskId: artifact.taskId, attemptId: artifact.attemptId },
+      };
+    };
 
-    await assign({
-      taskId: "produce",
-      assignedTagId: producerTag.id,
-      instruction: "Produce the report",
-      acceptanceCriteria: ["Report captured"],
-    });
-    await submitted("produce");
+    const produceTaskId = await turn("produce", producerTag);
+    await completed(produceTaskId);
     expect(errors).toEqual([]);
     const reportId = produced["report"];
     if (!reportId) throw new Error("The producer did not capture the report");
@@ -354,19 +385,11 @@ it("shares an artifact between two unreachable Worker Hosts through a shared Vol
       }),
     ).toEqual([]);
 
-    for (const [taskId, tag] of [
-      ["consume", consumerTag],
-      ["isolated", isolatedTag],
-    ] as const)
-      await assign({
-        taskId,
-        assignedTagId: tag.id,
-        instruction: "Read the report",
-        acceptanceCriteria: ["Report read"],
-        inputArtifacts: [{ artifactId: reportId, paths: ["outputs/report.bin"] }],
-      });
-    await submitted("consume");
-    await submitted("isolated");
+    const pinned = [await pin(reportId, "outputs/report.bin")];
+    const consumeTaskId = await turn("consume", consumerTag, pinned);
+    const isolatedTaskId = await turn("isolated", isolatedTag, pinned);
+    await completed(consumeTaskId);
+    await completed(isolatedTaskId);
     expect(errors).toEqual([]);
 
     // The consumer read the producer's copy from the shared Volume with its own mapping.
@@ -417,7 +440,7 @@ it("shares an artifact between two unreachable Worker Hosts through a shared Vol
     await expect(readFile(unmapped)).rejects.toMatchObject({ code: "ENOENT" });
     // Listings say where each copy is: on the shared Volume, never on the Control Plane.
     const listed = JSON.parse(
-      await runArtifactCommand(operator, "list", ["--task", "produce"]),
+      await runArtifactCommand(operator, "list", ["--task", produceTaskId]),
     ) as { items: { metadata: { id: string }; status: unknown }[] };
     expect(listed.items.find((item) => item.metadata.id === reportId)?.status).toEqual({
       locations: [{ kind: "volume", volume: "shared" }],

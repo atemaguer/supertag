@@ -21,14 +21,14 @@ describe("field management", () => {
       workerHosts: [],
       runsOn: ["gpu"],
       locations: [location("C1", ["deploy"])],
-      acceptsMessagesFrom: [{ tag: "reviewer", types: ["message"] }],
+      acceptsMessagesFrom: ["reviewer"],
     };
     const fields = flattenSpec("Tag", spec);
     expect([...fields.keys()]).toEqual([
       "spec.roles[Engineer]",
       "spec.runsOn[gpu]",
-      "spec.locations[slack:C1]",
       "spec.acceptsMessagesFrom[reviewer]",
+      "spec.locations[slack:C1]",
     ]);
     expect(unflattenSpec("Tag", fields)).toEqual(spec);
     expect(flattenSpec("Workspace", { ref: "main", delivery: "branch" })).toEqual(

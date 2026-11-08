@@ -84,7 +84,9 @@ export class BudgetNotifications {
         await this.store.enqueueOutboundReply({
           inboundEventId: route.inboundEventId,
           workerId: "objective-controller",
-          presentation: "status",
+          // Error presentation is immutable in the outbox: a concurrent or repeated sweep
+          // cannot reset the delivery of a notice that already reached the home thread.
+          presentation: "error",
           deliveryKey: route.key,
           text: budgetNoticeText(item),
           createdAt: new Date().toISOString(),
@@ -133,10 +135,9 @@ export class BudgetNotifications {
     }
     if (objectiveClosed(objective.status))
       return { status: "pending", reason: "The Objective is closed; refresh the inbox." };
-    const itemKey =
-      item.kind === "objective_limit"
-        ? item.key.slice(`objective_limit:${item.objectiveId}:`.length)
-        : item.key;
+    // Both kinds key their inbox item `<kind>:<objectiveId>:<eventKey>`; the notice names the
+    // event key alone, so the two kinds build the same delivery key shape.
+    const itemKey = item.key.slice(`${item.kind}:${item.objectiveId}:`.length);
     if (
       item.kind === "objective_limit" &&
       !objectiveLimitEvents(objective).some((event) => event.key === itemKey)
@@ -144,11 +145,19 @@ export class BudgetNotifications {
       return { status: "pending", reason: "The limit changed; refresh the inbox." };
     const home = await objectiveHome(this.store, objective, this.defaultTaskId);
     if (!home?.inboundEventId)
-      return {
-        status: "unconfigured",
-        reason:
-          "The Objective has no home thread and no operator notification destination is configured; no external notification was delivered.",
-      };
+      // A destination the operator chose that no longer verifies is a failure, not an Objective
+      // that was never given one.
+      return objective.notificationTaskId
+        ? {
+            status: "failed",
+            reason:
+              "The Objective's notification destination could not be verified; no external notification was delivered.",
+          }
+        : {
+            status: "unconfigured",
+            reason:
+              "The Objective has no home thread and no operator notification destination is configured; no external notification was delivered.",
+          };
     return {
       inboundEventId: home.inboundEventId,
       key: `${DELIVERY_PREFIX[item.kind]}:${encodeURIComponent(objective.id)}:${encodeURIComponent(itemKey)}:${encodeURIComponent(home.id)}`,

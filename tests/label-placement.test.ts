@@ -587,7 +587,7 @@ it("holds a surface Task until a bound Worker Host carries the Tag's runsOn labe
   }
 }, 15000);
 
-it("places Objective Tasks only on bound Worker Hosts that carry the Tag's runsOn labels", async () => {
+it("places Session Tasks only on bound Worker Hosts that carry the Tag's runsOn labels", async () => {
   const directory = await mkdtemp(join(tmpdir(), "supertag-objective-labels-"));
   const databaseUrl = `file:${join(directory, "state.db")}`;
   await migrateDatabase({ url: databaseUrl });
@@ -626,15 +626,6 @@ it("places Objective Tasks only on bound Worker Hosts that carry the Tag's runsO
   try {
     const gpuTag = await store.createTag({ name: "Trainer" });
     const tpuTag = await store.createTag({ name: "Researcher" });
-    await store.createObjective({ id: "objective", ownerTagId: gpuTag.id, outcome: "Train" });
-    await store.createTeam({
-      id: "team",
-      objectiveId: "objective",
-      name: "Training",
-      leadTagId: gpuTag.id,
-      memberTagIds: [tpuTag.id],
-      maxConcurrency: 2,
-    });
     runtime = await startControlPlaneRuntime({
       host: "127.0.0.1",
       port: 0,
@@ -671,28 +662,24 @@ it("places Objective Tasks only on bound Worker Hosts that carry the Tag's runsO
     await store.setTagRunsOn(gpuTag.id, ["gpu"]);
     await store.setTagRunsOn(tpuTag.id, ["gpu", "tpu"]);
 
-    for (const [taskId, tag] of [
-      ["gpu-task", gpuTag],
-      ["tpu-task", tpuTag],
-    ] as const) {
-      const response = await fetch(`${runtime.url}/api/v1/coordination/assign_task`, {
+    // Each Tag takes a conversation turn, which the Control Plane must place.
+    const taskIds = new Map<string, string>();
+    for (const tag of [gpuTag, tpuTag]) {
+      const response = await fetch(`${runtime.url}/api/v1/tags/${tag.name}/messages`, {
         method: "POST",
         headers: { Authorization: "Bearer labels-admin", "Content-Type": "application/json" },
-        body: JSON.stringify({
-          objectiveId: "objective",
-          taskId,
-          teamId: "team",
-          assignedTagId: tag.id,
-          instruction: "Train the model",
-          acceptanceCriteria: ["Trained"],
-        }),
+        body: JSON.stringify({ text: "Train the model" }),
       });
-      expect(response.status, await response.text()).toBe(200);
+      const text = await response.text();
+      expect(response.status, text).toBe(201);
+      taskIds.set(tag.name, (JSON.parse(text) as { taskId: string }).taskId);
     }
+    const gpuTaskId = taskIds.get(gpuTag.name) as string;
+    const tpuTaskId = taskIds.get(tpuTag.name) as string;
     await expect
-      .poll(async () => (await store.getTaskAssignment("gpu-task"))?.status, { timeout: 10000 })
-      .toBe("submitted");
-    expect(observed.find((spec) => spec.taskId === "gpu-task")?.placement).toMatchObject({
+      .poll(async () => (await store.findTaskById(gpuTaskId))?.status, { timeout: 10000 })
+      .toBe("completed");
+    expect(observed.find((spec) => spec.taskId === gpuTaskId)?.placement).toMatchObject({
       allowedWorkerHostIds: ["gpu-host"],
       workerHostId: "gpu-host",
     });
@@ -700,13 +687,13 @@ it("places Objective Tasks only on bound Worker Hosts that carry the Tag's runsO
     await expect
       .poll(
         async () =>
-          (await store.listTaskEvents("tpu-task")).find(
+          (await store.listTaskEvents(tpuTaskId)).find(
             (event) => event.type === "task.scheduling-incompatible",
           )?.payload,
         { timeout: 10000 },
       )
       .toMatchObject({ status: "incompatible", unmetRequirements: ["labels:tpu"] });
-    expect(observed.some((spec) => spec.taskId === "tpu-task")).toBe(false);
+    expect(observed.some((spec) => spec.taskId === tpuTaskId)).toBe(false);
   } finally {
     for (const connection of connections) await connection.stop();
     await runtime?.close();

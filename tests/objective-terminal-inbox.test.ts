@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ObjectiveController } from "../packages/control-plane/src/objective-controller.js";
-import { emptyTagContextPlan } from "../packages/core/src/index.js";
+import {
+  objectiveSessionKey,
+  type SurfaceTagAuthorizationSnapshot,
+} from "../packages/core/src/index.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
 import { createIsolatedPostgresDatabase } from "./support/database.js";
 
@@ -24,57 +27,126 @@ for (const dialect of ["sqlite", "postgresql"] as const)
         const store = new DrizzleStore({ url });
         await store.connect();
         const owner = await store.createTag({ name: randomUUID() });
+        const team = await store.createTeam({
+          id: randomUUID(),
+          name: `team-${randomUUID()}`,
+          memberTagIds: [owner.id],
+        });
         const objective = await store.createObjective({
           id: randomUUID(),
           ownerTagId: owner.id,
+          teamId: team.id,
           outcome: "Repair the service",
           budgetLimitMinor: 1000,
         });
-        const team = await store.createTeam({
-          id: `${objective.id}:leadership`,
-          objectiveId: objective.id,
-          name: "Leadership",
-          leadTagId: owner.id,
-          memberTagIds: [],
-          maxConcurrency: 1,
+
+        const account = await store.saveSurfaceAccount({
+          provider: "slack",
+          externalAccountId: randomUUID(),
+          displayName: "Slack",
+          authMethod: "test",
+          credentialId: "test",
+          status: "connected",
+          configuration: {},
+          verifiedAt: new Date().toISOString(),
+        });
+        const route = await store.addTagRoute({
+          tagId: owner.id,
+          surfaceAccountId: account.id,
+          scope: "channel:repair",
         });
         const at = new Date().toISOString();
-        const root = await store.admitTaskAssignment({
-          taskId: `${objective.id}:start`,
-          objectiveId: objective.id,
-          teamId: team.id,
-          requestedByTagId: owner.id,
-          assignedTagId: owner.id,
-          instruction: "Repair the service",
-          acceptanceCriteria: ["Safe"],
-          execution: {},
-          startObjectiveExecution: true,
-          contextPlan: emptyTagContextPlan(at),
-          workspacePlan: { version: 1, status: "none" },
-          authorizationSnapshot: {
-            version: 4,
-            capturedAt: at,
-            tag: { id: owner.id, name: owner.name },
-            origin: { kind: "internal", objectiveId: objective.id, requestedByTagId: owner.id },
-            requester: { id: owner.id, kind: "bot" },
-            permissionSets: [],
-            resources: [],
-            runtimeActions: [],
+        const authorization: SurfaceTagAuthorizationSnapshot = {
+          version: 5,
+          capturedAt: at,
+          tag: { id: owner.id, name: owner.name },
+          origin: {
+            provider: "slack",
+            surfaceAccountId: account.id,
+            tagRouteId: route.id,
+            scope: "channel:repair",
           },
-        });
-        const ask = await store.enqueueObjectiveMessage({
-          objectiveId: objective.id,
-          senderTagId: owner.id,
-          sourceTaskId: root.taskId,
-          type: "message",
-          body: { message: "Raise the budget to 2000?" },
-          idempotencyKey: "budget-question",
+          requester: { id: "supertag", kind: "bot" },
+          roles: [],
+          permissionSets: [],
+          resources: [],
+          runtimeActions: [],
+        };
+        const contextPlan = { version: 7, capturedAt: at, sets: [] } as const;
+        const sessionKey = objectiveSessionKey(objective.id);
+        /** One turn of the Objective's own Session, settled with the outcome given. */
+        const ownerTurn = async (text: string, outcome: Record<string, unknown>) => {
+          const admitted = await store.admitInboundEvent({
+            surfaceAccountId: account.id,
+            tagRouteId: route.id,
+            tagId: owner.id,
+            authorization,
+            contextPlan,
+            event: {
+              eventId: randomUUID(),
+              logicalEventId: randomUUID(),
+              provider: "slack",
+              externalAccountId: account.externalAccountId,
+              kind: "message",
+              scope: "channel:repair",
+              sessionKey,
+              actor: { id: "supertag", displayName: "SuperTag", kind: "bot" },
+              text,
+              occurredAt: new Date().toISOString(),
+              callback: {
+                provider: "slack",
+                mode: "slack_thread",
+                threadKey: sessionKey,
+                target: { channelId: "repair", threadTs: "1.000" },
+              },
+              source: {},
+              metadata: {},
+              internal: {
+                kind: "delivery",
+                from: { kind: "supertag" },
+                reason: "objective_start",
+                objectiveId: objective.id,
+              },
+            },
+          });
+          const session = await store.openSession({
+            tagId: owner.id,
+            sessionKey,
+            origin: {},
+            objectiveId: objective.id,
+            at,
+          });
+          const task = await store.openTask({
+            inboundEventId: admitted.work.id,
+            tagId: owner.id,
+            sessionId: session.id,
+            execution: {},
+            actor: { id: "supertag", kind: "bot" },
+            trigger: {},
+            workspacePlan: { version: 1, status: "none" },
+            sessionHistory: [],
+            authorizationSnapshot: authorization,
+            contextPlan,
+            createdAt: new Date().toISOString(),
+          });
+          await store.startTask({ taskId: task.id, startedAt: new Date().toISOString() });
+          return store.closeTask({
+            taskId: task.id,
+            status: "completed",
+            outcome,
+            endedAt: new Date().toISOString(),
+          });
+        };
+
+        // The Objective's turn asked the operator a question and waits on the answer.
+        const asked = await ownerTurn("Repair the service", {
+          question: "Raise the budget to 2000?",
         });
         const approval = await store.createApprovalRequest({
           objectiveId: objective.id,
-          taskId: root.taskId,
+          taskId: asked.id,
           requestingTagId: owner.id,
-          kind: "plan",
+          kind: "surface-action",
           actions: [{ target: "runtime", action: "deploy" }],
           summary: "Deploy the repair",
           ruleSources: ["release"],
@@ -84,9 +156,9 @@ for (const dialect of ["sqlite", "postgresql"] as const)
           store,
           owner,
           objective,
-          root,
-          ask: ask.message,
+          asked,
           approval,
+          ownerTurn,
           controller: new ObjectiveController(store, undefined),
           async close() {
             await store.disconnect();
@@ -96,14 +168,18 @@ for (const dialect of ["sqlite", "postgresql"] as const)
         };
       }
 
-      it("resolves questions and expires approvals when the operator cancels", async () => {
+      it("drops the owner's question and expires approvals when the operator cancels", async () => {
         const f = await fixture();
         try {
           const before = await f.controller.readCoordinationInbox({ objectiveId: f.objective.id });
           expect(before.items.map((item) => item.kind).toSorted()).toEqual([
             "approval",
-            "operator_message",
+            "question",
           ]);
+          expect(before.items.find((item) => item.kind === "question")).toMatchObject({
+            objectiveId: f.objective.id,
+            question: { text: "Raise the budget to 2000?" },
+          });
 
           await f.store.cancelObjective(
             f.objective.id,
@@ -113,101 +189,30 @@ for (const dialect of ["sqlite", "postgresql"] as const)
 
           const after = await f.controller.readCoordinationInbox({ objectiveId: f.objective.id });
           expect(after.items).toEqual([]);
-          const [message] = await f.store.listObjectiveMessages({ objectiveId: f.objective.id });
-          expect(message).toMatchObject({
-            id: f.ask.id,
-            status: "resolved",
-            resolutionReason: "Objective cancelled",
-            replyMessageId: null,
-            resolvedAt: expect.any(String),
-          });
-          expect(
-            (
-              await f.store.listObjectiveMessages({
-                objectiveId: f.objective.id,
-                pendingOnly: true,
-              })
-            ).map((item) => item.id),
-          ).toEqual([]);
           const [request] = await f.store.listApprovalRequests({ objectiveId: f.objective.id });
           expect(request).toMatchObject({
             id: f.approval.id,
             status: "expired",
             reason: "Objective cancelled",
           });
-          // A linked answer remains possible without reopening the Objective.
-          await f.store.sendOperatorObjectiveMessage({
-            objectiveId: f.objective.id,
-            message: "Too late, but yes.",
-            inReplyTo: f.ask.id,
-            idempotencyKey: "late-reply",
-            operatorId: "test-operator",
-          });
-          expect(await f.store.getObjectiveMessage(f.ask.id)).toMatchObject({ status: "replied" });
           expect((await f.store.getObjective(f.objective.id)).status).toBe("cancelled");
         } finally {
           await f.close();
         }
       });
 
-      it("refuses completion until questions are answered and then expires approvals", async () => {
+      it("expires pending approvals when the Objective completes", async () => {
         const f = await fixture();
         try {
-          await f.store.updateTaskAssignment(
-            f.root.taskId,
-            { expectedStatus: "queued", status: "cancelled" },
-            f.owner.id,
-          );
           const current = await f.store.getObjective(f.objective.id);
-          await expect(
-            f.store.updateObjectiveStatus(f.objective.id, {
-              expectedRevision: current.revision,
-              status: "completed",
-              completionSummary: "Repaired.",
-            }),
-          ).rejects.toThrow(f.ask.id);
-
-          const pending = await f.store.getObjectiveMessage(f.ask.id);
-          expect(pending).toMatchObject({ status: "pending", resolutionReason: null });
-          expect(
-            (await f.store.listApprovalRequests({ objectiveId: f.objective.id }))[0],
-          ).toMatchObject({ status: "pending" });
-          await f.store.sendOperatorObjectiveMessage({
-            objectiveId: f.objective.id,
-            message: "Yes",
-            inReplyTo: f.ask.id,
-            idempotencyKey: "answer-before-completion",
-            operatorId: "test-operator",
-          });
-          const delivery = await f.store.claimTagMessage({
-            tagId: f.owner.id,
-            credentialId: "test-owner",
-            now: new Date().toISOString(),
-            leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
-          });
-          if (!delivery) throw new Error("Expected operator reply delivery");
-          await f.store.settleTagMessage({
-            tagId: f.owner.id,
-            credentialId: "test-owner",
-            messageId: delivery.message.id,
-            leaseToken: delivery.leaseToken,
-            now: new Date().toISOString(),
-            status: "processed",
-          });
-          const refreshed = await f.store.getObjective(f.objective.id);
           await f.store.updateObjectiveStatus(f.objective.id, {
-            expectedRevision: refreshed.revision,
+            expectedRevision: current.revision,
             status: "completed",
             completionSummary: "Repaired.",
           });
 
           const after = await f.controller.readCoordinationInbox({ objectiveId: f.objective.id });
           expect(after.items).toEqual([]);
-          const [message] = await f.store.listObjectiveMessages({ objectiveId: f.objective.id });
-          expect(message).toMatchObject({
-            status: "replied",
-            resolutionReason: null,
-          });
           const [request] = await f.store.listApprovalRequests({ objectiveId: f.objective.id });
           expect(request).toMatchObject({ status: "expired", reason: "Objective completed" });
         } finally {
@@ -215,17 +220,9 @@ for (const dialect of ["sqlite", "postgresql"] as const)
         }
       });
 
-      it("leaves answered questions and decided approvals unchanged", async () => {
+      it("leaves decided approvals unchanged and drops a question a later turn replaced", async () => {
         const f = await fixture();
         try {
-          await f.store.replyToObjectiveMessage({
-            messageId: f.ask.id,
-            objectiveId: f.objective.id,
-            recipientTagId: f.owner.id,
-            body: { message: "Yes" },
-            idempotencyKey: "reply",
-            operatorId: "test-operator",
-          });
           await f.store.decideApprovalRequest({
             id: f.approval.id,
             decision: "deny",
@@ -233,9 +230,12 @@ for (const dialect of ["sqlite", "postgresql"] as const)
             decidedByKind: "operator",
             reason: "Not now",
           });
+          // The operator answered, so the Objective's next turn carries no question.
+          await f.ownerTurn("Yes, raise it", { summary: "Budget raised." });
+          const inbox = await f.controller.readCoordinationInbox({ objectiveId: f.objective.id });
+          expect(inbox.items).toEqual([]);
+
           await f.store.cancelObjective(f.objective.id, {}, { operatorId: "test-operator" });
-          const [message] = await f.store.listObjectiveMessages({ objectiveId: f.objective.id });
-          expect(message).toMatchObject({ status: "replied", resolvedAt: null });
           const [request] = await f.store.listApprovalRequests({ objectiveId: f.objective.id });
           expect(request).toMatchObject({ status: "denied", reason: "Not now" });
         } finally {

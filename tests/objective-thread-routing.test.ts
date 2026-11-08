@@ -83,7 +83,7 @@ async function threadFixture(
   await store.connect();
   cleanups.push(() => store.disconnect());
   options.prepare?.(store);
-  const replies: Array<{ threadKey: string; markdown: string }> = [];
+  const replies: Array<{ threadKey: string; kind?: string; markdown: string }> = [];
   const controlPlane = new ControlPlane({
     store,
     credentialVault: new FileGatewayCredentialVault(join(directory, "vault.json")),
@@ -92,8 +92,12 @@ async function threadFixture(
         new StaticWorker({ id: "thread-worker", profile: { id: "default", revision: "1" } }),
       ]),
     ),
-    reply: async (route: InboundSurfaceEvent, reply: { markdown: string }) => {
-      replies.push({ threadKey: route.callback.threadKey, markdown: reply.markdown });
+    reply: async (route: InboundSurfaceEvent, reply: { kind?: string; markdown: string }) => {
+      replies.push({
+        threadKey: route.callback.threadKey,
+        ...(reply.kind === undefined ? {} : { kind: reply.kind }),
+        markdown: reply.markdown,
+      });
       return { externalMessageId: `reply-${replies.length}` };
     },
     ...(options.audit === undefined ? {} : { audit: options.audit }),
@@ -137,70 +141,112 @@ async function threadFixture(
   return { store, controlPlane, replies, tag, objective };
 }
 
+/** The last status answer SuperTag posted in the thread; the owner's own replies are skipped. */
+const lastStatus = (replies: ReadonlyArray<{ kind?: string; markdown: string }>) =>
+  replies.filter((reply) => reply.kind === "status").at(-1);
+
+/** The Objective's own Session turns, oldest first, with the turn each Task was admitted for. */
+async function ownerTurns(store: DrizzleStore, objectiveId: string) {
+  const session = await store.findObjectiveOwnerSession(objectiveId);
+  if (!session) return [];
+  const tasks = (await store.listTasks({ sessionId: session.id })).toSorted((a, b) =>
+    a.createdAt.localeCompare(b.createdAt),
+  );
+  return Promise.all(
+    tasks.map(async (task) => ({
+      task,
+      event:
+        task.inboundEventId === null
+          ? undefined
+          : await store.findInboundEventById(task.inboundEventId),
+    })),
+  );
+}
+
+/** Sets the status, re-reading the revision when the sweep changed it underneath. */
+async function setStatus(
+  store: DrizzleStore,
+  objectiveId: string,
+  input: { readonly status: "ready_for_review"; readonly completionSummary: string },
+  actorTagId: string,
+) {
+  for (let attempt = 0; ; attempt += 1) {
+    const current = await store.getObjective(objectiveId);
+    try {
+      return await store.updateObjectiveStatus(
+        objectiveId,
+        { ...input, expectedRevision: current.revision },
+        actorTagId,
+      );
+    } catch (error) {
+      if (attempt >= 4) throw error;
+    }
+  }
+}
+
 for (const dialect of ["sqlite", "postgresql"] as const)
   it.skipIf(dialect === "postgresql" && !postgres)(
-    `routes replies in an Objective's notification thread to its owner and approves from it (${dialect})`,
+    `routes replies in an Objective's home thread to its own Session and approves from it (${dialect})`,
     async () => {
       const { store, controlPlane, replies, tag, objective } = await threadFixture(dialect);
 
-      const reply = await controlPlane.ingestSurfaceEvent(
-        event("Please mention the pricing change.", {
-          kind: "message",
-          actor: { id: "U2", kind: "user" },
-        }),
-      );
+      const message = event("Please mention the pricing change.", {
+        kind: "message",
+        actor: { id: "U2", kind: "user" },
+      });
+      const reply = await controlPlane.ingestSurfaceEvent(message);
       expect(reply).toMatchObject({ status: "accepted", objectiveId: objective.id });
       expect(reply.taskId).toBeUndefined();
-      const [delivered] = await store.listTagMessages(tag.id);
-      expect(delivered).toMatchObject({
-        operatorId: "slack:U2",
-        recipientTagId: tag.id,
-        body: { message: "Please mention the pricing change." },
+      // The message is a turn of the Objective's own Session, in its home thread.
+      const [turn, ...rest] = await ownerTurns(store, objective.id);
+      expect(rest).toHaveLength(0);
+      expect(turn?.event?.event.text).toBe("Please mention the pricing change.");
+      expect(turn?.event?.event.callback.threadKey).toBe("T-THREAD|C1|1.000");
+      expect(turn?.event?.event.internal).toMatchObject({
+        kind: "delivery",
+        reason: "objective_message",
+        objectiveId: objective.id,
+        from: { kind: "person", id: "slack:U2" },
       });
-      expect(replies.at(-1)).toEqual({
+      expect(lastStatus(replies)).toEqual({
         threadKey: "T-THREAD|C1|1.000",
-        markdown: "Sent to the Objective owner.",
+        kind: "status",
+        markdown: "Sent to the Objective.",
       });
+
+      // The same surface event again is a duplicate, not a second turn.
+      const repeated = await controlPlane.ingestSurfaceEvent(message);
+      expect(repeated).toMatchObject({ status: "accepted", objectiveId: objective.id });
+      expect(lastStatus(replies)?.markdown).toBe(
+        "This message was already delivered to the Objective.",
+      );
+      expect(await ownerTurns(store, objective.id)).toHaveLength(1);
 
       // Approval works only once the owner submitted the Objective for review.
       await controlPlane.ingestSurfaceEvent(event("@SuperTag approve"));
-      expect(replies.at(-1)?.markdown).toContain("not ready_for_review");
-      const current = await store.getObjective(objective.id);
-      await store.updateObjectiveStatus(
+      expect(lastStatus(replies)?.markdown).toContain("not ready_for_review");
+      await setStatus(
+        store,
         objective.id,
-        {
-          status: "ready_for_review",
-          expectedRevision: current.revision,
-          completionSummary: "Notes drafted with pricing.",
-        },
+        { status: "ready_for_review", completionSummary: "Notes drafted with pricing." },
         tag.id,
       );
-      // The owner has read the operator message before submitting.
-      const claimed = await store.claimTagMessage({
-        tagId: tag.id,
-        credentialId: "owner",
-        now: new Date().toISOString(),
-        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
-      });
-      if (!claimed) throw new Error("Missing operator message");
-      await store.settleTagMessage({
-        tagId: tag.id,
-        credentialId: "owner",
-        messageId: claimed.message.id,
-        leaseToken: claimed.leaseToken,
-        now: new Date().toISOString(),
-        status: "processed",
-      });
       const approved = await controlPlane.ingestSurfaceEvent(event("@SuperTag approve"));
       expect(approved).toMatchObject({ status: "accepted", objectiveId: objective.id });
-      expect(replies.at(-1)?.markdown).toBe("Approved. Objective launch-notes is completed.");
+      expect(lastStatus(replies)?.markdown).toBe("Approved. Objective launch-notes is completed.");
       expect(await store.getObjective(objective.id)).toMatchObject({
         status: "completed",
         completionSummary: "Notes drafted with pricing.",
       });
-      // Replying to a completed Objective requires an explicit reopen from the CLI.
-      await controlPlane.ingestSurfaceEvent(event("One more thing", { kind: "message" }));
-      expect(replies.at(-1)?.markdown).toContain("--reopen");
+      // A completed Objective no longer owns its home thread: replies there are ordinary turns.
+      const after = await controlPlane.ingestSurfaceEvent(
+        event("One more thing", {
+          kind: "message",
+        }),
+      );
+      expect(after.status).toBe("accepted");
+      expect(after.objectiveId).toBeUndefined();
+      expect(after.taskId).toBeDefined();
       expect((await store.getObjective(objective.id)).status).toBe("completed");
 
       // Other threads keep their ordinary handling.
@@ -221,7 +267,6 @@ for (const dialect of ["sqlite", "postgresql"] as const)
       // Each operator decision from the thread is in the audit trail, attributed to the person.
       // Entries within one millisecond have no defined order, so compare them as a set.
       const audit = await store.listAuditEntries();
-      expect(audit).toHaveLength(4);
       for (const entry of audit) expect(Date.parse(entry.at)).not.toBeNaN();
       expect(
         audit.map(({ actor, action, target, outcome, status, source }) => ({
@@ -234,6 +279,14 @@ for (const dialect of ["sqlite", "postgresql"] as const)
         })),
       ).toEqual(
         expect.arrayContaining([
+          {
+            actor: "slack:U2",
+            action: "objective.message",
+            target: "Objective/launch-notes",
+            outcome: "succeeded",
+            status: undefined,
+            source: "gateway",
+          },
           {
             actor: "slack:U2",
             action: "objective.message",
@@ -258,16 +311,9 @@ for (const dialect of ["sqlite", "postgresql"] as const)
             status: undefined,
             source: "gateway",
           },
-          {
-            actor: "slack:U1",
-            action: "objective.message",
-            target: "Objective/launch-notes",
-            outcome: "failed",
-            status: 409,
-            source: "gateway",
-          },
         ]),
       );
+      expect(audit).toHaveLength(4);
       const recorded = JSON.stringify(audit);
       for (const secret of ["xoxb-test", "xapp-test", "pricing change", "One more thing"])
         expect(recorded).not.toContain(secret);
@@ -306,15 +352,15 @@ for (const [name, options] of [
   ],
 ] as const)
   it(`still delivers thread messages and approval answers when ${name}`, async () => {
-    const { store, controlPlane, replies, tag, objective } = await threadFixture("sqlite", options);
+    const { store, controlPlane, replies, objective } = await threadFixture("sqlite", options);
     const sent = await controlPlane.ingestSurfaceEvent(
       event("Please mention the pricing change.", { kind: "message" }),
     );
     expect(sent).toMatchObject({ status: "accepted", objectiveId: objective.id });
-    expect(replies.at(-1)?.markdown).toBe("Sent to the Objective owner.");
-    expect(await store.listTagMessages(tag.id)).toHaveLength(1);
+    expect(lastStatus(replies)?.markdown).toBe("Sent to the Objective.");
+    expect(await ownerTurns(store, objective.id)).toHaveLength(1);
     // A refused approval still answers with its reason rather than an audit failure.
     const refused = await controlPlane.ingestSurfaceEvent(event("@SuperTag approve"));
     expect(refused).toMatchObject({ status: "accepted", objectiveId: objective.id });
-    expect(replies.at(-1)?.markdown).toContain("not ready_for_review");
+    expect(lastStatus(replies)?.markdown).toContain("not ready_for_review");
   });

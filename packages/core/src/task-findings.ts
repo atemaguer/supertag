@@ -130,9 +130,8 @@ export function taskFindingsBySeverity(
 }
 
 /**
- * The findings of a stored Task result, held under `taskResult`; findings outside `taskResult`
- * are never trusted. Invalid stored findings become one high finding, so corrupted data cannot
- * read as having no findings.
+ * The findings of a stored {@link TaskResult}, held under its own `findings`. Invalid stored
+ * findings become one high finding, so corrupted data cannot read as having no findings.
  */
 export function storedTaskFindings(result: unknown): readonly TaskFinding[] {
   try {
@@ -144,14 +143,12 @@ export function storedTaskFindings(result: unknown): readonly TaskFinding[] {
 
 /** Stored findings, throwing with the reason when the record's findings do not validate. */
 function strictStoredTaskFindings(result: unknown): readonly TaskFinding[] {
-  if (!isRecord(result)) return [];
-  const taskResult = result["taskResult"];
-  if (taskResult === undefined) return [];
-  if (!isRecord(taskResult))
-    throw new Error("Stored Task result findings are invalid: taskResult must be an object");
-  if (taskResult["findings"] === undefined) return [];
+  if (result === undefined || result === null) return [];
+  if (!isRecord(result))
+    throw new Error("Stored Task result findings are invalid: the result must be an object");
+  if (result["findings"] === undefined) return [];
   try {
-    return parseTaskFindings(taskResult["findings"]);
+    return parseTaskFindings(result["findings"]);
   } catch (error) {
     throw new Error(
       `Stored Task result findings are invalid: ${error instanceof Error ? error.message : String(error)}`,

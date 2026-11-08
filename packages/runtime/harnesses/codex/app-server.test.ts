@@ -55,8 +55,8 @@ if(m.method==='turn/start'){if(mode==='turn-failed')return send({id:m.id,error:{
  reply(m.id,{turn:{id:'turn'}});notify('turn/started',{threadId:'root',turn:{id:'turn',...(mode==='reported-model-cost'?{model:'gpt-5'}:{})}});
  if(mode==='default-model-cost'||mode==='reported-model-cost'){complete();return;}
  if(mode.startsWith('capacity-')){capacityStarts++;fs.writeFileSync('capacity-starts.txt',String(capacityStarts));if((mode==='capacity-once'||mode==='capacity-similar')&&capacityStarts===2){complete();return;}if(mode==='capacity-tool')notify('item/started',{threadId:'root',item:{type:'commandExecution',id:'command'}});if(mode==='capacity-output')notify('item/agentMessage/delta',{threadId:'root',delta:'partial'});if(mode==='capacity-usage')usage('root',1);notify('turn/completed',{threadId:'root',turn:{id:'turn',status:'failed',error:{message:mode==='capacity-quota'?'Usage limit reached':mode==='capacity-similar'?'Provider is temporarily at capacity. Try again later.':'Selected model is at capacity. Please try a different model.'}}});return;}
- if(mode==='manager-flood'){send({id:903,method:'item/tool/call',params:{threadId:'root',turnId:'turn',callId:'manager-call',namespace:'supertag-coordination',tool:'assign_task',arguments:{taskId:'task-1'}}});const delta='x'.repeat(65536);for(let i=0;i<63;i++)notify('item/commandExecution/outputDelta',{threadId:'root',itemId:'c',delta});process.stdout.write(JSON.stringify({method:'item/commandExecution/outputDelta',params:{threadId:'root',itemId:'c',delta}})+'\\n',()=>fs.writeFileSync('flooded.txt','4 MiB written'));return;}
- if(mode.startsWith('manager-')){const threadId=mode==='manager-forged-child'?'child':'root';const turnId=mode==='manager-forged-turn'?'other-turn':'turn';const args=mode==='manager-malformed-arguments'?[]:{taskId:'task-1'};send({id:903,method:'item/tool/call',params:{threadId,turnId,callId:'manager-call',namespace:'supertag-coordination',tool:'assign_task',arguments:args}});return;}
+ if(mode==='manager-flood'){send({id:903,method:'item/tool/call',params:{threadId:'root',turnId:'turn',callId:'manager-call',namespace:'supertag-coordination',tool:'start_session',arguments:{taskId:'task-1'}}});const delta='x'.repeat(65536);for(let i=0;i<63;i++)notify('item/commandExecution/outputDelta',{threadId:'root',itemId:'c',delta});process.stdout.write(JSON.stringify({method:'item/commandExecution/outputDelta',params:{threadId:'root',itemId:'c',delta}})+'\\n',()=>fs.writeFileSync('flooded.txt','4 MiB written'));return;}
+ if(mode.startsWith('manager-')){const threadId=mode==='manager-forged-child'?'child':'root';const turnId=mode==='manager-forged-turn'?'other-turn':'turn';const args=mode==='manager-malformed-arguments'?[]:{taskId:'task-1'};send({id:903,method:'item/tool/call',params:{threadId,turnId,callId:'manager-call',namespace:'supertag-coordination',tool:'start_session',arguments:args}});return;}
  if(['unknown','unowned-parent','wrong-read-id'].includes(mode)){notify('thread/tokenUsage/updated',{threadId:'unowned',tokenUsage:{total:{}}});complete();return;}
  if(mode==='forked-child'){notify('thread/started',{thread:{id:'child',parentThreadId:'root'}});return;}
  if(mode==='limit'){notify('item/completed',{threadId:'root',item:{type:'collabAgentToolCall',senderThreadId:'root',tool:'spawnAgent',receiverThreadIds:['one','two']}});return;}
@@ -86,7 +86,7 @@ if(m.id===900){if(m.result.answers.choice.answers[0]!=='approved answer')process
  if(mode==='terminal-snapshot')return;setTimeout(()=>{usage('child',5);done('child');fs.writeFileSync('settled.txt','children settled');},40);return;}
 if(m.id===901){if(m.result.decision!=='decline')process.exit(6);send({id:902,method:'account/chatgptAuthTokens/refresh',params:{}});return;}
 if(m.id===902){if(!m.error)process.exit(5);complete();return;}
-if(m.id===903){fs.writeFileSync('dynamic-response.json',JSON.stringify(m.result));if(mode==='manager-duplicate'){send({id:904,method:'item/tool/call',params:{threadId:'root',turnId:'turn',callId:'manager-call',namespace:'supertag-coordination',tool:'assign_task',arguments:{taskId:'task-1'}}});return;}complete();return;}
+if(m.id===903){fs.writeFileSync('dynamic-response.json',JSON.stringify(m.result));if(mode==='manager-duplicate'){send({id:904,method:'item/tool/call',params:{threadId:'root',turnId:'turn',callId:'manager-call',namespace:'supertag-coordination',tool:'start_session',arguments:{taskId:'task-1'}}});return;}complete();return;}
 });
 `,
   );
@@ -306,7 +306,7 @@ lines.on("line", line => {
   if (message.method === "initialize")
     return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "environment-manager", version: "1" } } });
   if (message.method === "tools/list")
-    return send({ jsonrpc: "2.0", id: message.id, result: { tools: [{ name: "assign_task", description: "Assign from the environment", inputSchema: { type: "object", properties: { taskId: { type: "string" } }, required: ["taskId"] } }] } });
+    return send({ jsonrpc: "2.0", id: message.id, result: { tools: [{ name: "start_session", description: "Assign from the environment", inputSchema: { type: "object", properties: { taskId: { type: "string" } }, required: ["taskId"] } }] } });
   if (message.method === "tools/call")
     return send({ jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text: process.env.ENVIRONMENT_MARKER + ":" + message.params.arguments.taskId }] } });
 });
@@ -321,9 +321,9 @@ lines.on("line", line => {
       provider: "test",
       operations: [
         {
-          name: "assign_task",
+          name: "start_session",
           effect: "write",
-          actions: ["tasks:assign"],
+          actions: ["sessions:start"],
           resourceArgumentPolicies: [
             {
               match: "scope",
@@ -360,7 +360,7 @@ async function managerToolFixture(responseText = "assigned", advertiseAssign = t
       tools: advertiseAssign
         ? [
             {
-              name: "assign_task",
+              name: "start_session",
               description: "Assign an admitted task",
               inputSchema: {
                 type: "object",
@@ -400,9 +400,9 @@ async function managerToolFixture(responseText = "assigned", advertiseAssign = t
       provider: "supertag",
       operations: [
         {
-          name: "assign_task",
+          name: "start_session",
           effect: "write",
-          actions: ["tasks:assign"],
+          actions: ["sessions:start"],
           inputSchema: { type: "object" },
           resourceArgumentPolicies: [
             {
@@ -452,8 +452,8 @@ it("publishes the dynamically authorized manager subset and dispatches only for 
       JSON.parse(await readFile(f.environment.resolvePath("dynamic-response.json"), "utf8")),
     ).toEqual({ contentItems: [{ type: "inputText", text: "assigned" }], success: true });
     expect(events.filter((event) => event.type.startsWith("tool.call."))).toMatchObject([
-      { type: "tool.call.started", call: { operation: "assign_task" } },
-      { type: "tool.call.completed", call: { operation: "assign_task" } },
+      { type: "tool.call.started", call: { operation: "start_session" } },
+      { type: "tool.call.completed", call: { operation: "start_session" } },
     ]);
     expect(
       JSON.parse(await readFile(f.environment.resolvePath("dynamic-tools.json"), "utf8")),
@@ -465,7 +465,7 @@ it("publishes the dynamically authorized manager subset and dispatches only for 
         tools: [
           {
             type: "function",
-            name: "assign_task",
+            name: "start_session",
             description: "Assign an admitted task",
             inputSchema: {
               type: "object",
@@ -496,8 +496,8 @@ it("dispatches a Codex dynamic tool through an execution-environment-owned MCP c
       success: true,
     });
     expect(events.filter((event) => event.type.startsWith("tool.call."))).toMatchObject([
-      { type: "tool.call.started", call: { operation: "assign_task" } },
-      { type: "tool.call.completed", call: { operation: "assign_task" } },
+      { type: "tool.call.started", call: { operation: "start_session" } },
+      { type: "tool.call.completed", call: { operation: "start_session" } },
     ]);
   } finally {
     await f.cleanup();
@@ -528,7 +528,7 @@ it("keeps reading Codex output while a dynamic tool call waits", async () => {
     10000,
     async () => ({
       client: "worker-host",
-      tools: [{ name: "assign_task", inputSchema: { type: "object" } }],
+      tools: [{ name: "start_session", inputSchema: { type: "object" } }],
       callTool,
       close: async () => {},
     }),
@@ -545,8 +545,8 @@ it("keeps reading Codex output while a dynamic tool call waits", async () => {
       success: true,
     });
     expect(events.filter((event) => event.type.startsWith("tool.call."))).toMatchObject([
-      { type: "tool.call.started", call: { operation: "assign_task" } },
-      { type: "tool.call.completed", call: { operation: "assign_task" } },
+      { type: "tool.call.started", call: { operation: "start_session" } },
+      { type: "tool.call.completed", call: { operation: "start_session" } },
     ]);
   } finally {
     await f.cleanup();
@@ -557,7 +557,7 @@ it("rejects calls to Control Plane coordination operations omitted by dynamic au
   const manager = await managerToolFixture();
   const connected = await connectWorkerMcpClient(manager.input);
   try {
-    expect(connected.tools.map((tool) => tool.name)).toEqual(["assign_task"]);
+    expect(connected.tools.map((tool) => tool.name)).toEqual(["start_session"]);
     await expect(connected.callTool("update_objective", {})).rejects.toThrow(
       "Tool update_objective is not admitted for this Task",
     );
@@ -593,7 +593,7 @@ it("fails closed when dynamic Control Plane authority advertises no operations",
   const manager = await managerToolFixture("unused", false);
   try {
     await expect(connectWorkerMcpClient(manager.input)).rejects.toThrow(
-      "Required Worker-owned MCP tools are unavailable: assign_task, update_objective",
+      "Required Worker-owned MCP tools are unavailable: start_session, update_objective",
     );
   } finally {
     await manager.close();

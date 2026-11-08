@@ -208,7 +208,7 @@ it("shows Objective spend against budget in major units", () => {
         id: "launch",
         status: "working",
         ownerTagId: "lead",
-        spentMinor: 1380,
+        limitState: { reportedSpend: { amountMinor: 1380, currency: "USD" } },
         budgetLimitMinor: 3000,
         budgetCurrency: "USD",
         deadline: "2026-10-03T04:45:00.000Z",
@@ -242,7 +242,13 @@ it("no longer offers the supertag team command group", async () => {
 it("keeps allocation-unit budgets out of money in the Objective table", () => {
   const table = renderListTable("objective", {
     items: [
-      { id: "units", status: "working", ownerTagId: "lead", spentMinor: 5, budgetLimitMinor: 40 },
+      {
+        id: "units",
+        status: "working",
+        ownerTagId: "lead",
+        limitState: { reportedSpend: { amountMinor: 5, currency: null } },
+        budgetLimitMinor: 40,
+      },
     ],
   });
   expect(table).toContain("5 units / 40 units");

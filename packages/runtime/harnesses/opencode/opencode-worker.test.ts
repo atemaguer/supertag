@@ -207,8 +207,8 @@ it("runs with manager-only coordination and bounded General and Explore subagent
         task: { "*": "deny", general: "allow", explore: "allow" },
         external_directory: "deny",
       });
-      expect(config.permission["supertag-coordination_assign_task"]).toBe("allow");
-      expect(config.permission["supertag_coordination_assign_task"]).toBe("allow");
+      expect(config.permission["supertag-coordination_start_session"]).toBe("allow");
+      expect(config.permission["supertag_coordination_start_session"]).toBe("allow");
       expect(config.agent.build).toMatchObject({ mode: "primary", permission: config.permission });
       expect(config.agent.general).toMatchObject({
         mode: "subagent",
@@ -259,6 +259,7 @@ it("runs with manager-only coordination and bounded General and Explore subagent
     coordination: {
       controlPlaneUrl: upstream.controlPlaneUrl,
       token: "coordination-secret",
+      scope: "surface" as const,
       objectiveId: "objective",
     },
   }))

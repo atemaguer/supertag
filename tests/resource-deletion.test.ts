@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
-import { coordinationTools } from "../apps/cli/src/coordination-http.ts";
+import { surfaceTools } from "../apps/cli/src/coordination-http.ts";
 import { main } from "../apps/cli/src/index.ts";
 import { artifactVolumeLabel } from "../packages/core/src/index.js";
 import { DrizzleStore } from "../packages/store/src/index.js";
@@ -44,9 +44,7 @@ ${header("Tag", "release")}spec:
       channelId: C01
       permissionSets: [deploy]
       contextSets: [guides]
-  acceptsMessagesFrom:
-    - tag: lead
-      types: [message]
+  acceptsMessagesFrom: [lead]
 ---
 ${header("Tag", "lead")}spec:
   locations:
@@ -252,12 +250,11 @@ describe("supertag delete", () => {
       reason: "Conflict",
       details: { references: ["Tag release"] },
     });
-    // Built-in Roles can never be deleted.
-    const roles = await client.request<{
-      items: { metadata: { name: string }; status: { builtIn: boolean } }[];
-    }>("/api/v1/roles");
-    const builtIn = roles.items.find((role) => role.status.builtIn)?.metadata.name;
-    expect(await fail("delete", "role", builtIn ?? "missing")).toContain("is a built-in Role");
+    // Every Role is declared; there are no built-in Roles to protect.
+    const roles = await client.request<{ items: { metadata: { name: string } }[] }>(
+      "/api/v1/roles",
+    );
+    expect(roles.items.map((role) => role.metadata.name)).toEqual(["Engineer"]);
     expect(await fail("delete", "role", "Nobody")).toBe("Role Nobody does not exist");
 
     // Drop the references; the Role then retires, and its sets delete.
@@ -341,11 +338,7 @@ describe("supertag delete", () => {
       "create",
       "team",
       "launchers",
-      "--objective",
-      "launch",
-      "--name",
-      "Launchers",
-      "--lead",
+      "--member",
       "release",
       "--member",
       "lead",
@@ -354,12 +347,14 @@ describe("supertag delete", () => {
     );
 
     const refused = await fail("delete", "tag", "lead");
-    expect(refused).toBe("tag lead is in use by Team launchers of Objective launch (member).");
+    expect(refused).toBe("tag lead is in use by Team launchers (member).");
     const owner = await fail("delete", "tag", "release", "--dry-run");
     expect(owner).toContain("tag release is in use by Objective launch (owner)");
-    expect(owner).toContain("Team launchers of Objective launch (lead)");
+    expect(owner).toContain("Team launchers (member)");
 
     await run("cancel", "objective", "launch");
+    // A Team outlives the Objectives that name it, so its membership is dropped explicitly.
+    await run("update", "team", "launchers", "--member", "lead");
     const store = new DrizzleStore({ url: `file:${databasePath}` });
     await store.connect();
     try {
@@ -486,7 +481,7 @@ describe("supertag delete", () => {
     });
     expect(response.status).toBe(403);
     // No coordination tool deletes or retires anything.
-    expect(coordinationTools.map((tool) => tool.name)).not.toContainEqual(
+    expect(surfaceTools.map((tool) => tool.name)).not.toContainEqual(
       expect.stringMatching(/delete|retire|remove|prune/u),
     );
   });

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +8,7 @@ import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { runObjectiveCommand } from "../apps/cli/src/objectives.ts";
 import { runResourceCommand } from "../apps/cli/src/resources.ts";
-import type { AdmitTaskAssignmentInput } from "../packages/core/src/index.ts";
+import { objectiveSessionKey } from "../packages/core/src/index.ts";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.ts";
 
 const ADMIN = "operator-token-admin";
@@ -164,25 +164,25 @@ describe("Operator Token API", () => {
     const { url, call, create, store, audit, directory } = await runtime();
     const issued = (await (await create(ADMIN, "laptop-2")).json()) as IssuedToken;
     const owner = await store.createTag({ name: "owner" });
+    await store.bindTagWorkerHost(owner.id, "control-plane-static-host");
+    const team = await store.createTeam({
+      id: "attributed-team",
+      name: "Export Team",
+      memberTagIds: [owner.id],
+      maxConcurrency: 1,
+    });
     const objective = await store.createObjective({
       id: "attributed",
       ownerTagId: owner.id,
       outcome: "Ship the export",
+      teamId: team.id,
     });
-    const team = await store.createTeam({
-      id: "attributed-team",
-      objectiveId: objective.id,
-      name: "Export Team",
-      leadTagId: owner.id,
-      memberTagIds: [],
-      maxConcurrency: 1,
-    });
-    await store.admitTaskAssignment(assignment(objective.id, team.id, owner));
+    const task = await ownerTask(store, objective.id, owner);
     const request = await store.createApprovalRequest({
       objectiveId: objective.id,
-      taskId: "attributed-task",
+      taskId: task.id,
       requestingTagId: owner.id,
-      kind: "plan",
+      kind: "surface-action",
       actions: [{ target: "runtime", action: "deploy" }],
       summary: "Deploy after merge",
       ruleSources: ["release"],
@@ -202,9 +202,18 @@ describe("Operator Token API", () => {
     });
 
     const target = { url, token: issued.secret };
-    await runObjectiveCommand(target, ["message", objective.id, "Please include CSV"]);
-    const messages = await store.listTagMessages(owner.id);
-    expect(messages.map((message) => message.operatorId)).toContain("token:laptop-2");
+    const messaged = JSON.parse(
+      await runObjectiveCommand(target, [
+        "message",
+        objective.id,
+        "Please include CSV",
+        "--output",
+        "json",
+      ]),
+    ) as { taskId: string };
+    // The message is a turn of the Objective's own Session, made by the token's operator.
+    const turn = await store.findTaskById(messaged.taskId);
+    expect(turn?.actor).toMatchObject({ id: "token:laptop-2" });
 
     const cancelled = await call(issued.secret, `/api/v1/objectives/${objective.id}/cancel`, {
       method: "POST",
@@ -247,31 +256,92 @@ function digest(secret: string): string {
   return createHash("sha256").update(secret).digest("hex");
 }
 
-function assignment(
+/** Opens a Task of the Objective's own Session, as its start turn does. */
+async function ownerTask(
+  store: DrizzleStore,
   objectiveId: string,
-  teamId: string,
   owner: { readonly id: string; readonly name: string },
-): AdmitTaskAssignmentInput {
-  return {
-    taskId: "attributed-task",
-    objectiveId,
-    teamId,
-    requestedByTagId: owner.id,
-    assignedTagId: owner.id,
-    instruction: "Export the report",
-    acceptanceCriteria: ["done"],
-    execution: {},
-    authorizationSnapshot: {
-      version: 4,
-      capturedAt: new Date().toISOString(),
-      tag: { id: owner.id, name: owner.name },
-      origin: { kind: "internal", objectiveId, requestedByTagId: owner.id },
-      requester: { id: owner.id, kind: "bot" },
-      permissionSets: [],
-      resources: [],
-      runtimeActions: [],
+) {
+  const at = new Date().toISOString();
+  const account = await store.saveSurfaceAccount({
+    provider: "slack",
+    externalAccountId: "T0TOKEN",
+    displayName: "Slack",
+    authMethod: "test",
+    credentialId: "test",
+    status: "connected",
+    configuration: {},
+    verifiedAt: at,
+  });
+  const route = await store.addTagRoute({
+    tagId: owner.id,
+    surfaceAccountId: account.id,
+    scope: "channel:export",
+  });
+  const authorization = {
+    version: 5,
+    capturedAt: at,
+    tag: { id: owner.id, name: owner.name },
+    origin: {
+      provider: "slack",
+      surfaceAccountId: account.id,
+      tagRouteId: route.id,
+      scope: "channel:export",
     },
-    contextPlan: { version: 7, capturedAt: new Date().toISOString(), sets: [] },
+    requester: { id: "human", kind: "user" },
+    roles: [],
+    permissionSets: [],
+    resources: [],
+    runtimeActions: [],
+  } as const;
+  const contextPlan = { version: 7, capturedAt: at, sets: [] } as const;
+  const sessionKey = objectiveSessionKey(objectiveId);
+  const event = {
+    eventId: randomUUID(),
+    logicalEventId: randomUUID(),
+    provider: "slack",
+    externalAccountId: account.externalAccountId,
+    kind: "message",
+    scope: "channel:export",
+    sessionKey,
+    actor: { id: "human", kind: "user" },
+    text: "Export the report",
+    occurredAt: at,
+    callback: {
+      provider: "slack",
+      mode: "slack_thread",
+      threadKey: sessionKey,
+      target: { channelId: "export", threadTs: sessionKey },
+    },
+    source: {},
+    metadata: {},
+  } as const;
+  const admitted = await store.admitInboundEvent({
+    surfaceAccountId: account.id,
+    tagRouteId: route.id,
+    tagId: owner.id,
+    authorization,
+    contextPlan,
+    event,
+  });
+  const session = await store.openSession({
+    tagId: owner.id,
+    sessionKey,
+    origin: {},
+    at,
+    objectiveId,
+  });
+  return store.openTask({
+    inboundEventId: admitted.work.id,
+    tagId: owner.id,
+    sessionId: session.id,
+    execution: {},
+    actor: event.actor,
+    trigger: {},
     workspacePlan: { version: 1, status: "none" },
-  };
+    sessionHistory: [],
+    authorizationSnapshot: authorization,
+    contextPlan,
+    createdAt: at,
+  });
 }

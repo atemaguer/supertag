@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { taskResourceFromStore } from "../apps/cli/src/control-plane-resources.js";
 import { createWorkspacePullRequestHandler } from "../apps/cli/src/gateway-surfaces.js";
-import { ObjectiveController } from "../packages/control-plane/src/objective-controller.js";
+import { ControlPlane } from "../packages/control-plane/src/index.js";
 import {
   WORKSPACE_PULL_REQUEST_RETRY,
   type WorkspacePullRequestHandler,
@@ -14,12 +14,16 @@ import {
 } from "../packages/control-plane/src/workspace-pull-requests.js";
 import {
   type SurfaceAccount,
-  type TaskAssignment,
+  type Task,
   WORKSPACE_PULL_REQUEST_EVENTS,
   workspacePullRequestReference,
 } from "../packages/core/src/index.js";
 import { LocalWorklet } from "../packages/runtime/sdk/src/index.js";
-import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
+import {
+  DrizzleStore,
+  FileGatewayCredentialVault,
+  migrateDatabase,
+} from "../packages/store/src/index.js";
 import {
   closeGitHubPullRequest,
   GitHubPullRequestError,
@@ -57,20 +61,21 @@ describe("Workspace pull request lifecycle", () => {
     });
     const owner = await store.createTag({ name: `owner-${randomUUID()}` });
     const member = await store.createTag({ name: `member-${randomUUID()}` });
-    for (const tag of [owner, member]) await store.bindTagWorkerHost(tag.id, "host");
+    // The owner runs nowhere, so its own conversation's turn stays held and the test drives it.
+    await store.bindTagWorkerHost(owner.id, "owner-host");
+    await store.bindTagWorkerHost(member.id, "host");
+    const team = await store.createTeam({
+      id: randomUUID(),
+      name: `delivery-${randomUUID()}`,
+      memberTagIds: [owner.id, member.id],
+      maxConcurrency: 1,
+    });
     const objective = await store.createObjective({
       id: `objective-${randomUUID().slice(0, 8)}`,
       ownerTagId: owner.id,
+      teamId: team.id,
       outcome: "Ship the change.",
       workspaces: ["app"],
-    });
-    const team = await store.createTeam({
-      id: randomUUID(),
-      objectiveId: objective.id,
-      name: "Delivery",
-      leadTagId: owner.id,
-      memberTagIds: [member.id],
-      maxConcurrency: 1,
     });
     const calls: {
       kind: "ready" | "close";
@@ -88,21 +93,52 @@ describe("Workspace pull request lifecycle", () => {
         calls.push({ kind: "close", target, comment: target.comment });
       },
     };
-    const controller = new ObjectiveController(store, new LocalWorklet("w", "host", []));
+    const controlPlane = new ControlPlane({
+      store,
+      credentialVault: new FileGatewayCredentialVault(join(directory, "vault.json")),
+      worklet: new LocalWorklet("w", "host", []),
+      reply: async () => undefined,
+      dispatch: { pollIntervalMs: 1_000_000 },
+    });
+    const controller = controlPlane.objectives;
+    controller.activateCoordination({ url: "http://127.0.0.1:1" });
     controller.setWorkspacePullRequestHandler(handler);
-    cleanups.push(() => controller.stop());
+    await controlPlane.start();
+    cleanups.push(() => controlPlane.stop());
+    const { taskId: ownerTaskId } = await controlPlane.startObjective(objective.id);
+    const ownerTask = await store.findTaskById(ownerTaskId);
+    if (!ownerTask?.inboundEventId) throw new Error("The Objective opened no turn");
+    const claimed = await store.claimDueInboundEvent({
+      inboundEventId: ownerTask.inboundEventId,
+      leaseOwner: "pr-lifecycle",
+      now: new Date().toISOString(),
+      leaseExpiresAt: new Date(Date.now() + 300_000).toISOString(),
+    });
+    if (!claimed) throw new Error("The Objective's turn was not claimable");
+    await store.startTask({ taskId: ownerTaskId, startedAt: new Date().toISOString() });
+    const ownerAttempt = await store.createTaskAttempt({
+      taskId: ownerTaskId,
+      attemptNumber: claimed.attemptCount,
+      workerProfile: { id: "default", revision: "1" },
+      workerSnapshot: { workerHostId: "owner-host" },
+      startedAt: new Date().toISOString(),
+    });
+    const running = await store.findTaskById(ownerTaskId);
+    if (!running) throw new Error("Missing owner Task");
+    const capability = await controller.surfaceCoordination(running, ownerAttempt);
+    if (!capability) throw new Error("Missing owner coordination");
+    const caller = await controller.authenticateExecution(capability.token);
+    /** A work Session whose Worker opened a draft pull request. */
     const assign = async () => {
-      const task = (await controller.command("assign_task", {
-        objectiveId: objective.id,
-        taskId: randomUUID(),
-        teamId: team.id,
-        assignedTagId: member.id,
-        instruction: "Change the code",
-        acceptanceCriteria: ["Changed"],
-      })) as TaskAssignment;
+      const started = (await controller.commandAsAttempt(
+        "start_session",
+        { title: "Change the code", instruction: "Change the code" },
+        caller,
+      )) as { sessionId: string };
+      const task = (await store.listTasks({ sessionId: started.sessionId }))[0] as Task;
       // What a Worker records on its Task Attempt result after opening the draft.
       await store.appendTaskEvent({
-        taskId: task.taskId,
+        taskId: task.id,
         type: "result",
         payload: {
           type: "result",
@@ -119,27 +155,33 @@ describe("Workspace pull request lifecycle", () => {
       });
       return task;
     };
-    /** Settles the stored assignment without the controller, so a test lifecycle acts on it. */
-    const cancel = (task: TaskAssignment) => store.cancelTaskAssignment(task.taskId, owner.id);
-    const accept = async (task: TaskAssignment) => {
-      await store.claimTaskAssignment({ taskId: task.taskId, leaseOwner: "test" });
-      await store.createTaskAttempt({
-        taskId: task.taskId,
-        attemptNumber: 1,
-        workerProfile: { id: "test", revision: "1" },
-        workerSnapshot: {},
-        startedAt: new Date().toISOString(),
+    /** Ends the work Session's Task the way the Control Plane does, without running it. */
+    const settleTask = async (task: Task, status: "cancelled" | "completed") => {
+      await store.closeTask({
+        taskId: task.id,
+        status,
+        endedAt: new Date().toISOString(),
+        ...(status === "completed"
+          ? {
+              result: {
+                summary: "Changed the code",
+                decisions: [],
+                changes: [],
+                unresolved: [],
+                findings: [],
+                references: [],
+                artifacts: [],
+              },
+            }
+          : {}),
       });
-      await store.settleTaskAssignment({
-        taskId: task.taskId,
-        leaseOwner: "test",
-        attemptCount: 1,
-        result: { taskResult: { artifacts: [] } },
-      });
-      return store.reviewTaskAssignment(task.taskId, owner.id, true, "Accepted");
+      return (await store.findTaskById(task.id)) as Task;
     };
+    const cancel = (task: Task) => settleTask(task, "cancelled");
+    const accept = (task: Task) => settleTask(task, "completed");
     return {
       store,
+      controlPlane,
       controller,
       objective,
       calls,
@@ -156,22 +198,18 @@ describe("Workspace pull request lifecycle", () => {
   it("captures the Workspace source on the Task plan", async () => {
     const f = await fixture();
     const task = await f.assign();
-    expect((await f.store.findTaskById(task.taskId))?.workspacePlan).toMatchObject({
+    expect((await f.store.findTaskById(task.id))?.workspacePlan).toMatchObject({
       status: "workspace",
       source: "https://github.com/acme/app.git",
       delivery: "pull-request",
     });
   });
 
-  it("closes the pull request with a comment when the Task is cancelled, once", async () => {
+  it("closes the pull request with a comment when the work Session is cancelled, once", async () => {
     const f = await fixture();
     const task = await f.assign();
-    await f.controller.command("update_task", {
-      objectiveId: f.objective.id,
-      taskId: task.taskId,
-      expectedStatus: "queued",
-      status: "cancelled",
-    });
+    const cancelled = await f.cancel(task);
+    await new WorkspacePullRequestLifecycle(f.store, f.handler).settle(cancelled);
     expect(f.calls).toEqual([
       {
         kind: "close",
@@ -180,10 +218,10 @@ describe("Workspace pull request lifecycle", () => {
           repository: "acme/app",
           number: 7,
         }),
-        comment: `SuperTag closed this pull request because Task ${task.taskId} was cancelled.`,
+        comment: `SuperTag closed this pull request because Task ${task.id} was cancelled.`,
       },
     ]);
-    const events = await f.store.listTaskEvents(task.taskId);
+    const events = await f.store.listTaskEvents(task.id);
     expect(
       events.find((event) => event.type === WORKSPACE_PULL_REQUEST_EVENTS.closed)?.payload,
     ).toMatchObject({
@@ -191,14 +229,11 @@ describe("Workspace pull request lifecycle", () => {
       taskStatus: "cancelled",
     });
     // Settling again never repeats the provider call.
-    await new WorkspacePullRequestLifecycle(f.store, f.handler).settle({
-      taskId: task.taskId,
-      status: "cancelled",
-    });
+    await new WorkspacePullRequestLifecycle(f.store, f.handler).settle(cancelled);
     expect(f.calls).toHaveLength(1);
     const resource = await taskResourceFromStore(
       f.store,
-      (await f.store.findTaskById(task.taskId)) as never,
+      (await f.store.findTaskById(task.id)) as never,
     );
     expect(resource.status.pullRequest).toEqual({
       repository: "acme/app",
@@ -208,17 +243,17 @@ describe("Workspace pull request lifecycle", () => {
     });
   });
 
-  it("marks the draft ready for review when the Task is accepted, and records failures", async () => {
+  it("marks the draft ready for review when the work Session completes, and records failures", async () => {
     const f = await fixture();
     const task = await f.assign();
-    await f.accept(task);
+    const completed = await f.accept(task);
     let clock = Date.parse("2026-09-30T12:00:00.000Z");
     const lifecycle = new WorkspacePullRequestLifecycle(f.store, f.handler, undefined, () => clock);
     f.fail(new Error("GitHub ready-for-review failed with HTTP 502"));
-    await lifecycle.settle({ taskId: task.taskId, status: "accepted" });
+    await lifecycle.settle(completed);
     const failed = await taskResourceFromStore(
       f.store,
-      (await f.store.findTaskById(task.taskId)) as never,
+      (await f.store.findTaskById(task.id)) as never,
     );
     expect(failed.status.pullRequest).toMatchObject({
       state: "draft",
@@ -227,15 +262,15 @@ describe("Workspace pull request lifecycle", () => {
     });
     f.fail(undefined);
     // A scheduled retry owns the transition; settling again waits for it.
-    await lifecycle.settle({ taskId: task.taskId, status: "accepted" });
+    await lifecycle.settle(completed);
     expect(f.calls).toHaveLength(0);
     clock += 60_000;
     await lifecycle.retryDue(true);
-    await lifecycle.settle({ taskId: task.taskId, status: "accepted" });
+    await lifecycle.settle(completed);
     expect(f.calls.map((call) => call.kind)).toEqual(["ready"]);
     const ready = await taskResourceFromStore(
       f.store,
-      (await f.store.findTaskById(task.taskId)) as never,
+      (await f.store.findTaskById(task.id)) as never,
     );
     expect(ready.status.pullRequest).toEqual({
       repository: "acme/app",
@@ -243,26 +278,26 @@ describe("Workspace pull request lifecycle", () => {
       url: PULL_REQUEST.url,
       state: "ready",
     });
-    // Tasks that have not settled leave the pull request alone.
-    await lifecycle.settle({ taskId: task.taskId, status: "submitted" });
+    // A Task that has not ended leaves the pull request alone.
+    await lifecycle.settle({ ...completed, status: "running" });
     expect(f.calls).toHaveLength(1);
   });
 
   it("retries a failed close with doubling backoff and stops after bounded attempts", async () => {
     const f = await fixture();
     const task = await f.assign();
-    await f.cancel(task);
+    const cancelled = await f.cancel(task);
     let clock = Date.parse("2026-09-30T12:00:00.000Z");
     const lifecycle = new WorkspacePullRequestLifecycle(f.store, f.handler, undefined, () => clock);
     f.fail(new Error("fetch failed"));
-    await lifecycle.settle({ taskId: task.taskId, status: "cancelled" });
+    await lifecycle.settle(cancelled);
     const delays: number[] = [];
     for (;;) {
       const [pending] = await f.store.listDueWorkspacePullRequestTransitions(
         "9999-01-01T00:00:00.000Z",
       );
       if (!pending) break;
-      expect(pending).toMatchObject({ taskId: task.taskId, action: "close" });
+      expect(pending).toMatchObject({ taskId: task.id, action: "close" });
       const due = Date.parse(pending.nextAttemptAt);
       delays.push((due - clock) / 60_000);
       // Nothing happens before the backoff elapses.
@@ -277,7 +312,7 @@ describe("Workspace pull request lifecycle", () => {
     }
     expect(delays).toEqual([1, 2, 4, 8, 16, 32, 60, 60, 60]);
     expect(WORKSPACE_PULL_REQUEST_RETRY.maxAttempts).toBe(10);
-    const failures = (await f.store.listTaskEvents(task.taskId)).filter(
+    const failures = (await f.store.listTaskEvents(task.id)).filter(
       (event) => event.type === WORKSPACE_PULL_REQUEST_EVENTS.failed,
     );
     expect(failures).toHaveLength(10);
@@ -285,7 +320,7 @@ describe("Workspace pull request lifecycle", () => {
     expect(failures.at(-1)?.payload).not.toHaveProperty("nextAttemptAt");
     const resource = await taskResourceFromStore(
       f.store,
-      (await f.store.findTaskById(task.taskId)) as never,
+      (await f.store.findTaskById(task.id)) as never,
     );
     expect(resource.status.pullRequest).toMatchObject({
       state: "draft",
@@ -297,11 +332,11 @@ describe("Workspace pull request lifecycle", () => {
   it("recovers on a later retry and records the transition once", async () => {
     const f = await fixture();
     const task = await f.assign();
-    await f.cancel(task);
+    const cancelled = await f.cancel(task);
     let clock = Date.parse("2026-09-30T12:00:00.000Z");
     const lifecycle = new WorkspacePullRequestLifecycle(f.store, f.handler, undefined, () => clock);
     f.fail(new GitHubPullRequestError("GitHub pull request close failed with HTTP 503", true, 503));
-    await lifecycle.settle({ taskId: task.taskId, status: "cancelled" });
+    await lifecycle.settle(cancelled);
     f.fail(undefined);
     clock += 60_000;
     await lifecycle.retryDue(true);
@@ -310,25 +345,25 @@ describe("Workspace pull request lifecycle", () => {
     expect(
       await f.store.listDueWorkspacePullRequestTransitions("9999-01-01T00:00:00.000Z"),
     ).toEqual([]);
-    const events = await f.store.listTaskEvents(task.taskId);
+    const events = await f.store.listTaskEvents(task.id);
     expect(events.filter((e) => e.type === WORKSPACE_PULL_REQUEST_EVENTS.closed)).toHaveLength(1);
   });
 
   it("does not retry permanent failures such as a missing pull request", async () => {
     const f = await fixture();
     const task = await f.assign();
-    await f.cancel(task);
+    const cancelled = await f.cancel(task);
     const lifecycle = new WorkspacePullRequestLifecycle(f.store, f.handler);
     f.fail(
       new GitHubPullRequestError("GitHub pull request lookup failed with HTTP 404", false, 404),
     );
-    await lifecycle.settle({ taskId: task.taskId, status: "cancelled" });
+    await lifecycle.settle(cancelled);
     expect(
       await f.store.listDueWorkspacePullRequestTransitions("9999-01-01T00:00:00.000Z"),
     ).toEqual([]);
     const resource = await taskResourceFromStore(
       f.store,
-      (await f.store.findTaskById(task.taskId)) as never,
+      (await f.store.findTaskById(task.id)) as never,
     );
     expect(resource.status.pullRequest).toEqual({
       repository: "acme/app",
@@ -337,17 +372,13 @@ describe("Workspace pull request lifecycle", () => {
       state: "draft",
       lastError: "GitHub pull request lookup failed with HTTP 404",
     });
-    const [failure] = (await f.store.listTaskEvents(task.taskId)).filter(
+    const [failure] = (await f.store.listTaskEvents(task.id)).filter(
       (event) => event.type === WORKSPACE_PULL_REQUEST_EVENTS.failed,
     );
     expect(failure?.payload).toMatchObject({ attempt: 1, retryable: false });
     // A missing handler is also permanent.
     const other = await f.assign();
-    await f.cancel(other);
-    await new WorkspacePullRequestLifecycle(f.store, undefined).settle({
-      taskId: other.taskId,
-      status: "cancelled",
-    });
+    await new WorkspacePullRequestLifecycle(f.store, undefined).settle(await f.cancel(other));
     expect(
       await f.store.listDueWorkspacePullRequestTransitions("9999-01-01T00:00:00.000Z"),
     ).toEqual([]);
@@ -356,15 +387,15 @@ describe("Workspace pull request lifecycle", () => {
   it("drops a pending retry once the pull request already reached its state", async () => {
     const f = await fixture();
     const task = await f.assign();
-    await f.cancel(task);
+    const cancelled = await f.cancel(task);
     let clock = Date.parse("2026-09-30T12:00:00.000Z");
     const lifecycle = new WorkspacePullRequestLifecycle(f.store, f.handler, undefined, () => clock);
     f.fail(new Error("socket hang up"));
-    await lifecycle.settle({ taskId: task.taskId, status: "cancelled" });
+    await lifecycle.settle(cancelled);
     f.fail(undefined);
     // Another Control Plane instance, or a person, recorded the close meanwhile.
     await f.store.appendTaskEvent({
-      taskId: task.taskId,
+      taskId: task.id,
       type: WORKSPACE_PULL_REQUEST_EVENTS.closed,
       payload: { url: PULL_REQUEST.url },
     });
@@ -376,27 +407,19 @@ describe("Workspace pull request lifecycle", () => {
     ).toEqual([]);
   });
 
-  it("closes each open Task's pull request when its Objective is cancelled", async () => {
+  it("cancels each open Task of a cancelled Objective and closes its pull request", async () => {
     const f = await fixture();
     const task = await f.assign();
     const result = await f.controller.cancelObjective({ objectiveId: f.objective.id });
-    expect(result.cancelledTaskIds).toEqual([task.taskId]);
+    expect(result.cancelledTaskIds).toContain(task.id);
+    expect((await f.store.findTaskById(task.id))?.status).toBe("cancelled");
     expect(f.calls).toEqual([
-      expect.objectContaining({
+      {
         kind: "close",
-        comment: `SuperTag closed this pull request because Task ${task.taskId} was cancelled.`,
-      }),
+        target: expect.objectContaining({ repository: "acme/app", number: 7 }),
+        comment: `SuperTag closed this pull request because Task ${task.id} was cancelled.`,
+      },
     ]);
-  });
-
-  it("closes the pull request when the Task result is rejected", async () => {
-    const f = await fixture();
-    const task = await f.assign();
-    await new WorkspacePullRequestLifecycle(f.store, f.handler).settle({
-      taskId: task.taskId,
-      status: "rejected",
-    });
-    expect(f.calls[0]?.comment).toContain("was rejected");
   });
 
   it("uses the Control Plane's GitHub Surface Account credential", async () => {

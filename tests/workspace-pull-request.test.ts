@@ -3,10 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { workSessionBranch } from "../packages/control-plane/src/work-sessions.js";
 import {
   githubRepositoryFromSource,
   type TaskNamedWorkspacePlan,
-  taskWorkspaceBranch,
   WORKSPACE_PULL_REQUEST_ACTION,
 } from "../packages/core/src/index.js";
 import { createClaudeCodeWorker } from "../packages/runtime/harnesses/claude-code/src/index.js";
@@ -123,7 +123,7 @@ describe("pull-request delivery on GitHub", () => {
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   });
 
-  const branch = taskWorkspaceBranch("objective-1", "task-1");
+  const branch = workSessionBranch("task-1");
   const plan: TaskNamedWorkspacePlan = {
     version: 1,
     status: "workspace",
@@ -148,6 +148,7 @@ describe("pull-request delivery on GitHub", () => {
       coordination: {
         controlPlaneUrl: "http://127.0.0.1:1",
         token: "coordination",
+        scope: "surface",
         objectiveId: "objective-1",
       },
       workspacePlan: plan,

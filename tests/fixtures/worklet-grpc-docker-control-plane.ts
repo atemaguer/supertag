@@ -1,8 +1,13 @@
 /** Fixture-only HTTP driver around production Control Plane ownership and scheduling. */
+
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { ControlPlane } from "../../packages/control-plane/src/index.js";
-import { emptyTagContextPlan } from "../../packages/core/src/index.js";
+import {
+  emptyTagContextPlan,
+  type SurfaceTagAuthorizationSnapshot,
+} from "../../packages/core/src/index.js";
 import {
   RemoteWorkletServer,
   startWorkletGrpcServer,
@@ -38,26 +43,94 @@ controlPlane = new ControlPlane({
 });
 await controlPlane.start();
 remote.start();
-const existingObjective = await store.getObjective("pooled-objective").catch(() => undefined);
-const tag = existingObjective
-  ? await store.findTagById(existingObjective.ownerTagId)
-  : await store.createTag({ name: "Distributed research" });
-if (!tag) throw new Error("Missing objective owner");
-if (!existingObjective) {
-  await store.createObjective({
-    id: "pooled-objective",
-    ownerTagId: tag.id,
-    outcome: "Produce one pooled conclusion",
-    budgetLimitMinor: 100,
+const tag =
+  (await store.findTagByName("Distributed research")) ??
+  (await store.createTag({ name: "Distributed research" }));
+// The fixture's callers name Tasks; Task ids are the Control Plane's, so it keeps the mapping.
+const taskIds = new Map<string, string>();
+const account = await store.saveSurfaceAccount({
+  provider: "slack",
+  externalAccountId: "worklet-grpc-fixture",
+  displayName: "Fixture",
+  authMethod: "test",
+  credentialId: "test",
+  status: "connected",
+  configuration: {},
+  verifiedAt: new Date().toISOString(),
+});
+const route = await store.addTagRoute({
+  tagId: tag.id,
+  surfaceAccountId: account.id,
+  scope: "channel:fixture",
+});
+
+/** Admits one conversation turn of the Tag, placed by the profile the caller names. */
+async function admitTurn(label: string, profile: string): Promise<string> {
+  const at = new Date().toISOString();
+  const authorization: SurfaceTagAuthorizationSnapshot = {
+    version: 5,
+    capturedAt: at,
+    tag: { id: tag.id, name: tag.name },
+    origin: {
+      provider: "slack",
+      surfaceAccountId: account.id,
+      tagRouteId: route.id,
+      scope: "channel:fixture",
+    },
+    requester: { id: "operator", kind: "user" },
+    roles: [],
+    permissionSets: [],
+    resources: [],
+    runtimeActions: [],
+  };
+  const contextPlan = emptyTagContextPlan(at);
+  const sessionKey = `fixture:${label}`;
+  const actor = { id: "operator", kind: "user" } as const;
+  const admitted = await store.admitInboundEvent({
+    surfaceAccountId: account.id,
+    tagRouteId: route.id,
+    tagId: tag.id,
+    authorization,
+    contextPlan,
+    execution: { profile: { id: profile, revision: "1" } },
+    event: {
+      eventId: randomUUID(),
+      logicalEventId: randomUUID(),
+      provider: "slack",
+      externalAccountId: account.externalAccountId,
+      kind: "message",
+      scope: "channel:fixture",
+      sessionKey,
+      actor,
+      text: label,
+      occurredAt: at,
+      callback: {
+        provider: "slack",
+        mode: "slack_thread",
+        threadKey: sessionKey,
+        target: { channelId: "fixture", threadTs: sessionKey },
+      },
+      source: {},
+      metadata: {},
+    },
   });
-  await store.createTeam({
-    id: "pooled-team",
-    objectiveId: "pooled-objective",
-    name: "Distributed team",
-    leadTagId: tag.id,
-    memberTagIds: [tag.id],
-    maxConcurrency: 2,
+  const session = await store.openSession({ tagId: tag.id, sessionKey, origin: {}, at });
+  const task = await store.openTask({
+    inboundEventId: admitted.work.id,
+    tagId: tag.id,
+    sessionId: session.id,
+    execution: { profile: { id: profile, revision: "1" } },
+    actor,
+    trigger: {},
+    requestText: label,
+    workspacePlan: { version: 1, status: "none" },
+    sessionHistory: [],
+    authorizationSnapshot: authorization,
+    contextPlan,
+    createdAt: at,
   });
+  taskIds.set(label, task.id);
+  return task.id;
 }
 // The deterministic Harness advertises tool support but does not call MCP; this fixture
 // exercises execution scheduling and recovery, not the coordination HTTP handlers.
@@ -82,16 +155,7 @@ http.on("request", (request, response) => {
       await store.bindTagWorkerHost(tag.id, body.id);
     } else if (request.url === "/hosts") value = await controlPlane.listWorkerHosts();
     else if (request.url === "/assign")
-      value = await controlPlane.objectives.commandAsAdministrator("assign_task", {
-        objectiveId: "pooled-objective",
-        teamId: "pooled-team",
-        assignedTagId: tag.id,
-        taskId: body.taskId,
-        instruction: body.taskId,
-        acceptanceCriteria: ["Complete the requested operation"],
-        maxCostMinor: 0,
-        execution: { profile: { id: body.profile ?? body.host, revision: "1" } },
-      });
+      value = { taskId: await admitTurn(body.taskId, body.profile ?? body.host) };
     else if (request.url === "/select")
       value = await remote.selectPlacement(
         { profile: { id: body.profile, revision: "1" } },
@@ -101,21 +165,27 @@ http.on("request", (request, response) => {
     else if (request.url === "/release") {
       await remote.releasePlacement(body.placement);
       value = { released: true };
-    } else if (request.url === "/task")
+    } else if (request.url === "/task") {
+      const taskId = taskIds.get(body.taskId) ?? body.taskId;
+      const task = await store.findTaskById(taskId);
       value = {
-        assignment: await store.getTaskAssignment(body.taskId),
-        attempts: await store.listTaskAttempts(body.taskId),
-        events: await store.listTaskEvents(body.taskId),
+        assignment:
+          task === undefined
+            ? undefined
+            : {
+                status: task.status,
+                attemptCount: (await store.listTaskAttempts(taskId)).length,
+                ...(task.responseText === undefined ? {} : { result: { text: task.responseText } }),
+              },
+        attempts: await store.listTaskAttempts(taskId),
+        events: await store.listTaskEvents(taskId),
       };
-    else if (request.url === "/inspect") value = await remote.inspect(body.attemptId);
-    else if (request.url === "/cancel")
-      value = await controlPlane.objectives.commandAsAdministrator("update_task", {
-        objectiveId: "pooled-objective",
-        taskId: body.taskId,
-        expectedStatus: "running",
-        status: "cancelled",
-      });
-    else if (request.url === "/restart-frontend") {
+    } else if (request.url === "/inspect") value = await remote.inspect(body.attemptId);
+    else if (request.url === "/cancel") {
+      const taskId = taskIds.get(body.taskId) ?? body.taskId;
+      const { accepted } = await controlPlane.requestTaskCancellation(taskId);
+      value = { accepted };
+    } else if (request.url === "/restart-frontend") {
       await frontend.close();
       frontend = await startWorkletGrpcServer({ remote, host: "0.0.0.0", port: 8789, tls });
       value = { restarted: true };

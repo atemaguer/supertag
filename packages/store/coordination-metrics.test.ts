@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { inboxSessionKey, objectiveSessionKey } from "@supertag/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { createIsolatedPostgresDatabase } from "../../tests/support/database.js";
-import type { AdmitTaskAssignmentInput } from "../core/src/index.js";
 import { DrizzleStore, migrateDatabase } from "./src/index.js";
 
 const postgres = process.env["SUPERTAG_POSTGRES_URL"];
@@ -33,108 +33,182 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       });
       const owner = await store.createTag({ name: `owner-${randomUUID()}` });
       const worker = await store.createTag({ name: `worker-${randomUUID()}` });
+      const team = await store.createTeam({
+        id: randomUUID(),
+        name: `Metrics Team ${randomUUID()}`,
+        memberTagIds: [owner.id, worker.id],
+        maxConcurrency: 1_000,
+      });
       const objective = await store.createObjective({
         id: randomUUID(),
         ownerTagId: owner.id,
         outcome: "Measure coordination",
-      });
-      const team = await store.createTeam({
-        id: randomUUID(),
-        objectiveId: objective.id,
-        name: "Metrics Team",
-        leadTagId: owner.id,
-        memberTagIds: [worker.id],
-        maxConcurrency: 1_000,
-      });
-      const assignment = (taskId: string, requiresApproval = false): AdmitTaskAssignmentInput => ({
-        taskId,
-        objectiveId: objective.id,
         teamId: team.id,
-        requestedByTagId: owner.id,
-        assignedTagId: worker.id,
-        instruction: `Measure ${taskId}`,
-        acceptanceCriteria: ["Recorded"],
-        requiresApproval,
-        execution: {},
-        authorizationSnapshot: {
-          version: 4,
-          capturedAt: new Date().toISOString(),
+      });
+      const account = await store.saveSurfaceAccount({
+        provider: "slack",
+        externalAccountId: randomUUID(),
+        displayName: "Slack",
+        authMethod: "test",
+        credentialId: "test",
+        status: "connected",
+        configuration: {},
+        verifiedAt: new Date().toISOString(),
+      });
+      const route = await store.addTagRoute({
+        tagId: owner.id,
+        surfaceAccountId: account.id,
+        scope: "channel:metrics",
+      });
+      const ownerSession = await store.openSession({
+        tagId: owner.id,
+        sessionKey: objectiveSessionKey(objective.id),
+        origin: {},
+        objectiveId: objective.id,
+        at: new Date().toISOString(),
+      });
+      /** One work Session turn of the Objective, left pending. */
+      async function turn(title: string) {
+        const at = new Date().toISOString();
+        const session = await store.openSession({
+          tagId: worker.id,
+          sessionKey: `work:${ownerSession.id}:${title}`,
+          origin: {},
+          parentSessionId: ownerSession.id,
+          at,
+        });
+        const authorization = {
+          version: 5,
+          capturedAt: at,
           tag: { id: worker.id, name: worker.name },
-          origin: { kind: "internal", objectiveId: objective.id, requestedByTagId: owner.id },
+          origin: {
+            tagRouteId: route.id,
+            surfaceAccountId: account.id,
+            provider: "slack",
+            scope: "channel:metrics",
+          },
           requester: { id: owner.id, kind: "bot" },
           permissionSets: [],
           resources: [],
           runtimeActions: [],
-        },
-        contextPlan: { version: 7, capturedAt: new Date().toISOString(), sets: [] },
-        workspacePlan: { version: 1, status: "none" },
-      });
-      return { store, owner, worker, objective, assignment };
+        } as const;
+        const eventId = randomUUID();
+        const admitted = await store.admitInboundEvent({
+          surfaceAccountId: account.id,
+          tagRouteId: route.id,
+          tagId: worker.id,
+          authorization,
+          contextPlan: { version: 7, capturedAt: at, sets: [] },
+          event: {
+            eventId,
+            logicalEventId: eventId,
+            provider: "slack",
+            externalAccountId: account.externalAccountId,
+            kind: "message",
+            scope: "channel:metrics",
+            sessionKey: session.sessionKey,
+            actor: { id: worker.id, kind: "bot" },
+            internal: {
+              kind: "work_session",
+              startedByTaskId: eventId,
+              parentSessionId: ownerSession.id,
+              title,
+            },
+            text: `Measure ${title}`,
+            occurredAt: at,
+            callback: {
+              provider: "slack",
+              mode: "slack_thread",
+              threadKey: "metrics",
+              target: { channelId: "metrics", threadTs: "metrics" },
+            },
+            source: {},
+            metadata: {},
+          },
+        });
+        const task = await store.openTask({
+          inboundEventId: admitted.work.id,
+          tagId: worker.id,
+          sessionId: session.id,
+          execution: {},
+          actor: { id: worker.id, kind: "bot" },
+          trigger: { origin: "work_session" },
+          requestText: `Measure ${title}`,
+          workspacePlan: { version: 1, status: "none" },
+          sessionHistory: [],
+          authorizationSnapshot: authorization,
+          contextPlan: { version: 7, capturedAt: at, sets: [] },
+          createdAt: at,
+        });
+        return { task, inboundEventId: admitted.work.id };
+      }
+      return { store, owner, worker, objective, team, turn, ownerSession };
     }
 
-    it("counts every Task and TaskAssignment beyond resource-list pagination", async () => {
+    it("counts every Task and inbox item beyond resource-list pagination", async () => {
       const f = await fixture();
+      const tasks: string[] = [];
       for (let index = 0; index < 137; index += 1)
-        await f.store.admitTaskAssignment(f.assignment(`metric-task-${index}`, index < 3));
+        tasks.push((await f.turn(`metric-task-${index}`)).task.id);
+      for (const taskId of tasks.slice(0, 3))
+        await f.store.createApprovalRequest({
+          objectiveId: f.objective.id,
+          taskId,
+          attemptId: `${taskId}-attempt`,
+          requestingTagId: f.worker.id,
+          kind: "surface-action",
+          actions: [{ target: "runtime", action: "files:write" }],
+          summary: "Write the export",
+          ruleSources: ["release"],
+          approvers: [],
+        });
 
       const metrics = await f.store.readCoordinationMetrics({
         asOf: "2030-01-01T00:00:00.000Z",
       });
 
       expect(metrics.tasks).toMatchObject({ total: 137, pending: 137 });
-      expect(metrics.taskAssignments).toMatchObject({ total: 137, queued: 137 });
-      expect(metrics.coordinationInbox.byKind.task_approval).toBe(3);
+      expect(metrics.sessions).toBe(138);
+      expect(metrics.coordinationInbox.byKind.approval).toBe(3);
       expect(metrics.coordinationInbox.pending).toBe(3);
       expect(metrics.coordinationInbox.oldestActionableAgeSeconds).toBeGreaterThan(0);
     });
 
     it("aggregates the latest cumulative usage and native child-agent peak", async () => {
       const f = await fixture();
-      const taskId = randomUUID();
-      await f.store.admitTaskAssignment(f.assignment(taskId));
-      await f.store.claimTaskAssignment({ taskId, leaseOwner: "metrics-worker" });
+      const { task, inboundEventId } = await f.turn("usage");
+      const now = new Date().toISOString();
+      await f.store.claimDueInboundEvent({
+        inboundEventId,
+        leaseOwner: "metrics-worker",
+        now,
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+      await f.store.startTask({ taskId: task.id, startedAt: now });
       const attempt = await f.store.createTaskAttempt({
-        taskId,
+        taskId: task.id,
         attemptNumber: 1,
         workerProfile: { id: "metrics", revision: "1" },
-        workerSnapshot: {},
-        startedAt: new Date().toISOString(),
+        workerSnapshot: { durableExecution: true },
+        startedAt: now,
       });
-      const at = new Date().toISOString();
-      for (const payload of [
+      const at = now;
+      for (const usage of [
+        { inputTokens: 3, outputTokens: 2, cachedInputTokens: 0, totalTokens: 5, complete: false },
         {
-          taskId,
-          attemptId: attempt.id,
-          at,
-          type: "usage.updated",
-          usage: {
-            inputTokens: 3,
-            outputTokens: 2,
-            cachedInputTokens: 0,
-            totalTokens: 5,
-            complete: false,
-          },
-        },
-        {
-          taskId,
-          attemptId: attempt.id,
-          at,
-          type: "usage.updated",
-          usage: {
-            inputTokens: 12,
-            outputTokens: 8,
-            cachedInputTokens: 1,
-            totalTokens: 20,
-            complete: true,
-            reportedCost: { amountMinor: 7, currency: "USD" },
-          },
+          inputTokens: 12,
+          outputTokens: 8,
+          cachedInputTokens: 1,
+          totalTokens: 20,
+          complete: true,
+          reportedCost: { amountMinor: 7, currency: "USD" },
         },
       ])
         await f.store.appendTaskEvent({
-          taskId,
+          taskId: task.id,
           attemptId: attempt.id,
           type: "usage.updated",
-          payload,
+          payload: { taskId: task.id, attemptId: attempt.id, at, type: "usage.updated", usage },
         });
       for (const [id, status] of [
         ["child-1", "running"],
@@ -143,11 +217,11 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         ["child-2", "completed"],
       ] as const)
         await f.store.appendTaskEvent({
-          taskId,
+          taskId: task.id,
           attemptId: attempt.id,
           type: "agent.updated",
           payload: {
-            taskId,
+            taskId: task.id,
             attemptId: attempt.id,
             at,
             type: "agent.updated",
@@ -155,27 +229,22 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           },
         });
       await f.store.appendTaskEvent({
-        taskId,
+        taskId: task.id,
         attemptId: attempt.id,
         type: "execution.failed",
         payload: {
-          taskId,
+          taskId: task.id,
           attemptId: attempt.id,
           at,
           type: "execution.failed",
           error: { name: "Error", message: "Codex reported token budget exceeded" },
         },
       });
-      await f.store.settleTaskAssignment({
-        taskId,
-        leaseOwner: "metrics-worker",
-        attemptCount: 1,
-        result: { outcomeUnknown: true },
-        terminalAttempt: { id: attempt.id, status: "failed" },
-        failed: true,
-      });
 
-      const metrics = await f.store.readCoordinationMetrics();
+      // Read past the Attempt's lease: a durable Attempt whose lease lapsed awaits reconciliation.
+      const metrics = await f.store.readCoordinationMetrics({
+        asOf: "2030-01-01T00:00:00.000Z",
+      });
       expect(metrics.usage).toEqual({
         reportingAttempts: 1,
         totalTokens: 20,
@@ -192,18 +261,18 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
 
     it("reports durable scheduling latency, reservation outcomes, and Worker Host utilization", async () => {
       const f = await fixture();
-      const queuedTaskId = randomUUID();
-      const placedTaskId = randomUUID();
-      await f.store.admitTaskAssignment(f.assignment(queuedTaskId));
-      await f.store.admitTaskAssignment(f.assignment(placedTaskId));
-      await f.store.updateTaskAssignment(
-        queuedTaskId,
-        { expectedStatus: "queued", priority: "urgent" },
-        f.owner.id,
-      );
-      await f.store.claimTaskAssignment({ taskId: placedTaskId, leaseOwner: "scheduler" });
+      await f.turn("queued");
+      const placed = await f.turn("placed");
+      const now = new Date().toISOString();
+      await f.store.claimDueInboundEvent({
+        inboundEventId: placed.inboundEventId,
+        leaseOwner: "scheduler",
+        now,
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+      await f.store.startTask({ taskId: placed.task.id, startedAt: now });
       const attempt = await f.store.createTaskAttempt({
-        taskId: placedTaskId,
+        taskId: placed.task.id,
         attemptNumber: 1,
         workerProfile: { id: "metrics", revision: "1" },
         workerSnapshot: {
@@ -212,17 +281,14 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             workerHostId: "metrics-host",
             workletId: "metrics-worklet",
             workerId: "metrics-worker",
-            reservation: {
-              id: randomUUID(),
-              expiresAt: "2030-01-01T00:01:00.000Z",
-            },
+            reservation: { id: randomUUID(), expiresAt: "2030-01-01T00:01:00.000Z" },
           },
           workerHostId: "metrics-host",
         },
-        startedAt: new Date().toISOString(),
+        startedAt: now,
       });
       await f.store.appendTaskEvent({
-        taskId: placedTaskId,
+        taskId: placed.task.id,
         attemptId: attempt.id,
         type: "task.admission-rejected",
         payload: { version: 1, reason: "capacity changed" },
@@ -230,7 +296,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       await f.store.enrollWorkerHost({
         id: "metrics-host",
         credentialId: "credential",
-        enrolledAt: new Date().toISOString(),
+        enrolledAt: now,
       });
       await f.store.claimWorkerHostConnection({
         workerHostId: "metrics-host",
@@ -243,7 +309,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         availableSlots: 3,
         activeAttempts: 1,
         ready: true,
-        observedAt: new Date().toISOString(),
+        observedAt: now,
       });
 
       const metrics = await f.store.readCoordinationMetrics({
@@ -255,12 +321,6 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         averagePlacementDurationMs: 17,
         maximumPlacementDurationMs: 17,
         admissionRejections: 1,
-        byPriority: {
-          urgent: expect.objectContaining({ queued: 1, placedAttempts: 0 }),
-          high: expect.objectContaining({ queued: 0, placedAttempts: 0 }),
-          normal: expect.objectContaining({ queued: 0, placedAttempts: 1 }),
-          low: expect.objectContaining({ queued: 0, placedAttempts: 0 }),
-        },
         reservations: { consumed: 1, active: 0, expired: 0 },
         workerHosts: [
           {
@@ -278,60 +338,41 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       expect(metrics.scheduling.oldestQueuedAgeSeconds).toBeGreaterThan(0);
     });
 
-    it("reports durable Mailbox backlog and retry attempts", async () => {
+    it("reports the Mailbox messages no inbox turn has taken", async () => {
       const f = await fixture();
-      await f.store.setTagMessagingGrant({
-        senderTagId: f.owner.id,
-        recipientTagId: f.worker.id,
-        messageTypes: ["clarification.requested"],
-      });
-      const credentialId = randomUUID();
-      await f.store.createTagMailboxCredential({
-        id: credentialId,
-        tagId: f.worker.id,
-        tokenHash: randomUUID(),
-        createdAt: new Date().toISOString(),
-      });
-      await f.store.enqueueTagMessage({
+      await f.store.setTagMessagingGrants(f.worker.id, [f.owner.id]);
+      const first = await f.store.deliverTagMessage({
         senderTagId: f.owner.id,
         recipientTagId: f.worker.id,
         objectiveId: f.objective.id,
-        type: "clarification.requested",
-        body: { question: "Need durable evidence?" },
-        idempotencyKey: randomUUID(),
+        text: "Need durable evidence?",
+        hops: 0,
       });
-      const claim = async () => {
-        const now = new Date().toISOString();
-        const delivery = await f.store.claimTagMessage({
-          tagId: f.worker.id,
-          credentialId,
-          now,
-          leaseExpiresAt: new Date(Date.now() + 30_000).toISOString(),
-        });
-        expect(delivery).toBeDefined();
-        if (!delivery) throw new Error("Expected Mailbox delivery");
-        return { delivery, now };
-      };
-      for (let index = 0; index < 2; index += 1) {
-        const { delivery, now } = await claim();
-        await f.store.settleTagMessage({
-          tagId: f.worker.id,
-          credentialId,
-          messageId: delivery.message.id,
-          leaseToken: delivery.leaseToken,
-          now,
-          status: "pending",
-        });
-      }
+      await f.store.deliverTagMessage({
+        senderTagId: f.owner.id,
+        recipientTagId: f.worker.id,
+        objectiveId: f.objective.id,
+        text: "And the schedule?",
+        hops: 0,
+      });
+      expect(await f.store.readCoordinationMetrics()).toMatchObject({
+        mailbox: { pending: 2, oldestPendingAt: first.message.createdAt },
+      });
 
-      const metrics = await f.store.readCoordinationMetrics();
-      expect(metrics.mailbox).toMatchObject({
-        backlog: 1,
-        retrying: 1,
-        retryAttempts: 1,
-        failed: 0,
+      // Binding them to an inbox turn clears the backlog.
+      const inbox = await f.store.openSession({
+        tagId: f.worker.id,
+        sessionKey: inboxSessionKey(f.worker.id),
+        origin: {},
+        at: new Date().toISOString(),
       });
-      expect(metrics.mailbox.oldestPendingAt).not.toBeNull();
+      const turn = await f.turn("inbox-turn");
+      await f.store.bindInboxMessages(turn.task.id, f.worker.id);
+      expect(inbox.sessionKey).toBe(inboxSessionKey(f.worker.id));
+      expect((await f.store.readCoordinationMetrics()).mailbox).toEqual({
+        pending: 0,
+        oldestPendingAt: null,
+      });
     });
   });
 }

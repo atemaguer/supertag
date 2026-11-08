@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -185,9 +185,12 @@ describe("Objective commands", () => {
   };
 
   it("routes message and approve to the Objective commands", () => {
-    expect(
-      normalizeActionFirstCommand(["message", "objective", "a", "Fix it", "--reopen"]),
-    ).toEqual(["objective", "message", "a", "Fix it", "--reopen"]);
+    expect(normalizeActionFirstCommand(["message", "objective", "a", "Fix it"])).toEqual([
+      "objective",
+      "message",
+      "a",
+      "Fix it",
+    ]);
     expect(normalizeActionFirstCommand(["approve", "objective", "a"])).toEqual([
       "objective",
       "approve",
@@ -253,9 +256,9 @@ describe("Objective commands", () => {
     expect(summary).toBe(
       `objective/${createdId} created\nFollow it: supertag watch objective ${createdId}\nSee results: supertag describe objective ${createdId}\n`,
     );
-    // The owner without a Worker Host cannot start, so create also says it was not started.
+    // The owner without a Worker Host cannot take the first turn, so create says so.
     expect(errors.filter((line) => line.startsWith("Warning: "))).toHaveLength(3);
-    expect(errors.at(-1)).toMatch(/^Warning: The owner was not started: /u);
+    expect(errors.at(-1)).toMatch(/^Warning: The Objective was not started: /u);
     // --output json prints the full record for scripts.
     const created = JSON.parse(
       await run(
@@ -273,12 +276,12 @@ describe("Objective commands", () => {
     expect(created.id).toMatch(/^ship-sso-for-[a-z0-9]{4}$/u);
     expect(errors.at(-1)).toBe(`Created Objective ${created.id}.\n`);
 
-    // Bound to the embedded Worker Host, the owner's Tasks can run; only the missing runtime
+    // Bound to the embedded Worker Host, the owner's turns can run; only the missing runtime
     // actions are reported, since they limit rather than hold the Tasks.
     await run("update", "tag", "planner", "--add-worker-host", "control-plane-static-host");
     expect(
       await run("create", "objective", "ready", "--outcome", "Ship", "--owner", "planner"),
-    ).toContain("objective/ready created\nStarted planner with Task ready:start.\n");
+    ).toMatch(/^objective\/ready created\nStarted planner with Task \S+\.\n/u);
     expect(errors).toEqual([noRuntimeActions]);
     const described = await run("describe", "objective", "ready");
     expect(described).toContain("Runnable: yes");
@@ -308,16 +311,20 @@ describe("Objective commands", () => {
     ]);
   });
 
-  it("starts the owner on create, once, and never on a dry run", async () => {
+  it("starts the Objective's conversation on create, once, and never on a dry run", async () => {
+    /** What the Objective has: when it started, and the Tasks of its own conversation. */
     const started = async (id: string) => {
       const direct = new DrizzleStore({ url: databaseUrl });
       await direct.connect();
       try {
         const objective = await direct.getObjective(id).catch(() => undefined);
+        const session = objective ? await direct.findObjectiveOwnerSession(id) : undefined;
         return {
           startedAt: objective?.executionStartedAt ?? null,
-          teams: objective ? (await direct.listTeams(id)).map((team) => team.id) : [],
-          tasks: objective ? (await direct.listTaskAssignments(id)).map((task) => task.taskId) : [],
+          tasks:
+            session === undefined
+              ? []
+              : (await direct.listTasks({ sessionId: session.id })).map((task) => task.id),
         };
       } finally {
         await direct.disconnect();
@@ -325,17 +332,12 @@ describe("Objective commands", () => {
     };
     // Without a Worker Host the owner cannot start; the Objective is still created.
     await run("create", "objective", "launch", "--outcome", "Launch", "--owner", "planner");
-    expect(errors.filter((line) => line.startsWith("Warning: The owner was not started:"))).toEqual(
-      [
-        "Warning: The owner was not started: Tag planner cannot accept Tasks because it has no Worker Host binding. Bind a Worker Host to the Tag, then retry. Once that is fixed, run this command again with ID launch to start it.\n",
-      ],
-    );
-    // Like start_objective, the attempt leaves only the empty leadership Team behind.
-    expect(await started("launch")).toEqual({
-      startedAt: null,
-      teams: ["launch:leadership"],
-      tasks: [],
-    });
+    expect(
+      errors.filter((line) => line.startsWith("Warning: The Objective was not started:")),
+    ).toEqual([
+      "Warning: The Objective was not started: Tag planner cannot accept Tasks because it has no Worker Host binding. Bind a Worker Host to the Tag, then retry. Once that is fixed, run this command again with ID launch to start it.\n",
+    ]);
+    expect(await started("launch")).toEqual({ startedAt: null, tasks: [] });
     expect(await run("describe", "objective", "launch")).toContain(
       "rerun supertag create objective with this ID and the same definition",
     );
@@ -352,44 +354,22 @@ describe("Objective commands", () => {
       "--dry-run",
     );
     expect(errors.some((line) => line.startsWith("Started owner"))).toBe(false);
-    expect(await started("draft")).toEqual({ startedAt: null, teams: [], tasks: [] });
-    // --no-start only creates, for operators who assign the Tasks themselves.
-    await run(
-      "create",
-      "objective",
-      "manual",
-      "--outcome",
-      "Manual",
-      "--owner",
-      "planner",
-      "--no-start",
-    );
-    expect(errors.some((line) => line.startsWith("Started owner"))).toBe(false);
-    expect(await started("manual")).toEqual({ startedAt: null, teams: [], tasks: [] });
+    expect(await started("draft")).toEqual({ startedAt: null, tasks: [] });
 
-    // Rerunning the same create starts the owner, and running it again changes nothing.
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      expect(
+    // Rerunning the same create starts the conversation, and running it again changes nothing.
+    const summaries: string[] = [];
+    for (let attempt = 0; attempt < 2; attempt += 1)
+      summaries.push(
         await run("create", "objective", "launch", "--outcome", "Launch", "--owner", "planner"),
-      ).toContain("Started planner with Task launch:start.\n");
-    }
+      );
+    expect(summaries[0]).toContain("Started planner with Task ");
+    expect(summaries[1]).toBe(summaries[0]);
     const first = await started("launch");
-    expect(first).toMatchObject({
-      startedAt: expect.any(String),
-      teams: ["launch:leadership"],
-      tasks: ["launch:start"],
-    });
-
-    // start_objective stays available and returns the existing start Task.
-    const input = join(directory, "start.json");
-    await writeFile(input, JSON.stringify({ objectiveId: "launch", maxCostMinor: 1000 }));
-    expect(JSON.parse(await run("coordinate", "start_objective", "--input", input))).toMatchObject({
-      taskId: "launch:start",
-    });
-    expect(await started("launch")).toEqual(first);
+    expect(first.startedAt).toEqual(expect.any(String));
+    expect(first.tasks).toHaveLength(1);
   });
 
-  it("updates, completes, messages, and approves without a revision", async () => {
+  it("updates, completes, and approves without a revision", async () => {
     await run(
       "create",
       "objective",
@@ -411,20 +391,38 @@ describe("Objective commands", () => {
     expect(
       await fail("update", "objective", "report", "--status", "working", "--revision", "2"),
     ).toBe("Objective revision changed; reload before updating");
-
-    // Answering a blocked owner returns the Objective to working.
-    expect(await run("message", "objective", "report", "Use the 2030 figures.")).toMatch(
-      /^Sent message \S+ to the owner of Objective report\.\nThe Objective moved from blocked to working\.\nThe Objective has not started; the owner reads the message once it starts\.\n$/u,
-    );
     expect(await fail("approve", "objective", "report")).toContain(
-      "Objective report is working, not ready_for_review",
+      "Objective report is blocked, not ready_for_review",
     );
     await run("update", "objective", "report", "--status", "ready_for_review");
     expect(JSON.parse(await run("get", "objective", "report"))).toMatchObject({
       status: "ready_for_review",
     });
-    // Unread operator mail holds approval, exactly as it holds completion.
-    expect(await fail("approve", "objective", "report")).toContain("Mailbox messages remain");
+    expect(await run("approve", "objective", "report")).toBe(
+      "objective/report approved; it is completed (revision 5).\n",
+    );
+  });
+
+  it("sends an operator message as the Objective's next turn", async () => {
+    // A message is a turn of the Objective's conversation, so the owner needs a Worker Host.
+    await run("update", "tag", "planner", "--add-worker-host", "control-plane-static-host");
+    await run(
+      "create",
+      "objective",
+      "report",
+      "--outcome",
+      "Write the report",
+      "--owner",
+      "planner",
+    );
+    await run("update", "objective", "report", "--status", "blocked");
+    // A message moves a blocked Objective back to working and becomes the owner's next turn.
+    expect(await run("message", "objective", "report", "Use the 2030 figures.")).toContain(
+      "Sent to the conversation of Objective report.\nThe Objective moved from blocked back to working.",
+    );
+    expect(JSON.parse(await run("get", "objective", "report"))).toMatchObject({
+      status: "working",
+    });
   });
 
   it("prints an updated budget limit in major units", async () => {
@@ -446,7 +444,7 @@ describe("Objective commands", () => {
     );
   });
 
-  it("completes without a revision and reopens a completed Objective only with --reopen", async () => {
+  it("completes without a revision and keeps a completed Objective closed", async () => {
     await run("create", "objective", "notes", "--outcome", "Write notes", "--owner", "planner");
     expect(await run("complete", "objective", "notes", "--summary", "Notes written.")).toBe(
       "objective/notes completed (revision 2).\n",
@@ -456,87 +454,53 @@ describe("Objective commands", () => {
       completionSummary: "Notes written.",
       revision: 2,
     });
-    expect(await fail("message", "objective", "notes", "Add a glossary.")).toContain("--reopen");
-    expect(await run("message", "objective", "notes", "Add a glossary.", "--reopen")).toContain(
-      "The Objective was reopened and is working again.",
-    );
-    expect(JSON.parse(await run("get", "objective", "notes"))).toMatchObject({
-      status: "working",
-      completionSummary: null,
-      revision: 3,
-    });
+    // Nothing reopens a completed Objective: its conversation is over.
+    expect(await fail("message", "objective", "notes", "Reopen?")).toMatch(/completed/u);
   });
 
-  it("updates Teams without a revision and reads their channels", async () => {
-    await run("create", "objective", "ops", "--outcome", "Run ops", "--owner", "planner");
-    const team = await run(
-      "create",
-      "team",
-      "crew",
-      "--objective",
-      "ops",
-      "--name",
-      "Crew",
-      "--lead",
-      "planner",
-      "--max-concurrency",
-      "1",
-    );
-    expect(team).toBe("team/crew created.\n");
+  it("creates a Team the Objective names and reads its Workstream", async () => {
     expect(
-      JSON.parse(
-        await run(
-          "update",
-          "team",
-          "crew",
-          "--objective",
-          "ops",
-          "--name",
-          "Crew 2",
-          "--output",
-          "json",
-        ),
-      ),
-    ).toMatchObject({ name: "Crew 2", revision: 2 });
-    // The Team's channel was created with it and reads the Team's current name.
-    const channel = JSON.parse(await run("get", "workstream", "crew")) as Record<string, unknown>;
-    expect(channel).toMatchObject({ id: "crew", objectiveId: "ops", title: "Crew 2" });
-    expect(channel).not.toHaveProperty("status");
-    expect(channel).not.toHaveProperty("revision");
+      await run("create", "team", "crew", "--member", "planner", "--max-concurrency", "1"),
+    ).toBe("team/crew created.\n");
+    expect(
+      JSON.parse(await run("update", "team", "crew", "--name", "crew-2", "--output", "json")),
+    ).toMatchObject({ name: "crew-2", maxConcurrency: 1, revision: 2 });
+    await run(
+      "create",
+      "objective",
+      "ops",
+      "--outcome",
+      "Run ops",
+      "--owner",
+      "planner",
+      "--team",
+      "crew-2",
+    );
+    expect(JSON.parse(await run("get", "objective", "ops"))).toMatchObject({ teamId: "crew" });
     const direct = new DrizzleStore({ url: databaseUrl });
     await direct.connect();
     try {
       const planner = await direct.findTagByName("planner");
-      await direct.postWorkstream({
-        workstreamId: "crew",
+      await direct.post({
+        teamId: "crew",
         authorTagId: planner?.id as string,
         body: "Which region first?",
-        type: "question",
         to: [planner?.id as string],
-        idempotencyKey: "region",
       });
-      const listing = await run("list", "workstream-post", "--workstream", "crew");
-      expect(listing).toMatch(/SEQUENCE\s+AUTHOR\s+TYPE\s+TO\s+TIME\s+MESSAGE/u);
-      expect(listing).toContain("question");
-      expect(listing).toContain(planner?.id as string);
     } finally {
       await direct.disconnect();
     }
-    const tagged = await run("list", "workstream", "--tag", "planner");
-    expect(tagged).toMatch(/ID\s+TITLE\s+OBJECTIVE\s+OWNER[\s\S]*crew\s+Crew 2\s+ops\s+\S/u);
-    const all = await run("list", "workstream");
-    expect(all).toMatch(/ID\s+TITLE\s+OBJECTIVE\s+OWNER[\s\S]*crew\s+Crew 2\s+ops\s+\S/u);
-    // Text tables name the owner Tag rather than its ID.
-    for (const listing of [tagged, all]) {
-      const row = listing.split("\n").find((line) => line.startsWith("crew "));
-      expect(row?.trim().split(/\s+/u).at(-1)).toMatch(/^[a-z][\w-]*$/u);
-      expect(row).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/u);
-    }
-    await fail("create", "workstream", "stream", "--objective", "ops", "--title", "Stream");
-    await fail("update", "workstream", "crew", "--status", "blocked");
-    await fail("list", "workstream-message", "--workstream", "crew");
-    expect(await run("dissolve", "team", "crew", "--objective", "ops")).toBe(
-      "team/crew dissolved (revision 3).\n",
-    );
+    // The text table names the author Tag rather than its ID, and has no post type column.
+    const listing = await run("list", "workstream-post", "--team", "crew");
+    expect(listing).toMatch(/SEQUENCE\s+AUTHOR\s+TO\s+TIME\s+MESSAGE/u);
+    expect(listing).toMatch(/^1\s+planner\s+planner\s+\S+\s+Which region first\?$/mu);
+    expect(listing).not.toMatch(/TYPE/u);
+    const json = JSON.parse(
+      await run("list", "workstream-post", "--team", "crew", "--output", "json"),
+    ) as { items: readonly { sequence: number; body: string }[] };
+    expect(json.items).toHaveLength(1);
+    expect(json.items[0]).toMatchObject({ sequence: 1, body: "Which region first?" });
+    // A Team an open Objective names stays until the Objective closes.
+    expect(await fail("delete", "team", "crew")).toContain("cannot be deleted");
   });
 });

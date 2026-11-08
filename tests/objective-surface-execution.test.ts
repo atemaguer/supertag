@@ -18,7 +18,35 @@ import {
 import { durableTestWorklet } from "./support/durable-test-worklet.js";
 import { harnessRequest } from "./support/harness-request.js";
 
-it("turns human surface requests into objective execution and routes durable progress and approval notices back", async () => {
+/** The tools a conversation turn and an Objective's own turn advertise, in surfaceTools order. */
+const CONVERSATION_TOOLS = [
+  "create_objective",
+  "read_objective",
+  "list_objectives",
+  "list_sessions",
+  "search_sessions",
+  "read_session",
+  "start_session",
+  "continue_session",
+  "send_message",
+  "post",
+  "read_workstream",
+];
+const OBJECTIVE_TOOLS = [
+  "read_objective",
+  "update_objective",
+  "list_sessions",
+  "search_sessions",
+  "read_session",
+  "start_session",
+  "continue_session",
+  "ask",
+  "send_message",
+  "post",
+  "read_workstream",
+];
+
+it("turns a human surface request into an Objective conversation whose turns reply in the thread", async () => {
   const directory = await mkdtemp(join(tmpdir(), "supertag-surface-execution-"));
   const url = `file:${join(directory, "state.db")}`;
   await migrateDatabase({ url });
@@ -27,8 +55,8 @@ it("turns human surface requests into objective execution and routes durable pro
   const errors: unknown[] = [];
   const replies: Array<{ route: unknown; markdown: string }> = [];
   let objectiveId = "";
-  let surfaceExecutions = 0;
-  let updateExecuted = false;
+  let conversationTurns = 0;
+  const objectiveTurns: string[] = [];
   let surfaceToken = "";
   const worker = createCodexWorker({
     workspace: directory,
@@ -52,92 +80,63 @@ it("turns human surface requests into objective execution and routes durable pro
       try {
         const tools = (await client.listTools()).tools.map((tool) => tool.name);
         if (tools.includes("create_objective")) {
-          surfaceExecutions++;
+          conversationTurns++;
           surfaceToken = server.headers["Authorization"] ?? "";
-          expect(tools).toEqual([
-            "create_objective",
-            "attach_objective",
-            "select_objective",
-            "read_objective",
-            "list_tasks",
-            "read_commitments",
-            "start_objective",
-            "instruct_objective",
-            "list_sessions",
-            "search_sessions",
-            "read_session",
-            "list_objectives",
-            "start_session",
-            "continue_session",
-          ]);
-          // The portfolio always tells the Tag it can recall other conversations, and lists its
-          // open Objectives once there is one.
+          expect(tools).toEqual(CONVERSATION_TOOLS);
+          // The portfolio always tells the Tag it can recall other conversations.
           const prompt = JSON.stringify(request);
           expect(prompt).toContain("search_sessions, list_sessions and read_session");
-          if (surfaceExecutions === 1)
-            expect(prompt).toContain("this Tag owns no open Objectives you can see");
-          else {
-            expect(prompt).toContain("Tag portfolio");
-            expect(prompt).toContain(`- ${objectiveId} [`);
-          }
+          expect(prompt).toContain("this Tag owns no open Objectives you can see");
           const forbidden = await client
-            .callTool({ name: "approve_task", arguments: { taskId: "approval" } })
+            .callTool({ name: "update_objective", arguments: { status: "completed" } })
             .catch(() => undefined);
           expect(forbidden === undefined || forbidden.isError).toBeTruthy();
-          if (surfaceExecutions === 1) {
-            const objective = await call("create_objective", {
-              outcome: "Validate scheduling",
-            });
-            objectiveId = objective.id;
-            expect(objective.runtimeActions).toEqual([]);
-            // The surface Tag has a connected Worker Host, so nothing would hold its Tasks; the
-            // only warning is that its Permission Sets allow no runtime actions.
-            expect(objective.warnings).toEqual([
-              expect.stringContaining("Permission Sets allow no runtime actions"),
-            ]);
-            await call("start_objective");
-          } else {
-            expect((await call("select_objective")).id).toBe(objectiveId);
-            await call("instruct_objective");
-            await call("instruct_objective");
-          }
-        } else {
-          expect(tools).toContain("send_message");
-          expect(tools).not.toContain("create_objective");
-          if (harnessRequest(request.prompt).includes("Assess this authenticated human update")) {
-            expect(request.prompt).toContain("Focus on solo practices instead");
-            updateExecuted = true;
-            await call("send_message", {
-              recipientObjectiveId: objectiveId,
-              type: "progress.updated",
-              body: { message: "Target market updated" },
-              idempotencyKey: "human-update",
-            });
-          } else if (!harnessRequest(request.prompt).includes("A delegated Task changed state")) {
-            await call("send_message", {
-              recipientObjectiveId: objectiveId,
-              type: "progress.updated",
-              body: { message: "Research is underway" },
-              idempotencyKey: "initial-progress",
-            });
-            await call("send_message", {
-              recipientObjectiveId: objectiveId,
-              type: "progress.updated",
-              body: { message: "Research is underway" },
-              idempotencyKey: "initial-progress",
-            });
-            const objective = await call("read_objective");
-            await call("assign_task", {
-              taskId: "approval",
-              teamId: `${objectiveId}:leadership`,
-              assignedTagId: objective.ownerTagId,
-              instruction: "Publish the validated product",
-              acceptanceCriteria: ["Human approved publication"],
-              requiresApproval: true,
-            });
-          }
+          const objective = await call("create_objective", { outcome: "Validate scheduling" });
+          objectiveId = objective.id;
+          expect(objective.runtimeActions).toEqual([]);
+          // The surface Tag has a connected Worker Host, so nothing would hold its turns; the
+          // only warning is that its Permission Sets allow no runtime actions.
+          expect(objective.warnings).toEqual([
+            expect.stringContaining("Permission Sets allow no runtime actions"),
+          ]);
+          // Creating it starts its own conversation at once.
+          expect(objective.started.taskId).toEqual(expect.any(String));
+          yield { type: "output.message", text: "Started an Objective for that." };
+          return;
         }
-        yield { type: "output.message", text: "Request handled" };
+        expect(tools).toEqual(OBJECTIVE_TOOLS);
+        const text = harnessRequest(request.prompt);
+        objectiveTurns.push(text);
+        if (objectiveTurns.length === 1) {
+          expect(text).toContain(`Objective ${objectiveId} has started.`);
+          expect(request.prompt).toContain("<objective-outcome>");
+          expect(request.prompt).toContain("Validate scheduling");
+          const summary = await call("read_objective");
+          expect(summary).toMatchObject({
+            id: objectiveId,
+            status: "working",
+            owner: "SuperTag",
+            team: null,
+            // Its own conversation is the only Session so far.
+            sessions: [{ tag: "SuperTag", status: "running" }],
+          });
+          // A turn of one Objective never reads another's.
+          const foreign = await client
+            .callTool({ name: "read_objective", arguments: { objectiveId: "other" } })
+            .catch(() => undefined);
+          expect(foreign === undefined || foreign.isError).toBeTruthy();
+          await call("ask", { question: "Which market should I validate first?" });
+          yield { type: "output.message", text: "Which market should I validate first?" };
+          return;
+        }
+        expect(text).toContain("Focus on solo practices instead");
+        const summary = await call("read_objective");
+        await call("update_objective", {
+          status: "completed",
+          expectedRevision: summary.revision,
+          completionSummary: "Validated for solo practices",
+        });
+        yield { type: "output.message", text: "Validated for solo practices." };
       } catch (error) {
         errors.push(error);
         throw error;
@@ -151,19 +150,8 @@ it("turns human surface requests into objective execution and routes durable pro
     credentialVault: new FileGatewayCredentialVault(join(directory, "vault.json")),
     worklet: durableTestWorklet(new LocalWorklet("surface-worklet", "surface-host", [worker])),
     reply: Object.assign(
-      async (
-        route: InboundSurfaceEvent,
-        reply: { markdown: string },
-        _account: unknown,
-        delivery: { replaceExternalMessageId?: string },
-      ) => {
+      async (route: InboundSurfaceEvent, reply: { markdown: string }) => {
         replies.push({ route, markdown: reply.markdown });
-        if (
-          reply.markdown === "Research is underway" ||
-          reply.markdown === "Target market updated" ||
-          reply.markdown.startsWith("Approval required")
-        )
-          expect(delivery.replaceExternalMessageId).toBeUndefined();
         return { externalMessageId: `reply-${replies.length}` };
       },
       { capabilities: () => ({ replacement: true }) },
@@ -199,9 +187,7 @@ it("turns human surface requests into objective execution and routes durable pro
       configuration: { transport: "socket" },
       secrets: { botToken: "xoxb-test", appToken: "xapp-test" },
     });
-    const tag = await store.createTag({
-      name: "SuperTag",
-    });
+    const tag = await store.createTag({ name: "SuperTag" });
     await store.bindTagWorkerHost(tag.id, "surface-host");
     await store.addTagRoute({
       tagId: tag.id,
@@ -229,52 +215,51 @@ it("turns human surface requests into objective execution and routes durable pro
       metadata: {},
     };
     expect((await controlPlane.ingestSurfaceEvent(event)).status).toBe("accepted");
+    // The Objective's first turn runs on its own and its reply reaches the home thread.
     await expect
       .poll(
         () => {
           expect(errors).toEqual([]);
-          return replies.some((reply) => reply.markdown.startsWith("Approval required"));
+          return replies.some(
+            (reply) => reply.markdown === "Which market should I validate first?",
+          );
         },
-        {
-          timeout: 15000,
-        },
+        { timeout: 15000 },
       )
       .toBe(true);
-    expect(errors).toEqual([]);
-    expect(replies.filter((reply) => reply.markdown === "Research is underway")).toHaveLength(1);
-    expect((await store.getTaskAssignment("approval"))?.approval).toBe("pending");
+    expect(conversationTurns).toBe(1);
+    // The coordination token of a settled Attempt no longer authenticates.
     const stale = await fetch(`${controlPlaneUrl}/internal/v1/coordination/mcp`, {
       method: "POST",
       headers: { Authorization: surfaceToken, "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
     expect(stale.status).toBe(401);
+
+    // A plain reply in the home thread is the Objective's next turn, not a new conversation turn.
     expect(
       (
         await controlPlane.ingestSurfaceEvent({
           ...event,
           eventId: "second",
           logicalEventId: "second",
+          kind: "message",
           text: "Focus on solo practices instead",
           actor: { id: "U2", kind: "user" },
         })
       ).status,
     ).toBe("accepted");
+    expect(replies.at(-1)?.markdown).toBe("Sent to the Objective.");
     await expect
-      .poll(() => replies.some((reply) => reply.markdown === "Target market updated"), {
+      .poll(() => replies.some((reply) => reply.markdown === "Validated for solo practices."), {
         timeout: 15000,
       })
       .toBe(true);
-    expect(updateExecuted).toBe(true);
-    expect(surfaceExecutions).toBe(2);
-    expect(
-      (await store.listTaskAssignments(objectiveId)).filter((task) =>
-        task.taskId.startsWith("surface-instruction:"),
-      ),
-    ).toHaveLength(1);
-    expect(replies.filter((reply) => reply.markdown.startsWith("Approval required"))).toHaveLength(
-      1,
-    );
+    expect(conversationTurns).toBe(1);
+    expect(objectiveTurns).toHaveLength(2);
+    await expect
+      .poll(async () => (await store.getObjective(objectiveId)).status, { timeout: 5000 })
+      .toBe("completed");
     for (const reply of replies) expect(reply.route).toMatchObject({ callback: event.callback });
     expect(errors).toEqual([]);
   } finally {

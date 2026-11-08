@@ -128,7 +128,7 @@ describe("supertag status", () => {
         objectives: view.objectives.map((objective) => ({
           ...objective,
           needsOperator: 0,
-          openHighFindings:
+          highFindings:
             objective.id === "newer"
               ? [{ taskId: "review-a", id: "F1", summary: "Missing guard", location: "src/a.ts:3" }]
               : [],
@@ -137,7 +137,7 @@ describe("supertag status", () => {
       },
       now,
     );
-    expect(text).toContain("Open high: review-a F1: Missing guard (src/a.ts:3)");
+    expect(text).toContain("High finding: review-a F1: Missing guard (src/a.ts:3)");
   });
 
   it("counts running Task Attempts per harness and busy Tags", () => {
@@ -326,8 +326,14 @@ describe("supertag status", () => {
             { objectiveId: "newer", kind: "approval", operatorEligible: true, nextActorTagIds: [] },
             {
               objectiveId: "newer",
-              kind: "task_review",
+              kind: "question",
               operatorEligible: true,
+              nextActorTagIds: [],
+            },
+            {
+              objectiveId: "newer",
+              kind: "task_attention",
+              operatorEligible: false,
               nextActorTagIds: ["x"],
             },
           ],
@@ -347,14 +353,15 @@ describe("supertag status", () => {
       "/api/v1/coordination/inbox",
       "/api/v1/coordination/inbox?cursor=page-2",
     ]);
-    expect(output.inbox).toEqual({ items: 2, truncated: false });
+    // Every operator-eligible item counts, whether or not a Tag could also act on it.
+    expect(output.inbox).toEqual({ items: 3, truncated: false });
     expect(
       output.objectives.map((item: { id: string; needsOperator: number }) => [
         item.id,
         item.needsOperator,
       ]),
     ).toEqual([
-      ["newer", 1],
+      ["newer", 2],
       ["older", 1],
     ]);
   });

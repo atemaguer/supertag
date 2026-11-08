@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { objectiveSessionKey } from "@supertag/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { createIsolatedPostgresDatabase } from "../../tests/support/database.js";
 import { DrizzleStore, migrateDatabase } from "./src/index.js";
@@ -17,14 +18,11 @@ describe("resource change definition", () => {
   it("records only changed fields in stable order", () => {
     expect(
       resourceChangeDelta(
-        { context: { old: true }, leadTagId: "lead", name: "Same" },
-        { context: { current: true }, leadTagId: "next", name: "Same" },
-        ["name", "leadTagId", "context"],
+        { maxConcurrency: 2, memberTagIds: ["a"], name: "Same" },
+        { maxConcurrency: 5, memberTagIds: ["a"], name: "Same" },
+        ["name", "maxConcurrency", "memberTagIds"],
       ),
-    ).toEqual({
-      context: { previous: { old: true }, next: { current: true } },
-      leadTagId: { previous: "lead", next: "next" },
-    });
+    ).toEqual({ maxConcurrency: { previous: 2, next: 5 } });
   });
 
   it("uses null as the pre-creation value", () => {
@@ -36,9 +34,9 @@ describe("resource change definition", () => {
   it("bounds delta payload size and revision pagination", () => {
     expect(() =>
       resourceChangeDelta(
-        { context: { value: "a".repeat(RESOURCE_CHANGE_MAX_BYTES) } },
-        { context: { value: "b".repeat(RESOURCE_CHANGE_MAX_BYTES) } },
-        ["context"],
+        { name: "a".repeat(RESOURCE_CHANGE_MAX_BYTES) },
+        { name: "b".repeat(RESOURCE_CHANGE_MAX_BYTES) },
+        ["name"],
       ),
     ).toThrow("Resource change exceeds 192 KiB");
     expect(
@@ -79,130 +77,159 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       });
       const owner = await store.createTag({ name: `owner-${randomUUID()}` });
       const lead = await store.createTag({ name: `lead-${randomUUID()}` });
+      const team = await store.createTeam({
+        id: randomUUID(),
+        name: `Research ${randomUUID()}`,
+        memberTagIds: [owner.id, lead.id],
+        maxConcurrency: 2,
+      });
       const objective = await store.createObjective({
         id: randomUUID(),
         ownerTagId: owner.id,
         outcome: "Retain Team changes",
+        teamId: team.id,
       });
-      const team = await store.createTeam(
-        {
-          id: randomUUID(),
-          objectiveId: objective.id,
-          name: "Research",
-          leadTagId: lead.id,
-          memberTagIds: [],
-          maxConcurrency: 2,
-        },
-        owner.id,
-      );
-      return { store, reopened, owner, lead, objective, team };
-    }
-
-    it("persists creation and changed-field deltas with provenance", async () => {
-      const f = await fixture();
-      await f.store.setTagMessagingGrant({
-        senderTagId: f.lead.id,
-        recipientTagId: f.owner.id,
-        messageTypes: ["message"],
+      const account = await store.saveSurfaceAccount({
+        provider: "slack",
+        externalAccountId: randomUUID(),
+        displayName: "Slack",
+        authMethod: "test",
+        credentialId: "test",
+        status: "connected",
+        configuration: {},
+        verifiedAt: new Date().toISOString(),
       });
-      const sourceMessage = (
-        await f.store.enqueueTagMessage({
-          senderTagId: f.lead.id,
-          recipientTagId: f.owner.id,
-          objectiveId: f.objective.id,
-          type: "message",
-          body: { requestedChange: "Update shared context" },
-          idempotencyKey: randomUUID(),
-        })
-      ).message;
-      const sourceTaskId = randomUUID();
-      await f.store.admitTaskAssignment({
-        taskId: sourceTaskId,
-        objectiveId: f.objective.id,
-        teamId: f.team.id,
-        requestedByTagId: f.owner.id,
-        assignedTagId: f.lead.id,
-        instruction: "Maintain Team context",
-        acceptanceCriteria: ["Context is current"],
-        execution: {},
-        authorizationSnapshot: {
-          version: 4,
-          capturedAt: new Date().toISOString(),
-          tag: { id: f.lead.id, name: f.lead.name },
+      const route = await store.addTagRoute({
+        tagId: owner.id,
+        surfaceAccountId: account.id,
+        scope: "channel:research",
+      });
+      /** One turn of the Objective's own Session, as the Control Plane admits it. */
+      async function objectiveTask(): Promise<string> {
+        const at = new Date().toISOString();
+        const authorization = {
+          version: 5,
+          capturedAt: at,
+          tag: { id: owner.id, name: owner.name },
           origin: {
-            kind: "internal",
-            objectiveId: f.objective.id,
-            requestedByTagId: f.owner.id,
+            tagRouteId: route.id,
+            surfaceAccountId: account.id,
+            provider: "slack",
+            scope: "channel:research",
           },
-          requester: { id: f.owner.id, kind: "bot" },
+          requester: { id: owner.id, kind: "bot" },
           permissionSets: [],
           resources: [],
           runtimeActions: [],
-        },
-        contextPlan: { version: 7, capturedAt: new Date().toISOString(), sets: [] },
-        workspacePlan: { version: 1, status: "none" },
-      });
-      await f.store.updateTeam(
-        f.team.id,
-        {
-          expectedRevision: 1,
-          name: "Research and Review",
-          context: { policy: "reviewed artifacts only" },
-        },
-        f.lead.id,
-        { sourceTaskId, sourceMessageId: sourceMessage.id },
-      );
+        } as const;
+        const eventId = randomUUID();
+        const admitted = await store.admitInboundEvent({
+          surfaceAccountId: account.id,
+          tagRouteId: route.id,
+          tagId: owner.id,
+          authorization,
+          contextPlan: { version: 7, capturedAt: at, sets: [] },
+          event: {
+            eventId,
+            logicalEventId: eventId,
+            provider: "slack",
+            externalAccountId: account.externalAccountId,
+            kind: "message",
+            scope: "channel:research",
+            sessionKey: objectiveSessionKey(objective.id),
+            actor: { id: owner.id, kind: "bot" },
+            internal: { kind: "delivery", from: { kind: "supertag" }, reason: "objective_start" },
+            text: "Retain Team changes",
+            occurredAt: at,
+            callback: {
+              provider: "slack",
+              mode: "slack_thread",
+              threadKey: "research",
+              target: { channelId: "research", threadTs: "research" },
+            },
+            source: {},
+            metadata: {},
+          },
+        });
+        const session = await store.openSession({
+          tagId: owner.id,
+          sessionKey: objectiveSessionKey(objective.id),
+          origin: {},
+          objectiveId: objective.id,
+          at,
+        });
+        const task = await store.openTask({
+          inboundEventId: admitted.work.id,
+          tagId: owner.id,
+          sessionId: session.id,
+          execution: {},
+          actor: { id: owner.id, kind: "bot" },
+          trigger: { origin: "objective_start" },
+          workspacePlan: { version: 1, status: "none" },
+          sessionHistory: [],
+          authorizationSnapshot: authorization,
+          contextPlan: { version: 7, capturedAt: at, sets: [] },
+          createdAt: at,
+        });
+        return task.id;
+      }
+      return { store, reopened, owner, lead, objective, team, objectiveTask };
+    }
+
+    it("records a Team's creation and only its changed fields", async () => {
+      const f = await fixture();
+      await f.store.updateTeam(f.team.id, { expectedRevision: 1, maxConcurrency: 5 });
 
       const changes = await f.reopened.listResourceChanges({
         resourceType: "team",
         resourceId: f.team.id,
       });
       expect(changes).toHaveLength(2);
-      expect(changes[0]).toMatchObject({
-        fromRevision: 0,
-        toRevision: 1,
-        actorTagId: f.owner.id,
-        sourceTaskId: null,
-        sourceMessageId: null,
-      });
+      expect(changes[0]).toMatchObject({ fromRevision: 0, toRevision: 1, sourceTaskId: null });
       // JSONB preserves the changed fields, but does not preserve object key order.
       expect(Object.keys(changes[0]?.changes ?? {}).sort()).toEqual([
-        "context",
-        "leadTagId",
         "maxConcurrency",
         "memberTagIds",
         "name",
-        "objectiveId",
-        "objectiveIds",
-        "parentTeamId",
-        "scaling",
-        "status",
       ]);
       expect(changes[1]).toMatchObject({
         fromRevision: 1,
         toRevision: 2,
-        actorTagId: f.lead.id,
-        sourceTaskId,
-        sourceMessageId: sourceMessage.id,
-        changes: {
-          context: { previous: {}, next: { policy: "reviewed artifacts only" } },
-          name: { previous: "Research", next: "Research and Review" },
-        },
+        changes: { maxConcurrency: { previous: 2, next: 5 } },
       });
-      expect(Object.keys(changes[1]?.changes ?? {}).sort()).toEqual(["context", "name"]);
+      expect(Object.keys(changes[1]?.changes ?? {}).sort()).toEqual(["maxConcurrency"]);
+    });
+
+    it("records the Tag and Task behind an Objective change", async () => {
+      const f = await fixture();
+      const sourceTaskId = await f.objectiveTask();
+      await f.store.updateObjectiveStatus(
+        f.objective.id,
+        { expectedRevision: f.objective.revision, status: "blocked" },
+        f.owner.id,
+        undefined,
+        { taskId: sourceTaskId },
+      );
+
+      const changes = await f.reopened.listResourceChanges({
+        resourceType: "objective",
+        resourceId: f.objective.id,
+      });
+      expect(changes.at(-1)).toMatchObject({
+        actorTagId: f.owner.id,
+        operatorId: null,
+        sourceTaskId,
+        changes: { status: { previous: "working", next: "blocked" } },
+      });
     });
 
     it("pages by revision and does not journal rejected writes", async () => {
       const f = await fixture();
-      await f.store.updateTeam(f.team.id, { expectedRevision: 1, name: "Revision two" }, f.lead.id);
+      await f.store.updateTeam(f.team.id, { expectedRevision: 1, name: "Revision two" });
       await expect(
-        f.store.updateTeam(f.team.id, { expectedRevision: 1, name: "Stale" }, f.lead.id),
+        f.store.updateTeam(f.team.id, { expectedRevision: 1, name: "Stale" }),
       ).rejects.toMatchObject({ statusCode: 409 });
-      await f.store.updateTeam(
-        f.team.id,
-        { expectedRevision: 2, name: "Revision three" },
-        f.lead.id,
-      );
+      await f.store.updateTeam(f.team.id, { expectedRevision: 2, name: "Revision three" });
 
       const second = await f.reopened.listResourceChanges({
         resourceType: "team",

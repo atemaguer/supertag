@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type TaskNamedWorkspacePlan, taskWorkspaceBranch } from "../packages/core/src/index.js";
+import { workSessionBranch } from "../packages/control-plane/src/work-sessions.js";
+import type { TaskNamedWorkspacePlan } from "../packages/core/src/index.js";
 import {
   type ResolutionContext,
   resolveSkillPackages,
@@ -35,7 +36,7 @@ describe("Git worktree Workspace resolver", () => {
     version: 1,
     status: "workspace",
     workspace: "app",
-    branch: taskWorkspaceBranch("objective-1", "objective-1:task/1"),
+    branch: workSessionBranch("task-1"),
     delivery: "branch",
     setup: `echo run >> ${setupLog}`,
     ...overrides,
@@ -110,7 +111,7 @@ describe("Git worktree Workspace resolver", () => {
         plan({
           setup: undefined,
           workspace: i ? "alias" : "app",
-          branch: taskWorkspaceBranch("objective-1", `message:${id}`),
+          branch: workSessionBranch(id),
         }),
       ),
       taskId: `message:${id}`,
@@ -119,7 +120,7 @@ describe("Git worktree Workspace resolver", () => {
     const inputs = await Promise.all(specs.map((spec) => workspaces.resolve(context(spec))));
     const branches = inputs.map((input) => input?.source.provenance?.["branch"]);
     expect(new Set(branches).size).toBe(2);
-    expect(branches).toContain("supertag/objective-1/message");
+    expect(branches).toContain("supertag/session/11111111");
   });
 
   it("refuses a declared checkout on a remote provider before fetching or creating an MCP snapshot", async () => {
@@ -169,7 +170,7 @@ describe("Git worktree Workspace resolver", () => {
 
   it("creates a worktree on the deterministic branch, reuses it on retry, and runs setup once", async () => {
     const workspacePlan = plan();
-    expect(workspacePlan.branch).toBe("supertag/objective-1/task-1");
+    expect(workspacePlan.branch).toBe("supertag/session/task1");
     const first = await resolver().resolve(context(task(workspacePlan)));
     expect(first).toMatchObject({
       kind: "workspace",
@@ -351,7 +352,7 @@ describe("Git worktree Workspace resolver", () => {
     await writeFile(join(checkout, ".gitignore"), "*.log\nnode_modules/\n");
     git(checkout, "add", "-A");
     git(checkout, "commit", "--quiet", "-m", "Configure Workspace MCP server and setup");
-    const sourceBranch = taskWorkspaceBranch("objective-1", "objective-1:source");
+    const sourceBranch = workSessionBranch("source-1");
     git(checkout, "checkout", "--quiet", "-b", sourceBranch);
     await writeFile(join(checkout, "change.txt"), "submitted\n");
     // The change under review rewrites the script the setup command runs.

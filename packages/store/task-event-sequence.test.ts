@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
+import { objectiveSessionKey, objectiveStartDeliveryId } from "@supertag/core";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { afterEach, describe, expect, it } from "vitest";
@@ -35,38 +36,84 @@ describe.skipIf(!postgres)("postgresql Task event sequences", () => {
       ownerTagId: owner.id,
       outcome: "Record events concurrently",
     });
-    const team = await store.createTeam(
-      {
-        id: randomUUID(),
-        objectiveId: objective.id,
-        name: "Engineering",
-        leadTagId: owner.id,
-        memberTagIds: [],
-        maxConcurrency: 1,
+    const account = await store.saveSurfaceAccount({
+      provider: "slack",
+      externalAccountId: randomUUID(),
+      displayName: "Slack",
+      authMethod: "test",
+      credentialId: "test",
+      status: "connected",
+      configuration: {},
+      verifiedAt: at,
+    });
+    const route = await store.addTagRoute({
+      tagId: owner.id,
+      surfaceAccountId: account.id,
+      scope: "channel:test",
+    });
+    const authorization = {
+      version: 5,
+      capturedAt: at,
+      tag: { id: owner.id, name: owner.name },
+      origin: {
+        tagRouteId: route.id,
+        surfaceAccountId: account.id,
+        provider: "slack",
+        scope: "channel:test",
       },
-      owner.id,
-    );
-    const { taskId } = await store.admitTaskAssignment({
-      taskId: randomUUID(),
-      teamId: team.id,
-      objectiveId: objective.id,
-      requestedByTagId: owner.id,
-      assignedTagId: owner.id,
-      instruction: "Complete the assignment",
-      acceptanceCriteria: ["Done"],
-      execution: {},
-      workspacePlan: { version: 1, status: "none" },
+      requester: { id: owner.id, kind: "bot" },
+      permissionSets: [],
+      resources: [],
+      runtimeActions: [],
+    } as const;
+    const sessionKey = objectiveSessionKey(objective.id);
+    const admitted = await store.admitInboundEvent({
+      surfaceAccountId: account.id,
+      tagRouteId: route.id,
+      tagId: owner.id,
+      authorization,
       contextPlan: { version: 7, capturedAt: at, sets: [] },
-      authorizationSnapshot: {
-        version: 4,
-        capturedAt: at,
-        tag: { id: owner.id, name: owner.name },
-        origin: { kind: "internal", objectiveId: objective.id, requestedByTagId: owner.id },
-        requester: { id: owner.id, kind: "bot" },
-        permissionSets: [],
-        resources: [],
-        runtimeActions: [],
+      event: {
+        eventId: objectiveStartDeliveryId(objective.id),
+        logicalEventId: objectiveStartDeliveryId(objective.id),
+        provider: "slack",
+        externalAccountId: account.externalAccountId,
+        kind: "message",
+        scope: "channel:test",
+        sessionKey,
+        actor: { id: owner.id, kind: "bot" },
+        internal: { kind: "delivery", from: { kind: "supertag" }, reason: "objective_start" },
+        text: "Record events concurrently",
+        occurredAt: at,
+        callback: {
+          provider: "slack",
+          mode: "slack_thread",
+          threadKey: sessionKey,
+          target: { channelId: "test", threadTs: sessionKey },
+        },
+        source: {},
+        metadata: {},
       },
+    });
+    const session = await store.openSession({
+      tagId: owner.id,
+      sessionKey,
+      origin: {},
+      objectiveId: objective.id,
+      at,
+    });
+    const { id: taskId } = await store.openTask({
+      inboundEventId: admitted.work.id,
+      tagId: owner.id,
+      sessionId: session.id,
+      execution: {},
+      actor: { id: owner.id, kind: "bot" },
+      trigger: { origin: "objective_start" },
+      workspacePlan: { version: 1, status: "none" },
+      sessionHistory: [],
+      authorizationSnapshot: authorization,
+      contextPlan: { version: 7, capturedAt: at, sets: [] },
+      createdAt: at,
     });
     const before = (await store.listTaskEvents(taskId)).length;
 

@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { workSessionBranch } from "../packages/control-plane/src/work-sessions.js";
 import {
   type TaskNamedWorkspacePlan,
-  taskWorkspaceBranch,
   workspaceBranchHeadPin,
   workspaceBranchPin,
 } from "../packages/core/src/index.js";
@@ -52,7 +52,7 @@ describe("Workspace source clones", { timeout: 20_000 }, () => {
       status: "workspace",
       workspace: "app",
       source,
-      branch: taskWorkspaceBranch("objective-1", taskId),
+      branch: workSessionBranch(taskId),
       delivery: "branch",
       ...overrides,
     }) satisfies TaskNamedWorkspacePlan;

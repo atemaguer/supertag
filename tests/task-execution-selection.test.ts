@@ -17,7 +17,7 @@ import { connectDurableTestWorklet } from "./support/durable-test-connection.js"
 import { durableTestWorklet } from "./support/durable-test-worklet.js";
 import { enrollWorkerHost } from "./support/worker-host-enrollment.js";
 
-it("schedules one Tag's Tasks by their own requirements and persists the concrete Attempt selection", async () => {
+it("schedules each Tag's Task onto the Worker its harness names and persists the concrete Attempt selection", async () => {
   const directory = await mkdtemp(join(tmpdir(), "supertag-task-selection-"));
   const databaseUrl = `file:${join(directory, "state.db")}`;
   await migrateDatabase({ url: databaseUrl });
@@ -61,21 +61,14 @@ it("schedules one Tag's Tasks by their own requirements and persists the concret
     },
   });
   try {
-    const tag = await store.createTag({ name: "Engineering" });
-    expect(tag).not.toHaveProperty("workerProfile");
-    await store.createObjective({
-      id: "objective",
-      ownerTagId: tag.id,
-      outcome: "Complete research and implementation",
-    });
-    await store.createTeam({
-      id: "team",
-      objectiveId: "objective",
-      name: "Engineering",
-      leadTagId: tag.id,
-      memberTagIds: [],
-      maxConcurrency: 2,
-    });
+    // Each Tag pins its own harness; a Task of that Tag must run on a matching Worker profile.
+    const researcher = await store.createTag({ name: "Researcher" });
+    const coder = await store.createTag({ name: "Coder" });
+    const stranded = await store.createTag({ name: "Stranded" });
+    expect(researcher).not.toHaveProperty("workerProfile");
+    await store.setTagExecution(researcher.id, { harness: "research" });
+    await store.setTagExecution(coder.id, { harness: "coding" });
+    await store.setTagExecution(stranded.id, { harness: "unavailable" });
     runtime = await startControlPlaneRuntime({
       host: "127.0.0.1",
       port: 0,
@@ -94,7 +87,8 @@ it("schedules one Tag's Tasks by their own requirements and persists the concret
       ]),
     });
     const credential = await enrollWorkerHost(runtime.url, "selection-admin", "selection-host");
-    await store.bindTagWorkerHost(tag.id, "selection-host");
+    for (const tag of [researcher, coder, stranded])
+      await store.bindTagWorkerHost(tag.id, "selection-host");
     const selectedWorklet = new LocalWorklet("selection", "selection-host", [
       worker("research", "search"),
       worker("coding", "write"),
@@ -107,114 +101,81 @@ it("schedules one Tag's Tasks by their own requirements and persists the concret
       worklet: selectedWorklet,
       durableWorklet: durable,
     });
-    for (const [taskId, capability] of [
-      ["research-task", "search"],
-      ["coding-task", "write"],
-      ["pending-task", "unavailable"],
-    ]) {
-      const response = await fetch(`${runtime.url}/api/v1/coordination/assign_task`, {
+    const message = async (tagName: string) => {
+      const response = await fetch(`${runtime?.url}/api/v1/tags/${tagName}/messages`, {
         method: "POST",
         headers: { Authorization: "Bearer selection-admin", "Content-Type": "application/json" },
-        body: JSON.stringify({
-          objectiveId: "objective",
-          taskId,
-          teamId: "team",
-          assignedTagId: tag.id,
-          instruction: `Perform ${capability}`,
-          acceptanceCriteria: ["Evidence"],
-          execution: { requires: [{ id: capability, version: 1 }] },
-        }),
+        body: JSON.stringify({ text: "Do the work" }),
       });
-      expect(response.status, await response.text()).toBe(200);
-    }
+      const text = await response.text();
+      expect(response.status, text).toBe(201);
+      return (JSON.parse(text) as { taskId: string }).taskId;
+    };
+    const researchTask = await message(researcher.name);
+    const codingTask = await message(coder.name);
+    const pendingTask = await message(stranded.name);
     await expect
-      .poll(async () => (await store.getTaskAssignment("coding-task"))?.status, {
+      .poll(async () => (await store.findTaskById(codingTask))?.status, {
         timeout: 10000,
       })
-      .toBe("submitted");
+      .toBe("completed");
     await expect
-      .poll(async () => (await store.getTaskAssignment("research-task"))?.status, {
+      .poll(async () => (await store.findTaskById(researchTask))?.status, {
         timeout: 10000,
       })
-      .toBe("submitted");
-    expect(observed.filter((spec) => spec.taskId === "research-task")).toHaveLength(1);
+      .toBe("completed");
+    expect(observed.filter((spec) => spec.taskId === researchTask)).toHaveLength(1);
     expect(selectPlacement).toHaveBeenCalled();
     expect(observed.some((spec) => spec.workerProfile.id.startsWith("decoy-"))).toBe(false);
-    expect(observed.find((spec) => spec.taskId === "research-task")?.workerProfile).toEqual({
+    expect(observed.find((spec) => spec.taskId === researchTask)?.workerProfile).toEqual({
       id: "research",
       revision: "1",
     });
-    expect(observed.find((spec) => spec.taskId === "coding-task")?.workerProfile).toEqual({
+    expect(observed.find((spec) => spec.taskId === codingTask)?.workerProfile).toEqual({
       id: "coding",
       revision: "1",
     });
-    expect(observed.find((spec) => spec.taskId === "research-task")?.placement).toEqual({
+    expect(observed.find((spec) => spec.taskId === researchTask)?.placement).toMatchObject({
       allowedWorkerHostIds: ["selection-host"],
       workerHostId: "selection-host",
       workletId: "selection",
       workerId: "research",
     });
-    expect(observed.find((spec) => spec.taskId === "coding-task")?.placement).toEqual({
+    expect(observed.find((spec) => spec.taskId === codingTask)?.placement).toMatchObject({
       allowedWorkerHostIds: ["selection-host"],
       workerHostId: "selection-host",
       workletId: "selection",
       workerId: "coding",
     });
-    for (const taskId of ["research-task", "coding-task"]) {
+    for (const taskId of [researchTask, codingTask]) {
       const [attempt] = await store.listTaskAttempts(taskId);
       expect(attempt?.workerProfile).toEqual(
         observed.find((spec) => spec.taskId === taskId)?.workerProfile,
       );
       expect(attempt?.workerSnapshot["placement"]).toMatchObject({
-        allowedWorkerHostIds: ["selection-host"],
         workerHostId: "selection-host",
       });
       expect(observed.find((spec) => spec.taskId === taskId)?.authorization.tag).not.toHaveProperty(
         "workerProfile",
       );
     }
-    expect(await store.listTaskAttempts("pending-task")).toHaveLength(0);
-    expect((await store.getTaskAssignment("pending-task"))?.status).toBe("queued");
-    await expect
-      .poll(
-        async () =>
-          (await store.listTaskEvents("pending-task")).filter(
-            (event) => event.type === "task.scheduling-incompatible",
-          ).length,
-      )
-      .toBe(1);
-    const schedulingEvent = (await store.listTaskEvents("pending-task")).find(
-      (event) => event.type === "task.scheduling-incompatible",
-    );
-    expect(schedulingEvent?.payload).toMatchObject({
-      version: 1,
-      status: "incompatible",
-      execution: { requires: [{ id: "unavailable", version: 1 }] },
-      unmetRequirements: ["execution.requires.unavailable@1"],
-    });
-    const readResponse = await fetch(`${runtime.url}/api/v1/coordination/read_task`, {
-      method: "POST",
-      headers: { Authorization: "Bearer selection-admin", "Content-Type": "application/json" },
-      body: JSON.stringify({ objectiveId: "objective", taskId: "pending-task" }),
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    // A Tag pinned to a harness no bound Worker Host provides is never placed.
+    expect(await store.listTaskAttempts(pendingTask)).toHaveLength(0);
+    expect((await store.findTaskById(pendingTask))?.status).toBe("pending");
+    const readResponse = await fetch(`${runtime.url}/api/v1/tasks/${pendingTask}`, {
+      headers: { Authorization: "Bearer selection-admin" },
     });
     const readBody = await readResponse.text();
     expect(readResponse.status, readBody).toBe(200);
     expect(JSON.parse(readBody)).toMatchObject({
-      taskId: "pending-task",
-      scheduling: {
-        status: "incompatible",
-        unmetRequirements: ["execution.requires.unavailable@1"],
-      },
+      metadata: { id: pendingTask },
+      status: { phase: "pending" },
     });
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    expect(
-      (await store.listTaskEvents("pending-task")).filter(
-        (event) => event.type === "task.scheduling-incompatible",
-      ),
-    ).toHaveLength(1);
+
     // With no effort configured, the Task starts at low effort.
-    expect((await store.findTaskById("research-task"))?.execution).toEqual({
-      requires: [{ id: "search", version: 1 }],
+    expect((await store.findTaskById(researchTask))?.execution).toMatchObject({
+      harness: "research",
       effort: "low",
     });
   } finally {

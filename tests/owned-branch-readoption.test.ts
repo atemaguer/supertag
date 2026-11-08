@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type TaskNamedWorkspacePlan, taskWorkspaceBranch } from "../packages/core/src/index.js";
+import { workSessionBranch } from "../packages/control-plane/src/work-sessions.js";
+import type { TaskNamedWorkspacePlan } from "../packages/core/src/index.js";
 import {
   type ResolutionContext,
   type TaskAttemptSpec,
@@ -28,7 +29,7 @@ describe("owned branch readoption after empty-attempt cleanup", () => {
   afterEach(async () => {
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   });
-  const branch = taskWorkspaceBranch("demo", "message:11111111-1111-1111-1111-111111111111");
+  const branch = workSessionBranch("message:11111111-1111-1111-1111-111111111111");
   const plan = (o: Partial<TaskNamedWorkspacePlan> = {}): TaskNamedWorkspacePlan => ({
     version: 1,
     status: "workspace",

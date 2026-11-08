@@ -1,44 +1,65 @@
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { SurfaceAccount } from "@supertag/core";
+import type { SurfaceAccount, SurfaceTagAuthorizationSnapshot } from "@supertag/core";
 import { expect, it, vi } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
 import { createOperatorNotificationSender } from "../apps/cli/src/gateway-surfaces.js";
 import { parseOperatorChannel } from "../packages/control-plane/src/index.js";
+import { objectiveSessionKey } from "../packages/core/src/index.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
+
+interface RuntimeContext {
+  readonly url: string;
+  readonly send: ReturnType<typeof vi.fn>;
+  readonly store: DrizzleStore;
+  readonly ownerId: string;
+  readonly ownerName: string;
+  /** Holds a Session Task of the owner on a pending approval, as `request_action_approval` does. */
+  holdForApproval(): Promise<string>;
+}
 
 async function withRuntime(
   operatorChannel: string | undefined,
-  run: (context: {
-    readonly url: string;
-    readonly send: ReturnType<typeof vi.fn>;
-    readonly ownerId: string;
-  }) => Promise<void>,
+  run: (context: RuntimeContext) => Promise<void>,
 ) {
   const directory = await mkdtemp(join(tmpdir(), "supertag-operator-channel-runtime-"));
   const databaseUrl = `file:${join(directory, "state.db")}`;
   let runtime: Awaited<ReturnType<typeof startControlPlaneRuntime>> | undefined;
+  const store = new DrizzleStore({ url: databaseUrl });
   try {
     await migrateDatabase({ url: databaseUrl });
-    const store = new DrizzleStore({ url: databaseUrl });
     await store.connect();
     const owner = await store.createTag({ name: "Channel owner" });
     await store.bindTagWorkerHost(owner.id, "control-plane-static-host");
+    const team = await store.createTeam({
+      id: "channel-team",
+      name: "Channel Team",
+      memberTagIds: [owner.id],
+      maxConcurrency: 1,
+    });
     await store.createObjective({
       id: "channel-objective",
       ownerTagId: owner.id,
       outcome: "Tell the operator",
+      teamId: team.id,
     });
-    await store.createTeam({
-      id: "channel-team",
-      objectiveId: "channel-objective",
-      name: "Channel Team",
-      leadTagId: owner.id,
-      memberTagIds: [],
-      maxConcurrency: 1,
+    const account = await store.saveSurfaceAccount({
+      provider: "slack",
+      externalAccountId: "T0CHANNEL",
+      displayName: "Slack",
+      authMethod: "test",
+      credentialId: "test",
+      status: "connected",
+      configuration: {},
+      verifiedAt: new Date().toISOString(),
     });
-    await store.disconnect();
+    const route = await store.addTagRoute({
+      tagId: owner.id,
+      surfaceAccountId: account.id,
+      scope: "channel:work",
+    });
     const send = vi.fn(async () => ({ externalMessageId: "1.0" }));
     runtime = await startControlPlaneRuntime({
       host: "127.0.0.1",
@@ -48,39 +69,112 @@ async function withRuntime(
       ...(operatorChannel ? { operatorChannel } : {}),
       operatorNotificationSender: send,
     });
-    await run({ url: runtime.url, send, ownerId: owner.id });
+    const holdForApproval = async () => {
+      const at = new Date().toISOString();
+      const authorization: SurfaceTagAuthorizationSnapshot = {
+        version: 5,
+        capturedAt: at,
+        tag: { id: owner.id, name: owner.name },
+        origin: {
+          provider: "slack",
+          surfaceAccountId: account.id,
+          tagRouteId: route.id,
+          scope: "channel:work",
+        },
+        requester: { id: "human", kind: "user" },
+        roles: [],
+        permissionSets: [],
+        resources: [],
+        runtimeActions: [],
+      };
+      const contextPlan = { version: 7, capturedAt: at, sets: [] } as const;
+      const sessionKey = objectiveSessionKey("channel-objective");
+      const event = {
+        eventId: randomUUID(),
+        logicalEventId: randomUUID(),
+        provider: "slack",
+        externalAccountId: account.externalAccountId,
+        kind: "message",
+        scope: "channel:work",
+        sessionKey,
+        actor: { id: "human", kind: "user" },
+        text: "Start",
+        occurredAt: at,
+        callback: {
+          provider: "slack",
+          mode: "slack_thread",
+          threadKey: sessionKey,
+          target: { channelId: "work", threadTs: sessionKey },
+        },
+        source: {},
+        metadata: {},
+      } as const;
+      const admitted = await store.admitInboundEvent({
+        surfaceAccountId: account.id,
+        tagRouteId: route.id,
+        tagId: owner.id,
+        authorization,
+        contextPlan,
+        event,
+      });
+      const session = await store.openSession({
+        tagId: owner.id,
+        sessionKey,
+        origin: {},
+        at,
+        objectiveId: "channel-objective",
+      });
+      const task = await store.openTask({
+        inboundEventId: admitted.work.id,
+        tagId: owner.id,
+        sessionId: session.id,
+        execution: {},
+        actor: event.actor,
+        trigger: {},
+        workspacePlan: { version: 1, status: "none" },
+        sessionHistory: [],
+        authorizationSnapshot: authorization,
+        contextPlan,
+        createdAt: at,
+      });
+      const request = await store.createApprovalRequest({
+        objectiveId: "channel-objective",
+        taskId: task.id,
+        requestingTagId: owner.id,
+        kind: "surface-action",
+        actions: [{ target: "runtime", action: "files:write" }],
+        summary: "Write the private instruction",
+        ruleSources: [],
+        approvers: [],
+      });
+      return request.id;
+    };
+    await run({
+      url: runtime.url,
+      send,
+      store,
+      ownerId: owner.id,
+      ownerName: owner.name,
+      holdForApproval,
+    });
   } finally {
     await runtime?.close();
+    await store.disconnect().catch(() => undefined);
     await rm(directory, { recursive: true, force: true });
   }
 }
 
-async function holdTaskForApproval(url: string, ownerId: string) {
-  const response = await fetch(`${url}/api/v1/coordination/assign_task`, {
-    method: "POST",
-    headers: { authorization: "Bearer channel-admin", "content-type": "application/json" },
-    body: JSON.stringify({
-      objectiveId: "channel-objective",
-      taskId: "held-task",
-      teamId: "channel-team",
-      assignedTagId: ownerId,
-      instruction: "Private instruction",
-      acceptanceCriteria: ["Approved"],
-      requiresApproval: true,
-    }),
-  });
-  expect(response.status, await response.text()).toBe(200);
-}
-
-it("tells the configured operator channel about a CLI Objective's held Task", async () => {
-  await withRuntime("slack:C0OPS", async ({ url, send, ownerId }) => {
-    await holdTaskForApproval(url, ownerId);
+it("tells the configured operator channel about a CLI Objective's waiting approval", async () => {
+  await withRuntime("slack:C0OPS", async ({ url, send, holdForApproval }) => {
+    const requestId = await holdForApproval();
     await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1), { timeout: 10_000 });
     const [destination, text] = send.mock.calls[0] as unknown as [unknown, string];
     expect(destination).toEqual(parseOperatorChannel("slack:C0OPS"));
-    expect(text).toContain("Objective channel-objective needs you: Task held-task is held");
+    expect(text).toContain(
+      `Objective channel-objective needs you: Approval ${requestId} (work is waiting)`,
+    );
     expect(text).toMatch(/`supertag describe objective channel-objective`$/u);
-    expect(text).not.toContain("Private instruction");
+    expect(text).not.toContain("files:write");
     await vi.waitFor(async () => {
       const response = await fetch(`${url}/api/v1/coordination/inbox`, {
         headers: { authorization: "Bearer channel-admin" },
@@ -96,17 +190,20 @@ it("tells the configured operator channel about a CLI Objective's held Task", as
   });
 }, 30_000);
 
-it("leaves the inbox idle and scans promptly after an assignment changes it", async () => {
+it("leaves the inbox idle and scans promptly after a new approval changes it", async () => {
   const scan = vi.spyOn(DrizzleStore.prototype, "readCoordinationInbox");
   try {
-    await withRuntime("slack:C0OPS", async ({ url, send, ownerId }) => {
+    await withRuntime("slack:C0OPS", async ({ send, holdForApproval }) => {
       await vi.waitFor(() => expect(scan).toHaveBeenCalled());
       scan.mockClear();
       await new Promise((resolve) => setTimeout(resolve, 2_500));
-      expect(scan.mock.calls.filter(([input]) => input?.includeNotices)).toHaveLength(0);
-      await holdTaskForApproval(url, ownerId);
+      // The operator channel's own scan reads every kind; the budget sweep reads one kind.
+      const reconciles = () =>
+        scan.mock.calls.filter(([input]) => input?.limit === 100 && input?.kind === undefined);
+      expect(reconciles()).toHaveLength(0);
+      await holdForApproval();
       await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1), { timeout: 5_000 });
-      expect(scan.mock.calls.some(([input]) => input?.includeNotices)).toBe(true);
+      expect(reconciles().length).toBeGreaterThan(0);
     });
   } finally {
     scan.mockRestore();
@@ -114,8 +211,8 @@ it("leaves the inbox idle and scans promptly after an assignment changes it", as
 }, 30_000);
 
 it("sends nothing when no operator channel is configured", async () => {
-  await withRuntime(undefined, async ({ url, send, ownerId }) => {
-    await holdTaskForApproval(url, ownerId);
+  await withRuntime(undefined, async ({ url, send, holdForApproval }) => {
+    await holdForApproval();
     await new Promise((resolve) => setTimeout(resolve, 2_500));
     expect(send).not.toHaveBeenCalled();
     const response = await fetch(`${url}/api/v1/coordination/inbox`, {

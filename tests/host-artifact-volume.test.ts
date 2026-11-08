@@ -9,6 +9,7 @@ import {
   COORDINATION_CAPABILITY,
   DurableLocalWorklet,
   FileAttemptJournal,
+  SURFACE_COORDINATION_CAPABILITY,
   WORKSPACE_COPY_MOUNT_CAPABILITY,
   type Worker,
 } from "../packages/runtime/sdk/src/index.js";
@@ -54,11 +55,6 @@ it("stores a captured artifact on the producing host's artifact Volume, and the 
   await store.applyVolume({ name: "other", source: "s3://elsewhere/x", credential: "other" });
   const owner = await store.createTag({ name: "owner" });
   await store.bindTagWorkerHost(owner.id, "producer-host");
-  await store.createObjective({
-    id: "on-volume",
-    ownerTagId: owner.id,
-    outcome: "Keep artifacts on the artifact Volume",
-  });
   const canary = `volume-canary-${randomUUID()}`;
   const bytes = Buffer.concat([Buffer.from(canary), randomBytes(2048)]);
   const hex = createHash("sha256").update(bytes).digest("hex");
@@ -88,6 +84,7 @@ it("stores a captured artifact on the producing host's artifact Volume, and the 
             capabilities: [
               { id: "supertag.task-attempt.events", version: 1 },
               COORDINATION_CAPABILITY,
+              SURFACE_COORDINATION_CAPABILITY,
             ],
             contextTypes: [],
           },
@@ -97,7 +94,11 @@ it("stores a captured artifact on the producing host's artifact Volume, and the 
         profiles: [profile],
         contextTypes: [],
         maxConcurrency: 1,
-        capabilities: [{ id: "supertag.task-attempt.events", version: 1 }, COORDINATION_CAPABILITY],
+        capabilities: [
+          { id: "supertag.task-attempt.events", version: 1 },
+          COORDINATION_CAPABILITY,
+          SURFACE_COORDINATION_CAPABILITY,
+        ],
       };
     },
     async *execute(spec) {
@@ -231,12 +232,11 @@ it("stores a captured artifact on the producing host's artifact Volume, and the 
       durableWorklet: durable,
       reconnectIntervalMs: 20,
     });
-    const started = await fetch(`${controlPlaneUrl}/api/v1/coordination/start_objective`, {
-      method: "POST",
-      headers: { authorization: "Bearer test-admin", "content-type": "application/json" },
-      body: JSON.stringify({ objectiveId: "on-volume" }),
+    // Applying the Objective manifest starts its own conversation's first turn.
+    const startTaskId = await applyAndStart(store, controlPlaneUrl, "on-volume", {
+      owner: owner.name,
+      outcome: "Keep artifacts on the artifact Volume",
     });
-    expect(started.status, await started.text()).toBe(200);
     await expect.poll(() => results.length + errors.length, { timeout: 15000 }).toBe(1);
     expect(errors).toEqual([]);
     const [result] = results;
@@ -245,7 +245,7 @@ it("stores a captured artifact on the producing host's artifact Volume, and the 
     expect(result.foreignLookup).toBe(403);
     expect(credentialReads).toEqual(["team-artifacts", "team-artifacts", "team-artifacts"]);
 
-    const [producerAttempt] = await store.listTaskAttempts("on-volume:start");
+    const [producerAttempt] = await store.listTaskAttempts(startTaskId);
     if (!producerAttempt) throw new Error("Missing producer Attempt");
     // The accepted copy is at B, written with the host's credential. The refused write
     // at A remains unclaimed by the catalog.
@@ -277,7 +277,7 @@ it("stores a captured artifact on the producing host's artifact Volume, and the 
     ]);
     expect(await store.listVolumeIdsHoldingArtifacts()).toEqual([volume.id]);
     const task = (await (
-      await fetch(`${controlPlaneUrl}/api/v1/tasks/on-volume%3Astart`, {
+      await fetch(`${controlPlaneUrl}/api/v1/tasks/${encodeURIComponent(startTaskId)}`, {
         headers: { authorization: "Bearer test-admin" },
       })
     ).json()) as { status: { storage: { artifacts: { locations: unknown[] }[] } } };
@@ -327,17 +327,12 @@ it("refuses through Objective placement to mount a Volume a Worker Host stores a
   });
   const owner = await store.createTag({ name: "owner" });
   await store.bindTagWorkerHost(owner.id, "host");
-  await store.createObjective({
-    id: "guarded",
-    ownerTagId: owner.id,
-    outcome: "Never mount artifacts",
-    workspaces: ["research"],
-  });
   const ran: string[] = [];
   const profile = { id: "deterministic", revision: "1" };
   const capabilities = [
     { id: "supertag.task-attempt.events", version: 1 },
     COORDINATION_CAPABILITY,
+    SURFACE_COORDINATION_CAPABILITY,
     WORKSPACE_COPY_MOUNT_CAPABILITY,
     { id: "supertag.workspace.clone", version: 1 },
   ];
@@ -392,16 +387,15 @@ it("refuses through Objective placement to mount a Volume a Worker Host stores a
       worklet: local,
       reconnectIntervalMs: 20,
     });
-    const started = await fetch(`${runtime.url}/api/v1/coordination/start_objective`, {
-      method: "POST",
-      headers: { authorization: "Bearer test-admin", "content-type": "application/json" },
-      body: JSON.stringify({ objectiveId: "guarded" }),
+    const startTaskId = await applyAndStart(store, runtime.url, "guarded", {
+      owner: owner.name,
+      outcome: "Never mount artifacts",
+      workspaces: ["research"],
     });
-    expect(started.status, await started.text()).toBe(200);
     await expect
       .poll(
         async () =>
-          (await store.listTaskEvents("guarded:start")).find(
+          (await store.listTaskEvents(startTaskId)).find(
             (event) => event.type === "task.scheduling-incompatible",
           )?.payload,
         { timeout: 10000 },
@@ -420,3 +414,40 @@ it("refuses through Objective placement to mount a Volume a Worker Host stores a
     await rm(directory, { recursive: true, force: true });
   }
 }, 30000);
+
+/**
+ * Applies an Objective manifest, which creates the Objective and starts the first turn of its own
+ * conversation, and returns that turn's Task.
+ */
+async function applyAndStart(
+  store: DrizzleStore,
+  controlPlaneUrl: string,
+  name: string,
+  spec: Record<string, unknown>,
+): Promise<string> {
+  const response = await fetch(`${controlPlaneUrl}/api/v1/objectives`, {
+    method: "POST",
+    headers: { authorization: "Bearer test-admin", "content-type": "application/json" },
+    body: JSON.stringify({
+      apiVersion: "supertag/v1",
+      kind: "Objective",
+      metadata: { name },
+      spec,
+    }),
+  });
+  expect(response.status, await response.clone().text()).toBeLessThan(300);
+  let taskId: string | undefined;
+  await expect
+    .poll(
+      async () => {
+        const session = await store.findObjectiveOwnerSession(name);
+        if (!session) return false;
+        taskId = (await store.listTasks({ sessionId: session.id }))[0]?.id;
+        return taskId !== undefined;
+      },
+      { timeout: 10000 },
+    )
+    .toBe(true);
+  if (taskId === undefined) throw new Error(`Objective ${name} opened no turn`);
+  return taskId;
+}

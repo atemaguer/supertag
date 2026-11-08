@@ -2,19 +2,21 @@
 
 This example runs a small AI organization that builds and independently reviews a CSV utility.
 A **Tag** is a persistent AI identity with its own responsibilities and permissions. A **Role** describes its responsibilities and behavior.
-A **Team** groups related work under a manager, and an **Objective** describes the result
-that organization should achieve. A **Task** is one assignment toward that result.
-Managers choose their assignments and exchange evidence through
-**Mailboxes**, SuperTag's durable messages between teams.
+A **Team** is a flat list of Tags that may give each other work, and an **Objective** describes the
+result that organization should achieve. An Objective is a conversation its owner Tag holds: the
+owner starts **work Sessions** with `start_session`, naming another Tag in the Team to hand that
+Session to it, and each Session reports back as a later turn. The managers also reach each other
+directly through **Mailboxes**, SuperTag's durable messages between Tags, and share progress on the
+Team's **Workstream**.
 
-Claude Code and Codex run in separate local **Workers**, the processes that execute assignments.
+Claude Code and Codex run in separate local **Workers**, the processes that execute their turns.
 Each keeps its native sign-in on your computer. Their tools run in one shared execution environment, hosted in Docker or Modal,
 so both can inspect and change the same source files. The **Control Plane** stores the organization,
 schedules work, and records its outcome. A **Worklet** connects each Worker to it.
 
 ```mermaid
 flowchart LR
-    CP["Control Plane<br/>Roles, Tags, Teams, Tasks, Mailboxes"]
+    CP["Control Plane<br/>Roles, Tags, Teams, Sessions, Mailboxes"]
     subgraph Laptop["Local computer"]
       Claude["Worklet + Worker<br/>Claude Code and local login"]
       Codex["Worklet + Worker<br/>Codex and local login"]
@@ -27,7 +29,7 @@ flowchart LR
 ```
 
 The example prepares the organization and starts its Objective. It does not implement the managers'
-plans in JavaScript: the native agents choose assignments, coordinate, review, and record completion.
+plans in JavaScript: the native agents choose the work, coordinate, review, and record completion.
 The shared workspace is intentionally writable by both managers. Review includes the source digest;
 a shared file path is not an immutable SuperTag artifact.
 
@@ -55,9 +57,9 @@ npm run cleanup
 Tool access comes from a **Permission Set**, which lists the actions a Tag may perform.
 `bootstrap` builds Docker with the installed public SDK and the Codex version pinned by that
 package, starts the execution service and Control Plane, and creates the example's Roles, Permission Set,
-Tags, Teams, Objective, and Worker Host credentials. It does not run a model. `start` launches the two
-Workers and submits the Objective once. `status` reads stored organization state, Task events,
-and messages. `verify` independently tests the actual CSV module inside the sandbox; run it when the
+Tags, Team, Mailbox grants, and Worker Host credentials. It does not run a model. `start` launches the
+two Workers, then creates the Objective once; creating it starts the owner's first turn. `status`
+reads stored organization state, Task events, Workstream posts, and messages. `verify` independently tests the actual CSV module inside the sandbox; run it when the
 Objective reports completion. `cleanup` requests cancellation, stops the example's processes and
 container, and preserves state and evidence.
 
@@ -71,12 +73,13 @@ Credentials and logs stay in that private directory; they are not passed as comm
 The Workers use their existing native CLI authentication and discard provider API-key environment
 variables. No model credential is placed in the execution sandbox. Your provider's subscription limits still apply.
 
-An **Attempt** is one execution of a Task. Each Worker runs at most one assignment at a time.
+An **Attempt** is one execution of a Task, and a Task is one turn of a Session. Each Worker runs at
+most one Attempt at a time.
 Execution access lasts for the configured native deadline plus one minute for startup and cleanup;
 expired access cannot start more work.
 Attempts have a five-minute timeout and Claude
-has a 24-turn bound. The brief asks managers to stay within eight Tasks. This is an agent instruction,
-not a scheduler-enforced total Task limit; supervise the run with `status` and use `cleanup` to stop it.
+has a 24-turn bound. The brief asks managers to stay within eight work Sessions. This is an agent instruction,
+not a scheduler-enforced total Session limit; supervise the run with `status` and use `cleanup` to stop it.
 Set `SUPERTAG_EXAMPLE_ATTEMPT_MS`, `SUPERTAG_EXAMPLE_CLAUDE_MODEL`, or
 `SUPERTAG_EXAMPLE_CODEX_MODEL` before `start` to change those Worker settings.
 

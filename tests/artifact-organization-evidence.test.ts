@@ -11,18 +11,20 @@ function fixture(delivery: "read" | "materialize" = "read"): Input {
     expectedMinutes: 5848,
     state: {
       objectives: [{ ownerTagId: "owner", status: "completed" }],
-      assignments: [
+      // The owner's Objective conversation, and the review work Session started under it.
+      sessions: [
+        { id: "owner-session", tagId: "owner", sessionKey: "objective:ship" },
         {
-          taskId: "review-task",
-          assignedTagId: "reviewer",
-          requestedByTagId: "owner",
-          status: "accepted",
+          id: "review-session",
+          tagId: "reviewer",
+          sessionKey: "work:owner-session:1",
+          parentSessionId: "owner-session",
         },
       ],
       tasks: [
-        { id: "source-task", tagId: "owner" },
-        { id: "review-task", tagId: "reviewer" },
-        { id: "final-task", tagId: "owner" },
+        { id: "source-task", tagId: "owner", sessionId: "owner-session", status: "completed" },
+        { id: "review-task", tagId: "reviewer", sessionId: "review-session", status: "completed" },
+        { id: "final-task", tagId: "owner", sessionId: "owner-session", status: "completed" },
       ],
       attempts: [
         {
@@ -135,10 +137,18 @@ describe("artifact organization evidence integrity", () => {
       });
     },
   );
-  it("requires owner acceptance of delegated review", () => {
-    const input = fixture();
-    row(input, "assignments")["status"] = "submitted";
-    expect(() => verifyArtifactOrganizationEvidence(input)).toThrow("accept independent review");
+  it("requires a completed delegated review under the owner's own conversation", () => {
+    const failed = fixture();
+    row(failed, "tasks", 1)["status"] = "failed";
+    expect(() => verifyArtifactOrganizationEvidence(failed)).toThrow(
+      "Owner did not delegate an independent review that completed",
+    );
+    // A review Session of the reviewer's own, not started by the owner, is not a delegation.
+    const unparented = fixture();
+    delete row(unparented, "sessions", 1)["parentSessionId"];
+    expect(() => verifyArtifactOrganizationEvidence(unparented)).toThrow(
+      "Owner did not delegate an independent review that completed",
+    );
   });
   it.each(["same", "unknown"])(
     "rejects a %s review host even when unrelated Attempts span hosts",

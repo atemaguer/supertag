@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { inboxSessionKey, objectiveSessionKey } from "@supertag/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { createIsolatedPostgresDatabase } from "../../tests/support/database.js";
-import type { AdmitTaskAssignmentInput } from "../core/src/index.js";
 import { DrizzleStore, migrateDatabase } from "./src/index.js";
 
 const postgres = process.env["SUPERTAG_POSTGRES_URL"];
@@ -35,170 +35,255 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         });
         const owner = await store.createTag({ name: `owner-${randomUUID()}` });
         const worker = await store.createTag({ name: `worker-${randomUUID()}` });
+        const team = await store.createTeam({
+          id: `team-${randomUUID()}`,
+          name: `Export Team ${randomUUID()}`,
+          memberTagIds: [owner.id, worker.id],
+          maxConcurrency: 2,
+        });
         const objective = await store.createObjective({
           id: `objective-${randomUUID()}`,
           ownerTagId: owner.id,
           outcome: "Ship the export",
-        });
-        const team = await store.createTeam({
-          id: `team-${randomUUID()}`,
-          objectiveId: objective.id,
-          name: "Export Team",
-          leadTagId: owner.id,
-          memberTagIds: [worker.id],
-          maxConcurrency: 2,
-        });
-        const assignment = (
-          taskId: string,
-          extra: Partial<AdmitTaskAssignmentInput> = {},
-        ): AdmitTaskAssignmentInput => ({
-          taskId,
-          objectiveId: objective.id,
           teamId: team.id,
-          requestedByTagId: owner.id,
-          assignedTagId: worker.id,
-          instruction: "secret instruction",
-          acceptanceCriteria: ["secret criterion"],
-          execution: {},
-          authorizationSnapshot: {
-            version: 4,
-            capturedAt: new Date().toISOString(),
-            tag: { id: worker.id, name: worker.name },
-            origin: { kind: "internal", objectiveId: objective.id, requestedByTagId: owner.id },
+        });
+        const account = await store.saveSurfaceAccount({
+          provider: "slack",
+          externalAccountId: randomUUID(),
+          displayName: "Slack",
+          authMethod: "test",
+          credentialId: "test",
+          status: "connected",
+          configuration: {},
+          verifiedAt: new Date().toISOString(),
+        });
+        const route = await store.addTagRoute({
+          tagId: owner.id,
+          surfaceAccountId: account.id,
+          scope: "channel:export",
+        });
+        const ownerSession = await store.openSession({
+          tagId: owner.id,
+          sessionKey: objectiveSessionKey(objective.id),
+          origin: {},
+          objectiveId: objective.id,
+          at: new Date().toISOString(),
+        });
+        /**
+         * One turn of a Session: the Objective's own Session by default, a work Session under it
+         * with `work`, or the Tag's inbox Session with `inbox`.
+         */
+        async function turn(
+          options: {
+            readonly tagId?: string;
+            readonly work?: string;
+            readonly inbox?: true;
+            readonly instruction?: string;
+          } = {},
+        ) {
+          const tagId = options.tagId ?? owner.id;
+          const tag = tagId === owner.id ? owner : worker;
+          const at = new Date().toISOString();
+          const session = options.inbox
+            ? await store.openSession({
+                tagId,
+                sessionKey: inboxSessionKey(tagId),
+                origin: {},
+                at,
+              })
+            : options.work === undefined
+              ? ownerSession
+              : await store.openSession({
+                  tagId,
+                  sessionKey: `work:${ownerSession.id}:${options.work}`,
+                  origin: {},
+                  parentSessionId: ownerSession.id,
+                  at,
+                });
+          const authorization = {
+            version: 5,
+            capturedAt: at,
+            tag: { id: tag.id, name: tag.name },
+            origin: {
+              tagRouteId: route.id,
+              surfaceAccountId: account.id,
+              provider: "slack",
+              scope: "channel:export",
+            },
             requester: { id: owner.id, kind: "bot" },
             permissionSets: [],
             resources: [],
             runtimeActions: [],
-          },
-          contextPlan: { version: 7, capturedAt: new Date().toISOString(), sets: [] },
-          workspacePlan: { version: 1, status: "none" },
-          ...extra,
-        });
-        return { store, owner, worker, objective, team, assignment };
+          } as const;
+          const eventId = randomUUID();
+          const admitted = await store.admitInboundEvent({
+            surfaceAccountId: account.id,
+            tagRouteId: route.id,
+            tagId,
+            authorization,
+            contextPlan: { version: 7, capturedAt: at, sets: [] },
+            event: {
+              eventId,
+              logicalEventId: eventId,
+              provider: "slack",
+              externalAccountId: account.externalAccountId,
+              kind: "message",
+              scope: "channel:export",
+              sessionKey: session.sessionKey,
+              actor: { id: tag.id, kind: "bot" },
+              internal:
+                options.work === undefined
+                  ? {
+                      kind: "delivery",
+                      from: { kind: "supertag" },
+                      reason: options.inbox ? "inbox" : "objective_start",
+                    }
+                  : {
+                      kind: "work_session",
+                      startedByTaskId: eventId,
+                      parentSessionId: ownerSession.id,
+                      title: options.work,
+                    },
+              text: options.instruction ?? "secret instruction",
+              occurredAt: at,
+              callback: {
+                provider: "slack",
+                mode: "slack_thread",
+                threadKey: "export",
+                target: { channelId: "export", threadTs: "export" },
+              },
+              source: {},
+              metadata: {},
+            },
+          });
+          const task = await store.openTask({
+            inboundEventId: admitted.work.id,
+            tagId,
+            sessionId: session.id,
+            execution: {},
+            actor: { id: tag.id, kind: "bot" },
+            trigger: { origin: "objective" },
+            requestText: options.instruction ?? "secret instruction",
+            workspacePlan: { version: 1, status: "none" },
+            sessionHistory: [],
+            authorizationSnapshot: authorization,
+            contextPlan: { version: 7, capturedAt: at, sets: [] },
+            createdAt: at,
+          });
+          await store.startTask({ taskId: task.id, startedAt: at });
+          return task;
+        }
+        return { store, owner, worker, objective, team, turn };
       }
 
-      it("lists pending action and plan requests as approval items with commands", async () => {
+      const mergeAction = {
+        target: "surface" as const,
+        action: "pull_request.merge",
+        surfaceAccountId: "github-account",
+        scope: "acme/app",
+      };
+
+      it("lists a pending request as an approval item with commands, and drops it once decided", async () => {
         const f = await fixture();
-        await f.store.admitTaskAssignment(f.assignment("running-task"));
-        await f.store.claimTaskAssignment({ taskId: "running-task", leaseOwner: "test" });
-        const blocking = await f.store.createApprovalRequest({
+        const task = await f.turn({ tagId: f.worker.id, work: "merge" });
+        const request = await f.store.createApprovalRequest({
           objectiveId: f.objective.id,
-          taskId: "running-task",
+          taskId: task.id,
           attemptId: "attempt-1",
           requestingTagId: f.worker.id,
           kind: "surface-action",
-          actions: [
-            {
-              target: "surface",
-              action: "pull_request.merge",
-              surfaceAccountId: "github-account",
-              scope: "acme/app",
-            },
-          ],
+          actions: [mergeAction],
           argumentsDigest: `sha256:${"a".repeat(64)}`,
           summary: "Merge pull request 42 in acme/app",
           ruleSources: ["release"],
           approvers: [],
         });
-        const plan = await f.store.createApprovalRequest({
-          objectiveId: f.objective.id,
-          taskId: "running-task",
-          requestingTagId: f.owner.id,
-          kind: "plan",
-          actions: [{ target: "runtime", action: "deploy" }],
-          summary: "Deploy after merge",
-          ruleSources: ["release"],
-          approvers: [],
-        });
 
         const page = await f.store.readCoordinationInbox({ kind: "approval" });
-        expect(page.projectionVersion).toBe(7);
-        expect(page.items.map((item) => item.key).sort()).toEqual(
-          [`approval:${blocking.id}`, `approval:${plan.id}`].sort(),
-        );
-        const byKey = (key: string) => page.items.find((item) => item.key === key);
-        expect(byKey(`approval:${blocking.id}`)).toMatchObject({
-          kind: "approval",
-          objectiveId: f.objective.id,
-          teamId: f.team.id,
-          approval: {
-            requestId: blocking.id,
-            requestKind: "surface-action",
-            summary: "Merge pull request 42 in acme/app",
-            requestingTagId: f.worker.id,
-            taskId: "running-task",
-            blocking: true,
+        expect(page.projectionVersion).toBe(8);
+        expect(page.items).toMatchObject([
+          {
+            key: `approval:${request.id}`,
+            kind: "approval",
+            objectiveId: f.objective.id,
+            excludedActorTagIds: [f.worker.id],
+            operatorEligible: true,
+            approval: {
+              requestId: request.id,
+              requestKind: "surface-action",
+              summary: "Merge pull request 42 in acme/app",
+              requestingTagId: f.worker.id,
+              requestingTagName: f.worker.name,
+              taskId: task.id,
+              blocking: true,
+            },
+            commands: [
+              `supertag approve request ${request.id}`,
+              `supertag deny request ${request.id} --reason TEXT`,
+            ],
+            evidence: [
+              { kind: "approval_request", id: request.id },
+              { kind: "objective", id: f.objective.id },
+            ],
           },
-          commands: [
-            `supertag approve request ${blocking.id}`,
-            `supertag deny request ${blocking.id} --reason TEXT`,
-          ],
-          evidence: [{ kind: "approval_request", id: blocking.id }, { kind: "objective" }],
-        });
-        // The plan request carries no Attempt, so nothing running waits on it.
-        expect(byKey(`approval:${plan.id}`)?.approval?.blocking).toBe(false);
+        ]);
+        // Metadata only: neither the arguments digest nor the Task's instruction is exposed.
         expect(JSON.stringify(page)).not.toContain("sha256:");
+        expect(JSON.stringify(page)).not.toContain("secret instruction");
 
-        // Approval items appear in the unfiltered inbox too, and only while pending.
-        const all = await f.store.readCoordinationInbox({ objectiveId: f.objective.id });
-        expect(all.items.filter((item) => item.kind === "approval")).toHaveLength(2);
-        await f.store.decideApprovalRequest({
-          id: blocking.id,
-          decision: "approve",
-          scope: "once",
-          decidedBy: "admin",
-          decidedByKind: "operator",
-        });
+        // Approval items appear in the unfiltered inbox too.
         expect(
-          (await f.store.readCoordinationInbox({ kind: "approval" })).items.map((i) => i.key),
-        ).toEqual([`approval:${plan.id}`]);
-
+          (await f.store.readCoordinationInbox({ objectiveId: f.objective.id })).items.filter(
+            (item) => item.kind === "approval",
+          ),
+        ).toHaveLength(1);
         // A principal that may not list approvals sees none.
         expect(
           (await f.store.readCoordinationInbox({ includeApprovals: false })).items.filter(
             (item) => item.kind === "approval",
           ),
         ).toEqual([]);
+
+        await f.store.decideApprovalRequest({
+          id: request.id,
+          decision: "approve",
+          scope: "once",
+          decidedBy: "admin",
+          decidedByKind: "operator",
+        });
+        expect((await f.store.readCoordinationInbox({ kind: "approval" })).items).toEqual([]);
       });
 
-      it("names the request holding a Task without quoting its instruction", async () => {
+      it("lists an inbox turn's request without an Objective", async () => {
         const f = await fixture();
-        await f.store.admitTaskAssignment(f.assignment("held-task", { requiresApproval: true }));
+        const task = await f.turn({ tagId: f.worker.id, inbox: true });
         const request = await f.store.createApprovalRequest({
-          objectiveId: f.objective.id,
-          taskId: "held-task",
-          requestingTagId: f.owner.id,
-          kind: "task",
-          actions: [{ target: "runtime", action: "deploy" }],
-          summary: "Start Task held-task for worker with deploy: secret instruction",
+          objectiveId: null,
+          taskId: task.id,
+          attemptId: "attempt-inbox",
+          requestingTagId: f.worker.id,
+          kind: "surface-action",
+          actions: [mergeAction],
+          summary: "Merge pull request 7 in acme/app",
           ruleSources: ["release"],
           approvers: [],
         });
-        const page = await f.store.readCoordinationInbox({ kind: "task_approval" });
-        expect(page.items).toHaveLength(1);
-        expect(page.items[0]).toMatchObject({
-          key: "task_approval:held-task",
-          approval: {
-            requestId: request.id,
-            requestKind: "task",
-            summary: "Start Task held-task with deploy",
-            blocking: false,
+        expect((await f.store.readCoordinationInbox({ kind: "approval" })).items).toMatchObject([
+          {
+            key: `approval:${request.id}`,
+            objectiveId: null,
+            deadline: null,
+            commands: [
+              `supertag approve request ${request.id}`,
+              `supertag deny request ${request.id} --reason TEXT`,
+            ],
+            evidence: [{ kind: "approval_request", id: request.id }],
           },
-          commands: [`supertag approve request ${request.id}`, expect.any(String)],
-        });
-        expect(JSON.stringify(page)).not.toContain("secret instruction");
-        // Task requests stay under task_approval, not approval.
-        expect((await f.store.readCoordinationInbox({ kind: "approval" })).items).toEqual([]);
+        ]);
       });
 
       it("matches an action across the covering Tasks and records the caller's Task", async () => {
         const f = await fixture();
-        const action = {
-          target: "surface" as const,
-          action: "pull_request.merge",
-          surfaceAccountId: "github-account",
-          scope: "acme/app",
-        };
         const request = (taskId: string, coveringTaskIds?: readonly string[]) =>
           f.store.requestActionApproval({
             objectiveId: null,
@@ -206,7 +291,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             attemptId: `${taskId}-attempt`,
             requestingTagId: f.worker.id,
             kind: "surface-action",
-            actions: [action],
+            actions: [mergeAction],
             argumentsDigest: `sha256:${"b".repeat(64)}`,
             summary: "Merge pull request 42",
             ruleSources: ["release"],
@@ -255,12 +340,12 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         });
       });
 
-      it("omits requests whose Task already finished", async () => {
+      it("omits a request whose Session moved on", async () => {
         const f = await fixture();
-        await f.store.admitTaskAssignment(f.assignment("finished-task"));
+        const task = await f.turn({ tagId: f.worker.id, work: "comment" });
         await f.store.createApprovalRequest({
           objectiveId: f.objective.id,
-          taskId: "finished-task",
+          taskId: task.id,
           attemptId: "attempt-1",
           requestingTagId: f.worker.id,
           kind: "surface-action",
@@ -276,12 +361,19 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           ruleSources: ["review"],
           approvers: [],
         });
-        await f.store.updateTaskAssignment(
-          "finished-task",
-          { expectedStatus: "queued", status: "cancelled" },
-          f.owner.id,
-          { administrator: true },
-        );
+        // The Task ended waiting on the decision and is still its Session's latest: still actionable.
+        await f.store.closeTask({
+          taskId: task.id,
+          status: "completed",
+          endedAt: new Date().toISOString(),
+        });
+        expect((await f.store.readCoordinationInbox({ kind: "approval" })).items).toHaveLength(1);
+        // A cancelled Task waits on nothing.
+        await f.store.closeTask({
+          taskId: task.id,
+          status: "cancelled",
+          endedAt: new Date().toISOString(),
+        });
         expect((await f.store.readCoordinationInbox({ kind: "approval" })).items).toEqual([]);
       });
     },

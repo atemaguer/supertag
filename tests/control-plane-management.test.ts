@@ -209,11 +209,7 @@ spec:
         contextSets: ["shared-guidelines"],
         permissionSets: ["shared-engineering"],
       });
-      expect(unassignedRole.status).toEqual({
-        phase: "active",
-        builtIn: false,
-        assignedTags: [],
-      });
+      expect(unassignedRole.status).toEqual({ phase: "active", assignedTags: [] });
       await expect(
         client.request("/api/v1/roles", {
           method: "POST",
@@ -279,17 +275,13 @@ spec:
       expect(assignedRole.spec).toEqual(unassignedRole.spec);
       expect(assignedRole.status).toEqual({
         phase: "active",
-        builtIn: false,
         assignedTags: ["engineering"],
       });
-      const builtInRoles = await client.request<{
-        readonly items: readonly { readonly status: Record<string, unknown> }[];
+      // Every Role is declared; nothing is seeded, so only the declared Role is listed.
+      const roles = await client.request<{
+        readonly items: readonly { readonly metadata: { readonly name: string } }[];
       }>("/api/v1/roles");
-      expect(builtInRoles.items.map((role) => role.status)).toContainEqual({
-        phase: "active",
-        builtIn: true,
-        assignedTags: [],
-      });
+      expect(roles.items.map((role) => role.metadata.name)).toEqual(["Engineering Reviewer"]);
 
       const clearedTag = await client.request<typeof configuredTag>("/api/v1/tags", {
         method: "POST",
@@ -339,18 +331,17 @@ spec:
         kind: "MetricSnapshot",
         values: {
           tags: 1,
-          roles: 2,
+          roles: 1,
           roleAssignments: 1,
           surfaceAccounts: 1,
           permissionSets: 1,
           contextSets: 1,
           tasks: { total: 0 },
-          taskAssignments: { total: 0 },
           coordinationInbox: { pending: 0 },
           recovery: { unknownControlDeliveries: 0 },
           usage: { reportingAttempts: 0, totalTokens: 0 },
           nativeAgents: { peakConcurrent: 0 },
-          mailbox: { backlog: 0 },
+          mailbox: { pending: 0, oldestPendingAt: null },
           replyDelivery: { backlog: 0 },
         },
       });

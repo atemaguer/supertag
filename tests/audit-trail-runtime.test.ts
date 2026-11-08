@@ -10,15 +10,15 @@ import {
   classifyManagementRequest,
   fileAuditSink,
   type ManagementAuditEvent,
-  noteCoordinationCommand,
   noteRequestBody,
 } from "../apps/cli/src/audit-trail.ts";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { runObjectiveCommand } from "../apps/cli/src/objectives.ts";
 import { runResourceCommand } from "../apps/cli/src/resources.ts";
-import type { AdmitTaskAssignmentInput, AuditEntry, Store } from "../packages/core/src/index.ts";
+import type { AuditEntry, Store } from "../packages/core/src/index.ts";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.ts";
+import { openTestTask } from "./support/artifact-producer.js";
 import { createIsolatedPostgresDatabase } from "./support/database.js";
 
 const ADMIN = "audit-admin-token-value";
@@ -182,17 +182,18 @@ for (const dialect of ["sqlite", "postgresql"] as const)
       const decide = await createApproval(store, fixture);
       await runApprovalCommand(operator, ["approve", approve.id]);
       await runApprovalCommand(operator, ["deny", deny.id, "--reason", "Wait for the freeze"]);
-      const decided = await call(tokenSecret, "/api/v1/coordination/decide_approval", {
+      const decided = await call(tokenSecret, `/api/v1/coordination/approvals/${decide.id}/deny`, {
         method: "POST",
-        body: JSON.stringify({
-          objectiveId: fixture.objective.id,
-          requestId: decide.id,
-          decision: "deny",
-          reason: "Not now",
-        }),
+        body: JSON.stringify({ reason: "Not now" }),
       });
       expect(decided.status, await decided.clone().text()).toBe(200);
-      await runObjectiveCommand(operator, ["message", fixture.objective.id, "Include the CSV"]);
+      await runObjectiveCommand(operator, [
+        "message",
+        fixture.objective.id,
+        "Include-the-CSV",
+        "--output",
+        "json",
+      ]);
       // An Objective without open Tasks, which its owner submitted for review.
       const reviewed = await store.createObjective({
         id: "reviewed",
@@ -204,8 +205,23 @@ for (const dialect of ["sqlite", "postgresql"] as const)
         { status: "ready_for_review", expectedRevision: reviewed.revision },
         fixture.owner.id,
       );
+      // A message to an Objective waiting on review puts it back to work instead of approving it.
+      await runObjectiveCommand(operator, [
+        "message",
+        reviewed.id,
+        "One-more-change",
+        "--output",
+        "json",
+      ]);
+      await store.updateObjectiveStatus(
+        reviewed.id,
+        {
+          status: "ready_for_review",
+          expectedRevision: (await store.getObjective(reviewed.id)).revision,
+        },
+        fixture.owner.id,
+      );
       await runObjectiveCommand(operator, ["approve", reviewed.id]);
-      await runObjectiveCommand(operator, ["message", reviewed.id, "One more change", "--reopen"]);
       const cancelled = await call(
         tokenSecret,
         `/api/v1/objectives/${fixture.objective.id}/cancel`,
@@ -318,7 +334,7 @@ for (const dialect of ["sqlite", "postgresql"] as const)
           },
           {
             actor: token,
-            action: "objective.reopen",
+            action: "objective.message",
             target: "Objective/reviewed",
             outcome: "succeeded",
             status: 200,
@@ -382,8 +398,8 @@ for (const dialect of ["sqlite", "postgresql"] as const)
         rotatedToken,
         "xoxb-audit-secret",
         "xapp-audit-secret",
-        "Include the CSV",
-        "One more change",
+        "Include-the-CSV",
+        "One-more-change",
         "Wait for the freeze",
         "Superseded",
         "Not now",
@@ -405,6 +421,7 @@ for (const dialect of ["sqlite", "postgresql"] as const)
         ["PUT", `/api/v1/tags/${secret}/extra/${underscored}`],
         ["POST", `/api/v1/coordination/${secret.replaceAll("-", "_")}`],
         ["POST", `/api/v1/coordination/approvals/missing/${secret}`],
+        ["POST", "/api/v1/coordination/approvals/sk_live_missing_approval/deny"],
         ["DELETE", `/api/v1/${encodeURIComponent(`${secret}/${underscored}`)}`],
       ] as const) {
         const response = await call(ADMIN, path, { method, body: "{}" });
@@ -419,7 +436,7 @@ for (const dialect of ["sqlite", "postgresql"] as const)
       );
 
       const entries = await audit();
-      expect(entries).toHaveLength(9);
+      expect(entries).toHaveLength(10);
       expect(
         entries.map(({ action, target, method, path, outcome }) => ({
           action,
@@ -438,16 +455,16 @@ for (const dialect of ["sqlite", "postgresql"] as const)
             outcome: "failed",
           },
           {
-            action: "coordination.command",
-            target: "Objective",
+            action: "approval.deny",
+            target: "ApprovalRequest",
             method: "POST",
-            path: "/api/v1/coordination/{command}",
+            path: "/api/v1/coordination/approvals/{id}/deny",
             outcome: "failed",
           },
         ]),
       );
       const unmatched = entries.filter((entry) => entry.target === "UnknownRoute");
-      expect(unmatched).toHaveLength(6);
+      expect(unmatched).toHaveLength(7);
       for (const entry of unmatched) {
         expect(entry.action).toBe("request");
         expect(entry.path).toBeUndefined();
@@ -455,7 +472,7 @@ for (const dialect of ["sqlite", "postgresql"] as const)
       }
       const stored = JSON.stringify(await store.listAuditEntries({ limit: 500 }));
       const sunk = events.map((event) => JSON.stringify(event)).join("\n");
-      expect(events).toHaveLength(9);
+      expect(events).toHaveLength(10);
       for (const value of [
         secret,
         underscored,
@@ -834,26 +851,21 @@ describe("audit classification", () => {
         action: "request",
         target: "UnknownRoute",
       });
-    // A coordination command is named only once the handler recognizes it.
+    // There is no generic coordination command route any more: a name that is not a known
+    // operator route keeps nothing of the path.
     expect(classify("POST", "/api/v1/coordination/st_op_secret")).toEqual({
-      action: "coordination.command",
-      target: "Objective",
-      route: "/api/v1/coordination/{command}",
+      action: "request",
+      target: "UnknownRoute",
     });
-
-    const command = classify("POST", "/api/v1/coordination/update_task");
-    noteCoordinationCommand(command, "update_task", { objectiveId: "o", taskId: "t-1" });
-    expect(command).toEqual({
-      action: "coordination.update_task",
-      target: "Task/t-1",
-      route: "/api/v1/coordination/{command}",
-    });
-    const decision = classify("POST", "/api/v1/coordination/decide_approval");
-    noteCoordinationCommand(decision, "decide_approval", { requestId: "r-1", decision: "approve" });
-    expect(decision).toEqual({
+    expect(classify("POST", "/api/v1/coordination/approvals/r-1/approve")).toEqual({
       action: "approval.approve",
       target: "ApprovalRequest/r-1",
-      route: "/api/v1/coordination/{command}",
+      route: "/api/v1/coordination/approvals/{id}/approve",
+    });
+    expect(classify("POST", "/api/v1/coordination/objectives/o-1/messages")).toEqual({
+      action: "objective.message",
+      target: "Objective/o-1",
+      route: "/api/v1/coordination/objectives/{id}/messages",
     });
   });
 
@@ -898,61 +910,42 @@ function digest(secret: string): string {
 
 async function objectiveFixture(store: Store) {
   const owner = await store.createTag({ name: "owner" });
+  await store.enrollWorkerHost({
+    id: "audited-host",
+    credentialId: "credential/audited-host",
+    enrolledAt: new Date().toISOString(),
+  });
+  await store.bindTagWorkerHost(owner.id, "audited-host");
+  const team = await store.createTeam({
+    id: "audited-team",
+    name: "Export Team",
+    memberTagIds: [owner.id],
+    maxConcurrency: 1,
+  });
   const objective = await store.createObjective({
     id: "audited",
     ownerTagId: owner.id,
+    teamId: team.id,
     outcome: "Ship the export",
   });
-  const team = await store.createTeam({
-    id: "audited-team",
+  const { task } = await openTestTask(store as never, {
+    tagId: owner.id,
+    tagName: owner.name,
     objectiveId: objective.id,
-    name: "Export Team",
-    leadTagId: owner.id,
-    memberTagIds: [],
-    maxConcurrency: 1,
+    requestText: "Export the report",
   });
-  await store.admitTaskAssignment(assignment(objective.id, team.id, owner));
-  return { owner, objective, team };
+  return { owner, objective, team, task };
 }
 
 function createApproval(store: Store, fixture: Awaited<ReturnType<typeof objectiveFixture>>) {
   return store.createApprovalRequest({
     objectiveId: fixture.objective.id,
-    taskId: "audited-task",
+    taskId: fixture.task.id,
     requestingTagId: fixture.owner.id,
-    kind: "plan",
+    kind: "surface-action",
     actions: [{ target: "runtime", action: "deploy" }],
     summary: "Deploy after merge",
     ruleSources: ["release"],
     approvers: [],
   });
-}
-
-function assignment(
-  objectiveId: string,
-  teamId: string,
-  owner: { readonly id: string; readonly name: string },
-): AdmitTaskAssignmentInput {
-  return {
-    taskId: "audited-task",
-    objectiveId,
-    teamId,
-    requestedByTagId: owner.id,
-    assignedTagId: owner.id,
-    instruction: "Export the report",
-    acceptanceCriteria: ["done"],
-    execution: {},
-    authorizationSnapshot: {
-      version: 4,
-      capturedAt: new Date().toISOString(),
-      tag: { id: owner.id, name: owner.name },
-      origin: { kind: "internal", objectiveId, requestedByTagId: owner.id },
-      requester: { id: owner.id, kind: "bot" },
-      permissionSets: [],
-      resources: [],
-      runtimeActions: [],
-    },
-    contextPlan: { version: 7, capturedAt: new Date().toISOString(), sets: [] },
-    workspacePlan: { version: 1, status: "none" },
-  };
 }

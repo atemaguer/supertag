@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { emptyTagContextPlan } from "../packages/core/src/index.js";
+import { emptyTagContextPlan, objectiveSessionKey } from "../packages/core/src/index.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
 import { createIsolatedPostgresDatabase } from "./support/database.js";
 
@@ -41,41 +41,102 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           ownerTagId: owner.id,
           outcome: "Ship it",
         });
-        const team = await store.createTeam({
-          id: `${objective.id}:leadership`,
-          objectiveId: objective.id,
-          name: "Leadership",
-          leadTagId: owner.id,
-          memberTagIds: [owner.id],
-          maxConcurrency: 1,
+        const account = await store.saveSurfaceAccount({
+          provider: "slack",
+          externalAccountId: randomUUID(),
+          displayName: "Slack",
+          authMethod: "test",
+          credentialId: "test",
+          status: "connected",
+          configuration: {},
+          verifiedAt: new Date().toISOString(),
         });
-        const admit = async () => {
+        const route = await store.addTagRoute({
+          tagId: owner.id,
+          surfaceAccountId: account.id,
+          scope: "channel:ship",
+        });
+        const ownerSession = await store.openSession({
+          tagId: owner.id,
+          sessionKey: objectiveSessionKey(objective.id),
+          origin: {},
+          objectiveId: objective.id,
+          at: new Date().toISOString(),
+        });
+        /** One work Session of the Objective, whose Task may leave a pull request behind. */
+        const workTurn = async (title: string) => {
           const at = new Date().toISOString();
-          return store.admitTaskAssignment({
-            taskId: randomUUID(),
-            objectiveId: objective.id,
-            teamId: team.id,
-            requestedByTagId: owner.id,
-            assignedTagId: owner.id,
-            instruction: "Change it",
-            acceptanceCriteria: ["Changed"],
-            maxCostMinor: 0,
-            execution: {},
-            workspacePlan: { version: 1, status: "none" },
+          const session = await store.openSession({
+            tagId: owner.id,
+            sessionKey: `work:${ownerSession.id}:${title}`,
+            origin: {},
+            parentSessionId: ownerSession.id,
+            at,
+          });
+          const authorization = {
+            version: 5,
+            capturedAt: at,
+            tag: { id: owner.id, name: owner.name },
+            origin: {
+              tagRouteId: route.id,
+              surfaceAccountId: account.id,
+              provider: "slack",
+              scope: "channel:ship",
+            },
+            requester: { id: owner.id, kind: "bot" },
+            permissionSets: [],
+            resources: [],
+            runtimeActions: [],
+          } as const;
+          const eventId = randomUUID();
+          const admitted = await store.admitInboundEvent({
+            surfaceAccountId: account.id,
+            tagRouteId: route.id,
+            tagId: owner.id,
+            authorization,
             contextPlan: emptyTagContextPlan(at),
-            authorizationSnapshot: {
-              version: 4,
-              capturedAt: at,
-              tag: { id: owner.id, name: owner.name },
-              origin: { kind: "internal", objectiveId: objective.id, requestedByTagId: owner.id },
-              requester: { id: owner.id, kind: "bot" },
-              permissionSets: [],
-              resources: [],
-              runtimeActions: [],
+            event: {
+              eventId,
+              logicalEventId: eventId,
+              provider: "slack",
+              externalAccountId: account.externalAccountId,
+              kind: "message",
+              scope: "channel:ship",
+              sessionKey: session.sessionKey,
+              actor: { id: owner.id, kind: "bot" },
+              internal: {
+                kind: "work_session",
+                startedByTaskId: eventId,
+                parentSessionId: ownerSession.id,
+                title,
+              },
+              text: "Change it",
+              occurredAt: at,
+              callback: {
+                provider: "slack",
+                mode: "slack_thread",
+                threadKey: "ship",
+                target: { channelId: "ship", threadTs: "ship" },
+              },
+              source: {},
+              metadata: {},
             },
           });
+          return store.openTask({
+            inboundEventId: admitted.work.id,
+            tagId: owner.id,
+            sessionId: session.id,
+            execution: {},
+            actor: { id: owner.id, kind: "bot" },
+            trigger: { origin: "work_session" },
+            workspacePlan: { version: 1, status: "none" },
+            sessionHistory: [],
+            authorizationSnapshot: authorization,
+            contextPlan: emptyTagContextPlan(at),
+            createdAt: at,
+          });
         };
-        const [first, second] = [await admit(), await admit()];
+        const [first, second] = [await workTurn("first"), await workTurn("second")];
         const transition = {
           url: "https://github.com/acme/app/pull/7",
           action: "close" as const,
@@ -83,20 +144,20 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         };
         await store.saveWorkspacePullRequestTransition({
           ...transition,
-          taskId: first.taskId,
+          taskId: first.id,
           attemptCount: 1,
           nextAttemptAt: "2026-09-30T12:01:00.000Z",
         });
         await store.saveWorkspacePullRequestTransition({
           ...transition,
-          taskId: second.taskId,
+          taskId: second.id,
           attemptCount: 1,
           nextAttemptAt: "2026-09-30T12:05:00.000Z",
         });
         // Saving again replaces the Task's transition instead of adding another.
         await store.saveWorkspacePullRequestTransition({
           ...transition,
-          taskId: first.taskId,
+          taskId: first.id,
           attemptCount: 2,
           nextAttemptAt: "2026-09-30T12:03:00.000Z",
           lastError: "fetch failed",
@@ -107,19 +168,19 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         expect(
           await store.listDueWorkspacePullRequestTransitions("2026-09-30T12:10:00.000Z"),
         ).toMatchObject([
-          { taskId: first.taskId, attemptCount: 2, lastError: "fetch failed", action: "close" },
-          { taskId: second.taskId, attemptCount: 1 },
+          { taskId: first.id, attemptCount: 2, lastError: "fetch failed", action: "close" },
+          { taskId: second.id, attemptCount: 1 },
         ]);
         expect(
           await store.listDueWorkspacePullRequestTransitions("2026-09-30T12:10:00.000Z", 1),
         ).toHaveLength(1);
-        await store.deleteWorkspacePullRequestTransition(first.taskId);
-        await store.deleteWorkspacePullRequestTransition(first.taskId);
+        await store.deleteWorkspacePullRequestTransition(first.id);
+        await store.deleteWorkspacePullRequestTransition(first.id);
         expect(
           (await store.listDueWorkspacePullRequestTransitions("2026-09-30T12:10:00.000Z")).map(
             (item) => item.taskId,
           ),
-        ).toEqual([second.taskId]);
+        ).toEqual([second.id]);
       });
     },
   );

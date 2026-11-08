@@ -10,13 +10,11 @@ import {
   objectiveRuntimeActionWarnings,
   resolveObjectiveRuntimeActions,
   resolveOwnerObjectiveRuntimeActions,
-  TagMailboxService,
 } from "../packages/control-plane/src/index.ts";
-import { ObjectiveController } from "../packages/control-plane/src/objective-controller.ts";
+import { objectiveAuthorization } from "../packages/control-plane/src/objective-sessions.ts";
 import {
   mergeApprovalRequirements,
   type TagApprovalRequirement,
-  type TaskAssignment,
 } from "../packages/core/src/index.ts";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.ts";
 import { createIsolatedPostgresDatabase, migrateSqlite } from "./support/database.ts";
@@ -217,32 +215,6 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           runtimeActions: { previous: ["commands:execute", "files:write"], next: ["files:write"] },
         });
       });
-
-      it("gives Objectives a Tag creates the Tag's own actions and nothing it names", async () => {
-        const store = await database();
-        const tag = await store.createTag({ name: `planner-${randomUUID()}` });
-        await grantRuntimeActions(store, tag.id, [{ action: "files:write" }]);
-        const service = new TagMailboxService(store);
-        const credential = await service.issueCredential(tag.id);
-        const objective = await service.createObjective(credential.token, {
-          id: "planned",
-          outcome: "Plan it",
-        });
-        expect(objective.runtimeActions).toEqual(["files:write"]);
-        await expect(
-          service.createObjective(credential.token, {
-            id: "wider",
-            outcome: "Plan it",
-            runtimeActions: ["commands:execute"],
-          }),
-        ).rejects.toMatchObject({ statusCode: 403 });
-        // A retry returns the recorded Objective even after the Tag's grants change.
-        await grantRuntimeActions(store, tag.id, [{ action: "commands:execute" }]);
-        expect(
-          (await service.createObjective(credential.token, { id: "planned", outcome: "Plan it" }))
-            .runtimeActions,
-        ).toEqual(["files:write"]);
-      });
     },
   );
 }
@@ -261,13 +233,11 @@ describe("approval for inherited runtime actions", () => {
     const store = new DrizzleStore({ url });
     await store.connect();
     cleanups.push(() => store.disconnect());
-    const [owner, lead, worker] = await Promise.all(
-      ["owner", "lead", "worker"].map((name) =>
-        store.createTag({ name: `${name}-${randomUUID()}` }),
-      ),
+    const [owner, member] = await Promise.all(
+      ["owner", "member"].map((name) => store.createTag({ name: `${name}-${randomUUID()}` })),
     );
-    if (!owner || !lead || !worker) throw new Error("Missing Tags");
-    for (const tag of [owner, lead, worker]) await store.bindTagWorkerHost(tag.id, "fixture");
+    if (!owner || !member) throw new Error("Missing Tags");
+    for (const tag of [owner, member]) await store.bindTagWorkerHost(tag.id, "fixture");
     // Only the owner has Permission Sets; commands:execute needs approval.
     await grantRuntimeActions(store, owner.id, [
       { action: "commands:execute", approval: "required" },
@@ -278,83 +248,69 @@ describe("approval for inherited runtime actions", () => {
       objectiveId,
       ownerTagId: owner.id,
     });
+    const team = await store.createTeam({
+      id: randomUUID(),
+      name: `release-${randomUUID()}`,
+      memberTagIds: [owner.id, member.id],
+      maxConcurrency: 5,
+    });
     const objective = await store.createObjective({
       id: objectiveId,
       ownerTagId: owner.id,
       outcome: "Release the change",
       runtimeActions,
+      teamId: team.id,
     });
-    const team = await store.createTeam({
-      id: randomUUID(),
-      objectiveId,
-      name: "Release",
-      leadTagId: lead.id,
-      memberTagIds: [owner.id, worker.id],
-      maxConcurrency: 5,
+    const at = new Date().toISOString();
+    const account = await store.saveSurfaceAccount({
+      provider: "slack",
+      externalAccountId: randomUUID(),
+      displayName: "Fixture",
+      authMethod: "simulation",
+      credentialId: randomUUID(),
+      status: "connected",
+      configuration: {},
+      verifiedAt: at,
     });
-    const controller = new ObjectiveController(store, undefined, vi.fn());
-    controller.activateCoordination({ url: "http://fixture.invalid" });
-    const leaseOwner = controller["instanceId"];
-    const assign = (assignedTagId: string, caller?: TaskAssignment) =>
-      controller.command(
-        "assign_task",
-        {
-          ...(caller ? {} : { objectiveId }),
-          taskId: `task-${randomUUID()}`,
-          teamId: team.id,
-          assignedTagId,
-          instruction: "Run the release script",
-          acceptanceCriteria: ["Released"],
-        },
-        caller,
-      ) as Promise<TaskAssignment>;
-    const activate = async (task: TaskAssignment) => {
-      const [request] = await store.listApprovalRequests({ taskId: task.taskId, kind: "task" });
-      if (request)
-        await controller.decideApprovalRequest({ requestId: request.id, decision: "approve" });
-      const claimed = await store.claimTaskAssignment({ taskId: task.taskId, leaseOwner });
-      if (!claimed) throw new Error("Fixture assignment could not be claimed");
-      await store.createTaskAttempt({
-        workerProfile: { id: "default", revision: "1" },
-        taskId: task.taskId,
-        attemptNumber: claimed.attemptCount,
-        workerSnapshot: {},
-        startedAt: new Date().toISOString(),
-      });
-      await store.startTask({ taskId: task.taskId, startedAt: new Date().toISOString() });
-      return claimed;
-    };
-    return { store, owner, lead, worker, objective, assign, activate };
+    const route = await store.addTagRoute({
+      tagId: owner.id,
+      surfaceAccountId: account.id,
+      scope: "channel:C1",
+    });
+    const location = {
+      account,
+      route,
+      event: { actor: { id: "supertag", kind: "bot" as const } },
+    } as Parameters<typeof objectiveAuthorization>[3];
+    return { store, owner, member, objective, team, location };
   }
 
-  it("holds the owner's Task for an action its Permission Set gates", async () => {
+  it("holds the owner's turn for an action its Permission Set gates", async () => {
     const f = await fixture();
     expect(f.objective.runtimeActions).toEqual(["commands:execute", "files:write"]);
-    const task = await f.assign(f.owner.id);
-    expect(task.approval).toBe("pending");
-    const stored = await f.store.findTaskById(task.taskId);
-    expect(stored?.authorizationSnapshot.runtimeActions).toEqual([
-      "commands:execute",
-      "files:write",
-    ]);
-    expect(stored?.authorizationSnapshot.approvals).toEqual([
+    const snapshot = await objectiveAuthorization(f.store, f.objective, f.owner, f.location);
+    expect(snapshot.runtimeActions).toEqual(["commands:execute", "files:write"]);
+    expect(snapshot.approvals).toEqual([
       expect.objectContaining({ target: "runtime", action: "commands:execute" }),
     ]);
   });
 
-  it("holds a Team member's Task that inherits the gated action, directly or by delegation", async () => {
+  it("carries the owner's requirement to a Team member's turn, directly and by delegation", async () => {
     const f = await fixture();
-    // Assigned directly by an operator, the lead inherits the owner's requirement.
-    const lead = await f.assign(f.lead.id);
-    expect(lead.approval).toBe("pending");
-    // Approving the lead's Task once does not approve the work it delegates.
-    const caller = await f.activate(lead);
-    const delegated = await f.assign(f.worker.id, caller);
-    expect(delegated.approval).toBe("pending");
-    expect((await f.store.findTaskById(delegated.taskId))?.authorizationSnapshot).toMatchObject({
+    // A member with no Permission Sets of its own still runs under the Objective's actions,
+    // with the owner's approval requirement.
+    const member = await objectiveAuthorization(f.store, f.objective, f.member, f.location);
+    expect(member).toMatchObject({
       runtimeActions: ["commands:execute", "files:write"],
       approvals: [expect.objectContaining({ target: "runtime", action: "commands:execute" })],
     });
+    // Delegation never widens: the starting turn's authorization is the ceiling.
+    const narrowed = await objectiveAuthorization(f.store, f.objective, f.member, f.location, {
+      runtimeActions: ["files:write"],
+      approvals: [],
+    });
+    expect(narrowed.runtimeActions).toEqual(["files:write"]);
+    expect(narrowed.approvals ?? []).toEqual([]);
   });
 });
 

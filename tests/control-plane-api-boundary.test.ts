@@ -17,7 +17,7 @@ import {
   type Worklet,
 } from "../packages/runtime/sdk/src/index.ts";
 import {
-  GrpcExecutionAuthorityClient,
+  GrpcCoordinationClient,
   RemoteWorkletServer,
   WorkletConnection,
 } from "../packages/runtime/transport/src/index.ts";
@@ -106,12 +106,9 @@ describe("Control Plane API boundary", () => {
       headers: { authorization: "Bearer coordination-only" },
     });
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      objective: { id: objective.id },
-      performance: { total: 0 },
-      nextOffset: null,
-    });
-    for (const query of ["limit=0", "limit=1&limit=2", "offset=-1", "unknown=true", "teamId="]) {
+    expect(await response.json()).toMatchObject({ objective: { id: objective.id } });
+    // The overview takes no query parameters.
+    for (const query of ["limit=0", "offset=-1", "unknown=true", "teamId="]) {
       expect(
         (
           await fetch(`${endpoint}?${query}`, {
@@ -123,21 +120,13 @@ describe("Control Plane API boundary", () => {
     const target = { url: f.url, token: "coordination-only" };
     const rendered = await runObjectiveCommand(target, ["get", objective.id, "--overview"]);
     expect(rendered).toContain("Make progress inspectable");
-    expect(rendered).toContain("not been started");
+    expect(rendered).toContain("The Objective's conversation has not started.");
     expect(rendered).toContain("Budget: unlimited; no cost recorded");
     const json = JSON.parse(
-      await runObjectiveCommand(target, [
-        "get",
-        objective.id,
-        "--overview",
-        "--output",
-        "json",
-        "--limit",
-        "1",
-      ]),
+      await runObjectiveCommand(target, ["get", objective.id, "--overview", "--output", "json"]),
     );
     expect(json.objective.id).toBe(objective.id);
-    expect(json.tasks).toEqual([]);
+    expect(json.sessions ?? []).toEqual([]);
     await expect(runObjectiveCommand(target, ["get", objective.id, "--json"])).rejects.toThrow(
       "Unknown option '--json'",
     );
@@ -216,45 +205,10 @@ describe("Control Plane API boundary", () => {
     const fixture = await apiFixture();
     const { store } = fixture;
     const owner = await store.createTag({ name: `native-session-${randomUUID()}` });
-    const objective = await store.createObjective({
-      id: randomUUID(),
-      ownerTagId: owner.id,
-      outcome: "Preserve native conversations",
-    });
-    const team = await store.createTeam({
-      id: randomUUID(),
-      objectiveId: objective.id,
-      name: "Session tests",
-      leadTagId: owner.id,
-      memberTagIds: [],
-      maxConcurrency: 1,
-    });
     const profile = { id: "session-test", revision: "1" };
     const at = new Date().toISOString();
-    const taskId = randomUUID();
-    await store.admitTaskAssignment({
-      taskId,
-      objectiveId: objective.id,
-      teamId: team.id,
-      requestedByTagId: owner.id,
-      assignedTagId: owner.id,
-      instruction: "Store native state",
-      acceptanceCriteria: ["State retained"],
-      requiresApproval: true,
-      execution: { profile },
-      authorizationSnapshot: {
-        version: 4,
-        capturedAt: at,
-        tag: { id: owner.id, name: owner.name },
-        origin: { kind: "internal", objectiveId: objective.id, requestedByTagId: owner.id },
-        requester: { id: owner.id, kind: "user" },
-        permissionSets: [],
-        resources: [],
-        runtimeActions: [],
-      },
-      contextPlan: emptyTagContextPlan(at),
-      workspacePlan: { version: 1, status: "none" },
-    });
+    const opened = await openConversationTask(store, owner, { profile });
+    const taskId = opened.id;
     await store.startTask({ taskId, startedAt: at });
     const attempt = await store.createTaskAttempt({
       taskId,
@@ -488,7 +442,7 @@ describe("Control Plane API boundary", () => {
   it("owns authenticated internal coordination routes", async () => {
     const fixture = await apiFixture();
 
-    const response = await fetch(`${fixture.url}/internal/v1/mailbox/receive`, {
+    const response = await fetch(`${fixture.url}/internal/v1/coordination/tools/call`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{}",
@@ -496,7 +450,7 @@ describe("Control Plane API boundary", () => {
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({
-      error: "tag_messaging_error",
+      error: "Attempt credential required",
     });
   });
 
@@ -560,8 +514,16 @@ describe("Control Plane API boundary", () => {
     });
     const fixture = await apiFixture(workletApi, server, workletApi);
     const rpcUrl = await fixture.api.startWorkletGrpc({});
-    const client = new GrpcExecutionAuthorityClient({ baseUrl: rpcUrl });
-    await expect(client.rebind("private-invalid-execution-token")).rejects.toBeDefined();
+    const client = new GrpcCoordinationClient({
+      baseUrl: rpcUrl,
+      token: "private-invalid-execution-token",
+    });
+    await expect(
+      client.fetch("http://coordination/mcp", {
+        method: "POST",
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      }),
+    ).rejects.toBeDefined();
     const endpoint = `${fixture.url}/api/v1/metrics`;
     expect((await fetch(endpoint)).status).toBe(401);
     expect(
@@ -574,8 +536,8 @@ describe("Control Plane API boundary", () => {
     const snapshot = await response.json();
     expect(snapshot.values.rpc.methods).toContainEqual(
       expect.objectContaining({
-        service: "supertag.authority.v1.ExecutionAuthorityService",
-        method: "Rebind",
+        service: "supertag.coordination.v1.CoordinationService",
+        method: "ListTools",
         started: 1,
         completed: 1,
         active: 0,
@@ -615,7 +577,7 @@ describe("Control Plane API boundary", () => {
       headers: { authorization: "Bearer administrative-token" },
     });
     expect(refused.status).toBe(503);
-    const executionApi = await fetch(`${fixture.url}/internal/v1/mailbox/receive`, {
+    const executionApi = await fetch(`${fixture.url}/internal/v1/coordination/tools/call`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{}",
@@ -634,61 +596,21 @@ describe("Control Plane API boundary", () => {
       new LocalWorklet("worklet-a", "laptop-a", []),
     );
     const { store } = fixture;
-    const id = randomUUID();
-    const owner = await store.createTag({ name: `diagnostic-${id}` });
-    await store.createObjective({
-      id,
-      ownerTagId: owner.id,
-      outcome: "Explain distributed work",
-    });
-    await store.createTeam({
-      id,
-      objectiveId: id,
-      name: "Research",
-      leadTagId: owner.id,
-      memberTagIds: [],
-      maxConcurrency: 1,
-    });
+    const owner = await store.createTag({ name: `diagnostic-${randomUUID()}` });
     const at = new Date().toISOString();
     const profile = { id: "diagnostic", revision: "1" };
-    await store.admitTaskAssignment({
-      taskId: id,
-      objectiveId: id,
-      teamId: id,
-      requestedByTagId: owner.id,
-      assignedTagId: owner.id,
-      instruction: "Research",
-      startObjectiveExecution: true,
-      acceptanceCriteria: ["Research recorded"],
-      requiresApproval: true,
-      execution: { profile },
-      authorizationSnapshot: {
-        version: 4,
-        capturedAt: at,
-        tag: { id: owner.id, name: owner.name },
-        origin: { kind: "internal", objectiveId: id, requestedByTagId: owner.id },
-        requester: { id: owner.id, kind: "user" },
-        permissionSets: [],
-        resources: [],
-        runtimeActions: [],
-      },
-      contextPlan: emptyTagContextPlan(at),
-      workspacePlan: { version: 1, status: "none" },
-    });
+    const id = (await openConversationTask(store, owner, { profile })).id;
     const client = new ControlPlaneClient({ url: fixture.url, token: "administrative-token" });
     const queued = JSON.parse(await runResourceCommand(client, "get", ["task", id]));
     expect(queued).toMatchObject({
       apiVersion: "supertag/v1",
       kind: "Task",
       spec: { tagId: owner.id },
-      status: {
-        phase: "pending",
-        assignment: { phase: "queued", approval: "pending", teamId: id },
-      },
+      status: { phase: "pending" },
     });
     const queuedText = await runResourceCommand(client, "describe", ["task", id]);
-    expect(queuedText).toContain("Waiting for approval.");
     expect(queuedText).toContain("No execution Attempt has been recorded.");
+    expect(queuedText).toContain("No scheduling diagnosis is recorded");
     expect(queuedText).not.toContain("capacity problem");
     await store.appendTaskEvent({
       taskId: id,
@@ -710,116 +632,6 @@ describe("Control Plane API boundary", () => {
     const compatible = await runResourceCommand(client, "describe", ["task", id]);
     expect(compatible).toContain("Last scheduling check: compatible");
     expect(compatible).not.toContain("missing-required-profile");
-    await store.appendTaskEvent({
-      taskId: id,
-      type: "task.scheduling-waiting",
-      payload: {
-        version: 1,
-        status: "waiting",
-        reason: "capacity",
-        hosts: [
-          {
-            workerHostId: "laptop",
-            harnesses: ["claude-code"],
-            capacity: 2,
-            busyTaskIds: ["task-a", "task-b"],
-          },
-        ],
-      },
-    });
-    const waiting = await runResourceCommand(client, "describe", ["task", id]);
-    expect(waiting).toContain("Last scheduling check: waiting");
-    expect(waiting).toContain(
-      "Waiting for a free claude-code slot on Worker Host laptop (2 of 2 busy: task-a, task-b)",
-    );
-    expect(waiting).not.toContain("No scheduling diagnosis");
-    await store.appendTaskEvent({
-      taskId: id,
-      type: "task.scheduling-waiting",
-      payload: {
-        version: 1,
-        status: "waiting",
-        reason: "dependencies",
-        dependencies: [
-          { taskId: "step2-ref-delivery", status: "running" },
-          { taskId: "step3-sandboxes", status: "submitted" },
-          { taskId: "step4-missing", status: null },
-        ],
-      },
-    });
-    const dependent = await runResourceCommand(client, "describe", ["task", id]);
-    expect(dependent).toContain(
-      "Waiting for step2-ref-delivery (running), step3-sandboxes (submitted), step4-missing (unavailable).",
-    );
-    expect(dependent).not.toContain("Worker Host laptop");
-    await store.appendTaskEvent({
-      taskId: id,
-      type: "task.scheduling-waiting",
-      payload: {
-        version: 1,
-        status: "waiting",
-        reason: "claim",
-        claim: {
-          code: "objective_activation",
-          message:
-            "Its Tag already runs lead-activation in this Objective; the Task starts when that Attempt ends.",
-          taskIds: ["lead-activation"],
-        },
-      },
-    });
-    const declined = await runResourceCommand(client, "describe", ["task", id]);
-    expect(declined).toContain(
-      "Not started: Its Tag already runs lead-activation in this Objective; the Task starts when that Attempt ends.",
-    );
-    expect(declined).toContain("A Worker was free; the Task starts when this clears.");
-    // A decline that someone must clear says so instead of promising it clears by itself.
-    for (const [code, message, next] of [
-      ["approval", "The Task is waiting for approval.", "the Task starts once it is approved."],
-      [
-        "inactive_tag",
-        "Tag builder is paused, not active.",
-        "the Task cannot start until an operator fixes this.",
-      ],
-      [
-        "objective",
-        "Objective is paused.",
-        "the Task starts only if the Objective admits new work again",
-      ],
-    ] as const) {
-      await store.appendTaskEvent({
-        taskId: id,
-        type: "task.scheduling-waiting",
-        payload: { version: 1, status: "waiting", reason: "claim", claim: { code, message } },
-      });
-      const held = await runResourceCommand(client, "describe", ["task", id]);
-      expect(held).toContain(`Not started: ${message}`);
-      expect(held).toContain(next);
-      expect(held).not.toContain("the Task starts when this clears.");
-    }
-    await store.appendTaskEvent({
-      taskId: id,
-      type: "task.scheduling-compatible",
-      payload: { version: 1, status: "compatible" },
-    });
-    const listed = JSON.parse(await runResourceCommand(client, "get", ["task"]));
-    expect(
-      listed.items.find((item: { metadata: { id: string } }) => item.metadata.id === id).status
-        .assignment.approval,
-    ).toBe("pending");
-    await store.approveTaskAssignment(id, owner.id);
-    const claimed = await store.claimTaskAssignment({
-      taskId: id,
-      leaseOwner: "diagnostic-owner",
-      leaseSeconds: 300,
-    });
-    expect(claimed).toBeDefined();
-    await store.registerTaskAssignmentWait({
-      taskId: id,
-      leaseOwner: "diagnostic-owner",
-      attemptCount: claimed?.attemptCount ?? 0,
-      mailbox: true,
-      notBefore: "2099-01-01T00:00:00.000Z",
-    });
     const attempt = await store.createTaskAttempt({
       taskId: id,
       attemptNumber: 1,
@@ -872,11 +684,6 @@ describe("Control Plane API boundary", () => {
     const storedBefore = await store.listTaskEvents(id);
     const described = await runResourceCommand(client, "describe", ["task", id]);
     expect(described).toContain("Worker Host: laptop-a");
-    expect(described).toContain("New mailbox message");
-    expect(described).toContain("Time: 2099-01-01");
-    expect(described).toContain(
-      "The wait is registered; execution has not yet settled into waiting.",
-    );
     expect(described).toContain("Harness runtime: local-cli (local-process, local)");
     expect(described).toContain("Tool execution environment: shared-tools (docker, remote)");
     expect(described).toContain("Execution cleanup evidence: pending");
@@ -1041,6 +848,95 @@ describe("Control Plane API boundary", () => {
       failureMessage,
     );
   });
+
+  /** Opens a pending conversation Task of the Tag, as an inbound message does. */
+  async function openConversationTask(
+    store: DrizzleStore,
+    tag: { readonly id: string; readonly name: string },
+    execution: Record<string, unknown> = {},
+  ) {
+    const at = new Date().toISOString();
+    const account = await store.saveSurfaceAccount({
+      provider: "slack",
+      externalAccountId: randomUUID(),
+      displayName: "Slack",
+      authMethod: "test",
+      credentialId: "test",
+      status: "connected",
+      configuration: {},
+      verifiedAt: at,
+    });
+    const route = await store.addTagRoute({
+      tagId: tag.id,
+      surfaceAccountId: account.id,
+      scope: "channel:work",
+    });
+    const authorization = {
+      version: 5,
+      capturedAt: at,
+      tag: { id: tag.id, name: tag.name },
+      origin: {
+        provider: "slack",
+        surfaceAccountId: account.id,
+        tagRouteId: route.id,
+        scope: "channel:work",
+      },
+      requester: { id: "human", kind: "user" },
+      roles: [],
+      permissionSets: [],
+      resources: [],
+      runtimeActions: [],
+    } as const;
+    const contextPlan = emptyTagContextPlan(at);
+    const id = randomUUID();
+    const event = {
+      eventId: id,
+      logicalEventId: id,
+      provider: "slack",
+      externalAccountId: account.externalAccountId,
+      kind: "message",
+      scope: "channel:work",
+      sessionKey: `conversation-${id}`,
+      actor: { id: "human", kind: "user" },
+      text: "Do the work",
+      occurredAt: at,
+      callback: {
+        provider: "slack",
+        mode: "slack_thread",
+        threadKey: `conversation-${id}`,
+        target: { channelId: "work", threadTs: id },
+      },
+      source: {},
+      metadata: {},
+    } as const;
+    const admitted = await store.admitInboundEvent({
+      surfaceAccountId: account.id,
+      tagRouteId: route.id,
+      tagId: tag.id,
+      authorization,
+      contextPlan,
+      event,
+    });
+    const session = await store.openSession({
+      tagId: tag.id,
+      sessionKey: `conversation-${id}`,
+      origin: {},
+      at,
+    });
+    return store.openTask({
+      inboundEventId: admitted.work.id,
+      tagId: tag.id,
+      sessionId: session.id,
+      execution,
+      actor: event.actor,
+      trigger: {},
+      workspacePlan: { version: 1, status: "none" },
+      sessionHistory: [],
+      authorizationSnapshot: authorization,
+      contextPlan,
+      createdAt: at,
+    });
+  }
 
   async function apiFixture(
     workletApi?: RemoteWorkletServer,

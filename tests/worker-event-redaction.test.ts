@@ -2,7 +2,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { ObjectiveController } from "../packages/control-plane/src/objective-controller.js";
 import { buildTaskResult } from "../packages/control-plane/src/task-results.js";
 import { type DurableInboundEvent, emptyTagContextPlan } from "../packages/core/src/index.js";
 import {
@@ -71,16 +70,7 @@ it.each(["worker", "journal", "custom"] as const)(
           relationship: "changed" as const,
         },
       ],
-      findings: [
-        {
-          id: "F1",
-          severity: "low" as const,
-          status: "open" as const,
-          summary: secret,
-          location: reference,
-        },
-      ],
-      fixedFindings: [{ taskId: secret, findingId: "F1" }],
+      findings: [{ id: "F1", severity: "low" as const, summary: secret, location: reference }],
       artifacts: [{ artifactId: "artifact-1", paths: [selectedPath] }],
     };
     const probeEvents: Exclude<HarnessEvent, { type: "output.message" }>[] = [
@@ -294,50 +284,102 @@ it.each(["worker", "journal", "custom"] as const)(
       await store.connect();
       const owner = await store.createTag({ name: "owner" });
       await store.bindTagWorkerHost(owner.id, "fixture-host");
-      const objective = await store.createObjective({
-        id: "redaction",
-        ownerTagId: owner.id,
-        outcome: "Probe redaction",
+      const at = new Date().toISOString();
+      const account = await store.saveSurfaceAccount({
+        provider: "slack",
+        externalAccountId: "T0PROBE",
+        displayName: "Slack",
+        authMethod: "test",
+        credentialId: "test",
+        status: "connected",
+        configuration: {},
+        verifiedAt: at,
       });
-      const team = await store.createTeam({
-        id: "probe-team",
-        objectiveId: objective.id,
-        name: "Probe",
-        leadTagId: owner.id,
-        memberTagIds: [],
+      const route = await store.addTagRoute({
+        tagId: owner.id,
+        surfaceAccountId: account.id,
+        scope: "channel:probe",
       });
-      const controller = new ObjectiveController(store, undefined);
-      await controller.command("start_objective", { objectiveId: objective.id });
-      await controller.command("assign_task", {
-        objectiveId: objective.id,
-        teamId: team.id,
-        taskId: spec.taskId,
-        assignedTagId: owner.id,
-        instruction: "Probe",
-        acceptanceCriteria: ["No leaks"],
+      const authorization = {
+        version: 5,
+        capturedAt: at,
+        tag: { id: owner.id, name: owner.name },
+        origin: {
+          provider: "slack",
+          surfaceAccountId: account.id,
+          tagRouteId: route.id,
+          scope: "channel:probe",
+        },
+        requester: { id: "human", kind: "user" },
+        roles: [],
+        permissionSets: [],
+        resources: [],
+        runtimeActions: [],
+      } as const;
+      const contextPlan = emptyTagContextPlan(at);
+      const inbound = {
+        eventId: "probe-event",
+        logicalEventId: "probe-event",
+        provider: "slack",
+        externalAccountId: account.externalAccountId,
+        kind: "message",
+        scope: "channel:probe",
+        sessionKey: "conversation",
+        actor: { id: "human", kind: "user" },
+        text: "Probe",
+        occurredAt: at,
+        callback: {
+          provider: "slack",
+          mode: "slack_thread",
+          threadKey: "conversation",
+          target: { channelId: "probe", threadTs: "conversation" },
+        },
+        source: {},
+        metadata: {},
+      } as const;
+      const admitted = await store.admitInboundEvent({
+        surfaceAccountId: account.id,
+        tagRouteId: route.id,
+        tagId: owner.id,
+        authorization,
+        contextPlan,
+        event: inbound,
       });
-      const claimed = await store.claimTaskAssignment({ taskId: spec.taskId, leaseOwner: "probe" });
-      if (!claimed) throw new Error("Task not claimed");
-      const captured = await captureTestArtifact(store, spec.taskId, {
-        path: selectedPath,
+      const session = await store.openSession({
+        tagId: owner.id,
+        sessionKey: "conversation",
+        origin: {},
+        at,
       });
+      const task = await store.openTask({
+        inboundEventId: admitted.work.id,
+        tagId: owner.id,
+        sessionId: session.id,
+        execution: {},
+        actor: inbound.actor,
+        trigger: {},
+        workspacePlan: { version: 1, status: "none" },
+        sessionHistory: [],
+        authorizationSnapshot: authorization,
+        contextPlan,
+        createdAt: at,
+      });
+      const captured = await captureTestArtifact(store, task.id, { path: selectedPath });
       expect.soft(canonical.artifacts[0]?.paths).toEqual([selectedPath]);
-      await store.settleTaskAssignment({
-        taskId: spec.taskId,
-        leaseOwner: "probe",
-        attemptCount: claimed.attemptCount,
+      await store.closeTask({
+        taskId: task.id,
+        status: "completed",
+        endedAt: new Date().toISOString(),
+        responseText: canonical.summary,
         result: {
-          text: canonical.summary,
-          taskResult: {
-            ...canonical,
-            artifacts: canonical.artifacts.map((selection) => ({
-              ...selection,
-              artifactId: captured.id,
-            })),
-          },
+          ...canonical,
+          artifacts: canonical.artifacts.map((selection) => ({
+            ...selection,
+            artifactId: captured.id,
+          })),
         },
       });
-      const stored = (await store.getTaskAssignment(spec.taskId))?.result?.taskResult;
+      const stored = (await store.findTaskById(task.id))?.result;
       expect(stored).toBeDefined();
       expect(stored?.artifacts).toEqual([{ artifactId: captured.id, paths: [selectedPath] }]);
       const storedDiagnostics = { ...stored, artifacts: [] };

@@ -47,11 +47,6 @@ async function request(state, method, path, body) {
     throw new Error(`${method} ${path}: ${response.status} ${JSON.stringify(value)}`);
   return value;
 }
-const coordinate = (state, name, body = {}) =>
-  request(state, "POST", `/api/v1/coordination/${name}`, {
-    objectiveId: state.objectiveId,
-    ...body,
-  });
 async function waitUntil(check, timeout = 60000) {
   const deadline = Date.now() + timeout;
   let last;
@@ -339,7 +334,7 @@ async function bootstrap() {
           name === "claude"
             ? "Deliver a working, independently reviewed CSV utility"
             : "Independently examine work and report reproducible evidence",
-        instructions: `${state.mcp ? "At the beginning of every Task, call both example_stdio and example_http exchange MCP tools with collection docs, action read. Read and report the already committed INTERRUPTED_HANDOFF note; do not publish it again. These are actual MCP calls, not shell/file substitutes. Then proceed with your work. " : ""}Read BRIEF.md. You are the ${role.toLowerCase()}. Use the available coordination tools to inspect durable organization state, choose assignments, exchange evidence through Mailboxes, and record Task acceptance. The shared execution workspace is the place for source code and tests. The two existing execution profiles are shared-claude and shared-codex, revision 1. Do not create new Tags. Keep total Tasks at most eight. Finish a turn after arranging durable wait_for when waiting on a peer; do not poll in shell. Always include the reviewed SHA-256 in review evidence. ${name === "claude" ? "You own the Objective; complete it only after independent review succeeds and relevant Tasks settle." : "Review independently and report your findings to the owning manager; do not claim owner authority."}`,
+        instructions: `${state.mcp ? "At the beginning of every Task, call both example_stdio and example_http exchange MCP tools with collection docs, action read. Read and report the already committed INTERRUPTED_HANDOFF note; do not publish it again. These are actual MCP calls, not shell/file substitutes. Then proceed with your work. " : ""}Read BRIEF.md. You are the ${role.toLowerCase()}. The shared execution workspace is the place for source code and tests. The two existing execution profiles are shared-claude and shared-codex, revision 1. Do not create new Tags. Keep total work Sessions at most eight. Always include the reviewed SHA-256 in review evidence. ${name === "claude" ? "You own the Objective. Do the work in work Sessions: start_session {title, instruction} runs one as your own Tag, and start_session {title, instruction, tag} gives one to the review manager in your Team, who runs it under their own Roles. Each work Session reports back as a turn of this conversation; review that report, then accept it or send fixes with continue_session. Reach the other manager directly with send_message {to, text} and record shared progress with post {text, to?}. End each turn with work running or a question asked; complete the Objective only after independent review succeeds." : "You review work the delivery manager gives you. Report your findings in your final reply, which returns to the Objective that started your Session, and reach the delivery manager directly with send_message {to, text}; do not claim owner authority."}`,
         contextSets: [],
         permissionSets: ["shared-workspace"],
       }),
@@ -379,28 +374,13 @@ async function bootstrap() {
     );
     await save(state);
   }
-  await request(state, "POST", "/api/v1/tag-messaging/objectives", {
-    id: state.objectiveId,
-    ownerTagId: state.tagIds.claude,
-    outcome: [
-      "Build csv-summary.mjs to the specification in BRIEF.md, obtain independent review from the other manager in review.md, and record accepted work and completion through coordination tools.",
-      "Done when:",
-      ...[
-        "The dependency-free CSV summary module passes reproducible tests",
-        "The independent review manager reviews the actual source and records its SHA-256",
-        "Managers exchange work and review evidence through Mailboxes and record Task acceptance",
-      ].map((criterion) => `- ${criterion}`),
-    ].join("\n"),
-    runtimeActions: ["files:write", "commands:execute", "web:fetch"],
-    budgetLimitMinor: 1000,
-  });
-  await coordinate(state, "create_team", {
+  const team = await request(state, "POST", "/api/v1/tag-messaging/teams", {
     id: "shared-review",
     name: "Independent review",
-    leadTagId: state.tagIds.codex,
-    memberTagIds: [state.tagIds.codex],
-    maxConcurrency: 1,
+    memberTagIds: [state.tagIds.claude, state.tagIds.codex],
+    maxConcurrency: 2,
   });
+  state.teamId = team.id;
   for (const [senderTagId, recipientTagId] of [
     [state.tagIds.claude, state.tagIds.codex],
     [state.tagIds.codex, state.tagIds.claude],
@@ -408,13 +388,6 @@ async function bootstrap() {
     await request(state, "PUT", "/api/v1/tag-messaging/grants", {
       senderTagId,
       recipientTagId,
-      messageTypes: [
-        "message",
-        "result.submitted",
-        "progress.updated",
-        "delegation.requested",
-        "clarification.requested",
-      ],
     });
   state.ready = true;
   await save(state);
@@ -469,15 +442,32 @@ async function start() {
   // Persist intent before the non-idempotent request. Recovery inspects the existing Objective.
   state.started = new Date().toISOString();
   await save(state);
-  const result = await coordinate(state, "start_objective", {
-    execution: { profile: { id: "shared-claude", revision: "1" } },
-    maxCostMinor: 0,
+  // Creating the Objective starts its conversation: the owner Tag takes its first turn at once.
+  const result = await request(state, "POST", "/api/v1/tag-messaging/objectives", {
+    id: state.objectiveId,
+    ownerTagId: state.tagIds.claude,
+    teamId: state.teamId,
+    outcome: [
+      "Build csv-summary.mjs to the specification in BRIEF.md, obtain independent review from the review manager in review.md, and complete the Objective with that evidence.",
+      "Done when:",
+      ...[
+        "The dependency-free CSV summary module passes reproducible tests",
+        "The independent review manager reviews the actual source and records its SHA-256",
+        "The managers exchange work and review evidence through their Sessions, Mailboxes, and the Team's Workstream",
+      ].map((criterion) => `- ${criterion}`),
+    ].join("\n"),
+    runtimeActions: ["files:write", "commands:execute", "web:fetch"],
+    budgetLimitMinor: 1000,
   });
   print({ started: true, stateDirectory, objectiveId: state.objectiveId, result });
 }
 async function status() {
   const state = await load();
-  const objective = await coordinate(state, "read_objective");
+  const objective = await request(
+    state,
+    "GET",
+    `/api/v1/tag-messaging/objectives/${encodeURIComponent(state.objectiveId)}`,
+  ).catch(() => undefined);
   const tasks = (await request(state, "GET", "/api/v1/tasks")).items;
   const attempts = await Promise.all(
     tasks.map(async (task) => ({
@@ -511,7 +501,13 @@ async function status() {
     stateDirectory,
     managementUrl: state.managementUrl,
     objective,
-    assignments: objective.tasks,
+    posts: (
+      await request(
+        state,
+        "GET",
+        `/api/v1/tag-messaging/workstreams/${encodeURIComponent(state.teamId ?? "")}/posts`,
+      ).catch(() => ({ items: [] }))
+    ).items,
     tasks,
     attempts,
     messages,

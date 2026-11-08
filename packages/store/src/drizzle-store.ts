@@ -2711,7 +2711,7 @@ export class DrizzleStore implements Store {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       try {
         return await runDialectTransaction(this.#db, this.provider, function* (tx: any) {
-          const sequence = yield* nextTaskEventSequence(tx, t, taskId);
+          const sequence = yield* nextTaskEventSequence(tx, t, taskId, createdAt);
           const [row] = yield tx
             .insert(t)
             .values({
@@ -3936,12 +3936,18 @@ export class DrizzleStore implements Store {
             return status;
           }
           if (!prepared) throw new Error("Surface failure must be prepared before settlement");
+          // The failure source the Worker reported travels with the error onto both outcomes,
+          // so operator views and the coordination inbox can explain the failure.
+          const failureOutcome = {
+            error: payload.error,
+            ...(payload.failureKind === undefined ? {} : { failureKind: payload.failureKind }),
+          };
           if (input.attemptId)
             yield tx
               .update(a)
               .set({
                 status: "failed",
-                outcome: { error: payload.error },
+                outcome: failureOutcome,
                 endedAt: payload.failedAt,
                 updatedAt: payload.failedAt,
               })
@@ -3954,7 +3960,7 @@ export class DrizzleStore implements Store {
             .set({
               status: status === "failed" ? "failed" : "pending",
               ...(status === "failed"
-                ? { outcome: { error: payload.error }, endedAt: payload.failedAt }
+                ? { outcome: failureOutcome, endedAt: payload.failedAt }
                 : {}),
               updatedAt: payload.failedAt,
             })
@@ -4623,6 +4629,7 @@ function normalizeSurfaceFailure(
     ...(input.sessionBlockReason === undefined
       ? {}
       : { sessionBlockReason: required(input.sessionBlockReason, "Session block reason") }),
+    ...(input.failureKind === undefined ? {} : { failureKind: input.failureKind }),
   };
 }
 
