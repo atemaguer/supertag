@@ -205,6 +205,44 @@ describe("Workspace pull request lifecycle", () => {
     });
   });
 
+  it("leaves the Session's pull request open when a later Task that updated it is cancelled", async () => {
+    const result = (pullRequest: typeof PULL_REQUEST) => ({
+      type: "result",
+      payload: { result: { references: [workspacePullRequestReference(pullRequest)] } },
+    });
+    const events: Record<string, { type: string; payload: unknown }[]> = {
+      "task-1": [result(PULL_REQUEST)],
+      "task-2": [result(PULL_REQUEST)],
+      "task-3": [result({ ...PULL_REQUEST, number: 8, url: "https://github.com/acme/app/pull/8" })],
+    };
+    const store = {
+      listSessionTaskIds: async () => ["task-1", "task-2", "task-3"],
+      listTaskEvents: async (taskId: string) => events[taskId] ?? [],
+      appendTaskEvent: async () => undefined,
+    };
+    const closed: number[] = [];
+    const lifecycle = new WorkspacePullRequestLifecycle(store as never, {
+      markReadyForReview: async () => undefined,
+      close: async (target) => {
+        closed.push(target.number);
+      },
+    });
+    const cancelled = (id: string) =>
+      ({
+        id,
+        sessionId: "session-1",
+        status: "cancelled",
+        workspacePlan: { status: "workspace", delivery: "pull-request" },
+        outcome: {},
+      }) as unknown as Task;
+    // Task 2 updated the pull request Task 1 opened: it holds Task 1's work too.
+    await lifecycle.settle(cancelled("task-2"));
+    expect(closed).toEqual([]);
+    // Task 3 opened its own, which only its cancelled work is in.
+    await lifecycle.settle(cancelled("task-3"));
+    expect(closed).toEqual([8]);
+  });
+
   it("closes the pull request with a comment when the work Session is cancelled, once", async () => {
     const f = await fixture();
     const task = await f.assign();

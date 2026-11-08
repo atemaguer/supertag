@@ -120,9 +120,10 @@ A `startedSessions` entry with status `waiting` and `approvals` is a work Sessio
 recorded approval request. Ask the user, then run `supertag approve request ID` or
 `supertag deny request ID --reason TEXT`. Either decision continues the work Session on its own;
 do not message the Tag to resume it. An entry with `notContinued` was not continued, because the
-Tag's permissions changed or the turn's limits are spent; its text says which. The `--output json` command returns at that waiting report,
-and `supertag describe session ID` shows the work Session's next Task. An entry with a `question` waits for the user's answer, which
-your next message in that conversation passes on.
+Tag's permissions changed or too little of its budget pool is left; its text says which. The
+`--output json` command returns at that waiting report, and `supertag describe session ID` shows
+the work Session's next Task. An entry with a `question` waits for the user's answer, which your
+next message in that conversation passes on.
 
 Answer routine implementation questions only when the user's own instructions already settle
 them. Ask the user about scope changes, new commands or configuration, merges, spending increases,

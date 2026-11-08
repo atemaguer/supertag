@@ -209,7 +209,12 @@ it("ends an inbox turn without running it when an earlier turn already took its 
     const inboxSession = await harness.store.findSessionByTagAndKey(responder.id, inboxKey);
     const taskIds = await harness.store.listSessionTaskIds(inboxSession?.id ?? "");
     expect(taskIds).toHaveLength(2);
-    const empty = await harness.store.findTaskById(taskIds[1] ?? "");
+    // The empty turn settles on its own claim, after the turn that took its messages.
+    let empty = await harness.store.findTaskById(taskIds[1] ?? "");
+    for (let wait = 0; empty?.status === "pending" && wait < 100; wait += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      empty = await harness.store.findTaskById(taskIds[1] ?? "");
+    }
     expect(empty?.status).toBe("cancelled");
     expect(
       (await harness.store.listTaskEvents(empty?.id ?? ""))

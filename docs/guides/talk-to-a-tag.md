@@ -193,16 +193,16 @@ the Tag's Mailbox messages is titled `Inbox`. `STATUS` shows the latest Task's s
 - **A work Session commits its edits to its own branch.** When the Tag's Worker Hosts declare a
   Workspace, the work Session edits it and the Worker commits to a branch such as
   `supertag/session/0f3c2a9e`. Your checkout stays on its branch. The report names the branch, and
-  a continued work Session builds on it in the next branch, `supertag/session/0f3c2a9e-2`. With
+  a continued work Session commits on top of it, on the same branch. With
   several Workspaces, the Tag picks one when it starts the work Session. See
   [where a work Session's edits go](../concepts/tasks.md#where-a-work-sessions-edits-go).
 - **At most four work Sessions run at once per conversation.** Later ones wait their turn. One
   message starts at most four, and a conversation holds at most eight unfinished. A message whose
   limits allow no parallel agents (`maxNativeAgents: 0`) starts none.
 - **A message and its work Sessions share one budget.** When the message has token or cost limits,
-  each work Session it starts or continues gets an equal share of what the message hasn't spent or
-  given out yet. Once a share would be under a tenth of the message's limits, the Tag does the work
-  in its own reply. See
+  each work Session it starts or continues may spend what the message and its work Sessions
+  haven't spent yet. Once less than a twentieth of the message's limits is left, the Tag does the
+  work in its own reply. See
   [how work Sessions share a budget](../concepts/tasks.md#how-work-sessions-share-a-budget).
 - **A message you send while the Tag reports a work Session gets its own turn.** It isn't added to
   the report.

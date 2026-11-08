@@ -18,8 +18,7 @@ stay inside that copy.
 ## How it works
 
 Each local Task gets its own git worktree on the branch of its **Session**, one Tag's thread of
-Tasks: `supertag/session/<id>`, then `supertag/session/<id>-2` once a Task of that Session has
-delivered commits; see
+Tasks: `supertag/session/<id>`. Every Task of the Session commits to that one branch; see
 [where a work Session's edits go](../concepts/tasks.md#where-a-work-sessions-edits-go). A worktree is
 a second working directory of the same repository, so nothing is copied. The harness, such as
 Claude Code, Codex, or OpenCode, edits files there directly. A prepared environment provider
@@ -31,7 +30,7 @@ to the Task branch and delivers them as the Workspace's `delivery` says:
 | --- | --- |
 | `branch` (default) | The Task branch stays in your repository. The Task result names the branch and its head commit. |
 | `patch` | The Worker also saves `git format-patch` output of the Task branch as an artifact (a captured output file) on the Task result. The branch stays too. |
-| `pull-request` | The Worker pushes the Task branch to the GitHub `source` and opens one draft pull request per Task. See [Deliver pull requests](#deliver-pull-requests). |
+| `pull-request` | The Worker pushes the Session's branch to the GitHub `source` and opens one draft pull request per Session. See [Deliver pull requests](#deliver-pull-requests). |
 
 The Worker reads patches and pull requests from the Task branch's git ref. On a host with a bare
 clone, a provider can return commits in a git bundle. Before the Worker moves that branch, it
@@ -70,7 +69,7 @@ metadata:
   name: app
 spec:
   source: https://github.com/acme/app.git # optional; hosts without a checkout clone it
-  ref: main                               # base for Task branches
+  ref: main                               # base for Session branches
   setup: npm ci                           # optional; runs on the base commit of each new worktree
   mcp: [sentry]                           # optional; selected servers from .mcp.json
   skills: [docs-conventions]              # optional; Skills from the host checkout
@@ -82,7 +81,7 @@ supertag apply -f workspace.yaml
 ```
 
 Every field is optional for a workspace without mounts. A workspace with mounts needs a git
-`source`. Without `ref`, Task branches start from the checkout's current branch, or
+`source`. Without `ref`, Session branches start from the checkout's current branch, or
 from the source's default branch in a clone, else `main`. `source` must not contain credentials;
 each Worker Host supplies its own. Tags work in Teams: flat lists of member Tags. Together, your Teams of Tags
 make up an **autonomous organization**: Teams may pursue different Objectives but share one
@@ -628,28 +627,36 @@ delivery to get them back to your repository.
 
 ## Build on earlier work in the same Session
 
-A Session's work accumulates on its own branch. When the Tag that started a Session continues it
-with fixes or a follow-up, the next Task starts from the branch that Session's latest delivering
-Task produced and commits to the next numbered branch, such as `supertag/session/0f3c2a9e-2`. The
-Worker does the merge before the harness starts; the harness never runs `git merge`. This matters
-for Codex, whose sandbox cannot write the repository's shared git directory.
+A Session's work accumulates on its one branch. When the Tag that started a Session continues it
+with fixes or a follow-up, the next Task checks out the same branch, such as
+`supertag/session/0f3c2a9e`, at the Session's latest commit, and commits on top of it.
 
-- The new Task measures its own changes from that base, so its patch, changed-file count, and
-  review cover only the new work.
-- Each earlier commit of the Session is an ancestor of the new branch, so
-  `git merge-base --is-ancestor EARLIER_HEAD NEW_HEAD` confirms that a change includes it.
-- A Task that delivered no commits, such as one that only asked a question, leaves the next
-  branch name to the Task that does the work.
-- A merge conflict fails the Task Attempt before its harness starts, with
-  `failureKind: "workspace-setup"`, naming the conflicting paths.
+- The branch holds the whole Session's work, so its patch, changed-file count, and pull request
+  cover every Task of the Session, measured from where the branch left the Workspace `ref`.
+- A Task that delivered no commits, such as one that only asked a question, leaves the branch
+  where it was. When no Task has committed yet, the next one starts the branch from `ref`.
+- Commits added on top of the branch since, such as a reviewer's fixup pushed to the pull
+  request, are part of it: the next Task starts from them. So is a local commit whose push failed.
+- If the branch was rewritten so it no longer contains the Session's last commit, the next Task
+  Attempt fails with `failureKind: "workspace-setup"` rather than start over. Restore the branch,
+  then retry.
+- With `branch` or `patch` delivery the branch stays on the Worker Host that committed it. A later
+  Task placed on another Worker Host that lacks the branch fails the same way; bind the Tag to one
+  Worker Host for that Workspace, or use `pull-request` delivery.
+- If a branch with that name already exists and SuperTag did not create it for this Session, the
+  Worker leaves it alone and gives the Session a name with a short suffix, such as
+  `supertag/session/0f3c2a9e-1a2b3c4d`. The report names it, and later Tasks keep it.
+- Keep the Session's branch checked out nowhere else while the Session works. A Task Attempt whose
+  branch is checked out in your checkout, or in a worktree with uncommitted changes, fails with
+  `failureKind: "workspace-setup"` before its harness starts.
 
 To build on work another Tag did, start a new Session with an instruction that names the branch to
 start from, or merge that branch yourself first. Sessions do not merge each other's branches.
 
 ## Deliver pull requests
 
-With `delivery: pull-request`, each Task gets one GitHub pull request, the way dependency update
-bots work. The Workspace `source` must be a GitHub repository, such as
+With `delivery: pull-request`, each Session gets one GitHub pull request on its branch, the way
+dependency update bots work. The Workspace `source` must be a GitHub repository, such as
 `https://github.com/acme/app.git` or `git@github.com:acme/app.git`. `supertag apply` rejects other
 sources.
 
@@ -663,19 +670,21 @@ spec:
   delivery: pull-request
 ```
 
-The pull request follows the Task:
+The pull request follows the Session's Tasks:
 
 | Task event | Pull request |
 | --- | --- |
 | First Task Attempt that completes with commits | The Worker pushes `supertag/session/<id>` and opens a **draft** into `ref`, or the repository's default branch |
-| A later Task Attempt of the same Task | The Worker pushes to the same branch and updates the same pull request |
-| The Task completes | The Control Plane marks the pull request **ready for review** |
-| The Task is cancelled | The Control Plane comments and **closes** the pull request |
+| A later Task Attempt, or a later Task of the Session | The Worker pushes to the same branch and updates the same pull request |
+| A Task that pushed completes, waiting on nothing | The Control Plane marks the pull request **ready for review** |
+| A Task that pushed is cancelled | The Control Plane comments and **closes** the pull request, unless an earlier Task of the Session delivered to it |
+| A person merges the pull request | The Session's next Task that completes with commits opens a new one |
 | The Objective is cancelled | Each open Task is cancelled, so its pull request closes |
 
 The title comes from the Task Attempt's summary; the body adds its evidence and names the
-Objective and Task. SuperTag never merges. A pull request that someone closes on GitHub stays
-closed; later Task Attempts do not reopen it or push to it.
+Objective and Task. SuperTag never merges. A pull request that someone closes on GitHub without
+merging stays closed; later Task Attempts do not reopen it or push to it. Reopen it on GitHub for
+the Session's later Tasks to update it.
 
 If GitHub is unreachable, returns a server error, or rate-limits the Control Plane, SuperTag
 retries marking the pull request ready or closing it. The first retry comes after 1 minute, and the
@@ -771,7 +780,8 @@ Profiles that run their harness in the local process environment.
   or Modal Workspace environments, which serve a Workspace from its source, not a declared
   checkout; see [Remote Workspace environments](../reference/worker.md#remote-workspace-environments).
 - **GitHub pull requests only.** `pull-request` delivery supports sources on github.com. One pull
-  request covers one Task; grouping several Tasks into one pull request is not available yet.
+  request covers one Session's branch; grouping several Sessions into one pull request is not
+  available yet.
 - **Git commands inside the worktree are not policed yet.** The Worker pushes only the Task branch,
   and only for `pull-request` delivery. It never resets your working tree or changes your current
   branch. The Tag can still run git itself inside its

@@ -1502,42 +1502,42 @@ branch and delivers nothing: no patch, pull request, or branch reference; a retr
 from the base. The Worker never changes the checkout's working
 tree or current branch.
 
-### Workspace dependency merges
+### Session branches
 
-When the Control Plane dispatches a Task Attempt whose Task has accepted dependencies, the
-Workspace plan carries `dependencyBranches`: for each dependency in the same Workspace, its
-`taskId`, Task `branch`, and the full `head` commit its Worker recorded delivering in the accepted
-Task Attempt. A dependency that delivered no commits contributes its own accepted dependencies'
-entries instead. The Worklet protocol refuses any other field, a branch outside `supertag/`, or an
-abbreviated commit.
+Every Task of a Session works on the Session's one branch, `supertag/session/<id>`. The Worker
+records each branch it allocates on the Worker Host, keyed by the Task's Session, with the head it
+last committed. A later Task of the Session, or a retry of a Task, finds that record and checks the
+branch out at its latest commit, so its commits land on top of the earlier ones. It measures
+changes from where the branch forked from the Workspace ref, so its delivery covers the whole
+Session's work. A Task of a Session whose branch held no commits, and so was deleted, starts the
+branch afresh from the Workspace ref.
 
-A new Task branch starts from the Workspace ref commit merged with each entry, in order. The Worker
-does this in the repository's object store with `git merge-tree --write-tree` and
-`git commit-tree`, before it adds the Task worktree, so no harness merges. It needs git 2.38 or
-later. A commit the result already contains is skipped, and a commit that contains the result is
-fast-forwarded to. Each merge commit has two parents, the subject
-`Merge dependency branch <branch>`, and `SuperTag-Dependency` and `SuperTag-Task` trailers. Its
-author and date are fixed, so a later Task Attempt that starts afresh produces the same commit.
-The merge result is the Task's base: delivery measures changes from it, and the trusted commit
-stays the newest commit both it and the Workspace ref contain.
+The latest commit is the newer of the local branch and, in a host-managed clone, the fetched
+branch on the source, as long as it still contains the recorded head. A commit a reviewer pushed
+on top, or a local commit whose push failed, stays on the branch. A branch rewritten without the
+recorded head, or whose local and fetched copies diverged, fails the Task Attempt as a Workspace
+setup failure; restore the branch so it contains that commit, then retry.
 
-With `branch` delivery, a dependency's commit stays in the repository of the Worker Host that ran
-it. A host-managed clone that lacks the commit after its usual fetch fetches it from the source by
-commit id. That works when the commit reached the source under any ref, such as a pull request.
-The fetch changes no ref.
+A branch of the same name that the Session did not record, such as a person's branch or another
+Session's, is never taken. The Session gets a name with a short hash suffix instead, records it,
+and its later Tasks keep that name.
 
-A commit still missing, or a conflicting merge, fails the Task Attempt as a Workspace setup failure
-before any worktree exists. A missing-commit error says what makes the commit available: push the
-dependency's branch to the Workspace source, fetch it into the checkout, or run the Task on the
-Worker Host that ran the dependency. A conflict error names the dependency, its branch and commit,
-and up to 20 conflicting paths. Each path is escaped to one printable line: control characters,
-line separators, bidirectional controls, and backslashes become `\n`- or `\uXXXX`-style escapes.
+The Control Plane carries the branch to each later Task Attempt as `branchPin`, with
+`branchPinHead`, the full commit a Worker last recorded delivering on it: the Task's own, or else
+that of the Session's latest earlier Task that delivered commits in the same Workspace. A Worker
+Host without a local record adopts the branch only when `branchPinHead` is in its history there:
+the fetched branch in a host-managed clone, or the local branch in a checkout that another Worker
+Host also serves. When the branch is not there at all, as when `branch` or `patch` delivery left
+it on another Worker Host, the Task Attempt fails as a Workspace setup failure rather than start
+a branch of the same name afresh. Run the Task on that Worker Host, or use `pull-request`
+delivery so the branch is pushed.
 
-A kept worktree and a review's submitted commit are used as they are, without merging. A later
-Task Attempt that continues the Task branch without a kept worktree redoes the deterministic
-merge from where the branch forked from the Workspace ref. When the branch contains that merge,
-the merge stays the Task's base, so the dependencies' commits never count as the Task's own
-changes. Otherwise the fork point is the base.
+A Session runs one Task at a time. A failed or cancelled Task Attempt keeps its worktree on the
+branch, so before a later Task of the Session checks the branch out, the Worker removes that kept
+worktree; its Worker already committed everything in it. The Task Attempt fails as a Workspace
+setup failure instead when the branch is checked out in a worktree with uncommitted changes, in
+one a running Task Attempt on this Worker Host uses, or in a working tree outside the Worker's
+Task worktrees, such as the declared checkout itself.
 
 ### Workspace clones
 
@@ -1559,20 +1559,25 @@ With `delivery: pull-request`, a completed Task Attempt whose branch has commits
    whose actions include `pull-requests:create`. Without one, it pushes nothing.
 2. It resolves that Surface Account's Worker credential, which must list the repository scope in
    its allowed scopes.
-3. It looks up the Task branch's pull request. A closed one is left closed and nothing is pushed.
+3. It looks up the branch's pull request. A Session has one branch, so its later Tasks update the
+   same pull request. Once a person merges it, the Session's next delivery opens a new one from
+   the branch. One closed without merging is left closed and nothing is pushed; reopen it on
+   GitHub for later Tasks to update it.
 4. Before opening a new pull request, it applies `approval: required` on `pull-requests:create`
    through `request_action_approval`. It waits up to ten minutes; a pending or denied request
    pushes nothing.
-5. It pushes the Task branch, then opens a draft into `ref`, or the default branch, or updates the
+5. It pushes the Session's branch, then opens a draft into `ref`, or the default branch, or updates the
    existing pull request's title and body.
 
 The result is recorded as a `changes` entry and a `references` entry with
 `resourceType: pull-request`. A delivery that did not open or update a pull request adds its
 reason to `unresolved`; the Task Attempt still completes. The Control Plane marks the pull request
-ready for review when the Task is accepted, and closes it with a comment when the Task is cancelled
-or rejected. It uses the Surface Account credential it holds for the Gateway. It retries a step
-that failed because of a network error, a GitHub 5xx response, or a rate limit, with backoff from
-1 minute to 1 hour for at most 10 attempts; a 404 or a permission denial is not retried.
+ready for review when a Task that pushed to it completes without waiting on an answer or an
+approval. It closes it with a comment when such a Task is cancelled, unless an earlier Task of the
+Session also delivered to it: then it holds their work too and stays open. It uses the Surface Account
+credential it holds for the Gateway. It retries a step that failed because of a network error, a
+GitHub 5xx response, or a rate limit, with backoff from 1 minute to 1 hour for at most 10
+attempts; a 404 or a permission denial is not retried.
 
 ### E2B
 

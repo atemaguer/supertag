@@ -425,7 +425,7 @@ metadata:
   name: app          # 1-63 lowercase letters, digits, hyphens, or underscores
 spec:
   source: https://github.com/acme/app.git   # cloned by hosts without a checkout
-  ref: main                                 # base for Task branches
+  ref: main                                 # base for Session branches
   setup: npm ci                             # one shell command
   mounts:
     - volume: datasets                     # a separately configured Volume
@@ -439,12 +439,12 @@ spec:
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `spec.source` | none | Git remote; embedded credentials are rejected. Worker Hosts without a checkout clone it, and `pull-request` delivery pushes to it. |
-| `spec.ref` | The checkout's current branch, or the source's default branch in a clone, else `main` | Base for each new Task branch, and the base of pull requests |
+| `spec.ref` | The checkout's current branch, or the source's default branch in a clone, else `main` | Base for each new Session branch, and the base of pull requests |
 | `spec.setup` | none | One shell command run once in each new Task worktree |
 | `spec.mcp` | none | Selected server names from the trusted checkout's `.mcp.json` |
 | `spec.skills` | none | Selected Skill names from the host checkout |
 | `spec.mounts` | none | Volumes attached at absolute paths outside the checkout. Paths cannot overlap each other, staged files, or protected system locations. Each entry needs `volume` and `path`; `access` defaults to `read-only`, `strategy` to `copy`, and `maxBytes` is an optional positive byte limit. `mount` requests a native mount; `read-write` saves changes to the Volume source. |
-| `spec.delivery` | `branch` | `branch` keeps the Task branch; `patch` also attaches a patch artifact; `pull-request` pushes the branch and opens one GitHub pull request per Task. `pull-request` requires a github.com `source`. |
+| `spec.delivery` | `branch` | `branch` keeps the Session's branch; `patch` also attaches a patch artifact; `pull-request` pushes the branch and opens one GitHub pull request per Session. `pull-request` requires a github.com `source`. |
 
 A field set by an earlier apply that a later manifest omits returns to its default, as the
 [field manager rules](#field-managers-and-apply-sets) describe. `status.workerHosts` lists the

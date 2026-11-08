@@ -758,19 +758,6 @@ export class WorkspaceIntegrityError extends Error {
   override name = "WorkspaceIntegrityError";
 }
 
-/**
- * Merging a dependency's delivered branch conflicted, so the Task Attempt fails before its harness
- * starts. It is a Workspace setup failure; `paths` are the conflicting files.
- */
-export class WorkspaceMergeConflictError extends Error {
-  override name = "WorkspaceSetupError";
-  readonly paths: readonly string[];
-  constructor(paths: readonly string[], message = `Merge conflict in ${paths.join(", ")}`) {
-    super(message);
-    this.paths = paths;
-  }
-}
-
 /** The fields of a Workspace the host repository needs. */
 export interface WorkspaceSourceRef {
   readonly workspace: string;
@@ -1109,25 +1096,6 @@ export class WorkspaceHost {
   }
 
   /**
-   * Fetches one commit by id from a host-managed clone's source, into the object store only: no
-   * ref changes, not even FETCH_HEAD. True when the commit is then present. A source that refuses
-   * to serve the id, or does not hold it, gives false.
-   */
-  async fetchCommit(
-    repository: WorkspaceRepository,
-    commit: string,
-    credential: GitSourceCredential | undefined,
-  ): Promise<boolean> {
-    if (!repository.managed || !/^[0-9a-f]{40,64}$/u.test(commit)) return false;
-    await this.run(
-      repository.path,
-      ["fetch", "--quiet", "--no-tags", "--no-write-fetch-head", REMOTE, commit],
-      credential,
-    ).catch(() => undefined);
-    return this.hasRef(repository.path, `${commit}^{commit}`);
-  }
-
-  /**
    * The commit setup, MCP servers, and Skills are read from: the newest commit both the Task's
    * base and the Workspace ref contain. It is always reachable from the operator-chosen ref, so a
    * base an AI actor produced never becomes the trusted commit.
@@ -1175,94 +1143,6 @@ export class WorkspaceHost {
     await this.run(cwd, ["merge-base", "--is-ancestor", submitted, commit]).catch(() => {
       throw new Error(
         `Review branch at ${commit === "HEAD" ? "its worktree" : commit.slice(0, 12)} does not contain submitted commit ${submitted}; SuperTag refused to reuse it. Remove the branch to start the review afresh.`,
-      );
-    });
-  }
-
-  /**
-   * Merges `theirs` into `ours` in the repository's object store with `git merge-tree`, without a
-   * worktree, index, or ref change, and returns the merge commit. The same inputs give the same
-   * commit, because its identity and date are fixed: the later parent's committer date. A conflict
-   * throws {@link WorkspaceMergeConflictError} naming the conflicting paths.
-   */
-  async mergeCommit(
-    repository: string,
-    ours: string,
-    theirs: string,
-    message: string,
-    author: GitAuthor,
-  ): Promise<string> {
-    const merged = await this.#runStatus(repository, [
-      "merge-tree",
-      "--write-tree",
-      "--no-messages",
-      "--name-only",
-      "-z",
-      ours,
-      theirs,
-    ]);
-    const [tree, ...paths] = merged.stdout.split("\0").filter(Boolean);
-    if (merged.status === 1 && tree !== undefined)
-      throw new WorkspaceMergeConflictError([...new Set(paths)].sort());
-    if (merged.status !== 0 || tree === undefined || !/^[0-9a-f]{40,64}$/u.test(tree))
-      throw new Error(
-        `git merge-tree failed: ${merged.stderr.trim().slice(0, 500) || `exit ${merged.status}`}; merging dependencies needs git 2.38 or later`,
-      );
-    const dates = (await this.run(repository, ["show", "-s", "--format=%ct", ours, theirs]))
-      .split("\n")
-      .map((line) => Number(line.trim()))
-      .filter((value) => Number.isInteger(value));
-    const date = `${Math.max(0, ...dates)} +0000`;
-    const commit = await this.#runStatus(
-      repository,
-      [
-        "-c",
-        `user.name=${author.name}`,
-        "-c",
-        `user.email=${author.email}`,
-        "-c",
-        "commit.gpgsign=false",
-        "commit-tree",
-        tree,
-        "-p",
-        ours,
-        "-p",
-        theirs,
-        "-m",
-        message,
-      ],
-      { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
-    );
-    const id = commit.stdout.trim();
-    if (commit.status !== 0 || !/^[0-9a-f]{40,64}$/u.test(id))
-      throw new Error(`git commit-tree failed: ${commit.stderr.trim().slice(0, 500)}`);
-    return id;
-  }
-
-  /** Runs git like {@link run} and returns its exit status instead of rejecting on one. */
-  async #runStatus(
-    cwd: string,
-    args: readonly string[],
-    environment: Readonly<Record<string, string>> = {},
-  ): Promise<{ readonly status: number; readonly stdout: string; readonly stderr: string }> {
-    const invocation = await this.#invocation(cwd, args);
-    return new Promise((resolvePromise) => {
-      execFile(
-        this.git,
-        invocation.args,
-        {
-          encoding: "utf8",
-          maxBuffer: 64 * 1024 * 1024,
-          env: { ...invocation.env, ...environment },
-        },
-        (error, stdout, stderr) => {
-          const code = (error as { code?: unknown } | null)?.code;
-          resolvePromise({
-            status: error === null ? 0 : typeof code === "number" ? code : -1,
-            stdout,
-            stderr: stderr || (error?.message ?? ""),
-          });
-        },
       );
     });
   }
@@ -1354,6 +1234,14 @@ export class WorkspaceHost {
 
   forgetIntegrity(attemptId: string): void {
     this.#integrity.delete(attemptId);
+  }
+
+  /** True while a Task Attempt on this host, from its start to its finalize, works in `worktree`. */
+  async attemptUses(worktree: string): Promise<boolean> {
+    const target = await realpath(worktree).catch(() => resolve(worktree));
+    for (const { tree } of this.#integrity.values())
+      if ((await realpath(tree.path).catch(() => resolve(tree.path))) === target) return true;
+    return false;
   }
 
   async #integrityPaths(commonDir: string, tree: WorkspaceWorktree): Promise<string[]> {

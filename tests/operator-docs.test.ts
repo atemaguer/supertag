@@ -24,10 +24,11 @@ describe("operator documentation discovery", () => {
   });
   it.each(operatorPages)("guards pending-question replies in %s", (page) => {
     const content = readFileSync(resolve(root, page), "utf8");
+    // A message is the Objective's next turn, so the pages make the operator read the pending
+    // question first and quote it, and send through a file rather than the command line.
     expect(content).toMatch(/quote\s+the\s+question/iu);
-    expect(content).toMatch(/message objective[^\n]*--reply-to MESSAGE_ID[^\n]*--output json/iu);
-    expect(content).toMatch(/unmarked\s+message\s+leaves\s+questions\s+pending/iu);
-    expect(content).toContain("repliedToMessageId");
+    expect(content).toMatch(/pending questions\s+\*{0,2}before\s+(?:sending|messaging)/iu);
+    expect(content).toMatch(/message objective[^\n]* - --output json < "\$message_file"/u);
   });
   it.each(operatorPages)("guards administrator credentials in %s", (page) => {
     const content = readFileSync(resolve(root, page), "utf8");

@@ -204,7 +204,7 @@ An Objective's turn starts work with `start_session {title, instruction, tag?, w
 - Only an Objective's own turn may pass `tag`. A conversation's or an inbox turn's
   `start_session` runs on its own Tag.
 - With one Workspace, the work Session uses it; with several, name one in `workspace`. Edits go
-  to that Session's own branch, and later Tasks of the Session build on it.
+  to that Session's one branch, and each later Task of the Session commits on top of them.
 - At most four work Sessions run at once per Session; later ones wait.
 
 A work Session's result returns to the Objective's conversation as a turn. The owner reads it,
@@ -311,14 +311,22 @@ same pool: the conversation's turns and every work Session's Tasks, however deep
 
 - Each turn is admitted with `maxReportedCost` capped at the limit less the Objective's reported
   spend. A turn that asked for less keeps its own smaller ceiling.
+- Turns still running hold nothing back, so turns running at once can overspend the pool by what
+  they spend in flight.
 - When what remains falls below 5% of the limit, no new turn is admitted. `start_session` and
   `continue_session` are refused, and so is an operator's message; the refusal names the command
   that raises the limit.
+- A finished work Session's report turn is still admitted below 5%, capped at what remains, so
+  the owner hears the result. With nothing left, it stops on its first model call.
 - Reported spend is the sum of the latest provider-reported cost of each Task Attempt in the
   Objective's Sessions, in the Objective's currency. The Control Plane recomputes it from
   persisted usage evidence about every 10 seconds, so it survives restarts.
 - Codex costs are estimates from token usage and model prices, so the total can differ from
   provider billing.
+
+A conversation outside an Objective has a pool of the same shape for each turn: that turn's
+reported token and cost limits, shared with the work Sessions it starts or continues. See
+[how work Sessions share a budget](../concepts/tasks.md#how-work-sessions-share-a-budget).
 
 ### Monetary budgets
 

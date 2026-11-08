@@ -3,10 +3,8 @@ import {
   type InboundSurfaceEvent,
   type InternalTurn,
   mergeApprovalRequirements,
-  OBJECTIVE_POOL_FLOOR_RATIO,
   type Objective,
   restrictApprovalRequirements,
-  type SpendReport,
   type Store,
   type SurfaceAccount,
   type SurfaceTagAuthorizationSnapshot,
@@ -15,7 +13,6 @@ import {
   type TagMessage,
   type TagRoute,
   type Task,
-  type TaskExecutionRequirements,
 } from "@supertag/core";
 import { capturePermissionBundle, resolveTagRoles } from "./roles.js";
 
@@ -123,46 +120,6 @@ export async function objectiveHome(
     if (task?.inboundEventId) return task;
   }
   return undefined;
-}
-
-/** What the Tasks of an Objective's Sessions reported spending, in the Objective's currency. */
-export function objectiveSpentMinor(
-  objective: Pick<Objective, "budgetCurrency">,
-  report: SpendReport,
-): number {
-  const currency = objective.budgetCurrency;
-  if (!currency) return 0;
-  return report.groups.reduce(
-    (total, group) => total + (group.reportedCostByCurrency?.[currency] ?? 0),
-    0,
-  );
-}
-
-/**
- * Execution requirements drawing on the Objective's budget pool. Every turn of the Objective's
- * Sessions, the owner's and each work Session's, may spend at most what the budget has left.
- * Undefined when that is below `OBJECTIVE_POOL_FLOOR_RATIO` of the budget: the pool is spent, and
- * no new turn is admitted. An Objective without a budget in a currency has no pool.
- */
-export function poolExecution(
-  objective: Pick<Objective, "budgetLimitMinor" | "budgetCurrency">,
-  spentMinor: number,
-  base: TaskExecutionRequirements,
-): TaskExecutionRequirements | undefined {
-  const limit = objective.budgetLimitMinor;
-  const currency = objective.budgetCurrency;
-  if (limit === null || limit === undefined || !currency) return base;
-  const remaining = limit - spentMinor;
-  if (remaining < Math.max(1, Math.ceil(limit * OBJECTIVE_POOL_FLOOR_RATIO))) return undefined;
-  const own = base.limits?.maxReportedCost;
-  const amountMinor =
-    own !== undefined && own.currency === currency
-      ? Math.min(own.amountMinor, remaining)
-      : remaining;
-  return {
-    ...base,
-    limits: { ...base.limits, maxReportedCost: { currency, amountMinor } },
-  };
 }
 
 /**

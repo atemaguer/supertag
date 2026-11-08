@@ -437,7 +437,7 @@ describe("Git worktree Workspace resolver", () => {
     git(path, "reset", "--quiet", "--hard", "main");
     await expect(
       resolver().resolve(context({ ...spec, attemptId: "attempt-2" } as TaskAttemptSpec)),
-    ).rejects.toThrow("is not on branch");
+    ).rejects.toThrow(`no longer holds commit ${head.slice(0, 12)}`);
   });
 
   it("does not pass Worker Host credentials to setup", async () => {

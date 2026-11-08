@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   gitRefComponent,
@@ -45,7 +45,6 @@ import {
   type WorkspaceDefinition,
   type WorkspaceEnvironment,
   WorkspaceHost,
-  WorkspaceMergeConflictError,
   type WorkspaceRepository,
   workspaceDefinition,
   workspaceHarnessRequirement,
@@ -66,7 +65,15 @@ export interface GitWorkspaceCheckout {
 
 /** The Task fields Workspace resolution and delivery read. */
 export type WorkspaceTask = Pick<TaskAttemptSpec, "taskId" | "attemptId" | "workspacePlan"> &
-  Partial<Pick<TaskAttemptSpec, "authorization" | "coordination" | "tag" | "input">>;
+  Partial<Pick<TaskAttemptSpec, "authorization" | "coordination" | "tag" | "input" | "session">>;
+
+/**
+ * Who owns a Task's branch: its Session, so every Task of the Session continues one branch, or
+ * the Task itself when it names no Session.
+ */
+function branchOwner(task: WorkspaceTask): string {
+  return task.session === undefined ? task.taskId : `session:${task.session.id}`;
+}
 
 /** Supplies credentials for a Workspace source; undefined means the host's own git setup. */
 export interface WorkspaceSourceCredentials {
@@ -270,27 +277,6 @@ function setupError(error: unknown): Error {
   const failure = error instanceof Error ? error : new Error(String(error));
   failure.name = "WorkspaceSetupError";
   return failure;
-}
-
-/**
- * A path as one line of plain text: control characters, line and paragraph separators, and
- * bidirectional controls become `\n`-style or `\uXXXX` escapes, so a file name can neither start
- * a new line in a failure message nor reorder or hide its text.
- */
-function printablePath(path: string): string {
-  return path.replace(
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: these are the characters escaped.
-    /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069\\]/gu,
-    (character) =>
-      ({ "\n": "\\n", "\r": "\\r", "\t": "\\t", "\\": "\\\\" })[character] ??
-      `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`,
-  );
-}
-
-/** At most 20 paths, each as printable text, then how many more. */
-function listedPaths(paths: readonly string[]): string {
-  const shown = paths.slice(0, 20).map(printablePath).join(", ");
-  return paths.length > 20 ? `${shown}, and ${paths.length - 20} more` : shown;
 }
 
 /** A review may use only the immutable commit pinned by an admitted artifact input. */
@@ -671,6 +657,7 @@ export class WorkspaceEnvironmentResolver implements WorkspaceResolver {
       throw error;
     }
     const task = context.task;
+    const owner = branchOwner(task);
     // Before any clone, prepare, or provider call: every source passes host artifact protection.
     // Copy mounts also pin host credentials; native mounts pin credential-free metadata only.
     const volumes = await this.#pinVolumes(plan, environment, task);
@@ -690,12 +677,14 @@ export class WorkspaceEnvironmentResolver implements WorkspaceResolver {
               })
             : undefined;
           if (repository.managed) await host.fetch(repository, plan, credential);
-          plan = await this.#branches.allocate(repository, plan, task.taskId);
+          plan = await this.#branches.allocate(repository, plan, owner);
+          if (plan.branchPin === plan.branch)
+            await this.#releaseBranch(repository, plan, task.taskId);
           const commits =
             (local
               ? await this.#environment.resume(repository, plan, task.taskId, reviewHead)
-              : undefined) ?? (await this.#locate(repository, plan, task, reviewHead, credential));
-          await this.#branches.record(repository, plan, task.taskId, commits.head);
+              : undefined) ?? (await this.#locate(repository, plan, reviewHead));
+          await this.#branches.record(repository, plan, owner, commits.head);
           const trusted =
             commits.trusted ?? (await host.trusted(repository, plan, reviewHead ?? commits.base));
           const mcp = plan.mcp?.length
@@ -895,21 +884,21 @@ export class WorkspaceEnvironmentResolver implements WorkspaceResolver {
 
   /**
    * The commits a new Task checkout starts from. A clone is fetched first, so a new checkout
-   * starts from current work. A recorded Task branch, on this host or pushed by another, is
-   * continued; a review starts at the submitted commit it reviews and measures its own changes
-   * from it; otherwise the branch starts at the Workspace ref.
+   * starts from current work. A recorded branch, on this host or pushed by another, is continued
+   * from its head, whether by a retry of its Task or by a later Task of its Session, and measures
+   * changes from where it forked from the Workspace ref; a review starts at the submitted commit
+   * it reviews and measures its own changes from it; otherwise the branch starts at the Workspace
+   * ref.
    */
   async #locate(
     repository: WorkspaceRepository,
     plan: TaskNamedWorkspacePlan,
-    task: WorkspaceTask,
     reviewHead: string | undefined,
-    credential: GitSourceCredential | undefined,
   ): Promise<LocalTaskCommits> {
     const host = this.#host;
     const baseRef = await host.baseRef(repository, plan);
     const local = `refs/heads/${plan.branch}`;
-    // Another host may already have pushed this Task's branch; continue from it.
+    // Another host may already have pushed this branch; continue from it.
     const remote = host.remoteBranch(plan.branch);
     const existing = (await host.hasRef(repository.path, local))
       ? local
@@ -922,6 +911,34 @@ export class WorkspaceEnvironmentResolver implements WorkspaceResolver {
         throw setupError(
           `Task branch ${plan.branch} already exists without an ownership record; retry to allocate a new branch`,
         );
+      // Allocation continues the newer copy: commits pushed to the branch since, as a reviewer's
+      // fixup, fast-forward the local one.
+      if (
+        existing === local &&
+        repository.managed &&
+        (await host.hasRef(repository.path, remote))
+      ) {
+        const localHead = await host.commit(
+          repository.path,
+          local,
+          `Task branch ${local} is unreadable`,
+        );
+        const remoteHead = await host.commit(
+          repository.path,
+          remote,
+          `Task branch ${remote} is unreadable`,
+        );
+        if (
+          localHead !== remoteHead &&
+          (await host
+            .run(repository.path, ["merge-base", "--is-ancestor", localHead, remoteHead])
+            .then(
+              () => true,
+              () => false,
+            ))
+        )
+          await host.run(repository.path, ["update-ref", local, remoteHead, localHead]);
+      }
       const head = await host.commit(
         repository.path,
         existing,
@@ -931,8 +948,7 @@ export class WorkspaceEnvironmentResolver implements WorkspaceResolver {
       // the reviewer would see, and could deliver, content other than the change under review.
       if (reviewHead) await host.assertContains(repository.path, reviewHead, head);
       if (reviewHead) return { base: reviewHead, head };
-      const forked = await host.mergeBase(repository.path, head, baseRef).catch(() => head);
-      return { base: await this.#continuedBase(repository, plan, task, forked, head), head };
+      return { base: await host.mergeBase(repository.path, head, baseRef).catch(() => head), head };
     }
     if (reviewHead) {
       const base = await host.commit(
@@ -942,108 +958,58 @@ export class WorkspaceEnvironmentResolver implements WorkspaceResolver {
       );
       return { base, head: base };
     }
-    const ref = await host.commit(
+    const base = await host.commit(
       repository.path,
       baseRef,
       `Workspace ${plan.workspace} base ref ${baseRef} does not name a commit in the ${where}`,
     );
-    // A new Task branch starts from the Workspace ref merged with its dependencies' work, and
-    // measures its own changes from there.
-    const base = await this.#mergeDependencies(repository, plan, task, ref, where, credential);
     return { base, head: base };
   }
 
   /**
-   * The base of a Task branch this Attempt continues without a kept worktree, which would have
-   * recorded it. The branch started from the Workspace ref merged with its dependencies, and that
-   * merge is deterministic, so redoing it from where the branch forked from the ref gives the same
-   * commit. When the result is not in the branch, as when the branch was made otherwise, the fork
-   * point is the base. The redone merge fetches nothing and fails nothing.
+   * Frees a branch this Attempt continues from a worktree an earlier Task of its Session kept, as
+   * a failed Attempt does. That Task has ended, since a Session runs one Task at a time, and its
+   * Worker committed everything the Attempt left, so the worktree holds nothing the branch lacks.
+   * A worktree with uncommitted changes, one a running Attempt on this host uses, or a checkout
+   * outside this host's Task worktrees keeps the branch, and this Attempt is refused.
    */
-  async #continuedBase(
+  async #releaseBranch(
     repository: WorkspaceRepository,
     plan: TaskNamedWorkspacePlan,
-    task: WorkspaceTask,
-    forked: string,
-    head: string,
-  ): Promise<string> {
-    if (!plan.dependencyBranches?.length) return forked;
-    const merged = await this.#mergeDependencies(repository, plan, task, forked).catch(
-      () => forked,
-    );
-    if (merged === forked) return forked;
-    return this.#host.run(repository.path, ["merge-base", "--is-ancestor", merged, head]).then(
-      () => merged,
-      () => forked,
-    );
-  }
-
-  /**
-   * Merges each accepted dependency's delivered commit into `base`, in order, in the repository's
-   * object store: before any worktree exists, so no harness ever has to merge. A commit already
-   * contained is skipped and one that contains the result is fast-forwarded to. A conflict fails
-   * the Attempt before its harness starts, naming the conflicting paths.
-   *
-   * A dependency commit missing from a host-managed clone, as when another Worker Host delivered
-   * it, is fetched from the source by id when `where` is given. Still missing, it fails the
-   * Attempt with what would make it available.
-   */
-  async #mergeDependencies(
-    repository: WorkspaceRepository,
-    plan: TaskNamedWorkspacePlan,
-    task: WorkspaceTask,
-    base: string,
-    where?: string,
-    credential?: GitSourceCredential,
-  ): Promise<string> {
+    taskId: string,
+  ): Promise<void> {
     const host = this.#host;
-    const contains = (ancestor: string, commit: string) =>
-      host.run(repository.path, ["merge-base", "--is-ancestor", ancestor, commit]).then(
-        () => true,
-        () => false,
-      );
-    let merged = base;
-    for (const dependency of plan.dependencyBranches ?? []) {
-      const present = (await host.hasRef(repository.path, `${dependency.head}^{commit}`))
-        ? true
-        : where !== undefined && (await host.fetchCommit(repository, dependency.head, credential));
-      if (!present) {
-        const delivered = `Dependency ${dependency.taskId} delivered commit ${dependency.head.slice(0, 12)} on branch ${dependency.branch}`;
-        const stays = `with branch delivery it stays in the repository of the Worker Host that ran ${dependency.taskId}`;
-        throw setupError(
-          repository.managed
-            ? `${delivered}, which is not in the ${where} and could not be fetched from the source: ${stays}. Push branch ${dependency.branch} from that host to the Workspace source, or run this Task on that Worker Host, then retry; SuperTag started no harness`
-            : `${delivered}, which is not in the ${where}: ${stays}. Fetch branch ${dependency.branch} into this checkout, or run this Task on that Worker Host, then retry; SuperTag started no harness`,
-        );
-      }
-      const head = await host.commit(
-        repository.path,
-        dependency.head,
-        `Dependency commit ${dependency.head.slice(0, 12)} is unreadable`,
-      );
-      if (await contains(head, merged)) continue;
-      if (await contains(merged, head)) {
-        merged = head;
-        continue;
-      }
-      merged = await host
-        .mergeCommit(
-          repository.path,
-          merged,
-          head,
-          `Merge dependency branch ${dependency.branch}\n\nSuperTag-Dependency: ${dependency.taskId}\nSuperTag-Task: ${task.taskId}`,
-          this.#author,
-        )
-        .catch((error: unknown) => {
-          if (error instanceof WorkspaceMergeConflictError)
-            throw new WorkspaceMergeConflictError(
-              error.paths,
-              `Merging dependency ${dependency.taskId} (branch ${dependency.branch} at ${head.slice(0, 12)}) into this Task's base conflicts in ${listedPaths(error.paths)}; SuperTag started no harness`,
-            );
-          throw setupError(error);
-        });
+    const real = (path: string) => realpath(path).catch(() => resolve(path));
+    const path = this.worktreePath(plan.workspace, taskId);
+    const worktrees = await real(dirname(path));
+    const own = join(worktrees, basename(path));
+    // A worktree directory removed by hand leaves stale registration behind.
+    await host.run(repository.path, ["worktree", "prune"]);
+    const listed = await host.run(repository.path, ["worktree", "list", "--porcelain", "-z"]);
+    const holders: string[] = [];
+    let listedPath: string | undefined;
+    for (const field of listed.split("\0")) {
+      if (field.startsWith("worktree ")) listedPath = field.slice("worktree ".length);
+      else if (field === `branch refs/heads/${plan.branch}` && listedPath !== undefined)
+        holders.push(listedPath);
     }
-    return merged;
+    for (const holder of holders) {
+      const tree = await real(holder);
+      if (tree === own) continue;
+      if (dirname(tree) !== worktrees)
+        throw setupError(
+          `Branch ${plan.branch} is checked out in another working tree of Workspace ${plan.workspace}; switch that working tree to another branch, then retry`,
+        );
+      if (await host.attemptUses(tree))
+        throw setupError(
+          `Branch ${plan.branch} is in use by another running Task Attempt; retry once it ends`,
+        );
+      if ((await host.run(tree, ["status", "--porcelain", "--untracked-files=all"])).trim())
+        throw setupError(
+          `Branch ${plan.branch} is checked out in an earlier Task's worktree with uncommitted changes; commit or remove them, then retry`,
+        );
+      await host.discardWorktree(repository, tree);
+    }
   }
 
   /**
@@ -1092,7 +1058,7 @@ export class WorkspaceEnvironmentResolver implements WorkspaceResolver {
     if (requested === undefined) return undefined;
     const repository = await this.#host.repository(requested, false).catch(() => undefined);
     if (repository === undefined) return undefined;
-    const branch = await this.#branches.recorded(repository, task.taskId);
+    const branch = await this.#branches.recorded(repository, branchOwner(task));
     if (branch === undefined) return undefined;
     const plan = { ...requested, branch };
     const remote = this.#remoteByAttempt.get(task.attemptId);
@@ -1160,7 +1126,7 @@ export class WorkspaceEnvironmentResolver implements WorkspaceResolver {
       await this.#host.exclusive(plan.workspace, () =>
         this.#branches.advance(
           remote.repository,
-          task.taskId,
+          branchOwner(task),
           plan.branch,
           finalized.head,
           finalized.head === remote.checkout.base,
@@ -1222,7 +1188,7 @@ export class WorkspaceEnvironmentResolver implements WorkspaceResolver {
       worktreeRemoved = true;
     }
     await host.exclusive(plan.workspace, () =>
-      this.#branches.advance(repository, task.taskId, plan.branch, finalized.head, empty),
+      this.#branches.advance(repository, branchOwner(task), plan.branch, finalized.head, empty),
     );
     return { ...delivery, worktreeRemoved, branchRemoved };
   }

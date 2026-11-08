@@ -18,9 +18,7 @@ import { SessionContinuity } from "../packages/control-plane/src/session-continu
 import { tagPortfolio } from "../packages/control-plane/src/tag-sessions.ts";
 import {
   internalTurnMessages,
-  resumedWorkSessionExecution,
   workSessionEvent,
-  workSessionExecution,
   workSessionsPerTurn,
 } from "../packages/control-plane/src/work-sessions.ts";
 import {
@@ -253,6 +251,23 @@ function scriptedWorklet(maxConcurrency = 10) {
           text = "Asked in my reply instead.";
         } else text = `Answered: ${message}`;
       } else if (kind === "work") {
+        // "SPEND:N" in the request reports N tokens and N/20 cents of spend first.
+        const spend = /SPEND:(\d+)/u.exec(request?.text ?? "");
+        if (spend) {
+          const tokens = Number(spend[1]);
+          yield {
+            ...identity,
+            type: "usage.updated",
+            usage: {
+              inputTokens: tokens,
+              outputTokens: 0,
+              cachedInputTokens: 0,
+              totalTokens: tokens,
+              complete: false,
+              reportedCost: { amountMinor: Math.floor(tokens / 20), currency: "USD" },
+            },
+          };
+        }
         // A work Session may not start or continue more work, even when it asks.
         await call("start_session", { title: "nested", instruction: "Go deeper" });
         await call("continue_session", { sessionId: spec.session.id, message: "again" });
@@ -436,6 +451,60 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         if (!runtime) throw new Error("not started");
         return new ControlPlaneClient({ url: runtime.url, token });
       };
+
+      /**
+       * Returns a function that admits a turn of the "plan" conversation with reported limits, as
+       * an embedder's surface would, and waits for its reply and its work Sessions' reports.
+       */
+      const limitedTurns = async () => {
+        const first = await send("hello");
+        const startingTask = await store.findTaskById(first.taskId);
+        const starting = await store.findInboundEventById(startingTask?.inboundEventId ?? "");
+        if (!startingTask || !starting) throw new Error("missing conversation turn");
+        return async (text: string, maxReportedTokens: number, amountMinor: number) => {
+          const at = new Date().toISOString();
+          const eventId = `limited:${text}`;
+          const execution = {
+            limits: { maxReportedTokens, maxReportedCost: { amountMinor, currency: "USD" } },
+          };
+          const admitted = await store.admitInboundEvent({
+            surfaceAccountId: starting.surfaceAccountId,
+            tagRouteId: starting.tagRouteId,
+            tagId: starting.tagId,
+            authorization: starting.authorization,
+            contextPlan: starting.contextPlan,
+            execution,
+            event: { ...starting.event, eventId, logicalEventId: eventId, text, occurredAt: at },
+          });
+          const task = await store.openTask({
+            inboundEventId: admitted.work.id,
+            tagId: starting.tagId,
+            sessionId: startingTask.sessionId,
+            execution,
+            actor: starting.event.actor,
+            trigger: startingTask.trigger,
+            requestText: text,
+            workspacePlan: startingTask.workspacePlan,
+            sessionHistory: [],
+            authorizationSnapshot: starting.authorization,
+            contextPlan: starting.contextPlan,
+            createdAt: at,
+          });
+          let record: TagMessageRecord | undefined;
+          await vi.waitFor(
+            async () => {
+              record = await read(task.id);
+              expect(record.status).toBe("replied");
+              for (const session of record.startedSessions ?? [])
+                expect(session.reportStatus).toBe("replied");
+            },
+            { timeout: 20_000, interval: 50 },
+          );
+          return record as TagMessageRecord;
+        };
+      };
+      const limitsOf = async (taskId: string | undefined) =>
+        (await store.findTaskById(taskId ?? ""))?.execution.limits;
 
       beforeEach(async () => {
         directory = await mkdtemp(join(tmpdir(), "supertag-work-sessions-"));
@@ -838,96 +907,102 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         expect(script.seen.filter((entry) => entry.kind === "report")).toHaveLength(1);
       });
 
-      it("counts a turn's work Sessions against the turn's own token and cost limits", async () => {
-        const first = await send("hello");
-        const startingTask = await store.findTaskById(first.taskId);
-        const starting = await store.findInboundEventById(startingTask?.inboundEventId ?? "");
-        if (!startingTask || !starting) throw new Error("missing conversation turn");
-        /** Admits a conversation turn with reported limits, as an embedder's surface would. */
-        const turn = async (text: string, maxReportedTokens: number, amountMinor: number) => {
-          const at = new Date().toISOString();
-          const eventId = `limited:${text}`;
-          const execution = {
-            limits: { maxReportedTokens, maxReportedCost: { amountMinor, currency: "USD" } },
-          };
-          const admitted = await store.admitInboundEvent({
-            surfaceAccountId: starting.surfaceAccountId,
-            tagRouteId: starting.tagRouteId,
-            tagId: starting.tagId,
-            authorization: starting.authorization,
-            contextPlan: starting.contextPlan,
-            execution,
-            event: { ...starting.event, eventId, logicalEventId: eventId, text, occurredAt: at },
-          });
-          const task = await store.openTask({
-            inboundEventId: admitted.work.id,
-            tagId: starting.tagId,
-            sessionId: startingTask.sessionId,
-            execution,
-            actor: starting.event.actor,
-            trigger: startingTask.trigger,
-            requestText: text,
-            workspacePlan: startingTask.workspacePlan,
-            sessionHistory: [],
-            authorizationSnapshot: starting.authorization,
-            contextPlan: starting.contextPlan,
-            createdAt: at,
-          });
-          let record: TagMessageRecord | undefined;
-          await vi.waitFor(
-            async () => {
-              record = await read(task.id);
-              expect(record.status).toBe("replied");
-              for (const session of record.startedSessions ?? [])
-                expect(session.reportStatus).toBe("replied");
-            },
-            { timeout: 20_000, interval: 50 },
-          );
-          return record as TagMessageRecord;
-        };
-        const limitsOf = async (taskId: string | undefined) =>
-          (await store.findTaskById(taskId ?? ""))?.execution.limits;
-
-        // A turn that already spent 6,000 of 10,000 tokens and 300 of 500 cents leaves the rest
-        // to the four work Tasks it may still admit, a quarter each, and each admission draws
-        // from what is left.
+      it("draws a turn's work Sessions from the turn's own token and cost limits", async () => {
+        const turn = await limitedTurns();
+        // A turn that already spent 6,000 of 10,000 tokens and 300 of 500 cents: each work Task it
+        // starts may spend what is left. The first, still unreported, holds nothing back from the
+        // second.
         const limited = await turn("spend:6000|work:a|b", 10_000, 500);
         const [a, b] = limited.startedSessions ?? [];
         expect(await limitsOf(a?.taskId)).toEqual({
-          maxReportedTokens: 1_000,
-          maxReportedCost: { amountMinor: 50, currency: "USD" },
+          maxReportedTokens: 4_000,
+          maxReportedCost: { amountMinor: 200, currency: "USD" },
         });
         expect(await limitsOf(b?.taskId)).toEqual({
-          maxReportedTokens: 1_000,
-          maxReportedCost: { amountMinor: 50, currency: "USD" },
+          maxReportedTokens: 4_000,
+          maxReportedCost: { amountMinor: 200, currency: "USD" },
         });
-        // Report turns run outside the budget, under the turn's full limits: a resumed
+        // Report turns run outside the pool, under the turn's full limits: a resumed
         // conversation pays for its whole context on its first model call.
         expect(await limitsOf(a?.reportTaskId)).toEqual({
           maxReportedTokens: 10_000,
           maxReportedCost: { amountMinor: 500, currency: "USD" },
         });
 
-        // Too little left: a 250-token share is above zero but under a tenth of the limit, so
-        // the turn starts nothing and does the work itself.
-        const spent = await turn("spend:9000|work:c", 10_000, 1_000);
+        // Too little left: 400 tokens is under the floor of 5% of the limit, so the turn starts
+        // nothing and does the work itself.
+        const spent = await turn("spend:9600|work:c", 10_000, 1_000);
         expect(spent.startedSessions ?? []).toEqual([]);
         expect(callsOf(spent.taskId)[0]?.result["isError"]).toBe(true);
         expect(callText(callsOf(spent.taskId)[0])).toContain(
-          "already spent or hold too much of its token and cost limits",
+          "already spent too much of its token and cost limits",
         );
 
         // continue_session draws from the continuing turn, not the turn that started the work.
         const continued = await turn(`spend:1000|continue:${a?.id}|Answer: go on`, 2_000, 400);
         expect(callsOf(continued.taskId)[0]?.result["isError"]).toBeUndefined();
         expect(await limitsOf(continued.startedSessions?.[0]?.taskId)).toEqual({
-          maxReportedTokens: 250,
-          maxReportedCost: { amountMinor: 87, currency: "USD" },
+          maxReportedTokens: 1_000,
+          maxReportedCost: { amountMinor: 350, currency: "USD" },
         });
 
         // A turn without reported limits passes nothing on.
         const unlimited = await send("work:d");
         expect(await limitsOf(unlimited.startedSessions?.[0]?.taskId)).toBeUndefined();
+      });
+
+      it("continues a work Session after approval on what its turn's pool has left", async () => {
+        await requireMergeApproval("github-work-sessions-pool");
+        const turn = await limitedTurns();
+        // Both work Tasks may spend all the turn left; the probe then reports 3,000 tokens.
+        const record = await turn("spend:2000|work:APPROVE merge|SPEND:3000 probe", 10_000, 500);
+        const [waiting, probe] = record.startedSessions ?? [];
+        if (!waiting?.taskId || !runtime) throw new Error("missing work Session");
+        for (const session of [waiting, probe])
+          expect(await limitsOf(session?.taskId)).toEqual({
+            maxReportedTokens: 8_000,
+            maxReportedCost: { amountMinor: 400, currency: "USD" },
+          });
+        const [requestId] = ((await store.findTaskById(waiting.taskId))?.outcome?.["approvals"] ??
+          []) as string[];
+        await runApprovalCommand({ url: runtime.url, token: ADMIN }, ["approve", requestId ?? ""]);
+        let resumedId = "";
+        await vi.waitFor(
+          async () => {
+            const ids = await store.listSessionTaskIds(waiting.id);
+            expect(ids).toHaveLength(2);
+            resumedId = ids[1] ?? "";
+          },
+          { timeout: 10_000 },
+        );
+        // The continuing Task draws on the same pool: the limit less the turn's and the probe's
+        // spend.
+        expect(await limitsOf(resumedId)).toEqual({
+          maxReportedTokens: 5_000,
+          maxReportedCost: { amountMinor: 250, currency: "USD" },
+        });
+      });
+
+      it("does not continue a work Session after approval once its turn's pool is spent", async () => {
+        await requireMergeApproval("github-work-sessions-pool-spent");
+        const turn = await limitedTurns();
+        // The probe leaves 300 of 10,000 tokens, under the floor.
+        const record = await turn("spend:2000|work:APPROVE merge|SPEND:7700 probe", 10_000, 500);
+        const [waiting] = record.startedSessions ?? [];
+        if (!waiting?.taskId || !runtime) throw new Error("missing work Session");
+        const [requestId] = ((await store.findTaskById(waiting.taskId))?.outcome?.["approvals"] ??
+          []) as string[];
+        await runApprovalCommand({ url: runtime.url, token: ADMIN }, ["approve", requestId ?? ""]);
+        await vi.waitFor(
+          async () =>
+            expect(
+              (await store.listTaskEvents(waiting.taskId ?? "")).find(
+                (event) => event.type === "session.not-continued",
+              )?.payload,
+            ).toMatchObject({ requestIds: [requestId], reason: "budget" }),
+          { timeout: 10_000 },
+        );
+        expect(await store.listSessionTaskIds(waiting.id)).toEqual([waiting.taskId]);
       });
 
       it("lets one turn start at most four work Sessions", async () => {
@@ -1786,105 +1861,10 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
 }
 
 describe("work Session limits and report text", () => {
-  it("gives each work Task what is left of the starting turn's reported limits", () => {
+  it("bounds how many work Sessions one turn starts by its native agents", () => {
     expect(workSessionsPerTurn({})).toBe(4);
     expect(workSessionsPerTurn({ limits: { maxNativeAgents: 2 } })).toBe(2);
     expect(workSessionsPerTurn({ limits: { maxNativeAgents: 0 } })).toBe(0);
-    const execution = {
-      harness: "codex",
-      limits: {
-        maxReportedTokens: 10_000,
-        maxReportedCost: { amountMinor: 250, currency: "USD" },
-      },
-    };
-    const none = { tokens: 0, costMinor: 0 };
-    expect(workSessionExecution(execution, none, [])).toEqual({
-      harness: "codex",
-      limits: { maxReportedTokens: 2_500, maxReportedCost: { amountMinor: 62, currency: "USD" } },
-    });
-    // However much the turn spent, its spend and its work Tasks' allowances never exceed its
-    // limits.
-    for (const spent of [
-      none,
-      { tokens: 3_000, costMinor: 40 },
-      { tokens: 6_000, costMinor: 100 },
-    ]) {
-      const admitted: (typeof execution)[] = [];
-      for (;;) {
-        const next = workSessionExecution(execution, spent, admitted);
-        if (next === undefined || admitted.length === 4) break;
-        admitted.push(next as typeof execution);
-      }
-      expect(admitted.length).toBeGreaterThan(0);
-      expect(
-        spent.tokens + admitted.reduce((sum, task) => sum + task.limits.maxReportedTokens, 0),
-      ).toBeLessThanOrEqual(10_000);
-      expect(
-        spent.costMinor +
-          admitted.reduce((sum, task) => sum + task.limits.maxReportedCost.amountMinor, 0),
-      ).toBeLessThanOrEqual(250);
-    }
-    // A turn that spent half its limits gives only the remainder.
-    expect(workSessionExecution(execution, { tokens: 5_000, costMinor: 50 }, [])).toMatchObject({
-      limits: { maxReportedTokens: 1_250, maxReportedCost: { amountMinor: 50 } },
-    });
-    // A share at exactly a tenth of the limit is still given.
-    expect(workSessionExecution(execution, { tokens: 6_000, costMinor: 150 }, [])).toMatchObject({
-      limits: { maxReportedTokens: 1_000, maxReportedCost: { amountMinor: 25 } },
-    });
-    // Nothing left, or a share above zero but under a tenth of the limit, in tokens or in cost:
-    // no work Task.
-    expect(workSessionExecution(execution, { tokens: 9_997, costMinor: 0 }, [])).toBeUndefined();
-    expect(workSessionExecution(execution, { tokens: 0, costMinor: 247 }, [])).toBeUndefined();
-    expect(workSessionExecution(execution, { tokens: 9_000, costMinor: 0 }, [])).toBeUndefined();
-    expect(workSessionExecution(execution, { tokens: 0, costMinor: 160 }, [])).toBeUndefined();
-    expect(
-      workSessionExecution({ limits: { maxNativeAgents: 2, maxReportedTokens: 9 } }, none, [])
-        ?.limits,
-    ).toEqual({ maxNativeAgents: 2, maxReportedTokens: 4 });
-    // No reported limits: unchanged, whatever the turn spent.
-    expect(workSessionExecution({ harness: "codex" }, { tokens: 99, costMinor: 9 }, [])).toEqual({
-      harness: "codex",
-    });
-    expect(
-      workSessionExecution({ limits: { maxNativeAgents: 1 } }, { tokens: 99, costMinor: 9 }, []),
-    ).toEqual({ limits: { maxNativeAgents: 1 } });
-  });
-
-  it("continues a work Session after a decision on what is left of its Task's share", () => {
-    const turn = {
-      harness: "codex",
-      limits: { maxReportedTokens: 10_000, maxReportedCost: { amountMinor: 250, currency: "USD" } },
-    };
-    const share = {
-      harness: "codex",
-      limits: { maxReportedTokens: 2_500, maxReportedCost: { amountMinor: 62, currency: "USD" } },
-    };
-    // The waiting Task's allowance less what it reported: never a fresh share.
-    expect(resumedWorkSessionExecution(turn, share, { tokens: 1_000, costMinor: 20 })).toEqual({
-      harness: "codex",
-      limits: { maxReportedTokens: 1_500, maxReportedCost: { amountMinor: 42, currency: "USD" } },
-    });
-    // A chain of decisions spends at most the share.
-    let execution: typeof share | undefined = share;
-    let spentInChain = 0;
-    for (let step = 0; step < 10 && execution; step += 1) {
-      spentInChain += 500;
-      execution = resumedWorkSessionExecution(turn, execution, { tokens: 500, costMinor: 0 }) as
-        | typeof share
-        | undefined;
-    }
-    expect(execution).toBeUndefined();
-    expect(spentInChain).toBeLessThanOrEqual(2_500);
-    // Under a tenth of the turn's limit left, in tokens or in cost: it does not continue.
-    expect(
-      resumedWorkSessionExecution(turn, share, { tokens: 1_600, costMinor: 0 }),
-    ).toBeUndefined();
-    expect(resumedWorkSessionExecution(turn, share, { tokens: 0, costMinor: 40 })).toBeUndefined();
-    // No reported limits: unchanged.
-    expect(
-      resumedWorkSessionExecution({}, { harness: "codex" }, { tokens: 9, costMinor: 9 }),
-    ).toEqual({ harness: "codex" });
   });
 
   it("keeps the result out of the system message and cannot close its data block", () => {

@@ -15,25 +15,14 @@ describe("work Session branch names", () => {
     );
   });
 
-  it("numbers the next branch after the one a Task of the Session already delivered onto", () => {
-    const session = "3f2a91c4-0b77-4e51-9f0e-2b6c1d8a4e13";
-    const first = workSessionBranch(session);
-    const second = workSessionBranch(session, first);
-    expect(second).toBe(`${first}-2`);
-    expect(workSessionBranch(session, second)).toBe(`${first}-3`);
-  });
-
   it.each(["", "----", "@{bad}~^:?*[\\", "日本語", ".lock", "a".repeat(200), randomUUID()])(
     "produces a bounded git-safe name from %j",
     (sessionId) => {
-      for (const branch of [workSessionBranch(sessionId), workSessionBranch(sessionId, "x-9")]) {
-        expect(branch.length).toBeLessThanOrEqual(120);
-        expect(isValidGitRef(branch)).toBe(true);
-        expect(() =>
-          execFileSync("git", ["check-ref-format", `refs/heads/${branch}`]),
-        ).not.toThrow();
-        expect(() => execFileSync("git", ["check-ref-format", "--branch", branch])).not.toThrow();
-      }
+      const branch = workSessionBranch(sessionId);
+      expect(branch.length).toBeLessThanOrEqual(120);
+      expect(isValidGitRef(branch)).toBe(true);
+      expect(() => execFileSync("git", ["check-ref-format", `refs/heads/${branch}`])).not.toThrow();
+      expect(() => execFileSync("git", ["check-ref-format", "--branch", branch])).not.toThrow();
     },
   );
 });

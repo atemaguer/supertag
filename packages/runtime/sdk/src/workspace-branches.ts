@@ -6,7 +6,18 @@ import type { WorkspaceHost, WorkspaceRepository } from "./workspace-environment
 
 type Ownership = { branch: string; head?: string };
 
-/** Host-private ownership survives worktree removal. Call allocation under the repository lock. */
+/** A Workspace setup failure the Task Attempt reports as it is. */
+function refusal(message: string): Error {
+  const error = new Error(message);
+  error.name = "WorkspaceSetupError";
+  return error;
+}
+
+/**
+ * Host-private branch ownership, keyed by owner: a Task's Session, so every Task of the Session
+ * continues one branch, or the Task itself when it names no Session. Ownership survives worktree
+ * removal. Call allocation under the repository lock.
+ */
 export class WorkspaceBranches {
   constructor(private readonly host: WorkspaceHost) {}
 
@@ -65,18 +76,28 @@ export class WorkspaceBranches {
     ) as Record<string, Ownership>;
   }
 
-  async recorded(repository: WorkspaceRepository, taskId: string): Promise<string | undefined> {
+  async recorded(repository: WorkspaceRepository, owner: string): Promise<string | undefined> {
     const records = await this.#read(repository);
-    return Object.hasOwn(records, taskId) ? records[taskId]?.branch : undefined;
+    return Object.hasOwn(records, owner) ? records[owner]?.branch : undefined;
   }
 
+  /**
+   * The plan's branch for `owner`. The branch it recorded is continued, pinned, from the newer of
+   * its local and origin copies while that copy still holds the head it recorded: a commit a
+   * reviewer pushed, or a local commit whose push failed, stays on it. A recorded branch rewritten
+   * without that head, or whose copies diverged, is refused rather than replaced. Without a
+   * record, a branch the Control Plane pinned at a head another host recorded is adopted when this
+   * repository holds that head on it, and refused when the branch is not here at all. Otherwise
+   * the owner gets a name no other branch or owner holds, starting afresh: a branch of the same
+   * name that `owner` did not record, such as a person's or another Session's, is never taken.
+   */
   async allocate(
     repository: WorkspaceRepository,
     plan: TaskNamedWorkspacePlan,
-    taskId: string,
+    owner: string,
   ): Promise<TaskNamedWorkspacePlan> {
     const records = await this.#read(repository);
-    const recorded = Object.hasOwn(records, taskId) ? records[taskId] : undefined;
+    const recorded = Object.hasOwn(records, owner) ? records[owner] : undefined;
     const refs = (
       await this.host.run(repository.path, [
         "for-each-ref",
@@ -92,91 +113,58 @@ export class WorkspaceBranches {
     if (recorded) {
       if (
         Object.entries(records).some(
-          ([id, owner]) =>
-            id !== taskId && owner.branch.toLowerCase() === recorded.branch.toLowerCase(),
+          ([id, other]) =>
+            id !== owner && other.branch.toLowerCase() === recorded.branch.toLowerCase(),
         )
       )
         throw new Error("Recorded Task branch conflicts with another branch");
-      const local = `refs/heads/${recorded.branch}`;
-      const remote = `refs/remotes/origin/${recorded.branch}`;
-      const localHead = (await this.host.hasRef(repository.path, local))
-        ? await this.host.commit(repository.path, local, "Recorded Task branch is unreadable")
-        : undefined;
-      const remoteHead = (await this.host.hasRef(repository.path, remote))
-        ? await this.host.commit(
-            repository.path,
-            remote,
-            "Recorded remote Task branch is unreadable",
-          )
-        : undefined;
-      if (recorded.head === "deleted" && localHead === undefined && remoteHead === undefined) {
+      // A deleted name is free again only while no branch, local or on origin, has taken it.
+      if (recorded.head === "deleted" && !refs.includes(recorded.branch)) {
         const unpinned = { ...plan, branch: recorded.branch };
         delete unpinned.branchPin;
         return unpinned;
       }
-      if (
-        recorded.head &&
-        recorded.head !== "deleted" &&
-        (localHead === undefined || localHead === recorded.head) &&
-        (remoteHead === undefined || remoteHead === recorded.head)
-      ) {
-        if (localHead === undefined)
+      if (recorded.head && recorded.head !== "deleted") {
+        const copies = await this.#copies(repository, recorded.branch);
+        if (copies.length === 0) {
           await this.host.run(repository.path, [
             "update-ref",
-            local,
+            `refs/heads/${recorded.branch}`,
             recorded.head,
             "0".repeat(recorded.head.length),
           ]);
-        return { ...plan, branch: recorded.branch, branchPin: recorded.branch };
+          return { ...plan, branch: recorded.branch, branchPin: recorded.branch };
+        }
+        if (await this.#continues(repository, copies, recorded.head))
+          return { ...plan, branch: recorded.branch, branchPin: recorded.branch };
+        throw refusal(
+          `Branch ${recorded.branch} no longer holds commit ${recorded.head.slice(0, 12)}, the last one this Worker Host recorded on it, or its local and origin copies diverged; restore the branch so it contains that commit, then retry`,
+        );
       }
     }
-    // A new Worker Host has no local record. The Control Plane pins the branch from this Task's
-    // stored workspace input. The Worker's recorded head must remain in the fetched branch's
-    // history; a reused name or replaced remote ref is not ownership evidence.
+    // A new Worker Host has no local record. The Control Plane pins the branch a Worker recorded
+    // for this Task, or for its Session's earlier Tasks. The recorded head must remain in the
+    // branch's history here; a reused name or replaced ref is not ownership evidence.
     if (
       recorded === undefined &&
-      repository.managed &&
       plan.branchPin === plan.branch &&
       typeof plan.branchPinHead === "string" &&
-      /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u.test(plan.branchPinHead) &&
-      refs.filter((ref) => ref.toLowerCase() === plan.branch.toLowerCase()).length === 1 &&
-      !(await this.host.hasRef(repository.path, `refs/heads/${plan.branch}`)) &&
-      (await this.host.hasRef(repository.path, `refs/remotes/origin/${plan.branch}`)) &&
-      (await this.host
-        .run(repository.path, [
-          "merge-base",
-          "--is-ancestor",
-          plan.branchPinHead,
-          `refs/remotes/origin/${plan.branch}`,
-        ])
-        .then(
-          () => true,
-          () => false,
-        ))
-    )
-      return plan;
-    // A name whose earlier owners each held no commits, so their branches were deleted, holds no
-    // work: a work Session's next Task may take it over. A retry of such an owner starts afresh
-    // from the base anyway, on a newly allocated name.
-    const requested = plan.branch.toLowerCase();
-    const emptyOwners = Object.entries(records).filter(
-      ([id, owner]) => id !== taskId && owner.branch.toLowerCase() === requested,
-    );
-    if (
-      recorded === undefined &&
-      emptyOwners.length > 0 &&
-      emptyOwners.every(([, owner]) => owner.head === "deleted") &&
-      !refs.some((ref) => ref.toLowerCase() === requested)
+      /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u.test(plan.branchPinHead)
     ) {
-      // Rewrite the stored records as read, so other entries keep their stored form.
-      const file = await this.#file(repository);
-      const stored = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
-      for (const [id] of emptyOwners) {
-        delete records[id];
-        delete stored[id];
-      }
-      await writeFile(`${file}.tmp`, JSON.stringify(stored), { mode: 0o600 });
-      await rename(`${file}.tmp`, file);
+      const named = refs.filter((ref) => ref.toLowerCase() === plan.branch.toLowerCase());
+      if (named.length === 0)
+        throw refusal(
+          `Branch ${plan.branch} holds commit ${plan.branchPinHead.slice(0, 12)} on another Worker Host and was not pushed to this Workspace's source; run this Task on that Worker Host, or deliver the Workspace by pull request so its branch is pushed`,
+        );
+      const copies =
+        named.every((ref) => ref === plan.branch) &&
+        !Object.values(records).some(
+          (other) => other.branch.toLowerCase() === plan.branch.toLowerCase(),
+        )
+          ? await this.#copies(repository, plan.branch)
+          : [];
+      if (copies.length > 0 && (await this.#continues(repository, copies, plan.branchPinHead)))
+        return plan;
     }
     const occupied = new Set(
       [...refs, ...Object.values(records).map((owner) => owner.branch)].map((branch) =>
@@ -185,7 +173,7 @@ export class WorkspaceBranches {
     );
     let branch = plan.branch;
     const suffix = createHash("sha256")
-      .update(`${plan.branch}\n${taskId}`)
+      .update(`${plan.branch}\n${owner}`)
       .digest("hex")
       .slice(0, 8);
     for (let index = 0; occupied.has(branch.toLowerCase()); index += 1)
@@ -195,11 +183,47 @@ export class WorkspaceBranches {
     return unpinned;
   }
 
+  /**
+   * The heads of a branch's local copy and, in a managed clone, its origin copy. A declared
+   * checkout's origin copies are whatever its owner last fetched, so they are not read.
+   */
+  async #copies(repository: WorkspaceRepository, branch: string): Promise<readonly string[]> {
+    const copies: string[] = [];
+    for (const ref of [
+      `refs/heads/${branch}`,
+      ...(repository.managed ? [`refs/remotes/origin/${branch}`] : []),
+    ])
+      if (await this.host.hasRef(repository.path, ref))
+        copies.push(await this.host.commit(repository.path, ref, `Branch ${ref} is unreadable`));
+    return copies;
+  }
+
+  /** Whether the newer of a branch's copies holds `head`, when one copy holds the other. */
+  async #continues(
+    repository: WorkspaceRepository,
+    copies: readonly string[],
+    head: string,
+  ): Promise<boolean> {
+    const contains = (ancestor: string, commit: string) =>
+      ancestor === commit
+        ? Promise.resolve(true)
+        : this.host.run(repository.path, ["merge-base", "--is-ancestor", ancestor, commit]).then(
+            () => true,
+            () => false,
+          );
+    let newest = copies[0] as string;
+    for (const copy of copies.slice(1)) {
+      if (await contains(newest, copy)) newest = copy;
+      else if (!(await contains(copy, newest))) return false;
+    }
+    return contains(head, newest);
+  }
+
   /** Create the ref before releasing allocation's lock, so another host root also sees it. */
   async record(
     repository: WorkspaceRepository,
     plan: TaskNamedWorkspacePlan,
-    taskId: string,
+    owner: string,
     head: string,
   ): Promise<void> {
     const ref = `refs/heads/${plan.branch}`;
@@ -212,7 +236,7 @@ export class WorkspaceBranches {
     await mkdir(dirname(file), { recursive: true, mode: 0o700 });
     await writeFile(
       `${file}.tmp`,
-      JSON.stringify({ ...records, [taskId]: { branch: plan.branch, head } }),
+      JSON.stringify({ ...records, [owner]: { branch: plan.branch, head } }),
       {
         mode: 0o600,
       },
@@ -222,13 +246,13 @@ export class WorkspaceBranches {
 
   async advance(
     repository: WorkspaceRepository,
-    taskId: string,
+    owner: string,
     branch: string,
     head: string,
     allowMissing = false,
   ): Promise<void> {
     const records = await this.#read(repository);
-    if (records[taskId]?.branch !== branch) throw new Error("Task branch ownership changed");
+    if (records[owner]?.branch !== branch) throw new Error("Task branch ownership changed");
     const ref = `refs/heads/${branch}`;
     const present = await this.host.hasRef(repository.path, ref);
     if (!present && !allowMissing)
@@ -241,7 +265,7 @@ export class WorkspaceBranches {
     const file = await this.#file(repository);
     await writeFile(
       `${file}.tmp`,
-      JSON.stringify({ ...records, [taskId]: { branch, head: present ? head : "deleted" } }),
+      JSON.stringify({ ...records, [owner]: { branch, head: present ? head : "deleted" } }),
       {
         mode: 0o600,
       },

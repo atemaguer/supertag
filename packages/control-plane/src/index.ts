@@ -28,12 +28,17 @@ import {
   workSessionApprovalNotice,
   workSessionNotContinuedNotice,
 } from "./approvals.js";
-import { isSchedulingEvent } from "./capacity-wait.js";
 import {
-  latestSessionDelivery,
-  sessionWorkspaceBranches,
-  workerEvents,
-} from "./dependency-branches.js";
+  type BudgetPool,
+  limitsSpend,
+  objectivePool,
+  type PoolSpend,
+  poolExecution,
+  poolRemainderExecution,
+  poolSpend,
+  turnPool,
+} from "./budget-pool.js";
+import { isSchedulingEvent } from "./capacity-wait.js";
 import { DispatchErrorReporter } from "./dispatch-errors.js";
 import {
   idleAction,
@@ -42,11 +47,10 @@ import {
   objectiveAuthorization,
   objectiveBlockedText,
   objectiveHome,
-  objectiveSpentMinor,
   objectiveTurnText,
-  poolExecution,
 } from "./objective-sessions.js";
 import { repositoryReferences, unambiguousRepositoryReference } from "./repository-references.js";
+import { sessionBranchPin, workerEvents } from "./session-branch.js";
 import type {
   DelegatedStartRequest,
   MessageObjectiveInput,
@@ -63,15 +67,12 @@ import {
   continuedWorkSessionEvent,
   type InternalTurnContext,
   internalTurnMessages,
-  reportedTurnSpend,
-  resumedWorkSessionExecution,
   samePermissions,
   sessionReportEvent,
   WORK_SESSION_ASKED_EVENT,
   workSessionBranch,
   workSessionDelivery,
   workSessionEvent,
-  workSessionExecution,
   workSessionsPerTurn,
   workSessionWorkspace,
 } from "./work-sessions.js";
@@ -2448,13 +2449,12 @@ export class ControlPlane {
       task.workspacePlan.status === "workspace" && task.workspacePlan.mcp?.length
         ? workspaceMcpPin(await this.#store.listTaskAttempts(task.id))
         : undefined;
-    // A continued work Session Task starts from the work Session's earlier commits.
-    const sessionBranches =
-      task.workspacePlan.status === "workspace" &&
-      internal?.kind === "work_session" &&
-      internal.continued === true
-        ? await sessionWorkspaceBranches(this.#store, task, task.workspacePlan)
-        : [];
+    // A Task without a branch of its own yet continues the one its Session's earlier Tasks
+    // committed to, so a Worker Host without that branch adopts it rather than starting afresh.
+    const sessionPin =
+      task.workspacePlan.status === "workspace" && branchPin === undefined
+        ? await sessionBranchPin(this.#store, task, task.workspacePlan)
+        : undefined;
     return {
       version: 2,
       taskId: task.id,
@@ -2520,8 +2520,14 @@ export class ControlPlane {
               ...(skillPins === undefined ? {} : { skillPins }),
               ...(branchPin === undefined ? {} : { branch: branchPin, branchPin }),
               ...(branchPinHead === undefined ? {} : { branchPinHead }),
+              ...(sessionPin === undefined
+                ? {}
+                : {
+                    branch: sessionPin.branch,
+                    branchPin: sessionPin.branch,
+                    branchPinHead: sessionPin.head,
+                  }),
               ...(mcpPin === undefined ? {} : { mcpPin }),
-              ...(sessionBranches.length === 0 ? {} : { dependencyBranches: sessionBranches }),
             }
           : task.workspacePlan,
       workerProfile: attempt.workerProfile,
@@ -2684,8 +2690,8 @@ export class ControlPlane {
       | { readonly continue: ContinueSessionRequest },
   ): Promise<StartSessionResult> {
     const verb = "start" in request ? "start" : "continue";
-    // Work Sessions are parallel agents of the starting turn: a turn starts at most its share,
-    // none when its maxNativeAgents is 0, and they spend from its reported token and cost limits.
+    // Work Sessions are parallel agents of the starting turn: a turn starts a bounded number,
+    // none when its maxNativeAgents is 0, and they draw on its reported token and cost limits.
     // A retired Tag admits no new work, even work a running turn asks for.
     if ((await this.#store.findTagById(conversation.tagId))?.status !== "active")
       throw new TagMessagingError(
@@ -2796,7 +2802,7 @@ export class ControlPlane {
         : undefined;
     const execution =
       objective !== undefined
-        ? await this.#poolExecution(
+        ? await this.#objectivePoolExecution(
             objective,
             delegate !== undefined
               ? await this.#tagExecution(delegate)
@@ -2804,13 +2810,17 @@ export class ControlPlane {
                 ? delegatedWork.execution
                 : starting.execution,
           )
-        : await this.#turnShareExecution(conversation, starting, sessions, startedBy);
+        : await this.#turnPoolExecution(
+            conversation,
+            turnPool(starting.execution),
+            starting.execution,
+          );
     if (execution === undefined)
       throw new TagMessagingError(
         409,
         objective !== undefined
           ? `Objective ${objective.id} has too little of its budget left to ${verb} a work Session; finish the work in this turn, or ask an operator to raise the budget`
-          : `This turn and the work Sessions it started already spent or hold too much of its token and cost limits to ${verb} a useful work Session; finish the work in this turn`,
+          : `This turn and the work Sessions it started or continued already spent too much of its token and cost limits to ${verb} a useful work Session; finish the work in this turn`,
       );
     const running = sessions.filter((session) => session.task?.status === "running").length;
     // A new work Session edits one of the Session's Workspaces on its own branch; a continued
@@ -2943,33 +2953,45 @@ export class ControlPlane {
     return tag;
   }
 
-  /** A conversation turn's work Task share of the turn's reported token and cost limits. */
-  async #turnShareExecution(
-    conversation: Task,
-    starting: DurableInboundEvent,
-    sessions: readonly WorkSessionSummary[],
-    startedBy: (session: WorkSessionSummary) => string | undefined,
+  /**
+   * `base`, drawing on a conversation turn's pool: `pool`, the turn's reported limits, less what
+   * the turn and every work Session Task it started or continued reported. Undefined once too
+   * little of it is left.
+   */
+  async #turnPoolExecution(
+    turn: Task,
+    pool: BudgetPool,
+    base: TaskExecutionRequirements,
   ): Promise<TaskExecutionRequirements | undefined> {
-    // The turn and every work Task it admits share the turn's reported limits.
-    const limits = starting.execution.limits;
-    if (limits?.maxReportedTokens === undefined && limits?.maxReportedCost === undefined)
-      return starting.execution;
-    return workSessionExecution(
-      starting.execution,
-      reportedTurnSpend(
-        await this.#store.readSpend({ taskIds: [conversation.id] }),
-        starting.execution,
-      ),
-      (
-        await Promise.all(
-          sessions
-            .filter((session) => startedBy(session) === conversation.id)
-            .map((session) =>
-              session.task === undefined ? undefined : this.#store.findTaskById(session.task.id),
-            ),
-        )
-      ).flatMap((task) => (task === undefined ? [] : [task.execution])),
+    if (!limitsSpend(pool)) return base;
+    const taskIds = [turn.id, ...(await this.#workTasksStartedBy(turn))];
+    return poolExecution(pool, poolSpend(pool, await this.#store.readSpend({ taskIds })), base);
+  }
+
+  /**
+   * The work Session Tasks a turn started or continued, those that continued them after an
+   * approval decision included: every Task whose admitted event names the turn as its starter.
+   */
+  async #workTasksStartedBy(turn: Task): Promise<readonly string[]> {
+    const since = Date.parse(turn.createdAt);
+    const found = await Promise.all(
+      (await this.#store.listWorkSessions(turn.sessionId)).map(async (session) => {
+        const ids: string[] = [];
+        // Newest first: a Task older than the turn was not started by it.
+        for (const id of (await this.#store.listSessionTaskIds(session.sessionId)).toReversed()) {
+          const task = await this.#store.findTaskById(id);
+          if (!task || Date.parse(task.createdAt) < since) break;
+          const work = task.inboundEventId
+            ? await this.#store.findInboundEventById(task.inboundEventId)
+            : undefined;
+          const internal = work?.event.internal;
+          if (internal?.kind === "work_session" && internal.startedByTaskId === turn.id)
+            ids.push(id);
+        }
+        return ids;
+      }),
     );
+    return found.flat();
   }
 
   /** The Tag's default execution requirements, for a turn nobody chose a model or effort for. */
@@ -2982,22 +3004,23 @@ export class ControlPlane {
     }).execution;
   }
 
-  /** `base`, capped at what the Objective's budget has left; undefined once the pool is spent. */
-  async #poolExecution(
+  /** An Objective's budget pool and what its Tasks reported spending from it. */
+  async #objectivePoolDraw(
+    objective: Objective,
+  ): Promise<{ readonly pool: BudgetPool; readonly spent: PoolSpend }> {
+    const pool = objectivePool(objective);
+    if (!limitsSpend(pool)) return { pool, spent: { tokens: 0, costMinor: 0 } };
+    const report = await this.#store.readSpend({ objectiveIds: [objective.id] });
+    return { pool, spent: poolSpend(pool, report) };
+  }
+
+  /** `base`, drawing on the Objective's budget pool; undefined once too little of it is left. */
+  async #objectivePoolExecution(
     objective: Objective,
     base: TaskExecutionRequirements,
   ): Promise<TaskExecutionRequirements | undefined> {
-    if (
-      objective.budgetLimitMinor === null ||
-      objective.budgetLimitMinor === undefined ||
-      !objective.budgetCurrency
-    )
-      return base;
-    return poolExecution(
-      objective,
-      objectiveSpentMinor(objective, await this.#store.readSpend({ objectiveIds: [objective.id] })),
-      base,
-    );
+    const { pool, spent } = await this.#objectivePoolDraw(objective);
+    return poolExecution(pool, spent, base);
   }
 
   /**
@@ -3200,27 +3223,22 @@ export class ControlPlane {
         task.status === "completed" && Array.isArray(task.outcome?.["approvals"])
           ? task.outcome["approvals"].filter((id): id is string => typeof id === "string")
           : [];
-      const basedOn =
-        task.workspacePlan.status === "workspace" && internal.continued === true
-          ? (await sessionWorkspaceBranches(this.#store, task, task.workspacePlan)).at(-1)?.branch
-          : undefined;
       const delivery =
         task.workspacePlan.status === "workspace"
-          ? workSessionDelivery(
-              task,
-              workerEvents(await this.#store.listTaskEvents(task.id)),
-              basedOn,
-            )
+          ? workSessionDelivery(task, workerEvents(await this.#store.listTaskEvents(task.id)))
           : undefined;
-      // A report to an Objective draws from its budget pool like every turn of the Objective.
+      // A conversation's report runs under the starting turn's limits: it starts no work, and a
+      // resumed conversation pays for its whole context on its first model call. A report to an
+      // Objective draws from its budget pool like every turn of the Objective; it is owed, so it
+      // gets what is left even below the floor.
       const objectiveId = objectiveIdOfSessionKey(starting.event.sessionKey);
-      const execution =
-        objectiveId === undefined
-          ? starting.execution
-          : ((await this.#poolExecution(
-              await this.#store.getObjective(objectiveId),
-              starting.execution,
-            )) ?? starting.execution);
+      let execution = starting.execution;
+      if (objectiveId !== undefined) {
+        const { pool, spent } = await this.#objectivePoolDraw(
+          await this.#store.getObjective(objectiveId),
+        );
+        execution = poolRemainderExecution(pool, spent, starting.execution);
+      }
       const admission = await this.#store.admitInboundEvent({
         surfaceAccountId: starting.surfaceAccountId,
         tagRouteId: starting.tagRouteId,
@@ -3268,8 +3286,8 @@ export class ControlPlane {
    * them is decided. An Objective's own Session gets the decisions as its next turn. A work
    * Session's next Task carries them as its message, under the waiting Task's admitted
    * authorization only while its Tag's current permissions are the same, as `continue_session`
-   * requires, and drawing from the waiting Task's share of the starting turn's budget or from the
-   * Objective's pool. When either check fails, the starting Session is told, and the Task waits on
+   * requires, and drawing on the pool of the turn that started or continued the work Session, or
+   * on the Objective's. When either check fails, the starting Session is told, and the Task waits on
    * nothing. The event id is keyed by the waiting Task, so the decision listener, the report path
    * and the sweep continue it once between them. Runs in the waiting Task's turn, after its report
    * admission.
@@ -3394,17 +3412,15 @@ export class ControlPlane {
         await stop("permissions");
         return;
       }
+      // The continuing Task draws on the pool of the turn that started or continued the work.
       const execution =
         objective === undefined
-          ? resumedWorkSessionExecution(
-              startingTask.execution,
+          ? await this.#turnPoolExecution(
+              startingTask,
+              turnPool(startingTask.execution),
               work.execution,
-              reportedTurnSpend(
-                await this.#store.readSpend({ taskIds: [task.id] }),
-                work.execution,
-              ),
             )
-          : await this.#poolExecution(objective, work.execution);
+          : await this.#objectivePoolExecution(objective, work.execution);
       if (execution === undefined) {
         await stop("budget");
         return;
@@ -3581,7 +3597,10 @@ export class ControlPlane {
       },
     });
     const roles = await resolveTagRoles(this.#store, owner.id);
-    const execution = await this.#poolExecution(objective, await this.#tagExecution(owner, roles));
+    const execution = await this.#objectivePoolExecution(
+      objective,
+      await this.#tagExecution(owner, roles),
+    );
     if (execution === undefined)
       throw new TagMessagingError(
         409,
@@ -4164,7 +4183,7 @@ export class ControlPlane {
 
   /**
    * A work Session Task's plan for its Workspace: the plan it was opened with, or a new one on
-   * the work Session's next branch, after the branch of the Session's latest Task.
+   * the work Session's branch, which every Task of the Session continues.
    */
   async #workSessionPlan(
     work: DurableInboundEvent,
@@ -4180,18 +4199,7 @@ export class ControlPlane {
         409,
         `Workspace ${name} no longer exists; start a new work Session`,
       );
-    // Branches are numbered after the latest Task that delivered commits, so one that only
-    // asked the person leaves the next name to the Task that does the work. The number follows
-    // the branch that Task requested, not a hash-suffixed name its Worker fell back to.
-    const delivered = await latestSessionDelivery(this.#store, tasks, { workspace: name });
-    const deliveredPlan = tasks.find((task) => task.id === delivered?.taskId)?.workspacePlan;
-    return namedWorkspacePlan(
-      workspace,
-      workSessionBranch(
-        sessionId,
-        deliveredPlan?.status === "workspace" ? deliveredPlan.branch : delivered?.branch,
-      ),
-    );
+    return namedWorkspacePlan(workspace, workSessionBranch(sessionId));
   }
 
   async #openTaskAttempt(

@@ -82,13 +82,17 @@ export const WORK_SESSION_INSTRUCTION_MAX = 8_000;
 /** Work Sessions of one conversation that run at once; later ones queue. */
 export const WORK_SESSION_MAX_RUNNING = 4;
 /**
- * Work Sessions one conversation turn may start or continue. Each draws an equal share of what
- * the turn's reported token and cost limits have left (see `workSessionExecution`). A turn whose
- * `maxNativeAgents` is lower starts at most that many; 0 starts none.
+ * Work Sessions one turn may start or continue. A turn whose `maxNativeAgents` is lower starts at
+ * most that many; 0 starts none.
  */
 export const WORK_SESSION_MAX_PER_TURN = 4;
 /** Unfinished (running or queued) work Sessions one conversation may hold. */
 export const WORK_SESSION_MAX_OPEN = 8;
+/**
+ * A root Session's Tasks draw on one budget pool: an Objective's budget, or a conversation turn's
+ * reported limits. Below this share of the pool's limit left, no Task is admitted to draw on it.
+ */
+export const POOL_FLOOR_RATIO = 0.05;
 /** The bounded result text a report turn carries back to the conversation. */
 export const WORK_SESSION_REPORT_RESULT_MAX = 4_000;
 /** The question a work Session Task may put to the person with `ask`. */

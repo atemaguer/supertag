@@ -41,15 +41,17 @@ interface PullRequestState {
   readonly url: string;
   readonly state: string;
   readonly draft: boolean;
+  readonly merged: boolean;
 }
 
 /**
  * Pull-request delivery on GitHub, modeled on dependency update bots: one pull request per
- * Task on its `supertag/<objective>/<task>` branch, opened as a draft after the first completed
- * Task Attempt with commits and updated by later Attempts. The Tag must hold
- * `pull-requests:create` on the repository, pushes and API calls use the host's separate
- * Git credential, and an `approval: required` rule on the action holds the first push until
- * a person decides. SuperTag never merges.
+ * Session on its `supertag/session/<id>` branch, opened as a draft after the first completed
+ * Task Attempt with commits and updated by later Attempts and later Tasks of the Session. Once a
+ * person merges it, the Session's next delivery opens a new one; one a person closed unmerged is
+ * neither reopened nor pushed to. The Tag must hold `pull-requests:create` on the repository,
+ * pushes and API calls use the host's separate Git credential, and an `approval: required` rule
+ * on the action holds each opening push until a person decides. SuperTag never merges.
  */
 export class GitHubPullRequestPublisher implements WorkspacePullRequestPublisher {
   readonly #credentials: GitHubWorkerCredentialProvider;
@@ -91,7 +93,9 @@ export class GitHubPullRequestPublisher implements WorkspacePullRequestPublisher
       };
     const credential = await this.#credentials.resolve(resource.surfaceAccountId);
     const api = new GitHubPullRequestApi(credential, this.#request, input.signal);
-    const existing = await api.find(repository, plan.branch);
+    // A merged pull request is done: the Session's later work opens a new one from its branch.
+    const found = await api.find(repository, plan.branch);
+    const existing = found?.merged === true ? undefined : found;
     const pullRequestOf = (state: PullRequestState): WorkspacePullRequest => ({
       surfaceAccountId: resource.surfaceAccountId,
       repository: repository.fullName,
@@ -102,7 +106,7 @@ export class GitHubPullRequestPublisher implements WorkspacePullRequestPublisher
       return {
         status: "closed",
         pullRequest: pullRequestOf(existing),
-        message: `Pull request ${repository.fullName}#${existing.number} was closed on GitHub; SuperTag did not reopen it or push branch ${plan.branch}`,
+        message: `Pull request ${repository.fullName}#${existing.number} was closed on GitHub; SuperTag did not reopen it or push branch ${plan.branch}. Reopen it for this Session's later Tasks to update it`,
       };
     const baseBranch = plan.ref ?? (await api.defaultBranch(repository));
     if (existing === undefined) {
@@ -328,6 +332,7 @@ function pullRequestState(value: unknown): PullRequestState {
     url,
     state: typeof state === "string" ? state : "open",
     draft: value["draft"] === true,
+    merged: typeof value["merged_at"] === "string",
   };
 }
 
@@ -380,7 +385,7 @@ export function pullRequestBody(
       `Branch: \`${code(input.plan.branch)}\` into \`${code(base)}\``,
     ].join(" · "),
     "",
-    "Opened by SuperTag as a draft; it becomes ready for review when the Task is accepted. SuperTag never merges pull requests.",
+    "Opened by SuperTag as a draft; it becomes ready for review when a Task completes its work. SuperTag never merges pull requests.",
   ].join("\n");
   const summary = bounded(cleanText(input.summary ?? "").trim(), 8_000);
   const sections = [

@@ -180,12 +180,11 @@ CLI conversation has no location, so it uses the Workspaces that the Tag's Worke
 With one Workspace the work Session uses it. With several, the Tag names one when it starts the
 work Session. With none, the work Session runs without a Workspace, like its conversation.
 
-A work Session numbers its branches by the Tasks that commit. The first Task that commits gets
-`supertag/session/0f3c2a9e`, even when an earlier Task only asked the person and committed
-nothing. Each later Task gets the next branch, such as `supertag/session/0f3c2a9e-2`, and starts
-from the work Session's latest commits, so it sees the earlier edits. The report turn names the
-branch, so the Tag can tell the person where the changes are. The conversation turns themselves
-keep their own workspace. Editing still needs `files:write`.
+A work Session has one branch, and every Task of it works there. A continued Task picks up the
+branch at the work Session's latest commit, sees the earlier edits, and commits on top of them. A
+Task that only asked the person commits nothing and leaves the branch as it was. The report turn
+names the branch, so the Tag can tell the person where the changes are. The conversation turns
+themselves keep their own workspace. Editing still needs `files:write`.
 
 A work Session with a Workspace also gets the MCP servers the Workspace provides. Its conversation's
 turns use only MCP servers that the Tag's Worker Hosts declare; see
@@ -193,25 +192,30 @@ turns use only MCP servers that the Tag's Worker Hosts declare; see
 
 ### How work Sessions share a budget
 
-A conversation Task and the work Tasks it starts or continues share one budget: that Task's
-reported token and cost limits. Each new work Task gets an equal share of what is left. What is
-left is the limit minus what the conversation Task reported so far, and minus the allowances of
-the work Tasks it already started. For example, a Task limited to 10,000 tokens that reported
-6,000 gives its first work Task 1,000, a quarter of the 4,000 left. A work Task needs at least a
-tenth of the limit, in tokens and in cost, to do anything before it runs out. When its share is
-smaller, SuperTag refuses `start_session` and `continue_session`, and the Tag does the work in its
-own turn. `continue_session` draws from the turn that continues the work Session, not the one that
-started it. A Task without reported limits passes none on. Report turns sit outside the
-budget and run under the starting Task's full limits, so a result reaches the person even when the
-budget is spent.
+A conversation Task and the work Tasks it starts or continues share one budget pool: that Task's
+reported token and cost limits. Each new work Task may spend what the pool has left: the limit
+minus what the conversation Task and every work Task drawing on the pool reported so far. Work
+Tasks still running hold nothing back, so work Tasks running at once can overspend the pool by
+what they spend in flight. For example, a Task limited to 10,000 tokens that reported 6,000 gives
+its first work Task 4,000, and its second 4,000 too while the first has reported nothing. Once
+the first reports 3,000, a third gets 1,000.
+
+When less than a twentieth of the limit is left, in tokens or in cost, SuperTag refuses
+`start_session` and `continue_session`, and the Tag does the work in its own turn.
+`continue_session` draws from the turn that continues the work Session, not the one that started
+it. The Task that continues a work Session after an approval decision draws from the same pool as
+the Task that waited; with too little left, the work Session stops, and the conversation hears
+why. A Task without reported limits passes none on. Report turns sit outside the pool and run
+under the starting Task's full limits, so a result reaches the person even when the pool is spent.
 
 ### One budget pool per Objective
 
 An Objective has one budget pool, and everything beneath it draws from the same pool: its own
 turns and every work Session started under it. Each turn may spend at most what the budget has
 left, in the Objective's currency. When less than a twentieth of the budget is left, the pool is
-spent: SuperTag admits no new turn and refuses `start_session`. Once the running Task Attempts
-settle, the Objective's status becomes `limited`, and SuperTag tells the person in its thread.
+spent: SuperTag admits no new turn and refuses `start_session`. A finished work Session's report
+turn still comes in, capped at what is left. Once the running Task Attempts settle, the
+Objective's status becomes `limited`, and SuperTag tells the person in its thread.
 Raise the budget with `supertag update objective ID --budget-minor N` to continue.
 
 ## Task Attempt

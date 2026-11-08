@@ -40,6 +40,7 @@ interface FakePullRequest {
   number: number;
   html_url: string;
   state: "open" | "closed";
+  merged_at?: string;
   draft: boolean;
   head: string;
   base: string;
@@ -379,6 +380,26 @@ describe("pull-request delivery on GitHub", () => {
     expect(remoteHead()).toBe(pushed);
     expect(first?.head).toBe(pushed);
     expect(github.pulls).toHaveLength(1);
+  });
+
+  it("opens a new pull request for later work once the earlier one was merged", async () => {
+    const { attempt, github } = setup();
+    await attempt("attempt-1", "greeting.txt");
+    Object.assign(github.pulls[0] as FakePullRequest, {
+      state: "closed",
+      merged_at: "2026-11-08T12:00:00Z",
+    });
+    const second = await attempt("attempt-2", "farewell.txt", {}, "Add farewell");
+    expect(second?.pullRequest).toMatchObject({
+      status: "opened",
+      draft: true,
+      pullRequest: { number: 2 },
+    });
+    expect(remoteHead()).toBe(second?.head);
+    expect(github.pulls.map((pull) => [pull.number, pull.state])).toEqual([
+      [1, "closed"],
+      [2, "open"],
+    ]);
   });
 
   it("records the pull request on the Task Attempt result", async () => {

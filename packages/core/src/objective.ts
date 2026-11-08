@@ -480,9 +480,3 @@ export function objectiveResumeSummary(
   lines.push("Review the changes, then continue the Objective.");
   return lines.join("\n");
 }
-
-/**
- * Starting a work Session draws on the Objective's budget pool: its cost limit is what the
- * budget has left. Below this share of the budget left, a new work Session is refused.
- */
-export const OBJECTIVE_POOL_FLOOR_RATIO = 0.05;

@@ -457,4 +457,88 @@ describe("Workspace source clones", { timeout: 20_000 }, () => {
     expect(git(worktree, "rev-parse", "HEAD")).toBe(descendant);
     expect(await readFile(join(worktree, "host-a.txt"), "utf8")).toBe("a\n");
   });
+  describe("a Session's branch", () => {
+    const sessionId = "5e55104a-0000-4000-8000-000000000000";
+    const branch = workSessionBranch(sessionId);
+    /** Task `taskId` of the Session, as the Control Plane dispatches it. */
+    const sessionTask = (taskId: string, overrides: Partial<TaskNamedWorkspacePlan> = {}) =>
+      ({
+        ...task(taskId, { branch, delivery: "pull-request", ...overrides }),
+        session: { id: sessionId },
+      }) as unknown as TaskAttemptSpec;
+    const publisher = (push: () => boolean): WorkspacePullRequestPublisher => ({
+      async publish(input) {
+        if (push()) await input.push(undefined);
+        return { status: "failed", message: "test publish" };
+      },
+    });
+    const deliver = async (
+      instance: WorkspaceEnvironmentResolver,
+      spec: TaskAttemptSpec,
+      file: string,
+    ) => {
+      const worktree = await worktreeOf(spec, instance);
+      await writeFile(join(worktree, file), `${file}\n`);
+      const record = await instance.finalize(spec, "completed");
+      if (!record?.head) throw new Error("Missing delivered head");
+      return { worktree, record };
+    };
+
+    it("continues from a commit pushed to the branch since its last Task", async () => {
+      const instance = resolver({ pullRequests: publisher(() => true) });
+      const first = await deliver(instance, sessionTask("task-1"), "a.txt");
+      // A reviewer pushes a fixup on top of the Session's commit.
+      const tree = git(origin, "rev-parse", `${first.record.head}^{tree}`);
+      const fixup = git(origin, "commit-tree", tree, "-p", first.record.head, "-m", "Fixup");
+      git(origin, "update-ref", `refs/heads/${branch}`, fixup, first.record.head);
+
+      const worktree = await worktreeOf(sessionTask("task-2"), instance);
+      expect(git(worktree, "branch", "--show-current")).toBe(branch);
+      expect(git(worktree, "rev-parse", "HEAD")).toBe(fixup);
+    });
+
+    it("continues from its local commit when the last push did not happen", async () => {
+      let pushes = true;
+      const instance = resolver({ pullRequests: publisher(() => pushes) });
+      const first = await deliver(instance, sessionTask("task-1"), "a.txt");
+      pushes = false;
+      const second = await deliver(instance, sessionTask("task-2"), "b.txt");
+      expect(git(origin, "rev-parse", branch)).toBe(first.record.head);
+
+      const worktree = await worktreeOf(sessionTask("task-3"), instance);
+      expect(git(worktree, "branch", "--show-current")).toBe(branch);
+      expect(git(worktree, "rev-parse", "HEAD")).toBe(second.record.head);
+    });
+
+    it("refuses a branch rewritten without the Session's last commit", async () => {
+      const instance = resolver({ pullRequests: publisher(() => true) });
+      const first = await deliver(instance, sessionTask("task-1"), "a.txt");
+      // Someone force-pushes an unrelated commit over it.
+      const tree = git(origin, "rev-parse", "main^{tree}");
+      const replacement = git(origin, "commit-tree", tree, "-m", "Unrelated replacement");
+      git(origin, "update-ref", `refs/heads/${branch}`, replacement, first.record.head);
+
+      await expect(worktreeOf(sessionTask("task-2"), instance)).rejects.toThrow(
+        `Branch ${branch} no longer holds commit ${first.record.head.slice(0, 12)}`,
+      );
+    });
+
+    it("refuses a branch another Worker Host committed and never pushed", async () => {
+      const first = await deliver(
+        resolver(),
+        sessionTask("task-1", { delivery: "branch" }),
+        "a.txt",
+      );
+      const otherRoot = await mkdtemp(join(tmpdir(), "supertag-clone-root-b-"));
+      cleanups.push(() => rm(otherRoot, { recursive: true, force: true }));
+      const continued = sessionTask("task-2", {
+        delivery: "branch",
+        branchPin: branch,
+        branchPinHead: first.record.head,
+      });
+      await expect(worktreeOf(continued, resolver({ worktreeRoot: otherRoot }))).rejects.toThrow(
+        `Branch ${branch} holds commit ${first.record.head.slice(0, 12)} on another Worker Host and was not pushed`,
+      );
+    });
+  });
 });

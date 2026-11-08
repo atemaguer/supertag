@@ -651,21 +651,7 @@ function workspacePlan(value: unknown): void {
     if (plan["mounts"] !== undefined) parseWorkspaceMounts(plan["mounts"]);
     if (plan["mcpPin"] !== undefined) mcpDigest(plan["mcpPin"], "workspacePlan mcpPin");
     if (plan["volumes"] !== undefined) items(plan, "volumes", workspaceVolume);
-    if (plan["dependencyBranches"] !== undefined)
-      items(plan, "dependencyBranches", dependencyBranch);
   }
-}
-/** An accepted dependency's delivered commit: its Task, Task branch, and full commit id. */
-function dependencyBranch(value: unknown): void {
-  const record = fields(value, ["taskId", "branch", "head"]);
-  if (Object.keys(record).some((key) => !["taskId", "branch", "head"].includes(key)))
-    throw new Error(
-      "Worklet protocol workspacePlan dependencyBranches carry only taskId, branch, and head",
-    );
-  if (!/^supertag\/[A-Za-z0-9._/-]+$/u.test(record["branch"] as string))
-    throw new Error("Worklet protocol dependency branch must be a SuperTag Task branch");
-  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(record["head"] as string))
-    throw new Error("Worklet protocol dependency head must be a full commit id");
 }
 /** A Volume as dispatched: a source and a credential name, never a credential value. */
 function workspaceVolume(value: unknown): void {

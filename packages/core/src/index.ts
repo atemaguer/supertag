@@ -667,7 +667,10 @@ export interface TaskNamedWorkspacePlan {
   readonly ref?: string;
   /** Reserved branch candidate; the Worker records a suffixed name if Git already has it. */
   readonly branch: string;
-  /** Branch recorded by an earlier Task Attempt, carried by the Control Plane. */
+  /**
+   * Branch a Worker recorded for an earlier Attempt of the Task, or for an earlier Task of its
+   * Session, carried by the Control Plane.
+   */
   readonly branchPin?: string;
   /** Full Worker-recorded commit for branchPin; required to adopt it on a fresh Worker Host. */
   readonly branchPinHead?: string;
@@ -692,25 +695,12 @@ export interface TaskNamedWorkspacePlan {
    * Attempt. Only sources and credential names; the Worker Host resolves each credential itself.
    */
   readonly volumes?: readonly import("./volume.js").TaskWorkspaceVolume[];
-  /**
-   * Branches earlier Tasks delivered in this Workspace, such as the work Session's previous Task,
-   * read when the Control Plane dispatches an Attempt. A new Task branch starts from the base
-   * merged with each, in order; the Worker merges them before the harness starts.
-   */
-  readonly dependencyBranches?: readonly TaskWorkspaceDependencyBranch[];
   /** Host-observed first-attempt pins, carried to later Attempts for fail-closed retries. */
   readonly skillPins?: readonly {
     readonly name: string;
     readonly source: string;
     readonly digest: string;
   }[];
-}
-
-/** The commit an earlier Task's Worker recorded delivering on its Task branch. */
-export interface TaskWorkspaceDependencyBranch {
-  readonly taskId: string;
-  readonly branch: string;
-  readonly head: string;
 }
 
 /** One durable unit of user intent admitted for a Tag within a Session. */

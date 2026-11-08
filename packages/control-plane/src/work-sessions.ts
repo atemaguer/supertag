@@ -7,7 +7,6 @@ import {
   type InternalTurn,
   mailboxObject,
   mailboxText,
-  type SpendReport,
   type Store,
   type TagAuthorizationSnapshot,
   TagMessagingError,
@@ -211,26 +210,18 @@ function chosenWorkspace(
 }
 
 /**
- * A work Session Task's branch candidate: `supertag/session/<short Session id>` until a Task of
- * the Session delivers commits, then the next numbered branch after `previous`, the branch of the
- * Session's latest Task that delivered commits, which the new Task starts from.
+ * A Session's one branch candidate, `supertag/session/<short Session id>`. Every Task of the
+ * Session works on it, each committing on top of the ones before.
  */
-export function workSessionBranch(sessionId: string, previous?: string): string {
-  const base = `supertag/session/${sessionId.replace(/[^A-Za-z0-9]/gu, "").slice(0, 8) || "work"}`;
-  if (previous === undefined) return base;
-  const number = previous === base ? 1 : Number(/-(\d+)$/u.exec(previous)?.[1] ?? 1);
-  return `${base}-${number + 1}`;
+export function workSessionBranch(sessionId: string): string {
+  return `supertag/session/${sessionId.replace(/[^A-Za-z0-9]/gu, "").slice(0, 8) || "work"}`;
 }
 
 /**
  * SuperTag's account of where a finished work Task's Workspace changes are, from the Worker's
  * recorded delivery; undefined for a Task without a Workspace.
  */
-export function workSessionDelivery(
-  task: Task,
-  events: readonly TaskEvent[],
-  basedOn?: string,
-): string | undefined {
+export function workSessionDelivery(task: Task, events: readonly TaskEvent[]): string | undefined {
   if (task.workspacePlan.status !== "workspace") return undefined;
   const delivered = taskDelivery({
     workspacePlan: task.workspacePlan,
@@ -250,12 +241,7 @@ export function workSessionDelivery(
       : workspace.delivery === "patch" && delivered?.patches[0] !== undefined
         ? ` Its patch is the output file ${delivered.patches[0].path}.`
         : "";
-  // A continued Task's branch starts from the Session's earlier branch, so it holds all the work.
-  const stacked =
-    basedOn === undefined
-      ? ""
-      : ` That branch starts from the work Session's earlier branch ${basedOn}, so it already contains those changes; it is the one to review or merge.`;
-  return `Its changes are committed to branch ${workspace.branch} of Workspace ${workspace.name} (head ${workspace.head.slice(0, 12)}${files}).${stacked}${where}`;
+  return `Its changes are committed to branch ${workspace.branch} of Workspace ${workspace.name} (head ${workspace.head.slice(0, 12)}${files}).${where}`;
 }
 
 /**
@@ -268,131 +254,6 @@ export function workSessionsPerTurn(execution: TaskExecutionRequirements): numbe
   return agents === undefined
     ? WORK_SESSION_MAX_PER_TURN
     : Math.min(WORK_SESSION_MAX_PER_TURN, agents);
-}
-
-/** What a conversation turn's own Task Attempts have reported so far. */
-export interface ReportedTurnSpend {
-  readonly tokens: number;
-  /** In the currency of the turn's `maxReportedCost`. */
-  readonly costMinor: number;
-}
-
-/** A conversation turn's reported spend from a spend report over its Task alone. */
-export function reportedTurnSpend(
-  report: SpendReport,
-  execution: TaskExecutionRequirements,
-): ReportedTurnSpend {
-  const currency = execution.limits?.maxReportedCost?.currency;
-  let tokens = 0;
-  let costMinor = 0;
-  for (const group of report.groups) {
-    tokens += group.reportedTokens ?? 0;
-    if (currency !== undefined) costMinor += group.reportedCostByCurrency?.[currency] ?? 0;
-  }
-  return { tokens, costMinor };
-}
-
-/** A work Task's share must be at least this fraction of the turn's reported limit. */
-const WORK_SESSION_MIN_SHARE_DIVISOR = 10;
-
-/**
- * A work Task's execution requirements. A conversation turn and the work Tasks it starts or
- * continues share one budget: the turn's reported token and cost limits. A new work Task gets
- * what is left of them, the limit minus the turn's reported spend so far and the allowances of
- * the work Tasks the turn already admitted, split equally among the work Tasks the turn may still
- * admit. Undefined when that share is under a tenth of the turn's limit, in tokens or in cost,
- * because a work Task that small would stop on its first model call; the turn then does the work
- * itself. A turn without reported limits passes its requirements on unchanged.
- */
-export function workSessionExecution(
-  execution: TaskExecutionRequirements,
-  spent: ReportedTurnSpend,
-  admitted: readonly TaskExecutionRequirements[],
-): TaskExecutionRequirements | undefined {
-  const limits = execution.limits;
-  if (limits?.maxReportedTokens === undefined && limits?.maxReportedCost === undefined)
-    return execution;
-  const slots = Math.max(1, workSessionsPerTurn(execution) - admitted.length);
-  const share = (limit: number, own: number, held: (other: TaskExecutionRequirements) => number) =>
-    Math.floor((limit - own - admitted.reduce((total, other) => total + held(other), 0)) / slots);
-  const tokens =
-    limits.maxReportedTokens === undefined
-      ? undefined
-      : share(
-          limits.maxReportedTokens,
-          spent.tokens,
-          (other) => other.limits?.maxReportedTokens ?? 0,
-        );
-  const cost =
-    limits.maxReportedCost === undefined
-      ? undefined
-      : share(
-          limits.maxReportedCost.amountMinor,
-          spent.costMinor,
-          (other) => other.limits?.maxReportedCost?.amountMinor ?? 0,
-        );
-  const tooSmall = (share: number | undefined, limit: number | undefined) =>
-    share !== undefined &&
-    limit !== undefined &&
-    share < Math.max(1, Math.floor(limit / WORK_SESSION_MIN_SHARE_DIVISOR));
-  if (
-    tooSmall(tokens, limits.maxReportedTokens) ||
-    tooSmall(cost, limits.maxReportedCost?.amountMinor)
-  )
-    return undefined;
-  return {
-    ...execution,
-    limits: {
-      ...limits,
-      ...(tokens === undefined ? {} : { maxReportedTokens: tokens }),
-      ...(cost === undefined || limits.maxReportedCost === undefined
-        ? {}
-        : { maxReportedCost: { ...limits.maxReportedCost, amountMinor: cost } }),
-    },
-  };
-}
-
-/**
- * The execution requirements of the Task that continues a work Session after a decision on an
- * approval request its Task waited on. That Task carries on the waiting Task's share of the
- * starting turn's budget: its allowance less what it reported, so a chain of decisions never
- * spends more than the share. Undefined when what is left is under a tenth of the turn's limit,
- * like `workSessionExecution`; a later message continues the work Session from a new turn's budget.
- */
-export function resumedWorkSessionExecution(
-  turn: TaskExecutionRequirements,
-  waiting: TaskExecutionRequirements,
-  spent: ReportedTurnSpend,
-): TaskExecutionRequirements | undefined {
-  const limits = waiting.limits;
-  if (limits?.maxReportedTokens === undefined && limits?.maxReportedCost === undefined)
-    return waiting;
-  const tokens =
-    limits.maxReportedTokens === undefined ? undefined : limits.maxReportedTokens - spent.tokens;
-  const cost =
-    limits.maxReportedCost === undefined
-      ? undefined
-      : limits.maxReportedCost.amountMinor - spent.costMinor;
-  const tooSmall = (left: number | undefined, limit: number | undefined) =>
-    left !== undefined &&
-    (left < 1 ||
-      (limit !== undefined &&
-        left < Math.max(1, Math.floor(limit / WORK_SESSION_MIN_SHARE_DIVISOR))));
-  if (
-    tooSmall(tokens, turn.limits?.maxReportedTokens ?? limits.maxReportedTokens) ||
-    tooSmall(cost, turn.limits?.maxReportedCost?.amountMinor ?? limits.maxReportedCost?.amountMinor)
-  )
-    return undefined;
-  return {
-    ...waiting,
-    limits: {
-      ...limits,
-      ...(tokens === undefined ? {} : { maxReportedTokens: tokens }),
-      ...(cost === undefined || limits.maxReportedCost === undefined
-        ? {}
-        : { maxReportedCost: { ...limits.maxReportedCost, amountMinor: cost } }),
-    },
-  };
 }
 
 /**

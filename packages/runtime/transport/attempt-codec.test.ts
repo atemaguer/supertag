@@ -359,31 +359,6 @@ it("carries only valid recorded Task branch names", () => {
   ).toThrow();
 });
 
-it("carries dependency branches in the Workspace plan and refuses other shapes", () => {
-  const spec = repositoryAttempt("workspace-dependency-branches");
-  const workspacePlan = {
-    version: 1,
-    status: "workspace",
-    workspace: "app",
-    branch: "supertag/objective/task",
-    delivery: "branch",
-  };
-  const decode = (dependencyBranches: unknown) =>
-    decodeTaskAttemptSpec({ ...spec, workspacePlan: { ...workspacePlan, dependencyBranches } });
-  const head = "a".repeat(40);
-  expect(decode([{ taskId: "x", branch: "supertag/objective/x", head }])).toBeDefined();
-  expect(() => decode([{ taskId: "x", branch: "main", head }])).toThrow(
-    "dependency branch must be a SuperTag Task branch",
-  );
-  expect(() => decode([{ taskId: "x", branch: "supertag/objective/x", head: "abc" }])).toThrow(
-    "dependency head must be a full commit id",
-  );
-  expect(() =>
-    decode([{ taskId: "x", branch: "supertag/objective/x", head, path: "/etc" }]),
-  ).toThrow("carry only taskId, branch, and head");
-  expect(() => decode({})).toThrow("dependencyBranches must be an array");
-});
-
 it("revalidates operator mounts carried in the Worklet Workspace plan", () => {
   const spec = repositoryAttempt("workspace-mount-codec");
   const workspacePlan = {

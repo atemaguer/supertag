@@ -70,6 +70,7 @@ type LifecyclePersistence = Pick<
   Store,
   | "appendTaskEvent"
   | "findTaskById"
+  | "listSessionTaskIds"
   | "listTaskEvents"
   | "saveWorkspacePullRequestTransition"
   | "listDueWorkspacePullRequestTransitions"
@@ -84,8 +85,8 @@ const RETRY_SCAN_INTERVAL_MS = 5_000;
 
 /**
  * Moves a Task's pull request through its review lifecycle once the Task ends: a completed Task
- * that waits on nothing marks the draft ready for review; a cancelled one closes it with a short
- * comment. Each
+ * that waits on nothing marks the draft ready for review; a cancelled one closes a pull request
+ * it opened with a short comment. Each
  * transition is recorded as a Task event, so repeating a settlement never repeats the call.
  * A failure that may clear with time is stored as a pending transition and retried with backoff
  * by `retryDue`; a permanent failure is recorded once and left for a person.
@@ -103,7 +104,9 @@ export class WorkspacePullRequestLifecycle {
     this.handler = handler;
   }
 
-  async settle(task: Pick<Task, "id" | "status" | "workspacePlan" | "outcome">): Promise<void> {
+  async settle(
+    task: Pick<Task, "id" | "sessionId" | "status" | "workspacePlan" | "outcome">,
+  ): Promise<void> {
     try {
       const pending = await this.pending(task);
       // A scheduled retry owns the transition; settling again must not reset its backoff.
@@ -152,8 +155,14 @@ export class WorkspacePullRequestLifecycle {
     }
   }
 
-  /** The transition an ended Task still needs, or undefined when there is nothing to do. */
-  private async pending(task: Pick<Task, "id" | "status" | "workspacePlan" | "outcome">) {
+  /**
+   * The transition an ended Task still needs, or undefined when there is nothing to do. A
+   * cancelled Task closes only a pull request no earlier Task of its Session delivered to: the
+   * Session's pull request holds their work too, so it stays open.
+   */
+  private async pending(
+    task: Pick<Task, "id" | "sessionId" | "status" | "workspacePlan" | "outcome">,
+  ) {
     if (!SETTLED.includes(task.status as Settled)) return undefined;
     const status = task.status as Settled;
     const plan = task.workspacePlan;
@@ -170,6 +179,15 @@ export class WorkspacePullRequestLifecycle {
     const pullRequest = workspacePullRequestFromEvents(events);
     if (pullRequest === undefined || pullRequest.state === "closed") return undefined;
     if (status === "completed" && pullRequest.state === "ready") return undefined;
+    if (status === "cancelled") {
+      const ids = await this.store.listSessionTaskIds(task.sessionId);
+      for (const id of ids.slice(0, Math.max(0, ids.indexOf(task.id))))
+        if (
+          workspacePullRequestFromEvents(await this.store.listTaskEvents(id))?.url ===
+          pullRequest.url
+        )
+          return undefined;
+    }
     return { status, pullRequest };
   }
 

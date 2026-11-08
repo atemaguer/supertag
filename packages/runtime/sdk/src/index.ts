@@ -277,7 +277,6 @@ export {
   WorkspaceHost,
   type WorkspaceHostOptions,
   WorkspaceIntegrityError,
-  WorkspaceMergeConflictError,
   type WorkspaceRepository,
   type WorkspaceSourceRef,
   type WorkspaceWorktree,
