@@ -1,12 +1,12 @@
 # Requirements
 
 These requirements prepare a computer to run SuperTag. A **Tag** is a persistent AI identity with
-its own responsibilities and permissions, and Tags work in Teams under a lead. Together, your Teams
+its own responsibilities and permissions, and Tags work in Teams. Together, your Teams
 of Tags make up an **autonomous organization**: Teams may pursue different goals but share one set
 of rules and one record of the work. For example, a laptop can run the **Control Plane**, which
 stores your organization and accepts work, and act as a **Worker Host**, which provides execution
-capacity. A **Worker**, the code that does the work, completes an assigned **Task**, one request or
-assignment, through a **harness**: the connection to an agent system such as Codex, Claude Code, or Cursor.
+capacity. A **Worker**, the code that does the work, completes a **Task**, one turn of a Tag's
+work, through a **harness**: the connection to an agent system such as Codex, Claude Code, or Cursor.
 Check this page before [installing SuperTag](install.md).
 
 ## System and tools
@@ -155,7 +155,7 @@ Task Attempt's environment. If a `pnpm` executable on `PATH` installs the reposi
 pinned version into the host's home on demand, a Cursor Task cannot rely on that cache
 or a package download: its private home is empty and the sandbox denies network access.
 Use a Node version that meets this repository's minimum and a directly runnable pinned
-`pnpm` executable available on the Worker Host before assigning a Cursor coding Task.
+`pnpm` executable available on the Worker Host before a Cursor coding Task runs.
 The SDK's current `local.sandboxOptions` offers an enable switch but no read-path grants
 for a package store or Corepack cache. See [SDK sandbox options](https://cursor.com/docs/sdk/typescript.md),
 [Cursor run modes](https://cursor.com/docs/agent/security/run-modes.md), and

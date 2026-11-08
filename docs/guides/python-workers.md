@@ -5,7 +5,7 @@ Build and connect a **Worker**—the code that completes an accepted assignment,
 
 - A **harness** connects the Worker to a model or agent system.
 - A **Tag** is a persistent AI identity with its own responsibilities and permissions, and Tags work
-  in Teams under a lead. Together, your Teams of Tags make up an **autonomous organization**: Teams
+  in Teams: flat lists of member Tags. Together, your Teams of Tags make up an **autonomous organization**: Teams
   may pursue different goals but share one set of rules and one record of the work.
 - A Python **Worklet** supervises the Workers and connects them to the **Control Plane**, the
   service that stores and coordinates the organization.

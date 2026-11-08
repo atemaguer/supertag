@@ -66,16 +66,19 @@ hosts. None of these resources becomes a separate actor.
 
 ## Operational resources
 
-- **Objective** — a durable outcome definition with an accountable Tag, success criteria,
-  and an explicit completion assessment; independent of surface channels. Set `ongoing: true`
-  for a continuing responsibility that only an operator can end. Observation sources are optional
-  and independent of this choice.
-
-- **Team** places Tags in an organizational unit, with a lead, membership, optional parent, an optional
-  concurrency throttle, optional hierarchy scaling ceilings, durable context, a governing Objective, explicitly approved additional Objectives,
-  and a lifecycle.
-- **Workstream** is a Team's channel. Every Team has exactly one, created with the Team and sharing its ID. Its owner, participants, title, and Objective are read from the Team; it has no status or revision of its own. Posts in it are typed and may be addressed to Tags in the Team. Unread posts and direct messages reach each Tag's next Task Attempt once, in its activation digest.
-- **Mailbox** holds durable messages for a Tag or for an Objective’s operator. It supports communication across Teams, the organizational chain, and the operator.
+- **Objective** — an outcome a Tag owns, with a budget, a deadline, a status and an explicit
+  completion assessment. It is a conversation with a goal: it talks in the thread it was created
+  in, and the work happens in Sessions started beneath it. Set `ongoing: true` for a continuing
+  responsibility that only an operator can end. An Objective may name one Team, whose members its
+  owner may start work Sessions of. See [Objective coordination](coordination.md#objectives).
+- **Team** is a flat list of member Tags with an optional concurrency limit. Members may message
+  one another and share the Team's Workstream. A Team stands alone: any number of Objectives may
+  name one Team. See [Teams](coordination.md#teams).
+- **Workstream** is a Team's shared record of posts. Every member reads it, and a post wakes
+  nobody; each Tag a post addresses receives it in its Mailbox. See
+  [Workstream](coordination.md#workstream).
+- **Mailbox** is a Tag's inbox for plain-text messages from other Tags. Every message waiting
+  when a turn starts is handled together in that turn. See [Mailbox](coordination.md#mailbox).
 - **Session** preserves automatic continuity for one Tag conversation. Its audience is `shared`
   or `private`, derived from the conversation: a direct chat or a CLI conversation is private to
   its one person, and reported as `status.audience`. A Tag's conversation Tasks can list, search, and read its shared Sessions and
@@ -84,17 +87,12 @@ hosts. None of these resources becomes a separate actor.
   reports its conversation as read-only `spec.parentSessionId`; `status.latestTaskStatus` is the
   status of a Session's latest Task, `status.tag` the Tag's name, and `status.title` a work
   Session's title or a conversation's first request.
-- **Task** records one durable assignment from a surface or internal delegation. Its result can
-  carry [findings](coordination.md#review-findings): problems a reviewer reported about the Task,
-  each with a severity and status. A finding is part of the result, not a separate resource.
+- **Task** records one turn of a Session. Its result can carry
+  [findings](coordination.md#review-findings): problems the Task reports about its own work, each
+  with a severity, a summary and an optional location. A finding is part of the result, not a
+  separate resource.
 - **Task Attempt** records one Worker execution or retry.
-- A **reply activation** is a budgeted run that lets an idle Tag answer an addressed `question`
-  or `blocker` from a teammate, through a Team channel post or same-Team direct message.
-  For example, an idle reviewer wakes to answer a builder's test question without a separate
-  assignment from the lead. A `blocker` without `to` goes to the Team lead, unless the lead
-  wrote it. Reply activations carry no new authority and follow fixed loop brakes. See
-  [reply activations](mailbox.md#reply-activations).
-- An **approval request** records one ask for a decision on an action or Task, with its scope and
+- An **approval request** records one ask for a decision on a gated action, with its scope and
   decider. It is operational state listed with `supertag list approval`, not an applied resource.
   See [Approval requests](coordination.md#approval-requests).
 - **Worker Host** is the durable enrolled identity and latest observed capacity, capability,
@@ -111,15 +109,12 @@ resource. A per-host credential binds its Worklet connection to that Worker Host
 revocation block older connections without exposing credentials through ordinary resource reads.
 A **connection generation** is the increasing number that identifies the current connection.
 
-Most of these records are inspectable but not declaratively applied. Objectives, and the Teams
-nested under them, may also be declared in a manifest; see
-[Declared Objectives](#declared-objectives). Otherwise Objectives and Teams are created through
-[coordination commands](../guides/objective-coordination.md). Each Team's Workstream is created
-with it. Status is never
-declared: owners and operators record it explicitly.
-The execution records report what the service did. `TaskAssignment` is coordination metadata
-on a canonical Task, recording delegation, budget, dependencies, and review state. It is not a
-separate public resource.
+Most of these records are inspectable but not declaratively applied. An Objective, with the Team
+it names, may also be declared in a manifest; see [Declared Objectives](#declared-objectives).
+Otherwise an Objective comes from `supertag create objective` or an `@SuperTag objective` command,
+and a Team from `supertag create team`. A Team's Workstream exists with the Team. Status is never
+declared: owners and operators record it explicitly. The execution records report what the service
+did.
 
 ## Resource envelope
 
@@ -156,7 +151,7 @@ More Tag fields declare where its Tasks run, where the Tag works, and who may me
 | --- | --- | --- |
 | `spec.runsOn` | label | Labels a bound Worker Host must carry to run the Tag's Tasks. See [Worker Host labels](#worker-host-labels). |
 | `spec.locations` | `provider`, provider scope fields, optional `account`, `permissionSets`, `contextSets`, `workspaces` | Where the Tag answers, with the sets activated at each location and the Workspaces its Objectives get |
-| `spec.acceptsMessagesFrom` | `tag`, `types` | Mailbox grants where this Tag is the recipient |
+| `spec.acceptsMessagesFrom` | Tag name | Mailbox grants where this Tag is the recipient |
 
 Location scope fields match the `--add-location` flags in camelCase: `channelId` for Slack,
 `repo` or `repoId` for GitHub, `chatId` for Lark, `team` or `teamId` for Linear, and `teamId`
@@ -171,8 +166,8 @@ Objectives every Workspace whose `source` is that repository instead. `update ta
 does not set `workspaces`; declare them in a manifest. See
 [Objectives from a location](#objectives-from-a-location).
 
-Each `acceptsMessagesFrom` entry names a sender Tag and at least one message type from
-[the Mailbox reference](mailbox.md#grants).
+Each `acceptsMessagesFrom` entry names one sender Tag this Tag accepts messages from. Tags that
+share a Team need no entry. See [Mailbox](coordination.md#mailbox).
 
 Apply merges each of these lists entry by entry, and records who set each entry. See
 [Field managers and apply sets](#field-managers-and-apply-sets).
@@ -408,11 +403,8 @@ Each harness maps effort to its own option. Codex receives it as `model_reasonin
 Claude Code receives it as its effort option. OpenCode has no effort option, so it ignores effort
 and the Task Attempt records that it did.
 
-When SuperTag accepts a Task, it records one harness, model, and effort for it. A delegating Tag
-may choose a model or effort in `assign_task`, within the assignee's range; a failed or rejected
-Task raises the next one automatically. The Tag working a Task may also raise its own effort or
-switch to another allowed model with `escalate_task`, at most twice per Task. See
-[Coordination](coordination.md#execution-settings) and
+When SuperTag accepts a Task, it records one harness, model, and effort for it, from the acting
+Tag's own range. See
 [Scheduling and recovery](scheduling-and-recovery.md#placement-by-harness-and-model).
 
 `execution` is one field under the [field manager rules](#field-managers-and-apply-sets): one
@@ -461,7 +453,8 @@ Checkout paths stay on each host. Hosts whose Worker Profiles all report `supert
 can also serve a Workspace with a `source`; SuperTag prefers hosts that declare a checkout.
 
 An Objective lists its Workspaces in `workspaces`, an array of names. A Task records its
-Workspace, `source`, base `ref`, Task branch `supertag/<objective>/<task>`, `delivery`, and `setup`
+Workspace, `source`, base `ref`, its Session's branch `supertag/session/<short session id>`,
+`delivery`, and `setup`
 when SuperTag accepts it; `Task.spec.workspace` reports the name, branch, ref, and delivery. For
 `pull-request` delivery, `Task.status.pullRequest` reports the pull request's `repository`,
 `number`, `url`, and `state`: `draft`, `ready`, or `closed`. `lastError` appears when the Control
@@ -738,13 +731,10 @@ spec:
   outcome: Keep dependencies current and the build green. Open a pull request for each upgrade.
   ongoing: true
   workspaces: [app]
-  observe: ["dependency-upkeep:releases"]
   budget: { minor: 50000, currency: USD }
   deadline: "2027-01-01T00:00:00Z"
   runtimeActions: [files:write]
-  teams:
-    upkeep: { lead: maintainer, members: [builder], maxConcurrency: 2 }
-    releases: { lead: release-watcher }
+  team: { members: [maintainer, builder], maxConcurrency: 2 }
 ```
 
 | Field | Meaning | After creation |
@@ -754,22 +744,20 @@ spec:
 | `spec.outcome` | Required. One natural-language statement of the outcome. | Fixed |
 | `spec.ongoing` | `true` for a responsibility that only an operator ends. Default `false`. | Fixed |
 | `spec.workspaces` | Workspace names. | Fixed |
-| `spec.observe` | IDs of Team channels whose posts reach the owner for assessment. A channel's ID is its Team's ID. | Fixed |
 | `spec.budget` | `minor`, a nonnegative integer, and an optional uppercase `currency`. | Only increases |
 | `spec.deadline` | An ISO timestamp. | Changes |
-| `spec.runtimeActions` | Runtime actions for Tasks accepted afterwards. Omitted: what the owner's Permission Sets allow when it is created. | Changes |
-| `spec.teams` | Team name to `lead`, `members` (Tag names), and an optional `maxConcurrency` (1 to 1000) to throttle the Team. | Changes |
+| `spec.runtimeActions` | Runtime actions for turns admitted afterwards. Omitted: what the owner's Permission Sets allow when it is created. | Changes |
+| `spec.team` | An existing Team's name, or the Objective's own Team as `members` (Tag names), an optional `name`, and an optional `maxConcurrency` (1 to 1000). | Which Team is fixed; its own Team's fields change |
 
 The rules:
 
-- Applying a new Objective creates it and starts its owner. An Objective whose owner has not
-  started, such as one whose Tag had no Worker Host, starts on a later apply. A plan shows it as
-  `starts the owner`.
+- Applying a new Objective creates it and starts its conversation. An Objective that could not
+  start, such as one whose owner Tag had no Worker Host, starts on a later apply.
 - A change to a fixed field is refused before anything is applied. A new name creates a new
   Objective. A field another manager owns is reported as a conflict, as for other kinds.
 - A manifest that stops setting `budget`, `deadline`, or `runtimeActions` leaves the stored value.
-- A declared Team's ID is `OBJECTIVE:NAME`. `leadership` is reserved for the owner's own Team.
-  Apply creates, updates, and dissolves only the Teams it owns. A dissolved Team cannot return.
+- A declared Team's ID is the Objective's ID. Apply creates and updates only the Teams it owns,
+  and leaves a Team the Objective names by name alone.
 - `--prune` cancels a set member the input no longer declares; it is never deleted. A completed
   member leaves the set unchanged. A cancelled Objective cannot run again, so apply leaves a
   cancelled declaration as it is and says so.
@@ -835,7 +823,7 @@ still in use:
 
 | Resource | Deleting it | Refused while |
 | --- | --- | --- |
-| Tag | Retires the Tag and removes its locations with their set activations, Worker Host bindings, Mailbox grants in both directions, Mailbox credentials, and Role assignments | It owns an open Objective, leads or belongs to a Team of an open Objective, has a pending or running Task, or a Permission Set names it in `spec.approvers` |
+| Tag | Retires the Tag and removes its locations with their set activations, Worker Host bindings, Mailbox grants in both directions, and Role assignments | It owns an open Objective, belongs to any Team, has a pending or running Task, or a Permission Set names it in `spec.approvers` |
 | Role | Retires the Role and clears its sets | A Tag holds it, or it is built in |
 | Permission Set, Context Set | Deletes the set and its entries | An active Role lists it, or a Tag location activates it |
 | Workspace | Deletes the Workspace | An open Objective names it, or a Tag location lists it |
@@ -867,31 +855,23 @@ its checkout; SuperTag stops offering the Workspace until one with that name exi
 
 ## Internal coordination
 
-Each Tag has one logical Mailbox for durable internal messages. Mailboxes are not
-independently configured resources. [Tag messaging](../guides/tag-messaging.md) grants
-control messages across Teams; members of one Team may message each other without a grant.
-Delivery does not grant execution authority
-or accept an Objective. [Objectives](../guides/objectives.md) store outcomes and success
-criteria; their owner or an operator explicitly records completion. Grant rules are in
-[Mailbox grants](mailbox.md#grants), and completion rules are in
-[Completing an Objective](coordination.md#completing-an-objective).
+Each Tag has one Mailbox: plain-text messages from other Tags, handled together in one turn of
+the Tag's inbox. Mailboxes are not separately configured. Tags in one Team message each other
+without a grant; across Teams, a grant records that a recipient accepts messages from a sender.
+Delivery grants no execution authority. See [Mailbox](coordination.md#mailbox) and
+[Send messages between Tags](../guides/tag-messaging.md).
 
-Each Objective also has a logical operator mailbox. Its owner can use `send_message` to request
-judgment without an external reporting surface or a failed Task. The operator inbox projects
-unanswered questions; reports with `needsReply: false` appear in the Objective overview and watch
-timeline. `read_mailbox` reads their content and `send_message` records an attributed
-reply. Neither requests nor replies grant authority or change a budget. These are destinations
-for the existing messaging primitives, not separately provisioned resources. See
-[Operator decisions](coordination.md#operator-decisions) for the reply rules.
+An Objective talks with people in its home thread: `supertag message objective` and a reply in
+that thread deliver its next turn, and `ask` puts its question to a person. Neither a message nor
+a reply grants authority or changes a budget. See
+[Operator messages](coordination.md#operator-messages).
 
-These durable coordination surfaces connect Teams, Objectives, and their organizational chain. A
-harness exposes them only to its root harness actor. Native subagents do not acquire a Tag identity or
-Mailbox; they coordinate through the harness's local primitives. See
-[Coordination tools](coordination.md#coordination-tools) for the tools the root harness actor receives.
+A harness exposes these tools only to its root harness actor. Native subagents acquire no Tag
+identity and no Mailbox; they coordinate through the harness's local primitives. See
+[Coordination tools](coordination.md#coordination-tools).
 
-Each Team's channel, its [Workstream](../guides/workstreams.md), holds shared posts for progress,
-questions, and findings. Current Team members and the Objective owner read its history without
-receiving mailbox deliveries. Posts carry information; assignments and existing approval mechanisms
-retain execution authority. See [Team channel rules](mailbox.md#team-channel-rules).
+Each Team has one [Workstream](../guides/workstreams.md), its shared record of posts. Every
+member reads it, a post wakes nobody, and each Tag a post addresses receives it in its Mailbox.
+Posts carry information only. See [Workstream](coordination.md#workstream).
 
 For saved Task output, producer provenance, and artifact acquisition, see [artifacts](artifacts.md).

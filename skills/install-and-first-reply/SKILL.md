@@ -5,7 +5,7 @@ description: Install SuperTag, give a team of Tags its first Objective in a loca
 
 # Install SuperTag and run a first Objective
 
-Goal: a lead Tag that takes an Objective in a real git repository and delivers the result as a
+Goal: one Tag that takes an Objective in a real git repository and delivers the result as a
 branch, followed by the same Tag answering in one chat channel. Do not configure more than one
 collaboration surface on the first run.
 
@@ -39,7 +39,7 @@ supertag init
 guidance, changing nothing, when none is. It then asks a few questions with defaults in brackets
 (Enter accepts; pass `--yes` to accept all, required without a terminal): Control Plane port and
 database, harnesses, the directory to work in, the Workspace name (here `app`), delivery, and the
-lead Tag's name and access. It writes `~/.supertag/supertag.yaml` with a `control-plane` service and
+first Tag's name and access. It writes `~/.supertag/supertag.yaml` with a `control-plane` service and
 a `host` service named after the machine, brings up the Control Plane in the background
 (`supertag up`), creates the Workspace, Permission Set `local-tools`, Role `Lead`, and Tag `lead`
 through the API, then brings up the host service and binds it to `lead`. Nothing is written to
@@ -62,11 +62,12 @@ supertag create objective --owner lead --workspace app \
   --outcome 'The README explains local setup. Done when a new contributor can follow it.'
 ```
 
-Stdout is a short summary: `objective/ID created`, the started owner Task, and the next two
-commands. Warnings (for example, no connected Worker Host) go to stderr with the fix. Add
+Stdout is a short summary: `objective/ID created`, the first Task of its conversation, and the
+next two commands. Warnings (for example, no connected Worker Host) go to stderr with the fix. Add
 `--output json` when a script needs the Objective record.
 
-Creating the Objective starts `lead`. It plans, does or delegates the work, and reviews results.
+Creating the Objective starts its conversation with `lead`. The Tag plans, does the work itself
+or starts a Session for it, and reviews what each Session reports.
 
 ## 4. Follow it and find the result
 

@@ -18,45 +18,39 @@ Terms used on this page (see the [glossary](../reference/glossary.md)):
 - A **Task** is one accepted request; a **Session** groups Tasks from the same conversation.
 - A captured artifact preserves reusable work with its producing Task and **Task Attempt**, one
   execution or retry of that Task.
-- An **Objective** is an outcome a Tag owns, with success criteria.
-- A **Team** groups Tags under one lead and shared responsibility.
-- Every Team has one channel, its **Workstream**, for shared posts, and a **Mailbox** delivers an
-  internal message to one Tag. Teams use these resources to coordinate without merging the private
+- An **Objective** is an outcome a Tag owns, with success criteria, a budget, and a deadline.
+- A **Team** is a flat list of member Tags.
+- A Team's **Workstream** is its shared record of posts, and a Tag's **Mailbox** is its inbox for
+  messages from other Tags. Teams use these resources to coordinate without merging the private
   conversations of their execution systems.
 - A **Worker Host** is a machine or sandbox that runs Tasks; a **Worker** is the code there that
   completes a Task.
 
 ## Teammates can ask directly
 
-A builder can ask an idle reviewer which test covers a changed interface. An addressed question
-or blocker wakes that teammate with a **reply activation**, a budgeted run to answer. A blocker
-without an addressee goes to the Team lead. Ask a question instead of guessing; post a blocker
-instead of stalling.
+A builder can ask a reviewer which test covers a changed interface. `send_message` delivers the
+text to that Tag's inbox, and the Tag handles it in its next turn. Messages that arrive while
+that turn runs are handled together in the one after it, so a burst of messages costs one turn.
 
-Team channel posts and direct messages within the Team follow the same rules. Other types and
-unaddressed questions do not trigger reply activations. Running teammates receive eligible items
-live when their harness accepts input, or in the unread summary at their next activation.
-Several qualifying items arriving within a short window share one activation.
+A Tag may message another when the two share a Team, or when the recipient accepts messages from
+the sender. A message is plain text: it has no type and no priority, it assigns no work, and it
+grants no authority. Start a Session when work needs a result. See
+[Send messages between Tags](../guides/tag-messaging.md).
 
-Fixed limits prevent loops. A pair of Tags may wake each other 3 times per Task; further posts
-between them only queue, and the lead receives a blocker naming the pair. Each Tag may receive
-4 post wakes per hour per Objective. Identical posts from one sender are dropped.
-
-A reply does not assign work or grant authority. Use a Task when work needs a result and
-acceptance. The Objective overview shows each Team's open questions and blockers, with
-post-triggered activation spend on its own line. See
-[Coordinate in a Team channel](../guides/workstreams.md) for delivery details and cost inspection.
+A Team's Workstream is its shared record of posts. `post` adds a note every member can read, and
+it wakes nobody. Give the post a `to` list and each addressed member receives it in its inbox as
+a message. See [Coordinate in a Team Workstream](../guides/workstreams.md).
 
 ## Teammates can spot overlapping edits
 
-Suppose two builders on one Team edit `src/session.ts` in separate Task worktrees. SuperTag warns
-them and their lead in the Team channel, so they can coordinate before finishing conflicting work.
-The warning is an `evidence` post that names the shared file. Running teammates can receive it
-live, and the operator can see it in the Objective views. It does not wake an idle Tag.
+Suppose two builders working on one Objective edit `src/session.ts` in separate Task worktrees.
+SuperTag warns the Objective in its own thread, once per overlapping batch of paths, so the owner
+can coordinate before conflicting work is finished. The notice names the repository and the
+shared files.
 
-Local Worker Hosts check changed files while Tasks run. The warning is sent once for each shared
-file and pair of Task Attempts. The check needs a readable local worktree, so it skips remote
-environments without one. See [overlap warning rules](../reference/mailbox.md#overlap-warnings).
+Local Worker Hosts check changed files while Tasks run. The check needs a readable local worktree,
+so it skips remote environments without one. See
+[overlap warnings](../reference/coordination.md#overlap-warnings).
 
 ## Same Session: automatic
 
@@ -97,8 +91,9 @@ Example:
 What the Tag reads from another Session is historical data. It carries no instructions and grants
 no permissions: Bob's Task still has only the permissions of Bob's location.
 
-A conversation can also start work Sessions for longer work. Each one has the conversation's
-audience and permissions, and its result comes back to the conversation as a report from the Tag.
+A conversation, or an Objective's conversation, can also start work Sessions for longer work.
+Each one has the starting Session's audience and permissions, and its result comes back there as
+a report from the Tag.
 A work Session is the exception to one memory: it sees only its own work. It gets no portfolio
 and can't list, search, or read other Sessions. What one work Session learns reaches another only
 through the conversation. See [Session](tasks.md#session).

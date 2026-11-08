@@ -1,7 +1,7 @@
 # Manage Control Plane resources
 
 A **Tag** is a persistent AI identity with its own responsibilities and permissions, and Tags work
-in Teams under a lead. Together, your Teams of Tags make up an **autonomous organization**: Teams
+in Teams. Together, your Teams of Tags make up an **autonomous organization**: Teams
 may pursue different goals but share one set of rules and one record of the work. Inspect,
 configure, and control the resources stored by a **Control Plane** (the service that stores and
 coordinates the organization) from the CLI. The CLI manages local and remote Control Planes through
@@ -12,14 +12,14 @@ This page uses these terms:
 
 - A **Role** is an
   enduring responsibility assigned to a Tag.
-- A **Task** is one request or assignment accepted for a Tag. A **Task Attempt** is one execution
-  or retry of a Task. A **Session** groups the Tasks from one conversation.
+- A **Session** is one Tag's thread of work. A **Task** is one turn of a Session, and a
+  **Task Attempt** is one execution or retry of a Task.
 - A **Permission Set** lists actions a Task may perform. A **Context Set** holds reusable knowledge
   that may be added to a Task.
-- A **Team** is a group of Tags with a shared responsibility and a lead. Each Tag receives internal
-  messages through its **Mailbox**.
-- An **Objective** is an outcome a Tag owns, with success criteria. A **Workspace** is a named
-  repository that an Objective's Tasks work in.
+- A **Team** is a flat list of member Tags. A Tag's **Mailbox** is its inbox for messages from
+  other Tags.
+- An **Objective** is an outcome a Tag owns, with success criteria, a budget, and a deadline. A
+  **Workspace** is a named repository that an Objective's work happens in.
 - A **Worker Host** is a machine, container, VM, or sandbox that provides execution capacity. A
   **Worklet** connects it to the Control Plane.
 - A **Worker** is the code that completes a Task, through a **harness** that connects it to an
@@ -54,11 +54,11 @@ supertag events task TASK_ID
 `list` shows a text table with columns suited to each resource. Use `--output json` or
 `--output yaml` for a structured collection. Resource kinds use singular names, such as `list tag`;
 `list tags` is rejected. `get` returns one exact resource as JSON. `describe` defaults to a readable view for a Tag, Task, Session, or Worker Host; add `--output json` when a script needs
-the resource envelope. For a Task, `describe` summarizes its assignment, recorded wait conditions,
-and latest execution Task Attempt. It distinguishes the machine running the harness from the
-environment running its tools, and says when execution evidence is missing. A waiting Task shows
-when its wait was registered, its reason, and what it waits for. A Task Attempt that ended to register
-that wait is reported as a wait, not a failure.
+the resource envelope. For a Task, `describe` summarizes its Session and Objective, its phase,
+its Workspace and delivery, its findings, and its latest execution Task Attempt. It distinguishes
+the machine running the harness from the environment running its tools, and says when execution
+evidence is missing. A pending Task shows its last scheduling check and what it waits for. A Task
+Attempt that ended to register a wait is reported as a wait, not a failure.
 
 ## 3. Watch a resource
 
@@ -94,42 +94,26 @@ process has stopped. Use `supertag describe task TASK_ID` for the complete store
 Blocked progress in the event history can explain an unconfirmed cleanup, including the failed
 cleanup step and a redacted cause. It does not count as a terminal execution event.
 
-## Assign and follow a Task
+## Follow a Task
 
-Each Task is one durable assignment to a Tag. An operator assigns it within an existing Objective
-and Team. When you assign every Task yourself, create the Objective with
-`supertag create objective --no-start`, so its owner does not coordinate the same work.
+Each Task is one turn of a Session. Operators do not create Tasks directly: a person's message, an
+Objective's start, a report, a Mailbox message, or an answer each produce one. Follow any of them
+by ID:
 
-1. Find the Tag's generated ID with `supertag get tag NAME`; the `--tag` value uses it.
-2. Assign the Task:
+```sh
+supertag describe task TASK_ID
+supertag events task TASK_ID
+supertag watch task TASK_ID
+```
 
-   ```sh
-   supertag assign task TASK_ID \
-     --objective OBJECTIVE_ID \
-     --team TEAM_ID \
-     --tag TAG_ID \
-     --instruction-file instructions.txt \
-     --criterion "The requested result is complete"
-   ```
-
-   Omit `--profile` and `--profile-revision` to let the scheduler choose among compatible Workers.
-
-3. Follow it:
-
-   ```sh
-   supertag describe task TASK_ID
-   supertag events task TASK_ID
-   supertag watch task TASK_ID
-   ```
-
-Check that it worked: `describe task` shows the latest Task Attempt once execution begins. The Tag
+`describe task` shows the latest Task Attempt once execution begins. The Tag
 must be bound to at least one enrolled Worker Host, and a bound host must advertise a compatible
 Worker Profile before execution can begin.
 
-If the Task records a wait or a Task Attempt is interrupted, the Control Plane schedules recovery
-when the condition is met or capacity returns. There is no operator resume command for a Task;
-`resume worker-host` only ends a deliberate host drain. See the [CLI operator guide](cli.md) for a
-complete local run.
+If a Task waits on an answer or an approval, or a Task Attempt is interrupted, the Control Plane
+schedules the next turn when the answer arrives, the decision lands, or capacity returns. There is
+no operator resume command for a Task; `resume worker-host` only ends a deliberate host drain. See
+the [CLI operator guide](cli.md) for a complete local run.
 
 ## Apply configuration
 
@@ -219,9 +203,7 @@ spec:
       permissionSets: [engineering-runtime]
     - provider: github
       repo: acme/api
-  acceptsMessagesFrom:
-    - tag: reviewer
-      types: [message, result.submitted]
+  acceptsMessagesFrom: [reviewer]
 ---
 apiVersion: supertag/v1
 kind: Tag
@@ -232,9 +214,7 @@ spec:
   locations:
     - provider: slack
       channelId: C0123REVIEW
-  acceptsMessagesFrom:
-    - tag: builder
-      types: [delegation.requested]
+  acceptsMessagesFrom: [builder]
 ---
 apiVersion: supertag/v1
 kind: Role
@@ -281,9 +261,9 @@ Add `account` when more than one account exists for the provider. It takes the S
 manifest name or its external ID, such as the Slack workspace ID. `permissionSets` and `contextSets` activate those sets at that location, as
 `supertag activate permission-set` and `supertag activate context-set` do.
 
-`acceptsMessagesFrom` lists the Tags allowed to send this Tag Mailbox messages, and the message
-types each may send. Each entry has the effect of
-`supertag grant mailbox RECIPIENT --sender SENDER --type TYPE`.
+`acceptsMessagesFrom` lists the Tags allowed to send this Tag Mailbox messages. Each entry has
+the effect of `supertag grant mailbox RECIPIENT --sender SENDER`. Tags that share a Team message
+each other without a grant.
 
 These rules apply to every input:
 
@@ -384,8 +364,7 @@ spec:
   budget: { minor: 50000, currency: USD }
   deadline: 2027-01-01T00:00:00Z
   runtimeActions: [files:write]
-  teams:
-    upkeep: { lead: maintainer, members: [builder], maxConcurrency: 2 }
+  team: { name: upkeep, members: [builder], maxConcurrency: 2 }
 ```
 
 `metadata.name` is the Objective's ID. `owner` and `outcome` are required; the rest is optional:
@@ -396,18 +375,17 @@ spec:
 | `outcome` | One statement: the result, how it is verified, what must not change, and when to ask a person. | Fixed |
 | `ongoing` | `true` for a responsibility that only an operator ends. | Fixed |
 | `workspaces` | Workspaces its Tasks may work in. | Fixed |
-| `observe` | IDs of Team channels whose posts reach the owner for assessment. A channel's ID is its Team's ID, such as `OBJECTIVE:NAME` for a declared Team. | Fixed |
 | `budget` | `minor` units, with an optional three-letter `currency`. | Increases in place |
 | `deadline` | An ISO timestamp. | Changes in place |
 | `runtimeActions` | Narrows the runtime actions its Tasks may receive. Omitted: what the owner's Permission Sets allow. | Changes in place |
-| `teams` | Team name to `lead`, `members`, and an optional `maxConcurrency` throttle. Dropping it removes the limit. Each Team's ID, and its channel's ID, is `OBJECTIVE:NAME`. | Changes in place |
+| `team` | An existing Team's name, or a map of `members` with optional `name` and `maxConcurrency` that declares the Objective's own Team. | Which Team is fixed; a declared Team's fields change in place |
 
 The Objective's status is observed, not declared, so a manifest has no `status`.
 
-**Applying creates and starts it.** SuperTag creates the Objective, starts its owner as
-`supertag create objective` does, and creates its Teams. A Team's ID is the Objective's name and the
-Team's name, such as `dependency-upkeep:upkeep`. If the owner cannot start, for example because its
-Tag has no Worker Host, apply warns. A later apply starts it once the cause is fixed.
+**Applying creates and starts it.** SuperTag creates the Objective, starts its conversation as
+`supertag create objective` does, and creates a Team declared in place. That Team's ID is the
+Objective's ID. If the Objective cannot start, for example because its owner Tag has no Worker
+Host, apply warns. A later apply starts it once the cause is fixed.
 
 **Fixed fields refuse changes.** The owner and its Tasks treat the outcome, owner, and Workspaces as
 the definition of the work, so changing them in place would change work already accepted. Apply
@@ -421,11 +399,10 @@ Give the declaration a new name. The new name creates a new Objective, and the o
 running until you cancel it or prune it. Removing `deadline`, `budget`, or `runtimeActions` from the
 manifest keeps the current value, because none of them can be cleared.
 
-**Teams follow field ownership.** Apply creates the Teams the input adds, updates the lead, members,
-and concurrency of the ones it changes, and dissolves the ones it declared and the input dropped.
-Teams created another way, by a command or by the owner, stay. A Team that an operator changed with
-`supertag update team` belongs to `cli` until apply takes ownership with `--force-conflicts`. A
-dissolved Team cannot return, so give a replacement Team a new name.
+**A declared Team follows field ownership.** Apply creates the Team the input declares and keeps
+its name, members, and concurrency in step with the input. A Team named by name, or created with
+`supertag create team`, stays as it is. A Team that an operator changed with
+`supertag update team` belongs to `cli` until apply takes ownership with `--force-conflicts`.
 
 **Prune cancels.** Removing a declared Objective from a set's input and applying with `--prune`
 cancels it, as `supertag cancel objective` does. Its Tasks, results, and history stay. Without
@@ -440,8 +417,8 @@ Tag/maintainer deleted
 A cancelled Objective cannot run again. If its name stays in the input, apply leaves it as it is and
 says so.
 
-Check that it worked: `supertag describe objective dependency-upkeep` shows the owner's first Task,
-and `supertag diff -f dependency-upkeep.yaml` prints `No changes.`
+Check that it worked: `supertag describe objective dependency-upkeep` shows its first Task, and
+`supertag diff -f dependency-upkeep.yaml` prints `No changes.`
 
 ### Declare Surface Accounts
 
@@ -616,7 +593,7 @@ supertag get objective dependency-upkeep --output yaml
 ```
 
 Without a name, `get` prints every resource of that kind, separated by `---`. An Objective always
-needs its ID. Its export lists its declared Teams and its current runtime actions, but not its
+needs its ID. Its export lists its Team and its current runtime actions, but not its
 status. A Role listing skips
 built-in Roles, which exist on every Control Plane. The export lists every Tag field, including
 `locations` and `acceptsMessagesFrom`, so applying it manages all of them. Location scopes appear
@@ -650,7 +627,7 @@ lists what keeps each kind in use:
 
 | Kind | In use while |
 | --- | --- |
-| Tag | It owns an Objective that is not completed or cancelled, it leads or belongs to a Team of such an Objective, it has pending or running Tasks, or a Permission Set names it as an approver. |
+| Tag | It owns an Objective that is not completed or cancelled, it belongs to any Team, it has pending or running Tasks, or a Permission Set names it as an approver. |
 | Role | Any Tag holds it. Built-in Roles can never be deleted. |
 | Permission Set, Context Set | A Role lists it, or it is activated at a Tag location. |
 | Workspace | An Objective that is not completed or cancelled names it, or a Tag location lists it in `workspaces`. |
@@ -659,7 +636,7 @@ lists what keeps each kind in use:
 Deleting never erases history:
 
 - **A Tag is retired.** SuperTag removes its locations and their set activations, Worker Host
-  bindings, Mailbox grants in both directions, Mailbox credentials, and Role assignments. The Tag
+  bindings, Mailbox grants in both directions, and Role assignments. The Tag
   itself stays, so its Tasks, Sessions, approvals, Objectives, and artifacts still name it. A
   retired Tag receives no work, cannot be messaged, and cannot be bound to a Worker Host. An Auth
   Key that names it can no longer join a host.

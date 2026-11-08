@@ -46,8 +46,7 @@ at any time.
 | API area | Level | Compatibility boundary |
 | --- | --- | --- |
 | Task Attempt, event, Worker Host descriptor, Worklet descriptor, and transport JSON schemas | Beta | Published wire fields, versions, and checked-in fixtures |
-| Task result `findings` and the harness `Finding:` line format | Experimental | The [finding shape and rules](coordination.md#review-findings): severities, statuses, Control Plane ids, and strict validation; `read_task` `openFindings` |
-| Closing findings: `update_task` `finding`, result `fixedFindings`, and the harness `Fixed finding:` line format | Experimental | The [closure rules](coordination.md#closing-a-finding): who may close each severity, re-review acceptance, `closedBy`, `closedAt`, and `findingClosures` |
+| Task result `findings` and the harness `Finding:` line format | Experimental | The [finding shape and rules](coordination.md#review-findings): severities, Control Plane ids, and strict validation |
 | Worklet transport behavior | Beta | Negotiation, registration, heartbeat, dispatch, cancellation, and ordered events |
 | Protobuf/gRPC adapters | Experimental | Compatibility and conformance foundations; Worklet connections to HTTP(S) origins choose gRPC by default |
 
@@ -82,9 +81,8 @@ at any time.
 | `SessionStateStore` and continuity resolution | Beta | Exact-ref matching and resume → replay → fresh behavior |
 | Shipped Codex, Claude Code, local execution, E2B, MCP, and collaboration surface providers | Experimental | Provider IDs and documented configuration only; implementation details are not contracts |
 | Control-plane resource API and CLI commands | Beta | Documented resource shapes and commands; output prose is not machine-stable |
-| `supertag message objective --reply-to MESSAGE_ID` and `supertag recover worklet --host NAME` | Beta | Flag names and meaning: answer one pending question by message ID; select the host service whose journal recovery writes. Error prose is not machine-stable |
-| `supertag start objective ID [--output json]` | Beta | Starts an Objective created with `--no-start` through `start_objective`; text is for people and JSON is the structured start result |
-| `supertag message tag`, the `/api/v1/tags/:name/messages` routes and their reply stream, and the conversation tools `list_sessions`, `search_sessions`, `read_session`, `list_objectives`, `start_session`, `continue_session`, and `ask` | Experimental | Routes, message record fields including `startedSessions` and `waiting`, AI SDK UI message stream parts (`text-*`, `data-activity`, `finish`, `error`), tool names and inputs, and work Session limits (four per turn, eight unfinished per conversation, four running); output prose is not machine-stable |
+| `supertag message objective ID TEXT` and `supertag recover worklet --host NAME` | Beta | Flag names and meaning: deliver the next turn of an Objective's conversation; select the host service whose journal recovery writes. Error prose is not machine-stable |
+| `supertag message tag`, the `/api/v1/tags/:name/messages` routes and their reply stream, and the coordination tools `create_objective`, `read_objective`, `update_objective`, `list_objectives`, `list_sessions`, `search_sessions`, `read_session`, `start_session`, `continue_session`, `ask`, `send_message`, `post`, and `read_workstream` | Experimental | Routes, message record fields including `startedSessions` and `waiting`, AI SDK UI message stream parts (`text-*`, `data-activity`, `finish`, `error`), tool names and inputs, and work Session limits (four per turn, eight unfinished per conversation, four running); output prose is not machine-stable |
 | `supertag-ai/control-plane` embedding API | Experimental | Control Plane service boundary; no persistence-schema compatibility promise |
 | Conformance helpers and test fixtures | Beta | Published assertions and fixtures; helper implementation details may change |
 | Undocumented exports, package internals, and database tables | Internal | No compatibility promise |
@@ -210,6 +208,6 @@ and the earliest possible removal version. Notices belong in generated or
 runtime warnings where useful, the changelog, release notes, and the relevant
 reference documentation.
 
-Objectives use the experimental [Objective API](../../spec/objectives.md). Tag credentials
-can read owned Objectives and those their active Teams serve; only the owner or an
-operator may change Objective status. Team membership does not grant messaging rights.
+Objectives use the experimental [Objective API](../../spec/objectives.md). A Tag reads the
+Objectives it owns and those whose Team it belongs to; only the owner or an operator changes an
+Objective's status.

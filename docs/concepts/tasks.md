@@ -1,24 +1,14 @@
 # Tasks and Sessions
 
-A **Tag** is a persistent AI identity with its own responsibilities and permissions. A **Task** is
-one request or assignment that SuperTag has accepted for that Tag. SuperTag stores it so the work
-can be inspected, retried, or recovered. A **Session** groups Tasks from the same conversation so
-later requests can continue earlier work.
-
-Tasks are also how a team divides an outcome. When Tags pursue an **Objective**, an outcome owned by
-one Tag, the owner and the leads of each **Team**, a group of Tags under one lead, assign Tasks to
-Team members. Each submitted result waits for review before it counts.
+A **Tag** is a persistent AI identity with its own responsibilities and permissions. A **Session**
+is one thread of that Tag's work: a conversation with a person, the conversation of an
+**Objective** it owns, its inbox, or a piece of work started beneath one of those. A **Task** is
+one turn of a Session. SuperTag stores each Task so the work can be inspected, retried, or
+recovered.
 
 If someone asks `@SuperTag` a question and then follows up in the same thread,
 SuperTag creates two Tasks in one Session. Each Task still has its own status, result, and
 permissions.
-
-An Objective owner starts each activation with a brief of stored state. For example, an operator's
-"never delegate full verification" direction stays available after the owner acts on it and wakes
-again. The brief keeps operator direction separate from recent activity, with excerpts and references
-when messages exceed its space. Approval decisions contribute the operator's reason, without the
-AI-written request summary. See the [owner brief reference](../reference/coordination.md#owner-wakes)
-for its contents and bounds.
 
 ## Follow one request
 
@@ -36,24 +26,23 @@ calls those reusable responsibilities **Roles**. **Context Sets** select reusabl
 **Permission Sets** select allowed actions. SuperTag records these decisions on the Task. A later
 policy change affects later Tasks without rewriting work that was already accepted.
 
-## Owner activations and operator input
+## An Objective's conversation
 
-An **owner activation** is a Task that runs an Objective owner's coordination work. Each
-[Task Attempt](#task-attempt) starts with a fresh conversation and a short brief of stored state:
-the outcome, recent changes, open work, results, findings, and operator input that still needs
-handling.
+An Objective is a conversation with a goal. It runs in the thread it was created in: a Slack
+thread, a GitHub issue, or a person's CLI conversation. Each of its turns is a Task of the owner
+Tag, and the owner's reply posts to that thread.
 
-For example, an operator tells a release owner to wait for a specific candidate. That message
-stays in later briefs until an owner Task Attempt receives it and then acts. An unrelated Task
-running under the same Tag cannot clear it. Receiving or reading the message alone does not clear
-it either. A later reply to the operator, child assignment, or actual Objective change records
-handling. A no-op update does not.
+Turns are delivered, never scheduled. A turn runs when the Objective starts, when a Session
+beneath it reports, when a person messages it, when an approval is decided, and when SuperTag
+sends a budget or deadline notice. Each turn ends done or waiting. When a turn ends with nothing
+running and nothing asked while the Objective is still working, SuperTag wakes the Objective once
+to continue or finish. A second idle turn marks the Objective blocked and tells the person in the
+thread.
 
-When many messages accumulate, the brief favors the newest complete messages and points to stored
-history for the rest. An owner waiting for operator input wakes when it arrives. It cannot begin
-that wait while earlier input still needs handling. These rules help direction survive restarts
-and fresh conversations. See [owner wakes](../reference/coordination.md#owner-wakes) for exact
-bounds and [wait conditions](../reference/coordination.md#wait-conditions) for handling rules.
+A person directs the Objective by replying in its thread or running
+`supertag message objective ID TEXT`. The owner asks the person a question with `ask`, which ends
+the turn; the answer arrives as the next turn. See
+[Define and complete an Objective](../guides/objectives.md).
 
 ## Task
 
@@ -92,30 +81,46 @@ other Sessions when a question needs them. A Session is **shared** or **private*
 conversation: a direct chat or a person's CLI conversation is private to that person. See
 [across Sessions](multiplayer.md#across-sessions-one-tag-one-memory).
 
-A conversation can hand longer work to a **work Session**. A work Session is a Session of the same
-Tag whose parent is the conversation that started it. Its first Task runs an instruction the Tag
-wrote, under the permissions and Context Sets of the conversation Task that started it, never
-more. It has its own native harness session, so its tool output stays out of the
-conversation, and it inherits the conversation's audience. It
+A conversation, or an Objective's conversation, can hand longer work to a **work Session** with
+`start_session`. A work Session is a Session whose parent is the Session that started it. Its
+first Task runs an instruction the Tag wrote, under the permissions and Context Sets of the Task
+that started it, never more. It has its own native harness session, so its tool output stays out
+of the conversation, and it inherits the conversation's audience. It
 [sees only its own work](#what-a-work-session-sees). A work Session can't start more work
-Sessions or create, attach, or start an Objective. At most four run at once per conversation;
-later ones wait. One conversation Task starts or continues at most four, or its `maxNativeAgents`
-when lower, and they [share its budget](#how-work-sessions-share-a-budget). A conversation holds
-at most eight unfinished work Sessions.
+Sessions or create an Objective. At most four run at once beneath one Session;
+later ones wait. One Task starts or continues at most four, or its `maxNativeAgents`
+when lower, and in a conversation they [share its budget](#how-work-sessions-share-a-budget). A
+Session holds at most eight unfinished work Sessions.
 
-When a work Session's Task completes, fails, or is cancelled, its conversation gets one report turn:
-a new Task in the conversation Session that resumes the conversation's native session. It carries
+An Objective's turn can also give `start_session` a Tag: that starts a work Session of another
+member of the Objective's Team, with the Objective's conversation as its parent. The target Tag
+must be active and bound to a Worker Host.
+
+When a work Session's Task completes, fails, or is cancelled, the Session that started it gets one
+report turn: a new Task that resumes that Session's native session. It carries
 the work Session's title, status, and result, and the Tag reports it to the person where the
 conversation took place: the Slack thread, the issue, or the CLI conversation. SuperTag records
 each report once, even across a restart. The report turn has the starting Task's permissions and
-can't create or attach an Objective, because no person asked for one.
+can't create an Objective, because no person asked for one. An Objective's owner reviews a report
+by reading it, then accepts it in its reply or sends fixes with `continue_session`.
 
 An Objective started in a conversation reports back there: its questions, progress, approval
-notices, and completion. That conversation is the Objective's home Session. The work itself runs in
-the Objective's own Tasks, so planning and tool output stay out of the thread.
+notices, and completion. The work itself runs in the Sessions started beneath it, so planning and
+tool output stay out of the thread.
 
 You can also talk to a Tag from a terminal with `supertag message tag`. See
 [Talk to a Tag from the CLI](../guides/talk-to-a-tag.md).
+
+### A Tag's inbox
+
+A Tag's **Mailbox** is its inbox for messages from other Tags. A message is plain text, sent with
+`send_message`, and it arrives as a turn of the recipient Tag. Messages that arrive while that
+turn runs are handled together in the next one, so a Tag answers a burst of messages once. A
+message's status is the status of the Task that handled it.
+
+A Tag may message another Tag when the two share a Team, or when the recipient accepts messages
+from the sender. A grant is exactly that: this recipient accepts messages from this sender. See
+[Send messages between Tags](../guides/tag-messaging.md).
 
 ### What a work Session sees
 
@@ -200,6 +205,15 @@ started it. A Task without reported limits passes none on. Report turns sit outs
 budget and run under the starting Task's full limits, so a result reaches the person even when the
 budget is spent.
 
+### One budget pool per Objective
+
+An Objective has one budget pool, and everything beneath it draws from the same pool: its own
+turns and every work Session started under it. Each turn may spend at most what the budget has
+left, in the Objective's currency. When less than a twentieth of the budget is left, the pool is
+spent: SuperTag admits no new turn and refuses `start_session`. Once the running Task Attempts
+settle, the Objective's status becomes `limited`, and SuperTag tells the person in its thread.
+Raise the budget with `supertag update objective ID --budget-minor N` to continue.
+
 ## Task Attempt
 
 A **Task Attempt** is one execution of a Task. Most Tasks need one Task
@@ -214,31 +228,24 @@ renewal. It does not become successful conversation history.
 
 ## When a budget runs out
 
-An execution budget is an allocation for one Task Attempt, not a guarantee that its assignment will fit.
+An execution budget is an allocation for one Task Attempt, not a guarantee that the work will fit.
 SuperTag records a confirmed budget stop on the Task and leaves unfinished work stopped. It does
 not automatically grant another allocation. Accepted artifacts and completed Objectives keep their
-outcomes; a later manager overrun does not revoke them.
+outcomes; a later overrun does not revoke them.
 
-The responsible manager can use an ordinary message to a **Mailbox**, a Tag's direct delivery point,
-to explain what is complete, what remains, and the allocation requested. Another authorized
-Objective owner or Team lead, or an operator, decides whether to renew the allocation, reduce scope,
-defer, or stop. A message expresses a decision; the authorized Task update applies it. A Tag cannot
-renew its own exhausted Task. If that Tag has already stopped, the durable Task record remains
-available without another model turn. A waiting parent can observe the failed child through its
-existing wait mechanism.
-
-For Objective assignments, renewal starts a new Task Attempt on the same Task. Earlier usage and allocations remain in its history.
-A compatible, successfully archived native Session can preserve progress; it does not preserve a
-workspace or grant new permissions. If no safe archive exists, native resumption is unavailable.
-Ordinary surface conversations also stop automatic retry on confirmed exhaustion, but this
-renewal interface applies to Objective assignments. A new surface request does not automatically
-resume the failed native archive.
-Codex's reported-token control may overshoot between usage reports; this remains visible separately
-from delivery status.
+A Tag cannot raise its own limits. A person raises an Objective's budget with
+`supertag update objective ID --budget-minor N`; the Objective's next turn runs against the larger
+pool. Raising it starts a new Task Attempt on a Task stopped by the budget. Earlier usage and
+allocations remain in its history. A compatible, successfully archived native session can preserve
+progress; it does not preserve a workspace or grant new permissions. If no safe archive exists,
+native resumption is unavailable. Ordinary surface conversations also stop automatic retry on
+confirmed exhaustion, and a new surface request does not automatically resume the failed native
+archive. Codex's reported-token control may overshoot between usage reports; this remains visible
+separately from delivery status.
 
 Allocation fields, charging, and reserved versus spent amounts are defined in
-[Budgets and allocation](../reference/coordination.md#budgets-and-allocation). To renew an
-exhausted Task or increase an Objective's allocation, follow
+[Budgets and allocation](../reference/coordination.md#budgets-and-allocation). To raise an
+Objective's budget, follow
 [Respond to budget and operator requests](../guides/objective-decisions.md).
 
 ## Results and reusable artifacts
@@ -246,9 +253,8 @@ exhausted Task or increase an Objective's allocation, follow
 The Task itself stores the request text, response text, and structured result. Its result includes
 observable outcomes and references; execution events remain attached to the producing Task Attempt.
 A reviewer's result can also carry findings: problems it found, each with a severity of high,
-medium, or low. The owner closes a medium or low finding as fixed or accepted. A high finding
-closes only when the reviewer that reported it confirms the fix in a later review, or when an
-operator closes it. See [review findings](../reference/coordination.md#review-findings).
+medium, or low. An Objective's owner reads them in the report turn and decides what to send back
+with `continue_session`. See [review findings](../reference/coordination.md#review-findings).
 There is no separate handoff resource created for every response.
 
 When a Task can't resume its Session's native harness session, SuperTag derives bounded history
@@ -287,8 +293,6 @@ positive integers. Optional `profile: { "id": "local-codex", "revision": "1" }` 
 selection to an exact recipe. An empty object leaves selection to the Control Plane's compatibility
 checks. These requirements do not grant permissions or change the authorization snapshot.
 
-An Objective coordinator supplies `execution` on `assign_task`; `requiresApproval` keeps the Task
-queued until an operator updates its approval field.
 A trusted integrator admitting a collaboration surface event can use the Control Plane embedding API:
 
 ```ts
@@ -306,14 +310,15 @@ that same Task Attempt and selection; it does not choose another Worker Profile 
 Sessions have no profile binding. A Session's native state prefers the profile that produced it,
 and any profile of the same harness can resume it.
 
-### Cancelling assigned work
+### Cancelling a Task
 
-An authorized Objective owner or Team lead can cancel an assignment. Cancellation stops further
+An operator cancels one Task with `supertag cancel task ID`, and every open Task of an Objective
+with `supertag cancel objective ID`. Cancellation stops further
 results from that execution from being accepted. The Task event history records who cancelled it,
 when, and its previous status in `task.cancelled`. This event is saved with the cancellation itself, so
 an interrupted Worker does not need to report the action afterward.
 
-A Worker completes its own assignment by returning its output. It should not cancel its Task or
+A Worker completes its own Task by returning its output. It should not cancel its Task or
 try to accept its own running work to signal completion.
 
 ### Reusing an execution selection
@@ -347,11 +352,11 @@ execution requirements or authority wait for a separate execution.
 
 An uncertain acknowledgement holds the message to avoid duplicate delivery. If the same Task
 Attempt later confirms that it withdrew the unread message, SuperTag clears that uncertainty.
-The message runs once as its own Task on the next activation.
+The message runs once as its own Task in the Session's next turn.
 
 Without live input support, messages wait in Session order. Before the next execution starts,
 SuperTag refreshes its Session history and selects the latest compatible completed session state.
-Delegated Tasks can still run independently.
+Sessions started beneath this one still run independently.
 
 Codex app-server mode supports steering. Claude Code supports queueing when it runs through the
 Agent SDK, which it does for Session continuity, forwarded tools, and split execution. Claude Code
@@ -360,7 +365,7 @@ that ended with background work still running. The final result ends live input.
 takes no more input, and input it hasn't taken yet waits for the next Task Attempt. If Claude Code
 still holds taken input the model hasn't read, SuperTag kills the process at once and waits for
 it to exit before it uses the result. That unread input also waits for the next Task Attempt, even
-when Claude Code had already accepted it: a teammate's message returns to the next digest, and a
+when Claude Code had already accepted it: another Tag's message returns to the Tag's inbox, and a
 person's message in the thread runs as its own Task after the current work, once. Nothing after
 the final result changes the Task Attempt's outcome: no later turn, error, cancellation, or time
 limit. For example, cancelling while SuperTag waits for Claude Code to exit still completes the
@@ -380,7 +385,7 @@ and exporting its session state.
 If delivery or execution completion is uncertain, SuperTag blocks further execution in that
 Session rather than retrying the message or resuming an older session state. The durable delivery
 record retains the exact target Task Attempt. If that Task Attempt later withdraws the input as
-unread before SuperTag queues a recovery notice, the message returns to the next activation
+unread before SuperTag queues a recovery notice, the message returns to the Session's next turn
 automatically. Do not resend it while that execution is active.
 
 If the target Task Attempt ends without resolving delivery, SuperTag sends a recovery notice.

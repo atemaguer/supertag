@@ -26,9 +26,8 @@ machine: at most one `control-plane` service and any number of `host` services, 
 `env_file`, and `${VAR}` interpolation. It is a configuration file, not a wire message, so it
 rejects unknown fields instead of ignoring them; keys that start with `x-` are ignored. See [supertag.yaml and local state](../docs/reference/supertag-yaml.md).
 `objective-manifest.schema.json` describes the `Objective` manifest that `supertag apply -f`
-reads. It also rejects unknown fields,
-and it has no `status`: an Objective's status is observed, never declared. See
-[Declared Objectives](../docs/reference/resource-model.md#declared-objectives).
+reads. It also rejects unknown fields, and it has no `status`: an Objective's status is observed,
+never declared. See [Declared Objectives](../docs/reference/resource-model.md#declared-objectives).
 
 The [Worker service-provider contract](worker-spi.md) defines
 language-neutral extension behavior for Workers, harnesses, execution
@@ -70,25 +69,21 @@ Validate the complete document against its entry-point schema. Schema tests in `
 
 Checked-in examples under `fixtures/worklet-transport/VERSION/` describe the current protocol. SDKs in another language must decode the protocol 18 fixtures. CI validates the current fixtures on every supported Node.js release.
 
-## Tag messaging (Experimental)
+## Coordination (Experimental)
 
-The separate [Tag messaging HTTP v1 protocol](tag-messaging.md) and
-[tag-message.schema.json](tag-message.schema.json) define internal Tag-to-Tag delivery.
-Mailbox delivery remains separate from the [Worklet execution transport](worklet-transport.md). Command request
-objects reject unknown fields; message response objects remain extensible.
+[Objectives](objectives.md) define an outcome a Tag owns, with a budget, a deadline and a status;
+[objective.schema.json](objective.schema.json) is the response shape and
+[objective-manifest.schema.json](objective-manifest.schema.json) the declared form.
 
-[Workstreams](workstreams.md) are Team channels: every Team has one, created with it and sharing
-its ID, with typed and addressed posts. Their response is defined by
-[workstream.schema.json](workstream.schema.json).
+[Workstreams](workstreams.md) are Teams' shared records of posts, with
+[workstream.schema.json](workstream.schema.json) as the shape of one post. The
+[Team schema](team.schema.json) describes a Team: a flat list of member Tags with an optional
+concurrency limit.
 
-- [Objectives](objectives.md) — outcome definitions, success criteria, and explicit completion.
+Tag-to-Tag messages are plain text delivered as Tasks of the recipient's inbox; the rules are in
+[Mailbox](../docs/reference/coordination.md#mailbox). They are separate from the
+[Worklet execution transport](worklet-transport.md).
 
 [resource-deletion.schema.json](resource-deletion.schema.json) defines the response to deleting a
 Tag, Role, Permission Set, Context Set, or Workspace, including a dry run. See
 [Deleting resources](../docs/reference/control-plane-api.md#deleting-resources).
-
-The [Team schema](team.schema.json) describes Objective-scoped membership, leadership, concurrency,
-and lifecycle. See the [Objective coordination guide](../docs/guides/objective-coordination.md) for the current
-coordination commands and execution boundaries.
-[tag-directory.schema.json](tag-directory.schema.json) defines the result of the `list_tags`
-coordination tool: active Tags with their Roles, allowed execution, and bound Worker Hosts.

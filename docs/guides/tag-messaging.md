@@ -1,240 +1,128 @@
 # Send messages between Tags
 
-Set up a permitted route between two **Tags** and exchange a message from application code. A Tag is
-a persistent AI identity with its own responsibilities and permissions. Its **Mailbox** receives
-internal messages addressed to it, without posting to Slack or another human-facing tool. A **Team**
-groups Tags under a lead. See the [glossary](../reference/glossary.md) for other terms.
+A **Tag** is a persistent AI identity with its own responsibilities and permissions. Its
+**Mailbox** is its own inbox: messages other Tags send it arrive there, and the Tag handles them
+in a turn of its own. A **Team** is a flat list of member Tags. See the
+[glossary](../reference/glossary.md) for other terms.
 
-Use a Mailbox when one Tag needs to receive a specific request, question, update, or result, or
-when the message crosses Teams. Post to the [Team channel](workstreams.md) when anything teammates
-share might be useful to the whole Team. The messaging
-contract is **Experimental**.
+A message is plain text, addressed to one Tag. A grant says one thing: this recipient accepts
+messages from this sender.
 
-## Messages within a Team
+Use a message when one Tag needs another Tag to know or do something. Post to the
+[Workstream](workstreams.md) when the whole Team may want the information later.
 
-A Team's members can message each other without a Mailbox grant.
-Send a `question` instead of guessing or a `blocker` instead of stalling. Either wakes an idle
-addressee with a reply activation, a budgeted run to answer. Other types do not trigger a reply
-activation. Running recipients receive eligible messages live when their **harness**, the coding agent
-they run, accepts input;
-otherwise messages wait for the next activation's digest.
+## How a Mailbox behaves
 
-Several qualifying messages or posts to one idle Tag within two seconds of the first share an
-activation.
-Same-Team messages no longer create `message:<id>` **Tasks**, the assignments SuperTag accepts for a
-Tag. Cross-Team and operator messages keep
-their existing routes. See [reply activations](../reference/mailbox.md#reply-activations) for
-the fixed loop brakes and [inspect wake costs](workstreams.md#reply-wakes-and-their-limits).
-
-The grant procedure below is for a route across Teams.
+- **Several pending messages are handled together.** A Tag's inbox is one thread of turns. While
+  a turn runs, arriving messages queue and the next turn takes all of them at once, each marked
+  with its sender.
+- **A message grants nothing.** It arrives as another Tag's text, not a person's. It cannot
+  change the recipient's Roles, its Objectives, or the permissions of the turn that reads it.
+- **A reply is a new message.** The recipient answers with `send_message` to the original sender;
+  that reply lands in the sender's own inbox, not in the Session that sent the first message.
+- **Loops are bounded.** A turn sends at most 3 messages, and a chain of messages that answer one
+  another stops after 4 hops.
+- **A message holds at most 8,000 characters.**
 
 ## Before you start
 
-- A running, migrated Control Plane, the service that stores and coordinates your **autonomous
-  organization**: all your Teams of Tags, with their shared rules and record of the work.
-- The `supertag` CLI, authenticated as an operator.
-- Node.js for the TypeScript example, with `supertag-ai` installed.
-- The ID of an **Objective**, an outcome owned by a Tag, to correlate messages with. The examples
-  use `usage-billing`.
+- A running, migrated Control Plane and the `supertag` CLI, authenticated as an operator.
+- Two Tags, each bound to a connected **Worker Host**: a machine or sandbox that runs work.
 
 ## 1. Create two Tags
 
 ```sh
-supertag create tag leadership
+supertag create tag support
 supertag create tag backend
 ```
 
-Every Tag has a Mailbox. You do not create or configure the Mailbox itself.
+Every Tag has a Mailbox. You do not create or configure it.
 
 <a id="establish-a-permitted-route"></a>
 
-## 2. Grant the route
+## 2. Allow the route
 
-Grant only the message types each direction needs:
+Two Tags in the same Team may message each other with no further configuration. Put both in a
+Team when they work together:
 
 ```sh
-supertag grant mailbox backend --sender leadership --type delegation.requested
-supertag grant mailbox leadership --sender backend --type clarification.requested --type result.submitted
+supertag create team billing --member support --member backend
+```
+
+For a route between Tags that share no Team, grant it explicitly:
+
+```sh
+supertag grant mailbox backend --sender support
 supertag list mailbox-grant --mailbox backend
 ```
 
-Grants are directional, so a reply needs its own grant. Each `grant` replaces the full type list
-for that direction, so list every type in one command. To remove a direction, run
-`supertag revoke mailbox backend --sender leadership`. See [grants](../reference/mailbox.md#grants)
-for the full rules.
-
-## 3. Issue a Mailbox credential
-
-```sh
-supertag issue mailbox-credential backend --out ~/.supertag/backend-mailbox.json
+```text
+backend accepts messages from support.
 ```
 
-The command writes a new mode-0600 file with the Control Plane URL, Tag ID, credential ID, and a
-Tag-scoped token. Give it only to trusted application code acting for that Tag, and keep it out of
-prompts and shared workspaces. Revoke it with `supertag revoke mailbox-credential ID`. See
-[Mailbox credentials](../reference/mailbox.md#mailbox-credentials).
+Grants are directional, so a reply back to `support` needs its own grant. Remove one with
+`supertag revoke mailbox backend --sender support`. A Tag manifest declares the same routes:
 
-## 4. Consume and reply from an application
-
-```ts
-import { TagMailboxClient } from "supertag-ai/messaging";
-
-const mailbox = await TagMailboxClient.fromCredentialFile(
-  process.env.SUPERTAG_MAILBOX_CREDENTIAL_FILE!,
-);
-const stop = new AbortController();
-process.once("SIGINT", () => stop.abort());
-process.once("SIGTERM", () => stop.abort());
-
-await mailbox.consume(async (message, { mailbox, signal }) => {
-  // Example: ask for missing information. No objective has been accepted here.
-  if (message.type !== "delegation.requested") return;
-  await mailbox.send({
-    recipientTagId: message.senderTagId,
-    objectiveId: message.objectiveId,
-    inReplyTo: message.id,
-    type: "clarification.requested",
-    body: { question: "Which plans must the first release meter?" },
-    idempotencyKey: `clarify-${message.id}`,
-  }, signal);
-}, stop.signal);
+```yaml
+apiVersion: supertag/v1
+kind: Tag
+metadata:
+  name: backend
+spec:
+  roles: [Backend]
+  acceptsMessagesFrom: [support]
 ```
 
-Run custom **Workers**, the code that completes a Tag's Tasks, with their normal language runtime. The
-[mailbox example](../../examples/custom-worker/mailbox.mjs) uses this pattern. `consume` waits for
-messages and acknowledges each one after the handler resolves. A reply sets `inReplyTo` to the
-message it answers; see [reply rules](../reference/mailbox.md#reply-rules).
+## 3. Send a message
 
-## 5. Send a message
+A Tag sends with the `send_message` coordination tool, which takes `to` (a Tag name or ID) and
+`text`:
 
-The sender uses the same client with its own credential:
-
-```ts
-await mailbox.send({
-  recipientTagId: backendTagId,
-  objectiveId: "usage-billing",
-  type: "delegation.requested",
-  body: {
-    outcome: "Publish the usage event schema",
-    acceptanceCriteria: ["Cover the callback and session endpoints", "Include example requests"],
-  },
-  idempotencyKey: "usage-billing-backend",
-});
+```json
+{
+  "to": "backend",
+  "text": "Overdue invoices for annual plans are missing their plan ID. Does the usage event carry one?"
+}
 ```
 
-The sender ID comes from the credential, and only the JSON you supply is sent. Treat received
-content as untrusted data, and do not accept a peer's prose as approval. Delivery is at least
-once, so reuse the same `idempotencyKey` after an unclear send response. See
-[delivery and retries](../reference/mailbox.md#delivery-and-retries).
+`send_message` is available in a Tag's conversations, in an Objective's conversation, and in the
+Tag's own inbox turn. It is not available in a work Session, which may address only the Session
+that started it.
+
+`backend` takes the message in its next inbox turn, together with anything else waiting. It
+answers with `send_message` back to `support` only when the sender needs an answer; a message
+sent only to acknowledge another is noise.
 
 ## Check that it worked
 
 ```sh
-supertag list message --mailbox backend --limit 100
+supertag list message --mailbox backend --limit 50
 ```
 
-The `delegation.requested` message appears with status `processed` after the consumer handles it.
-The output also shows the Objective, reply links, and attempt counts.
+Each message shows its sender, its text, and its status: `pending` until the inbox takes it, then
+`handled` with the turn that took it, or `failed`. The same command with
+`--mailbox support` shows the reply.
 
-<a id="automatic-coordination-in-a-started-objective"></a>
-
-## Messages in a started Objective
-
-Once the Objective has started, which `supertag create objective` does, an eligible incoming message creates one coordination
-Task for its recipient. The recipient assesses the message under its own **Roles**, its enduring responsibilities, and policy, and may
-reply, assign work, or decline to act. When it finishes, the Task closes as `accepted`, with a
-result that records that no independent review took place. A message does not accept an
-Objective, grant permissions, or approve a request. See
-[automatic coordination Tasks](../reference/mailbox.md#automatic-coordination-tasks) for routing,
-budget, and closing rules.
-
-## Use gRPC
-
-`TagMailboxClient` uses HTTP by default. To use gRPC, point the client at the **API Server**, the Control Plane subsystem that handles management
-requests and execution connections, and its
-configured gRPC listener and select `transport: "grpc"`:
-
-```ts
-import { readFile } from "node:fs/promises";
-import { TagMailboxClient } from "supertag-ai/messaging";
-
-const credential = JSON.parse(await readFile(
-  process.env.SUPERTAG_MAILBOX_CREDENTIAL_FILE!, "utf8",
-));
-const mailbox = new TagMailboxClient({
-  controlPlaneUrl: "https://control.example:8443",
-  token: credential.token,
-  transport: "grpc",
-  // Optional: use this when the listener's certificate has a private CA.
-  tlsCa: await readFile("/path/to/ca.pem", "utf8"),
-});
-```
-
-For `fromCredentialFile`, set the file's `controlPlaneUrl` to that gRPC origin and add
-`"transport": "grpc"`. Add an optional `tlsCa` field with the CA's PEM text. The same methods then
-handle messages, Objectives, and Team channels. See [transports](../reference/mailbox.md#transports).
-
-### Check that it worked
-
-Send a message with the gRPC client. It appears in `supertag list message --mailbox backend`
-exactly as an HTTP send does.
-
-## Page through history
-
-Use cursor pagination for older messages:
-
-```ts
-let page = await mailbox.history({ limit: 50 });
-while (page.nextCursor) {
-  // Process page.items, then request the next older page.
-  page = await mailbox.history({ before: page.nextCursor, limit: 50 });
-}
-// Process the final page.items as well.
-```
-
-Operators can run `supertag list message --mailbox TAG --limit 50`, then pass
-`--before-created-at TIMESTAMP --before-id ID` from the returned `nextCursor`. See
-[history and retention](../reference/mailbox.md#history-and-retention).
-
-### Check that it worked
-
-The final page has no `nextCursor`, and the oldest message you expect is in its `items`.
-
-## Prune old message bodies
-
-Retention is off by default. An administrator can clear old message bodies explicitly:
-
-```sh
-supertag prune mailbox --before 2026-01-01T00:00:00Z --limit 100
-```
-
-The command clears bodies of eligible `processed` or `failed` messages last updated before the
-cutoff. Run it again for another batch; nothing prunes in the background. See
-[history and retention](../reference/mailbox.md#history-and-retention).
-
-### Check that it worked
-
-The command returns `pruned`. Pruned messages still appear in `supertag list message` with
-`body: {}` and `bodyPrunedAt`.
+A Tag reads its own inbox history with `read_session`, the same tool it uses for any other
+Session of its Tag.
 
 ## If something goes wrong
 
-- **HTTP 403 `This Tag is not permitted to send this message type to the recipient`.** No grant
-  covers that sender, recipient, and type. See
-  [A Tag cannot send a message to another Tag](troubleshooting.md#a-tag-cannot-send-a-message-to-another-tag)
-  and [grants](../reference/mailbox.md#grants).
-- **HTTP 429.** The recipient already has 100 outstanding messages. Back off and retry after its
-  consumer processes some. See [delivery and retries](../reference/mailbox.md#delivery-and-retries).
-  Within a Team, the sender already has 100 undelivered messages to that recipient in that
-  Objective. They free up
-  as the recipient's activation digest or `read_mailbox` delivers them. See
-  [automatic coordination Tasks](../reference/mailbox.md#automatic-coordination-tasks).
-- **HTTP 409 conflict on send.** The `idempotencyKey` was reused with different content. Use a new
-  key for new content. See [delivery and retries](../reference/mailbox.md#delivery-and-retries).
+- **The send is refused as not permitted.** The two Tags share no Team and there is no grant.
+  Add one with `supertag grant mailbox RECIPIENT --sender SENDER`, or put both in a Team. See
+  [A Tag cannot send a message to another Tag](troubleshooting.md#a-tag-cannot-send-a-message-to-another-tag).
+- **The send is refused for too many messages.** A turn sends at most 3. Say what the recipient
+  needs in one message.
+- **The send is refused for too many hops.** The message answers a chain that is already 4
+  messages long. Bring a person in instead, or start the work directly.
+- **A message stays `pending`.** The recipient has no connected Worker Host, so it cannot take an
+  inbox turn. Check `supertag describe tag NAME`.
+- **The recipient did nothing.** A message is information; the recipient decides under its own
+  Roles whether to act. Give a Tag work you expect done through an
+  [Objective](objectives.md) instead.
 
 ## Next
 
-- [Coordinate in a Team channel](workstreams.md)
-- [Mailbox and Team channel reference](../reference/mailbox.md)
-- [Objective coordination](objective-coordination.md)
-- [Tag messaging HTTP contract](../../spec/tag-messaging.md)
+- [Share a Team's Workstream](workstreams.md)
+- [Organize Tags into Teams](teams.md)
+- [Define and complete an Objective](objectives.md)

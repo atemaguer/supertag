@@ -1,7 +1,7 @@
 # Deploy the Control Plane on Railway
 
 A **Tag** is a persistent AI identity with its own responsibilities and permissions, and Tags work
-in Teams under a lead. Together, your Teams of Tags make up an **autonomous organization**: Teams
+in Teams: flat lists of member Tags. Together, your Teams of Tags make up an **autonomous organization**: Teams
 may pursue different goals but share one set of rules and one record of the work. Deploy a hosted
 **Control Plane** (the service that stores and coordinates a SuperTag organization) and PostgreSQL
 on Railway, while Codex, Claude Code, codebases, and MCP credentials stay on **Worker Hosts**

@@ -148,9 +148,9 @@ supertag describe tag engineering
 supertag watch tag                 # streams on resource-version change; use list for a snapshot
 ```
 
-`get` returns the portable envelope; `describe` adds observed status. Valid kinds accept
-singular, plural, and unspaced aliases (`tag`, `tags`, `permission-set`, `permissionset`,
-`permission-sets`, …).
+`get` returns the portable envelope; `describe` adds observed status. A kind is always singular
+and hyphenated (`tag`, `permission-set`, `context-set`). Plural and unspaced spellings are
+rejected.
 
 ## Cross-surface continuity
 
@@ -160,7 +160,7 @@ it at a destination. An agent can then inspect or retrieve selected work from an
 Constraints, all enforced: sharing is directional, source and destination are explicit, artifacts
 must belong to the same Tag, matching uses exact resource identity with bounded age and count,
 and failed Task Attempts never advance automatic continuity. These source selectors apply to surface
-Tasks; internal Objective Tasks discover artifacts through Objective and Team visibility instead.
+Tasks; an Objective's own Tasks discover artifacts through Objective visibility instead.
 Same-Session history is automatic and needs no Context Set.
 
 Details in [Context Sets and Permission Sets](../../docs/concepts/context-and-permissions.md)

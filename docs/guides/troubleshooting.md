@@ -204,8 +204,9 @@ to `~/.supertag/.env`.
 
 ### A Task is uncertain
 
-`supertag describe task` says `Assignment: uncertain`, `supertag ps` lists an uncertain Task
-Attempt, or the operator inbox has a `task-attention` item about one. The Task Attempt may have
+`supertag describe task` says `Execution state: cleanup is unconfirmed; the recorded phase does
+not establish current process activity.`, `supertag ps` lists the Task under `Uncertain:`, or the
+operator inbox has a `task-attention` item about one. The Task Attempt may have
 executed: for example, its Worker could not confirm cleanup in time. SuperTag will not run it again
 on its own, and it keeps a Worker slot. Whoever waits on the Task has already been woken. See
 [Uncertain Task Attempts](../reference/scheduling-and-recovery.md#uncertain-task-attempts).
@@ -220,7 +221,7 @@ Each of those places shows the reason and the exact recover command. To recover:
    ```
 
 2. Confirm that the Task Attempt's harness, tool processes, and any remote execution stopped.
-   Reconcile external actions before you assign replacement work.
+   Reconcile external actions before you start replacement work.
 3. Run the command that `describe task`, `ps`, or the inbox shows, with your reason:
 
    ```sh
@@ -355,18 +356,18 @@ turn holds back only later turns of its own conversation, never other conversati
 
 ### A Tag cannot send a message to another Tag
 
-`send_message` fails with `This Tag is not permitted to send this message type
-to the recipient` when no grant covers that sender, recipient, and type. Grants
-are directional. Each grant replaces the full type set for that sender and
-recipient, so list every type in one command:
+`send_message` is refused when the two Tags share no Team and the recipient has no grant for the
+sender. Put both Tags in a Team, or grant the route. A grant is directional and says one thing:
+this recipient accepts messages from this sender.
 
 ```sh
-supertag grant mailbox RECIPIENT --sender SENDER --type TYPE --type TYPE
+supertag grant mailbox RECIPIENT --sender SENDER
 supertag list mailbox-grant --mailbox RECIPIENT
 ```
 
-See [Grant the route](tag-messaging.md#2-grant-the-route) and the
-[grant rules](../reference/mailbox.md#grants).
+A send is also refused after 3 messages in one turn, or when the message would be the fifth hop
+of a chain of messages that answer one another. See
+[Allow the route](tag-messaging.md#2-allow-the-route).
 
 ## Next
 

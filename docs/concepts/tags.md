@@ -5,26 +5,26 @@
 A **Tag** is a persistent AI identity with its own responsibilities and permissions. For example, a
 reviewer Tag is responsible for reviewing changes and may read the repository but not edit it. You
 assign work to a Tag by name. A Tag talks to people in many conversations, each its own Session with
-its own harness session, and works on assignments that each start a new one. The Tag is what
+its own harness session, and longer work runs in Sessions of its own. The Tag is what
 persists across them: its configuration, its Sessions, its open assignments, and their results. SuperTag
-calls each accepted request or assignment a **Task**, and the place where a Tag receives internal
-messages its **Mailbox**. When people call on the Tag from Slack or another shared tool, they
+calls each turn of a Tag's work a **Task**, and the Tag's inbox for messages from other Tags its
+**Mailbox**. When people call on the Tag from Slack or another shared tool, they
 experience it as an AI teammate. The same Tag can work across several tools without losing its
-identity. Tags work in Teams under a lead. Together, your Teams of Tags make up an **autonomous
+identity. Tags work in Teams. Together, your Teams of Tags make up an **autonomous
 organization**: Teams may pursue different goals but share one Control Plane, its rules, and its
 record of the work.
 
 In security terms, the Tag is a non-human identity in SuperTag's identity and access
 management (IAM) model. Each Task still has its own requester, source, policy, and execution needs.
 
-This identity is the anchor for security and governance. Knowledge, authority, responsibilities,
+This identity is the anchor for security and accountability. Knowledge, authority, responsibilities,
 work, and audit history attach to an accountable Tag rather than to an interchangeable model
 session or temporary execution process.
 
 Terms used on this page (see the [glossary](../reference/glossary.md)):
 
 - A **Role** is an enduring responsibility assigned to a Tag.
-- A **Team** is a group of Tags under one lead and shared responsibility.
+- A **Team** is a flat list of member Tags.
 - A **Session** groups Tasks from the same conversation.
 - A **Context Set** selects reusable knowledge that may be added to a Task; a **Permission Set**
   selects allowed actions.
@@ -105,7 +105,7 @@ spec:
 ```
 
 All active Roles listed on a Tag apply to its work. A Role does not create another actor or choose
-which Task to run. If a responsibility needs its own name, mailbox, Task history, Team membership,
+which Task to run. If a responsibility needs its own name, Mailbox, Task history, Team membership,
 or accountability, create a separate Tag instead. See
 [When to use a Tag or a Role](roles.md#when-to-use-a-tag-or-a-role) for examples.
 

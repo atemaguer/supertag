@@ -1,7 +1,7 @@
 # Self-host SuperTag
 
 A **Tag** is a persistent AI identity with its own responsibilities and permissions, and Tags work
-in Teams under a lead. Together, your Teams of Tags make up an **autonomous organization**: Teams
+in Teams: flat lists of member Tags. Together, your Teams of Tags make up an **autonomous organization**: Teams
 may pursue different goals but share one set of rules and one record of the work. Run your own
 **Control Plane** (the service that stores and coordinates the organization) with PostgreSQL, and
 connect **Worker Hosts** (machines that provide execution capacity) to it. Each Worker Host runs a

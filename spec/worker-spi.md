@@ -56,7 +56,8 @@ Required behavior:
 
 - reject an unsupported profile before performing work;
 - run at most `maxConcurrency` Attempts at once, except one more whose `placement.coordinationSlot`
-  is true: an Objective owner's activation, which must not wait behind delegated work;
+  is true: a conversation's turn or a work Session's report turn, which must not wait behind the
+  work Sessions it supervises;
 - resolve the admitted context, workspace, tools, and continuity inputs;
 - select and configure any harness runtime and execution environment it uses;
 - start, monitor, cancel, and clean up every execution lifecycle;
@@ -541,20 +542,17 @@ execution. Exact Worker dispatch is required when a durable supervisor reserves 
 multi-Worker host; `LocalWorklet.executeOnWorker` implements that binding. Journal retention is
 operator-managed in this version.
 
-Task waiting requires durable Worklet execution and uses the existing coordination and
-cancellation lifecycle. `wait_for` persists its conditions before the Control Plane cancels the
-current Attempt; model cooperation or a final output is not required. Further coordination and artifact access are revoked immediately.
-The Worker must honor cancellation and finish its normal cleanup. For durable Worklets, the
-Control Plane retains the assignment until the terminal journal receipt confirms cleanup, then marks
-it waiting. Missing receipts never imply released execution capacity. A Control Plane restart reconciles
-a registered wait by cancelling the existing Attempt and observing its terminal receipt, without
-replaying execution. Only a durable wake condition permits a fresh Attempt for the same Task.
-The harness continues to emit ordinary execution events; no new event or protocol version is needed.
+A Task ends done or waiting. A Task that asked a person a question, or whose gated action waits
+on an approval, ends its Task Attempt normally: the Worker emits its final response and finishes
+its cleanup, and the Control Plane records the Task as waiting. Coordination and artifact access
+end with the Task Attempt.
 
-`escalate_task` uses the same lifecycle. It stores the Task's new model or effort and a wait that
-wakes at once, then cancels the current Attempt. The next Attempt for the same Task carries the new
-values in `execution.model` and `execution.effort` and the same `workspacePlan.branch`. Workers
-need no change.
+For durable Worklets, the Control Plane retains the Task until the terminal journal receipt
+confirms cleanup. Missing receipts never imply released execution capacity. A Control Plane
+restart reconciles a waiting Task by observing that terminal receipt, without replaying
+execution. The answer or decision arrives as a fresh Task Attempt for the Session's next Task,
+which carries the same `workspacePlan.branch`. Workers need no change, and the harness continues to
+emit ordinary execution events: no new event or protocol version is needed.
 
 
 ## Portable sandbox backends and process ownership

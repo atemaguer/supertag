@@ -18,9 +18,10 @@ whole system rather than another first-class resource.
   what persists across those sessions: its configuration, its open assignments, and their results.
 - <a id="role"></a>**Role** — an enduring responsibility assigned to a Tag. It can include a purpose, instructions,
   reusable knowledge, and allowed actions. See [Roles](../concepts/roles.md).
-- <a id="objective"></a>**Objective** — an outcome owned by a Tag, with success criteria and an explicit completion
-  assessment. Ongoing responsibilities can be declared in a [manifest](#manifest). See
-  [the coordination reference](coordination.md).
+- <a id="objective"></a>**Objective** — an outcome a Tag owns, with a budget, a deadline and a
+  status. It talks in the thread it was created in, and the work happens in Sessions started
+  beneath it. Ongoing responsibilities can be declared in a [manifest](#manifest). See
+  [the coordination reference](coordination.md#objectives).
 - <a id="task"></a>**Task** — one request or assignment accepted for a Tag under a recorded policy. See
   [the task concepts](../concepts/tasks.md).
 - <a id="session"></a>**Session** — a group of Tasks from the same conversation. All of a Tag's Sessions share
@@ -30,27 +31,19 @@ whole system rather than another first-class resource.
   work, and its result returns there through the Tag. See
   [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-one-memory) and
   [Session](../concepts/tasks.md#session).
-- <a id="team"></a>**Team** — a group of Tags with a shared responsibility, lead, and capacity boundary. See
-  [Team rules](coordination.md#team-rules).
-- <a id="finding"></a>**finding** — one problem a reviewer reports in a Task result, with a severity of high, medium,
-  or low and a status of open, fixed, or accepted. See
-  [Review findings](coordination.md#review-findings).
-- <a id="workstream"></a>**Workstream** — a Team's channel: the one shared thread every Team has, created with the Team
-  and sharing its ID. Its members post to it and read it, and the Objective owner reads it. Also
-  called the **Team channel**. See [Team channel rules](mailbox.md#team-channel-rules).
-- <a id="post"></a>**post** — one append-only entry in a Team channel. Its type is `note`, `question`, `blocker`,
-  `evidence`, or `decision`, and `to` can address it to Tags in the Team. A post carries no
-  authority. An addressed question or blocker can wake an idle teammate within fixed limits. See
-  [Coordinate in a Team channel](../guides/workstreams.md).
-- <a id="reply-activation"></a>**reply activation** — a budgeted run that lets an idle Tag answer a teammate's addressed
-  `question` or `blocker`, sent through a Team channel or same-Team direct message. A `blocker`
-  without `to` goes to the Team lead, unless the lead wrote it. Fixed loop brakes limit wakes;
-  a wake grants no authority. See [reply activations](mailbox.md#reply-activations).
-- <a id="activation-digest"></a>**activation digest** — the unread Team posts and direct messages a Tag sees once when its next
-  [Task Attempt](#task-attempt) starts, addressed items first, then blockers and decisions, capped at about 2,000
-  tokens. It carries no authority. See [activation digest](mailbox.md#activation-digest).
-- <a id="mailbox"></a>**Mailbox** — the direct delivery point through which one Tag receives internal messages. See
-  [the Mailbox reference](mailbox.md).
+- <a id="team"></a>**Team** — a flat list of member Tags with an optional concurrency limit. Members
+  message each other and share the Team's Workstream, and an Objective that names the Team may
+  start work Sessions of its members. See [Teams](coordination.md#teams).
+- <a id="finding"></a>**finding** — one problem a Task result reports about its own work, with a
+  severity of high, medium, or low. See [Review findings](coordination.md#review-findings).
+- <a id="workstream"></a>**Workstream** — a Team's shared record of posts. Every member reads it. See
+  [Workstream](coordination.md#workstream).
+- <a id="post"></a>**post** — one append-only entry in a Team's Workstream. It is plain text and carries
+  no authority. A post wakes nobody; each Tag it addresses receives it in that Tag's Mailbox. See
+  [Share progress in a Workstream](../guides/workstreams.md).
+- <a id="mailbox"></a>**Mailbox** — a Tag's inbox for plain-text messages from other Tags. Everything
+  waiting when a turn starts is handled together in that turn. See
+  [Mailbox](coordination.md#mailbox).
 
 ## Security and knowledge
 
@@ -59,8 +52,8 @@ whole system rather than another first-class resource.
   [Context and permissions](../concepts/context-and-permissions.md).
 - <a id="permission-set"></a>**Permission Set** — actions that a Task is allowed to perform through external tools or its
   execution system.
-- <a id="approval-request"></a>**approval request** — a recorded ask for a person or named approver to allow an action marked
-  `approval: required`, a held Task, or a lead's plan. See
+- <a id="approval-request"></a>**approval request** — a recorded ask for a person or named approver
+  to allow an action marked `approval: required`, or a planned list of them. See
   [Approval requests](coordination.md#approval-requests).
 - <a id="context-item"></a>**Context Item** — one named, versioned declaration inside a Context Set.
 - <a id="context-plan"></a>**Context Plan** — the versioned Context Items, Skills, and artifact selections that SuperTag
@@ -147,9 +140,6 @@ whole system rather than another first-class resource.
 
 ## Execution and recovery terms
 
-- <a id="owner-activation"></a>**owner activation** — a Task in which an Objective’s owner reviews new information and
-  decides what to do next. The Task may be queued, running, or waiting. See
-  [Owner triggers](scheduling-and-recovery.md#owner-triggers).
 - <a id="connection-generation"></a>**connection generation** — an increasing number identifying a Worker Host’s current
   connection. SuperTag rejects execution reports from older connections. See
   [Worklet API](control-plane-api.md#worklet-api).

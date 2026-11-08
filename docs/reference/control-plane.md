@@ -123,7 +123,7 @@ a Tag's Context Sets or Permission Sets beyond what the Control Plane admitted.
 
 The Control Plane writes a warning to its process log when one event-loop turn runs for more than
 one second. The warning includes `lagMs` and the HTTP route or background job active during the
-stall. For example, a long objective scheduling pass reports `job: objective scheduling`.
+stall. For example, a long dispatch pass reports `job: task dispatch`.
 
 For how `task-dispatch` picks a Worker Host and handles interrupted execution, see
 [Scheduling and interrupted execution](scheduling-and-recovery.md).

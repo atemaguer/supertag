@@ -6,15 +6,15 @@ results organized over time.
 
 If these terms are new, start with [core concepts](README.md).
 
-Security and governance are part of that design. Each **Tag** is a persistent AI identity with its
+Security and accountability are part of that design. Each **Tag** is a persistent AI identity with its
 own responsibilities and permissions. SuperTag gives each Tag a non-human identity in its access
 model. A **Context Set** selects reusable knowledge that may be included, a **Permission Set**
-selects allowed actions, and a **Task** is one accepted assignment that records the policy that
+selects allowed actions, and a **Task** is one turn of work that records the policy that
 applies to it.
 
-A **Role** is an enduring responsibility assigned to a Tag. A **Team** groups Tags under a lead, and
-its one channel is its **Workstream**. An **Objective** is an outcome a Tag owns. A **Mailbox**
-delivers internal messages to one Tag. Together, your Teams of Tags make up an **autonomous
+A **Role** is an enduring responsibility assigned to a Tag. A **Team** is a flat list of member
+Tags, and its shared record of posts is its **Workstream**. An **Objective** is an outcome a Tag
+owns. A **Mailbox** is a Tag's inbox for messages from other Tags. Together, your Teams of Tags make up an **autonomous
 organization**: Teams may pursue different Objectives but share one Control Plane, its rules, and
 its record of the work. The **Control Plane** is the service that stores the organization
 and applies its rules. **Worker Hosts** are machines or sandboxes that run the work. On them, a
@@ -47,10 +47,12 @@ SuperTag represents the parts of an organization that must survive any one promp
 or harness session:
 
 - **Tags and Roles** define accountable actors and their enduring responsibilities.
-- **Teams** establish ownership, leadership, membership, and execution capacity.
-- **Objectives and Tasks** connect desired outcomes to assignments and evidence.
-- **Team channels and Mailboxes** carry communication. Each Team's channel, its Workstream,
-  holds posts its members share. Mailboxes cross Team boundaries and the organizational chain.
+- **Teams** establish membership and a shared concurrency limit.
+- **Objectives, Sessions, and Tasks** connect desired outcomes to the work that delivers them and
+  to its evidence.
+- **Workstreams and Mailboxes** carry communication. A Team's Workstream holds the posts its
+  members share. A Mailbox is where one Tag receives another's messages, inside a Team or across
+  Teams by grant.
 - **Context Sets and Permission Sets** separate reusable knowledge from authority.
 - **Requester and source rules, budgets, approvals, scoped credentials, and Task policy records**
   prevent execution from silently gaining more authority.
@@ -59,9 +61,9 @@ or harness session:
   engines and run across distributed capacity.
 
 Coordination inside a harness stays local to that harness. Its manager and native subagents can use
-the harness's own communication primitives for tightly coupled work. Communication between Teams
-or through the organizational hierarchy crosses the SuperTag boundary through durable Tasks and
-Mailboxes. Members of one Team also share its channel.
+the harness's own communication primitives for tightly coupled work. Communication between Tags crosses the
+SuperTag boundary through durable Tasks and Mailboxes. Members of one Team also share its
+Workstream.
 
 ## Applications built on SuperTag
 
@@ -72,7 +74,8 @@ shared AI teammate  ->  specialized AI Team  ->  multi-Team AI organization
 ```
 
 A Slack-native multiplayer teammate is one product experience. A larger application may give
-several Tags distinct Roles, place them in Teams, and let managers delegate work toward Objectives.
+several Tags distinct Roles, place them in Teams, and let an Objective's owner start Sessions of
+its teammates.
 Another may provide no chat surface at all and direct the organization through an API or a custom
 control interface.
 
@@ -94,4 +97,4 @@ application pattern does not claim compatibility with or affiliation to Anthropi
 
 Continue to [How SuperTag fits together](how-it-works.md) for the runtime architecture or start with
 [Tags](tags.md), [Roles](roles.md), [Teams](../guides/teams.md), and
-[Objective coordination](../guides/objective-coordination.md) for the organizational model.
+[Define and complete an Objective](../guides/objectives.md) for the organizational model.

@@ -17,8 +17,9 @@ stay inside that copy.
 
 ## How it works
 
-Each local Task of an Objective gets its own git worktree on branch `supertag/<objective>/<task>`.
-A work Session's Tasks use `supertag/session/<id>`, then `supertag/session/<id>-2` and so on; see
+Each local Task gets its own git worktree on the branch of its **Session**, one Tag's thread of
+Tasks: `supertag/session/<id>`, then `supertag/session/<id>-2` once a Task of that Session has
+delivered commits; see
 [where a work Session's edits go](../concepts/tasks.md#where-a-work-sessions-edits-go). A worktree is
 a second working directory of the same repository, so nothing is copied. The harness, such as
 Claude Code, Codex, or OpenCode, edits files there directly. A prepared environment provider
@@ -83,7 +84,7 @@ supertag apply -f workspace.yaml
 Every field is optional for a workspace without mounts. A workspace with mounts needs a git
 `source`. Without `ref`, Task branches start from the checkout's current branch, or
 from the source's default branch in a clone, else `main`. `source` must not contain credentials;
-each Worker Host supplies its own. Tags work in Teams under a lead. Together, your Teams of Tags
+each Worker Host supplies its own. Tags work in Teams: flat lists of member Tags. Together, your Teams of Tags
 make up an **autonomous organization**: Teams may pursue different Objectives but share one
 Control Plane, its rules, and its record of the work. A Workspace can live in the same input as
 the rest of your organization; `supertag apply -f` applies Workspaces first.
@@ -524,21 +525,18 @@ The Objective gets the runtime actions the owner's Roles allow, such as `files:w
 `--runtime-action` options only to narrow them.
 
 Repeat `--workspace` to name several. SuperTag rejects names that no Workspace defines. Creating
-the Objective also starts the owner; see
-[Coordinate Tasks toward an Objective](objective-coordination.md#start-the-owner).
+the Objective also starts it; see
+[Define and complete an Objective](objectives.md#1-create-the-objective).
 
-Which Workspace a Task uses:
+Which Workspace a turn uses:
 
-- The owner's first Task uses the Objective's first Workspace.
-- With exactly one Workspace, every Task uses it.
-- With several, a lead chooses one per Task with `assign_task`'s `workspace` field. A Task without
-  a choice gets no Workspace.
-- A Task that handles a message, such as one an operator sends with `supertag message objective`,
-  uses the recipient's previous Workspace in the Objective, else the Objective's only Workspace. It
-  gets its own worktree like any other Task.
+- With exactly one Workspace, every turn of the Objective uses it, including its own conversation.
+- With several, the Objective's conversation gets no Workspace, and the owner names one when it
+  starts each Session. A Session without a name gets no Workspace.
+- A Session keeps the Workspace it started with for all of its turns.
 
-The choice, the base `ref`, and the Task branch are recorded when SuperTag accepts the Task. A
-retry or continuation of the same Task reuses the same branch.
+The choice, the base `ref`, and the branch are recorded when SuperTag opens the Task. A retry of
+the same Task reuses the same branch.
 
 ## Start from Slack or GitHub
 
@@ -616,55 +614,37 @@ As Tasks finish, list their branches in your checkout. Task Attempts that made n
 reviews, leave no branch.
 
 ```sh
-git -C ~/code/app branch --list 'supertag/*'
-git -C ~/code/app log --oneline main..supertag/faster-search/TASK_ID
+git -C ~/code/app branch --list 'supertag/session/*'
+git -C ~/code/app log --oneline main..supertag/session/SESSION_ID
 ```
 
 Each commit is authored by `SuperTag <supertag@localhost>` and names its Task and Task Attempt.
-`supertag describe task ID` shows the Task's Workspace and branch. `supertag events task ID` shows
-the base commit, head commit, and number of changed files for each Task Attempt. The Task result,
-which leads read with `read_task`, names the branch and its head commit. Review a branch, then
+`supertag describe task ID` shows the Task's Workspace and branch, and
+`supertag describe objective ID` lists each Session's branch under **Delivered**.
+`supertag events task ID` shows the base commit, head commit, and number of changed files for each
+Task Attempt. A Session's report names its branch and head commit. Review a branch, then
 merge it yourself. On a host that clones, the branches live in its clone; use `pull-request`
 delivery to get them back to your repository.
 
-## Build on another Task's work
+## Build on earlier work in the same Session
 
-A Task often continues where another Task stopped. For example, a lead accepts `add-export`, then
-asks for `document-export`, which needs the new export code. To say "build on `add-export`", make
-it a dependency, not a line in the instruction:
+A Session's work accumulates on its own branch. When the Tag that started a Session continues it
+with fixes or a follow-up, the next Task starts from the branch that Session's latest delivering
+Task produced and commits to the next numbered branch, such as `supertag/session/0f3c2a9e-2`. The
+Worker does the merge before the harness starts; the harness never runs `git merge`. This matters
+for Codex, whose sandbox cannot write the repository's shared git directory.
 
-```json
-{ "taskId": "document-export", "dependencies": ["add-export"], "instruction": "Document the export command" }
-```
+- The new Task measures its own changes from that base, so its patch, changed-file count, and
+  review cover only the new work.
+- Each earlier commit of the Session is an ancestor of the new branch, so
+  `git merge-base --is-ancestor EARLIER_HEAD NEW_HEAD` confirms that a change includes it.
+- A Task that delivered no commits, such as one that only asked a question, leaves the next
+  branch name to the Task that does the work.
+- A merge conflict fails the Task Attempt before its harness starts, with
+  `failureKind: "workspace-setup"`, naming the conflicting paths.
 
-`document-export` runs only after `add-export` is accepted. Before its harness starts, the Worker
-starts its Task branch from the Workspace base merged with the branch `add-export` delivered. The
-harness never runs `git merge`. This matters for Codex, whose sandbox cannot write the repository's
-shared git directory.
-
-- Each accepted dependency in the same Workspace is merged, in the order the dependencies are
-  listed. The Worker merges the head commit recorded for the accepted Task Attempt.
-- A dependency that delivered no commits, such as a review, passes on its own dependencies'
-  branches.
-- A dependency branch the base already contains is skipped. When a branch already contains the
-  base, the Task branch starts at its head without a merge commit.
-- The Task measures its own changes from the merge. Its patch, changed-file count, and review
-  cover only its own work.
-- Each dependency's commits are ancestors of the new branch, so
-  `git merge-base --is-ancestor DEPENDENCY_HEAD TASK_HEAD` confirms that a change includes it.
-- A merge conflict fails the Task Attempt before its harness starts, with `failureKind:
-  "workspace-setup"`. The error names the dependency and the conflicting paths, for example
-  `conflicts in README.md, src/export.ts`. Resolve the conflict on one dependency's branch, or
-  assign the Task without one of them.
-- With `branch` delivery, a dependency's commit stays on the Worker Host that ran it. A host that
-  clones fetches the commit from the source when the source has it, for example from a pull
-  request. Otherwise the Task Attempt fails before its harness starts and says what to do: push
-  the dependency's branch to the source, or run the Task on the dependency's Worker Host.
-- A review keeps starting at the exact submitted commit it reviews; dependencies are not merged
-  into it.
-
-A fix round works the same way. Once the reviewed Task is accepted, make the fix Task depend on it.
-The fix then starts from the reviewed change.
+To build on work another Tag did, start a new Session with an instruction that names the branch to
+start from, or merge that branch yourself first. Sessions do not merge each other's branches.
 
 ## Deliver pull requests
 
@@ -687,10 +667,10 @@ The pull request follows the Task:
 
 | Task event | Pull request |
 | --- | --- |
-| First Task Attempt that completes with commits | The Worker pushes `supertag/<objective>/<task>` and opens a **draft** into `ref`, or the repository's default branch |
+| First Task Attempt that completes with commits | The Worker pushes `supertag/session/<id>` and opens a **draft** into `ref`, or the repository's default branch |
 | A later Task Attempt of the same Task | The Worker pushes to the same branch and updates the same pull request |
-| The lead accepts the Task | The Control Plane marks the pull request **ready for review** |
-| The Task is cancelled, or its result is rejected | The Control Plane comments and **closes** the pull request |
+| The Task completes | The Control Plane marks the pull request **ready for review** |
+| The Task is cancelled | The Control Plane comments and **closes** the pull request |
 | The Objective is cancelled | Each open Task is cancelled, so its pull request closes |
 
 The title comes from the Task Attempt's summary; the body adds its evidence and names the
@@ -751,9 +731,9 @@ GitHub.
 | --- | --- |
 | Task worktree | `~/.supertag/workspaces/<workspace>/worktrees/<task>` |
 | Host-managed clone | `~/.supertag/workspaces/<workspace>/clone`, on hosts without a checkout |
-| Task branch | Your checkout's repository or the host's clone, `supertag/<objective>/<task>` |
+| Session branch | Your checkout's repository or the host's clone, `supertag/session/<id>` |
 | Patch (`patch` delivery) | An artifact on the Task result |
-| Pull request (`pull-request` delivery) | GitHub, from the pushed Task branch |
+| Pull request (`pull-request` delivery) | GitHub, from the pushed Session branch |
 
 The Worker keeps a Task's worktree while the Task can still be retried. It removes the worktree
 after a Task Attempt completes and keeps the branch. A later Task Attempt of the same Task recreates the

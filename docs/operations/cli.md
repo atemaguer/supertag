@@ -2,8 +2,8 @@
 
 Run SuperTag end to end on one computer. This page uses these terms:
 
-- A **Task** is one request or assignment accepted by SuperTag. A **Task Attempt** is one execution
-  or retry of a Task.
+- A **Session** is one Tag's thread of work. A **Task** is one turn of a Session, and a
+  **Task Attempt** is one execution or retry of a Task.
 - The **Control Plane** stores and schedules the work.
 - A **Worker Host** is an enrolled computer or sandbox that can execute it.
 - A **Worklet** connects that host to the Control Plane and advertises a **Worker Profile**, which
@@ -15,10 +15,10 @@ Run SuperTag end to end on one computer. This page uses these terms:
 The shortest path is [Start in a repository](#start-in-a-repository): `supertag init` sets up your
 repository, you create an Objective, follow it with `supertag watch objective`, and find its result
 with `supertag describe objective`. The [Get started](../../README.md#get-started) quickstart walks
-through that path. Tags work in Teams under a lead. Together, your Teams of Tags make up an
+through that path. Tags work in Teams. Together, your Teams of Tags make up an
 **autonomous organization**: Teams may pursue different Objectives but share one Control Plane, its
 rules, and its record of the work. The rest of this page then does each step by hand: configure an
-organization, connect execution capacity, assign a Task, and download its result. Use it to learn
+organization, connect execution capacity, run an Objective, and download its result. Use it to learn
 the CLI before you run Worker Hosts elsewhere.
 
 See the [glossary](../reference/glossary.md) for other terms. Commands follow this shape:
@@ -39,14 +39,9 @@ views on a terminal also filter reported values. Explicit `--output json` and pi
 `watch` output retain the original values for scripts.
 
 Commands that create or change something print a one-line summary for a person, such as
-`objective/cli-demo created` or `task/cli-demo-task cancelled.`, with warnings on standard error.
+`objective/cli-demo created` or `task/9f1c0b2e cancelled.`, with warnings on standard error.
 Add `--output json` to print the full record instead, for scripts. `get`, `list`, and `events`
 always print JSON.
-
-`supertag start objective ID [--output json]` starts an Objective created with `--no-start`.
-It creates the owner's first Task and prints the new status, deadline and budget when set, and
-`supertag describe objective ID` as the next step. With `--output json`, it prints the structured
-start result. An unknown ID or an Objective already started returns an error.
 
 ## See what your organization is doing
 
@@ -64,8 +59,8 @@ Worker Hosts
   laptop  ready  2/3 Task Attempts running (claude-code 0/1, codex 2/2)
 
 Tags
-  builder  busy: operator-reads:item1-status, operator-reads:item2-list
-    operator-reads:item1-status  running `npm test` for 24m
+  builder  busy: 4c81d0a7-5f3e-4a62-9c55-1b2d8e6a0f31
+    4c81d0a7-5f3e-4a62-9c55-1b2d8e6a0f31  running `npm test` for 24m
   lead  idle
 
 Objectives not finished
@@ -151,7 +146,7 @@ each default in brackets; press Enter to accept it, or pass `--yes` to accept th
    [Unsandboxed harnesses](../reference/supertag-yaml.md#unsandboxed-harnesses).
    Cursor uses its SDK and requires its own authentication; its app login does not suffice.
    See [Cursor setup](requirements.md#cursor-setup-and-limits).
-3. The lead **Tag**, named `lead` by default, and what it may do: read only, edit files and run
+3. The first **Tag**, named `lead` by default, and what it may do: read only, edit files and run
    commands (the default), or also open pull requests. Pull requests need a GitHub collaboration surface, which you can add later.
 
 `init` then writes `~/.supertag/supertag.yaml` with two services: `control-plane`, the local Control
@@ -166,7 +161,7 @@ supertag create objective --owner lead --workspace app \
   --outcome 'The README explains local setup. Done when a new contributor can follow it.'
 ```
 
-Creating the Objective also starts its owner, `lead`, with a first coordination Task. The command
+Creating the Objective also starts its conversation, with a first Task of `lead`. The command
 prints the Objective's ID and the next commands:
 
 ```sh
@@ -479,82 +474,64 @@ heartbeat and does not probe the process on demand. If the host does not become 
 The background process keeps the walkthrough to two terminals. Use a service supervisor for an
 always-on Worker Host.
 
-## 5. Create an Objective and Team
+## 5. Create a Team and an Objective
 
-An **Objective** states the outcome and criteria for success. Its runtime actions are an upper
-bound for every Task under it. They default to the owner's, so this Objective allows the same two
-actions as the Role. A **Team** groups Tags working toward that Objective; this example uses the
-Tag as its lead.
-
-Creating an Objective normally starts its owner, which then plans and assigns the work itself.
-This walkthrough assigns its Task by hand instead, so `--no-start` creates the Objective without
-starting the owner:
+A **Team** is a flat list of member Tags. An **Objective** states the outcome and criteria for
+success and names one Team; its owner may start a Session of any member. The Objective's runtime
+actions are an upper bound for every Task under it. They default to the owner's, so this Objective
+allows the same two actions as the Role.
 
 ```sh
+supertag create team cli-demo-team --member local-builder
+
 supertag create objective cli-demo \
-  --outcome "Produce a short evidence-based description of this workspace that explains the project's purpose and cites workspace evidence." \
+  --outcome "Write a short plain-text summary of what this project does to outputs/report.txt, using only evidence from files in this workspace. Done when the file exists and cites that evidence." \
   --owner local-builder \
-  --no-start
-
-supertag create team cli-demo-team \
-  --objective cli-demo \
-  --name "CLI demo" \
-  --lead local-builder
+  --team cli-demo-team
 ```
 
-## 6. Assign and follow a Task
+With no `--workspace`, the work uses the Workspace the connected Worker Host declares.
 
-Task assignment uses the Tag's generated ID. Read the Tag as JSON, copy `metadata.id`, and put it in
-`TAG_ID`:
+Creating the Objective starts its conversation at once:
+
+```text
+objective/cli-demo created
+Started local-builder with Task 9f1c0b2e-6a44-4d0d-9f1b-2c7a5d3e8b10.
+Follow it: supertag watch objective cli-demo
+See results: supertag describe objective cli-demo
+```
+
+## 6. Follow the work
+
+`supertag watch objective cli-demo` prints one line per event until the Objective closes. Each
+line names the Session and its Task. `supertag describe objective cli-demo` lists the same
+Sessions with their Task IDs, so copy one into `TASK_ID`:
 
 ```sh
-supertag get tag local-builder
-TAG_ID="PASTE_METADATA_ID_HERE"
+supertag describe objective cli-demo
+TASK_ID="PASTE_TASK_ID_HERE"
 ```
-
-Create the instruction file:
-
-```sh
-cat > "$HOME/.supertag/cli-demo/instructions.txt" <<'EOF'
-Inspect this workspace. Write a short plain-text summary of what the project does to
-outputs/report.txt. Use only evidence from files in this workspace.
-EOF
-```
-
-Assign the Task. Omitting a profile lets the scheduler choose any compatible Worker advertised by
-a bound Worker Host:
-
-```sh
-supertag assign task cli-demo-task \
-  --objective cli-demo \
-  --team cli-demo-team \
-  --tag "$TAG_ID" \
-  --instruction-file "$HOME/.supertag/cli-demo/instructions.txt" \
-  --criterion "outputs/report.txt contains a concise workspace summary" \
-  --output-file outputs/report.txt
-```
-
-When the Objective statement lists numbered items, add `--item N` for each item the Task serves,
-such as `--item 1 --item 3`. `supertag describe objective` then shows the Task under those items.
 
 Inspect the current state, durable events, or subsequent resource changes:
 
 ```sh
-supertag describe task cli-demo-task
-supertag events task cli-demo-task
-supertag watch task cli-demo-task
+supertag describe task "$TASK_ID"
+supertag events task "$TASK_ID"
+supertag watch task "$TASK_ID"
 ```
 
 `watch` prints JSON whenever the stored resource version changes and continues until you press
-Control-C. `supertag get task cli-demo-task` always returns the current Task as JSON.
+Control-C. `supertag get task "$TASK_ID"` always returns the current Task as JSON.
 
-SuperTag continues waiting Tasks automatically. If a Worklet is interrupted or killed mid-Task,
+A turn ends done or waiting. SuperTag starts the next turn when a report, an answer, or an
+approval decision arrives. If a Worklet is interrupted or killed mid-Task,
 see [Scheduling and interrupted execution](../reference/scheduling-and-recovery.md#leases-and-unknown-outcomes).
 
 Rules:
 
 - There is no `resume task` command. `resume worker-host` only returns a deliberately drained
   host to scheduling.
+- Answer a question or redirect the work with `supertag message objective cli-demo TEXT`.
 
 ## 7. Inspect continuity and the artifact
 
@@ -574,9 +551,9 @@ workspace files.
 After a successful Task Attempt captures `outputs/report.txt`, list its artifact metadata:
 
 ```sh
-supertag list artifact --task cli-demo-task --limit 20
+supertag list artifact --task "$TASK_ID" --limit 20
 supertag get artifact ARTIFACT_ID
-supertag describe task cli-demo-task
+supertag describe task "$TASK_ID"
 ```
 
 To download, first configure the Worklet with a transfer endpoint reachable from your machine,
@@ -620,14 +597,14 @@ If you configured downloads, the downloaded report summarizes your workspace:
 cat "$HOME/.supertag/cli-demo/report.txt"
 ```
 
-`supertag describe task cli-demo-task` shows the Task as completed, and
-`supertag list artifact --task cli-demo-task` lists `outputs/report.txt`.
+`supertag describe task "$TASK_ID"` shows the Task as completed, and
+`supertag list artifact --task "$TASK_ID"` lists `outputs/report.txt`.
 
 ## If something goes wrong
 
 - **The Worker Host never reports the expected Worklet.** Read
   `~/.supertag/cli-demo/worklet.log`, then work through
-  [Troubleshoot the first reply](../guides/troubleshooting.md#4-separate-surface-testing-from-worker-testing).
+  [Troubleshoot the first reply](../guides/troubleshooting.md#4-separate-collaboration-surface-testing-from-worker-testing).
 - **The Task stays pending.** No compatible Worker Host is ready; see
   [Inspect the Task](../guides/troubleshooting.md#5-inspect-the-task) and
   [Worker Host selection](../reference/scheduling-and-recovery.md#worker-host-selection).

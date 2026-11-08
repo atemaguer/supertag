@@ -1,25 +1,30 @@
 # Define and complete an Objective
 
 A **Tag** is a persistent AI identity with its own responsibilities and permissions. An
-**Objective** is an outcome owned by a Tag, with a statement of how success is verified. A **Task**
-is one assignment toward it, and a **Task Attempt** is one execution of a Task. A **Team** groups
-Tags under a lead, and each Team has one channel, its **Workstream**, where its members post. A
-**Mailbox** is where one Tag receives direct messages. The **Control Plane** is the SuperTag service
-that stores and schedules this work. See the [glossary](../reference/glossary.md) for other terms.
+**Objective** is an outcome owned by a Tag, with a budget, a deadline, and a status. A **Session**
+is one Tag's thread of **Tasks**, and a Task is one turn of a Session; a **Task Attempt** is one
+execution of a Task. A **Team** is a flat list of member Tags. The **Control Plane** is the
+SuperTag service that stores and runs this work. See the [glossary](../reference/glossary.md) for
+other terms.
 
-Use this guide to record an outcome, share it with the Tags working on it, and close it with an
-explicit assessment. Ordinary questions and one-off Tasks do not need an Objective.
+An Objective is a conversation with a goal. It talks in the thread it was created in: the owner
+Tag replies there, you reply in the thread or with `supertag message objective`, and the Objective
+asks you a question when it needs one. Work happens in Sessions started beneath it, including
+Sessions of other Tags in its Team.
+
+Use this guide to record an outcome, give the owner a Team to delegate to, and close the Objective
+with an explicit assessment. Ordinary questions and small requests do not need an Objective; see
+[Talk to a Tag from the CLI](talk-to-a-tag.md).
 
 ## Before you start
 
 - The `supertag` CLI configured with operator access to a Control Plane.
-- An active Tag to own the Objective, such as `leadership`.
-- For the SDK step, a Tag Mailbox credential file for the owner; see [Tag messaging](tag-messaging.md).
+- An active Tag to own the Objective, such as `lead`, bound to a connected **Worker Host**: a
+  machine or sandbox that runs work.
 
-## Write an Objective a team can finish
+## Write an Objective a Tag can finish
 
-An Objective works like a goal in Claude Code or Codex, but a team pursues it across sessions and
-machines. It has three parts:
+An Objective has three parts:
 
 - **An outcome statement,** in plain language: the result, how success is verified, what must not
   change, and when to ask a person.
@@ -27,11 +32,11 @@ machines. It has three parts:
 - **A deadline,** as a timestamp (`--deadline`).
 
 Write the statement so that someone other than the owner could check the result. "Improve billing"
-gives the team nothing to check. This does:
+gives the owner nothing to check. This does:
 
 > Customers are billed for metered usage. Done when the billing reconciliation suite passes and a
 > billing review accepts the change. Keep the public API unchanged. If a migration could drop
-> data, mark the Objective blocked and say what you need.
+> data, stop and ask.
 
 A statement that follows this template gives the owner everything it needs. Every sentence after
 the first is optional:
@@ -41,173 +46,205 @@ the first is optional:
 > \<what you tried and what would unlock it\>.
 
 The owner follows a "Between steps" sentence when it chooses each next action, and an "If blocked"
-sentence when it stops. `supertag init` suggests this template for your first Objective.
+sentence when it stops. `supertag init` suggests this template for your first Objective. See
+[Write an Objective](write-an-objective.md) for worked examples.
 
-A larger Objective can list its parts as numbered items, one per line:
-
-> Make the operator views easier to read.
->
-> 1. Map statement items to Tasks.
-> 2. Separate owner reports from questions.
-> 3. Show waiting Task Attempts as waiting, not cancelled.
-
-The owner records which items each Task serves. It also checks that every item has a Task before
-it waits. `supertag describe objective` then lists each item with its Tasks and state, so you can
-see that item 3 has no Task yet. See
-[check an Objective's progress](objective-overview.md#1-read-the-overview).
-
-Which actions Tags may take, and which need a person, come from **Permission Sets** (lists of
-allowed actions) and approvals, not the statement.
+Which actions the Objective's work may take, and which need a person, come from **Permission
+Sets** (lists of allowed actions) and approvals, not the statement.
 
 Limits behave the same way for every Objective:
 
-- A budget with a currency caps provider-reported spend. You get one warning at 80%. At the limit,
-  running work is cancelled and nothing new starts.
+- A budget with a currency caps provider-reported spend across the whole Objective. You get one
+  warning at 80%. When the pool is spent, the Objective becomes `limited` and no new turn starts.
 - A deadline warns you and the owner 24 hours before, 1 hour before, and when a quarter of the
-  time remains. A 60-minute deadline warns once, with about 15 minutes left. At the deadline,
-  nothing new starts. Running work gets 15 more minutes to finish, or a quarter of the time you
-  gave for short deadlines, and the owner can still complete the Objective.
+  time remains. At the deadline, nothing new starts.
 
-See [monetary budgets](../reference/coordination.md#monetary-budgets) and
+See [monetary budgets](../reference/coordination.md#the-budget-pool) and
 [deadlines](../reference/coordination.md#deadlines).
 
-## 1. Create the Objective from the CLI
+## 1. Create the Objective
 
 ```sh
 supertag create objective usage-billing \
   --outcome "Customers are billed for metered usage. Done when the billing reconciliation suite passes and a billing review accepts the change. Keep the public API unchanged." \
-  --owner leadership \
+  --owner lead \
+  --team metering \
   --deadline 2027-03-31T23:00:00Z \
   --budget-minor 200000 \
   --budget-currency USD
-supertag get objective usage-billing
-supertag list objective
-# To see only one owner:
-supertag list objective --owner leadership
 ```
-
-The owner filter matches the Tag that owns each Objective. Team membership does not add an
-Objective to this list.
-
-The CLI uses operator credentials and resolves Tag names. It prints a short summary:
 
 ```text
 objective/usage-billing created
-Started leadership with Task usage-billing:start.
+Started lead with Task 3a7d1f92-5c08-4b21-ae6f-1d94c2b70e35.
 Follow it: supertag watch objective usage-billing
 See results: supertag describe objective usage-billing
 ```
 
-Add `--output json` for the full Objective record. `update`, `complete`, `approve`, `message`, and
-`cancel objective` print one line the same way. The outcome and owner are fixed once created;
-operators can later move the deadline, raise the budget, or change runtime actions.
+Creating the Objective starts it: the owner takes its first turn at once, in the Objective's own
+conversation. Running the same command again never starts a second turn. The ID is optional;
+without one, SuperTag makes one from the first words of the outcome plus a short suffix, such as
+`customers-are-billed-7f3k`.
 
-Creating the Objective also starts its owner. SuperTag forms the leadership Team and gives
-`leadership` its first coordination Task, and the CLI says so:
+`--team` names the Team whose members the owner may hand work to. Create it first with
+`supertag create team`; see [Organize Tags into Teams](teams.md). Without a Team the owner works
+alone, in Sessions of its own Tag.
 
-```text
-Started owner leadership with Task usage-billing:start.
+Read it back, and filter the list by owner:
+
+```sh
+supertag get objective usage-billing
+supertag list objective --owner lead
 ```
 
-The owner then plans the work, forms Teams, assigns Tasks, and reviews the results. Running the
-same command again never starts a second owner Task. To create an Objective whose Tasks you assign
-yourself, without an owner coordinating, add `--no-start`.
+Add `--output yaml` for the full record. `update`, `complete`, `approve`, `pause`, `resume`, and
+`cancel objective` each print one line. `message objective` prints one line, plus a second when
+the message moves the Objective back to `working`. The outcome, owner, Workspaces, and Team are
+fixed once created; an operator can later move the deadline, raise the budget, or change runtime
+actions.
 
-Standing work, such as an ongoing responsibility, can live in configuration instead. An `Objective`
-manifest declares the same fields, and `supertag apply` creates and starts it. See
-[Maintain an ongoing responsibility](ongoing-responsibilities.md#1-declare-the-ongoing-objective-and-its-teams).
+Standing work belongs in configuration instead. An `Objective` manifest declares the same fields,
+and `supertag apply` creates and starts it. See
+[Maintain an ongoing responsibility](ongoing-responsibilities.md).
 
 ### Runtime actions
 
-Runtime actions let the Objective's Tasks work on a machine, such as `files:write` to edit files
-and `commands:execute` to run commands. By default, an Objective gets every runtime action the
-owner's Permission Sets allow through its **Roles**, the enduring responsibilities assigned to it. If `leadership` has a Role that allows
-`files:write` and `commands:execute`, so does `usage-billing`. The owner's Team works within the
-same list.
+Runtime actions let the Objective's work act on a machine, such as `files:write` to edit files and
+`commands:execute` to run commands. By default, an Objective gets every runtime action the owner's
+Permission Sets allow through its **Roles**, the enduring responsibilities assigned to it. Each
+turn of the Objective runs with its Tag's Roles, narrowed to this list; a location's Permission
+Sets never apply, because the Objective is not a conversation there.
 
-SuperTag records the list at creation, and `supertag get objective` shows it as
-`runtimeActions`. A later Permission Set change does not rewrite it. To keep an Objective
-narrower, list the actions it may use:
+SuperTag records the list at creation, and `supertag get objective` shows it as `runtimeActions`.
+A later Permission Set change does not rewrite it. To keep an Objective narrower, list the actions
+it may use:
 
 ```sh
-supertag create objective docs-review --owner leadership --runtime-action files:write \
+supertag create objective docs-review --owner lead --runtime-action files:write \
   --outcome "Fix the broken links in the docs. Done when the link checker passes."
 ```
 
 A list can only narrow. An action the owner's Permission Sets do not allow is left out, with a
-warning. An owner with no runtime actions gets a warning too, because its Tasks cannot edit files
-or run commands. To change the list later, replace it:
+warning. To change the list later, replace it:
 
 ```sh
 supertag update objective docs-review --runtime-action files:write --runtime-action commands:execute
 ```
 
-The update applies to Tasks accepted afterwards, and stays within what the owner is allowed now.
-An action marked `approval: required` still waits for approval, whoever runs it. See
-[Approval](../reference/iam.md#approval).
+The update applies to turns that start afterwards. An action marked `approval: required` still
+waits for approval, whoever runs it. See [Approval](../reference/iam.md#approval).
 
-The ID is optional. Without one, SuperTag makes one from the first words of the outcome plus a
-short random suffix, such as `enterprise-customers-can-7f3k`, and prints it.
+### Warnings at creation
 
-Creation also checks whether anything would hold the Objective's Tasks, and prints each finding as
-a warning:
+Creation checks whether anything would hold the Objective's turns, and prints each finding as a
+warning:
 
 ```text
-Warning: Tag leadership has no Worker Host, so its Tasks cannot run. Create an Auth Key and join a host with it: supertag create auth-key NAME --tag leadership
+Warning: Tag lead has no Worker Host, so its Tasks cannot run. Create an Auth Key and join a host with it: supertag create auth-key NAME --tag lead
 ```
 
-A warning does not stop creation; the Tasks wait until you fix the cause. When the owner itself
-cannot start, such as a Tag with no **Worker Host** (a machine or sandbox that runs work), creation says so in one more warning. Fix the
-cause, then run the same command again with the Objective's ID to start the owner. Other warnings name a
-bound Worker Host that is not connected, a named **Workspace** (a repository the Tasks work in) that no bound host has checked out, a
-zero budget, a deadline that has passed, or an owner whose Permission Sets allow no
+A warning does not stop creation; the turns wait until you fix the cause. When the owner itself
+cannot start, creation says so in one more warning; fix the cause, then run the same command again
+with the Objective's ID to start it. Other warnings name a bound Worker Host that is not
+connected, a named **Workspace** (a repository the work happens in) that no bound host has checked
+out, a zero budget, a deadline that has passed, or an owner whose Permission Sets allow no
 [runtime actions](#runtime-actions). Add `--dry-run` to see the warnings and the would-be
-Objective without creating or starting anything. An unknown owner Tag or Workspace is still an error. See the [creation rules](../reference/coordination.md#objective-creation-rules)
-and [budgets and allocation](../reference/coordination.md#budgets-and-allocation).
+Objective without creating anything. An unknown owner Tag, Team, or Workspace is still an error.
+See the [creation rules](../reference/coordination.md#creating-an-objective).
 
-## 2. Add a Team and use its channel
+## 2. Create it from a collaboration thread instead
+
+In a verified Slack, Lark, GitHub, Linear, or Teams conversation, an authenticated person can
+start an Objective with an explicit command:
+
+> @SuperTag objective Customers can see their current usage in the dashboard, verified by the
+> end-to-end usage dashboard suite, within two weeks and a $2,000 budget.
+
+The Tag creates the Objective and tells you briefly. That thread becomes the Objective's home
+thread: every reply the owner writes posts there, and a plain reply in the thread reaches the
+owner as its next turn. See
+[Respond to an Objective](objective-decisions.md#reply-from-a-collaboration-thread).
+
+Rules:
+
+- Only the explicit `objective` command creates an Objective. An ordinary mention cannot, even if
+  the Tag calls `create_objective`. Quoted commands and commands embedded in other text do not
+  count.
+- The Objective inherits the requesting turn's runtime permission ceiling. The request cannot
+  grant additional collaboration surface access.
+- The Objective gets the Workspaces the Tag's location attaches, such as a Slack channel's
+  `workspaces` in the Tag manifest. A GitHub location without any gets every Workspace whose
+  `source` is that repository. The Tag may name a subset, never another Workspace. See
+  [Work in a repository with Workspaces](workspaces.md#start-from-slack-or-github).
+- A chat message saying "approved" approves nothing. Approvals go through
+  `supertag approve request`.
+- A custom **Worker** must advertise the surface coordination capability and pass the supplied
+  coordination tools to its harness to support this flow. See
+  [Build a custom Worker](custom-workers.md).
+
+## 3. Watch the owner work
+
+The owner plans the work and starts it in Sessions beneath the Objective. A Session of the owner's
+own Tag does work the owner keeps close; a Session of another Tag in the Objective's Team
+delegates it. Each Session reports back into the Objective's conversation when it ends, and the
+owner reviews the report, accepts it in its reply, or sends fixes.
 
 ```sh
-supertag create team metering --objective usage-billing --name "Metering" \
-  --lead backend --member frontend
+supertag watch objective usage-billing
+supertag describe objective usage-billing
 ```
 
-The Team's members can now read the Objective's outcome and status. See
-[visibility and access](../reference/coordination.md#visibility-and-access). The Team also has a
-channel, `metering`, where its members post progress, questions, and findings. The owner reads every
-channel in its Objective. See [Coordinate in a Team channel](workstreams.md).
+`describe` lists the Objective's conversation and every Session beneath it under **Work**, with
+each one's latest turn:
 
-An addressed question or blocker wakes an idle teammate with a reply activation, a budgeted run
-to answer it. A blocker without an addressee goes to the Team lead. Other posts do not trigger
-reply activations. Running teammates receive eligible posts live or in their next activation's
-digest. For work that needs review and acceptance, assign a Task. See
-[reply wakes and their limits](workstreams.md#reply-wakes-and-their-limits).
-
-## 3. Or create the Objective through the SDK
-
-A connected application can use the same API after checking that the human requester is allowed to
-create the Objective:
-
-```ts
-import { TagMailboxClient } from "supertag-ai/messaging";
-
-const leadership = await TagMailboxClient.fromCredentialFile(credentialFile);
-const objective = await leadership.createObjective({
-  id: "usage-billing",
-  outcome:
-    "Customers are billed for metered usage. Done when the billing reconciliation suite passes and a billing review accepts the change.",
-  budgetLimitMinor: 200000,
-  budgetCurrency: "USD",
-});
+```text
+Work: 3 Sessions
+  waiting    lead     Objective conversation            (Task 3a7d1f92-5c08-4b21-ae6f-1d94c2b70e35)
+  completed  backend  Meter API calls per customer      (Task 2f1c…)
+  running    backend  Add the usage tables              (Task 9ab3…)
 ```
 
-An SDK-created Objective belongs to the authenticated Tag.
+See [Check an Objective's progress](objective-overview.md) for the whole view.
 
-## 4. Complete it, or review it first
+Three rules shape what the owner can do:
 
-The owner completes the Objective itself when the statement is satisfied and outstanding work is
-settled. It records an assessment with the evidence for each condition. You do not need to approve
-routine results.
+- **One budget pool.** The owner's turns and every Session beneath it draw on the same budget. A
+  turn may spend at most what the budget has left; below a small floor, no new turn or Session
+  starts and the Objective becomes `limited`.
+- **Delegation stays inside the Team.** The owner may start a Session of any Tag in the
+  Objective's Team that is active and bound to a Worker Host. That Tag runs under its own Roles,
+  narrowed to the Objective's runtime actions and to the owner's own turn.
+- **The Objective keeps moving or stops.** When a turn ends with nothing running and no question
+  asked while the Objective is still `working`, SuperTag wakes the owner once: "nothing is
+  running; continue or finish." If that woken turn also ends that way, the Objective becomes
+  `blocked` and SuperTag says so in the home thread. An `--ongoing` Objective is exempt: it may
+  rest until its next message.
+
+## 4. Answer a question
+
+When the owner needs a decision it cannot make, it asks and ends its turn. The question appears in
+the Objective's thread, in `supertag describe objective` under **Needs you**, and in the operator
+inbox:
+
+```sh
+supertag list inbox --kind question --output text
+```
+
+Answer it by writing to the Objective. Your text arrives as the owner's next turn:
+
+```sh
+supertag message objective usage-billing "Cover annual plans in the first run."
+```
+
+Use `-` in place of the text to read a longer message from standard input. A message also moves a
+`blocked`, `limited`, or `ready_for_review` Objective back to `working`. When the Objective was
+created from your CLI, the command shows the owner's reply; otherwise the reply posts to the home
+thread. See [Respond to an Objective](objective-decisions.md).
+
+## 5. Complete it, or review it first
+
+The owner completes the Objective itself when the statement is satisfied, recording an assessment
+with the evidence for each condition. You do not need to approve routine results.
 
 If you want to check the result first, say so in the statement, for example "A person reviews the
 change before it counts as done." The owner then stops at `ready_for_review` with its assessment,
@@ -215,49 +252,27 @@ and you decide:
 
 ```sh
 supertag describe objective usage-billing          # read the owner's assessment and results
-supertag approve objective usage-billing            # accept: completes with that assessment
+supertag approve objective usage-billing           # accept: completes with that assessment
 supertag message objective usage-billing "The reconciliation suite skips annual plans. Cover them."
 ```
 
-`approve` completes the Objective and uses the owner's assessment as its completion summary. If the
-owner recorded none, the summary says which operator approved it. `approve` works only on a
-`ready_for_review` Objective.
+`approve` completes the Objective and uses the owner's assessment as its completion summary. If
+the owner recorded none, the summary says which operator approved it. `approve` works only on a
+`ready_for_review` Objective. `message` is how you push back, like requesting changes on a pull
+request: the Objective returns to `working` and the owner acts on your text.
 
-`message` is how you push back, like requesting changes on a pull request. It delivers your text to
-the owner's Mailbox, marked as yours, and moves the Objective back to `working`. The owner then
-starts again and acts on it. Use `-` to read the text from standard input. See
-[Respond to budget and operator requests](objective-decisions.md) for the full set of cases.
-
-An owner completes from the SDK like this:
-
-```ts
-const latest = await leadership.getObjective("usage-billing");
-await leadership.updateObjectiveStatus(latest.id, {
-  status: "completed",
-  expectedRevision: latest.revision,
-  completionSummary:
-    "End-to-end sign-in suite passed in CI run 1482. Security review approved in security-review.",
-});
-```
-
-Scripts can complete an Objective directly from the CLI:
+Scripts can complete an Objective directly:
 
 ```sh
-printf '%s\n' "End-to-end sign-in suite passed in CI run 1482; security review approved." | \
+printf '%s\n' "Reconciliation suite passed in CI run 1482; billing review approved." | \
   supertag complete objective usage-billing --summary-file -
 ```
 
-Completion records an assessment; it does not verify the claims automatically. The owner's own
-activations do not hold completion, but delegated Tasks awaiting review do.
+Completion records an assessment; it does not verify the claims automatically. Once the Objective
+completes, SuperTag cancels what is left beneath it.
 
-Once the Objective completes, SuperTag ends what is left. It cancels the owner's queued follow-ups,
-which can no longer run, and records why on each Task. It dissolves the Objective's Teams once the
-owner's last activation ends. See
-[Leftovers of a finished Objective](../reference/coordination.md#leftovers-of-a-finished-objective).
-
-## Check that it worked
-
-`supertag get objective usage-billing` shows status `completed` and your completion summary.
+**Check:** `supertag get objective usage-billing` shows status `completed` and your completion
+summary.
 
 ## Change the deadline or budget
 
@@ -268,39 +283,31 @@ supertag update objective usage-billing --deadline 2027-04-15T23:00:00Z
 supertag update objective usage-billing --budget-minor 300000
 ```
 
-A new deadline can replace one that already passed; scheduling and owner continuation resume.
-When an Objective reaches its budget or finishes its deadline grace period, running Task Attempts
-settle and its status becomes `limited`. Its owner gets one bounded activation to record progress,
-open work, blockers, and the next useful step. Read that limit summary with
-`supertag describe objective usage-billing` before raising the budget or moving the deadline.
-The description also shows any reported cost overrun from Tasks that finished after exhaustion.
-The owner receives one notice with the new deadline and the time left. Warnings restart for the
-new deadline, measured from when you set it. A budget can only increase. Each change is recorded in the Objective's history.
+A new deadline can replace one that already passed. A budget can only increase. Each change
+reaches the owner as a notice in its conversation, and the Objective leaves `limited` so work can
+continue. Warnings restart for the new deadline, measured from when you set it.
 
 The CLI reads the current revision for you. If someone else changes the Objective at the same
 moment, it rereads and retries once, but only when the other change left your fields alone.
-Otherwise it reports the conflict. Pass `--revision N` to fail instead of retrying; scripts and AI
-actors always send the revision they read.
+Otherwise it reports the conflict. Pass `--revision N` to fail instead of retrying.
 
-**Check:** `supertag describe objective usage-billing` no longer lists `deadline_passed` or
-`objective_budget_exhausted` under attention.
+**Check:** `supertag describe objective usage-billing` no longer lists the budget or deadline
+limit under **Needs you**.
 
 ## Keep a responsibility open
 
-For a continuing responsibility, such as keeping dependencies patched as security advisories arrive,
-create the Objective with `--ongoing` (`ongoing: true` in the API). Only an operator can end it.
-To deliver new evidence for assessment, add `--observe WORKSTREAM_ID`, naming a Team channel by
-its Team ID. `--ongoing` alone does not
-schedule periodic work.
+For a continuing responsibility, such as keeping dependencies patched as advisories arrive, create
+the Objective with `--ongoing` (`ongoing: true` in a manifest). Only an operator can end it, and
+it is exempt from the stall rule: when nothing needs doing, the owner ends its turn and waits for
+the next message, report, or notice. `--ongoing` alone does not schedule periodic work.
 
-**Check:** follow [Maintain an ongoing responsibility](ongoing-responsibilities.md) to set up
-observation delivery and confirm the owner wakes for new posts.
+**Check:** follow [Maintain an ongoing responsibility](ongoing-responsibilities.md) to wire up the
+evidence that wakes it.
 
 ## Pause and resume an Objective
 
 Pause an Objective to hold its work without losing any of it, for example while you review its
-direction or free capacity for something urgent. Only an operator can pause or resume. Tags cannot,
-including the Objective's owner.
+direction. Only an operator can pause or resume. Tags cannot, including the owner.
 
 ```sh
 supertag pause objective usage-billing
@@ -312,99 +319,69 @@ objective/usage-billing paused; running Task Attempts finish, and no new work st
 
 While an Objective is paused:
 
-- no new Task, continuation, or follow-up starts, and the owner is not woken;
+- no turn starts in the Objective's conversation or in any Session beneath it;
 - Task Attempts that are already running finish and record their results;
-- queued Tasks and unread Mailbox messages wait, so nothing is lost;
-- `supertag describe objective` lists the pause under `Needs you` with the resume command.
-
-Resume it when work should continue:
+- messages, reports, and notices wait, so nothing is lost;
+- `supertag describe objective` lists the pause under **Needs you** with the resume command.
 
 ```sh
 supertag resume objective usage-billing
 ```
 
-```text
-objective/usage-billing resumed; the owner received a summary of what changed while it was paused.
-```
+Resuming gives the owner a turn with a summary of how long the Objective was paused and what
+changed meanwhile. Pausing a paused Objective, or resuming one that is not paused, changes
+nothing. In the Objective's Slack or Lark thread, `@SuperTag pause` and `@SuperTag resume` do the
+same.
 
-Resuming wakes the owner with a message that says how long the Objective was paused, which Tasks
-changed meanwhile, and how many queued Tasks may start again. Pausing a paused Objective, or resuming
-one that is not paused, changes nothing. In the Objective's Slack or Lark thread, `@SuperTag pause`
-and `@SuperTag resume` do the same.
-
-**Check:** `supertag describe objective usage-billing` shows the pause under `Needs you`, and no
+**Check:** `supertag describe objective usage-billing` shows the pause under **Needs you**, and no
 longer does after you resume it.
 
 ## Cancel an Objective
 
-Cancel an Objective when the outcome no longer matters, for example after priorities change.
-Only an operator can cancel. Tags cannot cancel an Objective, including its owner.
+Cancel an Objective when the outcome no longer matters. Only an operator can cancel.
 
 ```sh
 supertag cancel objective usage-billing --reason "Billing moved to next quarter"
 ```
 
-```text
-objective/usage-billing cancelled; 3 open Tasks were cancelled.
-```
+Cancellation is final. SuperTag cancels every open Task of the Objective, so running Task Attempts
+stop and their Workspace pull requests close, records why on each one, and posts the reason to the
+Objective's home thread. Waiting messages and reports are failed rather than delivered.
 
-Cancellation is final. SuperTag then:
-
-- cancels every open Task of the Objective, the same way `supertag cancel task` does, so running
-  Task Attempts stop and their Workspace pull requests close;
-- records on each cancelled Task why it stopped;
-- releases the budget those Tasks had reserved;
-- dissolves the Objective's Teams, unless a Team also serves an open Objective;
-- stops owner continuation, limit warnings, and observation of Team channels;
-- records the reason in the owner's Mailbox and posts it to the Objective's thread on a
-  **collaboration surface**, an external work tool such as Slack, when it has one.
-
-The owner's Mailbox notice does not start a new activation. Mailbox messages for the Objective
-that no Tag had started are marked failed.
-
-Cancel takes no `--revision`. Repeating it is harmless: SuperTag changes nothing and retries any
-open Task that an earlier cancellation could not stop. A completed Objective cannot be cancelled,
-and a cancelled one cannot be reopened. To pick the work back up, create a new Objective.
+Cancel takes no `--revision`. Repeating it is harmless. A completed Objective cannot be cancelled,
+and a cancelled one cannot be reopened; create a new Objective to pick the work back up.
 
 **Check:** `supertag describe objective usage-billing` shows status `cancelled`, the time, and the
-reason, its Tasks show `cancelled`, and `supertag list team --objective usage-billing` shows its
-Teams `dissolved`.
+reason.
 
 ## If something goes wrong
 
 - **Creation returns 409.** An Objective with that ID already has a different definition. Choose a
-  new ID; see [creation rules](../reference/coordination.md#objective-creation-rules).
+  new ID; see [creation rules](../reference/coordination.md#creating-an-objective).
 - **A status update reports a conflict.** Someone changed the same field while you were updating
   it. Reload the Objective before deciding whether to retry.
-- **Creation printed a warning.** The Objective exists, but its Tasks wait until you fix the cause.
-  `supertag describe objective ID` shows the same checks as its `Runnable` line.
-- **Completion is refused because Tasks are unsettled.** See
-  [Completing an Objective](../reference/coordination.md#completing-an-objective).
-- **The owner stopped before the Objective was complete.** When no other Task in the Objective
-  is queued, running, or waiting, SuperTag resumes the owner instead of leaving the Objective idle.
-  See [owner continuation](../reference/coordination.md#owner-continuation) for the limits.
-  - If the owner finished without completing the Objective, SuperTag asks it for a verdict:
-    complete the Objective with evidence, continue the remaining work, or mark it blocked. After
-    three such continuations in a row that start no new Tasks, SuperTag waits for you.
-  - If the owner's activation failed, SuperTag resumes it from durable state, at most three times.
-    It waits and retries later after a provider usage or rate limit, and it does not retry
-    authentication, billing, or unavailable-model errors, which you must fix first.
-  - A delegated Task that submitted a result always wakes the owner to review it, once per result.
-  - When SuperTag will not resume the owner, the owner's line under `Needs you` starts with
-    `Needs you: owner stalled`. Reply with `supertag message objective ID TEXT` to wake it.
-  - After budget exhaustion or the deadline grace period, the Objective becomes `limited`. Review
-    its limit summary, then raise the budget or move the deadline to resume it.
-- **Work stopped before the deadline or budget should have been reached.** Check
-  `supertag describe objective ID` for `objective_budget_exhausted`, `deadline_passed`, or
-  `budget_coverage_incomplete`. Reported spend counts only the cost
-  that each **harness** (the coding agent that runs a Task, such as Claude Code or Codex) reports.
-- **Another Tag gets 404.** It is not the owner or a member of one of the Objective's Teams; see
-  [visibility and access](../reference/coordination.md#visibility-and-access).
+- **Creation printed a warning.** The Objective exists, but its turns wait until you fix the
+  cause. `supertag describe objective ID` shows the same checks on its `Runnable` line.
+- **The Objective is `blocked`.** Its turns ended twice with nothing running and nothing asked.
+  Read `supertag describe objective ID`, then direct it with
+  `supertag message objective ID TEXT`.
+- **The Objective is `limited`.** Its budget pool is spent or its deadline passed. Raise the
+  budget or move the deadline to let work continue.
+- **Nothing starts although the budget has room.** The Objective may be paused, or its Team's
+  `maxConcurrency` may already be reached across every Objective that names the Team. See
+  [Organize Tags into Teams](teams.md#throttle-a-team-on-purpose).
+- **Delegation is refused.** The target Tag is not a member of the Objective's Team, is not
+  active, or has no bound Worker Host. Check `supertag get team NAME` and
+  `supertag describe tag NAME`.
+- **Work stopped before the deadline or budget should have been reached.** Reported spend counts
+  only what each **harness** (the coding agent that runs a Task, such as Claude Code or Codex)
+  reports; unpriced Task Attempts are listed on the budget line.
 
 ## Next
 
-- [Coordinate Tasks toward an Objective](objective-coordination.md)
-- [Coordinate in a Team channel](workstreams.md)
-- [Objective coordination reference](../reference/coordination.md), including
-  [Objective references](../reference/coordination.md#objective-references)
+- [Check an Objective's progress](objective-overview.md)
+- [Respond to an Objective](objective-decisions.md)
+- [Organize Tags into Teams](teams.md)
+- [Share a Team's Workstream](workstreams.md)
+- [Objective coordination reference](../reference/coordination.md)
 - [Objective HTTP contract](../../spec/objectives.md)

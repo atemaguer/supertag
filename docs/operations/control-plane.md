@@ -1,7 +1,7 @@
 # Control Plane operations
 
 A **Tag** is a persistent AI identity with its own responsibilities and permissions, and Tags work
-in Teams under a lead. Together, your Teams of Tags make up an **autonomous organization**: Teams
+in Teams. Together, your Teams of Tags make up an **autonomous organization**: Teams
 may pursue different goals but share one set of rules and one record of the work. The **Control
 Plane** is the service that stores and coordinates the organization, applies policy, and schedules
 work. If it is unavailable, SuperTag cannot accept new requests, send work to execution systems, or
@@ -17,11 +17,11 @@ This page uses these terms:
   storage location, such as a bucket prefix or a directory on a Worker Host.
 - A **Role** is an
   enduring responsibility assigned to a Tag.
-- A **Team** is a group of Tags with a shared responsibility and a lead. Each Tag receives internal
-  messages through its **Mailbox**.
-- An **Objective** is an outcome a Tag owns, with success criteria.
-- A **Task** is one request or assignment accepted for a Tag. A **Task Attempt** is one execution
-  or retry of a Task.
+- A **Team** is a flat list of member Tags. A Tag's **Mailbox** is its inbox for messages from
+  other Tags.
+- An **Objective** is an outcome a Tag owns, with success criteria, a budget, and a deadline.
+- A **Session** is one Tag's thread of work. A **Task** is one turn of a Session, and a
+  **Task Attempt** is one execution or retry of a Task.
 
 Its **API Server** (management and Worklet requests) and **Gateway** (collaboration-surface
 transport) share one process, deployment, and HTTP listener, so there is no separate service to
@@ -121,7 +121,7 @@ Migrations use `SUPERTAG_DATABASE_URL` and are safe to run again when already cu
 
 This section covers where operator alerts go and which inbox kinds exist. To act on a decision,
 follow [Respond to budget and operator requests](../guides/objective-decisions.md); the decision
-rules are in the [coordination reference](../reference/coordination.md#operator-decisions).
+rules are in the [coordination reference](../reference/coordination.md#approval-requests).
 
 ### Operator inbox
 
@@ -136,21 +136,19 @@ Filter with `--kind`:
 
 | Kind | Pending decision |
 | --- | --- |
-| `approval` | A permission marked `approval: required`, or a lead's plan, awaits an approval request decision |
-| `task-approval` | A queued Task awaits approval |
-| `task-review` | A submitted Task awaits review |
-| `task-budget` | A Task failed because its execution budget was exhausted |
-| `objective-budget` | Observation assessment cannot be admitted within the Objective allocation |
-| `operator-message` | The Objective owner sent a message for operator attention |
-| `task-attention` | An observation assessment stopped without acknowledging its evidence, the owner finished while the active Objective has no scheduled work or usable observation subscription, or a Task failed because its repository's git config changed during the Task Attempt, or a Task Attempt is uncertain and needs `supertag recover worklet` on its Worker Host |
+| `approval` | An action marked `approval: required` awaits a decision |
+| `question` | An Objective asked you a question with `ask` and waits on the answer |
+| `objective-budget` | The Objective's budget pool is used up and admits no further turn |
 | `objective-limit` | A monetary budget reached 80% or its limit, or a deadline is 24 hours away, 1 hour away, or passed |
+| `task-attention` | A Task failed because its repository's git config changed during the Task Attempt, or a Task Attempt is uncertain and needs `supertag recover worklet` on its Worker Host |
+| `mcp-login` | A Task is held until an MCP server is logged in |
 
 An alert requests a decision; it does not approve more spending. Accepted results remain recorded
 even when execution runs out of budget.
 
 Approval requests appear only to operators who may list them: the admin token, an Operator Token, or scoped
-credentials with `list_approvals` and no Team scope. A `task-approval` item names the request that
-holds its Task. `supertag list approval` keeps the full request listing for scripts.
+credentials with the `list_approvals` action. `supertag list approval` keeps the full
+request listing for scripts.
 
 ### Operator channel
 
@@ -172,10 +170,9 @@ addresses that conversation through a Task: the stored record of a request recei
 collaboration surface, such as a Slack conversation. Use that Task's ID as the destination; do not
 supply a channel name, webhook URL, or credentials.
 
-When work exhausts its execution budget, an active authorized parent manager or followup can handle
-the decision through existing coordination. Otherwise the Control Plane can notify this destination
-without running another agent turn. The pending decision remains in the operator inbox even when a
-manager is handling it. It chooses the Objective's explicit `notificationTaskId` first, then the
+When work exhausts its execution budget, the Control Plane notifies this destination without
+running another agent turn, and the pending decision stays in the operator inbox. It chooses the
+Objective's explicit `notificationTaskId` first, then the
 verified surface Task that originated the Objective, then the deployment default
 `SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID`. Its explicit destination lets one Objective send alerts to
 a different operator conversation from the deployment default.
@@ -192,30 +189,28 @@ other: a person mentions the Tag once in the operator conversation through a con
 
 ### Set an Objective-specific destination
 
-An authenticated operator can set an Objective-specific destination through the Objective update
-API. Read the Objective first and pass its current `expectedRevision`, so a stale configuration
-change cannot overwrite a newer decision:
+An authenticated operator sets an Objective-specific destination when creating the Objective, with
+`notificationTaskId` on `POST /api/v1/tag-messaging/objectives`:
 
 ```json
 {
-  "expectedRevision": 3,
+  "id": "objective-release",
+  "outcome": "Ship the 0.4 release.",
   "notificationTaskId": "verified-surface-task-id"
 }
 ```
 
-Use `notificationTaskId: null` to clear the explicit destination and return to the originating
-conversation or deployment fallback. This setting changes where the alert goes, not who may
-approve additional execution.
+The destination is fixed for the Objective's life. `PATCH /api/v1/tag-messaging/objectives/:id`
+takes only `status`, `expectedRevision`, `completionSummary`, `budgetLimitMinor`, `deadline` and
+`runtimeActions`; any other field returns 400. The setting changes where the alert goes, not who
+may approve additional execution.
 
-### Operator messages
+### Questions from an Objective
 
-Role instructions can ask managers to escalate earlier or request human judgment. The Objective
-owner can use the existing `send_message` primitive with `recipientObjectiveId`, type
-`message` (or `progress.updated`), and `body.message` to store its explanation in the operator
-mailbox, even without an external destination. These appear under `supertag list inbox --kind
-operator-message`. When a destination resolves, in the same order as budget alerts, the Control
-Plane also delivers the message there. The message stays in the inbox either way. An operator reply
-resolves that inbox message and can wake a manager waiting on its Mailbox.
+An Objective asks a person a question with `ask`. The question posts to the Objective's thread and
+appears under `supertag list inbox --kind question`. Answer it by replying in that thread or with
+`supertag message objective ID TEXT`; the answer starts the Objective's next turn and clears the
+inbox item.
 
 ### Delivery status
 
@@ -413,22 +408,23 @@ headers and command bodies cannot choose an operator ID or expand its access.
   {
     "token": "secret-issued-to-release-coordinator",
     "operatorId": "release-coordinator",
-    "actions": ["read_coordination_inbox", "read_team_history", "read_task", "update_task"],
+    "actions": ["read_coordination_inbox", "read_objective", "update_objective"],
     "objectiveIds": ["objective-release"],
-    "teamIds": ["team-release"],
     "revoked": false
   }
 ]
 ```
 
 `actions` contains exact coordination command names; `read_coordination_inbox` grants the inbox
-projection and `read_team_history` grants Team change history. `list_approvals` and
-`decide_approval` let an operator list and decide approval requests. Omit `objectiveIds` or `teamIds` only
-when the operator should span every resource at that level. Set `revoked` to `true` and restart the
+projection. `list_approvals` and
+`decide_approval` let an operator list and decide approval requests. A credential takes `token`,
+`operatorId`, `actions`, `objectiveIds` and `revoked`; any other field makes the Control Plane
+refuse to start. Omit `objectiveIds` only when the operator should reach every Objective. Set
+`revoked` to `true` and restart the
 Control Plane to refuse an issued token while retaining its configuration record. Scoped tokens can
 access only `/api/v1/coordination/*`; the Control Plane rejects them on configuration, collaboration surface, status,
-and metrics endpoints. `supertag coordinate` and `supertag events team` use the credential saved by
-`supertag connect control-plane`, so the same CLI works with a scoped token.
+and metrics endpoints. The CLI uses the credential saved by `supertag connect control-plane`, so
+the same commands work with a scoped token.
 
 ## Health and readiness
 
@@ -610,7 +606,7 @@ curl --fail http://127.0.0.1:3434/readyz
 
 The Control Plane and Worklet transport must be protocol-compatible. The optional gRPC listener
 requires a durable Worklet using protocol 18 and wire version 1. Other versions are rejected before
-assignment. Protocol 18 checks Team input authority at take time and supports selecting and
+a Task is sent. Protocol 18 checks live-input authority at take time and supports selecting and
 reserving the exact Worker/profile on the chosen host. Upgrade Worklets with the same release before
 treating the deployment as ready. See
 [gRPC Worklet setup](../guides/workers.md#connect-securely-through-grpc).

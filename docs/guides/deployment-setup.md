@@ -1,7 +1,7 @@
 # Configure a hosted Control Plane
 
 A **Tag** is a persistent AI identity with its own responsibilities and permissions, and Tags work
-in Teams under a lead. Together, your Teams of Tags make up an **autonomous organization**: Teams
+in Teams: flat lists of member Tags. Together, your Teams of Tags make up an **autonomous organization**: Teams
 may pursue different goals but share one set of rules and one record of the work. Prepare, check,
 and verify one configuration for a hosted **Control Plane** (the service that stores and coordinates
 a SuperTag organization) on Railway, Render, Fly.io, Modal, or Cloudflare. Agents execute on

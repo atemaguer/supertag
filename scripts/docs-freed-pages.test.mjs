@@ -17,7 +17,6 @@ test("newly freed pages use the public vocabulary", () => {
     "docs/concepts/persistence.md",
     "docs/guides/workspaces.md",
     "docs/guides/modal-workers.md",
-    "docs/reference/mailbox.md",
     "docs/reference/coordination.md",
     "docs/reference/worker.md",
     "docs/operations/install.md",

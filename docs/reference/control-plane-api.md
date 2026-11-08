@@ -254,7 +254,11 @@ GET  /api/v1/tasks
 GET  /api/v1/tasks/:id
 GET  /api/v1/tasks/:id/events
 POST /api/v1/tasks/:id/cancel
+POST /api/v1/objectives
+GET  /api/v1/objectives/:id
 POST /api/v1/objectives/:id/cancel
+POST /api/v1/objectives/:id/pause
+POST /api/v1/objectives/:id/resume
 GET  /api/v1/sessions
 GET  /api/v1/sessions/:id
 GET  /api/v1/sessions/:id/states
@@ -525,10 +529,10 @@ The virtual Tag operation remains for compound placement and binding workflows. 
 The API does not provide arbitrary process execution, filesystem access, database migrations, or
 deployment lifecycle control. Worker Host credential operations are limited to enrollment,
 rotation, and revocation; tokens do not appear in ordinary reads. The administrative credential has
-full control-plane authority. Coordination endpoints can instead use separately configured operator
-credentials restricted to exact actions, Objectives, and Teams. Task events, Team change history,
-and structured permission decisions provide execution and coordination auditing; a broader
-administrative audit log remains planned.
+full control-plane authority. Coordination endpoints can instead use separately configured
+operator credentials restricted to exact actions and Objectives. Task events, resource change
+history, and structured permission decisions provide execution and coordination auditing; a
+broader administrative audit log remains planned.
 
 See [Credential storage](credential-storage.md) for the server-side vault and client-side operator credential boundaries.
 
@@ -588,102 +592,98 @@ activity and its result, not each piece of text.
 
 ## Tag messaging administration (Experimental)
 
-`/api/v1/tag-messaging/*` manages directional messaging grants, issues and revokes
-Tag-scoped mailbox credentials, and inspects message history. These operation endpoints
-use the same administrative authentication; they do not expose a declarative Mailbox
-resource. Credential issuance returns the new token once. The separate
-`/internal/v1/mailbox/*` endpoints accept only Tag mailbox credentials. See the
-[complete HTTP contract](../../spec/tag-messaging.md) and [operator guide](../guides/tag-messaging.md).
+`/api/v1/tag-messaging/*` manages Objectives, Teams, Workstream posts, messaging grants and
+message history with the administrative credential. It exposes no declarative Mailbox resource.
 
-Team channel inspection and post history use `/api/v1/tag-messaging/workstreams`. Every Team
-gets its channel when it is created, so there is no endpoint to create, update, or close one. See
-the [Workstream HTTP contract](../../spec/workstreams.md).
+| Request | Operation |
+| --- | --- |
+| `POST /api/v1/tag-messaging/objectives` | Create an Objective and start its conversation; `?dryRun=true` validates and stores nothing |
+| `GET /api/v1/tag-messaging/objectives?tagId=&limit=&offset=` | List Objectives |
+| `GET /api/v1/tag-messaging/objectives/:id` | One Objective |
+| `PATCH /api/v1/tag-messaging/objectives/:id` | Update status, completion summary, budget, deadline or runtime actions |
+| `GET /api/v1/tag-messaging/teams?tagId=` | Every Team, or the Teams one Tag belongs to |
+| `POST /api/v1/tag-messaging/teams` | Create a Team |
+| `GET /api/v1/tag-messaging/teams/:idOrName` | One Team |
+| `PATCH /api/v1/tag-messaging/teams/:idOrName` | Update its name, members or `maxConcurrency` with `expectedRevision` |
+| `DELETE /api/v1/tag-messaging/teams/:idOrName` | Delete a Team; refused while an open Objective names it |
+| `GET /api/v1/tag-messaging/workstreams/:teamIdOrName/posts?afterSequence=&limit=` | A Team's Workstream posts |
+| `GET /api/v1/tag-messaging/grants?tagId=` | Grants in which the Tag is the sender or the recipient |
+| `PUT` or `DELETE /api/v1/tag-messaging/grants` | Add or remove one grant, with body `{senderTagId, recipientTagId}` |
+| `GET /api/v1/tag-messaging/messages?tagId=&beforeCreatedAt=&beforeId=&limit=` | Messages a Tag sent or received, newest first |
 
-Objectives use the experimental [Objective API](../../spec/objectives.md). Tag credentials
-can read owned Objectives and those their active Teams serve; only the owner or an
-operator may change Objective status. Team membership does not grant messaging rights.
+A grant is a pair: the recipient accepts messages from the sender. Tags that share a Team need
+none. The complete Objective contract is in [Objectives](../../spec/objectives.md) and the
+Workstream contract in [Workstreams](../../spec/workstreams.md). The CLI exposes these routes as
+`supertag create objective`, `supertag create team`, `supertag list workstream-post`,
+`supertag grant mailbox` and `supertag list message`.
 
 `POST /api/v1/objectives/:id/cancel` cancels an Objective and its open Tasks. It requires the
-admin token or an Operator Token, records the caller in the Objective's change history, and accepts
-an optional `{"reason": "..."}` body. It returns an `ObjectiveCancellation` resource whose status reports `changed`, `phase`, `cancelledAt`, `reason`,
-and `cancelledTaskIds`. Repeating the request returns 200 with `changed: false`; a completed
-Objective returns 409. See [Cancelling an Objective](coordination.md#cancelling-an-objective).
+admin token or an Operator Token, records the caller in the Objective's change history, and
+accepts an optional `{"reason": "..."}` body. It returns an `ObjectiveCancellation` resource whose
+status reports `changed`, `phase`, `cancelledAt`, `reason` and `cancelledTaskIds`. Repeating it
+returns 200 with `changed: false`; a completed Objective returns 409. `POST
+/api/v1/objectives/:id/pause` and `/resume` return `ObjectivePause` and `ObjectiveResume` the same
+way. See [Cancelling an Objective](coordination.md#cancelling-an-objective).
 
 ## Coordination operations (Experimental)
 
-`POST /api/v1/coordination/:operation` invokes the same bounded Objective, Team, Task, Mailbox,
-Team channel, and Tag primitives available to an authorized manager. Operators may use separate
-bearer credentials whose configured action, Objective, and Team scopes are checked before the
-operation runs.
+`POST /internal/v1/coordination/mcp` is the MCP endpoint a running Task Attempt calls with its
+execution credential. It offers only the tools that Task's turn may use; see
+[Coordination tools](coordination.md#coordination-tools). The Control Plane derives the acting Tag
+from the credential and refuses a tool the turn does not get.
 
-Administrative `read_objective` adds a budget projection to the canonical Objective and each visible Task.
-It keeps organizational limits, reservations, and charges separate from per-Task Attempt provider
-ceilings and observed costs. Provider amounts are grouped by currency without conversion; missing,
-running, partial, or mismatched evidence remains explicit. Objective-wide provider coverage is
-labeled as applying to visible Tasks, so a Team-scoped caller cannot mistake hidden work for covered
-spend. `read_task` exposes the same evidence for one visible Task.
+The operator routes under `/api/v1/coordination` use separate bearer credentials whose configured
+actions and Objective scopes are checked before the operation runs.
 
-Execution-time `read_objective` instead returns a bounded discovery summary, with `limit` and
-`offset`, independent per-collection page metadata, abbreviated instructions, and lossless paginated
-Objective definition text. Full results and provider evidence remain in `read_task`. This prevents
-large organizational histories from overflowing model tool responses. See
-[Discovery view for agents](coordination.md#discovery-view-for-agents).
+| Request | Operation |
+| --- | --- |
+| `GET /api/v1/coordination/inbox` | The operator inbox; filters are `objectiveId`, `kind`, `status`, `nextActorId`, `asOf`, `cursor` and `limit` |
+| `GET /api/v1/coordination/approvals` | List approval requests; `status` accepts `pending`, `approved`, `denied`, `expired` or `all` |
+| `POST /api/v1/coordination/approvals/:id/approve` | Optional body `scope` (`once` or `objective`), `validUntil` and `reason` |
+| `POST /api/v1/coordination/approvals/:id/deny` | Body `{"reason": "TEXT"}` |
+| `POST /api/v1/coordination/objectives/:id/messages` | Body `{text, idempotencyKey?}`; delivers the next turn of the Objective's conversation |
+| `POST /api/v1/coordination/objectives/:id/approve` | Body `{}`; completes a `ready_for_review` Objective |
+| `GET /api/v1/coordination/objectives/:id/overview` | The Objective overview |
 
-`GET /api/v1/coordination/inbox` projects pending Task approvals, reviews, and approval requests
-without introducing separate workflow resources; `kind=approval` selects approval requests. Each
-page includes `tagNames` for its Tag decision makers. The API returns the full view; the CLI
-filters `supertag list inbox` to operator decisions unless `--all` is set. See
-[Operator inbox](coordination.md#operator-inbox). `GET /api/v1/coordination/teams/:id/history?objectiveId=...` returns
-the Team's append-only changed-field deltas and Tag, operator, Task, and Mailbox provenance. The CLI
-exposes these reads through `supertag list inbox` and `supertag events team`.
+Unknown or repeated query parameters are rejected. The CLI exposes these as
+`supertag list inbox`, `supertag list approval`, `supertag approve request`,
+`supertag deny request`, `supertag message objective`, `supertag approve objective` and
+`supertag describe objective`.
 
-`GET /api/v1/coordination/approvals` lists approval requests, and
-`POST /api/v1/coordination/approvals/:id/approve` or `/deny` decides one. The CLI exposes them as
-`supertag list approval`, `supertag approve request`, and `supertag deny request`. See
-[Approval requests](coordination.md#approval-requests).
+`POST .../messages` returns `{duplicate, taskId, statusChange?}`. The same `idempotencyKey` with
+the same text returns the original delivery, and `statusChange` names the status the Objective
+left when the message moved it back to `working`. A message to a completed or cancelled Objective
+returns 409. See [Operator messages](coordination.md#operator-messages).
 
-`POST /api/v1/coordination/objectives/:id/messages` sends an operator message to the Objective
-owner with `{message, reopen?, idempotencyKey?}`. It requires `send_message` and access to that
-Objective. `POST /api/v1/coordination/objectives/:id/approve` with `{}` completes a
-`ready_for_review` Objective and requires `update_objective`. Team-scoped credentials cannot use
-either. The CLI exposes them as `supertag message objective` and `supertag approve objective`. See
-[Operator messages and review](coordination.md#operator-messages-and-review).
+`GET .../inbox` projects pending state over existing records; it introduces no workflow resource.
+Each page includes `tagNames` for its Tag decision makers. The API returns the full view, and the
+CLI filters `supertag list inbox` to operator decisions unless `--all` is set. Kinds use
+underscores over HTTP and hyphens in the CLI. See [Operator inbox](coordination.md#operator-inbox).
 
-`GET /api/v1/coordination/objectives/:id/overview` provides an operator view of progress,
-recorded blockers, performance summaries, and exact Task/Task Attempt/artifact/review references.
-It requires `read_objective` and access to that Objective; Team-scoped credentials are rejected
-because ownership and allocation data are Objective-wide. No new MCP tool or write action is added.
-Optional query parameters are `teamId`, `limit` (1–100, default 50), and `offset` (default 0).
-Unknown or repeated parameters are rejected. A Team filter selects exact Team membership, not its
-descendants, and does not grant access to additional records.
-
-The response includes `projectionVersion`, `capturedAt`, `objective`, `conditions`, `attention`,
-`approvals`, `performance`, `teams`, `allocation`, `pageUsage`, `tasks`, `total`, `offset`, and
-`nextOffset`. `conditions` holds one `Runnable` condition, `{type, status, reasons}`; see
-[Runnable](coordination.md#runnable). Without a Team filter, `conversation` lists the latest 50
-messages between the operator and the owner, oldest first. Each entry is
-`{id, from, tagId, text, createdAt}`; `from` is `owner` or `operator`. An owner message also has
-`status`, `pending` until the operator replies, and an operator message has `operatorId`.
-`approvals` counts pending requests and those approved or denied in the last 24 hours; pending
-requests also add an `approvals_pending` attention item. Counts cover all
-filtered assignments; execution detail and provider usage cover only the Task page. Usage coverage
-lists missing Task Attempt reports explicitly. These are observations across durable records, not a
-transactional snapshot or a dispatch guarantee. Existing write operations still require their own
-authority and status/revision fences. See [Overview fields](coordination.md#overview-fields)
-for metric definitions and limitations.
+`GET .../overview` requires `read_objective` and access to that Objective: a scoped credential
+naming `objectiveIds` reaches only those Objectives. Optional query parameters
+are `limit` (1–100, default 50) and `offset` (default 0). The response carries
+`projectionVersion`, `capturedAt`, `objective`, `conditions`, `attention`, `approvals`, `limits`,
+`pool`, `conversation`, `sessions`, `highFindings`, `posts`, `team`, `tagNames`, `writes`,
+`pageUsage`, `tasks`, `total`, `offset` and `nextOffset`. Counts cover the whole Objective;
+provider usage covers only the Task page, and missing Task Attempt reports are listed explicitly.
+These are observations across durable records, not a transactional snapshot. See
+[Overview fields](coordination.md#overview-fields).
 
 ### Read a Task's progress
 
-A Task is one assignment for a Tag. An execution Task Attempt records a particular Worker
+A Task is one turn of a Tag's Session. An execution Task Attempt records a particular Worker
 run of that Task. Use `supertag get task ID` for the JSON resource or `supertag describe task ID`
 for a readable summary. `supertag events task ID` shows its stored event history.
 
 Task reads include the existing `apiVersion`, `kind`, `metadata`, `spec`, and `status` envelope.
 The status adds these observations when records exist:
 
-- `assignment`: the Team and Objective, assignment phase, approval, priority, dependencies,
-  earliest eligible time, execution lease expiry, and registered wait conditions. These conditions
-  record what the manager requested; they do not imply a fresh scheduler decision.
+- `spec.objectiveId`: the Objective whose Session the Task belongs to, when it has one.
+- `findings`: the [findings](coordination.md#review-findings) its result carried, by severity, or
+  why the stored findings are unreadable.
+- `attempts`: every Task Attempt, oldest first, with its phase, times and provider-reported cost
+  when known.
 - `attempt`: the latest Task Attempt, its Worker Profile, recorded Worker/Host/Worklet identities,
   last event, execution placement, and the recorded failure message when its latest terminal event
   failed. Error stacks and additional error fields are omitted; messages retain the Worker's event
@@ -835,30 +835,24 @@ Session storage contract but requires an explicitly supplied durable adapter.
 
 ### Continuing Objectives and operator attention
 
-An Objective defines an outcome and its success criteria. Creation accepts `ongoing: true` for a
-continuing responsibility that only an operator may mark completed. The default is `false`; its
-owner may complete it after assessing the criteria and settling outstanding Tasks. This choice is
-independent of `observations`, which select Team channels for new-evidence delivery.
+Creation accepts `ongoing: true` for a continuing responsibility that only an operator may mark
+completed. The default is `false`: the owner completes it after assessing the outcome and
+settling outstanding work.
 
-The coordination inbox accepts `kind=task_attention`. These metadata-only entries identify failed
-observation assessments or owner Tasks with no scheduled continuation or usable observation
-subscription. Their `reason` explains why inspection is needed; `permittedActions` is empty because
-recovery depends on the result and possible external effects. Reading an entry does not resolve it.
-An entry for an uncertain Task Attempt also carries `uncertainAttempt` (`attemptId`, `workerHostId`,
-`workerId`), and its first `commands` entry is the `supertag recover worklet` command for it. A
-Task's assignment shows the same record as `uncertainAttempt`, with `attemptNumber`, `detectedAt`,
-and `reason`; it is null unless the running Task's current Task Attempt is uncertain. See
+The coordination inbox accepts `kind=task_attention`. These metadata-only entries identify a Task
+that needs an operator. Their `reason` explains why inspection is needed; `permittedActions` is
+empty, because recovery depends on the result and possible external effects. Reading an entry
+does not resolve it. An entry for an uncertain Task Attempt carries `uncertainAttempt`
+(`attemptId`, `workerHostId`, `workerId`), and its first `commands` entry is the
+`supertag recover worklet` command for it. See
 [Uncertain Task Attempts](scheduling-and-recovery.md#uncertain-task-attempts).
 
-Observation batches, receipts, and the task-attention inbox are described in
-[Observation delivery](coordination.md#observation-delivery).
-
-### Objective allocation recovery and wait explanations
+### Objective allocation recovery
 
 Administrative `update_objective` accepts an optional nonnegative integer `budgetLimitMinor` with
-`expectedRevision`. It must increase an active Objective's finite limit and cover charged plus
-reserved allocation; it cannot remove a limit or change its currency. Agent callers are rejected.
-The existing resource-change history records the operator and old/new values atomically.
+`expectedRevision`. It must increase an active Objective's finite limit; it cannot remove a limit
+or change its currency. Agent callers are rejected. The resource-change history records the
+operator and the old and new values atomically.
 
 Administrative `update_objective` also accepts `deadline`, an ISO timestamp, with
 `expectedRevision`. It may replace a deadline that already passed, and the change is audited the
@@ -869,82 +863,22 @@ The Objective's read-only `limitState` records the Control Plane's limit observa
 reported spend of a monetary budget, the 80% warning, exhaustion, deadline warnings, and deadline
 passage. Each entry names the limit or deadline it was observed against, so entries for an old
 limit stop applying after a change. The rules are in
-[Monetary budgets](coordination.md#monetary-budgets) and [Deadlines](coordination.md#deadlines).
+[The budget pool](coordination.md#the-budget-pool) and [Deadlines](coordination.md#deadlines).
 
 The inbox accepts `kind=objective_limit`. Each item carries the event in `reason`, an `objective`
 evidence entry, and an `update_objective` action that requires `budgetLimitMinor` or `deadline`.
-For an approaching deadline, `reason` calculates the time left when the inbox is read. For
-example, a warning created an hour before the deadline says about 27 minutes left when read
-27 minutes before it. After the deadline, it says the deadline has passed.
-Configured Gateway notices are sent once per item and are revalidated before delivery.
+For an approaching deadline, `reason` calculates the time left when the inbox is read: a warning
+created an hour before the deadline says about 27 minutes left when it is read 27 minutes before
+it, and says the deadline has passed afterwards. Configured Gateway notices are sent once per item
+and revalidated before delivery.
 
-Operator inbox projection version 5 includes `objective_budget` with an `update_objective` action
-and `operator_message` with a correlated `send_message` reply. Version 6 adds the `approval` kind
-and each item's `commands`. Version 7 adds the `mcp_login` kind. Older cursors must be refreshed.
-An `mcp_login` item marks a queued Task held because its Worker Host's login to an MCP server
-lapsed. Its key is `mcp_login:TASK_ID:SERVER`. It is an operator decision, so
-`supertag list inbox` shows it without `--all`. Its `commands` are `supertag mcp login SERVER`,
-then `supertag describe objective ID`. See
-[MCP OAuth login](supertag-yaml.md#mcp-oauth-login).
-The `objective_budget` item represents blocked observation admission, not a failed execution.
-Configured Gateway notices are deduplicated and revalidated before delivery.
+Operator inbox projection version 8 is current. Its kinds are `approval`, `question`,
+`objective_budget`, `objective_limit`, `task_attention` and `mcp_login`; older cursors must be
+refreshed. A `question` item stands for an Objective whose latest turn called `ask`. An
+`mcp_login` item marks a queued Task held because its Worker Host's login to an MCP server
+lapsed; its key is `mcp_login:TASK_ID:SERVER`, and its commands are `supertag mcp login SERVER`,
+then `supertag describe objective ID`. See [MCP OAuth login](supertag-yaml.md#mcp-oauth-login)
+and [Operator inbox](coordination.md#operator-inbox).
 
-For allocation fields and charging, see
-[Budgets and allocation](coordination.md#budgets-and-allocation). For who may answer and what a
-reply changes, see [Operator decisions](coordination.md#operator-decisions).
-
-`wait_for` accepts optional `reason` (1–2,000 characters). This self-reported explanation persists
-in `waitState`, including after resumption. `read_task` returns selected input metadata, an
-`inputPage` (default 20, `limit` 1–100, nonnegative `offset`), and authorized requester and Team
-channel routes. `sharedWorkstreamsTruncated` marks a bounded discovery list; absence there is not
-proof that no other visible channel exists. These views grant no new authority.
-
-`escalate_task` is available only to a running Task Attempt; operator calls receive 403. It takes
-`effort`, `model`, or both, and a required `reason` (1–2,000 characters). A value outside the
-Tag's range returns 400 with the allowed values; a request that changes nothing, a third
-escalation of one Task, or a non-durable Task Attempt returns 409. A successful call stores
-`waitState.escalation`, and the next activation's wake reason is `escalated`. The Task's events
-gain a `task.self-escalated` entry, and the Objective overview lists `selfEscalations` per Task.
-See [Self-escalation](coordination.md#self-escalation).
-
-`list_tags` is available to the Objective owner, Team leads, and operators; other Task Attempts
-receive 403. It takes optional `limit` (1–100, default 100) and `offset`, and returns
-`{tags, total, nextOffset}` as defined by
-[tag-directory.schema.json](../../spec/tag-directory.schema.json). `create_team`, `update_team`,
-`assign_task`, and `send_message` accept a Tag name wherever they take a Tag ID. See
-[Read tools](coordination.md#read-tools).
-
-### Objective operator messages
-
-`send_message` with `recipientObjectiveId` stores an operator message from the active Objective
-owner, using `type: "message"` or `"progress.updated"` and `body.message` (1–8,000 characters).
-Set `needsReply: false` to post a report without requesting an operator reply. Reports remain in
-the Objective conversation and watch timeline, but stay out of the operator decision inbox.
-The message remains durable if external notification delivery is unavailable. Request retries with
-the same Objective, sender, key, and content return the original message; different content conflicts.
-Each Objective admits at most 100 unanswered questions.
-
-The `operator_message` inbox item carries message identity and source metadata. For an operator
-allowed `read_objective` or `read_mailbox` without a Team scope, it also carries `message`:
-`{text, createdAt, truncated}`. `text` holds at most 500 characters; `truncated` is true when the
-stored message is longer, and `redaction.omitted` then still lists `body`. Other operators receive
-metadata only. To read a full message, an Objective-scoped operator (or the current owner) uses
-`read_mailbox` with `recipientObjectiveId` and optional `messageId`. Lists accept `limit` (1–100) and `after` (`createdAt`, `id`);
-`nextAfter` indicates another page may exist. Ordinary Tag mailbox reads are unchanged.
-
-An operator replies through `send_message` using `recipientTagId` set to the current owner,
-`inReplyTo` set to the operator message ID, `type: "message"`, `body.message`, and an idempotency key.
-Recording the attributed reply and resolving the operator inbox item is one transaction. Only one
-reply wins; identical retries are idempotent. The reply's trusted `operatorId` is preserved over
-HTTP and gRPC. An agent cannot set this attribution or resolve its own operator request.
-
-`POST /api/v1/coordination/objectives/:id/messages` is the simpler route. It answers the most
-recent unanswered operator message automatically, or sends an unsolicited operator message when
-none is pending. The response is `{message, duplicate, repliedToMessageId, objective, statusChange,
-guidance}`. The same `idempotencyKey` with the same text returns the original delivery; the CLI
-generates a new key for each command.
-
-A reply does not mutate a budget, permissions, or any other resource. Apply an authorized update
-first when required. The current owner receives the reply through normal Mailbox scheduling and
-can resume an existing Mailbox wait. Pending requests survive restart; delivery retries do not
-create another request. Changing the external destination does not change who may answer.
+For the pool and its ceilings, see [The budget pool](coordination.md#the-budget-pool). For what an
+operator's message changes, see [Operator messages](coordination.md#operator-messages).

@@ -96,7 +96,7 @@ and coordinate the connected Worker Hosts. Source contributors can use
 ## Match the CLI and the Control Plane
 
 A **Tag** is a persistent AI identity with its own responsibilities and permissions, and Tags work
-in Teams under a lead. Together, your Teams of Tags make up an **autonomous organization**: Teams
+in Teams. Together, your Teams of Tags make up an **autonomous organization**: Teams
 may pursue different goals but share one set of rules and one record of the work. The **Control
 Plane** is the service that stores your organization and accepts work. Your CLI talks to it. A
 shared Control Plane can run a different SuperTag version from your CLI, for example after a

@@ -6,7 +6,7 @@ state an **Objective**: what done means, how it's verified, a budget, and a dead
 reserved. A Tag is a persistent AI identity with its own responsibilities and permissions. You can
 direct the team from the coding agent you already use.
 
-A **Team** groups Tags under a lead. Together, your Teams of Tags make up an **autonomous
+A **Team** is a flat list of member Tags. Together, your Teams of Tags make up an **autonomous
 organization**: Teams may pursue different Objectives but share one Control Plane, its rules, and
 its record of the work. The **Control Plane** stores the organization and schedules work.
 A **Worker Host** is a machine or sandbox that runs that work. A **collaboration surface** connects
@@ -20,7 +20,7 @@ Follow this order on your first visit:
 2. [Give a Tag its first Objective](../README.md#get-started), then use the
    [CLI walkthrough](operations/cli.md) to inspect the result. [Write an Objective](guides/write-an-objective.md)
    explains how to state outcomes your team can verify.
-3. [Add a teammate](guides/first-team.md) and coordinate a lead and a builder in a [Team](guides/teams.md).
+3. [Add a teammate](guides/first-team.md) and put two Tags in a [Team](guides/teams.md).
    To direct SuperTag from Claude Code, Codex, or another coding agent, set up the
    [operator skill guide](guides/coding-agent-operator.md).
 4. [Connect a collaboration surface](surfaces/README.md) when you want to work from chat or issues.
@@ -41,10 +41,10 @@ Follow this order on your first visit:
 | Understand the main ideas | [Core concepts](concepts/README.md) |
 | Choose how to direct an AI engineering team | [The interaction model](concepts/interaction-model.md) |
 | Ask a Tag a question from your terminal | [Talk to a Tag from the CLI](guides/talk-to-a-tag.md) |
-| Give several Tags a shared outcome | [Coordinate Tasks toward an Objective](guides/objective-coordination.md) |
+| Give several Tags a shared outcome | [Define and complete an Objective](guides/objectives.md) |
 | Keep a Tag responsible as conditions change | [Maintain an ongoing responsibility](guides/ongoing-responsibilities.md) |
 | Understand progress, blockers, and results | [Check an Objective's progress](guides/objective-overview.md) |
-| Answer a budget or operator request, or review a result | [Respond to budget and operator requests](guides/objective-decisions.md) |
+| Answer a question, decide an approval, or review a result | [Respond to an Objective](guides/objective-decisions.md) |
 | Get alerts for inbox decisions | [Set up operator notifications](guides/notifications.md) |
 | Start from a ready-made team definition | [Example organizations](../examples/organizations/README.md) |
 | Run Claude and Codex against one shared workspace | [Two managers, one shared workspace](../examples/shared-organization/README.md) |
@@ -63,15 +63,15 @@ Read these in order when you want the complete mental model:
 1. A [Tag](concepts/tags.md) is a persistent AI identity with its own responsibilities and
    permissions.
 2. A [Role](concepts/roles.md) is an enduring responsibility assigned to a Tag.
-3. An [Objective](guides/objectives.md) is a desired outcome. A [Task](concepts/tasks.md) is one
-   current assignment, and a Session groups Tasks from the same conversation.
-4. A [Team](guides/teams.md) is a group of Tags with a lead and shared capacity.
-5. Every Team has one channel, its [Workstream](guides/workstreams.md), where members post. There
-   are no other Workstreams, and a channel has no status or revision of its own. A
-   [Mailbox](guides/tag-messaging.md) delivers an internal message to one Tag; a Team's lead and
-   members message each other without a grant.
+3. An [Objective](guides/objectives.md) is a desired outcome with a budget, a deadline, and a
+   status. A Session is one Tag's thread of work, and a [Task](concepts/tasks.md) is one turn of
+   it.
+4. A [Team](guides/teams.md) is a flat list of member Tags with an optional concurrency limit.
+5. A Team's [Workstream](guides/workstreams.md) is its shared record of posts; every member can
+   read it, and a post wakes nobody. A Tag's [Mailbox](guides/tag-messaging.md) is its inbox for
+   messages from other Tags; Tags in one Team message each other without a grant.
 
-Security and governance add two more resources. A
+Two more resources separate knowledge from authority. A
 [Context Set](concepts/context-and-permissions.md) selects reusable knowledge that may be added to a
 Task. A [Permission Set](concepts/context-and-permissions.md) selects actions that the Task may
 perform.
@@ -126,14 +126,13 @@ Choose the tool your team already uses:
 - [Write an Objective](guides/write-an-objective.md) — outcomes, evidence, constraints, and limits
 
 - [Define and complete an Objective](guides/objectives.md)
-- [Coordinate Tasks toward an Objective](guides/objective-coordination.md)
 - [Organize Tags into Teams](guides/teams.md)
-- [Coordinate in a Team channel](guides/workstreams.md)
+- [Share a Team's Workstream](guides/workstreams.md)
 - [Talk to a Tag from the CLI](guides/talk-to-a-tag.md)
 - [Send messages between Tags](guides/tag-messaging.md)
 - [Maintain an ongoing responsibility](guides/ongoing-responsibilities.md)
 - [Check an Objective's progress](guides/objective-overview.md)
-- [Respond to budget and operator requests](guides/objective-decisions.md)
+- [Respond to an Objective](guides/objective-decisions.md)
 - [Work in a repository with Workspaces](guides/workspaces.md)
 
 ## Build and extend SuperTag
@@ -154,8 +153,7 @@ Use these pages when you are implementing an integration, protocol, or Control P
 - [Resource model](reference/resource-model.md) — public resources and their common shape
 - [Identity and policy resolution](reference/iam.md) — identity, admission, permissions, and security rules
 - [Context resolution](reference/context-resolution.md) — how declared knowledge becomes Worker input
-- [Objective coordination reference](reference/coordination.md) — Objective, Team, budget, review, wait, and completion rules
-- [Mailbox and Team channel reference](reference/mailbox.md) — grants, delivery, replies, history, and Team channel rules
+- [Objective coordination reference](reference/coordination.md) — Objective, Team, Mailbox, Workstream, budget, and completion rules
 - [Worker reference](reference/worker.md) — execution contracts, events, continuity, and failure behavior
 - [Devcontainer settings for remote workspaces](reference/devcontainer-subset.md) — supported repository toolchain settings and refusals
 - [Scheduling and interrupted execution](reference/scheduling-and-recovery.md) — Worker Host selection, unknown outcomes, and reclaiming capacity

@@ -63,7 +63,7 @@ If you already use coding agents, two ideas will feel familiar:
   brings you only the decisions that need you, then the finished work to review.
 
 Each member of the team is a **Tag**: a persistent AI identity with its own responsibilities and
-permissions. For the invite feature, a lead Tag plans the work, a builder Tag writes the API and the
+permissions. For the invite feature, an owner Tag plans the work, a builder Tag writes the API and the
 invite flow, and a reviewer Tag checks each change but may not edit the repository. Each Tag runs
 the coding agent you choose, such as Claude Code, Codex, Cursor, OpenCode, or
 [your own harness](docs/guides/harness-runtime.md), with any model it supports. SuperTag is open
@@ -71,8 +71,8 @@ infrastructure, so that work runs where you choose: your laptop, your servers, o
 such as Modal and E2B.
 
 [Get started](#get-started) with one Tag and a small Objective in your own repository; its changes
-arrive as a git branch for you to review. Then add a builder to your first **Team**, a group of Tags
-with a lead, in the [first Team walkthrough](docs/guides/first-team.md).
+arrive as a git branch for you to review. Then add a builder to your first **Team**, a flat list of
+member Tags, in the [first Team walkthrough](docs/guides/first-team.md).
 
 ## From tasks to outcomes
 
@@ -93,20 +93,20 @@ change that charges a customer. That statement is an Objective, and a team of Ta
 ```text
 Objective: usage-based billing from July 1
     │
-    └─▶ lead Tag ──── plans the work, forms Teams, tracks progress
+    └─▶ owner Tag ─── works in the thread you created it in, starts the work
             │
-            ├─▶ backend Team ──── event metering, Stripe invoicing, plan migration
-            ├─▶ frontend Team ─── usage dashboard, billing settings
-            └─▶ quality Team ──── reconciliation suite, load tests
+            ├─▶ backend Tag ──── event metering, Stripe invoicing, plan migration
+            ├─▶ frontend Tag ─── usage dashboard, billing settings
+            └─▶ quality Tag ──── reconciliation suite, load tests
                                           │
 You ◀────── approve the plan migration and anything that charges a customer
 ```
 
-The lead Tag turns the outcome into **Tasks**, assignments that each Tag accepts and completes, and
-divides them among three Teams. The backend Team
-publishes the usage event schema in its Team channel, and the frontend Team builds the dashboard
-against it. The quality Team reviews each submitted change and replays recorded events through it
-to check the invoices. The work runs in parallel
+The owner Tag starts a **Session** for each piece of work, including Sessions of the other Tags in
+the Objective's **Team**. Each Session runs its own turns and reports back to the Objective when
+it ends. The backend Tag posts the usage event schema in the Team's **Workstream**, and the
+frontend Tag reads it there and builds the dashboard against it. The quality Tag reviews each
+change and replays recorded events through it to check the invoices. The work runs in parallel
 and continues across machines and restarts without you prompting each step. You step in only for
 the decisions you reserved. When a new engineer joins in week six, the owner, status, and history of
 every piece of work are already on record.
@@ -116,11 +116,11 @@ maintainers review and merge the results.
 
 SuperTag supplies what lets [Tags](docs/concepts/tags.md) work together:
 
-- **Clear ownership.** [Tasks](docs/concepts/tasks.md), [Teams](docs/guides/teams.md), and
-  [Objectives](docs/guides/objectives.md) record who owns what, what it depends on, and what has been
-  accepted.
+- **Clear ownership.** [Sessions and Tasks](docs/concepts/tasks.md),
+  [Teams](docs/guides/teams.md), and [Objectives](docs/guides/objectives.md) record who owns what
+  and what has been delivered.
 - **Explicit authority.** A **Permission Set** lists the actions a Tag may take, and a
-  **Context Set** selects the knowledge it may use ([context and permissions](docs/concepts/context-and-permissions.md)). [Approval points](docs/guides/objective-coordination.md#5-assign-a-task-that-needs-approval)
+  **Context Set** selects the knowledge it may use ([context and permissions](docs/concepts/context-and-permissions.md)). Approval points
   and [operator decisions](docs/guides/objective-decisions.md) keep the decisions that matter with
   people.
 - **Continuity.** An Objective keeps its criteria, [budget](docs/reference/coordination.md#budgets-and-allocation),
@@ -161,15 +161,15 @@ day, that's one loop. Here it is for the invite feature:
    `supertag create objective` does the same from the command line. Give the Objective
    done-when evidence, constraints, a budget, a deadline, and the approvals you want to keep. See
    [Write an Objective](docs/guides/write-an-objective.md).
-2. **Let the team work.** The lead Tag splits the outcome into Tasks, builders work on them in
+2. **Let the team work.** The owner Tag starts a Session for each piece of work, builders run in
    parallel, each in its own git worktree, and the reviewer checks every change. Follow along with
    `supertag watch objective workspace-invites`, or ask your operator thread how it's going.
 3. **Answer what needs you.** Only the decisions that need you reach you: questions, approvals,
    and findings, not every step. Your operator thread relays them, `supertag list inbox` lists them, and a connected Slack
    channel can notify you. Reply with `supertag message objective workspace-invites "..."` to
    clarify or redirect the work.
-4. **Review and accept.** The result arrives as a git branch, such as
-   `supertag/workspace-invites/...`, with the owner's summary and evidence in
+4. **Review and accept.** The result arrives as a git branch, one per Session, such as
+   `supertag/session/9f1c0b2e`, with the owner's summary and evidence in
    `supertag describe objective workspace-invites`. Merge it as you would any branch, or send it
    back with a message. If the Objective asked for your approval, `supertag approve objective
    workspace-invites` completes it.
@@ -247,13 +247,13 @@ supertag create objective first-reply --owner lead --workspace app \
 
 ```text
 objective/first-reply created
-Started lead with Task first-reply:start.
+Started lead with Task 9f1c0b2e-6a44-4d0d-9f1b-2c7a5d3e8b10.
 Follow it: supertag watch objective first-reply
 See results: supertag describe objective first-reply
 ```
 
-A **Task** is one assignment. Creating this Objective starts the lead's Task automatically.
-Use a new Objective ID if you have already tried `first-reply`.
+A **Task** is one turn of a Tag's work. Creating this Objective starts the lead's first turn
+automatically. Use a new Objective ID if you have already tried `first-reply`.
 
 ### 4. Follow it
 
@@ -261,17 +261,16 @@ Use a new Objective ID if you have already tried `first-reply`.
 supertag watch objective first-reply
 ```
 
-This excerpt is actual output from the start of a run; your timestamps will differ:
+An excerpt from the start of a run; your timestamps and IDs will differ:
 
 ```text
 2026-10-06 14:52:43Z  operator      Objective first-reply created for lead: Create SUPERTAG-HELLO.md containing exactly: Hello from SuperTag. Done when the file exists and you have checked its co…
-2026-10-06 14:52:43Z  lead          Task first-reply:start for lead: Coordinate this Objective through completion as its statement defines it, including how success is verified and every c…
-2026-10-06 14:52:43Z  lead          Task first-reply:start started
+2026-10-06 14:52:43Z  lead          Objective conversation: Task 9f1c0b2e-6a44-4d0d-9f1b-2c7a5d3e8b10 started
 ```
 
 `watch` prints progress until the Objective completes or is cancelled. Press Ctrl-C to stop
 watching; the work continues. A quiet watch does not mean the harness stopped. Inspect the Task
-with `supertag describe task first-reply:start` or follow service logs with `supertag logs -f`.
+with `supertag describe task TASK_ID` or follow service logs with `supertag logs -f`.
 
 ### 5. Inspect the result
 
@@ -279,16 +278,16 @@ with `supertag describe task first-reply:start` or follow service logs with `sup
 supertag describe objective first-reply
 ```
 
-While the Task is running, the view begins like this when the Control Plane has recorded
-$0.00 of usage. Before it has a usage record, the budget line says
-`Budget: unlimited; no cost recorded`:
+While the Task is running, the view begins like this. The budget line counts reported spend
+against the $10.00 limit you set. An Objective created without `--budget-minor` says
+`Budget: unlimited; no cost recorded` instead:
 
 ```text
 Objective first-reply: working
 Outcome: Create SUPERTAG-HELLO.md containing exactly: Hello from SuperTag. Done when the file exists and you have checked its contents. Do this yourself without delegating; change no other files.
 Owner: lead
 Runnable: yes
-Budget: unlimited; $0.00 from recorded usage
+Budget: $0.00 of $10.00 spent
 
 Delivered:
   Nothing yet.
@@ -297,24 +296,28 @@ Needs you:
   Nothing right now.
 ```
 
-If **Needs you** later says `owner stalled` or `no owner activation`, the owner Tag has no running,
-queued, or waiting **Task Attempt** (one run of a Task) to continue the Objective. See [troubleshooting](docs/guides/troubleshooting.md#a-harness-is-not-signed-in)
+If **Needs you** says `The Objective's conversation has not started.`, nothing held its first
+turn yet, usually an owner Tag with no Worker Host. If it says the Objective is blocked, two of
+its turns ended with nothing running and nothing asked; reply with
+`supertag message objective first-reply 'YOUR DIRECTION'`. See
+[troubleshooting](docs/guides/troubleshooting.md#a-harness-is-not-signed-in)
 if the Task failed because its harness was unsigned.
 
 When the Objective completes, the view adds a `Result:` line, **Delivered** lists the result and
 commands to review and check out its branch, and the Tasks are listed below it. Each
 Task works in a separate git worktree. Your original checkout stays on its current branch.
-For example, `supertag describe task first-reply:start` reported this actual branch during the run:
+For example, `supertag describe task 9f1c0b2e-6a44-4d0d-9f1b-2c7a5d3e8b10` reported this actual
+branch during the run:
 
 ```text
-Workspace: app (branch supertag/first-reply/start, delivery branch)
+Workspace: app (branch supertag/session/4b8e2a1c, delivery branch)
 ```
 
-Use the branch printed by your run to check the change:
+Use the branch printed by your run to check the change, from inside the repository:
 
 ```sh
-git diff main...supertag/first-reply/start
-git show supertag/first-reply/start:SUPERTAG-HELLO.md
+git diff main...supertag/session/4b8e2a1c
+git show supertag/session/4b8e2a1c:SUPERTAG-HELLO.md
 ```
 
 The file should contain `Hello from SuperTag.`. Replace `main` if your repository uses another
@@ -325,8 +328,8 @@ If the Task fails or stays queued, use [first-reply troubleshooting](docs/guides
 
 ### Next: add a teammate
 
-[Add a builder and run your first Team](docs/guides/first-team.md). The lead will assign work to
-another Tag and inspect its result. To start with a whole team instead, apply one of the
+[Add a builder and run your first Team](docs/guides/first-team.md). The lead will start a Session
+of another Tag and read what it reports. To start with a whole team instead, apply one of the
 [example organizations](examples/organizations/README.md): a lead with builders, a review team, or
 a team across Claude Code, Codex, and Cursor.
 
@@ -355,13 +358,13 @@ runs their Tasks with the harnesses you have installed, all working in your repo
 ```text
 your laptop (supertag init)
 ├── Control Plane
-└── Worker Host "laptop" ── Claude Code, Codex ──▶ lead Tag: plans, delegates, reviews
+└── Worker Host "laptop" ── Claude Code, Codex ──▶ lead Tag: plans, works, reviews
 ```
 
 `supertag init` sets this up for your repository: it starts a local Control Plane in the
 background and connects your laptop to it as a Worker Host, both as services in
-`~/.supertag/supertag.yaml`. A lead Tag plans the work, does or
-delegates each part, and reviews the results. Each Task works in its
+`~/.supertag/supertag.yaml`. A lead Tag plans the work, does each part itself or starts a Session
+for it, and reviews the results. Each Task works in its
 own git worktree, and its changes arrive as a `supertag/...` branch in your repository. Nothing is
 deployed, so this is the fastest way to try a team of Tags on a real repository.
 [Get started](#get-started) walks through it.
@@ -404,12 +407,12 @@ inspect, or control:
 | --- | --- |
 | **Tag** | A persistent AI identity with its own responsibilities and permissions |
 | **Role** | An enduring responsibility assigned to a Tag |
-| **Team** | A group of Tags with a shared responsibility, lead, and capacity limit |
-| **Objective** | An outcome owned by a Tag, with criteria for deciding when it is complete |
-| **Task** | One request or assignment accepted for a Tag |
-| **Session** | A group of Tasks from the same conversation |
-| **Workstream** | A Team's channel: the shared thread every Team has for its members' posts |
-| **Mailbox** | The direct delivery point through which one Tag receives internal messages |
+| **Team** | A flat list of member Tags, with an optional concurrency limit |
+| **Objective** | An outcome owned by a Tag, with a budget, a deadline, and criteria for deciding when it is complete |
+| **Session** | One Tag's thread of work: a conversation, an Objective's conversation, the Tag's inbox, or work started beneath one of those |
+| **Task** | One turn of a Session |
+| **Workstream** | A Team's shared record of its members' posts |
+| **Mailbox** | A Tag's inbox for messages from other Tags |
 | **Context Set** | Reusable knowledge that may be added to a Task |
 | **Permission Set** | Actions that a Task is allowed to perform |
 

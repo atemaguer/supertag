@@ -9,8 +9,8 @@ This is a basic security and governance rule:
 
 Before a Task runs, SuperTag decides which reusable knowledge may be added and which actions are
 allowed. Other terms on this page (see the [glossary](../reference/glossary.md)): a **Session**
-groups Tasks from the same conversation; an **Objective** is an outcome a Tag owns; a **Team**
-groups Tags under a lead; a **Skill** is a reusable package of instructions and supporting files; a
+groups Tasks from the same thread of work; an **Objective** is an outcome a Tag owns; a **Team**
+is a flat list of member Tags; a **Skill** is a reusable package of instructions and supporting files; a
 **Worker** is the code that completes a Task, and a **harness** connects that Worker to an agent
 system; the **Control Plane** stores the **autonomous organization**, all your Teams of Tags with
 their shared rules and record of the work, and applies its policy; a **collaboration surface**
@@ -64,8 +64,8 @@ supertag activate context-set shared-engineering --tag engineering \
 ```
 
 Artifact selectors use exact collaboration-surface sources and same-Tag work. They are not
-available on internal Objective Tasks through Roles; those Tasks use the catalog's Objective
-and Team visibility rules instead.
+available on an Objective's own Tasks through Roles; those Tasks use the catalog's Objective
+visibility rules instead.
 
 ### Custom knowledge types
 

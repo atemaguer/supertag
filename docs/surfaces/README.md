@@ -5,7 +5,7 @@ persistent AI identity with its own responsibilities and permissions. A **collab
 how SuperTag meets people in a tool such as Slack or GitHub: it receives events at a Tag's locations
 and replies there. See the [glossary](../reference/glossary.md) for other terms.
 
-Tags work in Teams under a lead. Together, your Teams of Tags make up an **autonomous
+Tags work in Teams: flat lists of member Tags. Together, your Teams of Tags make up an **autonomous
 organization**: Teams may pursue different goals but share one Control Plane, its rules,
 and its record of the work.
 The **Control Plane** is the SuperTag service that stores your organization and schedules work.

@@ -1,8 +1,8 @@
 # Worker Hosts, Worklets, Workers, and harnesses
 
 The components on this page provide the machines, code, and agent-system connections that run each
-**Task**, one accepted request or assignment for a **Tag**, a persistent AI identity with its own
-responsibilities and permissions. Tags work in Teams under a lead. Together, your Teams of Tags
+**Task**, one turn of work for a **Tag**, a persistent AI identity with its own
+responsibilities and permissions. Tags work in Teams. Together, your Teams of Tags
 make up an **autonomous organization**: Teams may pursue different goals but share one Control
 Plane, its rules, and its record of the work. The **Control Plane**, the service that stores the
 organization, decides what work to accept and keeps a lasting record of it. **Worker Hosts**
@@ -37,7 +37,7 @@ flowchart LR
     end
 
     subgraph Host["Worker Host"]
-        Worklet["Worklet<br/>supervises assignments"]
+        Worklet["Worklet<br/>supervises Tasks"]
         Worker["Worker<br/>runs the Task Attempt"]
         Harness["Optional harness"]
         Environments["Harness runtime and<br/>execution environment"]
@@ -64,7 +64,7 @@ new work to an unreachable, unready, full, or draining Worker Host.
 
 A Worklet is the persistent supervisor that runs on a Worker Host. It connects outbound to the
 Control Plane API Server's Worklet API, reports the host's Workers and capacity, renews its
-heartbeat, accepts assignments, enforces concurrency, and supervises execution.
+heartbeat, accepts Tasks, enforces concurrency, and supervises execution.
 
 The Worklet provides control and observation. It is not the Worker Host and does
 not define how a Task is performed.

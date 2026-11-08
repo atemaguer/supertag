@@ -107,12 +107,11 @@ The approvers of a request are the union of the approvers of the sets that requi
 | Entry | Who may decide |
 | --- | --- |
 | `operator:<operatorId>` | That operator, authenticated to the coordination API |
-| `tag:<Tag name or ID>` | That Tag, through the `decide_approval` coordination tool |
+| `tag:<Tag name or ID>` | That Tag, in its own turn |
 
 Without `approvers`, authorized operators decide. Listing only Tags adds Tag approvers; it
 does not remove operator authority. Listing any operator restricts operator decisions to the
-listed operators. A Tag never decides a request its own Task made, or the approval of a Task
-assigned to it.
+listed operators. A Tag never decides a request its own Task made.
 
 ### Where SuperTag checks approval
 
@@ -121,19 +120,16 @@ assigned to it.
 | Collaboration surface action through hosted MCP | The Worker-local policy proxy asks the Control Plane before forwarding each call |
 | MCP server tool (`target: mcp`) | The Worker-local policy proxy asks the Control Plane before forwarding each call; see [MCP server tools](#mcp-server-tools) |
 | Opening a Workspace pull request (`pull-requests:create`) | The Worker asks the Control Plane before pushing the Task branch; see [Workspaces](../guides/workspaces.md#deliver-pull-requests) |
-| Runtime action on a Task | Task admission holds the Task for approval, whatever the manager requested |
 | Shell commands and file writes inside a harness | Not checked per action yet; only through Task admission |
 
 The Worker fails closed. A gated call without a reachable Control Plane is not forwarded. The
-call returns "approval pending" with the request ID. In an Objective Task, the Tag can continue
-other work or wait for the decision. A work Session's Task ends waiting on the request instead,
-and the decision continues the work Session as its next Task, unless the Tag's permissions changed
-while it waited.
+call returns "approval pending" with the request ID. Every turn except a conversation's own ends
+waiting on that request, and the decision continues the Session as its next Task, unless the
+Tag's permissions changed while it waited. A conversation's turn keeps going and tells the person.
 
-A pending request expires when its Task finishes without waiting on it. A work Session's request
-stays pending while the work Session waits on it: its Task completed listing the request, and no
-later Task of that work Session started. See
-[a work Session waiting on approval](coordination.md#a-work-session-waiting-on-approval).
+A pending request expires when its Task finishes without waiting on it. A waiting Session's
+request stays pending: its Task completed listing the request, and no later Task of that Session
+started. See [a turn waiting on approval](coordination.md#a-turn-waiting-on-approval).
 
 A decision chooses its scope:
 
@@ -176,13 +172,12 @@ the actions its owner Tag's Permission Sets allow, resolved once at creation:
 | --- | --- |
 | By an operator (`supertag create objective`, API) | Union across the owner's active Roles |
 | From a collaboration thread (`@SuperTag objective`) | The invoking Task's: the Tag's Roles and the Permission Sets activated at that location |
-| By a Tag through its Mailbox credential | The creating Tag's Roles |
 
 An operator's explicit list narrows the default and never widens it. A Task in the Objective
 receives the actions within the Objective's list and, for delegated work, within its delegating
 Task's. Approval travels with the action: a Task waits when its own Permission Sets, or those of
 the Task or owner it inherits the action from, mark it `approval: required`. See
-[Objective creation rules](coordination.md#objective-creation-rules).
+[Objective runtime actions](coordination.md#objective-runtime-actions).
 
 Prefer narrow operations over `read`, `write`, or `admin` labels.
 
@@ -395,15 +390,14 @@ bodies to cross Tag boundaries under an explicit directional grant. This does no
 Context Set isolation or give a recipient access to another Tag's artifacts. A messaging
 grant authorizes delivery, not the requested action. The recipient application must apply
 its own execution and disclosure policies. The trusted Worker host holds a Tag-scoped
-credential; sender identity is never accepted from model-written message fields. Grant rules are
-in [Mailbox grants](mailbox.md#grants).
+credential; sender identity is never accepted from model-written message fields. A message is
+plain text and grants no authority. Tags in one Team message each other without a grant. Grant
+rules are in [Mailbox](coordination.md#mailbox).
 
-Team membership permits reading and posting to the Team's channel, its Workstream. The owner of
-the Team's governing Objective may read the channel too. Only members of an active Team post. This
-does not expand Context Set access, native provider permissions, or directional messaging grants,
-and a post carries no authority. See [Team channel rules](mailbox.md#team-channel-rules).
+Team membership permits reading and posting to the Team's Workstream. This does not expand
+Context Set access, native provider permissions, or messaging grants, and a post carries no
+authority. See [Workstream](coordination.md#workstream).
 
-Objectives use the experimental [Objective API](../../spec/objectives.md). Tag credentials
-can read owned Objectives and those their active Teams serve; only the owner or an
-operator may change Objective status. Team membership does not grant messaging rights. See
-[Visibility and access](coordination.md#visibility-and-access).
+Objectives use the experimental [Objective API](../../spec/objectives.md). A Tag reads the
+Objectives it owns and those whose Team it belongs to; only the owner or an operator changes an
+Objective's status. See [Objectives](coordination.md#objectives).

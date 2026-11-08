@@ -12,7 +12,7 @@ schema catalog, or an internal knowledge package, when SuperTag has no built-in 
   declaration into inputs for the **harness**, the coding agent that runs the Task, such as
   Claude Code or Codex.
 - A **Skill** is a reusable package of instructions and supporting files.
-- Tags work in Teams under a lead. Together, your Teams of Tags make up an **autonomous
+- Tags work in Teams: flat lists of member Tags. Together, your Teams of Tags make up an **autonomous
   organization**: Teams may pursue different goals but share one Control Plane, its rules,
   and its record of the work.
 - The **Control Plane** is the SuperTag service that stores the organization and schedules work.

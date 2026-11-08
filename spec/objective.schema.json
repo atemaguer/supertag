@@ -28,6 +28,10 @@
       "type": "string",
       "minLength": 1
     },
+    "ongoing": {
+      "type": "boolean",
+      "description": "A continuing responsibility. It is exempt from the idle rule and only an operator ends it. Fixed at creation."
+    },
     "teamId": {
       "type": ["string", "null"],
       "description": "The Team whose members the owner may hand work to; null when the owner works alone. Fixed at creation."
@@ -63,6 +67,12 @@
       "format": "date-time",
       "readOnly": true,
       "description": "When an operator cancelled the Objective."
+    },
+    "pausedAt": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "readOnly": true,
+      "description": "When an operator paused the Objective; null while it runs. A paused Objective admits no turns."
     },
     "cancellationReason": {
       "type": ["string", "null"],

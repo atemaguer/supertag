@@ -5,8 +5,8 @@ Codex, Claude Code, Cursor, and OpenCode integrations do not fit the execution s
 
 A **Task** is one accepted request or assignment. A **Worker** is the code that completes it. A
 **harness** connects a Worker to an agent system such as Codex or Claude Code. A **Tag** is a
-persistent AI identity with its own responsibilities and permissions, and Tags work in Teams under a
-lead. Together, your Teams of Tags make up an **autonomous organization**: Teams may pursue
+persistent AI identity with its own responsibilities and permissions, and Tags work in Teams: flat
+lists of member Tags. Together, your Teams of Tags make up an **autonomous organization**: Teams may pursue
 different goals but share one set of rules and one record of the work. A **Worker Host** is a
 machine or sandbox that provides execution capacity, and a **Worklet** connects it to the **Control
 Plane**, the SuperTag service that stores the organization and schedules work. A **Worker Profile**
@@ -591,7 +591,7 @@ const worker = createWorker({
   environments,
   artifactStore: (attempt) => {
     const coordination = attempt.coordination;
-    if (!coordination) throw new Error("Objective coordination required");
+    if (!coordination) throw new Error("Coordination configuration required");
     const post = async (path: string, body: unknown) => {
       const response = await fetch(new URL(path, coordination.controlPlaneUrl), {
         method: "POST",

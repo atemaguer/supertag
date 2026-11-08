@@ -12,8 +12,9 @@ Helping someone *use, develop against, or deploy* SuperTag is a different job â€
 Open infrastructure for building and running autonomous engineering teams or organizations made of
 AI actors, on any model, harness, and environment. People set outcomes and direct the team from
 Slack, GitHub, Lark/Feishu, Linear, Microsoft Teams, the CLI, or an API. A **Tag** is a stable
-non-human AI actor and identity. A **Task** is one accepted assignment for a Tag. **Context
-Sets** select reusable knowledge, and **Permission Sets** select allowed actions. Each Task keeps the
+non-human AI actor and identity. A **Session** is one Tag's thread of work and a **Task** is one
+turn of it. **Context Sets** select reusable knowledge, and **Permission Sets** select allowed
+actions. Each Task keeps the
 policy recorded when SuperTag accepted it.
 
 The **Control Plane** stores the organization, accepts and schedules work, recovers interrupted

@@ -120,6 +120,43 @@ or the turn's limits are spent, the decision doesn't continue it: the command pr
 `· not continued: TITLE` and why. Start a new work Session after a permission change, or send a
 message to continue it after the limits ran out.
 
+## 5. Talk to an Objective instead
+
+An **Objective** is an outcome a Tag owns, with a budget, a deadline, and a status. It has a
+conversation of its own, separate from yours, and it talks in the thread it was created in. An
+Objective you create from the CLI talks here:
+
+```sh
+supertag create objective billing-export --owner planner \
+  --outcome 'The billing export runs in under 5 seconds. Done when the export benchmark passes.'
+supertag message objective billing-export 'Start with the invoice query.'
+```
+
+`message objective` delivers your text as the Objective's next turn and follows the owner's reply
+the way `message tag` does, with the same `· working:` and `· done:` lines. It also answers a
+question the Objective asked, and moves a `blocked`, `limited`, or `ready_for_review` Objective
+back to `working`.
+
+An Objective created in Slack or another collaboration surface replies in that thread instead.
+`message objective` then says so and returns at once:
+
+```text
+The reply posts to the thread the Objective was created in.
+```
+
+The differences from a conversation are worth knowing:
+
+- **The Objective keeps going on its own.** Each Session it starts reports back into its
+  conversation, which gives the owner another turn without a message from you.
+- **It must keep moving.** A turn that ends with nothing running and no question gets one wake;
+  a second such turn marks the Objective `blocked` and tells you. An `--ongoing` Objective is
+  exempt.
+- **It has one budget pool.** Its own turns and every Session beneath it draw on the same budget.
+- **It can hand work to other Tags.** Name a Team with `--team`, and the owner may start a
+  Session of any member. A conversation cannot do this.
+
+See [Define and complete an Objective](objectives.md).
+
 ## Check that it worked
 
 ```sh
@@ -142,6 +179,9 @@ under `PARENT`. `STATUS` shows the latest Task's status: `pending`, `running`, `
   location's Permission Sets or Context Sets apply.
 - **The Tag remembers its other conversations.** It sees its open Objectives and can search its
   shared Sessions, such as Slack threads and GitHub issues, when a question needs them.
+- **Messages from other Tags arrive elsewhere.** A Tag's inbox is its own thread of turns, so a
+  message another Tag sends it never interrupts your conversation. See
+  [Send messages between Tags](tag-messaging.md).
 - **A work Session has the conversation's permissions, never more.** It runs with the same
   permissions as the message that started it. It can't start more work Sessions or
   create Objectives. A work Session started from your private conversation is private to you too.

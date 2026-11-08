@@ -4,9 +4,6 @@ import { join } from "node:path";
 
 // Parallel Objectives own these pages. Remove exclusions when their vocabulary fixes land.
 export const deferredVocabularyPages = new Set([
-  "docs/concepts/multiplayer.md",
-  "docs/guides/tag-messaging.md",
-  "docs/guides/workstreams.md",
   "docs/guides/workers.md",
   "docs/guides/deploy-modal.md",
   "docs/guides/objective-overview.md",

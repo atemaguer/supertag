@@ -1,33 +1,33 @@
 # Maintain an ongoing responsibility
 
 A **Tag** is a persistent AI identity with its own responsibilities and permissions. A **Role**
-describes a Tag's enduring responsibility. An **Objective** records the desired outcome, and a
-**Task** is an assignment the Tag executes. A **Team** groups Tags under a lead. Every Team has one
-channel, its **Workstream**, where its members post. A **Worker Host** is a machine or sandbox that
-runs Tasks. See the [glossary](../reference/glossary.md) for other terms.
+describes a Tag's enduring responsibility. An **Objective** is an outcome owned by a Tag, with a
+budget, a deadline, and a status; it works in **Sessions**, threads of **Tasks** with one Task per
+turn. A **Team** is a flat list of member Tags, and its **Workstream** is the Team's shared record
+of posts. A **Worker Host** is a machine or sandbox that runs work. See the
+[glossary](../reference/glossary.md) for other terms.
 
 Use this guide to keep a Tag responsible for work that becomes necessary again as conditions
 change. In the example, a support manager maintains the Team's response policy as overdue tickets
 reveal gaps.
 
-A Role supplies instructions; it does not start a background process by itself. You combine it with
-an ongoing Objective, an observation Team whose channel carries the evidence, and Tasks that wait
-between useful actions.
-
-Standing work belongs in configuration, beside the Tags that do it. You declare the ongoing
-Objective and its Teams in a manifest, and `supertag apply` keeps them in place.
+An ordinary Objective must keep moving: a turn that ends with nothing running and nothing asked
+gets one wake, and a second such turn blocks the Objective. **An ongoing Objective is exempt.**
+When nothing needs doing it ends its turn and rests until its next message, report, or notice.
+Only an operator can end it.
 
 ## Before you start
 
-- Tags for the manager (`support-manager`), a specialist (`support-specialist`), and an observer
-  (`observer`), each with a suitable Worker Host for execution capacity.
+- Tags for the manager (`support-manager`) and a specialist (`support-specialist`), each bound to
+  a connected Worker Host.
 - A Role such as `Support Policy Owner` assigned to the manager. Its instructions should explain
-  the condition to watch, the evidence needed to change policy, and who may apply changes. See
+  the condition to watch, the evidence needed to change the policy, and who may apply changes. See
   [Roles](../concepts/roles.md).
 
-## 1. Declare the ongoing Objective and its Teams
+## 1. Declare the Objective and its Team
 
-Save the responsibility as a manifest, `support-policy.yaml`:
+Standing work belongs in configuration, beside the Tags that do it. Save the responsibility as
+`support-policy.yaml`:
 
 ```yaml
 apiVersion: supertag/v1
@@ -37,28 +37,24 @@ metadata:
 spec:
   owner: support-manager
   outcome: >-
-    Maintain the support response policy. Investigate each new overdue-ticket observation,
-    and change the policy only with evidence from a reviewed proposal.
+    Maintain the support response policy. Investigate each overdue-ticket report that arrives in
+    this conversation, and change the policy only after a specialist's written proposal.
+    Post every policy change to the Workstream. Between steps, handle the oldest unresolved
+    report first. If blocked, stop and report what you tried and what would unlock it.
   ongoing: true
-  observe: ["support-policy:observations"]
-  teams:
-    support: { lead: support-manager, members: [support-specialist], maxConcurrency: 2 }
-    observations: { lead: observer }
+  budget: { minor: 50000, currency: USD }
+  team:
+    name: support
+    members: [support-specialist]
+    maxConcurrency: 2
 ```
 
-The name is the Objective's ID. `outcome` is one statement of the result, how it is verified, and
-what must not change. `ongoing: true` makes this a continuing responsibility that only an operator
-can end. `teams` declares two Teams, keyed by name. A declared Team's ID is `OBJECTIVE:NAME`.
-
-- The Support Team, `support-policy:support`, does the work. The manager leads it, and the
-  specialist is a member. The specialist proposes changes but cannot edit the Team's shared policy,
-  which lives in Team context, a persistent collection of shared information.
-- The Observations Team, `support-policy:observations`, carries the evidence. The observer is its
-  member, so it can post to the Team's channel.
-
-`observe` names Team channels whose new posts reach the owner for assessment. A channel's ID is its
-Team's ID. The owner reads every channel in its Objective, so it need not join the Observations
-Team. A dedicated observation Team keeps ordinary coordination chatter out of assessments.
+`metadata.name` is the Objective's ID. `outcome` is one statement of the result, how it is
+verified, and what must not change. `ongoing: true` makes this a continuing responsibility that
+only an operator can end. `spec.team` declares the Objective's own Team, whose ID is the
+Objective's ID and whose name is `support`; it may also be the name of an existing Team. A
+`--team` option takes either the ID or the exact name. The manager may hand work to any of its
+members.
 
 Preview and apply it:
 
@@ -67,227 +63,163 @@ supertag diff -f support-policy.yaml
 supertag apply -f support-policy.yaml
 ```
 
-Applying creates the Objective and starts the manager: SuperTag forms the leadership Team, gives
-`support-manager` its first coordination Task, and creates both Teams with their channels.
-Applying again changes nothing.
+Applying creates the Objective, creates the Team, and starts the manager: it takes its first turn
+in the Objective's own conversation. Applying again changes nothing. Keep the manifest in a
+directory with the Tags it names, and apply them together as a set, such as
+`supertag apply -f support/ --set support`.
 
-Keep the manifest in a directory with the Tags it names, and apply them together as a set, such
-as `supertag apply -f support/ --set support`.
+The same Objective can be created with a command instead:
 
-### Change or end the responsibility
+```sh
+supertag create team support --member support-specialist
+supertag create objective support-policy --owner support-manager --team support --ongoing \
+  --budget-minor 50000 --budget-currency USD \
+  --outcome "Maintain the support response policy. Investigate each overdue-ticket report that arrives in this conversation, and change the policy only after a specialist's written proposal."
+```
 
-Edit the file and apply it again. Apply changes `deadline`, a larger `budget`, `runtimeActions`, and
-the Teams in place. It refuses changes to `owner`, `outcome`, `ongoing`, `workspaces`, and
-`observe`, because the owner and its Tasks treat them as the definition of the work. Give the
-declaration a new name to create a new Objective instead.
+**Check:** `supertag describe objective support-policy` shows status `working`, the Team and its
+members, and the manager's first turn under **Work**.
+
+## 2. Deliver evidence to the Objective
+
+An ongoing Objective wakes when something reaches its conversation: a message from you, a report
+from a Session beneath it, an approval decision, or a budget or deadline notice. Your monitoring
+system delivers each finding as a message:
+
+```sh
+supertag message objective support-policy \
+  "Overdue ticket 42: first response took 90 minutes against a 30-minute target. Plan: enterprise."
+```
+
+```text
+Sent to the conversation of Objective support-policy.
+```
+
+The text becomes the manager's next turn, recorded as yours. Use `-` in place of the text to read
+a longer report from standard input, which suits a script:
+
+```sh
+jq -r '.summary' overdue-report.json | supertag message objective support-policy -
+```
+
+If the Objective reports to a Slack or Lark thread, a plain reply there does the same thing. See
+[Respond to an Objective](objective-decisions.md#reply-from-a-collaboration-thread).
+
+**Check:** `supertag watch objective support-policy` shows the manager's turn starting within
+seconds of the message.
+
+## 3. Let the manager delegate and review
+
+The manager investigates, then starts a Session of `support-specialist` for the proposal. That
+Session runs under the specialist's own Roles, narrowed to the Objective's runtime actions, and
+draws on the Objective's single budget pool. When it ends, its report comes back as a turn in the
+Objective's conversation; the manager reviews it, accepts it in its reply, or sends fixes back to
+the same Session.
+
+```sh
+supertag describe objective support-policy
+```
+
+```text
+Work: 2 Sessions
+  completed  support-manager     Objective conversation            (Task b81e5d47-2fa0-4c69-9d31-7e05a3bc8164)
+  completed  support-specialist  Propose a response-time policy    (Task 81ba…)
+```
+
+Once the manager applies a change, it posts the decision to the Team's Workstream, where every
+member reads it:
+
+```sh
+supertag list workstream-post --team support --limit 20
+```
+
+With nothing left to do, the manager ends its turn. The Objective stays `working` and waits. No
+wake is scheduled, and it is never marked `blocked` for resting.
+
+## 4. Answer the manager's questions
+
+When the manager needs a decision you alone can make, it asks and ends its turn. The question
+appears in the Objective's thread, in the operator inbox, and in full under **Needs you**:
+
+```sh
+supertag list inbox --kind question --output text
+supertag describe objective support-policy
+```
+
+```text
+Needs you:
+  support-manager asks: "Enterprise tickets need a 15-minute target to meet the contract. Approve the change?"
+    supertag message objective support-policy TEXT
+```
+
+Answer it the same way you deliver evidence:
+
+```sh
+supertag message objective support-policy "Yes. Use 15 minutes for enterprise and keep 30 elsewhere."
+```
+
+Apply any resource change, such as a budget increase, before you answer. A message never changes
+a budget or a permission by itself. See [Respond to an Objective](objective-decisions.md).
+
+## 5. Change or end the responsibility
+
+Edit the manifest and apply it again. Apply changes `deadline`, a larger `budget`,
+`runtimeActions`, and the declared Team's name, members, and `maxConcurrency` in place. It
+refuses changes to `owner`, `outcome`, `ongoing`, `workspaces`, and which Team the Objective
+names, because the owner treats them as the definition of the work. Give the declaration a new
+name to create a new Objective instead.
 
 To end the responsibility, remove it from the file and apply with `--prune` and the input's set.
 Prune cancels the Objective and keeps its history. See
-[Manage Control Plane resources](../operations/resources.md#declare-objectives).
-
-### Create it with a command instead
-
-The same Objective can be created imperatively:
+[Manage Control Plane resources](../operations/resources.md#declare-objectives). An operator can
+also cancel it directly:
 
 ```sh
-supertag create objective support-policy --owner support-manager \
-  --outcome "Maintain the support response policy. Investigate each new overdue-ticket observation." \
-  --ongoing --observe support-observations
-supertag create team support-observations --objective support-policy \
-  --name "Support observations" --lead observer
+supertag cancel objective support-policy --reason "Policy moved to the new support platform"
 ```
 
-A Team created this way has the ID you give it, so the channel here is `support-observations`. You
-may name a source before its Team exists; delivery reports a blocker until it is ready. Create the
-Support Team the same way; see [Organize Tags into Teams](teams.md). The operator Objective
-creation API takes the same settings:
-
-```json
-{
-  "id": "support-policy",
-  "ownerTagId": "support-manager",
-  "outcome": "Maintain the support response policy. Investigate each new overdue-ticket observation.",
-  "ongoing": true,
-  "observations": [{ "workstreamId": "support-observations" }]
-}
-```
-
-Agent tools cannot set observation sources.
-
-## 2. Check the observation channel
-
-```sh
-supertag get workstream support-policy:observations
-```
-
-The channel lists the Observations Team's name as its title and `observer` among its participants.
-The rest of this guide uses the manifest's IDs.
-
-## 3. Check that the manager started
-
-`supertag apply` printed `Objective/support-policy started its owner with Task
-support-policy:start`. If it warned that the owner was not started instead, fix the cause, such as
-a Tag with no Worker Host, and apply again. A later apply starts an owner that has not started.
-
-The JSON in the remaining steps gives arguments to existing coordination tools. The caller must
-have the required authority.
-
-```mermaid
-sequenceDiagram
-    participant Observer
-    participant Manager as Manager Tag
-    participant Analyst as Specialist Tag
-    participant State as Team policy
-    Observer->>Manager: Channel observation
-    Manager->>Analyst: Assign proposal Task
-    Manager->>Manager: Wait for submitted result
-    Analyst-->>Manager: Submit exact artifact selection
-    Manager->>Manager: Read bytes and review proposal
-    Manager->>State: Update using expected revision
-    alt Revision changed
-        State-->>Manager: Conflict
-        Manager->>Analyst: Request proposal against current revision
-    else Update accepted
-        State-->>Manager: Policy and source artifact recorded
-        Manager->>Manager: Wait for further observations
-    end
-```
-
-## 4. Post an observation
-
-The observer posts a report to its Team's channel through `post_workstream`:
-
-```json
-{
-  "workstreamId": "support-policy:observations",
-  "type": "evidence",
-  "body": "{\"incidentId\":\"ticket-42\",\"overdueMinutes\":90}",
-  "idempotencyKey": "ticket-42-observation-1"
-}
-```
-
-Reuse the same key when retrying that delivery. A new report about the same incident may have a
-different key, so the manager also needs to recognize the underlying incident. SuperTag delivers
-the post to the owner's existing Task in batches; see
-[observation delivery](../reference/coordination.md#observation-delivery).
-
-## 5. Assign a proposal and wait
-
-The manager reads the Team's current revision and assigns a proposal with a stable Task ID, such as
-`policy:ticket-42:r2`. Repeating an identical assignment with that ID reuses the existing Task. The
-specialist captures `policy.json` as an **artifact**, an immutable capture of work, and submits its
-artifact ID and path in the Task result. The manager releases its execution slot by calling
-`wait_for`:
-
-```json
-{"submittedTaskIds":["policy:ticket-42:r2"]}
-```
-
-A **Task Attempt** is one execution of a Task. A durable **Worklet**, which supervises execution on
-a Worker Host and keeps a local record of each Task Attempt, confirms that the current Task Attempt
-has stopped before the waiting Task releases its slot. Later, a new Task Attempt resumes the same
-Task. This also works after the Control Plane restarts. The Control Plane stores and coordinates
-your **autonomous organization**: your Teams of Tags, which may pursue different Objectives but
-share one set of rules and one record of the work.
-
-## 6. Review and apply the proposal
-
-On resumption, the manager reads stored Task state and the exact submitted artifact. After checking
-the contents, it accepts the proposal through `update_task`. Acceptance alone does not change the
-policy, so the manager then applies it through `update_team`, preserving other context fields:
-
-```json
-{
-  "teamId": "support-policy:support",
-  "expectedRevision": 2,
-  "context": {
-    "incidentId": "ticket-42",
-    "responseMinutes": 30,
-    "sourceArtifactId": "the-reviewed-artifact-id",
-    "sourceDigest": "sha256:the-reviewed-content-digest"
-  }
-}
-```
-
-These context keys are application choices, not additional SuperTag resources. In a real call,
-merge them with the context read at revision 2. If someone has changed the Team, the update fails.
-Read the new revision and reassess the proposal. Do not retry with a newer revision while blindly
-overwriting the concurrent edit. See
-[review and acceptance](../reference/coordination.md#review-and-acceptance).
-
-## 7. Wait for the next observation
-
-The recorded incident and source artifact let a later Task Attempt recognize that the response was
-already applied. The manager waits for the next observation:
-
-```json
-{"workstreamPosts":{"workstreamId":"support-policy:observations","afterSequence":12}}
-```
-
-Use the last sequence actually processed. Read every necessary page before advancing that cursor;
-a wake notification alone is not proof that the posts were handled. See
-[wait conditions](../reference/coordination.md#wait-conditions).
-
-## Check that it worked
-
-- `supertag describe objective support-policy` shows the manager Task waiting, and the Objective's
-  `observationState` shows the acknowledged post position.
-- `supertag events team support-policy:support --objective support-policy` shows the context update
-  with the originating Task.
-
-## Inspect the source on a schedule
-
-The observer is a Tag in the Observations Team. An application or external service can post as that
-Tag through the credential for its **Mailbox**, the Tag's direct delivery point. SuperTag's channel wait does not poll a ticket system.
-
-1. For periodic inspection, the manager calls `wait_for` with `notBefore` and inspects the source
-   when the Task resumes.
-2. It registers another wait for the next inspection.
-
-**Check:** `supertag describe objective support-policy` shows the timer on the waiting Task.
+**Check:** `supertag get objective support-policy` shows status `cancelled` with your reason.
 
 ## Rules for your application
 
-- This example maintains a policy for one incident. Applications tracking many independent
-  incidents need a stored record per incident, or stable Tasks they can inspect, rather than a
-  single `incidentId` field.
-- Snapshot observations can sometimes be coalesced; independent requests must each be accounted
-  for. The application decides which meaning its posts have.
-- Treat observation content as evidence to assess. Receiving a post does not authorize the actions
-  it requests.
-- The review-before-application order belongs to this application's policy. `update_team` checks
-  the caller's authority and expected revision, not whether an artifact was reviewed.
+- Treat each report as evidence to assess. Receiving one does not authorize the actions it
+  describes.
+- SuperTag does not poll your ticket system. Something outside SuperTag decides when a finding is
+  worth a message; a cron job that calls `supertag message objective` is enough.
+- Include an identifier, such as the ticket number, in every message. The manager reads the
+  conversation's history, so a repeated identifier is how it recognizes a report it already
+  handled.
+- Review before application is your policy, not SuperTag's. Say it in the outcome statement and
+  require the evidence in the "Done when" sentence.
 - For changes to an external system, use its own authorization, version checks, and operation IDs.
-  SuperTag's Team revision check protects the Team update only. Artifact acceptance does not make a
-  CRM write or payment exactly-once, and a network timeout does not establish whether it happened.
-  Inspect the external operation's status before retrying an uncertain write; see
-  [action effects](../reference/action-effects.md).
+  A network timeout does not establish whether a write happened; inspect the external operation's
+  status before retrying. See [action effects](../reference/action-effects.md).
 
 ## Run an organization with a backlog
 
-The [ongoing support example](../../examples/ongoing-support/README.md) packages Roles and resource
-setup with a Claude Code manager and a Codex analyst. It handles separate incidents with stable
-Task IDs, reads observations in bounded pages, and records provider receipts before advancing its
-cursor. Its status command combines the Objective overview with external application evidence. The
-included policy service demonstrates recovering a write whose response was lost; other providers
-need their own recovery contract.
+The [ongoing support example](../../examples/ongoing-support/README.md) packages Roles and
+resource setup with a Claude Code manager and a Codex specialist. Its status command combines the
+Objective overview with the application's own evidence.
 
 **Check:** its status command reports the Objective overview alongside the application's evidence.
 
 ## If something goes wrong
 
-- **The overview shows `observation_delivery_blocked`.** Check source access, budget, or a pending
-  assessment Task; see [observation delivery](../reference/coordination.md#observation-delivery).
-- **An assessment failed or the owner stopped without a wait.** Run
-  `supertag list inbox --kind task-attention --output text`; see
-  [the task-attention inbox](../reference/coordination.md#task-attention-inbox).
-- **Delivery waits for budget.** See [Respond to budget and operator requests](objective-decisions.md).
-- **The Team update conflicts.** Reread the Team and reassess the proposal, as in
-  [step 6](#6-review-and-apply-the-proposal).
+- **The manager never woke after a message.** Check `supertag describe objective support-policy`:
+  a `Runnable: no.` line names what holds its turns, such as a Tag with no connected Worker Host,
+  a pause, or a spent budget pool.
+- **The Objective is `limited`.** The budget pool is spent. Raise it with
+  `supertag update objective support-policy --budget-minor AMOUNT`; a budget can only increase.
+- **Work waits although the budget has room.** The Team's `maxConcurrency` counts turns across
+  every Objective that names the Team. See
+  [Throttle a Team on purpose](teams.md#throttle-a-team-on-purpose).
+- **A turn needs attention.** Run `supertag list inbox --kind task-attention --output text`.
+- **Apply refuses a change.** `owner`, `outcome`, `ongoing`, `workspaces`, and which Team the
+  Objective names are fixed. Create a new Objective for a different definition.
 
 ## Next
 
-- [Observation delivery](../reference/coordination.md#observation-delivery)
-- [Wait conditions](../reference/coordination.md#wait-conditions)
-- [Artifact handoff and review](../reference/artifacts.md#handoff-and-review)
+- [Define and complete an Objective](objectives.md)
+- [Respond to an Objective](objective-decisions.md)
+- [Share a Team's Workstream](workstreams.md)
 - [Check an Objective's progress](objective-overview.md)

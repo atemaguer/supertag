@@ -6,7 +6,7 @@ description: Operate SuperTag from a coding-agent conversation, running the user
 # Operate SuperTag
 
 Act as the user's operator through the configured `supertag` CLI. A Tag is a persistent AI identity with its own responsibilities and permissions;
-an Objective records an outcome owned by a lead Tag. SuperTag runs the team; this conversation
+an Objective records an outcome owned by one Tag. SuperTag runs the team; this conversation
 helps the user direct it. Installing this skill does not grant operator access or permission
 to change resources. Respect the user's existing authorization and the agent's execution policy.
 This operator session holds the administrator CLI credential. Never read or print `~/.supertag`.
@@ -16,7 +16,7 @@ Prefer a user-level skill outside the repository the team changes. Workers can e
 
 ## Establish the scope
 
-Confirm the selected Control Plane, lead Tag, Workspace, and user's requested outcome. A
+Confirm the selected Control Plane, owner Tag, Workspace, and user's requested outcome. A
 Workspace identifies the repository where the team works. Use `supertag --help` to verify commands
 against the installed version. If setup is missing, follow
 [Install SuperTag](https://github.com/atemaguer/supertag/blob/main/docs/operations/install.md),
@@ -51,7 +51,7 @@ contents in a shell command. Replace `PATH_FROM_MKTEMP` below with that path, th
 outcome_file='PATH_FROM_MKTEMP'
 (
   trap 'rm -f -- "$outcome_file"' EXIT
-  supertag create objective OBJECTIVE_ID --owner LEAD --workspace WORKSPACE \
+  supertag create objective OBJECTIVE_ID --owner OWNER_TAG --workspace WORKSPACE \
     --outcome "$(cat "$outcome_file")" --budget-minor MINOR_UNITS --budget-currency USD \
     --deadline ISO_TIMESTAMP
 )
@@ -60,7 +60,8 @@ outcome_file='PATH_FROM_MKTEMP'
 The quoted command substitution passes the file contents as one argument without evaluating them
 as shell code. The trap removes the private file even if creation fails.
 Replace placeholders; currency must match the user's choice. 1000 minor units in USD means USD 10.
-Creation starts the lead. Save the returned ID, any startup warnings, scope, and limits. Check
+Creation starts the Objective's conversation. Save the returned ID, any startup warnings, scope,
+and limits. Check
 existing Objectives first to avoid duplicate work. Do not silently recreate after an uncertain
 response; inspect the chosen ID.
 
@@ -86,11 +87,10 @@ warnings about missing or estimated team spend.
 
 ## Read pending questions before messaging
 
-An unmarked message leaves questions pending and does not wake a blocked Objective. Read the
-current inbox and description before sending anything. Answer a specific pending question with
-`--reply-to MESSAGE_ID`, using its ID from the inbox. An answer can move a blocked Objective
-back to working. If the question changed, reassess whether the reply still answers it. Quote
-the question you are answering in the reply:
+A message to an Objective is a turn in its conversation. Read the current inbox and description
+before sending anything, because the Objective's next turn runs on what you say. An answer can
+move a blocked Objective back to working. If the question changed, reassess whether the reply
+still answers it. Quote the question you are answering in the reply:
 
 ```sh
 umask 077
@@ -105,13 +105,13 @@ with your file-writing tool, inserting the actual question and answer as data. R
 message_file='PATH_FROM_MKTEMP'
 (
   trap 'rm -f -- "$message_file"' EXIT
-  supertag message objective OBJECTIVE_ID - --reply-to MESSAGE_ID --output json < "$message_file"
+  supertag message objective OBJECTIVE_ID - --output json < "$message_file"
 )
 ```
 
-The trap removes the private file even if the command fails.
-Replace `MESSAGE_ID` with the pending question's ID. Check the JSON `repliedToMessageId` against
-that ID. If the command rejects the ID, reread the inbox before replying.
+The trap removes the private file even if the command fails. Reread
+`supertag list inbox --objective OBJECTIVE_ID --output json` afterwards: the `question` item is
+gone once the answer started the next turn.
 
 To ask a Tag something outside an Objective, such as what it is working on, use
 `supertag message tag TAG - --session NAME --output json` with the same private-file pattern. The
@@ -160,8 +160,8 @@ the user explicitly authorizes that merge; team completion alone is not approval
 If the owner submits an Objective as `ready_for_review`, ask the user to review the assessment.
 After the user approves, run `supertag approve objective OBJECTIVE_ID`; any Objective in that
 state can be approved. Only ongoing Objectives have an enforced operator closure gate. For other
-Objectives, “ask before merging” in the statement is a request the lead follows, not a gate.
+Objectives, “ask before merging” in the statement is a request the owner follows, not a gate.
 
 Keep reports concise: Objective ID, what changed, evidence, decisions needed, reported spend
-against budget, and next check-in. Distinguish observations from estimates. For several
+against budget, and next check-in. Distinguish what you observed from what you estimated. For several
 Objectives, use one row per Objective plus the few questions needing a decision.

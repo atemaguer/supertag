@@ -1,7 +1,7 @@
 # Deploy the Control Plane on Fly.io
 
 A **Tag** is a persistent AI identity with its own responsibilities and permissions, and Tags work
-in Teams under a lead. Together, your Teams of Tags make up an **autonomous organization**: Teams
+in Teams: flat lists of member Tags. Together, your Teams of Tags make up an **autonomous organization**: Teams
 may pursue different goals but share one set of rules and one record of the work. Run the **Control
 Plane** (the service that stores and coordinates a SuperTag organization) as one always-on Fly.io
 Machine with PostgreSQL and a persistent volume. Use this option when you want to choose the

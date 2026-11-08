@@ -137,11 +137,10 @@ factory runs for each execution, keeping authority separate across concurrent Ta
 Control Plane API Server registers the Session service automatically; the low-level
 `startWorkletGrpcServer` helper alone does not provide persistence ownership.
 
-Native Session resume also checks live Team input. Preparing input without sending it,
-rejecting it, or revoking it does not block resume. Sent input awaiting acknowledgement,
-an unknown acknowledgement, and input withdrawn after dispatch do block resume, so the next
-activation starts without a transcript that could duplicate its digest. A prepared delivery
-withdrawn before dispatch does not block resume.
+Native Session resume also checks live input. Preparing input without sending it, rejecting it,
+or revoking it does not block resume. Input withdrawn after dispatch blocks resume, so the next
+turn starts without a transcript that could repeat the message. A prepared delivery withdrawn
+before dispatch does not block resume.
 
 For a person's message in a Session, the Control Plane stores the control delivery before
 sending it to the active Task Attempt. If the Control Plane restarts while awaiting the
@@ -270,8 +269,8 @@ and a timestamp before it streams them to the Control Plane:
 | --- | --- |
 | `output.delta` | `text`: a partial chunk of streamed output |
 | `output.message` | `text`: a complete message. Set `final: true` on the Task Attempt's final response: the Worker then finishes the Task Attempt as completed even if cancellation or a time limit fires later |
-| `input.withdrawn` | `commandId`: control `input` the harness confirms its model never read before the final response. Team coordination input then returns to the recipient's next activation digest. A person's Session message then runs as its own Task after the current work, including when its acknowledgement was `unknown`; its control delivery is recorded `withdrawn` and the target Task records a `task.session-input` event |
-| `result` | `result`: the structured Task result, for example `defaultTaskResult(text)`, which also parses `Finding:` lines into `findings` and `Fixed finding:` lines into `fixedFindings`. A result accompanying a final response claimed before cancellation is kept even when the result event arrives before the final `output.message`. Each finding needs only `severity`, `summary`, and an optional `location`; the Control Plane assigns its `id` and `status` and ignores any the Worker sends. See [review findings](coordination.md#review-findings) |
+| `input.withdrawn` | `commandId`: control `input` the harness confirms its model never read before the final response. A person's Session message then runs as its own Task after the current work, including when its acknowledgement was `unknown`; its control delivery is recorded `withdrawn` and the target Task records a `task.session-input` event |
+| `result` | `result`: the structured Task result, for example `defaultTaskResult(text)`, which also parses `Finding:` lines into `findings`. A result accompanying a final response claimed before cancellation is kept even when the result event arrives before the final `output.message`. Each finding needs only `severity`, `summary`, and an optional `location`; the Control Plane assigns its `id` and ignores any the Worker sends. See [review findings](coordination.md#review-findings) |
 | `progress.updated` | `progress`: `summary` and up to eight `items` |
 | `usage.updated` | `usage`: cumulative token counts, described below |
 | `agent.updated` | `agent`: native helper-agent activity |
@@ -692,8 +691,8 @@ provider token reports. Per-Task controls use the provider-neutral execution req
 
 Limit support is advertised per Worker Profile, so incompatible profiles are excluded during
 scheduling and the Worker rechecks effective support before harness startup. A Task that sets a
-limit its candidate Workers do not advertise stays queued. `read_task` then reports a scheduling
-incompatibility that names the unmet `execution.limits` path. The standard Worker rejects
+limit its candidate Workers do not advertise stays queued. `supertag describe task` then reports a
+scheduling incompatibility that names the unmet `execution.limits` path. The standard Worker rejects
 unsupported requirements before starting the harness.
 
 Each built-in harness advertises these limits:
@@ -749,10 +748,10 @@ other currencies fail closed. Actual provider-reported cost is emitted separatel
 
 ### Relation to Objective allocation
 
-Objective and Task `maxCostMinor` values reserve estimated budget. An Objective currency permits
-comparison with a Task's provider monetary ceiling; currencyless allocations remain internal
-units. Only an optional `usage.updated.reportedCost` value represents an actual provider-reported
-charge. See [Budgets and allocation](coordination.md#budgets-and-allocation).
+An Objective with a currency caps each of its turns at what its budget pool has left, so a Task's
+provider monetary ceiling is comparable with it; a budget without a currency stays an internal
+allocation. Only an optional `usage.updated.reportedCost` value represents an actual
+provider-reported charge. See [Budgets and allocation](coordination.md#budgets-and-allocation).
 
 ## Built-in harness behavior
 
@@ -1840,7 +1839,7 @@ Providers run conformance checks using only their published SDK surfaces.
 
 When composing several profiles in one Worker, each profile advertises the support of its
 selected harness and environment. A harness that cannot consume tools and instructions does
-not receive Objective coordination work. This lets deterministic and agent-backed profiles
+not receive a conversation's turns. This lets deterministic and agent-backed profiles
 share a Worker without advertising each other's capabilities.
 
 Custom Workers must supply `profileCapabilities` entries for exact profile IDs and revisions.
@@ -2023,8 +2022,7 @@ built during installation; installations that disable dependency build scripts m
 does not retain entire event histories in memory. Full specifications and coordination
 credentials are not stored.
 
-Journal retention is currently operator-managed. The Control Plane's mailbox-body retention
-command does not prune this journal. The snapshot methods `readAll` and `write` explicitly
+Journal retention is currently operator-managed. The snapshot methods `readAll` and `write` explicitly
 materialize or replace snapshots; `DurableLocalWorklet` uses the incremental path.
 
 ### Supervisor ownership

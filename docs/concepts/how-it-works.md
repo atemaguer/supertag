@@ -1,16 +1,16 @@
 # How SuperTag fits together
 
 With SuperTag, you define outcomes instead of tasks, and an AI engineering team delivers them.
-That team is made of Tags, persistent AI identities, grouped into Teams under a lead. Together, your
+That team is made of Tags, persistent AI identities, grouped into Teams. Together, your
 Teams of Tags make up an **autonomous organization**: Teams may pursue different outcomes but share
 one Control Plane, its rules, and its record of the work. SuperTag's architecture separates the
-durable organization and its governance from the systems that execute individual pieces of work.
+durable organization and its rules from the systems that execute individual pieces of work.
 
 If these terms are new, start with [core concepts](README.md).
 
 SuperTag has two top-level runtime components: the **Control Plane**, the service that stores and
 coordinates the organization, and **Worker Hosts**, machines or sandboxes that provide execution
-capacity. SuperTag stores each accepted request or assignment as a **Task** for a **Tag**. A Tag is
+capacity. SuperTag stores each accepted turn of work as a **Task** for a **Tag**. A Tag is
 a persistent AI identity with its own responsibilities and permissions.
 
 The diagram below also uses these terms (see the [glossary](../reference/glossary.md)):
@@ -63,17 +63,18 @@ layer relates to assistants, agent runtimes, and coding harnesses.
 
 The Control Plane is the source of truth for the organization. It owns Tags and their enduring
 responsibilities, called **Roles**. It owns **Objectives**, the outcomes Tags pursue, and **Teams**,
-groups of Tags under a lead. Each Team has one channel, its **Workstream**. It owns Tasks, the
-**Sessions** that group Tasks from one conversation, and **Mailboxes**, which deliver internal
-messages to one Tag. It also owns **Context Sets**, which select reusable knowledge for a Task,
+flat lists of member Tags. Each Team has a **Workstream**, its shared record of posts. It owns
+**Sessions**, each one Tag's thread of work, the **Tasks** that are their turns, and
+**Mailboxes**, where a Tag receives messages from other Tags. It also owns **Context Sets**, which select reusable knowledge for a Task,
 **Permission Sets**, which select the actions a Task may perform, and budgets, recorded policy,
 events, and audit history. It accepts new work, schedules it, keeps long-running records consistent,
 and recovers interrupted operations.
 
 Humans can direct the organization from **collaboration surfaces**, external work tools such as
-Slack or GitHub, in single-player or multiplayer workflows. Tags coordinate within a Team through
-its channel, and with other Teams through durable Tasks and Mailboxes. Harness-native subagents
-remain inside one Worker execution and use their harness's local coordination primitives.
+Slack or GitHub, in single-player or multiplayer workflows. Tags coordinate through Sessions
+started beneath an Objective, through Mailbox messages, and through their Team's Workstream.
+Harness-native subagents remain inside one Worker execution and use their harness's local
+coordination primitives.
 
 ## The API Server
 
@@ -84,8 +85,8 @@ boundary; the current CLI implements it by polling resource versions.
 
 The API Server is an internal Control Plane component, not a third top-level service. The current
 deployment runs it in the same process and on the same listener as the Gateway. Its Worklet API
-registers Worker Hosts, carries assignments and cancellation, accepts heartbeats and execution
-observations, and reports connection state. Keeping the code boundary separate lets resource and
+registers Worker Hosts, carries Tasks and cancellation, accepts heartbeats and reported
+execution events, and reports connection state. Keeping the code boundary separate lets resource and
 execution-control behavior evolve independently from collaboration-surface protocols without
 requiring another deployment.
 
@@ -103,7 +104,7 @@ Plane finds the configured Tag, accepts and stores the Task, and schedules it. W
 finishes, the Gateway carries the resulting presentation back to the originating surface.
 
 The Gateway does not decide organizational policy, create Tasks or Teams on its own, schedule
-Workers, or govern Mailboxes. It also stays out of arbitrary harness tool and MCP traffic.
+Workers, or decide who may message whom. It also stays out of arbitrary harness tool and MCP traffic.
 
 ## How identity and access are decided
 
@@ -124,7 +125,7 @@ exact profiles, supported Context types, capacity, and health. The Control Plane
 compatible, ready Worker Host. A Task remains pending when none is available.
 
 On the Worker Host, a Worker defines how the admitted Task becomes executed work. The Worklet
-supervises the assignment while the Worker owns input resolution, execution orchestration,
+supervises the Task while the Worker owns input resolution, execution orchestration,
 lifecycle, and event normalization:
 
 - Context Resolvers provide approved instructions, **Skills** (reusable instruction packages),
@@ -135,7 +136,7 @@ lifecycle, and event normalization:
 - A harness adapts those inputs to Codex, Claude Code, OpenCode, or another engine.
 - An environment provider runs the harness locally or in a remote sandbox.
 
-External actions happen from the Worker side. Their normalized observations return through the
+External actions happen from the Worker side. Their normalized results return through the
 Worklet API for the Control Plane to persist.
 
 ## What survives a failure

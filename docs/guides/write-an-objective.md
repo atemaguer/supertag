@@ -2,12 +2,12 @@
 
 An **Objective** is a desired outcome with an accountable **Tag**: a persistent AI identity with its
 own responsibilities and permissions. For example, an engineering team could deliver a tested
-database upgrade rather than just edit a dependency file. Use an Objective when several assignments
-need one definition of success. A **Task** is one accepted assignment; a **Team** groups Tags under
-a lead.
+database upgrade rather than just edit a dependency file. Use an Objective when several pieces of
+work need one definition of success. A **Session** is one Tag's thread of **Tasks**, one Task per
+turn; a **Team** is a flat list of member Tags.
 
 With SuperTag, you define outcomes instead of tasks. Give the owner a result to achieve and evidence to collect,
-then let it divide the work among builders and reviewers. Start with
+then let it split the work into Sessions of its own Tag and of its Team's Tags. Start with
 [installation](../operations/install.md) if you do not yet have a configured CLI and owner Tag.
 
 ## State the outcome
@@ -36,12 +36,12 @@ independent review, and a summary linking the changes to each requirement.
 Distinguish “ready for deployment” from “deployed.” If you want a reviewed branch, say so.
 If you want a production rollout, define the approval point and the evidence after rollout.
 
-## Set constraints and escalation points
+## Set constraints and when to ask
 
 Record what must remain stable: public interfaces, supported platforms, data retention, or
 latency. Name the allowed repositories and exclusions. State when the owner should stop and
-ask you, such as a destructive migration or a new paid dependency. Ask for the blocker,
-what the team tried, and the decision needed.
+ask you, such as a destructive migration or a new paid dependency. Ask for the blocker, what was
+tried, and the decision needed.
 
 A **Permission Set** selects allowed actions. Prose constraints guide the team; they do not
 grant permissions or replace approval rules. See [identity and permissions](../reference/iam.md).
@@ -58,7 +58,7 @@ provider-reported spend; it is not a quote for completing the outcome.
 Use `--deadline` with an ISO timestamp and an explicit timezone, such as
 `2027-03-31T17:00:00Z`. Choose a future date that leaves time for review. Writing a date or dollar
 amount only in the outcome does not configure these limits. See the exact
-[budget](../reference/coordination.md#monetary-budgets) and
+[budget](../reference/coordination.md#the-budget-pool) and
 [deadline](../reference/coordination.md#deadlines) behavior before relying on them.
 
 ## Three team-scale examples
@@ -135,5 +135,5 @@ its production rollout when the rollout depends on a later operator decision. Re
 required reviewed result as an input to the later Objective so work does not start prematurely.
 
 For continuing work without a finish date, read
-[Maintain an ongoing responsibility](ongoing-responsibilities.md). To organize the engineering team that delivers a bounded outcome, continue with
-[Coordinate Tasks toward an Objective](objective-coordination.md).
+[Maintain an ongoing responsibility](ongoing-responsibilities.md). To give the owner a Team to
+hand work to, continue with [Organize Tags into Teams](teams.md).

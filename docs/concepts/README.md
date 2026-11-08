@@ -6,27 +6,26 @@ SuperTag lets you define outcomes instead of tasks, and an AI engineering team d
 set an outcome: the result, how success is verified, the constraints, budget, and deadline, and
 which decisions need a person. A team plans the work, divides it, reviews each other's
 results, and keeps going until the outcome is met or it needs a person's decision. Its members
-are persistent AI identities called Tags, grouped into Teams under a lead. Together, your Teams of
+are persistent AI identities called Tags, grouped into Teams. Together, your Teams of
 Tags make up an **autonomous organization**: Teams may pursue different outcomes, called
 Objectives, but share one Control Plane (the service that stores and coordinates them), one set of
 rules, and one record of the work. This page calls it the organization.
 
-A team like that needs actors, responsibilities, goals, assignments, groups, and ways to
+A team like that needs actors, responsibilities, goals, work, groups, and ways to
 communicate. SuperTag represents each of these directly and keeps them available across model
 sessions, process restarts, and the machines that execute work.
 
 ```text
-Objective: the outcome to achieve
+Objective: the outcome to achieve, owned by one Tag
     |
-    +-- Team: the group responsible for part of the outcome
+    +-- Session: one Tag's thread of work, started beneath the Objective
           |
-          +-- Tag: a persistent AI identity
-                |
-                +-- Role: an enduring responsibility
-                +-- Task: one current assignment
+          +-- Task: one turn of that Session
 
-Workstream: each Team's channel for shared posts
-Mailbox: direct delivery to one Tag
+Team: a flat list of member Tags the Objective may hand work to
+Role: an enduring responsibility carried by a Tag
+Workstream: a Team's shared record of posts
+Mailbox: a Tag's inbox for messages from other Tags
 ```
 
 ## Start with the actor
@@ -40,27 +39,32 @@ of that tool.
 
 A [Role](roles.md) describes an enduring responsibility such as release management or security
 review. Assign a Role to a Tag when the same responsibility should guide that actor across many
-assignments.
+pieces of work.
 
 ## Give the organization direction
 
 An [Objective](../guides/objectives.md) states an outcome and how the organization will judge
-completion. A [Task](tasks.md) is one assignment accepted for a Tag. A **Session** groups Tasks
-from the same conversation so follow-up work can continue naturally.
+completion. It has a budget, a deadline, and a status. A **Session** is one Tag's thread of work,
+and a [Task](tasks.md) is one turn of a Session.
 
-A [Team](../guides/teams.md) groups Tags around a shared responsibility. It has a lead, members, and
-a capacity limit. The lead can divide an Objective into Tasks and delegate them to Team members.
+An Objective talks in the thread it was created in. Its owner Tag replies there, a person replies
+in the thread or runs `supertag message objective`, and the Objective asks the person a question
+when it needs one. The work happens in Sessions started beneath it, including Sessions of other
+Tags in its Team.
+
+A [Team](../guides/teams.md) is a flat list of member Tags with an optional concurrency limit. An
+Objective names one Team; its owner may start a Session of any member, and members may message
+each other.
 
 ## Communicate within and across Teams
 
-Every Team has one channel, its [Workstream](../guides/workstreams.md), created with the Team. Its
-members post progress, questions, and findings there, and the Objective owner reads every channel
-in its Objective. An addressed question or blocker can wake an idle teammate to reply, within
-fixed limits. Posts do not assign work. A
-[Mailbox](../guides/tag-messaging.md) delivers a message to one Tag, including messages to other
-Teams and up or down the organization hierarchy.
+A Tag's [Mailbox](../guides/tag-messaging.md) is its own inbox. Messages from other Tags arrive
+there, and several pending messages are handled together in one turn. A message is plain text.
 
-SuperTag makes Team channels and Mailboxes available only to the main agent running for a Tag. Any
+A Team's [Workstream](../guides/workstreams.md) is its shared record of posts. Every member can
+read it. A post wakes nobody; a post addressed to Tags reaches those Tags' inboxes.
+
+SuperTag makes Mailboxes and Workstreams available only to the main agent running for a Tag. Any
 subagents coordinate inside that local execution instead of communicating as independent members of
 the organization.
 
@@ -89,4 +93,4 @@ Read [how SuperTag fits together](how-it-works.md) and the
 one organization use different agent systems without making any one of them its source of truth.
 
 When you are ready to use these pieces together, follow
-[Objective coordination](../guides/objective-coordination.md).
+[Define and complete an Objective](../guides/objectives.md).

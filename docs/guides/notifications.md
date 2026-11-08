@@ -39,8 +39,9 @@ inbox item. Use `supertag list inbox` to inspect a notification's delivery statu
 `supertag describe objective ID` for one item or `supertag list inbox --objective ID` for a
 digest.
 
-SuperTag sends owner decision requests, open high-severity review findings, stalled Objectives,
-uncertain **Task Attempts** (single executions of a Task), and budget and deadline limits. It groups ordinary alerts for
+SuperTag sends one alert per operator inbox item: approval requests, an Objective's questions,
+budget warnings, deadline and budget limits, uncertain **Task Attempts** (single executions of a
+Task), and MCP logins a Task waits on. It groups ordinary alerts for
 60 seconds; a digest shows an `…and N more` line when it omits items. A blocking approval goes
 out immediately. There are no quiet hours. Progress reports and ordinary reviews do not send an
 alert. Failed deliveries retry in the background; desktop has three attempts, while webhook and

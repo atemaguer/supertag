@@ -28,22 +28,19 @@ The eligible pool is the Tag's bound hosts that carry every label the Task requi
 qualifies, the Task waits and records a `labels:...` scheduling requirement. Labels only narrow
 the pool; they never add a host. See [Worker Host labels](resource-model.md#worker-host-labels).
 
-An **owner activation** is a Task in which an Objective’s owner reviews new information and
-decides what to do next. It may be queued, running, or waiting. A **durable wait** stores the
-conditions for resuming a Task, so a Control Plane restart does not lose the wait.
+A **durable wait** stores the conditions for resuming a Task, so a Control Plane restart does not
+lose the wait.
 
 Queue order:
 
-- The Control Plane considers an Objective owner's queued Tasks first. An owner reviews results
-  and plans the next round, so its Team's delegated Tasks cannot keep it from a free slot.
-- An owner never runs two activations for the same Objective at once, and a new trigger never
-  queues behind another activation. See [Owner triggers](#owner-triggers).
-- Within that group and among all other Tasks, it considers queued Tasks by accepted priority,
-  then by availability time and stable Task ID.
-- A waiting Task moves up one effective priority tier after each 15 minutes that it remains
-  eligible.
-- Once Tasks share an effective tier, the older eligible Task runs first. This bounded aging
-  prevents a continuous urgent queue from starving ordinary work.
+- The Control Plane takes due turns by the time they became available, then by the order they
+  were admitted, so the oldest due turn runs first.
+- One Session runs one turn at a time. A second delivery into a Session waits until its current
+  turn ends, and is then delivered as the Session's next Task.
+- A Session's turn waits while its Objective is paused, completed or cancelled, and while turns
+  across the Sessions of every Objective naming its Team already reach the Team's
+  `maxConcurrency`. A held turn stays pending and consumes no Task Attempt.
+- A Session runs at most four work Sessions at once; the rest queue.
 
 Host and profile choice:
 
@@ -66,8 +63,6 @@ Placement reservations:
 - If Team, Tag, or approval checks decline the Task before a Task Attempt is created, the Control
   Plane releases the unused reservation immediately and records no Task event. Expiry remains
   the fallback for disconnections.
-- A Task whose dependencies are not all accepted gets no reservation; see
-  [Waiting for dependencies](#waiting-for-dependencies).
 
 When no host can run the Task:
 
@@ -78,22 +73,6 @@ When no host can run the Task:
 Worker, and stored reservation phase. This is stored scheduling evidence; the command does not
 contact the Worker Host.
 
-## Waiting for dependencies
-
-A Task with dependencies runs only after each of them is accepted. Until then, the Control Plane
-does not offer the Task to any Worker Host. It records one scheduling check that names each
-dependency that is not yet accepted and its status. `supertag describe task TASK_ID` shows it:
-
-```text
-Last scheduling check: waiting at 2026-10-01T09:14:02.118Z
-Waiting for step2-ref-delivery (running), step3-sandboxes (submitted).
-```
-
-A dependency that the Control Plane cannot read shows as `unavailable`. The record changes only
-when a dependency's status changes. Submission alone does not release the Task: a manager must
-accept the dependency. Once every dependency is accepted, the Task goes through
-[Worker Host selection](#worker-host-selection) like any other.
-
 ## Waiting for capacity
 
 Each Worker runs a limited number of Task Attempts at once. Built-in Workers derive the default from the machine: floor(min(CPU cores, memory in GB / 3) / 2),
@@ -103,106 +82,69 @@ Set it with `concurrency` on a [host service](supertag-yaml.md#host-concurrency)
 A host service takes a changed `concurrency` without a restart. It reports the new limit to the
 Control Plane at once, and scheduling uses it from then on.
 
-Each Worker also has one **coordination slot** beyond its concurrency. An Objective owner's
-activation and a conversation's turn, including its report turns, may use it. The owner starts
-even when delegated Tasks fill every slot, and a conversation still answers while its work
-Sessions fill them. Other Tasks, work Sessions included, start only while fewer Task Attempts than
-the concurrency run. A work Session that can't start doesn't hold back conversation turns. For example, a Worker with
-concurrency 1 runs one builder Task and an owner activation together. A Worker with concurrency 4
-runs four builder Tasks and an owner activation.
+Each Worker also has one **coordination slot** beyond its concurrency. A conversation's turn,
+including its report turns, may use it, so a Tag still answers a person while its work Sessions
+fill every ordinary slot. Other Tasks, work Sessions included, start only while fewer Task
+Attempts than the concurrency run. A work Session that cannot start does not hold back
+conversation turns. For example, a Worker with concurrency 1 runs one work Session and one
+conversation turn together, and a Worker with concurrency 4 runs four work Sessions and one
+conversation turn.
 `supertag status` includes that coordination slot in its capacity. It shows `5/5` for this
 example and labels the additional slot, so the five running Task Attempts do not appear to
 exceed capacity.
 
-A Task that some eligible host could run, but whose matching Workers are all busy, stays queued.
-The Control Plane records why, and `supertag describe task TASK_ID` shows it:
+A Task that some eligible host could run, but whose matching Workers are all busy, stays queued
+with no record. The Control Plane records a scheduling check only when no bound Worker Host
+*qualifies*: the host pool lacks a required label, cannot check out the Workspace, needs an MCP
+login, or refuses an unsandboxed command. `supertag describe task TASK_ID` shows that check on a
+pending Task:
 
 ```text
-Last scheduling check: waiting at 2026-10-01T09:14:02.118Z
-Waiting for a free claude-code slot on Worker Host laptop (2 of 2 busy: 7f3c..., 9a41...)
+Last scheduling check: incompatible at 2026-10-01T09:14:02.118Z
+Waiting: no bound Worker Host has labels gpu.
+Unmet requirements: labels:gpu
 ```
 
-The record names each eligible host, the harnesses that could run the Task, the host's capacity,
-and the Tasks whose running Task Attempts fill it. For an owner's activation, the capacity includes
-the coordination slots. When no eligible host has a matching Worker
-connected, it says so instead. The record changes only when the wait changes. Once the Task is
-placed, the next check records it as compatible. A slot not held by a running Task Attempt may be
-reserved for a starting one, or the host may be draining.
+The record changes only when the requirement changes. Once a qualifying host appears, the next
+check records the Task as `compatible`.
 
-A Worker can be free while the Control Plane still declines to start the Task. For example, its
-Team's `maxConcurrency` is full, or its Tag already runs an activation in the same Objective. The
-record then states the cause:
+`supertag get task ID` carries the same record under `status.scheduling`, with fields `status`
+(`incompatible` or `compatible`), `unmetRequirements`, `reason`, `unsandboxedCommands`,
+`workspaceRefusals`, `observedAt` and `sequence`.
+
+Other holds are silent. A turn waits without a record while its Session already runs a turn,
+while its Objective is paused or closed, and while the Sessions of every Objective naming its
+Team already reach the Team's `maxConcurrency`. Read
+[Queue order](#worker-host-selection) for those rules, and
+[Check an Objective's progress](../guides/objective-overview.md) for what is running under one
+Objective.
+
+A wait for capacity creates no other Task. The Task starts when a slot frees.
 
 ```text
-Last scheduling check: waiting at 2026-10-01T09:14:02.118Z
-Not started: Team builders runs at most 2 Tasks at once (maxConcurrency); running now: 7f3c..., 1 Task in other Objectives.
-A Worker was free; the Task starts when this clears.
+Worker slots:  [work Session 1] [work Session 2]   coordination slot: [      ]
+10:00  work Session 3 queued    ->  waits for work Session 1 or 2 to finish
+10:05  a person's message       ->  starts at once in the coordination slot
 ```
 
-The second line depends on what holds the Task:
+### Objective turns
 
-| `code` | Second line |
-| --- | --- |
-| `retry_delay`, `objective_activation`, `dependencies`, `team_concurrency` | The Task starts when this clears. |
-| `approval` | The Task starts once it is approved. |
-| `objective` | The Task starts only if the Objective admits new work again, such as after a resume or a raised limit. |
-| `inactive_tag`, `team` | The Task cannot start until an operator fixes this. |
-
-`supertag describe objective` shows the same cause as a `claim_declined` explanation for the
-Task.
-
-`read_task` returns the same record as `scheduling`, with `reason: "claim"` and a `claim` object.
-Its `code` is one of the values above, and `message` explains it. The object may also carry
-`taskIds`, `teamId`, `tagId`, or `availableAt`. A Team can serve several Objectives. When it does,
-a `team_concurrency` reason lists in `taskIds` and `message` only the running Tasks in the Task's
-own Objective. It gives just a count of Tasks running in other Objectives.
-
-Unlike a [scheduling incompatibility](coordination.md#scheduling-incompatibility), a wait for
-capacity creates no manager Task. The Task starts when a slot frees. When several Tasks wait for
-the same slot, an Objective owner's Task takes it before delegated Tasks; see
-[Worker Host selection](#worker-host-selection).
+An Objective's conversation runs one turn at a time. A trigger that arrives while a turn runs,
+such as a work Session's result, an operator's message or an approval decision, becomes the
+conversation's next Task; it does not start a second turn. See
+[What delivers a turn](coordination.md#what-delivers-a-turn).
 
 ```text
-Worker slots:  [builder Task 1] [builder Task 2]   coordination slot: [      ]
-10:00  builder Task 3 queued   ->  waits for builder Task 1 or 2 to finish
-10:05  owner review queued     ->  starts at once in the coordination slot
-```
-
-### Owner triggers
-
-An Objective owner is woken by several triggers: its start Task, a change to a Task it delegated,
-an assessment when its last activation ended, and a Mailbox message, such as an operator's message.
-SuperTag gives each Objective at most one open owner activation: a queued, running, or waiting owner
-Task in the Objective's Leadership Team. When a trigger arrives while one is open, SuperTag
-delivers the trigger to that activation instead of starting another:
-
-- A queued activation receives the trigger when it starts.
-- A waiting activation wakes at once, with wake reason `delivery`.
-- A running activation finishes its current Task Attempt. The activation then continues with
-  another Task Attempt that receives the trigger, instead of closing.
-
-The Task Attempt lists its triggers as `deliveries` in its context. They include changes to delegated
-Tasks that arrived while the activation was queued or waiting, such as the result its wake
-reason names. A change the activation already received is not delivered to it again, and neither
-is a change it made itself by accepting, rejecting, or cancelling a Task. A delivered message gets no
-Task of its own, so the activation handles it under the activation's recorded policy, as it would
-a message it reads itself. A Task Attempt that succeeds marks its delivered messages processed. One
-that fails returns them to the Mailbox, so the owner's next activation receives them. A surface
-instruction keeps its own Task, because it carries the authority of the person who sent it. It
-starts when the running activation ends.
-
-```text
-10:00  owner start Task queued; Worker slots full of builder Tasks
-10:01  operator message arrives   ->  delivered to the queued start Task; no second Task
-10:02  start Task runs in the coordination slot, with the message in its context
-10:04  builder result arrives      ->  delivered to the running start Task
-10:06  start Task Attempt ends     ->  the start Task continues and reviews the result
+10:00  Objective's first turn queued; Worker slots full of work Sessions
+10:01  operator message arrives   ->  waits; the running turn keeps its own input
+10:03  first turn ends            ->  the message runs as the conversation's next turn
+10:06  work Session reports       ->  runs as the turn after that
 ```
 
 ## Placement by harness and model
 
-Each Task records a harness, model, and effort when SuperTag accepts it; see
-[execution settings](coordination.md#execution-settings). Placement then works like this:
+Each Task records a harness, model, and effort when SuperTag accepts it, from the acting Tag's
+own range. Placement then works like this:
 
 - Each Worker profile advertises its harness, the models that harness serves, and the efforts it
   applies. A host's first model for a harness is its default. Configure them with
@@ -210,9 +152,8 @@ Each Task records a harness, model, and effort when SuperTag accepts it; see
   `supertag connect worklet --model`.
 - A Task with a harness runs only on a profile of that harness. A Task with a model runs only on a
   profile that lists that model. A profile that lists no models serves none by name.
-- When no bound host offers the model, the Task waits. Its scheduling record names
-  `execution.model`, and the responsible manager gets a Task to resolve it, as for other
-  [scheduling incompatibilities](coordination.md#scheduling-incompatibility).
+- When no bound host offers the model, the Task waits and its scheduling record names
+  `execution.model`.
 - Effort never blocks placement. A harness without an effort option runs the Task and records that
   it ignored the effort. Tasks start at `low` unless the Tag or its Roles set another effort.
 - A Task without a model runs with the host's default model, and the Task Attempt records which
@@ -226,7 +167,7 @@ These limits are fixed defaults:
 | --- | --- |
 | Task Attempt time limit | 60 minutes. `supertag connect worklet --timeout-ms` changes it for that Worklet. |
 | Claude Code turns | No SuperTag cap; Claude Code's own limits apply. A Worker Profile's `maxTurns` configuration still sets one. |
-| Unsatisfiable execution limits | Refused at assignment, naming the limits the Tag's connected profiles enforce. |
+| Unsatisfiable execution limits | Refused at admission, naming the limits the Tag's connected profiles enforce. |
 
 ## Conversation turn order
 
@@ -266,11 +207,6 @@ Continuation and interruption:
 
 - The Control Plane handles continuation. If a manager records a Task wait, SuperTag schedules a
   new Task Attempt after the condition is met.
-- A self-escalation is a continuation that starts at once. When the Tag working a Task calls
-  [`escalate_task`](coordination.md#self-escalation), SuperTag records the new execution, stops
-  the current Task Attempt as it does for a wait, and queues the same Task again. The next Task
-  Attempt runs with the new model or effort, on the same Task branch. It keeps the Task's
-  original reservation and is not charged again. A Task may escalate itself at most twice.
 - After a connection is interrupted, the Control Plane checks the Worklet's saved execution record
   before continuing.
 - An expired lease means the Task needs recovery; it does not prove that its execution stopped.
@@ -297,8 +233,8 @@ seconds, the Control Plane revokes it, so it can never report again. Its interru
 count as stopped, and their Tasks run again on another bound host:
 
 - A request from a collaboration surface gets a new Task Attempt, within the usual attempt limit.
-- An assigned Task returns to the queue when it holds no reserved budget and has attempts left.
-  Otherwise it fails and needs explicit reassignment, as after an expired lease.
+- A delivered turn gets a new Task Attempt while it has attempts left. Otherwise it fails, and
+  the Session needs a new turn, as after an expired lease.
 - The Task's events record `task.worker-host-removed` with the removed host's ID.
 
 Side effects the lost process already made are not undone. Use persistent hosts for work that must
@@ -321,7 +257,7 @@ secrets redacted. These include secret-bearing host environment values, such as 
 and URL usernames, passwords, and credential query parameters. Encoded copies of known secrets
 are also removed. For example, `https://user:password@example.com` becomes
 `https://[REDACTED]@example.com`. Redaction happens before truncation and storage, so the inbox
-and `read_task` receive the sanitized reason. The journal writes the reason to the receipt and to
+and `supertag get task` receive the sanitized reason. The journal writes the reason to the receipt and to
 an `execution.uncertain` journal event.
 Worker Host acceptance and placement failures use the same policy before the Control Plane can
 store them as admission rejection events or release reasons. See the
@@ -336,15 +272,14 @@ uncertain instead of a running Task with an expired lease:
 
 | Where | What it shows |
 | --- | --- |
-| `supertag describe task` | `Assignment: uncertain`, why, and the recover command |
+| `supertag describe task` | `uncertain`, why, and the recover command |
 | `supertag describe objective` | The Task as `uncertain`, its reason and recover command, and the inbox item under "Needs you" |
 | Operator inbox | A `task-attention` item whose first command is the exact `supertag recover worklet` command |
 | `supertag ps` | The host's uncertain Task Attempts, with the commands to stop the host, recover, and start it |
-| `read_task` | The assignment's `uncertainAttempt` |
+| `supertag get task` | `status.attempt` with its uncertainty |
 
-The uncertainty also wakes waiters. A waiting Task wakes with reason `uncertain_tasks` when it
-names the uncertain Task in `submittedTaskIds` or `acceptedTaskIds`, or requested it. It wakes once:
-waiting on the Task again does not wake again for the same uncertainty.
+An uncertain Task of a work Session reports nothing to the Session that started it until an
+operator settles it.
 
 To recover, follow
 [A Task is uncertain](../guides/troubleshooting.md#a-task-is-uncertain). After an operator confirms

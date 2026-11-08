@@ -14,7 +14,7 @@ Worker should run workspace tools somewhere other than its harness.
   the **Control Plane**, the SuperTag service that stores and schedules work.
 - A **Worker Profile** is a saved, versioned recipe for running a Worker.
 - A **Tag** is a persistent AI identity with its own responsibilities and permissions.
-- Tags work in Teams under a lead. Together, your Teams of Tags make up an **autonomous
+- Tags work in Teams: flat lists of member Tags. Together, your Teams of Tags make up an **autonomous
   organization**: Teams may pursue different goals but share one Control Plane, its rules, and
   its record of the work.
 

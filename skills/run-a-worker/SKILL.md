@@ -34,7 +34,7 @@ All state lives in `~/.supertag/` (or `SUPERTAG_STATE_DIR`); nothing is written 
   `connect worklet`); Codex needs no opt-in. A host in the same file as its
   Control Plane is enrolled with the local operator credential and keeps its own credential in
   `~/.supertag/hosts/SERVICE/credential.json`. Which Tags it serves comes from Tag manifests
-  (`spec.workerHosts`) or `supertag update tag TAG --add-worker-host ID`; `init` binds its lead Tag.
+  (`spec.workerHosts`) or `supertag update tag TAG --add-worker-host ID`; `init` binds the Tag it created.
 - `supertag ps` lists services, connection state, Tags served, and running Task Attempts;
   `supertag logs -f [SERVICE...]` follows logs; `supertag down` stops hosts first, then the Control
   Plane (`--remove-services` also uninstalls units); `supertag config` prints the resolved file or
@@ -153,11 +153,12 @@ A Context Set selects Skill identities; the Worker verifies version and digest p
 staging. The catalog is the allowlist — a Skill not in it cannot be staged.
 
 **Named Workspaces** — `--workspace NAME=PATH` (repeatable) declares a local git checkout of a
-`Workspace` resource. Objective Tasks that name it run on this host in their own git worktree on a
-`supertag/<objective>/<task>` branch, edited in place; the Worker commits after each Task Attempt.
+`Workspace` resource. Tasks that name it run on this host in their own git worktree on their
+Session's branch, `supertag/session/<short session id>`, edited in place; the Worker commits after
+each Task Attempt.
 Only local process profiles serve Workspaces. Without a declared checkout, such a host clones a
 Workspace's `source` under `~/.supertag/workspaces/<workspace>/clone`. `delivery: pull-request`
-pushes the Task branch and opens a GitHub draft pull request; it needs `pull-requests:create` on
+pushes the Session's branch and opens a GitHub draft pull request; it needs `pull-requests:create` on
 the repository and a host-local `GITHUB_TOKEN` restricted to it. An unnamed
 `--workspace PATH` is still a read-only-by-default copy. See `docs/guides/workspaces.md`.
 

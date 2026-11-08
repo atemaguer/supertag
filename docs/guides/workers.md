@@ -2,7 +2,7 @@
 
 Connect a machine you control so that **Tasks**, the requests or assignments SuperTag accepts, run
 there with a real agent. A **Tag** is a persistent AI identity with its own responsibilities and
-permissions, and Tags work in Teams under a lead. Together, your Teams of Tags make up an
+permissions, and Tags work in Teams: flat lists of member Tags. Together, your Teams of Tags make up an
 **autonomous organization**: Teams may pursue different goals but share one set of rules and one
 record of the work. The **Control Plane** stores and coordinates the organization.
 
@@ -648,7 +648,7 @@ client transport cannot make an HTTP/1 proxy carry gRPC.
 ## If something goes wrong
 
 - **The host never shows as ready, or a Task stays pending.** Work through
-  [Troubleshoot the first reply](troubleshooting.md#4-separate-surface-testing-from-worker-testing).
+  [Troubleshoot the first reply](troubleshooting.md#4-separate-collaboration-surface-testing-from-worker-testing).
 - **The Worklet keeps reconnecting.** Check the close code in
   [A remote Worklet keeps disconnecting](troubleshooting.md#a-remote-worklet-keeps-disconnecting).
 - **A Task stays queued while others run.** Run `supertag describe task TASK_ID`. A line such as

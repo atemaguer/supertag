@@ -5,8 +5,8 @@
 A **Tag** is a persistent AI identity with its own responsibilities and permissions. A **Role** is a
 reusable description of how that actor should carry out an enduring responsibility. Other terms on
 this page (see the [glossary](../reference/glossary.md)): a **Task** is one accepted assignment; a
-**Mailbox** is where the Tag receives internal messages; a **Team** groups Tags under one lead and
-shared responsibility; an **Objective** is an outcome owned by a Tag; a **Worker** is the code that
+**Mailbox** is the Tag's inbox for messages from other Tags; a **Team** is a flat list of member
+Tags; an **Objective** is an outcome owned by a Tag; a **Worker** is the code that
 completes a Task. Together, your Teams of Tags make up an **autonomous organization**: Teams may
 pursue different Objectives but share one Control Plane, its rules, and its record of the work.
 
@@ -26,7 +26,7 @@ changes affect later Tasks without changing work already accepted.
 
 ## When to use a Tag or a Role
 
-Create a **Tag** when you need a distinct actor with its own name, mailbox, Task history, Team
+Create a **Tag** when you need a distinct actor with its own name, Mailbox, Task history, Team
 membership, or accountability. Create a **Role** when you need a responsibility that can guide one
 or more existing actors.
 
@@ -34,10 +34,10 @@ or more existing actors.
 | --- | --- | --- |
 | Someone must own release work and receive messages about it | Tag | `release-manager` |
 | Several actors should follow the same security review policy | Role | `Security Reviewer` |
-| Research needs separate assignments, results, and Team placement from engineering | Tag | `researcher` |
-| Managers should apply the same organization-change policy | Role | `Org Architect` |
+| Research needs its own work, results, and Team placement, separate from engineering | Tag | `researcher` |
+| Every Tag on a Team should document its work the same way | Role | `Documentation Steward` |
 
-If a security reviewer must independently receive assignments, report progress, and be accountable
+If a security reviewer must independently receive work, report progress, and be accountable
 for approval, make it a Tag. If release and payments actors should each apply the same review rules
 as part of their existing work, assign both Tags the `Security Reviewer` Role.
 
@@ -96,21 +96,8 @@ at a particular location or situation. Put a set in a Role when it should follow
 responsibility. A Role does not bypass normal authorization: the Task's origin, requester, approval
 state, Worker policy, and provider-native access can still narrow what the Tag may do.
 
-## Built-in Roles
-
-SuperTag ships an **Org Architect** Role. It applies an organization's chosen policy to
-requests to create Tags and Teams without adding a separate tool for every approval workflow.
-Operators can customize its purpose, instructions, Context Sets, and Permission Sets, then list it
-on the Tags that should hold that responsibility.
-
-When an Org Architect is available, a manager's request to create a Tag or Team waits for
-the architect's decision. Managers keep the normal creation tools; the Role changes how SuperTag
-handles those requests instead of adding a separate approval tool. See
-[Coordinate Tasks toward an Objective](../guides/objective-coordination.md#start-the-owner) for the complete
-request, routing, and reply flow.
-
 ## Where to go next
 
 - Return to [core concepts](README.md).
 - Learn how [Context Sets and Permission Sets](context-and-permissions.md) carry knowledge and authority.
-- Follow the [Objective coordination guide](../guides/objective-coordination.md) to use Roles in a running organization.
+- Follow [Define and complete an Objective](../guides/objectives.md) to use Roles in a running organization.

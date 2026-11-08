@@ -86,41 +86,18 @@ between handing the text over and that confirmation. Its queued text skips slash
 and `@path` expansion. A Claude Code run that uses a one-shot CLI process starts without a
 control channel.
 
-### Deliver teammate input
+### Deliver a person's message
 
-An `input` command with `advisory: true` carries information the Task may weigh, such as
-[Team coordination](../reference/mailbox.md#live-delivery). If its acceptance is uncertain,
-answer `unknown` and keep the execution and its result; don't fail the Task Attempt over it. Codex
-app-server mode does this when a turn ends before it acknowledges an advisory steer, while it still
-fails the Task Attempt for other uncertain input. `LocalHarnessExecutionControl` aborts the
-uncertain advisory command's signal to withdraw queued input, caches its receipt, and keeps the
-channel open for later commands. Its default four-second command budget includes queue time,
-leaving room for the Worklet's five-second receipt deadline. Advisory dispatch waits at most one
-second (or a quarter of a custom command budget), so a stalled teammate item releases the queue
-before operator input times out. A command that expires in the queue is rejected without dispatch.
-Adapters must honor the abort signal before taking queued input. Other uncertain commands still
-close the channel.
+The only text the Control Plane sends into a running execution is a person's message in the same
+Session. The `input` command carries the sender's label and the message body as untrusted content,
+skips command expansion, and uses the ordinary queued input path with a client uuid.
 
-### Sender identity and authorization
+Nothing else arrives live. Another Tag's message and an addressed Workstream post reach the
+recipient Tag's inbox and run there as their own turn, so an adapter never has to merge them into
+a running native session.
 
-Teammate input also carries `origin: { kind: "peer", from: senderTagId }`, using the stored
-sender identity. Preserve this marker when the native SDK supports it; never derive it from
-message text. The installed Claude Code CLI can hold or refuse native peer input without a
-matching receipt, and its meta-message path does not reliably attribute replies by input uuid.
-SuperTag therefore omits `SDKUserMessage.origin` for Claude Code. The input retains its stored
-sender label and untrusted-content framing, skips command expansion, and uses the ordinary queued
-input path with a client uuid. Codex also uses this labelled text because its SDK has no peer field.
-
-An input with `requiresInputAuthorization: true` must also carry the ephemeral
-`HarnessControlOptions.authorizeInput` callback through Worker and Worklet wrappers.
-The Worker rejects it before dispatch unless execution control uses `LocalHarnessExecutionControl`
-and the callback is present. That control rejects it unless the adapter declares `authorizeInputAtTake`.
-The adapter must call the supplied guard after its own queues, immediately before handing text
-to the native session, and reject input when the guard returns false. Never persist the callback,
-reuse its answer, or replay an uncertain command. Built-in Claude Code and Codex adapters support
-this check. Custom Claude runners must also opt in when binding `ClaudeLiveInput`; an unguarded
-binding rejects guarded input. Custom adapters must use `LocalHarnessExecutionControl` with this
-check to receive Team input live; other control implementations leave it for the next activation digest.
+A command that expires in the queue is rejected without dispatch. Adapters must honor the abort
+signal before taking queued input. An uncertain command closes the channel.
 
 A malformed `input.withdrawn` command ID is ignored when processing saved events. It cannot block
 durable replay or settle a delivery. Valid withdrawal events still retry on storage failures.
@@ -129,20 +106,16 @@ durable replay or settle a delivery. Valid withdrawal events still retry on stor
 
 Claude Code withdraws accepted input that no reply names before the final result.
 A reply names its input by the client uuid that Claude Code stamps on it.
-For example, a teammate's note accepted during the final turn can remain unread.
-The next activation's digest is the authoritative copy of that withdrawn note.
+For example, a message accepted during the final turn can remain unread.
 Cleanup after a durable wait applies withdrawals before settling the Task Attempt.
-Withdrawn operator input returns to its pending Task.
+Withdrawn input returns to its pending Task and is delivered again as the Session's next turn.
 The same rule applies when acknowledgement times out or a native write remains unconfirmed.
 The saved native transcript may already contain it, so SuperTag keeps that archive
-without making it resumable. The next activation starts a fresh native session with
-canonical Session history and the digest, which supplies the note once. This sacrifices
-native conversation continuity for that activation. The Control Plane enforces this rule
-for every adapter, including when a durable wait settles. It refuses promotion when that
-Task Attempt has a withdrawal event
-or any sent teammate delivery still pending, unknown, or withdrawn. A late native
-acknowledgement does not override a delivery already recorded as unknown.
-Task Attempts with only confirmed deliveries remain eligible for native resume.
+without making it resumable. The next turn starts a fresh native session with canonical
+Session history, which supplies the message once. This sacrifices native conversation
+continuity for that turn. The Control Plane enforces this rule for every adapter, including
+when a durable wait settles: it refuses promotion when that Task Attempt has a withdrawal
+event. Task Attempts with no withdrawal event remain eligible for native resume.
 
 ### Preserving the final response
 
