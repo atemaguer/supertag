@@ -1,7 +1,7 @@
 # SuperTag and other agent systems
 
-With SuperTag, you define outcomes instead of tasks, and an AI engineering team delivers them, on
-any model, harness, and environment. Models and agent systems perform the work. SuperTag keeps the actors, responsibilities, goals, authority, communication, and
+SuperTag gives engineering work a persistent owner, a Tag, that runs on any model, harness, and
+environment. Models and agent systems perform the work. SuperTag keeps the actors, responsibilities, goals, authority, communication, and
 results organized over time.
 
 If these terms are new, start with [core concepts](README.md).

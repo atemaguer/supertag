@@ -1,7 +1,7 @@
 # How SuperTag fits together
 
-With SuperTag, you define outcomes instead of tasks, and an AI engineering team delivers them.
-That team is made of Tags, persistent AI identities, grouped into Teams. Together, your
+With SuperTag, a Tag, a persistent AI identity, owns engineering work: you talk to it or hand it an
+outcome, and it runs the work on your coding agents. Tags are grouped into Teams. Together, your
 Teams of Tags make up an **autonomous organization**: Teams may pursue different outcomes but share
 one Control Plane, its rules, and its record of the work. SuperTag's architecture separates the
 durable organization and its rules from the systems that execute individual pieces of work.

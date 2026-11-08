@@ -254,7 +254,7 @@ for (const required of [
   /findings/iu,
   /approvals/iu,
   /\]\(docs\/guides\/write-an-objective\.md\)/u,
-  /\]\(docs\/guides\/coding-agent-operator\.md\)/u,
+  /\]\(docs\/guides\/talk-to-a-tag\.md\)/u,
   /\]\(docs\/concepts\/interaction-model\.md\)/u,
 ])
   if (!required.test(positioning))

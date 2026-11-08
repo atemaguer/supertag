@@ -378,10 +378,13 @@ async function wizard(
   if (!answers.repository.hasCommits)
     write("This repository has no commits yet. Commit once before creating an Objective.\n");
   write(`
-SuperTag is ready. Create your first Objective:
+SuperTag is ready. Talk to ${answers.tag}:
+  supertag message tag ${answers.tag} "Read this repository and tell me what you would improve first."
+It answers here. Ask it for a change and it works in a Session of its own, asks when a
+decision is yours, and brings back a branch to review. Your next message continues the
+conversation; --session NAME starts another.
+To hand it an outcome with a budget and a deadline, create an Objective:
   supertag create objective --owner ${answers.tag} --workspace ${answers.workspace} --outcome "Search returns results in under 200 ms. Done when the benchmark passes."
-Change this example to the result you want and how to check it.
-Then watch it with supertag watch objective ID, and review it with supertag describe objective ID.
 
 ${yamlPath} runs two services in the background: ${controlPlaneService} (the Control Plane)
 and ${hostService} (this machine as a Worker Host).
