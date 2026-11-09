@@ -1059,11 +1059,17 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         script = scriptedWorklet(2);
         await start();
         const busy = await post("work:BLOCK one|BLOCK two");
+        // The turn starts its work Sessions before it replies; a message sent before the reply
+        // would join that turn, so wait for both.
         await vi.waitFor(
-          async () =>
-            expect(
-              (await read(busy.taskId)).workSessions?.map((session) => session.status),
-            ).toEqual(["WORK_SESSION_STATUS_RUNNING", "WORK_SESSION_STATUS_RUNNING"]),
+          async () => {
+            const record = await read(busy.taskId);
+            expect(record.workSessions?.map((session) => session.status)).toEqual([
+              "WORK_SESSION_STATUS_RUNNING",
+              "WORK_SESSION_STATUS_RUNNING",
+            ]);
+            expect(record.reply?.text).toBe("On it.");
+          },
           { timeout: 10_000 },
         );
         // Both Worker slots run work; the conversation turn takes the coordination slot.
@@ -1071,10 +1077,13 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         // A third work Session cannot be placed, and it does not hold back the next message.
         const third = await post("work:BLOCK three");
         await vi.waitFor(
-          async () =>
-            expect(
-              (await read(third.taskId)).workSessions?.map((session) => session.status),
-            ).toEqual(["WORK_SESSION_STATUS_PENDING"]),
+          async () => {
+            const record = await read(third.taskId);
+            expect(record.workSessions?.map((session) => session.status)).toEqual([
+              "WORK_SESSION_STATUS_PENDING",
+            ]);
+            expect(record.reply?.text).toBe("On it.");
+          },
           { timeout: 10_000 },
         );
         expect((await send("another question")).reply?.text).toBe("Answered: another question");

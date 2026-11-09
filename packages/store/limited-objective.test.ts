@@ -102,6 +102,8 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         } as const;
         const eventId = randomUUID();
         const admitted = await store.admitInboundEvent({
+          // Due at the turn's own time, so claiming it at that time never depends on the clock.
+          availableAt: at,
           surfaceAccountId: account.id,
           tagRouteId: route.id,
           tagId,
@@ -150,12 +152,13 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           contextPlan: { version: 7, capturedAt: at, sets: [] },
           createdAt: at,
         });
-        await store.claimDueInboundEvent({
+        const claimed = await store.claimDueInboundEvent({
           inboundEventId: admitted.work.id,
           leaseOwner: "summary",
           now: at,
-          leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+          leaseExpiresAt: new Date(Date.parse(at) + 60_000).toISOString(),
         });
+        if (claimed?.status !== "processing") throw new Error("The turn was not claimed");
         const attempt = await store.createTaskAttempt({
           taskId: task.id,
           attemptNumber: 1,

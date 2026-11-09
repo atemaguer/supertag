@@ -700,14 +700,23 @@ describe("remote Worklet transport", () => {
 
   it("keeps heartbeats flowing while a host labels probe is stalled", async () => {
     const httpServer = await listen();
+    // Count the heartbeats the server takes while the probe stays stalled, rather than racing a
+    // short timeout against the runner's scheduling.
+    const heartbeats = new Set<string>();
     const remote = startRemoteWorkletServer(httpServer, {
       heartbeatIntervalMs: 20,
-      heartbeatTimeoutMs: 150,
+      onWorkletObserved: (observation) => {
+        if (observation.connected) heartbeats.add(observation.lastHeartbeatAt);
+      },
     });
     const slow = deferred<readonly string[]>();
+    let probes = 0;
     const worklet = {
       ...testWorklet(async function* () {}),
-      hostLabels: () => slow.promise,
+      hostLabels: () => {
+        probes++;
+        return slow.promise;
+      },
     };
     const client = await connectWorklet({
       url: workletUrl(httpServer),
@@ -716,7 +725,13 @@ describe("remote Worklet transport", () => {
     });
     clients.push(client);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 350));
+      await vi.waitFor(() => expect(probes).toBe(1));
+      const before = heartbeats.size;
+      await vi.waitFor(() => expect(heartbeats.size).toBeGreaterThan(before + 10), {
+        timeout: 5_000,
+      });
+      // The one probe is still outstanding: heartbeats never waited for it.
+      expect(probes).toBe(1);
       expect(remote.isWorkletConnected).toBe(true);
       expect(client.isConnected).toBe(true);
     } finally {

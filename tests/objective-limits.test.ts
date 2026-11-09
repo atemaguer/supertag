@@ -152,7 +152,6 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         cleanups.push(() => store.disconnect());
         let cost = options.cost;
         const script = scriptedWorklet(() => cost);
-        cleanups.push(() => script.release());
         const controlPlane = new ControlPlane({
           store: new DrizzleStore({ url }),
           credentialVault: new FileGatewayCredentialVault(join(directory, "vault.json")),
@@ -162,6 +161,8 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         });
         await controlPlane.start();
         cleanups.push(() => controlPlane.stop());
+        // Released before the Control Plane stops, so a failed test cannot hold its drain.
+        cleanups.push(() => script.release());
         const owner = await store.createTag({ name: `owner-${randomUUID()}` });
         await store.bindTagWorkerHost(owner.id, "limits-host");
         const session = await startObjectiveSession({
@@ -335,8 +336,16 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             timeout: 10_000,
           })
           .toBe("running");
-        await f.sweep();
-        expect((await f.reload()).limitState?.budgetExhausted).toMatchObject({ spentMinor: 700 });
+        // The Task runs before its Worker reports the cost, so sweep until the spend is observed.
+        await expect
+          .poll(
+            async () => {
+              await f.sweep();
+              return (await f.reload()).limitState?.budgetExhausted;
+            },
+            { timeout: 10_000 },
+          )
+          .toMatchObject({ spentMinor: 700 });
         // The running Attempt keeps its authority; a spent Objective is limited only once
         // nothing of it runs.
         expect((await f.reload()).status).toBe("working");

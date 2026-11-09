@@ -161,10 +161,13 @@ for (const dialect of ["sqlite", "postgresql"] as const)
       expect(JSON.stringify(uncertain?.payload)).toContain("ExecutionCleanupError");
       // The Attempt credential and the host's secrets are redacted before anything stores them.
       expect(JSON.stringify(uncertain?.payload)).toContain("https://[REDACTED]@example.test/path");
-      expect(onDispatchError).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: expect.stringContaining("automatic replay is disabled"),
-        }),
+      // The Session is blocked as the outcome is stored; the report follows once it is committed.
+      await vi.waitFor(() =>
+        expect(onDispatchError).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message: expect.stringContaining("automatic replay is disabled"),
+          }),
+        ),
       );
 
       // Nothing the host reported carries the Attempt credential or host secrets.

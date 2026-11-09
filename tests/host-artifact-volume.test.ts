@@ -242,6 +242,11 @@ it("stores a captured artifact on the producing host's artifact Volume, and the 
     });
     await expect.poll(() => results.length + errors.length, { timeout: 15000 }).toBe(1);
     expect(errors).toEqual([]);
+    // The Worker records its results before its Attempt finishes. Disconnecting the host while
+    // the Attempt still runs would leave the Control Plane draining it, so wait for the Task.
+    await expect
+      .poll(async () => (await store.findTaskById(startTaskId))?.status, { timeout: 15000 })
+      .toBe("completed");
     const [result] = results;
     if (!result) throw new Error("The producer did not run");
     expect(result.foreignReceipt).toBe(403);

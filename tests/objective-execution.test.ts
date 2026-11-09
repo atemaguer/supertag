@@ -217,6 +217,15 @@ it("finishing an Objective does not exempt its completing Attempt from cancellat
           attemptId: spec.attemptId,
           at: new Date().toISOString(),
         };
+        // Listen before anything is visible to the test, so an early cancellation is never missed.
+        signal.addEventListener(
+          "abort",
+          () => {
+            aborted = true;
+            finish();
+          },
+          { once: true },
+        );
         yield { ...identity, type: "execution.started", workerId: "finisher" };
         if (!spec.coordination || !runtime) throw new Error("Missing coordination");
         const mcp = (id: number, body: Record<string, unknown>) =>
@@ -244,14 +253,6 @@ it("finishing an Objective does not exempt its completing Attempt from cancellat
         expect((await response.json()).result?.isError).not.toBe(true);
         // Completing the Objective does not end this Attempt; it keeps its own coordination.
         expect((await mcp(2, { method: "tools/list" })).status).toBe(200);
-        signal.addEventListener(
-          "abort",
-          () => {
-            aborted = true;
-            finish();
-          },
-          { once: true },
-        );
         await released;
         signal.throwIfAborted();
         yield { ...identity, type: "execution.completed" };

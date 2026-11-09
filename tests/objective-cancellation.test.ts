@@ -32,6 +32,8 @@ function scriptedWorklet() {
   const blocked = new Promise<void>((resolve) => {
     release = resolve;
   });
+  /** Tasks whose Attempt reached the Worker, so the Control Plane can stop them. */
+  const executing = new Set<string>();
   const worklet: Worklet = {
     id: "cancel-worklet",
     describe: async () => ({
@@ -70,6 +72,7 @@ function scriptedWorklet() {
         attemptId: spec.attemptId,
         at: new Date().toISOString(),
       };
+      executing.add(spec.taskId);
       yield { ...identity, type: "execution.started", workerId: "cancel-worker" };
       if (spec.input.messages.some((message) => message.text.includes("HOLD"))) await blocked;
       yield {
@@ -80,7 +83,7 @@ function scriptedWorklet() {
       yield { ...identity, type: "execution.completed" };
     },
   };
-  return { worklet, release: () => release() };
+  return { worklet, executing, release: () => release() };
 }
 
 for (const dialect of ["sqlite", "postgresql"] as const) {
@@ -116,6 +119,8 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         });
         await controlPlane.start();
         cleanups.push(() => controlPlane.stop());
+        // Released before the Control Plane stops, so a failed test cannot hold its drain.
+        cleanups.push(() => script.release());
         const owner = await store.createTag({ name: `owner-${randomUUID()}` });
         const member = await store.createTag({ name: `member-${randomUUID()}` });
         for (const tag of [owner, member]) await store.bindTagWorkerHost(tag.id, "cancel-host");
@@ -143,6 +148,9 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             timeout: 10_000,
           })
           .toBe("running");
+        await expect
+          .poll(() => f.script.executing.has(running.task.id), { timeout: 10_000 })
+          .toBe(true);
         // A second turn waits behind it, as one Session runs one turn at a time.
         const waiting = await f.controlPlane.messageObjective({
           objectiveId: f.session.objective.id,
@@ -307,6 +315,11 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           reason: "objective_start",
           unsettled: true,
         });
+        // While its Attempt is being opened the turn can be neither withdrawn nor stopped; once
+        // it reaches the Worker, the settlement stops it.
+        await expect
+          .poll(() => f.script.executing.has(running.task.id), { timeout: 10_000 })
+          .toBe(true);
         const waiting = await f.controlPlane.messageObjective({
           objectiveId: f.session.objective.id,
           text: "Status?",
