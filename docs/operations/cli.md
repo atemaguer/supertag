@@ -12,10 +12,10 @@ Run SuperTag end to end on one computer. This page uses these terms:
 - A **Tag** is a persistent AI identity with its own responsibilities and permissions.
 - An **Objective** is an outcome a Tag owns until it is met.
 
-The shortest path is [Start in a repository](#start-in-a-repository): `supertag init` sets up your
-repository, you create an Objective, follow it with `supertag watch objective`, and find its result
-with `supertag describe objective`. The [Get started](../../README.md#get-started) quickstart walks
-through that path. Tags work in Teams. Together, your Teams of Tags make up an
+The [quickstart](../../README.md#get-started) gets you talking to a Tag in the terminal UI.
+This walkthrough uses commands to create an Objective, follow it with `supertag watch objective`,
+and find its result with `supertag describe objective`. Tags work in Teams. Together, your Teams
+of Tags make up an
 **autonomous organization**: Teams may pursue different Objectives but share one Control Plane, its
 rules, and its record of the work. The rest of this page then does each step by hand: configure an
 organization, connect execution capacity, run an Objective, and download its result. Use it to learn
@@ -154,7 +154,10 @@ Plane, and a host service named after this computer, such as `studio`. It brings
 Plane with `supertag up` and creates the Workspace, the **Permission Set** `local-tools` (the
 actions the Tag may perform), the **Role** `Lead` (its enduring responsibility), and the Tag through
 the Control Plane's API. Then it brings up the host service, binds it to the Tag, checks that each
-harness Worker registered, and prints the command for a first Objective:
+harness Worker registered, and shows how to open the terminal UI. Run `supertag` from the same
+repository and select `lead` to start a conversation. See [Talk to a Tag](../guides/talk-to-a-tag.md).
+
+Scripts can create an Objective with the CLI.
 
 ```sh
 supertag create objective --owner lead --workspace app \

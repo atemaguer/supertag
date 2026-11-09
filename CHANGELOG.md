@@ -9,6 +9,11 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Changed
+
+- Setup and the quickstart now guide your first conversation through the terminal UI. If there
+  are no Tags, SuperTag shows how to get started with `supertag init`.
+
 ## [0.2.0-alpha.7] - 2026-11-09
 
 ### Added

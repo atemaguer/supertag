@@ -95,17 +95,27 @@ func (m *model) refresh() {
 	}
 }
 
-// renderConversation renders the shown conversation. Each entry is rendered once per width,
-// except work Session lines and branch lines, which change as they are selected, expanded and
-// read. It records the selected line's position for refresh to keep it in view.
+// renderConversation renders the shown conversation or setup guidance before a Tag is available.
+// Each entry is rendered once per width, except work Session lines and branch lines, which
+// change as they are selected, expanded and read. It records the selected line's position for
+// refresh to keep it in view.
 func (m model) renderConversation() string {
 	tag := m.selectedTag()
+	wrap := lipgloss.NewStyle().Width(m.paneWidth())
 	if tag == "" {
-		return faint.Render("No Tags yet. Create one with supertag apply or supertag create tag.")
+		switch {
+		case !m.tagsChecked:
+			return faint.Render(wrap.Render("Checking for Tags on the Control Plane…"))
+		case m.tagsErr != nil:
+			return wrap.Render("Could not check for Tags on this Control Plane.\n\n" + terminalText(m.tagsErr.Error()))
+		default:
+			return wrap.Render("No Tags are set up on this Control Plane.\n\n" +
+				"Run supertag init in your repository to set up a local Control Plane and its first Tag. " +
+				"For a shared Control Plane, ask its operator to set up a Tag.")
+		}
 	}
 	name := terminalText(tag)
 	width := m.paneWidth()
-	wrap := lipgloss.NewStyle().Width(width)
 	conversation := m.currentConversation(tag)
 	c := m.conversations[convKey(tag, conversation)]
 	if c == nil || (len(c.entries) == 0 && c.draft == "") {
@@ -336,6 +346,12 @@ func (m model) paneTitle() string {
 		return "New Objective · owned by " + terminalText(m.form.owner)
 	}
 	tag := m.selectedTag()
+	if tag == "" {
+		if m.tagsChecked && m.tagsErr == nil {
+			return "Set up SuperTag"
+		}
+		return "SuperTag"
+	}
 	return fmt.Sprintf("%s · %s", terminalText(tag), terminalText(m.currentConversation(tag)))
 }
 
@@ -365,7 +381,11 @@ func (m model) paneHint() string {
 	case paneNewObjective:
 		return m.formHint()
 	case paneConversation:
-		if c := m.shown(); c != nil && c.selected != nil {
+		c := m.shown()
+		if c == nil {
+			return "esc quits"
+		}
+		if c.selected != nil {
 			return m.selectionHint(*c.selected)
 		}
 	}

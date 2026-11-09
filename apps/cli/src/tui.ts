@@ -59,7 +59,8 @@ export async function runTui(options: TuiOptions = {}): Promise<number | undefin
   const target = await (options.resolveTarget ?? resolveControlPlaneTarget)(options.override);
   if (target === undefined) {
     process.stderr.write(
-      "No Control Plane is set up yet. Run supertag init in your repository to start one, or connect to your team's with: supertag connect control-plane URL\n",
+      "No Control Plane is set up yet. Run supertag init in your repository to get started.\n" +
+        "To use an existing Control Plane, run supertag connect control-plane URL.\n",
     );
     return 1;
   }

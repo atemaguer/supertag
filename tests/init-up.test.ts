@@ -360,9 +360,6 @@ describe("supertag init", () => {
       // Each service is reported once, without up's full report.
       expect(text.match(/local Control Plane (in|already)/g)).toHaveLength(1);
       expect(text).not.toContain("left alone");
-      expect(text).toContain(
-        '--outcome "Search returns results in under 200 ms. Done when the benchmark passes."',
-      );
       expect(text).not.toContain("Replace each <...>");
       expect(text).not.toContain("Control Plane ready at");
       expect(text).not.toContain("Follow its logs");
@@ -373,8 +370,9 @@ describe("supertag init", () => {
       expect(text).toContain("Host service studio-mac: Enrolled as Worker Host studio-mac");
       expect(text).toContain("Bound Worker Host studio-mac to Tag lead.");
       expect(text).toMatch(/Worker Host studio-mac connected; Workers registered: local-codex\./);
-      expect(text).toContain('supertag message tag lead "');
-      expect(text).toContain("supertag create objective --owner lead --workspace shop --outcome");
+      expect(text).toMatch(
+        /SuperTag is ready\. Run this in your terminal to open the UI\.\n  supertag\nSelect lead,[\s\S]*Ctrl-K and choose Create Objective[\s\S]*supertag message tag lead "/,
+      );
       expect(text).toContain("add restart: unless-stopped to both services");
       expect(text).not.toContain(await ensureLocalAdminToken());
 
@@ -523,7 +521,8 @@ describe("supertag init", () => {
       permissions: [],
     });
     expect(printed()).toContain("Opening pull requests also needs a GitHub surface");
-    expect(printed()).toContain("--owner builder --workspace site --outcome");
+    expect(printed()).toContain("Select builder, type");
+    expect(printed()).toContain('supertag message tag builder "');
 
     // Exit changes nothing.
     const before = await readFile(join(context.state, "supertag.yaml"), "utf8");

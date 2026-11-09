@@ -46,8 +46,7 @@ through the API, then brings up the host service and binds it to `lead`. Nothing
 the repository; all state lives in `~/.supertag/` (or `SUPERTAG_STATE_DIR`).
 At `Harnesses this machine serves`, `init` labels installed harnesses `signed in` or
 `not signed in`. OpenCode says `sign-in not checked (choose a model)` before model selection.
-Installed harnesses start selected even without sign-in, so
-select only signed-in harnesses; otherwise a Task can fail with `Not logged in`. After selection, `init` prints
+The defaults include only harnesses that pass the sign-in check. After selection, `init` prints
 `not signed in (the credential check did not succeed)` for each failed check and its sign-in
 instructions. If none pass, setup stops; sign in and rerun `supertag init`.
 

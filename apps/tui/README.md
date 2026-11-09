@@ -1,9 +1,10 @@
 # supertag-tui
 
-SuperTag's experimental terminal UI, written in Go with Bubble Tea v2, Lip Gloss v2, Bubbles v2
+SuperTag's terminal UI, written in Go with Bubble Tea v2, Lip Gloss v2, Bubbles v2
 and Glamour. The status bar shows which Control Plane it talks to, its Worker Hosts by phase
 (such as `Worker Hosts: 2 ready, 1 unreachable`; revoked hosts are left out), and whether it is
-reachable. The rail on the left has four sections:
+reachable. The conversation opens after the Control Plane returns a Tag. An empty Tag list
+shows setup instructions. The rail on the left has four sections:
 
 - **Tags**, each with its state. The main pane holds your conversation with the selected Tag,
   the `default` one at first: its recent history, then the reply streaming in, and work Sessions

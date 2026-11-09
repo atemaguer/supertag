@@ -11,7 +11,8 @@ The lead delegates a file to the builder, reviews what comes back, posts the res
 
 ## Before you start
 
-Finish the quickstart in a git repository with at least one commit. It creates `lead`, the
+Finish the quickstart and send your first message to `lead` in the terminal UI. From the
+repository, run `supertag` to reopen that conversation. The quickstart creates `lead`, the
 `local-tools` **Permission Set** (allowed file edits and commands), and a **Workspace** named
 after your repository. A Workspace tells SuperTag where repository work belongs; this guide uses
 `app`.
@@ -87,6 +88,8 @@ and share one Workstream.
 
 ## 3. Create the Objective
 
+Use the CLI here to set the Workspace explicitly.
+
 ```sh
 supertag create objective team-greeting --owner lead --team first-team --workspace app \
   --outcome 'Create TEAM-HELLO.md containing exactly: Hello from the team. Have builder write the file; review what it reports. Done when you have checked the delivered file, posted a one-line summary to the Workstream, and sent builder a message saying the file was accepted. Change no other files; do not push.'
@@ -104,6 +107,10 @@ conversation, starts a Session of `builder` for the file, and gets a turn back t
 Session reports. Use new Objective and Team IDs if these already exist.
 
 ## 4. Follow the work
+
+In another terminal, run `supertag` from your repository and select `team-greeting` under
+**Objectives** to follow its Sessions and see what needs your attention. The CLI also shows
+progress and results.
 
 ```sh
 supertag watch objective team-greeting

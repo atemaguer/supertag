@@ -225,7 +225,9 @@ type model struct {
 	follower *client.Follower
 	watcher  *client.Watcher
 
-	tags []*operatorv1.Tag
+	tags        []*operatorv1.Tag
+	tagsChecked bool
+	tagsErr     error
 	// selected is the Tag whose conversation the conversation pane shows.
 	selected int
 	focus    focus
@@ -315,7 +317,6 @@ func newModel(ctx context.Context, c *client.Client, f *client.Follower, w *clie
 	input := textinput.New()
 	input.Prompt = "> "
 	input.Placeholder = conversationPlaceholder
-	input.Focus()
 	cwd, _ := os.Getwd()
 	return model{
 		ctx:            ctx,
@@ -354,7 +355,7 @@ func newModel(ctx context.Context, c *client.Client, f *client.Follower, w *clie
 
 func (m model) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.reloadTags(), m.reloadConversations(), m.reloadObjectives(), m.reloadInbox(), m.reloadTeams(),
-		m.reloadHosts(), m.pollAfter(), m.hostsAfter(), textinput.Blink}
+		m.reloadHosts(), m.pollAfter(), m.hostsAfter()}
 	if m.watcher != nil {
 		cmds = append(cmds, waitForWatch(m.watcher.Run(m.ctx)))
 	}
@@ -510,8 +511,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.tagReload.done() {
 			again = m.tagsCmd()
 		}
+		m.tagsChecked, m.tagsErr = true, msg.err
 		if msg.err != nil {
 			m.fail(msg.err)
+			m.refresh()
 			return m, again
 		}
 		current := m.selectedTag()
@@ -524,7 +527,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.connected, m.status = true, "connected"
 		m.placeCursor()
-		return m, tea.Batch(again, m.selectTag())
+		var focusCmd tea.Cmd
+		if current != m.selectedTag() {
+			focusCmd = m.syncInput()
+		}
+		return m, tea.Batch(again, m.selectTag(), focusCmd)
 
 	case objectivesMsg:
 		var again tea.Cmd
@@ -1067,7 +1074,7 @@ func (m model) inputShown() bool {
 	switch m.pane {
 	case paneConversation:
 		c := m.shown()
-		return c == nil || c.selected == nil
+		return c != nil && c.selected == nil
 	case paneConversations:
 		return m.picker != nil && m.picker.naming
 	case paneInbox:

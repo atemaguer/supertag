@@ -1,18 +1,44 @@
-# Talk to a Tag from the CLI
+# Talk to a Tag from your terminal
 
 Send a **Tag** a message from your terminal and get its reply, without Slack or another
 collaboration surface. A Tag is a persistent AI identity with its own responsibilities and
-permissions. Each named conversation is its own **Session**, a group of Tasks from one
-conversation, so follow-ups continue where you left off.
+permissions. Each named conversation is its own **Session**, a thread of work. A **Task** is one
+turn in that thread, so follow-ups continue where you left off.
 
 Use this for questions and small requests. To give a Tag an outcome to own, create an
 [Objective](objectives.md).
 
-## Before you start
+## Open a conversation
 
-- A running Control Plane with a Tag, and a Worker Host bound to it. `supertag init` sets these
-  up; see [install SuperTag](../operations/install.md).
-- The `supertag` CLI connected to that Control Plane as an operator.
+Follow the [quickstart](../../README.md#get-started) to install SuperTag and run `supertag init`
+in a git repository. Setup creates a local [Control Plane](../concepts/how-it-works.md) and
+connects your machine as a [Worker Host](../concepts/workers.md) for the Tag.
+
+In the same repository, run `supertag`. Select `lead`, type “Read this repository and tell me what
+you would improve first,” and press Enter. The reply appears in the conversation. To check a
+delivered branch, ask for a small edit and wait for the Tag's work Session to report.
+
+If there is no local setup or the Control Plane has no Tags, SuperTag shows how to get started
+with `supertag init`. For a shared Control Plane, ask its operator to set up a Tag.
+
+| Key | Action |
+| --- | --- |
+| Ctrl-K | Open the command palette. |
+| Ctrl-O | Open the selected Tag's conversations. |
+| Ctrl-P | Switch Control Planes when more than one is available. |
+| ↑ on empty input | Select a work Session. Enter expands it. |
+| `d` on a work Session or branch | Show the diff from this checkout. |
+| `o` on a work Session or branch | Open its pull request when one exists. |
+
+To give `lead` an **Objective**, an outcome it owns, choose **Create Objective** from the
+command palette. Enter an outcome and how to verify it. Leave Team empty for `lead` to work
+alone. Enter a budget such as `10 USD` or leave it empty. Press Enter on the budget field to
+create the Objective, then Enter again to open its progress view.
+
+## Send messages from scripts
+
+Use `supertag message tag` for scripts or a CLI-only installation. You can also
+[run SuperTag from a coding agent](coding-agent-operator.md).
 
 ## 1. Send a message
 

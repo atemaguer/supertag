@@ -109,7 +109,7 @@ notices, and completion. The work itself runs in the Sessions started beneath it
 tool output stay out of the thread.
 
 You can also talk to a Tag from a terminal with `supertag message tag`. See
-[Talk to a Tag from the CLI](../guides/talk-to-a-tag.md).
+[Talk to a Tag from your terminal](../guides/talk-to-a-tag.md).
 
 ### A Tag's inbox
 

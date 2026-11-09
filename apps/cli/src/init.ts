@@ -384,13 +384,13 @@ async function wizard(
   if (!answers.repository.hasCommits)
     write("This repository has no commits yet. Commit once before creating an Objective.\n");
   write(`
-SuperTag is ready. Talk to ${answers.tag}:
+SuperTag is ready. Run this in your terminal to open the UI.
+  supertag
+Select ${answers.tag}, type "Read this repository and tell me what you would improve first.",
+and press Enter. Use Ctrl-K and choose Create Objective to give ${answers.tag} an outcome to own.
+
+Send the same message from a script or a CLI-only installation.
   supertag message tag ${answers.tag} "Read this repository and tell me what you would improve first."
-It answers here. Ask it for a change and it works in a Session of its own, asks when a
-decision is yours, and brings back a branch to review. Your next message continues the
-conversation; --session NAME starts another.
-To hand it an outcome with a budget and a deadline, create an Objective:
-  supertag create objective --owner ${answers.tag} --workspace ${answers.workspace} --outcome "Search returns results in under 200 ms. Done when the benchmark passes."
 
 ${yamlPath} runs two services in the background: ${controlPlaneService} (the Control Plane)
 and ${hostService} (this machine as a Worker Host).
@@ -1008,8 +1008,8 @@ init then writes ~/.supertag/supertag.yaml (or $SUPERTAG_STATE_DIR/supertag.yaml
 services: control-plane, and a host service named after this machine. It brings up the Control
 Plane with supertag up, creates the Workspace, Permission Set local-tools, Role Lead, and the Tag
 through its API, brings up the host service, which joins with its own credential, binds it to
-the Tag, checks that each harness Worker registered, and prints the command for your first
-Objective. It writes nothing in the repository.
+the Tag, and checks that each harness Worker registered. Run supertag in your terminal to talk
+to the lead Tag, or use supertag message tag from a script. init writes nothing in the repository.
 
 Rerunning shows the current setup. In another repository, init offers to add it as another
 Workspace of the same host service; it never starts a second Control Plane. Existing resources

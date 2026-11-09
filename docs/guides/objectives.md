@@ -14,7 +14,7 @@ Sessions of other Tags in its Team.
 
 Use this guide to record an outcome, give the owner a Team to delegate to, and close the Objective
 with an explicit assessment. Ordinary questions and small requests do not need an Objective; see
-[Talk to a Tag from the CLI](talk-to-a-tag.md).
+[Talk to a Tag from your terminal](talk-to-a-tag.md).
 
 ## Before you start
 
@@ -46,8 +46,7 @@ the first is optional:
 > \<what you tried and what would unlock it\>.
 
 The owner follows a "Between steps" sentence when it chooses each next action, and an "If blocked"
-sentence when it stops. `supertag init` suggests this template for your first Objective. See
-[Write an Objective](write-an-objective.md) for worked examples.
+sentence when it stops. See [Write an Objective](write-an-objective.md) for worked examples.
 
 Which actions the Objective's work may take, and which need a person, come from **Permission
 Sets** (lists of allowed actions) and approvals, not the statement.

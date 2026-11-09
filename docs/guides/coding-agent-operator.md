@@ -14,8 +14,9 @@ actors.
 
 ## Set up the operator skill
 
-First follow [Install SuperTag](../operations/install.md) to install the CLI from npm.
-Use the same guide's requirements for your runtime and signed-in coding agent.
+Follow the [quickstart](../../README.md#get-started) to install SuperTag, run `supertag init`,
+and get a reply from `lead`. Use the same checkout when you ask your coding agent to direct
+SuperTag. The terminal UI and your coding agent use the same local services.
 The operator skill is a separate text file; download it from the SuperTag repository:
 
 ```sh
@@ -25,18 +26,10 @@ curl --fail --location \
   --output ~/.local/share/supertag-operator/SKILL.md
 ```
 
-In the repository you want the team to change:
-
-```sh
-cd ~/code/app
-supertag init
-supertag ps
-```
-
-`init` creates the local setup and starts its services. Tags work in Teams: flat lists of member Tags. Together,
+Tags work in Teams, flat lists of member Tags. Together,
 your Teams of Tags make up an **autonomous organization**: Teams may pursue different Objectives but
 share one Control Plane, its rules, and its record of the work. The **Control Plane** stores the
-organization and schedules work. A **Worker Host** provides execution capacity. Check that `ps`
+organization and schedules work. A **Worker Host** provides execution capacity. Check that `supertag ps`
 shows the host connected. Note the lead Tag and **Workspace** names printed during setup; a
 Workspace identifies the repository where the team works. The example below uses `lead` and `app`.
 Do not start a second Control Plane.

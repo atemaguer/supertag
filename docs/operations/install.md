@@ -18,20 +18,20 @@ npm's global prefix. It needs Node.js 22.13.0 or newer and npm, and works on mac
 
 ```sh
 curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
 supertag --version
 ```
 
 It installs SuperTag under `~/.local/share/supertag`, with the `supertag` command in
 `~/.local/bin`, and removes the Claude Code and Codex CLI copies that the vendor SDKs bundle,
-since SuperTag runs the CLIs you install. Add `~/.local/bin` to your `PATH` if it isn't already.
+since SuperTag runs the CLIs you install. Add the `export` line to your shell startup file to use
+the command in new terminals.
 
-The script also installs the experimental terminal UI on macOS and Linux, on arm64 and amd64. It
-downloads the release's `supertag-tui` binary with curl or wget and checks it against the
-release's `SHA256SUMS`. Run `supertag` with no arguments in a terminal to open it. Its Ctrl-K
-opens a command palette, and Ctrl-P switches between this machine's Control Plane and the ones
-saved with `supertag connect control-plane`. If the
-download or the check fails, the script installs the CLI anyway and prints one line saying why
-the terminal UI was not installed. Run the script again to add it.
+The script also installs the terminal UI on macOS and Linux, on arm64 and amd64. It checks the
+downloaded binary against the release's `SHA256SUMS`. The macOS binary has no Developer ID
+signature or notarization.
+If the download or checksum fails, the script installs the CLI and explains why it skipped the
+terminal UI. Run the script again to add it.
 To choose the locations or a version, set these before `sh`:
 
 | Variable | Default |
@@ -145,7 +145,8 @@ documentation site.
 
 ## If something goes wrong
 
-- **`supertag` is not found.** Run `npm prefix --global` and add its `bin` directory to your `PATH`.
+- **`supertag` is not found.** After a curl install, add `~/.local/bin` to your `PATH`. After a global
+  npm install, run `npm prefix --global` and add that prefix's `bin` directory to your `PATH`.
 - **Plain `supertag` prints help instead of the terminal UI.** The terminal UI is not installed.
   Run the installer script again on macOS or Linux; it prints why if it still cannot install it.
 - **`supertag` says the terminal UI and the CLI versions must match.** Run the installer script
@@ -157,8 +158,8 @@ documentation site.
 
 ## Run it in a repository
 
-Follow [Get started](../../README.md#get-started) for setup and the first **Objective**, an outcome
-a Tag owns with success criteria. During `supertag init`, enter another number at the `Port` prompt if 3434 is busy. The setup starts a
+Follow [Get started](../../README.md#get-started) to set up a repository and get a reply from your
+first Tag. During `supertag init`, enter another number at the `Port` prompt if 3434 is busy. The setup starts a
 local Control Plane and a host service; `supertag ps` lists both, `supertag logs -f` follows
 their logs, `supertag down` stops them, and `supertag up` starts them again.
 [Start in a repository](cli.md#start-in-a-repository) explains what `init` sets up.

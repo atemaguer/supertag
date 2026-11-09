@@ -24,9 +24,12 @@
 
 ```sh
 curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
 cd your-repo && supertag init
-supertag message tag lead "Read this repository and tell me what you would improve first."
+supertag
 ```
+
+Select `lead` and ask it what it would improve first in your repository.
 
 <sub>macOS or Linux with <a href="docs/operations/requirements.md">Node.js</a> and Claude Code, Codex, Cursor, or OpenCode.</sub>
 
@@ -84,7 +87,7 @@ the evidence. Your next message continues the same conversation.
 
 | | Step | What happens |
 | --- | --- | --- |
-| **01** | **Talk to a Tag** | `supertag message tag lead "..."`, or mention it in Slack or on a GitHub issue. A question gets an answer; work gets a **Session** of its own, reported back in the same conversation. [Talk to a Tag](docs/guides/talk-to-a-tag.md) |
+| **01** | **Talk to a Tag** | Open `supertag`, or mention the Tag in Slack or on a GitHub issue. A question gets an answer. Longer work gets a **Session**, a separate thread of work that reports back to the conversation. [Talk to a Tag](docs/guides/talk-to-a-tag.md) |
 | **02** | **Give it an outcome** | For bigger work, an **Objective**: done-when evidence, constraints, a budget, a deadline, and the approvals you keep. The Tag plans the work and starts Sessions for it, including Sessions of other Tags on its **Team**. [Write an Objective](docs/guides/write-an-objective.md) |
 | **03** | **Review the branch** | Each Session's work arrives as its own branch, such as `supertag/session/9f1c0b2e`. Merge it, or send it back with a message. |
 
@@ -190,9 +193,10 @@ SuperTag is not:
 ## Get started
 
 SuperTag has two parts. The **Control Plane** stores your Tags, Teams, and Objectives and schedules
-their work. A **Worker Host** is a machine or sandbox that runs that work, where a **Worker**
-completes each Task, usually through a coding harness. On your laptop, `supertag init` sets up
-both. Check the [requirements](docs/operations/requirements.md) for supported systems and tools.
+their work. A **Worker Host** is a machine or sandbox that supplies execution capacity. A **Worker**
+completes each **Task**, one turn of a Session, usually through a coding harness. On your laptop,
+`supertag init` sets up both. Check the [requirements](docs/operations/requirements.md) for
+supported systems and tools.
 
 ### 1. Install SuperTag
 
@@ -200,13 +204,13 @@ You need [Node.js and npm](docs/operations/requirements.md#system-and-tools) on 
 
 ```sh
 curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
 supertag --version
 ```
 
-It installs SuperTag in `~/.local/share/supertag` and links `supertag` into `~/.local/bin`; add
-that directory to your `PATH` if it isn't already. It also installs the experimental terminal UI,
-which plain `supertag` opens in a terminal. Or run `npm install -g supertag-ai`, which leaves the
-terminal UI out. See [installation and version matching](docs/operations/install.md).
+The script installs the CLI and terminal UI. It puts the `supertag` command in `~/.local/bin`.
+Add the `export` line to your shell startup file to use the command in new terminals.
+See [installation options](docs/operations/install.md).
 
 ### 2. Set up your repository
 
@@ -238,8 +242,8 @@ local Control Plane and connects your machine as a Worker Host. Settings live in
 
 At `Harnesses this machine serves`, `init` labels each installed harness `signed in` or
 `not signed in`. OpenCode says `sign-in not checked (choose a model)` until you select its
-model. Installed harnesses start selected even when one is not signed in, so deselect any
-that is not, or a Task on it can fail with `Not logged in`. For Codex file-backed sign-in, `signed in` only means a credential is present and
+model. The defaults include only harnesses that pass the sign-in check. For Codex file-backed
+sign-in, `signed in` only means a credential is present and
 readable; it cannot confirm account access. Run Codex once to confirm access. Before finishing
 setup, `init` prints
 `not signed in (the credential check did not succeed)` for any failed check and gives its
@@ -250,67 +254,25 @@ and run `supertag init` again.
 
 ### 3. Talk to your Tag
 
-Ask `lead` for a small change you can check in any repository:
+Open the terminal UI from the same repository.
 
 ```sh
-supertag message tag lead 'Create SUPERTAG-HELLO.md containing exactly: Hello from SuperTag. Change no other files, and tell me the branch.'
+supertag
 ```
 
-The Tag answers in your terminal, starts a work Session, and stays until it reports, as in
-[the run above](#see-it-work). It names the branch its work Session committed to.
+Select `lead`, type “Read this repository and tell me what you would improve first,” and press
+Enter. The reply appears in the conversation. Follow up there, or open the
+[terminal guide](docs/guides/talk-to-a-tag.md) to review a branch or create an Objective.
 
-A **Task** is one turn of a Session. Ctrl-C stops following, not the work; your next message sees
-the report. If the first line says `· waiting:` and a reason, no Worker Host can run the turn yet:
-see [troubleshooting](docs/guides/troubleshooting.md#a-harness-is-not-signed-in).
-
-### 4. Review the branch
-
-Each work Session works in its own git worktree, so your checkout stays where it was. From inside
-the repository, use the branch the Tag named:
+Use this command for scripts or a CLI-only installation.
 
 ```sh
-git diff main...supertag/session/4b8e2a1c
-git show supertag/session/4b8e2a1c:SUPERTAG-HELLO.md
+supertag message tag lead 'Read this repository and tell me what you would improve first.'
 ```
 
-The file should contain `Hello from SuperTag.`. Replace `main` if your base branch differs.
-`supertag list session` shows the conversation and the work Session it started. See
-[Workspace delivery](docs/guides/workspaces.md) for patches and pull requests.
+You can also [run SuperTag from your coding agent](docs/guides/coding-agent-operator.md).
 
-### 5. Hand it an outcome
-
-```sh
-supertag create objective first-outcome --owner lead --workspace app \
-  --budget-minor 1000 --budget-currency USD \
-  --outcome 'SUPERTAG-HELLO.md also says which harness wrote it. Done when the file has both lines and you have checked them. Change no other files.'
-supertag watch objective first-outcome
-supertag describe objective first-outcome
-```
-
-`watch` prints progress until the Objective completes; Ctrl-C stops watching, not the work.
-`describe` begins like this while it runs:
-
-```text
-Objective first-outcome: working
-Outcome: SUPERTAG-HELLO.md also says which harness wrote it. Done when the file has both lines and you have checked them. Change no other files.
-Owner: lead
-Runnable: yes
-Budget: $0.00 of $10.00 spent
-
-Delivered:
-  Nothing yet.
-
-Needs you:
-  Nothing right now.
-```
-
-When it completes, a `Result:` line appears and **Delivered** lists the branch with commands to
-review and check it out. If **Needs you** shows a question, answer it with
-`supertag message objective first-outcome 'YOUR ANSWER'`. If the Objective is blocked, two of its
-turns ended with nothing running and nothing asked; reply the same way with your direction. If a
-Task fails or stays queued, see [first-reply troubleshooting](docs/guides/troubleshooting.md).
-
-### Next: add a teammate
+### Next: run your first Team
 
 [Add a builder and run your first Team](docs/guides/first-team.md). The lead will start a Session
 of another Tag and read what it reports. To start with a whole team instead, apply one of the

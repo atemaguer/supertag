@@ -193,12 +193,50 @@ func TestErrorsShowInTheStatusBar(t *testing.T) {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("The token is not valid"))
 	}}
 	m := start(t, testModel(t, fake))
-	if m.connected || !strings.Contains(screen(m), "The token is not valid") {
+	if m.connected || !strings.Contains(screen(m), "The token is not valid") ||
+		!strings.Contains(screen(m), "Could not check for Tags") || m.inputShown() {
 		t.Fatalf("status = %q:\n%s", m.status, screen(m))
 	}
 	m = update(t, m, tagsMsg{tags: nil, err: errors.New("dial tcp: connection refused")})
 	if !strings.Contains(screen(m), "connection refused") {
 		t.Fatalf("screen:\n%s", screen(m))
+	}
+}
+
+func TestShowsSetupUntilATagExists(t *testing.T) {
+	fake := &fakeControlPlane{tags: tags()}
+	m := testModel(t, fake)
+	if got := screen(m); !strings.Contains(got, "Checking for Tags") ||
+		strings.Contains(got, conversationPlaceholder) || m.input.Focused() {
+		t.Fatalf("screen before the Tag list loads:\n%s", got)
+	}
+
+	m = start(t, m)
+	if got := screen(m); !strings.Contains(got, "Set up SuperTag") ||
+		!strings.Contains(got, "supertag init") || strings.Contains(got, conversationPlaceholder) {
+		t.Fatalf("screen without any Tags:\n%s", got)
+	}
+	m = update(t, m, tea.PasteMsg{Content: "Text entered before setup"})
+	if m.input.Focused() || m.input.Value() != "" || m.inputShown() {
+		t.Fatal("the conversation input must be unavailable until a Tag exists")
+	}
+
+	fake.tags = tags("lead")
+	m = run(t, m, m.reloadTags())
+	if got := screen(m); !strings.Contains(got, "lead · default") ||
+		!strings.Contains(got, conversationPlaceholder) || !m.input.Focused() {
+		t.Fatalf("screen after a Tag becomes available:\n%s", got)
+	}
+
+	fake.tags = tags()
+	m = run(t, m, m.reloadTags())
+	if got := screen(m); !strings.Contains(got, "supertag init") || m.inputShown() || m.input.Focused() {
+		t.Fatalf("screen after the last Tag leaves:\n%s", got)
+	}
+	m = update(t, m, sentMsg{tag: "lead", conversation: "default", err: errors.New("Tag no longer exists")})
+	m = update(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	if got := screen(m); !strings.Contains(got, "Set up SuperTag") || !strings.Contains(got, "supertag init") {
+		t.Fatalf("a late send error replaced setup guidance:\n%s", got)
 	}
 }
 
