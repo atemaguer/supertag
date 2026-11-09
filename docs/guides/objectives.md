@@ -11,8 +11,8 @@ An Objective is a conversation with a goal. You can direct it from the terminal 
 thread. Its owner Tag asks you a question when it needs a decision. Work happens in Sessions
 started beneath it, including Sessions of other Tags in its Team.
 
-Use this guide to record an outcome, give the owner a Team to delegate to, and close the Objective
-with an explicit assessment. Ordinary questions and small requests do not need an Objective; see
+Use this guide to record an outcome, follow the owner's work, and close the Objective with an
+explicit assessment. Ordinary questions and small requests do not need an Objective. See
 [Talk to a Tag from your terminal](talk-to-a-tag.md).
 
 ## Before you start
@@ -66,7 +66,6 @@ See [monetary budgets](../reference/coordination.md#the-budget-pool) and
 supertag create objective usage-billing \
   --outcome "Customers are billed for metered usage. Done when the billing reconciliation suite passes and a billing review accepts the change. Keep the public API unchanged." \
   --owner lead \
-  --team metering \
   --deadline 2027-03-31T23:00:00Z \
   --budget-minor 200000 \
   --budget-currency USD
@@ -84,9 +83,8 @@ conversation. Running the same command again never starts a second turn. The ID 
 without one, SuperTag makes one from the first words of the outcome plus a short suffix, such as
 `customers-are-billed-7f3k`.
 
-`--team` names the Team whose members the owner may hand work to. Create it first with
-`supertag create team`; see [Organize Tags into Teams](teams.md). Without a Team the owner works
-alone, in Sessions of its own Tag.
+In this example, the owner starts its own work Sessions. To let it hand work to other Tags,
+create a Team and name it with `--team`. See [Organize Tags into Teams](teams.md).
 
 Read it back, and filter the list by owner:
 
@@ -197,8 +195,8 @@ each one's latest turn:
 ```text
 Work: 3 Sessions
   waiting    lead     Objective conversation            (Task 3a7d1f92-5c08-4b21-ae6f-1d94c2b70e35)
-  completed  backend  Meter API calls per customer      (Task 2f1c…)
-  running    backend  Add the usage tables              (Task 9ab3…)
+  completed  lead     Meter API calls per customer      (Task 2f1c…)
+  running    lead     Add the usage tables              (Task 9ab3…)
 ```
 
 See [Check an Objective's progress](objective-overview.md) for the whole view.

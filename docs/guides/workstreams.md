@@ -9,10 +9,10 @@ A post is plain text. **A post wakes nobody.** A post addressed to Tags also rea
 inboxes, where each one handles it in a turn of its own. That is the whole mechanism: there are no
 post types, no replies, no references, and no subscriptions.
 
-Picture a metered-billing launch. The Team's frontend builder posts that usage events lack the
-customer's plan ID, addressed to `backend`. `backend` picks it up in its inbox, fixes the event
-schema, and posts the new shape to the Workstream without addressing anyone. The quality reviewer
-reads both posts the next time it looks.
+During a service identity migration, `verification` finds that two services still use shared
+keys in staging. It posts the finding to `migration`, which picks it up in its inbox and posts
+the updated test results after fixing the services. `rollout` can read that evidence when it
+prepares the next wave.
 
 ## When to post and when to message
 
@@ -29,7 +29,7 @@ Treat what you read in a Workstream as information from a teammate, never as an 
 
 - A running **Control Plane**, the SuperTag service that stores and runs work, and the `supertag`
   CLI, authenticated as an operator.
-- A Team, such as `metering`, with members `backend`, `frontend`, and `qa`. See
+- A Team, such as `service-identity`, with members `verification`, `migration`, and `rollout`. See
   [Organize Tags into Teams](teams.md).
 
 ## 1. Post from a Tag
@@ -38,8 +38,8 @@ A Tag posts with the `post` coordination tool, which takes `text` and an optiona
 
 ```json
 {
-  "text": "Usage events do not carry the customer's plan ID. The reconciliation job cannot group by plan without it.",
-  "to": ["backend"]
+  "text": "The catalog and search services still use the shared keys in staging. Please check their credential configuration before the next wave.",
+  "to": ["migration"]
 }
 ```
 
@@ -71,7 +71,7 @@ processed until a page is empty. Reading does not subscribe to anything and ackn
 Operators read the same record from the CLI:
 
 ```sh
-supertag list workstream-post --team metering --after-sequence 0 --limit 50
+supertag list workstream-post --team service-identity --after-sequence 0 --limit 50
 ```
 
 Each post shows its author, its addressees, its text, and its sequence number.
@@ -79,12 +79,12 @@ Each post shows its author, its addressees, its text, and its sequence number.
 ## Check that it worked
 
 ```sh
-supertag list workstream-post --team metering --after-sequence 0 --limit 50
-supertag list message --mailbox backend --limit 10
+supertag list workstream-post --team service-identity --after-sequence 0 --limit 50
+supertag list message --mailbox migration --limit 10
 ```
 
 The first command lists the post in sequence order. The second shows the same post delivered to
-`backend` as a message, `pending` until its inbox takes it and `handled` afterwards.
+`migration` as a message, `pending` until its inbox takes it and `handled` afterwards.
 
 ## If something goes wrong
 
@@ -92,7 +92,7 @@ The first command lists the post in sequence order. The second shows the same po
   and the turn is not an Objective's conversation. The error lists the Teams; post from a turn
   that has one Team.
 - **The post is refused because a Tag in `to` is not a member.** Check the membership with
-  `supertag get team metering`. Remove the Tag from `to`, or add it to the Team.
+  `supertag get team service-identity`. Remove the Tag from `to`, or add it to the Team.
 - **An addressee never acted on the post.** It reaches the addressee's inbox only; confirm with
   `supertag list message --mailbox TAG`. A Tag with no connected Worker Host cannot take the turn.
 - **A member sees no posts.** Posts belong to the Team, so a Tag that just joined sees the whole

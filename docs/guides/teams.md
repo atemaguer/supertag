@@ -26,14 +26,21 @@ no permissions. Local subagents that an agent system creates inside one executio
 
 ## 1. Create a Team
 
+This example moves 12 production services from shared API keys to short-lived credentials
+issued to each service. Configure each member's access separately. Give `identity` access to
+the trust policy repository and `migration` access to the service repositories. Give
+`verification` read-only access to test results and telemetry, and `rollout` access to the
+staging tools it uses to rehearse cutovers and rollbacks.
+
 ```sh
-supertag create team metering --member backend --member frontend --member qa
+supertag create team service-identity --member lead --member identity --member migration \
+  --member verification --member rollout
 supertag list team
-supertag get team metering
+supertag get team service-identity
 ```
 
 ```text
-team/metering created.
+team/service-identity created.
 ```
 
 A Team has a name, its members, and an optional concurrency limit. There is no lead, no hierarchy,
@@ -44,7 +51,8 @@ and no Objective of its own: several Objectives can name the same Team.
 `--member` replaces the whole member list, so pass every member you want to keep:
 
 ```sh
-supertag update team metering --member backend --member frontend --member qa --member docs
+supertag update team service-identity --member lead --member identity --member migration \
+  --member verification --member rollout --member observability
 ```
 
 The CLI reads the Team's current revision for you and retries once after an unrelated change.
@@ -54,14 +62,17 @@ without a change, when the Team already has the values you set.
 ## 3. Name the Team on an Objective
 
 ```sh
-supertag create objective usage-billing --owner lead --team metering \
-  --outcome "Customers are billed for metered usage. Done when the billing reconciliation suite passes."
+supertag create objective service-identity-migration --owner lead --team service-identity \
+  --outcome "Move 12 production services to short-lived credentials issued to each service. Keep requests working through each rollout wave. Done when service checks pass and the old keys are retired. Ask me to approve each production cutover and retirement of the shared keys."
 ```
 
-The owner may now start a Session of `backend`, `frontend`, `qa`, or `docs` to do part of the
-work. That Tag runs under its own Roles, narrowed to the Objective's runtime actions, and draws on
-the Objective's budget. A Tag that is inactive or has no bound Worker Host is refused, because its
-work could never run.
+`lead` owns the Objective and starts work Sessions with the other Tags for each wave. Each
+Tag runs under its own Roles, narrowed to the Objective's runtime actions, and draws on the
+Objective's budget. A Tag must be active and bound to a Worker Host to take delegated work.
+The operator approves production cutovers and retirement of the shared keys.
+
+A **Workspace** tells SuperTag where repository work belongs. Add `--workspace NAME` for each
+Workspace the Objective needs.
 
 An Objective manifest can declare the Team instead of naming an existing one:
 
@@ -69,13 +80,17 @@ An Objective manifest can declare the Team instead of naming an existing one:
 apiVersion: supertag/v1
 kind: Objective
 metadata:
-  name: usage-billing
+  name: service-identity-migration
 spec:
   owner: lead
-  outcome: Customers are billed for metered usage. Done when the reconciliation suite passes.
+  outcome: >-
+    Move 12 production services to short-lived credentials issued to each service.
+    Keep requests working through each rollout wave.
+    Done when service checks pass and the old keys are retired.
+    Ask me to approve each production cutover and retirement of the shared keys.
   team:
-    name: Metering
-    members: [backend, frontend, qa]
+    name: Service identity
+    members: [lead, identity, migration, verification, rollout]
     maxConcurrency: 2
 ```
 
@@ -87,13 +102,13 @@ Team. Which Team an Objective names is fixed once it exists; a declared Team's n
 ## 4. Delete the Team
 
 ```sh
-supertag delete team metering
+supertag delete team service-identity
 ```
 
 Deletion is refused while an open Objective names the Team. Cancel or complete those Objectives
 first.
 
-**Check:** `supertag list team` no longer lists `metering`.
+Verify the deletion with `supertag list team`.
 
 ## Throttle a Team on purpose
 
@@ -102,7 +117,7 @@ a free slot. Set a limit only when you want fewer turns running at once, for exa
 rate-limited service:
 
 ```sh
-supertag update team metering --max-concurrency 2
+supertag update team service-identity --max-concurrency 2
 ```
 
 The limit counts turns across every open Objective that names the Team; later turns wait, and a
@@ -110,12 +125,11 @@ waiting turn holds no slot. Remove it again with an empty value, so Worker Host 
 only limit:
 
 ```sh
-supertag update team metering --max-concurrency ""
+supertag update team service-identity --max-concurrency ""
 ```
 
-**Check:** `supertag describe objective usage-billing` shows
-`Team Metering: at most 2 turns at once across its Objectives`, or
-`turns limited only by Worker Host capacity` without a limit.
+Use `supertag describe objective service-identity-migration` to see the Team's limit or confirm
+that only Worker Host capacity limits the number of turns.
 
 ## Messaging inside and outside the Team
 
@@ -124,8 +138,8 @@ arrives in the recipient's inbox and it handles it in a turn of its own. To let 
 messages from a Tag outside its Teams, grant the route explicitly:
 
 ```sh
-supertag grant mailbox backend --sender support
-supertag list mailbox-grant --mailbox backend
+supertag grant mailbox rollout --sender on-call
+supertag list mailbox-grant --mailbox rollout
 ```
 
 A grant says only "this recipient accepts messages from this sender". It is directional, and it

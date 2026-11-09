@@ -156,14 +156,11 @@ Cursor, and OpenCode.
 
 ## From one laptop to your whole team
 
-Start on your laptop. When your team joins, everyone shares one organization:
+Start on your laptop. When your team joins, everyone can use one hosted **Control Plane**, the
+service that stores the organization and schedules work. The machines that run the work connect
+as **Worker Hosts**.
 
-```text
-                    Control Plane (hosted) ◀── Slack, GitHub, Linear
-                     │          │          │
-               your laptop  their laptop  CI runner or cloud machine
-               (Claude Code)  (Codex)     (always on)
-```
+![Slack, GitHub, and Linear connect to one hosted Control Plane. Its Worker Hosts include laptops running Claude Code and Codex, and a CI runner or cloud machine.](assets/images/supertag-shared-control-plane.png)
 
 | | |
 | --- | --- |
@@ -273,9 +270,23 @@ For automation, see the [operator API](docs/reference/control-plane-api.md) or
 
 ### Next: run your first Team
 
-When you want a builder or reviewer with a role and permissions of its own, add another Tag
-to a Team. The owner can start work Sessions for that Tag and review what it reports.
-[Add a builder and run your first Team](docs/guides/first-team.md).
+Say you need to move 12 production services from shared API keys to short-lived credentials
+issued to each service. Keep requests working throughout the migration.
+
+| Tag | Responsibility and access |
+| --- | --- |
+| `lead` | Owns the Objective and sequences the rollout waves. |
+| `identity` | Updates trust policy in the identity repository. |
+| `migration` | Updates the service repositories to use the new credentials. |
+| `verification` | Has read-only access to test results and telemetry. Checks each wave against its error and latency limits. |
+| `rollout` | Uses configured staging tools to rehearse each cutover and rollback. |
+
+Configure each Tag's access separately. `lead` starts work Sessions with the other Tags and
+records their test and rehearsal results in the Team's Workstream. You use that evidence to
+approve each production cutover and decide when to retire the shared keys. The same Tags keep
+their responsibilities for future migrations.
+
+[Add a builder and run your first Team](docs/guides/first-team.md) for a small, runnable exercise.
 
 To start with a configured Team, apply one of the
 [example organizations](examples/organizations/README.md).
