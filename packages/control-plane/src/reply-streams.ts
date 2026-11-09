@@ -20,6 +20,12 @@ const FINISHED_TTL_SECONDS = 60;
 const IDLE_STREAM_MS = 60 * 60_000;
 const SWEEP_INTERVAL_MS = 60_000;
 
+/** One part of a Task's live reply in the AI SDK UI message stream vocabulary, numbered from 1. */
+export interface ReplyStreamPart {
+  readonly frame: number;
+  readonly part: Readonly<Record<string, unknown>> & { readonly type: string };
+}
+
 /** The final reply a finished Task recorded, as a stream's finish part carries it. */
 export interface StreamedReply {
   readonly presentation: string;
@@ -47,8 +53,8 @@ interface OpenStream {
 }
 
 /**
- * Live replies of conversation Tasks, one resumable stream per Task. Each chunk is one Server-Sent
- * Event carrying an AI SDK UI message stream part, numbered with an `id` so a reader resumes after
+ * Live replies of conversation Tasks, one resumable stream per Task. Each chunk is one line of
+ * JSON carrying an AI SDK UI message stream part and its frame number, so a reader resumes after
  * the last part it saw. The producer drains inside the Control Plane, so a stream completes with
  * no reader; a finished stream is forgotten quickly and readers use the stored reply instead.
  */
@@ -160,7 +166,7 @@ export class ReplyStreams {
   async read(
     taskId: string,
     after: number | "now" = 0,
-  ): Promise<ReadableStream<string> | undefined> {
+  ): Promise<ReadableStream<ReplyStreamPart> | undefined> {
     const stream = this.#streams.get(taskId);
     if (!stream) return undefined;
     // Text already received counts as sent before now.
@@ -169,7 +175,7 @@ export class ReplyStreams {
     await stream.ready;
     const live = await this.#context.resumeExistingStream(taskId).catch(() => undefined);
     if (!live) return undefined;
-    return skip > 0 ? live.pipeThrough(skipFrames(skip)) : live;
+    return live.pipeThrough(framesAfter(skip));
   }
 
   /** Ends every running stream without a finish, as the Control Plane stops. */
@@ -212,7 +218,7 @@ export class ReplyStreams {
    */
   #write(stream: OpenStream, part: Record<string, unknown>, essential = false): boolean {
     if (!essential && stream.truncated) return false;
-    const frame = `id: ${stream.frames + 1}\ndata: ${JSON.stringify(part)}\n\n`;
+    const frame = `${JSON.stringify({ frame: stream.frames + 1, part })}\n`;
     if (!essential && stream.characters + frame.length > MAX_STREAM_CHARACTERS) {
       stream.truncated = true;
       return false;
@@ -228,7 +234,6 @@ export class ReplyStreams {
     clearTimeout(stream.pendingTimer);
     stream.pendingTimer = undefined;
     this.#streams.delete(taskId);
-    stream.controller.enqueue("data: [DONE]\n\n");
     stream.controller.close();
   }
 }
@@ -263,17 +268,16 @@ function activityPart(event: TaskAttemptEvent): Record<string, unknown> | undefi
   return undefined;
 }
 
-/** Drops the frames a resuming reader already has. Producer chunks hold whole frames. */
-function skipFrames(after: number): TransformStream<string, string> {
+/** Parses the frames after `after`, dropping those a resuming reader already has. */
+function framesAfter(after: number): TransformStream<string, ReplyStreamPart> {
   return new TransformStream({
+    // Producer chunks hold whole lines; a resumed reader's first chunk holds several.
     transform(chunk, controller) {
-      const kept = chunk
-        .split(/(?<=\n\n)/u)
-        .filter(
-          (frame) => Number(/^id: (\d+)\n/u.exec(frame)?.[1] ?? Number.POSITIVE_INFINITY) > after,
-        )
-        .join("");
-      if (kept) controller.enqueue(kept);
+      for (const line of chunk.split("\n")) {
+        if (!line) continue;
+        const frame = JSON.parse(line) as ReplyStreamPart;
+        if (frame.frame > after) controller.enqueue(frame);
+      }
     },
   });
 }

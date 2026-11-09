@@ -194,9 +194,6 @@ describe("the operator RPC access, audit, and error conventions", () => {
     const service = probeService({ audit: "probe.mutate", adminOnly: true });
     const handler = createOperatorRpcHandler(
       {
-        controlPlane: { isAccepting: true, controllerStatuses: [] },
-        surfaceController: { name: "surfaces", status: () => ({ errors: [] }) as never },
-        startedAt: new Date().toISOString(),
         auditTrail: {
           record: async (entry) => {
             recorded.push(entry);
@@ -336,9 +333,6 @@ describe("the operator RPC access, audit, and error conventions", () => {
     expect(() =>
       createOperatorRpcHandler(
         {
-          controlPlane: { isAccepting: true, controllerStatuses: [] },
-          surfaceController: { name: "surfaces", status: () => ({ errors: [] }) as never },
-          startedAt: new Date().toISOString(),
           auditTrail: { record: async () => {} },
           authenticate: async () => undefined,
           accepting: () => true,

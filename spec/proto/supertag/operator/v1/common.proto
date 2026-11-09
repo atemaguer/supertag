@@ -78,6 +78,10 @@ enum ErrorReason {
   ERROR_REASON_RESOURCE_EXHAUSTED = 11;
 }
 
+// What a server stream sends after 15 seconds without another event, so
+// proxies keep an idle connection open. It carries no state.
+message Heartbeat {}
+
 // One request field an error is about.
 message FieldViolation {
   // The field path in the request, such as `spec.roles`.

@@ -228,7 +228,7 @@ it("tells a CLI conversation once why its turn waits, then answers", async () =>
     const conversation = runTagConversationCommand(
       { url: runtime.url, token: "waiting-admin" },
       ["waiter", "Hello"],
-      { intervalMs: 20, timeoutMs: 15_000, write: (text) => output.push(text) },
+      { timeoutMs: 15_000, write: (text) => output.push(text) },
     );
     await vi.waitFor(() => expect(output.join("")).toContain("· waiting:"), { timeout: 10_000 });
     await new Promise((resolve) => setTimeout(resolve, 200));

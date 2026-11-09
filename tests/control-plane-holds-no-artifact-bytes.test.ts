@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { artifactTransferVerificationKey } from "../apps/cli/src/artifact-transfer-key.js";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
+import { conversationClient } from "../apps/cli/src/operator-client.js";
 import {
   DurableLocalWorklet,
   FileArtifactStore,
@@ -226,14 +227,10 @@ async function captureWithoutControlPlaneBytes(advertise: boolean) {
       durableWorklet: durable,
       reconnectIntervalMs: 20,
     });
-    const started = await fetch(`${controlPlaneUrl}/api/v1/tags/${owner.name}/messages`, {
-      method: "POST",
-      headers: { authorization: "Bearer test-admin", "content-type": "application/json" },
-      body: JSON.stringify({ text: "Produce the artifact" }),
-    });
-    const startedText = await started.text();
-    expect(started.status, startedText).toBe(201);
-    const taskId = (JSON.parse(startedText) as { taskId: string }).taskId;
+    const { taskId } = await conversationClient({
+      url: controlPlaneUrl,
+      token: "test-admin",
+    }).sendMessage({ tag: owner.name, text: "Produce the artifact" });
     await expect.poll(() => attempts.length + errors.length, { timeout: 15000 }).toBe(1);
     expect(errors).toEqual([]);
     const [attempt] = attempts;

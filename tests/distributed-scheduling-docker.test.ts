@@ -310,11 +310,11 @@ suite("distributed scheduling across Docker Worker Hosts", () => {
    * one turn at a time. Returns the Task id.
    */
   const start = async (session: string, text: string) => {
-    const record = await api(
-      "POST",
-      `/api/v1/tags/${encodeURIComponent("Scheduler manager")}/messages`,
-      { text, session },
-    );
+    const record = await api("POST", "/supertag.operator.v1.ConversationService/SendMessage", {
+      tag: "Scheduler manager",
+      conversation: session,
+      text,
+    });
     const taskId = String(record["taskId"]);
     taskIds.set(session, taskId);
     return taskId;

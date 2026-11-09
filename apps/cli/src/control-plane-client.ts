@@ -253,15 +253,6 @@ export class ControlPlaneClient {
     return this.#request<T>(pathname, init);
   }
 
-  /** Opens a Server-Sent Events response; it stays open until `signal` aborts or it ends. */
-  stream(pathname: string, signal: AbortSignal): Promise<Response> {
-    return this.#response(pathname, {
-      method: "GET",
-      signal,
-      headers: { accept: "text/event-stream" },
-    });
-  }
-
   async #response(pathname: string, init: RequestInit): Promise<Response> {
     const url = new URL(pathname, `${this.#target.url}/`);
     if (url.origin !== new URL(this.#target.url).origin || url.username || url.password)

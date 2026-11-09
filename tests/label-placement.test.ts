@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
+import { conversationClient } from "../apps/cli/src/operator-client.js";
 import { ControlPlane } from "../packages/control-plane/src/index.js";
 import {
   dispatchedWorkspacePlan,
@@ -665,14 +666,11 @@ it("places Session Tasks only on bound Worker Hosts that carry the Tag's runsOn 
     // Each Tag takes a conversation turn, which the Control Plane must place.
     const taskIds = new Map<string, string>();
     for (const tag of [gpuTag, tpuTag]) {
-      const response = await fetch(`${runtime.url}/api/v1/tags/${tag.name}/messages`, {
-        method: "POST",
-        headers: { Authorization: "Bearer labels-admin", "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "Train the model" }),
-      });
-      const text = await response.text();
-      expect(response.status, text).toBe(201);
-      taskIds.set(tag.name, (JSON.parse(text) as { taskId: string }).taskId);
+      const sent = await conversationClient({
+        url: runtime.url,
+        token: "labels-admin",
+      }).sendMessage({ tag: tag.name, text: "Train the model" });
+      taskIds.set(tag.name, sent.taskId);
     }
     const gpuTaskId = taskIds.get(gpuTag.name) as string;
     const tpuTaskId = taskIds.get(tpuTag.name) as string;

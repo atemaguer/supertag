@@ -169,6 +169,8 @@ import {
   type WorkletDescriptor,
 } from "@supertag/worker-sdk";
 import { BudgetNotifications } from "./budget-notifications.js";
+import { ChangeNotifications } from "./change-notifications.js";
+import { cliConversationKey } from "./conversations.js";
 import {
   DURABLE_RECONNECT_GRACE_MS,
   executeWorkletAttempt,
@@ -210,7 +212,7 @@ import {
   sentNowhere,
 } from "./outbound-presentation.js";
 import { detectOverlapWarnings } from "./overlap-warnings.js";
-import { ReplyStreams } from "./reply-streams.js";
+import { type ReplyStreamPart, ReplyStreams } from "./reply-streams.js";
 import {
   captureInternalRoleContextPlan,
   capturePermissionBundle,
@@ -380,6 +382,11 @@ export interface ControlPlaneDependencies {
    * fails the change.
    */
   readonly audit?: (entry: RecordAuditEntryInput) => unknown;
+  /**
+   * Where change notices for operators' watch streams go. The store given as `store` publishes
+   * them when it was wrapped with `observeStoreChanges`; defaults to notices nothing publishes.
+   */
+  readonly changes?: ChangeNotifications;
 }
 
 export interface ControlPlaneControllerStatus {
@@ -490,8 +497,11 @@ export class ControlPlane {
   #admissionsDrained: (() => void) | undefined;
   #ephemeralSweepTimer: NodeJS.Timeout | undefined;
   readonly #audit: (entry: RecordAuditEntryInput) => unknown;
+  /** Change notices for operators' watch streams. */
+  readonly changes: ChangeNotifications;
 
   constructor(dependencies: ControlPlaneDependencies) {
+    this.changes = dependencies.changes ?? new ChangeNotifications();
     if ((dependencies.worklet === undefined) !== (dependencies.reply === undefined)) {
       throw new Error("Control Plane Worklet and reply handler must be configured together");
     }
@@ -1386,6 +1396,11 @@ export class ControlPlane {
     readonly operatorId: string;
     readonly session: string;
     readonly text: string;
+    /**
+     * A repeat with the same key from the same operator to the same Tag admits nothing and
+     * returns the first message's Task, whatever its text or conversation.
+     */
+    readonly idempotencyKey?: string;
   }): Promise<InboundIngestResult> {
     return this.#admitting(async () => {
       const tag = await this.#store.findTagByName(input.tagName);
@@ -1395,10 +1410,13 @@ export class ControlPlane {
       const account = await this.#cliAccount();
       const route = cliTagRoute(tag, account);
       const eventId = randomUUID();
-      const sessionKey = `cli:${input.operatorId}:${input.session}`;
+      const sessionKey = cliConversationKey(input.operatorId, input.session);
       const event: InboundSurfaceEvent = {
         eventId,
-        logicalEventId: eventId,
+        logicalEventId:
+          input.idempotencyKey === undefined
+            ? eventId
+            : `cli-message:${createHash("sha256").update(`${input.operatorId}\n${tag.id}\n${input.idempotencyKey}`).digest("hex")}`,
         provider: "cli",
         externalAccountId: CLI_EXTERNAL_ACCOUNT_ID,
         kind: "message",
@@ -2337,14 +2355,14 @@ export class ControlPlane {
   }
 
   /**
-   * The live reply of a running conversation Task as Server-Sent Events, after the part numbered
-   * `after` or only parts still to come; undefined when the Task has no running reply stream, so
-   * the caller reads the record.
+   * The live reply of a running conversation Task as AI SDK UI message stream parts, after the
+   * part numbered `after` or only parts still to come; undefined when the Task has no running
+   * reply stream, so the caller reads the record.
    */
   streamTaskReply(
     taskId: string,
     after: number | "now" = 0,
-  ): Promise<ReadableStream<string> | undefined> {
+  ): Promise<ReadableStream<ReplyStreamPart> | undefined> {
     return this.#replyStreams.read(taskId, after);
   }
 
@@ -5291,6 +5309,19 @@ function executionWorkerId(events: readonly WorkerTaskAttemptEvent[]): string | 
 }
 
 export { ArtifactCatalog } from "./artifact-catalog.js";
+export {
+  type ChangeKind,
+  type ChangeNotice,
+  ChangeNotifications,
+  type ChangeResumePoint,
+  type PositionedChangeNotice,
+} from "./change-notifications.js";
+export {
+  CONVERSATION_NAME,
+  cliConversationKey,
+  messageConversation,
+  parseCliConversationKey,
+} from "./conversations.js";
 export { controlPlaneEventLoopLag } from "./event-loop-lag.js";
 
 export { type CoordinationOperatorPrincipal, ObjectiveController } from "./objective-controller.js";
@@ -5310,12 +5341,14 @@ export {
   parseNotificationDestination,
   parseOperatorChannel,
 } from "./operator-channel.js";
+export type { ReplyStreamPart } from "./reply-streams.js";
 export {
   resolveOwnerObjectiveRuntimeActions,
   tagExecutionRange,
   tagRuntimeActions,
 } from "./roles.js";
 export { SessionPersistence } from "./session-persistence.js";
+export { observeStoreChanges } from "./store-changes.js";
 export {
   type TaskAttemptRunningCommand,
   taskAttemptReportedCost,

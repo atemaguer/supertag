@@ -61,6 +61,12 @@ at a time; a route that moves is removed.
 | RPC | Operator action | Returns |
 | --- | --- | --- |
 | `OrganizationService.GetStatus` | `status` | The Control Plane phase and the phase of each controller: Task dispatch, reply delivery, and collaboration surfaces |
+| `ConversationService.SendMessage` | `message_tag` | Sends a message to a Tag |
+| `ConversationService.GetMessage` | `read_conversation` | One message and its reply |
+| `ConversationService.FollowMessage` | `read_conversation` | Streams one message's reply and work |
+| `ConversationService.ListConversations` | `read_conversation` | The caller's conversations |
+| `ConversationService.ListMessages` | `read_conversation` | One conversation's messages |
+| `EventService.Watch` | `watch_events` | Streams change notices |
 
 Each RPC is a `POST` to `/PACKAGE.SERVICE/METHOD` on the API port, such as
 `/supertag.operator.v1.OrganizationService/GetStatus`. The listener speaks the Connect and
@@ -113,6 +119,8 @@ Every RPC declares an action. An RPC that only reads sets `idempotency_level = N
 every other RPC declares an audit action. Scoped coordination credentials are refused until the
 coordination routes move to RPCs.
 
+### RPC errors
+
 A refused call returns a Connect error: a JSON body with `code`, `message`, and `details`. The one
 detail is a `supertag.operator.v1.ErrorDetail` whose `reason` is stable; branch on it, never on
 `message`.
@@ -152,6 +160,177 @@ A call without a credential reveals nothing but the error:
 
 `value` is the binary detail in unpadded base64; `debug` repeats it as JSON for people reading the
 reply.
+
+### Server streams
+
+`FollowMessage` and `Watch` are server streams. The client sends one request and reads events
+until the stream ends. In the Connect protocol, a stream is a `POST` with
+`Content-Type: application/connect+json`. The request body and each event are one frame: a flags
+byte, a 4-byte big-endian length, then the JSON message. A last frame with flags `0x02` carries
+the end of the stream and any error. The generated clients handle the framing, so call streams
+through them rather than `curl`.
+
+Both streams send a `heartbeat` after 15 seconds without another event, so proxies keep an idle
+connection open. The server sets no deadline. A stream stays open until it ends on its own, the
+client cancels the call, or the Control Plane drains. Draining ends it with `unavailable` and
+`ERROR_REASON_DRAINING`; call again to resume. Before an event, an open stream rechecks its
+credential once 15 seconds have passed since the last check. When an admin revokes its Operator
+Token, or the token expires, the stream ends within 30 seconds, even when idle. It ends with
+`unauthenticated` and `ERROR_REASON_CREDENTIAL_REVOKED` or `ERROR_REASON_CREDENTIAL_EXPIRED`.
+
+### Conversations
+
+`ConversationService` serves `supertag message tag`, `supertag message objective`, and the
+terminal UI. A conversation is one Session between the caller and a Tag, named by the caller,
+such as `default` or `billing`. The same name continues the same Session.
+
+A conversation is private. The admin token is one operator, and each Operator Token is another.
+Each reads only its own conversations, even with the same name. Another operator's message fails
+with `not_found`, exactly as a message that does not exist. The Tag answers with its Roles'
+permissions only; no location's Permission or Context Sets apply.
+
+A message is one turn of the conversation, named by the ID of the Task it started. A turn may
+start **work Sessions**: Sessions of the same Tag that run longer work as their own Tasks and
+report back into the conversation. The message lists them in `workSessions`, each with its latest
+Task, its status, its question or approval notices, and its report.
+
+`SendMessage` returns the message before the Tag answers:
+
+```sh
+curl -s https://control.example.com/supertag.operator.v1.ConversationService/SendMessage \
+  -H "Authorization: Bearer $SUPERTAG_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"tag": "planner", "conversation": "billing", "text": "Which step is riskiest?",
+       "idempotencyKey": "billing-0007"}'
+```
+
+```json
+{
+  "taskId": "01JC8V3W6Q4Z9T2N5R7K1M0XHB",
+  "tag": "planner",
+  "conversation": "billing",
+  "sessionId": "01JC8T9F2D6S1Q8V4N3B7W5YKE",
+  "text": "Which step is riskiest?",
+  "createdAt": "2026-11-08T09:41:12.345Z",
+  "status": "REPLY_STATUS_WAITING"
+}
+```
+
+- An empty `conversation` means `default`. A name has 1 to 64 letters, digits, `.`, `_`, or `-`,
+  and starts with a letter or digit.
+- A repeat with the same `idempotencyKey` from the same caller to the same Tag returns the first
+  message and sends nothing.
+- A message sent while an earlier turn still runs may join that turn. `joinedTaskId` then names
+  it, and that turn's reply answers both. If that turn ends without reading the message,
+  `joinedTaskId` goes back to empty and the message runs as its own turn.
+- `waitingReason` says in one line why the turn has not started, while no bound Worker Host can
+  run it.
+- `SendMessage` fails with `not_found` for a Tag that does not exist, and with
+  `failed_precondition` and `ERROR_REASON_CONFLICT` when the Tag does not accept the message.
+
+`GetMessage` reads a message the caller sent, or a turn of an Objective that talks in one of the
+caller's conversations. Every operator may read the turns of an Objective that talks in no thread.
+A work Session's own Task is not a message: read it through the message that started it. `ListConversations` and `ListMessages` page with `pageSize` (0 means 50, at most 100),
+`pageToken`, and `nextPageToken`.
+
+### Following a reply
+
+`FollowMessage` streams one message until there is nothing more to show. Each event carries one
+part:
+
+| Part | Carries |
+| --- | --- |
+| `joined` | The running turn the message joined, or an empty `taskId` once that delivery is withdrawn |
+| `waiting` | Why the turn has not started; sent when the reason changes |
+| `textDelta` | Reply text as the Tag's harness writes it |
+| `activity` | A command or tool call starting or ending, or a retry in a new Task Attempt |
+| `finish` | The turn's reply, and the message with the work Sessions the turn started |
+| `error` | The error that ended the turn instead of a reply |
+| `workSessionChanged` | The whole of one work Session, after any change to it |
+| `end` | The message as `GetMessage` returns it; always the last event |
+| `heartbeat` | Nothing; keeps an idle stream open |
+
+The stream has two phases:
+
+```text
+turn:  [joined] [waiting…] (textDelta | activity)…  finish | error
+work:  (activity with workSessionId | workSessionChanged)…
+       end
+```
+
+- **The turn.** `joined` comes first when the message joined a running turn. Then come `waiting`
+  while no Worker Host can run it, text and activity while it runs, and one `finish` or `error`.
+- **The work.** After `finish`, the stream follows the work Sessions the turn started.
+  `finish.message` lists them. Their activity carries `workSessionId`; their text is never
+  streamed.
+- **The end.** `end` comes once every work Session has reported and none waits only on an
+  approval decision. A decision continues the work Session as a new Task, so the stream stays
+  open through it. A question counts as settled: the answer is the caller's next message. After
+  `error`, `end` follows at once.
+
+How a stream starts depends on the turn. A running turn sends its text and activity so far, then
+the rest live. A joined message sends `joined`, then the joined turn from the moment of the call.
+When the joined turn ends without reading the message, the Control Plane withdraws the delivery.
+The stream then sends `joined` with an empty `taskId` and follows the message's own turn.
+A finished turn sends its stored `finish` or `error` at once, without text, then the work phase.
+
+**Resume.** Every event except `heartbeat` has a `sequence`, increasing and greater than the
+request's `afterSequence`. To resume a dropped stream, call again with the last sequence received.
+While the server still holds the events after it, the new stream continues exactly. When it does
+not, for example after a Control Plane restart, the new stream skips the text and activity it
+lost and never repeats them. It sends `joined`, `waiting`, `finish` or `error`, and a
+`workSessionChanged` for each work Session again, for the current state. So a client applies those
+parts as state, not as counts, and `finish.reply` replaces any text it streamed.
+
+`supertag message tag --output json` stops following once every work Session's `reportStatus` is
+`REPLY_STATUS_REPLIED`, including one that waits on approval.
+
+Streamed reply text reaches readers only through `FollowMessage`. The message and the Task's
+result keep the final reply; the Task's events record its commands, tool calls, and result, not
+each piece of text.
+
+`@supertag/operator-api` includes `FollowEventAdapter`, which turns these events into
+[AI SDK UI message stream](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol) chunks for a chat
+UI built on the AI SDK hooks. Text deltas become text parts; activity, `joined`, `waiting`, the
+reply, and each work Session become `data-activity`, `data-joined`, `data-waiting`, `data-reply`,
+and `data-work-session` parts with stable IDs, so a repeat replaces a part instead of adding one.
+`error` becomes an `error` chunk and `end` becomes `finish`, with the message as
+`messageMetadata.message`.
+
+### Event stream
+
+`EventService.Watch` tells a client what changed, so it rereads only that. Each `change` names one
+thing by `kind` and ID and carries none of its state; the client rereads it through the RPC that
+reads that kind. `reason` is a few words for logs and people, such as `status completed`; clients
+do not parse it. `kinds` limits the stream to some kinds; empty sends every kind the caller may
+see.
+
+Every event carries an opaque `resumeToken`. To show current state without missing a change:
+
+1. Call `Watch` without a token. The first event is a `heartbeat` whose token marks the start.
+2. Read the state.
+3. Apply each change that follows.
+
+To resume a dropped stream, call again with the last token received. The server replays the
+changes after it, in order. When it can't, because the token is too old or from before the
+Control Plane restarted, the first event is a `resync`: the client rereads everything it shows. A
+token the server did not issue fails with `invalid_argument`. A notice may stand for several
+changes, and the same change may arrive twice, so treat each one as a reason to reread.
+
+The caller sees only what it could read through the other RPCs:
+
+| Kind | Who sees it |
+| --- | --- |
+| `WATCH_KIND_CONVERSATION_MESSAGE` | Messages in the caller's own conversations, with `read_conversation` |
+| `WATCH_KIND_SESSION`, `WATCH_KIND_TASK` | Everything, for the admin token and Operator Tokens, except that a conversation's Session and its Tasks, work Sessions included, reach only the operator whose conversation it is |
+| `WATCH_KIND_TAG` | Every Tag, for the admin token and Operator Tokens |
+| `WATCH_KIND_OBJECTIVE` | Objectives in the credential's Objective scope, with `read_objective` |
+| `WATCH_KIND_INBOX_ITEM` | Inbox items of those Objectives, with `read_coordination_inbox` |
+| `WATCH_KIND_APPROVAL` | Approval requests of those Objectives, with `list_approvals`; a request outside any Objective reaches only a credential without an Objective scope |
+
+A kind the caller may not see is left out silently, even when `kinds` names it. The comment on
+each `WatchKind` value in [`event.proto`](../../spec/proto/supertag/operator/v1/event.proto) says
+which ID fields its changes set.
 
 ## Organization spend
 
@@ -302,8 +481,8 @@ Resource names make creation idempotent. Repeating Tag creation with the same na
 existing Tag. `Tag.spec.roles` lists the reusable responsibilities assigned to that actor;
 execution requirements belong to Tasks.
 
-The current `supertag watch` command observes change by polling these resource versions. A native
-streaming watch protocol is not part of API v1.
+The current `supertag watch` command observes change by polling these resource versions.
+[`EventService.Watch`](#event-stream) streams notices of changes instead.
 
 ## API v1
 
@@ -635,60 +814,6 @@ history, and structured permission decisions provide execution and coordination 
 broader administrative audit log remains planned.
 
 See [Credential storage](credential-storage.md) for the server-side vault and client-side operator credential boundaries.
-
-## CLI conversations (Experimental)
-
-`supertag message tag` uses three routes. Each accepts the admin token or an Operator Token, and
-each caller sees only its own conversations; another caller's message returns `404`.
-
-```text
-POST /api/v1/tags/:name/messages
-GET  /api/v1/tags/:name/messages/:taskId
-GET  /api/v1/tags/:name/messages/:taskId/stream
-```
-
-`POST` sends `{"text": "...", "session": "NAME"}` and returns a `TagMessage` record. `GET` on the
-message returns the record, with `reply` once the Tag has answered. While no bound Worker Host can
-run the turn, `waiting` says why in one line, such as
-`no bound Worker Host provides MCP server notes`; it is absent once the turn can be placed.
-
-When the message's turn started or continued work Sessions, the record lists them in
-`startedSessions`, oldest first. Each entry has the Session `id`, its `title`, the work Session's
-latest `taskId` and its `status`, and `reportStatus`: `waiting`, or `replied` with `reportTaskId`
-and the report turn's `report` (`presentation` and `text`). `status` is `waiting` when the Task
-completed waiting on the person's answer or on approval. A Task that asked carries the `question`.
-While the work Session's Task has pending approval requests, `approvals` lists each one's
-`requestId` and the notice `text` posted to the conversation. A decision continues the work
-Session, and the entry then reports its next Task. When a decision can't continue it, because the
-Tag's permissions changed or its limits are spent, `notContinued` carries the notice that says so,
-and `status` is the Task's own. `GET` and `stream` also accept a work Session's `taskId`,
-for the operator whose conversation started it; its stream carries the work Session's activity.
-
-The `stream` route follows the reply as it is written. It answers with Server-Sent Events in the
-[AI SDK UI message stream protocol](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol) and the
-header `x-vercel-ai-ui-message-stream: v1`. Each event is one `data:` line with a JSON part and an
-`id:` line numbering it; the last event is `data: [DONE]`.
-
-| Part | Carries |
-| --- | --- |
-| `start` | The message, with the Task ID as `messageId`. |
-| `text-start`, `text-delta`, `text-end` | The Tag's reply text as its harness writes it. |
-| `data-activity` | A command or tool call starting and ending, or a retry in a new Task Attempt. |
-| `finish` | `messageMetadata.reply`, the final reply with its `presentation` and `text`. |
-| `error` | `errorText`, the error that ended the Task. |
-
-- **Resume.** Pass `?resumeAt=N` or a `Last-Event-ID: N` header to receive only the parts after
-  part `N` of a running reply.
-- **Finished replies.** When the Task has finished, or has no running stream, the route sends the
-  stored reply as one complete message.
-- **Joined messages.** A message that joined a running Task follows that Task's reply from the
-  moment it joined.
-- **Waiting.** Until the Task starts, the response stays open and sends a comment line every 15
-  seconds.
-
-Streamed reply text reaches readers only through this stream; the message record and the Task
-result keep the final reply. The Task's events record its command and tool
-activity and its result, not each piece of text.
 
 ## Tag messaging administration (Experimental)
 

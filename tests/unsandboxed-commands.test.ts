@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
+import { conversationClient } from "../apps/cli/src/operator-client.js";
 import { describeTask } from "../apps/cli/src/resources.js";
 import { commandPlacement, placeTask } from "../packages/control-plane/src/label-placement.js";
 import { objectiveRunnableReasons } from "../packages/control-plane/src/objective-runnable.js";
@@ -336,16 +337,13 @@ it("holds a claude-code Task that runs commands until its host opts in, and runs
       .toContain("harness:codex");
 
     // Each Tag takes a conversation turn, which the Control Plane must place.
-    const message = async (tagName: string) => {
-      const response = await fetch(`${runtime?.url}/api/v1/tags/${tagName}/messages`, {
-        method: "POST",
-        headers: { Authorization: "Bearer sandbox-admin", "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "Run the tests" }),
-      });
-      const text = await response.text();
-      expect(response.status, text).toBe(201);
-      return (JSON.parse(text) as { taskId: string }).taskId;
-    };
+    const message = async (tagName: string) =>
+      (
+        await conversationClient({ url: runtime?.url ?? "", token: "sandbox-admin" }).sendMessage({
+          tag: tagName,
+          text: "Run the tests",
+        })
+      ).taskId;
     const commandsTask = await message(builder.name);
     const filesTask = await message(reader.name);
     const mixedTask = await message(mixed.name);

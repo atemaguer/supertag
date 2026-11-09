@@ -13,22 +13,27 @@ import {
 import { codeToHttpStatus } from "@connectrpc/connect/protocol-connect";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
 import type { ControlPlane } from "@supertag/control-plane";
-import { TagMessagingError } from "@supertag/core";
+import { type Store, TagMessagingError } from "@supertag/core";
 import {
   action,
   allow_anonymous,
   audit_action,
   ControllerPhase,
   ControlPlanePhase,
+  ConversationService,
   ErrorDetailSchema,
   ErrorReason,
+  EventService,
   type FieldViolationSchema,
   OrganizationService,
   requires_admin_token,
 } from "@supertag/operator-api";
 import { type AuditTrail, auditTargetKind } from "./audit-trail.js";
 import type { OperatorAuthentication } from "./control-plane-api.js";
+import { conversationService } from "./conversation-rpc.js";
+import { eventService } from "./event-rpc.js";
 import type { SurfaceController } from "./gateway-surfaces.js";
+import { type MessageFollows, STREAM_HEARTBEAT_MS } from "./message-follow.js";
 
 /** Every operator RPC is served under this path prefix: `/supertag.operator.v1.SERVICE/METHOD`. */
 export const OPERATOR_RPC_PATH_PREFIX = "/supertag.operator.v1.";
@@ -55,10 +60,16 @@ const authenticatedCaller = createContextKey<Principal | undefined>(undefined, {
   description: "authenticated operator caller",
 });
 
+/** The operator who holds a conversation: the admin token is `admin`, an Operator Token its own. */
+export function conversationOperator(context: HandlerContext): string {
+  const caller = context.values.get(operatorPrincipal);
+  if (caller === undefined)
+    throw operatorError(Code.Internal, ErrorReason.INTERNAL, "Control Plane internal error");
+  return caller.kind === "break-glass" ? "admin" : caller.principal.operatorId;
+}
+
+/** What the request gate and the audit interceptor need, whatever services are registered. */
 export interface OperatorRpcDependencies {
-  readonly controlPlane: Pick<ControlPlane, "isAccepting" | "controllerStatuses">;
-  readonly surfaceController: Pick<SurfaceController, "name" | "status">;
-  readonly startedAt: string;
   readonly auditTrail: Pick<AuditTrail, "record">;
   /** Resolves an `authorization` header value; undefined when it names no known credential. */
   readonly authenticate: (
@@ -66,6 +77,11 @@ export interface OperatorRpcDependencies {
   ) => Promise<OperatorAuthentication | undefined>;
   /** False once the API Server drains; new calls then fail with `Unavailable`. */
   readonly accepting: () => boolean;
+  /**
+   * How often an open server stream rechecks its caller's credential; the stream heartbeat
+   * interval unless a test shortens it.
+   */
+  readonly reauthenticateMs?: number;
 }
 
 /** A refusal carrying the `ErrorDetail` every operator RPC error has. */
@@ -80,16 +96,29 @@ export function operatorError(
   ]);
 }
 
+/** What the operator services read and act on. */
+export interface OperatorServices {
+  readonly controlPlane: Pick<
+    ControlPlane,
+    "isAccepting" | "controllerStatuses" | "messageTag" | "streamTaskReply" | "changes"
+  >;
+  readonly surfaceController: Pick<SurfaceController, "name" | "status">;
+  readonly startedAt: string;
+  readonly store: Store;
+  readonly follows: MessageFollows;
+  /** Aborted once the API Server drains; open streams then end with `Unavailable`. */
+  readonly draining: () => AbortSignal;
+}
+
 /**
  * Serves the operator RPCs with the Connect and gRPC-Web protocols. gRPC itself needs HTTP/2,
- * which this HTTP/1.1 listener does not speak, so it is off. `routes` registers the services; it
- * defaults to every operator service. Throws when an RPC lacks the access or audit options it must
- * declare.
+ * which this HTTP/1.1 listener does not speak, so it is off. `routes` registers the services, as
+ * `registerOperatorRoutes` registers every operator service. Throws when an RPC lacks the access
+ * or audit options it must declare.
  */
 export function createOperatorRpcHandler(
   dependencies: OperatorRpcDependencies,
-  routes: (router: ConnectRouter) => void = (router) =>
-    registerOperatorRoutes(router, dependencies),
+  routes: (router: ConnectRouter) => void,
 ): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
   const adapter = connectNodeAdapter({
     connect: true,
@@ -97,7 +126,12 @@ export function createOperatorRpcHandler(
     grpc: false,
     readMaxBytes: OPERATOR_RPC_MAX_BYTES,
     requestGate: authentication(dependencies),
-    interceptors: [auditing(dependencies.auditTrail), errorMapping(), authorization()],
+    interceptors: [
+      auditing(dependencies.auditTrail),
+      errorMapping(),
+      authorization(),
+      reauthentication(dependencies),
+    ],
     routes: (router) => {
       routes(router);
       for (const handler of router.handlers) assertMethodOptions(handler.method);
@@ -110,7 +144,13 @@ export function createOperatorRpcHandler(
     });
 }
 
-function registerOperatorRoutes(router: ConnectRouter, dependencies: OperatorRpcDependencies) {
+/** Registers every operator service. */
+export function registerOperatorRoutes(router: ConnectRouter, dependencies: OperatorServices) {
+  router.service(ConversationService, conversationService(dependencies));
+  router.service(
+    EventService,
+    eventService({ changes: dependencies.controlPlane.changes, draining: dependencies.draining }),
+  );
   router.service(OrganizationService, {
     getStatus() {
       const accepting = dependencies.controlPlane.isAccepting;
@@ -180,26 +220,66 @@ function authentication(
         throw operatorError(Code.Unavailable, ErrorReason.DRAINING, "Control Plane is draining");
       const header = context.requestHeader.get("authorization") ?? undefined;
       if (header === undefined && getOption(context.method, allow_anonymous)) return;
-      const caller = await dependencies.authenticate(header);
-      if (caller === undefined)
-        throw operatorError(
-          Code.Unauthenticated,
-          ErrorReason.UNAUTHENTICATED,
-          "A valid Control Plane admin token or Operator Token is required",
-        );
-      if (caller.kind === "refused")
-        throw operatorError(
-          Code.Unauthenticated,
-          caller.reason === "revoked"
-            ? ErrorReason.CREDENTIAL_REVOKED
-            : ErrorReason.CREDENTIAL_EXPIRED,
-          caller.message,
-        );
-      context.values.set(authenticatedCaller, caller);
+      context.values.set(authenticatedCaller, await authenticated(dependencies, header));
     } catch (error) {
       throw toOperatorError(error);
     }
   };
+}
+
+/** The caller an `authorization` header names, or the `Unauthenticated` refusal. */
+async function authenticated(
+  dependencies: OperatorRpcDependencies,
+  header: string | undefined,
+): Promise<Principal> {
+  const caller = await dependencies.authenticate(header);
+  if (caller === undefined)
+    throw operatorError(
+      Code.Unauthenticated,
+      ErrorReason.UNAUTHENTICATED,
+      "A valid Control Plane admin token or Operator Token is required",
+    );
+  if (caller.kind === "refused")
+    throw operatorError(
+      Code.Unauthenticated,
+      caller.reason === "revoked" ? ErrorReason.CREDENTIAL_REVOKED : ErrorReason.CREDENTIAL_EXPIRED,
+      caller.message,
+    );
+  return caller;
+}
+
+/**
+ * Rechecks an authenticated server stream's credential before an event, at most every
+ * `reauthenticateMs`, so revoking or expiring an Operator Token also ends the streams it opened.
+ * Open streams send a heartbeat at least that often, so an idle one is rechecked too.
+ */
+function reauthentication(dependencies: OperatorRpcDependencies): Interceptor {
+  const everyMs = dependencies.reauthenticateMs ?? STREAM_HEARTBEAT_MS;
+  return (next) => async (request) => {
+    const response = await next(request);
+    if (!response.stream || request.contextValues.get(authenticatedCaller) === undefined)
+      return response;
+    const header = request.header.get("authorization") ?? undefined;
+    return {
+      ...response,
+      message: rechecking(response.message, everyMs, () => authenticated(dependencies, header)),
+    };
+  };
+}
+
+async function* rechecking<T>(
+  messages: AsyncIterable<T>,
+  everyMs: number,
+  recheck: () => Promise<unknown>,
+): AsyncIterable<T> {
+  let checkedAt = Date.now();
+  for await (const message of messages) {
+    if (Date.now() - checkedAt >= everyMs) {
+      await recheck();
+      checkedAt = Date.now();
+    }
+    yield message;
+  }
 }
 
 /** Checks that the authenticated caller may call this RPC, then attaches it as the principal. */
@@ -323,9 +403,19 @@ function toOperatorError(error: unknown): ConnectError {
 function errorMapping(): Interceptor {
   return (next) => async (request) => {
     try {
-      return await next(request);
+      const response = await next(request);
+      return response.stream ? { ...response, message: mappingErrors(response.message) } : response;
     } catch (error) {
       throw toOperatorError(error);
     }
   };
+}
+
+/** A server stream's messages, failing as the operator API's errors do. */
+async function* mappingErrors<T>(messages: AsyncIterable<T>): AsyncIterable<T> {
+  try {
+    yield* messages;
+  } catch (error) {
+    throw toOperatorError(error);
+  }
 }

@@ -41,7 +41,6 @@ import {
   DEFAULT_WORKSPACE_DELIVERY,
   normalizeApprovers,
   OPERATOR_TOKEN_PREFIX,
-  objectiveSessionKey,
   operatorTokenOperatorId,
   parseAuditQuery,
   parseAuthKeyName,
@@ -58,9 +57,7 @@ import {
   parseWorkspaceName,
   parseWorkspaceNames,
   parseWorkspaceSpec,
-  placementHoldReason,
   TagMessagingError,
-  workSessionWaiting,
 } from "@supertag/core";
 import type { VerifiedSurfaceAccount } from "@supertag/surface-sdk";
 import {
@@ -122,6 +119,7 @@ import {
   planReport,
   recordManagedWrite,
 } from "./managed-apply.js";
+import { MessageFollows } from "./message-follow.js";
 import {
   applyObjectiveManifest,
   objectivePlanReport,
@@ -130,7 +128,11 @@ import {
   parseObjectiveManifest,
   planObjectiveManifest,
 } from "./objective-manifest.js";
-import { createOperatorRpcHandler, OPERATOR_RPC_PATH_PREFIX } from "./operator-rpc.js";
+import {
+  createOperatorRpcHandler,
+  OPERATOR_RPC_PATH_PREFIX,
+  registerOperatorRoutes,
+} from "./operator-rpc.js";
 import { organizationStatus } from "./organization-status.js";
 import {
   applyDeletion,
@@ -197,8 +199,6 @@ interface ControlPlaneApiRequestContext extends ControlPlaneApiServerDependencie
   readonly request: IncomingMessage;
   readonly response: ServerResponse;
   readonly rpcSnapshot: () => RpcTelemetrySnapshot;
-  /** Aborted when the API Server drains, so long-lived responses such as reply streams end. */
-  readonly draining: AbortSignal;
 }
 
 const CONTROL_PLANE_BREAK_GLASS_PRINCIPAL: CoordinationOperatorPrincipal = {
@@ -222,6 +222,7 @@ export class ControlPlaneApiServer {
   readonly #rpcTelemetry: RpcTelemetry;
   readonly #auditTrail: AuditTrail;
   readonly #operatorRpc: (request: IncomingMessage, response: ServerResponse) => Promise<void>;
+  readonly #follows: MessageFollows;
   #workletGrpc: Promise<Awaited<ReturnType<typeof startWorkletGrpcServer>>> | undefined;
   #acceptingManagement = false;
   #acceptingInternal = false;
@@ -232,14 +233,26 @@ export class ControlPlaneApiServer {
     this.#rpcTelemetry = dependencies.rpcTelemetry ?? new RpcTelemetry();
     this.#auditTrail =
       dependencies.auditTrail ?? new AuditTrail(dependencies.store, dependencies.audit);
-    this.#operatorRpc = createOperatorRpcHandler({
+    this.#follows = new MessageFollows({
+      store: dependencies.store,
       controlPlane: dependencies.controlPlane,
-      surfaceController: dependencies.surfaceController,
-      startedAt: dependencies.startedAt,
-      auditTrail: this.#auditTrail,
-      authenticate: (authorization) => authenticateOperator(dependencies, authorization),
-      accepting: () => this.#acceptingManagement,
     });
+    this.#operatorRpc = createOperatorRpcHandler(
+      {
+        auditTrail: this.#auditTrail,
+        authenticate: (authorization) => authenticateOperator(dependencies, authorization),
+        accepting: () => this.#acceptingManagement,
+      },
+      (router) =>
+        registerOperatorRoutes(router, {
+          controlPlane: dependencies.controlPlane,
+          surfaceController: dependencies.surfaceController,
+          startedAt: dependencies.startedAt,
+          store: dependencies.store,
+          follows: this.#follows,
+          draining: () => this.#draining.signal,
+        }),
+    );
   }
 
   start(): void {
@@ -345,6 +358,7 @@ export class ControlPlaneApiServer {
     this.beginDrain();
     this.beginInternalDrain();
     await this.drain();
+    this.#follows.close();
     await this.#auditTrail.settled();
     const starting = this.#workletGrpc;
     try {
@@ -401,7 +415,6 @@ export class ControlPlaneApiServer {
         request,
         response,
         rpcSnapshot: () => this.#rpcTelemetry.snapshot(),
-        draining: this.#draining.signal,
       };
       if (operatorRpc) {
         await this.#operatorRpc(request, response);
@@ -1518,21 +1531,6 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
     }
     const [resource] = await sessionResources(context.store, [session]);
     writeJson(context.response, 200, resource);
-    return;
-  }
-
-  const tagMessageMatch = /^\/api\/v1\/tags\/([^/]+)\/messages(?:\/([^/]+)(\/stream)?)?$/u.exec(
-    url.pathname,
-  );
-  if (tagMessageMatch?.[1] !== undefined) {
-    await handleTagMessage(
-      context,
-      decodeURIComponent(tagMessageMatch[1]),
-      tagMessageMatch[2] === undefined ? undefined : decodeURIComponent(tagMessageMatch[2]),
-      // The admin token is one operator; each Operator Token is another.
-      authentication.kind === "break-glass" ? "admin" : authentication.principal.operatorId,
-      tagMessageMatch[3] === undefined ? undefined : url,
-    );
     return;
   }
 
@@ -3248,401 +3246,6 @@ async function applySurfaceAccountManifest(
   );
   await recordWrite(context.store, plan, storedSurfaceAccountSpec(account), options);
   writeJson(context.response, existing === undefined ? 201 : 200, surfaceAccountResource(account));
-}
-
-/** One message in an operator's CLI conversation with a Tag, and the Tag's reply once recorded. */
-interface TagMessageRecord {
-  readonly apiVersion: typeof CONTROL_PLANE_API_VERSION;
-  readonly kind: "TagMessage";
-  readonly tag: string;
-  readonly session: string;
-  readonly sessionId: string;
-  readonly taskId: string;
-  /** The running Task this message was delivered into, when it joined one instead of starting. */
-  readonly joinedTaskId?: string;
-  readonly status: "waiting" | "replied";
-  /** Why the turn has not started, while no bound Worker Host can run it. */
-  readonly waiting?: string;
-  /** The Tag's final reply: its result, or the error that ended the Task. */
-  readonly reply?: { readonly presentation: string; readonly text: string };
-  /** Work Sessions this message's turn started, and the report turn each one is owed. */
-  readonly startedSessions?: readonly StartedWorkSession[];
-}
-
-/** A work Session a message started: its Task's status and, once written, its report. */
-interface StartedWorkSession {
-  readonly id: string;
-  readonly title: string;
-  /** The work Session's Task, which `.../messages/TASK_ID/stream` follows. */
-  readonly taskId?: string;
-  /** The Task's status, or `waiting` when it completed by asking the person `question`. */
-  readonly status: string;
-  readonly question?: string;
-  /** The approval notices posted to this conversation for the Task's pending approval requests. */
-  readonly approvals?: readonly { readonly requestId: string; readonly text: string }[];
-  /** Why a decision on a request the Task waited on did not continue the work Session. */
-  readonly notContinued?: string;
-  readonly reportStatus: "waiting" | "replied";
-  /** The conversation turn that reports the work Session's result. */
-  readonly reportTaskId?: string;
-  readonly report?: { readonly presentation: string; readonly text: string };
-}
-
-const TAG_CONVERSATION_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
-
-/**
- * `POST /api/v1/tags/NAME/messages` sends one message in the operator's CLI conversation;
- * `GET /api/v1/tags/NAME/messages/TASK_ID` reads it back with the reply once there is one, and
- * `GET /api/v1/tags/NAME/messages/TASK_ID/stream` follows the reply as it is written.
- * A conversation is private: only the operator who sent the message reads it here.
- */
-async function handleTagMessage(
-  context: ControlPlaneApiRequestContext,
-  tagName: string,
-  taskId: string | undefined,
-  operatorId: string,
-  streamUrl?: URL,
-): Promise<void> {
-  const method = taskId === undefined ? "POST" : "GET";
-  if (context.request.method !== method) {
-    writeStatusError(context.response, 405, "MethodNotAllowed", `Use ${method} for this path`);
-    return;
-  }
-  const tag = await context.store.findTagByName(tagName);
-  if (tag === undefined) {
-    writeStatusError(context.response, 404, "NotFound", `Tag ${tagName} does not exist`);
-    return;
-  }
-  const prefix = `cli:${operatorId}:`;
-  if (taskId === undefined) {
-    const body = await readJsonBody(context.request);
-    const text = isRecord(body) && typeof body["text"] === "string" ? body["text"].trim() : "";
-    const session = isRecord(body) && body["session"] !== undefined ? body["session"] : "default";
-    if (!text) {
-      writeStatusError(context.response, 400, "BadRequest", "The message is empty");
-      return;
-    }
-    if (typeof session !== "string" || !TAG_CONVERSATION_NAME.test(session)) {
-      writeStatusError(
-        context.response,
-        400,
-        "BadRequest",
-        "A session name is 1 to 64 letters, digits, '.', '_' or '-', starting with a letter or digit",
-      );
-      return;
-    }
-    if (!context.controlPlane.isAccepting) {
-      writeJson(context.response, 503, { error: "control_plane_draining" });
-      return;
-    }
-    const result = await context.controlPlane.messageTag({
-      tagName: tag.name,
-      operatorId,
-      session,
-      text,
-    });
-    if (result.taskId === undefined) {
-      writeStatusError(
-        context.response,
-        409,
-        "Conflict",
-        result.reason ?? `Tag ${tag.name} did not accept the message`,
-      );
-      return;
-    }
-    taskId = result.taskId;
-  }
-  const task = await context.store.findTaskById(taskId);
-  const origin = isRecord(task?.trigger["origin"]) ? task.trigger["origin"] : undefined;
-  let sessionKey = typeof origin?.["sessionKey"] === "string" ? origin["sessionKey"] : "";
-  // A work Session's Task is readable where its conversation is: only by that operator.
-  if (task !== undefined && !sessionKey.startsWith(prefix) && method === "GET") {
-    const session = await context.store.findSessionById(task.sessionId);
-    const parent = session?.parentSessionId
-      ? await context.store.findSessionById(session.parentSessionId)
-      : undefined;
-    if (parent !== undefined) sessionKey = parent.sessionKey;
-    // An Objective's own turn is readable where its home thread is: by the operator whose CLI
-    // conversation it is, or by any operator when the Objective has no home thread.
-    if (
-      task.objectiveId !== undefined &&
-      task.inboundEventId &&
-      session?.sessionKey === objectiveSessionKey(task.objectiveId)
-    ) {
-      const callback = (await context.store.findInboundEventById(task.inboundEventId))?.event
-        .callback;
-      if (callback?.mode === "cli_conversation")
-        sessionKey =
-          callback.threadKey === session.sessionKey
-            ? `${prefix}${session.sessionKey}`
-            : callback.threadKey;
-    }
-  }
-  if (task === undefined || task.tagId !== tag.id || !sessionKey.startsWith(prefix)) {
-    writeStatusError(
-      context.response,
-      404,
-      "NotFound",
-      `Task ${taskId} is not a message in your conversations with Tag ${tag.name}`,
-    );
-    return;
-  }
-  if (streamUrl !== undefined) {
-    await streamTagMessage(context, task, streamResumePoint(context, streamUrl));
-    return;
-  }
-  const { reply, joinedTaskId } = await tagMessageReply(context.store, task);
-  const startedSessions = await startedWorkSessions(context.store, task);
-  const waiting = reply === undefined ? await placementHold(context.store, task) : undefined;
-  const record: TagMessageRecord = {
-    apiVersion: CONTROL_PLANE_API_VERSION,
-    kind: "TagMessage",
-    tag: tag.name,
-    session: sessionKey.slice(prefix.length),
-    sessionId: task.sessionId,
-    taskId: task.id,
-    ...(joinedTaskId === undefined ? {} : { joinedTaskId }),
-    status: reply === undefined ? "waiting" : "replied",
-    ...(waiting === undefined ? {} : { waiting }),
-    ...(reply === undefined
-      ? {}
-      : { reply: { presentation: reply.presentation, text: reply.text } }),
-    ...(startedSessions.length === 0 ? {} : { startedSessions }),
-  };
-  writeJson(context.response, method === "POST" ? 201 : 200, record);
-}
-
-/**
- * Why a pending Task waits for placement, from its latest scheduling event, or undefined when it
- * is not held. The Control Plane records a reason only when it changes.
- */
-async function placementHold(
-  store: ControlPlaneApiRequestContext["store"],
-  task: Task,
-): Promise<string | undefined> {
-  if (task.status !== "pending") return undefined;
-  const latest = (await store.listTaskEvents(task.id)).findLast(
-    (event) =>
-      event.type === "task.scheduling-incompatible" || event.type === "task.scheduling-compatible",
-  );
-  return latest?.type === "task.scheduling-incompatible"
-    ? placementHoldReason(latest.payload)
-    : undefined;
-}
-
-/** How often a reply stream rechecks a message that has neither a running stream nor a reply. */
-const TAG_MESSAGE_STREAM_WAIT_MS = 250;
-/** A comment line this often keeps idle proxies from closing a quiet reply stream. */
-const TAG_MESSAGE_STREAM_KEEPALIVE_MS = 15_000;
-
-/** The last part a resuming reader saw, from `resumeAt` or the `Last-Event-ID` header. */
-function streamResumePoint(context: ControlPlaneApiRequestContext, url: URL): number {
-  const header = context.request.headers["last-event-id"];
-  const value = url.searchParams.get("resumeAt") ?? (typeof header === "string" ? header : "0");
-  const after = Number(value);
-  return Number.isSafeInteger(after) && after > 0 ? after : 0;
-}
-
-/**
- * Serves one CLI message's reply as an AI SDK UI message stream over Server-Sent Events. A
- * running Task's live stream resumes after part `after`; a message that joined a running Task
- * follows that Task. A finished Task, or one without a live stream, sends its stored reply as one
- * complete message. Until either exists, the response waits.
- */
-async function streamTagMessage(
-  context: ControlPlaneApiRequestContext,
-  task: Task,
-  after: number,
-): Promise<void> {
-  const { response } = context;
-  response.writeHead(200, {
-    "content-type": "text/event-stream; charset=utf-8",
-    "cache-control": "no-store",
-    connection: "keep-alive",
-    "x-accel-buffering": "no",
-    "x-vercel-ai-ui-message-stream": "v1",
-  });
-  const closed = new AbortController();
-  const close = () => closed.abort();
-  response.once("close", close);
-  context.draining.addEventListener("abort", close, { once: true });
-  const keepalive = setInterval(
-    () => response.write(": keepalive\n\n"),
-    TAG_MESSAGE_STREAM_KEEPALIVE_MS,
-  );
-  keepalive.unref();
-  try {
-    while (!closed.signal.aborted) {
-      const current = (await context.store.findTaskById(task.id)) ?? task;
-      const { reply, joinedTaskId } = await tagMessageReply(context.store, current);
-      if (reply !== undefined) {
-        response.write(completeReplyStream(current.id, reply));
-        return;
-      }
-      // A joined message follows its Task from now on; earlier parts answered earlier messages.
-      const live = await context.controlPlane.streamTaskReply(
-        joinedTaskId ?? current.id,
-        joinedTaskId !== undefined && after === 0 ? "now" : after,
-      );
-      if (live !== undefined) {
-        await pipeReplyStream(live, response, closed.signal);
-        return;
-      }
-      await new Promise((resolve) => {
-        const timer = setTimeout(resolve, TAG_MESSAGE_STREAM_WAIT_MS);
-        closed.signal.addEventListener(
-          "abort",
-          () => {
-            clearTimeout(timer);
-            resolve(undefined);
-          },
-          { once: true },
-        );
-      });
-    }
-  } finally {
-    clearInterval(keepalive);
-    response.off("close", close);
-    context.draining.removeEventListener("abort", close);
-    response.end();
-  }
-}
-
-/** Copies a live reply stream to the response until it ends or the reader goes away. */
-async function pipeReplyStream(
-  live: ReadableStream<string>,
-  response: ServerResponse,
-  closed: AbortSignal,
-): Promise<void> {
-  const reader = live.getReader();
-  const cancel = () => void reader.cancel().catch(() => undefined);
-  closed.addEventListener("abort", cancel, { once: true });
-  try {
-    while (!closed.aborted) {
-      const { done, value } = await reader.read();
-      if (done) return;
-      if (value) response.write(value);
-    }
-  } finally {
-    closed.removeEventListener("abort", cancel);
-    cancel();
-  }
-}
-
-/** A stored reply as one complete UI message stream: its text, then its finish or error. */
-function completeReplyStream(
-  messageId: string,
-  reply: { readonly presentation: string; readonly text: string },
-): string {
-  const parts: Record<string, unknown>[] = [{ type: "start", messageId }];
-  if (reply.presentation === "error") parts.push({ type: "error", errorText: reply.text });
-  else
-    parts.push(
-      { type: "text-start", id: "text-1" },
-      { type: "text-delta", id: "text-1", delta: reply.text },
-      { type: "text-end", id: "text-1" },
-      {
-        type: "finish",
-        messageMetadata: { reply: { presentation: reply.presentation, text: reply.text } },
-      },
-    );
-  return `${parts.map((part, index) => `id: ${index + 1}\ndata: ${JSON.stringify(part)}\n\n`).join("")}data: [DONE]\n\n`;
-}
-
-/**
- * The reply that answers one CLI message. A message sent while an earlier Task in the Session
- * still runs is delivered into that Task, so the answer is that Task's final reply; a delivery
- * whose outcome is unknown is answered by the error notice recorded for it.
- */
-/** The work Sessions a message's turn started, oldest first, with their reports. */
-async function startedWorkSessions(
-  store: ControlPlaneApiRequestContext["store"],
-  task: Task,
-): Promise<readonly StartedWorkSession[]> {
-  // A message follows each work Session whose latest Task its turn started or continued.
-  const started = (await store.listWorkSessions(task.sessionId)).filter(
-    (session) => (session.task?.startedByTaskId ?? session.startedByTaskId) === task.id,
-  );
-  return Promise.all(
-    started.map(async (session) => {
-      const found = session.task ? await store.findWorkSessionReport(session.task.id) : undefined;
-      const report = found
-        ? await store.findOutboundReply(found.inboundEventId, "final")
-        : undefined;
-      const approvals = await workSessionApprovals(store, task, session.task);
-      const notContinued =
-        session.task && task.inboundEventId
-          ? await store.findOutboundReply(
-              task.inboundEventId,
-              `approval-continue:${session.task.id}`,
-            )
-          : undefined;
-      return {
-        id: session.sessionId,
-        title: session.title,
-        ...(session.task ? { taskId: session.task.id } : {}),
-        status: workSessionWaiting(session) ? "waiting" : (session.task?.status ?? "pending"),
-        ...(session.task?.question === undefined ? {} : { question: session.task.question }),
-        ...(approvals.length === 0 ? {} : { approvals }),
-        ...(notContinued === undefined ? {} : { notContinued: notContinued.text }),
-        reportStatus: report === undefined ? ("waiting" as const) : ("replied" as const),
-        ...(found?.taskId ? { reportTaskId: found.taskId } : {}),
-        ...(report === undefined
-          ? {}
-          : { report: { presentation: report.presentation, text: report.text } }),
-      };
-    }),
-  );
-}
-
-/**
- * The approval notices a work Session Task's pending approval requests posted to the conversation
- * turn that started it. The CLI delivers no status replies, so the message record carries them.
- */
-async function workSessionApprovals(
-  store: ControlPlaneApiRequestContext["store"],
-  turn: Task,
-  work: { readonly id: string } | undefined,
-): Promise<readonly { readonly requestId: string; readonly text: string }[]> {
-  if (!turn.inboundEventId || work === undefined) return [];
-  const requests = await store.listApprovalRequests({
-    taskId: work.id,
-    status: "pending",
-    limit: 100,
-  });
-  const notices = await Promise.all(
-    requests.map(async (request) => {
-      const notice = await store.findOutboundReply(
-        turn.inboundEventId as string,
-        `approval:${request.id}`,
-      );
-      return notice === undefined ? [] : [{ requestId: request.id, text: notice.text }];
-    }),
-  );
-  return notices.flat();
-}
-
-async function tagMessageReply(
-  store: ControlPlaneApiRequestContext["store"],
-  task: Task,
-): Promise<{
-  readonly reply?: { readonly presentation: string; readonly text: string };
-  readonly joinedTaskId?: string;
-}> {
-  if (task.inboundEventId === null) return {};
-  const own = await store.findOutboundReply(task.inboundEventId, "final");
-  if (own !== undefined) return { reply: own };
-  const unresolved = await store.findOutboundReply(task.inboundEventId, "session-input-unresolved");
-  if (unresolved !== undefined) return { reply: unresolved };
-  const reason = task.outcome?.["reason"];
-  const targetTaskId = task.outcome?.["targetTaskId"];
-  if (reason !== "input-accepted" || typeof targetTaskId !== "string") return {};
-  const target = await store.findTaskById(targetTaskId);
-  const reply =
-    target?.inboundEventId === null || target === undefined
-      ? undefined
-      : await store.findOutboundReply(target.inboundEventId, "final");
-  return { joinedTaskId: targetTaskId, ...(reply === undefined ? {} : { reply }) };
 }
 
 /** Sessions as resources, each with the status of its latest Task. */

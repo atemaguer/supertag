@@ -10,14 +10,21 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/atemaguer/supertag/apps/tui/client"
+	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
 )
 
-// conversationSession is the conversation the TUI shows: the same one as
+// conversationName is the conversation the TUI shows: the same one as
 // `supertag message tag NAME TEXT`.
-const conversationSession = "default"
+const conversationName = "default"
 
-// tagRefresh is how often the rail rereads the Tags and their state.
+// historyPage is how many past messages a conversation shows when its Tag is first selected.
+const historyPage = 50
+
+// tagRefresh is how often the rail rereads the Tags while the watch stream is down.
 var tagRefresh = 5 * time.Second
+
+// watchKinds are the changes the rail follows.
+var watchKinds = []operatorv1.WatchKind{operatorv1.WatchKind_WATCH_KIND_TAG, operatorv1.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE}
 
 type focus int
 
@@ -41,11 +48,15 @@ type entry struct {
 	text string
 }
 
-// conversation is what the TUI has shown of one Tag's default conversation since it started.
+// conversation is what the TUI shows of one Tag's default conversation: its newest page of
+// history, then what happened since the TUI started.
 type conversation struct {
 	entries []entry
 	// draft is the reply text streaming in; the final reply replaces it.
 	draft string
+	// loading and loaded track the history, which loads when the Tag is first selected. Sending
+	// waits for it, so a message is not shown both live and from history.
+	loading, loaded bool
 	// rendered is the first renderedCount entries rendered at renderedWidth. Entries never
 	// change once added, so each is rendered once per width, not on every streamed token.
 	rendered      strings.Builder
@@ -63,11 +74,20 @@ type (
 		tags []client.Tag
 		err  error
 	}
-	refreshMsg struct{}
-	sentMsg    struct {
-		tag    string
-		record client.MessageRecord
-		err    error
+	conversationsMsg struct {
+		conversations []*operatorv1.Conversation
+		err           error
+	}
+	pollMsg    struct{}
+	historyMsg struct {
+		tag   string
+		items []client.HistoryItem
+		err   error
+	}
+	sentMsg struct {
+		tag     string
+		message *operatorv1.Message
+		err     error
 	}
 	followMsg struct {
 		tag    string
@@ -75,17 +95,52 @@ type (
 		events <-chan client.FollowEvent
 	}
 	followDoneMsg struct{ tag string }
+	watchMsg      struct {
+		update  client.WatchUpdate
+		updates <-chan client.WatchUpdate
+	}
 )
+
+// reload coalesces rereads of one list: at most one runs, and changes during it reread once more.
+type reload struct{ running, again bool }
+
+// start reports whether a reread should start now.
+func (r *reload) start() bool {
+	if r.running {
+		r.again = true
+		return false
+	}
+	r.running = true
+	return true
+}
+
+// done reports whether another reread should start, because a change came during this one.
+func (r *reload) done() bool {
+	r.running = false
+	if r.again {
+		r.again = false
+		return r.start()
+	}
+	return false
+}
 
 type model struct {
 	ctx      context.Context
 	client   *client.Client
 	follower *client.Follower
+	watcher  *client.Watcher
 
 	tags          []client.Tag
 	selected      int
 	focus         focus
 	conversations map[string]*conversation
+	// open counts each Tag's work Sessions in the default conversation that have not finished.
+	open map[string]int
+
+	// live says the watch stream delivers changes; polling runs only while it does not.
+	live                  bool
+	polling               bool
+	tagReload, convReload *reload
 
 	input    textinput.Model
 	viewport viewport.Model
@@ -97,7 +152,7 @@ type model struct {
 	status    string
 }
 
-func newModel(ctx context.Context, c *client.Client, f *client.Follower) model {
+func newModel(ctx context.Context, c *client.Client, f *client.Follower, w *client.Watcher) model {
 	input := textinput.New()
 	input.Prompt = "> "
 	input.Placeholder = "Message the Tag"
@@ -106,29 +161,56 @@ func newModel(ctx context.Context, c *client.Client, f *client.Follower) model {
 		ctx:           ctx,
 		client:        c,
 		follower:      f,
+		watcher:       w,
 		conversations: map[string]*conversation{},
+		open:          map[string]int{},
+		tagReload:     &reload{},
+		convReload:    &reload{},
 		input:         input,
 		viewport:      viewport.New(),
 		md:            &markdown{},
+		polling:       true,
 		status:        "connecting",
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.loadTags(), textinput.Blink)
+	cmds := []tea.Cmd{m.reloadTags(), m.reloadConversations(), m.pollAfter(), textinput.Blink}
+	if m.watcher != nil {
+		cmds = append(cmds, waitForWatch(m.watcher.Run(m.ctx)))
+	}
+	return tea.Batch(cmds...)
 }
 
-func (m model) loadTags() tea.Cmd {
+func (m model) pollAfter() tea.Cmd {
+	return tea.Tick(tagRefresh, func(time.Time) tea.Msg { return pollMsg{} })
+}
+
+func (m model) reloadTags() tea.Cmd {
+	if !m.tagReload.start() {
+		return nil
+	}
+	return m.tagsCmd()
+}
+
+func (m model) reloadConversations() tea.Cmd {
+	if !m.convReload.start() {
+		return nil
+	}
+	return m.conversationsCmd()
+}
+
+func (m model) loadHistory(tag string) tea.Cmd {
 	return func() tea.Msg {
-		tags, err := m.client.ListTags(m.ctx)
-		return tagsMsg{tags: tags, err: err}
+		page, _, err := m.client.ListMessages(m.ctx, tag, conversationName, historyPage, "")
+		return historyMsg{tag: tag, items: client.History(tag, page), err: err}
 	}
 }
 
 func (m model) send(tag, text string) tea.Cmd {
 	return func() tea.Msg {
-		record, err := m.client.SendMessage(m.ctx, tag, text, conversationSession)
-		return sentMsg{tag: tag, record: record, err: err}
+		message, err := m.client.SendMessage(m.ctx, tag, conversationName, text)
+		return sentMsg{tag: tag, message: message, err: err}
 	}
 }
 
@@ -139,6 +221,16 @@ func waitFor(tag string, events <-chan client.FollowEvent) tea.Cmd {
 			return followDoneMsg{tag: tag}
 		}
 		return followMsg{tag: tag, event: event, events: events}
+	}
+}
+
+func waitForWatch(updates <-chan client.WatchUpdate) tea.Cmd {
+	return func() tea.Msg {
+		update, ok := <-updates
+		if !ok {
+			return nil
+		}
+		return watchMsg{update: update, updates: updates}
 	}
 }
 
@@ -158,6 +250,21 @@ func (m model) conversation(tag string) *conversation {
 	return c
 }
 
+// selectTag shows the selected Tag's conversation, loading its history the first time.
+func (m *model) selectTag() tea.Cmd {
+	m.refresh()
+	tag := m.selectedTag()
+	if tag == "" {
+		return nil
+	}
+	c := m.conversation(tag)
+	if c.loaded || c.loading {
+		return nil
+	}
+	c.loading = true
+	return m.loadHistory(tag)
+}
+
 func (m *model) fail(err error) {
 	m.connected = false
 	m.status = err.Error()
@@ -171,10 +278,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tagsMsg:
-		next := tea.Tick(tagRefresh, func(time.Time) tea.Msg { return refreshMsg{} })
+		var again tea.Cmd
+		if m.tagReload.done() {
+			again = m.tagsCmd()
+		}
 		if msg.err != nil {
 			m.fail(msg.err)
-			return m, next
+			return m, again
 		}
 		current := m.selectedTag()
 		m.tags = msg.tags
@@ -185,11 +295,54 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.connected, m.status = true, "connected"
-		m.refresh()
+		return m, tea.Batch(again, m.selectTag())
+
+	case conversationsMsg:
+		var again tea.Cmd
+		if m.convReload.done() {
+			again = m.conversationsCmd()
+		}
+		if msg.err == nil {
+			m.open = map[string]int{}
+			for _, c := range msg.conversations {
+				if c.GetName() == conversationName {
+					m.open[c.GetTag()] = int(c.GetOpenWorkSessionCount())
+				}
+			}
+		}
+		return m, again
+
+	case pollMsg:
+		if m.live {
+			m.polling = false
+			return m, nil
+		}
+		return m, tea.Batch(m.reloadTags(), m.reloadConversations(), m.pollAfter())
+
+	case watchMsg:
+		next := waitForWatch(msg.updates)
+		switch msg.update.Kind {
+		case client.WatchLive, client.WatchResync:
+			m.live = true
+			return m, tea.Batch(next, m.reloadTags(), m.reloadConversations())
+		case client.WatchChanged:
+			switch msg.update.Change.GetKind() {
+			case operatorv1.WatchKind_WATCH_KIND_TAG:
+				return m, tea.Batch(next, m.reloadTags())
+			case operatorv1.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE:
+				return m, tea.Batch(next, m.reloadConversations())
+			}
+		case client.WatchLost:
+			m.live = false
+			if !m.polling {
+				m.polling = true
+				return m, tea.Batch(next, m.reloadTags(), m.pollAfter())
+			}
+		}
 		return m, next
 
-	case refreshMsg:
-		return m, m.loadTags()
+	case historyMsg:
+		return m, m.showHistory(msg)
 
 	case sentMsg:
 		if msg.err != nil {
@@ -198,7 +351,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.connected, m.status = true, "connected"
-		return m, waitFor(msg.tag, m.follower.Follow(m.ctx, msg.tag, msg.record))
+		return m, waitFor(msg.tag, m.follower.Follow(m.ctx, msg.tag, msg.message, nil))
 
 	case followMsg:
 		m.apply(msg.tag, msg.event)
@@ -216,6 +369,46 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input, cmd = m.input.Update(msg)
 	}
 	return m, cmd
+}
+
+// tagsCmd and conversationsCmd reread a list whose reload is marked running.
+func (m model) tagsCmd() tea.Cmd {
+	return func() tea.Msg {
+		tags, err := m.client.ListTags(m.ctx)
+		return tagsMsg{tags: tags, err: err}
+	}
+}
+
+func (m model) conversationsCmd() tea.Cmd {
+	return func() tea.Msg {
+		conversations, err := m.client.ListConversations(m.ctx)
+		return conversationsMsg{conversations: conversations, err: err}
+	}
+}
+
+// showHistory adds a conversation's past messages, oldest first, and follows those that still
+// have a reply or work to show.
+func (m *model) showHistory(msg historyMsg) tea.Cmd {
+	c := m.conversation(msg.tag)
+	c.loading, c.loaded = false, true
+	if msg.err != nil {
+		m.addEntry(msg.tag, entryError, "Could not load the conversation history: "+msg.err.Error())
+		return nil
+	}
+	var cmds []tea.Cmd
+	for _, item := range msg.items {
+		c.add(entryYou, item.Message.GetText())
+		for _, event := range item.Events {
+			m.apply(msg.tag, event)
+		}
+		if item.Follow {
+			cmds = append(cmds, waitFor(msg.tag, m.follower.Follow(m.ctx, msg.tag, item.Message, item.Shown)))
+		}
+	}
+	if msg.tag == m.selectedTag() {
+		m.refresh()
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -236,12 +429,12 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.selected > 0 {
 				m.selected--
-				m.refresh()
+				return m, m.selectTag()
 			}
 		case "down", "j":
 			if m.selected < len(m.tags)-1 {
 				m.selected++
-				m.refresh()
+				return m, m.selectTag()
 			}
 		case "right", "enter":
 			return m.toggleFocus()
@@ -252,7 +445,7 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		text := strings.TrimSpace(m.input.Value())
 		tag := m.selectedTag()
-		if text == "" || tag == "" {
+		if text == "" || tag == "" || !m.conversation(tag).loaded {
 			return m, nil
 		}
 		m.input.Reset()
@@ -306,7 +499,10 @@ func (m *model) apply(tag string, event client.FollowEvent) {
 		dim(line)
 	case client.EventReply:
 		c.draft = ""
-		c.add(entryReply, event.Reply.Text)
+		c.add(entryReply, event.Reply.GetText())
+	case client.EventTurnError:
+		c.draft = ""
+		c.add(entryError, event.Text)
 	case client.EventWorking:
 		dim("· working: " + title)
 	case client.EventReport:
@@ -321,9 +517,6 @@ func (m *model) apply(tag string, event client.FollowEvent) {
 	case client.EventStillWorking:
 		dim(event.Text)
 	case client.EventJoined:
-		if event.Discard {
-			c.draft = ""
-		}
 		dim("· added to the turn in progress")
 	case client.EventError:
 		c.draft = ""

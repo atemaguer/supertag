@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
+import { conversationClient } from "../apps/cli/src/operator-client.js";
 import {
   LocalWorklet,
   type TaskAttemptSpec,
@@ -101,16 +102,13 @@ it("schedules each Tag's Task onto the Worker its harness names and persists the
       worklet: selectedWorklet,
       durableWorklet: durable,
     });
-    const message = async (tagName: string) => {
-      const response = await fetch(`${runtime?.url}/api/v1/tags/${tagName}/messages`, {
-        method: "POST",
-        headers: { Authorization: "Bearer selection-admin", "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "Do the work" }),
-      });
-      const text = await response.text();
-      expect(response.status, text).toBe(201);
-      return (JSON.parse(text) as { taskId: string }).taskId;
-    };
+    const message = async (tagName: string) =>
+      (
+        await conversationClient({
+          url: runtime?.url ?? "",
+          token: "selection-admin",
+        }).sendMessage({ tag: tagName, text: "Do the work" })
+      ).taskId;
     const researchTask = await message(researcher.name);
     const codingTask = await message(coder.name);
     const pendingTask = await message(stranded.name);

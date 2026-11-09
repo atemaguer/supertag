@@ -18,7 +18,6 @@ const external = [
   "better-sqlite3",
   "drizzle-orm",
   "e2b",
-  "eventsource-parser",
   "modal",
   "mdast-util-from-markdown",
   "mdast-util-gfm",

@@ -1,13 +1,12 @@
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fromJsonString } from "@bufbuild/protobuf";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
-import {
-  runTagConversationCommand,
-  type TagMessageRecord,
-} from "../apps/cli/src/tag-conversation.ts";
+import { runTagConversationCommand } from "../apps/cli/src/tag-conversation.ts";
 import { workSessionBranch } from "../packages/control-plane/src/work-sessions.ts";
+import { MessageSchema, ReplyStatus } from "../packages/operator-api/src/index.ts";
 import { createCodexWorker } from "../packages/runtime/harnesses/codex/src/index.ts";
 import {
   SURFACE_COORDINATION_CAPABILITY,
@@ -240,13 +239,14 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
 
       const send = async (text: string) => {
         if (!runtime) throw new Error("not started");
-        return JSON.parse(
+        return fromJsonString(
+          MessageSchema,
           await runTagConversationCommand(
             { url: runtime.url, token: ADMIN },
             ["planner", text, "--session", "plan", "--output", "json"],
-            { intervalMs: 20, timeoutMs: 30_000 },
+            { timeoutMs: 30_000 },
           ),
-        ) as TagMessageRecord;
+        );
       };
 
       beforeEach(async () => {
@@ -263,7 +263,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       it("commits a work Session's edits to its branch, reports it, and continues from it", async () => {
         await start(["app"]);
         const record = await send("work:Fix readme");
-        const started = record.startedSessions?.[0];
+        const started = record.workSessions[0];
         if (!started?.taskId || !started.reportTaskId) throw new Error("missing work Session");
         const branch = workSessionBranch(started.id);
         expect(branch).toBe(`supertag/session/${started.id.slice(0, 8)}`);
@@ -301,7 +301,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
 
         // The continued Task commits onto the work Session's branch, on top of the earlier commit.
         const continued = await send(`continue:${started.id}|Answer: go on`);
-        expect(continued.status).toBe("replied");
+        expect(continued.status).toBe(ReplyStatus.REPLIED);
         await vi.waitFor(
           async () => {
             const tasks = await store.listTasks({ sessionId: started.id });
@@ -344,7 +344,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       it("gives the Session's branch to its first Task that commits, after one that asked", async () => {
         await start(["app"], { emptyFirstWork: true });
         const record = await send("work:Fix readme");
-        const started = record.startedSessions?.[0];
+        const started = record.workSessions[0];
         if (!started?.taskId) throw new Error("missing work Session");
         const branch = workSessionBranch(started.id);
         expect((await store.findTaskById(started.taskId))?.workspacePlan).toMatchObject({
@@ -388,7 +388,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       it("keeps a work Session on the suffixed branch its Worker took beside an unrelated one", async () => {
         await start(["app"], { occupiedWorkBranch: true });
         const record = await send("work:Fix readme");
-        const started = record.startedSessions?.[0];
+        const started = record.workSessions[0];
         if (!started?.taskId) throw new Error("missing work Session");
         const branch = workSessionBranch(started.id);
         // The unrelated branch of the same name is never taken, so the Worker suffixed the name.
@@ -421,7 +421,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       it("pins a retried work Session Task to its own branch and head", async () => {
         await start(["app"], { failFirstWork: true });
         const record = await send("work:Fix readme");
-        const started = record.startedSessions?.[0];
+        const started = record.workSessions[0];
         const taskId = started?.taskId;
         if (!started || !taskId) throw new Error("missing work Session");
         const branch = workSessionBranch(started.id);
@@ -451,7 +451,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           "workspace must be one of this conversation's Workspaces: app, docs",
         );
         const record = await send("work:Docs@docs");
-        const started = record.startedSessions?.[0];
+        const started = record.workSessions[0];
         if (!started?.taskId) throw new Error("missing work Session");
         expect((await store.findTaskById(started.taskId))?.workspacePlan).toMatchObject({
           workspace: "docs",
@@ -462,7 +462,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       it("keeps the conversation's plan without a Workspace", async () => {
         await start([]);
         const record = await send("work:Research");
-        const started = record.startedSessions?.[0];
+        const started = record.workSessions[0];
         if (!started?.taskId) throw new Error("missing work Session");
         expect((await store.findTaskById(started.taskId))?.workspacePlan).toEqual({
           version: 1,

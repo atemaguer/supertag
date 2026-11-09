@@ -255,6 +255,44 @@ func (x *Metadata) GetUpdatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+// What a server stream sends after 15 seconds without another event, so
+// proxies keep an idle connection open. It carries no state.
+type Heartbeat struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Heartbeat) Reset() {
+	*x = Heartbeat{}
+	mi := &file_supertag_operator_v1_common_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Heartbeat) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Heartbeat) ProtoMessage() {}
+
+func (x *Heartbeat) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_operator_v1_common_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
+func (*Heartbeat) Descriptor() ([]byte, []int) {
+	return file_supertag_operator_v1_common_proto_rawDescGZIP(), []int{2}
+}
+
 // One request field an error is about.
 type FieldViolation struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -268,7 +306,7 @@ type FieldViolation struct {
 
 func (x *FieldViolation) Reset() {
 	*x = FieldViolation{}
-	mi := &file_supertag_operator_v1_common_proto_msgTypes[2]
+	mi := &file_supertag_operator_v1_common_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -280,7 +318,7 @@ func (x *FieldViolation) String() string {
 func (*FieldViolation) ProtoMessage() {}
 
 func (x *FieldViolation) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_common_proto_msgTypes[2]
+	mi := &file_supertag_operator_v1_common_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -293,7 +331,7 @@ func (x *FieldViolation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FieldViolation.ProtoReflect.Descriptor instead.
 func (*FieldViolation) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_common_proto_rawDescGZIP(), []int{2}
+	return file_supertag_operator_v1_common_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *FieldViolation) GetPath() string {
@@ -323,7 +361,7 @@ type ErrorDetail struct {
 
 func (x *ErrorDetail) Reset() {
 	*x = ErrorDetail{}
-	mi := &file_supertag_operator_v1_common_proto_msgTypes[3]
+	mi := &file_supertag_operator_v1_common_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -335,7 +373,7 @@ func (x *ErrorDetail) String() string {
 func (*ErrorDetail) ProtoMessage() {}
 
 func (x *ErrorDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_common_proto_msgTypes[3]
+	mi := &file_supertag_operator_v1_common_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -348,7 +386,7 @@ func (x *ErrorDetail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ErrorDetail.ProtoReflect.Descriptor instead.
 func (*ErrorDetail) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_common_proto_rawDescGZIP(), []int{3}
+	return file_supertag_operator_v1_common_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ErrorDetail) GetReason() ErrorReason {
@@ -380,7 +418,8 @@ const file_supertag_operator_v1_common_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"F\n" +
+	"updated_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\v\n" +
+	"\tHeartbeat\"F\n" +
 	"\x0eFieldViolation\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\"\x86\x01\n" +
@@ -415,20 +454,21 @@ func file_supertag_operator_v1_common_proto_rawDescGZIP() []byte {
 }
 
 var file_supertag_operator_v1_common_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_supertag_operator_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_supertag_operator_v1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_supertag_operator_v1_common_proto_goTypes = []any{
 	(ErrorReason)(0),              // 0: supertag.operator.v1.ErrorReason
 	(*Money)(nil),                 // 1: supertag.operator.v1.Money
 	(*Metadata)(nil),              // 2: supertag.operator.v1.Metadata
-	(*FieldViolation)(nil),        // 3: supertag.operator.v1.FieldViolation
-	(*ErrorDetail)(nil),           // 4: supertag.operator.v1.ErrorDetail
-	(*timestamppb.Timestamp)(nil), // 5: google.protobuf.Timestamp
+	(*Heartbeat)(nil),             // 3: supertag.operator.v1.Heartbeat
+	(*FieldViolation)(nil),        // 4: supertag.operator.v1.FieldViolation
+	(*ErrorDetail)(nil),           // 5: supertag.operator.v1.ErrorDetail
+	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
 }
 var file_supertag_operator_v1_common_proto_depIdxs = []int32{
-	5, // 0: supertag.operator.v1.Metadata.created_at:type_name -> google.protobuf.Timestamp
-	5, // 1: supertag.operator.v1.Metadata.updated_at:type_name -> google.protobuf.Timestamp
+	6, // 0: supertag.operator.v1.Metadata.created_at:type_name -> google.protobuf.Timestamp
+	6, // 1: supertag.operator.v1.Metadata.updated_at:type_name -> google.protobuf.Timestamp
 	0, // 2: supertag.operator.v1.ErrorDetail.reason:type_name -> supertag.operator.v1.ErrorReason
-	3, // 3: supertag.operator.v1.ErrorDetail.fields:type_name -> supertag.operator.v1.FieldViolation
+	4, // 3: supertag.operator.v1.ErrorDetail.fields:type_name -> supertag.operator.v1.FieldViolation
 	4, // [4:4] is the sub-list for method output_type
 	4, // [4:4] is the sub-list for method input_type
 	4, // [4:4] is the sub-list for extension type_name
@@ -447,7 +487,7 @@ func file_supertag_operator_v1_common_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_operator_v1_common_proto_rawDesc), len(file_supertag_operator_v1_common_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

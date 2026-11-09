@@ -2,112 +2,144 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"connectrpc.com/connect"
+
+	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1/operatorv1connect"
 )
 
-func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
-	t.Helper()
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
-	c, err := New(Target{URL: server.URL + "/", Token: "secret", Name: "local"}, "0.0.0-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return c
-}
-
-func requireAuth(t *testing.T, r *http.Request) {
-	t.Helper()
-	if got := r.Header.Get("authorization"); got != "Bearer secret" {
-		t.Errorf("%s %s authorization = %q", r.Method, r.URL.Path, got)
-	}
-}
-
 func TestListTags(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		requireAuth(t, r)
-		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/tags" {
-			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+	f := &fakeControlPlane{tags: func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s", r.Method)
 		}
 		_, _ = w.Write([]byte(`{"kind":"ResourceList","items":[{"kind":"Tag","metadata":{"name":"lead"},"status":{"phase":"active"}}]}`))
-	})
+	}}
+	c := newFake(t, f)
 	tags, err := c.ListTags(context.Background())
 	if err != nil || len(tags) != 1 || tags[0].Name() != "lead" || tags[0].Status.Phase != "active" {
 		t.Fatalf("ListTags() = %+v, %v", tags, err)
 	}
-}
-
-func TestSendMessage(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		requireAuth(t, r)
-		if r.Method != http.MethodPost || r.URL.EscapedPath() != "/api/v1/tags/a%2Fb/messages" {
-			t.Errorf("unexpected %s %s", r.Method, r.URL.EscapedPath())
-		}
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Error(err)
-		}
-		if len(body) != 2 || body["text"] != "hello" || body["session"] != "default" {
-			t.Errorf("body = %v", body)
-		}
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"kind":"TagMessage","tag":"a/b","session":"default","sessionId":"s","taskId":"t1","status":"waiting","waiting":"no bound Worker Host"}`))
-	})
-	record, err := c.SendMessage(context.Background(), "a/b", "hello", "default")
-	if err != nil || record.TaskID != "t1" || record.Status != "waiting" || record.Waiting != "no bound Worker Host" {
-		t.Fatalf("SendMessage() = %+v, %v", record, err)
+	if calls := f.callsTo("/api/v1/tags"); len(calls) != 1 || calls[0].authorization != "Bearer secret" || calls[0].version != "0.0.0-test" {
+		t.Fatalf("calls = %+v", calls)
 	}
 }
 
-func TestGetMessageAndErrors(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		requireAuth(t, r)
-		switch r.URL.Path {
-		case "/api/v1/tags/lead/messages/t1":
-			_, _ = w.Write([]byte(`{"taskId":"t1","status":"replied","reply":{"presentation":"markdown","text":"done"},"startedSessions":[{"id":"s1","title":"Fix","taskId":"w1","status":"running","reportStatus":"waiting"}]}`))
-		case "/api/v1/tags/lead/messages/missing":
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"error":"not_found","message":"Message missing was not found"}`))
-		default:
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+func TestSendMessageRetriesWithTheSameIdempotencyKey(t *testing.T) {
+	var requests []*operatorv1.SendMessageRequest
+	f := &fakeControlPlane{send: func(req *operatorv1.SendMessageRequest) (*operatorv1.Message, error) {
+		requests = append(requests, req)
+		if len(requests) == 1 {
+			return nil, connect.NewError(connect.CodeUnavailable, errors.New("restarting"))
 		}
-	})
-	record, err := c.GetMessage(context.Background(), "lead", "t1")
-	if err != nil || record.Reply.Text != "done" || record.StartedSessions[0].TaskID != "w1" {
-		t.Fatalf("GetMessage() = %+v, %v", record, err)
+		return &operatorv1.Message{TaskId: "t1", Tag: req.GetTag(), Conversation: "default",
+			Status: operatorv1.ReplyStatus_REPLY_STATUS_WAITING, WaitingReason: "no bound Worker Host"}, nil
+	}}
+	c := newFake(t, f)
+	message, err := c.SendMessage(context.Background(), "a/b", "default", "hello")
+	if err != nil || message.GetTaskId() != "t1" || message.GetWaitingReason() != "no bound Worker Host" {
+		t.Fatalf("SendMessage() = %v, %v", message, err)
 	}
+	if len(requests) != 2 {
+		t.Fatalf("%d requests, want a retry", len(requests))
+	}
+	first := requests[0]
+	if first.GetTag() != "a/b" || first.GetConversation() != "default" || first.GetText() != "hello" || first.GetIdempotencyKey() == "" {
+		t.Fatalf("request = %v", first)
+	}
+	if requests[1].GetIdempotencyKey() != first.GetIdempotencyKey() {
+		t.Fatal("the retry must reuse the idempotency key")
+	}
+	for _, call := range f.callsTo(operatorv1connect.ConversationServiceSendMessageProcedure) {
+		if call.authorization != "Bearer secret" || call.version != "0.0.0-test" || call.contentType != "application/json" || call.protoMajor != 1 {
+			t.Errorf("call = %+v, want the token, version and Connect JSON over HTTP/1.1", call)
+		}
+	}
+}
+
+func TestRefusalsCarryTheControlPlaneSentence(t *testing.T) {
+	sends := 0
+	f := &fakeControlPlane{
+		send: func(*operatorv1.SendMessageRequest) (*operatorv1.Message, error) {
+			sends++
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("Tag ghost was not found"))
+		},
+		tags: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":"forbidden"}`))
+		},
+	}
+	c := newFake(t, f)
 	var apiErr *APIError
-	if _, err := c.GetMessage(context.Background(), "lead", "missing"); !errors.As(err, &apiErr) || apiErr.Message != "Message missing was not found" {
-		t.Fatalf("want the message sentence, got %v", err)
+	if _, err := c.SendMessage(context.Background(), "ghost", "", "hi"); !errors.As(err, &apiErr) ||
+		apiErr.Code != connect.CodeNotFound || err.Error() != "Tag ghost was not found" {
+		t.Fatalf("SendMessage() error = %v", err)
 	}
-	if _, err := c.ListTags(context.Background()); err == nil || err.Error() != "Control Plane returned HTTP 401" {
-		t.Fatalf("want the HTTP status, got %v", err)
+	if sends != 1 {
+		t.Fatalf("a refusal was sent %d times", sends)
 	}
-}
+	if _, err := c.ListTags(context.Background()); err == nil || err.Error() != "Control Plane returned HTTP 403" {
+		t.Fatalf("ListTags() error = %v", err)
+	}
 
-func TestStreamResumes(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		requireAuth(t, r)
-		if r.URL.Path != "/api/v1/tags/lead/messages/t1/stream" || r.Header.Get("accept") != "text/event-stream" {
-			t.Errorf("unexpected %s accept=%q", r.URL.Path, r.Header.Get("accept"))
-		}
-		if got := r.Header.Get("last-event-id"); got != "7" {
-			t.Errorf("last-event-id = %q", got)
-		}
-		_, _ = w.Write([]byte("id: 8\ndata: {\"type\":\"finish\"}\n\n"))
-	})
-	stream, err := c.Stream(context.Background(), "lead", "t1", "7")
+	bad, err := New(Target{URL: c.Target().URL, Token: "wrong"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stream.Close()
-	if part, err := stream.NextPart(); err != nil || part.Type != "finish" || stream.LastID() != "8" {
-		t.Fatalf("NextPart() = %+v, %v", part, err)
+	if _, _, err := bad.ListMessages(context.Background(), "lead", "default", 0, ""); !errors.As(err, &apiErr) || apiErr.Code != connect.CodeUnauthenticated {
+		t.Fatalf("ListMessages() with a bad token = %v", err)
+	}
+}
+
+func TestListMessagesAndConversations(t *testing.T) {
+	f := &fakeControlPlane{
+		list: func(req *operatorv1.ListMessagesRequest) (*operatorv1.ListMessagesResponse, error) {
+			if req.GetTag() != "lead" || req.GetConversation() != "default" || req.GetPageSize() != 20 || req.GetPageToken() != "p1" {
+				t.Errorf("request = %v", req)
+			}
+			return &operatorv1.ListMessagesResponse{Messages: []*operatorv1.Message{{TaskId: "t2"}, {TaskId: "t1"}}, NextPageToken: "p2"}, nil
+		},
+		conversations: func(req *operatorv1.ListConversationsRequest) (*operatorv1.ListConversationsResponse, error) {
+			if req.GetPageToken() == "" {
+				return &operatorv1.ListConversationsResponse{Conversations: []*operatorv1.Conversation{{Tag: "lead", Name: "default"}}, NextPageToken: "next"}, nil
+			}
+			return &operatorv1.ListConversationsResponse{Conversations: []*operatorv1.Conversation{{Tag: "builder", Name: "default", OpenWorkSessionCount: 2}}}, nil
+		},
+	}
+	c := newFake(t, f)
+	messages, next, err := c.ListMessages(context.Background(), "lead", "default", 20, "p1")
+	if err != nil || len(messages) != 2 || messages[0].GetTaskId() != "t2" || next != "p2" {
+		t.Fatalf("ListMessages() = %v, %q, %v", messages, next, err)
+	}
+	conversations, err := c.ListConversations(context.Background())
+	if err != nil || len(conversations) != 2 || conversations[1].GetOpenWorkSessionCount() != 2 {
+		t.Fatalf("ListConversations() = %v, %v", conversations, err)
+	}
+}
+
+func TestCallsStayOnHTTP1WhenTheServerOffersHTTP2(t *testing.T) {
+	f := &fakeControlPlane{list: func(*operatorv1.ListMessagesRequest) (*operatorv1.ListMessagesResponse, error) {
+		return &operatorv1.ListMessagesResponse{}, nil
+	}}
+	server := httptest.NewUnstartedServer(f.handler())
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	c, err := New(Target{URL: server.URL, Token: "secret"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.http.Transport.(*http.Transport).TLSClientConfig = server.Client().Transport.(*http.Transport).TLSClientConfig
+	if _, _, err := c.ListMessages(context.Background(), "lead", "", 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	if calls := f.callsTo(operatorv1connect.ConversationServiceListMessagesProcedure); len(calls) != 1 || calls[0].protoMajor != 1 {
+		t.Fatalf("calls = %+v, want one over HTTP/1.1", calls)
 	}
 }
 

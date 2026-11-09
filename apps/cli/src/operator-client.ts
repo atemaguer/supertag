@@ -1,6 +1,6 @@
 import { Code, ConnectError, createClient, type Interceptor } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
-import { OrganizationService } from "@supertag/operator-api";
+import { ConversationService, EventService, OrganizationService } from "@supertag/operator-api";
 import {
   CLIENT_VERSION_HEADER,
   SUPERTAG_VERSION,
@@ -47,6 +47,16 @@ export function operatorTransport(options: OperatorClientOptions) {
 
 export function organizationClient(options: OperatorClientOptions) {
   return createClient(OrganizationService, operatorTransport(options));
+}
+
+/** Calls `ConversationService`. Pass `timeoutMs: 0` to `followMessage`, which has no deadline. */
+export function conversationClient(options: OperatorClientOptions) {
+  return createClient(ConversationService, operatorTransport(options));
+}
+
+/** Calls `EventService`. Pass `timeoutMs: 0` to `watch`, which has no deadline. */
+export function eventClient(options: OperatorClientOptions) {
+  return createClient(EventService, operatorTransport(options));
 }
 
 /**

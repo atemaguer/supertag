@@ -41,7 +41,6 @@
     "@supertag/worker-opencode": "workspace:*",
     "@supertag/worker-sdk": "workspace:*",
     "@supertag/worker-transport": "workspace:*",
-    "eventsource-parser": "4.1.3",
     "yaml": "2.8.1"
   }
 }

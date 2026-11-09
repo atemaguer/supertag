@@ -37,7 +37,7 @@ func main() {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if _, err := tea.NewProgram(newModel(ctx, c, client.NewFollower(c))).Run(); err != nil {
+	if _, err := tea.NewProgram(newModel(ctx, c, client.NewFollower(c), client.NewWatcher(c, watchKinds...))).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

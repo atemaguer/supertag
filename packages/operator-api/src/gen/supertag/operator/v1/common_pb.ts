@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/operator/v1/common.proto.
  */
 export const file_supertag_operator_v1_common: GenFile = /*@__PURE__*/
-  fileDesc("CiFzdXBlcnRhZy9vcGVyYXRvci92MS9jb21tb24ucHJvdG8SFHN1cGVydGFnLm9wZXJhdG9yLnYxIi8KBU1vbmV5EhAKCGN1cnJlbmN5GAEgASgJEhQKDGFtb3VudF9taW5vchgCIAEoAyKeAQoITWV0YWRhdGESCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIYChByZXNvdXJjZV92ZXJzaW9uGAMgASgJEi4KCmNyZWF0ZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnVwZGF0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIjMKDkZpZWxkVmlvbGF0aW9uEgwKBHBhdGgYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkidgoLRXJyb3JEZXRhaWwSMQoGcmVhc29uGAEgASgOMiEuc3VwZXJ0YWcub3BlcmF0b3IudjEuRXJyb3JSZWFzb24SNAoGZmllbGRzGAIgAygLMiQuc3VwZXJ0YWcub3BlcmF0b3IudjEuRmllbGRWaW9sYXRpb24qjgMKC0Vycm9yUmVhc29uEhwKGEVSUk9SX1JFQVNPTl9VTlNQRUNJRklFRBAAEiAKHEVSUk9SX1JFQVNPTl9VTkFVVEhFTlRJQ0FURUQQARIjCh9FUlJPUl9SRUFTT05fQ1JFREVOVElBTF9SRVZPS0VEEAISIwofRVJST1JfUkVBU09OX0NSRURFTlRJQUxfRVhQSVJFRBADEiIKHkVSUk9SX1JFQVNPTl9QRVJNSVNTSU9OX0RFTklFRBAEEhkKFUVSUk9SX1JFQVNPTl9EUkFJTklORxAFEiEKHUVSUk9SX1JFQVNPTl9JTlZBTElEX0FSR1VNRU5UEAYSGgoWRVJST1JfUkVBU09OX05PVF9GT1VORBAHEhkKFUVSUk9SX1JFQVNPTl9DT05GTElDVBAIEhkKFUVSUk9SX1JFQVNPTl9JTlRFUk5BTBAJEhwKGEVSUk9SX1JFQVNPTl9VTkFWQUlMQUJMRRAKEiMKH0VSUk9SX1JFQVNPTl9SRVNPVVJDRV9FWEhBVVNURUQQC0JOWkxnaXRodWIuY29tL2F0ZW1hZ3Vlci9zdXBlcnRhZy9wYWNrYWdlcy9vcGVyYXRvci1hcGkvZ28vb3BlcmF0b3J2MTtvcGVyYXRvcnYxYgZwcm90bzM", [file_google_protobuf_timestamp]);
+  fileDesc("CiFzdXBlcnRhZy9vcGVyYXRvci92MS9jb21tb24ucHJvdG8SFHN1cGVydGFnLm9wZXJhdG9yLnYxIi8KBU1vbmV5EhAKCGN1cnJlbmN5GAEgASgJEhQKDGFtb3VudF9taW5vchgCIAEoAyKeAQoITWV0YWRhdGESCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIYChByZXNvdXJjZV92ZXJzaW9uGAMgASgJEi4KCmNyZWF0ZWRfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnVwZGF0ZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIgsKCUhlYXJ0YmVhdCIzCg5GaWVsZFZpb2xhdGlvbhIMCgRwYXRoGAEgASgJEhMKC2Rlc2NyaXB0aW9uGAIgASgJInYKC0Vycm9yRGV0YWlsEjEKBnJlYXNvbhgBIAEoDjIhLnN1cGVydGFnLm9wZXJhdG9yLnYxLkVycm9yUmVhc29uEjQKBmZpZWxkcxgCIAMoCzIkLnN1cGVydGFnLm9wZXJhdG9yLnYxLkZpZWxkVmlvbGF0aW9uKo4DCgtFcnJvclJlYXNvbhIcChhFUlJPUl9SRUFTT05fVU5TUEVDSUZJRUQQABIgChxFUlJPUl9SRUFTT05fVU5BVVRIRU5USUNBVEVEEAESIwofRVJST1JfUkVBU09OX0NSRURFTlRJQUxfUkVWT0tFRBACEiMKH0VSUk9SX1JFQVNPTl9DUkVERU5USUFMX0VYUElSRUQQAxIiCh5FUlJPUl9SRUFTT05fUEVSTUlTU0lPTl9ERU5JRUQQBBIZChVFUlJPUl9SRUFTT05fRFJBSU5JTkcQBRIhCh1FUlJPUl9SRUFTT05fSU5WQUxJRF9BUkdVTUVOVBAGEhoKFkVSUk9SX1JFQVNPTl9OT1RfRk9VTkQQBxIZChVFUlJPUl9SRUFTT05fQ09ORkxJQ1QQCBIZChVFUlJPUl9SRUFTT05fSU5URVJOQUwQCRIcChhFUlJPUl9SRUFTT05fVU5BVkFJTEFCTEUQChIjCh9FUlJPUl9SRUFTT05fUkVTT1VSQ0VfRVhIQVVTVEVEEAtCTlpMZ2l0aHViLmNvbS9hdGVtYWd1ZXIvc3VwZXJ0YWcvcGFja2FnZXMvb3BlcmF0b3ItYXBpL2dvL29wZXJhdG9ydjE7b3BlcmF0b3J2MWIGcHJvdG8z", [file_google_protobuf_timestamp]);
 
 /**
  * An amount of money in the smallest unit of its currency.
@@ -92,6 +92,22 @@ export const MetadataSchema: GenMessage<Metadata> = /*@__PURE__*/
   messageDesc(file_supertag_operator_v1_common, 1);
 
 /**
+ * What a server stream sends after 15 seconds without another event, so
+ * proxies keep an idle connection open. It carries no state.
+ *
+ * @generated from message supertag.operator.v1.Heartbeat
+ */
+export type Heartbeat = Message<"supertag.operator.v1.Heartbeat"> & {
+};
+
+/**
+ * Describes the message supertag.operator.v1.Heartbeat.
+ * Use `create(HeartbeatSchema)` to create a new message.
+ */
+export const HeartbeatSchema: GenMessage<Heartbeat> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_common, 2);
+
+/**
  * One request field an error is about.
  *
  * @generated from message supertag.operator.v1.FieldViolation
@@ -117,7 +133,7 @@ export type FieldViolation = Message<"supertag.operator.v1.FieldViolation"> & {
  * Use `create(FieldViolationSchema)` to create a new message.
  */
 export const FieldViolationSchema: GenMessage<FieldViolation> = /*@__PURE__*/
-  messageDesc(file_supertag_operator_v1_common, 2);
+  messageDesc(file_supertag_operator_v1_common, 3);
 
 /**
  * The detail every refused call carries beside its Connect error code.
@@ -145,7 +161,7 @@ export type ErrorDetail = Message<"supertag.operator.v1.ErrorDetail"> & {
  * Use `create(ErrorDetailSchema)` to create a new message.
  */
 export const ErrorDetailSchema: GenMessage<ErrorDetail> = /*@__PURE__*/
-  messageDesc(file_supertag_operator_v1_common, 3);
+  messageDesc(file_supertag_operator_v1_common, 4);
 
 /**
  * Why the Control Plane refused a call. Clients branch on this, never on the

@@ -341,7 +341,8 @@ supertag revoke operator-token laptop-2
 ```
 
 A token expires 90 days after creation; create a new one under a new name before then. Revoking
-refuses the token on its next request, without a restart.
+refuses the token on its next request, without a restart. A conversation it is following or a
+watch it holds ends within 30 seconds.
 
 ### Audit log
 

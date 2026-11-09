@@ -7,7 +7,8 @@ import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { parseArgs, promisify } from "node:util";
 import { probeInvalidExecutionCredential } from "../apps/cli/src/deploy.js";
-import { organizationClient } from "../apps/cli/src/operator-client.js";
+import { conversationClient, organizationClient } from "../apps/cli/src/operator-client.js";
+import { ReplyStatus } from "../packages/operator-api/src/index.js";
 import {
   array,
   assertNoSecrets,
@@ -53,6 +54,17 @@ class Api {
     if (!response.ok)
       throw new Error(`Control Plane ${method} ${path} failed with HTTP ${response.status}`);
     return record(value, `${method} ${path} response`);
+  }
+
+  /** The conversation RPCs, and the options each call takes. */
+  conversations() {
+    return {
+      client: conversationClient({ url: this.origin, token: this.token }),
+      options: {
+        signal: runAbort.signal,
+        timeoutMs: Math.min(this.timeout, 30_000),
+      },
+    };
   }
 
   async waitUntilReachable(): Promise<void> {
@@ -458,17 +470,20 @@ async function converse(
   session: string,
   message: string,
 ): Promise<{ taskId: string; sessionId: string; reply: string; task: JsonRecord }> {
-  const path = `/api/v1/tags/${encodeURIComponent(tagName)}/messages`;
-  const sent = await apiClient.request("POST", path, { text: message, session });
-  const taskId = text(sent["taskId"], "turn Task id");
+  const { client, options } = apiClient.conversations();
+  const sent = await client.sendMessage(
+    { tag: tagName, conversation: session, text: message },
+    options,
+  );
+  const taskId = text(sent.taskId, "turn Task id");
   const replied = await poll(async () => {
-    const current = await apiClient.request("GET", `${path}/${encodeURIComponent(taskId)}`);
-    return current["status"] === "replied" ? current : undefined;
+    const current = await client.getMessage({ tag: tagName, taskId }, options);
+    return current.status === ReplyStatus.REPLIED ? current : undefined;
   }, `reply to Task ${taskId}`);
   return {
     taskId,
-    sessionId: text(replied["sessionId"], "turn Session id"),
-    reply: text(record(replied["reply"], "turn reply")["text"], "turn reply text"),
+    sessionId: text(replied.sessionId, "turn Session id"),
+    reply: text(replied.reply?.text, "turn reply text"),
     task: await pollTask(apiClient, taskId),
   };
 }

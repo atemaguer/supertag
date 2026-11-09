@@ -211,11 +211,12 @@ the Tag's Mailbox messages is titled `Inbox`. `STATUS` shows the latest Task's s
   continued work Session counts against your current message's limits, like a new one. If the
   Tag's permissions changed since the work Session last ran, the Tag starts a new work Session
   instead.
-- `--output json` waits for the reply and every report, and prints one message record with the
-  Session, the Task, the reply, and `startedSessions`: each work Session the message started or
-  continued, with its status and report. A work Session waiting on you has status `waiting` and
-  its `question`; one waiting for approval lists `approvals`, and the command returns there.
-  While no bound Worker Host can run the turn, `waiting` says why.
+- `--output json` waits for the reply and every report, and prints the message in its proto3 JSON
+  form: the `conversation`, `sessionId`, `taskId`, `reply`, and `workSessions`, each work Session
+  the message started or continued, with its status and report. A work Session waiting on you has
+  status `WORK_SESSION_STATUS_WAITING` and its `question`; one waiting for approval lists
+  `approvals`, and the command returns there. While no bound Worker Host can run the turn,
+  `waitingReason` says why. See [`Message`](../reference/control-plane-api.md#conversations).
 - **Ctrl-C stops showing the reply, not the work.** The Tag keeps working. The command prints the
   `supertag describe task` command that follows the Task.
 
@@ -230,7 +231,8 @@ the Tag's Mailbox messages is titled `Inbox`. `STATUS` shows the latest Task's s
   conversation, so your next message there sees it.
 - **A message sent while the Tag is still replying.** If the Tag's harness accepts input while it
   works, your message joins the running reply, and the command prints that reply. Otherwise the
-  message waits its turn.
+  message waits its turn. A reply that finishes before the Tag reads your message gives the
+  message its own turn, and the command prints that turn's reply.
 - **`The requesting Task already finished; request expired`.** The work Session no longer waits
   on that request: it moved on to a later Task, or its Task ended without waiting on it. If the
   work Session still needs the action, its next call creates a new request and notice.
@@ -238,7 +240,7 @@ the Tag's Mailbox messages is titled `Inbox`. `STATUS` shows the latest Task's s
 
 ## Reference
 
-- [CLI conversation routes and the reply stream](../reference/control-plane-api.md#cli-conversations-experimental)
+- [`ConversationService`: sending, reading, and following messages](../reference/control-plane-api.md#conversations)
 
 ## Next
 

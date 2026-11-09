@@ -116,14 +116,17 @@ gone once the answer started the next turn.
 To ask a Tag something outside an Objective, such as what it is working on, use
 `supertag message tag TAG - --session NAME --output json` with the same private-file pattern. The
 conversation is private to your operator credential and uses only the Tag's Roles' permissions.
-A `startedSessions` entry with status `waiting` and `approvals` is a work Session waiting on a
-recorded approval request. Ask the user, then run `supertag approve request ID` or
-`supertag deny request ID --reason TEXT`. Either decision continues the work Session on its own;
-do not message the Tag to resume it. An entry with `notContinued` was not continued, because the
-Tag's permissions changed or too little of its budget pool is left; its text says which. The
-`--output json` command returns at that waiting report, and `supertag describe session ID` shows
-the work Session's next Task. An entry with a `question` waits for the user's answer, which your
-next message in that conversation passes on.
+It prints the message in its proto3 JSON form; fields left empty are omitted. A `workSessions`
+entry with status `WORK_SESSION_STATUS_WAITING` and `approvals` is a work Session waiting on a
+recorded approval request; each approval's `requestId` names it. Ask the user, then run
+`supertag approve request ID` or `supertag deny request ID --reason TEXT`. Either decision
+continues the work Session on its own; do not message the Tag to resume it. An entry with
+`notContinued` was not continued, because the Tag's permissions changed or too little of its
+budget pool is left; its text says which. The `--output json` command returns once every entry's
+`reportStatus` is `REPLY_STATUS_REPLIED`, including at that waiting report, and
+`supertag describe session ID` shows the work Session's next Task. An entry with status
+`WORK_SESSION_STATUS_WAITING` and a `question` waits for the user's answer, which your next
+message in that conversation passes on.
 
 Answer routine implementation questions only when the user's own instructions already settle
 them. Ask the user about scope changes, new commands or configuration, merges, spending increases,

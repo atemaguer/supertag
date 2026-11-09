@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ControlPlaneClient, ControlPlaneRequestError } from "./src/control-plane-client.js";
+import { ControlPlaneClient } from "./src/control-plane-client.js";
 import { objectiveHelp, runObjectiveCommand } from "./src/objectives.js";
 
 afterEach(() => vi.restoreAllMocks());
@@ -8,13 +8,11 @@ const target = { url: "http://localhost", token: "test" };
 const MESSAGES = "/api/v1/coordination/objectives/objective-1/messages";
 
 /**
- * Answers the message POST, the Objective and Tag reads the reply follow needs, and then the
- * CLI conversation read with `reply`, or with a `ControlPlaneRequestError` of `status`.
+ * Answers the message POST and the Objective and Tag reads the reply follow needs over HTTP, and
+ * the operator RPCs over Connect: `GetMessage` with `message`, or `NotFound` without one, and
+ * `FollowMessage` with its finish and end.
  */
-function controlPlane(
-  result: Record<string, unknown>,
-  conversation: { readonly reply?: unknown; readonly status?: number } = { status: 404 },
-) {
+function controlPlane(result: Record<string, unknown>, message?: Record<string, unknown>) {
   const requests: Array<{ path: string; body?: string }> = [];
   const request = vi
     .spyOn(ControlPlaneClient.prototype, "request")
@@ -25,10 +23,38 @@ function controlPlane(
         return { id: "objective-1", ownerTagId: "owner-id" } as never;
       if (path === "/api/v1/tags")
         return { items: [{ metadata: { id: "owner-id", name: "planner" } }] } as never;
-      if (conversation.reply !== undefined) return conversation.reply as never;
-      throw new ControlPlaneRequestError("no CLI conversation", conversation.status ?? 404);
+      throw new Error(`unexpected request ${path}`);
     });
-  return { requests, request };
+  const rpcs: Array<{ path: string; body: unknown }> = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    const bytes = init?.body instanceof Uint8Array ? init.body : new Uint8Array();
+    const streaming = path.endsWith("/FollowMessage");
+    rpcs.push({ path, body: JSON.parse(new TextDecoder().decode(bytes.slice(streaming ? 5 : 0))) });
+    if (message === undefined)
+      return Response.json(
+        { code: "not_found", message: "Task objective-1:turn-2 is not a message" },
+        { status: 404 },
+      );
+    if (!streaming) return Response.json(message);
+    const frames = [
+      { sequence: "1", finish: { reply: message["reply"], message } },
+      { sequence: "2", end: { message } },
+    ].map((event) => envelope(0, event));
+    return new Response(Buffer.concat([...frames, envelope(2, {})]), {
+      headers: { "content-type": "application/connect+json" },
+    });
+  });
+  return { requests, request, rpcs };
+}
+
+/** One Connect stream frame: its flags, its length, then its JSON. */
+function envelope(flags: number, value: unknown): Buffer {
+  const json = Buffer.from(JSON.stringify(value));
+  const header = Buffer.alloc(5);
+  header.writeUInt8(flags, 0);
+  header.writeUInt32BE(json.length, 1);
+  return Buffer.concat([header, json]);
 }
 
 describe("message objective", () => {
@@ -62,18 +88,15 @@ describe("message objective", () => {
   });
 
   it("follows the owner's reply in the operator's own CLI conversation", async () => {
-    const { requests } = controlPlane(
+    const { rpcs } = controlPlane(
       { duplicate: true, taskId: "objective-1:turn-2" },
       {
-        reply: {
-          kind: "TagMessage",
-          tag: "planner",
-          session: "objective:objective-1",
-          sessionId: "session-1",
-          taskId: "objective-1:turn-2",
-          status: "replied",
-          reply: { presentation: "markdown", text: "Appendix checked." },
-        },
+        taskId: "objective-1:turn-2",
+        tag: "planner",
+        conversation: "objective:objective-1",
+        sessionId: "session-1",
+        status: "REPLY_STATUS_REPLIED",
+        reply: { presentation: "REPLY_PRESENTATION_FINAL_RESULT", text: "Appendix checked." },
       },
     );
     const written: string[] = [];
@@ -84,7 +107,10 @@ describe("message objective", () => {
     await runObjectiveCommand(target, ["message", "objective-1", "Check appendix"]);
     // A repeated send is not a second turn, and the reply is read from the owner's conversation.
     expect(written[0]).toBe("Already sent to the conversation of Objective objective-1.\n");
-    expect(requests.at(-1)?.path).toBe("/api/v1/tags/planner/messages/objective-1%3Aturn-2");
+    expect(rpcs[0]).toEqual({
+      path: "/supertag.operator.v1.ConversationService/GetMessage",
+      body: { tag: "planner", taskId: "objective-1:turn-2" },
+    });
     expect(written.join("")).toContain("Appendix checked.");
   });
 

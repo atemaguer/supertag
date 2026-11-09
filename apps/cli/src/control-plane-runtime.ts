@@ -2,11 +2,13 @@ import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { parseArgs } from "node:util";
 import {
+  ChangeNotifications,
   ControlPlane,
   configuredOperatorChannel,
   controlPlaneEventLoopLag,
   type OperatorNotificationSender,
   type OutboundReplyHandler,
+  observeStoreChanges,
   parseNotificationDestination,
 } from "@supertag/control-plane";
 import { type GatewayCredentialVault, isLoopbackAddress } from "@supertag/core";
@@ -161,8 +163,12 @@ export async function startControlPlaneRuntime(
   );
   const server = createServer();
   const startedAt = new Date().toISOString();
-  const store = new DrizzleStore(
-    options.databaseUrl === undefined ? {} : { url: options.databaseUrl },
+  // Every write through this store publishes the change notices operators' watch streams read.
+  const changes = new ChangeNotifications();
+  const store = observeStoreChanges(
+    new DrizzleStore(options.databaseUrl === undefined ? {} : { url: options.databaseUrl }),
+    changes,
+    (error) => process.stderr.write(`Control Plane change notice failed: ${errorMessage(error)}\n`),
   );
   const credentialVault =
     options.credentialVault ??
@@ -232,6 +238,7 @@ export async function startControlPlaneRuntime(
   const auditTrail = new AuditTrail(store, options.audit);
   controlPlane = new ControlPlane({
     store,
+    changes,
     credentialVault,
     audit: (entry) => auditTrail.record(entry),
     worklet,

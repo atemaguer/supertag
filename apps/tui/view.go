@@ -7,6 +7,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/atemaguer/supertag/apps/tui/client"
 )
 
 const railWidth = 24
@@ -114,7 +116,7 @@ func (m model) renderRail(height int) string {
 	first := max(m.selected-rows+1, 0)
 	for i := first; i < len(m.tags) && i < first+rows; i++ {
 		tag := m.tags[i]
-		phase := truncate(terminalText(tag.Status.Phase), railContent/2)
+		phase := truncate(terminalText(railState(tag, m.open[tag.Name()])), railContent/2)
 		nameWidth := railContent
 		if phase != "" {
 			nameWidth -= lipgloss.Width(phase) + 1
@@ -134,6 +136,15 @@ func (m model) renderRail(height int) string {
 		lines = append(lines, line)
 	}
 	return railStyle.Width(railWidth).Height(height).MaxHeight(height).Render(strings.Join(lines, "\n"))
+}
+
+// railState is what the rail shows beside a Tag: its phase, or how many work Sessions of the
+// default conversation are still open while the Tag is active.
+func railState(tag client.Tag, open int) string {
+	if open > 0 && tag.Status.Phase == "active" {
+		return fmt.Sprintf("%d open", open)
+	}
+	return tag.Status.Phase
 }
 
 func (m model) renderStatus() string {
@@ -159,7 +170,7 @@ func (m model) View() tea.View {
 		return v
 	}
 	bodyHeight := max(m.height-1, 2)
-	header := headerStyle.Render(truncate(fmt.Sprintf("%s · %s", terminalText(m.selectedTag()), conversationSession), m.paneWidth()))
+	header := headerStyle.Render(truncate(fmt.Sprintf("%s · %s", terminalText(m.selectedTag()), conversationName), m.paneWidth()))
 	pane := lipgloss.JoinVertical(lipgloss.Left, header, m.viewport.View(), m.input.View())
 	body := lipgloss.JoinHorizontal(lipgloss.Top, m.renderRail(bodyHeight), " ", pane)
 	body = lipgloss.NewStyle().Height(bodyHeight).MaxHeight(bodyHeight).Render(body)

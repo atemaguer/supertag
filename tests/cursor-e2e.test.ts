@@ -6,6 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { expect, it } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
+import { conversationClient } from "../apps/cli/src/operator-client.js";
 import {
   type CursorRunner,
   createCursorWorker,
@@ -155,16 +156,13 @@ it("runs a Cursor Task through Control Plane and Worklet with MCP, usage, resume
       worklet,
       durableWorklet: durableTestWorklet(worklet),
     });
-    const message = async (text: string) => {
-      const response = await fetch(`${runtime?.url}/api/v1/tags/${builder.name}/messages`, {
-        method: "POST",
-        headers: { Authorization: "Bearer cursor-admin", "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      const body = await response.text();
-      expect(response.status, body).toBe(201);
-      return (JSON.parse(body) as { taskId: string }).taskId;
-    };
+    const message = async (text: string) =>
+      (
+        await conversationClient({ url: runtime?.url ?? "", token: "cursor-admin" }).sendMessage({
+          tag: builder.name,
+          text,
+        })
+      ).taskId;
     const settled = async (taskId: string, status: string) => {
       await expect
         .poll(async () => (await store.findTaskById(taskId))?.status, { timeout: 20_000 })

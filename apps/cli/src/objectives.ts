@@ -1,12 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
+import { Code, ConnectError } from "@connectrpc/connect";
 import type { MessageObjectiveResult, ObjectiveOverview } from "@supertag/control-plane";
 import type { CoordinationInboxPage, Objective, Team } from "@supertag/core";
-import {
-  ControlPlaneClient,
-  ControlPlaneRequestError,
-  type ControlPlaneTarget,
-} from "./control-plane-client.js";
+import type { Message } from "@supertag/operator-api";
+import { ControlPlaneClient, type ControlPlaneTarget } from "./control-plane-client.js";
 import { localCheckouts } from "./delivery-view.js";
 import { money } from "./money.js";
 import { runObjectiveCancel } from "./objective-cancel.js";
@@ -14,7 +12,7 @@ import { formatObjectiveOverview } from "./objective-overview.js";
 import { runObjectivePause } from "./objective-pause.js";
 import { watchObjective } from "./objective-watch.js";
 import { withCurrentRevision } from "./revision.js";
-import { followTagMessage, type TagMessageRecord } from "./tag-conversation.js";
+import { followTagMessage, refusedAsError, tagConversationClient } from "./tag-conversation.js";
 import { runTeamCommand } from "./teams.js";
 import { terminalText } from "./terminal-text.js";
 
@@ -205,7 +203,7 @@ export async function runObjectiveCommand(
     );
     if (json) return `${JSON.stringify(result, null, 2)}\n`;
     process.stdout.write(formatMessageResult(id, result));
-    return followObjectiveReply(client, id, result.taskId);
+    return followObjectiveReply(client, target, id, result.taskId);
   }
   if (command === "approve") {
     const objective = await client.request<Objective>(
@@ -377,6 +375,7 @@ function formatMessageResult(id: string, result: MessageObjectiveResult): string
  */
 async function followObjectiveReply(
   client: ControlPlaneClient,
+  target: ControlPlaneTarget,
   id: string,
   taskId: string,
 ): Promise<string> {
@@ -391,20 +390,23 @@ async function followObjectiveReply(
   const name =
     tags.items.find((tag) => tag.metadata.id === objective.ownerTagId)?.metadata.name ??
     objective.ownerTagId;
-  const path = `/api/v1/tags/${encodeURIComponent(name)}/messages/${encodeURIComponent(taskId)}`;
-  let record: TagMessageRecord;
+  const conversations = tagConversationClient(target);
+  let message: Message;
   try {
-    record = await client.request<TagMessageRecord>(path);
+    message = await conversations.getMessage({ tag: name, taskId });
   } catch (error) {
-    if (error instanceof ControlPlaneRequestError && (error.status === 403 || error.status === 404))
+    if (
+      error instanceof ConnectError &&
+      (error.code === Code.NotFound || error.code === Code.PermissionDenied)
+    )
       return "The reply posts to the thread the Objective was created in.\n";
-    throw error;
+    return refusedAsError(() => Promise.reject(error));
   }
   const detach = new AbortController();
   const stop = () => detach.abort();
   process.once("SIGINT", stop);
   try {
-    return await followTagMessage(client, name, record, {
+    return await followTagMessage(conversations, message, {
       signal: detach.signal,
       write: (text) => process.stdout.write(text),
       warn: (text) => process.stderr.write(text),

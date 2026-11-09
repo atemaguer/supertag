@@ -4,9 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"connectrpc.com/connect"
+
+	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
 )
 
 // EventKind says what a FollowEvent shows.
@@ -21,6 +26,8 @@ const (
 	EventActivity
 	// EventReply is the Tag's final reply (Reply).
 	EventReply
+	// EventTurnError is the error that ended the turn instead of a reply (Text).
+	EventTurnError
 	// EventWorking says a work Session (Title) is working.
 	EventWorking
 	// EventReport is a work Session's (Title) report (Text); Status is "done", "waiting on you",
@@ -32,10 +39,10 @@ const (
 	EventNotContinued
 	// EventStillWorking says following stopped while work Sessions still run (Text).
 	EventStillWorking
-	// EventJoined says the message was delivered into a turn already being followed, which shows
-	// its reply and work; this follow shows nothing more.
+	// EventJoined says the message was delivered into a turn already running, whose reply
+	// answers it.
 	EventJoined
-	// EventError ends the follow with a failure (Text).
+	// EventError ends the follow with a failure to follow (Text).
 	EventError
 )
 
@@ -45,508 +52,476 @@ type FollowEvent struct {
 	Title  string
 	Status string
 	Text   string
-	Reply  *Reply
+	Reply  *operatorv1.Reply
 	// Indent marks activity of a work Session, shown under its "working" line.
 	Indent bool
-	// Discard, on EventJoined, drops the reply text this follow streamed: it repeated the turn
-	// it joined.
-	Discard bool
 }
 
-// Follower follows a message's turn the way `supertag message tag` does on a terminal.
+// Shown is what has been shown of one message, so a resumed stream, which may send the
+// current state again, and a message first shown from history add only what changed.
+type Shown struct {
+	tag, conversation string
+	joined            bool
+	replied           bool
+	waiting           map[string]bool
+	// sessions holds the latest snapshot of each work Session, in the order first seen.
+	sessions []*operatorv1.WorkSession
+	// tasks is the Task each work Session was last shown working on.
+	tasks map[string]string
+	keys  map[string]bool
+}
+
+func newShown(tag, conversation string) *Shown {
+	return &Shown{tag: tag, conversation: conversation, waiting: map[string]bool{}, tasks: map[string]string{}, keys: map[string]bool{}}
+}
+
+// once reports whether key is new, and records it.
+func (s *Shown) once(key string) bool {
+	if s.keys[key] {
+		return false
+	}
+	s.keys[key] = true
+	return true
+}
+
+func (s *Shown) join() []FollowEvent {
+	if s.joined {
+		return nil
+	}
+	s.joined = true
+	return []FollowEvent{{Kind: EventJoined}}
+}
+
+func (s *Shown) wait(reason string) []FollowEvent {
+	if reason == "" || s.replied || s.waiting[reason] {
+		return nil
+	}
+	s.waiting[reason] = true
+	return []FollowEvent{{Kind: EventWaiting, Text: reason}}
+}
+
+func (s *Shown) reply(reply *operatorv1.Reply) []FollowEvent {
+	if s.replied || reply == nil {
+		return nil
+	}
+	s.replied = true
+	if reply.GetPresentation() == operatorv1.ReplyPresentation_REPLY_PRESENTATION_ERROR {
+		return s.turnError(reply.GetText())
+	}
+	return []FollowEvent{{Kind: EventReply, Reply: reply}}
+}
+
+func (s *Shown) turnError(text string) []FollowEvent {
+	s.replied = true
+	if !s.once("turn-error") {
+		return nil
+	}
+	return []FollowEvent{{Kind: EventTurnError, Text: fmt.Sprintf("Tag %s could not answer: %s", s.tag, text)}}
+}
+
+// title names a work Session in its activity lines when the turn started more than one.
+func (s *Shown) title(id string) string {
+	if len(s.sessions) < 2 {
+		return ""
+	}
+	for _, session := range s.sessions {
+		if session.GetId() == id {
+			return session.GetTitle()
+		}
+	}
+	return ""
+}
+
+// workSession takes a work Session's current state and returns what changed: a "working" line
+// when it is new or a decision continued it as a new Task, each new approval notice, its report,
+// and why a decision did not continue it.
+func (s *Shown) workSession(session *operatorv1.WorkSession) []FollowEvent {
+	if session == nil || session.GetId() == "" {
+		return nil
+	}
+	id, task := session.GetId(), session.GetTaskId()
+	replaced := false
+	for i, held := range s.sessions {
+		if held.GetId() == id {
+			s.sessions[i], replaced = session, true
+		}
+	}
+	if !replaced {
+		s.sessions = append(s.sessions, session)
+	}
+	var events []FollowEvent
+	previous, known := s.tasks[id]
+	if !known || previous != task {
+		s.tasks[id] = task
+		// A work Session that had no Task yet is still the same piece of work.
+		if !known || previous != "" {
+			events = append(events, FollowEvent{Kind: EventWorking, Title: session.GetTitle()})
+		}
+	}
+	for _, approval := range session.GetApprovals() {
+		if s.once("approval:" + approval.GetRequestId()) {
+			events = append(events, FollowEvent{Kind: EventApproval, Title: session.GetTitle(), Text: approval.GetText()})
+		}
+	}
+	reportKey := "report:" + task
+	if task == "" {
+		reportKey = "report:" + id
+	}
+	if session.GetReportStatus() == operatorv1.ReplyStatus_REPLY_STATUS_REPLIED && session.GetReport() != nil && s.once(reportKey) {
+		events = append(events, FollowEvent{Kind: EventReport, Title: session.GetTitle(), Status: reportEnding(session), Text: session.GetReport().GetText()})
+	}
+	if session.GetNotContinued() != "" && s.once("stopped:"+task) {
+		events = append(events, FollowEvent{Kind: EventNotContinued, Title: session.GetTitle(), Text: session.GetNotContinued()})
+	}
+	return events
+}
+
+func (s *Shown) message(message *operatorv1.Message) []FollowEvent {
+	var events []FollowEvent
+	for _, session := range message.GetWorkSessions() {
+		events = append(events, s.workSession(session)...)
+	}
+	return events
+}
+
+// settled reports whether the message needs no more following: the turn replied, and each work
+// Session reported and does not wait on an approval decision only, since deciding it continues
+// the work Session.
+func (s *Shown) settled() bool {
+	if !s.replied {
+		return false
+	}
+	if s.keys["turn-error"] {
+		return true
+	}
+	for _, session := range s.sessions {
+		if session.GetReportStatus() != operatorv1.ReplyStatus_REPLY_STATUS_REPLIED ||
+			(session.GetStatus() == operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_WAITING && session.GetQuestion() == "") {
+			return false
+		}
+	}
+	return true
+}
+
+func reportEnding(session *operatorv1.WorkSession) string {
+	switch session.GetStatus() {
+	case operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_COMPLETED:
+		return "done"
+	case operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_WAITING:
+		if session.GetQuestion() == "" {
+			return "waiting for approval"
+		}
+		return "waiting on you"
+	case operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_FAILED:
+		return "failed"
+	}
+	return "stopped"
+}
+
+// HistoryItem is one past message as a conversation shows it.
+type HistoryItem struct {
+	Message *operatorv1.Message
+	// Events show what answered the message, as following it would have.
+	Events []FollowEvent
+	// Shown is what Events showed; pass it to Follow when Follow is true, so following adds
+	// only what changes.
+	Shown *Shown
+	// Follow says the message still has a reply or work to show.
+	Follow bool
+}
+
+// History turns a page of messages, newest first as ListMessages returns them, into what the
+// conversation shows, oldest first. A message delivered into another message's turn on the page
+// shows only that it joined; that turn shows the reply and the work.
+func History(tag string, page []*operatorv1.Message) []HistoryItem {
+	onPage := map[string]bool{}
+	for _, message := range page {
+		onPage[message.GetTaskId()] = true
+	}
+	items := make([]HistoryItem, 0, len(page))
+	for i := len(page) - 1; i >= 0; i-- {
+		message := page[i]
+		shown := newShown(tag, message.GetConversation())
+		item := HistoryItem{Message: message, Shown: shown}
+		if joined := message.GetJoinedTaskId(); joined != "" {
+			item.Events = shown.join()
+			if onPage[joined] && joined != message.GetTaskId() {
+				// Its follow shows nothing while that turn's does, unless the delivery is withdrawn.
+				item.Follow = message.GetStatus() != operatorv1.ReplyStatus_REPLY_STATUS_REPLIED
+				items = append(items, item)
+				continue
+			}
+		}
+		if message.GetStatus() == operatorv1.ReplyStatus_REPLY_STATUS_REPLIED {
+			item.Events = append(item.Events, shown.reply(message.GetReply())...)
+		} else {
+			item.Events = append(item.Events, shown.wait(message.GetWaitingReason())...)
+		}
+		item.Events = append(item.Events, shown.message(message)...)
+		item.Follow = !shown.settled()
+		items = append(items, item)
+	}
+	return items
+}
+
+// Follower follows messages the way `supertag message tag` does on a terminal.
 type Follower struct {
 	Client *Client
-	// Interval is how often records are reread; ReplyTimeout is how long a reply stream may go
-	// without a part; WorkTimeout is how long work Sessions are followed.
-	Interval, ReplyTimeout, WorkTimeout time.Duration
+	// Interval is the first pause before resuming a dropped stream; pauses double to a minute.
+	Interval time.Duration
+	// IdleTimeout is how long a stream may go without an event, heartbeats included, before it
+	// counts as dropped.
+	IdleTimeout time.Duration
+	// ReconnectTimeout is how long resuming may fail before the follow gives up.
+	ReconnectTimeout time.Duration
+	// WorkTimeout is how long work Sessions are followed after the reply.
+	WorkTimeout time.Duration
 
-	turnsMu sync.Mutex
-	turns   map[string]*tagTurns
+	mu     sync.Mutex
+	active map[string]map[string]int
 }
 
-// tagTurns is what one Tag's follows share, so a message joined into a running turn is not
-// shown twice: the turns whose reply is still being followed, and every Task a follow showed,
-// with the message whose follow showed it.
-type tagTurns struct {
-	replying map[string]chan struct{}
-	shown    map[string]string
-}
-
-// NewFollower returns a follower with the CLI's fixed timings.
+// NewFollower returns a follower with the CLI's timings.
 func NewFollower(c *Client) *Follower {
-	return &Follower{Client: c, Interval: time.Second, ReplyTimeout: 10 * time.Minute, WorkTimeout: time.Hour}
+	return &Follower{Client: c, Interval: time.Second, IdleTimeout: 45 * time.Second, ReconnectTimeout: 10 * time.Minute, WorkTimeout: time.Hour}
 }
 
-// Follow streams the turn's reply, then follows each work Session it started until it reports.
-// The channel closes when there is nothing more to follow or ctx ends.
-func (f *Follower) Follow(ctx context.Context, tag string, record MessageRecord) <-chan FollowEvent {
+// Follow streams the message's reply, then its work Sessions until each one reports. shown is
+// what is already shown of the message, from History; nil for a message just sent. The channel
+// closes when there is nothing more to follow or ctx ends.
+func (f *Follower) Follow(ctx context.Context, tag string, message *operatorv1.Message, shown *Shown) <-chan FollowEvent {
+	if shown == nil {
+		shown = newShown(tag, message.GetConversation())
+	}
+	release := f.register(tag, message.GetTaskId())
 	events := make(chan FollowEvent, 16)
-	emit := func(event FollowEvent) {
-		select {
-		case events <- event:
-		case <-ctx.Done():
+	emit := func(list ...FollowEvent) {
+		for _, event := range list {
+			select {
+			case events <- event:
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 	go func() {
 		defer close(events)
-		if err := f.follow(ctx, tag, record, emit); err != nil && ctx.Err() == nil {
+		defer release()
+		if err := f.follow(ctx, tag, message, shown, emit); err != nil && ctx.Err() == nil {
 			emit(FollowEvent{Kind: EventError, Text: err.Error()})
 		}
 	}()
 	return events
 }
 
-func (f *Follower) follow(ctx context.Context, tag string, record MessageRecord, emit func(FollowEvent)) error {
-	others, replied := f.beginTurn(tag, record.TaskID)
-	defer replied()
-	if record.Status != "replied" && len(others) > 0 {
-		// A message sent while another of this Tag's turns still replies may be delivered into
-		// that turn, whose follow already shows the reply and its work.
-		var joined bool
-		record, joined = f.awaitJoin(ctx, tag, record, others)
-		if joined {
-			emit(FollowEvent{Kind: EventJoined})
-			return nil
-		}
+// register records a follow of message taskID, so a later message delivered into its turn hands
+// the reply and work over to this follow.
+func (f *Follower) register(tag, taskID string) func() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.active == nil {
+		f.active = map[string]map[string]int{}
 	}
-	var mu sync.Mutex
-	shownWaiting := map[string]bool{}
-	showWaiting := func(current MessageRecord) {
-		mu.Lock()
-		defer mu.Unlock()
-		if current.Waiting == "" || shownWaiting[current.Waiting] {
-			return
-		}
-		shownWaiting[current.Waiting] = true
-		emit(FollowEvent{Kind: EventWaiting, Text: current.Waiting})
+	if f.active[tag] == nil {
+		f.active[tag] = map[string]int{}
 	}
-	showWaiting(record)
-
-	var streamed *Reply
-	if record.Status != "replied" {
-		// Until the reply stream sends its first part, reread the message to say why the turn
-		// has not started.
-		startedCtx, started := context.WithCancel(ctx)
-		var watching sync.WaitGroup
-		watching.Go(func() {
-			for pause(startedCtx, f.Interval) {
-				current, err := f.Client.GetMessage(startedCtx, tag, record.TaskID)
-				if startedCtx.Err() != nil {
-					return
-				}
-				if err == nil {
-					f.noteShown(tag, record.TaskID, current)
-					showWaiting(current)
-					if current.Status == "replied" {
-						return
-					}
-				}
-			}
-		})
-		reply, ended, err := f.streamReply(ctx, tag, record.TaskID, streamOptions{deltas: true, onPart: started}, emit)
-		started()
-		watching.Wait()
-		if err != nil {
-			return err
-		}
-		if ctx.Err() != nil {
-			return nil
-		}
-		if ended == endedIdle {
-			return fmt.Errorf("Tag %s has not replied yet; it keeps working on task/%s", tag, record.TaskID)
-		}
-		streamed = reply
-	}
-	reply := record.Reply
-	if reply == nil {
-		reply = streamed
-	}
-	if reply == nil {
-		replied, err := f.poll(ctx, tag, record)
-		if err != nil || replied.Reply == nil {
-			return err
-		}
-		reply = replied.Reply
-	}
-	current, err := f.reread(ctx, tag, record.TaskID, time.Now().Add(f.WorkTimeout))
-	if err != nil || ctx.Err() != nil {
-		return err
-	}
-	if f.joinedShown(tag, current) {
-		emit(FollowEvent{Kind: EventJoined, Discard: streamed != nil || record.Status != "replied"})
-		return nil
-	}
-	f.noteShown(tag, record.TaskID, current)
-	if reply.Presentation == "error" {
-		return fmt.Errorf("Tag %s could not answer: %s", tag, reply.Text)
-	}
-	emit(FollowEvent{Kind: EventReply, Reply: reply})
-	replied()
-	return f.followWork(ctx, tag, current, emit)
-}
-
-// beginTurn records a follow of message taskID; others are the Tag's other turns still replying,
-// each closed when its reply is shown. Call replied once this follow's reply is shown or it ends.
-func (f *Follower) beginTurn(tag, taskID string) (others []chan struct{}, replied func()) {
-	f.turnsMu.Lock()
-	defer f.turnsMu.Unlock()
-	if f.turns == nil {
-		f.turns = map[string]*tagTurns{}
-	}
-	turns := f.turns[tag]
-	if turns == nil {
-		turns = &tagTurns{replying: map[string]chan struct{}{}, shown: map[string]string{}}
-		f.turns[tag] = turns
-	}
-	for id, done := range turns.replying {
-		if id != taskID {
-			others = append(others, done)
-		}
-	}
-	done := make(chan struct{})
-	turns.replying[taskID] = done
-	turns.shown[taskID] = taskID
+	f.active[tag][taskID]++
 	var once sync.Once
-	return others, func() {
+	return func() {
 		once.Do(func() {
-			f.turnsMu.Lock()
-			defer f.turnsMu.Unlock()
-			if turns.replying[taskID] == done {
-				delete(turns.replying, taskID)
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if f.active[tag][taskID]--; f.active[tag][taskID] <= 0 {
+				delete(f.active[tag], taskID)
 			}
-			close(done)
 		})
 	}
 }
 
-// noteShown records that the follow of message taskID shows the Task its message joined.
-func (f *Follower) noteShown(tag, taskID string, current MessageRecord) {
-	if current.JoinedTaskID == "" {
+func (f *Follower) following(tag, taskID string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.active[tag][taskID] > 0
+}
+
+// errStreamEnded is a stream that closed before its end event.
+var errStreamEnded = errors.New("the Control Plane closed the stream early")
+
+// errIdle is a stream that went quiet for longer than heartbeats allow.
+var errIdle = errors.New("the Control Plane stopped sending events")
+
+// followState carries one follow across resumed streams.
+type followState struct {
+	tag     string
+	message *operatorv1.Message
+	shown   *Shown
+	after   int64
+	// workTimer stops the follow WorkTimeout after the reply.
+	workTimer *time.Timer
+	timedOut  atomic.Bool
+	stopWork  context.CancelFunc
+	// deferred says the message joined a turn another follow shows, so this follow shows
+	// nothing more unless the delivery is withdrawn and the message runs as its own turn.
+	deferred bool
+}
+
+func (f *Follower) follow(ctx context.Context, tag string, message *operatorv1.Message, shown *Shown, emit func(...FollowEvent)) error {
+	workCtx, stopWork := context.WithCancel(ctx)
+	defer stopWork()
+	state := &followState{tag: tag, message: message, shown: shown, stopWork: stopWork}
+	defer func() {
+		if state.workTimer != nil {
+			state.workTimer.Stop()
+		}
+	}()
+	if shown.replied {
+		f.startWork(state)
+	}
+	backoff := f.Interval
+	lastProgress := time.Now()
+	for {
+		done, progressed, err := f.stream(workCtx, state, emit)
+		if state.timedOut.Load() {
+			emit(FollowEvent{Kind: EventStillWorking, Text: fmt.Sprintf("Tag %s is still working; each report will arrive in the %s conversation.", tag, conversationName(message))})
+			return nil
+		}
+		if done || ctx.Err() != nil {
+			return nil
+		}
+		if !transient(err) {
+			return apiError(err)
+		}
+		if progressed {
+			backoff, lastProgress = f.Interval, time.Now()
+		}
+		if time.Since(lastProgress) > f.ReconnectTimeout {
+			return fmt.Errorf("lost the Control Plane while following task/%s: %w", message.GetTaskId(), apiError(err))
+		}
+		if !pause(workCtx, backoff) {
+			continue
+		}
+		backoff = min(backoff*2, time.Minute)
+	}
+}
+
+func conversationName(message *operatorv1.Message) string {
+	if name := message.GetConversation(); name != "" {
+		return name
+	}
+	return "default"
+}
+
+func (f *Follower) startWork(state *followState) {
+	if state.workTimer != nil {
 		return
 	}
-	f.turnsMu.Lock()
-	defer f.turnsMu.Unlock()
-	if turns := f.turns[tag]; turns != nil {
-		if _, ok := turns.shown[current.JoinedTaskID]; !ok {
-			turns.shown[current.JoinedTaskID] = taskID
-		}
-	}
+	state.workTimer = time.AfterFunc(f.WorkTimeout, func() {
+		state.timedOut.Store(true)
+		state.stopWork()
+	})
 }
 
-// joinedShown reports whether current joined a Task another message's follow shows.
-func (f *Follower) joinedShown(tag string, current MessageRecord) bool {
-	if current.JoinedTaskID == "" {
-		return false
-	}
-	f.turnsMu.Lock()
-	defer f.turnsMu.Unlock()
-	turns := f.turns[tag]
-	if turns == nil {
-		return false
-	}
-	owner, ok := turns.shown[current.JoinedTaskID]
-	return ok && owner != current.TaskID
-}
-
-// awaitJoin rereads the message until it joined a turn another follow shows, or the other
-// turns' replies are shown and one more reread says it did not.
-func (f *Follower) awaitJoin(ctx context.Context, tag string, record MessageRecord, others []chan struct{}) (MessageRecord, bool) {
-	settled := false
-	for {
-		if f.joinedShown(tag, record) {
-			return record, true
-		}
-		if settled || !pause(ctx, f.Interval) {
-			return record, false
-		}
-		settled = allClosed(others)
-		if current, err := f.Client.GetMessage(ctx, tag, record.TaskID); err == nil {
-			record = current
-		}
-	}
-}
-
-func allClosed(chans []chan struct{}) bool {
-	for _, c := range chans {
-		select {
-		case <-c:
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-// transient reports whether a failed request is worth retrying: the Control Plane could not be
-// reached, or it failed rather than refused.
-func transient(err error) bool {
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
-		return apiErr.Status >= 500 || apiErr.Status == 429
-	}
-	return true
-}
-
-// reread rereads the message, retrying while the Control Plane is unreachable until deadline.
-func (f *Follower) reread(ctx context.Context, tag, taskID string, deadline time.Time) (MessageRecord, error) {
-	for {
-		current, err := f.Client.GetMessage(ctx, tag, taskID)
-		if err == nil || ctx.Err() != nil || !transient(err) || time.Now().After(deadline) {
-			return current, err
-		}
-		if !pause(ctx, f.Interval) {
-			return current, nil
-		}
-	}
-}
-
-// poll rereads the message until it has a reply.
-func (f *Follower) poll(ctx context.Context, tag string, record MessageRecord) (MessageRecord, error) {
-	deadline := time.Now().Add(f.ReplyTimeout)
-	current := record
-	for current.Status != "replied" {
-		if time.Now().After(deadline) {
-			return current, fmt.Errorf("Tag %s has not replied yet; it keeps working on task/%s", tag, record.TaskID)
-		}
-		if !pause(ctx, f.Interval) {
-			return current, nil
-		}
-		// A Control Plane that is briefly unreachable, say while it restarts, is reread later.
-		next, err := f.Client.GetMessage(ctx, tag, record.TaskID)
-		if err != nil && !transient(err) {
-			return next, err
-		}
-		if err == nil {
-			current = next
-		}
-	}
-	return current, nil
-}
-
-// followWork follows the work Sessions a turn started: a line per Session, their activity, and
-// each report as it arrives.
-func (f *Follower) followWork(ctx context.Context, tag string, record MessageRecord, emit func(FollowEvent)) error {
-	if len(record.StartedSessions) == 0 {
-		return nil
-	}
-	followCtx, stop := context.WithCancel(ctx)
-	var activity sync.WaitGroup
-	defer func() {
-		stop()
-		activity.Wait()
-	}()
-	// Each work Session's Task being followed. A decision on its approval request continues the
-	// Session as its next Task, which shows "working" again and then its own report.
-	followed := map[string]string{}
-	shown := map[string]bool{}
-	follow := func(session StartedSession, count int) {
-		previous, known := followed[session.ID]
-		if known && previous == session.TaskID {
-			return
-		}
-		followed[session.ID] = session.TaskID
-		// A Session that had no Task yet is still the same piece of work.
-		if !known || previous != "" {
-			emit(FollowEvent{Kind: EventWorking, Title: session.Title})
-		}
-		if session.TaskID == "" || session.ReportStatus == "replied" {
-			return
-		}
-		opts := streamOptions{indent: true}
-		if count > 1 {
-			opts.title = session.Title
-		}
-		activity.Go(func() {
-			_, _, _ = f.streamReply(followCtx, tag, session.TaskID, opts, emit)
-		})
-	}
-	onRecord := func(current MessageRecord) {
-		for _, session := range current.StartedSessions {
-			follow(session, len(current.StartedSessions))
-		}
-		for _, session := range current.StartedSessions {
-			for _, approval := range session.Approvals {
-				if key := "approval:" + approval.RequestID; !shown[key] {
-					shown[key] = true
-					emit(FollowEvent{Kind: EventApproval, Title: session.Title, Text: approval.Text})
-				}
-			}
-			key := "report:" + session.TaskID
-			if session.TaskID == "" {
-				key = "report:" + session.ID
-			}
-			if session.Report == nil || shown[key] {
-				continue
-			}
-			shown[key] = true
-			emit(FollowEvent{Kind: EventReport, Title: session.Title, Status: reportEnding(session), Text: session.Report.Text})
-		}
-		for _, session := range current.StartedSessions {
-			if key := "stopped:" + session.TaskID; session.NotContinued != "" && !shown[key] {
-				shown[key] = true
-				emit(FollowEvent{Kind: EventNotContinued, Title: session.Title, Text: session.NotContinued})
-			}
-		}
-	}
-	deadline := time.Now().Add(f.WorkTimeout)
-	current := record
-	for {
-		onRecord(current)
-		if allSettled(current.StartedSessions) {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			emit(FollowEvent{Kind: EventStillWorking, Text: fmt.Sprintf("Tag %s is still working; each report will arrive in the %s conversation.", tag, record.Session)})
-			return nil
-		}
-		if !pause(ctx, f.Interval) {
-			return nil
-		}
-		// Work runs for a long time; a Control Plane that is briefly unreachable, say while it
-		// restarts, is reread on the next interval rather than ending the follow.
-		next, err := f.Client.GetMessage(ctx, tag, record.TaskID)
-		if err != nil && !transient(err) {
-			return err
-		}
-		if err == nil {
-			current = next
-		}
-	}
-}
-
-func reportEnding(session StartedSession) string {
-	switch session.Status {
-	case "completed":
-		return "done"
-	case "waiting":
-		if session.Question == "" {
-			return "waiting for approval"
-		}
-		return "waiting on you"
-	case "failed":
-		return "failed"
-	}
-	return "stopped"
-}
-
-// allSettled reports whether no work Session needs more following: each one's report arrived,
-// and none waits on an approval decision only, since deciding it continues the Session.
-func allSettled(sessions []StartedSession) bool {
-	for _, session := range sessions {
-		if session.ReportStatus != "replied" || (session.Status == "waiting" && session.Question == "") {
-			return false
-		}
-	}
-	return true
-}
-
-type streamEnd int
-
-const (
-	endedFinished streamEnd = iota
-	endedClosed
-	endedIdle
-)
-
-type streamOptions struct {
-	// deltas emits text deltas; indent and title mark a work Session's activity.
-	deltas bool
-	indent bool
-	title  string
-	onPart func()
-}
-
-// streamReply follows one reply stream to its finish or error part, emitting activity lines. A
-// dropped connection resumes after the last part seen, a few times.
-func (f *Follower) streamReply(ctx context.Context, tag, taskID string, opts streamOptions, emit func(FollowEvent)) (*Reply, streamEnd, error) {
+// stream reads one FollowMessage stream from the last sequence seen. done says the follow is
+// over: the stream ended. progressed says the stream delivered an event.
+func (f *Follower) stream(ctx context.Context, state *followState, emit func(...FollowEvent)) (done, progressed bool, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	idle := false
-	var idleMu sync.Mutex
-	timer := time.AfterFunc(f.ReplyTimeout, func() {
-		idleMu.Lock()
-		idle = true
-		idleMu.Unlock()
+	var idle atomic.Bool
+	timer := time.AfterFunc(f.IdleTimeout, func() {
+		idle.Store(true)
 		cancel()
 	})
 	defer timer.Stop()
-	wasIdle := func() bool {
-		idleMu.Lock()
-		defer idleMu.Unlock()
-		return idle
+	stream, err := f.Client.conversations.FollowMessage(ctx, connect.NewRequest(&operatorv1.FollowMessageRequest{
+		Tag: state.tag, TaskId: state.message.GetTaskId(), AfterSequence: state.after,
+	}))
+	if err != nil {
+		return false, false, err
 	}
-
-	lastID := ""
-	for attempt := 0; ; attempt++ {
-		reader, err := f.Client.Stream(ctx, tag, taskID, lastID)
-		if err == nil {
-			reply, done, readErr := f.readParts(reader, opts, timer, emit)
-			lastID = reader.LastID()
-			reader.Close()
-			if done {
-				return reply, endedFinished, nil
+	defer stream.Close()
+	shown := state.shown
+	for stream.Receive() {
+		timer.Reset(f.IdleTimeout)
+		progressed = true
+		event := stream.Msg()
+		if event.GetSequence() > state.after {
+			state.after = event.GetSequence()
+		}
+		if _, joined := event.GetPart().(*operatorv1.FollowEvent_Joined); state.deferred && !joined {
+			if _, end := event.GetPart().(*operatorv1.FollowEvent_End); end {
+				return true, true, nil
 			}
-			if readErr == nil {
-				return nil, endedClosed, nil
+			continue
+		}
+		switch part := event.GetPart().(type) {
+		case *operatorv1.FollowEvent_Joined:
+			joined := part.Joined.GetTaskId()
+			if joined != "" {
+				emit(shown.join()...)
 			}
-			err = readErr
-		}
-		if wasIdle() {
-			return nil, endedIdle, nil
-		}
-		if ctx.Err() != nil {
-			return nil, endedClosed, nil
-		}
-		var apiErr *APIError
-		if errors.As(err, &apiErr) || attempt >= 3 || !pause(ctx, f.Interval) {
-			return nil, endedClosed, err
+			state.deferred = joined != "" && joined != state.message.GetTaskId() && f.following(state.tag, joined)
+		case *operatorv1.FollowEvent_Waiting:
+			emit(shown.wait(part.Waiting.GetReason())...)
+		case *operatorv1.FollowEvent_TextDelta:
+			if text := part.TextDelta.GetText(); text != "" && !shown.replied {
+				emit(FollowEvent{Kind: EventDelta, Text: text})
+			}
+		case *operatorv1.FollowEvent_Activity:
+			activity := part.Activity
+			line := ActivityLine(activity)
+			if line == "" {
+				continue
+			}
+			if id := activity.GetWorkSessionId(); id != "" {
+				emit(FollowEvent{Kind: EventActivity, Title: shown.title(id), Text: line, Indent: true})
+			} else if !shown.replied {
+				emit(FollowEvent{Kind: EventActivity, Text: line})
+			}
+		case *operatorv1.FollowEvent_Finish:
+			reply := part.Finish.GetReply()
+			if reply == nil {
+				reply = part.Finish.GetMessage().GetReply()
+			}
+			emit(shown.reply(reply)...)
+			emit(shown.message(part.Finish.GetMessage())...)
+			f.startWork(state)
+		case *operatorv1.FollowEvent_Error:
+			emit(shown.turnError(part.Error.GetText())...)
+		case *operatorv1.FollowEvent_WorkSessionChanged:
+			emit(shown.workSession(part.WorkSessionChanged.GetWorkSession())...)
+		case *operatorv1.FollowEvent_End:
+			emit(shown.message(part.End.GetMessage())...)
+			return true, true, nil
 		}
 	}
+	if err := stream.Err(); err != nil && !idle.Load() {
+		return false, progressed, err
+	}
+	if idle.Load() {
+		return false, progressed, errIdle
+	}
+	return false, progressed, errStreamEnded
 }
 
-// readParts reads parts until a finish or error part (done), the stream's end (nil error) or a
-// read failure.
-func (f *Follower) readParts(reader *SSEReader, opts streamOptions, timer *time.Timer, emit func(FollowEvent)) (*Reply, bool, error) {
-	for {
-		part, err := reader.NextPart()
-		if errors.Is(err, ErrDone) || errors.Is(err, io.EOF) {
-			return nil, false, nil
+// ActivityLine is the short line for an activity, or "" for one not shown: a command or tool the
+// Tag starts, or a retry. An activity of a kind this client does not know shows its text.
+func ActivityLine(activity *operatorv1.Activity) string {
+	switch detail := activity.GetDetail().(type) {
+	case *operatorv1.Activity_Command:
+		if detail.Command.GetStatus() == operatorv1.ActivityStatus_ACTIVITY_STATUS_RUNNING {
+			return "· running: " + detail.Command.GetCommand()
 		}
-		if err != nil {
-			return nil, false, err
+		return ""
+	case *operatorv1.Activity_Tool:
+		if detail.Tool.GetStatus() == operatorv1.ActivityStatus_ACTIVITY_STATUS_RUNNING {
+			return "· using: " + detail.Tool.GetTool()
 		}
-		timer.Reset(f.ReplyTimeout)
-		if opts.onPart != nil {
-			opts.onPart()
-		}
-		switch part.Type {
-		case "text-delta":
-			if opts.deltas && part.Delta != "" {
-				emit(FollowEvent{Kind: EventDelta, Text: part.Delta})
-			}
-		case "data-activity":
-			if line := ActivityLine(part.Data); line != "" {
-				emit(FollowEvent{Kind: EventActivity, Title: opts.title, Text: line, Indent: opts.indent})
-			}
-		case "error":
-			return &Reply{Presentation: "error", Text: part.ErrorText}, true, nil
-		case "finish":
-			if part.MessageMetadata != nil {
-				return part.MessageMetadata.Reply, true, nil
-			}
-			return nil, true, nil
-		}
+		return ""
+	case *operatorv1.Activity_Retry:
+		return "· retrying (Task Attempt " + strconv.Itoa(int(detail.Retry.GetAttempt())) + ")"
 	}
-}
-
-// pause waits d; false when ctx ended first.
-func pause(ctx context.Context, d time.Duration) bool {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return true
-	case <-ctx.Done():
-		return false
+	if text := activity.GetText(); text != "" {
+		return "· " + text
 	}
+	return ""
 }

