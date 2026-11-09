@@ -2,16 +2,35 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ManagementAuditEvent } from "../apps/cli/src/control-plane-api.ts";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { runObjectiveCommand } from "../apps/cli/src/objectives.ts";
+import { organizationClient } from "../apps/cli/src/operator-client.ts";
 import { runResourceCommand } from "../apps/cli/src/resources.ts";
 import { objectiveSessionKey } from "../packages/core/src/index.ts";
+import {
+  ControlPlanePhase,
+  ErrorDetailSchema,
+  ErrorReason,
+} from "../packages/operator-api/src/index.ts";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.ts";
 
 const ADMIN = "operator-token-admin";
+
+/** The error GetStatus fails with for this token. */
+async function refusal(url: string, token: string): Promise<ConnectError> {
+  return organizationClient({ url, token })
+    .getStatus({})
+    .then(
+      () => {
+        throw new Error("GetStatus accepted the token");
+      },
+      (error: unknown) => ConnectError.from(error),
+    );
+}
 
 interface IssuedToken {
   readonly secret: string;
@@ -85,8 +104,9 @@ describe("Operator Token API", () => {
     expect((await create(ADMIN, "laptop-2")).status).toBe(409);
 
     // The token works for ordinary management and records when it was last used.
-    const status = await call(issued.secret, "/api/v1/status");
-    expect(status.status).toBe(200);
+    await expect(
+      organizationClient({ url, token: issued.secret }).getStatus({}),
+    ).resolves.toMatchObject({ phase: ControlPlanePhase.ACCEPTING });
     const listed = await call(ADMIN, "/api/v1/operator-tokens");
     const listText = await listed.text();
     expect(listText).not.toContain(issued.secret);
@@ -108,23 +128,28 @@ describe("Operator Token API", () => {
     });
     expect(revoked.status).toBe(200);
     expect(((await revoked.json()) as IssuedToken).status["phase"]).toBe("revoked");
-    const refused = await call(issued.secret, "/api/v1/status");
-    expect(refused.status).toBe(401);
-    expect(await refused.text()).toContain("was revoked");
+    const refused = await refusal(url, issued.secret);
+    expect(refused.code).toBe(Code.Unauthenticated);
+    expect(refused.rawMessage).toContain("was revoked");
+    expect(refused.findDetails(ErrorDetailSchema)).toMatchObject([
+      { reason: ErrorReason.CREDENTIAL_REVOKED },
+    ]);
     expect(
       (await call(ADMIN, "/api/v1/operator-tokens/missing/revoke", { method: "POST" })).status,
     ).toBe(404);
   });
 
   it("rejects malformed, unknown, and expired tokens without leaking which", async () => {
-    const { call, create, store } = await runtime();
+    const { url, create, store } = await runtime();
     const issued = (await (await create(ADMIN, "expiring")).json()) as IssuedToken;
-    expect((await call("stop_not-a-token", "/api/v1/status")).status).toBe(401);
+    expect((await refusal(url, "stop_not-a-token")).code).toBe(Code.Unauthenticated);
     // A well-formed secret with a valid lookup part but the wrong remainder is invalid.
-    const forged = `${issued.secret.slice(0, 21)}${"0".repeat(48)}`;
-    const forgedResponse = await call(forged, "/api/v1/status");
-    expect(forgedResponse.status).toBe(401);
-    expect(await forgedResponse.text()).not.toContain("expired");
+    const forged = await refusal(url, `${issued.secret.slice(0, 21)}${"0".repeat(48)}`);
+    expect(forged.code).toBe(Code.Unauthenticated);
+    expect(forged.rawMessage).not.toContain("expired");
+    expect(forged.findDetails(ErrorDetailSchema)).toMatchObject([
+      { reason: ErrorReason.UNAUTHENTICATED },
+    ]);
 
     // Expire the token in place: authentication compares against the stored expiry.
     const token = await store.findOperatorTokenByName("expiring");

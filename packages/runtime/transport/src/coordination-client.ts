@@ -7,29 +7,33 @@ import {
   decodeCoordinationDocument,
   encodeCoordinationDocument,
 } from "./coordination-codec.js";
-import {
-  GrpcExecutionAuthorityClient,
-  waitForExecutionAuthorityRefresh,
-} from "./execution-authority-client.js";
 
 /** Worker-local MCP compatibility edge; only typed tool calls cross the gRPC connection. */
 export class GrpcCoordinationClient {
   readonly #client;
-  readonly #authority: GrpcExecutionAuthorityClient;
-  #token: string;
-  #refreshing: Promise<string> | undefined;
+  readonly #token: string;
   constructor(options: {
     readonly baseUrl: string;
     readonly token: string;
     readonly tlsCa?: string;
   }) {
-    this.#authority = new GrpcExecutionAuthorityClient(options);
+    const url = new URL(options.baseUrl);
+    if (
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      url.pathname !== "/" ||
+      (url.protocol !== "https:" &&
+        !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))
+    )
+      throw new Error("Coordination requires HTTPS outside loopback and an origin URL");
     if (!options.token.trim()) throw new Error("Coordination Attempt credential required");
     this.#token = options.token;
     this.#client = createClient(
       CoordinationService,
       createGrpcTransport({
-        baseUrl: options.baseUrl,
+        baseUrl: url.origin,
         readMaxBytes: COORDINATION_GRPC_MAX_OUTPUT_BYTES,
         writeMaxBytes: COORDINATION_GRPC_MAX_INPUT_BYTES,
         idleConnectionTimeoutMs: 1000,
@@ -125,51 +129,11 @@ export class GrpcCoordinationClient {
     }) => Promise<T>,
     parent: AbortSignal,
   ): Promise<T> {
-    const signal = AbortSignal.any([parent, AbortSignal.timeout(30_000)]);
-    const token = this.#token;
-    const invoke = () =>
-      call({ headers: { authorization: `Bearer ${this.#token}` }, signal, timeoutMs: 30_000 });
-    try {
-      return await invoke();
-    } catch (error) {
-      if (!(error instanceof ConnectError) || error.code !== Code.Unauthenticated) throw error;
-      if (this.#token === token) {
-        this.#refreshing ??= this.#recover(token, AbortSignal.timeout(30_000))
-          .then((refreshed) => {
-            if (this.#token === token) this.#token = refreshed;
-            return refreshed;
-          })
-          .finally(() => {
-            this.#refreshing = undefined;
-          });
-        await waitForExecutionAuthorityRefresh(this.#refreshing, signal);
-      }
-      return invoke();
-    }
-  }
-  async #recover(token: string, signal: AbortSignal): Promise<string> {
-    // Recovery may be in progress when a surviving manager first asks to rebind.
-    // Only this credential exchange is retried; a tool mutation is never replayed on transport errors.
-    for (;;) {
-      signal.throwIfAborted();
-      try {
-        return await this.#authority.rebind(token, signal);
-      } catch (error) {
-        if (!(error instanceof ConnectError) || error.code !== Code.Unauthenticated) throw error;
-        await new Promise<void>((resolve, reject) => {
-          const abort = () => {
-            clearTimeout(timer);
-            reject(signal.reason);
-          };
-          const timer = setTimeout(() => {
-            signal.removeEventListener("abort", abort);
-            resolve();
-          }, 250);
-          if (signal.aborted) abort();
-          else signal.addEventListener("abort", abort, { once: true });
-        });
-      }
-    }
+    return call({
+      headers: { authorization: `Bearer ${this.#token}` },
+      signal: AbortSignal.any([parent, AbortSignal.timeout(30_000)]),
+      timeoutMs: 30_000,
+    });
   }
 }
 function json(value: unknown, status = 200): Response {

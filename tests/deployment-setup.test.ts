@@ -193,9 +193,10 @@ describe("deployment setup and verification", () => {
       const path = new URL(String(url)).pathname;
       if (path === "/healthz") return Response.json({ ok: true });
       if (path === "/readyz") return Response.json({ ok: false }, { status: 503 });
-      return new Response(null, {
-        status: new Headers(init?.headers).has("authorization") ? 200 : 401,
-      });
+      expect(path).toBe("/supertag.operator.v1.OrganizationService/GetStatus");
+      return new Headers(init?.headers).has("authorization")
+        ? Response.json({ phase: "CONTROL_PLANE_PHASE_ACCEPTING" })
+        : Response.json({ code: "unauthenticated", message: "token required" }, { status: 401 });
     });
     await expect(
       verifyDeployment(

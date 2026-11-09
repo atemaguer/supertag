@@ -4,16 +4,12 @@ import { connectNodeAdapter } from "@connectrpc/connect-node";
 import { afterEach, describe, expect, it } from "vitest";
 import { GrpcArtifactCatalogClient } from "./src/artifact-client.js";
 import { ArtifactCatalogService } from "./src/artifact-codec.js";
-import { ExecutionAuthorityService } from "./src/coordination-codec.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
-async function server(
-  implementation: Partial<ServiceImpl<typeof ArtifactCatalogService>>,
-  authority: Partial<ServiceImpl<typeof ExecutionAuthorityService>> = {},
-) {
+async function server(implementation: Partial<ServiceImpl<typeof ArtifactCatalogService>>) {
   const listener = createServer(
     connectNodeAdapter({
       grpc: true,
@@ -21,7 +17,6 @@ async function server(
       grpcWeb: false,
       routes: (router) => {
         router.service(ArtifactCatalogService, implementation);
-        router.service(ExecutionAuthorityService, authority);
       },
     }),
   );
@@ -42,95 +37,23 @@ async function server(
 }
 
 describe("artifact gRPC client", () => {
-  it("renews Attempt authority once and preserves the original operation input", async () => {
-    const input = { operationId: "stable", title: "Original", kind: "report", entries: [] };
-    const titles: string[] = [];
-    let renewals = 0;
-    const { baseUrl } = await server(
-      {
-        capture(request, context) {
-          titles.push(request.title);
-          if (context.requestHeader.get("authorization") !== "Bearer new-token")
-            throw new ConnectError("expired", Code.Unauthenticated);
-          return {
-            artifact: {
-              ...request,
-              id: "artifact",
-              taskId: "task",
-              attemptId: "attempt",
-              tagId: "tag",
-              sessionId: "session",
-              inputs: [],
-              createdAt: "2026-09-17T00:00:00Z",
-            },
-          };
-        },
+  it("refuses an expired Attempt credential without replaying the operation", async () => {
+    let calls = 0;
+    const { client } = await server({
+      capture() {
+        calls++;
+        throw new ConnectError("expired", Code.Unauthenticated);
       },
-      {
-        rebind(_, context) {
-          expect(context.requestHeader.get("authorization")).toBe("Bearer old-token");
-          renewals++;
-          input.title = "Changed by caller";
-          return { token: "new-token" };
-        },
-      },
-    );
-    const client = new GrpcArtifactCatalogClient({
-      baseUrl,
-      token: "old-token",
     });
-    await expect(client.request("capture", input)).resolves.toMatchObject({
-      artifact: { title: "Original", operationId: "stable" },
-    });
-    expect(titles).toEqual(["Original", "Original"]);
-    expect(renewals).toBe(1);
-  });
-  it("keeps a shared authority renewal alive when one catalog caller cancels", async () => {
-    let renewals = 0;
-    let expiredCalls = 0;
-    let renewalStarted!: () => void;
-    let secondExpired!: () => void;
-    let releaseRenewal!: () => void;
-    const started = new Promise<void>((resolve) => {
-      renewalStarted = resolve;
-    });
-    const bothExpired = new Promise<void>((resolve) => {
-      secondExpired = resolve;
-    });
-    const released = new Promise<void>((resolve) => {
-      releaseRenewal = resolve;
-    });
-    const { baseUrl } = await server(
-      {
-        find(_, context) {
-          if (context.requestHeader.get("authorization") !== "Bearer new-token") {
-            expiredCalls++;
-            if (expiredCalls === 2) secondExpired();
-            throw new ConnectError("expired", Code.Unauthenticated);
-          }
-          return { artifacts: [] };
-        },
-      },
-      {
-        async rebind() {
-          renewals++;
-          renewalStarted();
-          await released;
-          return { token: "new-token" };
-        },
-      },
-    );
-    const client = new GrpcArtifactCatalogClient({ baseUrl, token: "old-token" });
-    const cancelled = new AbortController();
-    const first = client.request("find", {}, cancelled.signal);
-    await started;
-    const second = client.request("find", {});
-    await bothExpired;
-    cancelled.abort(new Error("first catalog caller cancelled"));
-    releaseRenewal();
-    await expect(first).rejects.toThrow("first catalog caller cancelled");
-    await expect(second).resolves.toEqual({ artifacts: [] });
-    expect(renewals).toBe(1);
+    await expect(
+      client.request("capture", {
+        operationId: "stable",
+        title: "Report",
+        kind: "report",
+        entries: [],
+      }),
+    ).rejects.toMatchObject({ name: "ArtifactRequestError", status: 401 });
+    expect(calls).toBe(1);
   });
   it("does not retry an uncertain capture or silently use HTTP", async () => {
     let calls = 0;

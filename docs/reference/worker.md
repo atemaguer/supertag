@@ -125,15 +125,12 @@ chunks share the listener with Worklet RPCs but do not travel inside its control
 service uses the Task Attempt's credential and existing database authorization; a host token does
 not grant access to conversations.
 
-HTTP remains the Session transport for an explicit WebSocket Worker. gRPC clients renew
-execution authority through the gRPC listener. Shared execution environments keep
-their own transport selection.
+HTTP remains the Session transport for an explicit WebSocket Worker. Shared execution environments
+keep their own transport selection.
 
 Custom TypeScript Workers can set `sessionStateStore` to a factory receiving the admitted
 `TaskAttemptSpec`, then return `GrpcSessionStateStore` from `supertag-ai/transport`. Configure its
-`baseUrl`, per-Task Attempt `token`, and optional `tlsCa`. Authority renewal uses the same gRPC listener;
-set `renewAuthority: false` to disable renewal. The
-factory runs for each execution, keeping authority separate across concurrent Tasks. The built-in
+`baseUrl`, per-Task Attempt `token`, and optional `tlsCa`. The factory runs for each execution, keeping authority separate across concurrent Tasks. The built-in
 Control Plane API Server registers the Session service automatically; the low-level
 `startWorkletGrpcServer` helper alone does not provide persistence ownership.
 

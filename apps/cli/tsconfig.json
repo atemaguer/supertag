@@ -35,6 +35,9 @@
       "path": "../../packages/control-plane"
     },
     {
+      "path": "../../packages/operator-api"
+    },
+    {
       "path": "../../packages/store"
     },
     {

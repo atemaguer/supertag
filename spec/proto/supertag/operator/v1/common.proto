@@ -1,0 +1,95 @@
+syntax = "proto3";
+package supertag.operator.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1";
+
+// Messages shared by every operator service.
+//
+// Conventions for every RPC in this package:
+//
+// - The JSON form is proto3 JSON. Fields are lowerCamelCase and enums are
+//   their value names as strings.
+// - Times are `google.protobuf.Timestamp`, which encode as RFC 3339 strings.
+// - 64-bit integers encode as JSON strings.
+// - A list RPC takes `int32 page_size` and `string page_token` in its
+//   request and returns `string next_page_token` in its response. An empty
+//   `next_page_token` means the last page. A page token is opaque.
+// - A call the Control Plane refuses returns a Connect error code with one
+//   `ErrorDetail`. A body the Connect protocol itself rejects, one that is
+//   not valid JSON for the request message or is over 1 MB, gets only the
+//   code. The credential is checked before the body is read.
+
+// An amount of money in the smallest unit of its currency.
+message Money {
+  // The ISO 4217 code, such as `USD`.
+  string currency = 1;
+  // The amount in minor units. 1250 with `USD` is $12.50.
+  int64 amount_minor = 2;
+}
+
+// Identifies and versions a resource.
+message Metadata {
+  // The stable ID the Control Plane assigned.
+  string id = 1;
+  // The unique name within the resource's kind.
+  string name = 2;
+  // Changes whenever the resource changes. Compare it for equality only.
+  string resource_version = 3;
+  // When the resource was created.
+  google.protobuf.Timestamp created_at = 4;
+  // When the resource last changed.
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+// Why the Control Plane refused a call. Clients branch on this, never on the
+// error message, which is prose for people.
+enum ErrorReason {
+  // The Connect code alone says why, as for `Canceled`,
+  // `DeadlineExceeded`, and `Unimplemented`.
+  ERROR_REASON_UNSPECIFIED = 0;
+  // The call carried no credential, or one the Control Plane does not know.
+  ERROR_REASON_UNAUTHENTICATED = 1;
+  // The Operator Token was revoked.
+  ERROR_REASON_CREDENTIAL_REVOKED = 2;
+  // The Operator Token has expired.
+  ERROR_REASON_CREDENTIAL_EXPIRED = 3;
+  // The credential is valid but may not call this RPC: it lacks the RPC's
+  // operator action, or the RPC accepts only the admin token.
+  ERROR_REASON_PERMISSION_DENIED = 4;
+  // The Control Plane is shutting down and accepts no new calls. Retry
+  // against its replacement.
+  ERROR_REASON_DRAINING = 5;
+  // A request field is missing or malformed. `fields` names it.
+  ERROR_REASON_INVALID_ARGUMENT = 6;
+  // The named resource does not exist.
+  ERROR_REASON_NOT_FOUND = 7;
+  // The request conflicts with the stored resource. `fields` names each path.
+  ERROR_REASON_CONFLICT = 8;
+  // The Control Plane failed. The message names no internal detail.
+  ERROR_REASON_INTERNAL = 9;
+  // Something the RPC needs is not available on this Control Plane, such as
+  // a feature it is configured without. Retrying the same call does not help
+  // until the configuration changes.
+  ERROR_REASON_UNAVAILABLE = 10;
+  // The request is over a size limit, or the caller reached a rate or
+  // mailbox limit. The message names the limit.
+  ERROR_REASON_RESOURCE_EXHAUSTED = 11;
+}
+
+// One request field an error is about.
+message FieldViolation {
+  // The field path in the request, such as `spec.roles`.
+  string path = 1;
+  // What is wrong with it.
+  string description = 2;
+}
+
+// The detail every refused call carries beside its Connect error code.
+message ErrorDetail {
+  // The stable reason for the refusal.
+  ErrorReason reason = 1;
+  // The request fields involved, when the reason concerns fields.
+  repeated FieldViolation fields = 2;
+}

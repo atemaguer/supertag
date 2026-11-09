@@ -3,10 +3,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Code } from "@connectrpc/connect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ControlPlaneApiServer } from "../apps/cli/src/control-plane-api.ts";
+import { ControlPlaneApiServer, isControlPlaneApiPath } from "../apps/cli/src/control-plane-api.ts";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { runObjectiveCommand } from "../apps/cli/src/objectives.js";
+import { organizationClient } from "../apps/cli/src/operator-client.ts";
 import { runResourceCommand } from "../apps/cli/src/resources.ts";
 import { ControlPlane } from "../packages/control-plane/src/index.ts";
 import { emptyTagContextPlan } from "../packages/core/src/index.ts";
@@ -573,10 +575,9 @@ describe("Control Plane API boundary", () => {
     await Promise.resolve();
     expect(drained).toBe(false);
 
-    const refused = await fetch(`${fixture.url}/api/v1/status`, {
-      headers: { authorization: "Bearer administrative-token" },
-    });
-    expect(refused.status).toBe(503);
+    await expect(
+      organizationClient({ url: fixture.url, token: "administrative-token" }).getStatus({}),
+    ).rejects.toMatchObject({ code: Code.Unavailable });
     const executionApi = await fetch(`${fixture.url}/internal/v1/coordination/tools/call`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -988,7 +989,7 @@ describe("Control Plane API boundary", () => {
     });
     server.on("request", (request, response) => {
       const url = new URL(request.url ?? "/", "http://localhost");
-      if (!url.pathname.startsWith("/api/") && !url.pathname.startsWith("/internal/v1/")) {
+      if (!isControlPlaneApiPath(url.pathname)) {
         response.writeHead(404, { "content-type": "application/json" });
         response.end(JSON.stringify({ error: "not_found" }));
         return;

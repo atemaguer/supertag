@@ -2298,7 +2298,6 @@ export { GrpcArtifactCatalogClient, GrpcArtifactHostClient } from "./artifact-cl
 export * from "./artifact-codec.js";
 export { GrpcCoordinationClient } from "./coordination-client.js";
 export * from "./coordination-codec.js";
-export { GrpcExecutionAuthorityClient } from "./execution-authority-client.js";
 export * from "./session-codec.js";
 
 /** Compares per-Worker concurrency regardless of key order. */

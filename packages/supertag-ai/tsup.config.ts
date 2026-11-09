@@ -5,6 +5,7 @@ const external = [
   "@bufbuild/protobuf",
   "@connectrpc/connect",
   "@connectrpc/connect-node",
+  "@connectrpc/connect-web",
   "@anthropic-ai/claude-agent-sdk",
   "@inquirer/prompts",
   "@larksuiteoapi/node-sdk",

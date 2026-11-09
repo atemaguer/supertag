@@ -11,6 +11,7 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- An experimental operator API in protobuf, `supertag.operator.v1`, served on the Control Plane API port with the Connect and gRPC-Web protocols: `POST /supertag.operator.v1.OrganizationService/GetStatus` with JSON, the same `Authorization: Bearer` credential, and Connect error codes carrying a stable `ErrorDetail` reason. `supertag connect control-plane`, `supertag status control-plane`, and `supertag verify deployment` call `GetStatus`. Generated clients ship in the repository for TypeScript and Go.
 - An experimental terminal UI: `supertag` with no arguments, in an interactive terminal, opens a Go terminal UI that lists your Tags and streams a conversation with one, including its work Sessions. It runs from a checkout after `apps/tui/build.sh`; installed packages do not ship it yet, so there `supertag` prints help as before.
 - A Tag's conversations share one memory. Every conversation sees the Tag's open Objectives, and the Tag can list, search, and read its other Sessions with `list_sessions`, `search_sessions`, and `read_session`. `list_objectives` and `read_objective` reach any Objective the Tag owns.
 - Sessions are `shared` or `private`. A Lark direct chat or a CLI conversation is private to its one person; existing Lark direct-chat Sessions become private when you migrate.
@@ -45,6 +46,7 @@ within the pre-1.0 compatibility policy described in
 
 ### Removed
 
+- `GET /api/v1/status`; call `OrganizationService.GetStatus` instead. The unused `supertag.authority.v1.ExecutionAuthorityService`, `GrpcExecutionAuthorityClient` in `supertag-ai/transport`, and the `renewAuthority` option of `GrpcArtifactCatalogClient` and `GrpcSessionStateStore` are gone: the Control Plane stopped renewing execution credentials, so an expired one now fails with `Unauthenticated`. `supertag verify deployment --grpc-url` probes the coordination service instead.
 - The tools `assign_task`, `update_task`, `read_task`, `list_tasks`, `read_commitments`, `wait_for`, `escalate_task`, `read_mailbox`, `post_workstream` (now `post`), `read_team`, `update_team`, `request_approval`, `decide_approval`, `select_objective`, `attach_objective`, `start_objective`, `instruct_objective`, `create_team`, `create_tag` and `list_tags`. The commands `supertag assign task`, `supertag start objective` and its `--no-start` flag, `supertag events team`, `supertag coordinate`, `supertag prune mailbox`, the mailbox credential commands, `supertag message objective --reply-to`, and `supertag update objective --notification-task`. The `--lead`, `--parent`, `--max-breadth` and `--max-depth` flags, and the `--type` flag of `supertag grant mailbox`. The Objective manifest fields `observe` and `teams`, replaced by a single `team`. Message types and the `priority.*` and `governance.*` protocols, per-type Mailbox grants, Task approvals, review-finding closure, leadership and parent Teams, governance transfer, linked Objectives, the external mailbox transport at `/internal/v1/mailbox`, and the Org Architect Role.
 
 ## [0.2.0-alpha.6] - 2026-11-04

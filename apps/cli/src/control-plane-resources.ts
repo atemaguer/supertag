@@ -494,19 +494,6 @@ export type WorkerProfileResource = ControlPlaneResource<
   }
 >;
 
-export type ControlPlaneStatusResource = ControlPlaneResource<
-  "ControlPlane",
-  Record<string, never>,
-  {
-    readonly phase: "accepting" | "draining";
-    readonly apiVersion: 1;
-    readonly controllers: readonly {
-      readonly name: string;
-      readonly phase: string;
-    }[];
-  }
->;
-
 export type TagOperationResource = ControlPlaneResource<
   "TagOperation",
   {

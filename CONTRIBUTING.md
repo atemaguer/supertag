@@ -76,6 +76,14 @@ on file descriptor 3. With output piped, or without a built binary, `supertag` p
 before. `go test ./...` in `apps/tui` runs its tests; `SUPERTAG_TUI_E2E=1` adds an end-to-end run
 under tmux against a fake Control Plane.
 
+### Protobuf contracts
+
+The protobuf contracts live in `spec/proto`. After editing one, run `pnpm proto:generate`.
+`pnpm check` runs `buf lint` and fails when a checked-in binding is stale. Generation also writes
+the Go operator API bindings into the Go module in `packages/operator-api/go`, which pins the
+plugins as tools, so it needs Go 1.26 or later. `go test ./...` in that directory checks the
+generated Go client against the generated handler.
+
 ## Test your change
 
 Before opening a pull request, run:

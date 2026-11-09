@@ -15,10 +15,6 @@ import {
   decodeResolvedArtifactTransfer,
 } from "./artifact-codec.js";
 import {
-  GrpcExecutionAuthorityClient,
-  waitForExecutionAuthorityRefresh,
-} from "./execution-authority-client.js";
-import {
   AcquireRequestSchema,
   ArtifactCatalogService,
   ArtifactHostService,
@@ -35,7 +31,6 @@ interface Options {
   readonly baseUrl: string;
   readonly token: string;
   readonly tlsCa?: string;
-  readonly renewAuthority?: boolean;
 }
 function origin(value: string): string {
   const url = new URL(value);
@@ -72,14 +67,10 @@ function parse<D extends DescMessage>(schema: D, value: unknown) {
 /** Per-Attempt metadata client. Transport failures are never automatically replayed. */
 export class GrpcArtifactCatalogClient implements ArtifactCatalogTransport {
   readonly #client;
-  readonly #authority: GrpcExecutionAuthorityClient | undefined;
-  #token: string;
-  #refreshing: Promise<void> | undefined;
+  readonly #token: string;
   constructor(options: Options) {
     this.#client = createClient(ArtifactCatalogService, transport(options));
     this.#token = options.token;
-    this.#authority =
-      options.renewAuthority === false ? undefined : new GrpcExecutionAuthorityClient(options);
   }
   async request<T>(
     operation: ArtifactCatalogOperation,
@@ -168,27 +159,12 @@ export class GrpcArtifactCatalogClient implements ArtifactCatalogTransport {
     const signal = parent
       ? AbortSignal.any([parent, AbortSignal.timeout(30_000)])
       : AbortSignal.timeout(30_000);
-    const original = this.#token;
-    const invoke = () =>
-      call({ headers: { authorization: `Bearer ${this.#token}` }, signal, timeoutMs: 30_000 });
     try {
-      try {
-        return await invoke();
-      } catch (error) {
-        if (
-          !(error instanceof ConnectError) ||
-          error.code !== Code.Unauthenticated ||
-          !this.#authority
-        )
-          throw error;
-        if (this.#token === original) {
-          this.#refreshing ??= this.#refresh(original, AbortSignal.timeout(30_000)).finally(() => {
-            this.#refreshing = undefined;
-          });
-          await waitForExecutionAuthorityRefresh(this.#refreshing, signal);
-        }
-        return await invoke();
-      }
+      return await call({
+        headers: { authorization: `Bearer ${this.#token}` },
+        signal,
+        timeoutMs: 30_000,
+      });
     } catch (error) {
       if (error instanceof ConnectError) {
         const status = (
@@ -206,10 +182,6 @@ export class GrpcArtifactCatalogClient implements ArtifactCatalogTransport {
       }
       throw error;
     }
-  }
-  async #refresh(token: string, signal: AbortSignal) {
-    if (!this.#authority) throw new Error("Artifact authority renewal disabled");
-    this.#token = await this.#authority.rebind(token, signal);
   }
 }
 /** Host authority is limited to inventory reports, never catalog reads or transfer grants. */

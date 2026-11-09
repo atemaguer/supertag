@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import { afterEach, expect, it, vi } from "vitest";
 import { runDeploymentCommand, verifyDeploymentGrpc } from "../apps/cli/src/deploy.js";
 import {
-  ExecutionAuthorityService,
+  CoordinationService,
   RemoteWorkletServer,
   startWorkletGrpcServer,
 } from "../packages/runtime/transport/src/index.js";
@@ -19,7 +19,7 @@ const { Code, ConnectError } = createRequire(
   new URL("../packages/runtime/transport/package.json", import.meta.url),
 )("@connectrpc/connect");
 
-it("verifies TLS RPC routing and fails closed for an accepting or broken authority service", async () => {
+it("verifies TLS RPC routing and fails closed for an accepting or broken coordination service", async () => {
   const directory = await mkdtemp(join(tmpdir(), "supertag-deploy-grpc-"));
   let mode: "deny" | "accept" | "unavailable" = "deny";
   const received: string[] = [];
@@ -53,14 +53,17 @@ it("verifies TLS RPC routing and fails closed for an accepting or broken authori
       remote,
       tls: { key: await readFile(keyPath), cert },
       registerRoutes(router) {
-        router.service(ExecutionAuthorityService, {
-          rebind(_, context) {
+        router.service(CoordinationService, {
+          listTools(_, context) {
             received.push(context.requestHeader.get("authorization") ?? "");
-            if (mode === "accept") return { token: "incorrectly-accepted" };
+            if (mode === "accept") return { tools: [] };
             throw new ConnectError(
               "probe",
               mode === "deny" ? Code.Unauthenticated : Code.Unavailable,
             );
+          },
+          callTool() {
+            throw new ConnectError("probe", Code.Unimplemented);
           },
         });
       },

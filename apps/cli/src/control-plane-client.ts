@@ -2,15 +2,16 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { ConnectError } from "@connectrpc/connect";
 import { confirm, password } from "@inquirer/prompts";
 import type { CredentialValue } from "@supertag/core";
+import { ControlPlanePhase, type GetStatusResponse } from "@supertag/operator-api";
 import { FileCredentialStore, stateDirectory } from "@supertag/store";
 import type { VerifiedSurfaceAccount } from "@supertag/surface-sdk";
 import { stringify as stringifyYaml } from "yaml";
 import {
   CONTROL_PLANE_API_VERSION,
   type ControlPlaneResourceList,
-  type ControlPlaneStatusResource,
   type SurfaceAccountResource,
   type TagOperationResource,
   type TagResource,
@@ -19,6 +20,11 @@ import {
   environmentOperatorToken,
   localControlPlaneUrl as localUpControlPlaneUrl,
 } from "./local-state.js";
+import {
+  OPERATOR_API_VERSION,
+  operatorErrorMessage,
+  organizationClient,
+} from "./operator-client.js";
 import type { TagCommand } from "./tags.js";
 import {
   CLIENT_VERSION_HEADER,
@@ -162,8 +168,17 @@ export class ControlPlaneClient {
     return this.#target.url;
   }
 
-  async status(): Promise<ControlPlaneStatusResource> {
-    return this.#request<ControlPlaneStatusResource>("/api/v1/status", { method: "GET" });
+  async status(): Promise<GetStatusResponse> {
+    try {
+      return await organizationClient({
+        url: this.#target.url,
+        token: this.#target.token,
+        warnOnSkew: true,
+      }).getStatus({});
+    } catch (error) {
+      if (error instanceof ConnectError) throw new Error(operatorErrorMessage(error));
+      throw error;
+    }
   }
 
   async setupSurface(verified: VerifiedSurfaceAccount): Promise<SurfaceAccountResource> {
@@ -501,14 +516,7 @@ async function connectControlPlane(args: readonly string[]): Promise<void> {
     (await password({ message: "Operator Token or admin token", mask: "*" })).trim();
   if (!token) throw new Error("The Operator Token or admin token must not be empty");
   const target: ControlPlaneTarget = { name, url, token };
-  const status = await new ControlPlaneClient(target).status();
-  if (
-    status.apiVersion !== CONTROL_PLANE_API_VERSION ||
-    status.kind !== "ControlPlane" ||
-    status.status.apiVersion !== 1
-  ) {
-    throw new Error("Control Plane does not support this SuperTag management API");
-  }
+  await new ControlPlaneClient(target).status();
 
   const credentialRef = `control-plane/${createHash("sha256").update(name).digest("hex")}`;
   const credentialProvider = operatorCredentialProvider(FILE_OPERATOR_CREDENTIAL_PROVIDER);
@@ -644,8 +652,9 @@ async function statusControlPlane(args: readonly string[]): Promise<void> {
     throw new Error("No active remote Control Plane. Run: supertag connect control-plane URL");
   }
   const status = await new ControlPlaneClient(target).status();
+  const phase = ControlPlanePhase[status.phase]?.toLowerCase() ?? "unknown";
   process.stdout.write(
-    `${target.name === undefined || target.name === DEFAULT_CONTROL_PLANE_NAME ? target.url : target.name}\t${status.status.phase}\tAPI v${status.status.apiVersion}\n`,
+    `${target.name === undefined || target.name === DEFAULT_CONTROL_PLANE_NAME ? target.url : target.name}\t${phase}\tAPI ${OPERATOR_API_VERSION}\n`,
   );
 }
 

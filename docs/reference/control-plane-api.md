@@ -50,6 +50,109 @@ accepted during enrollment are write-only and never appear in a response. A Work
 appears only in the response that issues or rotates it; ordinary Worker Host reads never contain
 the token or its server-side logical credential ID.
 
+## Operator RPCs (Experimental)
+
+The Control Plane also serves operator RPCs defined in protobuf, in the package
+`supertag.operator.v1` under
+[`spec/proto/supertag/operator/v1/`](../../spec/proto/supertag/operator/v1/). The proto comments
+are the reference for each message and field. These RPCs replace the `/api/v1/` routes one service
+at a time; a route that moves is removed.
+
+| RPC | Operator action | Returns |
+| --- | --- | --- |
+| `OrganizationService.GetStatus` | `status` | The Control Plane phase and the phase of each controller: Task dispatch, reply delivery, and collaboration surfaces |
+
+Each RPC is a `POST` to `/PACKAGE.SERVICE/METHOD` on the API port, such as
+`/supertag.operator.v1.OrganizationService/GetStatus`. The listener speaks the Connect and
+gRPC-Web protocols over HTTP/1.1. gRPC itself needs HTTP/2 and is not served on this port yet.
+
+The Connect protocol accepts JSON, so `curl` can call any RPC:
+
+```sh
+curl -s https://control.example.com/supertag.operator.v1.OrganizationService/GetStatus \
+  -H "Authorization: Bearer $SUPERTAG_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+```json
+{
+  "metadata": {
+    "id": "control-plane",
+    "name": "control-plane",
+    "resourceVersion": "9f2c…",
+    "createdAt": "2026-11-08T09:00:00Z",
+    "updatedAt": "2026-11-08T09:41:12.345Z"
+  },
+  "phase": "CONTROL_PLANE_PHASE_ACCEPTING",
+  "controllers": [
+    { "name": "task-dispatch", "phase": "CONTROLLER_PHASE_RUNNING" },
+    { "name": "reply-delivery", "phase": "CONTROLLER_PHASE_RUNNING" },
+    { "name": "surfaces", "phase": "CONTROLLER_PHASE_RUNNING" }
+  ]
+}
+```
+
+Bodies use proto3 JSON. Field names are lowerCamelCase, enums are their value names, times are
+RFC 3339 strings, and 64-bit integers are strings. Send `Content-Type: application/proto` for the
+binary encoding instead. The generated clients in TypeScript and Go handle all of this.
+
+Authentication is the same `Authorization: Bearer` header as the routes above. The Control Plane
+checks the credential before it reads the request body. Method options in
+[`options.proto`](../../spec/proto/supertag/operator/v1/options.proto) declare who may call each
+RPC:
+
+| Option | Meaning |
+| --- | --- |
+| `(supertag.operator.v1.action)` | The operator action the credential must carry. The admin token and Operator Tokens carry every action |
+| `(supertag.operator.v1.requires_admin_token)` | Only the admin token may call the RPC; an Operator Token gets `permission_denied` |
+| `(supertag.operator.v1.allow_anonymous)` | A call without a credential is accepted |
+| `(supertag.operator.v1.audit_action)` | The `action` the [audit log](#audit-log) records for each authenticated call |
+
+Every RPC declares an action. An RPC that only reads sets `idempotency_level = NO_SIDE_EFFECTS`;
+every other RPC declares an audit action. Scoped coordination credentials are refused until the
+coordination routes move to RPCs.
+
+A refused call returns a Connect error: a JSON body with `code`, `message`, and `details`. The one
+detail is a `supertag.operator.v1.ErrorDetail` whose `reason` is stable; branch on it, never on
+`message`.
+
+| Connect code | HTTP status | `ErrorDetail.reason` |
+| --- | --- | --- |
+| `unauthenticated` | 401 | `ERROR_REASON_UNAUTHENTICATED`, `ERROR_REASON_CREDENTIAL_REVOKED`, or `ERROR_REASON_CREDENTIAL_EXPIRED` |
+| `permission_denied` | 403 | `ERROR_REASON_PERMISSION_DENIED` |
+| `invalid_argument` | 400 | `ERROR_REASON_INVALID_ARGUMENT` |
+| `not_found` | 404 | `ERROR_REASON_NOT_FOUND` |
+| `failed_precondition` | 400 | `ERROR_REASON_CONFLICT` |
+| `resource_exhausted` | 429 | `ERROR_REASON_RESOURCE_EXHAUSTED`: a request over a size limit, or a rate or mailbox limit reached |
+| `unavailable` | 503 | `ERROR_REASON_DRAINING` while the Control Plane shuts down; `ERROR_REASON_UNAVAILABLE` when this Control Plane lacks what the RPC needs, such as a feature it is configured without |
+| `internal` | 500 | `ERROR_REASON_INTERNAL`, with a message that names no internal detail |
+
+`canceled`, `deadline_exceeded`, and `unimplemented` carry `ERROR_REASON_UNSPECIFIED`; the code
+says why. A body the Connect protocol itself rejects gets only the code, with no detail: one that
+is not valid JSON for the request message (`invalid_argument`) or is over 1 MB
+(`resource_exhausted`). The credential is checked first, so an anonymous caller still gets
+`unauthenticated`.
+
+A call without a credential reveals nothing but the error:
+
+```json
+{
+  "code": "unauthenticated",
+  "message": "A valid Control Plane admin token or Operator Token is required",
+  "details": [
+    {
+      "type": "supertag.operator.v1.ErrorDetail",
+      "value": "CAE",
+      "debug": { "reason": "ERROR_REASON_UNAUTHENTICATED" }
+    }
+  ]
+}
+```
+
+`value` is the binary detail in unpadded base64; `debug` repeats it as JSON for people reading the
+reply.
+
 ## Organization spend
 
 `GET /api/v1/spend` returns cost and tokens across Task Attempts. Codex costs use model price estimates; `estimatedCostAttempts` counts those Task Attempts in each group. Each Task Attempt
@@ -207,7 +310,6 @@ streaming watch protocol is not part of API v1.
 ### Endpoints
 
 ```text
-GET  /api/v1/status
 GET  /api/v1/metrics
 GET  /api/v1/audit
 GET  /api/v1/tags
@@ -271,10 +373,7 @@ POST /api/v1/surface-enrollments
 POST /api/v1/tag-operations
 ```
 
-### Status and declarative resources
-
-`GET /api/v1/status` returns a `ControlPlane` resource. Its status reports the Control Plane phase
-and the independently named collaboration surface, Task-dispatch, and reply-delivery controllers.
+### Declarative resources
 
 Tags, Roles, Permission Sets, Context Sets, and Workspaces support declarative creation and
 reconciliation with [field managers](resource-model.md#field-managers-and-apply-sets). Each `POST`
@@ -424,7 +523,8 @@ rules.
 
 `GET /api/v1/audit` returns the recorded operator changes, newest first: applies, deletes, Operator
 Token and Auth Key changes, approval decisions, Objective messages, approvals, and cancellations,
-and every other authenticated management write. Reads are not recorded. The admin token and
+and every other authenticated management write. A call to an operator RPC that declares an audit
+action is recorded too, with `path` set to its procedure, `/supertag.operator.v1.SERVICE/METHOD`. Reads are not recorded. The admin token and
 Operator Tokens may call it; scoped coordination credentials receive `403`. `supertag audit` reads
 this route.
 

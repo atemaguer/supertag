@@ -184,8 +184,20 @@ describe("the Control Plane version header", () => {
     });
     for (const [path, init, status] of [
       ["/readyz", {}, 200],
-      ["/api/v1/status", { headers: { authorization: `Bearer ${ADMIN}` } }, 200],
-      ["/api/v1/status", {}, 401],
+      [
+        "/supertag.operator.v1.OrganizationService/GetStatus",
+        {
+          method: "POST",
+          headers: { authorization: `Bearer ${ADMIN}`, "content-type": "application/json" },
+          body: "{}",
+        },
+        200,
+      ],
+      [
+        "/supertag.operator.v1.OrganizationService/GetStatus",
+        { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+        401,
+      ],
       ["/api/v1/no-such-route", { headers: { authorization: `Bearer ${ADMIN}` } }, 404],
       ["/no-such-page", {}, 404],
     ] as const) {

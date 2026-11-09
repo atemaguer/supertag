@@ -30,13 +30,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.1"
-          cache-dependency-path: tests/fixtures/go-worklet/go.sum
+          cache-dependency-path: |
+            tests/fixtures/go-worklet/go.sum
+            packages/operator-api/go/go.sum
       - run: pnpm install --frozen-lockfile
       - run: pnpm proto:check
       # The protobuf contract may break freely until the first release; restore
       # `pnpm proto:breaking "$BASE_SHA" --self-test` against the release tag then.
       - run: pnpm test:proto:python
       - run: pnpm test:proto:go
+      - run: go -C packages/operator-api/go vet ./...
+      - run: go -C packages/operator-api/go test ./...
 
   compatibility:
     runs-on: ubuntu-latest

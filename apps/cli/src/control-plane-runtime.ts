@@ -30,6 +30,7 @@ import {
   ControlPlaneApiServer,
   type ControlPlaneOperatorCredential,
   environmentCoordinationOperatorCredentials,
+  isControlPlaneApiPath,
   type ManagementAuditEvent,
   validateCoordinationOperatorCredentials,
 } from "./control-plane-api.js";
@@ -418,7 +419,7 @@ async function handleHttpRequest(context: HttpRequestContext): Promise<void> {
     });
     return;
   }
-  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/internal/v1/")) {
+  if (isControlPlaneApiPath(url.pathname)) {
     await context.apiServer.handle(context.request, context.response, url);
     return;
   }
@@ -518,7 +519,7 @@ Environment:
 Remote Worker Hosts join with an Auth Key (supertag create auth-key) before connecting.
 
 Endpoints:
-  GET  /api/v1/status
+  POST /supertag.operator.v1.OrganizationService/GetStatus   (Connect and gRPC-Web)
   GET  /api/v1/metrics
   GET  /api/v1/tags
   POST /api/v1/tags

@@ -6,6 +6,8 @@ import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { parseArgs, promisify } from "node:util";
+import { probeInvalidExecutionCredential } from "../apps/cli/src/deploy.js";
+import { organizationClient } from "../apps/cli/src/operator-client.js";
 import {
   array,
   assertNoSecrets,
@@ -56,7 +58,10 @@ class Api {
   async waitUntilReachable(): Promise<void> {
     await poll(async () => {
       try {
-        await this.request("GET", "/api/v1/status");
+        await organizationClient({ url: this.origin, token: this.token }).getStatus(
+          {},
+          { signal: runAbort.signal, timeoutMs: Math.min(this.timeout, 30_000) },
+        );
         return true;
       } catch {
         return undefined;
@@ -658,14 +663,10 @@ async function negativeAuthentication(
   });
   assert.equal(response.status, 401);
   if (selectedTransport !== "grpc") return;
-  const { GrpcExecutionAuthorityClient } = await import(
-    "../packages/runtime/transport/src/index.js"
+  await probeInvalidExecutionCredential(
+    grpcOrigin(url),
+    caFile ? await readFile(caFile, "utf8") : undefined,
   );
-  const client = new GrpcExecutionAuthorityClient({
-    baseUrl: url,
-    ...(caFile ? { tlsCa: await readFile(caFile, "utf8") } : {}),
-  });
-  await assert.rejects(client.rebind(`invalid-${randomUUID()}`), /unauth|credential|token/i);
   void apiClient;
 }
 
@@ -731,6 +732,22 @@ function resolveWorkletUrl(
   url.protocol = "wss:";
   url.pathname = "/worklets";
   return url.toString();
+}
+
+/** The gRPC Worklet origin: HTTPS, or plain HTTP to a loopback address such as an SSH tunnel. */
+function grpcOrigin(value: string): string {
+  const url = new URL(value);
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    url.pathname !== "/" ||
+    !(url.protocol === "https:" || (url.protocol === "http:" && loopback))
+  )
+    throw new Error("--worklet-url for gRPC must be an HTTPS origin or a loopback HTTP origin");
+  return url.origin;
 }
 
 function redactUrl(value: string): string {

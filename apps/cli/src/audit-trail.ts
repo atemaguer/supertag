@@ -80,6 +80,12 @@ export class AuditTrail {
   }
 }
 
+/** The kind part of an audit target, such as `Tag` from `Tag/reviewer`. */
+export function auditTargetKind(target: string): string {
+  const slash = target.indexOf("/");
+  return slash === -1 ? target : target.slice(0, slash);
+}
+
 /**
  * Appends each entry to `path` as one JSON line, in order, with owner-only permissions. A failed
  * write is reported and never fails the request the entry describes.

@@ -1,8 +1,10 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Code } from "@connectrpc/connect";
 import { expect, it } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
+import { organizationClient } from "../apps/cli/src/operator-client.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
 
 it("binds coordination operators to server-side identity and least-privilege scopes", async () => {
@@ -88,8 +90,9 @@ it("binds coordination operators to server-side identity and least-privilege sco
     expect(revoked.status).toBe(401);
 
     // A coordination credential is not a management credential.
-    const controlPlane = await fetch(`${runtime.url}/api/v1/status`, { headers: scopedHeaders });
-    expect(controlPlane.status).toBe(403);
+    await expect(
+      organizationClient({ url: runtime.url, token: "scoped-reviewer-token" }).getStatus({}),
+    ).rejects.toMatchObject({ code: Code.PermissionDenied });
 
     // Break glass reaches the Objective the scoped credential may not.
     const breakGlass = await message("operator-break-glass-token", denied.id, "Reviewed");

@@ -2,7 +2,8 @@ import { randomBytes } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs, parseEnv } from "node:util";
-import { Code, ConnectError } from "@connectrpc/connect";
+import { Code, ConnectError, createClient } from "@connectrpc/connect";
+import { createGrpcTransport } from "@connectrpc/connect-node";
 import { input, password } from "@inquirer/prompts";
 import {
   DEPLOYMENT_ENVIRONMENT_KEYS,
@@ -14,7 +15,8 @@ import {
   deploymentRequiredKeys,
   resolveDeploymentEnvironment,
 } from "@supertag/deployment";
-import { GrpcExecutionAuthorityClient } from "@supertag/worker-transport";
+import { CoordinationService } from "@supertag/worker-transport";
+import { organizationClient } from "./operator-client.js";
 
 export function deploymentHelp(): string {
   return `Usage:
@@ -67,23 +69,30 @@ export async function verifyDeployment(
       "Deployment URL must be an HTTPS origin without credentials, query, or fragment",
     );
   if (!token.trim()) throw new Error("SUPERTAG_ADMIN_TOKEN is required");
-  const get = (path: string, authenticated = false) =>
-    request(new URL(path, url), {
-      redirect: "error",
-      signal: AbortSignal.timeout(15_000),
-      headers: authenticated ? { authorization: `Bearer ${token}` } : {},
-    });
+  const get = (path: string) =>
+    request(new URL(path, url), { redirect: "error", signal: AbortSignal.timeout(15_000) });
   const health = await get(DEPLOYMENT_RUNTIME.healthPath);
   if (!health.ok || ((await health.json()) as { ok?: unknown }).ok !== true)
     throw new Error("Control Plane liveness check failed");
-  const anonymous = await get("/api/v1/status");
-  await anonymous.body?.cancel();
-  if (anonymous.status !== 401)
+  const rpc = (authenticated: boolean) =>
+    organizationClient({
+      url: url.origin,
+      ...(authenticated ? { token } : {}),
+      fetch: request,
+    }).getStatus({}, { timeoutMs: 15_000 });
+  const anonymous = await rpc(false).then(
+    () => undefined,
+    (error: unknown) => ConnectError.from(error),
+  );
+  if (anonymous?.code !== Code.Unauthenticated)
     throw new Error("Control Plane management API did not reject an anonymous request");
-  const status = await get("/api/v1/status", true);
-  await status.body?.cancel();
-  if (!status.ok)
-    throw new Error(`Control Plane management authentication failed (HTTP ${status.status})`);
+  try {
+    await rpc(true);
+  } catch (error) {
+    throw new Error(
+      `Control Plane management authentication failed (${Code[ConnectError.from(error).code]})`,
+    );
+  }
   const readiness = await get(DEPLOYMENT_RUNTIME.readinessPath);
   await readiness.body?.cancel();
   if (!readiness.ok && (requireReady || readiness.status !== 503))
@@ -110,12 +119,35 @@ export async function verifyDeploymentGrpc(address: string, tlsCa?: string): Pro
     throw new Error(
       "gRPC deployment URL must be an HTTPS origin without credentials, query, or fragment",
     );
-  const client = new GrpcExecutionAuthorityClient({
-    baseUrl: url.origin,
-    ...(tlsCa ? { tlsCa } : {}),
-  });
+  return probeInvalidExecutionCredential(url.origin, tlsCa);
+}
+
+/**
+ * Calls `CoordinationService.ListTools` at `origin` with an invalid credential and requires a gRPC
+ * `Unauthenticated` refusal. It checks no URL policy of its own.
+ */
+export async function probeInvalidExecutionCredential(
+  origin: string,
+  tlsCa?: string,
+): Promise<string> {
+  const client = createClient(
+    CoordinationService,
+    createGrpcTransport({
+      baseUrl: origin,
+      readMaxBytes: 8192,
+      writeMaxBytes: 8192,
+      idleConnectionTimeoutMs: 1000,
+      ...(tlsCa ? { nodeOptions: { ca: tlsCa } } : {}),
+    }),
+  );
   try {
-    await client.rebind("supertag-deployment-verification-invalid-credential");
+    await client.listTools(
+      {},
+      {
+        headers: { authorization: "Bearer supertag-deployment-verification-invalid-credential" },
+        timeoutMs: 30_000,
+      },
+    );
   } catch (error) {
     if (
       error instanceof ConnectError &&
@@ -125,11 +157,11 @@ export async function verifyDeploymentGrpc(address: string, tlsCa?: string): Pro
     )
       return "gRPC TLS/HTTP2 routing and invalid execution credential rejection passed. Authenticated Worklet registration and sustained connectivity are not checked.\n";
     throw new Error(
-      "gRPC verification failed: check the RPC listener, HTTP/2 routing, TLS certificate and authority service.",
+      "gRPC verification failed: check the RPC listener, HTTP/2 routing, TLS certificate and coordination service.",
     );
   }
   throw new Error(
-    "gRPC verification failed: the authority service accepted an invalid execution credential.",
+    "gRPC verification failed: the coordination service accepted an invalid execution credential.",
   );
 }
 

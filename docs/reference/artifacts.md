@@ -684,8 +684,8 @@ a Worker. `supertag.artifact.v1.ArtifactCatalogService` exposes `Find`, `Inspect
 services share the Worklet gRPC listener and contain metadata only. Catalog calls use the execution
 credential; inventory calls use a Worker Host credential. Requests need a deadline of at most 60 seconds and are bounded to 256 KiB. The
 TypeScript client uses 30 seconds and does not automatically retry uncertain transport failures.
-HTTP remains available for compatible clients. The gRPC client renews execution authority through
-`ExecutionAuthorityService` on the same gRPC listener, without an HTTP dependency.
+HTTP remains available for compatible clients. An expired execution credential fails the call with
+`Unauthenticated`; the client does not renew it.
 
 ### HTTP catalog
 

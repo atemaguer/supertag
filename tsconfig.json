@@ -3,6 +3,7 @@
   "references": [
     { "path": "deploy/shared" },
     { "path": "packages/core" },
+    { "path": "packages/operator-api" },
     { "path": "packages/surfaces/sdk" },
     { "path": "packages/surfaces/slack" },
     { "path": "packages/surfaces/lark" },

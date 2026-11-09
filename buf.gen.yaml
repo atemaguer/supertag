@@ -13,8 +13,26 @@ plugins:
       - supertag.worklet.v1
       - supertag.session.v1
       - supertag.artifact.v1
-      - supertag.authority.v1
       - supertag.coordination.v1
     opt:
       - target=ts
       - import_extension=js
+  - local: protoc-gen-es
+    out: packages/operator-api/src/gen
+    types:
+      - supertag.operator.v1
+    opt:
+      - target=ts
+      - import_extension=js
+  - local: [go, -C, packages/operator-api/go, tool, protoc-gen-go]
+    out: packages/operator-api/go/operatorv1
+    types:
+      - supertag.operator.v1
+    opt:
+      - module=github.com/atemaguer/supertag/packages/operator-api/go/operatorv1
+  - local: [go, -C, packages/operator-api/go, tool, protoc-gen-connect-go]
+    out: packages/operator-api/go/operatorv1
+    types:
+      - supertag.operator.v1
+    opt:
+      - module=github.com/atemaguer/supertag/packages/operator-api/go/operatorv1

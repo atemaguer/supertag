@@ -5,7 +5,6 @@ import {
   ToolDocumentSchema,
 } from "./gen/supertag/coordination/v1/coordination_pb.js";
 
-export * from "./gen/supertag/authority/v1/authority_pb.js";
 export * from "./gen/supertag/coordination/v1/coordination_pb.js";
 export const COORDINATION_GRPC_MAX_INPUT_BYTES = 128_000;
 export const COORDINATION_GRPC_MAX_OUTPUT_BYTES = 3 * 1024 * 1024;

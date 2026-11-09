@@ -7,6 +7,7 @@ import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { main } from "../apps/cli/src/index.ts";
 import type { CredentialValue, GatewayCredentialVault } from "../packages/core/src/index.ts";
+import { ControllerPhase, ControlPlanePhase } from "../packages/operator-api/src/index.ts";
 import { DrizzleStore } from "../packages/store/src/index.ts";
 import { migrateSqlite as migrateSqliteDatabase } from "./support/database.ts";
 
@@ -75,15 +76,13 @@ describe("remote Control Plane management", () => {
         }),
       ).rejects.toThrow("Tag spec contains unknown fields: workerProfile");
       await expect(client.status()).resolves.toMatchObject({
-        kind: "ControlPlane",
-        status: {
-          phase: "accepting",
-          controllers: expect.arrayContaining([
-            { name: "surfaces", phase: "running" },
-            { name: "task-dispatch", phase: "running" },
-            { name: "reply-delivery", phase: "running" },
-          ]),
-        },
+        metadata: { name: "control-plane" },
+        phase: ControlPlanePhase.ACCEPTING,
+        controllers: expect.arrayContaining([
+          expect.objectContaining({ name: "surfaces", phase: ControllerPhase.RUNNING }),
+          expect.objectContaining({ name: "task-dispatch", phase: ControllerPhase.RUNNING }),
+          expect.objectContaining({ name: "reply-delivery", phase: ControllerPhase.RUNNING }),
+        ]),
       });
       const account = await client.setupSurface({
         provider: "slack",
@@ -354,7 +353,7 @@ spec:
         items: [expect.objectContaining({ kind: "WorkerProfile" })],
       });
 
-      const unauthorized = await fetch(`${runtime.url}/api/v1/status`);
+      const unauthorized = await fetch(`${runtime.url}/api/v1/tags`);
       expect(unauthorized.status).toBe(401);
       await expect(unauthorized.json()).resolves.toMatchObject({
         kind: "Status",

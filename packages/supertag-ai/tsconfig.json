@@ -11,6 +11,7 @@
       "@supertag/surface-teams": ["../surfaces/teams/src/index.ts"],
       "@supertag/core": ["../core/src/index.ts"],
       "@supertag/control-plane": ["../control-plane/src/index.ts"],
+      "@supertag/operator-api": ["../operator-api/src/index.ts"],
       "@supertag/store": ["../store/src/index.ts"],
       "@supertag/worker-claude-code": ["../runtime/harnesses/claude-code/src/index.ts"],
       "@supertag/worker-codex": ["../runtime/harnesses/codex/src/index.ts"],

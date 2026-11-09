@@ -1,0 +1,27 @@
+syntax = "proto3";
+package supertag.operator.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1";
+
+// Who may call an operator RPC, and what the audit trail records. The Control
+// Plane reads these options and checks every call in one place before the
+// RPC runs. It refuses to start when an RPC lacks an option it requires.
+extend google.protobuf.MethodOptions {
+  // The operator action the caller's credential must carry, such as `status`.
+  // The admin token and Operator Tokens carry every action. Every RPC
+  // declares one.
+  string action = 50001;
+  // Accept a call without a credential. A call that carries a credential is
+  // still authenticated and must carry `action`.
+  bool allow_anonymous = 50002;
+  // Accept only the Control Plane admin token. An Operator Token is refused
+  // with `PermissionDenied`, whatever actions it carries. Managing Operator
+  // Tokens needs this.
+  bool requires_admin_token = 50003;
+  // The audit action recorded for each authenticated call, such as
+  // `objective.cancel`. Every RPC that can change state declares one; an RPC
+  // that reads only sets `idempotency_level = NO_SIDE_EFFECTS` instead.
+  string audit_action = 50004;
+}

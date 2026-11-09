@@ -77,6 +77,7 @@ import { handleOperatorArtifacts } from "./artifact-resources.js";
 import {
   type AuditNote,
   AuditTrail,
+  auditTargetKind,
   classifyManagementRequest,
   type ManagementAuditEvent,
   noteRequestBody,
@@ -129,6 +130,7 @@ import {
   parseObjectiveManifest,
   planObjectiveManifest,
 } from "./objective-manifest.js";
+import { createOperatorRpcHandler, OPERATOR_RPC_PATH_PREFIX } from "./operator-rpc.js";
 import { organizationStatus } from "./organization-status.js";
 import {
   applyDeletion,
@@ -204,12 +206,22 @@ const CONTROL_PLANE_BREAK_GLASS_PRINCIPAL: CoordinationOperatorPrincipal = {
   scopes: { actions: ["*"] },
 };
 
+/** Whether `ControlPlaneApiServer.handle` serves this path: the HTTP API or an operator RPC. */
+export function isControlPlaneApiPath(pathname: string): boolean {
+  return (
+    pathname.startsWith("/api/") ||
+    pathname.startsWith("/internal/v1/") ||
+    pathname.startsWith(OPERATOR_RPC_PATH_PREFIX)
+  );
+}
+
 /** Internal API component for Control Plane resources, admission, and status. */
 export class ControlPlaneApiServer {
   readonly #dependencies: ControlPlaneApiServerDependencies;
   readonly #activeRequests = new Set<Promise<void>>();
   readonly #rpcTelemetry: RpcTelemetry;
   readonly #auditTrail: AuditTrail;
+  readonly #operatorRpc: (request: IncomingMessage, response: ServerResponse) => Promise<void>;
   #workletGrpc: Promise<Awaited<ReturnType<typeof startWorkletGrpcServer>>> | undefined;
   #acceptingManagement = false;
   #acceptingInternal = false;
@@ -220,6 +232,14 @@ export class ControlPlaneApiServer {
     this.#rpcTelemetry = dependencies.rpcTelemetry ?? new RpcTelemetry();
     this.#auditTrail =
       dependencies.auditTrail ?? new AuditTrail(dependencies.store, dependencies.audit);
+    this.#operatorRpc = createOperatorRpcHandler({
+      controlPlane: dependencies.controlPlane,
+      surfaceController: dependencies.surfaceController,
+      startedAt: dependencies.startedAt,
+      auditTrail: this.#auditTrail,
+      authenticate: (authorization) => authenticateOperator(dependencies, authorization),
+      accepting: () => this.#acceptingManagement,
+    });
   }
 
   start(): void {
@@ -355,12 +375,17 @@ export class ControlPlaneApiServer {
   }
 
   async handle(request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> {
-    if (!url.pathname.startsWith("/api/") && !url.pathname.startsWith("/internal/v1/"))
+    if (!isControlPlaneApiPath(url.pathname))
       throw new Error("ControlPlaneApiServer only handles Control Plane API routes");
     // The Gateway sets this too; an embedded API Server may be served without one.
     response.setHeader(VERSION_HEADER, SUPERTAG_VERSION);
+    const operatorRpc = url.pathname.startsWith(OPERATOR_RPC_PATH_PREFIX);
     const internal = url.pathname.startsWith("/internal/v1/");
-    if ((internal && !this.#acceptingInternal) || (!internal && !this.#acceptingManagement)) {
+    // Operator RPCs refuse in their own protocol once draining.
+    if (
+      !operatorRpc &&
+      ((internal && !this.#acceptingInternal) || (!internal && !this.#acceptingManagement))
+    ) {
       writeJson(response, 503, { error: "control_plane_draining" });
       return;
     }
@@ -378,6 +403,10 @@ export class ControlPlaneApiServer {
         rpcSnapshot: () => this.#rpcTelemetry.snapshot(),
         draining: this.#draining.signal,
       };
+      if (operatorRpc) {
+        await this.#operatorRpc(request, response);
+        return;
+      }
       if (internal) {
         await handleInternalApiRequest(context, url);
         return;
@@ -444,7 +473,10 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
     await handleWorkerHostJoin(context);
     return;
   }
-  const authentication = await authenticateOperator(context);
+  const authentication = await authenticateOperator(
+    context,
+    header(context.request, "authorization"),
+  );
   if (authentication === undefined || authentication.kind === "refused") {
     if (authentication === undefined && (await handleWorkerHostSelfRevocation(context, url)))
       return;
@@ -561,35 +593,6 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
 
   if (context.request.method === "GET" && url.pathname === "/api/v1/audit") {
     await handleAuditRead(context, url);
-    return;
-  }
-
-  if (context.request.method === "GET" && url.pathname === "/api/v1/status") {
-    const now = new Date().toISOString();
-    const status = {
-      phase: context.controlPlane.isAccepting ? ("accepting" as const) : ("draining" as const),
-      apiVersion: 1 as const,
-      controllers: [
-        ...context.controlPlane.controllerStatuses,
-        {
-          name: context.surfaceController.name,
-          phase: context.surfaceController.status().errors.length === 0 ? "running" : "degraded",
-        },
-      ],
-    };
-    writeJson(context.response, 200, {
-      apiVersion: CONTROL_PLANE_API_VERSION,
-      kind: "ControlPlane",
-      metadata: {
-        id: "control-plane",
-        name: "control-plane",
-        resourceVersion: createHash("sha256").update(JSON.stringify(status)).digest("hex"),
-        createdAt: context.startedAt,
-        updatedAt: now,
-      },
-      spec: {},
-      status,
-    });
     return;
   }
 
@@ -2893,12 +2896,6 @@ function auditManagementRequest(
   return note;
 }
 
-/** The kind part of an audit target, such as `Tag` from `Tag/reviewer`. */
-function auditTargetKind(target: string): string {
-  const slash = target.indexOf("/");
-  return slash === -1 ? target : target.slice(0, slash);
-}
-
 /** `GET /api/v1/audit`: recorded changes, newest first. */
 async function handleAuditRead(context: ControlPlaneApiRequestContext, url: URL): Promise<void> {
   const allowed = new Set(["since", "actor", "limit"]);
@@ -2929,13 +2926,11 @@ async function handleAuditRead(context: ControlPlaneApiRequestContext, url: URL)
   });
 }
 
-function bearerToken(request: IncomingMessage): string | undefined {
-  const authorization = header(request, "authorization");
+function bearerToken(authorization: string | undefined): string | undefined {
   return authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : undefined;
 }
 
-function hasBearerToken(request: IncomingMessage, expected: string): boolean {
-  const authorization = header(request, "authorization");
+function hasBearerToken(authorization: string | undefined, expected: string): boolean {
   if (!authorization?.startsWith("Bearer ")) return false;
   const actualDigest = createHash("sha256").update(authorization.slice("Bearer ".length)).digest();
   const expectedDigest = createHash("sha256").update(expected).digest();
@@ -2947,21 +2942,27 @@ function hasBearerToken(request: IncomingMessage, expected: string): boolean {
  * `operator-token` holds an Operator Token: everything except managing Operator Tokens, attributed
  * to `token:NAME`. `coordination` holds a static scoped credential limited to the coordination API.
  */
-type OperatorAuthentication =
+export type OperatorAuthentication =
   | { readonly kind: "break-glass"; readonly principal: CoordinationOperatorPrincipal }
   | { readonly kind: "operator-token"; readonly principal: CoordinationOperatorPrincipal }
   | { readonly kind: "coordination"; readonly principal: CoordinationOperatorPrincipal }
-  | { readonly kind: "refused"; readonly message: string };
+  | {
+      readonly kind: "refused";
+      readonly reason: "revoked" | "expired";
+      readonly message: string;
+    };
 
+/** Authenticates an `authorization` header value; undefined when it holds no known credential. */
 async function authenticateOperator(
   context: Pick<
-    ControlPlaneApiRequestContext,
-    "request" | "adminToken" | "coordinationOperatorCredentials" | "controlPlane"
+    ControlPlaneApiServerDependencies,
+    "adminToken" | "coordinationOperatorCredentials" | "controlPlane"
   >,
+  authorization: string | undefined,
 ): Promise<OperatorAuthentication | undefined> {
-  if (context.adminToken !== undefined && hasBearerToken(context.request, context.adminToken))
+  if (context.adminToken !== undefined && hasBearerToken(authorization, context.adminToken))
     return { kind: "break-glass", principal: CONTROL_PLANE_BREAK_GLASS_PRINCIPAL };
-  const bearer = bearerToken(context.request);
+  const bearer = bearerToken(authorization);
   if (bearer?.startsWith(OPERATOR_TOKEN_PREFIX)) {
     const result = await context.controlPlane.authenticateOperatorToken(bearer);
     if (result.status === "authenticated")
@@ -2976,17 +2977,19 @@ async function authenticateOperator(
     if (result.status === "revoked")
       return {
         kind: "refused",
+        reason: "revoked",
         message: "This Operator Token was revoked; ask an admin for a new one",
       };
     if (result.status === "expired")
       return {
         kind: "refused",
+        reason: "expired",
         message: "This Operator Token has expired; ask an admin for a new one",
       };
     // An unknown stop_ value may still be a static coordination credential.
   }
   for (const credential of context.coordinationOperatorCredentials) {
-    if (!hasBearerToken(context.request, credential.token)) continue;
+    if (!hasBearerToken(authorization, credential.token)) continue;
     if (credential.revoked === true) return undefined;
     return {
       kind: "coordination",

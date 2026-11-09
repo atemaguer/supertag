@@ -1,16 +1,12 @@
 import { isDeepStrictEqual } from "node:util";
 import { create } from "@bufbuild/protobuf";
-import { Code, ConnectError, createClient } from "@connectrpc/connect";
+import { createClient } from "@connectrpc/connect";
 import { createGrpcTransport } from "@connectrpc/connect-node";
 import type {
   SessionStateRef,
   SessionStateStore,
   StoredHarnessSessionState,
 } from "@supertag/worker-sdk";
-import {
-  GrpcExecutionAuthorityClient,
-  waitForExecutionAuthorityRefresh,
-} from "./execution-authority-client.js";
 import {
   decodeSessionArchive,
   decodeSessionRef,
@@ -29,19 +25,14 @@ import {
 export class GrpcSessionStateStore implements SessionStateStore {
   readonly #client;
   readonly #versions = new Map<string, number>();
-  readonly #authority: GrpcExecutionAuthorityClient | undefined;
-  #token: string;
-  #refreshing: Promise<void> | undefined;
+  readonly #token: string;
 
   constructor(options: {
     readonly baseUrl: string;
     readonly token: string;
     readonly tlsCa?: string;
-    readonly renewAuthority?: boolean;
   }) {
     const url = checkedUrl(options.baseUrl);
-    this.#authority =
-      options.renewAuthority === false ? undefined : new GrpcExecutionAuthorityClient(options);
     if (!options.token.trim()) throw new Error("Session execution credential required");
     this.#token = options.token;
     this.#client = createClient(
@@ -149,32 +140,7 @@ export class GrpcSessionStateStore implements SessionStateStore {
   }
 
   async #authorized<T>(call: (token: string, signal: AbortSignal) => Promise<T>): Promise<T> {
-    const signal = AbortSignal.timeout(30_000);
-    const token = this.#token;
-    try {
-      return await call(token, signal);
-    } catch (error) {
-      if (
-        !(error instanceof ConnectError) ||
-        error.code !== Code.Unauthenticated ||
-        !this.#authority
-      )
-        throw error;
-      if (this.#token === token) {
-        this.#refreshing ??= this.#refresh(token, AbortSignal.timeout(30_000)).finally(() => {
-          this.#refreshing = undefined;
-        });
-        await waitForExecutionAuthorityRefresh(this.#refreshing, signal);
-      }
-      // Authentication renewal replays the exact write version and bytes. Transport errors do not
-      // automatically retry a possibly committed write or switch to HTTP persistence.
-      return call(this.#token, signal);
-    }
-  }
-
-  async #refresh(token: string, signal: AbortSignal): Promise<void> {
-    if (!this.#authority) throw new Error("Session authority renewal disabled");
-    this.#token = await this.#authority.rebind(token, signal);
+    return call(this.#token, AbortSignal.timeout(30_000));
   }
 }
 

@@ -13,7 +13,6 @@ import {
   type SurfaceTagAuthorizationSnapshot,
   TagMessagingError,
 } from "../packages/core/src/index.js";
-import { ExecutionAuthorityService } from "../packages/runtime/transport/src/coordination-codec.js";
 import {
   type RemoteWorkletServer,
   startWorkletGrpcServer,
@@ -75,8 +74,6 @@ for (const provider of ["sqlite", "postgresql"] as const) {
           scope: "channel:sessions",
         });
         const callers = new Map<string, SurfaceCoordinationCaller>();
-        const rebindings = new Map<string, string>();
-        let renewals = 0;
         let authentications = 0;
         const authority = {
           async authenticateExecution(token: string | undefined) {
@@ -96,16 +93,6 @@ for (const provider of ["sqlite", "postgresql"] as const) {
                 execution: (token) => persistence.execution(token),
                 command: (operation, value, token) => persistence.command(operation, value, token),
               } as SessionPersistence);
-              router.service(ExecutionAuthorityService, {
-                rebind(_, context) {
-                  const replacement = rebindings.get(
-                    context.requestHeader.get("authorization")?.slice(7) ?? "",
-                  );
-                  if (!replacement) throw new Error("No recovery authority");
-                  renewals++;
-                  return { token: replacement };
-                },
-              });
             },
           });
         let listener = await openListener();
@@ -255,10 +242,6 @@ for (const provider of ["sqlite", "postgresql"] as const) {
           work,
           base,
           callers,
-          rebindings,
-          get renewals() {
-            return renewals;
-          },
           async reopen() {
             await listener.close();
             await store.disconnect();
@@ -458,20 +441,13 @@ for (const provider of ["sqlite", "postgresql"] as const) {
         expect(await f.store.findSessionState(a.state.ref.id)).toBeUndefined();
       });
 
-      it("renews expired per-Attempt authority and retains the exact write version", async () => {
+      it("refuses an expired per-Attempt credential without writing", async () => {
         const f = await fixture();
         const a = await f.work();
-        const caller = f.callers.get(a.token);
-        if (!caller) throw new Error("Missing caller");
-        const replacement = randomUUID();
-        f.callers.set(replacement, caller);
         f.callers.delete(a.token);
-        f.rebindings.set(a.token, replacement);
         const client = new GrpcSessionStateStore({ baseUrl: f.base, token: a.token });
-        await client.save(a.state);
-        expect((await f.store.findSessionState(a.state.ref.id))?.writeVersion).toBe(1);
-        await expect(client.load(a.state.ref)).resolves.toEqual(a.state);
-        expect(f.renewals).toBe(1);
+        await expect(client.save(a.state)).rejects.toMatchObject({ code: 16 });
+        expect(await f.store.findSessionState(a.state.ref.id)).toBeUndefined();
       });
 
       it("requires a bounded deadline before accepting archive frames", async () => {

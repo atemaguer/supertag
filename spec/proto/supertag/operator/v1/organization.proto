@@ -1,0 +1,65 @@
+syntax = "proto3";
+package supertag.operator.v1;
+
+import "supertag/operator/v1/common.proto";
+import "supertag/operator/v1/options.proto";
+
+option go_package = "github.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1";
+
+// Reads the state of the Control Plane as a whole.
+service OrganizationService {
+  // Reports whether the Control Plane accepts new work and how each of its
+  // controllers is running. It needs a credential: a call without one fails
+  // with `Unauthenticated` and reveals nothing else, which is how
+  // `supertag verify deployment` checks that the API refuses anonymous
+  // callers.
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "status";
+  }
+}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  // Names the Control Plane. `created_at` is when this process started, and
+  // `resource_version` changes when the phase or any controller changes.
+  Metadata metadata = 1;
+  // Whether the Control Plane accepts new work.
+  ControlPlanePhase phase = 2;
+  // Each controller the Control Plane runs, in a stable order.
+  repeated Controller controllers = 3;
+}
+
+// Whether the Control Plane accepts new work.
+enum ControlPlanePhase {
+  CONTROL_PLANE_PHASE_UNSPECIFIED = 0;
+  // It admits events and dispatches Tasks.
+  CONTROL_PLANE_PHASE_ACCEPTING = 1;
+  // It is shutting down. Accepted Tasks finish; nothing new starts.
+  CONTROL_PLANE_PHASE_DRAINING = 2;
+}
+
+// One independently running part of the Control Plane.
+message Controller {
+  // The controller's name: `task-dispatch`, `reply-delivery`, or the
+  // collaboration surface controller's name.
+  string name = 1;
+  // How it is running.
+  ControllerPhase phase = 2;
+}
+
+// How a controller is running.
+enum ControllerPhase {
+  CONTROLLER_PHASE_UNSPECIFIED = 0;
+  // It is doing its work.
+  CONTROLLER_PHASE_RUNNING = 1;
+  // It runs, but at least one of its connections reports an error.
+  CONTROLLER_PHASE_DEGRADED = 2;
+  // It is finishing accepted work before it stops.
+  CONTROLLER_PHASE_DRAINING = 3;
+  // It is not running.
+  CONTROLLER_PHASE_STOPPED = 4;
+  // This Control Plane is configured without it.
+  CONTROLLER_PHASE_DISABLED = 5;
+}

@@ -8,7 +8,6 @@ import { GrpcCoordinationClient } from "./src/coordination-client.js";
 import {
   CoordinationService,
   decodeCoordinationDocument,
-  ExecutionAuthorityService,
   encodeCoordinationDocument,
 } from "./src/coordination-codec.js";
 
@@ -105,91 +104,23 @@ it("uses the turn's allowed tool set and denies Host credentials, removed tools 
   );
 });
 
-it("shares one gRPC authority renewal for concurrent calls and retains exact mutation input", async () => {
-  let renewals = 0;
+it("sends a snapshot of the mutation input and surfaces an expired credential", async () => {
   const inputs: unknown[] = [];
   const baseUrl = await server((router) => {
-    router.service(ExecutionAuthorityService, {
-      async rebind(_, context) {
-        expect(context.requestHeader.get("authorization")).toBe("Bearer old");
-        renewals++;
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        return { token: "new" };
-      },
-    });
     router.service(CoordinationService, {
       callTool(request, context) {
-        const input = decodeCoordinationDocument(request.arguments);
-        if (context.requestHeader.get("authorization") !== "Bearer new")
-          throw new ConnectError("expired", Code.Unauthenticated);
-        inputs.push(input);
-        return { content: [{ text: JSON.stringify(input) }] };
+        expect(context.requestHeader.get("authorization")).toBe("Bearer old");
+        inputs.push(decodeCoordinationDocument(request.arguments));
+        throw new ConnectError("expired", Code.Unauthenticated);
       },
     });
   });
   const client = new GrpcCoordinationClient({ baseUrl, token: "old" });
   const input = { idempotencyKey: "stable", body: { message: "Original" } };
-  const first = client.fetch("http://unused/mcp", rpc("send_message", input));
-  const second = client.fetch("http://unused/mcp", rpc("send_message", input));
+  const sent = client.fetch("http://unused/mcp", rpc("send_message", input));
   input.body.message = "Changed";
-  await Promise.all([first, second]);
-  expect(renewals).toBe(1);
-  expect(inputs).toEqual(
-    Array(2).fill({ idempotencyKey: "stable", body: { message: "Original" } }),
-  );
-});
-
-it("does not let one cancelled caller poison a shared authority renewal", async () => {
-  let renewals = 0;
-  let expiredCalls = 0;
-  let renewalStarted!: () => void;
-  let secondExpired!: () => void;
-  let releaseRenewal!: () => void;
-  const started = new Promise<void>((resolve) => {
-    renewalStarted = resolve;
-  });
-  const bothExpired = new Promise<void>((resolve) => {
-    secondExpired = resolve;
-  });
-  const released = new Promise<void>((resolve) => {
-    releaseRenewal = resolve;
-  });
-  const baseUrl = await server((router) => {
-    router.service(ExecutionAuthorityService, {
-      async rebind() {
-        renewals++;
-        renewalStarted();
-        await released;
-        return { token: "new" };
-      },
-    });
-    router.service(CoordinationService, {
-      callTool(_, context) {
-        if (context.requestHeader.get("authorization") !== "Bearer new") {
-          expiredCalls++;
-          if (expiredCalls === 2) secondExpired();
-          throw new ConnectError("expired", Code.Unauthenticated);
-        }
-        return { content: [{ text: '{"ok":true}' }] };
-      },
-    });
-  });
-  const client = new GrpcCoordinationClient({ baseUrl, token: "old" });
-  const cancelled = new AbortController();
-  const first = client.fetch("http://unused/mcp", {
-    ...rpc("read_objective"),
-    signal: cancelled.signal,
-  });
-  await started;
-  const second = client.fetch("http://unused/mcp", rpc("read_objective"));
-  await bothExpired;
-  cancelled.abort(new Error("first caller cancelled"));
-  releaseRenewal();
-  await expect(first).rejects.toThrow("first caller cancelled");
-  await expect(second.then((response) => response.json())).resolves.toMatchObject({
-    result: { content: [{ text: '{"ok":true}' }] },
-  });
-  expect(renewals).toBe(1);
+  await expect(sent).rejects.toMatchObject({ code: Code.Unauthenticated });
+  expect(inputs).toEqual([{ idempotencyKey: "stable", body: { message: "Original" } }]);
 });
 
 it("acknowledges MCP notifications without touching the Control Plane", async () => {
@@ -210,16 +141,9 @@ it("acknowledges MCP notifications without touching the Control Plane", async ()
   expect(listed).not.toHaveBeenCalled();
 });
 
-it("does not retry a transport-uncertain tool mutation or renew authority on cleanup", async () => {
+it("does not retry a transport-uncertain tool mutation", async () => {
   let mutations = 0;
-  let renewals = 0;
   const baseUrl = await server((router) => {
-    router.service(ExecutionAuthorityService, {
-      rebind() {
-        renewals++;
-        return { token: "new" };
-      },
-    });
     router.service(CoordinationService, {
       callTool() {
         mutations++;
@@ -233,7 +157,6 @@ it("does not retry a transport-uncertain tool mutation or renew authority on cle
   ).rejects.toMatchObject({ code: Code.Unavailable });
   expect(mutations).toBe(1);
   expect((await client.fetch("http://unused/mcp", { method: "DELETE" })).status).toBe(405);
-  expect(renewals).toBe(0);
 });
 
 it("requires bounded deadlines and fences requests during internal drain", async () => {

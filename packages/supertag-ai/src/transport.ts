@@ -15,7 +15,6 @@ export {
   GrpcArtifactCatalogClient,
   GrpcArtifactHostClient,
   GrpcCoordinationClient,
-  GrpcExecutionAuthorityClient,
   GrpcSessionStateStore,
   RemoteWorkletServer,
   RpcTelemetry,
