@@ -36,7 +36,7 @@ To choose the locations or a version, set these before `sh`:
 
 | Variable | Default |
 | --- | --- |
-| `SUPERTAG_VERSION` | The release the script came from; for example, `0.2.0-alpha.6` installs that release |
+| `SUPERTAG_VERSION` | The release the script came from; for example, `0.2.0-alpha.7` installs that release |
 | `SUPERTAG_INSTALL_ROOT` | `~/.local/share/supertag` |
 | `SUPERTAG_BIN_DIR` | `~/.local/bin` |
 
@@ -49,7 +49,7 @@ npm install -g supertag-ai
 supertag --version
 ```
 
-The current release is `0.2.0-alpha.6`. The package includes the CLI, SDK, and bundled
+The current release is `0.2.0-alpha.7`. The package includes the CLI, SDK, and bundled
 documentation. A SuperTag source checkout is not required. The npm package does not include the
 terminal UI, so plain `supertag` prints help; use the installer script to get the terminal UI.
 
@@ -62,7 +62,7 @@ then add `~/.local/bin` to your `PATH` (for example,
 To install this exact release on another host:
 
 ```sh
-npm install -g supertag-ai@0.2.0-alpha.6
+npm install -g supertag-ai@0.2.0-alpha.7
 ```
 
 ## Install the TypeScript SDK
@@ -76,7 +76,7 @@ npm install supertag-ai
 For a shared deployment, select the same version as the Control Plane:
 
 ```sh
-npm install supertag-ai@0.2.0-alpha.6
+npm install supertag-ai@0.2.0-alpha.7
 ```
 
 See [Custom Workers](../guides/custom-workers.md) for the public extension interfaces.
@@ -86,11 +86,11 @@ See [Custom Workers](../guides/custom-workers.md) for the public extension inter
 Python applications need Python 3.10 or newer. Install the matching SDK:
 
 ```sh
-python -m pip install 'supertag==0.2.0a6'
+python -m pip install 'supertag==0.2.0a7'
 ```
 
 The explicit version selects this prerelease; pip otherwise selects an older stable release.
-Python spells `0.2.0-alpha.6` as `0.2.0a6`. The SDK is a library; use the npm CLI above to
+Python spells `0.2.0-alpha.7` as `0.2.0a7`. The SDK is a library; use the npm CLI above to
 manage the Control Plane and built-in Workers. See [Build a Python Worker](../guides/python-workers.md)
 for optional Codex and OpenAI Agents integrations.
 
@@ -118,9 +118,9 @@ supertag version
 ```
 
 ```text
-CLI version: 0.2.0-alpha.6
+CLI version: 0.2.0-alpha.7
 Control Plane: https://supertag.example.com
-Control Plane version: 0.2.0-alpha.6
+Control Plane version: 0.2.0-alpha.7
 Compatibility: supported (same version)
 ```
 

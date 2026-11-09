@@ -9,6 +9,8 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.2.0-alpha.7] - 2026-11-09
+
 ### Added
 
 - An experimental operator API in protobuf, `supertag.operator.v1`, served on the Control Plane API port with the Connect and gRPC-Web protocols: `POST /supertag.operator.v1.OrganizationService/GetStatus` with JSON, the same `Authorization: Bearer` credential, and Connect error codes carrying a stable `ErrorDetail` reason. `supertag connect control-plane`, `supertag status control-plane`, and `supertag verify deployment` call `GetStatus`. Generated clients ship in the repository for TypeScript and Go.

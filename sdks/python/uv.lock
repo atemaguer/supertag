@@ -1678,7 +1678,7 @@ wheels = [
 
 [[package]]
 name = "supertag"
-version = "0.2.0a6"
+version = "0.2.0a7"
 source = { editable = "." }
 dependencies = [
     { name = "websockets" },
