@@ -147,9 +147,8 @@ The first command shows the lead's one-line summary in the Team's Workstream, wh
 can read. The second shows the lead's message to `builder`, `pending` until the builder's inbox
 takes it and `handled` afterwards.
 
-**Needs you** in `supertag describe objective team-greeting` lists anything the lead asked you.
-Answer it with `supertag message objective team-greeting 'YOUR ANSWER'`; your text arrives as the
-lead's next turn. If no builder Session starts, check `supertag describe tag builder` for the host
+In the terminal UI, open **Waiting on you** to answer a question from the lead. Your answer
+becomes its next turn. If no builder Session starts, check `supertag describe tag builder` for the host
 binding, then use [first-reply troubleshooting](troubleshooting.md). A provider error needs a
 working harness sign-in before the Team can finish.
 

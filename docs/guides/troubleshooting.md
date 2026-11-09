@@ -334,7 +334,7 @@ in CI, set `SUPERTAG_NO_VERSION_WARNING=1`. The supported pairs are in
 ### A Tag stops answering
 
 A message gets no reply, and its Task stays pending. The Tag's turn is waiting for a Worker Host.
-`supertag message tag` prints the reason once, and `supertag describe task` shows it:
+The conversation in the terminal UI shows the reason.
 
 ```text
 · waiting: no bound Worker Host provides MCP server notes

@@ -90,6 +90,15 @@ warnings about missing or estimated team spend.
 
 ## Read pending questions before messaging
 
+Use the [operator API](../../docs/reference/control-plane-api.md) in new integrations.
+[`InboxService.AnswerQuestion`](../../docs/reference/operator-api/inbox.md#answerquestion)
+answers a pending question by its inbox key.
+[`ObjectiveService.MessageObjective`](../../docs/reference/operator-api/objective.md#messageobjective)
+sends a general follow-up, and
+[`ConversationService.SendMessage`](../../docs/reference/operator-api/conversation.md#sendmessage)
+sends a message to a Tag. The deprecated CLI commands below still support standard input and JSON
+for existing operator workflows.
+
 A message to an Objective is a turn in its conversation. Read the current inbox and description
 before sending anything, because the Objective's next turn runs on what you say. An answer can
 move a blocked Objective back to working. If the question changed, reassess whether the reply

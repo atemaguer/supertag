@@ -15,8 +15,8 @@ conversation with the Tag.
 
 ## Talk to a Tag
 
-A conversation with a Tag is a Session of its own, in your terminal with `supertag message tag`, in
-a Slack thread, or on a GitHub issue. A quick question gets an answer. For longer work the Tag
+A conversation with a Tag is a Session of its own. It can happen in the SuperTag terminal UI,
+in a Slack thread, or on a GitHub issue. A quick question gets an answer. For longer work the Tag
 starts a work Session, tells you, and reports the result back in the same conversation. When the
 work needs you, the question or approval appears there too, and your next message continues the
 conversation. The Tag sees its open Objectives in every conversation, so you can ask how one is

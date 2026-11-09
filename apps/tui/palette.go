@@ -38,9 +38,9 @@ type palette struct {
 }
 
 // slashOpensPalette says whether `/` opens the palette rather than being typed: on an empty input
-// line, or where the pane has no input line. The new Objective form takes `/` as text.
+// line, or where the pane has no input line. Objective forms and follow-ups take `/` as text.
 func (m model) slashOpensPalette() bool {
-	if m.pane == paneNewObjective && m.focus == focusInput {
+	if (m.pane == paneNewObjective || m.objectiveCompose) && m.focus == focusInput {
 		return false
 	}
 	return m.focus == focusRail || !m.inputShown() || m.input.Value() == ""

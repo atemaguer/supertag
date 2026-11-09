@@ -1,7 +1,9 @@
-import { existsSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { isAbsolute, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cliFailureExitCode, formatCliFailure, main } from "../apps/cli/src/index.ts";
+import { fakeOperatorRpc } from "./support/fake-operator-rpc.ts";
 
 describe("newcomer-facing CLI output", () => {
   afterEach(() => {
@@ -78,7 +80,8 @@ it("lists the routed coordination interfaces and documented flags in root help",
     "supertag create team NAME --member TAG",
     "supertag grant mailbox RECIPIENT --sender SENDER",
     "supertag list workstream-post --team TEAM",
-    "supertag message objective ID TEXT|-",
+    "supertag message tag NAME TEXT|- [--session NAME] [--output text|json] (deprecated)",
+    "supertag message objective ID TEXT|- [--output text|json] (deprecated)",
   ])
     expect(text).toContain(entry);
   // The Objective controller's commands and tools are gone from the surface.
@@ -95,6 +98,73 @@ it("lists the routed coordination interfaces and documented flags in root help",
   ])
     expect(text).not.toContain(removed);
 });
+
+it.each(["tag", "objective"] as const)(
+  "warns about message %s only for interactive text output",
+  async (kind) => {
+    const state = mkdtempSync(join(tmpdir(), "supertag-message-deprecation-"));
+    vi.stubEnv("SUPERTAG_STATE_DIR", state);
+    vi.stubEnv("SUPERTAG_OPERATOR_TOKEN", "test-token");
+    const stdin = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    const stdout = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
+    const tty = (stream: typeof process.stdin | typeof process.stdout, value: boolean) =>
+      Object.defineProperty(stream, "isTTY", { configurable: true, value });
+    const message = {
+      tag: "planner",
+      conversation: "default",
+      taskId: "task-1",
+      status: "REPLY_STATUS_REPLIED",
+      reply: { presentation: "REPLY_PRESENTATION_FINAL_RESULT", text: "Hello." },
+    };
+    fakeOperatorRpc({
+      "ConversationService/SendMessage": () => message,
+      "ConversationService/GetMessage": () => message,
+      "ConversationService/FollowMessage": async function* () {
+        yield { sequence: "1", finish: { reply: message.reply, message } };
+        yield { sequence: "2", end: { message } };
+      },
+      "ObjectiveService/MessageObjective": () => ({ tag: "planner", taskId: message.taskId }),
+    });
+    const output = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    const warning = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    const send = (...args: string[]) =>
+      main(["--control-plane=http://127.0.0.1:4321", "message", kind, "planner", "Hello", ...args]);
+    const stdoutText = () => output.mock.calls.map(([text]) => String(text)).join("");
+    const replacement = kind === "tag" ? "select a Tag" : "select the Objective, and press m";
+    try {
+      tty(process.stdin, true);
+      tty(process.stdout, true);
+      expect(await main(["message", kind, "--help"])).toBe(0);
+      expect(stdoutText()).toContain(`supertag message ${kind} is deprecated.`);
+      expect(stdoutText()).toContain(replacement);
+      expect(warning).not.toHaveBeenCalled();
+
+      expect(await send("--output", "text")).toBe(0);
+      expect(warning).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(replacement));
+      warning.mockClear();
+      for (const flags of [["--output", "json"], ["--output=json"]]) {
+        output.mockClear();
+        expect(await send(...flags)).toBe(0);
+        expect(JSON.parse(stdoutText())).toMatchObject({ taskId: message.taskId });
+      }
+      tty(process.stdout, false);
+      expect(await send()).toBe(0);
+      tty(process.stdout, true);
+      tty(process.stdin, false);
+      expect(await send()).toBe(0);
+      expect(warning).not.toHaveBeenCalled();
+    } finally {
+      if (stdin) Object.defineProperty(process.stdin, "isTTY", stdin);
+      else Reflect.deleteProperty(process.stdin, "isTTY");
+      if (stdout) Object.defineProperty(process.stdout, "isTTY", stdout);
+      else Reflect.deleteProperty(process.stdout, "isTTY");
+      vi.restoreAllMocks();
+      vi.unstubAllEnvs();
+      rmSync(state, { recursive: true, force: true });
+    }
+  },
+);
+
 it("reports the public package version from a checkout", async () => {
   const { readFile } = await import("node:fs/promises");
   const metadata = JSON.parse(

@@ -161,13 +161,14 @@ function attentionOf(
       kind: "objective_blocked",
       message:
         "The Objective is blocked: its owner ended twice with nothing running and nothing asked, or marked it blocked.",
-      nextAction: `Read its conversation, then answer or redirect the owner with supertag message objective ${objective.id} TEXT.`,
+      nextAction:
+        "Read the Objective's conversation, or open the Objective in the terminal UI and press m to message its owner.",
     });
   if (objective.status === "ready_for_review")
     attention.push({
       kind: "objective_review",
       message: "The owner submitted this Objective for review.",
-      nextAction: `Review the owner's assessment and results. Approve with supertag approve objective ${objective.id}, or request changes with supertag message objective ${objective.id} TEXT.`,
+      nextAction: `Review the owner's assessment and results. Run supertag approve objective ${objective.id} to approve, or open the Objective in the terminal UI and press m to request changes.`,
     });
   const question = sessions.find(
     (session) =>
@@ -179,7 +180,7 @@ function attentionOf(
     attention.push({
       kind: "owner_question",
       message: `The owner asked: ${preview(question.task.question)}`,
-      nextAction: `Answer with supertag message objective ${objective.id} TEXT.`,
+      nextAction: "Answer the question under Waiting on you in the terminal UI.",
     });
   if (!objectiveClosed(objective.status)) {
     const recorded = new Map(objectiveLimitEvents(objective).map((event) => [event.kind, event]));

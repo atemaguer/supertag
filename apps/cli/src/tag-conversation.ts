@@ -40,9 +40,14 @@ export interface TagConversationOptions {
   readonly interactive?: boolean;
 }
 
+export const tagMessageDeprecation =
+  "supertag message tag is deprecated. Run supertag in a terminal and select a Tag to message it.";
+
 export function tagConversationHelp(): string {
   return `Usage:
   supertag message tag NAME TEXT|- [--session NAME] [--output text|json]
+
+${tagMessageDeprecation}
 
 Sends TEXT (or standard input for -) to the Tag as you, shows a line for each command the Tag
 runs, then its reply.

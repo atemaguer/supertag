@@ -43,35 +43,13 @@ Plane posts new items to a Slack channel or sends you a direct message.
 
 ## 1. Answer a question
 
-A Tag that cannot go on without a decision asks and ends its turn. The question appears as inbox
-kind `question`, and in full under **Needs you** in the Objective's description:
+A Tag that needs a decision asks and ends its turn. In the terminal UI, open **Waiting on you**
+and select its question. Type your answer and press Enter. The answer becomes the owner's next
+turn. You can also reply in the Objective's home thread.
 
-```sh
-supertag list inbox --kind question --output text
-supertag describe objective service-operations
-```
-
-```text
-Needs you:
-  support-manager asks: "The repair needs 500 more. May I continue?"
-    supertag message objective service-operations TEXT
-```
-
-Apply any resource change first, then answer. Your text arrives as the Objective's next turn:
-
-```sh
-supertag update objective service-operations --budget-minor 1500
-supertag message objective service-operations "Raised the budget to 1500. Go ahead with the repair."
-```
-
-```text
-Sent to the conversation of Objective service-operations.
-```
-
-The message is recorded as yours. Use `-` in place of the text to read a longer message from
-standard input. A message never changes a budget, a permission, or an approval by itself. When
-the Objective was created from your CLI, the command follows the owner's reply; otherwise the
-reply posts to the Objective's home thread.
+Make any resource change before answering. For example, if the repair needs more budget, run
+`supertag update objective service-operations --budget-minor 1500`, then answer “Raised the
+budget to 1500. Go ahead with the repair.” The answer is recorded as yours.
 
 A question asked inside a Session beneath the Objective reaches the Objective's conversation
 first: the Tag that started that Session decides whether to answer it or to ask you.
@@ -134,24 +112,11 @@ for the new deadline, measured from when you set it.
 An Objective ends each turn with work running, a question asked, or the outcome finished. When a
 turn ends with none of those and the Objective is still `working`, SuperTag wakes it once. If
 that woken turn also ends with nothing running and nothing asked, the Objective becomes `blocked`
-and SuperTag says so in its home thread:
+and SuperTag says so in its home thread.
 
-```text
-Objective service-operations is blocked: its turns ended twice with nothing running and nothing
-asked. Reply in this thread or run supertag message objective service-operations to direct it.
-```
-
-Read `supertag describe objective service-operations` to see what the last turn did, then direct
-it:
-
-```sh
-supertag message objective service-operations "Start with the overdue tickets from last week."
-```
-
-```text
-Sent to the conversation of Objective service-operations.
-The Objective moved from blocked back to working.
-```
+Select the blocked Objective in the terminal UI and check what the last turn did. Press `m`,
+enter a direction such as “Start with the overdue tickets from last week,” and press Enter. The
+Objective returns to `working` and its owner takes a new turn.
 
 An `--ongoing` Objective is exempt from this rule. It may rest with nothing running and waits for
 its next message, report, or notice.
@@ -159,18 +124,14 @@ its next message, report, or notice.
 ## 6. Review a result
 
 An owner stops at `ready_for_review` when the Objective's statement asks for a person's review.
-`supertag describe objective ID` shows its assessment under **Owner's assessment** and the review
-under **Needs you**. Approve it or push back:
+Select the Objective in the terminal UI to read its assessment and see what needs your attention.
+To request a revision, press `m`, type what should change, and press Enter. For example, “The
+runbook still names the old dashboard. Update it.” The Objective returns to `working` and the
+owner acts on your text.
 
-```sh
-supertag approve objective service-operations
-supertag message objective service-operations "The runbook still names the old dashboard. Update it."
-```
-
-`approve` completes the Objective, using the assessment as the completion summary. If none was
-recorded, the summary says who approved it. It refuses an Objective that is not
-`ready_for_review`. A message instead returns the Objective to `working` and arrives as its next
-turn.
+To accept the result, run `supertag approve objective service-operations`. This completes a
+`ready_for_review` Objective and uses the owner's assessment as the completion summary. If
+the owner recorded none, the summary says who approved it.
 
 ## Reply from a collaboration thread
 
@@ -178,9 +139,8 @@ An Objective's home thread is the Slack, Lark, GitHub, Linear, or Teams thread i
 or the thread an operator chose as its notification destination. Where SuperTag routes replies for
 that surface, you can direct the Objective from the thread itself:
 
-- A plain reply is a message to the Objective, exactly like `supertag message objective`. It
-  answers a pending question and moves a `blocked`, `limited`, or `ready_for_review` Objective
-  back to `working`.
+- A plain reply goes to the Objective's conversation. It answers a pending question and moves
+  a `blocked`, `limited`, or `ready_for_review` Objective back to `working`.
 - `@SuperTag approve` completes a `ready_for_review` Objective.
 - `@SuperTag pause` and `@SuperTag resume` pause and resume it, like `supertag pause objective`
   and `supertag resume objective`.

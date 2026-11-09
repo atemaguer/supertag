@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -182,7 +183,7 @@ func TestSelectingAnObjectiveShowsItLive(t *testing.T) {
 		"No connected Worker can run it.",
 		"builder to lead: Fix is on the branch.",
 		"Team billing: at most 2 turns at once across its Objectives",
-		"Live · answer its questions under Waiting on you",
+		"m message the owner · answer questions under Waiting on you",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("screen lacks %q", want)
@@ -225,10 +226,13 @@ func TestAnsweringAQuestionInPlace(t *testing.T) {
 	m = moveTo(t, m, "? ")
 	got := screen(m)
 	for _, want := range []string{"Waiting on you · question", "Objective obj-billing waits on your answer", "The owner asks:",
-		"Should 100% stay allowed?", "supertag message objective obj-billing TEXT", "Type your answer"} {
+		"Should 100% stay allowed?", "Type your answer"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("screen lacks %q:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "supertag message objective") {
+		t.Fatalf("the question offers an outdated message command:\n%s", got)
 	}
 	m = press(t, m, key(tea.KeyRight))
 	m.input.SetValue("No, cap it at 100.")
@@ -241,6 +245,103 @@ func TestAnsweringAQuestionInPlace(t *testing.T) {
 	if !strings.Contains(got, "Sent. lead takes your answer as its next turn.") || !strings.Contains(got, "Waiting on you (1)") ||
 		!strings.Contains(got, "This item is settled.") || m.inputShown() {
 		t.Fatalf("after answering:\n%s", got)
+	}
+}
+
+func TestObjectiveFollowUpStaysInTheObjective(t *testing.T) {
+	fake := coordinationFake()
+	fake.messageObjective = func(req *operatorv1.MessageObjectiveRequest) (*operatorv1.MessageObjectiveResponse, error) {
+		if req.GetId() != "obj-billing" || req.GetText() != "Cap percentages at 100." || req.GetIdempotencyKey() == "" {
+			t.Errorf("message request = %v", req)
+		}
+		return &operatorv1.MessageObjectiveResponse{Tag: "lead", TaskId: "task-follow-up"}, nil
+	}
+	fake.getMessage = func(req *operatorv1.GetMessageRequest) (*operatorv1.Message, error) {
+		if req.GetTag() != "lead" || req.GetTaskId() != "task-follow-up" {
+			t.Errorf("reply request = %v", req)
+		}
+		return &operatorv1.Message{TaskId: req.GetTaskId(), Tag: req.GetTag(), Conversation: "objective:obj-billing"}, nil
+	}
+	fake.follow = func(_ context.Context, req *operatorv1.FollowMessageRequest, stream *connect.ServerStream[operatorv1.FollowEvent]) error {
+		if req.GetTag() != "lead" || req.GetTaskId() != "task-follow-up" {
+			t.Errorf("follow request = %v", req)
+		}
+		return stream.Send(followEvent(1, &operatorv1.Finish{Reply: finalReply("I will cap percentages.")}))
+	}
+	m := startAll(t, testModel(t, fake))
+	m = moveTo(t, m, "Billing rejects")
+	m = press(t, m, letter('m'))
+	m.input.SetValue("Cap percentages at 100.")
+	m = press(t, m, key(tea.KeyEscape), letter('m'))
+	if !m.inputShown() || m.input.Value() != "Cap percentages at 100." {
+		t.Fatal("esc should close the composer and keep its draft")
+	}
+	m = press(t, m, key(tea.KeyEnter))
+	got := screen(m)
+	for _, want := range []string{"Your follow-up", "Follow-up sent.", "lead replied", "I will cap percentages."} {
+		if !strings.Contains(got, want) {
+			t.Errorf("screen lacks %q:\n%s", want, got)
+		}
+	}
+	if len(fake.sent) != 0 || len(m.conversation("lead", "default").entries) != 0 || m.inputShown() {
+		t.Fatalf("the follow-up must stay out of the normal Tag conversation:\n%s", got)
+	}
+}
+
+func TestObjectiveFollowUpKeepsTheDraftAndExplainsAnExternalReply(t *testing.T) {
+	fake := coordinationFake()
+	refuse := true
+	fake.messageObjective = func(req *operatorv1.MessageObjectiveRequest) (*operatorv1.MessageObjectiveResponse, error) {
+		if req.GetText() != "Try a smaller change." {
+			t.Errorf("message text = %q", req.GetText())
+		}
+		if refuse {
+			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("Message refused"))
+		}
+		return &operatorv1.MessageObjectiveResponse{Tag: "lead", TaskId: "task-external"}, nil
+	}
+	fake.getMessage = func(*operatorv1.GetMessageRequest) (*operatorv1.Message, error) {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("No reply in this conversation"))
+	}
+	m := startAll(t, testModel(t, fake))
+	m = moveTo(t, m, "Billing rejects")
+	m = press(t, m, letter('m'))
+	m.input.SetValue("Try a smaller change.")
+	m = press(t, m, key(tea.KeyEnter))
+	if got := screen(m); !strings.Contains(got, "Could not send your follow-up. Message refused") {
+		t.Fatalf("a refused send must explain why:\n%s", got)
+	}
+	m = press(t, m, letter('m'))
+	if m.input.Value() != "Try a smaller change." {
+		t.Fatalf("the draft was lost: %q", m.input.Value())
+	}
+	m = press(t, m, key(tea.KeyTab), key(tea.KeyDown), letter('m'))
+	if m.objectiveID != "obj-invites" || !m.inputShown() || m.input.Value() != "" {
+		t.Fatalf("the draft crossed into another Objective:\n%s", screen(m))
+	}
+	m = press(t, m, key(tea.KeyEscape), key(tea.KeyTab), key(tea.KeyUp), letter('m'))
+	if m.objectiveID != "obj-billing" || m.input.Value() != "Try a smaller change." {
+		t.Fatalf("returning to the Objective lost its draft: %q", m.input.Value())
+	}
+	refuse = false
+	m = press(t, m, key(tea.KeyEnter))
+	if got := screen(m); !strings.Contains(got, "Follow-up sent.") ||
+		!strings.Contains(got, "The reply posts to the thread the Objective was created in.") {
+		t.Fatalf("the accepted message must explain where to read the reply:\n%s", got)
+	}
+}
+
+func TestClosingAnObjectiveEndsItsComposer(t *testing.T) {
+	m := startAll(t, testModel(t, coordinationFake()))
+	m = moveTo(t, m, "Billing rejects")
+	m = press(t, m, letter('m'))
+	m.input.SetValue("One more change.")
+	closed := billingOverview()
+	closed.Objective.Status = operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_COMPLETED
+	m = update(t, m, overviewMsg{id: "obj-billing", overview: closed})
+	m = press(t, m, letter('m'), key(tea.KeyEnter))
+	if m.inputShown() || m.drafts[objectivePaneKey("obj-billing")] != "One more change." {
+		t.Fatalf("the composer remained open after closure or lost the draft:\n%s", screen(m))
 	}
 }
 

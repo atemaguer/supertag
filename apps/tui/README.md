@@ -11,7 +11,10 @@ shows setup instructions. The rail on the left has four sections:
   as they run and report.
 - **Objectives**, the open ones, each with its spend against a budget in a currency, or why it is
   held (`blocked`, `limited`, `review`, `paused`). Selecting one shows what
-  `supertag describe objective` shows, kept current.
+  `supertag describe objective` shows, kept current. Press `m` to message its owner. Enter sends
+  the follow-up, and Esc closes the composer and keeps the draft. The pane shows the latest
+  follow-up and reply from this terminal UI session. Replies on collaboration surfaces post in
+  the thread where the Objective started.
 - **Waiting on you (N)**, the inbox items an operator decides: `?` marks a question, `!` an
   approval request. Selecting one opens it in place. Type the answer to a question and press
   enter. On an approval request, press `a` then enter to approve it once, or `d` to deny it and

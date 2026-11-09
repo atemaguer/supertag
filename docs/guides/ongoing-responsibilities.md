@@ -82,27 +82,22 @@ members, and the manager's first turn under **Work**.
 
 ## 2. Deliver evidence to the Objective
 
-An ongoing Objective wakes when something reaches its conversation: a message from you, a report
-from a Session beneath it, an approval decision, or a budget or deadline notice. Your monitoring
-system delivers each finding as a message:
+An ongoing Objective wakes when a message, Session report, approval decision, or budget or
+deadline notice reaches its conversation. To send a finding, select the Objective in the
+terminal UI, press `m`, and enter it. For example, “Overdue ticket 42: first response took
+90 minutes against a 30-minute target. Plan: enterprise.” Press Enter to send it as the
+manager's next turn.
+
+For new monitoring integrations, use the
+[`ObjectiveService.MessageObjective` operator API](../reference/operator-api/objective.md#messageobjective).
+Existing scripts can still use the deprecated CLI command. Pass `-` for standard input and
+`--output json` for a machine-readable response.
 
 ```sh
-supertag message objective support-policy \
-  "Overdue ticket 42: first response took 90 minutes against a 30-minute target. Plan: enterprise."
+jq -r '.summary' overdue-report.json | supertag message objective support-policy - --output json
 ```
 
-```text
-Sent to the conversation of Objective support-policy.
-```
-
-The text becomes the manager's next turn, recorded as yours. Use `-` in place of the text to read
-a longer report from standard input, which suits a script:
-
-```sh
-jq -r '.summary' overdue-report.json | supertag message objective support-policy -
-```
-
-If the Objective reports to a Slack or Lark thread, a plain reply there does the same thing. See
+If the Objective has a Slack or Lark home thread, you can also reply there. See
 [Respond to an Objective](objective-decisions.md#reply-from-a-collaboration-thread).
 
 **Check:** `supertag watch objective support-policy` shows the manager's turn starting within
@@ -138,28 +133,12 @@ wake is scheduled, and it is never marked `blocked` for resting.
 
 ## 4. Answer the manager's questions
 
-When the manager needs a decision you alone can make, it asks and ends its turn. The question
-appears in the Objective's thread, in the operator inbox, and in full under **Needs you**:
+When the manager needs a decision, it asks and ends its turn. Select the question under
+**Waiting on you** in the terminal UI, type your answer, and press Enter. You can also reply in
+the Objective's home thread.
 
-```sh
-supertag list inbox --kind question --output text
-supertag describe objective support-policy
-```
-
-```text
-Needs you:
-  support-manager asks: "Enterprise tickets need a 15-minute target to meet the contract. Approve the change?"
-    supertag message objective support-policy TEXT
-```
-
-Answer it the same way you deliver evidence:
-
-```sh
-supertag message objective support-policy "Yes. Use 15 minutes for enterprise and keep 30 elsewhere."
-```
-
-Apply any resource change, such as a budget increase, before you answer. A message never changes
-a budget or a permission by itself. See [Respond to an Objective](objective-decisions.md).
+Apply any resource change, such as a budget increase, before you answer. A message alone
+changes neither budgets nor permissions. See [Respond to an Objective](objective-decisions.md).
 
 ## 5. Change or end the responsibility
 
@@ -185,7 +164,7 @@ supertag cancel objective support-policy --reason "Policy moved to the new suppo
 - Treat each report as evidence to assess. Receiving one does not authorize the actions it
   describes.
 - SuperTag does not poll your ticket system. Something outside SuperTag decides when a finding is
-  worth a message; a cron job that calls `supertag message objective` is enough.
+  worth a message. A cron job can send it through the [operator API](#2-deliver-evidence-to-the-objective).
 - Include an identifier, such as the ticket number, in every message. The manager reads the
   conversation's history, so a repeated identifier is how it recognizes a report it already
   handled.

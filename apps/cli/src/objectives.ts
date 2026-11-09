@@ -31,6 +31,9 @@ import { followTagMessage, refusedAsError, tagConversationClient } from "./tag-c
 import { terminalText } from "./terminal-text.js";
 import { workstreamPosts } from "./workstreams.js";
 
+export const objectiveMessageDeprecation =
+  "supertag message objective is deprecated. Run supertag in a terminal, select the Objective, and press m.";
+
 export function objectiveHelp(): string {
   return `Usage:
   supertag create objective [ID] --outcome TEXT --owner TAG [--team TEAM] [--budget-minor N --budget-currency CODE] [--deadline ISO] [--runtime-action ACTION ...] [--workspace NAME ...] [--ongoing] [--dry-run]
@@ -62,6 +65,7 @@ with a warning. Update --runtime-action replaces the list for turns that start a
 A budget with --budget-currency caps provider-reported cost for the owner and all the work it
 starts. Repeat --workspace to name Workspaces the Objective's work may use; each must already exist.
 Use --ongoing for a responsibility that only an operator can end.
+${objectiveMessageDeprecation}
 message sends TEXT (or standard input for -) to the Objective's conversation as its next turn and
 shows the owner's reply when the Objective was created from this CLI; otherwise the reply posts
 to the thread the Objective was created in. A message answers a question the owner asked, and

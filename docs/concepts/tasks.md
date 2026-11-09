@@ -39,10 +39,9 @@ running and nothing asked while the Objective is still working, SuperTag wakes t
 to continue or finish. A second idle turn marks the Objective blocked and tells the person in the
 thread.
 
-A person directs the Objective by replying in its thread or running
-`supertag message objective ID TEXT`. The owner asks the person a question with `ask`, which ends
-the turn; the answer arrives as the next turn. See
-[Define and complete an Objective](../guides/objectives.md).
+A person directs the Objective from the terminal UI or by replying in its home thread. The
+owner asks the person a question with `ask`, which ends the turn. The answer arrives as the
+next turn. See [Define and complete an Objective](../guides/objectives.md).
 
 ## Task
 
@@ -108,7 +107,7 @@ An Objective started in a conversation reports back there: its questions, progre
 notices, and completion. The work itself runs in the Sessions started beneath it, so planning and
 tool output stay out of the thread.
 
-You can also talk to a Tag from a terminal with `supertag message tag`. See
+You can also talk to a Tag in the terminal UI. See
 [Talk to a Tag from your terminal](../guides/talk-to-a-tag.md).
 
 ### A Tag's inbox
@@ -131,9 +130,9 @@ Sessions only through the conversation.
 
 Nothing a work Session writes is posted while it works; the only thing posted mid-run is
 SuperTag's own [approval notice](#when-a-work-session-needs-the-person). Its Task streams its
-activity, and `supertag message tag` in a terminal shows that activity as the work runs. The Tag
-speaks when the work Session finishes or waits, in a report turn. Nothing a work Session writes
-reaches a person without a Tag turn.
+activity, which appears in the terminal UI when you expand the work Session. The Tag speaks
+when the work Session finishes or waits, in a report turn. Nothing a work Session writes reaches
+a person without a Tag turn.
 
 ### When a work Session needs the person
 
@@ -151,11 +150,11 @@ and its report turn has run.
 
 When a work Session's Task calls an action that needs approval, the call doesn't run. The Task
 ends, completed and **waiting on approval** of that request. The approval notice posts to the
-conversation, because the work Session itself posts nowhere. On the CLI, `supertag message tag`
-prints it. The notice is SuperTag's own text: it names the request, the permission that requires
-approval, and the `supertag approve request` and `supertag deny request` commands that decide it.
-It says the work Session continues on its own once the person decides. It leaves out the work
-Session's own description of the request, which `supertag list approval` shows. A work Session's
+conversation. The notice names the request and the permission that requires approval. If it
+appears under **Waiting on you** in the terminal UI, decide it there. For a request shown only
+in the conversation, use `supertag approve request` or `supertag deny request`.
+The notice says the work Session continues on its own once the person decides.
+`supertag list approval` shows the work Session's description of the request. A work Session's
 Task gets one notice per permission while its requests wait, however many it makes. The report
 turn tells the person briefly what the work Session waits for. A chat message never approves an
 action.

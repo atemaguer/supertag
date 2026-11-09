@@ -61,7 +61,7 @@ call it, and what the audit log records, and one page per service:
 | Service | Serves |
 | --- | --- |
 | [`OrganizationService`](operator-api/organization.md) | `supertag status`, `spend`, `audit`, and metrics |
-| [`ConversationService`](operator-api/conversation.md) | `supertag message tag` and the terminal UI's conversations |
+| [`ConversationService`](operator-api/conversation.md) | Conversations between an operator and a Tag |
 | [`EventService`](operator-api/event.md) | Change notices for clients that show live state |
 | [`InboxService`](operator-api/inbox.md) | The operator inbox and approval requests |
 | [`ObjectiveService`](operator-api/objective.md) | Objectives |

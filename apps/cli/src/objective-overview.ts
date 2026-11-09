@@ -82,7 +82,7 @@ export function formatObjectiveOverview(
       );
   }
 
-  // Needs you: decisions only the operator makes, each with its command.
+  // Needs you: decisions only the operator makes, with how to act on each.
   const needs: string[] = [];
   if (objective.status === "limited")
     needs.push(
@@ -91,6 +91,7 @@ export function formatObjectiveOverview(
       `    supertag update objective ${id} --deadline ISO_TIME`,
     );
   const owner = view.sessions.find((session) => session.owner);
+  const answerQuestion = "    Open supertag in a terminal and answer under Waiting on you.";
   // The owner's question appears in full: the operator has no other way to read it.
   const asks = (text: string) => {
     const body = operatorNotice(text)
@@ -108,21 +109,21 @@ export function formatObjectiveOverview(
     if (item.kind === "question" && owner?.task?.question !== undefined)
       needs.push(...asks(owner.task.question));
     else needs.push(`  ${coordinationInboxHeadline(item)}`);
-    const command = item.commands?.[0];
-    if (command) needs.push(`    ${command}`);
+    if (item.kind === "question") needs.push(answerQuestion);
+    else if (item.commands?.[0]) needs.push(`    ${item.commands[0]}`);
   }
   if (
     context.inbox === undefined &&
     owner?.task?.status === "waiting" &&
     owner.task.question !== undefined
   )
-    needs.push(...asks(owner.task.question), `    supertag message objective ${id} TEXT`);
+    needs.push(...asks(owner.task.question), answerQuestion);
   for (const item of view.attention) {
     if (item.kind === "objective_review")
       needs.push(
         "  The owner submitted the Objective for review.",
         `    Approve: supertag approve objective ${id}`,
-        `    Ask for changes: supertag message objective ${id} TEXT`,
+        "    To ask for changes, open supertag in a terminal, select this Objective, and press m.",
       );
     else if (item.kind === "not_started" || item.kind === "objective_paused")
       needs.push(`  ${item.message}`, `    ${item.nextAction}`);

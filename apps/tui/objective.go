@@ -56,17 +56,20 @@ func (m model) openObjective(id string) *operatorv1.Objective {
 func (m model) renderObjective() string {
 	wrap := lipgloss.NewStyle().Width(m.paneWidth())
 	overview := m.overviews[m.objectiveID]
-	if err := m.overviewErrs[m.objectiveID]; err != "" {
-		text := errorStyle.Render(wrap.Render("Could not read the Objective: " + err))
-		if overview == nil {
-			return text
-		}
-		return text + "\n\n" + wrap.Render(describeObjective(overview, m.inbox.Items))
+	var sections []string
+	if followUp := m.objectiveMessageText(); followUp != "" {
+		sections = append(sections, wrap.Render(followUp))
 	}
-	if overview == nil {
-		return faint.Render(wrap.Render("Reading the Objective…"))
+	err := m.overviewErrs[m.objectiveID]
+	if err != "" {
+		sections = append(sections, errorStyle.Render(wrap.Render("Could not read the Objective: "+err)))
 	}
-	return wrap.Render(describeObjective(overview, m.inbox.Items))
+	if overview != nil {
+		sections = append(sections, wrap.Render(describeObjective(overview, m.inbox.Items)))
+	} else if err == "" {
+		sections = append(sections, faint.Render(wrap.Render("Reading the Objective…")))
+	}
+	return strings.Join(sections, "\n\n")
 }
 
 // describeObjective renders an Objective's overview as `supertag describe objective` does: what a
@@ -160,11 +163,16 @@ func describeObjective(view *operatorv1.ObjectiveOverview, inbox []*operatorv1.I
 		if item.GetObjectiveId() != objective.GetId() || !item.GetOperatorEligible() {
 			continue
 		}
-		if item.GetKind() == operatorv1.InboxItemKind_INBOX_ITEM_KIND_QUESTION && item.GetQuestion().GetText() != "" {
-			needs = append(needs, asks(tag(objective.GetOwnerTagId()), item.GetQuestion().GetText())...)
-		} else {
-			needs = append(needs, "  "+inboxHeadline(item))
+		if item.GetKind() == operatorv1.InboxItemKind_INBOX_ITEM_KIND_QUESTION {
+			if text := item.GetQuestion().GetText(); text != "" {
+				needs = append(needs, asks(tag(objective.GetOwnerTagId()), text)...)
+			} else {
+				needs = append(needs, "  "+inboxHeadline(item))
+			}
+			needs = append(needs, "    Answer under Waiting on you.")
+			continue
 		}
+		needs = append(needs, "  "+inboxHeadline(item))
 		if commands := item.GetCommands(); len(commands) > 0 {
 			needs = append(needs, "    "+commands[0])
 		}
@@ -174,7 +182,7 @@ func describeObjective(view *operatorv1.ObjectiveOverview, inbox []*operatorv1.I
 		case operatorv1.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_REVIEW:
 			needs = append(needs, "  The owner submitted the Objective for review.",
 				"    Approve: supertag approve objective "+id,
-				"    Ask for changes: supertag message objective "+id+" TEXT")
+				"    Press m to ask for changes.")
 		case operatorv1.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_NOT_STARTED, operatorv1.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_PAUSED:
 			needs = append(needs, "  "+item.GetMessage(), "    "+item.GetNextAction())
 		}

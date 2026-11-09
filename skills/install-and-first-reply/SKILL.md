@@ -90,10 +90,11 @@ shows the URL and state.
 
 ## 5. Answer, push back, or approve
 
-**Needs you** in `describe objective` lists each decision with its command:
+In the terminal UI, answer questions under **Waiting on you**. To redirect work, select the
+Objective, press `m`, type the follow-up, and press Enter. For automated replies, follow
+[Operate SuperTag](../operate-supertag/SKILL.md#read-pending-questions-before-messaging).
 
 ```sh
-supertag message objective ID 'Also document the test command.'
 supertag approve objective ID      # only when the Objective is ready_for_review
 supertag approve request REQUEST_ID
 ```

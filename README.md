@@ -46,14 +46,39 @@ side, and you become the manager between them: briefing each one, checking progr
 questions, and reconciling results.
 
 SuperTag gives that work a persistent owner. A **Tag** is a persistent AI identity with its own
-responsibilities and permissions. It keeps what it owns across every session and every place you
-talk to it, runs the work on your coding agents, asks you only when a decision is yours, and comes
-back with a git branch to review. When one Tag isn't enough, it hands pieces to other Tags on its
-Team: see the [first Team walkthrough](docs/guides/first-team.md).
+responsibilities and permissions. It keeps the outcome in view across sessions and runs each
+piece of work in a separate **work Session**, a thread for that piece. You steer the owner and
+review the results it brings back.
+
+Start with one Tag. Add a **Team**, a flat list of member Tags, when the work needs distinct
+roles or permissions. An owner can then assign work Sessions to other Tags in its Team. See the
+[first Team walkthrough](docs/guides/first-team.md).
 
 ## See it work
 
-From a real run in a small repository, formatting lightly trimmed:
+Say you want to move from flat plans to usage-based billing. Give `lead` an **Objective**,
+an outcome and a way to check when it is done.
+
+> Customers can see their metered usage, and test invoices match the usage records. Done when
+> the billing reconciliation suite passes. Stay within $5,000. Ask me before migrating
+> existing plans or doing anything that charges a customer.
+
+Here is how one Tag could split that work:
+
+| Work Session | What it reports back to `lead` |
+| --- | --- |
+| Metering and invoicing | The event schema, metering code, tests for duplicate events, and test invoices |
+| Usage dashboard | A dashboard that reads the usage records and shows how they were counted |
+| Reconciliation and load tests | Evidence that the invoices match the usage records and the pipeline handles the expected load |
+
+`lead` reviews what the Sessions report and brings the branches and evidence back to you. You
+decide whether to migrate existing plans or allow customer charges.
+
+<details>
+<summary>See a real run for a small edit</summary>
+
+This earlier CLI transcript shows a Tag starting one work Session and reporting its result.
+Formatting is lightly trimmed.
 
 ```text
 $ supertag message tag lead 'apply_discount accepts percentages over 100 and returns negative amounts. Fix it so the percent must be between 0 and 100, add a test, and tell me the branch.'
@@ -72,8 +97,7 @@ Branch: supertag/session/b3861d05 in the Workspace repo.
 Tests: python3 -m unittest -v ran 5 tests, all passing.
 ```
 
-The Tag planned the change, ran it in a work Session of its own, and came back with a branch and
-the evidence. Your next message continues the same conversation.
+</details>
 
 ## What a Tag does for you
 
@@ -88,30 +112,32 @@ the evidence. Your next message continues the same conversation.
 | | Step | What happens |
 | --- | --- | --- |
 | **01** | **Talk to a Tag** | Open `supertag`, or mention the Tag in Slack or on a GitHub issue. A question gets an answer. Longer work gets a **Session**, a separate thread of work that reports back to the conversation. [Talk to a Tag](docs/guides/talk-to-a-tag.md) |
-| **02** | **Give it an outcome** | For bigger work, an **Objective**: done-when evidence, constraints, a budget, a deadline, and the approvals you keep. The Tag plans the work and starts Sessions for it, including Sessions of other Tags on its **Team**. [Write an Objective](docs/guides/write-an-objective.md) |
-| **03** | **Review the branch** | Each Session's work arrives as its own branch, such as `supertag/session/9f1c0b2e`. Merge it, or send it back with a message. |
+| **02** | **Give it an outcome** | An Objective records done-when evidence, constraints, a budget, a deadline, and the approvals you keep. The owner starts work Sessions, reviews their results, and decides what runs next. [Write an Objective](docs/guides/write-an-objective.md) |
+| **03** | **Review the branches** | With branch delivery, each repository work Session can bring back its own branch. Review it, then merge it or ask the owner for changes. |
 
-An Objective is a short manifest you can keep in your repository and apply with
-`supertag apply -f`, or create with `supertag create objective`, or ask the Tag to create:
+Create an Objective from the terminal UI's command palette, or keep it as a short manifest in
+your repository and apply it with `supertag apply -f`.
 
 ```yaml
 apiVersion: supertag/v1
 kind: Objective
 metadata:
-  name: workspace-invites
+  name: usage-based-billing
 spec:
   owner: lead
   outcome: >-
-    People can invite teammates to a workspace and choose their role. Done when the
-    end-to-end tests pass and the API docs cover it. Ask me before changing the database schema.
-  budget: { minor: 30000, currency: USD }
-  deadline: 2027-01-15T17:00:00Z
+    Customers can see their metered usage, and test invoices match the usage records.
+    Done when the billing reconciliation suite passes.
+    Ask me before migrating existing plans or doing anything that charges a customer.
+  budget: { minor: 500000, currency: USD }
+  deadline: 2027-07-01T17:00:00Z
 ```
 
-You steer; the Tags do the steps. Only decisions reach you: questions, approvals, and findings.
-They arrive in the conversation where the work started, `supertag list inbox` lists them, and
-Slack can notify you. To drive SuperTag from a Claude Code, Codex, or Cursor thread instead, give
-it the [operator skill](docs/guides/coding-agent-operator.md). The
+You steer the Objective through its owner. Findings come back to the conversation.
+**Waiting on you** shows questions and approval requests that need your decisions.
+Slack can also notify you.
+To direct SuperTag from a Claude Code, Codex, or Cursor thread, give it the
+[operator skill](docs/guides/coding-agent-operator.md). The
 [interaction model](docs/concepts/interaction-model.md) explains how a conversation, an Objective,
 and a Team divide the work.
 
@@ -148,30 +174,6 @@ Together, your Teams of Tags make up an **autonomous organization**: Teams may p
 Objectives but share one set of rules and one record of the work. When a laptop goes offline, new
 work goes to another host bound to the same Tag. See [Run a Worker](docs/guides/workers.md) and
 [multiplayer continuity](docs/concepts/multiplayer.md).
-
-## From tasks to outcomes
-
-Say your company moves from flat plans to usage-based billing this quarter: metering, a usage
-pipeline, Stripe invoicing, a customer dashboard, a plan migration, and a reconciliation suite.
-Today you write each task, run dozens of sessions, and pass context between them. With SuperTag,
-you state the outcome once, within $5,000 of agent spend, with your approval before the plan
-migration and before anything charges a customer:
-
-```text
-Objective: usage-based billing from July 1
-    │
-    └─▶ owner Tag ─── works in the thread you created it in, starts the work
-            │
-            ├─▶ backend Tag ──── event metering, Stripe invoicing, plan migration
-            ├─▶ frontend Tag ─── usage dashboard, billing settings
-            └─▶ quality Tag ──── reconciliation suite, load tests
-                                          │
-You ◀────── approve the plan migration and anything that charges a customer
-```
-
-The backend Tag posts the usage event schema in the Team's Workstream, and the frontend Tag builds
-the dashboard against it. SuperTag itself is built this way: its features are delivered as
-Objectives by a team of Tags, and maintainers review and merge the results.
 
 ## Is SuperTag right for you?
 
@@ -264,20 +266,17 @@ Select `lead`, type “Read this repository and tell me what you would improve f
 Enter. The reply appears in the conversation. Follow up there, or open the
 [terminal guide](docs/guides/talk-to-a-tag.md) to review a branch or create an Objective.
 
-Use this command for scripts or a CLI-only installation.
-
-```sh
-supertag message tag lead 'Read this repository and tell me what you would improve first.'
-```
-
-You can also [run SuperTag from your coding agent](docs/guides/coding-agent-operator.md).
+For automation, see the [operator API](docs/reference/control-plane-api.md) or
+[run SuperTag from your coding agent](docs/guides/coding-agent-operator.md).
 
 ### Next: run your first Team
 
-[Add a builder and run your first Team](docs/guides/first-team.md). The lead will start a Session
-of another Tag and read what it reports. To start with a whole team instead, apply one of the
-[example organizations](examples/organizations/README.md): a lead with builders, a review team, or
-a team across Claude Code, Codex, and Cursor.
+When you want a builder or reviewer with a role and permissions of its own, add another Tag
+to a Team. The owner can start work Sessions for that Tag and review what it reports.
+[Add a builder and run your first Team](docs/guides/first-team.md).
+
+To start with a configured Team, apply one of the
+[example organizations](examples/organizations/README.md).
 
 Stop the local services with `supertag down`; restart them with `supertag up`.
 
@@ -295,8 +294,9 @@ happened, decides what runs next, and chooses which coding agent runs each piece
 
 **How is an Objective different from `/goal`?** In Claude Code or Codex, `/goal` keeps one session
 working until a condition holds. An Objective is that goal owned by a Tag, with a budget, a
-deadline, and the approvals you keep. It outlives any one session or machine, and several Tags can
-work on it at once.
+deadline, and the approvals you keep. The owner can start several work Sessions and coordinate
+their results across sessions and machines. If the Objective names a Team, its owner can assign
+Sessions to other Tags.
 
 **Do I need a cloud account?** No. `supertag init` runs everything on your laptop. Deploy a Control
 Plane only when your team shares Tags.

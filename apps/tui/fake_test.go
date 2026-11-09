@@ -34,12 +34,13 @@ type fakeControlPlane struct {
 
 	token string
 	// tags answers ListResources for Tags; an error refuses it.
-	tags    func() ([]*operatorv1.Tag, error)
-	history func(*operatorv1.ListMessagesRequest) []*operatorv1.Message
-	open    func() []*operatorv1.Conversation
-	send    func(*operatorv1.SendMessageRequest) *operatorv1.Message
-	follow  func(context.Context, *operatorv1.FollowMessageRequest, *connect.ServerStream[operatorv1.FollowEvent]) error
-	watch   func(context.Context, *operatorv1.WatchRequest, *connect.ServerStream[operatorv1.WatchEvent]) error
+	tags       func() ([]*operatorv1.Tag, error)
+	history    func(*operatorv1.ListMessagesRequest) []*operatorv1.Message
+	open       func() []*operatorv1.Conversation
+	send       func(*operatorv1.SendMessageRequest) *operatorv1.Message
+	getMessage func(*operatorv1.GetMessageRequest) (*operatorv1.Message, error)
+	follow     func(context.Context, *operatorv1.FollowMessageRequest, *connect.ServerStream[operatorv1.FollowEvent]) error
+	watch      func(context.Context, *operatorv1.WatchRequest, *connect.ServerStream[operatorv1.WatchEvent]) error
 	// objectives, overview and items answer ListObjectives, DescribeObjective and ListInboxItems;
 	// approve, deny and answer answer the decisions, nil meaning success.
 	objectives func() []*operatorv1.Objective
@@ -49,7 +50,8 @@ type fakeControlPlane struct {
 	deny       func(*operatorv1.DenyRequest) error
 	answer     func(*operatorv1.AnswerQuestionRequest) error
 	// create answers CreateObjective, nil meaning it creates the Objective `obj-new`.
-	create func(*operatorv1.CreateObjectiveRequest) (*operatorv1.CreateObjectiveResponse, error)
+	create           func(*operatorv1.CreateObjectiveRequest) (*operatorv1.CreateObjectiveResponse, error)
+	messageObjective func(*operatorv1.MessageObjectiveRequest) (*operatorv1.MessageObjectiveResponse, error)
 	// sessions answers GetSession, nil meaning NotFound; taskEvents answers ListTaskEvents;
 	// teamList answers ListTeams and GetTeam; posts answers ListWorkstreamPosts.
 	sessions   func(id string) *operatorv1.Session
@@ -154,6 +156,28 @@ func (f *fakeControlPlane) SendMessage(_ context.Context, req *connect.Request[o
 	f.sent = append(f.sent, req.Msg)
 	f.mu.Unlock()
 	return connect.NewResponse(f.send(req.Msg)), nil
+}
+
+func (f *fakeControlPlane) MessageObjective(_ context.Context, req *connect.Request[operatorv1.MessageObjectiveRequest]) (*connect.Response[operatorv1.MessageObjectiveResponse], error) {
+	if f.messageObjective == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, nil)
+	}
+	res, err := f.messageObjective(req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (f *fakeControlPlane) GetMessage(_ context.Context, req *connect.Request[operatorv1.GetMessageRequest]) (*connect.Response[operatorv1.Message], error) {
+	if f.getMessage == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, nil)
+	}
+	res, err := f.getMessage(req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
 }
 
 func (f *fakeControlPlane) ListMessages(_ context.Context, req *connect.Request[operatorv1.ListMessagesRequest]) (*connect.Response[operatorv1.ListMessagesResponse], error) {

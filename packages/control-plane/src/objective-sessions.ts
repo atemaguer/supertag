@@ -147,7 +147,7 @@ export function objectiveTurnText(
 
 /** The text that tells the operator an Objective was blocked after a second idle turn. */
 export function objectiveBlockedText(objectiveId: string): string {
-  return `Objective ${objectiveId} is blocked: its turns ended twice with nothing running and nothing asked. Reply in this thread or run supertag message objective ${objectiveId} to direct it.`;
+  return `Objective ${objectiveId} is blocked. Its turns ended twice with nothing running and nothing asked. Reply in this thread, or open the Objective in the terminal UI and press m to message its owner.`;
 }
 
 /** The Tag's Mailbox messages an inbox turn handles, each in its own data block. */

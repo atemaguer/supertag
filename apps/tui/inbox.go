@@ -141,7 +141,7 @@ func (m model) renderItem() string {
 			add("", "Why: "+item.GetReason())
 		}
 	}
-	if commands := item.GetCommands(); len(commands) > 0 {
+	if commands := item.GetCommands(); item.GetKind() != operatorv1.InboxItemKind_INBOX_ITEM_KIND_QUESTION && len(commands) > 0 {
 		add("", "Commands:")
 		for _, command := range commands {
 			add("  " + command)

@@ -163,8 +163,8 @@ export function inboxHelp(): string {
   supertag watch inbox [--objective ID] [--kind KIND] [--output text|json]
 
 The inbox lists what waits on a person: approval requests, questions an Objective asked, budget
-and deadline limits, Tasks that need an operator, and MCP servers to log in to. Each item names
-the command that acts on it. Without --all, list inbox shows only items the operator decides.
+and deadline limits, Tasks that need an operator, and MCP servers to log in to. Each item shows
+how to act on it. Without --all, list inbox shows only items the operator decides.
 watch inbox prints each item once, as it appears, until Ctrl-C.
 `;
 }
@@ -354,14 +354,17 @@ export async function watchCoordinationInbox(
   });
 }
 
-/** One line per inbox item: when, what, where, and the command to act. */
+const answerInTerminal = "Open supertag in a terminal and answer under Waiting on you.";
+
+/** One line per inbox item: when, what, where, and how to act. */
 export function formatCoordinationInboxLine(item: CoordinationInboxItem): string {
-  const command = item.commands?.[0];
+  const action =
+    item.kind === "question" && item.operatorEligible ? answerInTerminal : item.commands?.[0];
   const question = item.question
     ? `: ${quoteLine(operatorNotice(item.question.text), COORDINATION_INBOX_QUESTION_LIMIT)}`
     : "";
   return terminalText(
-    `${item.actionableSince}  ${item.kind}${item.objectiveId === null ? "" : `  Objective ${item.objectiveId}`}  ${coordinationInboxHeadline(item)}${question}${command ? `  -> ${command}` : ""}`,
+    `${item.actionableSince}  ${item.kind}${item.objectiveId === null ? "" : `  Objective ${item.objectiveId}`}  ${coordinationInboxHeadline(item)}${question}${action ? `  -> ${action}` : ""}`,
   );
 }
 
@@ -409,7 +412,8 @@ function formatCoordinationInbox(page: CoordinationInboxPage): string {
       );
     // Reasons and commands can carry Worker Host or Tag text: one line each, so none forges a line.
     if (item.reason) lines.push(`  ${terminalText(item.reason)}`);
-    for (const command of item.commands ?? []) lines.push(`  Run: ${terminalText(command)}`);
+    if (item.kind === "question" && item.operatorEligible) lines.push(`  ${answerInTerminal}`);
+    else for (const command of item.commands ?? []) lines.push(`  Run: ${terminalText(command)}`);
   }
   if (page.truncatedKinds.length)
     lines.push("", `Incomplete scan: ${page.truncatedKinds.join(", ")}`);

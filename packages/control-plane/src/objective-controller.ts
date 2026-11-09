@@ -927,7 +927,7 @@ export class ObjectiveController {
           ? `Objective ${objective.id} is already completed`
           : objective.status === "cancelled"
             ? `Objective ${objective.id} is cancelled`
-            : `Objective ${objective.id} is ${objective.status}, not ready_for_review. Only a result the owner submitted for review can be approved; send changes with supertag message objective ${objective.id} TEXT`,
+            : `Objective ${objective.id} is ${objective.status}, not ready_for_review. The owner must submit a result for review before it can be approved. Open the Objective in the terminal UI and press m to send changes.`,
       );
     const completed = await this.store.updateObjectiveStatus(
       objective.id,

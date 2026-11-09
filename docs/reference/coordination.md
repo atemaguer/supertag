@@ -39,10 +39,9 @@ Three rules cover every exchange in SuperTag.
    they started, Tags in their Team, and the Workstream. To get another Tag's work, start a
    Session of that Tag with `start_session {tag}`.
 
-An Objective is a conversation with a goal. It talks in the thread it was created in: its owner
-Tag replies there, a person replies in that thread or with `supertag message objective`, and the
-Objective asks the person when it needs a decision. The work happens in Sessions started
-beneath it, including Sessions of other Tags in its Team.
+An Objective is a conversation with a goal. A person directs it from the terminal UI or the
+thread where it was created. Its owner Tag asks the person when it needs a decision. The work
+happens in Sessions started beneath it, including Sessions of other Tags in its Team.
 
 ### A worked example
 
@@ -138,8 +137,7 @@ picks it in this order:
 2. the surface Task that created the Objective;
 3. the Control Plane's default operator notification Task.
 
-Without any of these, the conversation runs in the owner Tag's CLI account, and
-`supertag message objective` prints the reply.
+Without any of these, the conversation runs in the owner Tag's CLI account.
 
 Every turn of the conversation is delivered into that thread's location, and the owner's final
 reply is posted there exactly as written. While an Objective is open, a plain reply in its home
@@ -163,12 +161,16 @@ next.
 
 ### Operator messages
 
-`supertag message objective ID TEXT` (or `-` for standard input) delivers the next turn of the
-conversation, attributed to the operator. In a Slack or Lark home thread a plain reply from a
-person does the same, `@SuperTag approve` acts as `supertag approve objective`, and
-`@SuperTag pause` and `@SuperTag resume` act as the pause and resume commands. The operator ID is
-the provider and the user, such as `slack:U123`. Anyone who may create Objectives in that channel
-may do this.
+A message delivers the next turn of the conversation, attributed to the operator. Send it from
+the terminal UI or through
+[`ObjectiveService.MessageObjective`](operator-api/objective.md#messageobjective). Existing
+scripts can use the [deprecated CLI commands](../guides/talk-to-a-tag.md#send-messages-from-scripts)
+while migrating.
+
+In a Slack or Lark home thread, a plain reply also delivers the next turn. `@SuperTag approve`
+acts as `supertag approve objective`, and `@SuperTag pause` and `@SuperTag resume` act as the
+pause and resume commands. The operator ID is the provider and the user, such as `slack:U123`.
+Anyone who may create Objectives in that channel may do this.
 
 - A message never changes a budget, permissions or any other resource. Apply the resource change
   with its own command first; replying "approved" alone changes no allocation.
@@ -186,9 +188,9 @@ recorded with `ready_for_review`, becomes the completion summary. Without one, t
 ### Asking a person
 
 An Objective's turn calls `ask {question}` with one concise question, then ends its turn. The
-Task ends waiting. The question reaches the person in the home thread and as a `question` item in
-`supertag list inbox`. The answer, through a thread reply or `supertag message objective`,
-is the conversation's next turn. The same tool in a work Session asks the Session that started it.
+Task ends waiting. The question reaches the person in the home thread and as a `question` item
+in the operator inbox. An answer from **Waiting on you** in the terminal UI or from the home
+thread becomes the conversation's next turn. The same tool in a work Session asks the Session that started it.
 
 ### Work and delegation
 
@@ -497,9 +499,9 @@ A message that arrives between the claim and the binding is not lost. It stays u
 Control Plane's sweep delivers a turn for it. An inbox turn that binds nothing settles completed
 without dispatch.
 
-An inbox turn runs in the Tag's CLI account under the Tag's own Roles, like
-`supertag message tag`. It carries no Objective and draws on no pool. Its final reply is recorded
-in the Session and sent nowhere; answering a sender takes another `send_message`.
+An inbox turn runs in the Tag's CLI account under the Tag's own Roles, like a private
+conversation in the terminal UI. It carries no Objective and draws on no pool. SuperTag records
+its final reply in the Session. Answering a sender takes another `send_message`.
 
 ### Limits
 
@@ -754,8 +756,9 @@ The CLI spells a kind with hyphens; the API names it `INBOX_ITEM_KIND_APPROVAL` 
 
 - `supertag list inbox` shows the decisions an operator can make. `--all` adds items only a Tag
   can act on. Text output names both decision makers.
-- Every item carries `commands`: the `supertag` commands that act on it, most direct first. A
-  `question` item's first command is `supertag message objective ID TEXT`.
+- Items can carry `commands`, which list the CLI actions available for the item. To answer a
+  `question` item, use **Waiting on you** in the terminal UI or call
+  [`InboxService.AnswerQuestion`](operator-api/inbox.md#answerquestion).
 - Item identity for watching and notification is the item's `occurrence`: its `key`, plus the
   Task's attempt count when the item cites a Task. The same decision after another Task Attempt is
   a new occurrence.

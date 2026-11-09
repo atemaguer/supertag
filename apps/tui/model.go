@@ -278,9 +278,11 @@ type model struct {
 	pane   pane
 	// objectiveID is the Objective the Objective pane shows, and overviews what was last read of
 	// each Objective shown.
-	objectiveID  string
-	overviews    map[string]*operatorv1.ObjectiveOverview
-	overviewErrs map[string]string
+	objectiveID       string
+	overviews         map[string]*operatorv1.ObjectiveOverview
+	overviewErrs      map[string]string
+	objectiveCompose  bool
+	objectiveMessages map[string]*objectiveMessage
 	// item is the inbox item the inbox pane shows, kept after it leaves the inbox; itemNote is
 	// what came of acting on it.
 	item     *operatorv1.InboxItem
@@ -319,37 +321,38 @@ func newModel(ctx context.Context, c *client.Client, f *client.Follower, w *clie
 	input.Placeholder = conversationPlaceholder
 	cwd, _ := os.Getwd()
 	return model{
-		ctx:            ctx,
-		client:         c,
-		follower:       f,
-		watcher:        w,
-		conversations:  map[string]*conversation{},
-		current:        map[string]string{},
-		open:           map[string]int{},
-		work:           map[string]*workDetail{},
-		expanded:       map[string]bool{},
-		teamViews:      map[string]client.TeamView{},
-		teamErrs:       map[string]string{},
-		teamReload:     &reload{},
-		teamView:       &reload{},
-		git:            runGit,
-		cwd:            cwd,
-		openURL:        openURL,
-		overviews:      map[string]*operatorv1.ObjectiveOverview{},
-		overviewErrs:   map[string]string{},
-		drafts:         map[string]string{},
-		inbox:          client.Inbox{TagNames: map[string]string{}},
-		tagReload:      &reload{},
-		convReload:     &reload{},
-		objReload:      &reload{},
-		inboxReload:    &reload{},
-		overviewReload: &reload{},
-		hostReload:     &reload{},
-		input:          input,
-		viewport:       viewport.New(),
-		md:             &markdown{},
-		polling:        true,
-		status:         "connecting",
+		ctx:               ctx,
+		client:            c,
+		follower:          f,
+		watcher:           w,
+		conversations:     map[string]*conversation{},
+		current:           map[string]string{},
+		open:              map[string]int{},
+		work:              map[string]*workDetail{},
+		expanded:          map[string]bool{},
+		teamViews:         map[string]client.TeamView{},
+		teamErrs:          map[string]string{},
+		teamReload:        &reload{},
+		teamView:          &reload{},
+		git:               runGit,
+		cwd:               cwd,
+		openURL:           openURL,
+		overviews:         map[string]*operatorv1.ObjectiveOverview{},
+		overviewErrs:      map[string]string{},
+		objectiveMessages: map[string]*objectiveMessage{},
+		drafts:            map[string]string{},
+		inbox:             client.Inbox{TagNames: map[string]string{}},
+		tagReload:         &reload{},
+		convReload:        &reload{},
+		objReload:         &reload{},
+		inboxReload:       &reload{},
+		overviewReload:    &reload{},
+		hostReload:        &reload{},
+		input:             input,
+		viewport:          viewport.New(),
+		md:                &markdown{},
+		polling:           true,
+		status:            "connecting",
 	}
 }
 
@@ -547,6 +550,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, again
 
+	case objectiveSentMsg:
+		return m, m.objectiveMessageSent(msg)
+
+	case objectiveReplyMsg:
+		return m, m.objectiveReplyRead(msg)
+
 	case inboxMsg:
 		var again tea.Cmd
 		if m.inboxReload.done() {
@@ -581,6 +590,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			delete(m.overviewErrs, msg.id)
 		}
 		if m.pane == paneObjective && m.objectiveID == msg.id {
+			if m.objectiveCompose && !m.canMessageObjective() {
+				m.saveDraft()
+				again = tea.Batch(again, m.syncInput())
+			}
 			m.refresh()
 		}
 		return m, again
@@ -819,6 +832,11 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc":
+		if m.pane == paneObjective && m.objectiveCompose {
+			m.saveDraft()
+			m.refresh()
+			return m, m.syncInput()
+		}
 		if m.decision == decisionConfirm || m.decision == decisionReason {
 			m.decision = decisionNone
 			m.input.Reset()
@@ -840,6 +858,9 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "ctrl+o":
 		return m, m.openPicker()
+	}
+	if msg.String() == "m" && m.pane == paneObjective && !m.objectiveCompose {
+		return m, m.composeObjectiveMessage()
 	}
 	if m.decision == decisionConfirm {
 		if msg.String() == "enter" {
@@ -931,6 +952,8 @@ func (m *model) submit() tea.Cmd {
 		m.input.Reset()
 		m.addEntry(tag, name, entryYou, text)
 		return m.send(tag, name, text)
+	case paneObjective:
+		return m.sendObjectiveMessage(text)
 	case paneConversations:
 		return m.startConversation(text)
 	case paneInbox:
@@ -1075,6 +1098,8 @@ func (m model) inputShown() bool {
 	case paneConversation:
 		c := m.shown()
 		return c != nil && c.selected == nil
+	case paneObjective:
+		return m.objectiveCompose
 	case paneConversations:
 		return m.picker != nil && m.picker.naming
 	case paneInbox:
@@ -1140,7 +1165,7 @@ func (m model) rows() []row {
 func (m model) rowKey(r row) string {
 	switch r.kind {
 	case rowObjective:
-		return "objective:" + m.objectives[r.index].GetId()
+		return objectivePaneKey(m.objectives[r.index].GetId())
 	case rowInbox:
 		return "inbox:" + m.inbox.Items[r.index].GetOccurrence()
 	case rowTeam:
@@ -1153,7 +1178,7 @@ func (m model) rowKey(r row) string {
 func (m model) paneKey() string {
 	switch m.pane {
 	case paneObjective:
-		return "objective:" + m.objectiveID
+		return objectivePaneKey(m.objectiveID)
 	case paneInbox:
 		return "inbox:" + m.item.GetOccurrence()
 	case paneTeam:
@@ -1177,9 +1202,10 @@ func (m model) draftKey() string {
 
 // saveDraft keeps the input for the pane's return, and empties it.
 func (m *model) saveDraft() {
-	if key := m.draftKey(); key != "" {
+	if key := m.draftKey(); key != "" && (m.pane != paneObjective || m.objectiveCompose) {
 		m.drafts[key] = m.input.Value()
 	}
+	m.objectiveCompose = false
 	m.input.Reset()
 }
 

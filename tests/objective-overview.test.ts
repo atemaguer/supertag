@@ -297,7 +297,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       expect(view.attention.map((item) => item.kind)).toContain("owner_question");
       const text = formatObjectiveOverview(overviewViewOf(view));
       expect(text).toContain(`${f.owner.name} asks: "Which region first?"`);
-      expect(text).toContain(`supertag message objective ${f.objective.id} TEXT`);
+      expect(text).toContain("Open supertag in a terminal and answer under Waiting on you.");
     }, 30_000);
 
     it("explains a failed turn and lists the high findings of the latest results", async () => {

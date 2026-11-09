@@ -359,6 +359,9 @@ func (m model) paneTitle() string {
 func (m model) paneHint() string {
 	switch m.pane {
 	case paneObjective:
+		if m.canMessageObjective() {
+			return "m message the owner · answer questions under Waiting on you"
+		}
 		return "Live · answer its questions under Waiting on you"
 	case paneInbox:
 		switch {

@@ -195,7 +195,11 @@ it("shows the Objective's question and where to read a long one in full", async 
   expect(text).toContain(
     "  The question continues; read it in full with supertag describe objective objective-a.",
   );
-  expect(text).toContain("Run: supertag message objective objective-a TEXT");
+  expect(text).toContain("Open supertag in a terminal and answer under Waiting on you.");
+  const json = await runInboxCommand(target, "list", ["--output", "json"]);
+  expect(JSON.parse(json).items[0].commands).toEqual([
+    "supertag message objective objective-a TEXT",
+  ]);
 });
 
 it("prints reasons and commands on one line each, so host text cannot forge a Run line", async () => {
@@ -387,7 +391,7 @@ it("watch inbox writes one JSON object per line", async () => {
 
 it("puts a question's own text on the watch line, bounded and single-line", () => {
   expect(formatCoordinationInboxLine(questionItem("Which region\nfirst?"))).toBe(
-    '2026-09-30T00:00:00.000Z  question  Objective objective-a  Objective objective-a waits on your answer: "Which region first?"  -> supertag message objective objective-a TEXT',
+    '2026-09-30T00:00:00.000Z  question  Objective objective-a  Objective objective-a waits on your answer: "Which region first?"  -> Open supertag in a terminal and answer under Waiting on you.',
   );
   expect(formatCoordinationInboxLine(questionItem(`a\u001b[2K\rb`))).not.toContain("\u001b");
 });

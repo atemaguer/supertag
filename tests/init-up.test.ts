@@ -371,8 +371,9 @@ describe("supertag init", () => {
       expect(text).toContain("Bound Worker Host studio-mac to Tag lead.");
       expect(text).toMatch(/Worker Host studio-mac connected; Workers registered: local-codex\./);
       expect(text).toMatch(
-        /SuperTag is ready\. Run this in your terminal to open the UI\.\n  supertag\nSelect lead,[\s\S]*Ctrl-K and choose Create Objective[\s\S]*supertag message tag lead "/,
+        /SuperTag is ready\. Run this in your terminal to open the UI\.\n {2}supertag\nSelect lead,[\s\S]*Ctrl-K and choose Create Objective/,
       );
+      expect(text).not.toContain("supertag message tag");
       expect(text).toContain("add restart: unless-stopped to both services");
       expect(text).not.toContain(await ensureLocalAdminToken());
 
@@ -522,7 +523,7 @@ describe("supertag init", () => {
     });
     expect(printed()).toContain("Opening pull requests also needs a GitHub surface");
     expect(printed()).toContain("Select builder, type");
-    expect(printed()).toContain('supertag message tag builder "');
+    expect(printed()).not.toContain("supertag message tag");
 
     // Exit changes nothing.
     const before = await readFile(join(context.state, "supertag.yaml"), "utf8");

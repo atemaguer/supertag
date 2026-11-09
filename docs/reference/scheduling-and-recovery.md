@@ -180,7 +180,7 @@ oldest first:
   same Tag or another. Each pass tries due turns until one runs, however many wait ahead of it.
 - A conversation runs at most four work Sessions at once; the rest wait their turn.
 - A waiting turn records why, once each time the reason changes. `supertag describe task` shows
-  it as `Waiting: REASON`, and `supertag message tag` prints `· waiting: REASON`. The reason clears
+  it as `Waiting: REASON`, and the terminal UI shows it in the conversation. The reason clears
   once a host can run the turn, also after a Control Plane restart.
 
 For example, a turn in Slack thread A waits for an MCP server login. A later message in thread B,

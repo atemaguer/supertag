@@ -191,6 +191,17 @@ func retrying[T any](ctx context.Context, call func(context.Context) (T, error))
 	}
 }
 
+// GetMessage reads a single message the operator can follow.
+func (c *Client) GetMessage(ctx context.Context, tag, taskID string) (*operatorv1.Message, error) {
+	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
+	defer cancel()
+	res, err := c.conversations.GetMessage(ctx, connect.NewRequest(&operatorv1.GetMessageRequest{Tag: tag, TaskId: taskID}))
+	if err != nil {
+		return nil, apiError(err)
+	}
+	return res.Msg, nil
+}
+
 // ListMessages returns one page of the messages the caller sent in the conversation, newest
 // first, and the token of the next page.
 func (c *Client) ListMessages(ctx context.Context, tag, conversation string, pageSize int32, pageToken string) ([]*operatorv1.Message, string, error) {

@@ -67,14 +67,13 @@ Details:
   `supertag download artifact` command, a pull request and its state, and output artifacts. When
   the Control Plane runs locally, a branch shows its checkout path and the `git diff` and
   `git switch` commands that review it.
-- **Needs you** lists the decisions only you make, each with its command: approval requests, a
-  question the Objective asked, a result submitted for review, a pause, and budget or deadline
-  limits. A question appears in full, with its line breaks kept:
+- **Needs you** lists approval requests, questions, results submitted for review, pauses, and
+  budget or deadline limits. A question appears in full. Answer it under **Waiting on you** in
+  the terminal UI.
 
   ```text
   Needs you:
     lead asks: "Which plans should the first invoice run cover?"
-      supertag message objective usage-billing-7f3k TEXT
   ```
 - **High findings** appears above the owner when the latest result of a Session reported one.
 - **Work** lists the Objective's conversation first, then each Session started beneath it, with
@@ -96,9 +95,9 @@ still allow new work. Each reason names the next step. `Runnable: yes` means non
 the turns; it does not promise that a Worker has capacity. A closed Objective has no `Runnable`
 line.
 
-When the owner submitted the Objective for review, the overview shows its assessment and suggests
-`supertag approve objective ID` or `supertag message objective ID TEXT`. See
-[reviewing a result](objective-decisions.md#6-review-a-result).
+When the owner submits the Objective for review, the overview shows its assessment. Select the
+Objective in the terminal UI and press `m` to request changes, or accept the result with
+`supertag approve objective ID`. See [reviewing a result](objective-decisions.md#6-review-a-result).
 
 ## 2. Follow it as it happens
 
@@ -162,8 +161,8 @@ supertag list inbox --objective OBJECTIVE_ID --output text
 supertag watch inbox
 ```
 
-Each item ends with the command that acts on it, such as `supertag approve request ID`. A
-question shows its text, up to 500 characters. `watch inbox` prints each new item on one line as
+Items show the available actions, such as `supertag approve request ID`. A question shows up
+to 500 characters of its text. `watch inbox` prints each new item on one line as
 it appears; press Ctrl-C to stop. To be told without watching, configure an
 [operator channel](../operations/control-plane.md#operator-channel) in Slack. How to decide each
 kind is in [Respond to an Objective](objective-decisions.md).
@@ -193,8 +192,8 @@ concerns. Explanations are evidence and suggested next steps, not permission gra
   does not authorize repeating an external action.
 - A spent budget pool stops new turns. The Objective's status becomes `limited`; raise the budget
   to let work continue.
-- An Objective marked `blocked` ended two turns with nothing running and nothing asked. Direct it
-  with `supertag message objective ID TEXT`; see
+- An Objective marked `blocked` ended two turns with nothing running and nothing asked. Select
+  it in the terminal UI and press `m` to direct it. See
   [restart a blocked Objective](objective-decisions.md#5-restart-a-blocked-objective).
 - A `cancelled` Objective shows when it was cancelled and the operator's reason. No new work
   starts for it. See [Cancel an Objective](objectives.md#cancel-an-objective).

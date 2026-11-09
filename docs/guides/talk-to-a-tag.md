@@ -31,157 +31,69 @@ with `supertag init`. For a shared Control Plane, ask its operator to set up a T
 | `o` on a work Session or branch | Open its pull request when one exists. |
 
 To give `lead` an **Objective**, an outcome it owns, choose **Create Objective** from the
-command palette. Enter an outcome and how to verify it. Leave Team empty for `lead` to work
-alone. Enter a budget such as `10 USD` or leave it empty. Press Enter on the budget field to
-create the Objective, then Enter again to open its progress view.
+command palette. Enter an outcome and how to verify it. Leave Team and Budget blank for this first
+run. A currency budget requires a [Worker](../concepts/workers.md) that can enforce a reported
+cost limit. Press Enter on the budget field to create the Objective, then Enter again to open
+its progress view.
+
+## Continue a conversation
+
+Each Tag opens in your `default` conversation. To keep a topic separate, press Ctrl-O, then
+`n`, type a name such as `billing`, and press Enter. Use Ctrl-O and Enter to reopen an
+existing conversation. The Tag sees the earlier messages in that conversation.
+
+## Follow longer work
+
+The Tag answers a quick question directly. For longer work, such as researching a slow export,
+it can start a **work Session**, a separate thread that runs the work as its own Task. The Tag
+tells you when it starts and reports back when the work finishes or needs a decision. Select
+a work Session and press Enter to see its commands, tool calls, and result.
+
+You can leave the terminal UI while work runs. The report appears in the conversation when you
+return.
+
+## Answer a question or decide an approval
+
+If the Tag asks which region a work Session should use, answer in the same conversation. The
+Tag passes your answer to the work Session and reports back after it continues.
+
+If a request appears under **Waiting on you**, select it and review the requested action.
+Press `a` and Enter to approve it once, or press `d`, enter a reason, and press Enter to deny it.
+For requests shown only in the conversation, use `supertag list approval` to inspect the
+request, then `supertag approve request ID` or `supertag deny request ID --reason TEXT` to decide.
+A decision lets the work Session continue on its own. If it cannot continue, the conversation
+shows the reason.
+
+## Talk to an Objective
+
+To give an Objective a new direction or request a revision, select it under **Objectives**.
+Press `m`, type your follow-up, and press Enter to send it as the owner's next turn. Press Esc
+to close the composer and keep the draft. If the Objective has a pending question, answer it
+under **Waiting on you**. The owner's reply appears below the follow-up for a local Objective,
+or in the home thread for an Objective on Slack or another collaboration surface.
+
+The Objective keeps working as its Sessions report back. It shares a budget across its own
+turns and every Session it starts. When it names a Team, the owner can start a Session of
+another member. See [Define and complete an Objective](objectives.md).
 
 ## Send messages from scripts
 
-Use `supertag message tag` for scripts or a CLI-only installation. You can also
-[run SuperTag from a coding agent](coding-agent-operator.md).
+Use the [operator API](../reference/control-plane-api.md) for new integrations. Call
+[`ConversationService.SendMessage`](../reference/operator-api/conversation.md#sendmessage)
+to send to a Tag, or
+[`ObjectiveService.MessageObjective`](../reference/operator-api/objective.md#messageobjective)
+to send to an Objective.
 
-## 1. Send a message
-
-```sh
-supertag message tag planner 'What are you working on?'
-```
-
-While the Tag works, the command shows the commands it runs, then prints its reply. In a
-terminal, a dim line such as `· running: ls src` marks each command the Tag starts. The command
-exits when the reply is complete. To send a longer message, pass `-` and write it to standard input:
+The CLI messaging commands are deprecated. Existing scripts can still pass `-` to read from
+standard input and use `--output json` for a machine-readable response.
 
 ```sh
-supertag message tag planner - < question.md
+supertag message tag planner - --session billing --output json < question.md
+supertag message objective billing-export - --output json < update.md
 ```
 
-## 2. Continue a conversation
-
-Without `--session`, messages go to your `default` conversation. Name a conversation to keep a
-topic separate:
-
-```sh
-supertag message tag planner 'Plan the billing migration.' --session billing
-supertag message tag planner 'Which step is riskiest?' --session billing
-```
-
-The second message sees the first, and the Tag's reply to it.
-
-## 3. Follow longer work
-
-The Tag answers a quick question directly. For work that takes longer, such as research, several
-tool calls, or edits, it starts a **work Session**: a new Session of the same Tag that runs the
-work as its own Task. The Tag replies briefly that it started, and the command stays to follow
-the work:
-
-```text
-$ supertag message tag planner 'Find out why the billing export is slow.' --session billing
-I'm looking into the billing export now and will report back here.
-· working: Investigate slow billing export
-· done: Investigate slow billing export
-The export is slow because it loads every invoice before filtering. Filtering in the query
-cuts it from 40 s to 2 s. Want me to make that change?
-```
-
-In a terminal, dim lines such as `· running: rg invoice` show what each work Session does. They
-are how you follow its progress; the Tag doesn't post progress of its own. The Tag speaks again
-when a work Session finishes or waits: it gets a turn in your conversation to report the result,
-or what the work Session waits for, in its own words. The command exits when every work Session it started
-has reported.
-
-Ctrl-C stops following, not the work. The report still arrives in the conversation, and your next
-message there sees it.
-
-## 4. Answer a work Session's question or approval
-
-A work Session that needs a decision from you stops and asks. The command shows it waiting on you,
-then the Tag's question:
-
-```text
-$ supertag message tag planner 'Move the billing export to the new cluster.' --session billing
-I'm starting the move and will report back here.
-· working: Move billing export
-· waiting on you: Move billing export
-Which region should the new cluster use: eu-west or us-east?
-```
-
-Answer with your next message in the same conversation. The Tag passes your answer to the work
-Session, which picks up where it stopped, and the command follows it again:
-
-```text
-$ supertag message tag planner 'eu-west' --session billing
-I've passed that on.
-· working: Move billing export
-· done: Move billing export
-The billing export now runs on the eu-west cluster.
-```
-
-If a work Session needs approval for an action, it stops and waits for your decision, the way it
-waits for an answer. `supertag message tag` prints the notice under `· approval needed: TITLE`,
-and on Slack and other surfaces it posts to your conversation. The notice names the permission
-that requires approval, in SuperTag's words. The Tag then tells you briefly what the work Session
-waits for:
-
-```text
-$ supertag message tag planner 'Resolve the Sentry issue for the export timeout.' --session billing
-I'm resolving the issue and will report back here.
-· working: Resolve export timeout issue
-· approval needed: Resolve export timeout issue
-Work Session "Resolve export timeout issue" is waiting for approval:
-- 6f0d2c1e-8a4b-4f7e-9c3d-2b5a1e7f9d40: MCP sentry/update_issue (required by sentry-triage)
-Review with supertag list approval, then supertag approve request ID or supertag deny request ID --reason TEXT.
-The work Session continues on its own once you decide.
-· waiting for approval: Resolve export timeout issue
-It's waiting for your approval to update the Sentry issue.
-```
-
-`supertag list approval` shows the request in full. Decide it with
-`supertag approve request ID` or `supertag deny request ID --reason TEXT`; a message to the Tag
-doesn't approve anything, and you don't need to message the Tag after deciding. Either decision
-continues the work Session as its next Task. An approval lets it retry the same action once; a
-denial gives it your reason, so it can try another way or report back. Its report then reaches
-your conversation like any other. `supertag message tag` keeps following a work Session that
-waits for approval, so decide from another terminal; the command then prints `· working:` again,
-then `· done:` or the next wait. If the Tag's permissions changed while the work Session waited,
-or the turn's limits are spent, the decision doesn't continue it: the command prints
-`· not continued: TITLE` and why. Start a new work Session after a permission change, or send a
-message to continue it after the limits ran out.
-
-## 5. Talk to an Objective instead
-
-An **Objective** is an outcome a Tag owns, with a budget, a deadline, and a status. It has a
-conversation of its own, separate from yours, and it talks in the thread it was created in. An
-Objective you create from the CLI talks here:
-
-```sh
-supertag create objective billing-export --owner planner \
-  --outcome 'The billing export runs in under 5 seconds. Done when the export benchmark passes.'
-supertag message objective billing-export 'Start with the invoice query.'
-```
-
-`message objective` delivers your text as the Objective's next turn and follows the owner's reply
-the way `message tag` does, with the same `· working:` and `· done:` lines. It also answers a
-question the Objective asked, and moves a `blocked`, `limited`, or `ready_for_review` Objective
-back to `working`.
-
-An Objective created in Slack or another collaboration surface replies in that thread instead.
-`message objective` then says so and returns at once:
-
-```text
-The reply posts to the thread the Objective was created in.
-```
-
-The differences from a conversation are worth knowing:
-
-- **The Objective keeps going on its own.** Each Session it starts reports back into its
-  conversation, which gives the owner another turn without a message from you.
-- **It must keep moving.** A turn that ends with nothing running and no question gets one wake;
-  a second such turn marks the Objective `blocked` and tells you. An `--ongoing` Objective is
-  exempt.
-- **It has one budget pool.** Its own turns and every Session beneath it draw on the same budget.
-- **It can hand work to other Tags.** Name a Team with `--team`, and the owner may start a
-  Session of any member. A conversation cannot do this.
-
-See [Define and complete an Objective](objectives.md).
+For a coding agent that operates SuperTag from a separate conversation, see
+[Run SuperTag from your coding agent](coding-agent-operator.md).
 
 ## Check that it worked
 

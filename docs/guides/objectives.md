@@ -7,10 +7,9 @@ execution of a Task. A **Team** is a flat list of member Tags. The **Control Pla
 SuperTag service that stores and runs this work. See the [glossary](../reference/glossary.md) for
 other terms.
 
-An Objective is a conversation with a goal. It talks in the thread it was created in: the owner
-Tag replies there, you reply in the thread or with `supertag message objective`, and the Objective
-asks you a question when it needs one. Work happens in Sessions started beneath it, including
-Sessions of other Tags in its Team.
+An Objective is a conversation with a goal. You can direct it from the terminal UI or its home
+thread. Its owner Tag asks you a question when it needs a decision. Work happens in Sessions
+started beneath it, including Sessions of other Tags in its Team.
 
 Use this guide to record an outcome, give the owner a Team to delegate to, and close the Objective
 with an explicit assessment. Ordinary questions and small requests do not need an Objective; see
@@ -97,8 +96,7 @@ supertag list objective --owner lead
 ```
 
 Add `--output yaml` for the full record. `update`, `complete`, `approve`, `pause`, `resume`, and
-`cancel objective` each print one line. `message objective` prints one line, plus a second when
-the message moves the Objective back to `working`. The outcome, owner, Workspaces, and Team are
+`cancel objective` each print one line. The outcome, owner, Workspaces, and Team are
 fixed once created; an operator can later move the deadline, raise the budget, or change runtime
 actions.
 
@@ -221,44 +219,25 @@ Three rules shape what the owner can do:
 
 ## 4. Answer a question
 
-When the owner needs a decision it cannot make, it asks and ends its turn. The question appears in
-the Objective's thread, in `supertag describe objective` under **Needs you**, and in the operator
-inbox:
-
-```sh
-supertag list inbox --kind question --output text
-```
-
-Answer it by writing to the Objective. Your text arrives as the owner's next turn:
-
-```sh
-supertag message objective usage-billing "Cover annual plans in the first run."
-```
-
-Use `-` in place of the text to read a longer message from standard input. A message also moves a
-`blocked`, `limited`, or `ready_for_review` Objective back to `working`. When the Objective was
-created from your CLI, the command shows the owner's reply; otherwise the reply posts to the home
-thread. See [Respond to an Objective](objective-decisions.md).
+When the owner needs a decision, it asks and ends its turn. In the terminal UI, open **Waiting
+on you**, select its question, type your answer, and press Enter. The answer is the owner's
+next turn. You can also answer in the Objective's home thread. See
+[Respond to an Objective](objective-decisions.md).
 
 ## 5. Complete it, or review it first
 
 The owner completes the Objective itself when the statement is satisfied, recording an assessment
 with the evidence for each condition. You do not need to approve routine results.
 
-If you want to check the result first, say so in the statement, for example "A person reviews the
-change before it counts as done." The owner then stops at `ready_for_review` with its assessment,
-and you decide:
+If you want to check the result first, say so in the statement, for example “A person reviews the
+change before it counts as done.” The owner then stops at `ready_for_review` with its assessment.
+Open the Objective in the terminal UI to read it. To request changes, press `m`, describe what
+should change, and press Enter. The Objective returns to `working` and the owner acts on your
+text.
 
-```sh
-supertag describe objective usage-billing          # read the owner's assessment and results
-supertag approve objective usage-billing           # accept: completes with that assessment
-supertag message objective usage-billing "The reconciliation suite skips annual plans. Cover them."
-```
-
-`approve` completes the Objective and uses the owner's assessment as its completion summary. If
-the owner recorded none, the summary says which operator approved it. `approve` works only on a
-`ready_for_review` Objective. `message` is how you push back, like requesting changes on a pull
-request: the Objective returns to `working` and the owner acts on your text.
+To approve the result, run `supertag approve objective usage-billing`. Approval completes a
+`ready_for_review` Objective using the owner's assessment as the summary. If the owner recorded
+none, the summary says who approved it.
 
 Scripts can complete an Objective directly:
 
@@ -362,8 +341,7 @@ reason.
 - **Creation printed a warning.** The Objective exists, but its turns wait until you fix the
   cause. `supertag describe objective ID` shows the same checks on its `Runnable` line.
 - **The Objective is `blocked`.** Its turns ended twice with nothing running and nothing asked.
-  Read `supertag describe objective ID`, then direct it with
-  `supertag message objective ID TEXT`.
+  Open the Objective in the terminal UI, review its last turn, and press `m` to give it a direction.
 - **The Objective is `limited`.** Its budget pool is spent or its deadline passed. Raise the
   budget or move the deadline to let work continue.
 - **Nothing starts although the budget has room.** The Objective may be paused, or its Team's

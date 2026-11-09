@@ -91,6 +91,22 @@ func (c *Client) DescribeObjective(ctx context.Context, id string) (*operatorv1.
 	return res.Msg, nil
 }
 
+// MessageObjective sends a follow-up to the owner in the Objective's own conversation.
+func (c *Client) MessageObjective(ctx context.Context, id, text string) (*operatorv1.MessageObjectiveResponse, error) {
+	key, err := idempotencyKey()
+	if err != nil {
+		return nil, err
+	}
+	request := &operatorv1.MessageObjectiveRequest{Id: id, Text: text, IdempotencyKey: key}
+	return retrying(ctx, func(ctx context.Context) (*operatorv1.MessageObjectiveResponse, error) {
+		res, err := c.objectives.MessageObjective(ctx, connect.NewRequest(request))
+		if err != nil {
+			return nil, err
+		}
+		return res.Msg, nil
+	})
+}
+
 // Inbox is what waits on the operator.
 type Inbox struct {
 	// Items are the items an operator decides, the longest waiting first.

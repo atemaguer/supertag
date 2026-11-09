@@ -389,9 +389,6 @@ SuperTag is ready. Run this in your terminal to open the UI.
 Select ${answers.tag}, type "Read this repository and tell me what you would improve first.",
 and press Enter. Use Ctrl-K and choose Create Objective to give ${answers.tag} an outcome to own.
 
-Send the same message from a script or a CLI-only installation.
-  supertag message tag ${answers.tag} "Read this repository and tell me what you would improve first."
-
 ${yamlPath} runs two services in the background: ${controlPlaneService} (the Control Plane)
 and ${hostService} (this machine as a Worker Host).
   supertag ps          List them
@@ -1009,7 +1006,7 @@ services: control-plane, and a host service named after this machine. It brings 
 Plane with supertag up, creates the Workspace, Permission Set local-tools, Role Lead, and the Tag
 through its API, brings up the host service, which joins with its own credential, binds it to
 the Tag, and checks that each harness Worker registered. Run supertag in your terminal to talk
-to the lead Tag, or use supertag message tag from a script. init writes nothing in the repository.
+to the lead Tag. Select an Objective and press m to message it. init writes nothing in the repository.
 
 Rerunning shows the current setup. In another repository, init offers to add it as another
 Workspace of the same host service; it never starts a second Control Plane. Existing resources

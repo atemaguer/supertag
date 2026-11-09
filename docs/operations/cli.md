@@ -534,7 +534,8 @@ Rules:
 
 - There is no `resume task` command. `resume worker-host` only returns a deliberately drained
   host to scheduling.
-- Answer a question or redirect the work with `supertag message objective cli-demo TEXT`.
+- Answer a question under **Waiting on you** in the terminal UI. To redirect the work, select
+  `cli-demo` under **Objectives**, press `m`, type your direction, and press Enter.
 
 ## 7. Inspect continuity and the artifact
 

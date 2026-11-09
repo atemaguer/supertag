@@ -574,11 +574,13 @@ describe("describe objective", () => {
     expect(text).toContain(`Branch ${BRANCH} in Workspace product, 3 changed files`);
     expect(text).toContain("The owner submitted the Objective for review.");
     expect(text).toContain(`Approve: supertag approve objective ${OBJECTIVE}`);
-    expect(text).toContain(`Ask for changes: supertag message objective ${OBJECTIVE} TEXT`);
+    expect(text).toContain(
+      "To ask for changes, open supertag in a terminal, select this Objective, and press m.",
+    );
     expect(text).toContain("Work: 2 Sessions");
   });
 
-  it("shows the owner's question in full, with the command that answers it", () => {
+  it("shows the owner's question in full and directs the operator to the terminal UI", () => {
     const question = `Which region first?\n\n${"Detail. ".repeat(30)}`;
     const text = formatObjectiveOverview(
       overviewViewOf(
@@ -598,7 +600,7 @@ describe("describe objective", () => {
     );
     expect(text).toContain('planner asks: "Which region first?');
     expect(text).toContain("Detail. Detail.");
-    expect(text).toContain(`supertag message objective ${OBJECTIVE} TEXT`);
+    expect(text).toContain("Open supertag in a terminal and answer under Waiting on you.");
   });
 
   it("says nothing was delivered for a closed Objective and keeps the follow-up commands", () => {

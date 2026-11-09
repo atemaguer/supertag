@@ -188,9 +188,9 @@ other: a person mentions the Tag once in the operator conversation through a con
 ### Questions from an Objective
 
 An Objective asks a person a question with `ask`. The question posts to the Objective's thread and
-appears under `supertag list inbox --kind question`. Answer it by replying in that thread or with
-`supertag message objective ID TEXT`; the answer starts the Objective's next turn and clears the
-inbox item.
+appears in **Waiting on you** in the terminal UI. Select the question, type your answer, and
+press Enter. You can also reply in the home thread. The answer starts the Objective's next turn
+and clears the inbox item.
 
 ### Delivery status
 

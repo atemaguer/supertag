@@ -175,8 +175,10 @@ mktemp
 ```
 
 The agent writes the quoted question and answer above to the returned path with its
-file-writing tool, without putting the text in a shell command. It replaces `PATH_FROM_MKTEMP`
-with that path, then runs:
+file-writing tool. For new integrations, call
+[`InboxService.AnswerQuestion`](../reference/operator-api/inbox.md#answerquestion).
+During migration, the deprecated CLI command still accepts standard input and returns JSON.
+Replace `PATH_FROM_MKTEMP` with the returned path before running it.
 
 ```sh
 message_file='PATH_FROM_MKTEMP'

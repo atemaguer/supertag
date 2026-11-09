@@ -861,9 +861,9 @@ without a grant; across Teams, a grant records that a recipient accepts messages
 Delivery grants no execution authority. See [Mailbox](coordination.md#mailbox) and
 [Send messages between Tags](../guides/tag-messaging.md).
 
-An Objective talks with people in its home thread: `supertag message objective` and a reply in
-that thread deliver its next turn, and `ask` puts its question to a person. Neither a message nor
-a reply grants authority or changes a budget. See
+A message from the terminal UI or a reply in the Objective's home thread delivers its next
+turn. The owner uses `ask` to put a question to a person. A message grants no authority and
+changes no budget. See
 [Operator messages](coordination.md#operator-messages).
 
 A harness exposes these tools only to its root harness actor. Native subagents acquire no Tag
