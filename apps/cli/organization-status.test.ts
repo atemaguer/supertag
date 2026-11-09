@@ -1,15 +1,13 @@
+import { create, toJson } from "@bufbuild/protobuf";
 import type { Objective, Tag, TaskAttempt } from "@supertag/core";
+import { OrganizationOverviewSchema } from "@supertag/operator-api";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fakeOperatorRpc } from "../../tests/support/fake-operator-rpc.js";
-import { ControlPlaneClient } from "./src/control-plane-client.js";
 import type { WorkerHostResource } from "./src/control-plane-resources.js";
 import { main } from "./src/index.js";
-import {
-  formatOrganizationStatus,
-  type OrganizationStatus,
-  organizationStatus,
-  runStatusCommand,
-} from "./src/organization-status.js";
+import { organizationOverviewMessage } from "./src/organization-protos.js";
+import { formatOrganizationStatus, runStatusCommand } from "./src/organization-status.js";
+import { type OrganizationStatus, organizationStatus } from "./src/organization-views.js";
 
 const now = new Date("2026-10-03T03:00:00.000Z");
 
@@ -317,13 +315,12 @@ describe("supertag status", () => {
   });
 
   it("reads the organization and the operator inbox, and prints JSON", async () => {
-    const paths: string[] = [];
-    vi.spyOn(ControlPlaneClient.prototype, "request").mockImplementation(async (path) => {
-      paths.push(path);
-      if (path === "/api/v1/organization") return view as never;
-      throw new Error(`unexpected request ${path}`);
-    });
     const rpc = fakeOperatorRpc({
+      "OrganizationService/GetOrganization": () =>
+        toJson(
+          OrganizationOverviewSchema,
+          create(OrganizationOverviewSchema, organizationOverviewMessage(view)),
+        ),
       "InboxService/ListInboxItems": (body) =>
         body["pageToken"] === "page-2"
           ? {
@@ -347,7 +344,17 @@ describe("supertag status", () => {
     const output = JSON.parse(
       await runStatusCommand({ url: "http://localhost", token: "t" }, ["--output", "json"]),
     );
-    expect(paths).toEqual(["/api/v1/organization"]);
+    expect(rpc.called("OrganizationService/GetOrganization")).toHaveLength(1);
+    // The overview prints exactly as the Control Plane built it, field order included.
+    const { inbox: _inbox, objectives, ...rest } = output;
+    expect(
+      JSON.stringify({
+        ...rest,
+        objectives: objectives.map(
+          ({ needsOperator: _needs, ...objective }: { needsOperator: number }) => objective,
+        ),
+      }),
+    ).toBe(JSON.stringify(view));
     expect(rpc.called("InboxService/ListInboxItems").map(({ body }) => body)).toEqual([
       { pageSize: 100 },
       { pageToken: "page-2", pageSize: 100 },

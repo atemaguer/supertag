@@ -1,4 +1,5 @@
 import { expect, it, vi } from "vitest";
+import { workerHostJson } from "../../tests/support/fake-host-rpc.js";
 import { fakeOperatorRpc } from "../../tests/support/fake-operator-rpc.js";
 import { fakeWorkRpc } from "../../tests/support/fake-work-rpc.js";
 import { ControlPlaneClient } from "./src/control-plane-client.js";
@@ -167,24 +168,37 @@ it("shows busy Tags and running attempts against host capacity", async () => {
     .mockResolvedValueOnce({
       items: [
         {
-          metadata: { id: "host-1", name: "laptop" },
-          status: {
-            connectionStatus: "connected",
-            workers: [{ id: "worker-1", type: "codex", maxConcurrency: 2 }],
-          },
+          metadata: { id: "tag-1", name: "builder" },
+          spec: { roles: [], workerHosts: ["host-1"] },
+          status: {},
         },
       ],
     });
-  const rpc = fakeWorkRpc([
-    {
-      metadata: { id: "task-1" },
-      spec: { tagId: "tag-1" },
-      status: {
-        phase: "running",
-        attempt: { phase: "running", workerHostId: "host-1", workerId: "worker-1" },
+  const rpc = fakeWorkRpc(
+    [
+      {
+        metadata: { id: "task-1" },
+        spec: { tagId: "tag-1" },
+        status: {
+          phase: "running",
+          attempt: { phase: "running", workerHostId: "host-1", workerId: "worker-1" },
+        },
       },
+    ],
+    {
+      "HostService/ListWorkerHosts": () => ({
+        workerHosts: [
+          workerHostJson({
+            metadata: { id: "host-1", name: "laptop" },
+            status: {
+              connectionStatus: "connected",
+              workers: [{ id: "worker-1", type: "codex", maxConcurrency: 2 }],
+            },
+          }),
+        ],
+      }),
     },
-  ]);
+  );
   try {
     expect(await runListCommand(target, ["tag"])).toContain("task-1");
     expect(await runListCommand(target, ["worker-host"])).toContain("codex 1/2");

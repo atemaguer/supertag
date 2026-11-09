@@ -74,7 +74,7 @@ export class AuditTrail {
     reportSafely(this.#onError, error);
   }
 
-  /** Waits for every entry recorded so far to reach the database, so a read sees them. */
+  /** Waits for every entry recorded so far to reach the database. */
   async settled(): Promise<void> {
     await Promise.allSettled([...this.#pending]);
   }
@@ -160,10 +160,9 @@ const ROUTES: readonly Route[] = [
     (match, _method, dryRun) => {
       const collection = match[1] as string;
       const kind = RESOURCE_PATHS[collection];
-      if (kind !== undefined)
-        return { action: `apply${dryRun}`, target: kind, route: `/api/v1/${collection}` };
-      const created = CREATE_ROUTES[collection];
-      return created === undefined ? undefined : { ...created, route: `/api/v1/${collection}` };
+      return kind === undefined
+        ? undefined
+        : { action: `apply${dryRun}`, target: kind, route: `/api/v1/${collection}` };
     },
   ],
   [
@@ -183,24 +182,6 @@ const ROUTES: readonly Route[] = [
   ],
   [
     "POST",
-    /^\/api\/v1\/operator-tokens\/([^/]+)\/revoke$/u,
-    (match) => ({
-      action: "operator-token.revoke",
-      target: named("OperatorToken", id(match)),
-      route: "/api/v1/operator-tokens/{name}/revoke",
-    }),
-  ],
-  [
-    "POST",
-    /^\/api\/v1\/auth-keys\/([^/]+)\/revoke$/u,
-    (match) => ({
-      action: "auth-key.revoke",
-      target: named("AuthKey", id(match)),
-      route: "/api/v1/auth-keys/{name}/revoke",
-    }),
-  ],
-  [
-    "POST",
     /^\/api\/v1\/apply-sets\/([^/]+)\/prune$/u,
     (match, _method, dryRun) => ({
       action: `prune${dryRun}`,
@@ -208,43 +189,7 @@ const ROUTES: readonly Route[] = [
       route: "/api/v1/apply-sets/{name}/prune",
     }),
   ],
-  [
-    undefined,
-    /^\/api\/v1\/worker-hosts\/([^/]+)\/credential$/u,
-    (match, method) => ({
-      action:
-        method === "DELETE" ? "worker-host.credential.revoke" : "worker-host.credential.rotate",
-      target: named("WorkerHost", id(match)),
-      route: "/api/v1/worker-hosts/{id}/credential",
-    }),
-  ],
-  [
-    "POST",
-    /^\/api\/v1\/worker-hosts\/([^/]+)\/(drain|resume)$/u,
-    (match) => ({
-      action: `worker-host.${match[2]}`,
-      target: named("WorkerHost", id(match)),
-      route: `/api/v1/worker-hosts/{id}/${match[2]}`,
-    }),
-  ],
-  [
-    undefined,
-    /^\/api\/v1\/tags\/([^/]+)\/worker-hosts\/[^/]+$/u,
-    (match, method) => ({
-      action: method === "DELETE" ? "tag.worker-host.remove" : "tag.worker-host.add",
-      target: named("Tag", id(match)),
-      route: "/api/v1/tags/{name}/worker-hosts/{id}",
-    }),
-  ],
 ];
-
-const CREATE_ROUTES: Readonly<Record<string, AuditNote>> = {
-  "operator-tokens": { action: "operator-token.create", target: "OperatorToken" },
-  "auth-keys": { action: "auth-key.create", target: "AuthKey" },
-  "worker-hosts": { action: "worker-host.enroll", target: "WorkerHost" },
-  "surface-enrollments": { action: "surface.enroll", target: "SurfaceAccount" },
-  "tag-operations": { action: "tag.operation", target: "Tag" },
-};
 
 /**
  * The action, target, and route template a management write performs, from its method and route
@@ -268,9 +213,6 @@ export function classifyManagementRequest(method: string, url: URL): AuditNote {
  */
 export function noteRequestBody(note: AuditNote | undefined, body: unknown): void {
   if (note === undefined || note.target.includes("/")) return;
-  // A Tag operation's or surface enrollment's `metadata.id` is a request ID, not the resource the
-  // request changes, so it is never confirmed and stays out of the target.
-  if (note.action === "tag.operation" || note.action === "surface.enroll") return;
   const document = Array.isArray(body) ? body[0] : body;
   if (typeof document !== "object" || document === null) return;
   const metadata = (document as Record<string, unknown>)["metadata"];

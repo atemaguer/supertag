@@ -6,17 +6,23 @@ import type {
   TaskExecutionPlacementReport,
 } from "@supertag/control-plane";
 import type {
+  AuthKey,
+  ConnectedSurfaceProvider,
   CreateObjectiveInput,
   CreateTeamInput,
   Objective,
+  OperatorToken,
   ResolvedArtifactTransfer,
   Store,
+  SurfaceAccount,
   TagMessagingGrant,
   Task,
   Team,
   UpdateObjectiveStatusInput,
   UpdateTeamInput,
+  WorkerHost,
 } from "@supertag/core";
+import type { VerifiedSurfaceAccount } from "@supertag/surface-sdk";
 
 /**
  * What an operator RPC does to the Organization's state. `read` changes nothing. `data_write`
@@ -53,6 +59,34 @@ export const OPERATOR_RPC_CLASSES: Readonly<Record<string, OperatorRpcClass>> = 
   "supertag.operator.v1.ObjectiveService/PauseObjective": "control",
   "supertag.operator.v1.ObjectiveService/ResumeObjective": "control",
   "supertag.operator.v1.OrganizationService/GetStatus": "read",
+  "supertag.operator.v1.OrganizationService/GetOrganization": "read",
+  "supertag.operator.v1.OrganizationService/GetSpend": "read",
+  "supertag.operator.v1.OrganizationService/ListAuditEntries": "read",
+  "supertag.operator.v1.OrganizationService/GetMetrics": "read",
+  "supertag.operator.v1.HostService/ListWorkerHosts": "read",
+  "supertag.operator.v1.HostService/GetWorkerHost": "read",
+  "supertag.operator.v1.HostService/EnrollWorkerHost": "control",
+  "supertag.operator.v1.HostService/RotateWorkerHostCredential": "control",
+  "supertag.operator.v1.HostService/RevokeWorkerHostCredential": "control",
+  "supertag.operator.v1.HostService/DrainWorkerHost": "control",
+  "supertag.operator.v1.HostService/ResumeWorkerHost": "control",
+  "supertag.operator.v1.HostService/BindWorkerHost": "control",
+  "supertag.operator.v1.HostService/UnbindWorkerHost": "control",
+  "supertag.operator.v1.HostService/CreateAuthKey": "control",
+  "supertag.operator.v1.HostService/ListAuthKeys": "read",
+  "supertag.operator.v1.HostService/GetAuthKey": "read",
+  "supertag.operator.v1.HostService/RevokeAuthKey": "control",
+  "supertag.operator.v1.AccessService/CreateOperatorToken": "control",
+  "supertag.operator.v1.AccessService/ListOperatorTokens": "read",
+  "supertag.operator.v1.AccessService/GetOperatorToken": "read",
+  "supertag.operator.v1.AccessService/RevokeOperatorToken": "control",
+  "supertag.operator.v1.SurfaceService/SetUpSurface": "control",
+  "supertag.operator.v1.SurfaceService/ListSurfaceAccounts": "read",
+  "supertag.operator.v1.SurfaceService/GetSurfaceAccount": "read",
+  "supertag.operator.v1.SurfaceService/AddTagLocation": "control",
+  "supertag.operator.v1.SurfaceService/RemoveTagLocation": "control",
+  "supertag.operator.v1.SurfaceService/ActivateSet": "control",
+  "supertag.operator.v1.SurfaceService/DeactivateSet": "control",
   "supertag.operator.v1.WorkService/ListTasks": "read",
   "supertag.operator.v1.WorkService/GetTask": "read",
   "supertag.operator.v1.WorkService/ListTaskEvents": "read",
@@ -84,29 +118,43 @@ export function operatorRpcClass(method: DescMethod): OperatorRpcClass | undefin
 
 /** The store reads operator RPC handlers make. None of them changes state. */
 export const OPERATOR_READ_STORE_METHODS = [
+  "findAuthKeyByName",
   "findCapturedArtifact",
   "findInboundEventById",
+  "findOperatorTokenByName",
   "findOutboundReply",
   "findSessionById",
   "findSessionByTagAndKey",
   "findSessionState",
+  "findSurfaceAccount",
+  "findSurfaceAccountByName",
   "findTagById",
   "findTagByName",
   "findTaskById",
   "findWorkSessionReport",
+  "findWorkerHostById",
   "getObjective",
   "getTeam",
   "hasArtifactUpload",
   "listApprovalRequests",
   "listArtifactStorageLocations",
   "listArtifactVolumeLocations",
+  "listAuditEntries",
+  "listAuthKeys",
   "listCapturedArtifacts",
+  "listObjectiveSessions",
   "listObjectives",
+  "listOpenObjectives",
+  "listOperatorTokens",
+  "listRunningTaskAttempts",
   "listSessionStates",
   "listSessionTaskIds",
   "listSessions",
+  "listSurfaceAccounts",
   "listTagMessageHistory",
   "listTagMessagingGrants",
+  "listTagWorkerHostBindings",
+  "listTags",
   "listTaskAttempts",
   "listTaskEvents",
   "listTasks",
@@ -116,6 +164,8 @@ export const OPERATOR_READ_STORE_METHODS = [
   "listVolumes",
   "listWorkSessions",
   "listWorkerHosts",
+  "readCoordinationMetrics",
+  "readSpend",
   "sessionTaskSummaries",
 ] as const satisfies readonly (keyof Store)[];
 
@@ -164,6 +214,36 @@ export interface OperatorQueries {
   readonly readObjectiveOverview: ObjectiveController["readObjectiveOverview"];
   readonly objectiveRunnable: ObjectiveController["objectiveRunnable"];
   readonly controlPlaneStatus: () => Promise<ControlPlaneStatus>;
+  /**
+   * Every Worker Host: the stored ones, or the embedded Worklet's own host when the Control Plane
+   * runs one that is not scheduled through the store.
+   */
+  readonly listWorkerHosts: () => Promise<readonly WorkerHost[]>;
+}
+
+/**
+ * A place on a collaboration surface, as `SurfaceService` names it. Set the fields the provider
+ * needs; `account` selects the Surface Account by ID, external account ID or manifest name.
+ */
+export interface OperatorSurfaceLocation {
+  readonly provider: ConnectedSurfaceProvider;
+  readonly account?: string;
+  readonly channelId?: string;
+  readonly chatId?: string;
+  readonly teamId?: string;
+  readonly team?: string;
+  readonly repoId?: string;
+  readonly repo?: string;
+}
+
+/** A location resolved on its Surface Account. */
+export interface ResolvedSurfaceLocation {
+  readonly tag: { readonly id: string; readonly name: string };
+  readonly provider: ConnectedSurfaceProvider;
+  /** The location for people, such as a Slack channel ID or `chat oc_123`. */
+  readonly location: string;
+  readonly surfaceAccountId: string;
+  readonly accountDisplayName: string;
 }
 
 /**
@@ -271,4 +351,67 @@ export interface OperatorControl {
   readonly revokeMailbox: (
     grant: TagMessagingGrant,
   ) => Promise<{ readonly grant: TagMessagingGrant; readonly changed: boolean }>;
+  /** Enrolls a Worker Host under a new ID; an ID already enrolled is refused as `AlreadyExists`. */
+  readonly enrollWorkerHost: (
+    id: string,
+  ) => Promise<{ readonly workerHost: WorkerHost; readonly token: string }>;
+  /**
+   * Replaces a Worker Host's credential while its revision is still the expected one, so a
+   * repeat of a rotation that applied is refused as stale and changes nothing.
+   */
+  readonly rotateWorkerHostCredential: (input: {
+    readonly id: string;
+    readonly expectedCredentialRevision: number;
+  }) => Promise<{ readonly workerHost: WorkerHost; readonly token: string }>;
+  /** Revokes a Worker Host; revoking a revoked host returns it unchanged. */
+  readonly revokeWorkerHostCredential: (id: string) => Promise<WorkerHost>;
+  /** Drains or resumes a Worker Host; setting what it already has changes nothing. */
+  readonly setWorkerHostDraining: (input: {
+    readonly id: string;
+    readonly draining: boolean;
+  }) => Promise<WorkerHost>;
+  /** Binds or unbinds a Worker Host and a Tag; `changed` is false when it already was so. */
+  readonly setTagWorkerHost: (input: {
+    readonly tagId: string;
+    readonly workerHostId: string;
+    readonly bound: boolean;
+  }) => Promise<{ readonly workerHostIds: readonly string[]; readonly changed: boolean }>;
+  /** Creates an Auth Key; a name already used is refused as `AlreadyExists`. */
+  readonly createAuthKey: (input: {
+    readonly name: string;
+    readonly tags: readonly string[];
+    readonly labels: readonly string[];
+    readonly reusable: boolean;
+    readonly ephemeral: boolean;
+  }) => Promise<{ readonly authKey: AuthKey; readonly secret: string }>;
+  /** Revokes an Auth Key; revoking a revoked key returns it. Undefined when there is none. */
+  readonly revokeAuthKey: (name: string) => Promise<AuthKey | undefined>;
+  /** Creates an Operator Token; a name already used is refused as `AlreadyExists`. */
+  readonly createOperatorToken: (
+    name: string,
+  ) => Promise<{ readonly operatorToken: OperatorToken; readonly secret: string }>;
+  /** Revokes an Operator Token; revoking a revoked token returns it. Undefined when there is none. */
+  readonly revokeOperatorToken: (name: string) => Promise<OperatorToken | undefined>;
+  /**
+   * Saves a verified Surface Account and its credentials, updating the account with the same
+   * provider and external account ID in place.
+   */
+  readonly setUpSurface: (verified: VerifiedSurfaceAccount) => Promise<SurfaceAccount>;
+  /**
+   * Adds or removes a Tag's location; `changed` is false when the Tag already had it, or did not.
+   * Removing a location also deactivates every set activated there.
+   */
+  readonly setTagLocation: (input: {
+    readonly tag: string;
+    readonly location: OperatorSurfaceLocation;
+    readonly present: boolean;
+  }) => Promise<ResolvedSurfaceLocation & { readonly changed: boolean }>;
+  /** Activates or deactivates a Context Set or Permission Set in one of a Tag's locations. */
+  readonly setSetActivation: (input: {
+    readonly kind: "context-set" | "permission-set";
+    readonly set: string;
+    readonly tag: string;
+    readonly location: OperatorSurfaceLocation;
+    readonly active: boolean;
+  }) => Promise<ResolvedSurfaceLocation & { readonly set: string }>;
 }

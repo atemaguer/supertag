@@ -7,12 +7,19 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ManagementAuditEvent } from "../apps/cli/src/control-plane-api.ts";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
+import { operatorTokenView } from "../apps/cli/src/host-protos.ts";
 import { runObjectiveCommand } from "../apps/cli/src/objectives.ts";
 import {
+  accessClient,
+  hostClient,
   inboxClient,
   objectiveClient,
   organizationClient,
 } from "../apps/cli/src/operator-client.ts";
+import {
+  getOperatorTokenResource,
+  listOperatorTokenResources,
+} from "../apps/cli/src/operator-resources.ts";
 import { runResourceCommand } from "../apps/cli/src/resources.ts";
 import { objectiveSessionKey } from "../packages/core/src/index.ts";
 import {
@@ -34,12 +41,6 @@ async function refusal(url: string, token: string): Promise<ConnectError> {
       },
       (error: unknown) => ConnectError.from(error),
     );
-}
-
-interface IssuedToken {
-  readonly secret: string;
-  readonly metadata: { readonly name: string; readonly createdAt: string };
-  readonly status: Record<string, unknown>;
 }
 
 describe("Operator Token API", () => {
@@ -78,74 +79,74 @@ describe("Operator Token API", () => {
           ...init.headers,
         },
       });
-    const create = (token: string, name: string) =>
-      call(token, "/api/v1/operator-tokens", {
-        method: "POST",
-        body: JSON.stringify({
-          apiVersion: "supertag/v1",
-          kind: "OperatorToken",
-          metadata: { name },
-          spec: {},
-        }),
-      });
-    return { url: started.url, store, audit, call, create, directory };
+    const access = (token: string) => accessClient({ url: started.url, token });
+    const create = async (token: string, name: string) => {
+      const created = await access(token).createOperatorToken({ name });
+      return { secret: created.secret, ...operatorTokenView(created.operatorToken as never) };
+    };
+    return { url: started.url, store, audit, call, create, access, directory };
   }
 
   it("issues a token once, lists it without the secret, and refuses it once revoked", async () => {
-    const { url, call, create, store } = await runtime();
-    expect((await fetch(`${url}/api/v1/operator-tokens`)).status).toBe(401);
-    expect((await create(ADMIN, "Not Valid")).status).toBe(400);
+    const { url, access, create, store } = await runtime();
+    await expect(accessClient({ url }).listOperatorTokens({})).rejects.toMatchObject({
+      code: Code.Unauthenticated,
+    });
+    await expect(create(ADMIN, "Not Valid")).rejects.toMatchObject({
+      code: Code.InvalidArgument,
+    });
 
-    const created = await create(ADMIN, "laptop-2");
-    expect(created.status).toBe(201);
-    expect(created.headers.get("cache-control")).toBe("no-store");
-    const issued = (await created.json()) as IssuedToken;
+    const issued = await create(ADMIN, "laptop-2");
     expect(issued.secret).toMatch(/^stop_[a-f0-9]{64}$/u);
     expect(issued.status).toMatchObject({ phase: "active", operatorId: "token:laptop-2" });
     expect(
       Date.parse(String(issued.status["expiresAt"])) - Date.parse(issued.metadata.createdAt),
     ).toBe(90 * 24 * 60 * 60_000);
-    expect((await create(ADMIN, "laptop-2")).status).toBe(409);
+    await expect(create(ADMIN, "laptop-2")).rejects.toMatchObject({ code: Code.AlreadyExists });
 
     // The token works for ordinary management and records when it was last used.
     await expect(
       organizationClient({ url, token: issued.secret }).getStatus({}),
     ).resolves.toMatchObject({ phase: ControlPlanePhase.ACCEPTING });
-    const listed = await call(ADMIN, "/api/v1/operator-tokens");
-    const listText = await listed.text();
+    const listed = await listOperatorTokenResources({ url, token: ADMIN });
+    const listText = JSON.stringify(listed);
     expect(listText).not.toContain(issued.secret);
     expect(listText).not.toContain("secretDigest");
-    const [item] = (JSON.parse(listText) as { items: IssuedToken[] }).items;
+    const [item] = listed.items;
     expect(item?.metadata.name).toBe("laptop-2");
-    expect(item?.status["lastUsedAt"]).toEqual(expect.any(String));
+    expect(item?.status.lastUsedAt).toEqual(expect.any(String));
     expect(item).not.toHaveProperty("secret");
-    expect(
-      (await (await call(ADMIN, "/api/v1/operator-tokens/laptop-2")).json()) as IssuedToken,
-    ).toMatchObject({ metadata: { name: "laptop-2" }, status: { phase: "active" } });
+    await expect(
+      getOperatorTokenResource({ url, token: ADMIN }, "laptop-2"),
+    ).resolves.toMatchObject({ metadata: { name: "laptop-2" }, status: { phase: "active" } });
 
     // Only the hash is stored.
     const [row] = await store.listOperatorTokens();
     expect(JSON.stringify(row)).not.toContain(issued.secret);
 
-    const revoked = await call(ADMIN, "/api/v1/operator-tokens/laptop-2/revoke", {
-      method: "POST",
-    });
-    expect(revoked.status).toBe(200);
-    expect(((await revoked.json()) as IssuedToken).status["phase"]).toBe("revoked");
+    const revoked = operatorTokenView(
+      await access(ADMIN).revokeOperatorToken({ name: "laptop-2" }),
+    );
+    expect(revoked.status.phase).toBe("revoked");
+    // Revoking a revoked token returns it.
+    expect(
+      operatorTokenView(await access(ADMIN).revokeOperatorToken({ name: "laptop-2" })).status
+        .revokedAt,
+    ).toBe(revoked.status.revokedAt);
     const refused = await refusal(url, issued.secret);
     expect(refused.code).toBe(Code.Unauthenticated);
     expect(refused.rawMessage).toContain("was revoked");
     expect(refused.findDetails(ErrorDetailSchema)).toMatchObject([
       { reason: ErrorReason.CREDENTIAL_REVOKED },
     ]);
-    expect(
-      (await call(ADMIN, "/api/v1/operator-tokens/missing/revoke", { method: "POST" })).status,
-    ).toBe(404);
+    await expect(access(ADMIN).revokeOperatorToken({ name: "missing" })).rejects.toMatchObject({
+      code: Code.NotFound,
+    });
   });
 
   it("rejects malformed, unknown, and expired tokens without leaking which", async () => {
     const { url, create, store } = await runtime();
-    const issued = (await (await create(ADMIN, "expiring")).json()) as IssuedToken;
+    const issued = await create(ADMIN, "expiring");
     expect((await refusal(url, "stop_not-a-token")).code).toBe(Code.Unauthenticated);
     // A well-formed secret with a valid lookup part but the wrong remainder is invalid.
     const forged = await refusal(url, `${issued.secret.slice(0, 21)}${"0".repeat(48)}`);
@@ -167,16 +168,21 @@ describe("Operator Token API", () => {
   });
 
   it("lets only the admin token manage Operator Tokens", async () => {
-    const { call, create } = await runtime();
-    const issued = (await (await create(ADMIN, "teammate")).json()) as IssuedToken;
-    expect((await create(issued.secret, "another")).status).toBe(403);
-    expect((await call(issued.secret, "/api/v1/operator-tokens")).status).toBe(403);
-    expect(
-      (await call(issued.secret, "/api/v1/operator-tokens/teammate/revoke", { method: "POST" }))
-        .status,
-    ).toBe(403);
+    const { url, call, create, access } = await runtime();
+    const issued = await create(ADMIN, "teammate");
+    const denied = { code: Code.PermissionDenied };
+    await expect(create(issued.secret, "another")).rejects.toMatchObject(denied);
+    await expect(access(issued.secret).listOperatorTokens({})).rejects.toMatchObject(denied);
+    await expect(
+      access(issued.secret).getOperatorToken({ name: "teammate" }),
+    ).rejects.toMatchObject(denied);
+    await expect(
+      access(issued.secret).revokeOperatorToken({ name: "teammate" }),
+    ).rejects.toMatchObject(denied);
     // Everything else the admin token reaches is open to it, including Auth Keys and applies.
-    expect((await call(issued.secret, "/api/v1/auth-keys")).status).toBe(200);
+    await expect(hostClient({ url, token: issued.secret }).listAuthKeys({})).resolves.toMatchObject(
+      { authKeys: [] },
+    );
     const tag = await call(issued.secret, "/api/v1/tags", {
       method: "POST",
       body: JSON.stringify({
@@ -191,7 +197,7 @@ describe("Operator Token API", () => {
 
   it("attributes approvals, messages, cancellations, and applies to token:NAME", async () => {
     const { url, create, store, audit, directory } = await runtime();
-    const issued = (await (await create(ADMIN, "laptop-2")).json()) as IssuedToken;
+    const issued = await create(ADMIN, "laptop-2");
     const owner = await store.createTag({ name: "owner" });
     await store.bindTagWorkerHost(owner.id, "control-plane-static-host");
     const team = await store.createTeam({
@@ -269,7 +275,9 @@ describe("Operator Token API", () => {
     expect(audit).toContainEqual(
       expect.objectContaining({
         actor: "control-plane-break-glass",
-        path: "/api/v1/operator-tokens",
+        action: "operator-token.create",
+        target: "OperatorToken/laptop-2",
+        path: "/supertag.operator.v1.AccessService/CreateOperatorToken",
       }),
     );
   });

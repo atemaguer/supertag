@@ -5,6 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { main } from "../apps/cli/src/index.ts";
+import {
+  getSurfaceAccountResource,
+  listSurfaceAccountResources,
+} from "../apps/cli/src/operator-resources.ts";
 import { applyManifests } from "../apps/cli/src/resources.ts";
 import { DrizzleStore } from "../packages/store/src/index.ts";
 import type { VerifiedSurfaceAccount } from "../packages/surfaces/sdk/src/index.ts";
@@ -142,10 +146,7 @@ describe("SurfaceAccount manifests", () => {
     );
     expect(slackCalls).toEqual([{ method: "auth.test", token: BOT }]);
 
-    const resource = await client.request<{
-      metadata: Record<string, unknown>;
-      spec: Record<string, unknown>;
-    }>("/api/v1/surface-accounts/acme-slack");
+    const resource = await getSurfaceAccountResource(client.operator, "acme-slack");
     expect(resource.metadata["name"]).toBe("acme-slack");
     expect(resource.spec).toMatchObject({
       provider: "slack",
@@ -279,9 +280,7 @@ ${permission}`;
   it("skips the provider when nothing changed and verifies and stores a rotated value", async () => {
     const path = await write("slack.yaml", account());
     await run("apply", "-f", path);
-    const first = await client.request<{ metadata: { resourceVersion: string } }>(
-      "/api/v1/surface-accounts/acme-slack",
-    );
+    const first = await getSurfaceAccountResource(client.operator, "acme-slack");
 
     expect(await run("apply", "-f", path)).toBe(
       "SurfaceAccount/acme-slack configured; credentials unchanged\n",
@@ -289,11 +288,7 @@ ${permission}`;
     expect(slackCalls).toHaveLength(1);
     // Nothing was rewritten, so surface runtimes keep running.
     expect(
-      (
-        await client.request<{ metadata: { resourceVersion: string } }>(
-          "/api/v1/surface-accounts/acme-slack",
-        )
-      ).metadata.resourceVersion,
+      (await getSurfaceAccountResource(client.operator, "acme-slack")).metadata.resourceVersion,
     ).toBe(first.metadata.resourceVersion);
 
     // Rotating the referenced value is detected at apply, verified, and stored.
@@ -387,9 +382,7 @@ spec:
       "SurfaceAccount/acme-slack: provider verification failed: Slack auth.test failed: invalid_auth",
     );
     expect(message).not.toContain("xoxb-rejected");
-    expect((await client.request<{ items: unknown[] }>("/api/v1/surface-accounts")).items).toEqual(
-      [],
-    );
+    expect((await listSurfaceAccountResources(client.operator)).items).toEqual([]);
     expect((await client.request<{ items: unknown[] }>("/api/v1/tags")).items).toEqual([]);
 
     // Unset references fail the same way, naming the reference.
@@ -490,9 +483,7 @@ spec:
     );
     expect(resolved.toSorted()).toEqual(["slack-app", "slack-bot"]);
     expect(verified).toEqual([{ appToken: "xapp-from-resolver", botToken: "xoxb-from-resolver" }]);
-    expect(
-      (await client.request<{ spec: unknown }>("/api/v1/surface-accounts/acme-slack")).spec,
-    ).toMatchObject({
+    expect((await getSurfaceAccountResource(client.operator, "acme-slack")).spec).toMatchObject({
       secrets: { appToken: { secretRef: "slack-app" }, botToken: { secretRef: "slack-bot" } },
     });
 
@@ -549,9 +540,7 @@ spec:
       ].join("\n"),
     );
     expect(JSON.stringify(await vault())).not.toContain(BOT);
-    expect((await client.request<{ items: unknown[] }>("/api/v1/surface-accounts")).items).toEqual(
-      [],
-    );
+    expect((await listSurfaceAccountResources(client.operator)).items).toEqual([]);
     expect(await fail("get", "surface", "acme-slack")).toContain("does not exist");
 
     // Applying the manifest again reconnects the same provider account under the name.
@@ -575,9 +564,7 @@ spec:
     expect(await run("apply", "-f", remaining, "--set", "team", "--prune")).toBe(
       "Tag/builder configured\nSurfaceAccount/acme-slack deleted\n",
     );
-    expect((await client.request<{ items: unknown[] }>("/api/v1/surface-accounts")).items).toEqual(
-      [],
-    );
+    expect((await listSurfaceAccountResources(client.operator)).items).toEqual([]);
   });
 
   it("adopts an account set up interactively and refuses to move a name to another account", async () => {
@@ -595,13 +582,9 @@ spec:
     );
     expect(await run("get", "surface", "--output", "yaml")).toBe("");
 
-    const before = await client.request<{ metadata: { id: string } }>(
-      "/api/v1/surface-accounts/slack:T123",
-    );
+    const before = await getSurfaceAccountResource(client.operator, "slack:T123");
     await run("apply", "-f", await write("slack.yaml", account()));
-    const adopted = await client.request<{ metadata: { id: string } }>(
-      "/api/v1/surface-accounts/acme-slack",
-    );
+    const adopted = await getSurfaceAccountResource(client.operator, "acme-slack");
     expect(adopted.metadata.id).toBe(before.metadata.id);
     expect(JSON.stringify(await vault())).not.toContain("xoxb-interactive");
 

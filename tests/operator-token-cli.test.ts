@@ -11,8 +11,11 @@ import { normalizeActionFirstCommand } from "../apps/cli/src/action-command.ts";
 import { resolveControlPlaneTarget } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { main } from "../apps/cli/src/index.ts";
+import { accessClient } from "../apps/cli/src/operator-client.ts";
 import { runOperatorTokenCommand } from "../apps/cli/src/operator-tokens.ts";
 import { migrateSqlite } from "./support/database.ts";
+import { fakeOperatorRpc } from "./support/fake-operator-rpc.ts";
+import { issueOperatorToken } from "./support/operator-access.ts";
 
 const CONTROL_PLANE = "https://control.example.com";
 const SECRET = `stop_${"b".repeat(64)}`;
@@ -60,34 +63,26 @@ describe("Operator Token commands", () => {
   });
 
   it("creates a token, prints the secret once, and never takes a flag for it", async () => {
-    const requests: { path: string; init?: RequestInit }[] = [];
-    const client = {
-      async request<T>(path: string, init?: RequestInit): Promise<T> {
-        requests.push({ path, ...(init ? { init } : {}) });
-        return {
-          apiVersion: "supertag/v1",
-          kind: "OperatorToken",
-          metadata: { id: "t", name: path.endsWith("/revoke") ? "laptop-2" : "laptop-2" },
-          spec: {},
-          status: {
-            phase: path.endsWith("/revoke") ? "revoked" : "active",
-            operatorId: "token:laptop-2",
-            expiresAt: "2026-12-30T00:00:00.000Z",
-          },
-          secret: SECRET,
-        } as T;
-      },
-    };
+    const token = (phase: string) => ({
+      metadata: { id: "t", name: "laptop-2", createdAt: "2026-10-01T00:00:00Z" },
+      phase,
+      operatorId: "token:laptop-2",
+      expiresAt: "2026-12-30T00:00:00Z",
+    });
+    const rpc = fakeOperatorRpc({
+      "AccessService/CreateOperatorToken": () => ({
+        operatorToken: token("OPERATOR_TOKEN_PHASE_ACTIVE"),
+        secret: SECRET,
+      }),
+      "AccessService/RevokeOperatorToken": () => token("OPERATOR_TOKEN_PHASE_REVOKED"),
+    });
+    const client = { operator: { url: CONTROL_PLANE, token: "admin" } };
     const output = await runOperatorTokenCommand(client, "create", ["laptop-2"], CONTROL_PLANE);
     expect(output.split(SECRET)).toHaveLength(2);
     expect(output).toContain("recorded as token:laptop-2");
+    expect(output).toContain("It expires at 2026-12-30T00:00:00.000Z.");
     expect(output).toContain(`supertag connect control-plane ${CONTROL_PLANE}`);
-    expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({
-      apiVersion: "supertag/v1",
-      kind: "OperatorToken",
-      metadata: { name: "laptop-2" },
-      spec: {},
-    });
+    expect(rpc.called("AccessService/CreateOperatorToken")[0]?.body).toEqual({ name: "laptop-2" });
     await expect(
       runOperatorTokenCommand(client, "create", ["laptop-2", "--expires", "1d"], CONTROL_PLANE),
     ).rejects.toThrow("Unknown option '--expires'");
@@ -97,7 +92,7 @@ describe("Operator Token commands", () => {
     await expect(
       runOperatorTokenCommand(client, "revoke", ["laptop-2"], CONTROL_PLANE),
     ).resolves.toContain("Revoked Operator Token laptop-2");
-    expect(requests.at(-1)?.path).toBe("/api/v1/operator-tokens/laptop-2/revoke");
+    expect(rpc.called("AccessService/RevokeOperatorToken")[0]?.body).toEqual({ name: "laptop-2" });
   });
 });
 
@@ -119,12 +114,7 @@ describe("a teammate connecting with an Operator Token", () => {
       await runtime.close();
       await rm(directory, { recursive: true, force: true });
     });
-    const created = await fetch(`${runtime.url}/api/v1/operator-tokens`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${ADMIN}`, "content-type": "application/json" },
-      body: JSON.stringify({ kind: "OperatorToken", metadata: { name: "laptop-2" } }),
-    });
-    const { secret } = (await created.json()) as { secret: string };
+    const secret = await issueOperatorToken(runtime.url, ADMIN, "laptop-2");
     return { url: runtime.url, secret, client: join(directory, "client") };
   }
 
@@ -168,10 +158,7 @@ describe("a teammate connecting with an Operator Token", () => {
 
   it("refuses a revoked token when connecting", async () => {
     const { url, secret, client } = await controlPlane();
-    await fetch(`${url}/api/v1/operator-tokens/laptop-2/revoke`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${ADMIN}` },
-    });
+    await accessClient({ url, token: ADMIN }).revokeOperatorToken({ name: "laptop-2" });
     vi.stubEnv("SUPERTAG_STATE_DIR", client);
     vi.stubEnv("SUPERTAG_ADMIN_TOKEN", "");
     vi.stubEnv("SUPERTAG_CONTROL_PLANE", undefined);

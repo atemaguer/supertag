@@ -15,6 +15,7 @@ import { connectNodeAdapter } from "@connectrpc/connect-node";
 import type { ChangeFeed } from "@supertag/control-plane";
 import { TagMessagingError } from "@supertag/core";
 import {
+  AccessService,
   action,
   allow_anonymous,
   allow_scoped_credential,
@@ -23,17 +24,22 @@ import {
   ErrorDetailSchema,
   ErrorReason,
   EventService,
+  HostService,
   InboxService,
   MailboxService,
   ObjectiveService,
   OrganizationService,
   requires_admin_token,
+  SurfaceService,
   TeamService,
   WorkService,
 } from "@supertag/operator-api";
+import type { RpcTelemetrySnapshot } from "@supertag/worker-transport";
+import { accessService } from "./access-rpc.js";
 import { type AuditTrail, auditTargetKind } from "./audit-trail.js";
 import { conversationService } from "./conversation-rpc.js";
 import { eventService } from "./event-rpc.js";
+import { hostService } from "./host-rpc.js";
 import { inboxService } from "./inbox-rpc.js";
 import { mailboxService } from "./mailbox-rpc.js";
 import type { MessageFollower } from "./message-follow.js";
@@ -55,6 +61,7 @@ import {
   operatorRpcClass,
 } from "./operator-seams.js";
 import { organizationService } from "./organization-rpc.js";
+import { surfaceService } from "./surface-rpc.js";
 import { teamService } from "./team-rpc.js";
 import { workService } from "./work-rpc.js";
 
@@ -96,6 +103,8 @@ export interface OperatorServices {
   readonly control: OperatorControl;
   readonly changes: ChangeFeed;
   readonly follows: MessageFollower;
+  /** The RPC counters of this API Server process, which `GetMetrics` reports as its own. */
+  readonly rpcTelemetry: () => RpcTelemetrySnapshot;
   /** Aborted once the API Server drains; open streams then end with `Unavailable`. */
   readonly draining: () => AbortSignal;
 }
@@ -138,12 +147,16 @@ export function createOperatorRpcHandler(
 
 /** Registers every operator service. Throws when an RPC has no class in `OPERATOR_RPC_CLASSES`. */
 export function registerOperatorRoutes(router: ConnectRouter, dependencies: OperatorServices) {
-  const { store, queries, writes, control, changes, follows, draining } = dependencies;
+  const { store, queries, writes, control, changes, follows, rpcTelemetry, draining } =
+    dependencies;
   router.service(ConversationService, conversationService({ store, control, follows, draining }));
   router.service(InboxService, inboxService({ store, queries, control }));
   router.service(ObjectiveService, objectiveService({ store, queries, control }));
   router.service(EventService, eventService({ changes, store, draining }));
-  router.service(OrganizationService, organizationService({ queries }));
+  router.service(OrganizationService, organizationService({ store, queries, rpcTelemetry }));
+  router.service(HostService, hostService({ store, queries, control }));
+  router.service(AccessService, accessService({ store, control }));
+  router.service(SurfaceService, surfaceService({ store, control }));
   router.service(WorkService, workService({ store, writes, control }));
   router.service(TeamService, teamService({ store, control }));
   router.service(MailboxService, mailboxService({ store, control }));
@@ -292,7 +305,9 @@ function authorization(): Interceptor {
 
 /**
  * Records one audit entry for each authenticated call to an RPC that declares `audit_action`, once
- * the RPC returns or fails. Refusals by the request gate are not recorded, as on the HTTP API.
+ * the RPC returns or fails, and stores it before answering, so any API Server process lists it to
+ * a call that begins after this one returned. Refusals by the request gate are not recorded, as on
+ * the HTTP API.
  */
 function auditing(auditTrail: Pick<AuditTrail, "record">): Interceptor {
   return (next) => async (request) => {
@@ -308,7 +323,7 @@ function auditing(auditTrail: Pick<AuditTrail, "record">): Interceptor {
       failure = ConnectError.from(error).code;
       throw error;
     } finally {
-      void auditTrail.record({
+      await auditTrail.record({
         at: new Date().toISOString(),
         actor: caller.principal.operatorId,
         action: auditAction,

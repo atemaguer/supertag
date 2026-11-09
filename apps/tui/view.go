@@ -245,13 +245,16 @@ func railState(tag client.Tag, open int) string {
 	return tag.Status.Phase
 }
 
+// renderStatus is the status line: the Control Plane, its Worker Hosts, how to switch to another
+// Control Plane when there is one, and whether it is reachable.
 func (m model) renderStatus() string {
-	target := m.client.Target()
-	where := terminalText(target.URL)
-	if target.Name != "" && target.Name != target.URL {
-		where = terminalText(target.Name) + " · " + where
+	left := " " + contextLabel(m.client.Target()) + "  "
+	if hosts := m.hostSummary(); hosts != "" {
+		left += hosts + "  "
 	}
-	left := " " + where + "  "
+	if m.switchable {
+		left += "ctrl+p Control Planes  "
+	}
 	state := okStyle.Render("connected")
 	if !m.connected {
 		status := strings.Join(strings.Fields(terminalText(m.status)), " ")

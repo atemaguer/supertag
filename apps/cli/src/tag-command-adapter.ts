@@ -754,7 +754,7 @@ function writePermissionActivations(
   }
 }
 
-interface ScopedValues {
+export interface ScopedValues {
   readonly actions?: string;
   readonly account?: string;
   readonly "chat-id"?: string;
@@ -804,7 +804,7 @@ function parseContextArtifactsCommand(args: readonly string[]): {
   };
 }
 
-function parseContextSurfaceCommand(args: readonly string[]): {
+export function parseContextSurfaceCommand(args: readonly string[]): {
   readonly tagName: string;
   readonly setName: string;
   readonly provider: SurfaceProvider;
@@ -864,7 +864,7 @@ function exactPositionals(
   return positionals.map((value, index) => required(value, `Argument ${index + 1}`));
 }
 
-function parseScopedCommand(
+export function parseScopedCommand(
   args: readonly string[],
   command: "add" | "allow" | "remove" | "revoke",
 ): {
@@ -1018,7 +1018,7 @@ function accountById(accounts: readonly SurfaceAccount[], id: string): SurfaceAc
   return accounts.find((account) => account.id === id);
 }
 
-function shellWord(value: string): string {
+export function shellWord(value: string): string {
   return /^[A-Za-z0-9_.-]+$/u.test(value) ? value : JSON.stringify(value);
 }
 

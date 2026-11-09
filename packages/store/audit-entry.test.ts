@@ -41,10 +41,10 @@ for (const dialect of ["sqlite", "postgresql"] as const)
         action: "operator-token.create",
         target: "OperatorToken/laptop-2",
         outcome: "succeeded",
-        status: 201,
+        status: 200,
         source: "api",
         method: "POST",
-        path: "/api/v1/operator-tokens",
+        path: "/supertag.operator.v1.AccessService/CreateOperatorToken",
       });
       expect(recorded).toEqual({
         id: expect.any(String),
@@ -53,10 +53,10 @@ for (const dialect of ["sqlite", "postgresql"] as const)
         action: "operator-token.create",
         target: "OperatorToken/laptop-2",
         outcome: "succeeded",
-        status: 201,
+        status: 200,
         source: "api",
         method: "POST",
-        path: "/api/v1/operator-tokens",
+        path: "/supertag.operator.v1.AccessService/CreateOperatorToken",
       });
       await store.recordAuditEntry({
         at: at(2),
@@ -107,6 +107,34 @@ for (const dialect of ["sqlite", "postgresql"] as const)
       expect((await other.listAuditEntries({ limit: 1 })).map((entry) => entry.at)).toEqual([
         at(3),
       ]);
+      const [newest] = await other.listAuditEntries({ limit: 1 });
+      expect(
+        (await other.listAuditEntries({ limit: 1, after: newest })).map((entry) => entry.at),
+      ).toEqual([at(2)]);
+      expect(await other.listAuditEntries({ after: all[2] })).toEqual([]);
+    });
+
+    it("continues after an entry without repeating entries recorded since", async () => {
+      const { store } = await fixture();
+      const entry = (id: string, minute: number) =>
+        store.recordAuditEntry({
+          id,
+          at: at(minute),
+          actor: "token:laptop-2",
+          action: "delete",
+          target: `Role/${id}`,
+          outcome: "succeeded",
+          source: "api",
+        });
+      await entry("a", 1);
+      await entry("b", 2);
+      await entry("c", 2);
+      const first = await store.listAuditEntries({ limit: 2 });
+      expect(first.map((item) => item.id)).toEqual(["c", "b"]);
+      await entry("d", 3);
+      await entry("e", 4);
+      const next = await store.listAuditEntries({ limit: 2, after: first.at(-1) });
+      expect(next.map((item) => item.id)).toEqual(["a"]);
     });
 
     it("refuses incomplete entries and out-of-range limits", async () => {
@@ -126,6 +154,9 @@ for (const dialect of ["sqlite", "postgresql"] as const)
       ).rejects.toThrow(/outcome/u);
       await expect(store.listAuditEntries({ limit: 0 })).rejects.toThrow(/limit/u);
       await expect(store.listAuditEntries({ limit: 501 })).rejects.toThrow(/limit/u);
+      await expect(store.listAuditEntries({ after: { at: "yesterday", id: "a" } })).rejects.toThrow(
+        /after/u,
+      );
       expect(await store.listAuditEntries()).toEqual([]);
     });
   });

@@ -13,18 +13,13 @@ import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { stateDirectory as defaultStateDirectory } from "@supertag/store";
 import type { ControlPlaneClient } from "./control-plane-client.js";
-import {
-  CONTROL_PLANE_API_VERSION,
-  type WorkerHostCredentialIssuance,
-} from "./control-plane-resources.js";
+import { workerHostCredentialView, workerHostView } from "./host-protos.js";
+import { hostClient } from "./operator-client.js";
 import { takeOutputFlag } from "./output-flag.js";
+import { refusedAsError } from "./tag-conversation.js";
 
 export type WorkerHostCommand = "drain" | "enroll" | "resume" | "revoke" | "rotate-credential";
 export type WorkerHostControlPlaneCommand = WorkerHostCommand;
-
-interface WorkerHostApiClient {
-  request<T>(path: string, init?: RequestInit): Promise<T>;
-}
 
 export function isWorkerHostCommand(value: string | undefined): value is WorkerHostCommand {
   return (
@@ -37,10 +32,11 @@ export function isWorkerHostCommand(value: string | undefined): value is WorkerH
 }
 
 export async function runWorkerHostOperation(
-  client: Pick<ControlPlaneClient, "request"> | WorkerHostApiClient,
+  client: Pick<ControlPlaneClient, "operator">,
   command: WorkerHostControlPlaneCommand,
   args: readonly string[],
 ): Promise<string> {
+  const hosts = hostClient(client.operator);
   if (command === "enroll" || command === "rotate-credential") {
     const { values, positionals } = parseArgs({
       args,
@@ -54,28 +50,17 @@ export async function runWorkerHostOperation(
         `Usage: supertag ${command === "enroll" ? "enroll worker-host" : "rotate worker-host-credential"} ID --out PATH`,
       );
     }
-    const issuance = await client.request<WorkerHostCredentialIssuance>(
-      command === "enroll"
-        ? "/api/v1/worker-hosts"
-        : `/api/v1/worker-hosts/${encodeURIComponent(id)}/credential`,
-      command === "enroll"
-        ? {
-            method: "POST",
-            body: JSON.stringify({
-              apiVersion: CONTROL_PLANE_API_VERSION,
-              kind: "WorkerHostEnrollment",
-              metadata: { id },
-              spec: {},
+    const issuance = workerHostCredentialView(
+      await refusedAsError(async () =>
+        command === "enroll"
+          ? hosts.enrollWorkerHost({ id })
+          : hosts.rotateWorkerHostCredential({
+              id,
+              expectedCredentialRevision: (await hosts.getWorkerHost({ id })).credentialRevision,
             }),
-          }
-        : { method: "POST" },
+      ),
     );
-    if (
-      issuance.apiVersion !== CONTROL_PLANE_API_VERSION ||
-      issuance.kind !== "WorkerHostCredential" ||
-      issuance.metadata.workerHostId !== id ||
-      !issuance.credential.token
-    ) {
+    if (issuance.metadata.workerHostId !== id || !issuance.credential.token) {
       throw new Error("Control Plane returned an invalid Worker Host credential");
     }
     const path = await writeWorkerHostCredential(values.out, {
@@ -91,14 +76,13 @@ export async function runWorkerHostOperation(
   const id = rest[0]?.trim();
   if (rest.length !== 1 || !id) throw new Error(`Usage: supertag ${command} worker-host ID`);
   if (command === "revoke") {
-    await client.request(`/api/v1/worker-hosts/${encodeURIComponent(id)}/credential`, {
-      method: "DELETE",
-    });
+    await refusedAsError(() => hosts.revokeWorkerHostCredential({ id }));
     return `Revoked Worker Host ${id}.\n`;
   }
-  const resource = await client.request<{ readonly status?: { readonly phase?: string } }>(
-    `/api/v1/worker-hosts/${encodeURIComponent(id)}/${command}`,
-    { method: "POST" },
+  const resource = workerHostView(
+    await refusedAsError(() =>
+      command === "drain" ? hosts.drainWorkerHost({ id }) : hosts.resumeWorkerHost({ id }),
+    ),
   );
   if (json) return `${JSON.stringify(resource, null, 2)}\n`;
   return command === "drain"

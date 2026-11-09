@@ -64,3 +64,19 @@ export function conversationOperator(context: HandlerContext): string {
 export function drainingError() {
   return operatorError(Code.Unavailable, ErrorReason.DRAINING, "Control Plane is draining");
 }
+
+/** Names what an audited RPC changes, as `Kind/NAME` or `Kind/ID`, or only its kind. */
+export function noteAuditTarget(context: HandlerContext, target: string): void {
+  const note = context.values.get(operatorAuditTarget);
+  if (note !== undefined) note.target = target;
+}
+
+/** A request field that must not be empty, trimmed; `InvalidArgument` naming it otherwise. */
+export function requiredField(value: string, path: string, description: string): string {
+  const trimmed = value.trim();
+  if (trimmed === "")
+    throw operatorError(Code.InvalidArgument, ErrorReason.INVALID_ARGUMENT, `${path} is required`, [
+      { path, description },
+    ]);
+  return trimmed;
+}

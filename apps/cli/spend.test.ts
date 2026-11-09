@@ -1,6 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
-import { ControlPlaneClient } from "./src/control-plane-client.js";
+import { create, toJson } from "@bufbuild/protobuf";
+import type { SpendReport } from "@supertag/core";
+import { SpendReportSchema } from "@supertag/operator-api";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fakeOperatorRpc } from "../../tests/support/fake-operator-rpc.js";
+import { spendReportMessage } from "./src/organization-protos.js";
 import { formatSpend, runSpendCommand } from "./src/spend.js";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("spend output", () => {
   it("renders reported sums, unknown usage, and Objective budgets", () => {
@@ -62,63 +70,81 @@ describe("spend output", () => {
     );
   });
 
-  it("preserves the group usage in JSON output", async () => {
-    const subtotal = {
-      attempts: 1,
-      reportedCostByCurrency: { USD: 5 },
-      unknownCostAttempts: 0,
-      reportedTokens: 10,
-      unknownTokenAttempts: 0,
-    };
-    const report = {
+  it("preserves the group usage in JSON output, field order included", async () => {
+    const report: SpendReport = {
       by: "objective",
       since: null,
-      groups: [{ ...subtotal, key: "build" }],
+      groups: [
+        {
+          key: "build",
+          attempts: 2,
+          reportedCostByCurrency: { USD: 5 },
+          unknownCostAttempts: 1,
+          unpricedTokens: 30,
+          reportedTokens: 40,
+          unknownTokenAttempts: 0,
+          budget: { limitMinor: 2500, currency: "USD" },
+          estimatedCostAttempts: 1,
+          unpricedModels: { "gpt-x": 1 },
+        },
+        {
+          key: "unassigned",
+          attempts: 1,
+          reportedCostByCurrency: null,
+          unknownCostAttempts: 1,
+          unpricedTokens: 0,
+          reportedTokens: null,
+          unknownTokenAttempts: 1,
+          budget: null,
+        },
+      ],
     };
-    const request = vi.spyOn(ControlPlaneClient.prototype, "request").mockResolvedValue(report);
-    try {
-      const result = await runSpendCommand({ url: "http://localhost", token: "test" }, [
-        "--output",
-        "json",
-      ]);
-      expect(JSON.parse(result)).toEqual(report);
-    } finally {
-      request.mockRestore();
-    }
+    const rpc = fakeOperatorRpc({
+      "OrganizationService/GetSpend": () =>
+        toJson(SpendReportSchema, create(SpendReportSchema, spendReportMessage(report))),
+    });
+    const result = await runSpendCommand({ url: "http://localhost", token: "test" }, [
+      "--output",
+      "json",
+    ]);
+    expect(result).toBe(`${JSON.stringify(report, null, 2)}\n`);
+    expect(rpc.called("OrganizationService/GetSpend")[0]?.body).toEqual({
+      by: "SPEND_GROUPING_OBJECTIVE",
+    });
   });
 
-  it("requests the filtered API view and prints JSON", async () => {
-    const request = vi
-      .spyOn(ControlPlaneClient.prototype, "request")
-      .mockResolvedValue({ by: "day", since: "2026-10-01T00:00:00.000Z", groups: [] });
-    try {
-      const result = await runSpendCommand({ url: "http://localhost", token: "test" }, [
-        "--by",
-        "day",
+  it("requests the filtered report and prints JSON", async () => {
+    const rpc = fakeOperatorRpc({
+      "OrganizationService/GetSpend": () => ({
+        by: "SPEND_GROUPING_DAY",
+        since: "2026-10-01T00:00:00Z",
+      }),
+    });
+    const result = await runSpendCommand({ url: "http://localhost", token: "test" }, [
+      "--by",
+      "day",
+      "--since",
+      "2026-10-01T00:00:00Z",
+      "--output",
+      "json",
+    ]);
+    expect(rpc.called("OrganizationService/GetSpend")[0]?.body).toEqual({
+      by: "SPEND_GROUPING_DAY",
+      since: "2026-10-01T00:00:00Z",
+    });
+    expect(JSON.parse(result)).toEqual({
+      by: "day",
+      since: "2026-10-01T00:00:00.000Z",
+      groups: [],
+    });
+    await expect(
+      runSpendCommand({ url: "http://localhost", token: "test" }, ["--since", "invalid"]),
+    ).rejects.toThrow("ISO timestamp");
+    await expect(
+      runSpendCommand({ url: "http://localhost", token: "test" }, [
         "--since",
-        "2026-10-01T00:00:00Z",
-        "--output",
-        "json",
-      ]);
-      expect(request).toHaveBeenCalledWith(
-        "/api/v1/spend?by=day&since=2026-10-01T00%3A00%3A00.000Z",
-      );
-      expect(JSON.parse(result)).toEqual({
-        by: "day",
-        since: "2026-10-01T00:00:00.000Z",
-        groups: [],
-      });
-      await expect(
-        runSpendCommand({ url: "http://localhost", token: "test" }, ["--since", "invalid"]),
-      ).rejects.toThrow("ISO timestamp");
-      await expect(
-        runSpendCommand({ url: "http://localhost", token: "test" }, [
-          "--since",
-          "2026-02-30T00:00:00Z",
-        ]),
-      ).rejects.toThrow("ISO timestamp");
-    } finally {
-      request.mockRestore();
-    }
+        "2026-02-30T00:00:00Z",
+      ]),
+    ).rejects.toThrow("ISO timestamp");
   });
 });

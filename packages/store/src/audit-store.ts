@@ -9,7 +9,7 @@ import {
   type ListAuditEntriesInput,
   type RecordAuditEntryInput,
 } from "@supertag/core";
-import { and, desc, eq, gte } from "drizzle-orm";
+import { and, desc, eq, gte, lt, or } from "drizzle-orm";
 
 const OUTCOMES = new Set(["succeeded", "failed"]);
 const SOURCES = new Set(["api", "gateway"]);
@@ -52,10 +52,21 @@ export class DrizzleAuditStore implements AuditStore {
     const limit = input.limit ?? AUDIT_DEFAULT_LIMIT;
     if (!Number.isInteger(limit) || limit < 1 || limit > AUDIT_MAX_LIMIT)
       throw new RangeError(`limit must be an integer from 1 through ${AUDIT_MAX_LIMIT}`);
+    const after = input.after;
+    if (after !== undefined && (Number.isNaN(Date.parse(after.at)) || after.id === ""))
+      throw new RangeError("after must name an audit entry's time and ID");
     const table = this.tables.auditEntries;
     const filters = [
       ...(input.since === undefined ? [] : [gte(table.at, new Date(input.since).toISOString())]),
       ...(input.actor === undefined ? [] : [eq(table.actor, input.actor)]),
+      ...(after === undefined
+        ? []
+        : [
+            or(
+              lt(table.at, new Date(after.at).toISOString()),
+              and(eq(table.at, new Date(after.at).toISOString()), lt(table.id, after.id)),
+            ),
+          ]),
     ];
     const rows = await this.db
       .select()

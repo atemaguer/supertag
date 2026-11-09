@@ -196,7 +196,9 @@ describe("the operator RPC access, audit, and error conventions", () => {
     const handler = createOperatorRpcHandler(
       {
         auditTrail: {
+          // A slow store: a call answers only once its entry is stored.
           record: async (entry) => {
+            await new Promise((resolve) => setTimeout(resolve, 25));
             recorded.push(entry);
           },
         },
@@ -271,7 +273,7 @@ describe("the operator RPC access, audit, and error conventions", () => {
     expect((await call(AUDITED, ADMIN)).status).toBe(200);
   });
 
-  it("records each authenticated call to an audited RPC, and no read", async () => {
+  it("records each authenticated call to an audited RPC before answering, and no read", async () => {
     recorded.length = 0;
     await call(AUDITED, ADMIN);
     await call(AUDITED, "stop_operator");

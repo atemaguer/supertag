@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util";
+import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import {
   AUDIT_DEFAULT_LIMIT,
   AUDIT_MAX_LIMIT,
@@ -6,6 +7,10 @@ import {
   parseAuditQuery,
 } from "@supertag/core";
 import type { ControlPlaneClient } from "./control-plane-client.js";
+import { CONTROL_PLANE_API_VERSION } from "./control-plane-resources.js";
+import { organizationClient } from "./operator-client.js";
+import { auditEntryView } from "./organization-protos.js";
+import { refusedAsError } from "./tag-conversation.js";
 
 export function auditHelp(): string {
   return `Usage:
@@ -22,9 +27,9 @@ writes. Each entry names the actor, action, target, time, and outcome, never a s
 `;
 }
 
-/** `supertag audit`: reads the durable audit trail through the Control Plane API. */
+/** `supertag audit`: reads the durable audit trail through `OrganizationService.ListAuditEntries`. */
 export async function runAuditCommand(
-  client: Pick<ControlPlaneClient, "request">,
+  client: Pick<ControlPlaneClient, "operator">,
   args: readonly string[],
 ): Promise<string> {
   const { values, positionals } = parseArgs({
@@ -47,14 +52,21 @@ export async function runAuditCommand(
   } catch (error) {
     throw new Error(`--${error instanceof Error ? error.message : String(error)}`);
   }
-  const query = new URLSearchParams();
-  if (parsed.since !== undefined) query.set("since", parsed.since);
-  if (parsed.actor !== undefined) query.set("actor", parsed.actor);
-  query.set("limit", String(parsed.limit));
-  const result = await client.request<{ readonly items: readonly AuditEntry[] }>(
-    `/api/v1/audit?${query}`,
-    { method: "GET" },
+  const { since, actor, limit } = parsed;
+  const page = await refusedAsError(() =>
+    organizationClient(client.operator).listAuditEntries({
+      ...(since === undefined ? {} : { since: timestampFromDate(new Date(since)) }),
+      actor: actor ?? "",
+      pageSize: limit,
+    }),
   );
+  const items: readonly AuditEntry[] = page.entries.map(auditEntryView);
+  const result = {
+    apiVersion: CONTROL_PLANE_API_VERSION,
+    kind: "AuditEntryList",
+    metadata: { limit },
+    items,
+  };
   return values.output === "json"
     ? `${JSON.stringify(result, null, 2)}\n`
     : formatAuditEntries(result.items);

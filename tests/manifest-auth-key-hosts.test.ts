@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
+import { hostClient } from "../apps/cli/src/operator-client.ts";
 import { FileGatewayCredentialVault } from "../packages/store/src/index.ts";
 import { migrateSqlite } from "./support/database.ts";
 
@@ -47,14 +48,9 @@ describe("Worker Hosts joined with an Auth Key", () => {
         }),
       });
     const join_ = async (key: string, name: string) => {
-      const { secret } = await api<{ secret: string }>("/api/v1/auth-keys", {
-        method: "POST",
-        body: JSON.stringify({
-          apiVersion: "supertag/v1",
-          kind: "AuthKey",
-          metadata: { name: key },
-          spec: { tags: ["builder"] },
-        }),
+      const { secret } = await hostClient({ url: started.url, token: adminToken }).createAuthKey({
+        name: key,
+        tags: ["builder"],
       });
       const response = await fetch(`${started.url}/api/v1/worker-host-joins`, {
         method: "POST",

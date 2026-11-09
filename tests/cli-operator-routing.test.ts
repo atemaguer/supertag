@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { normalizeActionFirstCommand } from "../apps/cli/src/action-command.js";
 import * as controlPlane from "../apps/cli/src/control-plane-client.js";
 import { main } from "../apps/cli/src/index.js";
+import { fakeHostRpc, workerHostResourceOf } from "./support/fake-host-rpc.ts";
 import { fakeOperatorRpc } from "./support/fake-operator-rpc.js";
 
 afterEach(() => vi.restoreAllMocks());
@@ -69,10 +70,12 @@ it("preserves explicit JSON for general resource inspection", async () => {
     metadata: { id: "host-a" },
     status: { phase: "ready" },
   };
-  vi.spyOn(controlPlane.ControlPlaneClient.prototype, "request").mockResolvedValue(resource);
+  fakeHostRpc([resource]);
   const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   expect(await main(["describe", "worker-host", "host-a", "--output", "json"])).toBe(0);
-  expect(JSON.parse(write.mock.calls.map(([v]) => String(v)).join(""))).toEqual(resource);
+  expect(JSON.parse(write.mock.calls.map(([v]) => String(v)).join(""))).toEqual(
+    workerHostResourceOf(resource),
+  );
 });
 
 it("routes apply and diff -f and leaves a resource name unrewritten", () => {

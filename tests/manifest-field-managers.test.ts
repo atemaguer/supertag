@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { main } from "../apps/cli/src/index.ts";
+import { listWorkerHostResources } from "../apps/cli/src/operator-resources.ts";
 import { DrizzleStore } from "../packages/store/src/index.js";
 import { migrateSqlite } from "./support/database.ts";
 
@@ -150,9 +151,7 @@ describe("field managers and apply sets", () => {
 
   it("keeps locations and hosts added with the CLI and removes what the manifest dropped", async () => {
     await run("apply", "-f", await write("organization.yaml", organization));
-    const hosts = await client.request<{ items: { metadata: { id: string } }[] }>(
-      "/api/v1/worker-hosts",
-    );
+    const hosts = await listWorkerHostResources(client.operator);
     const host = hosts.items[0]?.metadata.id ?? "missing";
     await run("update", "tag", "builder", "--add-worker-host", host);
     await run("update", "tag", "builder", "--add-location", "slack", "--channel-id", "C0CLI");

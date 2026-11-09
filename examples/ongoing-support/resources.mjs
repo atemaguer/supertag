@@ -47,12 +47,7 @@ export async function createOrganization(api) {
   const actors = {};
   for (const name of ["manager", "analyst"]) {
     const hostId = `support-${name}-host`;
-    const enrolled = await api.request("POST", "/api/v1/worker-hosts", {
-      apiVersion: "supertag/v1",
-      kind: "WorkerHostEnrollment",
-      metadata: { id: hostId },
-      spec: {},
-    });
+    const enrolled = await api.rpc("HostService", "EnrollWorkerHost", { id: hostId });
     const instructions = await readFile(new URL(`./roles/${name}.md`, import.meta.url), "utf8");
     await api.request(
       "POST",
@@ -72,7 +67,7 @@ export async function createOrganization(api) {
       "/api/v1/tags",
       resource("Tag", `Support ${name}`, { roles: [`Support ${name}`], workerHosts: [hostId] }),
     );
-    actors[name] = { hostId, credential: enrolled.credential.token, tagId: tag.metadata.id };
+    actors[name] = { hostId, credential: enrolled.token, tagId: tag.metadata.id };
   }
   // One flat Team: the manager owns the Objective and may give work Sessions to the analyst.
   const members = ["Support manager", "Support analyst"];

@@ -9,12 +9,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlPlaneApiServer, isControlPlaneApiPath } from "../apps/cli/src/control-plane-api.ts";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { runObjectiveCommand } from "../apps/cli/src/objectives.js";
-import { organizationClient, workClient } from "../apps/cli/src/operator-client.ts";
+import { hostClient, organizationClient, workClient } from "../apps/cli/src/operator-client.ts";
+import {
+  getWorkerHostResource,
+  listWorkerHostResources,
+} from "../apps/cli/src/operator-resources.ts";
+import { organizationStatusView } from "../apps/cli/src/organization-protos.ts";
 import { runResourceCommand } from "../apps/cli/src/resources.ts";
 import { taskView } from "../apps/cli/src/work-protos.ts";
 import { ControlPlane } from "../packages/control-plane/src/index.ts";
 import { emptyTagContextPlan } from "../packages/core/src/index.ts";
-import { SessionStateStatus, TaskSchema } from "../packages/operator-api/src/index.ts";
+import {
+  SessionStateStatus,
+  TaskSchema,
+  WorkerHostPhase,
+} from "../packages/operator-api/src/index.ts";
 import {
   executionWarningProgress,
   LocalWorklet,
@@ -38,6 +47,18 @@ async function taskViewOf(url: string, id: string) {
   return taskView(task) as ReturnType<typeof JSON.parse>;
 }
 
+/** One operator RPC as `curl` sends it: a Connect JSON POST. */
+function connectJson(url: string, method: string, body: unknown, token?: string) {
+  return fetch(`${url}/supertag.operator.v1.${method}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+    },
+    body: JSON.stringify(body),
+  });
+}
+
 describe("Control Plane API boundary", () => {
   const cleanups: Array<() => Promise<void>> = [];
 
@@ -47,37 +68,33 @@ describe("Control Plane API boundary", () => {
 
   it("serves spend only to management credentials and rejects invalid filters", async () => {
     const f = await apiFixture();
-    const endpoint = `${f.url}/api/v1/spend`;
-    expect((await fetch(endpoint)).status).toBe(401);
-    expect(
-      (await fetch(endpoint, { headers: { authorization: "Bearer coordination-only" } })).status,
-    ).toBe(403);
-    const headers = { authorization: "Bearer administrative-token" };
-    const response = await fetch(endpoint, { headers });
+    const spend = (body: unknown, token?: string) =>
+      connectJson(f.url, "OrganizationService/GetSpend", body, token);
+    expect((await spend({})).status).toBe(401);
+    expect((await spend({}, "coordination-only")).status).toBe(403);
+    const response = await spend({}, "administrative-token");
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ by: "objective", since: null, groups: [] });
-    expect((await fetch(`${endpoint}?since=invalid`, { headers })).status).toBe(400);
-    expect((await fetch(`${endpoint}?by=invalid`, { headers })).status).toBe(400);
+    expect(await response.json()).toEqual({ by: "SPEND_GROUPING_OBJECTIVE" });
+    expect((await spend({ since: "invalid" }, "administrative-token")).status).toBe(400);
+    expect((await spend({ by: 7 }, "administrative-token")).status).toBe(400);
   });
 
   it("serves the organization overview only to management credentials", async () => {
     const f = await apiFixture();
-    const endpoint = `${f.url}/api/v1/organization`;
-    expect((await fetch(endpoint)).status).toBe(401);
-    expect(
-      (await fetch(endpoint, { headers: { authorization: "Bearer coordination-only" } })).status,
-    ).toBe(403);
-    const response = await fetch(endpoint, {
-      headers: { authorization: "Bearer administrative-token" },
-    });
+    const overview = (token?: string) =>
+      connectJson(f.url, "OrganizationService/GetOrganization", {}, token);
+    expect((await overview()).status).toBe(401);
+    expect((await overview("coordination-only")).status).toBe(403);
+    const response = await overview("administrative-token");
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       workerHosts: { id: string }[];
-      tags: unknown[];
-      objectives: unknown[];
+      tags?: unknown[];
+      objectives?: unknown[];
     };
     expect(body.workerHosts.map((host) => host.id)).toContain("api-host");
-    expect(body).toMatchObject({ tags: [], objectives: [] });
+    expect(body.tags).toBeUndefined();
+    expect(body.objectives).toBeUndefined();
   });
 
   it("preserves administrative authentication without starting a Gateway", async () => {
@@ -345,35 +362,25 @@ describe("Control Plane API boundary", () => {
       authenticateWorklet: sharedTokenAuthentication("fixture-bootstrap-token"),
     });
     const fixture = await apiFixture(workletApi, server, workletApi);
-    const headers = {
-      authorization: "Bearer administrative-token",
-      "content-type": "application/json",
-    };
-
-    const enrolled = await fetch(`${fixture.url}/api/v1/worker-hosts`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        apiVersion: "supertag/v1",
-        kind: "WorkerHostEnrollment",
-        metadata: { id: "build-east-1" },
-        spec: {},
-      }),
-    });
-    expect(enrolled.status).toBe(201);
-    expect(enrolled.headers.get("cache-control")).toBe("no-store");
-    const enrollment = (await enrolled.json()) as {
-      readonly credential: { readonly token: string };
-    };
+    const hosts = hostClient({ url: fixture.url, token: "administrative-token" });
+    const enrolled = await connectJson(
+      fixture.url,
+      "HostService/EnrollWorkerHost",
+      { id: "build-east-1" },
+      "administrative-token",
+    );
+    expect(enrolled.status).toBe(200);
+    const enrollment = (await enrolled.json()) as { readonly token: string };
     expect(enrollment).toMatchObject({
-      kind: "WorkerHostCredential",
-      metadata: { workerHostId: "build-east-1" },
-      credential: { token: expect.any(String) },
+      workerHostId: "build-east-1",
+      issuedAt: expect.any(String),
+      token: expect.any(String),
     });
 
-    const initial = await fetch(`${fixture.url}/api/v1/worker-hosts/build-east-1`, { headers });
-    expect(initial.status).toBe(200);
-    const initialResource = await initial.json();
+    const initialResource = await getWorkerHostResource(
+      { url: fixture.url, token: "administrative-token" },
+      "build-east-1",
+    );
     expect(initialResource).toMatchObject({
       kind: "WorkerHost",
       metadata: { id: "build-east-1" },
@@ -385,60 +392,47 @@ describe("Control Plane API boundary", () => {
         connectionStatus: "disconnected",
       },
     });
-    expect(JSON.stringify(initialResource)).not.toContain(enrollment.credential.token);
+    expect(JSON.stringify(initialResource)).not.toContain(enrollment.token);
     expect(JSON.stringify(initialResource)).not.toContain("credentialId");
 
-    const duplicate = await fetch(`${fixture.url}/api/v1/worker-hosts`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        apiVersion: "supertag/v1",
-        kind: "WorkerHostEnrollment",
-        metadata: { id: "build-east-1" },
-        spec: {},
-      }),
+    await expect(hosts.enrollWorkerHost({ id: "build-east-1" })).rejects.toMatchObject({
+      code: Code.AlreadyExists,
     });
-    expect(duplicate.status).toBe(409);
-    await expect(duplicate.json()).resolves.toMatchObject({ reason: "AlreadyExists" });
-
-    const rotated = await fetch(`${fixture.url}/api/v1/worker-hosts/build-east-1/credential`, {
-      method: "POST",
-      headers,
-    });
-    expect(rotated.status).toBe(200);
-    expect(rotated.headers.get("cache-control")).toBe("no-store");
-    const rotation = (await rotated.json()) as {
-      readonly credential: { readonly token: string };
-    };
-    expect(rotation.credential.token).not.toBe(enrollment.credential.token);
-
-    const afterRotation = await fetch(`${fixture.url}/api/v1/worker-hosts/build-east-1`, {
-      headers,
-    });
-    await expect(afterRotation.json()).resolves.toMatchObject({
-      status: { credentialRevision: 2 },
+    await expect(hosts.enrollWorkerHost({ id: "  " })).rejects.toMatchObject({
+      code: Code.InvalidArgument,
     });
 
-    const revoked = await fetch(`${fixture.url}/api/v1/worker-hosts/build-east-1/credential`, {
-      method: "DELETE",
-      headers,
+    const rotation = await hosts.rotateWorkerHostCredential({
+      id: "build-east-1",
+      expectedCredentialRevision: 1n,
     });
-    expect(revoked.status).toBe(204);
-    expect(await revoked.text()).toBe("");
-
-    const afterRevocation = await fetch(`${fixture.url}/api/v1/worker-hosts/build-east-1`, {
-      headers,
-    });
-    await expect(afterRevocation.json()).resolves.toMatchObject({
-      status: { phase: "revoked", credentialRevision: 2 },
+    expect(rotation.token).not.toBe(enrollment.token);
+    await expect(
+      hosts.rotateWorkerHostCredential({ id: "build-east-1", expectedCredentialRevision: 0n }),
+    ).rejects.toMatchObject({ code: Code.InvalidArgument });
+    await expect(hosts.getWorkerHost({ id: "build-east-1" })).resolves.toMatchObject({
+      credentialRevision: 2n,
     });
 
-    const rotateRevoked = await fetch(
-      `${fixture.url}/api/v1/worker-hosts/build-east-1/credential`,
-      { method: "POST", headers },
-    );
-    expect(rotateRevoked.status).toBe(409);
-    await expect(rotateRevoked.json()).resolves.toMatchObject({ reason: "Revoked" });
+    await hosts.revokeWorkerHostCredential({ id: "build-east-1" });
+    await expect(hosts.getWorkerHost({ id: "build-east-1" })).resolves.toMatchObject({
+      phase: WorkerHostPhase.REVOKED,
+      credentialRevision: 2n,
+    });
+    await expect(
+      hosts.rotateWorkerHostCredential({ id: "build-east-1", expectedCredentialRevision: 2n }),
+    ).rejects.toMatchObject({ code: Code.FailedPrecondition });
+    await expect(hosts.getWorkerHost({ id: "missing" })).rejects.toMatchObject({
+      code: Code.NotFound,
+    });
+    // Worker Hosts are served only as operator RPCs.
+    expect(
+      (
+        await fetch(`${fixture.url}/api/v1/worker-hosts`, {
+          headers: { authorization: "Bearer administrative-token" },
+        })
+      ).status,
+    ).toBe(404);
   });
 
   it("owns authenticated internal coordination routes", async () => {
@@ -526,28 +520,25 @@ describe("Control Plane API boundary", () => {
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
       }),
     ).rejects.toBeDefined();
-    const endpoint = `${fixture.url}/api/v1/metrics`;
-    expect((await fetch(endpoint)).status).toBe(401);
-    expect(
-      (await fetch(endpoint, { headers: { authorization: "Bearer coordination-only" } })).status,
-    ).toBe(403);
-    const response = await fetch(endpoint, {
-      headers: { authorization: "Bearer administrative-token" },
-    });
+    const metrics = (token?: string) =>
+      connectJson(fixture.url, "OrganizationService/GetMetrics", {}, token);
+    expect((await metrics()).status).toBe(401);
+    expect((await metrics("coordination-only")).status).toBe(403);
+    const response = await metrics("administrative-token");
     expect(response.status).toBe(200);
     const snapshot = await response.json();
-    expect(snapshot.values.rpc.methods).toContainEqual(
+    expect(snapshot.rpc.methods).toContainEqual(
       expect.objectContaining({
         service: "supertag.coordination.v1.CoordinationService",
         method: "ListTools",
-        started: 1,
-        completed: 1,
-        active: 0,
-        errors: 1,
+        started: "1",
+        completed: "1",
+        errors: "1",
       }),
     );
     expect(JSON.stringify(snapshot)).not.toContain("private-invalid-execution-token");
-    expect(snapshot.values.rpc.queues.frames).toBe(0);
+    expect(snapshot.rpc.queues.frames).toBeUndefined();
+    expect(snapshot.tasks).toEqual({});
   });
 
   it("fences new requests and drains active requests before shutdown", async () => {
@@ -562,9 +553,12 @@ describe("Control Plane API boundary", () => {
         await releaseMetrics.promise;
         return metrics;
       });
-    const active = fetch(`${fixture.url}/api/v1/metrics`, {
-      headers: { authorization: "Bearer administrative-token" },
-    });
+    const active = connectJson(
+      fixture.url,
+      "OrganizationService/GetMetrics",
+      {},
+      "administrative-token",
+    );
     await metricsStarted.promise;
 
     fixture.api.beginDrain();
@@ -673,9 +667,7 @@ describe("Control Plane API boundary", () => {
     const describedHost = await runResourceCommand(client, "describe", ["worker-host", "laptop-a"]);
     expect(describedHost).toContain("Task files in docker sandboxes are lost");
     expect(describedHost).not.toContain("Storage: persistent");
-    const listedHosts = (await client.request("/api/v1/worker-hosts")) as {
-      items: { metadata: { id: string }; status: { storage: unknown } }[];
-    };
+    const listedHosts = await listWorkerHostResources(client.operator);
     expect(
       listedHosts.items.find((host) => host.metadata.id === "laptop-a")?.status.storage,
     ).toEqual({
@@ -720,13 +712,9 @@ describe("Control Plane API boundary", () => {
     expect(await runResourceCommand(client, "describe", ["task", id])).toMatch(
       /^Command: running `pnpm test:verify` for \d+s$/mu,
     );
-    const organization = (await (
-      await fetch(`${fixture.url}/api/v1/organization`, {
-        headers: { authorization: "Bearer administrative-token" },
-      })
-    ).json()) as {
-      tags: { id: string; runningCommands: { taskId: string; command: string }[] }[];
-    };
+    const organization = organizationStatusView(
+      await organizationClient(client.operator).getOrganization({}),
+    );
     expect(organization.tags.find((tag) => tag.id === owner.id)?.runningCommands).toMatchObject([
       { taskId: id, command: "pnpm test:verify" },
     ]);

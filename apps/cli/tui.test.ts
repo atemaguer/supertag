@@ -2,10 +2,12 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { opensTui, runTui, tuiBuildHint } from "./src/tui.js";
+import { FileOperatorCredentialProvider } from "./src/control-plane-client.js";
+import { opensTui, runTui, tuiBuildHint, tuiHandover } from "./src/tui.js";
 
 const token = "st-test-token-on-fd-3";
 const target = { name: "local", url: "http://127.0.0.1:4321", token };
+const team = { name: "team", url: "https://cp.example.com", token: "st-test-team-token" };
 const version = "1.2.3";
 let directory: string;
 
@@ -15,6 +17,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   rmSync(directory, { recursive: true, force: true });
 });
 
@@ -47,9 +50,17 @@ handoff.on("end", () => {
   return { binary, out };
 }
 
+interface Received {
+  fd3: string;
+  argv: string[];
+  env: Record<string, string>;
+}
+
 it("hands the target to the binary on fd 3, never in argv or the environment", async () => {
   const { binary, out } = stubBinary(7);
+  const resolveContexts = vi.fn(async () => [team]);
   const code = await runTui({
+    resolveContexts,
     override: "local",
     env: { ...process.env, SUPERTAG_TUI_BINARY: binary, SUPERTAG_OPERATOR_TOKEN: token },
     version,
@@ -59,16 +70,78 @@ it("hands the target to the binary on fd 3, never in argv or the environment", a
     },
   });
   expect(code).toBe(7);
-  const received = JSON.parse(readFileSync(out, "utf8")) as {
-    fd3: string;
-    argv: string[];
-    env: Record<string, string>;
-  };
+  const received = JSON.parse(readFileSync(out, "utf8")) as Received;
   expect(received.fd3.endsWith("\n")).toBe(true);
   expect(received.fd3.trim().split("\n")).toHaveLength(1);
-  expect(JSON.parse(received.fd3)).toEqual(target);
+  // A token from the environment is for the Control Plane it selects only.
+  expect(resolveContexts).not.toHaveBeenCalled();
+  expect(JSON.parse(received.fd3)).toEqual({ contexts: [target], current: 0 });
   expect(JSON.stringify(received.argv)).not.toContain(token);
   expect(JSON.stringify(received.env)).not.toContain(token);
+});
+
+it("hands every saved Control Plane to the binary on fd 3, marking the current one", async () => {
+  const { binary, out } = stubBinary();
+  const local = { url: "http://127.0.0.1:7468", token: "st-test-local" };
+  const code = await runTui({
+    env: { PATH: process.env["PATH"], SUPERTAG_TUI_BINARY: binary },
+    version,
+    resolveTarget: async () => team,
+    resolveContexts: async () => [local, target, team],
+  });
+  expect(code).toBe(0);
+  const received = JSON.parse(readFileSync(out, "utf8")) as Received;
+  expect(JSON.parse(received.fd3)).toEqual({ contexts: [local, target, team], current: 2 });
+  for (const secret of [token, team.token, local.token]) {
+    expect(JSON.stringify(received.argv)).not.toContain(secret);
+    expect(JSON.stringify(received.env)).not.toContain(secret);
+  }
+});
+
+it("hands over each saved connection whose credential it can read", async () => {
+  vi.stubEnv("SUPERTAG_STATE_DIR", directory);
+  vi.stubEnv("SUPERTAG_OPERATOR_TOKEN", "");
+  vi.stubEnv("SUPERTAG_ADMIN_TOKEN", "");
+  vi.stubEnv("SUPERTAG_CONTROL_PLANE", "");
+  await new FileOperatorCredentialProvider(join(directory, "credentials.json")).store(
+    "control-plane/team",
+    { token: team.token },
+  );
+  writeFileSync(
+    join(directory, "control-planes.json"),
+    JSON.stringify({
+      version: 1,
+      activeConnection: "team",
+      controlPlanes: { team: { url: team.url }, gone: { url: "https://gone.example.com" } },
+      credentials: {
+        team: { provider: "file", credentialId: "control-plane/team" },
+        gone: { provider: "file", credentialId: "control-plane/gone" },
+      },
+      connections: {
+        team: { controlPlane: "team", credential: "team" },
+        gone: { controlPlane: "gone", credential: "gone" },
+      },
+    }),
+  );
+  const { binary, out } = stubBinary();
+  const code = await runTui({
+    env: { PATH: process.env["PATH"], SUPERTAG_TUI_BINARY: binary },
+    version,
+    resolveTarget: async () => target,
+  });
+  expect(code).toBe(0);
+  const received = JSON.parse(readFileSync(out, "utf8")) as Received;
+  expect(JSON.parse(received.fd3)).toEqual({ contexts: [target, team], current: 0 });
+});
+
+it("lists the selected Control Plane once, first when it is not saved", () => {
+  const url = { url: "https://other.example.com", token: "st-test-url" };
+  expect(tuiHandover(url, [target, team])).toEqual({ contexts: [url, target, team], current: 0 });
+  expect(tuiHandover(target, [team, target, team])).toEqual({
+    contexts: [team, target],
+    current: 1,
+  });
+  expect(tuiHandover(target, [])).toEqual({ contexts: [target], current: 0 });
 });
 
 it("keeps credential variables out of the version check's environment", async () => {

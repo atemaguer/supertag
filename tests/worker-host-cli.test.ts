@@ -8,6 +8,9 @@ import {
   runWorkerHostOperation,
   workerHostCredentialPath,
 } from "../apps/cli/src/worker-hosts.ts";
+import { fakeOperatorRpc } from "./support/fake-operator-rpc.ts";
+
+const client = { operator: { url: "https://control.example.com", token: "admin" } };
 
 describe("Worker Host operator commands", () => {
   afterEach(() => {
@@ -35,24 +38,25 @@ describe("Worker Host operator commands", () => {
   });
 
   it.each([
-    ["enroll" as const, "/api/v1/worker-hosts"],
-    ["rotate-credential" as const, "/api/v1/worker-hosts/host-a/credential"],
-  ])("%s writes the credential once without printing the secret", async (command, path) => {
+    ["enroll" as const, ["HostService/EnrollWorkerHost"]],
+    [
+      "rotate-credential" as const,
+      ["HostService/GetWorkerHost", "HostService/RotateWorkerHostCredential"],
+    ],
+  ])("%s writes the credential once without printing the secret", async (command, methods) => {
     const directory = await mkdtemp(join(tmpdir(), "supertag-worker-host-credential-"));
     const stateDirectory = join(directory, ".supertag");
     vi.stubEnv("SUPERTAG_STATE_DIR", stateDirectory);
-    const requests: { readonly path: string; readonly init?: RequestInit }[] = [];
-    const client = {
-      async request<T>(requestPath: string, init?: RequestInit): Promise<T> {
-        requests.push({ path: requestPath, init });
-        return {
-          apiVersion: "supertag/v1",
-          kind: "WorkerHostCredential",
-          metadata: { workerHostId: "host-a", issuedAt: "2026-09-14T00:00:00.000Z" },
-          credential: { token: "one-time-secret" },
-        } as T;
-      },
-    };
+    const credential = () => ({
+      workerHostId: "host-a",
+      issuedAt: "2026-09-14T00:00:00Z",
+      token: "one-time-secret",
+    });
+    const rpc = fakeOperatorRpc({
+      "HostService/EnrollWorkerHost": credential,
+      "HostService/GetWorkerHost": () => ({ metadata: { id: "host-a" }, credentialRevision: "3" }),
+      "HostService/RotateWorkerHostCredential": credential,
+    });
 
     try {
       const credentialPath = join(directory, "issued", "host-a.json");
@@ -71,9 +75,12 @@ describe("Worker Host operator commands", () => {
         token: "one-time-secret",
       });
       expect((await stat(credentialPath)).mode & 0o777).toBe(0o600);
-      expect(requests).toHaveLength(1);
-      expect(requests[0]).toMatchObject({ path });
-      expect(requests[0]?.init?.method).toBe("POST");
+      expect(rpc.calls.map((call) => call.method)).toEqual(methods);
+      if (command === "rotate-credential")
+        expect(rpc.called("HostService/RotateWorkerHostCredential")[0]?.body).toEqual({
+          id: "host-a",
+          expectedCredentialRevision: "3",
+        });
       await expect(stat(join(stateDirectory, "worker-hosts"))).rejects.toMatchObject({
         code: "ENOENT",
       });
@@ -83,32 +90,25 @@ describe("Worker Host operator commands", () => {
   });
 
   it("revokes a host credential without returning a secret", async () => {
-    const requests: { readonly path: string; readonly init?: RequestInit }[] = [];
-    const client = {
-      async request<T>(path: string, init?: RequestInit): Promise<T> {
-        requests.push({ path, init });
-        return undefined as T;
-      },
-    };
+    const rpc = fakeOperatorRpc({
+      "HostService/RevokeWorkerHostCredential": () => ({ metadata: { id: "host-a" } }),
+    });
 
     await expect(runWorkerHostOperation(client, "revoke", ["host-a"])).resolves.toBe(
       "Revoked Worker Host host-a.\n",
     );
-    expect(requests).toEqual([
-      {
-        path: "/api/v1/worker-hosts/host-a/credential",
-        init: { method: "DELETE" },
-      },
+    expect(rpc.calls).toEqual([
+      { method: "HostService/RevokeWorkerHostCredential", body: { id: "host-a" } },
     ]);
   });
 
   it("requires an output path and never accepts a token through enrollment options", async () => {
-    const request = vi.fn();
-    await expect(runWorkerHostOperation({ request }, "enroll", ["host-a"])).rejects.toThrow(
+    const rpc = fakeOperatorRpc({});
+    await expect(runWorkerHostOperation(client, "enroll", ["host-a"])).rejects.toThrow(
       "--out PATH",
     );
     await expect(
-      runWorkerHostOperation({ request }, "enroll", [
+      runWorkerHostOperation(client, "enroll", [
         "host-a",
         "--out",
         "/tmp/credential.json",
@@ -116,7 +116,7 @@ describe("Worker Host operator commands", () => {
         "forbidden",
       ]),
     ).rejects.toThrow("Unknown option '--token'");
-    expect(request).not.toHaveBeenCalled();
+    expect(rpc.calls).toEqual([]);
   });
 
   it("keeps every host credential inside the SuperTag state directory", () => {

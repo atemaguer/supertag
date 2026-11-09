@@ -228,7 +228,7 @@ describe("the CLI against a Control Plane", () => {
     const server = await fakeControlPlane(SUPERTAG_VERSION);
     const client = new ControlPlaneClient({ url: server.url, token: ADMIN });
     await client.listTags();
-    await client.request("/api/v1/worker-hosts");
+    await client.request("/api/v1/roles");
     expect(server.requests.map((headers) => headers["supertag-client-version"])).toEqual([
       SUPERTAG_VERSION,
       SUPERTAG_VERSION,

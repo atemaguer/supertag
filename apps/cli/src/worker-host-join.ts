@@ -4,12 +4,13 @@ import {
   workerHostNameFromHostname,
 } from "@supertag/core";
 import { stateDirectory as defaultStateDirectory } from "@supertag/store";
-import { ControlPlaneClient, type ControlPlaneTarget } from "./control-plane-client.js";
+import type { ControlPlaneTarget } from "./control-plane-client.js";
 import {
   CONTROL_PLANE_API_VERSION,
   type WorkerHostCredentialIssuance,
 } from "./control-plane-resources.js";
 import { machineName as machineHostname } from "./machine-name.js";
+import { enrollWorkerHostCredential } from "./operator-resources.js";
 import {
   findStoredWorkerHostCredentials,
   readStoredWorkerHostCredential,
@@ -229,36 +230,20 @@ async function enrollAsOperator(
   exact: boolean,
   state: string,
 ): Promise<WorkletCredential> {
-  const client = new ControlPlaneClient(target);
   for (let attempt = 1; attempt <= (exact ? 1 : MAX_OPERATOR_NAME_ATTEMPTS); attempt += 1) {
     const workerHostId = workerHostNameCandidate(name, attempt);
-    let issuance: WorkerHostCredentialIssuance;
-    try {
-      issuance = await client.request<WorkerHostCredentialIssuance>("/api/v1/worker-hosts", {
-        method: "POST",
-        body: JSON.stringify({
-          apiVersion: CONTROL_PLANE_API_VERSION,
-          kind: "WorkerHostEnrollment",
-          metadata: { id: workerHostId },
-          spec: {},
-        }),
-      });
-    } catch (error) {
-      if (error instanceof Error && /already enrolled/u.test(error.message)) {
-        if (exact)
-          throw new Error(
-            `Worker Host ${workerHostId} is already enrolled, but its credential is not stored on this machine. Choose another --worker-host.`,
-          );
-        continue;
-      }
-      throw error;
+    const issued = await enrollWorkerHostCredential(
+      { url: target.url, token: target.token, warnOnSkew: true },
+      workerHostId,
+    );
+    if (issued === undefined) {
+      if (exact)
+        throw new Error(
+          `Worker Host ${workerHostId} is already enrolled, but its credential is not stored on this machine. Choose another --worker-host.`,
+        );
+      continue;
     }
-    if (
-      issuance?.kind !== "WorkerHostCredential" ||
-      issuance.metadata.workerHostId !== workerHostId ||
-      !issuance.credential.token
-    )
-      throw new Error("Control Plane returned an invalid Worker Host credential");
+    const issuance = { credential: { token: issued.token } };
     await storeWorkerHostCredential(
       { workerHostId, token: issuance.credential.token, controlPlane: options.controlPlane },
       state,

@@ -88,13 +88,10 @@ suite("Team delegation through production APIs on distributed Docker Workers", (
     await launch("control-plane", "Organization API ready", ["-p", "127.0.0.1::8790"]);
     await refreshPort();
     for (const host of ["worker-a", "worker-b"]) {
-      const issuance = await api("POST", "/api/v1/worker-hosts", {
-        apiVersion: CONTROL_PLANE_API_VERSION,
-        kind: "WorkerHostEnrollment",
-        metadata: { id: host },
-        spec: {},
+      const issuance = await api("POST", "/supertag.operator.v1.HostService/EnrollWorkerHost", {
+        id: host,
       });
-      const token = (issuance["credential"] as { token: string }).token;
+      const token = String(issuance["token"]);
       await launch(
         host,
         "Organization Worker ready",

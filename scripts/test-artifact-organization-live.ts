@@ -254,13 +254,10 @@ try {
       state = join(directory, workerId, "state");
     await mkdir(state, { recursive: true, mode: 0o700 });
     await stageWorkerAuth({ name: "codex", homeDirectory: home });
-    const issuance = await api("POST", "/api/v1/worker-hosts", {
-      apiVersion: "supertag/v1",
-      kind: "WorkerHostEnrollment",
-      metadata: { id: workerId },
-      spec: {},
+    const issuance = await api("POST", "/supertag.operator.v1.HostService/EnrollWorkerHost", {
+      id: workerId,
     });
-    const token = record(issuance["credential"])["token"];
+    const token = issuance["token"];
     assert.equal(typeof token, "string");
     secrets.push(token as string);
     await launch(

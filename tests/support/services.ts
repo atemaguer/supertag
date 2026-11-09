@@ -8,6 +8,12 @@ import { afterEach, beforeEach, vi } from "vitest";
 import { resolveControlPlaneTarget } from "../../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../../apps/cli/src/control-plane-runtime.ts";
 import { listSlots, runningProcess } from "../../apps/cli/src/local-state.ts";
+import { hostClient } from "../../apps/cli/src/operator-client.ts";
+import {
+  getAuthKeyResource,
+  getWorkerHostResource,
+  listWorkerHostResources,
+} from "../../apps/cli/src/operator-resources.ts";
 import type { ServiceEnvironment } from "../../apps/cli/src/up-service.ts";
 import { migrateSqlite } from "./database.ts";
 
@@ -173,6 +179,27 @@ export async function api(path: string, init: RequestInit = {}) {
   >;
 }
 
+async function localTarget() {
+  const target = await resolveControlPlaneTarget();
+  if (target === undefined) throw new Error("no local operator credential");
+  return target;
+}
+
+/** Reads a Worker Host of the local Control Plane, as `supertag get worker-host` prints it. */
+export async function localWorkerHost(id: string) {
+  return getWorkerHostResource(await localTarget(), id);
+}
+
+/** Lists the Worker Hosts of the local Control Plane, as `supertag get worker-host` prints them. */
+export async function localWorkerHosts() {
+  return listWorkerHostResources(await localTarget());
+}
+
+/** Binds a Worker Host to a Tag on the local Control Plane. */
+export async function bindLocalWorkerHost(tag: string, workerHostId: string) {
+  return hostClient(await localTarget()).bindWorkerHost({ tag, workerHostId });
+}
+
 const SHARED_ADMIN = "shared-control-plane-admin";
 
 /** A teammate's view: a shared Control Plane with Tag lead and Auth Keys for it. */
@@ -212,17 +239,19 @@ export async function sharedControlPlane(context: ServicesContext) {
   });
   const authKey = async (name: string) =>
     (
-      await shared("/api/v1/auth-keys", {
-        method: "POST",
-        body: JSON.stringify({
-          apiVersion: "supertag/v1",
-          kind: "AuthKey",
-          metadata: { name },
-          spec: { tags: ["lead"] },
-        }),
+      await hostClient({ url: runtime.url, token: SHARED_ADMIN }).createAuthKey({
+        name,
+        tags: ["lead"],
       })
     ).secret;
-  return { url: runtime.url, shared, authKey };
+  const admin = { url: runtime.url, token: SHARED_ADMIN };
+  return {
+    url: runtime.url,
+    shared,
+    authKey,
+    workerHost: (id: string) => getWorkerHostResource(admin, id),
+    authKeyResource: (name: string) => getAuthKeyResource(admin, name),
+  };
 }
 
 /**

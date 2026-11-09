@@ -10,6 +10,7 @@ import { toJson } from "@bufbuild/protobuf";
 import { probeInvalidExecutionCredential } from "../apps/cli/src/deploy.js";
 import {
   conversationClient,
+  hostClient,
   organizationClient,
   workClient,
 } from "../apps/cli/src/operator-client.js";
@@ -19,6 +20,8 @@ import {
   ReplyStatus,
   SessionStateSchema,
   TaskEventSchema,
+  type WorkerHost,
+  WorkerHostConnection,
 } from "../packages/operator-api/src/index.js";
 import {
   assertNoSecrets,
@@ -90,6 +93,26 @@ class Api {
       ),
     );
     return { body: toJson(ListSessionStatesResponseSchema, listed) as JsonRecord, details };
+  }
+
+  /** One Worker Host, read from HostService. */
+  async workerHost(id: string): Promise<WorkerHost> {
+    return await hostClient({ url: this.origin, token: this.token }).getWorkerHost(
+      { id },
+      { signal: runAbort.signal, timeoutMs: Math.min(this.timeout, 30_000) },
+    );
+  }
+
+  /** Enrolls a Worker Host and returns its credential's token. */
+  async enrollWorkerHost(id: string): Promise<string> {
+    const credential = await hostClient({
+      url: this.origin,
+      token: this.token,
+    }).enrollWorkerHost(
+      { id },
+      { signal: runAbort.signal, timeoutMs: Math.min(this.timeout, 30_000) },
+    );
+    return credential.token;
   }
 
   /** The conversation RPCs, and the options each call takes. */
@@ -437,9 +460,7 @@ try {
     hostB: {
       id: hostB,
       initialGeneration: connectionGeneration(hostBInitial),
-      finalGeneration: connectionGeneration(
-        await api.request("GET", `/api/v1/worker-hosts/${hostB}`),
-      ),
+      finalGeneration: connectionGeneration(await api.workerHost(hostB)),
       credentialDigest: digest(credentialB),
     },
     independentlyAuthenticated: credentialA !== credentialB,
@@ -521,13 +542,7 @@ async function capturedEvidence(
 }
 
 async function enrollHost(apiClient: Api, hostId: string): Promise<string> {
-  const issuance = await apiClient.request("POST", "/api/v1/worker-hosts", {
-    apiVersion: "supertag/v1",
-    kind: "WorkerHostEnrollment",
-    metadata: { id: hostId },
-    spec: {},
-  });
-  return text(record(issuance["credential"], "Worker credential")["token"], "Worker token");
+  return text(await apiClient.enrollWorkerHost(hostId), "Worker token");
 }
 
 interface RunningWorker {
@@ -629,9 +644,8 @@ async function stopWorker(worker: RunningWorker): Promise<void> {
 
 async function waitForConnected(apiClient: Api, hostId: string, afterGeneration: number) {
   return poll(async () => {
-    const host = await apiClient.request("GET", `/api/v1/worker-hosts/${hostId}`);
-    const status = record(host["status"], "Worker Host status");
-    return status["connectionStatus"] === "connected" &&
+    const host = await apiClient.workerHost(hostId);
+    return host.connectionStatus === WorkerHostConnection.CONNECTED &&
       connectionGeneration(host) > afterGeneration
       ? host
       : undefined;
@@ -640,17 +654,13 @@ async function waitForConnected(apiClient: Api, hostId: string, afterGeneration:
 
 async function waitForDisconnected(apiClient: Api, hostId: string): Promise<void> {
   await poll(async () => {
-    const host = await apiClient.request("GET", `/api/v1/worker-hosts/${hostId}`);
-    return record(host["status"], "Worker Host status")["connectionStatus"] === "disconnected"
-      ? true
-      : undefined;
+    const host = await apiClient.workerHost(hostId);
+    return host.connectionStatus === WorkerHostConnection.DISCONNECTED ? true : undefined;
   }, `Worker Host ${hostId} disconnection`);
 }
 
-function connectionGeneration(host: JsonRecord): number {
-  const value = record(host["status"], "Worker Host status")["connectionGeneration"];
-  if (typeof value !== "number") throw new Error("Worker Host connection generation missing");
-  return value;
+function connectionGeneration(host: WorkerHost): number {
+  return Number(host.connectionGeneration);
 }
 
 async function pollTask(apiClient: Api, taskId: string): Promise<JsonRecord> {

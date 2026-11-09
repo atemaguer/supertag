@@ -309,7 +309,7 @@ async function run() {
         ],
         cpEnv,
       );
-      await waitUntil(() => api.request("GET", "/api/v1/worker-hosts"));
+      await waitUntil(() => api.rpc("HostService", "ListWorkerHosts", {}));
       return child;
     };
     let plane = await startPlane();

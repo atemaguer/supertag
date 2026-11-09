@@ -24,6 +24,7 @@ import {
 import { LocalWorklet, StaticWorker } from "../packages/runtime/sdk/src/index.ts";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.ts";
 import { createIsolatedPostgresDatabase } from "./support/database.ts";
+import { issueOperatorToken } from "./support/operator-access.ts";
 
 const postgres = process.env["SUPERTAG_POSTGRES_URL"];
 const ADMIN = "watch-admin";
@@ -359,13 +360,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       });
 
       it("tells the operator whose conversation it is when a message is sent and answered", async () => {
-        const issued = (await (
-          await fetch(`${runtime.url}/api/v1/operator-tokens`, {
-            method: "POST",
-            headers: { authorization: `Bearer ${ADMIN}`, "content-type": "application/json" },
-            body: JSON.stringify({ kind: "OperatorToken", metadata: { name: "alice" } }),
-          })
-        ).json()) as { secret: string };
+        const issued = { secret: await issueOperatorToken(runtime.url, ADMIN, "alice") };
         const changesFor = async (token: string, taskId: () => string) => {
           const events: WatchEvent[] = [];
           const abort = new AbortController();

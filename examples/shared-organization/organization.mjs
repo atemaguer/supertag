@@ -138,7 +138,7 @@ async function startControlPlane(state) {
     await cpEnvironment(state),
   );
   await save(state);
-  await waitUntil(() => request(state, "GET", "/api/v1/worker-hosts"));
+  await waitUntil(() => rpc(state, "HostService", "ListWorkerHosts", {}));
 }
 async function freePort() {
   const server = createServer();
@@ -349,12 +349,7 @@ async function bootstrap() {
     );
     state.tagIds[name] = tag.metadata.id;
     const hostId = `shared-${name}-host`;
-    const enrollment = await request(state, "POST", "/api/v1/worker-hosts", {
-      apiVersion: "supertag/v1",
-      kind: "WorkerHostEnrollment",
-      metadata: { id: hostId },
-      spec: {},
-    });
+    const enrollment = await rpc(state, "HostService", "EnrollWorkerHost", { id: hostId });
     await writeFile(
       join(stateDirectory, `${name}.json`),
       JSON.stringify(
@@ -367,7 +362,7 @@ async function bootstrap() {
               : state.executionUrl,
           executionToken: await secret("execution-token"),
           ...(state.mcp ? { mcpToken: await secret("mcp-token") } : {}),
-          credential: enrollment.credential.token,
+          credential: enrollment.token,
         },
         null,
         2,
@@ -514,7 +509,7 @@ async function status() {
     tasks,
     attempts,
     messages,
-    workerHosts: (await request(state, "GET", "/api/v1/worker-hosts")).items,
+    workerHosts: (await rpc(state, "HostService", "ListWorkerHosts", {})).workerHosts ?? [],
   });
 }
 async function cleanupExecution(state) {

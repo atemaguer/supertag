@@ -1,0 +1,138 @@
+syntax = "proto3";
+package supertag.operator.v1;
+
+import "google/protobuf/timestamp.proto";
+import "supertag/operator/v1/common.proto";
+import "supertag/operator/v1/options.proto";
+
+option go_package = "github.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1";
+
+// Operator Tokens: `supertag create operator-token`, `list operator-token`,
+// `get operator-token` and `revoke operator-token`.
+//
+// An Operator Token lets one teammate or machine manage a shared Control
+// Plane without the admin token. It carries every operator action except
+// managing Operator Tokens, and the changes made with it are recorded as
+// `token:NAME`. A token expires 90 days after it is created.
+//
+// Access. Only the Control Plane admin token may call these RPCs. An
+// Operator Token or a scoped coordination credential is refused with
+// `PermissionDenied`.
+//
+// Every RPC that names an Operator Token takes its name, and fails with
+// `InvalidArgument` for an empty one and `NotFound` for a token that does not
+// exist. A call while the Control Plane drains fails with `Unavailable` and
+// `ERROR_REASON_DRAINING`.
+service AccessService {
+  // Creates an Operator Token and returns its secret, as `supertag create
+  // operator-token` does. The secret is returned only by this call and is
+  // never stored in readable form.
+  //
+  // Names are never reused, so an audit entry that names `token:NAME` always
+  // means one token. Repeating the call, or using the name of a revoked or
+  // expired token, changes nothing and fails with `AlreadyExists` and
+  // `ERROR_REASON_CONFLICT`. It fails with `InvalidArgument` for a malformed
+  // name.
+  rpc CreateOperatorToken(CreateOperatorTokenRequest) returns (CreateOperatorTokenResponse) {
+    option (supertag.operator.v1.action) = "manage_operator_token";
+    option (supertag.operator.v1.audit_action) = "operator-token.create";
+    option (supertag.operator.v1.requires_admin_token) = true;
+  }
+
+  // Lists Operator Tokens, the earliest created first, then by name, as
+  // `supertag list operator-token` shows them, revoked and expired tokens
+  // included. Secrets are never returned. It fails with `InvalidArgument`
+  // for a malformed `page_token`.
+  rpc ListOperatorTokens(ListOperatorTokensRequest) returns (ListOperatorTokensResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_operator_token";
+    option (supertag.operator.v1.requires_admin_token) = true;
+  }
+
+  // Reads one Operator Token, without its secret, as `supertag get
+  // operator-token` shows it.
+  rpc GetOperatorToken(GetOperatorTokenRequest) returns (OperatorToken) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_operator_token";
+    option (supertag.operator.v1.requires_admin_token) = true;
+  }
+
+  // Revokes an Operator Token, as `supertag revoke operator-token` does.
+  // Calls that present it are refused with `Unauthenticated` and
+  // `ERROR_REASON_CREDENTIAL_REVOKED` from now on, and the server streams it
+  // opened end at their next credential check. Revoking a revoked token
+  // changes nothing and returns it.
+  rpc RevokeOperatorToken(RevokeOperatorTokenRequest) returns (OperatorToken) {
+    option (supertag.operator.v1.action) = "manage_operator_token";
+    option (supertag.operator.v1.audit_action) = "operator-token.revoke";
+    option (supertag.operator.v1.requires_admin_token) = true;
+  }
+}
+
+message CreateOperatorTokenRequest {
+  // The token's name: 1 to 63 lowercase letters, digits, hyphens or
+  // underscores, starting with a letter or digit. Never reused.
+  string name = 1;
+}
+
+message CreateOperatorTokenResponse {
+  // The new token.
+  OperatorToken operator_token = 1;
+  // The token's secret. It is returned only here; send it to its holder
+  // over a private channel. The holder saves it with `supertag connect
+  // control-plane`.
+  string secret = 2;
+}
+
+message ListOperatorTokensRequest {
+  // At most this many tokens; 0 means 100, and more than 500 means 500.
+  int32 page_size = 1;
+  // The `next_page_token` of the previous page.
+  string page_token = 2;
+}
+
+message ListOperatorTokensResponse {
+  // The tokens, the earliest created first, then by name.
+  repeated OperatorToken operator_tokens = 1;
+  // Fetches the next page. Empty on the last page.
+  string next_page_token = 2;
+}
+
+message GetOperatorTokenRequest {
+  // The token's name.
+  string name = 1;
+}
+
+message RevokeOperatorTokenRequest {
+  // The token's name.
+  string name = 1;
+}
+
+// One Operator Token, without its secret.
+message OperatorToken {
+  // Names the token. `resource_version` changes when any field of this view
+  // changes.
+  Metadata metadata = 1;
+  // Its phase.
+  OperatorTokenPhase phase = 2;
+  // The operator ID calls made with it act as, such as `token:laptop-2`.
+  string operator_id = 3;
+  // When it expires.
+  google.protobuf.Timestamp expires_at = 4;
+  // When a call last presented it. The Control Plane refreshes it at most
+  // once a minute. Unset when it was never used.
+  google.protobuf.Timestamp last_used_at = 5;
+  // When it was revoked. Unset when it was not.
+  google.protobuf.Timestamp revoked_at = 6;
+}
+
+// An Operator Token's phase. Revocation wins over expiry.
+enum OperatorTokenPhase {
+  OPERATOR_TOKEN_PHASE_UNSPECIFIED = 0;
+  // Calls may present it.
+  OPERATOR_TOKEN_PHASE_ACTIVE = 1;
+  // It expired.
+  OPERATOR_TOKEN_PHASE_EXPIRED = 2;
+  // The admin revoked it.
+  OPERATOR_TOKEN_PHASE_REVOKED = 3;
+}

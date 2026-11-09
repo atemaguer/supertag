@@ -2,9 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { takeOutputFlag } from "../apps/cli/src/output-flag.ts";
 import { runTaskCommand } from "../apps/cli/src/tasks.ts";
 import { runWorkerHostOperation } from "../apps/cli/src/worker-hosts.ts";
+import { workerHostJson, workerHostResourceOf } from "./support/fake-host-rpc.ts";
 import { fakeOperatorRpc } from "./support/fake-operator-rpc.ts";
 
-const client = (response: unknown) => ({
+const _client = (response: unknown) => ({
   calls: [] as string[],
   async request<T>(path: string): Promise<T> {
     this.calls.push(path);
@@ -49,16 +50,25 @@ describe("one-line summaries for commands that change something", () => {
 
   it("summarizes draining and resuming a Worker Host", async () => {
     const resource = { kind: "WorkerHost", metadata: { id: "host-a" } };
-    expect(await runWorkerHostOperation(client(resource), "drain", ["host-a"])).toBe(
+    const hosts = fakeOperatorRpc({
+      "HostService/DrainWorkerHost": () => workerHostJson(resource),
+      "HostService/ResumeWorkerHost": () => workerHostJson(resource),
+    });
+    const operator = { operator: { url: "http://127.0.0.1:1", token: "t" } };
+    expect(await runWorkerHostOperation(operator, "drain", ["host-a"])).toBe(
       "worker-host/host-a draining: it finishes accepted work and takes no new Tasks.\n",
     );
-    expect(await runWorkerHostOperation(client(resource), "resume", ["host-a"])).toBe(
+    expect(await runWorkerHostOperation(operator, "resume", ["host-a"])).toBe(
       "worker-host/host-a resumed: it takes new Tasks again.\n",
     );
     expect(
-      JSON.parse(
-        await runWorkerHostOperation(client(resource), "drain", ["host-a", "--output", "json"]),
-      ),
-    ).toEqual(resource);
+      JSON.parse(await runWorkerHostOperation(operator, "drain", ["host-a", "--output", "json"])),
+    ).toEqual(workerHostResourceOf(resource));
+    expect(hosts.calls.map((call) => call.body)).toEqual([
+      { id: "host-a" },
+      { id: "host-a" },
+      { id: "host-a" },
+    ]);
+    vi.restoreAllMocks();
   });
 });

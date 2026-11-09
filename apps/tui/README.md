@@ -1,8 +1,9 @@
 # supertag-tui
 
 SuperTag's experimental terminal UI, written in Go with Bubble Tea v2, Lip Gloss v2, Bubbles v2
-and Glamour. The status bar shows which Control Plane it talks to. The rail on the left has four
-sections:
+and Glamour. The status bar shows which Control Plane it talks to, its Worker Hosts by phase
+(such as `Worker Hosts: 2 ready, 1 unreachable`; revoked hosts are left out), and whether it is
+reachable. The rail on the left has four sections:
 
 - **Tags**, each with its state. The main pane holds your conversation with the selected Tag,
   the `default` one at first: its recent history, then the reply streaming in, and work Sessions
@@ -38,6 +39,11 @@ work and latest entry. Enter switches to one. `n` starts a new conversation: typ
 64 letters, digits, `.`, `_` or `-`, starting with a letter or digit) and press enter. The Tag's
 rail state counts the open work Sessions of the conversation it shows. Esc goes back.
 
+Ctrl-P lists the Control Planes you can switch to, when there is more than one: this machine's,
+when it has a local operator credential, and each one saved with `supertag connect control-plane`.
+Enter switches to the one under the cursor, and esc goes back. Switching ends every stream and call
+to the Control Plane you leave and reads everything anew from the next; unsent input stays behind.
+
 Tab moves between the rail and the main pane; up and down (or `k` and `j`) move through the rail,
 and enter opens the row. Esc quits when there is nothing to go back from, and Ctrl-C quits.
 Every text from the server, an agent or a diff is filtered for the terminal, so an escape sequence
@@ -53,7 +59,9 @@ commands and tool calls. `TeamService` lists and reads the Teams, and
 `MailboxService.ListWorkstreamPosts` reads the shown Team's Workstream. `EventService.Watch` keeps
 the rail, the Objective view, the Team view and expanded work Sessions current, including how many
 work Sessions of each shown conversation are still open. While that stream is down, the TUI
-rereads what it shows every five seconds. The Tags themselves come from `GET /api/v1/tags`. See
+rereads what it shows every five seconds. `HostService.ListWorkerHosts` feeds the status bar,
+reread every 15 seconds; when the Control Plane refuses it, the status bar leaves the Worker Hosts
+out. The Tags themselves come from `GET /api/v1/tags`. See
 `contributing/tui-design.md`.
 
 Build with `./build.sh`, which cross-compiles static binaries for macOS and Linux (arm64 and
@@ -61,8 +69,12 @@ amd64) into `dist/supertag-tui-GOOS-GOARCH`, versioned from `packages/supertag-a
 Run the tests with `go test ./...`. The end-to-end test runs the built binary through
 `supertag` under tmux, in a throwaway git checkout: `SUPERTAG_TUI_E2E=1 go test -run TestEndToEnd -v .`
 
-Plain `supertag`, run in an interactive terminal, launches it. The CLI resolves the Control
-Plane URL and token as every other command does, starts the binary with an extra pipe as file descriptor 3, and writes one JSON line
-`{"url": ..., "token": ..., "name": ...}` to it. The binary never reads `~/.supertag` and takes no
-token from its arguments; started any other way, it prints `Run supertag in a terminal to start the
-terminal UI.` and exits 2.
+Plain `supertag`, run in an interactive terminal, launches it. The CLI resolves the current
+Control Plane as every other command does, and the others it can switch to, starts the binary with
+an extra pipe as file descriptor 3, and writes one JSON line to it:
+`{"contexts": [{"url": ..., "token": ..., "name": ...}, ...], "current": N}`, where `current` is the
+index of the selected Control Plane and `name` is left out for this machine's. When
+`SUPERTAG_OPERATOR_TOKEN` or `SUPERTAG_ADMIN_TOKEN` is set, that token goes only to the Control Plane
+it selects, so the list holds that one alone. A saved connection whose credential cannot be read is
+left out. The binary never reads `~/.supertag` and takes no token from its arguments or environment;
+started any other way, it prints `Run supertag in a terminal to start the terminal UI.` and exits 2.

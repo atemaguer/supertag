@@ -1,5 +1,6 @@
 import { taskExecutionPlacementReport } from "@supertag/control-plane";
-import type { Store, WorkerHost } from "@supertag/core";
+import type { WorkerHost } from "@supertag/core";
+import type { OperatorReadStore } from "./operator-seams.js";
 import type { HostStorageEvidence } from "./storage-durability.js";
 
 /** Bound history reads; running Attempts are included even outside the recent Task window. */
@@ -11,7 +12,7 @@ const STORAGE_TASK_SCAN = 200;
  */
 export async function workerHostStorage(
   store: Pick<
-    Store,
+    OperatorReadStore,
     "listTasks" | "listTaskAttempts" | "listRunningTaskAttempts" | "listTaskEvents"
   >,
   hosts: readonly Pick<WorkerHost, "id">[],

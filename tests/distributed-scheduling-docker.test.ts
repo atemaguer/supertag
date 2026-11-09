@@ -141,24 +141,26 @@ suite("distributed scheduling across Docker Worker Hosts", () => {
     expect(hosts.filter((host) => host === "host-a")).toHaveLength(1);
     expect(hosts.filter((host) => host === "host-b")).toHaveLength(2);
     expect(hosts).not.toContain("host-c");
-    const loadMetrics = await api("GET", "/api/v1/metrics");
+    const loadMetrics = await api(
+      "POST",
+      "/supertag.operator.v1.OrganizationService/GetMetrics",
+      {},
+    );
     expect(loadMetrics).toMatchObject({
-      values: {
-        scheduling: {
-          placedAttempts: 3,
-          reservations: { consumed: 3 },
-          workerHosts: expect.arrayContaining([
-            expect.objectContaining({ id: "host-a", activeAttempts: 1, utilization: 1 }),
-            expect.objectContaining({ id: "host-b", activeAttempts: 2, utilization: 1 }),
-          ]),
-        },
+      scheduling: {
+        placedAttempts: "3",
+        reservations: { consumed: "3" },
+        workerHosts: expect.arrayContaining([
+          expect.objectContaining({ id: "host-a", activeAttempts: 1, utilization: 1 }),
+          expect.objectContaining({ id: "host-b", activeAttempts: 2, utilization: 1 }),
+        ]),
       },
     });
     await eventually(async () =>
       (await Promise.all(loadTaskIds.map(taskRow))).every((row) => row?.["status"] === "completed"),
     );
 
-    await api("POST", "/api/v1/worker-hosts/host-a/drain");
+    await api("POST", "/supertag.operator.v1.HostService/DrainWorkerHost", { id: "host-a" });
     const drained = await start("drained-placement", "Run while host-a drains hold=25");
     await eventually(async () => (await taskRow(drained))?.["status"] === "completed");
     expect(selectedHost((await attempts()).find((row) => row["taskId"] === drained))).toBe(
@@ -221,13 +223,10 @@ suite("distributed scheduling across Docker Worker Hosts", () => {
   }
 
   async function enrollAndLaunch(host: { id: string; profile: string; capacity: string }) {
-    const issuance = await api("POST", "/api/v1/worker-hosts", {
-      apiVersion: CONTROL_PLANE_API_VERSION,
-      kind: "WorkerHostEnrollment",
-      metadata: { id: host.id },
-      spec: {},
+    const issuance = await api("POST", "/supertag.operator.v1.HostService/EnrollWorkerHost", {
+      id: host.id,
     });
-    const token = String((issuance["credential"] as Row)["token"]);
+    const token = String(issuance["token"]);
     containers.push(name(host.id));
     await execute("docker", [
       "run",

@@ -21,6 +21,7 @@ import {
   CLI,
   fakeHarness,
   git,
+  localWorkerHost,
   repository,
   TIMEOUT,
   useServicesContext,
@@ -394,7 +395,7 @@ describe("supertag init", () => {
         roles: ["Lead"],
         workerHosts: ["studio-mac"],
       });
-      expect((await api("/api/v1/worker-hosts/studio-mac")).status).toMatchObject({
+      expect((await localWorkerHost("studio-mac")).status).toMatchObject({
         connectionStatus: "connected",
         workspaces: ["shop"],
       });
@@ -453,7 +454,7 @@ describe("supertag init", () => {
       const host = (await loadServicesFile()).services[1];
       expect(host).toMatchObject({ name: "studio-mac", workspaces: { shop: root, docs } });
       expect(await readdir(docs)).toEqual([".git"]);
-      expect((await api("/api/v1/worker-hosts/studio-mac")).status).toMatchObject({
+      expect((await localWorkerHost("studio-mac")).status).toMatchObject({
         workspaces: expect.arrayContaining(["docs", "shop"]),
       });
       await bringDown({ write: () => {} });

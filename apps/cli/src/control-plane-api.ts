@@ -8,14 +8,11 @@ import {
   AuthKeyRedemptionError,
   resolveOwnerObjectiveRuntimeActions,
   SessionPersistence,
-  type TaskAttemptRunningCommand,
-  taskAttemptRunningCommand,
 } from "@supertag/control-plane";
 import type {
   AddTagContextItemInput,
   AddTagPermissionInput,
   AnyArtifactTransferGrantClaims,
-  AuthKey,
   ConnectedSurfaceProvider,
   ExecutionSettings,
   GatewayCredentialVault,
@@ -30,7 +27,6 @@ import type {
   TagMessagingGrant,
   TagPermission,
   TagPermissionSet,
-  Task,
   VolumeSpec,
   WorkspaceSpec,
 } from "@supertag/core";
@@ -41,13 +37,10 @@ import {
   normalizeApprovers,
   OPERATOR_TOKEN_PREFIX,
   operatorTokenOperatorId,
-  parseAuditQuery,
-  parseAuthKeyName,
   parseCreateObjective,
   parseExecutionSettings,
   parseMcpGrantAction,
   parseMcpGrantResource,
-  parseOperatorTokenName,
   parseVolumeName,
   parseVolumeSpec,
   parseWorkerHostLabels,
@@ -77,12 +70,10 @@ import {
   noteRequestBody,
 } from "./audit-trail.js";
 import {
-  authKeyResource,
   CONTROL_PLANE_API_VERSION,
   canonicalMailboxGrants,
   canonicalTagLocations,
   contextSetResource,
-  operatorTokenResource,
   permissionSetResource,
   resourceList,
   roleResource,
@@ -94,7 +85,6 @@ import {
   volumeResource,
   workerHostCredentialIssuance,
   workerHostResource,
-  workerHostResourcesFromStore,
   workerProfileResourcesFromHost,
   workspaceEnvironments,
   workspaceResource,
@@ -133,12 +123,10 @@ import {
   registerOperatorRoutes,
 } from "./operator-rpc.js";
 import type { OperatorAuthentication } from "./operator-rpc-context.js";
-import { organizationStatus } from "./organization-status.js";
 import {
   applyDeletion,
   DELETE_KIND_NAMES,
   deletionRefusal,
-  findSurfaceAccountForDeletion,
   planDeletion,
 } from "./resource-deletion.js";
 import { registerSessionGrpcRoutes } from "./session-grpc.js";
@@ -150,7 +138,6 @@ import {
   sameCredential,
   manifestSpec as surfaceManifestSpec,
 } from "./surface-account-manifest.js";
-import { isTagCommand, renderTagOperation, type TagCommand } from "./tag-command-adapter.js";
 import {
   AccountSelectionError,
   type SurfaceTarget,
@@ -252,6 +239,7 @@ export class ControlPlaneApiServer {
           control: controlPlaneControl(dependencies),
           changes: dependencies.controlPlane.changes,
           follows: this.#follows,
+          rpcTelemetry: () => this.#rpcTelemetry.snapshot(),
           draining: () => this.#draining.signal,
         }),
     );
@@ -516,142 +504,12 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
     return;
   }
   if (
-    url.pathname === "/api/v1/operator-tokens" ||
-    url.pathname.startsWith("/api/v1/operator-tokens/")
-  ) {
-    if (authentication.kind !== "break-glass") {
-      writeStatusError(
-        context.response,
-        403,
-        "Forbidden",
-        "Only the admin token manages Operator Tokens",
-      );
-      return;
-    }
-    await handleOperatorTokenRequest(context, url);
-    return;
-  }
-  if (
     (context.request.method === "POST" && url.pathname === "/api/v1/objectives") ||
     (context.request.method === "GET" && /^\/api\/v1\/objectives\/[^/]+$/u.test(url.pathname))
   ) {
     await handleObjectiveManifestRequest(context, url, authentication.principal);
     return;
   }
-  if (context.request.method === "GET" && url.pathname === "/api/v1/audit") {
-    await handleAuditRead(context, url);
-    return;
-  }
-
-  if (context.request.method === "GET" && url.pathname === "/api/v1/metrics") {
-    const metrics = await context.store.readCoordinationMetrics();
-    const { capturedAt, ...values } = metrics;
-    writeJson(context.response, 200, {
-      apiVersion: CONTROL_PLANE_API_VERSION,
-      kind: "MetricSnapshot",
-      metadata: { capturedAt },
-      values: { ...values, rpc: context.rpcSnapshot() },
-    });
-    return;
-  }
-
-  if (context.request.method === "GET" && url.pathname === "/api/v1/organization") {
-    const [hosts, tags, runningAttempts, objectives] = await Promise.all([
-      context.controlPlane.listWorkerHosts(),
-      context.store.listTags(),
-      context.store.listRunningTaskAttempts(),
-      context.store.listOpenObjectives(),
-    ]);
-    // Status shows spend only for open Objectives, so read only their Attempts.
-    const spend = await context.store.readSpend({
-      by: "objective",
-      objectiveIds: objectives.map((objective) => objective.id),
-    });
-    const taskTagIds = new Map<string, string>();
-    const runningCommands = new Map<string, TaskAttemptRunningCommand>();
-    for (const taskId of new Set(runningAttempts.map((attempt) => attempt.taskId))) {
-      const task = await context.store.findTaskById(taskId);
-      if (task !== undefined) taskTagIds.set(taskId, task.tagId);
-      const attempt = runningAttempts
-        .filter((candidate) => candidate.taskId === taskId)
-        .toSorted((a, b) => b.attemptNumber - a.attemptNumber)[0];
-      const running = taskAttemptRunningCommand(
-        attempt,
-        await context.store.listTaskEvents(taskId),
-      );
-      if (running !== null) runningCommands.set(taskId, running);
-    }
-    // The latest Task of each of the Objective's Sessions carries its current findings.
-    const objectiveTasks = new Map(
-      await Promise.all(
-        objectives.map(async (objective) => {
-          const tasks: Task[] = [];
-          for (const session of await context.store.listObjectiveSessions(objective.id)) {
-            const task =
-              session.task === undefined
-                ? undefined
-                : await context.store.findTaskById(session.task.id);
-            if (task !== undefined) tasks.push(task);
-          }
-          return [objective.id, tasks] as const;
-        }),
-      ),
-    );
-    writeJson(
-      context.response,
-      200,
-      organizationStatus({
-        asOf: new Date().toISOString(),
-        workerHosts: hosts
-          .filter((host) => !(host.ephemeral && host.enrollmentStatus === "revoked"))
-          .map((host) => workerHostResource(host)),
-        tags,
-        runningAttempts,
-        taskTagIds,
-        runningCommands,
-        objectives,
-        objectiveTasks,
-        objectiveSpend: new Map(spend.groups.map((group) => [group.key, group])),
-      }),
-    );
-    return;
-  }
-
-  if (context.request.method === "GET" && url.pathname === "/api/v1/spend") {
-    const by = url.searchParams.get("by") ?? "objective";
-    const since = url.searchParams.get("since") ?? undefined;
-    if (
-      url.searchParams.size !==
-        [...url.searchParams.keys()].filter((key) => key === "by" || key === "since").length ||
-      !["tag", "objective", "day"].includes(by)
-    ) {
-      writeStatusError(
-        context.response,
-        400,
-        "Invalid",
-        "Spend supports by=tag|objective|day and since=ISO",
-      );
-      return;
-    }
-    try {
-      writeJson(
-        context.response,
-        200,
-        await context.store.readSpend({
-          by: by as "tag" | "objective" | "day",
-          ...(since === undefined ? {} : { since }),
-        }),
-      );
-    } catch (error) {
-      if (error instanceof Error && error.message.startsWith("since must")) {
-        writeStatusError(context.response, 400, "Invalid", error.message);
-        return;
-      }
-      throw error;
-    }
-    return;
-  }
-
   if (context.request.method === "GET" && url.pathname === "/api/v1/tags") {
     const [tags, routes, assignments, roles, accounts, organization] = await Promise.all([
       context.store.listTags(),
@@ -696,217 +554,8 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
     return;
   }
 
-  if (context.request.method === "GET" && url.pathname === "/api/v1/surface-accounts") {
-    writeJson(
-      context.response,
-      200,
-      resourceList((await context.store.listSurfaceAccounts()).map(surfaceAccountResource)),
-    );
-    return;
-  }
-
   if (context.request.method === "POST" && url.pathname === "/api/v1/surface-accounts") {
     await applySurfaceAccountManifest(context, url);
-    return;
-  }
-
-  const surfaceAccountMatch = /^\/api\/v1\/surface-accounts\/([^/]+)$/u.exec(url.pathname);
-  if (context.request.method === "GET" && surfaceAccountMatch?.[1] !== undefined) {
-    const name = decodeURIComponent(surfaceAccountMatch[1]);
-    const account = await findSurfaceAccountForDeletion(context.store, name);
-    if (account === undefined) {
-      writeJson(context.response, 404, {
-        error: "not_found",
-        message: `Surface Account ${name} does not exist`,
-      });
-      return;
-    }
-    writeJson(context.response, 200, surfaceAccountResource(account));
-    return;
-  }
-
-  if (context.request.method === "POST" && url.pathname === "/api/v1/worker-hosts") {
-    const desired = parseWorkerHostEnrollment(await readJsonBody(context.request));
-    if ((await context.controlPlane.listWorkerHosts()).some((host) => host.id === desired.id)) {
-      writeStatusError(context.response, 409, "AlreadyExists", "Worker Host is already enrolled");
-      return;
-    }
-    let issued: Awaited<ReturnType<ControlPlane["enrollWorkerHost"]>>;
-    try {
-      issued = await context.controlPlane.enrollWorkerHost(desired);
-    } catch (error) {
-      if (error instanceof Error && /^Worker Host .+ is already enrolled$/u.test(error.message)) {
-        writeStatusError(context.response, 409, "AlreadyExists", "Worker Host is already enrolled");
-        return;
-      }
-      throw error;
-    }
-    writeOneTimeCredential(
-      context.response,
-      201,
-      workerHostCredentialIssuance(issued.workerHost.id, issued.token, issued.workerHost.updatedAt),
-    );
-    return;
-  }
-
-  if (context.request.method === "GET" && url.pathname === "/api/v1/worker-hosts") {
-    // Removed ephemeral hosts stay readable by ID but leave the default list.
-    const workerHosts = (await context.controlPlane.listWorkerHosts()).filter(
-      (host) => !(host.ephemeral && host.enrollmentStatus === "revoked"),
-    );
-    writeJson(
-      context.response,
-      200,
-      resourceList(await workerHostResourcesFromStore(context.store, workerHosts)),
-    );
-    return;
-  }
-
-  if (context.request.method === "POST" && url.pathname === "/api/v1/auth-keys") {
-    let desired: ReturnType<typeof parseAuthKeyRequest>;
-    try {
-      desired = parseAuthKeyRequest(await readJsonBody(context.request));
-    } catch (error) {
-      writeStatusError(context.response, 400, "Invalid", errorText(error));
-      return;
-    }
-    let issued: Awaited<ReturnType<ControlPlane["createAuthKey"]>>;
-    try {
-      issued = await context.controlPlane.createAuthKey(desired);
-    } catch (error) {
-      if (error instanceof TagMessagingError) {
-        writeStatusError(
-          context.response,
-          error.statusCode,
-          error.statusCode === 409 ? "AlreadyExists" : "Invalid",
-          error.message,
-        );
-        return;
-      }
-      throw error;
-    }
-    writeOneTimeCredential(context.response, 201, {
-      ...(await authKeyResourceFromStore(context.store, issued.authKey)),
-      secret: issued.secret,
-    });
-    return;
-  }
-
-  if (context.request.method === "GET" && url.pathname === "/api/v1/auth-keys") {
-    const keys = await context.controlPlane.listAuthKeys();
-    const tagNames = await tagNamesById(context.store);
-    writeJson(
-      context.response,
-      200,
-      resourceList(keys.map((key) => authKeyResource(key, tagNames))),
-    );
-    return;
-  }
-
-  const authKeyMatch = /^\/api\/v1\/auth-keys\/([^/]+?)(\/revoke)?$/u.exec(url.pathname);
-  if (
-    authKeyMatch?.[1] !== undefined &&
-    ((context.request.method === "GET" && authKeyMatch[2] === undefined) ||
-      (context.request.method === "POST" && authKeyMatch[2] === "/revoke"))
-  ) {
-    const name = decodeURIComponent(authKeyMatch[1]);
-    const key =
-      context.request.method === "POST"
-        ? await context.controlPlane.revokeAuthKey(name)
-        : await context.controlPlane.findAuthKey(name);
-    if (key === undefined) {
-      writeStatusError(context.response, 404, "NotFound", `Auth Key ${name} does not exist`);
-      return;
-    }
-    writeJson(context.response, 200, await authKeyResourceFromStore(context.store, key));
-    return;
-  }
-
-  const workerHostCredentialMatch = /^\/api\/v1\/worker-hosts\/([^/]+)\/credential$/u.exec(
-    url.pathname,
-  );
-  if (workerHostCredentialMatch?.[1] !== undefined) {
-    const id = decodeURIComponent(workerHostCredentialMatch[1]);
-    if (context.request.method === "POST") {
-      const issued = await context.controlPlane.rotateWorkerHostCredential(id);
-      if (issued === undefined) {
-        const existing = (await context.controlPlane.listWorkerHosts()).find(
-          (host) => host.id === id,
-        );
-        if (existing === undefined) {
-          writeStatusError(context.response, 404, "NotFound", "Worker Host does not exist");
-        } else {
-          writeStatusError(
-            context.response,
-            409,
-            "Revoked",
-            "A revoked Worker Host must be enrolled under a new ID",
-          );
-        }
-        return;
-      }
-      writeOneTimeCredential(
-        context.response,
-        200,
-        workerHostCredentialIssuance(
-          issued.workerHost.id,
-          issued.token,
-          issued.workerHost.updatedAt,
-        ),
-      );
-      return;
-    }
-    if (context.request.method === "DELETE") {
-      if ((await context.controlPlane.revokeWorkerHostCredential(id)) === undefined) {
-        writeStatusError(context.response, 404, "NotFound", "Worker Host does not exist");
-        return;
-      }
-      context.response.writeHead(204);
-      context.response.end();
-      return;
-    }
-  }
-
-  const workerHostOperationMatch = /^\/api\/v1\/worker-hosts\/([^/]+)\/(drain|resume)$/u.exec(
-    url.pathname,
-  );
-  if (
-    context.request.method === "POST" &&
-    workerHostOperationMatch?.[1] !== undefined &&
-    workerHostOperationMatch[2] !== undefined
-  ) {
-    const id = decodeURIComponent(workerHostOperationMatch[1]);
-    const draining = workerHostOperationMatch[2] === "drain";
-    if (!(await context.controlPlane.setWorkerHostDraining(id, draining))) {
-      writeStatusError(context.response, 404, "NotFound", "Worker Host does not exist");
-      return;
-    }
-    const workerHost = (await context.controlPlane.listWorkerHosts()).find(
-      (candidate) => candidate.id === id,
-    );
-    if (workerHost === undefined) {
-      writeStatusError(context.response, 404, "NotFound", "Worker Host does not exist");
-      return;
-    }
-    writeJson(context.response, 200, workerHostResource(workerHost));
-    return;
-  }
-
-  const workerHostMatch = /^\/api\/v1\/worker-hosts\/([^/]+)$/u.exec(url.pathname);
-  if (context.request.method === "GET" && workerHostMatch?.[1] !== undefined) {
-    const id = decodeURIComponent(workerHostMatch[1]);
-    const workerHost = (await context.controlPlane.listWorkerHosts()).find(
-      (candidate) => candidate.id === id,
-    );
-    if (workerHost === undefined) {
-      writeStatusError(context.response, 404, "NotFound", "Worker Host does not exist");
-      return;
-    }
-    writeJson(
-      context.response,
-      200,
-      (await workerHostResourcesFromStore(context.store, [workerHost]))[0],
-    );
     return;
   }
 
@@ -1435,41 +1084,6 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
     return;
   }
 
-  const tagWorkerHostMatch = /^\/api\/v1\/tags\/([^/]+)\/worker-hosts\/([^/]+)$/u.exec(
-    url.pathname,
-  );
-  if (
-    (context.request.method === "PUT" || context.request.method === "DELETE") &&
-    tagWorkerHostMatch?.[1] !== undefined &&
-    tagWorkerHostMatch[2] !== undefined
-  ) {
-    const name = decodeURIComponent(tagWorkerHostMatch[1]);
-    const workerHostId = decodeURIComponent(tagWorkerHostMatch[2]);
-    const tag = await context.store.findTagByName(name);
-    if (tag === undefined) {
-      writeJson(context.response, 404, {
-        error: "not_found",
-        message: `Tag ${JSON.stringify(name)} does not exist`,
-      });
-      return;
-    }
-    if (context.request.method === "PUT") {
-      const workerHosts = await context.controlPlane.listWorkerHosts();
-      if (!workerHosts.some((host) => host.id === workerHostId)) {
-        writeJson(context.response, 404, {
-          error: "not_found",
-          message: `Worker Host ${workerHostId} does not exist`,
-        });
-        return;
-      }
-      await context.store.bindTagWorkerHost(tag.id, workerHostId);
-    } else {
-      await context.store.unbindTagWorkerHost(tag.id, workerHostId);
-    }
-    writeJson(context.response, 200, await tagResourceFromStore(context.store, tag));
-    return;
-  }
-
   if (context.request.method === "GET" && url.pathname.startsWith("/api/v1/tags/")) {
     const name = decodeURIComponent(url.pathname.slice("/api/v1/tags/".length));
     // A retired Tag stays readable by name until a new Tag takes the name.
@@ -1542,60 +1156,7 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
     return;
   }
 
-  if (context.request.method === "POST" && url.pathname === "/api/v1/surface-enrollments") {
-    const enrollment = parseResourceRequest(
-      await readJsonBody(context.request),
-      "SurfaceEnrollment",
-    );
-    const verified = parseVerifiedSurfaceAccount(enrollment.spec);
-    const account = await context.controlPlane.setupSurfaceAccount(verified);
-    writeJson(context.response, 200, surfaceAccountResource(account));
-    return;
-  }
-
-  if (context.request.method === "POST" && url.pathname === "/api/v1/tag-operations") {
-    const request = parseResourceRequest(await readJsonBody(context.request), "TagOperation");
-    const command = parseTagCommandRequest(request.spec);
-    const output = await renderTagOperation(command.command, command.args, {
-      store: context.store,
-      credentialVault: context.credentialVault,
-    });
-    const now = new Date().toISOString();
-    writeJson(context.response, 200, {
-      apiVersion: CONTROL_PLANE_API_VERSION,
-      kind: "TagOperation",
-      metadata: {
-        id: request.id,
-        resourceVersion: "1",
-        createdAt: now,
-        updatedAt: now,
-      },
-      spec: command,
-      status: { phase: "completed", output },
-    });
-    return;
-  }
-
   writeStatusError(context.response, 404, "NotFound", "Admin route not found");
-}
-
-function parseResourceRequest(
-  value: unknown,
-  expectedKind: "SurfaceEnrollment" | "TagOperation",
-): { readonly id: string; readonly spec: Record<string, unknown> } {
-  if (
-    !isRecord(value) ||
-    value["apiVersion"] !== CONTROL_PLANE_API_VERSION ||
-    value["kind"] !== expectedKind ||
-    !isRecord(value["metadata"]) ||
-    !isRecord(value["spec"])
-  ) {
-    throw new Error(`${expectedKind} resource is invalid`);
-  }
-  return {
-    id: requiredString(value["metadata"]["id"], `${expectedKind} metadata.id`),
-    spec: value["spec"],
-  };
 }
 
 interface DesiredTagLocation {
@@ -2240,37 +1801,6 @@ interface DesiredRole {
   readonly execution?: ExecutionSettings;
 }
 
-function parseWorkerHostEnrollment(value: unknown): {
-  readonly id: string;
-} {
-  if (
-    !isRecord(value) ||
-    value["apiVersion"] !== CONTROL_PLANE_API_VERSION ||
-    value["kind"] !== "WorkerHostEnrollment" ||
-    !isRecord(value["metadata"]) ||
-    !isRecord(value["spec"])
-  ) {
-    throw new Error("WorkerHostEnrollment resource is invalid");
-  }
-  const unknownTopLevel = Object.keys(value).filter(
-    (key) => !["apiVersion", "kind", "metadata", "spec"].includes(key),
-  );
-  if (unknownTopLevel.length > 0) {
-    throw new Error(`WorkerHostEnrollment contains unknown fields: ${unknownTopLevel.join(", ")}`);
-  }
-  const unknownMetadata = Object.keys(value["metadata"]).filter((key) => key !== "id");
-  if (unknownMetadata.length > 0) {
-    throw new Error(
-      `WorkerHostEnrollment metadata contains unknown fields: ${unknownMetadata.join(", ")}`,
-    );
-  }
-  if (Object.keys(value["spec"]).length > 0) {
-    throw new Error("WorkerHostEnrollment spec must be empty");
-  }
-  const id = requiredString(value["metadata"]["id"], "WorkerHostEnrollment metadata.id");
-  return { id };
-}
-
 /**
  * Redeems the Auth Key in the Authorization header: enrolls a new Worker Host, binds the key's
  * Tags, and returns the host's credential once.
@@ -2392,47 +1922,8 @@ function parseWorkerHostJoin(value: unknown): string {
   return parseWorkerHostName(value["metadata"]["name"]);
 }
 
-function parseAuthKeyRequest(value: unknown): {
-  readonly name: string;
-  readonly tags: readonly string[];
-  readonly labels: readonly string[];
-  readonly reusable: boolean;
-  readonly ephemeral: boolean;
-} {
-  if (
-    !isRecord(value) ||
-    value["apiVersion"] !== CONTROL_PLANE_API_VERSION ||
-    value["kind"] !== "AuthKey" ||
-    !isRecord(value["metadata"]) ||
-    !isRecord(value["spec"])
-  )
-    throw new Error("AuthKey resource is invalid");
-  const unknown = Object.keys(value["spec"]).filter(
-    (key) => !["tags", "labels", "reusable", "ephemeral"].includes(key),
-  );
-  if (unknown.length > 0)
-    throw new Error(`AuthKey spec contains unknown fields: ${unknown.join(", ")}`);
-  const tags = value["spec"]["tags"];
-  if (!Array.isArray(tags) || tags.some((tag) => typeof tag !== "string"))
-    throw new Error("AuthKey spec.tags must be an array of Tag names");
-  for (const flag of ["reusable", "ephemeral"])
-    if (value["spec"][flag] !== undefined && typeof value["spec"][flag] !== "boolean")
-      throw new Error(`AuthKey spec.${flag} must be a boolean`);
-  return {
-    name: parseAuthKeyName(value["metadata"]["name"]),
-    tags,
-    labels: parseWorkerHostLabels(value["spec"]["labels"] ?? [], "AuthKey spec.labels"),
-    reusable: value["spec"]["reusable"] === true,
-    ephemeral: value["spec"]["ephemeral"] === true,
-  };
-}
-
 async function tagNamesById(store: Store): Promise<ReadonlyMap<string, string>> {
   return new Map((await store.listTags({ includeRetired: true })).map((tag) => [tag.id, tag.name]));
-}
-
-async function authKeyResourceFromStore(store: Store, key: AuthKey) {
-  return authKeyResource(key, await tagNamesById(store));
 }
 
 function errorText(error: unknown): string {
@@ -2587,80 +2078,14 @@ function contextItemValue(item: TagContextItem): DesiredContextItem {
   };
 }
 
-async function handleOperatorTokenRequest(
-  context: ControlPlaneApiRequestContext,
-  url: URL,
-): Promise<void> {
-  if (context.request.method === "POST" && url.pathname === "/api/v1/operator-tokens") {
-    let name: string;
-    try {
-      name = parseOperatorTokenRequest(await readJsonBody(context.request));
-    } catch (error) {
-      writeStatusError(context.response, 400, "Invalid", errorText(error));
-      return;
-    }
-    let issued: Awaited<ReturnType<ControlPlane["createOperatorToken"]>>;
-    try {
-      issued = await context.controlPlane.createOperatorToken({ name });
-    } catch (error) {
-      if (error instanceof TagMessagingError) {
-        writeStatusError(
-          context.response,
-          error.statusCode,
-          error.statusCode === 409 ? "AlreadyExists" : "Invalid",
-          error.message,
-        );
-        return;
-      }
-      throw error;
-    }
-    writeOneTimeCredential(context.response, 201, {
-      ...operatorTokenResource(issued.operatorToken),
-      secret: issued.secret,
-    });
-    return;
-  }
-  if (context.request.method === "GET" && url.pathname === "/api/v1/operator-tokens") {
-    const tokens = await context.controlPlane.listOperatorTokens();
-    writeJson(context.response, 200, resourceList(tokens.map(operatorTokenResource)));
-    return;
-  }
-  const match = /^\/api\/v1\/operator-tokens\/([^/]+?)(\/revoke)?$/u.exec(url.pathname);
-  if (
-    match?.[1] !== undefined &&
-    ((context.request.method === "GET" && match[2] === undefined) ||
-      (context.request.method === "POST" && match[2] === "/revoke"))
-  ) {
-    const name = decodeURIComponent(match[1]);
-    const token =
-      context.request.method === "POST"
-        ? await context.controlPlane.revokeOperatorToken(name)
-        : await context.controlPlane.findOperatorToken(name);
-    if (token === undefined) {
-      writeStatusError(context.response, 404, "NotFound", `Operator Token ${name} does not exist`);
-      return;
-    }
-    writeJson(context.response, 200, operatorTokenResource(token));
-    return;
-  }
-  writeJson(context.response, 404, { error: "not_found" });
-}
-
-function parseOperatorTokenRequest(value: unknown): string {
-  if (!isRecord(value) || value["kind"] !== "OperatorToken")
-    throw new Error("Expected an OperatorToken resource");
-  const metadata = value["metadata"];
-  if (!isRecord(metadata)) throw new Error("OperatorToken metadata.name is required");
-  return parseOperatorTokenName(metadata["name"]);
-}
-
 /** Each write request's audit note, so body parsing can name its target. */
 const auditNotes = new WeakMap<IncomingMessage, AuditNote>();
 
 /**
- * Records who changed what. Every authenticated management write, such as an apply, a delete, an
- * Auth Key, an approval decision, or an Objective message, becomes one audit entry in the database
- * and in the configured sink once its response ends. Reads are not recorded.
+ * Records who changed what. Every authenticated management write, such as an apply or a delete,
+ * becomes one audit entry in the database and in the configured sink. The entry is stored before
+ * the response ends, so a read that begins after the caller has its answer lists it, whichever
+ * API Server process serves the read. Reads are not recorded.
  */
 function auditManagementRequest(
   context: ControlPlaneApiRequestContext,
@@ -2671,25 +2096,24 @@ function auditManagementRequest(
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return undefined;
   const note = classifyManagementRequest(method, url);
   auditNotes.set(context.request, note);
+  const response = context.response;
   let recorded = false;
-  const record = () => {
-    if (recorded) return;
+  const record = (succeeded: boolean): Promise<void> => {
+    if (recorded) return Promise.resolve();
     recorded = true;
     // Recording never fails the request it describes, and never throws out of this listener.
     try {
-      const status = context.response.statusCode;
-      const succeeded = context.response.writableFinished && status < 400;
       // A name the caller supplied is kept only once a real change succeeded, so it names a real
       // resource. A failed request or a dry run keeps only the kind, since its name might hold a
       // credential.
       const confirmed = succeeded && !note.action.endsWith(".dry-run");
-      void context.auditTrail.record({
+      return context.auditTrail.record({
         at: new Date().toISOString(),
         actor,
         action: note.action,
         target: confirmed ? note.target : auditTargetKind(note.target),
         outcome: succeeded ? "succeeded" : "failed",
-        status,
+        status: response.statusCode,
         source: "api",
         method,
         // The route template, never the request's own path, which the caller chose.
@@ -2697,41 +2121,19 @@ function auditManagementRequest(
       });
     } catch {
       // The trail reports its own failures; there is nothing more to do here.
+      return Promise.resolve();
     }
   };
-  context.response.once("finish", record);
-  context.response.once("close", record);
+  const end = response.end;
+  response.end = function endAfterAudit(this: ServerResponse, ...args: unknown[]) {
+    response.end = end;
+    void record(response.statusCode < 400).finally(() =>
+      (end as (...values: unknown[]) => ServerResponse).apply(response, args),
+    );
+    return response;
+  } as ServerResponse["end"];
+  response.once("close", () => void record(false));
   return note;
-}
-
-/** `GET /api/v1/audit`: recorded changes, newest first. */
-async function handleAuditRead(context: ControlPlaneApiRequestContext, url: URL): Promise<void> {
-  const allowed = new Set(["since", "actor", "limit"]);
-  let query: ReturnType<typeof parseAuditQuery>;
-  try {
-    for (const key of url.searchParams.keys()) {
-      if (!allowed.has(key)) throw new RangeError(`Unknown audit query parameter: ${key}`);
-      if (url.searchParams.getAll(key).length !== 1)
-        throw new RangeError(`Give the ${key} query parameter once`);
-    }
-    const value = (key: string) => url.searchParams.get(key) ?? undefined;
-    query = parseAuditQuery({
-      since: value("since"),
-      actor: value("actor"),
-      limit: value("limit"),
-    });
-  } catch (error) {
-    writeStatusError(context.response, 400, "Invalid", errorText(error));
-    return;
-  }
-  // Changes this Control Plane already answered are visible to the next read.
-  await context.auditTrail.settled();
-  writeJson(context.response, 200, {
-    apiVersion: CONTROL_PLANE_API_VERSION,
-    kind: "AuditEntryList",
-    metadata: { limit: query.limit },
-    items: await context.store.listAuditEntries(query),
-  });
 }
 
 function bearerToken(authorization: string | undefined): string | undefined {
@@ -3265,25 +2667,6 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   } catch {
     throw new Error("Request body must be valid JSON");
   }
-}
-
-function parseTagCommandRequest(value: unknown): {
-  readonly command: TagCommand;
-  readonly args: readonly string[];
-} {
-  if (!isRecord(value)) {
-    throw new Error("Tag command is invalid");
-  }
-  const command = stringValue(value["command"]);
-  if (!isTagCommand(command)) throw new Error("Tag command is invalid");
-  if (command === "create") {
-    throw new Error("Create Tags with POST /api/v1/tags");
-  }
-  const args = value["args"];
-  if (!Array.isArray(args) || !args.every((argument) => typeof argument === "string")) {
-    throw new Error("Tag command arguments must be strings");
-  }
-  return { command, args };
 }
 
 function parseVerifiedSurfaceAccount(value: unknown): VerifiedSurfaceAccount {

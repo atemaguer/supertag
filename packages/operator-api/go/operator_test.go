@@ -12,7 +12,9 @@ import (
 	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1/operatorv1connect"
 )
 
-type organization struct{}
+type organization struct {
+	operatorv1connect.UnimplementedOrganizationServiceHandler
+}
 
 func (organization) GetStatus(
 	_ context.Context,

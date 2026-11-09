@@ -37,9 +37,10 @@ Authorization: Bearer <admin-token-or-operator-token>
 Use HTTPS outside loopback. Set `SUPERTAG_ADMIN_TOKEN` for every non-loopback Control Plane. A
 loopback Control Plane generates a local credential under `~/.supertag` when none is configured.
 
-The admin token may call every route. An [Operator Token](resource-model.md#operator-tokens), a
-`stop_` secret, may call every route except the `operator-tokens` routes, which return `403`. A
-revoked or expired Operator Token returns `401` with a message that says which. Scoped coordination
+The admin token may call every route and RPC. An [Operator Token](resource-model.md#operator-tokens),
+a `stop_` secret, may call every one except [`AccessService`](#operator-tokens), which refuses it
+with `permission_denied`. A revoked or expired Operator Token is refused as unauthenticated, with a
+message that says which. Scoped coordination
 credentials reach only the coordination routes. The Control Plane records the caller as
 `control-plane-break-glass`, `token:NAME`, or the scoped credential's `operatorId` on approvals,
 Objective messages, and Objective and Team changes, and in the [audit log](#audit-log) entry for
@@ -58,9 +59,15 @@ The Control Plane also serves operator RPCs defined in protobuf, in the package
 are the reference for each message and field. These RPCs replace the `/api/v1/` routes one service
 at a time; a route that moves is removed.
 
+### RPC list
+
 | RPC | Operator action | Returns |
 | --- | --- | --- |
 | `OrganizationService.GetStatus` | `status` | The Control Plane phase and the phase of each controller: Task dispatch, reply delivery, and collaboration surfaces |
+| `OrganizationService.GetOrganization` | `read_organization` | What the organization is doing right now |
+| `OrganizationService.GetSpend` | `read_spend` | Cost and tokens of Task Attempts, grouped |
+| `OrganizationService.ListAuditEntries` | `read_audit` | Recorded operator changes, newest first |
+| `OrganizationService.GetMetrics` | `read_metrics` | An operational snapshot for monitoring |
 | `ConversationService.SendMessage` | `message_tag` | Sends a message to a Tag |
 | `ConversationService.GetMessage` | `read_conversation` | One message and its reply |
 | `ConversationService.FollowMessage` | `read_conversation` | Streams one message's reply and work |
@@ -104,6 +111,32 @@ at a time; a route that moves is removed.
 | `MailboxService.RevokeMailbox` | `manage_mailbox` | Removes that grant |
 | `MailboxService.ListMailboxGrants` | `read_mailbox` | The grants in which a Tag is the sender or the recipient |
 | `MailboxService.ListWorkstreamPosts` | `read_mailbox` | A Team's Workstream posts |
+| `HostService.ListWorkerHosts` | `read_worker_host` | Worker Hosts, the earliest enrolled first |
+| `HostService.GetWorkerHost` | `read_worker_host` | One Worker Host |
+| `HostService.EnrollWorkerHost` | `manage_worker_host` | Enrolls a Worker Host and returns its first credential |
+| `HostService.RotateWorkerHostCredential` | `manage_worker_host_credential` | Replaces a Worker Host's credential |
+| `HostService.RevokeWorkerHostCredential` | `manage_worker_host_credential` | Revokes a Worker Host |
+| `HostService.DrainWorkerHost` | `manage_worker_host` | Stops a Worker Host taking new Tasks |
+| `HostService.ResumeWorkerHost` | `manage_worker_host` | Ends a drain |
+| `HostService.BindWorkerHost` | `bind_worker_host` | Lets a Worker Host run a Tag's Tasks |
+| `HostService.UnbindWorkerHost` | `bind_worker_host` | Removes that binding |
+| `HostService.CreateAuthKey` | `manage_auth_key` | Creates an Auth Key and returns its secret once |
+| `HostService.ListAuthKeys` | `read_auth_key` | Auth Keys, without their secrets |
+| `HostService.GetAuthKey` | `read_auth_key` | One Auth Key |
+| `HostService.RevokeAuthKey` | `manage_auth_key` | Stops new joins with an Auth Key |
+| `AccessService.CreateOperatorToken` | `manage_operator_token` | Creates an Operator Token and returns its secret once |
+| `AccessService.ListOperatorTokens` | `read_operator_token` | Operator Tokens, without their secrets |
+| `AccessService.GetOperatorToken` | `read_operator_token` | One Operator Token |
+| `AccessService.RevokeOperatorToken` | `manage_operator_token` | Refuses an Operator Token from the next call |
+| `SurfaceService.SetUpSurface` | `set_up_surface` | Saves a verified Surface Account and its credentials |
+| `SurfaceService.ListSurfaceAccounts` | `read_surface_account` | Connected Surface Accounts |
+| `SurfaceService.GetSurfaceAccount` | `read_surface_account` | One Surface Account |
+| `SurfaceService.AddTagLocation` | `manage_tag_location` | Makes a Tag answer in a location |
+| `SurfaceService.RemoveTagLocation` | `manage_tag_location` | Stops a Tag answering in a location |
+| `SurfaceService.ActivateSet` | `manage_set_activation` | Activates a Context Set or Permission Set in a location |
+| `SurfaceService.DeactivateSet` | `manage_set_activation` | Deactivates it |
+
+### Calling an RPC
 
 Each RPC is a `POST` to `/PACKAGE.SERVICE/METHOD` on the API port, such as
 `/supertag.operator.v1.OrganizationService/GetStatus`. The listener speaks the Connect and
@@ -576,61 +609,222 @@ while more follow. To follow new posts, call again with the last `sequence` when
 The Workstream contract is in [Workstreams](../../spec/workstreams.md). See
 [Send messages between Tags](../guides/tag-messaging.md).
 
-## Organization spend
+### Organization
 
-`GET /api/v1/spend` returns cost and tokens across Task Attempts. Codex costs use model price estimates; `estimatedCostAttempts` counts those Task Attempts in each group. Each Task Attempt
-counts once, using its latest valid usage report. It requires the same operator credential as other
-management reads. Query parameters are `by=tag|objective|day` (default `objective`) and
-`since=ISO` (Task Attempt start time, inclusive). Invalid grouping or ISO timestamps return
-HTTP 400.
+`OrganizationService` serves `supertag status`, `spend`, and `audit`, and the snapshot a monitoring
+system reads. The admin token and Operator Tokens may call every RPC; a scoped coordination
+credential gets `permission_denied`.
 
-For older Codex Task Attempts with tokens but no stored cost, SuperTag estimates cost from the
-selected model in the Task Attempt snapshot and marks it estimated. An unknown cost remains when
-the Task Attempt has no token report or the model has no known price. Estimates use the current
-model price table, so they can differ from the amount billed when prices changed.
+`GetOrganization` returns what the organization is doing right now:
 
-The response has `by`, `since`, and `groups`. Each group includes `key`, `attempts`,
-`reportedCostByCurrency`, `unknownCostAttempts`, `reportedTokens` (null if none was reported),
-and `unknownTokenAttempts`. `unpricedModels`, present only when nonempty, maps each model that
-had no price to the number of unknown-cost Task Attempts that reported tokens for it.
-`unpricedTokens` counts only tokens from those Task Attempts. Tag groups also have `name`;
-Objective groups have `budget` containing
-`limitMinor` and `currency`, or null. Currency is null for allocation budgets. Day keys are UTC
-dates. `reportedCostByCurrency` is null when no cost was reported; it never implies zero cost.
+- `workerHosts`: each Worker Host that is not revoked, with its `phase`, `running` Task Attempts,
+  `capacity`, and `coordinationCapacity`, and the same counts per harness in `harnesses`.
+  `capacity` includes coordination slots, which only an Objective's owner uses;
+  `coordinationCapacity` counts only those. For example, four regular slots and one coordination
+  slot show `running: 5`, `capacity: 5`, and `coordinationCapacity: 1` when full. `diskSpace` and
+  `diskWarning` report scratch space as the host last reported it.
+- `tags`: each Tag that is not retired, with `runningTaskIds`, empty when the Tag is idle, and the
+  commands their harnesses report as running.
+- `objectives`: each Objective that is not completed or cancelled, newest first, with `status`,
+  `owner`, `deadline`, `spentMinor`, `budgetLimitMinor`, `currency`, and its high-severity
+  findings. Amounts are in minor units, so `1380` with `USD` means $13.80. `currency` is empty for
+  allocation budgets. `unpricedAttempts` and `unpricedTokens` count Task Attempts whose model has no
+  published price; `spentMinor` excludes their unknown cost.
 
-Each group also includes `postTriggered`: usage from reply activations triggered by Team
-questions and blockers, including direct messages. It contains the same cost, token, and
-coverage fields as the group. These amounts are already included in the group totals.
-`supertag spend` labels this subtotal "Post-triggered activations (included in total)".
-The Objective overview exposes `objectiveSpend` and its subset `postTriggeredSpend` for the
-entire Objective, independent of Task pagination and Team filters.
-`supertag describe objective ID` uses these totals for its budget and reply spend lines.
-With a Team filter, it labels spend as covering the entire Objective.
+The operator inbox is not part of it: `supertag status` counts it with
+`InboxService.ListInboxItems`.
 
-## Organization overview
+`GetSpend` sums cost and tokens across Task Attempts. Each Task Attempt counts once, with its latest
+valid usage report. `by` groups by `SPEND_GROUPING_OBJECTIVE`, the default, `SPEND_GROUPING_TAG`,
+or `SPEND_GROUPING_DAY`, in UTC dates. `since` counts only Task Attempts that started at or after
+that time. Each group has `key`, `attempts`, `reportedCostByCurrency`, `unknownCostAttempts`,
+`estimatedCostAttempts`, `reportedTokens`, and `unknownTokenAttempts`. Objective groups carry
+`budget`, and Task Attempts outside any Objective form the group `unassigned`. Tag groups carry
+`name`. Currencies are never combined, and an empty `reportedCostByCurrency` never means zero cost.
 
-`GET /api/v1/organization` returns what the organization is doing right now. `supertag status`
-reads it. It requires the same operator credential as other management reads.
+For Codex Task Attempts with tokens but no stored cost, SuperTag estimates the cost from the model
+in the Task Attempt snapshot and counts the Task Attempt in `estimatedCostAttempts`. Estimates use
+the current price table, so they can differ from what was billed. A model with no price leaves the
+cost unknown: `unpricedModels` counts those Task Attempts per model, and `unpricedTokens` sums their
+tokens.
 
-The response has `asOf`, `workerHosts`, `tags`, and `objectives`:
+```sh
+curl -s https://control.example.com/supertag.operator.v1.OrganizationService/GetSpend \
+  -H "Authorization: Bearer $SUPERTAG_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"by": "SPEND_GROUPING_TAG", "since": "2026-11-01T00:00:00Z"}'
+```
 
-- Each Worker Host has `id`, `phase`, `running`, `capacity`, `coordinationCapacity`, and
-  `harnesses`. Each harness entry has `harness`, `running`, `capacity`, and
-  `coordinationCapacity`. `running` counts all running Task Attempts. `capacity` includes
-  regular slots and any coordination slots; `coordinationCapacity` counts only
-  those coordination slots. For example, four regular slots and one coordination slot show
-  `running: 5`, `capacity: 5`, and `coordinationCapacity: 1` when full. Revoked hosts are
-  left out.
-- Each Tag that is not retired has `id`, `name`, and `runningTaskIds`. An empty list means the
-  Tag is idle.
-- Each Objective that is not completed or cancelled has `id`, `status`, `ownerTagId`,
-  `ownerName`, `deadline`, `spentMinor`, `budgetLimitMinor`, and `currency`, newest first.
-  Amounts are in minor units, so `1380` with `USD` means $13.80. `currency` is null for
-  allocation budgets. When a model has no published price, `unpricedAttempts` and
-  `unpricedTokens` count those Task Attempts and their reported tokens. These fields are absent
-  when there are no unpriced Task Attempts. `spentMinor` excludes their unknown cost.
+### Audit log
 
-The operator inbox is not part of this response. Read it with `InboxService.ListInboxItems`.
+`ListAuditEntries` returns the recorded operator changes, newest first: applies, deletes, Worker
+Host, Auth Key, Operator Token, and surface changes, approval decisions, Objective messages, and
+every other call that can change state. A call to an RPC that declares an audit action is recorded
+with `path` set to its procedure, such as `/supertag.operator.v1.HostService/DrainWorkerHost`.
+Reads are not recorded. A change whose call returned before `ListAuditEntries` began is listed.
+`supertag audit` reads this RPC.
+
+| Field | Meaning |
+| --- | --- |
+| `since` | Only entries at or after this time |
+| `actor` | Only entries by this exact actor, such as `token:laptop-2`; at most 200 characters |
+| `pageSize` | 0 means 50, at most 500 |
+| `pageToken` | The `nextPageToken` of the previous page. The next page continues after the last entry returned, so entries recorded in between are neither repeated nor skipped. |
+
+```json
+{
+  "entries": [
+    {
+      "id": "5f0c2e1a-…",
+      "at": "2026-10-01T09:30:00.120Z",
+      "actor": "token:laptop-2",
+      "action": "worker-host.drain",
+      "target": "WorkerHost/build-east-1",
+      "outcome": "AUDIT_OUTCOME_SUCCEEDED",
+      "status": 200,
+      "source": "AUDIT_SOURCE_API",
+      "method": "POST",
+      "path": "/supertag.operator.v1.HostService/DrainWorkerHost"
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `actor` | `control-plane-break-glass`, `token:NAME`, a scoped credential's `operatorId`, or `slack:USER` or `lark:USER` for a person in an Objective's thread |
+| `action` | What was done, such as `apply`, `apply.dry-run`, `delete`, `prune`, `worker-host.enroll`, `worker-host.credential.rotate`, `worker-host.credential.revoke`, `worker-host.drain`, `worker-host.resume`, `tag.worker-host.add`, `tag.worker-host.remove`, `auth-key.create`, `auth-key.revoke`, `operator-token.create`, `operator-token.revoke`, `surface.enroll`, `tag.location.add`, `tag.location.remove`, `tag.set.activate`, `tag.set.deactivate`, `approval.approve`, `approval.deny`, `objective.message`, `objective.reopen`, `objective.approve`, `objective.cancel`, `task.cancel`, `task.inspect`, `artifact.download`, `team.create`, `team.update`, `team.delete`, `mailbox-grant.add`, `mailbox-grant.revoke`, or `coordination.COMMAND` for a command the Control Plane recognizes (`coordination.command` otherwise). A write to a route the Control Plane doesn't recognize is `request` on `UnknownRoute`, and nothing from its path is kept, because a path might hold a credential. |
+| `target` | `Kind/NAME` or `Kind/ID`, such as `Tag/reviewer` or `ApprovalRequest/ID`; only the kind when the request named no valid target, failed, or was a dry run |
+| `outcome` | `AUDIT_OUTCOME_SUCCEEDED`, or `AUDIT_OUTCOME_FAILED` for an error response or an interrupted request |
+| `status` | The HTTP status. For an RPC it is the status its Connect code maps to, such as `200`, `404` for `not_found`, or `409` for `already_exists`. For a change from an Objective's thread, only a refused change has one: the status the API would return. |
+| `source` | `AUDIT_SOURCE_API` for a Control Plane API call, `AUDIT_SOURCE_GATEWAY` for an Objective thread in Slack or Lark |
+| `method`, `path` | For API entries, the call's method and the route it matched as a template, such as `/api/v1/tags/{name}`, or the RPC's procedure. The call's own path is never stored, and `path` is empty for an unrecognized route. |
+
+An entry never contains a credential, a secret value, a digest, or a request body. The Control
+Plane writes each entry to its database and to one more sink, standard error or the file
+`logging.audit` names in `supertag.yaml`; see [Audit log](../operations/control-plane.md#audit-log).
+
+### Metrics
+
+`GetMetrics` returns a bounded operational snapshot: resource counts, Tasks by status, the recovery
+backlog, the operator inbox, usage, harness subagents, scheduling, the Mailbox backlog, and reply
+delivery. `scheduling` reports the current queue and oldest queued Task, average and maximum queue
+and placement duration, admission rejections, reservations consumed, active, and expired, and each
+Worker Host's capacity and utilization. A reservation released after a declined claim leaves no
+durable record, so the snapshot doesn't count it. Durations are milliseconds and utilization is a
+number from zero to one. Everything except `rpc` comes from stored records, so reading metrics does
+not contact a Worklet. Task events remain the detailed execution audit trail.
+
+`rpc` reports the gRPC activity of the API Server process that answered the call, not of the whole
+deployment. `startedAt` identifies the counter epoch; `capturedAt` is the observation time.
+`methods` counts calls by service and method: started, completed, and active calls, active streams,
+errors, status codes (entry N counts code N, for codes 0–16), and cumulative duration buckets in
+milliseconds. The last bucket has no `le` and counts every duration. A stream's duration is its
+lifetime, not the time for an individual Task or message. `channels` counts HTTP/2 connections; an
+increase in opened connections alone does not distinguish new hosts from reconnects. `queues`
+reports buffered Worklet frames and bytes, capacity, peaks, and overflow rejections; `closeCodes`
+groups Worklet closures by code. `traceErrors` counts failed or dropped lifecycle-log writes.
+
+RPC observations reset when the API Server process is replaced. Export snapshots to your monitoring
+system if you need history, and use successive samples from the same `startedAt` epoch for rates.
+They contain no Task identifiers, credentials, request bodies, or error messages.
+
+### Worker Hosts and Auth Keys
+
+`HostService` serves `supertag list worker-host`, `get worker-host`, `describe worker-host`,
+`enroll worker-host`, `drain worker-host`, `resume worker-host`, `rotate worker-host-credential`,
+`revoke worker-host-credential`, `update tag --add-worker-host` and `--remove-worker-host`, and
+`create auth-key`, `list auth-key`, `get auth-key`, and `revoke auth-key`. The terminal UI's status
+bar counts Worker Hosts by phase with `ListWorkerHosts`. The admin token and Operator Tokens may call
+every RPC; a scoped coordination credential gets `permission_denied`.
+
+A `WorkerHost` is the durable identity of an enrolled Worker Host, built from what the host last
+reported. It carries its phase, drain state, credential revision, connection generation, protocols,
+last observation, capacity, active Task Attempts, available slots, and last advertised Workers, so
+disconnected and revoked hosts stay visible across Control Plane restarts. Neither its token nor its
+logical credential ID appears. `ephemeral` is true for a host joined with an ephemeral Auth Key, and
+`authKey` names the key a host redeemed. `ListWorkerHosts` leaves out ephemeral hosts revoked after
+they disconnected; `GetWorkerHost` still reads them.
+
+`EnrollWorkerHost` returns a `WorkerHostCredential` whose `token` appears only in that response. An
+ID enrolls once: a repeat, or an ID a revoked host had, fails with `already_exists`.
+`RotateWorkerHostCredential` takes `expectedCredentialRevision`, the host's current
+`credentialRevision`, and returns a new credential. The old token stops working, and the host's
+connection ends. A retry of a rotation that applied changes nothing and fails with
+`failed_precondition`, as does rotating a revoked host. `RevokeWorkerHostCredential` revokes the host
+and ends its connection; revoking it again returns it unchanged. `DrainWorkerHost` and
+`ResumeWorkerHost` start and end a drain, and return the host without `storage`. The CLI writes each
+issued credential to the mode-0600 file `--out` names and never prints its token.
+
+`BindWorkerHost` and `UnbindWorkerHost` take a Tag name and a Worker Host ID. They return the Tag's
+bound hosts and `changed`, which is false when nothing changed, so a retry is safe.
+
+`CreateAuthKey` takes `name`, `tags`, and optional `labels`, `reusable`, and `ephemeral`. It returns
+the `AuthKey` and its `secret`, once. Names are never reused: a repeat, or the name of a revoked or
+expired key, fails with `already_exists`. `ListAuthKeys` and `GetAuthKey` never return the secret.
+`RevokeAuthKey` blocks further joins; hosts that already joined keep their enrollment. See
+[Auth Keys](resource-model.md#auth-keys) for the fields and rules.
+
+Lists take `pageSize` (0 means 100, at most 500) and `pageToken`. Redeeming an Auth Key, and a host
+acting on itself with its own credential, stay plain HTTP; see [Worklet API](#worklet-api).
+
+```sh
+curl -s https://control.example.com/supertag.operator.v1.HostService/DrainWorkerHost \
+  -H "Authorization: Bearer $SUPERTAG_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"id": "build-east-1"}'
+```
+
+### Operator Tokens
+
+`AccessService` serves `supertag create operator-token`, `list operator-token`,
+`get operator-token`, and `revoke operator-token`. Only the admin token may call it; an Operator
+Token or a scoped credential gets `permission_denied`.
+
+`CreateOperatorToken` takes a `name` and returns the `OperatorToken` and its `secret`, once. A name
+already used, even by a revoked token, fails with `already_exists`. `ListOperatorTokens` and
+`GetOperatorToken` never return the secret, and lists page as `HostService` lists do.
+`RevokeOperatorToken` refuses the token from the next call; revoking it again returns it. See
+[Operator Tokens](resource-model.md#operator-tokens) for the fields and rules.
+
+### Collaboration surfaces
+
+`SurfaceService` serves `supertag setup surface`, `list surface`, `get surface`,
+`update tag --add-location` and `--remove-location`, and `activate` and `deactivate` of a Context
+Set or Permission Set. The admin token and Operator Tokens may call every RPC; a scoped coordination
+credential gets `permission_denied`.
+
+`SetUpSurface` saves a Surface Account whose credentials the CLI already verified with the
+provider: `provider`, `externalAccountId`, `displayName`, `authMethod`, `configuration`, and
+`secrets`. The secrets go to the Control Plane's credential vault and never appear in a response or
+the audit log. An account with the same provider and external account ID is updated in place, so a
+retry changes nothing more.
+
+`ListSurfaceAccounts` lists connected accounts, the earliest created first, and pages as
+`HostService` lists do. `GetSurfaceAccount` reads one by manifest name or by
+`PROVIDER:EXTERNAL_ID`. Its `secrets` lists the references a SurfaceAccount manifest declared, and is
+unset for an account that only `supertag setup surface` set up.
+
+A `SurfaceLocation` names one place: `channelId` for Slack, `chatId` for Lark, `teamId` and
+`channelId` for Microsoft Teams, `repo` or `repoId` for GitHub, and `team` or `teamId` for Linear.
+`account` selects the Surface Account when the provider has several. The Control Plane resolves a
+GitHub repository or Linear team name with the account's credentials.
+
+`AddTagLocation` and `RemoveTagLocation` return `changed` false when the Tag already had the
+location, or did not, so both are safe to retry. A location has at most one Tag: adding one that
+another Tag has fails with `failed_precondition`. Removing a location also deactivates every set
+activated there. `ActivateSet` and `DeactivateSet` take `kind` (`SET_KIND_CONTEXT_SET` or
+`SET_KIND_PERMISSION_SET`), the set's name, the Tag, and one of the Tag's locations.
+
+```sh
+curl -s https://control.example.com/supertag.operator.v1.SurfaceService/AddTagLocation \
+  -H "Authorization: Bearer $SUPERTAG_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"tag": "builder", "location": {"provider": "SURFACE_PROVIDER_SLACK", "channelId": "C0123456789"}}'
+```
+
+Applying and deleting SurfaceAccount manifests is described under
+[Declarative resources](#declarative-resources).
 
 ## Worklet API
 
@@ -669,8 +863,11 @@ is the one-time `WorkerHostCredential`, plus `status.authKey`, `status.tags`, an
 `status.ephemeral`. Failures return `401` for an unknown key, `403` for an expired, revoked, or used
 key, and `409` when one of the key's Tags no longer exists.
 
-A host credential also authorizes `DELETE /api/v1/worker-hosts/:id/credential` for that same
-host, so a host can remove itself. It authorizes no other management request.
+A Worker Host may also act on itself with its own credential, without an operator credential:
+`DELETE /api/v1/worker-hosts/:id/credential` revokes it, and `POST /api/v1/worker-hosts/:id/drain`
+and `/resume` start and end a drain. `supertag up` and `supertag down` drain a host service this
+way before restarting or stopping it, and the host resumes itself when it starts again. A host
+credential authorizes no other management request.
 
 A custom Worker that reads its host credential from its own secret manager gets one from
 `supertag enroll worker-host ID --out PATH`, which writes the one-time credential to a mode-`0600`
@@ -733,14 +930,10 @@ The current `supertag watch` command observes change by polling these resource v
 ### Endpoints
 
 ```text
-GET  /api/v1/metrics
-GET  /api/v1/audit
 GET  /api/v1/tags
 POST /api/v1/tags
 GET  /api/v1/tags/:name
 DELETE /api/v1/tags/:name
-PUT  /api/v1/tags/:name/worker-hosts/:workerHostId
-DELETE /api/v1/tags/:name/worker-hosts/:workerHostId
 GET  /api/v1/permission-sets
 POST /api/v1/permission-sets
 GET  /api/v1/permission-sets/:name
@@ -758,32 +951,16 @@ POST /api/v1/workspaces
 GET  /api/v1/workspaces/:name
 DELETE /api/v1/workspaces/:name
 POST /api/v1/apply-sets/:name/prune
-GET  /api/v1/worker-hosts
-POST /api/v1/worker-hosts
-GET  /api/v1/worker-hosts/:id
-POST /api/v1/worker-hosts/:id/credential
-DELETE /api/v1/worker-hosts/:id/credential
-POST /api/v1/worker-hosts/:id/drain
-POST /api/v1/worker-hosts/:id/resume
-GET  /api/v1/auth-keys
-POST /api/v1/auth-keys
-GET  /api/v1/auth-keys/:name
-POST /api/v1/auth-keys/:name/revoke
 POST /api/v1/worker-host-joins
-GET  /api/v1/operator-tokens
-POST /api/v1/operator-tokens
-GET  /api/v1/operator-tokens/:name
-POST /api/v1/operator-tokens/:name/revoke
 GET  /api/v1/worker-profiles
 POST /api/v1/objectives
 GET  /api/v1/objectives/:id
-GET  /api/v1/surface-accounts
 POST /api/v1/surface-accounts
-GET  /api/v1/surface-accounts/:name
 DELETE /api/v1/surface-accounts/:name
-POST /api/v1/surface-enrollments
-POST /api/v1/tag-operations
 ```
+
+A Worker Host's own credential also reaches `DELETE /api/v1/worker-hosts/:id/credential` and
+`POST /api/v1/worker-hosts/:id/drain` and `/resume`; see [Worklet API](#worklet-api).
 
 ### Declarative resources
 
@@ -811,8 +988,8 @@ it. The response holds the complete `spec` the resource would have after the mer
 stored resource reports, such as a GitHub `repo` resolved to its `repoId`. Its `plan` reports
 `action` (`create`, `update`, or `unchanged`), `changes` (each `path`, `action`, and values), and
 `conflicts`. A dry run checks structure, Surface Accounts, locations, and Worker Hosts. It does not check that named Roles, sets, or sender Tags
-exist; `supertag apply` checks those against the whole input. Worker Host, Worker Profile, Task,
-and Session resources expose observed state. Collection responses use a `ResourceList` envelope
+exist; `supertag apply` checks those against the whole input. Worker Profile resources expose
+observed state. Collection responses use a `ResourceList` envelope
 and include a collection resource version.
 
 `POST /api/v1/surface-accounts` applies a
@@ -823,13 +1000,14 @@ credential material, write-only:
 | Field | With | Effect |
 | --- | --- | --- |
 | `credentials` | `dryRun=true` | The resolved secret values. The plan adds `secrets`: `changed` or `unchanged`, compared with the vault in constant time. Nothing is stored or echoed. |
-| `verified` | a write | The account as the CLI verified it with the provider, in the `surface-enrollments` shape, with its secrets. The Control Plane stores it as enrollment does, with the manifest's name and references. |
+| `verified` | a write | The account as the CLI verified it with the provider: `provider`, `externalAccountId`, `displayName`, `authMethod`, `configuration`, and `secrets`. The Control Plane stores it as `SurfaceService.SetUpSurface` does, with the manifest's name and references. |
 
 A write without `verified` only records field ownership and set membership, and fails if anything
 would change. A dry run on an existing account also returns `current`, its `provider` and
 `externalAccountId`. Changing `provider`, or `verified` for another provider account than the name
-holds, is refused with `409`. `GET /api/v1/surface-accounts/:name` reads an account by manifest
-name or by `PROVIDER:EXTERNAL_ID`; its `spec.secrets` lists the declared references.
+holds, is refused with `409`. [`SurfaceService.GetSurfaceAccount`](#collaboration-surfaces) reads
+an account by manifest name or by `PROVIDER:EXTERNAL_ID`; its `secrets` lists the declared
+references.
 
 `POST /api/v1/apply-sets/:name/prune` takes `{ "keep": [{ "kind": "Tag", "name": "builder" }] }`,
 the resources in the latest input. It deletes the set's other members, Tags first and Surface
@@ -886,131 +1064,6 @@ Role that is already retired, returns `404`. `GET /api/v1/tags/:name` still retu
 with `status.phase: retired` and `status.retiredAt`, while no active Tag holds the name;
 `GET /api/v1/tags` lists only active Tags.
 
-### Worker Host enrollment and credentials
-
-`WorkerHost` is a durable identity for an enrolled Worker Host. Its spec contains the desired drain
-state. Its status reports its phase, credential revision, connection generation, protocols, last observation,
-capacity, active Task Attempts, available slots, and last advertised Workers. Disconnected and revoked
-hosts therefore remain visible across Control Plane restart. Neither the token nor its logical
-credential ID appears in this resource.
-
-`POST /api/v1/worker-hosts` accepts a virtual `WorkerHostEnrollment` with the host ID in
-`metadata.id` and an empty `spec`. It returns a virtual `WorkerHostCredential` whose
-`credential.token` is available once with `Cache-Control: no-store`.
-`POST /api/v1/worker-hosts/:id/credential` rotates the
-credential and returns the same one-time response. `DELETE` revokes the credential and fences its
-current connection. The CLI writes issuance responses to a protected file with `--out`; it never
-writes their token to a required mode-0600 output file. Use `supertag revoke worker-host-credential ID`, `drain worker-host ID`, and `resume worker-host ID` for the
-corresponding lifecycle operations.
-
-A Worker Host may also act on itself with its own credential, without an operator credential:
-`DELETE /api/v1/worker-hosts/:id/credential` revokes it, and `POST /api/v1/worker-hosts/:id/drain`
-and `/resume` start and end a drain. `supertag up` and `supertag down` drain a host service this
-way before restarting or stopping it, and the host resumes itself when it starts again.
-
-`WorkerHost.status.ephemeral` is `true` for a host joined with an ephemeral Auth Key, and
-`status.authKey` names the key a host redeemed. `GET /api/v1/worker-hosts` omits removed ephemeral
-hosts; `GET /api/v1/worker-hosts/:id` still returns them.
-
-### Auth Keys
-
-`POST /api/v1/auth-keys` accepts an `AuthKey` with `metadata.name` and `spec.tags`, plus optional
-boolean `spec.reusable` and `spec.ephemeral`. It returns the `AuthKey` resource and its `secret`
-once, with `Cache-Control: no-store`. `GET /api/v1/auth-keys` and `GET /api/v1/auth-keys/:name`
-never include the secret. `POST /api/v1/auth-keys/:name/revoke` blocks further joins. The admin
-token and Operator Tokens may call these routes. See [Auth Keys](resource-model.md#auth-keys) for the
-fields and rules.
-
-### Operator Tokens
-
-`POST /api/v1/operator-tokens` accepts an `OperatorToken` with `metadata.name`. It returns the
-`OperatorToken` resource and its `secret` once, with `Cache-Control: no-store`. A name already used,
-even by a revoked token, returns `409`. `GET /api/v1/operator-tokens` and
-`GET /api/v1/operator-tokens/:name` never include the secret. `POST
-/api/v1/operator-tokens/:name/revoke` refuses the token from the next request. Only the admin token
-may call these routes. See [Operator Tokens](resource-model.md#operator-tokens) for the fields and
-rules.
-
-### Audit log
-
-`GET /api/v1/audit` returns the recorded operator changes, newest first: applies, deletes, Operator
-Token and Auth Key changes, approval decisions, Objective messages, approvals, and cancellations,
-and every other authenticated management write. A call to an operator RPC that declares an audit
-action is recorded too, with `path` set to its procedure, `/supertag.operator.v1.SERVICE/METHOD`. Reads are not recorded. The admin token and
-Operator Tokens may call it; scoped coordination credentials receive `403`. `supertag audit` reads
-this route.
-
-| Query | Meaning |
-| --- | --- |
-| `since` | Only entries at or after this ISO 8601 time |
-| `actor` | Only entries by this exact actor, such as `token:laptop-2` |
-| `limit` | 1 through 500; 50 by default |
-
-An unknown, repeated, or invalid query parameter returns `400`.
-
-```json
-{
-  "apiVersion": "supertag/v1",
-  "kind": "AuditEntryList",
-  "metadata": { "limit": 50 },
-  "items": [
-    {
-      "id": "5f0c2e1a-…",
-      "at": "2026-10-01T09:30:00.120Z",
-      "actor": "token:laptop-2",
-      "action": "apply",
-      "target": "Tag/reviewer",
-      "outcome": "succeeded",
-      "status": 201,
-      "source": "api",
-      "method": "POST",
-      "path": "/api/v1/tags"
-    }
-  ]
-}
-```
-
-| Field | Meaning |
-| --- | --- |
-| `actor` | `control-plane-break-glass`, `token:NAME`, a scoped credential's `operatorId`, or `slack:USER` or `lark:USER` for a person in an Objective's thread |
-| `action` | What was done, such as `apply`, `apply.dry-run`, `delete`, `prune`, `operator-token.create`, `operator-token.revoke`, `auth-key.create`, `auth-key.revoke`, `approval.approve`, `approval.deny`, `objective.message`, `objective.reopen`, `objective.approve`, `objective.cancel`, `task.cancel`, `task.inspect`, `artifact.download`, `team.create`, `team.update`, `team.delete`, `mailbox-grant.add`, `mailbox-grant.revoke`, or `coordination.COMMAND` for a command the Control Plane recognizes (`coordination.command` otherwise). A write to a route the Control Plane doesn't recognize is `request` on `UnknownRoute`, and nothing from its path is kept, because a path might hold a credential. |
-| `target` | `Kind/NAME` or `Kind/ID`, such as `Tag/reviewer` or `ApprovalRequest/ID`; only the kind when the request named no valid target, failed, or was a dry run |
-| `outcome` | `succeeded`, or `failed` for an error response or an interrupted request |
-| `status` | The HTTP status. For a change from an Objective's thread, only a refused change has one: the status the API would return. |
-| `source` | `api` for a Control Plane API request, `gateway` for an Objective thread in Slack or Lark |
-| `method`, `path` | For `api` entries, the request's method and the route it matched as a template, such as `/api/v1/tags/{name}`. The request's own path is never stored, and `path` is left out for an unrecognized route. |
-
-An entry never contains a credential, a secret value, a digest, or a request body. The Control
-Plane writes each entry to its database and to one more sink, standard error or the file
-`logging.audit` names in `supertag.yaml`; see [Audit log](../operations/control-plane.md#audit-log).
-
-### Metrics
-
-`GET /api/v1/metrics` returns a bounded operational snapshot with resource and Task-state counts.
-Its `values.scheduling` section reports the current queue and oldest queued Task, average and
-maximum queue and placement duration, admission rejections, reservations consumed, active, and expired, and a
-per-Worker-Host capacity and utilization snapshot. A reservation released after a declined claim
-leaves no durable record, so the snapshot doesn't count it. Durations are milliseconds and utilization is a
-number from zero to one. `scheduling.byPriority` separates queue depth, oldest queued age, placed
-Task Attempts, and observed queue duration for `urgent`, `high`, `normal`, and `low` work. This makes
-priority starvation visible before changing scheduling policy. These values come from stored assignments, Task Attempts, scheduling audit
-events, and the latest durable Worker Host observations; reading metrics does not contact a
-Worklet. Task events remain the detailed execution audit trail.
-
-`values.rpc` reports the API Server's process-local gRPC activity. `startedAt` identifies the
-counter epoch; `capturedAt` is the observation time. `methods` groups calls by service and method,
-with started/completed/active counts, active streams, errors, status-code counts (array indexes
-0–16), and cumulative duration buckets in milliseconds. A bucket with `le: null` includes every
-duration. Streaming durations measure the lifetime of a stream, not the time for an individual
-Task or message. `channels` counts HTTP/2 connections; an increase in opened connections alone
-does not distinguish new hosts from reconnects. `queues` reports buffered Worklet frames/bytes,
-capacity, peaks and overflow rejections; `closeCodes` groups Worklet closures by code.
-
-RPC observations reset when the API Server process is replaced. Export snapshots to your monitoring
-system if you need history, and use successive samples from the same `startedAt` epoch for rates.
-They contain no Task identifiers, credentials, request bodies, or error messages. They do not
-replace durable Task audit records. `traceErrors` counts failed or dropped lifecycle-log writes.
-
 ### Errors
 
 Administrative API errors use a structured `Status` document with a reason, HTTP code, message,
@@ -1025,17 +1078,6 @@ Control Plane's release, such as `0.2.0-alpha.6`. `GET /healthz` needs no creden
 `SuperTag-Client-Version`. The supported pairs are in
 [CLI and Control Plane versions](api-stability.md#cli-and-control-plane-versions).
 
-### Virtual write resources
-
-`SurfaceEnrollment` is a virtual write resource. Its spec contains a locally verified collaboration surface
-account and write-only credentials; its response is a secret-free `SurfaceAccount` resource. The
-request and response never name the Control Plane's credential backend or its physical storage
-location, so moving from the local file vault to an external service does not change this API.
-
-`TagOperation` is a virtual resource for operations that currently span several underlying resources, including surface placement, Context Set activation, and Permission Set activation. The operation receives its own identity and returns output under `status`. Ordinary Tag creation does not use this operation path.
-
-The virtual Tag operation remains for compound placement and binding workflows. It is versioned without pretending to be shell access or arbitrary command execution.
-
 ## Deliberate exclusions
 
 The API does not provide arbitrary process execution, filesystem access, database migrations, or
@@ -1043,8 +1085,7 @@ deployment lifecycle control. Worker Host credential operations are limited to e
 rotation, and revocation; tokens do not appear in ordinary reads. The administrative credential has
 full control-plane authority. Coordination endpoints can instead use separately configured
 operator credentials restricted to exact actions and Objectives. Task events, resource change
-history, and structured permission decisions provide execution and coordination auditing; a
-broader administrative audit log remains planned.
+history, structured permission decisions, and the [audit log](#audit-log) record what happened.
 
 See [Credential storage](credential-storage.md) for the server-side vault and client-side operator credential boundaries.
 

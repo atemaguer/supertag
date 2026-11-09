@@ -4,8 +4,14 @@
 
 import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { Timestamp } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Metadata } from "./common_pb.js";
 import { file_supertag_operator_v1_common } from "./common_pb.js";
+import type { DiskSpace, WorkerHostPhase } from "./host_pb.js";
+import { file_supertag_operator_v1_host } from "./host_pb.js";
+import type { Budget, HighFinding, ObjectiveStatus } from "./objective_pb.js";
+import { file_supertag_operator_v1_objective } from "./objective_pb.js";
 import { file_supertag_operator_v1_options } from "./options_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -13,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/operator/v1/organization.proto.
  */
 export const file_supertag_operator_v1_organization: GenFile = /*@__PURE__*/
-  fileDesc("CidzdXBlcnRhZy9vcGVyYXRvci92MS9vcmdhbml6YXRpb24ucHJvdG8SFHN1cGVydGFnLm9wZXJhdG9yLnYxIhIKEEdldFN0YXR1c1JlcXVlc3QitAEKEUdldFN0YXR1c1Jlc3BvbnNlEjAKCG1ldGFkYXRhGAEgASgLMh4uc3VwZXJ0YWcub3BlcmF0b3IudjEuTWV0YWRhdGESNgoFcGhhc2UYAiABKA4yJy5zdXBlcnRhZy5vcGVyYXRvci52MS5Db250cm9sUGxhbmVQaGFzZRI1Cgtjb250cm9sbGVycxgDIAMoCzIgLnN1cGVydGFnLm9wZXJhdG9yLnYxLkNvbnRyb2xsZXIiUAoKQ29udHJvbGxlchIMCgRuYW1lGAEgASgJEjQKBXBoYXNlGAIgASgOMiUuc3VwZXJ0YWcub3BlcmF0b3IudjEuQ29udHJvbGxlclBoYXNlKn0KEUNvbnRyb2xQbGFuZVBoYXNlEiMKH0NPTlRST0xfUExBTkVfUEhBU0VfVU5TUEVDSUZJRUQQABIhCh1DT05UUk9MX1BMQU5FX1BIQVNFX0FDQ0VQVElORxABEiAKHENPTlRST0xfUExBTkVfUEhBU0VfRFJBSU5JTkcQAirMAQoPQ29udHJvbGxlclBoYXNlEiAKHENPTlRST0xMRVJfUEhBU0VfVU5TUEVDSUZJRUQQABIcChhDT05UUk9MTEVSX1BIQVNFX1JVTk5JTkcQARIdChlDT05UUk9MTEVSX1BIQVNFX0RFR1JBREVEEAISHQoZQ09OVFJPTExFUl9QSEFTRV9EUkFJTklORxADEhwKGENPTlRST0xMRVJfUEhBU0VfU1RPUFBFRBAEEh0KGUNPTlRST0xMRVJfUEhBU0VfRElTQUJMRUQQBTKCAQoTT3JnYW5pemF0aW9uU2VydmljZRJrCglHZXRTdGF0dXMSJi5zdXBlcnRhZy5vcGVyYXRvci52MS5HZXRTdGF0dXNSZXF1ZXN0Gicuc3VwZXJ0YWcub3BlcmF0b3IudjEuR2V0U3RhdHVzUmVzcG9uc2UiDZACAYq1GAZzdGF0dXNCTlpMZ2l0aHViLmNvbS9hdGVtYWd1ZXIvc3VwZXJ0YWcvcGFja2FnZXMvb3BlcmF0b3ItYXBpL2dvL29wZXJhdG9ydjE7b3BlcmF0b3J2MWIGcHJvdG8z", [file_supertag_operator_v1_common, file_supertag_operator_v1_options]);
+  fileDesc("CidzdXBlcnRhZy9vcGVyYXRvci92MS9vcmdhbml6YXRpb24ucHJvdG8SFHN1cGVydGFnLm9wZXJhdG9yLnYxIhIKEEdldFN0YXR1c1JlcXVlc3QitAEKEUdldFN0YXR1c1Jlc3BvbnNlEjAKCG1ldGFkYXRhGAEgASgLMh4uc3VwZXJ0YWcub3BlcmF0b3IudjEuTWV0YWRhdGESNgoFcGhhc2UYAiABKA4yJy5zdXBlcnRhZy5vcGVyYXRvci52MS5Db250cm9sUGxhbmVQaGFzZRI1Cgtjb250cm9sbGVycxgDIAMoCzIgLnN1cGVydGFnLm9wZXJhdG9yLnYxLkNvbnRyb2xsZXIiUAoKQ29udHJvbGxlchIMCgRuYW1lGAEgASgJEjQKBXBoYXNlGAIgASgOMiUuc3VwZXJ0YWcub3BlcmF0b3IudjEuQ29udHJvbGxlclBoYXNlIhgKFkdldE9yZ2FuaXphdGlvblJlcXVlc3QigQIKFE9yZ2FuaXphdGlvbk92ZXJ2aWV3Ei8KC2NhcHR1cmVkX2F0GAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBJCCgx3b3JrZXJfaG9zdHMYAiADKAsyLC5zdXBlcnRhZy5vcGVyYXRvci52MS5Pcmdhbml6YXRpb25Xb3JrZXJIb3N0EjMKBHRhZ3MYAyADKAsyJS5zdXBlcnRhZy5vcGVyYXRvci52MS5Pcmdhbml6YXRpb25UYWcSPwoKb2JqZWN0aXZlcxgEIAMoCzIrLnN1cGVydGFnLm9wZXJhdG9yLnYxLk9yZ2FuaXphdGlvbk9iamVjdGl2ZSKdAgoWT3JnYW5pemF0aW9uV29ya2VySG9zdBIKCgJpZBgBIAEoCRI0CgVwaGFzZRgCIAEoDjIlLnN1cGVydGFnLm9wZXJhdG9yLnYxLldvcmtlckhvc3RQaGFzZRIPCgdydW5uaW5nGAMgASgFEhAKCGNhcGFjaXR5GAQgASgFEh0KFWNvb3JkaW5hdGlvbl9jYXBhY2l0eRgFIAEoBRI0CgloYXJuZXNzZXMYBiADKAsyIS5zdXBlcnRhZy5vcGVyYXRvci52MS5IYXJuZXNzTG9hZBIzCgpkaXNrX3NwYWNlGAcgASgLMh8uc3VwZXJ0YWcub3BlcmF0b3IudjEuRGlza1NwYWNlEhQKDGRpc2tfd2FybmluZxgIIAEoCSJgCgtIYXJuZXNzTG9hZBIPCgdoYXJuZXNzGAEgASgJEg8KB3J1bm5pbmcYAiABKAUSEAoIY2FwYWNpdHkYAyABKAUSHQoVY29vcmRpbmF0aW9uX2NhcGFjaXR5GAQgASgFIogBCg9Pcmdhbml6YXRpb25UYWcSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIYChBydW5uaW5nX3Rhc2tfaWRzGAMgAygJEkEKEHJ1bm5pbmdfY29tbWFuZHMYBCADKAsyJy5zdXBlcnRhZy5vcGVyYXRvci52MS5UYWdSdW5uaW5nQ29tbWFuZCJlChFUYWdSdW5uaW5nQ29tbWFuZBIPCgd0YXNrX2lkGAEgASgJEg8KB2NvbW1hbmQYAiABKAkSLgoKc3RhcnRlZF9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAikgMKFU9yZ2FuaXphdGlvbk9iamVjdGl2ZRIKCgJpZBgBIAEoCRI1CgZzdGF0dXMYAiABKA4yJS5zdXBlcnRhZy5vcGVyYXRvci52MS5PYmplY3RpdmVTdGF0dXMSFAoMb3duZXJfdGFnX2lkGAMgASgJEg0KBW93bmVyGAQgASgJEiwKCGRlYWRsaW5lGAUgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBITCgtzcGVudF9taW5vchgGIAEoAxIfChJidWRnZXRfbGltaXRfbWlub3IYByABKANIAIgBARIQCghjdXJyZW5jeRgIIAEoCRIWCg5zcGVuZF9jdXJyZW5jeRgJIAEoCRIZChF1bnByaWNlZF9hdHRlbXB0cxgKIAEoBRIXCg91bnByaWNlZF90b2tlbnMYCyABKAMSOAoNaGlnaF9maW5kaW5ncxgMIAMoCzIhLnN1cGVydGFnLm9wZXJhdG9yLnYxLkhpZ2hGaW5kaW5nQhUKE19idWRnZXRfbGltaXRfbWlub3IibQoPR2V0U3BlbmRSZXF1ZXN0Ei8KAmJ5GAEgASgOMiMuc3VwZXJ0YWcub3BlcmF0b3IudjEuU3BlbmRHcm91cGluZxIpCgVzaW5jZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAimwEKC1NwZW5kUmVwb3J0Ei8KAmJ5GAEgASgOMiMuc3VwZXJ0YWcub3BlcmF0b3IudjEuU3BlbmRHcm91cGluZxIpCgVzaW5jZRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMAoGZ3JvdXBzGAMgAygLMiAuc3VwZXJ0YWcub3BlcmF0b3IudjEuU3BlbmRHcm91cCK4BAoKU3BlbmRHcm91cBILCgNrZXkYASABKAkSDAoEbmFtZRgCIAEoCRIsCgZidWRnZXQYAyABKAsyHC5zdXBlcnRhZy5vcGVyYXRvci52MS5CdWRnZXQSEAoIYXR0ZW1wdHMYBCABKAUSXwoZcmVwb3J0ZWRfY29zdF9ieV9jdXJyZW5jeRgFIAMoCzI8LnN1cGVydGFnLm9wZXJhdG9yLnYxLlNwZW5kR3JvdXAuUmVwb3J0ZWRDb3N0QnlDdXJyZW5jeUVudHJ5Eh0KFXVua25vd25fY29zdF9hdHRlbXB0cxgGIAEoBRIfChdlc3RpbWF0ZWRfY29zdF9hdHRlbXB0cxgHIAEoBRJNCg91bnByaWNlZF9tb2RlbHMYCCADKAsyNC5zdXBlcnRhZy5vcGVyYXRvci52MS5TcGVuZEdyb3VwLlVucHJpY2VkTW9kZWxzRW50cnkSFwoPdW5wcmljZWRfdG9rZW5zGAkgASgDEhwKD3JlcG9ydGVkX3Rva2VucxgKIAEoA0gAiAEBEh4KFnVua25vd25fdG9rZW5fYXR0ZW1wdHMYCyABKAUaPQobUmVwb3J0ZWRDb3N0QnlDdXJyZW5jeUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoAzoCOAEaNQoTVW5wcmljZWRNb2RlbHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAU6AjgBQhIKEF9yZXBvcnRlZF90b2tlbnMiegoXTGlzdEF1ZGl0RW50cmllc1JlcXVlc3QSKQoFc2luY2UYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg0KBWFjdG9yGAIgASgJEhEKCXBhZ2Vfc2l6ZRgDIAEoBRISCgpwYWdlX3Rva2VuGAQgASgJImYKGExpc3RBdWRpdEVudHJpZXNSZXNwb25zZRIxCgdlbnRyaWVzGAEgAygLMiAuc3VwZXJ0YWcub3BlcmF0b3IudjEuQXVkaXRFbnRyeRIXCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAkilQIKCkF1ZGl0RW50cnkSCgoCaWQYASABKAkSJgoCYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg0KBWFjdG9yGAMgASgJEg4KBmFjdGlvbhgEIAEoCRIOCgZ0YXJnZXQYBSABKAkSMwoHb3V0Y29tZRgGIAEoDjIiLnN1cGVydGFnLm9wZXJhdG9yLnYxLkF1ZGl0T3V0Y29tZRITCgZzdGF0dXMYByABKAVIAIgBARIxCgZzb3VyY2UYCCABKA4yIS5zdXBlcnRhZy5vcGVyYXRvci52MS5BdWRpdFNvdXJjZRIOCgZtZXRob2QYCSABKAkSDAoEcGF0aBgKIAEoCUIJCgdfc3RhdHVzIhMKEUdldE1ldHJpY3NSZXF1ZXN0ItgFCg5NZXRyaWNTbmFwc2hvdBIvCgtjYXB0dXJlZF9hdBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDAoEdGFncxgCIAEoAxINCgVyb2xlcxgDIAEoAxIYChByb2xlX2Fzc2lnbm1lbnRzGAQgASgDEhgKEHN1cmZhY2VfYWNjb3VudHMYBSABKAMSFwoPcGVybWlzc2lvbl9zZXRzGAYgASgDEhQKDGNvbnRleHRfc2V0cxgHIAEoAxIQCghzZXNzaW9ucxgIIAEoAxIvCgV0YXNrcxgJIAEoCzIgLnN1cGVydGFnLm9wZXJhdG9yLnYxLlRhc2tDb3VudHMSNwoIcmVjb3ZlcnkYCiABKAsyJS5zdXBlcnRhZy5vcGVyYXRvci52MS5SZWNvdmVyeU1ldHJpY3MSPgoSY29vcmRpbmF0aW9uX2luYm94GAsgASgLMiIuc3VwZXJ0YWcub3BlcmF0b3IudjEuSW5ib3hNZXRyaWNzEjEKBXVzYWdlGAwgASgLMiIuc3VwZXJ0YWcub3BlcmF0b3IudjEuVXNhZ2VNZXRyaWNzEj8KDW5hdGl2ZV9hZ2VudHMYDSABKAsyKC5zdXBlcnRhZy5vcGVyYXRvci52MS5OYXRpdmVBZ2VudE1ldHJpY3MSOwoKc2NoZWR1bGluZxgOIAEoCzInLnN1cGVydGFnLm9wZXJhdG9yLnYxLlNjaGVkdWxpbmdNZXRyaWNzEjUKB21haWxib3gYDyABKAsyJC5zdXBlcnRhZy5vcGVyYXRvci52MS5CYWNrbG9nTWV0cmljcxJCCg5yZXBseV9kZWxpdmVyeRgQIAEoCzIqLnN1cGVydGFnLm9wZXJhdG9yLnYxLlJlcGx5RGVsaXZlcnlNZXRyaWNzEi0KA3JwYxgRIAEoCzIgLnN1cGVydGFnLm9wZXJhdG9yLnYxLlJwY01ldHJpY3MicwoKVGFza0NvdW50cxINCgV0b3RhbBgBIAEoAxIPCgdwZW5kaW5nGAIgASgDEg8KB3J1bm5pbmcYAyABKAMSEQoJY29tcGxldGVkGAQgASgDEg4KBmZhaWxlZBgFIAEoAxIRCgljYW5jZWxsZWQYBiABKAMigwEKD1JlY292ZXJ5TWV0cmljcxIiChp1bmtub3duX2NvbnRyb2xfZGVsaXZlcmllcxgBIAEoAxIYChBibG9ja2VkX3Nlc3Npb25zGAIgASgDEjIKKmR1cmFibGVfZXhlY3V0aW9uc19hd2FpdGluZ19yZWNvbmNpbGlhdGlvbhgDIAEoAyKXAgoMSW5ib3hNZXRyaWNzEg8KB3BlbmRpbmcYASABKAMSPwoHYnlfa2luZBgCIAMoCzIuLnN1cGVydGFnLm9wZXJhdG9yLnYxLkluYm94TWV0cmljcy5CeUtpbmRFbnRyeRI4ChRvbGRlc3RfYWN0aW9uYWJsZV9hdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKgodb2xkZXN0X2FjdGlvbmFibGVfYWdlX3NlY29uZHMYBCABKANIAIgBARotCgtCeUtpbmRFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAM6AjgBQiAKHl9vbGRlc3RfYWN0aW9uYWJsZV9hZ2Vfc2Vjb25kcyL/AQoMVXNhZ2VNZXRyaWNzEhoKEnJlcG9ydGluZ19hdHRlbXB0cxgBIAEoAxIUCgx0b3RhbF90b2tlbnMYAiABKAMSGwoTaW5jb21wbGV0ZV9hdHRlbXB0cxgDIAEoAxJhChlyZXBvcnRlZF9jb3N0X2J5X2N1cnJlbmN5GAQgAygLMj4uc3VwZXJ0YWcub3BlcmF0b3IudjEuVXNhZ2VNZXRyaWNzLlJlcG9ydGVkQ29zdEJ5Q3VycmVuY3lFbnRyeRo9ChtSZXBvcnRlZENvc3RCeUN1cnJlbmN5RW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgDOgI4ASJzChJOYXRpdmVBZ2VudE1ldHJpY3MSFwoPcGVha19jb25jdXJyZW50GAEgASgDEiEKGXRva2VuX2xpbWl0X2ludGVycnVwdGlvbnMYAiABKAMSIQoZYWdlbnRfbGltaXRfaW50ZXJydXB0aW9ucxgDIAEoAyLtAwoRU2NoZWR1bGluZ01ldHJpY3MSDgoGcXVldWVkGAEgASgDEjQKEG9sZGVzdF9xdWV1ZWRfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiYKGW9sZGVzdF9xdWV1ZWRfYWdlX3NlY29uZHMYAyABKANIAIgBARIXCg9wbGFjZWRfYXR0ZW1wdHMYBCABKAMSIQoZYXZlcmFnZV9xdWV1ZV9kdXJhdGlvbl9tcxgFIAEoARIhChltYXhpbXVtX3F1ZXVlX2R1cmF0aW9uX21zGAYgASgBEiUKHWF2ZXJhZ2VfcGxhY2VtZW50X2R1cmF0aW9uX21zGAcgASgBEiUKHW1heGltdW1fcGxhY2VtZW50X2R1cmF0aW9uX21zGAggASgBEhwKFGFkbWlzc2lvbl9yZWplY3Rpb25zGAkgASgDEj4KDHJlc2VydmF0aW9ucxgKIAEoCzIoLnN1cGVydGFnLm9wZXJhdG9yLnYxLlJlc2VydmF0aW9uTWV0cmljcxJBCgx3b3JrZXJfaG9zdHMYCyADKAsyKy5zdXBlcnRhZy5vcGVyYXRvci52MS5Xb3JrZXJIb3N0VXRpbGl6YXRpb25CHAoaX29sZGVzdF9xdWV1ZWRfYWdlX3NlY29uZHMiRwoSUmVzZXJ2YXRpb25NZXRyaWNzEhAKCGNvbnN1bWVkGAEgASgDEg4KBmFjdGl2ZRgCIAEoAxIPCgdleHBpcmVkGAMgASgDIrIBChVXb3JrZXJIb3N0VXRpbGl6YXRpb24SCgoCaWQYASABKAkSNAoFcGhhc2UYAiABKA4yJS5zdXBlcnRhZy5vcGVyYXRvci52MS5Xb3JrZXJIb3N0UGhhc2USFwoPYWN0aXZlX2F0dGVtcHRzGAMgASgFEhAKCGNhcGFjaXR5GAQgASgFEhcKD2F2YWlsYWJsZV9zbG90cxgFIAEoBRITCgt1dGlsaXphdGlvbhgGIAEoASJYCg5CYWNrbG9nTWV0cmljcxIPCgdwZW5kaW5nGAEgASgDEjUKEW9sZGVzdF9wZW5kaW5nX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCKYAQoUUmVwbHlEZWxpdmVyeU1ldHJpY3MSDwoHYmFja2xvZxgBIAEoAxIQCghyZXRyeWluZxgCIAEoAxIWCg5yZXRyeV9hdHRlbXB0cxgDIAEoAxIOCgZmYWlsZWQYBCABKAMSNQoRb2xkZXN0X3BlbmRpbmdfYXQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIqgDCgpScGNNZXRyaWNzEi4KCnN0YXJ0ZWRfYXQYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2NhcHR1cmVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI3CgdtZXRob2RzGAMgAygLMiYuc3VwZXJ0YWcub3BlcmF0b3IudjEuUnBjTWV0aG9kTWV0cmljcxI5CghjaGFubmVscxgEIAEoCzInLnN1cGVydGFnLm9wZXJhdG9yLnYxLlJwY0NoYW5uZWxNZXRyaWNzEjUKBnF1ZXVlcxgFIAEoCzIlLnN1cGVydGFnLm9wZXJhdG9yLnYxLlJwY1F1ZXVlTWV0cmljcxJFCgtjbG9zZV9jb2RlcxgGIAMoCzIwLnN1cGVydGFnLm9wZXJhdG9yLnYxLlJwY01ldHJpY3MuQ2xvc2VDb2Rlc0VudHJ5EhQKDHRyYWNlX2Vycm9ycxgHIAEoAxoxCg9DbG9zZUNvZGVzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgDOgI4ASLhAQoQUnBjTWV0aG9kTWV0cmljcxIPCgdzZXJ2aWNlGAEgASgJEg4KBm1ldGhvZBgCIAEoCRIPCgdzdGFydGVkGAMgASgDEhEKCWNvbXBsZXRlZBgEIAEoAxIOCgZhY3RpdmUYBSABKAMSFgoOYWN0aXZlX3N0cmVhbXMYBiABKAMSDgoGZXJyb3JzGAcgASgDEhQKDHN0YXR1c19jb2RlcxgIIAMoAxI6CghkdXJhdGlvbhgJIAEoCzIoLnN1cGVydGFnLm9wZXJhdG9yLnYxLlJwY0R1cmF0aW9uTWV0cmljcyJ5ChJScGNEdXJhdGlvbk1ldHJpY3MSDQoFY291bnQYASABKAMSDQoFdG90YWwYAiABKAESCwoDbWF4GAMgASgBEjgKB2J1Y2tldHMYBCADKAsyJy5zdXBlcnRhZy5vcGVyYXRvci52MS5ScGNEdXJhdGlvbkJ1Y2tldCI6ChFScGNEdXJhdGlvbkJ1Y2tldBIPCgJsZRgBIAEoAUgAiAEBEg0KBWNvdW50GAIgASgDQgUKA19sZSJDChFScGNDaGFubmVsTWV0cmljcxIOCgZhY3RpdmUYASABKAMSDgoGb3BlbmVkGAIgASgDEg4KBmNsb3NlZBgDIAEoAyKuAQoPUnBjUXVldWVNZXRyaWNzEg4KBmFjdGl2ZRgBIAEoAxIOCgZmcmFtZXMYAiABKAMSDQoFYnl0ZXMYAyABKAMSFwoPY2FwYWNpdHlfZnJhbWVzGAQgASgDEhYKDmNhcGFjaXR5X2J5dGVzGAUgASgDEhMKC3BlYWtfZnJhbWVzGAYgASgDEhIKCnBlYWtfYnl0ZXMYByABKAMSEgoKcmVqZWN0aW9ucxgIIAEoAyp9ChFDb250cm9sUGxhbmVQaGFzZRIjCh9DT05UUk9MX1BMQU5FX1BIQVNFX1VOU1BFQ0lGSUVEEAASIQodQ09OVFJPTF9QTEFORV9QSEFTRV9BQ0NFUFRJTkcQARIgChxDT05UUk9MX1BMQU5FX1BIQVNFX0RSQUlOSU5HEAIqzAEKD0NvbnRyb2xsZXJQaGFzZRIgChxDT05UUk9MTEVSX1BIQVNFX1VOU1BFQ0lGSUVEEAASHAoYQ09OVFJPTExFUl9QSEFTRV9SVU5OSU5HEAESHQoZQ09OVFJPTExFUl9QSEFTRV9ERUdSQURFRBACEh0KGUNPTlRST0xMRVJfUEhBU0VfRFJBSU5JTkcQAxIcChhDT05UUk9MTEVSX1BIQVNFX1NUT1BQRUQQBBIdChlDT05UUk9MTEVSX1BIQVNFX0RJU0FCTEVEEAUqfQoNU3BlbmRHcm91cGluZxIeChpTUEVORF9HUk9VUElOR19VTlNQRUNJRklFRBAAEhwKGFNQRU5EX0dST1VQSU5HX09CSkVDVElWRRABEhYKElNQRU5EX0dST1VQSU5HX1RBRxACEhYKElNQRU5EX0dST1VQSU5HX0RBWRADKmQKDEF1ZGl0T3V0Y29tZRIdChlBVURJVF9PVVRDT01FX1VOU1BFQ0lGSUVEEAASGwoXQVVESVRfT1VUQ09NRV9TVUNDRUVERUQQARIYChRBVURJVF9PVVRDT01FX0ZBSUxFRBACKlsKC0F1ZGl0U291cmNlEhwKGEFVRElUX1NPVVJDRV9VTlNQRUNJRklFRBAAEhQKEEFVRElUX1NPVVJDRV9BUEkQARIYChRBVURJVF9TT1VSQ0VfR0FURVdBWRACMuwEChNPcmdhbml6YXRpb25TZXJ2aWNlEmsKCUdldFN0YXR1cxImLnN1cGVydGFnLm9wZXJhdG9yLnYxLkdldFN0YXR1c1JlcXVlc3QaJy5zdXBlcnRhZy5vcGVyYXRvci52MS5HZXRTdGF0dXNSZXNwb25zZSINkAIBirUYBnN0YXR1cxKFAQoPR2V0T3JnYW5pemF0aW9uEiwuc3VwZXJ0YWcub3BlcmF0b3IudjEuR2V0T3JnYW5pemF0aW9uUmVxdWVzdBoqLnN1cGVydGFnLm9wZXJhdG9yLnYxLk9yZ2FuaXphdGlvbk92ZXJ2aWV3IhiQAgGKtRgRcmVhZF9vcmdhbml6YXRpb24SZwoIR2V0U3BlbmQSJS5zdXBlcnRhZy5vcGVyYXRvci52MS5HZXRTcGVuZFJlcXVlc3QaIS5zdXBlcnRhZy5vcGVyYXRvci52MS5TcGVuZFJlcG9ydCIRkAIBirUYCnJlYWRfc3BlbmQShAEKEExpc3RBdWRpdEVudHJpZXMSLS5zdXBlcnRhZy5vcGVyYXRvci52MS5MaXN0QXVkaXRFbnRyaWVzUmVxdWVzdBouLnN1cGVydGFnLm9wZXJhdG9yLnYxLkxpc3RBdWRpdEVudHJpZXNSZXNwb25zZSIRkAIBirUYCnJlYWRfYXVkaXQScAoKR2V0TWV0cmljcxInLnN1cGVydGFnLm9wZXJhdG9yLnYxLkdldE1ldHJpY3NSZXF1ZXN0GiQuc3VwZXJ0YWcub3BlcmF0b3IudjEuTWV0cmljU25hcHNob3QiE5ACAYq1GAxyZWFkX21ldHJpY3NCTlpMZ2l0aHViLmNvbS9hdGVtYWd1ZXIvc3VwZXJ0YWcvcGFja2FnZXMvb3BlcmF0b3ItYXBpL2dvL29wZXJhdG9ydjE7b3BlcmF0b3J2MWIGcHJvdG8z", [file_google_protobuf_timestamp, file_supertag_operator_v1_common, file_supertag_operator_v1_host, file_supertag_operator_v1_objective, file_supertag_operator_v1_options]);
 
 /**
  * @generated from message supertag.operator.v1.GetStatusRequest
@@ -90,6 +96,1620 @@ export type Controller = Message<"supertag.operator.v1.Controller"> & {
  */
 export const ControllerSchema: GenMessage<Controller> = /*@__PURE__*/
   messageDesc(file_supertag_operator_v1_organization, 2);
+
+/**
+ * @generated from message supertag.operator.v1.GetOrganizationRequest
+ */
+export type GetOrganizationRequest = Message<"supertag.operator.v1.GetOrganizationRequest"> & {
+};
+
+/**
+ * Describes the message supertag.operator.v1.GetOrganizationRequest.
+ * Use `create(GetOrganizationRequestSchema)` to create a new message.
+ */
+export const GetOrganizationRequestSchema: GenMessage<GetOrganizationRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 3);
+
+/**
+ * What the organization is doing right now. See `GetOrganization`.
+ *
+ * @generated from message supertag.operator.v1.OrganizationOverview
+ */
+export type OrganizationOverview = Message<"supertag.operator.v1.OrganizationOverview"> & {
+  /**
+   * When the Control Plane read the records.
+   *
+   * @generated from field: google.protobuf.Timestamp captured_at = 1;
+   */
+  capturedAt?: Timestamp | undefined;
+
+  /**
+   * Each Worker Host that is not revoked, by ID.
+   *
+   * @generated from field: repeated supertag.operator.v1.OrganizationWorkerHost worker_hosts = 2;
+   */
+  workerHosts: OrganizationWorkerHost[];
+
+  /**
+   * Each Tag that is not deleted, by name.
+   *
+   * @generated from field: repeated supertag.operator.v1.OrganizationTag tags = 3;
+   */
+  tags: OrganizationTag[];
+
+  /**
+   * Each Objective that is not completed or cancelled, the newest first.
+   *
+   * @generated from field: repeated supertag.operator.v1.OrganizationObjective objectives = 4;
+   */
+  objectives: OrganizationObjective[];
+};
+
+/**
+ * Describes the message supertag.operator.v1.OrganizationOverview.
+ * Use `create(OrganizationOverviewSchema)` to create a new message.
+ */
+export const OrganizationOverviewSchema: GenMessage<OrganizationOverview> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 4);
+
+/**
+ * A Worker Host's load. Capacity counts regular slots plus the owner-only
+ * slots Workers with the coordination capability add, one per such Worker.
+ *
+ * @generated from message supertag.operator.v1.OrganizationWorkerHost
+ */
+export type OrganizationWorkerHost = Message<"supertag.operator.v1.OrganizationWorkerHost"> & {
+  /**
+   * The host's ID.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * Its phase.
+   *
+   * @generated from field: supertag.operator.v1.WorkerHostPhase phase = 2;
+   */
+  phase: WorkerHostPhase;
+
+  /**
+   * Task Attempts running on it.
+   *
+   * @generated from field: int32 running = 3;
+   */
+  running: number;
+
+  /**
+   * How many Task Attempts it runs at once, owner-only slots included.
+   *
+   * @generated from field: int32 capacity = 4;
+   */
+  capacity: number;
+
+  /**
+   * Its owner-only coordination slots.
+   *
+   * @generated from field: int32 coordination_capacity = 5;
+   */
+  coordinationCapacity: number;
+
+  /**
+   * Its load per harness, by harness name. A Worker that serves several
+   * harnesses counts its capacity under each of them.
+   *
+   * @generated from field: repeated supertag.operator.v1.HarnessLoad harnesses = 6;
+   */
+  harnesses: HarnessLoad[];
+
+  /**
+   * Its free and total scratch space, as it last reported. Unset when it
+   * never reported.
+   *
+   * @generated from field: supertag.operator.v1.DiskSpace disk_space = 7;
+   */
+  diskSpace?: DiskSpace | undefined;
+
+  /**
+   * A warning when free scratch space is below the smaller of 10 GiB and 5%
+   * of the volume. Empty otherwise.
+   *
+   * @generated from field: string disk_warning = 8;
+   */
+  diskWarning: string;
+};
+
+/**
+ * Describes the message supertag.operator.v1.OrganizationWorkerHost.
+ * Use `create(OrganizationWorkerHostSchema)` to create a new message.
+ */
+export const OrganizationWorkerHostSchema: GenMessage<OrganizationWorkerHost> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 5);
+
+/**
+ * Running Task Attempts against capacity for one harness on one Worker Host.
+ *
+ * @generated from message supertag.operator.v1.HarnessLoad
+ */
+export type HarnessLoad = Message<"supertag.operator.v1.HarnessLoad"> & {
+  /**
+   * The harness, such as `codex`, or the Worker type when its Workers name
+   * none.
+   *
+   * @generated from field: string harness = 1;
+   */
+  harness: string;
+
+  /**
+   * Task Attempts of this harness running on the host.
+   *
+   * @generated from field: int32 running = 2;
+   */
+  running: number;
+
+  /**
+   * Its capacity, owner-only slots included.
+   *
+   * @generated from field: int32 capacity = 3;
+   */
+  capacity: number;
+
+  /**
+   * Its owner-only coordination slots.
+   *
+   * @generated from field: int32 coordination_capacity = 4;
+   */
+  coordinationCapacity: number;
+};
+
+/**
+ * Describes the message supertag.operator.v1.HarnessLoad.
+ * Use `create(HarnessLoadSchema)` to create a new message.
+ */
+export const HarnessLoadSchema: GenMessage<HarnessLoad> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 6);
+
+/**
+ * Whether a Tag is busy.
+ *
+ * @generated from message supertag.operator.v1.OrganizationTag
+ */
+export type OrganizationTag = Message<"supertag.operator.v1.OrganizationTag"> & {
+  /**
+   * The Tag's ID.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * The Tag's name.
+   *
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * The Tasks whose Task Attempts run now, sorted. Empty when the Tag is
+   * idle.
+   *
+   * @generated from field: repeated string running_task_ids = 3;
+   */
+  runningTaskIds: string[];
+
+  /**
+   * The command each running Task's harness reports as running, for
+   * harnesses that report commands.
+   *
+   * @generated from field: repeated supertag.operator.v1.TagRunningCommand running_commands = 4;
+   */
+  runningCommands: TagRunningCommand[];
+};
+
+/**
+ * Describes the message supertag.operator.v1.OrganizationTag.
+ * Use `create(OrganizationTagSchema)` to create a new message.
+ */
+export const OrganizationTagSchema: GenMessage<OrganizationTag> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 7);
+
+/**
+ * The command a running Task's harness reports.
+ *
+ * @generated from message supertag.operator.v1.TagRunningCommand
+ */
+export type TagRunningCommand = Message<"supertag.operator.v1.TagRunningCommand"> & {
+  /**
+   * The Task's ID.
+   *
+   * @generated from field: string task_id = 1;
+   */
+  taskId: string;
+
+  /**
+   * The command, as plain single-line text. The harness wrote it, so it is
+   * untrusted text.
+   *
+   * @generated from field: string command = 2;
+   */
+  command: string;
+
+  /**
+   * When it started.
+   *
+   * @generated from field: google.protobuf.Timestamp started_at = 3;
+   */
+  startedAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message supertag.operator.v1.TagRunningCommand.
+ * Use `create(TagRunningCommandSchema)` to create a new message.
+ */
+export const TagRunningCommandSchema: GenMessage<TagRunningCommand> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 8);
+
+/**
+ * An Objective that is not finished, with its spend.
+ *
+ * @generated from message supertag.operator.v1.OrganizationObjective
+ */
+export type OrganizationObjective = Message<"supertag.operator.v1.OrganizationObjective"> & {
+  /**
+   * The Objective's ID.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * Where it stands.
+   *
+   * @generated from field: supertag.operator.v1.ObjectiveStatus status = 2;
+   */
+  status: ObjectiveStatus;
+
+  /**
+   * The owner Tag's ID.
+   *
+   * @generated from field: string owner_tag_id = 3;
+   */
+  ownerTagId: string;
+
+  /**
+   * The owner Tag's name, or its ID when the Tag no longer exists.
+   *
+   * @generated from field: string owner = 4;
+   */
+  owner: string;
+
+  /**
+   * When it is due. Unset without a deadline.
+   *
+   * @generated from field: google.protobuf.Timestamp deadline = 5;
+   */
+  deadline?: Timestamp | undefined;
+
+  /**
+   * Provider-reported spend in minor units of `spend_currency`, as last
+   * observed; 0 when none is known.
+   *
+   * @generated from field: int64 spent_minor = 6;
+   */
+  spentMinor: bigint;
+
+  /**
+   * The budget limit, in minor units of `currency` or in allocation units.
+   * Unset without a budget.
+   *
+   * @generated from field: optional int64 budget_limit_minor = 7;
+   */
+  budgetLimitMinor?: bigint | undefined;
+
+  /**
+   * The budget's ISO 4217 code. Empty when the budget counts allocation
+   * units or there is none.
+   *
+   * @generated from field: string currency = 8;
+   */
+  currency: string;
+
+  /**
+   * The currency of `spent_minor`. Empty when spend counts allocation units.
+   *
+   * @generated from field: string spend_currency = 9;
+   */
+  spendCurrency: string;
+
+  /**
+   * Task Attempts whose model has no published price, so their cost is
+   * unknown and a budget in a currency cannot be enforced on them.
+   *
+   * @generated from field: int32 unpriced_attempts = 10;
+   */
+  unpricedAttempts: number;
+
+  /**
+   * The tokens those Task Attempts used. 0 when `unpriced_attempts` is 0.
+   *
+   * @generated from field: int64 unpriced_tokens = 11;
+   */
+  unpricedTokens: bigint;
+
+  /**
+   * The high-severity findings of the latest Task of each of its Sessions,
+   * in Session order.
+   *
+   * @generated from field: repeated supertag.operator.v1.HighFinding high_findings = 12;
+   */
+  highFindings: HighFinding[];
+};
+
+/**
+ * Describes the message supertag.operator.v1.OrganizationObjective.
+ * Use `create(OrganizationObjectiveSchema)` to create a new message.
+ */
+export const OrganizationObjectiveSchema: GenMessage<OrganizationObjective> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 9);
+
+/**
+ * @generated from message supertag.operator.v1.GetSpendRequest
+ */
+export type GetSpendRequest = Message<"supertag.operator.v1.GetSpendRequest"> & {
+  /**
+   * How to group Task Attempts. Unspecified groups by Objective.
+   *
+   * @generated from field: supertag.operator.v1.SpendGrouping by = 1;
+   */
+  by: SpendGrouping;
+
+  /**
+   * Counts only Task Attempts that started at or after this time. Unset
+   * counts all of them.
+   *
+   * @generated from field: google.protobuf.Timestamp since = 2;
+   */
+  since?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message supertag.operator.v1.GetSpendRequest.
+ * Use `create(GetSpendRequestSchema)` to create a new message.
+ */
+export const GetSpendRequestSchema: GenMessage<GetSpendRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 10);
+
+/**
+ * Spend grouped as asked. See `GetSpend`.
+ *
+ * @generated from message supertag.operator.v1.SpendReport
+ */
+export type SpendReport = Message<"supertag.operator.v1.SpendReport"> & {
+  /**
+   * How the groups are formed. Never unspecified.
+   *
+   * @generated from field: supertag.operator.v1.SpendGrouping by = 1;
+   */
+  by: SpendGrouping;
+
+  /**
+   * The `since` of the request. Unset when it had none.
+   *
+   * @generated from field: google.protobuf.Timestamp since = 2;
+   */
+  since?: Timestamp | undefined;
+
+  /**
+   * The groups, by `key`. Empty when no Task Attempt counts.
+   *
+   * @generated from field: repeated supertag.operator.v1.SpendGroup groups = 3;
+   */
+  groups: SpendGroup[];
+};
+
+/**
+ * Describes the message supertag.operator.v1.SpendReport.
+ * Use `create(SpendReportSchema)` to create a new message.
+ */
+export const SpendReportSchema: GenMessage<SpendReport> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 11);
+
+/**
+ * The usage of one group of Task Attempts.
+ *
+ * @generated from message supertag.operator.v1.SpendGroup
+ */
+export type SpendGroup = Message<"supertag.operator.v1.SpendGroup"> & {
+  /**
+   * The Objective ID or `unassigned`, the Tag ID, or the day as
+   * `YYYY-MM-DD`.
+   *
+   * @generated from field: string key = 1;
+   */
+  key: string;
+
+  /**
+   * The Tag's name when grouped by Tag. Empty otherwise.
+   *
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * The Objective's budget when grouped by Objective and it has one. Unset
+   * otherwise.
+   *
+   * @generated from field: supertag.operator.v1.Budget budget = 3;
+   */
+  budget?: Budget | undefined;
+
+  /**
+   * Task Attempts in the group.
+   *
+   * @generated from field: int32 attempts = 4;
+   */
+  attempts: number;
+
+  /**
+   * Their provider-reported cost by ISO 4217 code, in minor units, estimated
+   * costs included. Empty when none reported a cost.
+   *
+   * @generated from field: map<string, int64> reported_cost_by_currency = 5;
+   */
+  reportedCostByCurrency: { [key: string]: bigint };
+
+  /**
+   * Task Attempts that reported no cost. They are not counted as zero.
+   *
+   * @generated from field: int32 unknown_cost_attempts = 6;
+   */
+  unknownCostAttempts: number;
+
+  /**
+   * Task Attempts whose cost is an estimate from a model price table.
+   *
+   * @generated from field: int32 estimated_cost_attempts = 7;
+   */
+  estimatedCostAttempts: number;
+
+  /**
+   * Unknown-cost Task Attempts that reported tokens for a model the harness
+   * has no price for, counted by model.
+   *
+   * @generated from field: map<string, int32> unpriced_models = 8;
+   */
+  unpricedModels: { [key: string]: number };
+
+  /**
+   * The tokens of those Task Attempts.
+   *
+   * @generated from field: int64 unpriced_tokens = 9;
+   */
+  unpricedTokens: bigint;
+
+  /**
+   * The tokens reported by every Task Attempt that reported usage. Unset
+   * when none did.
+   *
+   * @generated from field: optional int64 reported_tokens = 10;
+   */
+  reportedTokens?: bigint | undefined;
+
+  /**
+   * Task Attempts that reported no usage.
+   *
+   * @generated from field: int32 unknown_token_attempts = 11;
+   */
+  unknownTokenAttempts: number;
+};
+
+/**
+ * Describes the message supertag.operator.v1.SpendGroup.
+ * Use `create(SpendGroupSchema)` to create a new message.
+ */
+export const SpendGroupSchema: GenMessage<SpendGroup> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 12);
+
+/**
+ * @generated from message supertag.operator.v1.ListAuditEntriesRequest
+ */
+export type ListAuditEntriesRequest = Message<"supertag.operator.v1.ListAuditEntriesRequest"> & {
+  /**
+   * Lists only entries at or after this time. Unset lists from the oldest.
+   *
+   * @generated from field: google.protobuf.Timestamp since = 1;
+   */
+  since?: Timestamp | undefined;
+
+  /**
+   * Lists only entries by this exact operator, such as `token:laptop-2`.
+   * Empty lists every operator's.
+   *
+   * @generated from field: string actor = 2;
+   */
+  actor: string;
+
+  /**
+   * At most this many entries; 0 means 50, and more than 500 means 500.
+   *
+   * @generated from field: int32 page_size = 3;
+   */
+  pageSize: number;
+
+  /**
+   * The `next_page_token` of the previous page.
+   *
+   * @generated from field: string page_token = 4;
+   */
+  pageToken: string;
+};
+
+/**
+ * Describes the message supertag.operator.v1.ListAuditEntriesRequest.
+ * Use `create(ListAuditEntriesRequestSchema)` to create a new message.
+ */
+export const ListAuditEntriesRequestSchema: GenMessage<ListAuditEntriesRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 13);
+
+/**
+ * @generated from message supertag.operator.v1.ListAuditEntriesResponse
+ */
+export type ListAuditEntriesResponse = Message<"supertag.operator.v1.ListAuditEntriesResponse"> & {
+  /**
+   * The entries, the newest first.
+   *
+   * @generated from field: repeated supertag.operator.v1.AuditEntry entries = 1;
+   */
+  entries: AuditEntry[];
+
+  /**
+   * Fetches the next page, which continues after this page's last entry, so
+   * entries recorded in between are neither repeated nor skipped. Empty on
+   * the last page.
+   *
+   * @generated from field: string next_page_token = 2;
+   */
+  nextPageToken: string;
+};
+
+/**
+ * Describes the message supertag.operator.v1.ListAuditEntriesResponse.
+ * Use `create(ListAuditEntriesResponseSchema)` to create a new message.
+ */
+export const ListAuditEntriesResponseSchema: GenMessage<ListAuditEntriesResponse> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 14);
+
+/**
+ * One recorded operator change.
+ *
+ * @generated from message supertag.operator.v1.AuditEntry
+ */
+export type AuditEntry = Message<"supertag.operator.v1.AuditEntry"> & {
+  /**
+   * The entry's ID.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * When the Control Plane finished handling the change.
+   *
+   * @generated from field: google.protobuf.Timestamp at = 2;
+   */
+  at?: Timestamp | undefined;
+
+  /**
+   * Who acted: `control-plane-break-glass` for the admin token,
+   * `token:NAME` for an Operator Token, a scoped credential's operator ID,
+   * or `PROVIDER:USER` for a person in an Objective thread.
+   *
+   * @generated from field: string actor = 3;
+   */
+  actor: string;
+
+  /**
+   * What was done, such as `apply`, `auth-key.create` or
+   * `approval.approve`: an RPC's `audit_action`, or what the call it
+   * arrived as did.
+   *
+   * @generated from field: string action = 4;
+   */
+  action: string;
+
+  /**
+   * What it was done to, as `Kind/NAME` or `Kind/ID`, such as
+   * `Tag/builder`. Only the kind, such as `Tag`, when the change failed or
+   * its name could hold a secret.
+   *
+   * @generated from field: string target = 5;
+   */
+  target: string;
+
+  /**
+   * Whether the change took effect.
+   *
+   * @generated from field: supertag.operator.v1.AuditOutcome outcome = 6;
+   */
+  outcome: AuditOutcome;
+
+  /**
+   * The HTTP status of the response, for a change that arrived as a call.
+   * An RPC's status is the HTTP status its Connect code maps to. Unset
+   * otherwise.
+   *
+   * @generated from field: optional int32 status = 7;
+   */
+  status?: number | undefined;
+
+  /**
+   * Where the Control Plane received the change.
+   *
+   * @generated from field: supertag.operator.v1.AuditSource source = 8;
+   */
+  source: AuditSource;
+
+  /**
+   * The call's HTTP method, for a change that arrived as a call. Empty
+   * otherwise.
+   *
+   * @generated from field: string method = 9;
+   */
+  method: string;
+
+  /**
+   * The route the call matched, as a template such as
+   * `/supertag.operator.v1.HostService/DrainWorkerHost`. It is never the
+   * call's own path. Empty when the call matched no route or the change
+   * did not arrive as a call.
+   *
+   * @generated from field: string path = 10;
+   */
+  path: string;
+};
+
+/**
+ * Describes the message supertag.operator.v1.AuditEntry.
+ * Use `create(AuditEntrySchema)` to create a new message.
+ */
+export const AuditEntrySchema: GenMessage<AuditEntry> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 15);
+
+/**
+ * @generated from message supertag.operator.v1.GetMetricsRequest
+ */
+export type GetMetricsRequest = Message<"supertag.operator.v1.GetMetricsRequest"> & {
+};
+
+/**
+ * Describes the message supertag.operator.v1.GetMetricsRequest.
+ * Use `create(GetMetricsRequestSchema)` to create a new message.
+ */
+export const GetMetricsRequestSchema: GenMessage<GetMetricsRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 16);
+
+/**
+ * An operational snapshot. See `GetMetrics`. Durations are milliseconds.
+ *
+ * @generated from message supertag.operator.v1.MetricSnapshot
+ */
+export type MetricSnapshot = Message<"supertag.operator.v1.MetricSnapshot"> & {
+  /**
+   * When the Control Plane read the records.
+   *
+   * @generated from field: google.protobuf.Timestamp captured_at = 1;
+   */
+  capturedAt?: Timestamp | undefined;
+
+  /**
+   * Tags.
+   *
+   * @generated from field: int64 tags = 2;
+   */
+  tags: bigint;
+
+  /**
+   * Roles.
+   *
+   * @generated from field: int64 roles = 3;
+   */
+  roles: bigint;
+
+  /**
+   * Role assignments to Tags.
+   *
+   * @generated from field: int64 role_assignments = 4;
+   */
+  roleAssignments: bigint;
+
+  /**
+   * Surface Accounts.
+   *
+   * @generated from field: int64 surface_accounts = 5;
+   */
+  surfaceAccounts: bigint;
+
+  /**
+   * Permission Sets.
+   *
+   * @generated from field: int64 permission_sets = 6;
+   */
+  permissionSets: bigint;
+
+  /**
+   * Context Sets.
+   *
+   * @generated from field: int64 context_sets = 7;
+   */
+  contextSets: bigint;
+
+  /**
+   * Sessions.
+   *
+   * @generated from field: int64 sessions = 8;
+   */
+  sessions: bigint;
+
+  /**
+   * Tasks by status.
+   *
+   * @generated from field: supertag.operator.v1.TaskCounts tasks = 9;
+   */
+  tasks?: TaskCounts | undefined;
+
+  /**
+   * Work recovery still has to settle.
+   *
+   * @generated from field: supertag.operator.v1.RecoveryMetrics recovery = 10;
+   */
+  recovery?: RecoveryMetrics | undefined;
+
+  /**
+   * The operator inbox.
+   *
+   * @generated from field: supertag.operator.v1.InboxMetrics coordination_inbox = 11;
+   */
+  coordinationInbox?: InboxMetrics | undefined;
+
+  /**
+   * Provider-reported usage.
+   *
+   * @generated from field: supertag.operator.v1.UsageMetrics usage = 12;
+   */
+  usage?: UsageMetrics | undefined;
+
+  /**
+   * Native subagents of harnesses.
+   *
+   * @generated from field: supertag.operator.v1.NativeAgentMetrics native_agents = 13;
+   */
+  nativeAgents?: NativeAgentMetrics | undefined;
+
+  /**
+   * The Task queue and placement.
+   *
+   * @generated from field: supertag.operator.v1.SchedulingMetrics scheduling = 14;
+   */
+  scheduling?: SchedulingMetrics | undefined;
+
+  /**
+   * Mailbox messages no inbox turn has taken yet.
+   *
+   * @generated from field: supertag.operator.v1.BacklogMetrics mailbox = 15;
+   */
+  mailbox?: BacklogMetrics | undefined;
+
+  /**
+   * Replies waiting to reach collaboration surfaces.
+   *
+   * @generated from field: supertag.operator.v1.ReplyDeliveryMetrics reply_delivery = 16;
+   */
+  replyDelivery?: ReplyDeliveryMetrics | undefined;
+
+  /**
+   * The answering API Server process's RPC counters. Each process counts
+   * its own, from `rpc.started_at`, and they reset when it is replaced.
+   *
+   * @generated from field: supertag.operator.v1.RpcMetrics rpc = 17;
+   */
+  rpc?: RpcMetrics | undefined;
+};
+
+/**
+ * Describes the message supertag.operator.v1.MetricSnapshot.
+ * Use `create(MetricSnapshotSchema)` to create a new message.
+ */
+export const MetricSnapshotSchema: GenMessage<MetricSnapshot> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 17);
+
+/**
+ * Tasks by status.
+ *
+ * @generated from message supertag.operator.v1.TaskCounts
+ */
+export type TaskCounts = Message<"supertag.operator.v1.TaskCounts"> & {
+  /**
+   * Every Task.
+   *
+   * @generated from field: int64 total = 1;
+   */
+  total: bigint;
+
+  /**
+   * Pending Tasks.
+   *
+   * @generated from field: int64 pending = 2;
+   */
+  pending: bigint;
+
+  /**
+   * Running Tasks.
+   *
+   * @generated from field: int64 running = 3;
+   */
+  running: bigint;
+
+  /**
+   * Completed Tasks.
+   *
+   * @generated from field: int64 completed = 4;
+   */
+  completed: bigint;
+
+  /**
+   * Failed Tasks.
+   *
+   * @generated from field: int64 failed = 5;
+   */
+  failed: bigint;
+
+  /**
+   * Cancelled Tasks.
+   *
+   * @generated from field: int64 cancelled = 6;
+   */
+  cancelled: bigint;
+};
+
+/**
+ * Describes the message supertag.operator.v1.TaskCounts.
+ * Use `create(TaskCountsSchema)` to create a new message.
+ */
+export const TaskCountsSchema: GenMessage<TaskCounts> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 18);
+
+/**
+ * Work recovery still has to settle.
+ *
+ * @generated from message supertag.operator.v1.RecoveryMetrics
+ */
+export type RecoveryMetrics = Message<"supertag.operator.v1.RecoveryMetrics"> & {
+  /**
+   * Control messages to Worker Hosts whose delivery is not known.
+   *
+   * @generated from field: int64 unknown_control_deliveries = 1;
+   */
+  unknownControlDeliveries: bigint;
+
+  /**
+   * Sessions blocked until recovery settles them.
+   *
+   * @generated from field: int64 blocked_sessions = 2;
+   */
+  blockedSessions: bigint;
+
+  /**
+   * Durable executions waiting for their Worker Host to reconcile them.
+   *
+   * @generated from field: int64 durable_executions_awaiting_reconciliation = 3;
+   */
+  durableExecutionsAwaitingReconciliation: bigint;
+};
+
+/**
+ * Describes the message supertag.operator.v1.RecoveryMetrics.
+ * Use `create(RecoveryMetricsSchema)` to create a new message.
+ */
+export const RecoveryMetricsSchema: GenMessage<RecoveryMetrics> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 19);
+
+/**
+ * The operator inbox.
+ *
+ * @generated from message supertag.operator.v1.InboxMetrics
+ */
+export type InboxMetrics = Message<"supertag.operator.v1.InboxMetrics"> & {
+  /**
+   * Pending items.
+   *
+   * @generated from field: int64 pending = 1;
+   */
+  pending: bigint;
+
+  /**
+   * Pending items by kind, such as `approval_request`.
+   *
+   * @generated from field: map<string, int64> by_kind = 2;
+   */
+  byKind: { [key: string]: bigint };
+
+  /**
+   * When the oldest actionable item arrived. Unset when there is none.
+   *
+   * @generated from field: google.protobuf.Timestamp oldest_actionable_at = 3;
+   */
+  oldestActionableAt?: Timestamp | undefined;
+
+  /**
+   * Its age in seconds. Unset when there is none.
+   *
+   * @generated from field: optional int64 oldest_actionable_age_seconds = 4;
+   */
+  oldestActionableAgeSeconds?: bigint | undefined;
+};
+
+/**
+ * Describes the message supertag.operator.v1.InboxMetrics.
+ * Use `create(InboxMetricsSchema)` to create a new message.
+ */
+export const InboxMetricsSchema: GenMessage<InboxMetrics> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 20);
+
+/**
+ * Provider-reported usage.
+ *
+ * @generated from message supertag.operator.v1.UsageMetrics
+ */
+export type UsageMetrics = Message<"supertag.operator.v1.UsageMetrics"> & {
+  /**
+   * Task Attempts with at least one usage report.
+   *
+   * @generated from field: int64 reporting_attempts = 1;
+   */
+  reportingAttempts: bigint;
+
+  /**
+   * Their tokens.
+   *
+   * @generated from field: int64 total_tokens = 2;
+   */
+  totalTokens: bigint;
+
+  /**
+   * Task Attempts whose reports do not cover the whole Task Attempt.
+   *
+   * @generated from field: int64 incomplete_attempts = 3;
+   */
+  incompleteAttempts: bigint;
+
+  /**
+   * Their cost by ISO 4217 code, in minor units.
+   *
+   * @generated from field: map<string, int64> reported_cost_by_currency = 4;
+   */
+  reportedCostByCurrency: { [key: string]: bigint };
+};
+
+/**
+ * Describes the message supertag.operator.v1.UsageMetrics.
+ * Use `create(UsageMetricsSchema)` to create a new message.
+ */
+export const UsageMetricsSchema: GenMessage<UsageMetrics> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 21);
+
+/**
+ * Native subagents of harnesses.
+ *
+ * @generated from message supertag.operator.v1.NativeAgentMetrics
+ */
+export type NativeAgentMetrics = Message<"supertag.operator.v1.NativeAgentMetrics"> & {
+  /**
+   * The most subagents one Task Attempt ran at once.
+   *
+   * @generated from field: int64 peak_concurrent = 1;
+   */
+  peakConcurrent: bigint;
+
+  /**
+   * Task Attempts stopped at their token limit.
+   *
+   * @generated from field: int64 token_limit_interruptions = 2;
+   */
+  tokenLimitInterruptions: bigint;
+
+  /**
+   * Task Attempts stopped at their subagent limit.
+   *
+   * @generated from field: int64 agent_limit_interruptions = 3;
+   */
+  agentLimitInterruptions: bigint;
+};
+
+/**
+ * Describes the message supertag.operator.v1.NativeAgentMetrics.
+ * Use `create(NativeAgentMetricsSchema)` to create a new message.
+ */
+export const NativeAgentMetricsSchema: GenMessage<NativeAgentMetrics> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 22);
+
+/**
+ * The Task queue and placement.
+ *
+ * @generated from message supertag.operator.v1.SchedulingMetrics
+ */
+export type SchedulingMetrics = Message<"supertag.operator.v1.SchedulingMetrics"> & {
+  /**
+   * Pending Tasks.
+   *
+   * @generated from field: int64 queued = 1;
+   */
+  queued: bigint;
+
+  /**
+   * When the oldest pending Task was queued. Unset when none is.
+   *
+   * @generated from field: google.protobuf.Timestamp oldest_queued_at = 2;
+   */
+  oldestQueuedAt?: Timestamp | undefined;
+
+  /**
+   * Its age in seconds. Unset when none is queued.
+   *
+   * @generated from field: optional int64 oldest_queued_age_seconds = 3;
+   */
+  oldestQueuedAgeSeconds?: bigint | undefined;
+
+  /**
+   * Task Attempts placed on a Worker Host.
+   *
+   * @generated from field: int64 placed_attempts = 4;
+   */
+  placedAttempts: bigint;
+
+  /**
+   * Average time from queueing to placement.
+   *
+   * @generated from field: double average_queue_duration_ms = 5;
+   */
+  averageQueueDurationMs: number;
+
+  /**
+   * Longest time from queueing to placement.
+   *
+   * @generated from field: double maximum_queue_duration_ms = 6;
+   */
+  maximumQueueDurationMs: number;
+
+  /**
+   * Average time to place a Task Attempt.
+   *
+   * @generated from field: double average_placement_duration_ms = 7;
+   */
+  averagePlacementDurationMs: number;
+
+  /**
+   * Longest time to place a Task Attempt.
+   *
+   * @generated from field: double maximum_placement_duration_ms = 8;
+   */
+  maximumPlacementDurationMs: number;
+
+  /**
+   * Task Attempts a Worker Host refused to admit.
+   *
+   * @generated from field: int64 admission_rejections = 9;
+   */
+  admissionRejections: bigint;
+
+  /**
+   * Capacity reservations. A reservation released after a declined claim
+   * leaves no record, so none of these counts it.
+   *
+   * @generated from field: supertag.operator.v1.ReservationMetrics reservations = 10;
+   */
+  reservations?: ReservationMetrics | undefined;
+
+  /**
+   * Each Worker Host's capacity, from its latest stored observation.
+   *
+   * @generated from field: repeated supertag.operator.v1.WorkerHostUtilization worker_hosts = 11;
+   */
+  workerHosts: WorkerHostUtilization[];
+};
+
+/**
+ * Describes the message supertag.operator.v1.SchedulingMetrics.
+ * Use `create(SchedulingMetricsSchema)` to create a new message.
+ */
+export const SchedulingMetricsSchema: GenMessage<SchedulingMetrics> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 23);
+
+/**
+ * Capacity reservations.
+ *
+ * @generated from message supertag.operator.v1.ReservationMetrics
+ */
+export type ReservationMetrics = Message<"supertag.operator.v1.ReservationMetrics"> & {
+  /**
+   * Reservations a Task Attempt used.
+   *
+   * @generated from field: int64 consumed = 1;
+   */
+  consumed: bigint;
+
+  /**
+   * Reservations held now.
+   *
+   * @generated from field: int64 active = 2;
+   */
+  active: bigint;
+
+  /**
+   * Reservations that expired unused.
+   *
+   * @generated from field: int64 expired = 3;
+   */
+  expired: bigint;
+};
+
+/**
+ * Describes the message supertag.operator.v1.ReservationMetrics.
+ * Use `create(ReservationMetricsSchema)` to create a new message.
+ */
+export const ReservationMetricsSchema: GenMessage<ReservationMetrics> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 24);
+
+/**
+ * One Worker Host's capacity.
+ *
+ * @generated from message supertag.operator.v1.WorkerHostUtilization
+ */
+export type WorkerHostUtilization = Message<"supertag.operator.v1.WorkerHostUtilization"> & {
+  /**
+   * The host's ID.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * Its phase: connected, draining or unreachable.
+   *
+   * @generated from field: supertag.operator.v1.WorkerHostPhase phase = 2;
+   */
+  phase: WorkerHostPhase;
+
+  /**
+   * Task Attempts running on it.
+   *
+   * @generated from field: int32 active_attempts = 3;
+   */
+  activeAttempts: number;
+
+  /**
+   * How many it runs at once.
+   *
+   * @generated from field: int32 capacity = 4;
+   */
+  capacity: number;
+
+  /**
+   * How many more it can take now.
+   *
+   * @generated from field: int32 available_slots = 5;
+   */
+  availableSlots: number;
+
+  /**
+   * `active_attempts` over `capacity`, from 0 to 1.
+   *
+   * @generated from field: double utilization = 6;
+   */
+  utilization: number;
+};
+
+/**
+ * Describes the message supertag.operator.v1.WorkerHostUtilization.
+ * Use `create(WorkerHostUtilizationSchema)` to create a new message.
+ */
+export const WorkerHostUtilizationSchema: GenMessage<WorkerHostUtilization> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 25);
+
+/**
+ * A backlog.
+ *
+ * @generated from message supertag.operator.v1.BacklogMetrics
+ */
+export type BacklogMetrics = Message<"supertag.operator.v1.BacklogMetrics"> & {
+  /**
+   * Items waiting.
+   *
+   * @generated from field: int64 pending = 1;
+   */
+  pending: bigint;
+
+  /**
+   * When the oldest arrived. Unset when none waits.
+   *
+   * @generated from field: google.protobuf.Timestamp oldest_pending_at = 2;
+   */
+  oldestPendingAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message supertag.operator.v1.BacklogMetrics.
+ * Use `create(BacklogMetricsSchema)` to create a new message.
+ */
+export const BacklogMetricsSchema: GenMessage<BacklogMetrics> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 26);
+
+/**
+ * Replies waiting to reach collaboration surfaces.
+ *
+ * @generated from message supertag.operator.v1.ReplyDeliveryMetrics
+ */
+export type ReplyDeliveryMetrics = Message<"supertag.operator.v1.ReplyDeliveryMetrics"> & {
+  /**
+   * Replies not yet delivered.
+   *
+   * @generated from field: int64 backlog = 1;
+   */
+  backlog: bigint;
+
+  /**
+   * Replies waiting to retry.
+   *
+   * @generated from field: int64 retrying = 2;
+   */
+  retrying: bigint;
+
+  /**
+   * Retries made.
+   *
+   * @generated from field: int64 retry_attempts = 3;
+   */
+  retryAttempts: bigint;
+
+  /**
+   * Replies that will not be retried.
+   *
+   * @generated from field: int64 failed = 4;
+   */
+  failed: bigint;
+
+  /**
+   * When the oldest undelivered reply was created. Unset when none waits.
+   *
+   * @generated from field: google.protobuf.Timestamp oldest_pending_at = 5;
+   */
+  oldestPendingAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message supertag.operator.v1.ReplyDeliveryMetrics.
+ * Use `create(ReplyDeliveryMetricsSchema)` to create a new message.
+ */
+export const ReplyDeliveryMetricsSchema: GenMessage<ReplyDeliveryMetrics> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 27);
+
+/**
+ * One API Server process's RPC counters, Worklet transports included. They
+ * hold no request headers, bodies, IDs or error messages.
+ *
+ * @generated from message supertag.operator.v1.RpcMetrics
+ */
+export type RpcMetrics = Message<"supertag.operator.v1.RpcMetrics"> & {
+  /**
+   * When the process began counting. Compare samples only within one
+   * `started_at`.
+   *
+   * @generated from field: google.protobuf.Timestamp started_at = 1;
+   */
+  startedAt?: Timestamp | undefined;
+
+  /**
+   * When it was read.
+   *
+   * @generated from field: google.protobuf.Timestamp captured_at = 2;
+   */
+  capturedAt?: Timestamp | undefined;
+
+  /**
+   * Counters per service and method.
+   *
+   * @generated from field: repeated supertag.operator.v1.RpcMethodMetrics methods = 3;
+   */
+  methods: RpcMethodMetrics[];
+
+  /**
+   * HTTP/2 connections.
+   *
+   * @generated from field: supertag.operator.v1.RpcChannelMetrics channels = 4;
+   */
+  channels?: RpcChannelMetrics | undefined;
+
+  /**
+   * Buffered Worklet frames.
+   *
+   * @generated from field: supertag.operator.v1.RpcQueueMetrics queues = 5;
+   */
+  queues?: RpcQueueMetrics | undefined;
+
+  /**
+   * Worklet closures by close code.
+   *
+   * @generated from field: map<string, int64> close_codes = 6;
+   */
+  closeCodes: { [key: string]: bigint };
+
+  /**
+   * Lifecycle events a slow or failing trace sink dropped.
+   *
+   * @generated from field: int64 trace_errors = 7;
+   */
+  traceErrors: bigint;
+};
+
+/**
+ * Describes the message supertag.operator.v1.RpcMetrics.
+ * Use `create(RpcMetricsSchema)` to create a new message.
+ */
+export const RpcMetricsSchema: GenMessage<RpcMetrics> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 28);
+
+/**
+ * Counters for one RPC method.
+ *
+ * @generated from message supertag.operator.v1.RpcMethodMetrics
+ */
+export type RpcMethodMetrics = Message<"supertag.operator.v1.RpcMethodMetrics"> & {
+  /**
+   * The service.
+   *
+   * @generated from field: string service = 1;
+   */
+  service: string;
+
+  /**
+   * The method.
+   *
+   * @generated from field: string method = 2;
+   */
+  method: string;
+
+  /**
+   * Calls started.
+   *
+   * @generated from field: int64 started = 3;
+   */
+  started: bigint;
+
+  /**
+   * Calls completed.
+   *
+   * @generated from field: int64 completed = 4;
+   */
+  completed: bigint;
+
+  /**
+   * Calls running.
+   *
+   * @generated from field: int64 active = 5;
+   */
+  active: bigint;
+
+  /**
+   * Streams open.
+   *
+   * @generated from field: int64 active_streams = 6;
+   */
+  activeStreams: bigint;
+
+  /**
+   * Calls that failed.
+   *
+   * @generated from field: int64 errors = 7;
+   */
+  errors: bigint;
+
+  /**
+   * Completed calls by gRPC status code: entry N counts code N, for codes 0
+   * to 16.
+   *
+   * @generated from field: repeated int64 status_codes = 8;
+   */
+  statusCodes: bigint[];
+
+  /**
+   * Call durations. A stream's duration is its lifetime.
+   *
+   * @generated from field: supertag.operator.v1.RpcDurationMetrics duration = 9;
+   */
+  duration?: RpcDurationMetrics | undefined;
+};
+
+/**
+ * Describes the message supertag.operator.v1.RpcMethodMetrics.
+ * Use `create(RpcMethodMetricsSchema)` to create a new message.
+ */
+export const RpcMethodMetricsSchema: GenMessage<RpcMethodMetrics> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 29);
+
+/**
+ * A duration histogram, in milliseconds.
+ *
+ * @generated from message supertag.operator.v1.RpcDurationMetrics
+ */
+export type RpcDurationMetrics = Message<"supertag.operator.v1.RpcDurationMetrics"> & {
+  /**
+   * Durations observed.
+   *
+   * @generated from field: int64 count = 1;
+   */
+  count: bigint;
+
+  /**
+   * Their sum.
+   *
+   * @generated from field: double total = 2;
+   */
+  total: number;
+
+  /**
+   * The longest.
+   *
+   * @generated from field: double max = 3;
+   */
+  max: number;
+
+  /**
+   * Cumulative buckets, the smallest bound first.
+   *
+   * @generated from field: repeated supertag.operator.v1.RpcDurationBucket buckets = 4;
+   */
+  buckets: RpcDurationBucket[];
+};
+
+/**
+ * Describes the message supertag.operator.v1.RpcDurationMetrics.
+ * Use `create(RpcDurationMetricsSchema)` to create a new message.
+ */
+export const RpcDurationMetricsSchema: GenMessage<RpcDurationMetrics> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 30);
+
+/**
+ * One cumulative histogram bucket.
+ *
+ * @generated from message supertag.operator.v1.RpcDurationBucket
+ */
+export type RpcDurationBucket = Message<"supertag.operator.v1.RpcDurationBucket"> & {
+  /**
+   * Its upper bound. Unset for the last bucket, which counts every duration.
+   *
+   * @generated from field: optional double le = 1;
+   */
+  le?: number | undefined;
+
+  /**
+   * Durations at or below the bound.
+   *
+   * @generated from field: int64 count = 2;
+   */
+  count: bigint;
+};
+
+/**
+ * Describes the message supertag.operator.v1.RpcDurationBucket.
+ * Use `create(RpcDurationBucketSchema)` to create a new message.
+ */
+export const RpcDurationBucketSchema: GenMessage<RpcDurationBucket> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 31);
+
+/**
+ * HTTP/2 connections. More opened connections alone do not tell new hosts
+ * from reconnects.
+ *
+ * @generated from message supertag.operator.v1.RpcChannelMetrics
+ */
+export type RpcChannelMetrics = Message<"supertag.operator.v1.RpcChannelMetrics"> & {
+  /**
+   * Connections open.
+   *
+   * @generated from field: int64 active = 1;
+   */
+  active: bigint;
+
+  /**
+   * Connections opened.
+   *
+   * @generated from field: int64 opened = 2;
+   */
+  opened: bigint;
+
+  /**
+   * Connections closed.
+   *
+   * @generated from field: int64 closed = 3;
+   */
+  closed: bigint;
+};
+
+/**
+ * Describes the message supertag.operator.v1.RpcChannelMetrics.
+ * Use `create(RpcChannelMetricsSchema)` to create a new message.
+ */
+export const RpcChannelMetricsSchema: GenMessage<RpcChannelMetrics> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 32);
+
+/**
+ * Buffered Worklet frames.
+ *
+ * @generated from message supertag.operator.v1.RpcQueueMetrics
+ */
+export type RpcQueueMetrics = Message<"supertag.operator.v1.RpcQueueMetrics"> & {
+  /**
+   * Queues open.
+   *
+   * @generated from field: int64 active = 1;
+   */
+  active: bigint;
+
+  /**
+   * Frames buffered.
+   *
+   * @generated from field: int64 frames = 2;
+   */
+  frames: bigint;
+
+  /**
+   * Bytes buffered.
+   *
+   * @generated from field: int64 bytes = 3;
+   */
+  bytes: bigint;
+
+  /**
+   * The frame capacity.
+   *
+   * @generated from field: int64 capacity_frames = 4;
+   */
+  capacityFrames: bigint;
+
+  /**
+   * The byte capacity.
+   *
+   * @generated from field: int64 capacity_bytes = 5;
+   */
+  capacityBytes: bigint;
+
+  /**
+   * The most frames buffered at once.
+   *
+   * @generated from field: int64 peak_frames = 6;
+   */
+  peakFrames: bigint;
+
+  /**
+   * The most bytes buffered at once.
+   *
+   * @generated from field: int64 peak_bytes = 7;
+   */
+  peakBytes: bigint;
+
+  /**
+   * Frames refused because a queue was full.
+   *
+   * @generated from field: int64 rejections = 8;
+   */
+  rejections: bigint;
+};
+
+/**
+ * Describes the message supertag.operator.v1.RpcQueueMetrics.
+ * Use `create(RpcQueueMetricsSchema)` to create a new message.
+ */
+export const RpcQueueMetricsSchema: GenMessage<RpcQueueMetrics> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_organization, 33);
 
 /**
  * Whether the Control Plane accepts new work.
@@ -177,7 +1797,121 @@ export const ControllerPhaseSchema: GenEnum<ControllerPhase> = /*@__PURE__*/
   enumDesc(file_supertag_operator_v1_organization, 1);
 
 /**
- * Reads the state of the Control Plane as a whole.
+ * How `GetSpend` groups Task Attempts.
+ *
+ * @generated from enum supertag.operator.v1.SpendGrouping
+ */
+export enum SpendGrouping {
+  /**
+   * @generated from enum value: SPEND_GROUPING_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * By the Objective of each Task Attempt's Task. Task Attempts outside any
+   * Objective form the group `unassigned`.
+   *
+   * @generated from enum value: SPEND_GROUPING_OBJECTIVE = 1;
+   */
+  OBJECTIVE = 1,
+
+  /**
+   * By Tag.
+   *
+   * @generated from enum value: SPEND_GROUPING_TAG = 2;
+   */
+  TAG = 2,
+
+  /**
+   * By the UTC day each Task Attempt started.
+   *
+   * @generated from enum value: SPEND_GROUPING_DAY = 3;
+   */
+  DAY = 3,
+}
+
+/**
+ * Describes the enum supertag.operator.v1.SpendGrouping.
+ */
+export const SpendGroupingSchema: GenEnum<SpendGrouping> = /*@__PURE__*/
+  enumDesc(file_supertag_operator_v1_organization, 2);
+
+/**
+ * Whether a recorded change took effect.
+ *
+ * @generated from enum supertag.operator.v1.AuditOutcome
+ */
+export enum AuditOutcome {
+  /**
+   * @generated from enum value: AUDIT_OUTCOME_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * It took effect.
+   *
+   * @generated from enum value: AUDIT_OUTCOME_SUCCEEDED = 1;
+   */
+  SUCCEEDED = 1,
+
+  /**
+   * It was refused or failed.
+   *
+   * @generated from enum value: AUDIT_OUTCOME_FAILED = 2;
+   */
+  FAILED = 2,
+}
+
+/**
+ * Describes the enum supertag.operator.v1.AuditOutcome.
+ */
+export const AuditOutcomeSchema: GenEnum<AuditOutcome> = /*@__PURE__*/
+  enumDesc(file_supertag_operator_v1_organization, 3);
+
+/**
+ * Where the Control Plane received a change.
+ *
+ * @generated from enum supertag.operator.v1.AuditSource
+ */
+export enum AuditSource {
+  /**
+   * @generated from enum value: AUDIT_SOURCE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * A call to the API Server.
+   *
+   * @generated from enum value: AUDIT_SOURCE_API = 1;
+   */
+  API = 1,
+
+  /**
+   * A person's action in an Objective thread on a collaboration surface,
+   * through the Gateway.
+   *
+   * @generated from enum value: AUDIT_SOURCE_GATEWAY = 2;
+   */
+  GATEWAY = 2,
+}
+
+/**
+ * Describes the enum supertag.operator.v1.AuditSource.
+ */
+export const AuditSourceSchema: GenEnum<AuditSource> = /*@__PURE__*/
+  enumDesc(file_supertag_operator_v1_organization, 4);
+
+/**
+ * Reads the state of the Control Plane and the organization it runs as a
+ * whole: `supertag status`, `spend` and `audit`, and the operational metrics
+ * a monitoring system scrapes.
+ *
+ * Access. The admin token and Operator Tokens may call every RPC; a scoped
+ * coordination credential is refused with `PermissionDenied`. Every caller
+ * sees the whole organization.
+ *
+ * A call while the Control Plane drains fails with `Unavailable` and
+ * `ERROR_REASON_DRAINING`.
  *
  * @generated from service supertag.operator.v1.OrganizationService
  */
@@ -195,6 +1929,64 @@ export const OrganizationService: GenService<{
     methodKind: "unary";
     input: typeof GetStatusRequestSchema;
     output: typeof GetStatusResponseSchema;
+  },
+  /**
+   * Reports what the organization is doing right now, as `supertag status`
+   * shows it: each Worker Host with its running Task Attempts against
+   * capacity per harness, each Tag as idle or busy, and each Objective that
+   * is not completed or cancelled with its spend, budget, deadline and high
+   * findings. The operator inbox count comes from `InboxService`.
+   *
+   * @generated from rpc supertag.operator.v1.OrganizationService.GetOrganization
+   */
+  getOrganization: {
+    methodKind: "unary";
+    input: typeof GetOrganizationRequestSchema;
+    output: typeof OrganizationOverviewSchema;
+  },
+  /**
+   * Sums the provider-reported cost and tokens of Task Attempts, as
+   * `supertag spend` shows them, grouped by Objective, Tag or day. Separate
+   * currencies are never combined.
+   *
+   * @generated from rpc supertag.operator.v1.OrganizationService.GetSpend
+   */
+  getSpend: {
+    methodKind: "unary";
+    input: typeof GetSpendRequestSchema;
+    output: typeof SpendReportSchema;
+  },
+  /**
+   * Lists recorded operator changes, the newest first, as `supertag audit`
+   * shows them: applies, deletes, Operator Token, Auth Key and Worker Host
+   * changes, approval decisions, Objective messages and every other call that
+   * can change state. An entry never holds a credential, a secret, a digest
+   * or a request body. A change whose call returned before this call began
+   * is listed.
+   *
+   * It fails with `InvalidArgument` for an `actor` over 200 characters or a
+   * malformed `page_token`.
+   *
+   * @generated from rpc supertag.operator.v1.OrganizationService.ListAuditEntries
+   */
+  listAuditEntries: {
+    methodKind: "unary";
+    input: typeof ListAuditEntriesRequestSchema;
+    output: typeof ListAuditEntriesResponseSchema;
+  },
+  /**
+   * Reads a bounded operational snapshot for monitoring: resource and Task
+   * counts, recovery and scheduling state, inbox, Mailbox and reply delivery
+   * backlogs, usage, and the answering API Server process's RPC counters.
+   * Everything but `rpc` comes from stored records; reading it contacts no
+   * Worklet.
+   *
+   * @generated from rpc supertag.operator.v1.OrganizationService.GetMetrics
+   */
+  getMetrics: {
+    methodKind: "unary";
+    input: typeof GetMetricsRequestSchema;
+    output: typeof MetricSnapshotSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_supertag_operator_v1_organization, 0);

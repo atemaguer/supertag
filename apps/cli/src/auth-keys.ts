@@ -1,7 +1,9 @@
 import { parseArgs } from "node:util";
 import { parseWorkerHostLabels } from "@supertag/core";
 import type { ControlPlaneClient } from "./control-plane-client.js";
-import { type AuthKeyResource, CONTROL_PLANE_API_VERSION } from "./control-plane-resources.js";
+import { authKeyView } from "./host-protos.js";
+import { hostClient } from "./operator-client.js";
+import { refusedAsError } from "./tag-conversation.js";
 
 export type AuthKeyCommand = "create" | "revoke";
 
@@ -17,19 +19,17 @@ export function isAuthKeyCommand(value: string | undefined): value is AuthKeyCom
  * The secret is printed once, on create, and never stored by the CLI.
  */
 export async function runAuthKeyCommand(
-  client: Pick<ControlPlaneClient, "request">,
+  client: Pick<ControlPlaneClient, "operator">,
   command: AuthKeyCommand,
   args: readonly string[],
   controlPlaneUrl: string,
 ): Promise<string> {
+  const hosts = hostClient(client.operator);
   if (command === "revoke") {
     const { positionals } = parseArgs({ args, allowPositionals: true, options: {}, strict: true });
     const name = positionals[0]?.trim();
     if (positionals.length !== 1 || !name) throw new Error("Usage: supertag revoke auth-key NAME");
-    const resource = await client.request<AuthKeyResource>(
-      `/api/v1/auth-keys/${encodeURIComponent(name)}/revoke`,
-      { method: "POST" },
-    );
+    const resource = authKeyView(await refusedAsError(() => hosts.revokeAuthKey({ name })));
     return `Revoked Auth Key ${resource.metadata.name ?? name}. It cannot join new Worker Hosts; hosts that already joined keep their enrollment.\n`;
   }
   const { values, positionals } = parseArgs({
@@ -48,20 +48,18 @@ export async function runAuthKeyCommand(
   if (positionals.length !== 1 || !name || tags.length === 0)
     throw new Error(`Usage: ${CREATE_USAGE}`);
   const labels = parseWorkerHostLabels(values.label ?? [], "--label");
-  const issued = await client.request<AuthKeyResource & { readonly secret?: unknown }>(
-    "/api/v1/auth-keys",
-    {
-      method: "POST",
-      body: JSON.stringify({
-        apiVersion: CONTROL_PLANE_API_VERSION,
-        kind: "AuthKey",
-        metadata: { name },
-        spec: { tags, labels, reusable: values.reusable, ephemeral: values.ephemeral },
-      }),
-    },
+  const created = await refusedAsError(() =>
+    hosts.createAuthKey({
+      name,
+      tags,
+      labels: [...labels],
+      reusable: values.reusable,
+      ephemeral: values.ephemeral,
+    }),
   );
-  if (issued?.kind !== "AuthKey" || typeof issued.secret !== "string" || !issued.secret)
+  if (created.authKey === undefined || !created.secret)
     throw new Error("Control Plane returned an invalid Auth Key");
+  const issued = { ...authKeyView(created.authKey), secret: created.secret };
   const kind = [
     issued.spec.reusable ? "reusable" : "one-off",
     ...(issued.spec.ephemeral ? ["ephemeral"] : []),

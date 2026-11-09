@@ -1,8 +1,12 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Code } from "@connectrpc/connect";
 import { afterEach, describe, expect, it } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
+import { workerHostView } from "../apps/cli/src/host-protos.ts";
+import { hostClient } from "../apps/cli/src/operator-client.ts";
+import { getWorkerHostResource } from "../apps/cli/src/operator-resources.ts";
 import { LocalWorklet, StaticWorker } from "../packages/runtime/sdk/src/index.ts";
 import { WorkletConnection } from "../packages/runtime/transport/src/index.ts";
 import { FileGatewayCredentialVault } from "../packages/store/src/index.ts";
@@ -37,7 +41,8 @@ describe("Worker Host runtime lifecycle", () => {
       });
     let runtime = await start();
     cleanups.push(() => runtime.close());
-    const headers = { authorization: `Bearer ${adminToken}` };
+    const admin = () => ({ url: runtime.url, token: adminToken });
+    const headers = admin;
     const hostId = "build-east-1";
     const worklet = new LocalWorklet("build-worklet", hostId, [
       new StaticWorker({
@@ -65,7 +70,7 @@ describe("Worker Host runtime lifecycle", () => {
     await connection.start();
 
     await expect
-      .poll(async () => (await workerHost(runtime.url, headers, hostId)).status)
+      .poll(async () => (await workerHost(headers, hostId)).status)
       .toMatchObject({
         phase: "ready",
         connectionGeneration: 1,
@@ -80,20 +85,17 @@ describe("Worker Host runtime lifecycle", () => {
     expect(vaultContents).not.toContain(credential);
     expect(vaultContents).toContain('"algorithm": "sha256"');
 
-    const drained = await fetch(`${runtime.url}/api/v1/worker-hosts/${hostId}/drain`, {
-      method: "POST",
-      headers,
-    });
-    expect(drained.status).toBe(200);
-    await expect(drained.json()).resolves.toMatchObject({
+    const drained = workerHostView(await hostClient(admin()).drainWorkerHost({ id: hostId }));
+    expect(drained).toMatchObject({
       spec: { draining: true },
       status: { phase: "draining", availableSlots: 0 },
     });
+    expect(drained.status.storage).toBeUndefined();
 
     await connection.stop();
     await runtime.close();
     runtime = await start();
-    await expect(workerHost(runtime.url, headers, hostId)).resolves.toMatchObject({
+    await expect(workerHost(headers, hostId)).resolves.toMatchObject({
       spec: { draining: true },
       status: {
         phase: "unreachable",
@@ -111,30 +113,32 @@ describe("Worker Host runtime lifecycle", () => {
     });
     await connection.start();
     await expect
-      .poll(async () => (await workerHost(runtime.url, headers, hostId)).status)
+      .poll(async () => (await workerHost(headers, hostId)).status)
       .toMatchObject({
         phase: "draining",
         connectionGeneration: 2,
         availableSlots: 0,
       });
 
-    const resumed = await fetch(`${runtime.url}/api/v1/worker-hosts/${hostId}/resume`, {
-      method: "POST",
-      headers,
-    });
-    expect(resumed.status).toBe(200);
-    await expect(resumed.json()).resolves.toMatchObject({
+    expect(
+      workerHostView(await hostClient(admin()).resumeWorkerHost({ id: hostId })),
+    ).toMatchObject({
       spec: { draining: false },
       status: { phase: "ready", ready: true, availableSlots: 1 },
     });
 
-    const rotated = await fetch(`${runtime.url}/api/v1/worker-hosts/${hostId}/credential`, {
-      method: "POST",
-      headers,
+    const rotation = await hostClient(admin()).rotateWorkerHostCredential({
+      id: hostId,
+      expectedCredentialRevision: 1n,
     });
-    expect(rotated.status).toBe(200);
-    const rotation = (await rotated.json()) as { credential: { token: string } };
-    expect(rotation.credential.token).not.toBe(credential);
+    expect(rotation.token).not.toBe(credential);
+    // A retry of the same rotation is refused as stale and changes nothing.
+    await expect(
+      hostClient(admin()).rotateWorkerHostCredential({
+        id: hostId,
+        expectedCredentialRevision: 1n,
+      }),
+    ).rejects.toMatchObject({ code: Code.FailedPrecondition });
     await expect.poll(() => connection.isConnected).toBe(false);
 
     const stale = new WorkletConnection({
@@ -148,50 +152,43 @@ describe("Worker Host runtime lifecycle", () => {
 
     const current = new WorkletConnection({
       url: `${runtime.url.replace(/^http/u, "ws")}/worklets`,
-      credential: rotation.credential.token,
+      credential: rotation.token,
       worklet,
       durableWorklet,
       reconnectIntervalMs: 5,
     });
     await current.start();
     await expect
-      .poll(async () => (await workerHost(runtime.url, headers, hostId)).status)
+      .poll(async () => (await workerHost(headers, hostId)).status)
       .toMatchObject({ credentialRevision: 2, connectionGeneration: 4, phase: "ready" });
 
-    const revoked = await fetch(`${runtime.url}/api/v1/worker-hosts/${hostId}/credential`, {
-      method: "DELETE",
-      headers,
-    });
-    expect(revoked.status).toBe(204);
+    expect(
+      workerHostView(await hostClient(admin()).revokeWorkerHostCredential({ id: hostId })),
+    ).toMatchObject({ status: { phase: "revoked" } });
     await expect.poll(() => current.isConnected).toBe(false);
-    await expect(workerHost(runtime.url, headers, hostId)).resolves.toMatchObject({
+    await expect(workerHost(headers, hostId)).resolves.toMatchObject({
       spec: { draining: true },
       status: { phase: "revoked", connectionGeneration: 5, ready: false },
     });
 
     const revokedCredential = new WorkletConnection({
       url: `${runtime.url.replace(/^http/u, "ws")}/worklets`,
-      credential: rotation.credential.token,
+      credential: rotation.token,
       worklet,
       durableWorklet,
       reconnectIntervalMs: 5,
     });
+    // Revoking a revoked host returns it unchanged.
+    await expect(
+      hostClient(admin()).revokeWorkerHostCredential({ id: hostId }),
+    ).resolves.toMatchObject({ connectionGeneration: 5n });
     await expect(revokedCredential.start()).rejects.toThrow("Authentication failed");
   });
 });
 
 async function workerHost(
-  url: string,
-  headers: Readonly<Record<string, string>>,
+  options: () => { readonly url: string; readonly token: string },
   id: string,
-): Promise<{
-  readonly spec: { readonly draining: boolean };
-  readonly status: Readonly<Record<string, unknown>>;
-}> {
-  const response = await fetch(`${url}/api/v1/worker-hosts/${encodeURIComponent(id)}`, { headers });
-  expect(response.status).toBe(200);
-  return response.json() as Promise<{
-    readonly spec: { readonly draining: boolean };
-    readonly status: Readonly<Record<string, unknown>>;
-  }>;
+) {
+  return getWorkerHostResource(options(), id);
 }

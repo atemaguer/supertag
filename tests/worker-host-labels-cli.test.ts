@@ -5,7 +5,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { runAuthKeyCommand } from "../apps/cli/src/auth-keys.js";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.js";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
+import { authKeyView } from "../apps/cli/src/host-protos.ts";
 import { main } from "../apps/cli/src/index.js";
+import { hostClient } from "../apps/cli/src/operator-client.ts";
+import {
+  getAuthKeyResource,
+  getWorkerHostResource,
+  listWorkerHostResources,
+} from "../apps/cli/src/operator-resources.ts";
 import { runResourceCommand } from "../apps/cli/src/resources.js";
 import * as worker from "../apps/cli/src/worker.js";
 import { LocalWorklet, StaticWorker } from "../packages/runtime/sdk/src/index.js";
@@ -13,6 +20,7 @@ import { WorkletConnection } from "../packages/runtime/transport/src/index.js";
 import { FileGatewayCredentialVault } from "../packages/store/src/index.js";
 import { migrateSqlite } from "./support/database.js";
 import { durableTestWorklet } from "./support/durable-test-worklet.js";
+import { fakeOperatorRpc } from "./support/fake-operator-rpc.ts";
 import { fakeWorkRpc } from "./support/fake-work-rpc.ts";
 
 const CONTROL_PLANE = "https://control.example.com";
@@ -25,26 +33,29 @@ describe("Worker Host label commands", () => {
   });
 
   it("sends --label on create auth-key and reports the granted labels", async () => {
-    const bodies: unknown[] = [];
-    const client = {
-      async request<T>(_path: string, init?: RequestInit): Promise<T> {
-        bodies.push(JSON.parse(String(init?.body)));
-        return {
-          kind: "AuthKey",
+    const rpc = fakeOperatorRpc({
+      "HostService/CreateAuthKey": () => ({
+        authKey: {
           metadata: { name: "gpu-pool" },
-          spec: { tags: ["trainer"], labels: ["gpu", "team:ml"], reusable: true, ephemeral: false },
-          status: { phase: "active", expiresAt: "2026-12-29T00:00:00.000Z", redemptionCount: 0 },
-          secret: `stak_${"b".repeat(64)}`,
-        } as T;
-      },
-    };
+          tags: ["trainer"],
+          labels: ["gpu", "team:ml"],
+          reusable: true,
+          phase: "AUTH_KEY_PHASE_ACTIVE",
+          expiresAt: "2026-12-29T00:00:00Z",
+        },
+        secret: `stak_${"b".repeat(64)}`,
+      }),
+    });
+    const client = { operator: { url: CONTROL_PLANE, token: "admin" } };
     const output = await runAuthKeyCommand(
       client,
       "create",
       ["gpu-pool", "--tag", "trainer", "--label", "GPU", "--label", "team:ml", "--reusable"],
       CONTROL_PLANE,
     );
-    expect(bodies[0]).toMatchObject({ spec: { labels: ["gpu", "team:ml"] } });
+    expect(rpc.called("HostService/CreateAuthKey")[0]?.body).toMatchObject({
+      labels: ["gpu", "team:ml"],
+    });
     expect(output).toContain("Hosts that join with it get labels gpu, team:ml.");
     await expect(
       runAuthKeyCommand(
@@ -149,9 +160,7 @@ describe("Worker Host label commands", () => {
         runtime.url,
       ),
     ).toContain("Hosts that join with it get labels gpu.");
-    const key = await client.request<{ spec: { labels: string[] } }>(
-      "/api/v1/auth-keys/trainer-pool",
-    );
+    const key = await getAuthKeyResource(client.operator, "trainer-pool");
     expect(key.spec.labels).toEqual(["gpu"]);
   });
 
@@ -181,18 +190,14 @@ describe("Worker Host label commands", () => {
         spec: {},
       }),
     });
-    const issued = await client.request<{ secret: string; spec: Record<string, unknown> }>(
-      "/api/v1/auth-keys",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          apiVersion: "supertag/v1",
-          kind: "AuthKey",
-          metadata: { name: "gpu-pool" },
-          spec: { tags: ["trainer"], labels: ["GPU", "team:ml"], reusable: true },
-        }),
-      },
-    );
+    const hosts = hostClient(client.operator);
+    const created = await hosts.createAuthKey({
+      name: "gpu-pool",
+      tags: ["trainer"],
+      labels: ["GPU", "team:ml"],
+      reusable: true,
+    });
+    const issued = { secret: created.secret, ...authKeyView(created.authKey as never) };
     expect(issued.spec).toEqual({
       tags: ["trainer"],
       labels: ["gpu", "team:ml"],
@@ -200,15 +205,7 @@ describe("Worker Host label commands", () => {
       ephemeral: false,
     });
     await expect(
-      client.request("/api/v1/auth-keys", {
-        method: "POST",
-        body: JSON.stringify({
-          apiVersion: "supertag/v1",
-          kind: "AuthKey",
-          metadata: { name: "bad-labels" },
-          spec: { tags: ["trainer"], labels: ["no spaces"] },
-        }),
-      }),
+      hosts.createAuthKey({ name: "bad-labels", tags: ["trainer"], labels: ["no spaces"] }),
     ).rejects.toThrow("is invalid");
     const joined = (await (
       await fetch(`${runtime.url}/api/v1/worker-host-joins`, {
@@ -234,18 +231,11 @@ describe("Worker Host label commands", () => {
     });
     cleanups.push(() => connection.stop());
     await connection.start();
-    const status = async () =>
-      (
-        await client.request<{ status: { labels: string[]; grantedLabels: string[] } }>(
-          "/api/v1/worker-hosts/gpu-1",
-        )
-      ).status;
+    const status = async () => (await getWorkerHostResource(client.operator, "gpu-1")).status;
     await expect.poll(async () => (await status()).labels).toContain("rack:b");
     expect((await status()).grantedLabels).toEqual(["gpu", "team:ml"]);
     expect((await status()).labels).toEqual(expect.arrayContaining(["gpu", "team:ml", "rack:b"]));
-    const listed = await client.request<{ items: { status: { labels: string[] } }[] }>(
-      "/api/v1/worker-hosts",
-    );
+    const listed = await listWorkerHostResources(client.operator);
     expect(listed.items[0]?.status.labels).toContain("rack:b");
     const described = await runResourceCommand(client, "describe", ["worker-host", "gpu-1"]);
     expect(described).toMatch(/Labels: .*rack:b/u);

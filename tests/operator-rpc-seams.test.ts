@@ -15,12 +15,15 @@ const SOURCE = join(import.meta.dirname, "../apps/cli/src");
 
 /** The modules implementing operator services; each serves `read` RPCs. */
 const SERVICE_MODULES = [
+  "access-rpc.ts",
   "conversation-rpc.ts",
   "event-rpc.ts",
+  "host-rpc.ts",
   "inbox-rpc.ts",
   "mailbox-rpc.ts",
   "objective-rpc.ts",
   "organization-rpc.ts",
+  "surface-rpc.ts",
   "team-rpc.ts",
   "work-rpc.ts",
 ];
@@ -79,6 +82,7 @@ describe("the operator RPC seams", () => {
     control: {} as never,
     changes: {} as never,
     follows: {} as never,
+    rpcTelemetry: () => ({}) as never,
     draining: () => new AbortController().signal,
   });
   const registered = router.handlers.map(
@@ -100,7 +104,7 @@ describe("the operator RPC seams", () => {
 
   it("gives the read store only reads", () => {
     for (const method of OPERATOR_READ_STORE_METHODS)
-      expect(method).toMatch(/^(find|get|has|list)|Summaries$/u);
+      expect(method).toMatch(/^(find|get|has|list|read)|Summaries$/u);
   });
 
   it("keeps service modules off the Control Plane runtime and the full store", () => {
@@ -127,6 +131,9 @@ describe("the operator RPC seams", () => {
     expect(seen).toContain("conversation-messages.ts");
     expect(seen).toContain("work-views.ts");
     expect(seen).toContain("task-storage.ts");
+    expect(seen).toContain("control-plane-resources.ts");
+    expect(seen).toContain("worker-host-storage.ts");
+    expect(seen).toContain("organization-views.ts");
     expect(violations).toEqual([]);
   });
 

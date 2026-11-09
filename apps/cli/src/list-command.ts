@@ -25,6 +25,7 @@ import {
 } from "./objective-protos.js";
 import { runObjectiveCommand } from "./objectives.js";
 import { workClient } from "./operator-client.js";
+import { isOperatorResourcePath, listOperatorResources } from "./operator-resources.js";
 import { refusedAsError } from "./tag-conversation.js";
 import { runTeamCommand } from "./teams.js";
 import { terminalText } from "./terminal-text.js";
@@ -397,7 +398,10 @@ export async function runListCommand(
     }
   } else if (kind in paths) {
     if (options.length) throw new Error(`Usage: supertag list ${kind} [--output text|json|yaml]`);
-    value = await client.request(`/api/v1/${paths[kind]}`);
+    const path = paths[kind] ?? "";
+    value = isOperatorResourcePath(path)
+      ? await listOperatorResources(client.operator, path)
+      : await client.request(`/api/v1/${path}`);
   } else {
     let response: string;
     if (kind === "objective") {

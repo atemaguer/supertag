@@ -45,6 +45,7 @@ import {
 } from "../packages/runtime/sdk/src/index.ts";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.ts";
 import { createIsolatedPostgresDatabase } from "./support/database.ts";
+import { issueOperatorToken } from "./support/operator-access.ts";
 
 const PostgresqlPool = createRequire(new URL("../packages/store/package.json", import.meta.url))(
   "pg",
@@ -1133,10 +1134,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       });
 
       it("keeps a private conversation's work Sessions private to its person", async () => {
-        const issued = await client().request<{ secret: string }>("/api/v1/operator-tokens", {
-          method: "POST",
-          body: JSON.stringify({ kind: "OperatorToken", metadata: { name: "alice" } }),
-        });
+        const issued = { secret: await issueOperatorToken(client().url, ADMIN, "alice") };
         const mine = await send("work:secret plan");
         const started = mine.workSessions?.[0];
         if (!started?.taskId) throw new Error("missing work Session");

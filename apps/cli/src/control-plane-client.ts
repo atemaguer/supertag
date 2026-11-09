@@ -13,9 +13,9 @@ import {
   CONTROL_PLANE_API_VERSION,
   type ControlPlaneResourceList,
   type SurfaceAccountResource,
-  type TagOperationResource,
   type TagResource,
 } from "./control-plane-resources.js";
+import { SURFACE_PROVIDERS, surfaceAccountView } from "./host-protos.js";
 import {
   environmentOperatorToken,
   localControlPlaneUrl as localUpControlPlaneUrl,
@@ -25,7 +25,10 @@ import {
   type OperatorClientOptions,
   operatorErrorMessage,
   organizationClient,
+  surfaceClient,
 } from "./operator-client.js";
+import { refusedAsError } from "./tag-conversation.js";
+import { runTagLocationCommand } from "./tag-locations.js";
 import type { TagCommand } from "./tags.js";
 import {
   CLIENT_VERSION_HEADER,
@@ -188,15 +191,21 @@ export class ControlPlaneClient {
   }
 
   async setupSurface(verified: VerifiedSurfaceAccount): Promise<SurfaceAccountResource> {
-    return this.#request<SurfaceAccountResource>("/api/v1/surface-enrollments", {
-      method: "POST",
-      body: JSON.stringify({
-        apiVersion: CONTROL_PLANE_API_VERSION,
-        kind: "SurfaceEnrollment",
-        metadata: { id: randomUUID() },
-        spec: verified,
-      }),
-    });
+    const provider = verified.provider === "cli" ? undefined : SURFACE_PROVIDERS[verified.provider];
+    if (provider === undefined)
+      throw new Error("A CLI conversation is not a collaboration surface");
+    return surfaceAccountView(
+      await refusedAsError(() =>
+        surfaceClient(this.operator).setUpSurface({
+          provider,
+          externalAccountId: verified.externalAccountId,
+          displayName: verified.displayName,
+          authMethod: verified.authMethod,
+          configuration: JSON.parse(JSON.stringify(verified.configuration)),
+          secrets: { ...verified.secrets },
+        }),
+      ),
+    );
   }
 
   async listTags(): Promise<ControlPlaneResourceList<TagResource>> {
@@ -219,24 +228,7 @@ export class ControlPlaneClient {
         : ` Bind a Worker Host before it can run Tasks: supertag update tag ${resource.metadata.name} --add-worker-host HOST.`;
       return `Created Tag ${resource.metadata.name} (${resource.metadata.id}).${bindingGuidance}\n`;
     }
-    if (command === "bind-worker-host" || command === "unbind-worker-host") {
-      const { name, workerHostId } = parseTagWorkerHostArgs(command, args);
-      const resource = await this.#request<TagResource>(
-        `/api/v1/tags/${encodeURIComponent(name)}/worker-hosts/${encodeURIComponent(workerHostId)}`,
-        { method: command === "bind-worker-host" ? "PUT" : "DELETE" },
-      );
-      return `${command === "bind-worker-host" ? "Bound" : "Unbound"} Worker Host ${workerHostId} ${command === "bind-worker-host" ? "to" : "from"} Tag ${resource.metadata.name}.\n`;
-    }
-    const result = await this.#request<TagOperationResource>("/api/v1/tag-operations", {
-      method: "POST",
-      body: JSON.stringify({
-        apiVersion: CONTROL_PLANE_API_VERSION,
-        kind: "TagOperation",
-        metadata: { id: randomUUID() },
-        spec: { command, args },
-      }),
-    });
-    return result.status.output;
+    return runTagLocationCommand(this.operator, command, args);
   }
 
   async createTag(input: {
@@ -332,22 +324,6 @@ function parseCreateTagArgs(args: readonly string[]): {
   };
 }
 
-function parseTagWorkerHostArgs(
-  command: "bind-worker-host" | "unbind-worker-host",
-  args: readonly string[],
-): { readonly name: string; readonly workerHostId: string } {
-  const { positionals } = parseArgs({ args, allowPositionals: true, options: {}, strict: true });
-  if (positionals.length !== 2) {
-    throw new Error(
-      `Usage: supertag update tag NAME --${command === "bind-worker-host" ? "add" : "remove"}-worker-host HOST`,
-    );
-  }
-  return {
-    name: required(positionals[0], "Tag name"),
-    workerHostId: required(positionals[1], "Worker Host ID"),
-  };
-}
-
 export async function runControlPlaneManagementCommand(
   command: ControlPlaneManagementCommand,
   args: readonly string[],
@@ -388,6 +364,19 @@ export async function resolveControlPlaneTarget(
   override?: string,
 ): Promise<ControlPlaneTarget | undefined> {
   return resolveSavedControlPlaneTarget(override);
+}
+
+/** The names of the saved Control Plane connections, sorted. */
+export async function savedControlPlaneConnectionNames(): Promise<string[]> {
+  return Object.keys((await readControlPlaneConfiguration()).connections).sort();
+}
+
+/**
+ * This machine's Control Plane with the local operator credential, whatever connection is active;
+ * undefined without one.
+ */
+export async function resolveLocalControlPlaneTarget(): Promise<ControlPlaneTarget | undefined> {
+  return resolveSavedControlPlaneTarget("");
 }
 
 /** The Control Plane a selection or the saved active connection names. */

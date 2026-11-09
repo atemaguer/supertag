@@ -1,8 +1,8 @@
 // Package client talks to a SuperTag Control Plane: the operator API's ConversationService,
-// ObjectiveService, InboxService, WorkService, TeamService, MailboxService and EventService
-// through the generated Connect client, a follower that turns one message's FollowMessage stream
-// into the events a terminal UI shows, and a watcher that keeps the UI's view of Tags,
-// conversations, Objectives, Teams and the inbox current.
+// ObjectiveService, InboxService, WorkService, TeamService, MailboxService, HostService and
+// EventService through the generated Connect client, a follower that turns one message's
+// FollowMessage stream into the events a terminal UI shows, and a watcher that keeps the UI's view
+// of Tags, conversations, Objectives, Teams and the inbox current.
 package client
 
 import (
@@ -75,6 +75,7 @@ type Client struct {
 	work          operatorv1connect.WorkServiceClient
 	teams         operatorv1connect.TeamServiceClient
 	mailbox       operatorv1connect.MailboxServiceClient
+	hosts         operatorv1connect.HostServiceClient
 }
 
 // New returns a client for target; version is sent as the client version. Only the URL's origin
@@ -103,6 +104,7 @@ func New(target Target, version string) (*Client, error) {
 	c.work = operatorv1connect.NewWorkServiceClient(httpClient, c.origin, options...)
 	c.teams = operatorv1connect.NewTeamServiceClient(httpClient, c.origin, options...)
 	c.mailbox = operatorv1connect.NewMailboxServiceClient(httpClient, c.origin, options...)
+	c.hosts = operatorv1connect.NewHostServiceClient(httpClient, c.origin, options...)
 	return c, nil
 }
 

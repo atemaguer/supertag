@@ -526,37 +526,17 @@ Environment:
 Remote Worker Hosts join with an Auth Key (supertag create auth-key) before connecting.
 
 Endpoints:
-  POST /supertag.operator.v1.OrganizationService/GetStatus   (Connect and gRPC-Web)
-  GET  /api/v1/metrics
+  POST /supertag.operator.v1.SERVICE/METHOD   (operator RPCs: Connect and gRPC-Web)
   GET  /api/v1/tags
   POST /api/v1/tags
-  PUT  /api/v1/tags/:name/worker-hosts/:workerHostId
-  DELETE /api/v1/tags/:name/worker-hosts/:workerHostId
   GET  /api/v1/permission-sets
   POST /api/v1/permission-sets
   GET  /api/v1/context-sets
   POST /api/v1/context-sets
   GET  /api/v1/roles
   POST /api/v1/roles
-  GET  /api/v1/worker-hosts
-  POST /api/v1/worker-hosts
-  GET  /api/v1/worker-hosts/:id
-  POST /api/v1/worker-hosts/:id/credential
-  DELETE /api/v1/worker-hosts/:id/credential
-  POST /api/v1/worker-hosts/:id/drain
-  POST /api/v1/worker-hosts/:id/resume
-  GET  /api/v1/auth-keys
-  POST /api/v1/auth-keys
-  GET  /api/v1/auth-keys/:name
-  POST /api/v1/auth-keys/:name/revoke
   POST /api/v1/worker-host-joins        (authorized by an Auth Key)
-  GET  /api/v1/operator-tokens          (admin token only, like every operator-tokens route)
-  POST /api/v1/operator-tokens
-  GET  /api/v1/operator-tokens/:name
-  POST /api/v1/operator-tokens/:name/revoke
   GET  /api/v1/worker-profiles
-  POST /api/v1/surface-enrollments
-  POST /api/v1/tag-operations
   POST /webhooks/slack/:externalAccountId
   POST /webhooks/github/:externalAccountId
   POST /webhooks/linear

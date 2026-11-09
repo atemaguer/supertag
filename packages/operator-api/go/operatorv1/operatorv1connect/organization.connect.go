@@ -36,6 +36,18 @@ const (
 	// OrganizationServiceGetStatusProcedure is the fully-qualified name of the OrganizationService's
 	// GetStatus RPC.
 	OrganizationServiceGetStatusProcedure = "/supertag.operator.v1.OrganizationService/GetStatus"
+	// OrganizationServiceGetOrganizationProcedure is the fully-qualified name of the
+	// OrganizationService's GetOrganization RPC.
+	OrganizationServiceGetOrganizationProcedure = "/supertag.operator.v1.OrganizationService/GetOrganization"
+	// OrganizationServiceGetSpendProcedure is the fully-qualified name of the OrganizationService's
+	// GetSpend RPC.
+	OrganizationServiceGetSpendProcedure = "/supertag.operator.v1.OrganizationService/GetSpend"
+	// OrganizationServiceListAuditEntriesProcedure is the fully-qualified name of the
+	// OrganizationService's ListAuditEntries RPC.
+	OrganizationServiceListAuditEntriesProcedure = "/supertag.operator.v1.OrganizationService/ListAuditEntries"
+	// OrganizationServiceGetMetricsProcedure is the fully-qualified name of the OrganizationService's
+	// GetMetrics RPC.
+	OrganizationServiceGetMetricsProcedure = "/supertag.operator.v1.OrganizationService/GetMetrics"
 )
 
 // OrganizationServiceClient is a client for the supertag.operator.v1.OrganizationService service.
@@ -46,6 +58,32 @@ type OrganizationServiceClient interface {
 	// `supertag verify deployment` checks that the API refuses anonymous
 	// callers.
 	GetStatus(context.Context, *connect.Request[operatorv1.GetStatusRequest]) (*connect.Response[operatorv1.GetStatusResponse], error)
+	// Reports what the organization is doing right now, as `supertag status`
+	// shows it: each Worker Host with its running Task Attempts against
+	// capacity per harness, each Tag as idle or busy, and each Objective that
+	// is not completed or cancelled with its spend, budget, deadline and high
+	// findings. The operator inbox count comes from `InboxService`.
+	GetOrganization(context.Context, *connect.Request[operatorv1.GetOrganizationRequest]) (*connect.Response[operatorv1.OrganizationOverview], error)
+	// Sums the provider-reported cost and tokens of Task Attempts, as
+	// `supertag spend` shows them, grouped by Objective, Tag or day. Separate
+	// currencies are never combined.
+	GetSpend(context.Context, *connect.Request[operatorv1.GetSpendRequest]) (*connect.Response[operatorv1.SpendReport], error)
+	// Lists recorded operator changes, the newest first, as `supertag audit`
+	// shows them: applies, deletes, Operator Token, Auth Key and Worker Host
+	// changes, approval decisions, Objective messages and every other call that
+	// can change state. An entry never holds a credential, a secret, a digest
+	// or a request body. A change whose call returned before this call began
+	// is listed.
+	//
+	// It fails with `InvalidArgument` for an `actor` over 200 characters or a
+	// malformed `page_token`.
+	ListAuditEntries(context.Context, *connect.Request[operatorv1.ListAuditEntriesRequest]) (*connect.Response[operatorv1.ListAuditEntriesResponse], error)
+	// Reads a bounded operational snapshot for monitoring: resource and Task
+	// counts, recovery and scheduling state, inbox, Mailbox and reply delivery
+	// backlogs, usage, and the answering API Server process's RPC counters.
+	// Everything but `rpc` comes from stored records; reading it contacts no
+	// Worklet.
+	GetMetrics(context.Context, *connect.Request[operatorv1.GetMetricsRequest]) (*connect.Response[operatorv1.MetricSnapshot], error)
 }
 
 // NewOrganizationServiceClient constructs a client for the supertag.operator.v1.OrganizationService
@@ -66,17 +104,69 @@ func NewOrganizationServiceClient(httpClient connect.HTTPClient, baseURL string,
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		getOrganization: connect.NewClient[operatorv1.GetOrganizationRequest, operatorv1.OrganizationOverview](
+			httpClient,
+			baseURL+OrganizationServiceGetOrganizationProcedure,
+			connect.WithSchema(organizationServiceMethods.ByName("GetOrganization")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
+		getSpend: connect.NewClient[operatorv1.GetSpendRequest, operatorv1.SpendReport](
+			httpClient,
+			baseURL+OrganizationServiceGetSpendProcedure,
+			connect.WithSchema(organizationServiceMethods.ByName("GetSpend")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
+		listAuditEntries: connect.NewClient[operatorv1.ListAuditEntriesRequest, operatorv1.ListAuditEntriesResponse](
+			httpClient,
+			baseURL+OrganizationServiceListAuditEntriesProcedure,
+			connect.WithSchema(organizationServiceMethods.ByName("ListAuditEntries")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
+		getMetrics: connect.NewClient[operatorv1.GetMetricsRequest, operatorv1.MetricSnapshot](
+			httpClient,
+			baseURL+OrganizationServiceGetMetricsProcedure,
+			connect.WithSchema(organizationServiceMethods.ByName("GetMetrics")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // organizationServiceClient implements OrganizationServiceClient.
 type organizationServiceClient struct {
-	getStatus *connect.Client[operatorv1.GetStatusRequest, operatorv1.GetStatusResponse]
+	getStatus        *connect.Client[operatorv1.GetStatusRequest, operatorv1.GetStatusResponse]
+	getOrganization  *connect.Client[operatorv1.GetOrganizationRequest, operatorv1.OrganizationOverview]
+	getSpend         *connect.Client[operatorv1.GetSpendRequest, operatorv1.SpendReport]
+	listAuditEntries *connect.Client[operatorv1.ListAuditEntriesRequest, operatorv1.ListAuditEntriesResponse]
+	getMetrics       *connect.Client[operatorv1.GetMetricsRequest, operatorv1.MetricSnapshot]
 }
 
 // GetStatus calls supertag.operator.v1.OrganizationService.GetStatus.
 func (c *organizationServiceClient) GetStatus(ctx context.Context, req *connect.Request[operatorv1.GetStatusRequest]) (*connect.Response[operatorv1.GetStatusResponse], error) {
 	return c.getStatus.CallUnary(ctx, req)
+}
+
+// GetOrganization calls supertag.operator.v1.OrganizationService.GetOrganization.
+func (c *organizationServiceClient) GetOrganization(ctx context.Context, req *connect.Request[operatorv1.GetOrganizationRequest]) (*connect.Response[operatorv1.OrganizationOverview], error) {
+	return c.getOrganization.CallUnary(ctx, req)
+}
+
+// GetSpend calls supertag.operator.v1.OrganizationService.GetSpend.
+func (c *organizationServiceClient) GetSpend(ctx context.Context, req *connect.Request[operatorv1.GetSpendRequest]) (*connect.Response[operatorv1.SpendReport], error) {
+	return c.getSpend.CallUnary(ctx, req)
+}
+
+// ListAuditEntries calls supertag.operator.v1.OrganizationService.ListAuditEntries.
+func (c *organizationServiceClient) ListAuditEntries(ctx context.Context, req *connect.Request[operatorv1.ListAuditEntriesRequest]) (*connect.Response[operatorv1.ListAuditEntriesResponse], error) {
+	return c.listAuditEntries.CallUnary(ctx, req)
+}
+
+// GetMetrics calls supertag.operator.v1.OrganizationService.GetMetrics.
+func (c *organizationServiceClient) GetMetrics(ctx context.Context, req *connect.Request[operatorv1.GetMetricsRequest]) (*connect.Response[operatorv1.MetricSnapshot], error) {
+	return c.getMetrics.CallUnary(ctx, req)
 }
 
 // OrganizationServiceHandler is an implementation of the supertag.operator.v1.OrganizationService
@@ -88,6 +178,32 @@ type OrganizationServiceHandler interface {
 	// `supertag verify deployment` checks that the API refuses anonymous
 	// callers.
 	GetStatus(context.Context, *connect.Request[operatorv1.GetStatusRequest]) (*connect.Response[operatorv1.GetStatusResponse], error)
+	// Reports what the organization is doing right now, as `supertag status`
+	// shows it: each Worker Host with its running Task Attempts against
+	// capacity per harness, each Tag as idle or busy, and each Objective that
+	// is not completed or cancelled with its spend, budget, deadline and high
+	// findings. The operator inbox count comes from `InboxService`.
+	GetOrganization(context.Context, *connect.Request[operatorv1.GetOrganizationRequest]) (*connect.Response[operatorv1.OrganizationOverview], error)
+	// Sums the provider-reported cost and tokens of Task Attempts, as
+	// `supertag spend` shows them, grouped by Objective, Tag or day. Separate
+	// currencies are never combined.
+	GetSpend(context.Context, *connect.Request[operatorv1.GetSpendRequest]) (*connect.Response[operatorv1.SpendReport], error)
+	// Lists recorded operator changes, the newest first, as `supertag audit`
+	// shows them: applies, deletes, Operator Token, Auth Key and Worker Host
+	// changes, approval decisions, Objective messages and every other call that
+	// can change state. An entry never holds a credential, a secret, a digest
+	// or a request body. A change whose call returned before this call began
+	// is listed.
+	//
+	// It fails with `InvalidArgument` for an `actor` over 200 characters or a
+	// malformed `page_token`.
+	ListAuditEntries(context.Context, *connect.Request[operatorv1.ListAuditEntriesRequest]) (*connect.Response[operatorv1.ListAuditEntriesResponse], error)
+	// Reads a bounded operational snapshot for monitoring: resource and Task
+	// counts, recovery and scheduling state, inbox, Mailbox and reply delivery
+	// backlogs, usage, and the answering API Server process's RPC counters.
+	// Everything but `rpc` comes from stored records; reading it contacts no
+	// Worklet.
+	GetMetrics(context.Context, *connect.Request[operatorv1.GetMetricsRequest]) (*connect.Response[operatorv1.MetricSnapshot], error)
 }
 
 // NewOrganizationServiceHandler builds an HTTP handler from the service implementation. It returns
@@ -104,10 +220,46 @@ func NewOrganizationServiceHandler(svc OrganizationServiceHandler, opts ...conne
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	organizationServiceGetOrganizationHandler := connect.NewUnaryHandler(
+		OrganizationServiceGetOrganizationProcedure,
+		svc.GetOrganization,
+		connect.WithSchema(organizationServiceMethods.ByName("GetOrganization")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
+	organizationServiceGetSpendHandler := connect.NewUnaryHandler(
+		OrganizationServiceGetSpendProcedure,
+		svc.GetSpend,
+		connect.WithSchema(organizationServiceMethods.ByName("GetSpend")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
+	organizationServiceListAuditEntriesHandler := connect.NewUnaryHandler(
+		OrganizationServiceListAuditEntriesProcedure,
+		svc.ListAuditEntries,
+		connect.WithSchema(organizationServiceMethods.ByName("ListAuditEntries")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
+	organizationServiceGetMetricsHandler := connect.NewUnaryHandler(
+		OrganizationServiceGetMetricsProcedure,
+		svc.GetMetrics,
+		connect.WithSchema(organizationServiceMethods.ByName("GetMetrics")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.operator.v1.OrganizationService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case OrganizationServiceGetStatusProcedure:
 			organizationServiceGetStatusHandler.ServeHTTP(w, r)
+		case OrganizationServiceGetOrganizationProcedure:
+			organizationServiceGetOrganizationHandler.ServeHTTP(w, r)
+		case OrganizationServiceGetSpendProcedure:
+			organizationServiceGetSpendHandler.ServeHTTP(w, r)
+		case OrganizationServiceListAuditEntriesProcedure:
+			organizationServiceListAuditEntriesHandler.ServeHTTP(w, r)
+		case OrganizationServiceGetMetricsProcedure:
+			organizationServiceGetMetricsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -119,4 +271,20 @@ type UnimplementedOrganizationServiceHandler struct{}
 
 func (UnimplementedOrganizationServiceHandler) GetStatus(context.Context, *connect.Request[operatorv1.GetStatusRequest]) (*connect.Response[operatorv1.GetStatusResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.operator.v1.OrganizationService.GetStatus is not implemented"))
+}
+
+func (UnimplementedOrganizationServiceHandler) GetOrganization(context.Context, *connect.Request[operatorv1.GetOrganizationRequest]) (*connect.Response[operatorv1.OrganizationOverview], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.operator.v1.OrganizationService.GetOrganization is not implemented"))
+}
+
+func (UnimplementedOrganizationServiceHandler) GetSpend(context.Context, *connect.Request[operatorv1.GetSpendRequest]) (*connect.Response[operatorv1.SpendReport], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.operator.v1.OrganizationService.GetSpend is not implemented"))
+}
+
+func (UnimplementedOrganizationServiceHandler) ListAuditEntries(context.Context, *connect.Request[operatorv1.ListAuditEntriesRequest]) (*connect.Response[operatorv1.ListAuditEntriesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.operator.v1.OrganizationService.ListAuditEntries is not implemented"))
+}
+
+func (UnimplementedOrganizationServiceHandler) GetMetrics(context.Context, *connect.Request[operatorv1.GetMetricsRequest]) (*connect.Response[operatorv1.MetricSnapshot], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.operator.v1.OrganizationService.GetMetrics is not implemented"))
 }

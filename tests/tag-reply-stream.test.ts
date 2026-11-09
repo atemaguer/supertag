@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { equals } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { conversationClient } from "../apps/cli/src/operator-client.ts";
 import { runTagConversationCommand } from "../apps/cli/src/tag-conversation.ts";
@@ -18,6 +17,7 @@ import {
 import type { TaskAttemptEvent, Worklet } from "../packages/runtime/sdk/src/index.ts";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.ts";
 import { createIsolatedPostgresDatabase } from "./support/database.ts";
+import { issueOperatorToken } from "./support/operator-access.ts";
 
 const postgres = process.env["SUPERTAG_POSTGRES_URL"];
 const ADMIN = "test-administrative-token";
@@ -398,12 +398,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
     });
 
     it("hides another operator's message", async () => {
-      const issued = await new ControlPlaneClient({ url: runtime.url, token: ADMIN }).request<{
-        secret: string;
-      }>("/api/v1/operator-tokens", {
-        method: "POST",
-        body: JSON.stringify({ kind: "OperatorToken", metadata: { name: "alice" } }),
-      });
+      const issued = { secret: await issueOperatorToken(runtime.url, ADMIN, "alice") };
       const message = await send("Check the repository");
       const refused = await follow(message.taskId, ended, { token: issued.secret }).catch(
         (error: unknown) => error,

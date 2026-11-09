@@ -8,7 +8,6 @@ import type {
   OperatorTokenPhase,
   Role,
   RoleAssignment,
-  Store,
   SurfaceAccount,
   Tag,
   TagContextActivation,
@@ -40,6 +39,7 @@ import type {
   WorkerProfileCapabilities,
   WorkerProfileRef,
 } from "@supertag/worker-sdk";
+import type { OperatorReadStore } from "./operator-seams.js";
 import type { HostStorageEvidence } from "./storage-durability.js";
 import { type PreparedWorkspaceStatus, preparedWorkspaceOf } from "./work-views.js";
 import { workerHostStorage } from "./worker-host-storage.js";
@@ -362,18 +362,6 @@ export type WorkerProfileResource = ControlPlaneResource<
     readonly workerHostId: string;
     readonly workletId: string;
     readonly workerId: string;
-  }
->;
-
-export type TagOperationResource = ControlPlaneResource<
-  "TagOperation",
-  {
-    readonly command: string;
-    readonly args: readonly string[];
-  },
-  {
-    readonly phase: "completed";
-    readonly output: string;
   }
 >;
 
@@ -747,7 +735,7 @@ const PREPARED_ENVIRONMENT_TASK_SCAN = 200;
  * the Control Plane learns digest, provider, and trusted commit only from Attempt provenance.
  */
 export async function workspaceEnvironments(
-  store: Pick<Store, "listTasks" | "listTaskAttempts" | "listTaskEvents">,
+  store: Pick<OperatorReadStore, "listTasks" | "listTaskAttempts" | "listTaskEvents">,
   workspace: Workspace,
   hosts: readonly WorkerHost[],
 ): Promise<readonly WorkspaceEnvironmentStatus[]> {
@@ -828,7 +816,7 @@ function environmentProviderOf(snapshot: Readonly<Record<string, unknown>>): str
 
 /** Read storage evidence once for a host list, including disconnected hosts. */
 export async function workerHostResourcesFromStore(
-  store: Store,
+  store: Parameters<typeof workerHostStorage>[0],
   hosts: readonly WorkerHost[],
 ): Promise<WorkerHostResource[]> {
   const storage = await workerHostStorage(store, hosts);
@@ -1004,7 +992,8 @@ function workerHostDescriptor(host: WorkerHost): WorkerHostDescriptor | undefine
   return { id: host.id, workers: workers as readonly WorkerDescriptor[] };
 }
 
-function workerDescriptor(value: unknown): WorkerDescriptor | undefined {
+/** One Worker of a Worklet's host descriptor; undefined when it is malformed. */
+export function workerDescriptor(value: unknown): WorkerDescriptor | undefined {
   if (!isRecord(value)) return undefined;
   const id = text(value["id"]);
   const type = text(value["type"]);

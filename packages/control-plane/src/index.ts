@@ -798,13 +798,27 @@ export class ControlPlane {
     }
   }
 
+  /**
+   * Replaces an active Worker Host's credential; undefined when the host is missing or revoked.
+   * With `expectedCredentialRevision`, the rotation applies only at that revision, and any other
+   * revision is refused with a 409, so a repeated rotation changes nothing.
+   */
   async rotateWorkerHostCredential(
     workerHostId: string,
+    expectedCredentialRevision?: number,
   ): Promise<{ readonly workerHost: WorkerHost; readonly token: string } | undefined> {
     const id = requiredText(workerHostId, "Worker Host id");
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const current = await this.#store.findWorkerHostById(id);
       if (current === undefined || current.enrollmentStatus !== "active") return undefined;
+      if (
+        expectedCredentialRevision !== undefined &&
+        current.credentialRevision !== expectedCredentialRevision
+      )
+        throw new TagMessagingError(
+          409,
+          `Worker Host ${id} is at credential revision ${current.credentialRevision}, not ${expectedCredentialRevision}`,
+        );
       const token = workerHostToken();
       const credentialId = workerHostCredentialId(id, current.credentialRevision + 1);
       await this.#credentialVault.store(credentialId, workerHostCredentialDigest(token));

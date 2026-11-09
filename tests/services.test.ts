@@ -22,10 +22,13 @@ import { SUPERTAG_VERSION } from "../apps/cli/src/version.ts";
 import { machineWorkerConcurrency } from "../apps/cli/src/worker-concurrency.ts";
 import {
   api,
+  bindLocalWorkerHost,
   CLI,
   fakeHarness,
   fakeServices,
   freePort,
+  localWorkerHost,
+  localWorkerHosts,
   repository,
   sharedControlPlane,
   TIMEOUT,
@@ -254,7 +257,7 @@ ${entries}  laptop:
             token: await ensureLocalAdminToken(),
           });
           expect((await api("/api/v1/tags")).items).toEqual([]);
-          expect((await api("/api/v1/worker-hosts")).items).toEqual([]);
+          expect((await localWorkerHosts()).items).toEqual([]);
           await expect(bringUp({ foreground: true })).rejects.toThrow(
             /already running in the foreground[\s\S]*supertag down control-plane/,
           );
@@ -493,7 +496,7 @@ describe("host services", () => {
       ) as { workerHostId: string; token: string; controlPlane: string };
       expect(credential).toMatchObject({ workerHostId: "laptop" });
       expect(credential.token).not.toBe(await ensureLocalAdminToken());
-      expect((await api("/api/v1/worker-hosts/laptop")).status).toMatchObject({
+      expect((await localWorkerHost("laptop")).status).toMatchObject({
         connectionStatus: "connected",
         workspaces: ["shop"],
       });
@@ -508,7 +511,7 @@ describe("host services", () => {
           spec: {},
         }),
       });
-      await api("/api/v1/tags/lead/worker-hosts/laptop", { method: "PUT" });
+      await bindLocalWorkerHost("lead", "laptop");
       const rows = await listServices();
       expect(rows[1]).toMatchObject({
         service: "laptop",
@@ -579,7 +582,7 @@ describe("host services", () => {
       expect(printed()).toContain(
         "Host service laptop: workspaces changed, so SuperTag restarts it.",
       );
-      expect((await api("/api/v1/worker-hosts/laptop")).status).toMatchObject({
+      expect((await localWorkerHost("laptop")).status).toMatchObject({
         workspaces: expect.arrayContaining(["docs", "shop"]),
       });
 
@@ -603,12 +606,12 @@ describe("host services", () => {
       // down SERVICE drains the host with its own credential before stopping it; up resumes it.
       context.output.length = 0;
       await expect(bringDown({ names: ["laptop"] })).resolves.toBe("stopped");
-      expect((await api("/api/v1/worker-hosts/laptop")).spec).toMatchObject({ draining: true });
+      expect((await localWorkerHost("laptop")).spec).toMatchObject({ draining: true });
       await expect(stat(join(context.state, "hosts", "laptop", "drained"))).resolves.toBeDefined();
       context.output.length = 0;
       await bringUp({ cliCommand: CLI });
       expect(printed()).toContain("Resumed Worker Host laptop: it takes new Task Attempts again.");
-      expect((await api("/api/v1/worker-hosts/laptop")).spec).toMatchObject({ draining: false });
+      expect((await localWorkerHost("laptop")).spec).toMatchObject({ draining: false });
       await expect(stat(join(context.state, "hosts", "laptop", "drained"))).rejects.toMatchObject({
         code: "ENOENT",
       });
@@ -637,8 +640,7 @@ describe("host services", () => {
     concurrency: ${concurrency}
 `;
       const capacity = async () =>
-        ((await api("/api/v1/worker-hosts/laptop")) as { status: { capacity: number } }).status
-          .capacity;
+        ((await localWorkerHost("laptop")) as { status: { capacity: number } }).status.capacity;
       await writeServices(context, services(2));
       const first = await bringUp({ cliCommand: CLI });
       const pid = first.services[1]?.status?.pid;
@@ -773,7 +775,7 @@ secrets:
       expect(printed()).toContain(
         `Worker Host laptop connected to ${remote.url}; Workers registered: local-codex.`,
       );
-      expect((await remote.shared("/api/v1/worker-hosts/laptop")).status).toMatchObject({
+      expect((await remote.workerHost("laptop")).status).toMatchObject({
         connectionStatus: "connected",
         authKey: "laptop-key",
         workspaces: ["app"],
@@ -789,7 +791,7 @@ secrets:
       const again = await bringUp({ cliCommand: CLI, names: ["laptop"] });
       expect(again.services[0]?.status?.workerHostId).toBe("laptop");
       expect(printed()).not.toContain("Joined as");
-      expect((await remote.shared("/api/v1/auth-keys/unused")).status).toMatchObject({
+      expect((await remote.authKeyResource("unused")).status).toMatchObject({
         redemptionCount: 0,
       });
       await bringDown({ write: () => {} });
@@ -819,7 +821,7 @@ secrets:
           spec: {},
         }),
       });
-      await api("/api/v1/tags/lead/worker-hosts/laptop", { method: "PUT" });
+      await bindLocalWorkerHost("lead", "laptop");
 
       // The file drops the host: up and ps say how to remove it, and leave it running.
       await writeServices(context, "services:\n  control-plane: { type: control-plane }\n");
@@ -845,7 +847,7 @@ secrets:
         /Stopped host service laptop \(process \d+\)\.\nUnbound Worker Host laptop from Tag lead\.\nRevoked Worker Host laptop\.\nRemoved host service laptop from this machine/u,
       );
       expect((await api("/api/v1/tags/lead")).spec.workerHosts).toEqual([]);
-      expect((await api("/api/v1/worker-hosts/laptop")).status).toMatchObject({
+      expect((await localWorkerHost("laptop")).status).toMatchObject({
         phase: "revoked",
       });
       await expect(stat(join(context.state, "hosts", "laptop"))).rejects.toMatchObject({

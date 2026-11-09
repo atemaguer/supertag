@@ -5,7 +5,6 @@ import { fromJsonString } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { normalizeActionFirstCommand } from "../apps/cli/src/action-command.ts";
-import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { main } from "../apps/cli/src/index.ts";
 import { conversationClient } from "../apps/cli/src/operator-client.ts";
@@ -18,6 +17,7 @@ import {
 import { LocalWorklet, StaticWorker, type Worklet } from "../packages/runtime/sdk/src/index.ts";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.ts";
 import { createIsolatedPostgresDatabase } from "./support/database.ts";
+import { issueOperatorToken } from "./support/operator-access.ts";
 
 const postgres = process.env["SUPERTAG_POSTGRES_URL"];
 const ADMIN = "test-administrative-token";
@@ -142,12 +142,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
     });
 
     it("keeps each operator's conversations private", async () => {
-      const issued = await new ControlPlaneClient({ url: runtime.url, token: ADMIN }).request<{
-        secret: string;
-      }>("/api/v1/operator-tokens", {
-        method: "POST",
-        body: JSON.stringify({ kind: "OperatorToken", metadata: { name: "alice" } }),
-      });
+      const issued = { secret: await issueOperatorToken(runtime.url, ADMIN, "alice") };
       const mine = await send(ADMIN, "Admin request", "--session", "plan");
       const hers = await send(issued.secret, "Alice request", "--session", "plan");
       expect(hers.sessionId).not.toBe(mine.sessionId);

@@ -13,7 +13,9 @@ import {
   runningProcess,
   type ServiceSlot,
 } from "./local-state.js";
+import { hostClient } from "./operator-client.js";
 import { displayPath, SUPERTAG_YAML } from "./supertag-yaml.js";
+import { refusedAsError } from "./tag-conversation.js";
 import type { KnownService } from "./up.js";
 import { readWorkerHostCredential, revokeOwnWorkerHostCredential } from "./worker-hosts.js";
 
@@ -119,9 +121,8 @@ async function unbindFromTags(
   for (const tag of list.items) {
     const name = tag.metadata.name;
     if (name === undefined || !(tag.spec.workerHosts ?? []).includes(workerHostId)) continue;
-    await client.request(
-      `/api/v1/tags/${encodeURIComponent(name)}/worker-hosts/${encodeURIComponent(workerHostId)}`,
-      { method: "DELETE" },
+    await refusedAsError(() =>
+      hostClient(client.operator).unbindWorkerHost({ tag: name, workerHostId }),
     );
     unbound.push(name);
   }

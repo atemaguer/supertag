@@ -4,7 +4,10 @@ export type AuditOutcome = "succeeded" | "failed";
 /** Where the Control Plane received the change: its API Server, or a work tool through the Gateway. */
 export type AuditSource = "api" | "gateway";
 
-/** `supertag audit` and `GET /api/v1/audit` return this many entries unless asked for another number. */
+/**
+ * `supertag audit` and `OrganizationService.ListAuditEntries` return this many entries unless asked
+ * for another number.
+ */
 export const AUDIT_DEFAULT_LIMIT = 50;
 /** The most entries one audit read returns. */
 export const AUDIT_MAX_LIMIT = 500;
@@ -44,6 +47,17 @@ export interface ListAuditEntriesInput {
   readonly actor?: string;
   /** From 1 through {@link AUDIT_MAX_LIMIT}; defaults to {@link AUDIT_DEFAULT_LIMIT}. */
   readonly limit?: number;
+  /**
+   * Only entries listed after this one: older, or as old with a smaller ID. A page that continues
+   * from the last entry of the previous one neither repeats nor skips entries recorded meanwhile.
+   */
+  readonly after?: AuditEntryPosition;
+}
+
+/** Where an entry falls in the newest-first audit order. */
+export interface AuditEntryPosition {
+  readonly at: string;
+  readonly id: string;
 }
 
 export interface AuditStore {

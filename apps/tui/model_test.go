@@ -280,18 +280,22 @@ func TestKeysMoveFocusAndSelection(t *testing.T) {
 	}
 }
 
-func TestReadTarget(t *testing.T) {
+func TestReadHandover(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 	go func() {
-		fmt.Fprintln(w, `{"url":"http://127.0.0.1:7468","token":"st_x","name":"local"}`)
+		fmt.Fprintln(w, `{"contexts":[{"url":"http://127.0.0.1:7468","token":"st_x"},{"url":"https://cp.example.com","token":"st_z","name":"team"}],"current":1}`)
 		w.Close()
 	}()
-	target, err := readTarget(r)
-	if err != nil || target.URL != "http://127.0.0.1:7468" || target.Token != "st_x" || target.Name != "local" {
-		t.Fatalf("readTarget() = %+v, %v", target, err)
+	h, err := readHandover(r)
+	if err != nil || h.Current != 1 || len(h.Contexts) != 2 {
+		t.Fatalf("readHandover() = %+v, %v", h, err)
+	}
+	if local, team := h.Contexts[0], h.Contexts[1]; local.URL != "http://127.0.0.1:7468" || local.Token != "st_x" || local.Name != "" ||
+		team.URL != "https://cp.example.com" || team.Token != "st_z" || team.Name != "team" {
+		t.Fatalf("readHandover() contexts = %+v", h.Contexts)
 	}
 
 	// `supertag` spawns with Node's stdio "pipe", which is a Unix socketpair.
@@ -301,22 +305,42 @@ func TestReadTarget(t *testing.T) {
 	}
 	parent, child := os.NewFile(uintptr(fds[0]), "parent"), os.NewFile(uintptr(fds[1]), "supertag-target")
 	go func() {
-		fmt.Fprintln(parent, `{"url":"http://127.0.0.1:7468","token":"st_y"}`)
+		fmt.Fprintln(parent, `{"contexts":[{"url":"http://127.0.0.1:7468","token":"st_y"}],"current":0}`)
 		parent.Close()
 	}()
-	if target, err := readTarget(child); err != nil || target.Token != "st_y" || target.Name != "" {
-		t.Fatalf("readTarget(socketpair) = %+v, %v", target, err)
+	if h, err := readHandover(child); err != nil || h.Contexts[h.Current].Token != "st_y" {
+		t.Fatalf("readHandover(socketpair) = %+v, %v", h, err)
+	}
+
+	for _, bad := range []string{
+		`{"url":"http://x","token":"t"}`,
+		`{"contexts":[],"current":0}`,
+		`{"contexts":[{"url":"http://x","token":"t"}],"current":1}`,
+		`{"contexts":[{"url":"http://x","token":"t"}],"current":-1}`,
+		`{"contexts":[{"url":"http://x","token":"t"},{"url":"http://y"}],"current":0}`,
+	} {
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			fmt.Fprint(w, bad)
+			w.Close()
+		}()
+		if _, err := readHandover(r); err == nil {
+			t.Fatalf("readHandover(%s) must fail", bad)
+		}
 	}
 
 	file, err := os.CreateTemp(t.TempDir(), "target")
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Fprint(file, `{"url":"http://x","token":"t"}`)
-	if _, err := readTarget(file); err == nil {
+	fmt.Fprint(file, `{"contexts":[{"url":"http://x","token":"t"}],"current":0}`)
+	if _, err := readHandover(file); err == nil {
 		t.Fatal("a regular file must not count as the target pipe")
 	}
-	if _, err := readTarget(nil); err == nil {
+	if _, err := readHandover(nil); err == nil {
 		t.Fatal("want an error without a descriptor")
 	}
 }

@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
+import { fakeHostRpc, workerHostResourceOf } from "../../tests/support/fake-host-rpc.js";
 import { ControlPlaneClient } from "./src/control-plane-client.js";
 import { main } from "./src/index.js";
 import { operatorNotice } from "./src/operator-notice.js";
@@ -23,7 +24,7 @@ it("keeps connection counters in JSON, not the human host description", async ()
     spec: { draining: false },
     status: { phase: "ready", connectionStatus: "connected", connectionGeneration: 2 },
   };
-  vi.spyOn(client, "request").mockResolvedValue(resource);
+  fakeHostRpc([resource]);
   const text = await runResourceCommand(client, "describe", ["worker-host", "host"]);
   expect(text).toContain("Recorded connection: connected");
   expect(text).not.toContain("Connection generation:");
@@ -31,7 +32,7 @@ it("keeps connection counters in JSON, not the human host description", async ()
     JSON.parse(
       await runResourceCommand(client, "describe", ["worker-host", "host", "--output", "json"]),
     ),
-  ).toEqual(resource);
+  ).toEqual(workerHostResourceOf(resource));
 });
 
 it("translates generated stall notices without rewriting owner messages", () => {

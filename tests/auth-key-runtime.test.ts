@@ -1,8 +1,12 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Code } from "@connectrpc/connect";
 import { afterEach, describe, expect, it } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
+import { authKeyView } from "../apps/cli/src/host-protos.ts";
+import { hostClient } from "../apps/cli/src/operator-client.ts";
+import { getAuthKeyResource, getWorkerHostResource } from "../apps/cli/src/operator-resources.ts";
 import { LocalWorklet, StaticWorker } from "../packages/runtime/sdk/src/index.ts";
 import { WorkletConnection } from "../packages/runtime/transport/src/index.ts";
 import { FileGatewayCredentialVault } from "../packages/store/src/index.ts";
@@ -41,23 +45,15 @@ describe("Auth Key API", () => {
     const admin = { authorization: `Bearer ${adminToken}`, "content-type": "application/json" };
     const api = (path: string, init: RequestInit = {}) =>
       fetch(`${started.url}${path}`, { ...init, headers: { ...admin, ...init.headers } });
-    return { url: started.url, api, vaultPath };
-  }
-
-  function createKey(
-    api: (path: string, init?: RequestInit) => Promise<Response>,
-    name: string,
-    spec: Record<string, unknown>,
-  ) {
-    return api("/api/v1/auth-keys", {
-      method: "POST",
-      body: JSON.stringify({
-        apiVersion: "supertag/v1",
-        kind: "AuthKey",
-        metadata: { name },
-        spec,
-      }),
-    });
+    const options = { url: started.url, token: adminToken };
+    return {
+      url: started.url,
+      api,
+      vaultPath,
+      hosts: hostClient(options),
+      workerHost: (id: string) => getWorkerHostResource(options, id),
+      authKey: (name: string) => getAuthKeyResource(options, name),
+    };
   }
 
   function joinHost(url: string, secret: string, name: string) {
@@ -74,7 +70,7 @@ describe("Auth Key API", () => {
   }
 
   it("issues a key once, joins a host bound to its Tags, and never shows the secret again", async () => {
-    const { url, api, vaultPath } = await runtime();
+    const { url, api, vaultPath, hosts, workerHost, authKey } = await runtime();
     expect(
       (
         await api("/api/v1/tags", {
@@ -90,18 +86,15 @@ describe("Auth Key API", () => {
     ).toBe(201);
 
     // Only operators may manage keys.
-    const anonymous = await fetch(`${url}/api/v1/auth-keys`);
-    expect(anonymous.status).toBe(401);
-    expect((await createKey(api, "laptop", { tags: ["missing"] })).status).toBe(400);
+    await expect(hostClient({ url }).listAuthKeys({})).rejects.toMatchObject({
+      code: Code.Unauthenticated,
+    });
+    await expect(hosts.createAuthKey({ name: "laptop", tags: ["missing"] })).rejects.toMatchObject({
+      code: Code.NotFound,
+    });
 
-    const created = await createKey(api, "laptop", { tags: ["builder"] });
-    expect(created.status).toBe(201);
-    expect(created.headers.get("cache-control")).toBe("no-store");
-    const issued = (await created.json()) as {
-      secret: string;
-      spec: Record<string, unknown>;
-      status: Record<string, unknown>;
-    };
+    const created = await hosts.createAuthKey({ name: "laptop", tags: ["builder"] });
+    const issued = { secret: created.secret, ...authKeyView(created.authKey as never) };
     expect(issued.secret).toMatch(/^stak_[a-f0-9]{64}$/u);
     expect(issued.spec).toEqual({
       tags: ["builder"],
@@ -110,10 +103,14 @@ describe("Auth Key API", () => {
       ephemeral: false,
     });
     expect(issued.status).toMatchObject({ phase: "active", redemptionCount: 0 });
-    expect((await createKey(api, "laptop", { tags: ["builder"] })).status).toBe(409);
+    await expect(hosts.createAuthKey({ name: "laptop", tags: ["builder"] })).rejects.toMatchObject({
+      code: Code.AlreadyExists,
+    });
 
-    const listed = await (await api("/api/v1/auth-keys")).text();
-    const got = await (await api("/api/v1/auth-keys/laptop")).text();
+    const listed = JSON.stringify(await hosts.listAuthKeys({}), (_key, value) =>
+      typeof value === "bigint" ? String(value) : value,
+    );
+    const got = JSON.stringify(await authKey("laptop"));
     for (const body of [listed, got]) {
       expect(body).not.toContain(issued.secret);
       expect(body).not.toContain("secretDigest");
@@ -139,14 +136,14 @@ describe("Auth Key API", () => {
     const again = await joinHost(url, issued.secret, "desktop");
     expect(again.status).toBe(403);
     await expect(again.json()).resolves.toMatchObject({ message: expect.stringContaining("used") });
-    await expect((await api("/api/v1/auth-keys/laptop")).json()).resolves.toMatchObject({
+    await expect(authKey("laptop")).resolves.toMatchObject({
       status: { phase: "used", redemptionCount: 1, usedAt: expect.any(String) },
     });
 
     await expect((await api("/api/v1/tags/builder")).json()).resolves.toMatchObject({
       spec: { workerHosts: ["laptop"] },
     });
-    await expect((await api("/api/v1/worker-hosts/laptop")).json()).resolves.toMatchObject({
+    await expect(workerHost("laptop")).resolves.toMatchObject({
       status: { authKey: "laptop", ephemeral: false },
     });
 
@@ -162,20 +159,11 @@ describe("Auth Key API", () => {
     });
     cleanups.unshift(() => connection.stop());
     await connection.start();
-    await expect
-      .poll(
-        async () =>
-          (
-            (await (await api("/api/v1/worker-hosts/laptop")).json()) as {
-              status: { phase: string };
-            }
-          ).status.phase,
-      )
-      .toBe("ready");
+    await expect.poll(async () => (await workerHost("laptop")).status.phase).toBe("ready");
   });
 
   it("rejects revoked keys and lets reusable keys join hosts under NAME-2", async () => {
-    const { url, api } = await runtime();
+    const { url, api, hosts, workerHost } = await runtime();
     await api("/api/v1/tags", {
       method: "POST",
       body: JSON.stringify({
@@ -185,9 +173,12 @@ describe("Auth Key API", () => {
         spec: {},
       }),
     });
-    const issued = (await (
-      await createKey(api, "ci", { tags: ["builder"], reusable: true, ephemeral: true })
-    ).json()) as { secret: string };
+    const issued = await hosts.createAuthKey({
+      name: "ci",
+      tags: ["builder"],
+      reusable: true,
+      ephemeral: true,
+    });
     const first = (await (await joinHost(url, issued.secret, "runner")).json()) as Joined;
     const second = (await (await joinHost(url, issued.secret, "runner")).json()) as Joined;
     expect([first.metadata.workerHostId, second.metadata.workerHostId]).toEqual([
@@ -196,17 +187,20 @@ describe("Auth Key API", () => {
     ]);
     expect(second.status.ephemeral).toBe(true);
 
-    const revoked = await api("/api/v1/auth-keys/ci/revoke", { method: "POST" });
-    expect(revoked.status).toBe(200);
-    await expect(revoked.json()).resolves.toMatchObject({
-      status: { phase: "revoked", redemptionCount: 2 },
-    });
+    const revoked = authKeyView(await hosts.revokeAuthKey({ name: "ci" }));
+    expect(revoked).toMatchObject({ status: { phase: "revoked", redemptionCount: 2 } });
+    // Revoking a revoked key returns it.
+    expect(authKeyView(await hosts.revokeAuthKey({ name: "ci" })).status.revokedAt).toBe(
+      revoked.status.revokedAt,
+    );
     expect((await joinHost(url, issued.secret, "runner")).status).toBe(403);
     // Revocation blocks new joins only; joined hosts stay enrolled.
-    await expect((await api("/api/v1/worker-hosts/runner-2")).json()).resolves.toMatchObject({
+    await expect(workerHost("runner-2")).resolves.toMatchObject({
       status: { phase: "unreachable", ephemeral: true },
     });
-    expect((await api("/api/v1/auth-keys/missing/revoke", { method: "POST" })).status).toBe(404);
+    await expect(hosts.revokeAuthKey({ name: "missing" })).rejects.toMatchObject({
+      code: Code.NotFound,
+    });
 
     // A removed ephemeral host leaves the default list but stays readable by ID.
     const removed = await fetch(`${url}/api/v1/worker-hosts/runner-2/credential`, {
@@ -214,15 +208,13 @@ describe("Auth Key API", () => {
       headers: { authorization: `Bearer ${second.credential.token}` },
     });
     expect(removed.status).toBe(204);
-    const listed = (await (await api("/api/v1/worker-hosts")).json()) as {
-      items: { metadata: { id: string } }[];
-    };
-    expect(listed.items.map((item) => item.metadata.id)).toEqual(["runner"]);
-    expect((await api("/api/v1/worker-hosts/runner-2")).status).toBe(200);
+    const listed = await hosts.listWorkerHosts({});
+    expect(listed.workerHosts.map((host) => host.metadata?.id)).toEqual(["runner"]);
+    await expect(workerHost("runner-2")).resolves.toMatchObject({ status: { phase: "revoked" } });
   });
 
   it("lets a Worker Host revoke only itself with its own credential", async () => {
-    const { url, api } = await runtime();
+    const { url, api, hosts, workerHost } = await runtime();
     await api("/api/v1/tags", {
       method: "POST",
       body: JSON.stringify({
@@ -232,9 +224,7 @@ describe("Auth Key API", () => {
         spec: {},
       }),
     });
-    const issued = (await (
-      await createKey(api, "fleet", { tags: ["builder"], reusable: true })
-    ).json()) as { secret: string };
+    const issued = await hosts.createAuthKey({ name: "fleet", tags: ["builder"], reusable: true });
     const a = (await (await joinHost(url, issued.secret, "host-a")).json()) as Joined;
     const b = (await (await joinHost(url, issued.secret, "host-b")).json()) as Joined;
 
@@ -243,24 +233,20 @@ describe("Auth Key API", () => {
       headers: { authorization: `Bearer ${a.credential.token}` },
     });
     expect(crossed.status).toBe(401);
-    await expect((await api("/api/v1/worker-hosts/host-b")).json()).resolves.toMatchObject({
+    await expect(workerHost("host-b")).resolves.toMatchObject({
       status: { phase: "unreachable" },
     });
     // A host credential grants nothing else on the management API.
-    expect(
-      (
-        await fetch(`${url}/api/v1/auth-keys`, {
-          headers: { authorization: `Bearer ${a.credential.token}` },
-        })
-      ).status,
-    ).toBe(401);
+    await expect(
+      hostClient({ url, token: a.credential.token }).listAuthKeys({}),
+    ).rejects.toMatchObject({ code: Code.Unauthenticated });
 
     const own = await fetch(`${url}/api/v1/worker-hosts/host-a/credential`, {
       method: "DELETE",
       headers: { authorization: `Bearer ${a.credential.token}` },
     });
     expect(own.status).toBe(204);
-    await expect((await api("/api/v1/worker-hosts/host-a")).json()).resolves.toMatchObject({
+    await expect(workerHost("host-a")).resolves.toMatchObject({
       status: { phase: "revoked", revocationReason: "SelfRevoked" },
     });
     expect(b.metadata.workerHostId).toBe("host-b");

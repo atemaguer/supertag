@@ -1,12 +1,24 @@
 syntax = "proto3";
 package supertag.operator.v1;
 
+import "google/protobuf/timestamp.proto";
 import "supertag/operator/v1/common.proto";
+import "supertag/operator/v1/host.proto";
+import "supertag/operator/v1/objective.proto";
 import "supertag/operator/v1/options.proto";
 
 option go_package = "github.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1";
 
-// Reads the state of the Control Plane as a whole.
+// Reads the state of the Control Plane and the organization it runs as a
+// whole: `supertag status`, `spend` and `audit`, and the operational metrics
+// a monitoring system scrapes.
+//
+// Access. The admin token and Operator Tokens may call every RPC; a scoped
+// coordination credential is refused with `PermissionDenied`. Every caller
+// sees the whole organization.
+//
+// A call while the Control Plane drains fails with `Unavailable` and
+// `ERROR_REASON_DRAINING`.
 service OrganizationService {
   // Reports whether the Control Plane accepts new work and how each of its
   // controllers is running. It needs a credential: a call without one fails
@@ -16,6 +28,48 @@ service OrganizationService {
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
     option (supertag.operator.v1.action) = "status";
+  }
+
+  // Reports what the organization is doing right now, as `supertag status`
+  // shows it: each Worker Host with its running Task Attempts against
+  // capacity per harness, each Tag as idle or busy, and each Objective that
+  // is not completed or cancelled with its spend, budget, deadline and high
+  // findings. The operator inbox count comes from `InboxService`.
+  rpc GetOrganization(GetOrganizationRequest) returns (OrganizationOverview) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_organization";
+  }
+
+  // Sums the provider-reported cost and tokens of Task Attempts, as
+  // `supertag spend` shows them, grouped by Objective, Tag or day. Separate
+  // currencies are never combined.
+  rpc GetSpend(GetSpendRequest) returns (SpendReport) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_spend";
+  }
+
+  // Lists recorded operator changes, the newest first, as `supertag audit`
+  // shows them: applies, deletes, Operator Token, Auth Key and Worker Host
+  // changes, approval decisions, Objective messages and every other call that
+  // can change state. An entry never holds a credential, a secret, a digest
+  // or a request body. A change whose call returned before this call began
+  // is listed.
+  //
+  // It fails with `InvalidArgument` for an `actor` over 200 characters or a
+  // malformed `page_token`.
+  rpc ListAuditEntries(ListAuditEntriesRequest) returns (ListAuditEntriesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_audit";
+  }
+
+  // Reads a bounded operational snapshot for monitoring: resource and Task
+  // counts, recovery and scheduling state, inbox, Mailbox and reply delivery
+  // backlogs, usage, and the answering API Server process's RPC counters.
+  // Everything but `rpc` comes from stored records; reading it contacts no
+  // Worklet.
+  rpc GetMetrics(GetMetricsRequest) returns (MetricSnapshot) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_metrics";
   }
 }
 
@@ -62,4 +116,520 @@ enum ControllerPhase {
   CONTROLLER_PHASE_STOPPED = 4;
   // This Control Plane is configured without it.
   CONTROLLER_PHASE_DISABLED = 5;
+}
+
+message GetOrganizationRequest {}
+
+// What the organization is doing right now. See `GetOrganization`.
+message OrganizationOverview {
+  // When the Control Plane read the records.
+  google.protobuf.Timestamp captured_at = 1;
+  // Each Worker Host that is not revoked, by ID.
+  repeated OrganizationWorkerHost worker_hosts = 2;
+  // Each Tag that is not deleted, by name.
+  repeated OrganizationTag tags = 3;
+  // Each Objective that is not completed or cancelled, the newest first.
+  repeated OrganizationObjective objectives = 4;
+}
+
+// A Worker Host's load. Capacity counts regular slots plus the owner-only
+// slots Workers with the coordination capability add, one per such Worker.
+message OrganizationWorkerHost {
+  // The host's ID.
+  string id = 1;
+  // Its phase.
+  WorkerHostPhase phase = 2;
+  // Task Attempts running on it.
+  int32 running = 3;
+  // How many Task Attempts it runs at once, owner-only slots included.
+  int32 capacity = 4;
+  // Its owner-only coordination slots.
+  int32 coordination_capacity = 5;
+  // Its load per harness, by harness name. A Worker that serves several
+  // harnesses counts its capacity under each of them.
+  repeated HarnessLoad harnesses = 6;
+  // Its free and total scratch space, as it last reported. Unset when it
+  // never reported.
+  DiskSpace disk_space = 7;
+  // A warning when free scratch space is below the smaller of 10 GiB and 5%
+  // of the volume. Empty otherwise.
+  string disk_warning = 8;
+}
+
+// Running Task Attempts against capacity for one harness on one Worker Host.
+message HarnessLoad {
+  // The harness, such as `codex`, or the Worker type when its Workers name
+  // none.
+  string harness = 1;
+  // Task Attempts of this harness running on the host.
+  int32 running = 2;
+  // Its capacity, owner-only slots included.
+  int32 capacity = 3;
+  // Its owner-only coordination slots.
+  int32 coordination_capacity = 4;
+}
+
+// Whether a Tag is busy.
+message OrganizationTag {
+  // The Tag's ID.
+  string id = 1;
+  // The Tag's name.
+  string name = 2;
+  // The Tasks whose Task Attempts run now, sorted. Empty when the Tag is
+  // idle.
+  repeated string running_task_ids = 3;
+  // The command each running Task's harness reports as running, for
+  // harnesses that report commands.
+  repeated TagRunningCommand running_commands = 4;
+}
+
+// The command a running Task's harness reports.
+message TagRunningCommand {
+  // The Task's ID.
+  string task_id = 1;
+  // The command, as plain single-line text. The harness wrote it, so it is
+  // untrusted text.
+  string command = 2;
+  // When it started.
+  google.protobuf.Timestamp started_at = 3;
+}
+
+// An Objective that is not finished, with its spend.
+message OrganizationObjective {
+  // The Objective's ID.
+  string id = 1;
+  // Where it stands.
+  ObjectiveStatus status = 2;
+  // The owner Tag's ID.
+  string owner_tag_id = 3;
+  // The owner Tag's name, or its ID when the Tag no longer exists.
+  string owner = 4;
+  // When it is due. Unset without a deadline.
+  google.protobuf.Timestamp deadline = 5;
+  // Provider-reported spend in minor units of `spend_currency`, as last
+  // observed; 0 when none is known.
+  int64 spent_minor = 6;
+  // The budget limit, in minor units of `currency` or in allocation units.
+  // Unset without a budget.
+  optional int64 budget_limit_minor = 7;
+  // The budget's ISO 4217 code. Empty when the budget counts allocation
+  // units or there is none.
+  string currency = 8;
+  // The currency of `spent_minor`. Empty when spend counts allocation units.
+  string spend_currency = 9;
+  // Task Attempts whose model has no published price, so their cost is
+  // unknown and a budget in a currency cannot be enforced on them.
+  int32 unpriced_attempts = 10;
+  // The tokens those Task Attempts used. 0 when `unpriced_attempts` is 0.
+  int64 unpriced_tokens = 11;
+  // The high-severity findings of the latest Task of each of its Sessions,
+  // in Session order.
+  repeated HighFinding high_findings = 12;
+}
+
+message GetSpendRequest {
+  // How to group Task Attempts. Unspecified groups by Objective.
+  SpendGrouping by = 1;
+  // Counts only Task Attempts that started at or after this time. Unset
+  // counts all of them.
+  google.protobuf.Timestamp since = 2;
+}
+
+// How `GetSpend` groups Task Attempts.
+enum SpendGrouping {
+  SPEND_GROUPING_UNSPECIFIED = 0;
+  // By the Objective of each Task Attempt's Task. Task Attempts outside any
+  // Objective form the group `unassigned`.
+  SPEND_GROUPING_OBJECTIVE = 1;
+  // By Tag.
+  SPEND_GROUPING_TAG = 2;
+  // By the UTC day each Task Attempt started.
+  SPEND_GROUPING_DAY = 3;
+}
+
+// Spend grouped as asked. See `GetSpend`.
+message SpendReport {
+  // How the groups are formed. Never unspecified.
+  SpendGrouping by = 1;
+  // The `since` of the request. Unset when it had none.
+  google.protobuf.Timestamp since = 2;
+  // The groups, by `key`. Empty when no Task Attempt counts.
+  repeated SpendGroup groups = 3;
+}
+
+// The usage of one group of Task Attempts.
+message SpendGroup {
+  // The Objective ID or `unassigned`, the Tag ID, or the day as
+  // `YYYY-MM-DD`.
+  string key = 1;
+  // The Tag's name when grouped by Tag. Empty otherwise.
+  string name = 2;
+  // The Objective's budget when grouped by Objective and it has one. Unset
+  // otherwise.
+  Budget budget = 3;
+  // Task Attempts in the group.
+  int32 attempts = 4;
+  // Their provider-reported cost by ISO 4217 code, in minor units, estimated
+  // costs included. Empty when none reported a cost.
+  map<string, int64> reported_cost_by_currency = 5;
+  // Task Attempts that reported no cost. They are not counted as zero.
+  int32 unknown_cost_attempts = 6;
+  // Task Attempts whose cost is an estimate from a model price table.
+  int32 estimated_cost_attempts = 7;
+  // Unknown-cost Task Attempts that reported tokens for a model the harness
+  // has no price for, counted by model.
+  map<string, int32> unpriced_models = 8;
+  // The tokens of those Task Attempts.
+  int64 unpriced_tokens = 9;
+  // The tokens reported by every Task Attempt that reported usage. Unset
+  // when none did.
+  optional int64 reported_tokens = 10;
+  // Task Attempts that reported no usage.
+  int32 unknown_token_attempts = 11;
+}
+
+message ListAuditEntriesRequest {
+  // Lists only entries at or after this time. Unset lists from the oldest.
+  google.protobuf.Timestamp since = 1;
+  // Lists only entries by this exact operator, such as `token:laptop-2`.
+  // Empty lists every operator's.
+  string actor = 2;
+  // At most this many entries; 0 means 50, and more than 500 means 500.
+  int32 page_size = 3;
+  // The `next_page_token` of the previous page.
+  string page_token = 4;
+}
+
+message ListAuditEntriesResponse {
+  // The entries, the newest first.
+  repeated AuditEntry entries = 1;
+  // Fetches the next page, which continues after this page's last entry, so
+  // entries recorded in between are neither repeated nor skipped. Empty on
+  // the last page.
+  string next_page_token = 2;
+}
+
+// One recorded operator change.
+message AuditEntry {
+  // The entry's ID.
+  string id = 1;
+  // When the Control Plane finished handling the change.
+  google.protobuf.Timestamp at = 2;
+  // Who acted: `control-plane-break-glass` for the admin token,
+  // `token:NAME` for an Operator Token, a scoped credential's operator ID,
+  // or `PROVIDER:USER` for a person in an Objective thread.
+  string actor = 3;
+  // What was done, such as `apply`, `auth-key.create` or
+  // `approval.approve`: an RPC's `audit_action`, or what the call it
+  // arrived as did.
+  string action = 4;
+  // What it was done to, as `Kind/NAME` or `Kind/ID`, such as
+  // `Tag/builder`. Only the kind, such as `Tag`, when the change failed or
+  // its name could hold a secret.
+  string target = 5;
+  // Whether the change took effect.
+  AuditOutcome outcome = 6;
+  // The HTTP status of the response, for a change that arrived as a call.
+  // An RPC's status is the HTTP status its Connect code maps to. Unset
+  // otherwise.
+  optional int32 status = 7;
+  // Where the Control Plane received the change.
+  AuditSource source = 8;
+  // The call's HTTP method, for a change that arrived as a call. Empty
+  // otherwise.
+  string method = 9;
+  // The route the call matched, as a template such as
+  // `/supertag.operator.v1.HostService/DrainWorkerHost`. It is never the
+  // call's own path. Empty when the call matched no route or the change
+  // did not arrive as a call.
+  string path = 10;
+}
+
+// Whether a recorded change took effect.
+enum AuditOutcome {
+  AUDIT_OUTCOME_UNSPECIFIED = 0;
+  // It took effect.
+  AUDIT_OUTCOME_SUCCEEDED = 1;
+  // It was refused or failed.
+  AUDIT_OUTCOME_FAILED = 2;
+}
+
+// Where the Control Plane received a change.
+enum AuditSource {
+  AUDIT_SOURCE_UNSPECIFIED = 0;
+  // A call to the API Server.
+  AUDIT_SOURCE_API = 1;
+  // A person's action in an Objective thread on a collaboration surface,
+  // through the Gateway.
+  AUDIT_SOURCE_GATEWAY = 2;
+}
+
+message GetMetricsRequest {}
+
+// An operational snapshot. See `GetMetrics`. Durations are milliseconds.
+message MetricSnapshot {
+  // When the Control Plane read the records.
+  google.protobuf.Timestamp captured_at = 1;
+  // Tags.
+  int64 tags = 2;
+  // Roles.
+  int64 roles = 3;
+  // Role assignments to Tags.
+  int64 role_assignments = 4;
+  // Surface Accounts.
+  int64 surface_accounts = 5;
+  // Permission Sets.
+  int64 permission_sets = 6;
+  // Context Sets.
+  int64 context_sets = 7;
+  // Sessions.
+  int64 sessions = 8;
+  // Tasks by status.
+  TaskCounts tasks = 9;
+  // Work recovery still has to settle.
+  RecoveryMetrics recovery = 10;
+  // The operator inbox.
+  InboxMetrics coordination_inbox = 11;
+  // Provider-reported usage.
+  UsageMetrics usage = 12;
+  // Native subagents of harnesses.
+  NativeAgentMetrics native_agents = 13;
+  // The Task queue and placement.
+  SchedulingMetrics scheduling = 14;
+  // Mailbox messages no inbox turn has taken yet.
+  BacklogMetrics mailbox = 15;
+  // Replies waiting to reach collaboration surfaces.
+  ReplyDeliveryMetrics reply_delivery = 16;
+  // The answering API Server process's RPC counters. Each process counts
+  // its own, from `rpc.started_at`, and they reset when it is replaced.
+  RpcMetrics rpc = 17;
+}
+
+// Tasks by status.
+message TaskCounts {
+  // Every Task.
+  int64 total = 1;
+  // Pending Tasks.
+  int64 pending = 2;
+  // Running Tasks.
+  int64 running = 3;
+  // Completed Tasks.
+  int64 completed = 4;
+  // Failed Tasks.
+  int64 failed = 5;
+  // Cancelled Tasks.
+  int64 cancelled = 6;
+}
+
+// Work recovery still has to settle.
+message RecoveryMetrics {
+  // Control messages to Worker Hosts whose delivery is not known.
+  int64 unknown_control_deliveries = 1;
+  // Sessions blocked until recovery settles them.
+  int64 blocked_sessions = 2;
+  // Durable executions waiting for their Worker Host to reconcile them.
+  int64 durable_executions_awaiting_reconciliation = 3;
+}
+
+// The operator inbox.
+message InboxMetrics {
+  // Pending items.
+  int64 pending = 1;
+  // Pending items by kind, such as `approval_request`.
+  map<string, int64> by_kind = 2;
+  // When the oldest actionable item arrived. Unset when there is none.
+  google.protobuf.Timestamp oldest_actionable_at = 3;
+  // Its age in seconds. Unset when there is none.
+  optional int64 oldest_actionable_age_seconds = 4;
+}
+
+// Provider-reported usage.
+message UsageMetrics {
+  // Task Attempts with at least one usage report.
+  int64 reporting_attempts = 1;
+  // Their tokens.
+  int64 total_tokens = 2;
+  // Task Attempts whose reports do not cover the whole Task Attempt.
+  int64 incomplete_attempts = 3;
+  // Their cost by ISO 4217 code, in minor units.
+  map<string, int64> reported_cost_by_currency = 4;
+}
+
+// Native subagents of harnesses.
+message NativeAgentMetrics {
+  // The most subagents one Task Attempt ran at once.
+  int64 peak_concurrent = 1;
+  // Task Attempts stopped at their token limit.
+  int64 token_limit_interruptions = 2;
+  // Task Attempts stopped at their subagent limit.
+  int64 agent_limit_interruptions = 3;
+}
+
+// The Task queue and placement.
+message SchedulingMetrics {
+  // Pending Tasks.
+  int64 queued = 1;
+  // When the oldest pending Task was queued. Unset when none is.
+  google.protobuf.Timestamp oldest_queued_at = 2;
+  // Its age in seconds. Unset when none is queued.
+  optional int64 oldest_queued_age_seconds = 3;
+  // Task Attempts placed on a Worker Host.
+  int64 placed_attempts = 4;
+  // Average time from queueing to placement.
+  double average_queue_duration_ms = 5;
+  // Longest time from queueing to placement.
+  double maximum_queue_duration_ms = 6;
+  // Average time to place a Task Attempt.
+  double average_placement_duration_ms = 7;
+  // Longest time to place a Task Attempt.
+  double maximum_placement_duration_ms = 8;
+  // Task Attempts a Worker Host refused to admit.
+  int64 admission_rejections = 9;
+  // Capacity reservations. A reservation released after a declined claim
+  // leaves no record, so none of these counts it.
+  ReservationMetrics reservations = 10;
+  // Each Worker Host's capacity, from its latest stored observation.
+  repeated WorkerHostUtilization worker_hosts = 11;
+}
+
+// Capacity reservations.
+message ReservationMetrics {
+  // Reservations a Task Attempt used.
+  int64 consumed = 1;
+  // Reservations held now.
+  int64 active = 2;
+  // Reservations that expired unused.
+  int64 expired = 3;
+}
+
+// One Worker Host's capacity.
+message WorkerHostUtilization {
+  // The host's ID.
+  string id = 1;
+  // Its phase: connected, draining or unreachable.
+  WorkerHostPhase phase = 2;
+  // Task Attempts running on it.
+  int32 active_attempts = 3;
+  // How many it runs at once.
+  int32 capacity = 4;
+  // How many more it can take now.
+  int32 available_slots = 5;
+  // `active_attempts` over `capacity`, from 0 to 1.
+  double utilization = 6;
+}
+
+// A backlog.
+message BacklogMetrics {
+  // Items waiting.
+  int64 pending = 1;
+  // When the oldest arrived. Unset when none waits.
+  google.protobuf.Timestamp oldest_pending_at = 2;
+}
+
+// Replies waiting to reach collaboration surfaces.
+message ReplyDeliveryMetrics {
+  // Replies not yet delivered.
+  int64 backlog = 1;
+  // Replies waiting to retry.
+  int64 retrying = 2;
+  // Retries made.
+  int64 retry_attempts = 3;
+  // Replies that will not be retried.
+  int64 failed = 4;
+  // When the oldest undelivered reply was created. Unset when none waits.
+  google.protobuf.Timestamp oldest_pending_at = 5;
+}
+
+// One API Server process's RPC counters, Worklet transports included. They
+// hold no request headers, bodies, IDs or error messages.
+message RpcMetrics {
+  // When the process began counting. Compare samples only within one
+  // `started_at`.
+  google.protobuf.Timestamp started_at = 1;
+  // When it was read.
+  google.protobuf.Timestamp captured_at = 2;
+  // Counters per service and method.
+  repeated RpcMethodMetrics methods = 3;
+  // HTTP/2 connections.
+  RpcChannelMetrics channels = 4;
+  // Buffered Worklet frames.
+  RpcQueueMetrics queues = 5;
+  // Worklet closures by close code.
+  map<string, int64> close_codes = 6;
+  // Lifecycle events a slow or failing trace sink dropped.
+  int64 trace_errors = 7;
+}
+
+// Counters for one RPC method.
+message RpcMethodMetrics {
+  // The service.
+  string service = 1;
+  // The method.
+  string method = 2;
+  // Calls started.
+  int64 started = 3;
+  // Calls completed.
+  int64 completed = 4;
+  // Calls running.
+  int64 active = 5;
+  // Streams open.
+  int64 active_streams = 6;
+  // Calls that failed.
+  int64 errors = 7;
+  // Completed calls by gRPC status code: entry N counts code N, for codes 0
+  // to 16.
+  repeated int64 status_codes = 8;
+  // Call durations. A stream's duration is its lifetime.
+  RpcDurationMetrics duration = 9;
+}
+
+// A duration histogram, in milliseconds.
+message RpcDurationMetrics {
+  // Durations observed.
+  int64 count = 1;
+  // Their sum.
+  double total = 2;
+  // The longest.
+  double max = 3;
+  // Cumulative buckets, the smallest bound first.
+  repeated RpcDurationBucket buckets = 4;
+}
+
+// One cumulative histogram bucket.
+message RpcDurationBucket {
+  // Its upper bound. Unset for the last bucket, which counts every duration.
+  optional double le = 1;
+  // Durations at or below the bound.
+  int64 count = 2;
+}
+
+// HTTP/2 connections. More opened connections alone do not tell new hosts
+// from reconnects.
+message RpcChannelMetrics {
+  // Connections open.
+  int64 active = 1;
+  // Connections opened.
+  int64 opened = 2;
+  // Connections closed.
+  int64 closed = 3;
+}
+
+// Buffered Worklet frames.
+message RpcQueueMetrics {
+  // Queues open.
+  int64 active = 1;
+  // Frames buffered.
+  int64 frames = 2;
+  // Bytes buffered.
+  int64 bytes = 3;
+  // The frame capacity.
+  int64 capacity_frames = 4;
+  // The byte capacity.
+  int64 capacity_bytes = 5;
+  // The most frames buffered at once.
+  int64 peak_frames = 6;
+  // The most bytes buffered at once.
+  int64 peak_bytes = 7;
+  // Frames refused because a queue was full.
+  int64 rejections = 8;
 }

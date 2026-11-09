@@ -1,0 +1,493 @@
+syntax = "proto3";
+package supertag.operator.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "supertag/operator/v1/common.proto";
+import "supertag/operator/v1/options.proto";
+
+option go_package = "github.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1";
+
+// Worker Hosts and the Auth Keys that join them: `supertag list worker-host`,
+// `get worker-host`, `describe worker-host`, `enroll worker-host`, `drain
+// worker-host`, `resume worker-host`, `rotate worker-host-credential`,
+// `revoke worker-host-credential`, `update tag --add-worker-host` and
+// `--remove-worker-host`, `create auth-key`, `list auth-key`, `get auth-key`
+// and `revoke auth-key`.
+//
+// A Worker Host is a machine that runs Tasks for the Tags bound to it. Its
+// Worklet connects to the Control Plane with the host's credential. An
+// operator enrolls a host and receives its first credential, or creates an
+// Auth Key that a machine redeems to join by itself. Redeeming an Auth Key,
+// and the calls a host makes with its own credential, such as draining itself
+// before `supertag down`, are not part of this service; they keep the
+// transport the host uses.
+//
+// Every view is built from what each host last reported to the Control
+// Plane, never a live probe of the machine. A Control Plane that runs its own
+// Worklet in process, without a Worker Host record, lists that Worklet's host
+// too, and its ID cannot be enrolled.
+//
+// Access. The admin token and Operator Tokens may call every RPC; a scoped
+// coordination credential is refused with `PermissionDenied`. Every caller
+// sees every Worker Host and Auth Key.
+//
+// Every RPC that names a Worker Host takes its ID, and fails with
+// `InvalidArgument` for an empty one and, unless it says otherwise,
+// `NotFound` for a host that was never enrolled. Every RPC that names an Auth Key takes its name, and fails with
+// `InvalidArgument` for an empty one and `NotFound` for a key that does not
+// exist. A call while the Control Plane drains fails with `Unavailable` and
+// `ERROR_REASON_DRAINING`.
+service HostService {
+  // Lists Worker Hosts, the earliest enrolled first, then by ID, as `supertag
+  // list worker-host` shows them. A host that joined with an ephemeral Auth
+  // Key and was revoked after it disconnected is left out; `GetWorkerHost`
+  // still reads it. It fails with `InvalidArgument` for a malformed
+  // `page_token`.
+  rpc ListWorkerHosts(ListWorkerHostsRequest) returns (ListWorkerHostsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_worker_host";
+  }
+
+  // Reads one Worker Host as `supertag get worker-host` and `describe
+  // worker-host` show it, revoked hosts included.
+  rpc GetWorkerHost(GetWorkerHostRequest) returns (WorkerHost) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_worker_host";
+  }
+
+  // Enrolls a Worker Host under a new ID and returns its first credential, as
+  // `supertag enroll worker-host` does. The host is bound to no Tag; bind it
+  // with `BindWorkerHost`. The token is returned only by this call and is
+  // never stored in readable form, so a caller that loses it rotates the
+  // credential.
+  //
+  // An ID is enrolled once. Repeating the call, or enrolling an ID a revoked
+  // host had, changes nothing and fails with `AlreadyExists` and
+  // `ERROR_REASON_CONFLICT`.
+  rpc EnrollWorkerHost(EnrollWorkerHostRequest) returns (WorkerHostCredential) {
+    option (supertag.operator.v1.action) = "manage_worker_host";
+    option (supertag.operator.v1.audit_action) = "worker-host.enroll";
+  }
+
+  // Replaces a Worker Host's credential and returns the new one, as
+  // `supertag rotate worker-host-credential` does. The previous token stops
+  // working at once, and the host's current connection ends; its Worklet
+  // connects again with the new token. The token is returned only by this
+  // call.
+  //
+  // The rotation applies only while the host's `credential_revision` is
+  // still `expected_credential_revision`, so a retry of a rotation that
+  // already applied changes nothing. It fails with `FailedPrecondition` and
+  // `ERROR_REASON_CONFLICT` when the revision differs, or when the host is
+  // revoked: a revoked host must be enrolled under a new ID. It fails with
+  // `InvalidArgument` for an `expected_credential_revision` below 1.
+  rpc RotateWorkerHostCredential(RotateWorkerHostCredentialRequest) returns (WorkerHostCredential) {
+    option (supertag.operator.v1.action) = "manage_worker_host_credential";
+    option (supertag.operator.v1.audit_action) = "worker-host.credential.rotate";
+  }
+
+  // Revokes a Worker Host, as `supertag revoke worker-host-credential` does
+  // with operator access. Its credential stops working at once, its
+  // connection ends, and it takes no new Tasks. A revoked host stays readable
+  // and its ID is never enrolled again. Revoking a revoked host changes
+  // nothing and returns it.
+  rpc RevokeWorkerHostCredential(RevokeWorkerHostCredentialRequest) returns (WorkerHost) {
+    option (supertag.operator.v1.action) = "manage_worker_host_credential";
+    option (supertag.operator.v1.audit_action) = "worker-host.credential.revoke";
+  }
+
+  // Drains a Worker Host, as `supertag drain worker-host` does: it finishes
+  // the work it accepted and takes no new Tasks until it is resumed. Draining
+  // a draining host changes nothing. The host returned has no `storage`.
+  rpc DrainWorkerHost(DrainWorkerHostRequest) returns (WorkerHost) {
+    option (supertag.operator.v1.action) = "manage_worker_host";
+    option (supertag.operator.v1.audit_action) = "worker-host.drain";
+  }
+
+  // Ends a drain, as `supertag resume worker-host` does: the host takes new
+  // Tasks again. Resuming a host that is not draining changes nothing. The
+  // host returned has no `storage`.
+  rpc ResumeWorkerHost(ResumeWorkerHostRequest) returns (WorkerHost) {
+    option (supertag.operator.v1.action) = "manage_worker_host";
+    option (supertag.operator.v1.audit_action) = "worker-host.resume";
+  }
+
+  // Binds a Worker Host to a Tag, as `supertag update tag --add-worker-host`
+  // does, so the host may run the Tag's Tasks. Binding a host that is
+  // already bound changes nothing and succeeds with `changed` false. It fails
+  // with `NotFound` when the Tag does not exist or was deleted, or the host
+  // was never enrolled.
+  rpc BindWorkerHost(BindWorkerHostRequest) returns (BindWorkerHostResponse) {
+    option (supertag.operator.v1.action) = "bind_worker_host";
+    option (supertag.operator.v1.audit_action) = "tag.worker-host.add";
+  }
+
+  // Unbinds a Worker Host from a Tag, as `supertag update tag
+  // --remove-worker-host` does. Task Attempts already running on the host
+  // are not stopped. Unbinding a host that is not bound changes nothing and
+  // succeeds with `changed` false, whether or not the host exists. It fails
+  // with `NotFound` when the Tag does not exist or was deleted.
+  rpc UnbindWorkerHost(UnbindWorkerHostRequest) returns (UnbindWorkerHostResponse) {
+    option (supertag.operator.v1.action) = "bind_worker_host";
+    option (supertag.operator.v1.audit_action) = "tag.worker-host.remove";
+  }
+
+  // Creates an Auth Key, as `supertag create auth-key` does, and returns its
+  // secret. Every Worker Host that redeems the key is bound to its Tags and
+  // carries its labels. A one-off key joins one host and expires one hour
+  // after it is created; a reusable key expires after 90 days. The secret is
+  // returned only by this call and is never stored in readable form.
+  //
+  // Names are never reused. Repeating the call, or using the name of a
+  // revoked or expired key, changes nothing and fails with `AlreadyExists`
+  // and `ERROR_REASON_CONFLICT`. It fails with `InvalidArgument` for a
+  // malformed name or label, no Tags, more than 32 Tags, or more than 64
+  // labels, and `NotFound` for a Tag that does not exist or was deleted.
+  rpc CreateAuthKey(CreateAuthKeyRequest) returns (CreateAuthKeyResponse) {
+    option (supertag.operator.v1.action) = "manage_auth_key";
+    option (supertag.operator.v1.audit_action) = "auth-key.create";
+  }
+
+  // Lists Auth Keys, the earliest created first, then by name, as `supertag
+  // list auth-key` shows them, revoked and expired keys included. Secrets are
+  // never returned. It fails with `InvalidArgument` for a malformed
+  // `page_token`.
+  rpc ListAuthKeys(ListAuthKeysRequest) returns (ListAuthKeysResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_auth_key";
+  }
+
+  // Reads one Auth Key, without its secret, as `supertag get auth-key` shows
+  // it.
+  rpc GetAuthKey(GetAuthKeyRequest) returns (AuthKey) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_auth_key";
+  }
+
+  // Revokes an Auth Key, as `supertag revoke auth-key` does: no new Worker
+  // Host can join with it. Hosts that already joined keep their enrollment
+  // and Tags. Revoking a revoked key changes nothing and returns it.
+  rpc RevokeAuthKey(RevokeAuthKeyRequest) returns (AuthKey) {
+    option (supertag.operator.v1.action) = "manage_auth_key";
+    option (supertag.operator.v1.audit_action) = "auth-key.revoke";
+  }
+}
+
+message ListWorkerHostsRequest {
+  // At most this many Worker Hosts; 0 means 100, and more than 500 means
+  // 500.
+  int32 page_size = 1;
+  // The `next_page_token` of the previous page.
+  string page_token = 2;
+}
+
+message ListWorkerHostsResponse {
+  // The Worker Hosts, the earliest enrolled first, then by ID.
+  repeated WorkerHost worker_hosts = 1;
+  // Fetches the next page. Empty on the last page.
+  string next_page_token = 2;
+}
+
+message GetWorkerHostRequest {
+  // The Worker Host's ID.
+  string id = 1;
+}
+
+message EnrollWorkerHostRequest {
+  // The new Worker Host's ID. Leading and trailing whitespace is removed, and
+  // what remains must not be empty.
+  string id = 1;
+}
+
+message RotateWorkerHostCredentialRequest {
+  // The Worker Host's ID.
+  string id = 1;
+  // The host's `credential_revision` as the caller read it, from 1. Read it
+  // with `GetWorkerHost`.
+  int64 expected_credential_revision = 2;
+}
+
+message RevokeWorkerHostCredentialRequest {
+  // The Worker Host's ID.
+  string id = 1;
+}
+
+message DrainWorkerHostRequest {
+  // The Worker Host's ID.
+  string id = 1;
+}
+
+message ResumeWorkerHostRequest {
+  // The Worker Host's ID.
+  string id = 1;
+}
+
+message BindWorkerHostRequest {
+  // The Tag's name.
+  string tag = 1;
+  // The Worker Host's ID.
+  string worker_host_id = 2;
+}
+
+message BindWorkerHostResponse {
+  // The Tag's name.
+  string tag = 1;
+  // The Tag's ID.
+  string tag_id = 2;
+  // The IDs of every Worker Host bound to the Tag after the call, sorted.
+  repeated string worker_hosts = 3;
+  // False when the host was already bound and nothing changed.
+  bool changed = 4;
+}
+
+message UnbindWorkerHostRequest {
+  // The Tag's name.
+  string tag = 1;
+  // The Worker Host's ID.
+  string worker_host_id = 2;
+}
+
+message UnbindWorkerHostResponse {
+  // The Tag's name.
+  string tag = 1;
+  // The Tag's ID.
+  string tag_id = 2;
+  // The IDs of every Worker Host bound to the Tag after the call, sorted.
+  repeated string worker_hosts = 3;
+  // False when the host was not bound and nothing changed.
+  bool changed = 4;
+}
+
+message CreateAuthKeyRequest {
+  // The key's name: 1 to 63 lowercase letters, digits, hyphens or
+  // underscores, starting with a letter or digit. Never reused.
+  string name = 1;
+  // The Tags every host that redeems the key is bound to, by name: 1 to 32
+  // of them. Repeated names count once.
+  repeated string tags = 2;
+  // Placement labels every host that redeems the key carries, such as `gpu`:
+  // at most 64, each 1 to 63 lowercase letters, digits, dots, colons,
+  // hyphens or underscores, starting with a letter or digit. Labels are
+  // lowercased, and repeated labels count once. Labels that start with
+  // `mcp:`, `mcp-login:`, `volume-credential:` or `artifact-volume:` come
+  // from host configuration and are refused. Labels place work only; they
+  // never grant access.
+  repeated string labels = 3;
+  // Lets the key join any number of hosts until it expires after 90 days.
+  // False makes a one-off key that joins one host and expires after one
+  // hour.
+  bool reusable = 4;
+  // Hosts that join with the key are revoked after they disconnect with no
+  // open Task Attempts, and leave `ListWorkerHosts`.
+  bool ephemeral = 5;
+}
+
+message CreateAuthKeyResponse {
+  // The new key.
+  AuthKey auth_key = 1;
+  // The key's secret. It is returned only here; store it in a secret
+  // manager. A machine joins with it through `supertag connect worklet`.
+  string secret = 2;
+}
+
+message ListAuthKeysRequest {
+  // At most this many Auth Keys; 0 means 100, and more than 500 means 500.
+  int32 page_size = 1;
+  // The `next_page_token` of the previous page.
+  string page_token = 2;
+}
+
+message ListAuthKeysResponse {
+  // The Auth Keys, the earliest created first, then by name.
+  repeated AuthKey auth_keys = 1;
+  // Fetches the next page. Empty on the last page.
+  string next_page_token = 2;
+}
+
+message GetAuthKeyRequest {
+  // The key's name.
+  string name = 1;
+}
+
+message RevokeAuthKeyRequest {
+  // The key's name.
+  string name = 1;
+}
+
+// One Worker Host, as the Control Plane last recorded it.
+message WorkerHost {
+  // `id` and `name` are both the host's ID. `resource_version` changes when
+  // any field of this view changes.
+  Metadata metadata = 1;
+  // Whether an operator or the host itself drained it.
+  bool draining = 2;
+  // Its phase, derived from the fields below.
+  WorkerHostPhase phase = 3;
+  // Free and total space on the filesystem the host uses for Task Attempt
+  // scratch, as it last reported. Unset when it never reported.
+  DiskSpace disk_space = 4;
+  // It joined with an ephemeral Auth Key, so it is revoked after it
+  // disconnects with no open Task Attempts.
+  bool ephemeral = 5;
+  // Where the host's Task Attempts kept their files, from the placements the
+  // Control Plane recorded. Set only by `ListWorkerHosts` and
+  // `GetWorkerHost`.
+  WorkerHostStorage storage = 6;
+  // The name of the Auth Key the host redeemed to join. Empty when an
+  // operator enrolled it.
+  string auth_key = 7;
+  // Increases with every credential rotation, from 1. Pass it as
+  // `RotateWorkerHostCredentialRequest.expected_credential_revision`.
+  int64 credential_revision = 8;
+  // Increases with every connection, so only the current connection may
+  // report.
+  int64 connection_generation = 9;
+  // Whether its Worklet is connected.
+  WorkerHostConnection connection_status = 10;
+  // The ID of its current or last Worklet. Empty when it never connected.
+  string worklet_id = 11;
+  // The Worklet protocol version it connected with. Unset when it never
+  // connected.
+  optional int32 protocol_version = 12;
+  // The durable transport extension version it connected with. Unset when
+  // its Worklet does not support it.
+  optional int32 durable_protocol_version = 13;
+  // The durable control extension version it connected with. Unset when its
+  // Worklet does not support it.
+  optional int32 control_protocol_version = 14;
+  // Each Worker the host's Worklet advertised, in the Worklet protocol's
+  // `WorkerDescriptor` JSON form: `id`, `type`, `capabilities`, `profiles`,
+  // `profileCapabilities` (harness, models, efforts and capabilities per
+  // Worker Profile), `contextTypes` and `maxConcurrency`. The host reports
+  // them, so they are untrusted.
+  repeated google.protobuf.Struct workers = 15;
+  // The names of the Workspaces with a checkout declared on the host. Paths
+  // stay on the host.
+  repeated string workspaces = 16;
+  // Its placement labels: those it advertised, which are self-reported, and
+  // those its Auth Key granted. Sorted.
+  repeated string labels = 17;
+  // The labels its Auth Key granted. Sorted.
+  repeated string granted_labels = 18;
+  // Whether it can take Tasks now.
+  bool ready = 19;
+  // When its credential last claimed a connection. Unset when it never did.
+  google.protobuf.Timestamp last_authenticated_at = 20;
+  // How many connection claims with a wrong credential were refused.
+  int32 failed_authentication_count = 21;
+  // When a claim was last refused. Unset when none was.
+  google.protobuf.Timestamp last_authentication_failure_at = 22;
+  // When it last reported. Unset when it never did.
+  google.protobuf.Timestamp last_seen_at = 23;
+  // When its current or last connection began. Unset when it never
+  // connected.
+  google.protobuf.Timestamp connected_at = 24;
+  // When its last connection ended. Unset while its first connection lasts
+  // or when it never connected.
+  google.protobuf.Timestamp disconnected_at = 25;
+  // When it was revoked. Unset while it is enrolled.
+  google.protobuf.Timestamp revoked_at = 26;
+  // Why it was revoked: `OperatorRevoked`, `SelfRevoked` or
+  // `EphemeralDisconnected`. Empty while it is enrolled.
+  string revocation_reason = 27;
+  // Task Attempts running on it.
+  int32 active_attempts = 28;
+  // How many Task Attempts it runs at once.
+  int32 capacity = 29;
+  // How many more it can take now.
+  int32 available_slots = 30;
+}
+
+// A Worker Host's phase. Revocation wins over everything else, then a lost
+// connection, then draining.
+enum WorkerHostPhase {
+  WORKER_HOST_PHASE_UNSPECIFIED = 0;
+  // Connected but not ready to take Tasks.
+  WORKER_HOST_PHASE_CONNECTED = 1;
+  // It finishes accepted work and takes no new Tasks.
+  WORKER_HOST_PHASE_DRAINING = 2;
+  // Connected and taking Tasks.
+  WORKER_HOST_PHASE_READY = 3;
+  // Revoked. It never connects again.
+  WORKER_HOST_PHASE_REVOKED = 4;
+  // Its Worklet is not connected.
+  WORKER_HOST_PHASE_UNREACHABLE = 5;
+}
+
+// Whether a Worker Host's Worklet is connected.
+enum WorkerHostConnection {
+  WORKER_HOST_CONNECTION_UNSPECIFIED = 0;
+  // It is connected.
+  WORKER_HOST_CONNECTION_CONNECTED = 1;
+  // It is not connected.
+  WORKER_HOST_CONNECTION_DISCONNECTED = 2;
+}
+
+// Space on one filesystem, in bytes.
+message DiskSpace {
+  // Space available to the host.
+  int64 free_bytes = 1;
+  // The filesystem's size.
+  int64 total_bytes = 2;
+}
+
+// Where a Worker Host's Task Attempts kept their files.
+message WorkerHostStorage {
+  // The remote sandbox providers its Task Attempts ran in, such as `e2b`.
+  // Their files are lost when the sandbox stops.
+  repeated string sandboxes = 1;
+  // True when a Task Attempt of the host recorded no complete placement, so
+  // where its files were is not known.
+  bool placement_unknown = 2;
+}
+
+// A Worker Host credential, returned once when it is issued.
+message WorkerHostCredential {
+  // The Worker Host's ID.
+  string worker_host_id = 1;
+  // When it was issued.
+  google.protobuf.Timestamp issued_at = 2;
+  // The token the host's Worklet connects with. It is a secret; give it to
+  // the host through its secret manager.
+  string token = 3;
+}
+
+// One Auth Key, without its secret.
+message AuthKey {
+  // Names the key. `resource_version` changes when any field of this view
+  // changes.
+  Metadata metadata = 1;
+  // The Tags a host that redeems the key is bound to, by name. A Tag
+  // deleted since keeps its name; one whose record is gone shows its ID.
+  repeated string tags = 2;
+  // The placement labels it grants, sorted.
+  repeated string labels = 3;
+  // It joins any number of hosts until it expires.
+  bool reusable = 4;
+  // Hosts that join with it are revoked after they disconnect.
+  bool ephemeral = 5;
+  // Its phase.
+  AuthKeyPhase phase = 6;
+  // When it expires.
+  google.protobuf.Timestamp expires_at = 7;
+  // When a host last redeemed it. Unset when none has.
+  google.protobuf.Timestamp used_at = 8;
+  // How many hosts redeemed it.
+  int32 redemption_count = 9;
+  // When it was revoked. Unset when it was not.
+  google.protobuf.Timestamp revoked_at = 10;
+}
+
+// An Auth Key's phase. Revocation wins over expiry, and expiry over use.
+enum AuthKeyPhase {
+  AUTH_KEY_PHASE_UNSPECIFIED = 0;
+  // A host can join with it.
+  AUTH_KEY_PHASE_ACTIVE = 1;
+  // A one-off key that a host already redeemed.
+  AUTH_KEY_PHASE_USED = 2;
+  // It expired.
+  AUTH_KEY_PHASE_EXPIRED = 3;
+  // An operator revoked it.
+  AUTH_KEY_PHASE_REVOKED = 4;
+}

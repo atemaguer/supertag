@@ -15,6 +15,7 @@ import {
 import { LocalWorklet, StaticWorker } from "../packages/runtime/sdk/src/index.ts";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.ts";
 import { createIsolatedPostgresDatabase } from "./support/database.ts";
+import { issueOperatorToken } from "./support/operator-access.ts";
 
 const postgres = process.env["SUPERTAG_POSTGRES_URL"];
 const ADMIN = "conversation-admin";
@@ -56,12 +57,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       await store.connect();
       const tag = await store.createTag({ name: "planner" });
       await store.bindTagWorkerHost(tag.id, "conversation-host");
-      const issued = await fetch(`${runtime.url}/api/v1/operator-tokens`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${ADMIN}`, "content-type": "application/json" },
-        body: JSON.stringify({ kind: "OperatorToken", metadata: { name: "alice" } }),
-      });
-      alice = ((await issued.json()) as { secret: string }).secret;
+      alice = await issueOperatorToken(runtime.url, ADMIN, "alice");
     });
 
     afterEach(async () => {

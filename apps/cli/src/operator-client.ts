@@ -1,12 +1,15 @@
 import { Code, ConnectError, createClient, type Interceptor } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import {
+  AccessService,
   ConversationService,
   EventService,
+  HostService,
   InboxService,
   MailboxService,
   ObjectiveService,
   OrganizationService,
+  SurfaceService,
   TeamService,
   WorkService,
 } from "@supertag/operator-api";
@@ -86,6 +89,18 @@ export function teamClient(options: OperatorClientOptions) {
 
 export function mailboxClient(options: OperatorClientOptions) {
   return createClient(MailboxService, operatorTransport(options));
+}
+
+export function hostClient(options: OperatorClientOptions) {
+  return createClient(HostService, operatorTransport(options));
+}
+
+export function accessClient(options: OperatorClientOptions) {
+  return createClient(AccessService, operatorTransport(options));
+}
+
+export function surfaceClient(options: OperatorClientOptions) {
+  return createClient(SurfaceService, operatorTransport(options));
 }
 
 /**

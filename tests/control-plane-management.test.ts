@@ -2,11 +2,13 @@ import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Code } from "@connectrpc/connect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { main } from "../apps/cli/src/index.ts";
-import { workClient } from "../apps/cli/src/operator-client.ts";
+import { hostClient, organizationClient, workClient } from "../apps/cli/src/operator-client.ts";
+import { listWorkerHostResources } from "../apps/cli/src/operator-resources.ts";
 import type { CredentialValue, GatewayCredentialVault } from "../packages/core/src/index.ts";
 import { ControllerPhase, ControlPlanePhase } from "../packages/operator-api/src/index.ts";
 import { DrizzleStore } from "../packages/store/src/index.ts";
@@ -44,7 +46,7 @@ describe("remote Control Plane management", () => {
       vi.stubEnv("SUPERTAG_ADMIN_TOKEN", token);
       await expect(main(["control-plane", "connect", runtime.url])).resolves.toBe(0);
       await expect(main(["tag", "create", "engineering"])).resolves.toBe(0);
-      await expect(main(["tag", "list"])).resolves.toBe(0);
+      await expect(main(["list", "tag"])).resolves.toBe(0);
       await expect(main(["get", "tag"])).resolves.toBe(0);
       await expect(main(["describe", "tag", "engineering"])).resolves.toBe(0);
       expect(output.join("")).toContain("This is now your active Control Plane");
@@ -57,7 +59,7 @@ describe("remote Control Plane management", () => {
       expect(output.join("")).toContain("staging.us");
       await expect(main(["control-plane", "use", "default"])).resolves.toBe(0);
       await expect(
-        main(["--control-plane", "staging.us", "tag", "show", "engineering"]),
+        main(["--control-plane", "staging.us", "describe", "tag", "engineering"]),
       ).resolves.toBe(0);
 
       const client = new ControlPlaneClient({ url: runtime.url, token });
@@ -318,25 +320,24 @@ spec:
       await expect(work.listSessions({})).resolves.toMatchObject({ sessions: [] });
       for (const route of ["/api/v1/tasks", "/api/v1/sessions"])
         expect((await fetch(`${runtime.url}${route}`, { headers: adminHeaders })).status).toBe(404);
-      await expect(client.request("/api/v1/metrics")).resolves.toMatchObject({
-        kind: "MetricSnapshot",
-        values: {
-          tags: 1,
-          roles: 1,
-          roleAssignments: 1,
-          surfaceAccounts: 1,
-          permissionSets: 1,
-          contextSets: 1,
-          tasks: { total: 0 },
-          coordinationInbox: { pending: 0 },
-          recovery: { unknownControlDeliveries: 0 },
-          usage: { reportingAttempts: 0, totalTokens: 0 },
-          nativeAgents: { peakConcurrent: 0 },
-          mailbox: { pending: 0, oldestPendingAt: null },
-          replyDelivery: { backlog: 0 },
-        },
+      const metrics = await organizationClient(client.operator).getMetrics({});
+      expect(metrics).toMatchObject({
+        tags: 1n,
+        roles: 1n,
+        roleAssignments: 1n,
+        surfaceAccounts: 1n,
+        permissionSets: 1n,
+        contextSets: 1n,
+        tasks: { total: 0n },
+        coordinationInbox: { pending: 0n },
+        recovery: { unknownControlDeliveries: 0n },
+        usage: { reportingAttempts: 0n, totalTokens: 0n },
+        nativeAgents: { peakConcurrent: 0n },
+        mailbox: { pending: 0n },
+        replyDelivery: { backlog: 0n },
       });
-      await expect(client.request("/api/v1/worker-hosts")).resolves.toMatchObject({
+      expect(metrics.mailbox?.oldestPendingAt).toBeUndefined();
+      await expect(listWorkerHostResources(client.operator)).resolves.toMatchObject({
         kind: "ResourceList",
         items: [expect.objectContaining({ kind: "WorkerHost" })],
       });
@@ -383,21 +384,28 @@ spec:
           },
         }),
       ]);
-      const hosts = await client.request<{
-        items: readonly { metadata: { id: string } }[];
-      }>("/api/v1/worker-hosts");
+      const hosts = await listWorkerHostResources(client.operator);
       const hostId = hosts.items[0]?.metadata.id;
       if (!hostId) throw new Error("Expected embedded Worker Host");
+      const tagHosts = hostClient(client.operator);
       await expect(
-        client.request(`/api/v1/tags/engineering/worker-hosts/${encodeURIComponent(hostId)}`, {
-          method: "PUT",
-        }),
-      ).resolves.toMatchObject({ spec: { workerHosts: [hostId] } });
+        tagHosts.bindWorkerHost({ tag: "engineering", workerHostId: hostId }),
+      ).resolves.toMatchObject({ tag: "engineering", workerHosts: [hostId], changed: true });
       await expect(
-        client.request(`/api/v1/tags/engineering/worker-hosts/${encodeURIComponent(hostId)}`, {
-          method: "DELETE",
-        }),
-      ).resolves.toMatchObject({ spec: { workerHosts: [] } });
+        tagHosts.bindWorkerHost({ tag: "engineering", workerHostId: hostId }),
+      ).resolves.toMatchObject({ workerHosts: [hostId], changed: false });
+      await expect(client.getTag("engineering")).resolves.toMatchObject({
+        spec: { workerHosts: [hostId] },
+      });
+      await expect(
+        tagHosts.unbindWorkerHost({ tag: "engineering", workerHostId: hostId }),
+      ).resolves.toMatchObject({ workerHosts: [], changed: true });
+      await expect(
+        tagHosts.unbindWorkerHost({ tag: "engineering", workerHostId: hostId }),
+      ).resolves.toMatchObject({ changed: false });
+      await expect(
+        tagHosts.bindWorkerHost({ tag: "missing", workerHostId: hostId }),
+      ).rejects.toMatchObject({ code: Code.NotFound });
 
       const store = new DrizzleStore({ url: `file:${databasePath}` });
       await store.connect();
@@ -461,7 +469,7 @@ spec:
 
     try {
       await expect(main(["tag", "create", "local-api"])).resolves.toBe(0);
-      await expect(main(["tag", "show", "local-api"])).resolves.toBe(0);
+      await expect(main(["describe", "tag", "local-api"])).resolves.toBe(0);
       expect(output.join("")).toContain("Created Tag local-api");
       expect(output.join("")).toContain("Tag: local-api");
       await expect(stat(join(directory, "control-planes.json"))).rejects.toMatchObject({

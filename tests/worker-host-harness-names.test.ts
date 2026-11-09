@@ -2,15 +2,23 @@ import { afterEach, expect, it, vi } from "vitest";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.js";
 import { renderListTable, runListCommand } from "../apps/cli/src/list-command.js";
 import { runResourceCommand } from "../apps/cli/src/resources.js";
+import { fakeHostRpc, workerHostJson, workerHostResourceOf } from "./support/fake-host-rpc.ts";
 import { fakeWorkRpc } from "./support/fake-work-rpc.ts";
 
+/** One Worker Profile's capabilities for a harness, as a Worklet advertises them. */
+const serves = (harness: string) => ({
+  profile: { id: harness, revision: "1" },
+  capabilities: [],
+  contextTypes: [],
+  harness,
+});
 const workers = [
-  { id: "local-claude", type: "supertag", profileCapabilities: [{ harness: "claude-code" }] },
-  { id: "local-codex", type: "supertag", profileCapabilities: [{ harness: "codex" }] },
+  { id: "local-claude", type: "supertag", profileCapabilities: [serves("claude-code")] },
+  { id: "local-codex", type: "supertag", profileCapabilities: [serves("codex")] },
   {
     id: "shared",
     type: "supertag",
-    profileCapabilities: [{ harness: "codex" }, { harness: "claude-code" }, { harness: "codex" }],
+    profileCapabilities: [serves("codex"), serves("claude-code"), serves("codex")],
   },
   { id: "custom", type: "custom-worker", profileCapabilities: [] },
 ];
@@ -24,7 +32,7 @@ it("lists advertised harnesses instead of the built-in Worker type", () => {
 
 it("describes each Worker's harnesses with a fallback for custom Workers", async () => {
   const api = new ControlPlaneClient({ url: "http://127.0.0.1:1", token: "unused" });
-  vi.spyOn(api, "request").mockResolvedValue(resource);
+  fakeHostRpc([resource]);
   const output = await runResourceCommand(api, "describe", ["worker-host", "host"]);
   expect(output).toContain("Worker: local-claude (claude-code)");
   expect(output).toContain("Worker: local-codex (codex)");
@@ -32,21 +40,23 @@ it("describes each Worker's harnesses with a fallback for custom Workers", async
   expect(output).toContain("Worker: custom (custom-worker)");
   expect(
     JSON.parse(await runResourceCommand(api, "describe", ["worker-host", "host", "--output=json"])),
-  ).toEqual(resource);
+  ).toEqual(workerHostResourceOf(resource));
 });
 
 afterEach(() => vi.restoreAllMocks());
 it("labels running capacity by harness while preserving shared Worker capacity", async () => {
-  vi.spyOn(ControlPlaneClient.prototype, "request").mockResolvedValueOnce({ items: [resource] });
-  fakeWorkRpc([
-    {
-      metadata: { id: "task" },
-      status: {
-        phase: "running",
-        attempt: { phase: "running", workerHostId: "host", workerId: "local-codex" },
+  fakeWorkRpc(
+    [
+      {
+        metadata: { id: "task" },
+        status: {
+          phase: "running",
+          attempt: { phase: "running", workerHostId: "host", workerId: "local-codex" },
+        },
       },
-    },
-  ]);
+    ],
+    { "HostService/ListWorkerHosts": () => ({ workerHosts: [workerHostJson(resource)] }) },
+  );
   const output = await runListCommand({ url: "http://127.0.0.1:1", token: "unused" }, [
     "worker-host",
   ]);

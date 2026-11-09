@@ -24,6 +24,11 @@ import {
 import { locationKey } from "./field-management.js";
 import { money } from "./money.js";
 import { workClient } from "./operator-client.js";
+import {
+  getOperatorResource,
+  isOperatorResourcePath,
+  listOperatorResources,
+} from "./operator-resources.js";
 import { runningCommandText } from "./running-command.js";
 import { hostStorageLines, sandboxStorage, UNKNOWN_TASK_STORAGE } from "./storage-durability.js";
 import { isSupertagYamlInput, SUPERTAG_YAML } from "./supertag-yaml.js";
@@ -139,9 +144,7 @@ export async function runResourceCommand(
     if (descriptor.path === "objectives" && name === undefined)
       throw new Error("Usage: supertag get objective ID --output yaml");
     if (name !== undefined) {
-      const resource = await client.request<Resource>(
-        `/api/v1/${descriptor.path}/${encodeURIComponent(name)}`,
-      );
+      const resource = await readResource(client, descriptor.path, name);
       if (descriptor.path === "surface-accounts" && !declaredByManifest(resource))
         throw new Error(
           `Surface Account ${name} was set up with supertag setup surface, so it has no manifest or secret references to export. To manage it declaratively, write a SurfaceAccount manifest for the same provider account and apply it; apply adopts the account once its credentials verify.`,
@@ -150,7 +153,7 @@ export async function runResourceCommand(
     }
     // Interactively set up Surface Accounts have no secret references, so a listing exports only
     // resources a manifest can reproduce.
-    const list = await client.request<ResourceList>(`/api/v1/${descriptor.path}`);
+    const list = await readResources(client, descriptor.path);
     return list.items
       .filter((item) => item.kind !== "SurfaceAccount" || declaredByManifest(item))
       .map(exportManifest)
@@ -176,8 +179,8 @@ export async function runResourceCommand(
   }
   const resource =
     name === undefined
-      ? await client.request<ResourceList>(`/api/v1/${descriptor.path}`)
-      : await client.request<Resource>(`/api/v1/${descriptor.path}/${encodeURIComponent(name)}`);
+      ? await readResources(client, descriptor.path)
+      : await readResource(client, descriptor.path, name);
   if (command === "describe" && output === "text" && name !== undefined && "kind" in resource) {
     if (resource.kind === "WorkerHost") return describeWorkerHost(resource);
     if (resource.kind === "Tag") return describeTag(resource);
@@ -185,6 +188,20 @@ export async function runResourceCommand(
     if (resource.kind === "Volume") return describeVolume(resource);
   }
   return terminalJson(resource, human);
+}
+
+/** Lists the resources at a path: Worker Hosts, Auth Keys, Operator Tokens and Surface Accounts by RPC. */
+function readResources(client: ControlPlaneClient, path: string): Promise<ResourceList> {
+  return isOperatorResourcePath(path)
+    ? (listOperatorResources(client.operator, path) as Promise<unknown> as Promise<ResourceList>)
+    : client.request<ResourceList>(`/api/v1/${path}`);
+}
+
+/** Reads one resource at a path by name, as `readResources` lists them. */
+function readResource(client: ControlPlaneClient, path: string, name: string): Promise<Resource> {
+  return isOperatorResourcePath(path)
+    ? (getOperatorResource(client.operator, path, name) as Promise<unknown> as Promise<Resource>)
+    : client.request<Resource>(`/api/v1/${path}/${encodeURIComponent(name)}`);
 }
 
 /** `describe task`: the Task as the Control Plane recorded it, with this machine's checkouts. */
@@ -1761,7 +1778,7 @@ async function pendingTagLocations(
   const created = [...surfaces.values()].filter((surface) => surface.pending);
   const tags = documents.filter((document) => document.path === "tags");
   if (created.length === 0 || tags.length === 0) return new Map();
-  const accounts = (await client.request<ResourceList>("/api/v1/surface-accounts")).items;
+  const accounts = (await readResources(client, "surface-accounts")).items;
   const pending = new Map<ManifestDocument, number[]>();
   for (const document of tags) {
     const spec = isRecord(document.resource.spec) ? document.resource.spec : {};
@@ -2101,7 +2118,7 @@ async function getOptional(
   name: string,
 ): Promise<Resource | undefined> {
   try {
-    return await client.request<Resource>(`/api/v1/${path}/${encodeURIComponent(name)}`);
+    return await readResource(client, path, name);
   } catch (error) {
     if (error instanceof Error && error.message.includes("does not exist")) return undefined;
     throw error;
@@ -2181,12 +2198,12 @@ async function watchResources(
   if (values.output !== undefined && values.output !== "json")
     throw new Error("Watch supports --output json; text output is available for describe");
   const path = descriptorFor(kind).path;
-  const pathname =
-    name === undefined ? `/api/v1/${path}` : `/api/v1/${path}/${encodeURIComponent(name)}`;
   const work = path === "tasks" || path === "sessions" ? workClient(client.operator) : undefined;
   const read = (): Promise<Resource | ResourceList> =>
     work === undefined
-      ? client.request<Resource | ResourceList>(pathname)
+      ? name === undefined
+        ? readResources(client, path)
+        : readResource(client, path, name)
       : (refusedAsError(async () =>
           path === "tasks"
             ? name === undefined

@@ -1,5 +1,5 @@
-// Command supertag-tui is SuperTag's terminal UI. Plain `supertag` in a terminal starts it and hands it the
-// Control Plane target over file descriptor 3.
+// Command supertag-tui is SuperTag's terminal UI. Plain `supertag` in a terminal starts it and hands it
+// the Control Planes to talk to over file descriptor 3.
 package main
 
 import (
@@ -25,49 +25,62 @@ func main() {
 		fmt.Println(version)
 		return
 	}
-	target, err := readTarget(os.NewFile(3, "supertag-target"))
+	h, err := readHandover(os.NewFile(3, "supertag-target"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, launchHint)
 		os.Exit(2)
 	}
-	c, err := client.New(target, version)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a, err := newApp(ctx, dial(version), h.Contexts, h.Current)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	if _, err := tea.NewProgram(newModel(ctx, c, client.NewFollower(c), client.NewWatcher(c, watchKinds...))).Run(); err != nil {
+	defer a.stop()
+	if _, err := tea.NewProgram(a).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-// readTarget reads the one JSON line `supertag` writes to the inherited pipe, to EOF. Only a
+// handover is what `supertag` writes to descriptor 3: every Control Plane the CLI resolved, and
+// the index of the one it selected.
+type handover struct {
+	Contexts []client.Target `json:"contexts"`
+	Current  int             `json:"current"`
+}
+
+// readHandover reads the one JSON line `supertag` writes to the inherited pipe, to EOF. Only a
 // pipe or a socket counts (Node's `stdio: "pipe"` is a Unix socketpair), so a stray descriptor 3
 // a shell left open on a file or terminal is not read.
-func readTarget(f *os.File) (client.Target, error) {
-	var target client.Target
+func readHandover(f *os.File) (handover, error) {
+	var h handover
 	if f == nil {
-		return target, errors.New("no target descriptor")
+		return h, errors.New("no target descriptor")
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return target, err
+		return h, err
 	}
 	if info.Mode()&(os.ModeNamedPipe|os.ModeSocket) == 0 {
-		return target, errors.New("the target descriptor is not a pipe")
+		return h, errors.New("the target descriptor is not a pipe")
 	}
 	data, err := io.ReadAll(io.LimitReader(f, 1<<20))
 	if err != nil {
-		return target, err
+		return h, err
 	}
-	if err := json.Unmarshal(data, &target); err != nil {
-		return target, err
+	if err := json.Unmarshal(data, &h); err != nil {
+		return h, err
 	}
-	if target.URL == "" || target.Token == "" {
-		return target, errors.New("the target needs a url and a token")
+	if len(h.Contexts) == 0 || h.Current < 0 || h.Current >= len(h.Contexts) {
+		return h, errors.New("the handover needs its Control Planes and the index of the current one")
 	}
-	return target, nil
+	for _, target := range h.Contexts {
+		if target.URL == "" || target.Token == "" {
+			return h, errors.New("every Control Plane needs a url and a token")
+		}
+	}
+	return h, nil
 }

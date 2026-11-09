@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { MessageInitShape } from "@bufbuild/protobuf";
+import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { Code } from "@connectrpc/connect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runApprovalCommand } from "../apps/cli/src/approvals.ts";
@@ -16,12 +18,25 @@ import {
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { runObjectiveCommand } from "../apps/cli/src/objectives.ts";
-import { inboxClient, objectiveClient } from "../apps/cli/src/operator-client.ts";
+import {
+  accessClient,
+  hostClient,
+  inboxClient,
+  objectiveClient,
+  organizationClient,
+  surfaceClient,
+} from "../apps/cli/src/operator-client.ts";
+import { auditEntryView } from "../apps/cli/src/organization-protos.ts";
 import { runResourceCommand } from "../apps/cli/src/resources.ts";
 import type { AuditEntry, Store } from "../packages/core/src/index.ts";
+import {
+  type ListAuditEntriesRequestSchema,
+  SurfaceProvider,
+} from "../packages/operator-api/src/index.ts";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.ts";
 import { openTestTask } from "./support/artifact-producer.js";
 import { createIsolatedPostgresDatabase } from "./support/database.js";
+import { issueOperatorToken } from "./support/operator-access.ts";
 
 const ADMIN = "audit-admin-token-value";
 const SCOPED = "audit-scoped-coordination-token";
@@ -71,11 +86,13 @@ async function runtime(
         ...init.headers,
       },
     });
-  const audit = async (token = ADMIN, query = "") => {
-    const response = await call(token, `/api/v1/audit${query}`);
-    expect(response.status, await response.clone().text()).toBe(200);
-    return ((await response.json()) as { items: AuditEntry[] }).items;
-  };
+  const audit = async (
+    token = ADMIN,
+    request: MessageInitShape<typeof ListAuditEntriesRequestSchema> = {},
+  ): Promise<AuditEntry[]> =>
+    (await organizationClient({ url: started.url, token }).listAuditEntries(request)).entries.map(
+      auditEntryView,
+    );
   return { url: started.url, store, events, call, audit, directory };
 }
 
@@ -94,18 +111,9 @@ for (const dialect of ["sqlite", "postgresql"] as const)
       const startedAt = new Date().toISOString();
 
       // Operator Token management, by the admin token.
-      const created = await call(ADMIN, "/api/v1/operator-tokens", {
-        method: "POST",
-        body: JSON.stringify({
-          apiVersion: "supertag/v1",
-          kind: "OperatorToken",
-          metadata: { name: "laptop-2" },
-          spec: {},
-        }),
-      });
-      expect(created.status).toBe(201);
-      const tokenSecret = ((await created.json()) as { secret: string }).secret;
+      const tokenSecret = await issueOperatorToken(url, ADMIN, "laptop-2");
       const operator = { url, token: tokenSecret };
+      const hosts = hostClient(operator);
       const client = new ControlPlaneClient(operator);
 
       // Applies and deletes, by the Operator Token.
@@ -122,60 +130,25 @@ for (const dialect of ["sqlite", "postgresql"] as const)
       expect(invalid.status).toBeGreaterThanOrEqual(400);
 
       // Auth Key management.
-      const authKey = await call(tokenSecret, "/api/v1/auth-keys", {
-        method: "POST",
-        body: JSON.stringify({
-          apiVersion: "supertag/v1",
-          kind: "AuthKey",
-          metadata: { name: "build-hosts" },
-          spec: { tags: ["reviewer"] },
-        }),
-      });
-      expect(authKey.status, await authKey.clone().text()).toBe(201);
-      const authKeySecret = ((await authKey.json()) as { secret: string }).secret;
-      expect(
-        (await call(tokenSecret, "/api/v1/auth-keys/build-hosts/revoke", { method: "POST" }))
-          .status,
-      ).toBe(200);
+      const authKeySecret = (await hosts.createAuthKey({ name: "build-hosts", tags: ["reviewer"] }))
+        .secret;
+      await hosts.revokeAuthKey({ name: "build-hosts" });
 
       // A Worker Host credential, issued and rotated.
-      const enrolled = await call(tokenSecret, "/api/v1/worker-hosts", {
-        method: "POST",
-        body: JSON.stringify({
-          apiVersion: "supertag/v1",
-          kind: "WorkerHostEnrollment",
-          metadata: { id: "build-host" },
-          spec: {},
-        }),
-      });
-      expect(enrolled.status, await enrolled.clone().text()).toBe(201);
-      const hostToken = ((await enrolled.json()) as { credential: { token: string } }).credential
-        .token;
-      const rotated = await call(tokenSecret, "/api/v1/worker-hosts/build-host/credential", {
-        method: "POST",
-      });
-      expect(rotated.status).toBe(200);
-      const rotatedToken = ((await rotated.json()) as { credential: { token: string } }).credential
-        .token;
+      const hostToken = (await hosts.enrollWorkerHost({ id: "build-host" })).token;
+      const rotatedToken = (
+        await hosts.rotateWorkerHostCredential({ id: "build-host", expectedCredentialRevision: 1n })
+      ).token;
 
       // Surface credentials in an enrollment.
-      const enrollment = await call(tokenSecret, "/api/v1/surface-enrollments", {
-        method: "POST",
-        body: JSON.stringify({
-          apiVersion: "supertag/v1",
-          kind: "SurfaceEnrollment",
-          metadata: { id: "enroll-1" },
-          spec: {
-            provider: "slack",
-            externalAccountId: "T-AUDIT",
-            displayName: "Audit",
-            authMethod: "slack-socket-mode",
-            configuration: { transport: "socket" },
-            secrets: { botToken: "xoxb-audit-secret", appToken: "xapp-audit-secret" },
-          },
-        }),
+      const enrolled = await surfaceClient(operator).setUpSurface({
+        provider: SurfaceProvider.SLACK,
+        externalAccountId: "T-AUDIT",
+        displayName: "Audit",
+        authMethod: "slack-socket-mode",
+        configuration: { transport: "socket" },
+        secrets: { botToken: "xoxb-audit-secret", appToken: "xapp-audit-secret" },
       });
-      expect(enrollment.status, await enrollment.clone().text()).toBe(200);
 
       // Approvals, Objective messages, approval, and cancellation.
       const fixture = await objectiveFixture(store);
@@ -235,9 +208,7 @@ for (const dialect of ["sqlite", "postgresql"] as const)
       ).rejects.toMatchObject({ code: Code.FailedPrecondition });
 
       await runResourceCommand(client, "delete", ["tag", "reviewer"]);
-      expect(
-        (await call(ADMIN, "/api/v1/operator-tokens/laptop-2/revoke", { method: "POST" })).status,
-      ).toBe(200);
+      await accessClient({ url, token: ADMIN }).revokeOperatorToken({ name: "laptop-2" });
 
       const entries = await audit();
       const token = "token:laptop-2";
@@ -249,7 +220,7 @@ for (const dialect of ["sqlite", "postgresql"] as const)
             action: "operator-token.create",
             target: "OperatorToken/laptop-2",
             outcome: "succeeded",
-            status: 201,
+            status: 200,
           },
           {
             actor: token,
@@ -270,7 +241,7 @@ for (const dialect of ["sqlite", "postgresql"] as const)
             action: "auth-key.create",
             target: "AuthKey/build-hosts",
             outcome: "succeeded",
-            status: 201,
+            status: 200,
           },
           {
             actor: token,
@@ -284,12 +255,19 @@ for (const dialect of ["sqlite", "postgresql"] as const)
             action: "worker-host.enroll",
             target: "WorkerHost/build-host",
             outcome: "succeeded",
-            status: 201,
+            status: 200,
           },
           {
             actor: token,
             action: "worker-host.credential.rotate",
             target: "WorkerHost/build-host",
+            outcome: "succeeded",
+            status: 200,
+          },
+          {
+            actor: token,
+            action: "surface.enroll",
+            target: `SurfaceAccount/${enrolled.metadata?.id}`,
             outcome: "succeeded",
             status: 200,
           },
@@ -536,30 +514,50 @@ describe("audit reads and sinks", () => {
       "Tag/second",
       "Tag/first",
     ]);
-    expect((await audit(ADMIN, `?since=${encodeURIComponent(between)}`)).length).toBe(2);
+    expect((await audit(ADMIN, { since: timestampFromDate(new Date(between)) })).length).toBe(2);
     expect(
-      (await audit(ADMIN, "?actor=control-plane-break-glass")).map((entry) => entry.target),
+      (await audit(ADMIN, { actor: "control-plane-break-glass" })).map((entry) => entry.target),
     ).toEqual(["Tag/second", "Tag/first"]);
-    expect((await audit(ADMIN, "?limit=1")).map((entry) => entry.target)).toEqual([
+    expect((await audit(ADMIN, { pageSize: 1 })).map((entry) => entry.target)).toEqual([
       "ApprovalRequest",
     ]);
-    for (const query of [
-      "?limit=0",
-      "?limit=501",
-      "?limit=ten",
-      "?since=yesterday",
-      "?actor=",
-      "?other=1",
-      "?limit=1&limit=2",
+    // Pages continue where the last ended.
+    const first = await organizationClient({ url, token: ADMIN }).listAuditEntries({
+      pageSize: 2,
+    });
+    expect(first.entries.map((entry) => entry.target)).toEqual(["ApprovalRequest", "Tag/second"]);
+    // A change recorded between pages neither repeats nor shifts the next page.
+    expect((await tag(ADMIN, "third")).status).toBe(201);
+    const next = await organizationClient({ url, token: ADMIN }).listAuditEntries({
+      pageSize: 2,
+      pageToken: first.nextPageToken,
+    });
+    expect(next.entries.map((entry) => entry.target)).toEqual(["Tag/first"]);
+    expect(next.nextPageToken).toBe("");
+    const list = (body: unknown, token?: string) =>
+      fetch(`${url}/supertag.operator.v1.OrganizationService/ListAuditEntries`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+        },
+        body: JSON.stringify(body),
+      });
+    for (const body of [
+      { pageSize: -1 },
+      { pageSize: "ten" },
+      { since: "yesterday" },
+      { actor: "x".repeat(201) },
+      { pageToken: "not-a-token" },
     ]) {
-      const response = await call(ADMIN, `/api/v1/audit${query}`);
-      expect(response.status, query).toBe(400);
+      const response = await list(body, ADMIN);
+      expect(response.status, JSON.stringify(body)).toBe(400);
     }
-    expect((await fetch(`${url}/api/v1/audit`)).status).toBe(401);
+    expect((await list({})).status).toBe(401);
     // Scoped coordination credentials reach only the coordination API.
-    expect((await call(SCOPED, "/api/v1/audit")).status).toBe(403);
+    expect((await list({}, SCOPED)).status).toBe(403);
     // Reading the audit trail adds nothing to it.
-    expect(await audit()).toHaveLength(3);
+    expect(await audit()).toHaveLength(4);
   });
 
   it("supertag audit prints entries as text or JSON and validates its flags", async () => {
@@ -615,18 +613,8 @@ describe("audit reads and sinks", () => {
     const directory = await mkdtemp(join(tmpdir(), "supertag-audit-file-"));
     cleanups.push(() => rm(directory, { recursive: true, force: true }));
     const file = join(directory, "audit.jsonl");
-    const { call, audit, store } = await runtime("sqlite", { sink: fileAuditSink(file) });
-    const created = await call(ADMIN, "/api/v1/operator-tokens", {
-      method: "POST",
-      body: JSON.stringify({
-        apiVersion: "supertag/v1",
-        kind: "OperatorToken",
-        metadata: { name: "file-sink" },
-        spec: {},
-      }),
-    });
-    expect(created.status).toBe(201);
-    const secret = ((await created.json()) as { secret: string }).secret;
+    const { url, call, audit, store } = await runtime("sqlite", { sink: fileAuditSink(file) });
+    const secret = await issueOperatorToken(url, ADMIN, "file-sink");
     expect((await call(ADMIN, "/api/v1/tags/missing", { method: "DELETE" })).status).toBe(404);
     const [newest, oldest] = await audit();
     // The file catches up asynchronously; wait until both lines are written.
@@ -810,20 +798,10 @@ describe("audit classification", () => {
       route: "/api/v1/apply-sets/{name}/prune",
     });
     // A path segment that is not a plain name or ID is left out of the target.
-    expect(classify("POST", "/api/v1/worker-hosts/build%20one/drain")).toEqual({
-      action: "worker-host.drain",
-      target: "WorkerHost",
-      route: "/api/v1/worker-hosts/{id}/drain",
-    });
-    expect(classify("POST", "/api/v1/worker-hosts/build/drain")).toEqual({
-      action: "worker-host.drain",
-      target: "WorkerHost/build",
-      route: "/api/v1/worker-hosts/{id}/drain",
-    });
-    expect(classify("DELETE", "/api/v1/worker-hosts/build/credential")).toEqual({
-      action: "worker-host.credential.revoke",
-      target: "WorkerHost/build",
-      route: "/api/v1/worker-hosts/{id}/credential",
+    expect(classify("DELETE", "/api/v1/tags/build%20one")).toEqual({
+      action: "delete",
+      target: "Tag",
+      route: "/api/v1/tags/{name}",
     });
     // An unmatched path is the caller's and might hold a credential, so none of it is kept.
     for (const [method, path] of [
@@ -832,6 +810,13 @@ describe("audit classification", () => {
       ["DELETE", "/api/v1/unknown-kind/st_op_secret"],
       ["PATCH", "/api/v1/tags/builder"],
       ["POST", "/other/st_op_secret"],
+      // Worker Hosts, Auth Keys, Operator Tokens and surfaces are operator RPCs, not routes.
+      ["POST", "/api/v1/worker-hosts/build/drain"],
+      ["DELETE", "/api/v1/worker-hosts/build/credential"],
+      ["POST", "/api/v1/auth-keys"],
+      ["POST", "/api/v1/operator-tokens/laptop/revoke"],
+      ["POST", "/api/v1/tag-operations"],
+      ["POST", "/api/v1/surface-enrollments"],
     ])
       expect(classify(method as string, path as string), path).toEqual({
         action: "request",
@@ -846,32 +831,13 @@ describe("audit classification", () => {
       expect(classify("POST", path), path).toEqual({ action: "request", target: "UnknownRoute" });
   });
 
-  it("never names a Tag operation's or surface enrollment's target from its request ID", () => {
-    const operation = classifyManagementRequest(
-      "POST",
-      new URL("http://localhost/api/v1/tag-operations"),
-    );
-    noteRequestBody(operation, { metadata: { id: "sk_live_tag_operation_credential" } });
-    expect(operation).toMatchObject({ action: "tag.operation", target: "Tag" });
-    const enrollment = classifyManagementRequest(
-      "POST",
-      new URL("http://localhost/api/v1/surface-enrollments"),
-    );
-    noteRequestBody(enrollment, { metadata: { id: "sk_live_enrollment_credential" } });
-    expect(enrollment).toMatchObject({ action: "surface.enroll", target: "SurfaceAccount" });
-  });
-
   it("reads only a well-formed name from a body and nothing else", () => {
     const apply = classify("POST", "/api/v1/tags");
     noteRequestBody(apply, { metadata: { name: "builder" }, spec: { secret: "s3cret" } });
     expect(apply).toEqual({ action: "apply", target: "Tag/builder", route: "/api/v1/tags" });
-    const odd = classify("POST", "/api/v1/auth-keys");
+    const odd = classify("POST", "/api/v1/roles");
     noteRequestBody(odd, { metadata: { name: "has spaces and\nnewlines" } });
-    expect(odd).toEqual({
-      action: "auth-key.create",
-      target: "AuthKey",
-      route: "/api/v1/auth-keys",
-    });
+    expect(odd).toEqual({ action: "apply", target: "Role", route: "/api/v1/roles" });
   });
 });
 

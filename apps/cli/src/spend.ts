@@ -1,8 +1,12 @@
 import { parseArgs } from "node:util";
+import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { parseSpendSince, type SpendReport, type SpendUsage } from "@supertag/core";
-import { ControlPlaneClient, type ControlPlaneTarget } from "./control-plane-client.js";
+import type { ControlPlaneTarget } from "./control-plane-client.js";
 import { money } from "./money.js";
+import { organizationClient } from "./operator-client.js";
+import { SPEND_GROUPINGS, spendReportView } from "./organization-protos.js";
 import { takeOutputFlag } from "./output-flag.js";
+import { refusedAsError } from "./tag-conversation.js";
 import { terminalText } from "./terminal-text.js";
 
 export async function runSpendCommand(
@@ -20,10 +24,14 @@ export async function runSpendCommand(
   const by = values.by ?? "objective";
   if (by !== "tag" && by !== "objective" && by !== "day")
     throw new Error("--by must be tag, objective, or day");
-  const query = new URLSearchParams({ by });
-  if (values.since !== undefined) query.set("since", parseSpendSince(values.since));
-  const report = await new ControlPlaneClient(target).request<SpendReport>(
-    `/api/v1/spend?${query}`,
+  const since = values.since === undefined ? undefined : parseSpendSince(values.since);
+  const report = spendReportView(
+    await refusedAsError(() =>
+      organizationClient({ url: target.url, token: target.token, warnOnSkew: true }).getSpend({
+        by: SPEND_GROUPINGS[by],
+        ...(since === undefined ? {} : { since: timestampFromDate(new Date(since)) }),
+      }),
+    ),
   );
   return output.json ? `${JSON.stringify(report, null, 2)}\n` : formatSpend(report);
 }

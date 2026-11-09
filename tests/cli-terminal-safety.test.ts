@@ -17,6 +17,7 @@ import {
 } from "../apps/cli/src/tag-command-adapter.ts";
 import { AccountSelectionError } from "../apps/cli/src/tag-surface-target.ts";
 import { terminalText } from "../apps/cli/src/terminal-text.ts";
+import { fakeHostRpc, workerHostJson, workerHostResourceOf } from "./support/fake-host-rpc.ts";
 import { fakeOperatorRpc } from "./support/fake-operator-rpc.ts";
 
 const hostile = "visible\x1b[2J\x1b]0;hidden-title\x07\r\n\t\b\x00\x7f\u009b\u202e\u2028\u2029end";
@@ -64,18 +65,29 @@ it("filters all Worker Host description fields and preserves JSON values", async
         {
           id: hostile,
           type: hostile,
-          profileCapabilities: [{ harness: hostile, models: [hostile], efforts: [hostile] }],
+          profileCapabilities: [
+            {
+              profile: { id: hostile, revision: "1" },
+              capabilities: [],
+              contextTypes: [],
+              harness: hostile,
+              models: [hostile],
+              efforts: ["high"],
+            },
+          ],
         },
       ],
     },
   };
-  vi.spyOn(client, "request").mockResolvedValue(resource);
+  fakeHostRpc([{ ...resource, metadata: { id: "host" } }], {
+    "HostService/GetWorkerHost": () => workerHostJson(resource),
+  });
   safe(await runResourceCommand(client, "describe", ["worker-host", "host"]));
   expect(
     JSON.parse(
       await runResourceCommand(client, "describe", ["worker-host", "host", "--output", "json"]),
     ),
-  ).toEqual(resource);
+  ).toEqual(workerHostResourceOf(resource));
 });
 
 it("filters ps cells, host details, errors, and uncertain attempt recovery commands", () => {

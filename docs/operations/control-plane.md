@@ -370,7 +370,8 @@ the file `logging.audit` names in `supertag.yaml`:
 ```
 
 `path` is the route the request
-matched, as a template such as `/api/v1/tags/{name}`, never the request's own path. A write to a
+matched, as a template such as `/api/v1/tags/{name}`, or the RPC's procedure, such as
+`/supertag.operator.v1.HostService/DrainWorkerHost`, never the request's own path. A write to a
 route the Control Plane doesn't recognize is recorded as `request` on `UnknownRoute`, with no
 `path`, so a credential pasted into a URL never reaches the log. A failure to write the line or the
 entry is reported on standard error and never fails the change itself, even when the report fails
@@ -466,9 +467,9 @@ verification. The probe uses a deliberately invalid execution credential and req
 authentication rejection. It never sends the administrative token to the RPC listener. It checks
 routing and TLS, not authenticated host registration or long-lived stream stability.
 
-The administrator-only `GET /api/v1/metrics` response includes `values.rpc`: call counts, duration
-buckets, active streams, connection counts, Worklet queue pressure and closure codes. See the
-[API reference](../reference/control-plane-api.md) for reset and duration semantics. Watch changes
+`OrganizationService.GetMetrics` reports `rpc`: call counts, duration buckets, active streams,
+connection counts, Worklet queue pressure and closure codes for the API Server process that answered.
+See [Metrics](../reference/control-plane-api.md#metrics) for reset and duration semantics. Watch changes
 over time: increasing queue rejection counts, persistent errors or repeated connection closures
 are reasons to inspect capacity, networking and credentials. Choose alert thresholds from your
 workload's measured baseline.

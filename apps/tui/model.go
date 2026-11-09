@@ -294,6 +294,15 @@ type model struct {
 	height   int
 	md       *markdown
 
+	// hosts are the Worker Hosts as last read; hostsKnown is false until a read succeeds and
+	// after one fails.
+	hosts      []*operatorv1.WorkerHost
+	hostsKnown bool
+	hostReload *reload
+
+	// switchable says the status bar offers switching to another Control Plane.
+	switchable bool
+
 	connected bool
 	status    string
 }
@@ -330,6 +339,7 @@ func newModel(ctx context.Context, c *client.Client, f *client.Follower, w *clie
 		objReload:      &reload{},
 		inboxReload:    &reload{},
 		overviewReload: &reload{},
+		hostReload:     &reload{},
 		input:          input,
 		viewport:       viewport.New(),
 		md:             &markdown{},
@@ -339,7 +349,8 @@ func newModel(ctx context.Context, c *client.Client, f *client.Follower, w *clie
 }
 
 func (m model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.reloadTags(), m.reloadConversations(), m.reloadObjectives(), m.reloadInbox(), m.reloadTeams(), m.pollAfter(), textinput.Blink}
+	cmds := []tea.Cmd{m.reloadTags(), m.reloadConversations(), m.reloadObjectives(), m.reloadInbox(), m.reloadTeams(),
+		m.reloadHosts(), m.pollAfter(), m.hostsAfter(), textinput.Blink}
 	if m.watcher != nil {
 		cmds = append(cmds, waitForWatch(m.watcher.Run(m.ctx)))
 	}
@@ -389,7 +400,7 @@ func (m model) reloadOverview() tea.Cmd {
 // reloadAll rereads everything the TUI shows.
 func (m model) reloadAll() tea.Cmd {
 	return tea.Batch(m.reloadTags(), m.reloadConversations(), m.reloadObjectives(), m.reloadInbox(), m.reloadOverview(),
-		m.reloadTeams(), m.reloadTeam(), m.reloadPicker())
+		m.reloadTeams(), m.reloadTeam(), m.reloadPicker(), m.reloadHosts())
 }
 
 func (m model) loadHistory(tag, name string) tea.Cmd {
@@ -644,6 +655,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case teamMsg:
 		return m, m.teamRead(msg)
+
+	case hostsMsg:
+		return m, m.hostsRead(msg)
+
+	case hostTickMsg:
+		return m, tea.Batch(m.reloadHosts(), m.hostsAfter())
 
 	case tea.KeyPressMsg:
 		return m.key(msg)

@@ -14,12 +14,7 @@ import {
   ensureLocalAdminToken,
   normalizeControlPlaneUrl,
 } from "./control-plane-client.js";
-import {
-  CONTROL_PLANE_API_VERSION,
-  type TagResource,
-  type WorkerHostCredentialIssuance,
-  type WorkerHostResource,
-} from "./control-plane-resources.js";
+import type { TagResource } from "./control-plane-resources.js";
 import { resumeIfDrained } from "./drain.js";
 import { providerCredentialsFromEnvFile } from "./host-environment.js";
 import { hostMcpToolServers } from "./host-mcp.js";
@@ -49,6 +44,8 @@ import {
   writeStatus,
 } from "./local-state.js";
 import { FileMcpLoginStore, lapsedMcpLogins } from "./mcp-oauth.js";
+import { hostClient } from "./operator-client.js";
+import { enrollWorkerHostCredential, getWorkerHostResource } from "./operator-resources.js";
 import { hostServiceStorageWarnings } from "./storage-durability.js";
 import {
   availableHostVolumeCredentials,
@@ -61,6 +58,7 @@ import {
   serviceFingerprint,
   UNSANDBOXED_HARNESSES,
 } from "./supertag-yaml.js";
+import { refusedAsError } from "./tag-conversation.js";
 import { resolvedSummary } from "./up-serve.js";
 import { SUPERTAG_VERSION } from "./version.js";
 import {
@@ -248,34 +246,18 @@ async function enrollLocal(
   target: ControlPlaneTarget,
   name: string,
 ): Promise<{ readonly workerHostId: string; readonly token: string; readonly notice: string }> {
-  const client = new ControlPlaneClient(target);
   for (let attempt = 1; attempt <= 20; attempt += 1) {
     const workerHostId = workerHostNameCandidate(name, attempt);
-    try {
-      const issuance = await client.request<WorkerHostCredentialIssuance>("/api/v1/worker-hosts", {
-        method: "POST",
-        body: JSON.stringify({
-          apiVersion: CONTROL_PLANE_API_VERSION,
-          kind: "WorkerHostEnrollment",
-          metadata: { id: workerHostId },
-          spec: {},
-        }),
-      });
-      if (
-        issuance?.kind !== "WorkerHostCredential" ||
-        issuance.metadata.workerHostId !== workerHostId ||
-        !issuance.credential.token
-      )
-        throw new Error("Control Plane returned an invalid Worker Host credential");
-      return {
-        workerHostId,
-        token: issuance.credential.token,
-        notice: `Enrolled as Worker Host ${workerHostId} on the local Control Plane.`,
-      };
-    } catch (error) {
-      if (error instanceof Error && /already enrolled/u.test(error.message)) continue;
-      throw error;
-    }
+    const issued = await enrollWorkerHostCredential(
+      { url: target.url, token: target.token, warnOnSkew: true },
+      workerHostId,
+    );
+    if (issued === undefined) continue;
+    return {
+      workerHostId,
+      token: issued.token,
+      notice: `Enrolled as Worker Host ${workerHostId} on the local Control Plane.`,
+    };
   }
   throw new Error(`No free Worker Host ID near ${name}`);
 }
@@ -725,11 +707,9 @@ export async function hostHealthLines(
   const client = new ControlPlaneClient(target.local);
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const host = await client
-      .request<WorkerHostResource>(
-        `/api/v1/worker-hosts/${encodeURIComponent(status.workerHostId)}`,
-      )
-      .catch(() => undefined);
+    const host = await getWorkerHostResource(client.operator, status.workerHostId).catch(
+      () => undefined,
+    );
     const registered = host?.status.workers.map((worker) => worker.id) ?? [];
     const missing = workers.filter((worker) => !registered.includes(worker));
     if (host?.status.connectionStatus === "connected" && missing.length === 0)
@@ -760,10 +740,7 @@ export async function bindLocalTags(
         continue;
       }
       if (resource.spec.workerHosts.includes(workerHostId)) continue;
-      await client.request(
-        `/api/v1/tags/${encodeURIComponent(tag)}/worker-hosts/${encodeURIComponent(workerHostId)}`,
-        { method: "PUT" },
-      );
+      await refusedAsError(() => hostClient(client.operator).bindWorkerHost({ tag, workerHostId }));
       notice(`Bound Worker Host ${workerHostId} to Tag ${tag}.`);
     } catch (error) {
       if (error instanceof ControlPlaneRequestError && error.status === 404) {

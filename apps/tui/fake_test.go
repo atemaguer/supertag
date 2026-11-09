@@ -18,9 +18,10 @@ import (
 )
 
 // fakeControlPlane serves GET /api/v1/tags and the generated ConversationService,
-// ObjectiveService, InboxService, WorkService, TeamService, MailboxService and EventService
-// handlers. Unset functions answer with an empty history, no conversations, no Objectives, an
-// empty inbox, no Sessions, no Task events, no Teams, and a watch stream that only stays open.
+// ObjectiveService, InboxService, WorkService, TeamService, MailboxService, HostService and
+// EventService handlers. Unset functions answer with an empty history, no conversations, no
+// Objectives, an empty inbox, no Sessions, no Task events, no Teams, no Worker Hosts, and a watch
+// stream that only stays open.
 type fakeControlPlane struct {
 	operatorv1connect.UnimplementedConversationServiceHandler
 	operatorv1connect.UnimplementedObjectiveServiceHandler
@@ -29,6 +30,7 @@ type fakeControlPlane struct {
 	operatorv1connect.UnimplementedWorkServiceHandler
 	operatorv1connect.UnimplementedTeamServiceHandler
 	operatorv1connect.UnimplementedMailboxServiceHandler
+	operatorv1connect.UnimplementedHostServiceHandler
 
 	token   string
 	tags    func(http.ResponseWriter)
@@ -51,6 +53,9 @@ type fakeControlPlane struct {
 	taskEvents func(*operatorv1.ListTaskEventsRequest) []*operatorv1.TaskEvent
 	teamList   func() []*operatorv1.Team
 	posts      func(*operatorv1.ListWorkstreamPostsRequest) *operatorv1.ListWorkstreamPostsResponse
+	// hostList answers ListWorkerHosts; hostErr, when set, refuses it.
+	hostList func() []*operatorv1.WorkerHost
+	hostErr  error
 
 	mu                sync.Mutex
 	conversationLists []string
@@ -58,6 +63,7 @@ type fakeControlPlane struct {
 	postReads         map[string]int
 	badAuth           int
 	tagReads          int
+	hostReads         int
 	sent              []*operatorv1.SendMessageRequest
 	followed          map[string]int
 	resumed           map[string][]int64
@@ -82,6 +88,7 @@ func (f *fakeControlPlane) start(t *testing.T) *httptest.Server {
 	mux.Handle(operatorv1connect.NewWorkServiceHandler(f))
 	mux.Handle(operatorv1connect.NewTeamServiceHandler(f))
 	mux.Handle(operatorv1connect.NewMailboxServiceHandler(f))
+	mux.Handle(operatorv1connect.NewHostServiceHandler(f))
 	mux.HandleFunc("GET /api/v1/tags", func(w http.ResponseWriter, _ *http.Request) {
 		f.mu.Lock()
 		f.tagReads++
@@ -202,6 +209,20 @@ func (f *fakeControlPlane) ListWorkstreamPosts(_ context.Context, req *connect.R
 	res := &operatorv1.ListWorkstreamPostsResponse{}
 	if f.posts != nil {
 		res = f.posts(req.Msg)
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (f *fakeControlPlane) ListWorkerHosts(context.Context, *connect.Request[operatorv1.ListWorkerHostsRequest]) (*connect.Response[operatorv1.ListWorkerHostsResponse], error) {
+	f.mu.Lock()
+	f.hostReads++
+	f.mu.Unlock()
+	if f.hostErr != nil {
+		return nil, f.hostErr
+	}
+	res := &operatorv1.ListWorkerHostsResponse{}
+	if f.hostList != nil {
+		res.WorkerHosts = f.hostList()
 	}
 	return connect.NewResponse(res), nil
 }

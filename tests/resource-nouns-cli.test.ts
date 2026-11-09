@@ -32,6 +32,10 @@ const aliases = [
 const listedByRpc: Readonly<Record<string, string>> = {
   task: "WorkService/ListTasks",
   session: "WorkService/ListSessions",
+  "surface-account": "SurfaceService/ListSurfaceAccounts",
+  "worker-host": "HostService/ListWorkerHosts",
+  "auth-key": "HostService/ListAuthKeys",
+  "operator-token": "AccessService/ListOperatorTokens",
 };
 
 it.each(canonical.filter((kind) => !(kind in listedByRpc)))(

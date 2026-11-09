@@ -18,6 +18,7 @@ import {
   writeWorkerHostCredential,
 } from "../apps/cli/src/worker-hosts.js";
 import { workerHostNameCandidate, workerHostNameFromHostname } from "../packages/core/src/index.js";
+import { FakeRpcError, fakeOperatorRpc } from "./support/fake-operator-rpc.js";
 
 const CONTROL_PLANE = "https://control.example.com";
 const AUTH_KEY = `stak_${"a".repeat(64)}`;
@@ -94,20 +95,20 @@ describe("Auth Key commands", () => {
   });
 
   it("creates a key through the operator API and prints the secret once", async () => {
-    const requests: { path: string; init?: RequestInit }[] = [];
-    const client = {
-      async request<T>(path: string, init?: RequestInit): Promise<T> {
-        requests.push({ path, ...(init ? { init } : {}) });
-        return {
-          apiVersion: "supertag/v1",
-          kind: "AuthKey",
+    const rpc = fakeOperatorRpc({
+      "HostService/CreateAuthKey": () => ({
+        authKey: {
           metadata: { id: "k", name: "ci" },
-          spec: { tags: ["builder", "reviewer"], reusable: true, ephemeral: true },
-          status: { phase: "active", expiresAt: "2026-12-29T00:00:00.000Z", redemptionCount: 0 },
-          secret: AUTH_KEY,
-        } as T;
-      },
-    };
+          tags: ["builder", "reviewer"],
+          reusable: true,
+          ephemeral: true,
+          phase: "AUTH_KEY_PHASE_ACTIVE",
+          expiresAt: "2026-12-29T00:00:00Z",
+        },
+        secret: AUTH_KEY,
+      }),
+    });
+    const client = { operator: { url: CONTROL_PLANE, token: "admin" } };
     const output = await runAuthKeyCommand(
       client,
       "create",
@@ -118,13 +119,13 @@ describe("Auth Key commands", () => {
     expect(output).toContain(
       "Created Auth Key ci (reusable, ephemeral) for Tags builder, reviewer",
     );
+    expect(output).toContain("It expires at 2026-12-29T00:00:00.000Z.");
     expect(output).toContain(`supertag connect worklet --control-plane ${CONTROL_PLANE}`);
-    expect(requests[0]?.path).toBe("/api/v1/auth-keys");
-    expect(JSON.parse(String(requests[0]?.init?.body))).toEqual({
-      apiVersion: "supertag/v1",
-      kind: "AuthKey",
-      metadata: { name: "ci" },
-      spec: { tags: ["builder", "reviewer"], labels: [], reusable: true, ephemeral: true },
+    expect(rpc.called("HostService/CreateAuthKey")[0]?.body).toEqual({
+      name: "ci",
+      tags: ["builder", "reviewer"],
+      reusable: true,
+      ephemeral: true,
     });
     await expect(runAuthKeyCommand(client, "create", ["ci"], CONTROL_PLANE)).rejects.toThrow(
       "--tag TAG",
@@ -135,24 +136,39 @@ describe("Auth Key commands", () => {
   });
 
   it("revokes a key by name", async () => {
-    const request = vi.fn(async () => ({ metadata: { name: "ci" } }));
+    const rpc = fakeOperatorRpc({
+      "HostService/RevokeAuthKey": () => ({
+        metadata: { name: "ci" },
+        phase: "AUTH_KEY_PHASE_REVOKED",
+        expiresAt: "2026-12-29T00:00:00Z",
+      }),
+    });
     await expect(
-      runAuthKeyCommand({ request } as never, "revoke", ["ci"], CONTROL_PLANE),
+      runAuthKeyCommand(
+        { operator: { url: CONTROL_PLANE, token: "admin" } },
+        "revoke",
+        ["ci"],
+        CONTROL_PLANE,
+      ),
     ).resolves.toContain("hosts that already joined keep their enrollment");
-    expect(request).toHaveBeenCalledWith("/api/v1/auth-keys/ci/revoke", { method: "POST" });
+    expect(rpc.called("HostService/RevokeAuthKey")[0]?.body).toEqual({ name: "ci" });
   });
 
-  it("routes create auth-key to the operator Control Plane", async () => {
+  it("routes revoke auth-key to the operator Control Plane", async () => {
     vi.spyOn(controlPlane, "resolveControlPlaneTarget").mockResolvedValue({
       url: CONTROL_PLANE,
       token: "operator",
     });
-    const request = vi
-      .spyOn(controlPlane.ControlPlaneClient.prototype, "request")
-      .mockResolvedValue({ metadata: { name: "ci" } });
+    const rpc = fakeOperatorRpc({
+      "HostService/RevokeAuthKey": () => ({
+        metadata: { name: "ci" },
+        phase: "AUTH_KEY_PHASE_REVOKED",
+        expiresAt: "2026-12-29T00:00:00Z",
+      }),
+    });
     vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     expect(await main(["revoke", "auth-key", "ci"])).toBe(0);
-    expect(request).toHaveBeenCalledWith("/api/v1/auth-keys/ci/revoke", { method: "POST" });
+    expect(rpc.called("HostService/RevokeAuthKey")).toHaveLength(1);
   });
 
   it("passes the Auth Key and management URL to connect worklet", async () => {
@@ -291,15 +307,17 @@ describe("Worklet credential resolution", () => {
 
   it("enrolls the host with operator credentials for the same Control Plane", async () => {
     const state = await stateDirectory();
-    const request = vi
-      .spyOn(controlPlane.ControlPlaneClient.prototype, "request")
-      .mockRejectedValueOnce(new Error("Worker Host is already enrolled"))
-      .mockResolvedValueOnce({
-        apiVersion: "supertag/v1",
-        kind: "WorkerHostCredential",
-        metadata: { workerHostId: "laptop-2", issuedAt: "2026-09-30T00:00:00.000Z" },
-        credential: { token: "operator-issued" },
-      });
+    const rpc = fakeOperatorRpc({
+      "HostService/EnrollWorkerHost": (body) => {
+        if (body["id"] === "laptop")
+          throw new FakeRpcError("already_exists", "Worker Host is already enrolled", 409);
+        return {
+          workerHostId: "laptop-2",
+          issuedAt: "2026-09-30T00:00:00Z",
+          token: "operator-issued",
+        };
+      },
+    });
     const resolved = await resolveWorkletCredential({
       controlPlane: "http://127.0.0.1:3434",
       hostname: "laptop",
@@ -308,7 +326,10 @@ describe("Worklet credential resolution", () => {
     });
     expect(resolved).toMatchObject({ workerHostId: "laptop-2", source: "operator" });
     expect(resolved.notice).toContain("supertag update tag TAG --add-worker-host laptop-2");
-    expect(request).toHaveBeenCalledTimes(2);
+    expect(rpc.called("HostService/EnrollWorkerHost").map((call) => call.body["id"])).toEqual([
+      "laptop",
+      "laptop-2",
+    ]);
     expect(await readFile(workerHostCredentialPath("laptop-2", state), "utf8")).toContain(
       "operator-issued",
     );

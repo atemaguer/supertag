@@ -1,28 +1,30 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.js";
 import { runResourceCommand } from "../apps/cli/src/resources.js";
+import { fakeHostRpc } from "./support/fake-host-rpc.ts";
 import { fakeOperatorRpc } from "./support/fake-operator-rpc.js";
 
 afterEach(() => vi.restoreAllMocks());
 const client = () => new ControlPlaneClient({ url: "http://127.0.0.1:1", token: "unused" });
 it("describes Host observations without treating stored slots as live capacity", async () => {
   const api = client();
-  vi.spyOn(api, "request").mockResolvedValue({
-    kind: "WorkerHost",
-    metadata: { id: "host" },
-    spec: { draining: true },
-    status: {
-      phase: "unreachable",
-      connectionStatus: "disconnected",
-      connectionGeneration: 4,
-      capacity: 3,
-      availableSlots: 2,
-      activeAttempts: 1,
-      protocolVersion: 14,
-      durableProtocolVersion: 1,
-      workers: [{ id: "worker", type: "codex", profiles: [{ id: "default", revision: "1" }] }],
+  fakeHostRpc([
+    {
+      metadata: { id: "host" },
+      spec: { draining: true },
+      status: {
+        phase: "unreachable",
+        connectionStatus: "disconnected",
+        connectionGeneration: 4,
+        capacity: 3,
+        availableSlots: 2,
+        activeAttempts: 1,
+        protocolVersion: 14,
+        durableProtocolVersion: 1,
+        workers: [{ id: "worker", type: "codex", profiles: [{ id: "default", revision: "1" }] }],
+      },
     },
-  });
+  ]);
   const output = await runResourceCommand(api, "describe", [
     "worker-host",
     "host",

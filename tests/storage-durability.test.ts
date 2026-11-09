@@ -19,6 +19,7 @@ import {
   readWorkerHostCredential,
   writeWorkerHostCredential,
 } from "../apps/cli/src/worker-hosts.ts";
+import { fakeHostRpc } from "./support/fake-host-rpc.ts";
 import { fakeWorkRpc } from "./support/fake-work-rpc.ts";
 
 const EPHEMERAL_LINE =
@@ -59,13 +60,13 @@ function sandboxWorkers(provider: string) {
 
 async function describeHost(status: Record<string, unknown>): Promise<string> {
   const client = new ControlPlaneClient({ url: "http://127.0.0.1:1", token: "unused" });
-  vi.spyOn(client, "request").mockResolvedValue({
-    apiVersion: "supertag/v1",
-    kind: "WorkerHost",
-    metadata: { id: "ci-7" },
-    spec: { draining: false },
-    status: { phase: "ready", labels: [], workers: [], ...status },
-  });
+  fakeHostRpc([
+    {
+      metadata: { id: "ci-7" },
+      spec: { draining: false },
+      status: { phase: "ready", labels: [], workers: [], ...status },
+    },
+  ]);
   return runResourceCommand(client, "describe", ["worker-host", "ci-7"]);
 }
 
