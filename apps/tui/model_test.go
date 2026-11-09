@@ -46,7 +46,7 @@ func update(t *testing.T, m model, msg tea.Msg) model {
 }
 
 // run feeds cmd's messages back into Update until no command is left, as the program would,
-// running batched commands in order. A poll tick ends its chain.
+// running batched commands in order. A poll tick or the input cursor's blink ends its chain.
 func run(t *testing.T, m model, cmd tea.Cmd) model {
 	t.Helper()
 	queue := []tea.Cmd{cmd}
@@ -56,7 +56,11 @@ func run(t *testing.T, m model, cmd tea.Cmd) model {
 		if next == nil {
 			continue
 		}
-		switch msg := next().(type) {
+		msg := next()
+		if strings.HasPrefix(fmt.Sprintf("%T", msg), "cursor.") {
+			continue
+		}
+		switch msg := msg.(type) {
 		case nil, pollMsg:
 		case tea.BatchMsg:
 			queue = append(queue, msg...)

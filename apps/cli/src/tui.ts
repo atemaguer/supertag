@@ -1,15 +1,21 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { constants as osConstants } from "node:os";
 import { fileURLToPath } from "node:url";
 import { type ControlPlaneTarget, resolveControlPlaneTarget } from "./control-plane-client.js";
+import { SUPERTAG_VERSION } from "./version.js";
 
 export interface TuiOptions {
   /** The global `--control-plane` selection. */
   readonly override?: string | undefined;
   readonly env?: NodeJS.ProcessEnv;
   readonly resolveTarget?: (override?: string) => Promise<ControlPlaneTarget | undefined>;
+  /** The CLI release the binary must match. */
+  readonly version?: string;
 }
+
+const installCommand =
+  "curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh";
 
 /** Credential variables the CLI reads; the TUI receives the token on fd 3 only. */
 const credentialVariables = ["SUPERTAG_OPERATOR_TOKEN", "SUPERTAG_ADMIN_TOKEN"];
@@ -29,12 +35,18 @@ export function opensTui(
 /**
  * Opens the terminal UI against the selected Control Plane and returns its exit code, or
  * undefined when no TUI binary is installed for this platform, so the caller shows help instead.
- * Without a Control Plane it says to run `supertag init` and returns 1.
+ * A binary from another release is refused with how to fix it, and without a Control Plane it
+ * says to run `supertag init`; both return 1.
  */
 export async function runTui(options: TuiOptions = {}): Promise<number | undefined> {
   const env = options.env ?? process.env;
   const binary = findTuiBinary(env);
   if (binary === undefined) return undefined;
+  const mismatch = versionMismatch(binary, options.version ?? SUPERTAG_VERSION, env);
+  if (mismatch !== undefined) {
+    process.stderr.write(mismatch);
+    return 1;
+  }
   const target = await (options.resolveTarget ?? resolveControlPlaneTarget)(options.override);
   if (target === undefined) {
     process.stderr.write(
@@ -45,12 +57,44 @@ export async function runTui(options: TuiOptions = {}): Promise<number | undefin
   return launch(binary, target, env);
 }
 
-/** How to build the TUI, when this CLI runs from a checkout that has its sources. */
-export function tuiBuildHint(): string | undefined {
-  const script = fileURLToPath(new URL("../../tui/build.sh", import.meta.url));
-  return executable(script)
+/**
+ * How to get the TUI when no binary is found: build it in a checkout that has its sources,
+ * otherwise reinstall with the curl installer.
+ */
+export function tuiBuildHint(checkout: boolean = inCheckout()): string {
+  return checkout
     ? "The terminal UI is not built in this checkout. Build it with: cd apps/tui && ./build.sh\n"
-    : undefined;
+    : `The terminal UI is not installed. Reinstall SuperTag with the curl installer to get it: ${installCommand}\n`;
+}
+
+function inCheckout(): boolean {
+  return executable(fileURLToPath(new URL("../../tui/build.sh", import.meta.url)));
+}
+
+/** The refusal for a binary whose release differs from the CLI's, or undefined when they match. */
+function versionMismatch(
+  binary: string,
+  cliVersion: string,
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  let reported: string;
+  try {
+    reported = execFileSync(binary, ["--version"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5_000,
+      env: withoutCredentials(env),
+    }).trim();
+  } catch {
+    reported = "";
+  }
+  if (reported === cliVersion) return undefined;
+  const fix = env["SUPERTAG_TUI_BINARY"]?.trim()
+    ? `Point SUPERTAG_TUI_BINARY at a ${cliVersion} build, or unset it.`
+    : inCheckout()
+      ? "Rebuild it with: cd apps/tui && ./build.sh"
+      : `Reinstall SuperTag with the curl installer: ${installCommand}`;
+  return `The terminal UI at ${binary} is ${reported === "" ? "an unknown version" : reported} but this CLI is ${cliVersion}, and they must match. ${fix}\n`;
 }
 
 /** SUPERTAG_TUI_BINARY, else the checkout's apps/tui/dist build, else the packaged tui/ binary. */
@@ -83,17 +127,21 @@ function executable(path: string): boolean {
   }
 }
 
+function withoutCredentials(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const childEnv = { ...env };
+  for (const name of credentialVariables) delete childEnv[name];
+  return childEnv;
+}
+
 function launch(
   binary: string,
   target: ControlPlaneTarget,
   env: NodeJS.ProcessEnv,
 ): Promise<number> {
-  const childEnv = { ...env };
-  for (const name of credentialVariables) delete childEnv[name];
   return new Promise((resolve, reject) => {
     const child = spawn(binary, [], {
       stdio: ["inherit", "inherit", "inherit", "pipe"],
-      env: childEnv,
+      env: withoutCredentials(env),
     });
     const forward = (signal: NodeJS.Signals) => () => {
       child.kill(signal);

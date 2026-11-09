@@ -1,6 +1,5 @@
 import type { TaskAttemptRunningCommand } from "@supertag/control-plane";
 import {
-  type CoordinationInboxPage,
   type Objective,
   type SpendUsage,
   storedTaskFindings,
@@ -13,8 +12,10 @@ import { ControlPlaneClient, type ControlPlaneTarget } from "./control-plane-cli
 import type { WorkerHostResource } from "./control-plane-resources.js";
 import { type DiskSpace, lowDiskWarning } from "./disk-space.js";
 import { money } from "./money.js";
+import { inboxClient } from "./operator-client.js";
 import { takeOutputFlag } from "./output-flag.js";
 import { runningCommandText } from "./running-command.js";
+import { refusedAsError } from "./tag-conversation.js";
 import { terminalText } from "./terminal-text.js";
 
 /** Running Task Attempts against total capacity for one harness on one Worker Host. */
@@ -292,7 +293,7 @@ export async function runStatusCommand(
   const client = new ControlPlaneClient(target);
   const [organization, inbox] = await Promise.all([
     client.request<OrganizationStatus>("/api/v1/organization"),
-    operatorInbox(client),
+    operatorInbox(target),
   ]);
   const items = inbox.items;
   const byObjective = new Map<string, number>();
@@ -310,22 +311,24 @@ export async function runStatusCommand(
 }
 
 /** Every item the operator decides, as `supertag list inbox` counts them. */
-async function operatorInbox(client: ControlPlaneClient): Promise<{
-  items: CoordinationInboxPage["items"][number][];
+async function operatorInbox(target: ControlPlaneTarget): Promise<{
+  items: { readonly objectiveId: string | null }[];
   truncated: boolean;
 }> {
-  const items: CoordinationInboxPage["items"][number][] = [];
+  const inbox = inboxClient({ url: target.url, token: target.token });
+  const items: { readonly objectiveId: string | null }[] = [];
   let truncated = false;
-  let cursor: string | undefined;
+  let pageToken = "";
   do {
-    const page: CoordinationInboxPage = await client.request<CoordinationInboxPage>(
-      `/api/v1/coordination/inbox${cursor === undefined ? "" : `?${new URLSearchParams({ cursor })}`}`,
-      { method: "GET" },
+    const token = pageToken;
+    const page = await refusedAsError(() =>
+      inbox.listInboxItems({ pageToken: token, pageSize: 100 }),
     );
-    items.push(...page.items.filter((item) => item.operatorEligible));
-    if ((page.truncatedKinds ?? []).length > 0) truncated = true;
-    cursor = page.nextCursor ?? undefined;
-  } while (cursor);
+    for (const item of page.items)
+      if (item.operatorEligible) items.push({ objectiveId: item.objectiveId || null });
+    if (page.truncatedKinds.length > 0) truncated = true;
+    pageToken = page.nextPageToken;
+  } while (pageToken);
   return { items, truncated };
 }
 

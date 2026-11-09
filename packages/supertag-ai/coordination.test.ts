@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { CoordinationClient } from "./src/coordination.js";
+import { CoordinationClient, InboxItemKind } from "./src/coordination.js";
 
-function page(body: unknown, status = 200) {
+function reply(body: unknown, status = 200) {
   return vi.fn(
-    async () =>
+    async (_url: string | URL | Request, _init?: RequestInit) =>
       new Response(JSON.stringify(body), {
         status,
         headers: { "content-type": "application/json" },
@@ -12,13 +12,8 @@ function page(body: unknown, status = 200) {
 }
 
 describe("CoordinationClient", () => {
-  it("reads a filtered inbox through the versioned coordination endpoint", async () => {
-    const fetch = page({
-      projectionVersion: 8,
-      asOf: "2026-09-11T00:00:00.000Z",
-      items: [],
-      truncatedKinds: [],
-    });
+  it("lists a filtered inbox through InboxService.ListInboxItems", async () => {
+    const fetch = reply({ asOf: "2026-09-11T00:00:00Z", items: [], truncatedKinds: [] });
     const client = new CoordinationClient({
       baseUrl: "https://control-plane.example",
       token: "operator-secret",
@@ -26,15 +21,21 @@ describe("CoordinationClient", () => {
     });
 
     await expect(
-      client.inbox({ objectiveId: "objective-a", kind: "question", limit: 20 }),
+      client.inbox({ objectiveId: "objective-a", kind: InboxItemKind.QUESTION, pageSize: 20 }),
     ).resolves.toMatchObject({ items: [] });
-    expect(String(fetch.mock.calls[0]?.[0])).toBe(
-      "https://control-plane.example/api/v1/coordination/inbox?objectiveId=objective-a&kind=question&limit=20",
+    const [url, init] = fetch.mock.calls[0] ?? [];
+    expect(String(url)).toBe(
+      "https://control-plane.example/supertag.operator.v1.InboxService/ListInboxItems",
     );
+    expect(JSON.parse(new TextDecoder().decode(init?.body as Uint8Array))).toEqual({
+      objectiveId: "objective-a",
+      kind: "INBOX_ITEM_KIND_QUESTION",
+      pageSize: 20,
+    });
   });
 
   it("authenticates with a header, never in the URL or the body", async () => {
-    const fetch = page({ projectionVersion: 8, asOf: "", items: [], truncatedKinds: [] });
+    const fetch = reply({ items: [] });
     const client = new CoordinationClient({
       baseUrl: "https://control-plane.example/control/",
       token: "operator-secret",
@@ -43,21 +44,19 @@ describe("CoordinationClient", () => {
 
     await client.inbox();
     const [url, init] = fetch.mock.calls[0] ?? [];
-    expect(String(url)).toBe("https://control-plane.example/api/v1/coordination/inbox");
     expect(String(url)).not.toContain("operator-secret");
-    expect(init?.body ?? "").not.toContain("operator-secret");
-    expect(init?.headers).toMatchObject({ authorization: "Bearer operator-secret" });
+    expect(new TextDecoder().decode(init?.body as Uint8Array)).not.toContain("operator-secret");
+    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer operator-secret");
   });
 
-  it("returns the API Server error and rejects paths outside the coordination surface", async () => {
+  it("returns the Control Plane's error message", async () => {
     const client = new CoordinationClient({
       baseUrl: "http://127.0.0.1:3434",
       token: "operator-secret",
-      fetch: page({ message: "stale revision" }, 409),
+      fetch: reply({ code: "permission_denied", message: "missing read_coordination_inbox" }, 403),
     });
 
-    await expect(client.inbox()).rejects.toThrow("stale revision");
-    await expect(client.request("/api/v1/tasks")).rejects.toThrow("coordination API");
+    await expect(client.inbox()).rejects.toThrow("missing read_coordination_inbox");
   });
 
   it("requires a token and an HTTP base URL", () => {

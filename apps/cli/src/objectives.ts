@@ -1,20 +1,35 @@
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
+import { type DescMessage, type MessageShape, toJsonString } from "@bufbuild/protobuf";
+import { timestampDate, timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError } from "@connectrpc/connect";
-import type { MessageObjectiveResult, ObjectiveOverview } from "@supertag/control-plane";
-import type { CoordinationInboxPage, Objective, Team } from "@supertag/core";
-import type { Message } from "@supertag/operator-api";
+import {
+  ListObjectivesResponseSchema,
+  type Message,
+  MessageObjectiveResponseSchema,
+  ObjectiveOverviewSchema,
+  ObjectiveSchema,
+} from "@supertag/operator-api";
 import { ControlPlaneClient, type ControlPlaneTarget } from "./control-plane-client.js";
 import { localCheckouts } from "./delivery-view.js";
 import { money } from "./money.js";
 import { runObjectiveCancel } from "./objective-cancel.js";
 import { formatObjectiveOverview } from "./objective-overview.js";
 import { runObjectivePause } from "./objective-pause.js";
+import {
+  inboxItemRecord,
+  OBJECTIVE_STATUS,
+  type ObjectiveView,
+  objectiveView,
+  overviewView,
+} from "./objective-protos.js";
 import { watchObjective } from "./objective-watch.js";
+import { eventClient, inboxClient, objectiveClient } from "./operator-client.js";
 import { withCurrentRevision } from "./revision.js";
 import { followTagMessage, refusedAsError, tagConversationClient } from "./tag-conversation.js";
-import { runTeamCommand } from "./teams.js";
 import { terminalText } from "./terminal-text.js";
+import { workstreamPosts } from "./workstreams.js";
 
 export function objectiveHelp(): string {
   return `Usage:
@@ -75,9 +90,11 @@ export async function runObjectiveCommand(
   args: readonly string[],
 ): Promise<string> {
   const [command, ...rest] = args;
-  if (command === "cancel") return runObjectiveCancel(new ControlPlaneClient(target), rest);
+  const connection = { url: target.url, token: target.token, warnOnSkew: true };
+  const client = objectiveClient(connection);
+  if (command === "cancel") return refusedAsError(() => runObjectiveCancel(client, rest));
   if (command === "pause" || command === "resume")
-    return runObjectivePause(new ControlPlaneClient(target), command, rest);
+    return refusedAsError(() => runObjectivePause(client, command, rest));
   const { values, positionals } = parseArgs({
     args: [...rest],
     allowPositionals: true,
@@ -154,8 +171,6 @@ export async function runObjectiveCommand(
   if (values.output !== undefined && values.output !== "json" && values.output !== "text")
     throw new Error("--output must be text or json");
   const json = values.output === "json";
-  const client = new ControlPlaneClient(target);
-  const base = "/api/v1/tag-messaging/objectives";
   const id = positionals[0] ?? "";
   if (command === "watch") {
     const controller = new AbortController();
@@ -163,33 +178,43 @@ export async function runObjectiveCommand(
     process.once("SIGINT", stop);
     try {
       const checkouts = json ? undefined : await localCheckouts(target.url);
-      await watchObjective(client, id, {
-        output: json ? "json" : "text",
-        signal: controller.signal,
-        write: (text) => process.stdout.write(text),
-        warn: (text) => process.stderr.write(text),
-        ...(checkouts === undefined ? {} : { checkouts }),
-      });
+      await refusedAsError(() =>
+        watchObjective(
+          {
+            objectives: client,
+            inbox: inboxClient(connection),
+            posts: workstreamPosts(new ControlPlaneClient(target)),
+            events: eventClient(connection),
+          },
+          id,
+          {
+            output: json ? "json" : "text",
+            signal: controller.signal,
+            write: (text) => process.stdout.write(text),
+            warn: (text) => process.stderr.write(text),
+            ...(checkouts === undefined ? {} : { checkouts }),
+          },
+        ),
+      );
     } finally {
       process.removeListener("SIGINT", stop);
     }
     return "";
   }
   if (command === "get" && values.overview) {
-    const overview = await client.request<ObjectiveOverview>(
-      `/api/v1/coordination/objectives/${encodeURIComponent(id)}/overview`,
-    );
-    if (json) return `${JSON.stringify(overview, null, 2)}\n`;
+    const overview = await refusedAsError(() => client.describeObjective({ id }));
+    if (json) return jsonOf(ObjectiveOverviewSchema, overview);
     const [inbox, checkouts] = await Promise.all([
-      client
-        .request<CoordinationInboxPage>(
-          `/api/v1/coordination/inbox?${new URLSearchParams({ objectiveId: id, limit: "100" })}`,
-        )
-        .then((page) => page.items)
+      inboxClient(connection)
+        .listInboxItems({ objectiveId: id, pageSize: 100 })
+        .then((page) => {
+          const asOf = page.asOf === undefined ? new Date() : timestampDate(page.asOf);
+          return page.items.map((item) => inboxItemRecord(item, asOf));
+        })
         .catch(() => undefined),
       localCheckouts(target.url),
     ]);
-    return formatObjectiveOverview(overview, {
+    return formatObjectiveOverview(overviewView(overview), {
       ...(inbox === undefined ? {} : { inbox }),
       ...(checkouts === undefined ? {} : { checkouts }),
     });
@@ -197,62 +222,54 @@ export async function runObjectiveCommand(
   if (command === "message") {
     const text = positionals[1] === "-" ? await readStdin() : (positionals[1] ?? "");
     if (!text.trim()) throw new Error("The message is empty");
-    const result = await client.request<MessageObjectiveResult>(
-      `/api/v1/coordination/objectives/${encodeURIComponent(id)}/messages`,
-      { method: "POST", body: JSON.stringify({ text: text.trim() }) },
+    const result = await refusedAsError(() =>
+      client.messageObjective({ id, text: text.trim(), idempotencyKey: randomUUID() }),
     );
-    if (json) return `${JSON.stringify(result, null, 2)}\n`;
-    process.stdout.write(formatMessageResult(id, result));
-    return followObjectiveReply(client, target, id, result.taskId);
+    if (json) return jsonOf(MessageObjectiveResponseSchema, result);
+    process.stdout.write(
+      formatMessageResult(id, result.duplicate, OBJECTIVE_STATUS.word(result.statusChange)),
+    );
+    return followObjectiveReply(target, result.tag, result.taskId);
   }
   if (command === "approve") {
-    const objective = await client.request<Objective>(
-      `/api/v1/coordination/objectives/${encodeURIComponent(id)}/approve`,
-      { method: "POST", body: "{}" },
-    );
+    const objective = await refusedAsError(() => client.approveObjective({ id }));
     return json
-      ? `${JSON.stringify(objective, null, 2)}\n`
+      ? jsonOf(ObjectiveSchema, objective)
       : `objective/${terminalText(objective.id)} approved; it is completed (revision ${objective.revision}).\n`;
   }
-  let result: unknown;
   if (command === "create") {
     if (!values.outcome || !values.owner) throw new Error(objectiveHelp());
-    const owner = await client.getTag(values.owner);
     const dryRun = values["dry-run"] === true;
-    const created = await client.request<
-      Objective & {
-        warnings?: string[];
-        dryRun?: boolean;
-        started?: { taskId: string };
-        notStarted?: string;
-      }
-    >(`${base}${dryRun ? "?dryRun=true" : ""}`, {
-      method: "POST",
-      body: JSON.stringify({
-        // Omitted IDs are generated by the Control Plane from the outcome.
-        ...(positionals[0] === undefined ? {} : { id: positionals[0] }),
-        ongoing: values.ongoing ?? false,
-        outcome: values.outcome,
-        ownerTagId: owner.metadata.id,
-        ...(values.team === undefined ? {} : { teamId: await teamId(client, values.team) }),
-        ...(values.deadline === undefined ? {} : { deadline: values.deadline }),
-        ...(values["budget-minor"] === undefined
-          ? {}
-          : { budgetLimitMinor: Number(values["budget-minor"]) }),
-        ...(values["budget-currency"] === undefined
-          ? {}
-          : { budgetCurrency: values["budget-currency"] }),
-        ...(values["runtime-action"] === undefined
-          ? {}
-          : { runtimeActions: values["runtime-action"] }),
-        ...(values.workspace === undefined ? {} : { workspaces: values.workspace }),
-      }),
-    });
-    const { warnings = [], dryRun: _dryRun, started, notStarted, ...objective } = created;
-    for (const warning of warnings) process.stderr.write(`Warning: ${terminalText(warning)}\n`);
-    if (notStarted !== undefined)
+    if (values["budget-currency"] !== undefined && values["budget-minor"] === undefined)
+      throw new Error("budgetCurrency requires budgetLimitMinor");
+    const request = {
+      // Omitted IDs are generated by the Control Plane from the outcome.
+      id: positionals[0] ?? "",
+      ongoing: values.ongoing ?? false,
+      outcome: values.outcome,
+      owner: values.owner,
+      team: values.team ?? "",
+      ...(values.deadline === undefined ? {} : { deadline: deadlineOf(values.deadline) }),
+      ...(values["budget-minor"] === undefined
+        ? {}
+        : {
+            budget: {
+              limitMinor: minorOf(values["budget-minor"]),
+              currency: values["budget-currency"] ?? "",
+            },
+          }),
+      runtimeActions: values["runtime-action"] ?? [],
+      workspaces: values.workspace ?? [],
+      dryRun,
+    };
+    const created = await refusedAsError(() => client.createObjective(request));
+    const objective = created.objective;
+    if (objective === undefined) throw new Error("The Control Plane returned no Objective");
+    for (const warning of created.warnings)
+      process.stderr.write(`Warning: ${terminalText(warning)}\n`);
+    if (created.notStarted !== "")
       process.stderr.write(
-        `Warning: The Objective was not started: ${terminalText(notStarted).replace(/\.?$/u, ".")} Once that is fixed, run this command again with ID ${terminalText(objective.id)} to start it.\n`,
+        `Warning: The Objective was not started: ${terminalText(created.notStarted).replace(/\.?$/u, ".")} Once that is fixed, run this command again with ID ${terminalText(objective.id)} to start it.\n`,
       );
     if (json) {
       if (dryRun)
@@ -261,20 +278,20 @@ export async function runObjectiveCommand(
         );
       else if (positionals[0] === undefined)
         process.stderr.write(`Created Objective ${terminalText(objective.id)}.\n`);
-      if (started !== undefined)
+      if (created.startedTaskId !== "")
         process.stderr.write(
-          `Started owner ${terminalText(values.owner ?? "")} with Task ${terminalText(started.taskId)}.\n`,
+          `Started owner ${terminalText(values.owner ?? "")} with Task ${terminalText(created.startedTaskId)}.\n`,
         );
-      return `${JSON.stringify(objective, null, 2)}\n`;
+      return jsonOf(ObjectiveSchema, objective);
     }
     const lines = [
       dryRun
         ? `objective/${terminalText(objective.id)} checked; nothing was created (dry run)`
         : `objective/${terminalText(objective.id)} created`,
     ];
-    if (started !== undefined)
+    if (created.startedTaskId !== "")
       lines.push(
-        `Started ${terminalText(values.owner ?? "")} with Task ${terminalText(started.taskId)}.`,
+        `Started ${terminalText(values.owner ?? "")} with Task ${terminalText(created.startedTaskId)}.`,
       );
     if (!dryRun)
       lines.push(
@@ -282,17 +299,21 @@ export async function runObjectiveCommand(
         `See results: supertag describe objective ${terminalText(objective.id)}`,
       );
     return `${lines.join("\n")}\n`;
-  } else if (command === "list") {
-    const query = new URLSearchParams();
-    if (values.owner !== undefined) {
-      const tag = await client.getTag(values.owner);
-      if (!tag.metadata.id) throw new Error("Tag has no ID");
-      query.set("tagId", tag.metadata.id);
-    }
-    if (values.limit !== undefined) query.set("limit", values.limit);
-    result = await client.request(`${base}?${query}`);
-  } else if (command === "get") result = await client.request(`${base}/${encodeURIComponent(id)}`);
-  else if (command === "status") {
+  }
+  if (command === "list") {
+    if (values.limit !== undefined && !/^\d+$/u.test(values.limit))
+      throw new Error("--limit must be an integer");
+    const listed = await refusedAsError(() =>
+      client.listObjectives({
+        owner: values.owner ?? "",
+        pageSize: values.limit === undefined ? 0 : Number(values.limit),
+      }),
+    );
+    return jsonOf(ListObjectivesResponseSchema, listed);
+  }
+  if (command === "get")
+    return jsonOf(ObjectiveSchema, await refusedAsError(() => client.getObjective({ id })));
+  if (command === "status") {
     if (values.summary !== undefined && values["summary-file"] !== undefined)
       throw new Error("--summary and --summary-file cannot be combined");
     const summary =
@@ -301,8 +322,13 @@ export async function runObjectiveCommand(
         : values["summary-file"] === "-"
           ? await readStdin()
           : await readFile(values["summary-file"], "utf8");
+    const status = positionals[1];
+    if (status !== undefined && !OBJECTIVE_STATUS.words.includes(status as never))
+      throw new Error(
+        "A valid status, budgetLimitMinor, deadline, or runtimeActions and a positive expectedRevision are required",
+      );
     const change = {
-      ...(positionals[1] === undefined ? {} : { status: positionals[1] }),
+      ...(status === undefined ? {} : { status }),
       ...(summary === undefined ? {} : { completionSummary: summary.trim() }),
       ...(values.deadline === undefined ? {} : { deadline: values.deadline }),
       ...(values["budget-minor"] === undefined
@@ -312,60 +338,90 @@ export async function runObjectiveCommand(
         ? {}
         : { runtimeActions: values["runtime-action"] }),
     };
-    const path = `${base}/${encodeURIComponent(id)}`;
-    const updated = await withCurrentRevision({
-      explicit: values.revision,
-      resource: `Objective ${id}`,
-      read: () => client.request<Record<string, unknown>>(path),
-      fields: Object.keys(change),
-      write: (expectedRevision) =>
-        client.request<Record<string, unknown> & { warnings?: string[] }>(path, {
-          method: "PATCH",
-          body: JSON.stringify({ ...change, expectedRevision }),
-        }),
-    });
-    const { warnings = [], ...objective } = updated;
-    for (const warning of warnings) process.stderr.write(`Warning: ${terminalText(warning)}\n`);
-    if (json) return `${JSON.stringify(objective, null, 2)}\n`;
-    return formatObjectiveUpdate(id, objective, change);
-  } else throw new Error(objectiveHelp());
-  return `${JSON.stringify(result, null, 2)}\n`;
+    const updated = await refusedAsError(() =>
+      withCurrentRevision({
+        explicit: values.revision,
+        resource: `Objective ${id}`,
+        read: async () =>
+          objectiveView(await client.getObjective({ id })) as unknown as Record<string, unknown>,
+        fields: Object.keys(change),
+        write: (expectedRevision) =>
+          client.updateObjective({
+            id,
+            expectedRevision: BigInt(expectedRevision),
+            ...(status === undefined ? {} : { status: OBJECTIVE_STATUS.value(status) }),
+            ...(summary === undefined ? {} : { completionSummary: summary.trim() }),
+            ...(values.deadline === undefined ? {} : { deadline: deadlineOf(values.deadline) }),
+            ...(values["budget-minor"] === undefined
+              ? {}
+              : { budgetLimitMinor: minorOf(values["budget-minor"]) }),
+            ...(values["runtime-action"] === undefined
+              ? {}
+              : { runtimeActions: { actions: values["runtime-action"] } }),
+          }),
+      }),
+    );
+    for (const warning of updated.warnings)
+      process.stderr.write(`Warning: ${terminalText(warning)}\n`);
+    if (updated.objective === undefined) throw new Error("The Control Plane returned no Objective");
+    if (json) return jsonOf(ObjectiveSchema, updated.objective);
+    return formatObjectiveUpdate(id, objectiveView(updated.objective), change);
+  }
+  throw new Error(objectiveHelp());
+}
+
+/** A message as `--output json` prints it: its proto JSON, indented. */
+function jsonOf<Desc extends DescMessage>(schema: Desc, message: MessageShape<Desc>): string {
+  return `${toJsonString(schema, message, { prettySpaces: 2 })}\n`;
+}
+
+function deadlineOf(value: string) {
+  const deadline = new Date(value);
+  if (Number.isNaN(deadline.getTime())) throw new Error("deadline must be an ISO timestamp");
+  return timestampFromDate(deadline);
+}
+
+function minorOf(value: string): bigint {
+  if (!/^\d+$/u.test(value)) throw new Error("budgetLimitMinor must be a nonnegative integer");
+  return BigInt(value);
 }
 
 /** `objective/ID updated: status blocked (revision 3)`, naming each field the command set. */
 function formatObjectiveUpdate(
   id: string,
-  objective: Record<string, unknown>,
+  objective: ObjectiveView,
   change: Record<string, unknown>,
 ): string {
-  const revision = typeof objective["revision"] === "number" ? objective["revision"] : "?";
+  const revision = objective.revision;
   if (change["status"] === "completed")
     return `objective/${id} completed (revision ${revision}).\n`;
   const parts: string[] = [];
-  if (change["status"] !== undefined) parts.push(`status ${String(objective["status"])}`);
-  if (change["deadline"] !== undefined) parts.push(`deadline ${String(objective["deadline"])}`);
+  if (change["status"] !== undefined) parts.push(`status ${objective.status}`);
+  if (change["deadline"] !== undefined) parts.push(`deadline ${String(objective.deadline)}`);
   if (change["budgetLimitMinor"] !== undefined)
     parts.push(`budget limit ${budgetLimit(objective)}`);
-  if (Array.isArray(objective["runtimeActions"]) && change["runtimeActions"] !== undefined)
-    parts.push(`runtime actions ${objective["runtimeActions"].join(", ") || "none"}`);
+  if (change["runtimeActions"] !== undefined)
+    parts.push(`runtime actions ${objective.runtimeActions.join(", ") || "none"}`);
   return `objective/${id} updated${parts.length ? `: ${parts.join(", ")}` : ""} (revision ${revision}).\n`;
 }
 
-function budgetLimit(objective: Record<string, unknown>): string {
-  const limit = objective["budgetLimitMinor"];
-  const currency = objective["budgetCurrency"];
-  if (typeof limit !== "number") return "none";
-  return typeof currency === "string" ? money(limit, currency) : `${limit} allocation units`;
+function budgetLimit(objective: ObjectiveView): string {
+  const limit = objective.budgetLimitMinor;
+  const currency = objective.budgetCurrency;
+  if (limit === null) return "none";
+  return currency !== null ? money(limit, currency) : `${limit} allocation units`;
 }
 
-function formatMessageResult(id: string, result: MessageObjectiveResult): string {
+function formatMessageResult(
+  id: string,
+  duplicate: boolean,
+  statusChange: string | undefined,
+): string {
   const lines = [
-    `${result.duplicate ? "Already sent" : "Sent"} to the conversation of Objective ${terminalText(id)}.`,
+    `${duplicate ? "Already sent" : "Sent"} to the conversation of Objective ${terminalText(id)}.`,
   ];
-  if (result.statusChange)
-    lines.push(
-      `The Objective moved from ${result.statusChange.replaceAll("_", " ")} back to working.`,
-    );
+  if (statusChange)
+    lines.push(`The Objective moved from ${statusChange.replaceAll("_", " ")} back to working.`);
   return `${lines.join("\n")}\n`;
 }
 
@@ -374,26 +430,14 @@ function formatMessageResult(id: string, result: MessageObjectiveResult): string
  * is this operator's CLI conversation. Otherwise the reply posts to the Objective's home thread.
  */
 async function followObjectiveReply(
-  client: ControlPlaneClient,
   target: ControlPlaneTarget,
-  id: string,
+  tag: string,
   taskId: string,
 ): Promise<string> {
-  const objective = await client.request<Objective>(
-    `/api/v1/tag-messaging/objectives/${encodeURIComponent(id)}`,
-  );
-  const tags = await client.request<{
-    readonly items: readonly {
-      readonly metadata: { readonly id: string; readonly name?: string };
-    }[];
-  }>("/api/v1/tags");
-  const name =
-    tags.items.find((tag) => tag.metadata.id === objective.ownerTagId)?.metadata.name ??
-    objective.ownerTagId;
   const conversations = tagConversationClient(target);
   let message: Message;
   try {
-    message = await conversations.getMessage({ tag: name, taskId });
+    message = await conversations.getMessage({ tag, taskId });
   } catch (error) {
     if (
       error instanceof ConnectError &&
@@ -415,12 +459,6 @@ async function followObjectiveReply(
   } finally {
     process.removeListener("SIGINT", stop);
   }
-}
-
-/** A Team's ID from its name or ID. */
-async function teamId(client: ControlPlaneClient, name: string): Promise<string> {
-  const team = JSON.parse(await runTeamCommand(client, ["get", name])) as Team;
-  return team.id;
 }
 
 async function readStdin(): Promise<string> {

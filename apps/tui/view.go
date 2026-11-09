@@ -61,12 +61,20 @@ func (m *model) layout() {
 	m.refresh()
 }
 
-// refresh redraws the selected conversation, keeping the view at the bottom when it was there.
+// refresh redraws the main pane. A conversation stays at the bottom when it was there; the other
+// panes keep their scroll position.
 func (m *model) refresh() {
-	atBottom := m.viewport.AtBottom()
-	m.viewport.SetContent(m.renderConversation())
-	if atBottom {
-		m.viewport.GotoBottom()
+	switch m.pane {
+	case paneObjective:
+		m.viewport.SetContent(m.renderObjective())
+	case paneInbox:
+		m.viewport.SetContent(m.renderItem())
+	default:
+		atBottom := m.viewport.AtBottom()
+		m.viewport.SetContent(m.renderConversation())
+		if atBottom {
+			m.viewport.GotoBottom()
+		}
 	}
 }
 
@@ -109,32 +117,64 @@ func (m model) renderConversation() string {
 // railContent is the rail's text width: railWidth less its right border and padding.
 const railContent = railWidth - 2
 
-// renderRail lists the Tags one row each, cut to fit, scrolled so the selected Tag shows.
+// renderRail lists the Tags, the open Objectives and what waits on you, one row each, cut to
+// fit, scrolled so the row under the cursor shows.
 func (m model) renderRail(height int) string {
-	lines := []string{headerStyle.Render("Tags")}
-	rows := max(height-1, 1)
-	first := max(m.selected-rows+1, 0)
-	for i := first; i < len(m.tags) && i < first+rows; i++ {
-		tag := m.tags[i]
-		phase := truncate(terminalText(railState(tag, m.open[tag.Name()])), railContent/2)
-		nameWidth := railContent
-		if phase != "" {
-			nameWidth -= lipgloss.Width(phase) + 1
+	paneKey := m.paneKey()
+	var lines []string
+	cursorLine := 0
+	at := 0
+	add := func(r row, label, state string) {
+		if at == m.cursor {
+			cursorLine = len(lines)
 		}
-		name := truncate(terminalText(tag.Name()), nameWidth)
+		at++
+		state = truncate(state, railContent/2)
+		labelWidth := railContent
+		if state != "" {
+			labelWidth -= lipgloss.Width(state) + 1
+		}
 		style := lipgloss.NewStyle()
-		if i == m.selected {
+		switch {
+		case m.focus == focusRail && at-1 == m.cursor:
+			style = focusedSel
+		case m.rowKey(r) == paneKey:
 			style = selected
-			if m.focus == focusRail {
-				style = focusedSel
-			}
 		}
-		line := style.Render(name)
-		if phase != "" {
-			line += " " + faint.Render(phase)
+		line := style.Render(truncate(label, labelWidth))
+		if state != "" {
+			line += " " + faint.Render(state)
 		}
 		lines = append(lines, line)
 	}
+	section := func(title, err string) {
+		lines = append(lines, headerStyle.Render(truncate(title, railContent)))
+		if err != "" {
+			lines = append(lines, errorStyle.Render(truncate(strings.Join(strings.Fields(err), " "), railContent)))
+		}
+	}
+
+	section("Tags", "")
+	for i, tag := range m.tags {
+		add(row{rowTag, i}, terminalText(tag.Name()), terminalText(railState(tag, m.open[tag.Name()])))
+	}
+	if len(m.objectives) > 0 || m.objectivesErr != "" {
+		section("Objectives", m.objectivesErr)
+		for i, objective := range m.objectives {
+			add(row{rowObjective, i}, objectiveName(objective), objectiveState(objective))
+		}
+	}
+	waiting := fmt.Sprintf("Waiting on you (%d)", len(m.inbox.Items))
+	if m.inbox.Truncated {
+		waiting = fmt.Sprintf("Waiting on you (%d+)", len(m.inbox.Items))
+	}
+	section(waiting, m.inboxErr)
+	for i, item := range m.inbox.Items {
+		add(row{rowInbox, i}, m.inboxRow(item), "")
+	}
+
+	first := max(cursorLine-height+1, 0)
+	lines = lines[first:min(first+height, len(lines))]
 	return railStyle.Width(railWidth).Height(height).MaxHeight(height).Render(strings.Join(lines, "\n"))
 }
 
@@ -170,13 +210,55 @@ func (m model) View() tea.View {
 		return v
 	}
 	bodyHeight := max(m.height-1, 2)
-	header := headerStyle.Render(truncate(fmt.Sprintf("%s · %s", terminalText(m.selectedTag()), conversationName), m.paneWidth()))
-	pane := lipgloss.JoinVertical(lipgloss.Left, header, m.viewport.View(), m.input.View())
+	header := headerStyle.Render(truncate(m.paneTitle(), m.paneWidth()))
+	bottom := m.input.View()
+	if !m.inputShown() {
+		bottom = faint.Render(truncate(m.paneHint(), m.paneWidth()))
+	}
+	pane := lipgloss.JoinVertical(lipgloss.Left, header, m.viewport.View(), bottom)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, m.renderRail(bodyHeight), " ", pane)
 	body = lipgloss.NewStyle().Height(bodyHeight).MaxHeight(bodyHeight).Render(body)
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatus()))
 	v.AltScreen = true
 	return v
+}
+
+// paneTitle heads the main pane: the conversation, the Objective, or the kind of inbox item.
+func (m model) paneTitle() string {
+	switch m.pane {
+	case paneObjective:
+		name := m.objectiveID
+		if overview := m.overviews[m.objectiveID]; overview != nil {
+			name = firstLine(overview.GetObjective().GetOutcome())
+		} else if objective := m.openObjective(m.objectiveID); objective != nil {
+			name = firstLine(objective.GetOutcome())
+		}
+		return "Objective · " + terminalText(name)
+	case paneInbox:
+		return "Waiting on you · " + itemKindName(m.item.GetKind())
+	}
+	return fmt.Sprintf("%s · %s", terminalText(m.selectedTag()), conversationName)
+}
+
+// paneHint ends a pane that has no input line: the keys that act on it.
+func (m model) paneHint() string {
+	switch m.pane {
+	case paneObjective:
+		return "Live · answer its questions under Waiting on you"
+	case paneInbox:
+		switch {
+		case m.decision == decisionConfirm:
+			return "enter approves this request once · esc cancels"
+		case m.decision == decisionSending:
+			return "Waiting for the Control Plane…"
+		case m.inboxItem(m.item.GetOccurrence()) == nil:
+			return "This item is settled."
+		case m.approvalShown():
+			return "a approve · d deny"
+		}
+		return "Run the command above to act on it."
+	}
+	return ""
 }
 
 // truncate cuts s to width columns, ending it with "…" when cut.

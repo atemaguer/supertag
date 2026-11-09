@@ -265,6 +265,43 @@ describe("approval: required on permissions", () => {
     expect(snapshot.runtimeActions).toEqual(["commands:execute", "files:write"]);
   });
 
+  it("pages operator listings from where the last page ended, most recent first", async () => {
+    const f = await fixture();
+    const { task } = await f.runningTask();
+    const created = [];
+    for (const summary of ["first", "second", "third"])
+      created.push(
+        await f.store.createApprovalRequest({
+          objectiveId: f.objective.id,
+          taskId: task.id,
+          requestingTagId: f.worker.id,
+          kind: "surface-action",
+          actions: [{ target: "runtime", action: "commands:execute" }],
+          summary,
+          ruleSources: [],
+          approvers: [],
+        }),
+      );
+    const newest = (await f.store.listApprovalRequests({ objectiveId: f.objective.id })).map(
+      (request) => request.id,
+    );
+    expect(newest).toHaveLength(3);
+    const first = await f.controller.listApprovalRequests({
+      objectiveId: f.objective.id,
+      limit: 2,
+    });
+    expect(first.requests.map((request) => request.id)).toEqual(newest.slice(0, 2));
+    expect(first.next).toBeDefined();
+    const rest = await f.controller.listApprovalRequests({
+      objectiveId: f.objective.id,
+      limit: 2,
+      ...(first.next === undefined ? {} : { before: first.next }),
+    });
+    expect(rest.requests.map((request) => request.id)).toEqual(newest.slice(2));
+    expect(rest.next).toBeUndefined();
+    expect(created.map((request) => request.id).toSorted()).toEqual(newest.toSorted());
+  });
+
   it("restricts operator decisions when a Permission Set names operator approvers", async () => {
     const f = await fixture();
     await f.store.setTagPermissionSetApprovers(f.set.id, ["operator:release-oncall"]);

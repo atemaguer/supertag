@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/operator/v1/event.proto.
  */
 export const file_supertag_operator_v1_event: GenFile = /*@__PURE__*/
-  fileDesc("CiBzdXBlcnRhZy9vcGVyYXRvci92MS9ldmVudC5wcm90bxIUc3VwZXJ0YWcub3BlcmF0b3IudjEiVAoMV2F0Y2hSZXF1ZXN0EhQKDHJlc3VtZV90b2tlbhgBIAEoCRIuCgVraW5kcxgCIAMoDjIfLnN1cGVydGFnLm9wZXJhdG9yLnYxLldhdGNoS2luZCLLAQoKV2F0Y2hFdmVudBIUCgxyZXN1bWVfdG9rZW4YASABKAkSMwoGY2hhbmdlGAIgASgLMiEuc3VwZXJ0YWcub3BlcmF0b3IudjEuV2F0Y2hDaGFuZ2VIABIzCgZyZXN5bmMYAyABKAsyIS5zdXBlcnRhZy5vcGVyYXRvci52MS5XYXRjaFJlc3luY0gAEjQKCWhlYXJ0YmVhdBgEIAEoCzIfLnN1cGVydGFnLm9wZXJhdG9yLnYxLkhlYXJ0YmVhdEgAQgcKBWV2ZW50IuYBCgtXYXRjaENoYW5nZRItCgRraW5kGAEgASgOMh8uc3VwZXJ0YWcub3BlcmF0b3IudjEuV2F0Y2hLaW5kEgoKAmlkGAIgASgJEgsKA3RhZxgDIAEoCRISCgpzZXNzaW9uX2lkGAQgASgJEg8KB3Rhc2tfaWQYBSABKAkSFAoMb2JqZWN0aXZlX2lkGAYgASgJEhQKDGNvbnZlcnNhdGlvbhgHIAEoCRIOCgZyZWFzb24YCCABKAkSLgoKY2hhbmdlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiDQoLV2F0Y2hSZXN5bmMq2wEKCVdhdGNoS2luZBIaChZXQVRDSF9LSU5EX1VOU1BFQ0lGSUVEEAASEgoOV0FUQ0hfS0lORF9UQUcQARIWChJXQVRDSF9LSU5EX1NFU1NJT04QAhITCg9XQVRDSF9LSU5EX1RBU0sQAxIYChRXQVRDSF9LSU5EX09CSkVDVElWRRAEEhkKFVdBVENIX0tJTkRfSU5CT1hfSVRFTRAFEhcKE1dBVENIX0tJTkRfQVBQUk9WQUwQBhIjCh9XQVRDSF9LSU5EX0NPTlZFUlNBVElPTl9NRVNTQUdFEAcydAoMRXZlbnRTZXJ2aWNlEmQKBVdhdGNoEiIuc3VwZXJ0YWcub3BlcmF0b3IudjEuV2F0Y2hSZXF1ZXN0GiAuc3VwZXJ0YWcub3BlcmF0b3IudjEuV2F0Y2hFdmVudCITkAIBirUYDHdhdGNoX2V2ZW50czABQk5aTGdpdGh1Yi5jb20vYXRlbWFndWVyL3N1cGVydGFnL3BhY2thZ2VzL29wZXJhdG9yLWFwaS9nby9vcGVyYXRvcnYxO29wZXJhdG9ydjFiBnByb3RvMw", [file_google_protobuf_timestamp, file_supertag_operator_v1_common, file_supertag_operator_v1_options]);
+  fileDesc("CiBzdXBlcnRhZy9vcGVyYXRvci92MS9ldmVudC5wcm90bxIUc3VwZXJ0YWcub3BlcmF0b3IudjEiVAoMV2F0Y2hSZXF1ZXN0EhQKDHJlc3VtZV90b2tlbhgBIAEoCRIuCgVraW5kcxgCIAMoDjIfLnN1cGVydGFnLm9wZXJhdG9yLnYxLldhdGNoS2luZCLLAQoKV2F0Y2hFdmVudBIUCgxyZXN1bWVfdG9rZW4YASABKAkSMwoGY2hhbmdlGAIgASgLMiEuc3VwZXJ0YWcub3BlcmF0b3IudjEuV2F0Y2hDaGFuZ2VIABIzCgZyZXN5bmMYAyABKAsyIS5zdXBlcnRhZy5vcGVyYXRvci52MS5XYXRjaFJlc3luY0gAEjQKCWhlYXJ0YmVhdBgEIAEoCzIfLnN1cGVydGFnLm9wZXJhdG9yLnYxLkhlYXJ0YmVhdEgAQgcKBWV2ZW50IvcBCgtXYXRjaENoYW5nZRItCgRraW5kGAEgASgOMh8uc3VwZXJ0YWcub3BlcmF0b3IudjEuV2F0Y2hLaW5kEgoKAmlkGAIgASgJEgsKA3RhZxgDIAEoCRISCgpzZXNzaW9uX2lkGAQgASgJEg8KB3Rhc2tfaWQYBSABKAkSFAoMb2JqZWN0aXZlX2lkGAYgASgJEhQKDGNvbnZlcnNhdGlvbhgHIAEoCRIOCgZyZWFzb24YCCABKAkSLgoKY2hhbmdlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDwoHdGVhbV9pZBgKIAEoCSINCgtXYXRjaFJlc3luYyr7AQoJV2F0Y2hLaW5kEhoKFldBVENIX0tJTkRfVU5TUEVDSUZJRUQQABISCg5XQVRDSF9LSU5EX1RBRxABEhYKEldBVENIX0tJTkRfU0VTU0lPThACEhMKD1dBVENIX0tJTkRfVEFTSxADEhgKFFdBVENIX0tJTkRfT0JKRUNUSVZFEAQSGQoVV0FUQ0hfS0lORF9JTkJPWF9JVEVNEAUSFwoTV0FUQ0hfS0lORF9BUFBST1ZBTBAGEiMKH1dBVENIX0tJTkRfQ09OVkVSU0FUSU9OX01FU1NBR0UQBxIeChpXQVRDSF9LSU5EX1dPUktTVFJFQU1fUE9TVBAIMngKDEV2ZW50U2VydmljZRJoCgVXYXRjaBIiLnN1cGVydGFnLm9wZXJhdG9yLnYxLldhdGNoUmVxdWVzdBogLnN1cGVydGFnLm9wZXJhdG9yLnYxLldhdGNoRXZlbnQiF5ACAYq1GAx3YXRjaF9ldmVudHOotRgBMAFCTlpMZ2l0aHViLmNvbS9hdGVtYWd1ZXIvc3VwZXJ0YWcvcGFja2FnZXMvb3BlcmF0b3ItYXBpL2dvL29wZXJhdG9ydjE7b3BlcmF0b3J2MWIGcHJvdG8z", [file_google_protobuf_timestamp, file_supertag_operator_v1_common, file_supertag_operator_v1_options]);
 
 /**
  * @generated from message supertag.operator.v1.WatchRequest
@@ -164,6 +164,13 @@ export type WatchChange = Message<"supertag.operator.v1.WatchChange"> & {
    * @generated from field: google.protobuf.Timestamp changed_at = 9;
    */
   changedAt?: Timestamp | undefined;
+
+  /**
+   * The ID of the Team it belongs to.
+   *
+   * @generated from field: string team_id = 10;
+   */
+  teamId: string;
 };
 
 /**
@@ -260,6 +267,15 @@ export enum WatchKind {
    * @generated from enum value: WATCH_KIND_CONVERSATION_MESSAGE = 7;
    */
   CONVERSATION_MESSAGE = 7,
+
+  /**
+   * A Team's Workstream got a post. `id` is the post's ID and `team_id` its
+   * Team's. Reread the Objectives the Team serves with
+   * `ObjectiveService.DescribeObjective`, which carries the newest posts.
+   *
+   * @generated from enum value: WATCH_KIND_WORKSTREAM_POST = 8;
+   */
+  WORKSTREAM_POST = 8,
 }
 
 /**
@@ -302,12 +318,16 @@ export const EventService: GenService<{
    *
    * - `WATCH_KIND_CONVERSATION_MESSAGE`: messages in the caller's own
    *   conversations, as `ConversationService.GetMessage` reads them. The
-   *   credential needs the `read_conversation` action.
+   *   credential needs the `read_conversation` action. A scoped coordination
+   *   credential has no conversations and sees none.
    * - `WATCH_KIND_SESSION` and `WATCH_KIND_TASK`: every Session and Task for
    *   the admin token and Operator Tokens, except that a conversation's
    *   Session and its Tasks, work Sessions included, reach only the operator
-   *   whose conversation it is.
-   * - `WATCH_KIND_TAG`: every Tag, for the admin token and Operator Tokens.
+   *   whose conversation it is. A scoped coordination credential with the
+   *   `read_objective` action sees only the Tasks of Objectives its scope
+   *   allows, by `objective_id`, and no Sessions.
+   * - `WATCH_KIND_TAG`: every Tag, for the admin token and Operator Tokens. A
+   *   scoped coordination credential sees none.
    * - `WATCH_KIND_OBJECTIVE`: Objectives the credential's Objective scope
    *   allows, with the `read_objective` action.
    * - `WATCH_KIND_INBOX_ITEM`: inbox items of Objectives the credential's
@@ -316,6 +336,14 @@ export const EventService: GenService<{
    *   Objective scope allows, with the `list_approvals` action. A request
    *   outside any Objective reaches only a credential without an Objective
    *   scope.
+   * - `WATCH_KIND_WORKSTREAM_POST`: posts to every Team's Workstream for the
+   *   admin token and Operator Tokens. A scoped coordination credential with
+   *   the `read_objective` action sees posts to the Teams of Objectives its
+   *   scope allows, as `ObjectiveService.DescribeObjective` shows them.
+   *
+   * The admin token and Operator Tokens carry every action and have no
+   * Objective scope. A scoped coordination credential needs the
+   * `watch_events` action to call `Watch` at all.
    *
    * A kind the caller may not see is left out silently, even when `kinds`
    * names it.

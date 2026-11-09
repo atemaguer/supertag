@@ -172,10 +172,8 @@ supply a channel name, webhook URL, or credentials.
 
 When work exhausts its execution budget, the Control Plane notifies this destination without
 running another agent turn, and the pending decision stays in the operator inbox. It chooses the
-Objective's explicit `notificationTaskId` first, then the
-verified surface Task that originated the Objective, then the deployment default
-`SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID`. Its explicit destination lets one Objective send alerts to
-a different operator conversation from the deployment default.
+verified surface Task that originated the Objective first, then the deployment default
+`SUPERTAG_OPERATOR_NOTIFICATION_TASK_ID`.
 
 ### Set the deployment default
 
@@ -186,24 +184,6 @@ permission to send to a destination. A headless deployment gets such a Task the 
 other: a person mentions the Tag once in the operator conversation through a connected
 **Surface Account**, an enrolled external workspace or account. Copy that Task's ID from
 `supertag list task`.
-
-### Set an Objective-specific destination
-
-An authenticated operator sets an Objective-specific destination when creating the Objective, with
-`notificationTaskId` on `POST /api/v1/tag-messaging/objectives`:
-
-```json
-{
-  "id": "objective-release",
-  "outcome": "Ship the 0.4 release.",
-  "notificationTaskId": "verified-surface-task-id"
-}
-```
-
-The destination is fixed for the Objective's life. `PATCH /api/v1/tag-messaging/objectives/:id`
-takes only `status`, `expectedRevision`, `completionSummary`, `budgetLimitMinor`, `deadline` and
-`runtimeActions`; any other field returns 400. The setting changes where the alert goes, not who
-may approve additional execution.
 
 ### Questions from an Objective
 
@@ -409,23 +389,29 @@ headers and command bodies cannot choose an operator ID or expand its access.
   {
     "token": "secret-issued-to-release-coordinator",
     "operatorId": "release-coordinator",
-    "actions": ["read_coordination_inbox", "read_objective", "update_objective"],
+    "actions": ["read_coordination_inbox", "read_objective", "update_objective", "watch_events"],
     "objectiveIds": ["objective-release"],
     "revoked": false
   }
 ]
 ```
 
-`actions` contains exact coordination command names; `read_coordination_inbox` grants the inbox
-projection. `list_approvals` and
-`decide_approval` let an operator list and decide approval requests. A credential takes `token`,
+`actions` contains exact operator action names; `read_coordination_inbox` grants the inbox.
+`list_approvals` and `decide_approval` let an operator list and decide approval requests, and
+`watch_events` lets it follow changes with `supertag watch inbox` and `supertag watch objective`.
+For a scoped credential, `update_objective` grants only `ApproveObjective`: `supertag approve
+objective` for an Objective submitted for review. A credential takes `token`,
 `operatorId`, `actions`, `objectiveIds` and `revoked`; any other field makes the Control Plane
 refuse to start. Omit `objectiveIds` only when the operator should reach every Objective. Set
 `revoked` to `true` and restart the
-Control Plane to refuse an issued token while retaining its configuration record. Scoped tokens can
-access only `/api/v1/coordination/*`; the Control Plane rejects them on configuration, collaboration surface, status,
-and metrics endpoints. The CLI uses the credential saved by `supertag connect control-plane`, so
-the same commands work with a scoped token.
+Control Plane to refuse an issued token while retaining its configuration record. A scoped token
+can call only the operator RPCs that accept scoped credentials: every `InboxService` RPC,
+`ObjectiveService.GetObjective`, `DescribeObjective`, `MessageObjective` and `ApproveObjective`, and
+`EventService.Watch`. Each also needs the RPC's action, and reaches only the Objectives the scope
+names. The Control Plane refuses scoped tokens on every other RPC and every `/api/v1/` route. The CLI
+uses the credential saved by `supertag connect control-plane`, so `supertag list inbox`,
+`supertag approve request`, `supertag describe objective` and the other commands those RPCs serve
+work with a scoped token. See [Operator RPCs](../reference/control-plane-api.md#operator-rpcs-experimental).
 
 ## Health and readiness
 

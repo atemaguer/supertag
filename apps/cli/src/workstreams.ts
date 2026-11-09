@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util";
+import type { WorkstreamPost } from "@supertag/core";
 import type { ControlPlaneClient } from "./control-plane-client.js";
 import { runTeamCommand } from "./teams.js";
 
@@ -38,4 +39,18 @@ export async function listWorkstreamPosts(
   return client.request(
     `/api/v1/tag-messaging/workstreams/${encodeURIComponent(team.id)}/posts?${query}`,
   );
+}
+
+/** Reads a Team's Workstream posts after a sequence number, oldest first, one page per call. */
+export function workstreamPosts(client: Pick<ControlPlaneClient, "request">) {
+  return async (
+    teamId: string,
+    afterSequence: number,
+    limit: number,
+  ): Promise<readonly WorkstreamPost[]> =>
+    (
+      await client.request<{ readonly items: readonly WorkstreamPost[] }>(
+        `/api/v1/tag-messaging/workstreams/${encodeURIComponent(teamId)}/posts?${new URLSearchParams({ afterSequence: String(afterSequence), limit: String(limit) })}`,
+      )
+    ).items;
 }

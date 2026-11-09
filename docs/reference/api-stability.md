@@ -112,7 +112,7 @@ Each `supertag-ai` import path has its own stability level:
 | `supertag-ai/testing` | Beta | Conformance probes such as `runWorkerConformance` and `assertConformance` |
 | `supertag-ai/surfaces` | Beta | Custom collaboration surface contract and Markdown pipeline |
 | `supertag-ai/transport` | Experimental | Persistent remote Worklet connection, protocol, and gRPC adapters |
-| `supertag-ai/coordination` | Experimental | `CoordinationClient` and the redacted coordination inbox contract |
+| `supertag-ai/coordination` | Experimental | `CoordinationClient`, which lists the operator inbox through `InboxService`, and the inbox messages it returns |
 | `supertag-ai/control-plane` | Experimental | Embeddable Control Plane service boundary |
 | `supertag-ai/spec/*` | Experimental | Language-neutral JSON Schemas and fixtures |
 | `supertag-ai/harnesses/codex`, `/claude-code`, `/cursor`, `/opencode` | Experimental | Shipped Codex, Claude Code, Cursor, and OpenCode harnesses |

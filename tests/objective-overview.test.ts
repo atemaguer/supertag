@@ -15,6 +15,7 @@ import {
 } from "../packages/core/src/index.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
 import { createIsolatedPostgresDatabase } from "./support/database.js";
+import { overviewViewOf } from "./support/objective-overview-view.js";
 
 const postgres = process.env["SUPERTAG_POSTGRES_URL"];
 
@@ -263,7 +264,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           createdAt: expect.any(String),
         },
       ]);
-      const text = formatObjectiveOverview(view);
+      const text = formatObjectiveOverview(overviewViewOf(view));
       expect(text).toContain(`Owner: ${f.owner.name}`);
       const names: Record<string, string> = {
         [f.owner.id]: f.owner.name,
@@ -294,7 +295,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         question: "Which region first?",
       });
       expect(view.attention.map((item) => item.kind)).toContain("owner_question");
-      const text = formatObjectiveOverview(view);
+      const text = formatObjectiveOverview(overviewViewOf(view));
       expect(text).toContain(`${f.owner.name} asks: "Which region first?"`);
       expect(text).toContain(`supertag message objective ${f.objective.id} TEXT`);
     }, 30_000);
@@ -348,8 +349,8 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           location: "a.ts:4",
         },
       ]);
-      expect(formatObjectiveOverview(view)).toContain(
-        "High findings (1):\n  " + `${started.task.id} F1: Missing authorization. (a.ts:4)`,
+      expect(formatObjectiveOverview(overviewViewOf(view))).toContain(
+        `High findings (1):\n  ${started.task.id} F1: Missing authorization. (a.ts:4)`,
       );
     }, 30_000);
 
@@ -382,7 +383,9 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       // The pool is the Objective's one budget; usage is counted from every Session's Attempts.
       expect(view.pool).toMatchObject({ limitMinor: 1000, currency: "USD", spentMinor: 0 });
       expect(view.objectiveSpend.reportedCostByCurrency).toMatchObject({ USD: 250 });
-      expect(formatObjectiveOverview(view)).toContain("Budget: $0.00 of $10.00 spent");
+      expect(formatObjectiveOverview(overviewViewOf(view))).toContain(
+        "Budget: $0.00 of $10.00 spent",
+      );
       // The limit sweep records reported spend against the pool.
       const objective = await f.store.getObjective(f.objective.id);
       await f.store.recordObjectiveLimitState(
@@ -398,7 +401,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         },
         objective.revision,
       );
-      expect(formatObjectiveOverview(await f.overview())).toContain(
+      expect(formatObjectiveOverview(overviewViewOf(await f.overview()))).toContain(
         "Budget: $2.50 of $10.00 spent",
       );
     }, 30_000);
@@ -454,7 +457,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           nextAction: `supertag resume objective ${f.objective.id}`,
         }),
       );
-      expect(formatObjectiveOverview(paused)).toContain(
+      expect(formatObjectiveOverview(overviewViewOf(paused))).toContain(
         `supertag resume objective ${f.objective.id}`,
       );
       await f.store.cancelObjective(
@@ -465,8 +468,10 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       const cancelled = await f.overview();
       expect(cancelled.attention.map((item) => item.kind)).toContain("objective_cancelled");
       // A closed Objective no longer reports whether it could run.
-      expect(formatObjectiveOverview(cancelled)).not.toContain("Runnable");
-      expect(formatObjectiveOverview(cancelled)).toContain("Nothing was delivered.");
+      expect(formatObjectiveOverview(overviewViewOf(cancelled))).not.toContain("Runnable");
+      expect(formatObjectiveOverview(overviewViewOf(cancelled))).toContain(
+        "Nothing was delivered.",
+      );
     }, 30_000);
 
     it("renders agent-authored text without terminal controls", async () => {
@@ -476,7 +481,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         outcome: { question: "Pick one:\u001b[2K\r rm -rf /" },
         responseText: "Pick one.",
       });
-      const text = formatObjectiveOverview(await f.overview());
+      const text = formatObjectiveOverview(overviewViewOf(await f.overview()));
       expect(text).not.toContain("\u001b");
       expect(text).not.toContain("\r");
     }, 30_000);

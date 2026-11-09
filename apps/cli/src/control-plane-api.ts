@@ -20,6 +20,7 @@ import type {
   ExecutionSettings,
   GatewayCredentialVault,
   ManagedResourceKind,
+  Objective,
   Role,
   Session,
   Store,
@@ -44,7 +45,6 @@ import {
   operatorTokenOperatorId,
   parseAuditQuery,
   parseAuthKeyName,
-  parseCancelObjective,
   parseCreateObjective,
   parseExecutionSettings,
   parseMcpGrantAction,
@@ -108,7 +108,7 @@ import { registerCoordinationGrpcRoutes } from "./coordination-grpc.js";
 import { handleCoordinationRequest } from "./coordination-http.js";
 import { canonicalJson, locationKey, sameValue } from "./field-management.js";
 import type { SurfaceController } from "./gateway-surfaces.js";
-import { handleMailboxAdminRequest, type MailboxAdminControlPlane } from "./mailbox-http.js";
+import { handleMailboxAdminRequest } from "./mailbox-http.js";
 import {
   conflictMessage,
   type ManagedPlan,
@@ -128,11 +128,13 @@ import {
   parseObjectiveManifest,
   planObjectiveManifest,
 } from "./objective-manifest.js";
+import { controlPlaneControl, controlPlaneQueries } from "./operator-control-plane.js";
 import {
   createOperatorRpcHandler,
   OPERATOR_RPC_PATH_PREFIX,
   registerOperatorRoutes,
 } from "./operator-rpc.js";
+import type { OperatorAuthentication } from "./operator-rpc-context.js";
 import { organizationStatus } from "./organization-status.js";
 import {
   applyDeletion,
@@ -235,7 +237,8 @@ export class ControlPlaneApiServer {
       dependencies.auditTrail ?? new AuditTrail(dependencies.store, dependencies.audit);
     this.#follows = new MessageFollows({
       store: dependencies.store,
-      controlPlane: dependencies.controlPlane,
+      replies: dependencies.controlPlane,
+      changes: dependencies.controlPlane.changes,
     });
     this.#operatorRpc = createOperatorRpcHandler(
       {
@@ -245,10 +248,10 @@ export class ControlPlaneApiServer {
       },
       (router) =>
         registerOperatorRoutes(router, {
-          controlPlane: dependencies.controlPlane,
-          surfaceController: dependencies.surfaceController,
-          startedAt: dependencies.startedAt,
           store: dependencies.store,
+          queries: controlPlaneQueries(dependencies),
+          control: controlPlaneControl(dependencies),
+          changes: dependencies.controlPlane.changes,
           follows: this.#follows,
           draining: () => this.#draining.signal,
         }),
@@ -504,26 +507,12 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
   }
   auditManagementRequest(context, url, authentication.principal.operatorId);
 
-  if (url.pathname.startsWith("/api/v1/coordination/")) {
-    if (!context.controlPlane.isAccepting) {
-      writeJson(context.response, 503, { error: "control_plane_draining" });
-      return;
-    }
-    await handleCoordinationRequest(
-      context.request,
-      context.response,
-      url,
-      context.controlPlane.objectives,
-      authentication.principal,
-    );
-    return;
-  }
   if (authentication.kind === "coordination") {
     writeStatusError(
       context.response,
       403,
       "Forbidden",
-      "This operator credential is limited to the coordination API",
+      "A scoped coordination credential may call only the operator RPCs that accept one",
     );
     return;
   }
@@ -561,13 +550,7 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
     return;
   }
   if (url.pathname.startsWith("/api/v1/tag-messaging/")) {
-    await handleMailboxAdminRequest(
-      context.request,
-      context.response,
-      url,
-      context.store,
-      objectiveStarter(context, "create the Objective again later to start it"),
-    );
+    await handleMailboxAdminRequest(context.request, context.response, url, context.store);
     return;
   }
   if (
@@ -577,33 +560,6 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
     await handleObjectiveManifestRequest(context, url, authentication.principal);
     return;
   }
-  const objectiveCancelMatch = /^\/api\/v1\/objectives\/([^/]+)\/cancel$/u.exec(url.pathname);
-  if (context.request.method === "POST" && objectiveCancelMatch?.[1] !== undefined) {
-    await handleObjectiveCancellation(
-      context,
-      decodeURIComponent(objectiveCancelMatch[1]),
-      authentication.principal,
-    );
-    return;
-  }
-
-  const objectivePauseMatch = /^\/api\/v1\/objectives\/([^/]+)\/(pause|resume)$/u.exec(
-    url.pathname,
-  );
-  if (
-    context.request.method === "POST" &&
-    objectivePauseMatch?.[1] !== undefined &&
-    objectivePauseMatch[2] !== undefined
-  ) {
-    await handleObjectivePause(
-      context,
-      decodeURIComponent(objectivePauseMatch[1]),
-      objectivePauseMatch[2] === "pause",
-      authentication.principal,
-    );
-    return;
-  }
-
   if (context.request.method === "GET" && url.pathname === "/api/v1/audit") {
     await handleAuditRead(context, url);
     return;
@@ -2935,21 +2891,6 @@ function hasBearerToken(authorization: string | undefined, expected: string): bo
   return timingSafeEqual(actualDigest, expectedDigest);
 }
 
-/**
- * Who sent an operator request. `break-glass` holds the admin token and may do anything.
- * `operator-token` holds an Operator Token: everything except managing Operator Tokens, attributed
- * to `token:NAME`. `coordination` holds a static scoped credential limited to the coordination API.
- */
-export type OperatorAuthentication =
-  | { readonly kind: "break-glass"; readonly principal: CoordinationOperatorPrincipal }
-  | { readonly kind: "operator-token"; readonly principal: CoordinationOperatorPrincipal }
-  | { readonly kind: "coordination"; readonly principal: CoordinationOperatorPrincipal }
-  | {
-      readonly kind: "refused";
-      readonly reason: "revoked" | "expired";
-      readonly message: string;
-    };
-
 /** Authenticates an `authorization` header value; undefined when it holds no known credential. */
 async function authenticateOperator(
   context: Pick<
@@ -3338,7 +3279,10 @@ async function handleResourceDeletion(
 function objectiveStarter(
   context: ControlPlaneApiRequestContext,
   retry: string,
-): MailboxAdminControlPlane {
+): {
+  readonly runnable: (objective: Objective) => Promise<{ readonly reasons: readonly string[] }>;
+  readonly start: (objective: Objective) => Promise<{ readonly taskId: string }>;
+} {
   return {
     runnable: (objective) => context.controlPlane.objectives.objectiveRunnable(objective),
     start: async (objective) => {
@@ -3464,97 +3408,6 @@ async function handleObjectiveManifestRequest(
       ...(result.notStarted === undefined ? {} : { notStarted: result.notStarted }),
     });
   } catch (error) {
-    if (!(error instanceof TagMessagingError)) throw error;
-    const reasons: Record<number, string> = {
-      400: "Invalid",
-      403: "Forbidden",
-      404: "NotFound",
-      409: "Conflict",
-    };
-    writeStatusError(
-      context.response,
-      error.statusCode,
-      reasons[error.statusCode] ?? "Invalid",
-      error.message,
-    );
-  }
-}
-
-/** Operator pause or resume of an Objective; repeating either is harmless. */
-async function handleObjectivePause(
-  context: ControlPlaneApiRequestContext,
-  objectiveId: string,
-  pause: boolean,
-  principal: CoordinationOperatorPrincipal,
-): Promise<void> {
-  try {
-    const result = pause
-      ? {
-          ...(await context.controlPlane.objectives.pauseObjective({ objectiveId }, principal)),
-          summary: null,
-        }
-      : await context.controlPlane.objectives.resumeObjective({ objectiveId }, principal);
-    writeJson(context.response, 200, {
-      apiVersion: CONTROL_PLANE_API_VERSION,
-      kind: pause ? "ObjectivePause" : "ObjectiveResume",
-      metadata: { objectiveId: result.objective.id },
-      status: {
-        changed: result.changed,
-        phase: result.objective.status,
-        pausedAt: result.objective.pausedAt ?? null,
-        ...(pause ? {} : { summary: result.summary }),
-      },
-    });
-  } catch (error) {
-    if (!(error instanceof TagMessagingError)) throw error;
-    const reasons: Record<number, string> = {
-      400: "Invalid",
-      401: "Unauthorized",
-      403: "Forbidden",
-      404: "NotFound",
-      409: "Conflict",
-    };
-    writeStatusError(
-      context.response,
-      error.statusCode,
-      reasons[error.statusCode] ?? "Invalid",
-      error.message,
-    );
-  }
-}
-
-/** Operator cancellation of an Objective and its open Tasks; repeating it is harmless. */
-async function handleObjectiveCancellation(
-  context: ControlPlaneApiRequestContext,
-  objectiveId: string,
-  principal: CoordinationOperatorPrincipal,
-): Promise<void> {
-  const raw = await readBody(context.request);
-  let body: unknown = {};
-  try {
-    if (raw.trim()) body = JSON.parse(raw);
-    const { reason } = parseCancelObjective(body);
-    const result = await context.controlPlane.objectives.cancelObjective(
-      { objectiveId, reason: reason ?? null },
-      principal,
-    );
-    writeJson(context.response, 200, {
-      apiVersion: CONTROL_PLANE_API_VERSION,
-      kind: "ObjectiveCancellation",
-      metadata: { objectiveId: result.objective.id },
-      status: {
-        changed: result.changed,
-        phase: result.objective.status,
-        cancelledAt: result.objective.cancelledAt ?? null,
-        reason: result.objective.cancellationReason ?? null,
-        cancelledTaskIds: result.cancelledTaskIds,
-      },
-    });
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      writeStatusError(context.response, 400, "Invalid", "Request body must be valid JSON");
-      return;
-    }
     if (!(error instanceof TagMessagingError)) throw error;
     const reasons: Record<number, string> = {
       400: "Invalid",

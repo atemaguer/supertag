@@ -1,9 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { CoordinationOperatorPrincipal, ObjectiveController } from "@supertag/control-plane";
+import type { ObjectiveController } from "@supertag/control-plane";
 import {
   INBOX_SENDS_PER_TASK,
   OBJECTIVE_UPDATE_STATUSES,
-  type ReadCoordinationInboxInput,
   SESSION_SEARCH_MAX_QUERY,
   SESSION_TOOL_MAX_RESULTS,
   TAG_MESSAGE_TEXT_MAX,
@@ -191,23 +190,10 @@ export async function handleCoordinationRequest(
   url: URL,
   controller: Pick<
     ObjectiveController,
-    | "authenticateExecution"
-    | "coordinationActions"
-    | "commandAsAttempt"
-    | "readCoordinationInbox"
-    | "readObjectiveOverview"
-    | "listApprovalRequests"
-    | "decideApprovalRequest"
-    | "messageObjective"
-    | "approveObjective"
+    "authenticateExecution" | "coordinationActions" | "commandAsAttempt"
   >,
-  operator?: CoordinationOperatorPrincipal,
 ) {
   try {
-    if (operator) {
-      await handleOperatorRequest(request, response, url, controller, operator);
-      return;
-    }
     if (request.method !== "POST") {
       reply(response, 405, { error: "method_not_allowed" });
       return;
@@ -285,154 +271,4 @@ export async function handleCoordinationRequest(
       error: error instanceof Error ? error.message : "Coordination failed",
     });
   }
-}
-
-/** Operator routes under /api/v1/coordination: the inbox, overviews, approvals and messages. */
-async function handleOperatorRequest(
-  request: IncomingMessage,
-  response: ServerResponse,
-  url: URL,
-  controller: Parameters<typeof handleCoordinationRequest>[3],
-  operator: CoordinationOperatorPrincipal,
-): Promise<void> {
-  const overviewMatch = url.pathname.match(
-    /^\/api\/v1\/coordination\/objectives\/([^/]+)\/overview$/u,
-  );
-  if (request.method === "GET" && overviewMatch) {
-    assertKnownQuery(url, [], "overview");
-    reply(
-      response,
-      200,
-      await controller.readObjectiveOverview(
-        { objectiveId: decodeURIComponent(overviewMatch[1] as string) },
-        operator,
-      ),
-    );
-    return;
-  }
-  if (request.method === "GET" && url.pathname === "/api/v1/coordination/inbox") {
-    assertKnownQuery(
-      url,
-      ["objectiveId", "kind", "status", "nextActorId", "asOf", "cursor", "limit"],
-      "coordination inbox",
-    );
-    const limit = url.searchParams.get("limit");
-    reply(
-      response,
-      200,
-      await controller.readCoordinationInbox(
-        {
-          ...queryText(url, "objectiveId"),
-          ...queryText(url, "kind"),
-          ...queryText(url, "status"),
-          ...queryText(url, "nextActorId"),
-          ...queryText(url, "asOf"),
-          ...queryText(url, "cursor"),
-          ...(limit === null ? {} : { limit: queryInteger(limit, "limit") }),
-        } as ReadCoordinationInboxInput,
-        operator,
-      ),
-    );
-    return;
-  }
-  if (request.method === "GET" && url.pathname === "/api/v1/coordination/approvals") {
-    assertKnownQuery(url, ["objectiveId", "status", "limit"], "approval");
-    const limit = url.searchParams.get("limit");
-    reply(
-      response,
-      200,
-      await controller.listApprovalRequests(
-        {
-          ...queryText(url, "objectiveId"),
-          ...queryText(url, "status"),
-          ...(limit === null ? {} : { limit: queryInteger(limit, "limit") }),
-        },
-        operator,
-      ),
-    );
-    return;
-  }
-  const decisionMatch = url.pathname.match(
-    /^\/api\/v1\/coordination\/approvals\/([^/]+)\/(approve|deny)$/u,
-  );
-  if (request.method === "POST" && decisionMatch) {
-    const input = await body(request);
-    for (const key of Object.keys(input))
-      if (!["scope", "validUntil", "reason"].includes(key))
-        throw new TagMessagingError(400, `Unknown approval decision field: ${key}`);
-    reply(
-      response,
-      200,
-      await controller.decideApprovalRequest(
-        {
-          ...input,
-          requestId: decodeURIComponent(decisionMatch[1] as string),
-          decision: decisionMatch[2],
-        },
-        operator,
-      ),
-    );
-    return;
-  }
-  const objectiveMatch = url.pathname.match(
-    /^\/api\/v1\/coordination\/objectives\/([^/]+)\/(messages|approve)$/u,
-  );
-  if (request.method === "POST" && objectiveMatch) {
-    const objectiveId = decodeURIComponent(objectiveMatch[1] as string);
-    const input = await body(request);
-    if (objectiveMatch[2] === "approve") {
-      if (Object.keys(input).length > 0)
-        throw new TagMessagingError(400, "Approval takes no fields");
-      reply(response, 200, await controller.approveObjective({ objectiveId }, operator));
-      return;
-    }
-    if (objectiveMatch[2] === "messages") {
-      for (const key of Object.keys(input))
-        if (!["text", "idempotencyKey"].includes(key))
-          throw new TagMessagingError(400, `Unknown Objective message field: ${key}`);
-      if (typeof input["text"] !== "string" || !input["text"].trim())
-        throw new TagMessagingError(400, "text is required");
-      if (input["idempotencyKey"] !== undefined && typeof input["idempotencyKey"] !== "string")
-        throw new TagMessagingError(400, "idempotencyKey must be a string");
-      reply(
-        response,
-        200,
-        await controller.messageObjective(
-          {
-            objectiveId,
-            text: input["text"],
-            ...(input["idempotencyKey"] === undefined
-              ? {}
-              : { idempotencyKey: input["idempotencyKey"] }),
-          },
-          operator,
-        ),
-      );
-      return;
-    }
-  }
-  reply(response, 404, { error: "not_found" });
-}
-
-function queryText(url: URL, name: string): Record<string, string> {
-  const values = url.searchParams.getAll(name);
-  if (values.length === 0) return {};
-  if (values.length !== 1 || !values[0]?.trim())
-    throw new TagMessagingError(400, `Exactly one non-empty ${name} query parameter is required`);
-  return { [name]: values[0] };
-}
-
-function queryInteger(value: string, name: string): number {
-  if (!/^\d+$/u.test(value)) throw new TagMessagingError(400, `${name} must be an integer`);
-  return Number(value);
-}
-
-function assertKnownQuery(url: URL, allowed: readonly string[], name: string): void {
-  const unknown = [...new Set(url.searchParams.keys())].filter((key) => !allowed.includes(key));
-  if (unknown.length > 0)
-    throw new TagMessagingError(
-      400,
-      `Unknown ${name} query parameter${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}`,
-    );
-  for (const key of allowed) queryText(url, key);
 }

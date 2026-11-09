@@ -24,4 +24,11 @@ extend google.protobuf.MethodOptions {
   // `objective.cancel`. Every RPC that can change state declares one; an RPC
   // that reads only sets `idempotency_level = NO_SIDE_EFFECTS` instead.
   string audit_action = 50004;
+  // Accept a scoped coordination credential, one the Control Plane reads from
+  // `SUPERTAG_COORDINATION_OPERATORS_FILE`. It must carry `action` among its
+  // actions, and it reaches only the Objectives its scope names: the RPC
+  // refuses any other with `PermissionDenied`. Without this option such a
+  // credential is refused with `PermissionDenied`, whatever actions it
+  // carries.
+  bool allow_scoped_credential = 50005;
 }

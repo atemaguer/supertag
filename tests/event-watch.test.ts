@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { OperatorAuthentication } from "../apps/cli/src/control-plane-api.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { eventService } from "../apps/cli/src/event-rpc.ts";
 import { conversationClient, eventClient } from "../apps/cli/src/operator-client.ts";
 import { createOperatorRpcHandler } from "../apps/cli/src/operator-rpc.ts";
+import type { OperatorAuthentication } from "../apps/cli/src/operator-rpc-context.ts";
 import {
   type ChangeNotice,
   ChangeNotifications,
@@ -87,6 +87,13 @@ describe("EventService.Watch", () => {
           scopes: { actions: ["watch_events", "read_objective"], objectiveIds: ["objective-1"] },
         },
       },
+      "Bearer coordinator": {
+        kind: "coordination",
+        principal: {
+          operatorId: "coordinator",
+          scopes: { actions: ["watch_events", "read_objective"], objectiveIds: ["objective-1"] },
+        },
+      },
     } satisfies Record<string, OperatorAuthentication>);
     const handler = createOperatorRpcHandler(
       {
@@ -101,6 +108,10 @@ describe("EventService.Watch", () => {
           EventService,
           eventService({
             changes,
+            store: {
+              getObjective: async (id: string) =>
+                ({ id, teamId: id === "objective-1" ? "team-1" : null }) as never,
+            },
             draining: () => new AbortController().signal,
             heartbeatMs: 100,
           }),
@@ -192,7 +203,11 @@ describe("EventService.Watch", () => {
       notice({ kind: "objective", id: "objective-1", objectiveId: "objective-1" }),
       notice({ kind: "objective", id: "objective-2", objectiveId: "objective-2" }),
       notice({ kind: "approval", id: "approval-1", taskId: "task-x" }),
+      notice({ kind: "task", id: "task-objective-1", objectiveId: "objective-1" }),
+      notice({ kind: "session", id: "session-objective-1" }),
       notice({ kind: "tag", id: "tag-last", tag: "last" }),
+      notice({ kind: "workstream_post", id: "post-team-2", teamId: "team-2" }),
+      notice({ kind: "workstream_post", id: "post-team-1", teamId: "team-1" }),
     ];
     const ids = (events: readonly WatchEvent[]) => changed(events).map((change) => change.id);
     const last = (events: readonly WatchEvent[]) => ids(events).includes("tag-last");
@@ -202,6 +217,8 @@ describe("EventService.Watch", () => {
       "objective-1",
       "objective-2",
       "approval-1",
+      "task-objective-1",
+      "session-objective-1",
       "tag-last",
     ]);
     expect(ids(await watchWhile("alice", published, last))).toEqual([
@@ -209,10 +226,29 @@ describe("EventService.Watch", () => {
       "objective-1",
       "objective-2",
       "approval-1",
+      "task-objective-1",
+      "session-objective-1",
       "tag-last",
     ]);
+    // A scoped coordination credential sees its Objectives, their Tasks and their Team's posts,
+    // and no conversations, Sessions or Tags.
+    expect(
+      ids(
+        await watchWhile("coordinator", published, (events) => ids(events).includes("post-team-1")),
+      ),
+    ).toEqual(["objective-1", "task-objective-1", "post-team-1"]);
+    expect(
+      changed(
+        await watchWhile(ADMIN, published, (events) => ids(events).includes("post-team-1")),
+      ).at(-1),
+    ).toMatchObject({ kind: WatchKind.WORKSTREAM_POST, id: "post-team-1", teamId: "team-1" });
     // Objectives in scope only; no approval outside an Objective, nor kinds it lacks actions for.
-    expect(ids(await watchWhile("scoped", published, last))).toEqual(["objective-1", "tag-last"]);
+    expect(ids(await watchWhile("scoped", published, last))).toEqual([
+      "objective-1",
+      "task-objective-1",
+      "session-objective-1",
+      "tag-last",
+    ]);
     // `kinds` narrows what a caller may see.
     expect(ids(await watchWhile(ADMIN, published, last, { kinds: [WatchKind.TAG] }))).toEqual([
       "tag-last",

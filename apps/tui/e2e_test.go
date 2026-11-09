@@ -19,10 +19,11 @@ import (
 )
 
 // The end-to-end test runs the built binary through plain `supertag` (the Node CLI from this
-// checkout) under tmux, against a fake Control Plane serving one earlier message as history and
-// one scripted conversation turn: a streamed reply with a command that starts one work Session,
-// which then reports. It needs tmux, node_modules and ./build.sh output, so it runs only with
-// SUPERTAG_TUI_E2E=1:
+// checkout) under tmux, against a fake Control Plane serving one earlier message as history, one
+// scripted conversation turn (a streamed reply with a command that starts one work Session, which
+// then reports), one open Objective, and an inbox holding the Objective owner's question and an
+// approval request. It answers the question and approves the request in place. It needs tmux,
+// node_modules and ./build.sh output, so it runs only with SUPERTAG_TUI_E2E=1:
 //
 //	SUPERTAG_TUI_E2E=1 go test -run TestEndToEnd -v .
 const (
@@ -41,9 +42,16 @@ const (
 func endToEndControlPlane() *fakeControlPlane {
 	work := workSession("ses-work-1", fakeWorkTitle, fakeWorkTask, "")
 	done := workSession("ses-work-1", fakeWorkTitle, fakeWorkTask, fakeReport)
+	inbox := coordinationFake()
 	return &fakeControlPlane{
-		token: fakeToken,
-		tags:  func(w http.ResponseWriter) { tagList(w, "lead", "builder") },
+		token:      fakeToken,
+		tags:       func(w http.ResponseWriter) { tagList(w, "lead", "builder") },
+		objectives: func() []*operatorv1.Objective { return []*operatorv1.Objective{billingOverview().GetObjective()} },
+		overview:   inbox.overview,
+		items:      inbox.items,
+		approve:    inbox.approve,
+		deny:       inbox.deny,
+		answer:     inbox.answer,
 		history: func(req *operatorv1.ListMessagesRequest) []*operatorv1.Message {
 			if req.GetTag() != fakeTag {
 				return nil
@@ -186,7 +194,6 @@ func TestEndToEnd(t *testing.T) {
 		t.Errorf("the reply's markdown was not rendered")
 	}
 	fake.mu.Lock()
-	defer fake.mu.Unlock()
 	if fake.badAuth != 0 {
 		t.Errorf("%d requests came without the operator token", fake.badAuth)
 	}
@@ -196,6 +203,57 @@ func TestEndToEnd(t *testing.T) {
 	if fake.followed[fakeTask] != 1 || len(fake.followed) != 1 {
 		t.Errorf("follows = %v, want one of %s", fake.followed, fakeTask)
 	}
+	fake.mu.Unlock()
+
+	keys := func(keys ...string) { run(append([]string{"send-keys", "-t", session}, keys...)...) }
+	waitFor("the rail's Objectives and inbox", 10*time.Second, func(pane string) bool {
+		return strings.Contains(pane, "$41.23/$300") && strings.Contains(pane, "Waiting on you (2)")
+	})
+	keys("Tab")
+	keys("Down")
+	keys("Down")
+	pane = waitFor("the Objective view", 10*time.Second, func(pane string) bool {
+		return strings.Contains(pane, "Objective obj-billing: working")
+	})
+	t.Logf("Objective view:\n%s", pane)
+	for _, want := range []string{"Budget: $41.23 of $300.00 spent", "Branch supertag/session/b3861d05 in Workspace app",
+		`lead asks: "Should 100% stay allowed?"`, "Report: Percentages over 100 now raise."} {
+		if !strings.Contains(pane, want) {
+			t.Errorf("the Objective view does not show %q", want)
+		}
+	}
+
+	keys("Down")
+	waitFor("the question", 10*time.Second, func(pane string) bool { return strings.Contains(pane, "The owner asks:") })
+	keys("Enter")
+	keys("-l", "No, cap it at 100.")
+	keys("Enter")
+	waitFor("the answer to be sent", 10*time.Second, func(pane string) bool {
+		return strings.Contains(pane, "Sent. lead takes your answer") && strings.Contains(pane, "Waiting on you (1)")
+	})
+
+	keys("Tab")
+	keys("Enter")
+	waitFor("the approval request", 10*time.Second, func(pane string) bool { return strings.Contains(pane, "a approve · d deny") })
+	keys("a")
+	waitFor("the confirmation", 10*time.Second, func(pane string) bool { return strings.Contains(pane, "enter approves this request once") })
+	keys("Enter")
+	pane = waitFor("the approval", 10*time.Second, func(pane string) bool {
+		return strings.Contains(pane, "Approved once.") && strings.Contains(pane, "Waiting on you (0)")
+	})
+	t.Logf("after approving:\n%s", pane)
+
+	fake.mu.Lock()
+	if len(fake.answered) != 1 || fake.answered[0].GetKey() != "question:task-own" || fake.answered[0].GetText() != "No, cap it at 100." {
+		t.Errorf("answered = %v", fake.answered)
+	}
+	if len(fake.approved) != 1 || fake.approved[0].GetId() != "apr-1" {
+		t.Errorf("approved = %v", fake.approved)
+	}
+	if fake.badAuth != 0 {
+		t.Errorf("%d requests came without the operator token", fake.badAuth)
+	}
+	fake.mu.Unlock()
 }
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

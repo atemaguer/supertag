@@ -281,19 +281,18 @@ describe("Objective pause commands", () => {
     expect(parseSurfaceObjectiveCommand(mention("@SuperTag pause now"))).toBeUndefined();
   });
 
-  it("calls the pause and resume endpoints and prints one line", async () => {
+  it("calls PauseObjective and ResumeObjective and prints one line", async () => {
     const calls: string[] = [];
-    const client = {
-      request: async <T>(path: string) => {
-        calls.push(path);
-        return { status: { changed: true } } as T;
-      },
+    const answer = (method: string) => async (request: { readonly id: string }) => {
+      calls.push(`${method} ${request.id}`);
+      return { changed: true } as never;
     };
+    const client = { pauseObjective: answer("pause"), resumeObjective: answer("resume") };
     expect(await runObjectivePause(client, "pause", ["ship"])).toContain(
       "supertag resume objective ship",
     );
     expect(await runObjectivePause(client, "resume", ["ship"])).toContain("resumed");
-    expect(calls).toEqual(["/api/v1/objectives/ship/pause", "/api/v1/objectives/ship/resume"]);
+    expect(calls).toEqual(["pause ship", "resume ship"]);
     await expect(runObjectivePause(client, "pause", [])).rejects.toThrow(
       "Usage: supertag pause objective ID",
     );

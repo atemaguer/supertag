@@ -54,6 +54,14 @@ var file_supertag_operator_v1_options_proto_extTypes = []protoimpl.ExtensionInfo
 		Tag:           "bytes,50004,opt,name=audit_action",
 		Filename:      "supertag/operator/v1/options.proto",
 	},
+	{
+		ExtendedType:  (*descriptorpb.MethodOptions)(nil),
+		ExtensionType: (*bool)(nil),
+		Field:         50005,
+		Name:          "supertag.operator.v1.allow_scoped_credential",
+		Tag:           "varint,50005,opt,name=allow_scoped_credential",
+		Filename:      "supertag/operator/v1/options.proto",
+	},
 }
 
 // Extension fields to descriptorpb.MethodOptions.
@@ -81,6 +89,15 @@ var (
 	//
 	// optional string audit_action = 50004;
 	E_AuditAction = &file_supertag_operator_v1_options_proto_extTypes[3]
+	// Accept a scoped coordination credential, one the Control Plane reads from
+	// `SUPERTAG_COORDINATION_OPERATORS_FILE`. It must carry `action` among its
+	// actions, and it reaches only the Objectives its scope names: the RPC
+	// refuses any other with `PermissionDenied`. Without this option such a
+	// credential is refused with `PermissionDenied`, whatever actions it
+	// carries.
+	//
+	// optional bool allow_scoped_credential = 50005;
+	E_AllowScopedCredential = &file_supertag_operator_v1_options_proto_extTypes[4]
 )
 
 var File_supertag_operator_v1_options_proto protoreflect.FileDescriptor
@@ -91,7 +108,8 @@ const file_supertag_operator_v1_options_proto_rawDesc = "" +
 	"\x06action\x12\x1e.google.protobuf.MethodOptions\x18ц\x03 \x01(\tR\x06action:I\n" +
 	"\x0fallow_anonymous\x12\x1e.google.protobuf.MethodOptions\x18҆\x03 \x01(\bR\x0eallowAnonymous:R\n" +
 	"\x14requires_admin_token\x12\x1e.google.protobuf.MethodOptions\x18ӆ\x03 \x01(\bR\x12requiresAdminToken:C\n" +
-	"\faudit_action\x12\x1e.google.protobuf.MethodOptions\x18Ԇ\x03 \x01(\tR\vauditActionBNZLgithub.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1b\x06proto3"
+	"\faudit_action\x12\x1e.google.protobuf.MethodOptions\x18Ԇ\x03 \x01(\tR\vauditAction:X\n" +
+	"\x17allow_scoped_credential\x12\x1e.google.protobuf.MethodOptions\x18Ն\x03 \x01(\bR\x15allowScopedCredentialBNZLgithub.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1b\x06proto3"
 
 var file_supertag_operator_v1_options_proto_goTypes = []any{
 	(*descriptorpb.MethodOptions)(nil), // 0: google.protobuf.MethodOptions
@@ -101,10 +119,11 @@ var file_supertag_operator_v1_options_proto_depIdxs = []int32{
 	0, // 1: supertag.operator.v1.allow_anonymous:extendee -> google.protobuf.MethodOptions
 	0, // 2: supertag.operator.v1.requires_admin_token:extendee -> google.protobuf.MethodOptions
 	0, // 3: supertag.operator.v1.audit_action:extendee -> google.protobuf.MethodOptions
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	0, // [0:4] is the sub-list for extension extendee
+	0, // 4: supertag.operator.v1.allow_scoped_credential:extendee -> google.protobuf.MethodOptions
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	0, // [0:5] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
 }
 
@@ -120,7 +139,7 @@ func file_supertag_operator_v1_options_proto_init() {
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_operator_v1_options_proto_rawDesc), len(file_supertag_operator_v1_options_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   0,
-			NumExtensions: 4,
+			NumExtensions: 5,
 			NumServices:   0,
 		},
 		GoTypes:           file_supertag_operator_v1_options_proto_goTypes,

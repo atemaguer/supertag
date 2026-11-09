@@ -70,7 +70,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   if (opensTui(selection.args)) {
     const code = await runTui({ override: selection.controlPlaneOverride });
     if (code !== undefined) return code;
-    process.stdout.write(`${helpText()}\n${tuiBuildHint() ?? ""}`);
+    process.stdout.write(`${helpText()}\n${tuiBuildHint()}`);
     return 0;
   }
   if (command === "test" && provider === "notification") {

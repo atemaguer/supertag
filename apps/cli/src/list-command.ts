@@ -1,10 +1,13 @@
 import { parseArgs } from "node:util";
+import { fromJsonString } from "@bufbuild/protobuf";
+import { ListApprovalsResponseSchema, ListObjectivesResponseSchema } from "@supertag/operator-api";
 import { stringify as stringifyYaml } from "yaml";
 import { runApprovalCommand, runInboxCommand } from "./approvals.js";
 import { runArtifactCommand } from "./artifacts.js";
 import { ControlPlaneClient, type ControlPlaneTarget } from "./control-plane-client.js";
 import { runTagMessagingCommand } from "./messaging.js";
 import { money } from "./money.js";
+import { approvalRecord, type ObjectiveView, objectiveView } from "./objective-protos.js";
 import { runObjectiveCommand } from "./objectives.js";
 import { runTeamCommand } from "./teams.js";
 import { terminalText } from "./terminal-text.js";
@@ -198,6 +201,21 @@ const TAG_FIELDS: Readonly<Record<string, readonly string[]>> = {
   "workstream-post": ["authorTagId", "to"],
 };
 
+/** An Objective as a table row names its fields. */
+function objectiveRow(objective: ObjectiveView): Row {
+  return {
+    id: objective.id,
+    status: objective.status,
+    ownerTagId: objective.ownerTagId,
+    deadline: objective.deadline,
+    budgetLimitMinor: objective.budgetLimitMinor,
+    budgetCurrency: objective.budgetCurrency,
+    ...(objective.reportedSpendMinor === null
+      ? {}
+      : { limitState: { reportedSpend: { amountMinor: objective.reportedSpendMinor } } }),
+  };
+}
+
 function firstLine(text: string): string {
   const line = text.trim().split(/\r?\n/u)[0]?.trim() ?? "";
   return line.length > 80 ? `${line.slice(0, 79)}…` : line;
@@ -335,6 +353,17 @@ export async function runListCommand(
       ]);
     }
     value = JSON.parse(response);
+    // Text tables show the CLI's records; JSON and YAML keep the operator API's messages.
+    if (output === "text" && kind === "objective")
+      value = {
+        items: fromJsonString(ListObjectivesResponseSchema, response).objectives.map((objective) =>
+          objectiveRow(objectiveView(objective)),
+        ),
+      };
+    if (output === "text" && kind === "approval")
+      value = {
+        items: fromJsonString(ListApprovalsResponseSchema, response).approvals.map(approvalRecord),
+      };
   }
   const tagFields = TAG_FIELDS[kind];
   if (output === "text" && tagFields !== undefined) {

@@ -20,23 +20,17 @@ export function apiClient(url, adminToken) {
     if (!response.ok) throw new Error(`${path}: ${response.status} ${JSON.stringify(value)}`);
     return value;
   };
+  /** Calls an operator RPC over the Connect protocol with a JSON body. */
+  const rpc = (service, method, input) =>
+    request("POST", `/supertag.operator.v1.${service}/${method}`, input);
   return {
     request,
+    rpc,
     /** Delivers an operator message to the Objective's conversation. */
     message: (text, idempotencyKey) =>
-      request(
-        "POST",
-        `/api/v1/coordination/objectives/${encodeURIComponent(objectiveId)}/messages`,
-        {
-          text,
-          idempotencyKey,
-        },
-      ),
-    overview: (limit = 100) =>
-      request(
-        "GET",
-        `/api/v1/coordination/objectives/${encodeURIComponent(objectiveId)}/overview?limit=${limit}`,
-      ),
+      rpc("ObjectiveService", "MessageObjective", { id: objectiveId, text, idempotencyKey }),
+    overview: (pageSize = 100) =>
+      rpc("ObjectiveService", "DescribeObjective", { id: objectiveId, pageSize }),
   };
 }
 export async function createOrganization(api) {
@@ -93,10 +87,10 @@ export async function createOrganization(api) {
   ])
     await api.request("PUT", "/api/v1/tag-messaging/grants", { senderTagId, recipientTagId });
   // Creating the Objective starts its conversation; it is ongoing, so it rests between messages.
-  await api.request("POST", "/api/v1/tag-messaging/objectives", {
+  await api.rpc("ObjectiveService", "CreateObjective", {
     id: objectiveId,
-    ownerTagId: actors.manager.tagId,
-    teamId,
+    owner: "Support manager",
+    team: teamId,
     ongoing: true,
     outcome: [
       `Maintain support responses. Incident reports arrive as operator messages in this conversation. Team ${teamId}; give proposal work to analyst Tag ${actors.analyst.tagId}. Follow your Role.`,
@@ -108,7 +102,7 @@ export async function createOrganization(api) {
       ].map((criterion) => `- ${criterion}`),
     ].join("\n"),
     runtimeActions: ["files:write", "commands:execute"],
-    budgetLimitMinor: 1000,
+    budget: { limitMinor: 1000 },
   });
   return actors;
 }

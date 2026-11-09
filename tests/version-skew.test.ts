@@ -209,10 +209,10 @@ describe("the Control Plane version header", () => {
 
   it("names the unknown fields it rejects", async () => {
     const url = await realControlPlane();
-    const response = await fetch(`${url}/api/v1/tag-messaging/objectives`, {
+    const response = await fetch(`${url}/api/v1/tag-messaging/teams`, {
       method: "POST",
       headers: { authorization: `Bearer ${ADMIN}`, "content-type": "application/json" },
-      body: JSON.stringify({ outcome: "Ship it", ownerTagId: "t", rocket: 1 }),
+      body: JSON.stringify({ name: "launch", memberTagIds: [], rocket: 1 }),
     });
     expect(response.status).toBe(400);
     expect(response.headers.get("SuperTag-Version")).toBe(SUPERTAG_VERSION);

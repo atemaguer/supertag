@@ -204,8 +204,9 @@ supertag --version
 ```
 
 It installs SuperTag in `~/.local/share/supertag` and links `supertag` into `~/.local/bin`; add
-that directory to your `PATH` if it isn't already. Or run `npm install -g supertag-ai`. See
-[installation and version matching](docs/operations/install.md).
+that directory to your `PATH` if it isn't already. It also installs the experimental terminal UI,
+which plain `supertag` opens in a terminal. Or run `npm install -g supertag-ai`, which leaves the
+terminal UI out. See [installation and version matching](docs/operations/install.md).
 
 ### 2. Set up your repository
 

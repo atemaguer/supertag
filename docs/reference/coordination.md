@@ -85,7 +85,7 @@ turn, in every Session, draws on the Objective's one budget pool.
 - `--workspace`, repeatable, names up to 16 existing Workspaces. Unknown names are rejected.
 - `--ongoing` makes the Objective a continuing responsibility that only an operator ends.
 - `--dry-run` validates exactly as creation does, returns the would-be Objective with its
-  warnings and `dryRun: true`, and stores nothing.
+  warnings, and stores nothing.
 - Creation returns `warnings`: sentences naming conditions that would hold the Objective's turns,
   each with its next step. They cover an owner with no bound Worker Host, no bound host connected,
   a named Workspace no bound host has checked out, a zero budget, a passed deadline, and runtime
@@ -94,7 +94,7 @@ turn, in every Session, draws on the Objective's one budget pool.
   Starting is idempotent, so a retried creation returns the same first Task. When the first turn
   cannot be admitted, the Objective is still created and `notStarted` gives the reason.
 - Retrying the same definition returns the existing record with its current status. A different
-  definition with the same ID returns 409.
+  definition with the same ID is refused.
 
 A Tag creates an Objective from a thread with the `create_objective` tool, and only on an
 authenticated human `@SuperTag objective <outcome>` command in the admitted request. That
@@ -173,7 +173,7 @@ may do this.
 - A message never changes a budget, permissions or any other resource. Apply the resource change
   with its own command first; replying "approved" alone changes no allocation.
 - A `blocked`, `limited` or `ready_for_review` Objective returns to `working` on a message. A
-  `completed` or `cancelled` Objective takes no more messages and returns 409.
+  `completed` or `cancelled` Objective takes no more messages; a message to one is refused.
 - The same `idempotencyKey` with the same text returns the original delivery; the CLI generates a
   new key for each command.
 - The owner's answer to the message is its next reply in the home thread.
@@ -232,9 +232,9 @@ Statuses are `working`, `blocked`, `limited`, `ready_for_review`, `completed` an
 
 - The owner or an operator updates the status. A status update cannot set `cancelled`; see
   [Cancelling an Objective](#cancelling-an-objective).
-- Each update requires the current revision and increments it. Conflicting writes return 409.
+- Each update requires the current revision and increments it. Conflicting writes are refused.
 - The CLI commands `update objective`, `complete objective` and `update team` take `--revision`
-  as optional. Without it the CLI reads the current revision, and after a 409
+  as optional. Without it the CLI reads the current revision, and after a revision conflict
   caused by another writer it rereads and retries once, only when the other change left the
   fields it is changing untouched. With `--revision` it never retries. Coordination tools always
   send `expectedRevision`.
@@ -269,8 +269,8 @@ regular sweep.
 ### Pausing an Objective
 
 - Only an operator pauses or resumes, with `supertag pause objective ID` and
-  `supertag resume objective ID`, `POST /api/v1/objectives/{id}/pause` and
-  `/resume`, or `@SuperTag pause` and `@SuperTag resume` in the home thread. No coordination tool
+  `supertag resume objective ID`, `ObjectiveService.PauseObjective` and `ResumeObjective`, or
+  `@SuperTag pause` and `@SuperTag resume` in the home thread. No coordination tool
   pauses, so no Tag can.
 - A pause records `pausedAt` and leaves `status` unchanged. While it is set, no turn of any of the
   Objective's Sessions starts: deliveries stay pending rather than failing. Running Task Attempts
@@ -282,16 +282,18 @@ regular sweep.
 ### Cancelling an Objective
 
 - Only an operator cancels, with `supertag cancel objective ID [--reason TEXT]` or
-  `POST /api/v1/objectives/{id}/cancel`. `update_objective` refuses `cancelled` with 400.
-- `cancelled` is terminal. Later status, deadline, budget and notification updates return 409, and
-  no new turn, wake or limit warning follows.
+  `ObjectiveService.CancelObjective`. `UpdateObjective` and the `update_objective` tool refuse
+  `cancelled`.
+- `cancelled` is terminal. Later status, deadline and budget updates fail, and no new turn, wake
+  or limit warning follows.
 - The Objective records `cancelledAt` and `cancellationReason`, up to 2,000 characters. The
   revision increments once and the change history records the operator.
 - Every open Task in the Objective's Sessions is cancelled through the same path as
   `supertag cancel task`, pending deliveries fail, running Task Attempts stop, and Workspace pull
   requests close.
-- Cancellation needs no revision. Cancelling a cancelled Objective returns success with
-  `changed: false` and retries any Task still open. Cancelling a completed Objective returns 409.
+- Cancellation needs no revision. Cancelling a cancelled Objective succeeds with `changed` false
+  and retries any Task still open. Cancelling a completed Objective fails with
+  `failed_precondition`.
 
 ## Budgets and allocation
 
@@ -360,7 +362,7 @@ Attempts finish. If they finish at $3,080, the Objective shows an $80 overrun an
 - Admission resumes once the new limit exceeds reported spend, and warnings are raised again
   against it. The increase is audited in the Objective's change history.
 
-The HTTP rules are in
+The API rules are in
 [Objective allocation recovery](control-plane-api.md#objective-allocation-recovery). For the
 procedure, see [Respond to budget and operator requests](../guides/objective-decisions.md).
 
@@ -636,15 +638,9 @@ the Session waits on nothing. After a permission change, start a new work Sessio
 Task events record each step with the Permission Sets and the decider: `approval.requested`,
 `approval.granted-by-scope`, `approval.approved`, `approval.denied` and `approval.consumed`.
 
-The operator API mirrors the CLI:
-
-| Request | Operation |
-| --- | --- |
-| `GET /api/v1/coordination/approvals?objectiveId=ID&status=pending` | List requests; `status` also accepts `approved`, `denied`, `expired` or `all` |
-| `POST /api/v1/coordination/approvals/ID/approve` | Optional body fields `scope` (`once` or `objective`) and `validUntil` |
-| `POST /api/v1/coordination/approvals/ID/deny` | Body `{"reason":"TEXT"}` |
-
-Scoped operator credentials need the `list_approvals` and `decide_approval` actions.
+The operator API mirrors the CLI with `InboxService.ListApprovals`, `Approve` and `Deny`; see
+[Inbox](control-plane-api.md#inbox). Scoped operator credentials need the `list_approvals` and
+`decide_approval` actions.
 
 ## Review findings
 
@@ -676,25 +672,26 @@ skipped.
 
 ## Overview fields
 
-`supertag describe objective ID` and
-`GET /api/v1/coordination/objectives/{id}/overview` present one view of an Objective; see
-[Check an Objective's progress](../guides/objective-overview.md).
+`supertag describe objective ID` and `ObjectiveService.DescribeObjective` present one view of an
+Objective; see [Check an Objective's progress](../guides/objective-overview.md).
+`supertag describe objective ID --output json` prints the `ObjectiveOverview` message as proto
+JSON.
 
 | Field | Holds |
 | --- | --- |
 | `objective` | The Objective record, including status, revision, budget and deadline |
 | `conditions` | One `Runnable` condition; see [Runnable](#runnable) |
 | `attention` | Budget, deadline and approval items needing a person |
-| `approvals` | The Objective's pending approval requests, when the caller may list them |
-| `team` | The Objective's Team with its `id`, `name`, `memberTagIds` and `maxConcurrency`; null when the owner works alone |
+| `approvals` | Counts of the Objective's pending and recently decided approval requests |
+| `team` | The Objective's Team with its ID, name, members and `maxConcurrency`; unset when the owner works alone |
 | `limits` | The deadline, the time left, the grace period and the notices already raised |
-| `pool` | `currency`, `limitMinor`, `spentMinor` and `availableMinor` |
-| `conversation` | The newest 25 turns of the Objective's conversation, each `operator`, `supertag` or `owner` |
-| `sessions` | Each of the Objective's Sessions with its latest turn, its status, its question and the approvals it waits on |
+| `budget` | The limit, spend and what is left, the cost reported by currency, and the Task Attempts with unknown cost or an unpriced model |
+| `conversation` | The newest 25 turns of the Objective's conversation, each by an operator, SuperTag or the owner |
+| `sessions` | Each of the Objective's Sessions with the Tag running it, its status, its question, the approvals it waits on, and its latest Task's delivery, report and explanations |
 | `highFindings` | High findings in the latest result of each Session |
-| `posts` | Recent Workstream posts of the Objective's Team |
-| `tasks`, `pageUsage` | The Task page and its provider usage |
-| `total`, `offset`, `nextOffset` | The Task page's position; `nextOffset` is null on the last page |
+| `posts` | The newest Workstream posts of the Objective's Team |
+| `tasks` | One page of Tasks with their Task Attempts |
+| `totalTasks`, `nextPageToken` | The number of Tasks on all pages, and the token for the next page, empty on the last |
 | `writes` | Bytes each Volume received from these Tasks |
 | `tagNames` | Each Tag ID the view mentions, by name |
 
@@ -702,18 +699,15 @@ skipped.
 
 ### Allocation and usage
 
-- Pool totals always describe the whole Objective, even on a later Task page.
-- Provider usage totals describe only the displayed Task page. Follow pagination before comparing
-  a whole organization's consumption.
-- The JSON names those Task IDs, reports missing usage and cost observations, and sums each Task
-  Attempt's latest cumulative report exactly once. Missing reports stay unknown, never zero.
+- `budget` always describes the whole Objective, even on a later Task page.
+- It sums each Task Attempt's latest cumulative report exactly once and counts the Task Attempts
+  that reported no cost or no tokens. Missing reports stay unknown, never zero.
 - Amounts in different currencies stay separate and are never converted.
 
 ### Timing
 
-- `completedExecutionMs` sums the durations of Task Attempts with recorded end times, including
-  failed and cancelled ones. It measures a Task Attempt's lifetime, including tool and runtime
-  waits.
+- Each Task Attempt's `startedAt` and `endedAt` measure its lifetime, including tool and runtime
+  waits, for failed and cancelled ones too.
 - Additional Task Attempts include continuations after an approval, so they are not all failures
   or retries.
 - Queue age alone does not establish a capacity shortage: Team concurrency, the Tag's other
@@ -735,16 +729,17 @@ turns; it does not check Worker capacity, profile compatibility or approvals.
 
 ### Access
 
-The overview uses the authenticated administrative API and requires the `read_objective` action
-plus access to the requested Objective. See the
-[API reference](control-plane-api.md#coordination-operations-experimental) for the HTTP endpoint.
+The overview requires the `read_objective` action plus access to the requested Objective. See
+[Objectives](control-plane-api.md#objectives) in the API reference.
 
 ## Operator inbox
 
 `supertag list inbox` is a redacted projection over pending stored state. It creates no resource
 and grants no authority: the operator acts through the same commands as always. Filter it by
-Objective, kind or status. `supertag watch inbox` polls it once a second and prints each new item
-occurrence once.
+Objective or kind. `supertag watch inbox` follows the
+[event stream](control-plane-api.md#event-stream), rereads the inbox whenever an item changes, and
+prints each new item occurrence once. `--output json` prints `InboxService` messages as proto JSON;
+see [Inbox](control-plane-api.md#inbox).
 
 | Kind | Appears when |
 | --- | --- |
@@ -755,21 +750,22 @@ occurrence once.
 | `task-attention` | A Task needs an operator, such as an uncertain Task Attempt |
 | `mcp-login` | A Task is held until its Worker Host logs in to an MCP server |
 
-The CLI spells a kind with hyphens and the HTTP API with underscores.
+The CLI spells a kind with hyphens; the API names it `INBOX_ITEM_KIND_APPROVAL` and so on.
 
 - `supertag list inbox` shows the decisions an operator can make. `--all` adds items only a Tag
   can act on. Text output names both decision makers.
 - Every item carries `commands`: the `supertag` commands that act on it, most direct first. A
   `question` item's first command is `supertag message objective ID TEXT`.
-- Item identity for watching and notification is the item `key`, plus the Task's attempt count
-  when the item cites a Task. The same decision after another Task Attempt is a new occurrence.
+- Item identity for watching and notification is the item's `occurrence`: its `key`, plus the
+  Task's attempt count when the item cites a Task. The same decision after another Task Attempt is
+  a new occurrence.
 - A `question` item carries the question text for an operator who may read the whole Objective.
   Others receive metadata only.
-- An `approval` item's `approval` field holds `requestId`, `requestKind`, `summary`,
-  `requestingTagId`, `requestingTagName`, `taskId` and `blocking`. `blocking` is true when a
-  running or waiting Task Attempt made the request. Approval data appears only for principals with
-  the `list_approvals` action; others receive 403 for `kind=approval`. An approval
-  requested by an inbox turn has no Objective, so its `objectiveId` is null.
+- An `approval` item's `approval` field holds `requestId`, `kind`, `summary`, `requestingTagId`,
+  `requestingTag`, `taskId` and `blocking`. `blocking` is true when a running or waiting Task
+  Attempt made the request. Approval items appear only for principals with the `list_approvals`
+  action; others get `permission_denied` for `--kind approval`. An approval requested by an inbox
+  turn has no Objective, so its `objectiveId` is empty.
 - An `objective-limit` item appears once per warning or passage and disappears when the operator
   raises the budget or moves the deadline, or when the Objective finishes.
 - An `mcp-login` item's key is `mcp_login:TASK_ID:SERVER`, and its commands are

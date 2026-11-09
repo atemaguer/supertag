@@ -8,7 +8,11 @@ import type { ManagementAuditEvent } from "../apps/cli/src/control-plane-api.ts"
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { runObjectiveCommand } from "../apps/cli/src/objectives.ts";
-import { organizationClient } from "../apps/cli/src/operator-client.ts";
+import {
+  inboxClient,
+  objectiveClient,
+  organizationClient,
+} from "../apps/cli/src/operator-client.ts";
 import { runResourceCommand } from "../apps/cli/src/resources.ts";
 import { objectiveSessionKey } from "../packages/core/src/index.ts";
 import {
@@ -186,7 +190,7 @@ describe("Operator Token API", () => {
   });
 
   it("attributes approvals, messages, cancellations, and applies to token:NAME", async () => {
-    const { url, call, create, store, audit, directory } = await runtime();
+    const { url, create, store, audit, directory } = await runtime();
     const issued = (await (await create(ADMIN, "laptop-2")).json()) as IssuedToken;
     const owner = await store.createTag({ name: "owner" });
     await store.bindTagWorkerHost(owner.id, "control-plane-static-host");
@@ -214,12 +218,7 @@ describe("Operator Token API", () => {
       approvers: [],
     });
 
-    const approved = await call(
-      issued.secret,
-      `/api/v1/coordination/approvals/${request.id}/approve`,
-      { method: "POST", body: "{}" },
-    );
-    expect(approved.status, await approved.text()).toBe(200);
+    await inboxClient({ url, token: issued.secret }).approve({ id: request.id });
     expect(await store.getApprovalRequest(request.id)).toMatchObject({
       status: "approved",
       decidedBy: "token:laptop-2",
@@ -240,11 +239,10 @@ describe("Operator Token API", () => {
     const turn = await store.findTaskById(messaged.taskId);
     expect(turn?.actor).toMatchObject({ id: "token:laptop-2" });
 
-    const cancelled = await call(issued.secret, `/api/v1/objectives/${objective.id}/cancel`, {
-      method: "POST",
-      body: JSON.stringify({ reason: "Superseded" }),
+    await objectiveClient({ url, token: issued.secret }).cancelObjective({
+      id: objective.id,
+      reason: "Superseded",
     });
-    expect(cancelled.status, await cancelled.text()).toBe(200);
     const changes = await store.listResourceChanges({
       resourceType: "objective",
       resourceId: objective.id,

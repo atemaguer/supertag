@@ -72,9 +72,17 @@ pnpm supertag
 ```
 
 The CLI resolves the Control Plane and token as every command does and hands them to the binary
-on file descriptor 3. With output piped, or without a built binary, `supertag` prints help as
-before. `go test ./...` in `apps/tui` runs its tests; `SUPERTAG_TUI_E2E=1` adds an end-to-end run
-under tmux against a fake Control Plane.
+on file descriptor 3. With output piped, or without a built binary, `supertag` prints help. The
+CLI refuses a binary whose `--version` differs from its own and says how to rebuild it.
+`SUPERTAG_TUI_BINARY` points the CLI at another binary. `go test ./...` in `apps/tui` runs its
+tests; `SUPERTAG_TUI_E2E=1` adds an end-to-end run under tmux against a fake Control Plane.
+
+Each published release carries the four binaries and their `SHA256SUMS`, built at the release
+tag by `.github/workflows/release-cli.yml`. `install.sh` installs the matching binary into the
+package's `tui/` directory, where the CLI looks for it. To test the installer before a release,
+point `SUPERTAG_PACKAGE_SOURCE` at an npm-packed tarball and `SUPERTAG_TUI_SOURCE` at a
+directory holding the binaries and `SHA256SUMS`. `tests/install-script.test.ts` does this with
+fakes.
 
 ### Protobuf contracts
 
@@ -83,6 +91,16 @@ The protobuf contracts live in `spec/proto`. After editing one, run `pnpm proto:
 the Go operator API bindings into the Go module in `packages/operator-api/go`, which pins the
 plugins as tools, so it needs Go 1.26 or later. `go test ./...` in that directory checks the
 generated Go client against the generated handler.
+
+Each operator RPC has a class in `OPERATOR_RPC_CLASSES` (`apps/cli/src/operator-seams.ts`):
+`read`, `data_write` (adds records such as messages, posts, progress events and artifacts) or
+`control` (changes the state of Objectives, Tasks, approvals, hosts, credentials or resources). A
+`read` RPC sets `idempotency_level = NO_SIDE_EFFECTS`, and no other class does. Service modules
+read the store through `OperatorReadStore` and `OperatorQueries` and make every state transition
+through `OperatorControl`, whose methods take plain data and are idempotent. They never import the
+`ControlPlane`, the full `Store` or the in-memory `ChangeNotifications`, so a stateless Gateway
+can later serve them with `OperatorControl` as a call to the Control Plane.
+`tests/operator-rpc-seams.test.ts` checks the classes and the imports.
 
 ## Test your change
 

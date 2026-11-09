@@ -201,24 +201,6 @@ const ROUTES: readonly Route[] = [
   ],
   [
     "POST",
-    /^\/api\/v1\/objectives\/([^/]+)\/cancel$/u,
-    (match) => ({
-      action: "objective.cancel",
-      target: named("Objective", id(match)),
-      route: "/api/v1/objectives/{id}/cancel",
-    }),
-  ],
-  [
-    "POST",
-    /^\/api\/v1\/objectives\/([^/]+)\/(pause|resume)$/u,
-    (match) => ({
-      action: `objective.${match[2]}`,
-      target: named("Objective", id(match)),
-      route: `/api/v1/objectives/{id}/${match[2]}`,
-    }),
-  ],
-  [
-    "POST",
     /^\/api\/v1\/tasks\/([^/]+)\/cancel$/u,
     (match) => ({
       action: "task.cancel",
@@ -261,33 +243,6 @@ const ROUTES: readonly Route[] = [
       action: method === "DELETE" ? "tag.worker-host.remove" : "tag.worker-host.add",
       target: named("Tag", id(match)),
       route: "/api/v1/tags/{name}/worker-hosts/{id}",
-    }),
-  ],
-  [
-    "POST",
-    /^\/api\/v1\/coordination\/approvals\/([^/]+)\/(approve|deny)$/u,
-    (match) => ({
-      action: `approval.${match[2]}`,
-      target: named("ApprovalRequest", id(match)),
-      route: `/api/v1/coordination/approvals/{id}/${match[2]}`,
-    }),
-  ],
-  [
-    "POST",
-    /^\/api\/v1\/coordination\/objectives\/([^/]+)\/(messages|approve)$/u,
-    (match) => ({
-      action: match[2] === "approve" ? "objective.approve" : "objective.message",
-      target: named("Objective", id(match)),
-      route: `/api/v1/coordination/objectives/{id}/${match[2]}`,
-    }),
-  ],
-  [
-    undefined,
-    /^\/api\/v1\/tag-messaging\/objectives(?:\/([^/]+))?$/u,
-    (match) => ({
-      action: `objective.${match[1] === undefined ? "create" : "update"}`,
-      target: named("Objective", id(match, 1)),
-      route: `/api/v1/tag-messaging/objectives${match[1] === undefined ? "" : "/{id}"}`,
     }),
   ],
   [

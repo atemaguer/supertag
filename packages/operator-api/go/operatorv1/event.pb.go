@@ -53,6 +53,10 @@ const (
 	// `Message.task_id`; `tag`, `conversation`, and `session_id` name its
 	// conversation. Reread it with `ConversationService.GetMessage`.
 	WatchKind_WATCH_KIND_CONVERSATION_MESSAGE WatchKind = 7
+	// A Team's Workstream got a post. `id` is the post's ID and `team_id` its
+	// Team's. Reread the Objectives the Team serves with
+	// `ObjectiveService.DescribeObjective`, which carries the newest posts.
+	WatchKind_WATCH_KIND_WORKSTREAM_POST WatchKind = 8
 )
 
 // Enum value maps for WatchKind.
@@ -66,6 +70,7 @@ var (
 		5: "WATCH_KIND_INBOX_ITEM",
 		6: "WATCH_KIND_APPROVAL",
 		7: "WATCH_KIND_CONVERSATION_MESSAGE",
+		8: "WATCH_KIND_WORKSTREAM_POST",
 	}
 	WatchKind_value = map[string]int32{
 		"WATCH_KIND_UNSPECIFIED":          0,
@@ -76,6 +81,7 @@ var (
 		"WATCH_KIND_INBOX_ITEM":           5,
 		"WATCH_KIND_APPROVAL":             6,
 		"WATCH_KIND_CONVERSATION_MESSAGE": 7,
+		"WATCH_KIND_WORKSTREAM_POST":      8,
 	}
 )
 
@@ -294,7 +300,9 @@ type WatchChange struct {
 	// `status completed`. Clients do not parse it.
 	Reason string `protobuf:"bytes,8,opt,name=reason,proto3" json:"reason,omitempty"`
 	// When the change happened.
-	ChangedAt     *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=changed_at,json=changedAt,proto3" json:"changed_at,omitempty"`
+	ChangedAt *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=changed_at,json=changedAt,proto3" json:"changed_at,omitempty"`
+	// The ID of the Team it belongs to.
+	TeamId        string `protobuf:"bytes,10,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -392,6 +400,13 @@ func (x *WatchChange) GetChangedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *WatchChange) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
 // The stream continues from now, but the changes since the requested resume
 // token are lost. The client rereads everything it shows.
 type WatchResync struct {
@@ -444,7 +459,7 @@ const file_supertag_operator_v1_event_proto_rawDesc = "" +
 	"\x06change\x18\x02 \x01(\v2!.supertag.operator.v1.WatchChangeH\x00R\x06change\x12;\n" +
 	"\x06resync\x18\x03 \x01(\v2!.supertag.operator.v1.WatchResyncH\x00R\x06resync\x12?\n" +
 	"\theartbeat\x18\x04 \x01(\v2\x1f.supertag.operator.v1.HeartbeatH\x00R\theartbeatB\a\n" +
-	"\x05event\"\xb6\x02\n" +
+	"\x05event\"\xcf\x02\n" +
 	"\vWatchChange\x123\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1f.supertag.operator.v1.WatchKindR\x04kind\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12\x10\n" +
@@ -456,8 +471,10 @@ const file_supertag_operator_v1_event_proto_rawDesc = "" +
 	"\fconversation\x18\a \x01(\tR\fconversation\x12\x16\n" +
 	"\x06reason\x18\b \x01(\tR\x06reason\x129\n" +
 	"\n" +
-	"changed_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tchangedAt\"\r\n" +
-	"\vWatchResync*\xdb\x01\n" +
+	"changed_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tchangedAt\x12\x17\n" +
+	"\ateam_id\x18\n" +
+	" \x01(\tR\x06teamId\"\r\n" +
+	"\vWatchResync*\xfb\x01\n" +
 	"\tWatchKind\x12\x1a\n" +
 	"\x16WATCH_KIND_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eWATCH_KIND_TAG\x10\x01\x12\x16\n" +
@@ -466,9 +483,10 @@ const file_supertag_operator_v1_event_proto_rawDesc = "" +
 	"\x14WATCH_KIND_OBJECTIVE\x10\x04\x12\x19\n" +
 	"\x15WATCH_KIND_INBOX_ITEM\x10\x05\x12\x17\n" +
 	"\x13WATCH_KIND_APPROVAL\x10\x06\x12#\n" +
-	"\x1fWATCH_KIND_CONVERSATION_MESSAGE\x10\a2t\n" +
-	"\fEventService\x12d\n" +
-	"\x05Watch\x12\".supertag.operator.v1.WatchRequest\x1a .supertag.operator.v1.WatchEvent\"\x13\x8a\xb5\x18\fwatch_events\x90\x02\x010\x01BNZLgithub.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1b\x06proto3"
+	"\x1fWATCH_KIND_CONVERSATION_MESSAGE\x10\a\x12\x1e\n" +
+	"\x1aWATCH_KIND_WORKSTREAM_POST\x10\b2x\n" +
+	"\fEventService\x12h\n" +
+	"\x05Watch\x12\".supertag.operator.v1.WatchRequest\x1a .supertag.operator.v1.WatchEvent\"\x17\x8a\xb5\x18\fwatch_events\xa8\xb5\x18\x01\x90\x02\x010\x01BNZLgithub.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1b\x06proto3"
 
 var (
 	file_supertag_operator_v1_event_proto_rawDescOnce sync.Once

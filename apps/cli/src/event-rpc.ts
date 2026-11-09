@@ -2,8 +2,8 @@ import type { MessageInitShape } from "@bufbuild/protobuf";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { Code, type HandlerContext, type ServiceImpl } from "@connectrpc/connect";
 import type {
+  ChangeFeed,
   ChangeKind,
-  ChangeNotifications,
   CoordinationOperatorPrincipal,
   PositionedChangeNotice,
 } from "@supertag/control-plane";
@@ -13,9 +13,14 @@ import {
   type WatchEventSchema,
   WatchKind,
 } from "@supertag/operator-api";
-import { drainingError } from "./conversation-rpc.js";
-import { STREAM_HEARTBEAT_MS } from "./message-follow.js";
-import { conversationOperator, operatorError, operatorPrincipal } from "./operator-rpc.js";
+import {
+  conversationOperator,
+  drainingError,
+  operatorError,
+  operatorPrincipal,
+  STREAM_HEARTBEAT_MS,
+} from "./operator-rpc-context.js";
+import type { OperatorReadStore } from "./operator-seams.js";
 
 /** Notices one watcher may fall behind by before it resynchronizes instead. */
 const MAX_PENDING_NOTICES = 10_000;
@@ -28,12 +33,19 @@ const WATCH_KINDS: Readonly<Record<ChangeKind, WatchKind>> = {
   inbox_item: WatchKind.INBOX_ITEM,
   approval: WatchKind.APPROVAL,
   conversation_message: WatchKind.CONVERSATION_MESSAGE,
+  workstream_post: WatchKind.WORKSTREAM_POST,
 };
 
 type WatchEventInit = MessageInitShape<typeof WatchEventSchema>;
 
 export interface EventServiceDependencies {
-  readonly changes: ChangeNotifications;
+  /**
+   * The change notices. The Control Plane's feed keeps them in its process's memory, so a resume
+   * token holds only on the process that issued it.
+   */
+  readonly changes: ChangeFeed;
+  /** Reads the Teams of the Objectives a scoped coordination credential reaches. */
+  readonly store: Pick<OperatorReadStore, "getObjective">;
   /** Aborted once the API Server drains; open streams then end with `Unavailable`. */
   readonly draining: () => AbortSignal;
   /** How long a stream stays quiet before a heartbeat; 15 seconds unless a test shortens it. */
@@ -48,7 +60,7 @@ export function eventService(
   const heartbeatMs = dependencies.heartbeatMs ?? STREAM_HEARTBEAT_MS;
   return {
     async *watch(request, context) {
-      const visible = visibility(context, request.kinds);
+      const visible = await visibility(context, request.kinds, dependencies.store);
       const draining = dependencies.draining();
       const signal = AbortSignal.any([context.signal, draining]);
       const pending: PositionedChangeNotice[] = [];
@@ -67,7 +79,7 @@ export function eventService(
             event: { case: "heartbeat", value: {} },
           };
         else {
-          const resumed = changes.resume(request.resumeToken);
+          const resumed = await changes.resume(request.resumeToken);
           if (resumed.status === "invalid")
             throw operatorError(
               Code.InvalidArgument,
@@ -82,6 +94,7 @@ export function eventService(
             };
           else
             for (const notice of resumed.notices) {
+              if (notice.position > position) position = notice.position;
               const event = changeEvent(notice, visible, changes);
               if (event !== undefined) yield event;
             }
@@ -133,7 +146,7 @@ export function eventService(
 function changeEvent(
   notice: PositionedChangeNotice,
   visible: (notice: PositionedChangeNotice) => boolean,
-  changes: ChangeNotifications,
+  changes: ChangeFeed,
 ): WatchEventInit | undefined {
   if (!visible(notice)) return undefined;
   const kind = WATCH_KINDS[notice.kind];
@@ -146,7 +159,9 @@ function changeEvent(
       value: {
         kind,
         id: notice.id,
-        ...(kind === WatchKind.APPROVAL || kind === WatchKind.INBOX_ITEM
+        ...(kind === WatchKind.APPROVAL ||
+        kind === WatchKind.INBOX_ITEM ||
+        kind === WatchKind.WORKSTREAM_POST
           ? {}
           : set("tag", notice.tag)),
         ...(kind === WatchKind.TASK || kind === WatchKind.CONVERSATION_MESSAGE
@@ -159,6 +174,7 @@ function changeEvent(
         ...(kind === WatchKind.SESSION || kind === WatchKind.CONVERSATION_MESSAGE
           ? set("conversation", notice.conversation)
           : {}),
+        ...(kind === WatchKind.WORKSTREAM_POST ? set("teamId", notice.teamId) : {}),
         reason: notice.reason,
         changedAt: timestampFromDate(new Date(notice.changedAt)),
       },
@@ -168,20 +184,38 @@ function changeEvent(
 
 /**
  * Which notices the caller may see: what it could read through the other RPCs, with the same
- * actions and Objective scope, and of the kinds it asked for.
+ * actions and Objective scope, and of the kinds it asked for. A scoped coordination credential
+ * reads no conversations, Sessions or Tags, and only the Tasks and Team posts of its Objectives.
  */
-function visibility(
+async function visibility(
   context: HandlerContext,
   kinds: readonly WatchKind[],
-): (notice: PositionedChangeNotice) => boolean {
+  store: Pick<OperatorReadStore, "getObjective">,
+): Promise<(notice: PositionedChangeNotice) => boolean> {
   const caller = context.values.get(operatorPrincipal);
   const principal: CoordinationOperatorPrincipal | undefined = caller?.principal;
+  const scoped = caller?.kind === "coordination";
   const operatorId = conversationOperator(context);
   const actions = principal?.scopes.actions ?? [];
   const may = (action: string) => actions.includes("*") || actions.includes(action);
   const scope = principal?.scopes.objectiveIds;
   const inScope = (objectiveId: string | undefined) =>
     scope === undefined || (objectiveId !== undefined && scope.includes(objectiveId));
+  const teams =
+    scope === undefined
+      ? undefined
+      : new Set(
+          (
+            await Promise.all(
+              scope.map((id) =>
+                store.getObjective(id).then(
+                  (objective) => objective.teamId,
+                  () => null,
+                ),
+              ),
+            )
+          ).filter((teamId): teamId is string => teamId !== null),
+        );
   const wanted = new Set(kinds);
   const owns = (notice: PositionedChangeNotice) =>
     notice.conversationOwner === undefined ||
@@ -192,18 +226,32 @@ function visibility(
     if (wanted.size > 0 && !wanted.has(kind)) return false;
     switch (notice.kind) {
       case "conversation_message":
-        return may("read_conversation") && notice.conversationOwner !== undefined && owns(notice);
+        return (
+          !scoped &&
+          may("read_conversation") &&
+          notice.conversationOwner !== undefined &&
+          owns(notice)
+        );
       case "session":
+        return !scoped && owns(notice);
       case "task":
-        return owns(notice);
+        return scoped
+          ? may("read_objective") && notice.objectiveId !== undefined && inScope(notice.objectiveId)
+          : owns(notice);
       case "tag":
-        return true;
+        return !scoped;
       case "objective":
         return may("read_objective") && inScope(notice.objectiveId ?? notice.id);
       case "inbox_item":
         return may("read_coordination_inbox") && inScope(notice.objectiveId);
       case "approval":
         return may("list_approvals") && inScope(notice.objectiveId);
+      case "workstream_post":
+        return (
+          !scoped ||
+          (may("read_objective") &&
+            (teams === undefined || (notice.teamId !== undefined && teams.has(notice.teamId))))
+        );
     }
   };
 }

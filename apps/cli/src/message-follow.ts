@@ -1,11 +1,7 @@
 import { create, equals, type MessageInitShape } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
-import type {
-  ControlPlane,
-  PositionedChangeNotice,
-  ReplyStreamPart,
-} from "@supertag/control-plane";
-import type { Store, Tag, Task } from "@supertag/core";
+import type { ChangeFeed, PositionedChangeNotice, ReplyStreamPart } from "@supertag/control-plane";
+import type { Tag, Task } from "@supertag/core";
 import {
   type ActivitySchema,
   ActivityStatus,
@@ -18,10 +14,9 @@ import {
   WorkSessionSchema,
 } from "@supertag/operator-api";
 import { messageOf, workSessionSettled } from "./conversation-messages.js";
-import { operatorError } from "./operator-rpc.js";
+import { operatorError, STREAM_HEARTBEAT_MS } from "./operator-rpc-context.js";
+import type { OperatorReadStore } from "./operator-seams.js";
 
-/** A stream sends a heartbeat after this long without another event. */
-export const STREAM_HEARTBEAT_MS = 15_000;
 /** How long a feed nobody reads keeps recording, so a dropped follower resumes exactly. */
 const RESUME_WINDOW_MS = 2 * 60_000;
 const SWEEP_INTERVAL_MS = 30_000;
@@ -39,9 +34,25 @@ const MAX_EPOCH = 2n ** 32n - 1n;
 type Part = NonNullable<MessageInitShape<typeof FollowEventSchema>["part"]>;
 type ActivityInit = MessageInitShape<typeof ActivitySchema>;
 
+/** The live reply of a running turn, which only the process running it holds. */
+export interface LiveReplies {
+  /** The reply's parts from `after`, or undefined when no live reply of the Task is open. */
+  streamTaskReply(
+    taskId: string,
+    after: number | "now",
+  ): Promise<ReadableStream<ReplyStreamPart> | undefined>;
+}
+
 export interface MessageFollowSources {
-  readonly store: Store;
-  readonly controlPlane: Pick<ControlPlane, "streamTaskReply" | "changes">;
+  readonly store: OperatorReadStore;
+  readonly replies: LiveReplies;
+  readonly changes: Pick<ChangeFeed, "subscribe">;
+}
+
+/** What `FollowMessage` streams a message's events from. */
+export interface MessageFollower {
+  /** The events after `after`, then each new one, until `end` or until `signal` aborts. */
+  follow(message: FollowedMessage, after: bigint, signal: AbortSignal): AsyncIterable<FollowEvent>;
 }
 
 /** The message a follower follows: its Tag, its Task, and its conversation's name. */
@@ -125,7 +136,7 @@ class Wake {
   #resolve: (() => void) | undefined;
 
   constructor(
-    changes: MessageFollowSources["controlPlane"]["changes"],
+    changes: MessageFollowSources["changes"],
     concerns: (notice: PositionedChangeNotice) => boolean,
   ) {
     this.#unsubscribe = changes.subscribe((notice) => {
@@ -165,9 +176,10 @@ class Wake {
  * `FollowMessage` for every follower in this process. Each call gets its own feed, which reads
  * the message's live reply from the Control Plane's reply streams and its work Sessions from the
  * store, waking on change notices. A resume whose feed is still held continues it; any other
- * resume starts a new feed from the current state.
+ * resume starts a new feed from the current state. Feeds and live replies are in this process's
+ * memory, so a resume reaches its feed only on the process that started it.
  */
-export class MessageFollows {
+export class MessageFollows implements MessageFollower {
   readonly #sources: MessageFollowSources;
   readonly #feeds = new Map<string, Feed>();
   readonly #sweep: NodeJS.Timeout;
@@ -254,11 +266,11 @@ export class MessageFollows {
    * follower may already have and sends the current state instead.
    */
   async #run(feed: Feed, followed: FollowedMessage, mode: "start" | "resume"): Promise<void> {
-    const { store, controlPlane } = this.#sources;
+    const { store, replies, changes } = this.#sources;
     const signal = feed.stop.signal;
     const followedTasks = new Set([followed.task.id]);
     const wake = new Wake(
-      controlPlane.changes,
+      changes,
       (notice) =>
         (notice.kind === "conversation_message" && notice.id === followed.task.id) ||
         (notice.kind === "task" && followedTasks.has(notice.id)),
@@ -293,7 +305,7 @@ export class MessageFollows {
           feed.push({ case: "waiting", value: { reason: waiting } });
         }
         const turnId = joined === "" ? followed.task.id : joined;
-        const live = await controlPlane.streamTaskReply(turnId, from);
+        const live = await replies.streamTaskReply(turnId, from);
         if (live !== undefined) {
           await readStream(live, signal, (part) => {
             if (part.type === "text-delta" && typeof part["delta"] === "string" && part["delta"])
@@ -396,15 +408,12 @@ export class MessageFollows {
     from: number | "now",
     signal: AbortSignal,
   ): Promise<void> {
-    const { store, controlPlane } = this.#sources;
+    const { store, replies, changes } = this.#sources;
     // The Task's start opens its live reply.
-    const wake = new Wake(
-      controlPlane.changes,
-      (notice) => notice.kind === "task" && notice.id === taskId,
-    );
+    const wake = new Wake(changes, (notice) => notice.kind === "task" && notice.id === taskId);
     try {
       while (!signal.aborted) {
-        const live = await controlPlane.streamTaskReply(taskId, from);
+        const live = await replies.streamTaskReply(taskId, from);
         if (live !== undefined) {
           await readStream(live, signal, (part) => {
             const activity = activityOf(part, workSessionId);

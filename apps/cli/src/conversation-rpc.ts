@@ -1,6 +1,5 @@
+import { randomUUID } from "node:crypto";
 import { Code, type ServiceImpl } from "@connectrpc/connect";
-import type { ControlPlane } from "@supertag/control-plane";
-import type { Store } from "@supertag/core";
 import { type ConversationService, ErrorReason } from "@supertag/operator-api";
 import {
   conversationName,
@@ -13,16 +12,23 @@ import {
   readableMessage,
   sentMessages,
 } from "./conversation-messages.js";
-import type { MessageFollows } from "./message-follow.js";
-import { conversationOperator, operatorAuditTarget, operatorError } from "./operator-rpc.js";
+import type { MessageFollower } from "./message-follow.js";
+import {
+  conversationOperator,
+  drainingError,
+  operatorAuditTarget,
+  operatorError,
+} from "./operator-rpc-context.js";
+import type { OperatorControl, OperatorReadStore } from "./operator-seams.js";
 
 /** A key is 1 to 200 characters without whitespace or control characters. */
 const IDEMPOTENCY_KEY = /^[^\s\p{Cc}]{1,200}$/u;
 
 export interface ConversationServiceDependencies {
-  readonly store: Store;
-  readonly controlPlane: Pick<ControlPlane, "isAccepting" | "messageTag">;
-  readonly follows: MessageFollows;
+  readonly store: OperatorReadStore;
+  /** Admits a sent message as a turn. */
+  readonly control: Pick<OperatorControl, "accepting" | "messageTag">;
+  readonly follows: MessageFollower;
   /** Aborted once the API Server drains; open streams then end with `Unavailable`. */
   readonly draining: () => AbortSignal;
 }
@@ -31,7 +37,7 @@ export interface ConversationServiceDependencies {
 export function conversationService(
   dependencies: ConversationServiceDependencies,
 ): ServiceImpl<typeof ConversationService> {
-  const { store, controlPlane, follows } = dependencies;
+  const { store, control, follows } = dependencies;
   return {
     async sendMessage(request, context) {
       const operatorId = conversationOperator(context);
@@ -54,14 +60,13 @@ export function conversationService(
           "An idempotency key is 1 to 200 characters without whitespace or control characters",
           [{ path: "idempotency_key", description: "1 to 200 characters, no whitespace" }],
         );
-      if (!controlPlane.isAccepting)
-        throw operatorError(Code.Unavailable, ErrorReason.DRAINING, "Control Plane is draining");
-      const result = await controlPlane.messageTag({
+      if (!(await control.accepting())) throw drainingError();
+      const result = await control.messageTag({
         tagName: tag.name,
         operatorId,
         session: conversation,
         text,
-        ...(request.idempotencyKey === "" ? {} : { idempotencyKey: request.idempotencyKey }),
+        idempotencyKey: request.idempotencyKey || randomUUID(),
       });
       const task =
         result.taskId === undefined ? undefined : await store.findTaskById(result.taskId);
@@ -129,8 +134,4 @@ export function conversationService(
       };
     },
   };
-}
-
-export function drainingError() {
-  return operatorError(Code.Unavailable, ErrorReason.DRAINING, "Control Plane is draining");
 }

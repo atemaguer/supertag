@@ -1,9 +1,19 @@
+import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
-import type { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { formatObjectiveOverview } from "../apps/cli/src/objective-overview.ts";
-import { watchObjective } from "../apps/cli/src/objective-watch.ts";
+import { approvalMessage } from "../apps/cli/src/objective-protos.ts";
+import { type ObjectiveWatchClients, watchObjective } from "../apps/cli/src/objective-watch.ts";
 import type { ObjectiveOverview } from "../packages/control-plane/src/index.ts";
 import type { ApprovalRequest, TaskDelivery, WorkstreamPost } from "../packages/core/src/index.ts";
+import {
+  ListApprovalsResponseSchema,
+  WatchChangeSchema,
+  type WatchEvent,
+  WatchEventSchema,
+  WatchKind,
+} from "../packages/operator-api/src/index.ts";
+import { aborted } from "./support/fake-operator-rpc.ts";
+import { describedOverview, overviewViewOf } from "./support/objective-overview-view.ts";
 
 const OBJECTIVE = "ship-sso-7f3k";
 const OWNER = "owner-tag";
@@ -92,8 +102,16 @@ function view(overrides: Partial<ObjectiveOverview> = {}): ObjectiveOverview {
     attention: [],
     tagNames: { [OWNER]: "planner", [HELPER]: "builder" },
     team: { id: TEAM, name: "launch", memberTagIds: [OWNER, HELPER], maxConcurrency: null },
-    pool: { limitMinor: null, currency: null, spentMinor: null },
-    objectiveSpend: { attempts: 0 },
+    executionReadiness: "ready",
+    limits: { deadline: null, budget: null },
+    pool: { limitMinor: null, currency: null, spentMinor: null, availableMinor: null },
+    objectiveSpend: {
+      attempts: 0,
+      reportedCostByCurrency: null,
+      unknownCostAttempts: 0,
+      reportedTokens: null,
+      unknownTokenAttempts: 0,
+    },
     conversation: [],
     sessions: [ownerSession()],
     highFindings: [],
@@ -108,9 +126,48 @@ function view(overrides: Partial<ObjectiveOverview> = {}): ObjectiveOverview {
   } as unknown as ObjectiveOverview;
 }
 
+/** A change stream: a heartbeat, then a change to the Objective each time `next` is called. */
+function changes() {
+  const waiting: (() => void)[] = [];
+  let position = 0;
+  const event = (value: WatchEvent["event"]) =>
+    create(WatchEventSchema, { resumeToken: `v1.test.${position}`, event: value });
+  const events: ObjectiveWatchClients["events"] = {
+    watch: (_request, options) =>
+      (async function* () {
+        const signal = options?.signal ?? new AbortController().signal;
+        yield event({ case: "heartbeat", value: {} });
+        while (!signal.aborted) {
+          await Promise.race([
+            new Promise<void>((resolve) => waiting.push(resolve)),
+            aborted(signal),
+          ]);
+          if (signal.aborted) return;
+          position += 1;
+          yield event({
+            case: "change",
+            value: create(WatchChangeSchema, {
+              kind: WatchKind.OBJECTIVE,
+              id: OBJECTIVE,
+              objectiveId: OBJECTIVE,
+              reason: "changed",
+            }),
+          });
+        }
+      })(),
+  };
+  return {
+    events,
+    next: () => {
+      for (const resolve of waiting.splice(0)) resolve();
+    },
+  };
+}
+
 /**
- * A client that answers each overview poll with the next scripted snapshot, keeping the last one
- * afterwards, plus the approval requests and Workstream posts of that step.
+ * Clients that answer each overview read with the next scripted snapshot, keeping the last one
+ * afterwards, plus the approval requests and Workstream posts of that step. Each read but the
+ * last sends one change notice, so the watch reads every step once.
  */
 function scripted(
   steps: readonly {
@@ -118,26 +175,34 @@ function scripted(
     readonly approvals?: readonly ApprovalRequest[];
     readonly posts?: readonly WorkstreamPost[];
   }[],
+  afterLast: () => void,
 ) {
   let step = -1;
-  const paths: string[] = [];
-  const client = {
-    request: async (path: string) => {
-      paths.push(path);
-      if (path.includes("/overview")) {
+  const stream = changes();
+  const clients: ObjectiveWatchClients = {
+    events: stream.events,
+    objectives: {
+      describeObjective: async () => {
         step = Math.min(step + 1, steps.length - 1);
-        return steps[step]?.view;
-      }
-      const current = steps[Math.max(step, 0)];
-      if (path.includes("/approvals")) return { requests: current?.approvals ?? [] };
-      if (path.includes("/posts")) {
-        const after = Number(new URL(path, "http://x").searchParams.get("afterSequence") ?? 0);
-        return { items: (current?.posts ?? []).filter((post) => post.sequence > after) };
-      }
-      throw new Error(`Unexpected request ${path}`);
+        if (step < steps.length - 1) setTimeout(stream.next, 1);
+        else setTimeout(afterLast, 20);
+        const current = steps[step];
+        if (current === undefined) throw new Error("No step");
+        return describedOverview(current.view);
+      },
     },
-  } as unknown as Pick<ControlPlaneClient, "request">;
-  return { client, paths, polls: () => step + 1 };
+    inbox: {
+      listApprovals: async () =>
+        create(ListApprovalsResponseSchema, {
+          approvals: (steps[Math.max(step, 0)]?.approvals ?? []).map(approvalMessage),
+        }),
+    },
+    posts: async (_teamId, afterSequence, limit) =>
+      (steps[Math.max(step, 0)]?.posts ?? [])
+        .filter((post) => post.sequence > afterSequence)
+        .slice(0, limit),
+  };
+  return { clients, reads: () => step + 1 };
 }
 
 async function run(
@@ -146,23 +211,16 @@ async function run(
 ) {
   const written: string[] = [];
   const controller = new AbortController();
-  const { client, paths } = scripted(steps);
-  // Stop once the watch has seen every step, in case the Objective never closes.
-  let polls = 0;
-  const counting = {
-    request: async (path: string) => {
-      if (path.includes("/overview") && ++polls > steps.length) controller.abort();
-      return client.request(path);
-    },
-  } as unknown as Pick<ControlPlaneClient, "request">;
-  await watchObjective(counting, OBJECTIVE, {
+  // Stop once the watch has read every step, in case the Objective never closes.
+  const { clients } = scripted(steps, () => controller.abort());
+  await watchObjective(clients, OBJECTIVE, {
     output: options.output ?? "text",
     signal: controller.signal,
     write: (text) => written.push(text),
     intervalMs: 1,
     ...(options.settleMs === undefined ? {} : { settleMs: options.settleMs }),
   });
-  return { written, text: written.join(""), lines: written.join("").split("\n"), paths };
+  return { written, text: written.join(""), lines: written.join("").split("\n") };
 }
 
 describe("watch objective", () => {
@@ -285,6 +343,9 @@ describe("watch objective", () => {
       taskId: "task-build",
       requestingTagId: HELPER,
       kind: "surface-action",
+      actions: [],
+      ruleSources: [],
+      approvers: [],
       summary: "Merge pull request 42",
       status: "pending",
       createdAt: "2026-11-07T00:00:30.000Z",
@@ -299,7 +360,7 @@ describe("watch objective", () => {
       sequence: 1,
       createdAt: "2026-11-07T00:00:35.000Z",
     } as WorkstreamPost;
-    const { text, paths } = await run([
+    const { text } = await run([
       { view: view(), approvals: [request], posts: [post] },
       {
         view: view(),
@@ -323,9 +384,71 @@ describe("watch objective", () => {
       "2026-11-07 00:00:35Z  builder       Workstream post 1 to planner: Export is ready for review.",
     );
     expect(text).toContain("2026-11-07 00:00:38Z  operator      Approval request-1 approved");
-    // Each poll reads only the posts after the newest one already printed.
-    expect(paths.filter((path) => path.includes("/posts")).at(-1)).toContain("afterSequence=1");
+    // Each read prints only the posts after the newest one already printed.
     expect(text.split("Workstream post 1")).toHaveLength(2);
+  });
+
+  it("replays every Team post, a page at a time, and prints each burst in full", async () => {
+    const post = (sequence: number) =>
+      ({
+        id: `post-${sequence}`,
+        teamId: TEAM,
+        authorTagId: HELPER,
+        to: [],
+        body: `Update ${sequence}`,
+        sequence,
+        createdAt: new Date(Date.parse("2026-11-07T00:01:00.000Z") + sequence * 1000).toISOString(),
+      }) as WorkstreamPost;
+    const first = Array.from({ length: 120 }, (_, index) => post(index + 1));
+    const burst = [...first, ...Array.from({ length: 130 }, (_, index) => post(index + 121))];
+    const { text } = await run([
+      { view: view(), posts: first },
+      { view: view(), posts: burst },
+    ]);
+    for (const sequence of [1, 50, 120, 121, 250])
+      expect(text.split(`Workstream post ${sequence}: `)).toHaveLength(2);
+    expect(text.match(/Workstream post \d+: /gu)).toHaveLength(250);
+  });
+
+  it("rereads approvals and posts after a failed read instead of waiting for a change", async () => {
+    const post = {
+      id: "post-1",
+      teamId: TEAM,
+      authorTagId: HELPER,
+      to: [],
+      body: "Export is ready.",
+      sequence: 1,
+      createdAt: "2026-11-07T00:00:35.000Z",
+    } as WorkstreamPost;
+    const controller = new AbortController();
+    const written: string[] = [];
+    let postReads = 0;
+    let approvalReads = 0;
+    const clients: ObjectiveWatchClients = {
+      events: changes().events,
+      objectives: { describeObjective: async () => describedOverview(view()) },
+      inbox: {
+        listApprovals: async () => {
+          approvalReads += 1;
+          if (approvalReads === 1) throw new Error("unavailable");
+          return create(ListApprovalsResponseSchema, {});
+        },
+      },
+      posts: async () => {
+        postReads += 1;
+        if (postReads === 1) throw new Error("unavailable");
+        setTimeout(() => controller.abort(), 20);
+        return [post];
+      },
+    };
+    await watchObjective(clients, OBJECTIVE, {
+      output: "text",
+      signal: controller.signal,
+      write: (text) => written.push(text),
+      intervalMs: 1,
+    });
+    expect(written.join("")).toContain("Workstream post 1: Export is ready.");
+    expect(approvalReads).toBeGreaterThan(1);
   });
 
   it("explains a failed turn on its own lines and keeps the message in JSON", async () => {
@@ -382,46 +505,38 @@ describe("watch objective", () => {
 
   it("fails at once for an Objective it cannot read, and stops when the signal aborts", async () => {
     const controller = new AbortController();
-    await expect(
-      watchObjective(
-        {
-          request: async () => {
-            throw new Error("Objective not found");
-          },
-        } as unknown as Pick<ControlPlaneClient, "request">,
-        "missing",
-        {
-          output: "text",
-          signal: controller.signal,
-          write: () => undefined,
-          intervalMs: 1,
+    const refused: ObjectiveWatchClients = {
+      events: changes().events,
+      objectives: {
+        describeObjective: async () => {
+          throw new Error("Objective not found");
         },
-      ),
+      },
+      inbox: { listApprovals: async () => create(ListApprovalsResponseSchema, {}) },
+      posts: async () => [],
+    };
+    await expect(
+      watchObjective(refused, "missing", {
+        output: "text",
+        signal: controller.signal,
+        write: () => undefined,
+        intervalMs: 1,
+      }),
     ).rejects.toThrow("Objective not found");
     const written: string[] = [];
     const stopping = new AbortController();
-    let polls = 0;
-    await watchObjective(
-      {
-        request: async (path: string) => {
-          if (path.includes("/overview")) {
-            if (++polls === 2) stopping.abort();
-            return view();
-          }
-          return path.includes("/approvals") ? { requests: [] } : { items: [] };
-        },
-      } as unknown as Pick<ControlPlaneClient, "request">,
-      OBJECTIVE,
-      {
-        output: "text",
-        signal: stopping.signal,
-        write: (text) => written.push(text),
-        intervalMs: 1,
-      },
+    const { clients, reads } = scripted([{ view: view() }, { view: view() }], () =>
+      stopping.abort(),
     );
+    await watchObjective(clients, OBJECTIVE, {
+      output: "text",
+      signal: stopping.signal,
+      write: (text) => written.push(text),
+      intervalMs: 1,
+    });
     // An open Objective prints no closing summary when the watch is interrupted.
     expect(written.join("")).not.toContain("is completed");
-    expect(polls).toBe(2);
+    expect(reads()).toBe(2);
   });
 });
 
@@ -436,18 +551,20 @@ describe("describe objective", () => {
       },
     });
     const text = formatObjectiveOverview(
-      view({
-        objective: { ...view().objective, status: "ready_for_review" },
-        sessions: [ownerSession(), delivered],
-        attention: [
-          {
-            kind: "objective_review",
-            message: "The owner submitted this Objective for review.",
-            nextAction: "Approve it.",
-          },
-        ],
-        conditions: [{ type: "Runnable", status: true, reasons: [] }],
-      }),
+      overviewViewOf(
+        view({
+          objective: { ...view().objective, status: "ready_for_review" },
+          sessions: [ownerSession(), delivered],
+          attention: [
+            {
+              kind: "objective_review",
+              message: "The owner submitted this Objective for review.",
+              nextAction: "Approve it.",
+            },
+          ],
+          conditions: [{ type: "Runnable", status: true, reasons: [] }],
+        }),
+      ),
     );
     const lines = text.split("\n");
     expect(lines[0]).toBe(`Objective ${OBJECTIVE}: ready for review`);
@@ -464,18 +581,20 @@ describe("describe objective", () => {
   it("shows the owner's question in full, with the command that answers it", () => {
     const question = `Which region first?\n\n${"Detail. ".repeat(30)}`;
     const text = formatObjectiveOverview(
-      view({
-        sessions: [
-          ownerSession({
-            status: "waiting",
-            task: {
-              ...(ownerSession().task as NonNullable<Session["task"]>),
+      overviewViewOf(
+        view({
+          sessions: [
+            ownerSession({
               status: "waiting",
-              question,
-            },
-          }),
-        ],
-      }),
+              task: {
+                ...(ownerSession().task as NonNullable<Session["task"]>),
+                status: "waiting",
+                question,
+              },
+            }),
+          ],
+        }),
+      ),
     );
     expect(text).toContain('planner asks: "Which region first?');
     expect(text).toContain("Detail. Detail.");
@@ -484,11 +603,19 @@ describe("describe objective", () => {
 
   it("says nothing was delivered for a closed Objective and keeps the follow-up commands", () => {
     const text = formatObjectiveOverview(
-      view({ objective: { ...view().objective, status: "cancelled", cancelledAt: "2026-11-07Z" } }),
+      overviewViewOf(
+        view({
+          objective: {
+            ...view().objective,
+            status: "cancelled",
+            cancelledAt: "2026-11-07T00:02:00.000Z",
+          },
+        }),
+      ),
     );
     expect(text).toContain("Delivered:\n  Nothing was delivered.");
     expect(text).toContain("Needs you:\n  Nothing right now.");
-    expect(text).toContain("Cancelled: 2026-11-07Z");
+    expect(text).toContain("Cancelled: 2026-11-07T00:02:00.000Z");
     expect(text).toContain(`Full record: supertag describe objective ${OBJECTIVE} --output json`);
   });
 });

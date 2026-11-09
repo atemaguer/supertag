@@ -13,7 +13,8 @@ import type { HandlerContext } from "@connectrpc/connect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { organizationClient } from "../apps/cli/src/operator-client.ts";
-import { createOperatorRpcHandler, operatorAuditTarget } from "../apps/cli/src/operator-rpc.ts";
+import { createOperatorRpcHandler } from "../apps/cli/src/operator-rpc.ts";
+import { operatorAuditTarget } from "../apps/cli/src/operator-rpc-context.ts";
 import { type RecordAuditEntryInput, TagMessagingError } from "../packages/core/src/index.ts";
 import {
   action,

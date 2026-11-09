@@ -1,12 +1,13 @@
-import { explainHarnessSignIn, type ObjectiveOverview } from "@supertag/control-plane";
+import { explainHarnessSignIn } from "@supertag/control-plane";
 import { type CoordinationInboxItem, coordinationInboxHeadline } from "@supertag/core";
 import { formatDelivery, hasDelivery, type LocalCheckouts, shellWord } from "./delivery-view.js";
 import { money } from "./money.js";
+import type { ObjectiveOverviewView, ObjectiveSessionView } from "./objective-protos.js";
 import { operatorNotice } from "./operator-notice.js";
 import { terminalText } from "./terminal-text.js";
 
 /** The Objective's own conversation, or a work Session started under it. */
-export type ObjectiveOverviewSession = ObjectiveOverview["sessions"][number];
+export type ObjectiveOverviewSession = ObjectiveSessionView;
 
 /** Facts the describe view adds beside the Control Plane's overview. */
 export interface ObjectiveOverviewContext {
@@ -25,7 +26,7 @@ const OPEN_TASK = new Set(["pending", "running"]);
  * full record for `--output json`.
  */
 export function formatObjectiveOverview(
-  view: ObjectiveOverview,
+  view: ObjectiveOverviewView,
   context: ObjectiveOverviewContext = {},
 ): string {
   // Treat agent-authored text as text, never terminal escape sequences.
@@ -42,8 +43,7 @@ export function formatObjectiveOverview(
     lines.push(
       `${objective.status === "ready_for_review" ? "Owner's assessment" : "Result"}: ${objective.completionSummary}`,
     );
-  if (objective.limitState?.summary)
-    lines.push(`Limit summary: ${objective.limitState.summary.text}`);
+  if (objective.limitSummary) lines.push(`Limit summary: ${objective.limitSummary}`);
   if (view.highFindings.length)
     lines.push(
       `High findings (${view.highFindings.length}):`,
@@ -191,9 +191,9 @@ export function formatObjectiveOverview(
 }
 
 /** Budget in plain words: unlimited, or how much of the Objective's budget has been spent. */
-function budgetLine(view: ObjectiveOverview): string {
+function budgetLine(view: ObjectiveOverviewView): string {
   const { limitMinor, currency, spentMinor } = view.pool;
-  const unpricedAttempts = Object.values(view.objectiveSpend.unpricedModels ?? {}).reduce(
+  const unpricedAttempts = Object.values(view.unpricedModels).reduce(
     (sum, count) => sum + count,
     0,
   );

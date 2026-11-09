@@ -1,5 +1,6 @@
 import type { Objective, Tag, TaskAttempt } from "@supertag/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { fakeOperatorRpc } from "../../tests/support/fake-operator-rpc.js";
 import { ControlPlaneClient } from "./src/control-plane-client.js";
 import type { WorkerHostResource } from "./src/control-plane-resources.js";
 import { main } from "./src/index.js";
@@ -320,38 +321,36 @@ describe("supertag status", () => {
     vi.spyOn(ControlPlaneClient.prototype, "request").mockImplementation(async (path) => {
       paths.push(path);
       if (path === "/api/v1/organization") return view as never;
-      if (path === "/api/v1/coordination/inbox")
-        return {
-          items: [
-            { objectiveId: "newer", kind: "approval", operatorEligible: true, nextActorTagIds: [] },
-            {
-              objectiveId: "newer",
-              kind: "question",
-              operatorEligible: true,
-              nextActorTagIds: [],
+      throw new Error(`unexpected request ${path}`);
+    });
+    const rpc = fakeOperatorRpc({
+      "InboxService/ListInboxItems": (body) =>
+        body["pageToken"] === "page-2"
+          ? {
+              items: [
+                { objectiveId: "older", kind: "INBOX_ITEM_KIND_APPROVAL", operatorEligible: true },
+              ],
+            }
+          : {
+              items: [
+                { objectiveId: "newer", kind: "INBOX_ITEM_KIND_APPROVAL", operatorEligible: true },
+                { objectiveId: "newer", kind: "INBOX_ITEM_KIND_QUESTION", operatorEligible: true },
+                {
+                  objectiveId: "newer",
+                  kind: "INBOX_ITEM_KIND_TASK_ATTENTION",
+                  nextActorTagIds: ["x"],
+                },
+              ],
+              nextPageToken: "page-2",
             },
-            {
-              objectiveId: "newer",
-              kind: "task_attention",
-              operatorEligible: false,
-              nextActorTagIds: ["x"],
-            },
-          ],
-          nextCursor: "page-2",
-        } as never;
-      return {
-        items: [
-          { objectiveId: "older", kind: "approval", operatorEligible: true, nextActorTagIds: [] },
-        ],
-      } as never;
     });
     const output = JSON.parse(
       await runStatusCommand({ url: "http://localhost", token: "t" }, ["--output", "json"]),
     );
-    expect(paths).toEqual([
-      "/api/v1/organization",
-      "/api/v1/coordination/inbox",
-      "/api/v1/coordination/inbox?cursor=page-2",
+    expect(paths).toEqual(["/api/v1/organization"]);
+    expect(rpc.called("InboxService/ListInboxItems").map(({ body }) => body)).toEqual([
+      { pageSize: 100 },
+      { pageToken: "page-2", pageSize: 100 },
     ]);
     // Every operator-eligible item counts, whether or not a Tag could also act on it.
     expect(output.inbox).toEqual({ items: 3, truncated: false });

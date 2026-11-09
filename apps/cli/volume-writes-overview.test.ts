@@ -1,6 +1,6 @@
-import type { ObjectiveOverview } from "@supertag/control-plane";
 import { expect, it } from "vitest";
 import { formatObjectiveOverview } from "./src/objective-overview.js";
+import type { ObjectiveOverviewView } from "./src/objective-protos.js";
 
 it("summarizes files and bytes per Volume and flags partial writes", () => {
   const view = {
@@ -12,21 +12,18 @@ it("summarizes files and bytes per Volume and flags partial writes", () => {
       completionSummary: null,
     },
     pool: { limitMinor: 100, currency: "USD", spentMinor: 0 },
-    objectiveSpend: { unpricedModels: {} },
-    limits: { conditions: [] },
+    unpricedModels: {},
     conditions: [],
     sessions: [],
     highFindings: [],
-    posts: [],
     attention: [],
     team: null,
     tagNames: { owner: "owner" },
-    pageUsage: { provider: { observedCostByCurrency: {} }, reportedTokens: null },
     writes: [
       { volume: "archive", files: 3, bytes: 120, partial: 0, refused: 0 },
       { volume: "reports", files: 2, bytes: 75, partial: 1, refused: 0 },
     ],
-  } as unknown as ObjectiveOverview;
+  } as unknown as ObjectiveOverviewView;
 
   const output = formatObjectiveOverview(view);
   expect(output).toContain("Writes:\n  archive: 3 files / 120 bytes written");

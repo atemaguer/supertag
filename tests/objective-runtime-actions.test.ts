@@ -367,7 +367,12 @@ describe("Objective runtime action commands", () => {
     output.length = 0;
     errors.length = 0;
     await expect(main(args)).resolves.toBe(0);
-    return JSON.parse(output.join("")) as { runtimeActions: string[]; revision: number };
+    // Proto JSON leaves out an empty list and writes an int64 as a string.
+    const { runtimeActions = [], revision } = JSON.parse(output.join("")) as {
+      runtimeActions?: string[];
+      revision: string;
+    };
+    return { runtimeActions, revision: Number(revision) };
   };
   const warnings = () =>
     errors.filter((line) => line.startsWith("Warning: ") && line.includes("runtime"));

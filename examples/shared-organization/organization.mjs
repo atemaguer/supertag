@@ -443,30 +443,38 @@ async function start() {
   state.started = new Date().toISOString();
   await save(state);
   // Creating the Objective starts its conversation: the owner Tag takes its first turn at once.
-  const result = await request(state, "POST", "/api/v1/tag-messaging/objectives", {
-    id: state.objectiveId,
-    ownerTagId: state.tagIds.claude,
-    teamId: state.teamId,
-    outcome: [
-      "Build csv-summary.mjs to the specification in BRIEF.md, obtain independent review from the review manager in review.md, and complete the Objective with that evidence.",
-      "Done when:",
-      ...[
-        "The dependency-free CSV summary module passes reproducible tests",
-        "The independent review manager reviews the actual source and records its SHA-256",
-        "The managers exchange work and review evidence through their Sessions, Mailboxes, and the Team's Workstream",
-      ].map((criterion) => `- ${criterion}`),
-    ].join("\n"),
-    runtimeActions: ["files:write", "commands:execute", "web:fetch"],
-    budgetLimitMinor: 1000,
-  });
+  const result = await request(
+    state,
+    "POST",
+    "/supertag.operator.v1.ObjectiveService/CreateObjective",
+    {
+      id: state.objectiveId,
+      owner: "Shared claude manager",
+      team: state.teamId,
+      outcome: [
+        "Build csv-summary.mjs to the specification in BRIEF.md, obtain independent review from the review manager in review.md, and complete the Objective with that evidence.",
+        "Done when:",
+        ...[
+          "The dependency-free CSV summary module passes reproducible tests",
+          "The independent review manager reviews the actual source and records its SHA-256",
+          "The managers exchange work and review evidence through their Sessions, Mailboxes, and the Team's Workstream",
+        ].map((criterion) => `- ${criterion}`),
+      ].join("\n"),
+      runtimeActions: ["files:write", "commands:execute", "web:fetch"],
+      budget: { limitMinor: 1000 },
+    },
+  );
   print({ started: true, stateDirectory, objectiveId: state.objectiveId, result });
 }
 async function status() {
   const state = await load();
   const objective = await request(
     state,
-    "GET",
-    `/api/v1/tag-messaging/objectives/${encodeURIComponent(state.objectiveId)}`,
+    "POST",
+    "/supertag.operator.v1.ObjectiveService/GetObjective",
+    {
+      id: state.objectiveId,
+    },
   ).catch(() => undefined);
   const tasks = (await request(state, "GET", "/api/v1/tasks")).items;
   const attempts = await Promise.all(

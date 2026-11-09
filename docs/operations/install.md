@@ -24,6 +24,12 @@ supertag --version
 It installs SuperTag under `~/.local/share/supertag`, with the `supertag` command in
 `~/.local/bin`, and removes the Claude Code and Codex CLI copies that the vendor SDKs bundle,
 since SuperTag runs the CLIs you install. Add `~/.local/bin` to your `PATH` if it isn't already.
+
+The script also installs the experimental terminal UI on macOS and Linux, on arm64 and amd64. It
+downloads the release's `supertag-tui` binary with curl or wget and checks it against the
+release's `SHA256SUMS`. Run `supertag` with no arguments in a terminal to open it. If the
+download or the check fails, the script installs the CLI anyway and prints one line saying why
+the terminal UI was not installed. Run the script again to add it.
 To choose the locations or a version, set these before `sh`:
 
 | Variable | Default |
@@ -42,7 +48,8 @@ supertag --version
 ```
 
 The current release is `0.2.0-alpha.6`. The package includes the CLI, SDK, and bundled
-documentation. A SuperTag source checkout is not required.
+documentation. A SuperTag source checkout is not required. The npm package does not include the
+terminal UI, so plain `supertag` prints help; use the installer script to get the terminal UI.
 
 npm also downloads the Claude Code and Codex CLI copies that the vendor SDKs bundle, which
 SuperTag doesn't use; the installer script leaves them out. Ensure npm's global prefix's `bin`
@@ -137,6 +144,10 @@ documentation site.
 ## If something goes wrong
 
 - **`supertag` is not found.** Run `npm prefix --global` and add its `bin` directory to your `PATH`.
+- **Plain `supertag` prints help instead of the terminal UI.** The terminal UI is not installed.
+  Run the installer script again on macOS or Linux; it prints why if it still cannot install it.
+- **`supertag` says the terminal UI and the CLI versions must match.** Run the installer script
+  again, so both come from the same release.
 - **The version or commands differ from these docs.** Run `supertag --version`, then install
   the version named by these docs. The installed package includes its own guides under `dist/docs/`.
 - **A command warns that the CLI and Control Plane versions differ.** Run `supertag version`, then

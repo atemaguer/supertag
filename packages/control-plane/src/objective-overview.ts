@@ -72,6 +72,8 @@ export interface ObjectiveSessionTask {
   readonly delivery: TaskDelivery | null;
   /** The latest Task Attempt's status, when one started. */
   readonly attemptStatus?: string;
+  /** The result text the turn ended with, cut to 400 characters. */
+  readonly report?: string;
   readonly explanations: readonly ObjectiveTaskExplanation[];
 }
 
@@ -440,6 +442,7 @@ export async function buildObjectiveOverview(input: {
               taskDelivery({ workspacePlan: task.workspacePlan, result: task.result, events }) ??
               null,
             ...(latest === undefined ? {} : { attemptStatus: latest.status }),
+            ...(task.responseText ? { report: preview(task.responseText) ?? "" } : {}),
             explanations: taskExplanations({
               objective,
               task,

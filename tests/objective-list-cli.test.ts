@@ -1,30 +1,25 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.js";
 import { runObjectiveCommand } from "../apps/cli/src/objectives.js";
+import { fakeOperatorRpc } from "./support/fake-operator-rpc.js";
 
 afterEach(() => vi.restoreAllMocks());
 
+const LIST = "ObjectiveService/ListObjectives";
+
 it("lists every Objective without an owner", async () => {
-  const request = vi.spyOn(ControlPlaneClient.prototype, "request").mockResolvedValue({
-    items: [{ id: "new" }, { id: "old" }],
-  });
+  const rpc = fakeOperatorRpc({ [LIST]: () => ({ objectives: [{ id: "new" }, { id: "old" }] }) });
   expect(
     JSON.parse(await runObjectiveCommand({ url: "http://localhost", token: "t" }, ["list"])),
-  ).toEqual({ items: [{ id: "new" }, { id: "old" }] });
-  expect(request).toHaveBeenCalledWith("/api/v1/tag-messaging/objectives?");
+  ).toEqual({ objectives: [{ id: "new" }, { id: "old" }] });
+  expect(rpc.called(LIST)[0]?.body).toEqual({});
 });
 
 it("filters Objectives by the named owner instead of a positional Tag", async () => {
-  vi.spyOn(ControlPlaneClient.prototype, "getTag").mockResolvedValue({
-    metadata: { id: "reviewer-id" },
-  } as Awaited<ReturnType<ControlPlaneClient["getTag"]>>);
-  const request = vi
-    .spyOn(ControlPlaneClient.prototype, "request")
-    .mockResolvedValue({ items: [] });
+  const rpc = fakeOperatorRpc({ [LIST]: () => ({}) });
   await runObjectiveCommand({ url: "http://localhost", token: "t" }, [
     "list",
     "--owner",
     "reviewer",
   ]);
-  expect(request).toHaveBeenCalledWith("/api/v1/tag-messaging/objectives?tagId=reviewer-id");
+  expect(rpc.called(LIST)[0]?.body).toEqual({ owner: "reviewer" });
 });

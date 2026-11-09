@@ -106,7 +106,7 @@ The approvers of a request are the union of the approvers of the sets that requi
 
 | Entry | Who may decide |
 | --- | --- |
-| `operator:<operatorId>` | That operator, authenticated to the coordination API |
+| `operator:<operatorId>` | That operator, authenticated to the Control Plane's operator RPCs |
 | `tag:<Tag name or ID>` | That Tag, in its own turn |
 
 Without `approvers`, authorized operators decide. Listing only Tags adds Tag approvers; it

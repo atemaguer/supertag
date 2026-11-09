@@ -1,18 +1,42 @@
 import { parseArgs } from "node:util";
+import { create, toJsonString } from "@bufbuild/protobuf";
+import { timestampDate, timestampFromDate } from "@bufbuild/protobuf/wkt";
 import {
   type ApprovalRequest,
   COORDINATION_INBOX_KINDS,
   COORDINATION_INBOX_QUESTION_LIMIT,
+  COORDINATION_INBOX_VERSION,
   type CoordinationInboxItem,
   type CoordinationInboxPage,
   coordinationInboxHeadline,
-  coordinationInboxOccurrence,
   describeApprovalAction,
   shellWord,
 } from "@supertag/core";
-import { ControlPlaneClient, type ControlPlaneTarget } from "./control-plane-client.js";
+import {
+  type InboxItem,
+  type InboxItemKind,
+  InboxItemSchema,
+  ListApprovalsResponseSchema,
+  type ListInboxItemsResponse,
+  ListInboxItemsResponseSchema,
+  WatchKind,
+} from "@supertag/operator-api";
+import { followChanges } from "./change-follow.js";
+import type { ControlPlaneTarget } from "./control-plane-client.js";
+import {
+  APPROVAL_SCOPE,
+  APPROVAL_STATUS,
+  approvalRecord,
+  INBOX_KIND,
+  inboxItemRecord,
+} from "./objective-protos.js";
+import { eventClient, inboxClient } from "./operator-client.js";
 import { operatorNotice } from "./operator-notice.js";
+import { refusedAsError } from "./tag-conversation.js";
 import { terminalText } from "./terminal-text.js";
+
+type InboxClient = ReturnType<typeof inboxClient>;
+type EventClient = ReturnType<typeof eventClient>;
 
 export function approvalHelp(): string {
   return `Usage:
@@ -32,7 +56,7 @@ export async function runApprovalCommand(
   args: readonly string[],
 ): Promise<string> {
   const [command, ...rest] = args;
-  const client = new ControlPlaneClient(target);
+  const client = inboxClient({ url: target.url, token: target.token, warnOnSkew: true });
   if (command === "list") {
     const { values, positionals } = parseArgs({
       args: rest,
@@ -48,20 +72,20 @@ export async function runApprovalCommand(
     if (positionals.length > 0) throw new Error(approvalHelp());
     if (values.output !== "text" && values.output !== "json")
       throw new Error("--output must be text or json");
-    const query = new URLSearchParams();
-    if (values.objective !== undefined) query.set("objectiveId", values.objective);
-    query.set("status", values.status);
-    if (values.limit !== undefined) {
-      if (!/^\d+$/u.test(values.limit)) throw new Error("--limit must be an integer");
-      query.set("limit", values.limit);
-    }
-    const result = await client.request<{ readonly requests: readonly ApprovalRequest[] }>(
-      `/api/v1/coordination/approvals?${query}`,
-      { method: "GET" },
+    if (values.status !== "all" && !APPROVAL_STATUS.words.includes(values.status as never))
+      throw new Error("status must be pending, approved, denied, expired, or all");
+    if (values.limit !== undefined && !/^\d+$/u.test(values.limit))
+      throw new Error("--limit must be an integer");
+    const result = await refusedAsError(() =>
+      client.listApprovals({
+        objectiveId: values.objective ?? "",
+        status: APPROVAL_STATUS.value(values.status),
+        pageSize: values.limit === undefined ? 0 : Number(values.limit),
+      }),
     );
     return values.output === "json"
-      ? `${JSON.stringify(result, null, 2)}\n`
-      : formatApprovalRequests(result.requests, values.status);
+      ? `${toJsonString(ListApprovalsResponseSchema, result, { prettySpaces: 2 })}\n`
+      : formatApprovalRequests(result.approvals.map(approvalRecord), values.status);
   }
   if (command === "approve" || command === "deny") {
     const { values, positionals } = parseArgs({
@@ -75,22 +99,30 @@ export async function runApprovalCommand(
     });
     const [id, ...extra] = positionals;
     if (id === undefined || extra.length > 0) throw new Error(approvalHelp());
-    const body: Record<string, unknown> = {};
+    let decided: ApprovalRequest;
     if (command === "approve") {
       const scope = values["scope"];
       if (scope !== undefined && scope !== "once" && scope !== "objective")
         throw new Error("--scope must be once or objective");
-      if (scope !== undefined) body["scope"] = scope;
-      if (values["until"] !== undefined) body["validUntil"] = values["until"];
+      const until = values["until"];
+      const validUntil = typeof until === "string" ? new Date(until) : undefined;
+      if (validUntil !== undefined && Number.isNaN(validUntil.getTime()))
+        throw new Error("--until must be an ISO-8601 time");
+      decided = approvalRecord(
+        await refusedAsError(() =>
+          client.approve({
+            id,
+            scope: APPROVAL_SCOPE.value(scope),
+            ...(validUntil === undefined ? {} : { validUntil: timestampFromDate(validUntil) }),
+          }),
+        ),
+      );
     } else {
       if (typeof values["reason"] !== "string" || !values["reason"].trim())
         throw new Error("deny request requires --reason TEXT");
-      body["reason"] = values["reason"];
+      const reason = values["reason"];
+      decided = approvalRecord(await refusedAsError(() => client.deny({ id, reason })));
     }
-    const decided = await client.request<ApprovalRequest>(
-      `/api/v1/coordination/approvals/${encodeURIComponent(id)}/${command}`,
-      { method: "POST", body: JSON.stringify(body) },
-    );
     return `Approval request ${decided.id} ${decided.status}${decided.scope ? ` (scope: ${decided.scope}${decided.validUntil ? ` until ${decided.validUntil}` : ""})` : ""}.\n`;
   }
   throw new Error(approvalHelp());
@@ -165,14 +197,13 @@ export async function runInboxCommand(
     throw new Error(
       `--kind must be one of ${COORDINATION_INBOX_KINDS.map((item) => item.replaceAll("_", "-")).join(", ")}`,
     );
-  const query = new URLSearchParams();
-  for (const [name, value] of [
-    ["objectiveId", values.objective],
-    ["kind", kind],
-    ["nextActorId", values["next-actor"]],
-  ] as const)
-    if (value !== undefined) query.set(name, value);
-  const client = new ControlPlaneClient(target);
+  const filter: InboxFilter = {
+    objectiveId: values.objective ?? "",
+    kind: INBOX_KIND.value(kind),
+    nextActorTagId: values["next-actor"] ?? "",
+  };
+  const options = { url: target.url, token: target.token, warnOnSkew: true };
+  const inbox = inboxClient(options);
   if (command === "watch") {
     if (values.cursor !== undefined || values.limit !== undefined)
       throw new Error("watch inbox does not accept --cursor or --limit");
@@ -180,53 +211,74 @@ export async function runInboxCommand(
     const stop = () => controller.abort();
     process.once("SIGINT", stop);
     try {
-      await watchCoordinationInbox(client, query, {
-        output,
-        signal: controller.signal,
-        write: (text) => process.stdout.write(text),
-        warn: (text) => process.stderr.write(text),
-      });
+      await refusedAsError(() =>
+        watchCoordinationInbox({ inbox, events: eventClient(options) }, filter, {
+          output,
+          signal: controller.signal,
+          write: (text) => process.stdout.write(text),
+          warn: (text) => process.stderr.write(text),
+        }),
+      );
     } finally {
       process.removeListener("SIGINT", stop);
     }
     return "";
   }
-  if (values.cursor !== undefined) query.set("cursor", values.cursor);
-  if (values.limit !== undefined) {
-    if (!/^\d+$/u.test(values.limit)) throw new Error("--limit must be an integer");
-    query.set("limit", values.limit);
-  }
-  let result = await client.request<CoordinationInboxPage>(`/api/v1/coordination/inbox?${query}`, {
-    method: "GET",
-  });
+  if (values.limit !== undefined && !/^\d+$/u.test(values.limit))
+    throw new Error("--limit must be an integer");
+  const first = await refusedAsError(() =>
+    inbox.listInboxItems({
+      ...filter,
+      pageToken: values.cursor ?? "",
+      pageSize: values.limit === undefined ? 0 : Number(values.limit),
+    }),
+  );
+  let result = first;
   if (!values.all) {
-    const items = [...result.items];
-    const tagNames = { ...result.tagNames };
-    const truncatedKinds = new Set(result.truncatedKinds);
-    let cursor = result.nextCursor;
-    while (cursor) {
-      const nextQuery = new URLSearchParams(query);
-      nextQuery.set("cursor", cursor);
-      const next = await client.request<CoordinationInboxPage>(
-        `/api/v1/coordination/inbox?${nextQuery}`,
-        { method: "GET" },
+    const items = [...first.items];
+    const tagNames = { ...first.tagNames };
+    const truncatedKinds = new Set(first.truncatedKinds);
+    let pageToken = first.nextPageToken;
+    while (pageToken) {
+      const token = pageToken;
+      const next = await refusedAsError(() =>
+        inbox.listInboxItems({ ...filter, pageToken: token, pageSize: 100 }),
       );
       items.push(...next.items);
       Object.assign(tagNames, next.tagNames);
       for (const truncated of next.truncatedKinds) truncatedKinds.add(truncated);
-      cursor = next.nextCursor;
+      pageToken = next.nextPageToken;
     }
-    result = {
-      projectionVersion: result.projectionVersion,
-      asOf: result.asOf,
+    result = create(ListInboxItemsResponseSchema, {
+      ...(first.asOf === undefined ? {} : { asOf: first.asOf }),
       items: items.filter((item) => item.operatorEligible),
       tagNames,
       truncatedKinds: [...truncatedKinds],
-    };
+    });
   }
   return output === "text"
-    ? formatCoordinationInbox(result)
-    : `${JSON.stringify(result, null, 2)}\n`;
+    ? formatCoordinationInbox(inboxPage(result))
+    : `${toJsonString(ListInboxItemsResponseSchema, result, { prettySpaces: 2 })}\n`;
+}
+
+/** What `list inbox` and `watch inbox` filter on. */
+export interface InboxFilter {
+  readonly objectiveId: string;
+  readonly kind: InboxItemKind;
+  readonly nextActorTagId: string;
+}
+
+/** A page of the inbox as the CLI shows it. */
+function inboxPage(response: ListInboxItemsResponse): CoordinationInboxPage {
+  const asOf = response.asOf === undefined ? new Date() : timestampDate(response.asOf);
+  return {
+    projectionVersion: COORDINATION_INBOX_VERSION,
+    asOf: asOf.toISOString(),
+    items: response.items.map((item) => inboxItemRecord(item, asOf)),
+    tagNames: response.tagNames,
+    truncatedKinds: response.truncatedKinds.flatMap((kind) => INBOX_KIND.word(kind) ?? []),
+    ...(response.nextPageToken === "" ? {} : { nextCursor: response.nextPageToken }),
+  };
 }
 
 const WATCH_PAGE_LIMIT = 20;
@@ -236,64 +288,70 @@ export interface CoordinationInboxWatchOptions {
   readonly signal: AbortSignal;
   readonly write: (text: string) => void;
   readonly warn?: (text: string) => void;
-  readonly intervalMs?: number;
+  /** How long to wait before reconnecting a broken change stream. */
+  readonly retryMs?: number;
 }
 
 /**
- * Prints each pending inbox item once, as it appears, until the signal aborts. The first poll
- * prints everything already pending. An item that leaves the inbox and returns prints again.
+ * Prints each pending inbox item once, as it appears, until the signal aborts. It prints
+ * everything already pending first, then rereads the inbox each time the change stream says an
+ * inbox item changed. An item that leaves the inbox and returns prints again.
  */
 export async function watchCoordinationInbox(
-  client: Pick<ControlPlaneClient, "request">,
-  query: URLSearchParams,
+  clients: {
+    readonly inbox: Pick<InboxClient, "listInboxItems">;
+    readonly events: Pick<EventClient, "watch">;
+  },
+  filter: InboxFilter,
   options: CoordinationInboxWatchOptions,
 ): Promise<void> {
   let seen = new Set<string>();
-  while (!options.signal.aborted) {
-    try {
-      const items: CoordinationInboxItem[] = [];
-      let cursor: string | undefined;
-      for (let page = 0; page < WATCH_PAGE_LIMIT; page += 1) {
-        const pageQuery = new URLSearchParams(query);
-        pageQuery.set("limit", "100");
-        if (cursor) pageQuery.set("cursor", cursor);
-        const result = await client.request<CoordinationInboxPage>(
-          `/api/v1/coordination/inbox?${pageQuery}`,
-          { method: "GET" },
+  let read = false;
+  await followChanges(clients.events, {
+    kinds: [WatchKind.INBOX_ITEM],
+    signal: options.signal,
+    ...(options.warn === undefined ? {} : { warn: options.warn }),
+    ...(options.retryMs === undefined ? {} : { retryMs: options.retryMs }),
+    matches: (change) => filter.objectiveId === "" || change.objectiveId === filter.objectiveId,
+    refresh: async () => {
+      const items: InboxItem[] = [];
+      try {
+        let pageToken = "";
+        for (let page = 0; page < WATCH_PAGE_LIMIT; page += 1) {
+          const result = await clients.inbox.listInboxItems({
+            ...filter,
+            pageToken,
+            pageSize: 100,
+          });
+          items.push(...result.items);
+          pageToken = result.nextPageToken;
+          if (!pageToken) break;
+        }
+      } catch (error) {
+        // Nothing has printed yet, so a first failure, such as a refused credential, ends it.
+        if (!read) throw error;
+        options.warn?.(
+          `Inbox read failed: ${error instanceof Error ? error.message : String(error)}\n`,
         );
-        items.push(...result.items);
-        cursor = result.nextCursor;
-        if (!cursor) break;
+        return "poll";
       }
-      if (options.signal.aborted) break;
+      read = true;
+      if (options.signal.aborted) return "stop";
+      const asOf = new Date();
       const current = new Set<string>();
       for (const item of items) {
-        const occurrence = coordinationInboxOccurrence(item);
-        current.add(occurrence);
-        if (seen.has(occurrence)) continue;
+        current.add(item.occurrence);
+        if (seen.has(item.occurrence)) continue;
         options.write(
           options.output === "json"
-            ? `${JSON.stringify(item)}\n`
-            : `${formatCoordinationInboxLine(item)}\n`,
+            ? `${toJsonString(InboxItemSchema, item)}\n`
+            : `${formatCoordinationInboxLine(inboxItemRecord(item, asOf))}\n`,
         );
       }
       seen = current;
-    } catch (error) {
-      options.warn?.(
-        `Inbox poll failed: ${error instanceof Error ? error.message : String(error)}\n`,
-      );
-    }
-    await new Promise<void>((resolve) => {
-      if (options.signal.aborted) return resolve();
-      const timer = setTimeout(done, options.intervalMs ?? 1_000);
-      function done() {
-        clearTimeout(timer);
-        options.signal.removeEventListener("abort", done);
-        resolve();
-      }
-      options.signal.addEventListener("abort", done, { once: true });
-    });
-  }
+      return undefined;
+    },
+  });
 }
 
 /** One line per inbox item: when, what, where, and the command to act. */

@@ -1,6 +1,6 @@
 #!/bin/sh
-# Installs the SuperTag CLI from npm into its own directory, using the system's Node.js and npm.
-# SuperTag runs the Claude Code and Codex CLIs you install yourself, so the copies the vendor SDKs
+# Installs the SuperTag CLI from npm into its own directory, using the system's Node.js and npm,
+# plus the release's checksum-verified terminal UI binary on macOS and Linux. SuperTag runs the Claude Code and Codex CLIs you install yourself, so the copies the vendor SDKs
 # bundle are removed after installing. `supertag init` checks for your harness CLIs.
 set -eu
 
@@ -9,6 +9,7 @@ PACKAGE="${SUPERTAG_PACKAGE:-supertag-ai}"
 RELEASE_DEFAULT_VERSION="latest"
 REQUESTED_VERSION="${SUPERTAG_VERSION:-$RELEASE_DEFAULT_VERSION}"
 MINIMUM_NODE="22.13.0"
+RELEASE_DOWNLOADS="https://github.com/atemaguer/supertag/releases/download"
 
 fail() {
   printf 'SuperTag installer: %s\n' "$1" >&2
@@ -17,6 +18,90 @@ fail() {
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
+}
+
+# Fetches URL $1 to file $2 with curl or wget.
+download() {
+  if command_exists curl; then
+    curl -fsL -o "$2" "$1"
+  elif command_exists wget; then
+    wget -q -O "$2" "$1"
+  else
+    return 2
+  fi
+}
+
+# Prints the SHA-256 digest of file $1.
+sha256_of() {
+  if command_exists shasum; then
+    shasum -a 256 "$1" | awk '{ print $1 }'
+  elif command_exists sha256sum; then
+    sha256sum "$1" | awk '{ print $1 }'
+  else
+    return 2
+  fi
+}
+
+tui_skipped() {
+  printf 'The terminal UI was not installed: %s. The CLI works without it.\n' "$1" >&2
+}
+
+# Places the release's verified terminal UI binary in package directory $1 for version $2.
+# A failure here leaves the CLI installed without the terminal UI.
+install_tui() {
+  platform=$(node -p 'process.platform + "-" + process.arch')
+  case "$platform" in
+    darwin-arm64 | darwin-x64 | linux-arm64 | linux-x64) ;;
+    *)
+      tui_skipped "no build exists for $platform"
+      return 0
+      ;;
+  esac
+  name="supertag-tui-$(printf '%s' "$platform" | sed 's/x64$/amd64/')"
+  downloads="$1/.tui-download"
+  rm -rf "$downloads"
+  mkdir -p "$downloads"
+  if [ -n "${SUPERTAG_TUI_SOURCE:-}" ]; then
+    if ! cp "$SUPERTAG_TUI_SOURCE/$name" "$SUPERTAG_TUI_SOURCE/SHA256SUMS" "$downloads/" 2>/dev/null; then
+      rm -rf "$downloads"
+      tui_skipped "$SUPERTAG_TUI_SOURCE has no $name and SHA256SUMS"
+      return 0
+    fi
+  else
+    if ! command_exists curl && ! command_exists wget; then
+      rm -rf "$downloads"
+      tui_skipped "neither curl nor wget is available to download it"
+      return 0
+    fi
+    for file in "$name" SHA256SUMS; do
+      if ! download "$RELEASE_DOWNLOADS/v$2/$file" "$downloads/$file"; then
+        rm -rf "$downloads"
+        tui_skipped "could not download $file for release v$2"
+        return 0
+      fi
+    done
+  fi
+  expected=$(awk -v file="$name" '$2 == file || $2 == "*" file { print $1; exit }' "$downloads/SHA256SUMS")
+  if ! actual=$(sha256_of "$downloads/$name"); then
+    rm -rf "$downloads"
+    tui_skipped "neither shasum nor sha256sum is available to verify it"
+    return 0
+  fi
+  if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+    rm -rf "$downloads"
+    tui_skipped "$name did not match its SHA256SUMS checksum"
+    return 0
+  fi
+  chmod 755 "$downloads/$name"
+  tui_version=$("$downloads/$name" --version 2>/dev/null || true)
+  if [ "$tui_version" != "$2" ]; then
+    rm -rf "$downloads"
+    tui_skipped "$name reports version ${tui_version:-none}, not $2"
+    return 0
+  fi
+  mkdir -p "$1/tui"
+  mv -f "$downloads/$name" "$1/tui/$name"
+  rm -rf "$downloads"
 }
 
 # Succeeds when version $1 is at least $2, both major.minor.patch.
@@ -85,6 +170,8 @@ case "$RELEASE_VERSION" in
   '' | *[!0-9A-Za-z._+-]*) fail "the installed package has an invalid version" ;;
 esac
 [ -x "$STAGING/node_modules/.bin/supertag" ] || fail "the installed package has no supertag command"
+
+install_tui "$STAGING/node_modules/$PACKAGE" "$RELEASE_VERSION"
 
 TARGET="$INSTALL_ROOT/versions/$RELEASE_VERSION"
 rm -rf "$TARGET"

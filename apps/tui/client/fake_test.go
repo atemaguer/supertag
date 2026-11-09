@@ -14,10 +14,13 @@ import (
 	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1/operatorv1connect"
 )
 
-// fakeControlPlane serves the generated ConversationService and EventService handlers, each
-// RPC answered by the test's function, and records every call's headers.
+// fakeControlPlane serves the generated ConversationService, ObjectiveService, InboxService and
+// EventService handlers, each RPC answered by the test's function, and records every call's
+// headers.
 type fakeControlPlane struct {
 	operatorv1connect.UnimplementedConversationServiceHandler
+	operatorv1connect.UnimplementedObjectiveServiceHandler
+	operatorv1connect.UnimplementedInboxServiceHandler
 	operatorv1connect.UnimplementedEventServiceHandler
 
 	send          func(*operatorv1.SendMessageRequest) (*operatorv1.Message, error)
@@ -26,6 +29,12 @@ type fakeControlPlane struct {
 	follow        func(context.Context, *operatorv1.FollowMessageRequest, *connect.ServerStream[operatorv1.FollowEvent]) error
 	watch         func(context.Context, *operatorv1.WatchRequest, *connect.ServerStream[operatorv1.WatchEvent]) error
 	tags          http.HandlerFunc
+	objectives    func(*operatorv1.ListObjectivesRequest) (*operatorv1.ListObjectivesResponse, error)
+	describe      func(*operatorv1.DescribeObjectiveRequest) (*operatorv1.ObjectiveOverview, error)
+	inbox         func(*operatorv1.ListInboxItemsRequest) (*operatorv1.ListInboxItemsResponse, error)
+	approve       func(*operatorv1.ApproveRequest) (*operatorv1.Approval, error)
+	deny          func(*operatorv1.DenyRequest) (*operatorv1.Approval, error)
+	answer        func(*operatorv1.AnswerQuestionRequest) (*operatorv1.MessageObjectiveResponse, error)
 
 	mu    sync.Mutex
 	calls []call
@@ -51,6 +60,8 @@ func (f *fakeControlPlane) callsTo(procedure string) []call {
 func (f *fakeControlPlane) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle(operatorv1connect.NewConversationServiceHandler(f))
+	mux.Handle(operatorv1connect.NewObjectiveServiceHandler(f))
+	mux.Handle(operatorv1connect.NewInboxServiceHandler(f))
 	mux.Handle(operatorv1connect.NewEventServiceHandler(f))
 	mux.HandleFunc("/api/v1/tags", func(w http.ResponseWriter, r *http.Request) {
 		if f.tags == nil {
@@ -104,6 +115,39 @@ func (f *fakeControlPlane) FollowMessage(ctx context.Context, req *connect.Reque
 
 func (f *fakeControlPlane) Watch(ctx context.Context, req *connect.Request[operatorv1.WatchRequest], stream *connect.ServerStream[operatorv1.WatchEvent]) error {
 	return f.watch(ctx, req.Msg, stream)
+}
+
+// unary answers a unary RPC with the test's function.
+func unary[Req, Res any](fn func(*Req) (*Res, error), req *connect.Request[Req]) (*connect.Response[Res], error) {
+	res, err := fn(req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (f *fakeControlPlane) ListObjectives(_ context.Context, req *connect.Request[operatorv1.ListObjectivesRequest]) (*connect.Response[operatorv1.ListObjectivesResponse], error) {
+	return unary(f.objectives, req)
+}
+
+func (f *fakeControlPlane) DescribeObjective(_ context.Context, req *connect.Request[operatorv1.DescribeObjectiveRequest]) (*connect.Response[operatorv1.ObjectiveOverview], error) {
+	return unary(f.describe, req)
+}
+
+func (f *fakeControlPlane) ListInboxItems(_ context.Context, req *connect.Request[operatorv1.ListInboxItemsRequest]) (*connect.Response[operatorv1.ListInboxItemsResponse], error) {
+	return unary(f.inbox, req)
+}
+
+func (f *fakeControlPlane) Approve(_ context.Context, req *connect.Request[operatorv1.ApproveRequest]) (*connect.Response[operatorv1.Approval], error) {
+	return unary(f.approve, req)
+}
+
+func (f *fakeControlPlane) Deny(_ context.Context, req *connect.Request[operatorv1.DenyRequest]) (*connect.Response[operatorv1.Approval], error) {
+	return unary(f.deny, req)
+}
+
+func (f *fakeControlPlane) AnswerQuestion(_ context.Context, req *connect.Request[operatorv1.AnswerQuestionRequest]) (*connect.Response[operatorv1.MessageObjectiveResponse], error) {
+	return unary(f.answer, req)
 }
 
 func newFake(t *testing.T, f *fakeControlPlane) *Client {

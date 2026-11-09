@@ -5310,6 +5310,7 @@ function executionWorkerId(events: readonly WorkerTaskAttemptEvent[]): string | 
 
 export { ArtifactCatalog } from "./artifact-catalog.js";
 export {
+  type ChangeFeed,
   type ChangeKind,
   type ChangeNotice,
   ChangeNotifications,

@@ -1,0 +1,469 @@
+syntax = "proto3";
+package supertag.operator.v1;
+
+import "google/protobuf/timestamp.proto";
+import "supertag/operator/v1/objective.proto";
+import "supertag/operator/v1/options.proto";
+import "supertag/operator/v1/task.proto";
+
+option go_package = "github.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1";
+
+// What waits on a person, across Tags and Objectives: `supertag list inbox`,
+// `watch inbox`, `list approval`, `approve request` and `deny request`.
+//
+// The inbox is a read model over existing records: approval requests,
+// questions an Objective's owner asked, budget and deadline limits, Tasks
+// that need an operator, and MCP servers to log in to. An item leaves the
+// inbox once what it stands for is settled. Each item names the `supertag`
+// commands that act on it.
+//
+// Approval requests come from permissions marked `approval: required`. The
+// Task that asked ends waiting on the decision; a decision continues its
+// Session as the Session's next Task.
+//
+// Access. The admin token and Operator Tokens may call every RPC. Every RPC
+// also accepts a scoped coordination credential that carries the RPC's
+// action. Such a credential reaches only the Objectives its scope names:
+//
+// - A list without `objective_id` covers its one Objective, and fails with
+//   `PermissionDenied` when its scope names several.
+// - `objective_id` outside its scope fails with `PermissionDenied`.
+// - An approval request outside any Objective, which a Tag's inbox turn
+//   asked for, reaches only a credential without an Objective scope.
+//
+// Every RPC that changes state fails with `Unavailable` and
+// `ERROR_REASON_DRAINING` while the Control Plane drains.
+service InboxService {
+  // Lists the items waiting on a person, the longest waiting first. Every
+  // item is pending.
+  //
+  // Approval items are listed only for a credential that also carries the
+  // `list_approvals` action; `kind` `INBOX_ITEM_KIND_APPROVAL` without it
+  // fails with `PermissionDenied`. Items the operator does not decide, such
+  // as a question another Tag must answer, are listed too, with
+  // `operator_eligible` false.
+  //
+  // Each kind is scanned up to a bound. When a kind had more candidates than
+  // the bound, the response names it in `truncated_kinds` and some of its
+  // items are missing. It fails with `InvalidArgument` for a malformed
+  // `page_token`.
+  rpc ListInboxItems(ListInboxItemsRequest) returns (ListInboxItemsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_coordination_inbox";
+    option (supertag.operator.v1.allow_scoped_credential) = true;
+  }
+
+  // Lists approval requests, the most recently created first. A pending
+  // request whose Task already finished lists as `APPROVAL_STATUS_EXPIRED`;
+  // the Control Plane records the expiry itself, not this call.
+  rpc ListApprovals(ListApprovalsRequest) returns (ListApprovalsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "list_approvals";
+    option (supertag.operator.v1.allow_scoped_credential) = true;
+  }
+
+  // Approves a pending approval request, as `supertag approve request` does.
+  // The decision continues the waiting Session.
+  //
+  // It fails with `NotFound` for a request that does not exist,
+  // `PermissionDenied` when `approvers` names operators but not the caller,
+  // `InvalidArgument` for a `valid_until` that is not in the future or
+  // `APPROVAL_SCOPE_OBJECTIVE` on a request outside any Objective, and
+  // `FailedPrecondition` for a request that is no longer pending, including
+  // one whose Task already finished, which this call expires. Repeating the
+  // caller's own decision, with the same scope, returns the decided request.
+  rpc Approve(ApproveRequest) returns (Approval) {
+    option (supertag.operator.v1.action) = "decide_approval";
+    option (supertag.operator.v1.audit_action) = "approval.approve";
+    option (supertag.operator.v1.allow_scoped_credential) = true;
+  }
+
+  // Denies a pending approval request with a reason, as `supertag deny
+  // request` does. The decision continues the waiting Session, which reads
+  // the reason. It fails as `Approve` does, and with `InvalidArgument` for an
+  // empty reason.
+  rpc Deny(DenyRequest) returns (Approval) {
+    option (supertag.operator.v1.action) = "decide_approval";
+    option (supertag.operator.v1.audit_action) = "approval.deny";
+    option (supertag.operator.v1.allow_scoped_credential) = true;
+  }
+
+  // Answers the question an inbox item of kind `INBOX_ITEM_KIND_QUESTION`
+  // stands for: the text goes to the Objective's conversation as its owner's
+  // next turn, exactly as `ObjectiveService.MessageObjective` sends it, and
+  // the item leaves the inbox.
+  //
+  // It fails with `InvalidArgument` for empty text or a `key` that names no
+  // question item, `NotFound` when the Objective does not exist, and
+  // `FailedPrecondition` when the question no longer waits on an answer,
+  // because the owner took another turn or the Objective closed. A repeat
+  // with the same `idempotency_key` returns the first call's turn even after
+  // the question was answered.
+  rpc AnswerQuestion(AnswerQuestionRequest) returns (MessageObjectiveResponse) {
+    option (supertag.operator.v1.action) = "message_objective";
+    option (supertag.operator.v1.audit_action) = "objective.message";
+    option (supertag.operator.v1.allow_scoped_credential) = true;
+  }
+}
+
+message ListInboxItemsRequest {
+  // Lists only this Objective's items. Empty lists every Objective's and the
+  // items outside any Objective.
+  string objective_id = 1;
+  // Lists only items of this kind. Unspecified lists every kind.
+  InboxItemKind kind = 2;
+  // Lists only items this Tag may act on, by ID, as `next_actor_tag_ids`
+  // names it. Empty lists items whoever acts.
+  string next_actor_tag_id = 3;
+  // At most this many items; 0 means 50, and more than 100 means 100.
+  int32 page_size = 4;
+  // The `next_page_token` of the previous page.
+  string page_token = 5;
+}
+
+message ListInboxItemsResponse {
+  // When the Control Plane read the records.
+  google.protobuf.Timestamp as_of = 1;
+  // The items, the longest waiting first.
+  repeated InboxItem items = 2;
+  // Display names of the Tags the items name in `next_actor_tag_ids` and
+  // `excluded_actor_tag_ids`, keyed by Tag ID. A Tag that no longer exists
+  // has no entry.
+  map<string, string> tag_names = 3;
+  // Kinds whose scan reached its bound, so some of their items are missing.
+  repeated InboxItemKind truncated_kinds = 4;
+  // Fetches the next page. Empty on the last page.
+  string next_page_token = 5;
+}
+
+// What an inbox item waits on.
+enum InboxItemKind {
+  INBOX_ITEM_KIND_UNSPECIFIED = 0;
+  // A pending approval request. `approval` describes it.
+  INBOX_ITEM_KIND_APPROVAL = 1;
+  // An Objective's owner asked a question and waits on the answer.
+  // `question` carries it. Answer it with `AnswerQuestion`.
+  INBOX_ITEM_KIND_QUESTION = 2;
+  // An Objective's budget is used up.
+  INBOX_ITEM_KIND_OBJECTIVE_BUDGET = 3;
+  // An Objective reached a budget or deadline limit. `reason` says which.
+  INBOX_ITEM_KIND_OBJECTIVE_LIMIT = 4;
+  // A Task needs an operator, such as a running Task whose Task Attempt is
+  // uncertain. `uncertain_attempt` names that Attempt.
+  INBOX_ITEM_KIND_TASK_ATTENTION = 5;
+  // A Task is held until an MCP server is logged in to.
+  INBOX_ITEM_KIND_MCP_LOGIN = 6;
+}
+
+// One thing waiting on a person. It carries metadata only: no approval
+// action arguments, Task text or Tag output beyond what the fields name.
+message InboxItem {
+  // Identifies what the item stands for, such as `approval:ID` or
+  // `question:TASK_ID`. It is opaque except to `AnswerQuestion`, and it is
+  // the `id` of `WATCH_KIND_INBOX_ITEM` changes.
+  string key = 1;
+  // Identifies one occurrence of the item. A Task that needs the same
+  // decision again after another Task Attempt is a new occurrence with the
+  // same `key`. A client that shows each item once keys on this.
+  string occurrence = 2;
+  // What it waits on.
+  InboxItemKind kind = 3;
+  // Why it needs a look, in one sentence. Worker Hosts and Tags can shape
+  // it, so it is untrusted text.
+  string reason = 4;
+  // The Objective it belongs to. Empty only for an approval requested by a
+  // Tag's inbox turn, which belongs to no Objective.
+  string objective_id = 5;
+  // The IDs of the Tags that may act on it next.
+  repeated string next_actor_tag_ids = 6;
+  // The IDs of Tags that may not act on it, such as the Tag that asked.
+  repeated string excluded_actor_tag_ids = 7;
+  // Whether an operator decides it. `supertag list inbox` without `--all`
+  // shows only these.
+  bool operator_eligible = 8;
+  // Since when it waits.
+  google.protobuf.Timestamp actionable_since = 9;
+  // The deadline of its Objective. Unset without one.
+  google.protobuf.Timestamp deadline = 10;
+  // The records it was derived from.
+  repeated InboxEvidence evidence = 11;
+  // The approval request, for `INBOX_ITEM_KIND_APPROVAL`.
+  InboxApproval approval = 12;
+  // The question, for `INBOX_ITEM_KIND_QUESTION`, when the caller may read
+  // the whole Objective.
+  InboxQuestion question = 13;
+  // The uncertain Task Attempt, for an `INBOX_ITEM_KIND_TASK_ATTENTION` item
+  // about one.
+  UncertainAttempt uncertain_attempt = 14;
+  // The `supertag` commands that act on it, the most direct first, such as
+  // `supertag approve request ID`. A command for a Worker Host, such as
+  // `supertag recover worklet`, runs there.
+  repeated string commands = 15;
+  // How the operator notification about it was delivered. Unset for kinds
+  // that send none.
+  InboxNotification notification = 16;
+}
+
+// A record an inbox item was derived from.
+message InboxEvidence {
+  oneof record {
+    // A Task.
+    TaskEvidence task = 1;
+    // An Objective.
+    ObjectiveEvidence objective = 2;
+    // An approval request, by ID.
+    string approval_request_id = 3;
+  }
+}
+
+// A Task as an inbox item saw it.
+message TaskEvidence {
+  // The Task's ID.
+  string id = 1;
+  // How it was doing.
+  TaskStatus status = 2;
+  // How many Task Attempts it had.
+  int32 attempt_count = 3;
+  // When it last changed.
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+// An Objective as an inbox item saw it.
+message ObjectiveEvidence {
+  // The Objective's ID.
+  string id = 1;
+  // Its revision.
+  int64 revision = 2;
+}
+
+// The approval request an `INBOX_ITEM_KIND_APPROVAL` item stands for.
+message InboxApproval {
+  // The approval request's ID.
+  string request_id = 1;
+  // What kind of request it is.
+  ApprovalKind kind = 2;
+  // What would happen, in a short sanitized sentence.
+  string summary = 3;
+  // The ID of the Tag that asked.
+  string requesting_tag_id = 4;
+  // The name of the Tag that asked. Empty when the Tag no longer exists.
+  string requesting_tag = 5;
+  // The Task that asked.
+  string task_id = 6;
+  // Whether a running Task Attempt waits on the decision.
+  bool blocking = 7;
+}
+
+// The question an `INBOX_ITEM_KIND_QUESTION` item stands for.
+message InboxQuestion {
+  // The question, cut to 500 characters. The Tag wrote it, so it is
+  // untrusted text.
+  string text = 1;
+  // When the owner asked it.
+  google.protobuf.Timestamp asked_at = 2;
+  // Whether the question is longer than `text`. `DescribeObjective` shows it
+  // whole.
+  bool truncated = 3;
+}
+
+// A Task Attempt that may have executed, which only an operator on its
+// Worker Host can recover.
+message UncertainAttempt {
+  // The Task Attempt's ID.
+  string attempt_id = 1;
+  // The Worker Host it ran on, when known.
+  string worker_host_id = 2;
+  // The Worker it ran on, when known.
+  string worker_id = 3;
+}
+
+// Whether an operator notification was delivered.
+enum InboxNotificationStatus {
+  INBOX_NOTIFICATION_STATUS_UNSPECIFIED = 0;
+  // No operator notification channel is configured.
+  INBOX_NOTIFICATION_STATUS_NOT_CONFIGURED = 1;
+  // It waits to be sent.
+  INBOX_NOTIFICATION_STATUS_PENDING = 2;
+  // It is being sent.
+  INBOX_NOTIFICATION_STATUS_DELIVERING = 3;
+  // It was delivered.
+  INBOX_NOTIFICATION_STATUS_DELIVERED = 4;
+  // Sending it failed.
+  INBOX_NOTIFICATION_STATUS_FAILED = 5;
+  // The channel cannot deliver it now.
+  INBOX_NOTIFICATION_STATUS_UNAVAILABLE = 6;
+}
+
+// How the operator notification about an inbox item was delivered.
+message InboxNotification {
+  // Whether it was delivered.
+  InboxNotificationStatus status = 1;
+  // More about the status, such as where it was delivered or why it failed.
+  string reason = 2;
+}
+
+message ListApprovalsRequest {
+  // Lists only this Objective's requests. Empty lists every Objective's and
+  // the requests outside any Objective.
+  string objective_id = 1;
+  // Lists only requests with this status. Unspecified lists every status.
+  ApprovalStatus status = 2;
+  // At most this many requests; 0 means 100, and more than 500 means 500.
+  int32 page_size = 3;
+  // The `next_page_token` of the previous page.
+  string page_token = 4;
+}
+
+message ListApprovalsResponse {
+  // The requests, the most recently created first.
+  repeated Approval approvals = 1;
+  // Fetches the next page. Empty on the last page.
+  string next_page_token = 2;
+}
+
+message ApproveRequest {
+  // The approval request's ID.
+  string id = 1;
+  // What the approval covers. Unspecified means `APPROVAL_SCOPE_ONCE`.
+  ApprovalScope scope = 2;
+  // When the approval ends. It must be in the future. Unset: it does not
+  // end, apart from a once-scope approval being used up.
+  google.protobuf.Timestamp valid_until = 3;
+}
+
+message DenyRequest {
+  // The approval request's ID.
+  string id = 1;
+  // Why, at most 2,000 characters. The Session that asked reads it. Control
+  // characters are removed, and what remains must not be empty.
+  string reason = 2;
+}
+
+message AnswerQuestionRequest {
+  // The question item's `key`.
+  string key = 1;
+  // The answer. Leading and trailing whitespace is removed, and what remains
+  // must not be empty.
+  string text = 2;
+  // Makes a retry safe, as `MessageObjectiveRequest.idempotency_key` does.
+  string idempotency_key = 3;
+}
+
+// What kind of approval request it is.
+enum ApprovalKind {
+  APPROVAL_KIND_UNSPECIFIED = 0;
+  // A Tag's use of a surface, runtime or MCP action.
+  APPROVAL_KIND_SURFACE_ACTION = 1;
+}
+
+// Where an approval request stands.
+enum ApprovalStatus {
+  APPROVAL_STATUS_UNSPECIFIED = 0;
+  // It waits for a decision.
+  APPROVAL_STATUS_PENDING = 1;
+  // It was approved.
+  APPROVAL_STATUS_APPROVED = 2;
+  // It was denied.
+  APPROVAL_STATUS_DENIED = 3;
+  // It can no longer be used, because its Task finished or its approval
+  // ended.
+  APPROVAL_STATUS_EXPIRED = 4;
+}
+
+// What an approval covers.
+enum ApprovalScope {
+  APPROVAL_SCOPE_UNSPECIFIED = 0;
+  // This one request.
+  APPROVAL_SCOPE_ONCE = 1;
+  // Every matching action in the request's Objective, until `valid_until`
+  // when set.
+  APPROVAL_SCOPE_OBJECTIVE = 2;
+}
+
+// Who decided an approval request.
+enum ApprovalDecider {
+  APPROVAL_DECIDER_UNSPECIFIED = 0;
+  // An operator.
+  APPROVAL_DECIDER_OPERATOR = 1;
+  // A Tag named as an approver.
+  APPROVAL_DECIDER_TAG = 2;
+}
+
+// What an approval action acts on.
+enum ApprovalTarget {
+  APPROVAL_TARGET_UNSPECIFIED = 0;
+  // A collaboration surface, through a Surface Account.
+  APPROVAL_TARGET_SURFACE = 1;
+  // A runtime action in the Task's sandbox, such as `files:write`.
+  APPROVAL_TARGET_RUNTIME = 2;
+  // An MCP server's tool.
+  APPROVAL_TARGET_MCP = 3;
+}
+
+// One action an approval request covers.
+message ApprovalAction {
+  // What it acts on.
+  ApprovalTarget target = 1;
+  // The action. For `APPROVAL_TARGET_MCP`, the concrete `server/tool`
+  // called.
+  string action = 2;
+  // The Surface Account, for `APPROVAL_TARGET_SURFACE`.
+  string surface_account_id = 3;
+  // The Surface Account scope, for `APPROVAL_TARGET_SURFACE`.
+  string scope = 4;
+  // The resource the call's arguments name, for `APPROVAL_TARGET_MCP` when
+  // the server maps one.
+  string resource = 5;
+  // The surface provider, such as `github`, for display.
+  string provider = 6;
+  // The tool the Tag called, for display only.
+  string tool_name = 7;
+}
+
+// One approval request.
+message Approval {
+  // The approval request's ID.
+  string id = 1;
+  // The Objective it belongs to. Empty for a request a Tag's inbox turn made.
+  string objective_id = 2;
+  // The Task that asked.
+  string task_id = 3;
+  // The Task Attempt that asked, when known.
+  string attempt_id = 4;
+  // The ID of the Tag that asked.
+  string requesting_tag_id = 5;
+  // What kind of request it is.
+  ApprovalKind kind = 6;
+  // The actions it covers.
+  repeated ApprovalAction actions = 7;
+  // The `sha256:` digest of the call's canonical JSON arguments, for a
+  // surface action. The arguments themselves are never returned.
+  string arguments_digest = 8;
+  // What would happen, in a short sanitized sentence.
+  string summary = 9;
+  // The Permission Sets whose `approval: required` produced it.
+  repeated string rule_sources = 10;
+  // Who may decide it, as the requiring Permission Sets name them, such as
+  // `operator:ID`. Without an `operator:` entry, any operator may decide it.
+  repeated string approvers = 11;
+  // Where it stands.
+  ApprovalStatus status = 12;
+  // What the approval covers, once approved.
+  ApprovalScope scope = 13;
+  // When an `APPROVAL_SCOPE_OBJECTIVE` approval ends. Unset when it does not.
+  google.protobuf.Timestamp valid_until = 14;
+  // Who decided it: the operator's or Tag's ID. Empty while pending.
+  string decided_by = 15;
+  // Whether an operator or a Tag decided it.
+  ApprovalDecider decided_by_kind = 16;
+  // When it was decided. Unset while pending.
+  google.protobuf.Timestamp decided_at = 17;
+  // The decider's reason, when one was given. A denial always has one.
+  string reason = 18;
+  // When a once-scope approval was used up. Unset until then.
+  google.protobuf.Timestamp consumed_at = 19;
+  // When it was created.
+  google.protobuf.Timestamp created_at = 20;
+  // When it last changed.
+  google.protobuf.Timestamp updated_at = 21;
+}

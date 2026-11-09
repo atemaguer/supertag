@@ -141,8 +141,15 @@ describe("declarative Objectives", () => {
     expect(error).toBeInstanceOf(Error);
     return (error as Error).message;
   };
-  const objective = (id: string) =>
-    client.request<ObjectiveRecord>(`/api/v1/tag-messaging/objectives/${id}`);
+  const objective = async (id: string): Promise<ObjectiveRecord> => {
+    const store = new DrizzleStore({ url: `file:${databasePath}` });
+    await store.connect();
+    try {
+      return await store.getObjective(id);
+    } finally {
+      await store.disconnect();
+    }
+  };
   const teams = async (): Promise<readonly TeamRecord[]> => {
     const store = new DrizzleStore({ url: `file:${databasePath}` });
     await store.connect();

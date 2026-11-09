@@ -127,7 +127,7 @@ Use explicit entry points for integrations and lower-level contracts:
 | `supertag-ai/worker` | Custom Workers, harnesses, input resolution, tools, environments, and continuity |
 | `supertag-ai/transport` | Worklet transport and protocol contracts |
 | `supertag-ai/messaging` | Tag messaging, Team channels, and custom Worker consumers |
-| `supertag-ai/coordination` | Typed operator client and the redacted coordination inbox |
+| `supertag-ai/coordination` | Typed client for the operator inbox |
 | `supertag-ai/testing` | Extension conformance probes |
 | `supertag-ai/surfaces` | Custom collaboration surfaces |
 | `supertag-ai/control-plane` | Embedding the Control Plane |

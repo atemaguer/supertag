@@ -118,6 +118,8 @@ export interface ApprovalRequestListFilter {
   readonly status?: ApprovalRequestStatus;
   /** Only requests decided at or after this instant. */
   readonly decidedAfter?: string;
+  /** Only requests listed after this one, most recently created first. */
+  readonly before?: { readonly createdAt: string; readonly id: string };
   readonly limit?: number;
 }
 

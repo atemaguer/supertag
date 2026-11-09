@@ -79,6 +79,9 @@ supertag list inbox --objective OBJECTIVE_ID --output json
 supertag spend --by objective --output json
 ```
 
+`describe objective` and `list inbox` print their API messages in proto3 JSON: enums are value
+names such as `OBJECTIVE_STATUS_WORKING` or `INBOX_ITEM_KIND_QUESTION`, fields left empty are
+omitted, and 64-bit numbers, such as budget amounts, are strings.
 Follow pagination when the description is incomplete. Compare observed state with the previous
 check-in. Keep each Objective's evidence, decisions, budget, and deadline separate, even when one
 thread coordinates several. Report shared-capacity or repository conflicts when they affect
@@ -110,8 +113,8 @@ message_file='PATH_FROM_MKTEMP'
 ```
 
 The trap removes the private file even if the command fails. Reread
-`supertag list inbox --objective OBJECTIVE_ID --output json` afterwards: the `question` item is
-gone once the answer started the next turn.
+`supertag list inbox --objective OBJECTIVE_ID --output json` afterwards: the `INBOX_ITEM_KIND_QUESTION` item
+is gone once the answer started the next turn.
 
 To ask a Tag something outside an Objective, such as what it is working on, use
 `supertag message tag TAG - --session NAME --output json` with the same private-file pattern. The

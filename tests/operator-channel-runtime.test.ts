@@ -6,8 +6,10 @@ import type { SurfaceAccount, SurfaceTagAuthorizationSnapshot } from "@supertag/
 import { expect, it, vi } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
 import { createOperatorNotificationSender } from "../apps/cli/src/gateway-surfaces.js";
+import { inboxClient } from "../apps/cli/src/operator-client.js";
 import { parseOperatorChannel } from "../packages/control-plane/src/index.js";
 import { objectiveSessionKey } from "../packages/core/src/index.js";
+import { InboxNotificationStatus } from "../packages/operator-api/src/index.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
 
 interface RuntimeContext {
@@ -176,13 +178,11 @@ it("tells the configured operator channel about a CLI Objective's waiting approv
     expect(text).toMatch(/`supertag describe objective channel-objective`$/u);
     expect(text).not.toContain("files:write");
     await vi.waitFor(async () => {
-      const response = await fetch(`${url}/api/v1/coordination/inbox`, {
-        headers: { authorization: "Bearer channel-admin" },
+      const page = await inboxClient({ url, token: "channel-admin" }).listInboxItems({});
+      expect(page.items[0]?.notification).toMatchObject({
+        status: InboxNotificationStatus.DELIVERED,
+        reason: "via slack",
       });
-      const page = (await response.json()) as {
-        items: Array<{ notification?: { status: string; reason?: string } }>;
-      };
-      expect(page.items[0]?.notification).toEqual({ status: "delivered", reason: "via slack" });
     });
     // Later sweeps do not send it again.
     await new Promise((resolve) => setTimeout(resolve, 2_500));
@@ -215,11 +215,8 @@ it("sends nothing when no operator channel is configured", async () => {
     await holdForApproval();
     await new Promise((resolve) => setTimeout(resolve, 2_500));
     expect(send).not.toHaveBeenCalled();
-    const response = await fetch(`${url}/api/v1/coordination/inbox`, {
-      headers: { authorization: "Bearer channel-admin" },
-    });
-    const page = (await response.json()) as { items: Array<{ notification?: { status: string } }> };
-    expect(page.items[0]?.notification?.status).toBe("not configured");
+    const page = await inboxClient({ url, token: "channel-admin" }).listInboxItems({});
+    expect(page.items[0]?.notification?.status).toBe(InboxNotificationStatus.NOT_CONFIGURED);
   });
 }, 30_000);
 

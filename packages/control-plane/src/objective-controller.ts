@@ -308,12 +308,14 @@ export class ObjectiveController {
 
   /**
    * One pass of the Objective sweep, on the dispatcher's cadence: limits and their notices,
-   * approval digests to home threads, and due pull-request retries.
+   * expiry of approval requests whose Task finished, approval digests to home threads, and due
+   * pull-request retries.
    */
   async sweep(): Promise<void> {
     this.suspend.observe();
     await this.pollSystemWake();
     await this.sweepObjectiveLimits();
+    await this.approvals.expireFinished().catch(this.onError);
     await this.reportApprovalNotices();
     await this.pullRequests.retryDue();
   }
@@ -837,7 +839,12 @@ export class ObjectiveController {
 
   /** Operator listing of approval requests, scoped like the coordination inbox. */
   async listApprovalRequests(
-    input: { readonly objectiveId?: string; readonly status?: string; readonly limit?: number },
+    input: {
+      readonly objectiveId?: string;
+      readonly status?: string;
+      readonly before?: { readonly createdAt: string; readonly id: string };
+      readonly limit?: number;
+    },
     principal: CoordinationOperatorPrincipal = EMBEDDED_BREAK_GLASS_PRINCIPAL,
   ) {
     this.authorizeOperatorAction("list_approvals", principal);
@@ -845,15 +852,14 @@ export class ObjectiveController {
     const status = input.status === undefined || input.status === "all" ? undefined : input.status;
     if (status !== undefined && !["pending", "approved", "denied", "expired"].includes(status))
       throw new TagMessagingError(400, "status must be pending, approved, denied, expired, or all");
-    return {
-      requests: await this.approvals.list({
-        ...(objectiveId === undefined ? {} : { objectiveId }),
-        ...(status === undefined
-          ? {}
-          : { status: status as "pending" | "approved" | "denied" | "expired" }),
-        ...(input.limit === undefined ? {} : { limit: input.limit }),
-      }),
-    };
+    return this.approvals.list({
+      ...(objectiveId === undefined ? {} : { objectiveId }),
+      ...(status === undefined
+        ? {}
+        : { status: status as "pending" | "approved" | "denied" | "expired" }),
+      ...(input.before === undefined ? {} : { before: input.before }),
+      ...(input.limit === undefined ? {} : { limit: input.limit }),
+    });
   }
 
   /** Operator decision on one approval request; the decision continues the waiting Session. */

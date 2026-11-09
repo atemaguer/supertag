@@ -144,8 +144,10 @@ conversation transcripts.
 supertag describe objective OBJECTIVE_ID --output json
 ```
 
-The overview lists the Objective's Sessions and their latest Task. Per-Tag usage totals cover
-the Sessions it lists. Ordinary `supertag get objective` returns the plain Objective record.
+It prints the `ObjectiveOverview` message in proto3 JSON: the Objective's Sessions with their
+latest Task, spend against the budget for the whole Objective, and the first page of Tasks.
+`ObjectiveService.DescribeObjective` pages through the rest. Ordinary `supertag get objective` returns the plain Objective
+record.
 
 Together, your Teams of Tags make up an **autonomous organization**: Teams may pursue different
 Objectives but share one Control Plane, its rules, and its record of the work.
@@ -203,7 +205,6 @@ concerns. Explanations are evidence and suggested next steps, not permission gra
 
 - **Access is denied.** The overview needs operator access to the whole Objective; see
   [access](../reference/coordination.md#access).
-- **Totals look too small.** Usage totals cover only the displayed page; follow `nextOffset`.
 - **A turn stays pending with no blocker.** Check Worker availability with
   [troubleshooting](troubleshooting.md), and the Team's `maxConcurrency`.
 - **A running lease expired.** See

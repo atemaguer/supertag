@@ -8,7 +8,8 @@ export type ChangeKind =
   | "objective"
   | "inbox_item"
   | "approval"
-  | "conversation_message";
+  | "conversation_message"
+  | "workstream_post";
 
 /** A notice that one thing changed. It names the thing and carries none of its state. */
 export interface ChangeNotice {
@@ -19,6 +20,8 @@ export interface ChangeNotice {
   readonly sessionId?: string;
   readonly taskId?: string;
   readonly objectiveId?: string;
+  /** The ID of the Team it belongs to. */
+  readonly teamId?: string;
   /** The CLI conversation it belongs to, by name, for its owner. */
   readonly conversation?: string;
   /**
@@ -42,6 +45,22 @@ export type ChangeResumePoint =
   | { readonly status: "resync" }
   | { readonly status: "invalid" };
 
+/**
+ * What a watcher reads change notices from. Positions order the notices and a resume token names
+ * one. `ChangeNotifications` is the in-memory feed of one process; a feed over database events
+ * with LISTEN/NOTIFY can replace it, and then every process honours every other's tokens.
+ */
+export interface ChangeFeed {
+  /** The position of the latest notice subscribers have been given; 0 before the first. */
+  readonly position: number;
+  /** Calls `listener` with every notice from now on, until the returned function is called. */
+  subscribe(listener: (notice: PositionedChangeNotice) => void): () => void;
+  /** The opaque token that resumes after `position`. */
+  resumeToken(position?: number): string;
+  /** The notices after a resume token, or why a watcher cannot replay from it. */
+  resume(token: string): ChangeResumePoint | Promise<ChangeResumePoint>;
+}
+
 /** How many notices a Control Plane keeps for watchers that resume. */
 const CHANGE_NOTICE_CAPACITY = 10_000;
 const RESUME_TOKEN = /^v1\.([A-Za-z0-9_-]{16})\.(0|[1-9][0-9]{0,15})$/u;
@@ -53,7 +72,7 @@ const RESUME_TOKEN = /^v1\.([A-Za-z0-9_-]{16})\.(0|[1-9][0-9]{0,15})$/u;
  * a watcher resynchronizes. Several Control Plane processes would each see only their own
  * changes: a shared log is the follow-up for running more than one.
  */
-export class ChangeNotifications {
+export class ChangeNotifications implements ChangeFeed {
   readonly #instance = randomBytes(12).toString("base64url");
   readonly #ring: (PositionedChangeNotice | undefined)[] = [];
   readonly #capacity: number;

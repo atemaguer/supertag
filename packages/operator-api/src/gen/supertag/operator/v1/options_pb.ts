@@ -11,7 +11,7 @@ import { file_google_protobuf_descriptor } from "@bufbuild/protobuf/wkt";
  * Describes the file supertag/operator/v1/options.proto.
  */
 export const file_supertag_operator_v1_options: GenFile = /*@__PURE__*/
-  fileDesc("CiJzdXBlcnRhZy9vcGVyYXRvci92MS9vcHRpb25zLnByb3RvEhRzdXBlcnRhZy5vcGVyYXRvci52MTo4CgZhY3Rpb24SHi5nb29nbGUucHJvdG9idWYuTWV0aG9kT3B0aW9ucxjRhgMgASgJUgZhY3Rpb246SQoPYWxsb3dfYW5vbnltb3VzEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMY0oYDIAEoCFIOYWxsb3dBbm9ueW1vdXM6UgoUcmVxdWlyZXNfYWRtaW5fdG9rZW4SHi5nb29nbGUucHJvdG9idWYuTWV0aG9kT3B0aW9ucxjThgMgASgIUhJyZXF1aXJlc0FkbWluVG9rZW46QwoMYXVkaXRfYWN0aW9uEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMY1IYDIAEoCVILYXVkaXRBY3Rpb25CTlpMZ2l0aHViLmNvbS9hdGVtYWd1ZXIvc3VwZXJ0YWcvcGFja2FnZXMvb3BlcmF0b3ItYXBpL2dvL29wZXJhdG9ydjE7b3BlcmF0b3J2MWIGcHJvdG8z", [file_google_protobuf_descriptor]);
+  fileDesc("CiJzdXBlcnRhZy9vcGVyYXRvci92MS9vcHRpb25zLnByb3RvEhRzdXBlcnRhZy5vcGVyYXRvci52MTo4CgZhY3Rpb24SHi5nb29nbGUucHJvdG9idWYuTWV0aG9kT3B0aW9ucxjRhgMgASgJUgZhY3Rpb246SQoPYWxsb3dfYW5vbnltb3VzEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMY0oYDIAEoCFIOYWxsb3dBbm9ueW1vdXM6UgoUcmVxdWlyZXNfYWRtaW5fdG9rZW4SHi5nb29nbGUucHJvdG9idWYuTWV0aG9kT3B0aW9ucxjThgMgASgIUhJyZXF1aXJlc0FkbWluVG9rZW46QwoMYXVkaXRfYWN0aW9uEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMY1IYDIAEoCVILYXVkaXRBY3Rpb246WAoXYWxsb3dfc2NvcGVkX2NyZWRlbnRpYWwSHi5nb29nbGUucHJvdG9idWYuTWV0aG9kT3B0aW9ucxjVhgMgASgIUhVhbGxvd1Njb3BlZENyZWRlbnRpYWxCTlpMZ2l0aHViLmNvbS9hdGVtYWd1ZXIvc3VwZXJ0YWcvcGFja2FnZXMvb3BlcmF0b3ItYXBpL2dvL29wZXJhdG9ydjE7b3BlcmF0b3J2MWIGcHJvdG8z", [file_google_protobuf_descriptor]);
 
 /**
  * The operator action the caller's credential must carry, such as `status`.
@@ -51,4 +51,17 @@ export const requires_admin_token: GenExtension<MethodOptions, boolean> = /*@__P
  */
 export const audit_action: GenExtension<MethodOptions, string> = /*@__PURE__*/
   extDesc(file_supertag_operator_v1_options, 3);
+
+/**
+ * Accept a scoped coordination credential, one the Control Plane reads from
+ * `SUPERTAG_COORDINATION_OPERATORS_FILE`. It must carry `action` among its
+ * actions, and it reaches only the Objectives its scope names: the RPC
+ * refuses any other with `PermissionDenied`. Without this option such a
+ * credential is refused with `PermissionDenied`, whatever actions it
+ * carries.
+ *
+ * @generated from extension: bool allow_scoped_credential = 50005;
+ */
+export const allow_scoped_credential: GenExtension<MethodOptions, boolean> = /*@__PURE__*/
+  extDesc(file_supertag_operator_v1_options, 4);
 

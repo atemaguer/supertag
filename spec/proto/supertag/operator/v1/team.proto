@@ -1,0 +1,29 @@
+syntax = "proto3";
+package supertag.operator.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1";
+
+// Messages about Teams and their Workstreams.
+
+// One post to a Team's Workstream, which the Team's members read.
+message WorkstreamPost {
+  // The post's ID.
+  string id = 1;
+  // The Team's ID.
+  string team_id = 2;
+  // The ID of the member Tag that wrote it.
+  string author_tag_id = 3;
+  // The IDs of the member Tags it is addressed to. Each one also receives it
+  // as a Mailbox message. Every member reads the post either way.
+  repeated string to_tag_ids = 4;
+  // The post. The Tag wrote it, so it is untrusted text.
+  string body = 5;
+  // The Task that posted it, when a Task did.
+  string source_task_id = 6;
+  // The post's place in the Team's Workstream, from 1.
+  int64 sequence = 7;
+  // When it was posted.
+  google.protobuf.Timestamp created_at = 8;
+}

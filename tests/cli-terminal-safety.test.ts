@@ -17,6 +17,7 @@ import {
 } from "../apps/cli/src/tag-command-adapter.ts";
 import { AccountSelectionError } from "../apps/cli/src/tag-surface-target.ts";
 import { terminalText } from "../apps/cli/src/terminal-text.ts";
+import { fakeOperatorRpc } from "./support/fake-operator-rpc.ts";
 
 const hostile = "visible\x1b[2J\x1b]0;hidden-title\x07\r\n\t\b\x00\x7f\u009b\u202e\u2028\u2029end";
 const safe = (output: string) => {
@@ -148,23 +149,22 @@ it.each([
 });
 
 it("filters inbox detail fields as well as recovery commands", async () => {
-  vi.spyOn(ControlPlaneClient.prototype, "request").mockResolvedValue({
-    asOf: hostile,
-    truncatedKinds: [],
-    items: [
-      {
-        key: hostile,
-        kind: "task_attention",
-        objectiveId: hostile,
-        teamId: hostile,
-        nextActorTagIds: [],
-        operatorEligible: true,
-        actionableSince: hostile,
-        evidence: [],
-        reason: hostile,
-        commands: [hostile],
-      },
-    ],
+  fakeOperatorRpc({
+    "InboxService/ListInboxItems": () => ({
+      asOf: "2026-09-30T00:01:00Z",
+      items: [
+        {
+          key: hostile,
+          kind: "INBOX_ITEM_KIND_TASK_ATTENTION",
+          objectiveId: hostile,
+          operatorEligible: true,
+          actionableSince: "2026-09-30T00:00:00Z",
+          reason: hostile,
+          commands: [hostile],
+          notification: { status: "INBOX_NOTIFICATION_STATUS_FAILED", reason: hostile },
+        },
+      ],
+    }),
   });
   safe(
     await runInboxCommand({ url: "http://127.0.0.1:1", token: "unused" }, "list", [
@@ -196,14 +196,14 @@ it("sanitizes failure messages, including non-Error failures", () => {
 it.each(["create", "status"])(
   "sanitizes objective %s warnings and refusal reasons",
   async (command) => {
-    vi.spyOn(ControlPlaneClient.prototype, "getTag").mockResolvedValue({
-      metadata: { id: "owner" },
-    } as Awaited<ReturnType<ControlPlaneClient["getTag"]>>);
-    vi.spyOn(ControlPlaneClient.prototype, "request").mockResolvedValue({
-      id: "objective",
-      revision: 1,
-      warnings: [hostile],
-      notStarted: hostile,
+    const objective = { id: "objective", revision: "1" };
+    fakeOperatorRpc({
+      "ObjectiveService/CreateObjective": () => ({
+        objective,
+        warnings: [hostile],
+        notStarted: hostile,
+      }),
+      "ObjectiveService/UpdateObjective": () => ({ objective, warnings: [hostile] }),
     });
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     await runObjectiveCommand(

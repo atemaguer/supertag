@@ -6,6 +6,7 @@ import type {
   Store,
   Tag,
   Task,
+  WorkstreamPost,
 } from "@supertag/core";
 import type { ChangeNotice, ChangeNotifications } from "./change-notifications.js";
 import { messageConversation, parseCliConversationKey } from "./conversations.js";
@@ -18,7 +19,8 @@ type StoreChange =
   | { readonly kind: "task"; readonly taskId: string; readonly reason: string }
   | { readonly kind: "objective"; readonly objective: Objective; readonly reason: string }
   | { readonly kind: "approval"; readonly request: ApprovalRequest; readonly reason: string }
-  | { readonly kind: "reply"; readonly inboundEventId: string; readonly reason: string };
+  | { readonly kind: "reply"; readonly inboundEventId: string; readonly reason: string }
+  | { readonly kind: "post"; readonly post: WorkstreamPost; readonly reason: string };
 
 interface StoreWrite {
   /** Reads what the write is about before it runs, as a Tag that it deletes. */
@@ -119,6 +121,12 @@ const STORE_WRITES: Readonly<Record<string, StoreWrite>> = {
         : [],
   },
   decideApprovalRequest: { changes: approvalWrite("decided") },
+  post: {
+    changes: (_args, result) =>
+      isRecord(result) && result["duplicate"] === false && isRecord(result["post"])
+        ? [{ kind: "post", post: result["post"] as unknown as WorkstreamPost, reason: "posted" }]
+        : [],
+  },
   expireApprovalRequest: { changes: approvalWrite("expired") },
 };
 
@@ -130,9 +138,9 @@ const INBOX_MAX_PAGES = 20;
 /**
  * Returns `store` with each write that changes what operators watch publishing a notice to
  * `changes`: Tags, Sessions, Tasks, Objectives, approval requests, messages in CLI conversations,
- * and the inbox items they make, which it finds by rereading the inbox. A notice is published
- * once the write succeeds, in the order the writes finished; naming it reads the store, which
- * never fails the write.
+ * Workstream posts, and the inbox items they make, which it finds by rereading the inbox. A
+ * notice is published once the write succeeds, in the order the writes finished; naming it reads
+ * the store, which never fails the write.
  */
 export function observeStoreChanges<S extends Store>(
   store: S,
@@ -327,6 +335,16 @@ class StoreChangeObserver {
           : await this.#conversationMessages(task, `approval request ${change.reason}`, changedAt)),
       ];
     }
+    if (change.kind === "post")
+      return [
+        {
+          kind: "workstream_post",
+          id: change.post.id,
+          teamId: change.post.teamId,
+          reason: change.reason,
+          changedAt,
+        },
+      ];
     if (change.kind === "reply") {
       const task = await this.#taskOfInboundEvent(change.inboundEventId);
       return task === undefined ? [] : this.#conversationMessages(task, change.reason, changedAt);

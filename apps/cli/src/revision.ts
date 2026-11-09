@@ -1,3 +1,4 @@
+import { Code, ConnectError } from "@connectrpc/connect";
 import { ControlPlaneRequestError } from "./control-plane-client.js";
 
 /**
@@ -59,5 +60,8 @@ function revisionOf(resource: Readonly<Record<string, unknown>>, name: string): 
 }
 
 function isConflict(error: unknown): boolean {
-  return error instanceof ControlPlaneRequestError && error.status === 409;
+  return (
+    (error instanceof ControlPlaneRequestError && error.status === 409) ||
+    (error instanceof ConnectError && error.code === Code.FailedPrecondition)
+  );
 }

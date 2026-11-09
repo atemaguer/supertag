@@ -1,0 +1,366 @@
+package main
+
+import (
+	"errors"
+	"strings"
+	"sync"
+	"testing"
+
+	tea "charm.land/bubbletea/v2"
+	"connectrpc.com/connect"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/atemaguer/supertag/apps/tui/client"
+	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
+)
+
+func int32p(n int32) *int32 { return &n }
+func int64p(n int64) *int64 { return &n }
+
+// billingOverview is the overview of obj-billing: a Team of two, one delivered work Session with
+// a report, one running, and a Workstream post.
+func billingOverview() *operatorv1.ObjectiveOverview {
+	o := budgeted(objective("obj-billing", "Billing rejects bad discounts\nwith tests", operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_WORKING), 4123, 30000)
+	o.TeamId = "team-billing"
+	return &operatorv1.ObjectiveOverview{
+		Objective:  o,
+		TagNames:   map[string]string{"tag-lead": "lead", "tag-builder": "builder"},
+		Team:       &operatorv1.ObjectiveTeam{Id: "team-billing", Name: "billing", MemberTagIds: []string{"tag-lead", "tag-builder"}, MaxConcurrency: int32p(2)},
+		Conditions: []*operatorv1.ObjectiveCondition{{Type: "Runnable", Status: true}},
+		Budget:     &operatorv1.ObjectiveBudgetUse{Currency: "USD", LimitMinor: int64p(30000), SpentMinor: int64p(4123), UnpricedModels: map[string]int32{"m": 2}},
+		Approvals:  &operatorv1.ApprovalCounts{Pending: 1},
+		Sessions: []*operatorv1.ObjectiveSession{
+			{Id: "ses-own", TagId: "tag-lead", Owner: true, LatestTask: &operatorv1.ObjectiveSessionTask{Id: "task-own",
+				Status: operatorv1.ObjectiveSessionStatus_OBJECTIVE_SESSION_STATUS_WAITING}},
+			{Id: "ses-fix", TagId: "tag-builder", Title: "Validate apply_discount", LatestTask: &operatorv1.ObjectiveSessionTask{Id: "task-fix",
+				Status: operatorv1.ObjectiveSessionStatus_OBJECTIVE_SESSION_STATUS_COMPLETED, Report: "Percentages over 100 now raise.",
+				Delivery: &operatorv1.TaskDelivery{Workspace: &operatorv1.WorkspaceDelivery{Name: "app", Branch: "supertag/session/b3861d05", Head: "abc", ChangedFiles: int32p(2)}}}},
+			{Id: "ses-docs", TagId: "tag-builder", Title: "Document it", LatestTask: &operatorv1.ObjectiveSessionTask{Id: "task-docs",
+				Status:       operatorv1.ObjectiveSessionStatus_OBJECTIVE_SESSION_STATUS_PENDING,
+				Explanations: []*operatorv1.TaskExplanation{{Kind: operatorv1.TaskExplanationKind_TASK_EXPLANATION_KIND_WORKER_REQUIREMENTS, Message: "No connected Worker can run it."}}}},
+		},
+		Posts: []*operatorv1.WorkstreamPost{{Id: "p1", TeamId: "team-billing", AuthorTagId: "tag-builder", ToTagIds: []string{"tag-lead"}, Body: "Fix is on the branch.\nDetails follow."}},
+	}
+}
+
+// coordinationFake serves one open Objective with a budget, one blocked, one completed, and an
+// inbox of a question, an approval request and an item another Tag decides. Deciding or answering
+// an item removes it.
+func coordinationFake() *fakeControlPlane {
+	var mu sync.Mutex
+	items := []*operatorv1.InboxItem{
+		questionItem("obj-billing", "task-own", "Should 100% stay allowed?"),
+		approvalItem("obj-billing", "apr-1", "Push supertag/session/b3861d05 to origin"),
+		{Key: "question:task-x", Occurrence: "question:task-x:1", Kind: operatorv1.InboxItemKind_INBOX_ITEM_KIND_QUESTION, OperatorEligible: false},
+	}
+	remove := func(key string) {
+		mu.Lock()
+		defer mu.Unlock()
+		for i, item := range items {
+			if item.GetKey() == key {
+				items = append(items[:i], items[i+1:]...)
+				return
+			}
+		}
+	}
+	return &fakeControlPlane{
+		tags: tags("lead", "builder"),
+		objectives: func() []*operatorv1.Objective {
+			return []*operatorv1.Objective{
+				billingOverview().GetObjective(),
+				objective("obj-invites", "Invites expire", operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_BLOCKED),
+				objective("obj-done", "Old work", operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_COMPLETED),
+			}
+		},
+		overview: func(id string) *operatorv1.ObjectiveOverview {
+			if id == "obj-billing" {
+				return billingOverview()
+			}
+			return nil
+		},
+		items: func() []*operatorv1.InboxItem {
+			mu.Lock()
+			defer mu.Unlock()
+			return append([]*operatorv1.InboxItem(nil), items...)
+		},
+		approve: func(req *operatorv1.ApproveRequest) error { remove("approval:" + req.GetId()); return nil },
+		deny:    func(req *operatorv1.DenyRequest) error { remove("approval:" + req.GetId()); return nil },
+		answer:  func(req *operatorv1.AnswerQuestionRequest) error { remove(req.GetKey()); return nil },
+	}
+}
+
+// startAll loads the Tags, the Objectives and the inbox, as Init does without the watch stream.
+func startAll(t *testing.T, m model) model {
+	t.Helper()
+	return run(t, m, tea.Batch(m.reloadTags(), m.reloadConversations(), m.reloadObjectives(), m.reloadInbox()))
+}
+
+// press feeds one key and runs what it starts.
+func press(t *testing.T, m model, msg tea.KeyPressMsg) model {
+	t.Helper()
+	next, cmd := m.Update(msg)
+	return run(t, next.(model), cmd)
+}
+
+func letter(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Text: string(r)} }
+
+// moveTo focuses the rail and moves the cursor down to the row whose rail text contains label.
+func moveTo(t *testing.T, m model, label string) model {
+	t.Helper()
+	if m.focus != focusRail {
+		m = press(t, m, key(tea.KeyTab))
+	}
+	for range len(m.rows()) {
+		r := m.rows()[m.cursor]
+		text := ""
+		switch r.kind {
+		case rowObjective:
+			text = objectiveName(m.objectives[r.index])
+		case rowInbox:
+			text = m.inboxRow(m.inbox.Items[r.index])
+		default:
+			text = m.tags[r.index].Name()
+		}
+		if strings.Contains(text, label) {
+			return m
+		}
+		m = press(t, m, key(tea.KeyDown))
+	}
+	t.Fatalf("no rail row shows %q:\n%s", label, ansi.Strip(m.renderRail(40)))
+	return m
+}
+
+func TestTheRailListsOpenObjectivesAndWhatWaitsOnYou(t *testing.T) {
+	m := startAll(t, testModel(t, coordinationFake()))
+	rail := ansi.Strip(m.renderRail(28))
+	at := 0
+	for _, want := range []string{"Tags", "lead", "builder", "Objectives", "Billing r… $41.23/$300", "Invites expire blocked",
+		"Waiting on you (2)", "? Billing rejects bad", "! Push supertag/sess"} {
+		i := strings.Index(rail[at:], want)
+		if i < 0 {
+			t.Fatalf("rail lacks %q after position %d:\n%s", want, at, rail)
+		}
+		at += i + len(want)
+	}
+	if strings.Contains(rail, "Old work") {
+		t.Fatalf("a completed Objective is listed:\n%s", rail)
+	}
+	if len(m.rows()) != 6 {
+		t.Fatalf("rows = %d, want 2 Tags, 2 Objectives and 2 inbox items", len(m.rows()))
+	}
+}
+
+func TestSelectingAnObjectiveShowsItLive(t *testing.T) {
+	fake := coordinationFake()
+	m := startAll(t, testModel(t, fake))
+	m = update(t, m, tea.WindowSizeMsg{Width: 140, Height: 60})
+	m = moveTo(t, m, "Billing")
+	if m.pane != paneObjective || fake.descriptions("obj-billing") != 1 {
+		t.Fatalf("pane = %v, descriptions = %d", m.pane, fake.descriptions("obj-billing"))
+	}
+	got := screen(m)
+	for _, want := range []string{
+		"Objective · Billing rejects bad discounts",
+		"Objective obj-billing: working",
+		"Owner: lead",
+		"Team: billing (lead, builder)",
+		"Runnable: yes",
+		"Budget: $41.23 of $300.00 spent; 2 Task Attempts unpriced, so the budget cannot count them",
+		"Validate apply_discount (builder, Task task-fix)",
+		"Branch supertag/session/b3861d05 in Workspace app, 2 changed files",
+		`lead asks: "Should 100% stay allowed?"`,
+		"supertag approve request apr-1",
+		"Work: 3 Sessions",
+		"waiting    lead     Objective conversation  (Task task-own)",
+		"completed  builder  Validate apply_discount  (Task task-fix)",
+		"Report: Percentages over 100 now raise.",
+		"No connected Worker can run it.",
+		"builder to lead: Fix is on the branch.",
+		"Team billing: at most 2 turns at once across its Objectives",
+		"Live · answer its questions under Waiting on you",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("screen lacks %q", want)
+		}
+	}
+	if t.Failed() {
+		t.Log(got)
+	}
+
+	changed := func(m model, change *operatorv1.WatchChange) model {
+		closed := make(chan client.WatchUpdate)
+		close(closed)
+		next, cmd := m.Update(watchMsg{update: client.WatchUpdate{Kind: client.WatchChanged, Change: change}, updates: closed})
+		return run(t, next.(model), cmd)
+	}
+	m = changed(m, &operatorv1.WatchChange{Kind: operatorv1.WatchKind_WATCH_KIND_TASK, Id: "t", ObjectiveId: "obj-billing"})
+	m = changed(m, &operatorv1.WatchChange{Kind: operatorv1.WatchKind_WATCH_KIND_WORKSTREAM_POST, Id: "p2", TeamId: "team-billing"})
+	m = changed(m, &operatorv1.WatchChange{Kind: operatorv1.WatchKind_WATCH_KIND_TASK, Id: "t", ObjectiveId: "obj-other"})
+	m = changed(m, &operatorv1.WatchChange{Kind: operatorv1.WatchKind_WATCH_KIND_WORKSTREAM_POST, Id: "p3", TeamId: "team-other"})
+	m = changed(m, &operatorv1.WatchChange{Kind: operatorv1.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE, Tag: "lead"})
+	if n := fake.descriptions("obj-billing"); n != 3 {
+		t.Fatalf("descriptions = %d, want a reread for its Task and its Team's post only", n)
+	}
+
+	m = moveTo(t, m, "Invites")
+	if got := screen(m); !strings.Contains(got, "Could not read the Objective: Objective obj-invites was not found") {
+		t.Fatalf("screen:\n%s", got)
+	}
+	m = press(t, m, key(tea.KeyUp))
+	m = press(t, m, key(tea.KeyUp))
+	if m.pane != paneConversation || !strings.Contains(screen(m), "builder · default") {
+		t.Fatalf("moving back up should show a conversation:\n%s", screen(m))
+	}
+}
+
+func TestAnsweringAQuestionInPlace(t *testing.T) {
+	fake := coordinationFake()
+	m := startAll(t, testModel(t, fake))
+	m = update(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = moveTo(t, m, "? ")
+	got := screen(m)
+	for _, want := range []string{"Waiting on you · question", "Objective obj-billing waits on your answer", "The owner asks:",
+		"Should 100% stay allowed?", "supertag message objective obj-billing TEXT", "Type your answer"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("screen lacks %q:\n%s", want, got)
+		}
+	}
+	m = press(t, m, key(tea.KeyRight))
+	m.input.SetValue("No, cap it at 100.")
+	m = press(t, m, key(tea.KeyEnter))
+	if len(fake.answered) != 1 || fake.answered[0].GetKey() != "question:task-own" || fake.answered[0].GetText() != "No, cap it at 100." ||
+		fake.answered[0].GetIdempotencyKey() == "" {
+		t.Fatalf("answered = %v", fake.answered)
+	}
+	got = screen(m)
+	if !strings.Contains(got, "Sent. lead takes your answer as its next turn.") || !strings.Contains(got, "Waiting on you (1)") ||
+		!strings.Contains(got, "This item is settled.") || m.inputShown() {
+		t.Fatalf("after answering:\n%s", got)
+	}
+}
+
+func TestApprovingAndDenyingInPlace(t *testing.T) {
+	fake := coordinationFake()
+	m := startAll(t, testModel(t, fake))
+	m = update(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = moveTo(t, m, "! ")
+	got := screen(m)
+	for _, want := range []string{"Waiting on you · approval", "Approval apr-1 (work is waiting): Push supertag/session/b3861d05 to origin (requested by Tag",
+		"Requested by: builder", "A running Task Attempt waits on the decision.", "a approve · d deny"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("screen lacks %q:\n%s", want, got)
+		}
+	}
+	m = press(t, m, letter('a'))
+	if !strings.Contains(screen(m), "enter approves this request once · esc cancels") || len(fake.approved) != 0 {
+		t.Fatalf("a should ask to confirm:\n%s", screen(m))
+	}
+	m = press(t, m, key(tea.KeyEscape))
+	if m.decision != decisionNone || !strings.Contains(screen(m), "a approve · d deny") {
+		t.Fatal("esc should cancel approving, not quit")
+	}
+	m = press(t, m, letter('a'))
+	m = press(t, m, key(tea.KeyEnter))
+	if len(fake.approved) != 1 || fake.approved[0].GetId() != "apr-1" || fake.approved[0].GetScope() != operatorv1.ApprovalScope_APPROVAL_SCOPE_ONCE {
+		t.Fatalf("approved = %v", fake.approved)
+	}
+	if got := screen(m); !strings.Contains(got, "Approved once. The waiting Session continues.") || !strings.Contains(got, "Waiting on you (1)") {
+		t.Fatalf("after approving:\n%s", got)
+	}
+}
+
+func TestDenyingTakesAReasonAndKeepsItOnFailure(t *testing.T) {
+	fake := coordinationFake()
+	fails, deny := true, fake.deny
+	fake.deny = func(req *operatorv1.DenyRequest) error {
+		if fails {
+			return connect.NewError(connect.CodeUnavailable, errors.New("The Control Plane is draining."))
+		}
+		return deny(req)
+	}
+	m := startAll(t, testModel(t, fake))
+	m = update(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = moveTo(t, m, "! ")
+	m = press(t, m, letter('d'))
+	if m.focus != focusInput || !m.inputShown() || !strings.Contains(screen(m), "Why deny it?") {
+		t.Fatalf("d should ask for a reason:\n%s", screen(m))
+	}
+	m = press(t, m, key(tea.KeyEnter))
+	if len(fake.denied) != 0 {
+		t.Fatal("an empty reason must not deny")
+	}
+	m.input.SetValue("Push to a fork")
+	m = press(t, m, key(tea.KeyEnter))
+	if len(fake.denied) != 1 || fake.denied[0].GetId() != "apr-1" || fake.denied[0].GetReason() != "Push to a fork" {
+		t.Fatalf("denied = %v", fake.denied)
+	}
+	if !strings.Contains(screen(m), "The Control Plane is draining.") || m.input.Value() != "Push to a fork" || m.decision != decisionReason {
+		t.Fatalf("a failed deny should keep the reason:\n%s", screen(m))
+	}
+	fails = false
+	m = press(t, m, key(tea.KeyEnter))
+	if got := screen(m); len(fake.denied) != 2 || !strings.Contains(got, "Denied. The Session that asked continues with your reason.") ||
+		!strings.Contains(got, "Waiting on you (1)") {
+		t.Fatalf("after denying:\n%s", got)
+	}
+}
+
+func TestObjectiveAndInboxTextIsFilteredForTheTerminal(t *testing.T) {
+	fake := coordinationFake()
+	evil := "\x1b]0;owned\x07\x1b[8m"
+	fake.objectives = func() []*operatorv1.Objective {
+		return []*operatorv1.Objective{objective("obj-billing", "Billing"+evil, operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_WORKING)}
+	}
+	fake.overview = func(string) *operatorv1.ObjectiveOverview {
+		view := billingOverview()
+		view.Objective.Outcome += evil
+		view.Objective.CompletionSummary = "done" + evil
+		view.TagNames["tag-builder"] = "builder" + evil
+		view.Sessions[1].LatestTask.Report = "report" + evil
+		view.Posts[0].Body = "post" + evil
+		view.Attention = []*operatorv1.ObjectiveAttention{{Kind: operatorv1.ObjectiveAttentionKind_OBJECTIVE_ATTENTION_KIND_DEADLINE_APPROACHING, Message: "soon" + evil, NextAction: "act" + evil}}
+		return view
+	}
+	fake.items = func() []*operatorv1.InboxItem {
+		return []*operatorv1.InboxItem{questionItem("obj-billing", "task-own", "Why?"+evil+"\nReally?"), approvalItem("obj-billing", "apr-1", "Push"+evil)}
+	}
+	m := startAll(t, testModel(t, fake))
+	views := []string{m.View().Content}
+	for _, label := range []string{"Billing", "? ", "! "} {
+		m = moveTo(t, m, label)
+		views = append(views, m.View().Content)
+	}
+	for _, view := range views {
+		for _, raw := range []string{"\x1b]", "\x07", "\x1b[8m"} {
+			if strings.Contains(view, raw) {
+				t.Errorf("view carries %q from the server:\n%s", raw, ansi.Strip(view))
+			}
+		}
+	}
+}
+
+func TestMoney(t *testing.T) {
+	for _, c := range []struct {
+		minor    int64
+		currency string
+		want     string
+	}{
+		{4123, "USD", "$41.23"},
+		{123456789, "USD", "$1,234,567.89"},
+		{-250, "EUR", "-€2.50"},
+		{1200, "JPY", "¥1,200"},
+		{1234, "KWD", "KWD 1.234"},
+		{100, "CHF", "CHF 1.00"},
+		{5, "usd\x1b", "5 usd  minor units"},
+	} {
+		if got := money(c.minor, c.currency); got != c.want {
+			t.Errorf("money(%d, %q) = %q, want %q", c.minor, c.currency, got, c.want)
+		}
+	}
+	if got := shortMoney(30000, "USD"); got != "$300" {
+		t.Errorf("shortMoney = %q", got)
+	}
+	if got := shortMoney(4120, "USD"); got != "$41.20" {
+		t.Errorf("shortMoney = %q", got)
+	}
+}

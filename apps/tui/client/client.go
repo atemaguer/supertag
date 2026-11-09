@@ -1,7 +1,7 @@
-// Package client talks to a SuperTag Control Plane: the operator API's ConversationService and
-// EventService through the generated Connect client, a follower that turns one message's
-// FollowMessage stream into the events a terminal UI shows, and a watcher that keeps the UI's
-// view of Tags and conversations current.
+// Package client talks to a SuperTag Control Plane: the operator API's ConversationService,
+// ObjectiveService, InboxService and EventService through the generated Connect client, a
+// follower that turns one message's FollowMessage stream into the events a terminal UI shows, and
+// a watcher that keeps the UI's view of Tags, conversations, Objectives and the inbox current.
 package client
 
 import (
@@ -57,8 +57,8 @@ const clientVersionHeader = "SuperTag-Client-Version"
 // unaryTimeout bounds each call that is not a stream.
 const unaryTimeout = 30 * time.Second
 
-// sendRetryPause is the pause before the first retry of SendMessage; the second waits twice as
-// long.
+// sendRetryPause is the pause before the first retry of SendMessage or AnswerQuestion; the
+// second waits twice as long.
 var sendRetryPause = time.Second
 
 // Client calls one Control Plane.
@@ -68,6 +68,8 @@ type Client struct {
 	version       string
 	http          *http.Client
 	conversations operatorv1connect.ConversationServiceClient
+	objectives    operatorv1connect.ObjectiveServiceClient
+	inbox         operatorv1connect.InboxServiceClient
 	events        operatorv1connect.EventServiceClient
 }
 
@@ -91,6 +93,8 @@ func New(target Target, version string) (*Client, error) {
 	c := &Client{target: target, origin: base.Scheme + "://" + base.Host, version: version, http: httpClient}
 	options := []connect.ClientOption{connect.WithProtoJSON(), connect.WithInterceptors(headers{c})}
 	c.conversations = operatorv1connect.NewConversationServiceClient(httpClient, c.origin, options...)
+	c.objectives = operatorv1connect.NewObjectiveServiceClient(httpClient, c.origin, options...)
+	c.inbox = operatorv1connect.NewInboxServiceClient(httpClient, c.origin, options...)
 	c.events = operatorv1connect.NewEventServiceClient(httpClient, c.origin, options...)
 	return c, nil
 }
@@ -162,15 +166,28 @@ func (c *Client) SendMessage(ctx context.Context, tag, conversation, text string
 		return nil, err
 	}
 	request := &operatorv1.SendMessageRequest{Tag: tag, Conversation: conversation, Text: text, IdempotencyKey: key}
+	return retrying(ctx, func(ctx context.Context) (*operatorv1.Message, error) {
+		res, err := c.conversations.SendMessage(ctx, connect.NewRequest(request))
+		if err != nil {
+			return nil, err
+		}
+		return res.Msg, nil
+	})
+}
+
+// retrying makes an idempotent call, retrying it twice after a failure that may not have reached
+// the Control Plane, with a growing pause.
+func retrying[T any](ctx context.Context, call func(context.Context) (T, error)) (T, error) {
 	for attempt := 0; ; attempt++ {
 		callCtx, cancel := context.WithTimeout(ctx, unaryTimeout)
-		res, err := c.conversations.SendMessage(callCtx, connect.NewRequest(request))
+		res, err := call(callCtx)
 		cancel()
 		if err == nil {
-			return res.Msg, nil
+			return res, nil
 		}
 		if attempt >= 2 || ctx.Err() != nil || !transient(err) || !pause(ctx, time.Duration(attempt+1)*sendRetryPause) {
-			return nil, apiError(err)
+			var zero T
+			return zero, apiError(err)
 		}
 	}
 }

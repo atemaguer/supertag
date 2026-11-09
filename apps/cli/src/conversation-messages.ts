@@ -10,7 +10,6 @@ import {
 import {
   placementHoldReason,
   type Session,
-  type Store,
   type Tag,
   type Task,
   workSessionWaiting,
@@ -30,7 +29,8 @@ import {
   WorkSessionSchema,
   WorkSessionStatus,
 } from "@supertag/operator-api";
-import { operatorError } from "./operator-rpc.js";
+import { operatorError } from "./operator-rpc-context.js";
+import type { OperatorReadStore } from "./operator-seams.js";
 
 /** Characters of a conversation's latest entry that `Conversation.last_message_text` keeps. */
 const LAST_MESSAGE_CHARACTERS = 200;
@@ -42,7 +42,7 @@ const MAX_LISTED_TURNS = 1_000;
 type StoredReply = { readonly presentation: string; readonly text: string };
 
 /** A Tag a conversation RPC names, or `NotFound`. */
-export async function conversationTag(store: Store, name: string): Promise<Tag> {
+export async function conversationTag(store: OperatorReadStore, name: string): Promise<Tag> {
   const tag = name === "" ? undefined : await store.findTagByName(name);
   if (tag === undefined || tag.status !== "active")
     throw operatorError(Code.NotFound, ErrorReason.NOT_FOUND, `Tag ${name} does not exist`);
@@ -67,7 +67,7 @@ export function conversationName(value: string): string {
  * or `NotFound`: for another operator's message exactly as for one that does not exist.
  */
 export async function readableMessage(
-  store: Store,
+  store: OperatorReadStore,
   tag: Tag,
   taskId: string,
   operatorId: string,
@@ -92,7 +92,7 @@ export async function readableMessage(
 
 /** A message as `GetMessage` returns it: its reply once written and its work Sessions. */
 export async function messageOf(
-  store: Store,
+  store: OperatorReadStore,
   tag: Pick<Tag, "name">,
   task: Task,
   conversation: string,
@@ -153,7 +153,7 @@ const WORK_SESSION_STATUSES: Readonly<Record<string, WorkSessionStatus>> = {
  * outcome is unknown is answered by the error notice recorded for it.
  */
 async function messageReply(
-  store: Store,
+  store: OperatorReadStore,
   task: Task,
 ): Promise<{ readonly reply?: StoredReply; readonly joinedTaskId?: string }> {
   if (task.inboundEventId === null) return {};
@@ -176,7 +176,7 @@ async function messageReply(
  * Why a pending Task waits for placement, from its latest scheduling event, or undefined when it
  * is not held. The Control Plane records a reason only when it changes.
  */
-async function placementHold(store: Store, task: Task): Promise<string | undefined> {
+async function placementHold(store: OperatorReadStore, task: Task): Promise<string | undefined> {
   if (task.status !== "pending") return undefined;
   const latest = (await store.listTaskEvents(task.id)).findLast(
     (event) =>
@@ -188,7 +188,7 @@ async function placementHold(store: Store, task: Task): Promise<string | undefin
 }
 
 /** The work Sessions a message's turn started or continued, oldest first, with their reports. */
-async function startedWorkSessions(store: Store, task: Task): Promise<WorkSession[]> {
+async function startedWorkSessions(store: OperatorReadStore, task: Task): Promise<WorkSession[]> {
   const started = (await store.listWorkSessions(task.sessionId)).filter(
     (session) => (session.task?.startedByTaskId ?? session.startedByTaskId) === task.id,
   );
@@ -227,7 +227,7 @@ async function startedWorkSessions(store: Store, task: Task): Promise<WorkSessio
  * turn that started it. The CLI delivers no status replies, so the message carries them.
  */
 async function workSessionApprovals(
-  store: Store,
+  store: OperatorReadStore,
   turn: Task,
   work: { readonly id: string } | undefined,
 ): Promise<{ requestId: string; text: string }[]> {
@@ -248,7 +248,7 @@ async function workSessionApprovals(
 }
 
 /** Whether a turn of a CLI conversation is a message the person sent, not one SuperTag admitted. */
-async function sentByOperator(store: Store, task: Task): Promise<boolean> {
+async function sentByOperator(store: OperatorReadStore, task: Task): Promise<boolean> {
   if (!task.inboundEventId) return false;
   const inbound = await store.findInboundEventById(task.inboundEventId);
   return inbound !== undefined && inbound.event.internal === undefined;
@@ -256,7 +256,7 @@ async function sentByOperator(store: Store, task: Task): Promise<boolean> {
 
 /** The messages the caller sent in one conversation, newest first, from `offset`. */
 export async function sentMessages(
-  store: Store,
+  store: OperatorReadStore,
   tag: Tag,
   operatorId: string,
   conversation: string,
@@ -283,7 +283,7 @@ export async function sentMessages(
 
 /** The caller's conversations, optionally with one Tag, the most recent entry first. */
 export async function operatorConversations(
-  store: Store,
+  store: OperatorReadStore,
   operatorId: string,
   tag: Tag | undefined,
 ): Promise<Conversation[]> {
@@ -330,7 +330,7 @@ export async function operatorConversations(
 
 /** A conversation's most recent entry: the caller's message, a reply, or a work Session's report. */
 async function latestEntry(
-  store: Store,
+  store: OperatorReadStore,
   session: Session,
 ): Promise<
   { readonly text: string; readonly author: ConversationAuthor; readonly at: string } | undefined

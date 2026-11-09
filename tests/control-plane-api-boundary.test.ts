@@ -94,7 +94,7 @@ describe("Control Plane API boundary", () => {
     });
   });
 
-  it("serves the Objective overview to authorized operators through HTTP and the existing CLI", async () => {
+  it("serves the Objective overview to authorized operators over Connect and the CLI", async () => {
     const f = await apiFixture();
     const owner = await f.store.createTag({ name: `overview-${randomUUID()}` });
     const objective = await f.store.createObjective({
@@ -102,23 +102,24 @@ describe("Control Plane API boundary", () => {
       ownerTagId: owner.id,
       outcome: "Make progress inspectable",
     });
-    const endpoint = `${f.url}/api/v1/coordination/objectives/${objective.id}/overview`;
-    expect((await fetch(endpoint)).status).toBe(401);
-    const response = await fetch(endpoint, {
-      headers: { authorization: "Bearer coordination-only" },
-    });
+    const describe = (body: unknown, token?: string) =>
+      fetch(`${f.url}/supertag.operator.v1.ObjectiveService/DescribeObjective`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+        },
+        body: JSON.stringify(body),
+      });
+    expect((await describe({ id: objective.id })).status).toBe(401);
+    const response = await describe({ id: objective.id }, "coordination-only");
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ objective: { id: objective.id } });
-    // The overview takes no query parameters.
-    for (const query of ["limit=0", "offset=-1", "unknown=true", "teamId="]) {
-      expect(
-        (
-          await fetch(`${endpoint}?${query}`, {
-            headers: { authorization: "Bearer coordination-only" },
-          })
-        ).status,
-      ).toBe(400);
-    }
+    for (const body of [
+      { id: objective.id, pageSize: -1 },
+      { id: objective.id, pageToken: "x" },
+    ])
+      expect((await describe(body, "coordination-only")).status).toBe(400);
     const target = { url: f.url, token: "coordination-only" };
     const rendered = await runObjectiveCommand(target, ["get", objective.id, "--overview"]);
     expect(rendered).toContain("Make progress inspectable");
@@ -142,7 +143,7 @@ describe("Control Plane API boundary", () => {
     ).toBe(objective.id);
   });
 
-  it("cancels an Objective through the administrative API and the CLI", async () => {
+  it("cancels an Objective through CancelObjective and the CLI", async () => {
     const f = await apiFixture();
     const owner = await f.store.createTag({ name: `cancel-${randomUUID()}` });
     const objective = await f.store.createObjective({
@@ -150,16 +151,18 @@ describe("Control Plane API boundary", () => {
       ownerTagId: owner.id,
       outcome: "Explore a direction we may drop",
     });
-    const endpoint = `${f.url}/api/v1/objectives/${objective.id}/cancel`;
-    expect((await fetch(endpoint, { method: "POST" })).status).toBe(401);
-    expect(
-      (
-        await fetch(endpoint, {
-          method: "POST",
-          headers: { authorization: "Bearer coordination-only" },
-        })
-      ).status,
-    ).toBe(403);
+    const cancel = (body: unknown, token?: string) =>
+      fetch(`${f.url}/supertag.operator.v1.ObjectiveService/CancelObjective`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+        },
+        body: JSON.stringify(body),
+      });
+    expect((await cancel({ id: objective.id })).status).toBe(401);
+    // CancelObjective does not accept scoped coordination credentials.
+    expect((await cancel({ id: objective.id }, "coordination-only")).status).toBe(403);
     const admin = { url: f.url, token: "administrative-token" };
     await expect(
       runObjectiveCommand(admin, ["cancel", objective.id, "--revision", "1"]),
@@ -175,32 +178,24 @@ describe("Control Plane API boundary", () => {
       ]),
     );
     expect(cancelled).toMatchObject({
-      kind: "ObjectiveCancellation",
-      metadata: { objectiveId: objective.id },
-      status: {
-        changed: true,
-        phase: "cancelled",
-        reason: "Priorities changed",
-        cancelledTaskIds: [],
+      objective: {
+        id: objective.id,
+        status: "OBJECTIVE_STATUS_CANCELLED",
+        cancellationReason: "Priorities changed",
       },
+      changed: true,
     });
+    expect(cancelled.cancelledTaskIds).toBeUndefined();
     expect(await runObjectiveCommand(admin, ["cancel", objective.id])).toBe(
       `objective/${objective.id} was already cancelled.\n`,
     );
     const rendered = await runObjectiveCommand(admin, ["get", objective.id, "--overview"]);
     expect(rendered).toContain(`Objective ${objective.id}: cancelled`);
     expect(rendered).toContain("An operator cancelled this Objective: Priorities changed");
-    const invalid = await fetch(endpoint, {
-      method: "POST",
-      headers: { authorization: "Bearer administrative-token" },
-      body: JSON.stringify({ reason: "" }),
-    });
-    expect(invalid.status).toBe(400);
-    const missing = await fetch(`${f.url}/api/v1/objectives/missing/cancel`, {
-      method: "POST",
-      headers: { authorization: "Bearer administrative-token" },
-    });
-    expect(missing.status).toBe(404);
+    expect((await cancel({ id: objective.id, reason: "   " }, "administrative-token")).status).toBe(
+      400,
+    );
+    expect((await cancel({ id: "missing" }, "administrative-token")).status).toBe(404);
   });
 
   it("retrieves private native Session state only through administrative Session endpoints", async () => {

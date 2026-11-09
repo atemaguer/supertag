@@ -36,12 +36,16 @@ service EventService {
   //
   // - `WATCH_KIND_CONVERSATION_MESSAGE`: messages in the caller's own
   //   conversations, as `ConversationService.GetMessage` reads them. The
-  //   credential needs the `read_conversation` action.
+  //   credential needs the `read_conversation` action. A scoped coordination
+  //   credential has no conversations and sees none.
   // - `WATCH_KIND_SESSION` and `WATCH_KIND_TASK`: every Session and Task for
   //   the admin token and Operator Tokens, except that a conversation's
   //   Session and its Tasks, work Sessions included, reach only the operator
-  //   whose conversation it is.
-  // - `WATCH_KIND_TAG`: every Tag, for the admin token and Operator Tokens.
+  //   whose conversation it is. A scoped coordination credential with the
+  //   `read_objective` action sees only the Tasks of Objectives its scope
+  //   allows, by `objective_id`, and no Sessions.
+  // - `WATCH_KIND_TAG`: every Tag, for the admin token and Operator Tokens. A
+  //   scoped coordination credential sees none.
   // - `WATCH_KIND_OBJECTIVE`: Objectives the credential's Objective scope
   //   allows, with the `read_objective` action.
   // - `WATCH_KIND_INBOX_ITEM`: inbox items of Objectives the credential's
@@ -50,12 +54,21 @@ service EventService {
   //   Objective scope allows, with the `list_approvals` action. A request
   //   outside any Objective reaches only a credential without an Objective
   //   scope.
+  // - `WATCH_KIND_WORKSTREAM_POST`: posts to every Team's Workstream for the
+  //   admin token and Operator Tokens. A scoped coordination credential with
+  //   the `read_objective` action sees posts to the Teams of Objectives its
+  //   scope allows, as `ObjectiveService.DescribeObjective` shows them.
+  //
+  // The admin token and Operator Tokens carry every action and have no
+  // Objective scope. A scoped coordination credential needs the
+  // `watch_events` action to call `Watch` at all.
   //
   // A kind the caller may not see is left out silently, even when `kinds`
   // names it.
   rpc Watch(WatchRequest) returns (stream WatchEvent) {
     option idempotency_level = NO_SIDE_EFFECTS;
     option (supertag.operator.v1.action) = "watch_events";
+    option (supertag.operator.v1.allow_scoped_credential) = true;
   }
 }
 
@@ -111,6 +124,10 @@ enum WatchKind {
   // `Message.task_id`; `tag`, `conversation`, and `session_id` name its
   // conversation. Reread it with `ConversationService.GetMessage`.
   WATCH_KIND_CONVERSATION_MESSAGE = 7;
+  // A Team's Workstream got a post. `id` is the post's ID and `team_id` its
+  // Team's. Reread the Objectives the Team serves with
+  // `ObjectiveService.DescribeObjective`, which carries the newest posts.
+  WATCH_KIND_WORKSTREAM_POST = 8;
 }
 
 // A notice that one thing changed. Only the fields its kind names are set.
@@ -134,6 +151,8 @@ message WatchChange {
   string reason = 8;
   // When the change happened.
   google.protobuf.Timestamp changed_at = 9;
+  // The ID of the Team it belongs to.
+  string team_id = 10;
 }
 
 // The stream continues from now, but the changes since the requested resume

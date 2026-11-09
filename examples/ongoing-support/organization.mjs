@@ -119,7 +119,8 @@ async function snapshot(state) {
   const needsApplication = proposals
     .filter(
       (session) =>
-        session.status === "completed" && !Object.hasOwn(provider.operations, session.title),
+        session.status === "OBJECTIVE_SESSION_STATUS_COMPLETED" &&
+        !Object.hasOwn(provider.operations, session.title),
     )
     .map((session) => ({
       sessionId: session.id,
@@ -144,7 +145,7 @@ async function verify(state, report) {
   const overview = report.overview;
   // Every incident an operator reported in this conversation, in order.
   const reported = overview.conversation
-    .filter((turn) => turn.from === "operator")
+    .filter((turn) => turn.author === "OBJECTIVE_CONVERSATION_AUTHOR_OPERATOR")
     .flatMap((turn) => [...turn.text.matchAll(/"incidentId"\s*:\s*"([^"]*)"/gu)].map((m) => m[1]));
   const incidents = [...new Set(reported)];
   assert(
@@ -159,17 +160,25 @@ async function verify(state, report) {
   );
   const owner = overview.sessions.find((session) => session.owner);
   assert(owner, "The Objective has no conversation");
-  assert.equal(owner.status, "completed", "The owner must finish its turn, not wait");
+  assert.equal(
+    owner.status,
+    "OBJECTIVE_SESSION_STATUS_COMPLETED",
+    "The owner must finish its turn, not wait",
+  );
   // The Worker Host's copies; the Control Plane keeps only the catalog.
   const artifacts = new FileArtifactStore(join(directory, "artifacts"));
   for (const incidentId of incidents) {
     const operationId = `support:${incidentId}`;
     const session = overview.sessions.find((item) => item.title === operationId);
-    assert.equal(session?.status, "completed", `${operationId} did not report`);
+    assert.equal(
+      session?.status,
+      "OBJECTIVE_SESSION_STATUS_COMPLETED",
+      `${operationId} did not report`,
+    );
     const receipt = report.provider.operations[operationId];
     assert(receipt, `${operationId} has no provider receipt`);
     const events = (
-      await api.request("GET", `/api/v1/tasks/${encodeURIComponent(session.task.id)}/events`)
+      await api.request("GET", `/api/v1/tasks/${encodeURIComponent(session.latestTask.id)}/events`)
     ).items;
     assert(
       events.some(
@@ -208,13 +217,13 @@ async function verify(state, report) {
       return {
         incidentId,
         sessionId: session.id,
-        taskId: session.task.id,
+        taskId: session.latestTask.id,
         artifactId: receipt.sourceArtifactId,
         digest: receipt.sourceDigest,
         timeToAppliedMs: Date.parse(receipt.appliedAt) - Date.parse(session.createdAt),
       };
     }),
-    usage: report.overview.pageUsage,
+    usage: report.overview.budget,
     limits:
       "Two local Worker processes, local SQLite and policy service; not independent machines or arbitrary-provider exactly-once.",
   };
@@ -355,7 +364,7 @@ async function run() {
       // The owner's first turn runs when a Worker is available; it ends with nothing to do.
       await waitUntil(async () => {
         const owner = (await api.overview()).sessions.find((session) => session.owner);
-        return owner?.status === "completed";
+        return owner?.status === "OBJECTIVE_SESSION_STATUS_COMPLETED";
       }, 240000);
       if (process.env.SUPPORT_RESTART !== "0") {
         await stop(plane, "SIGKILL");
@@ -368,7 +377,9 @@ async function run() {
       await waitUntil(async () => {
         const overview = await api.overview();
         const failed = overview.sessions.find((session) =>
-          ["failed", "cancelled"].includes(session.status),
+          ["OBJECTIVE_SESSION_STATUS_FAILED", "OBJECTIVE_SESSION_STATUS_CANCELLED"].includes(
+            session.status,
+          ),
         );
         if (failed)
           throw Object.assign(new Error(`Session ${failed.id} is ${failed.status}`), {
@@ -381,7 +392,7 @@ async function run() {
         return (
           ["one", "two", "three"].every((incidentId) =>
             Object.hasOwn(applied, `support:${incidentId}`),
-          ) && owner?.status === "completed"
+          ) && owner?.status === "OBJECTIVE_SESSION_STATUS_COMPLETED"
         );
       }, 600000);
       const report = await snapshot(state);

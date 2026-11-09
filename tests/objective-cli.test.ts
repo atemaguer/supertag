@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Code } from "@connectrpc/connect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { normalizeActionFirstCommand } from "../apps/cli/src/action-command.ts";
 import {
@@ -9,6 +10,7 @@ import {
 } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { main } from "../apps/cli/src/index.ts";
+import { objectiveClient } from "../apps/cli/src/operator-client.ts";
 import { withCurrentRevision } from "../apps/cli/src/revision.ts";
 import { generateObjectiveId } from "../packages/core/src/index.ts";
 import { DrizzleStore } from "../packages/store/src/index.ts";
@@ -225,8 +227,10 @@ describe("Objective commands", () => {
       `Dry run: Objective ${dry.id} was checked but not created.\n`,
     ]);
     await expect(
-      client.request(`/api/v1/tag-messaging/objectives/${dry.id}`),
-    ).rejects.toMatchObject({ status: 404 });
+      objectiveClient({ url: client.url, token: "test-administrative-token" }).getObjective({
+        id: dry.id,
+      }),
+    ).rejects.toMatchObject({ code: Code.NotFound });
     // Never-satisfiable input is still an error, in a dry run too.
     expect(
       await fail(
@@ -272,7 +276,7 @@ describe("Objective commands", () => {
         "json",
       ),
     ) as { id: string; status: string };
-    expect(created).toMatchObject({ status: "working" });
+    expect(created).toMatchObject({ status: "OBJECTIVE_STATUS_WORKING" });
     expect(created.id).toMatch(/^ship-sso-for-[a-z0-9]{4}$/u);
     expect(errors.at(-1)).toBe(`Created Objective ${created.id}.\n`);
 
@@ -302,8 +306,8 @@ describe("Objective commands", () => {
     };
     expect(overview.conditions).toEqual([
       {
+        // Proto JSON leaves out false and empty fields.
         type: "Runnable",
-        status: false,
         reasons: [
           "No Worker Host bound to Tag planner is connected (remote-host). Its Tasks wait until one connects.",
         ],
@@ -387,7 +391,7 @@ describe("Objective commands", () => {
       JSON.parse(
         await run("update", "objective", "report", "--status", "blocked", "--output", "json"),
       ),
-    ).toMatchObject({ status: "blocked", revision: 3 });
+    ).toMatchObject({ status: "OBJECTIVE_STATUS_BLOCKED", revision: "3" });
     expect(
       await fail("update", "objective", "report", "--status", "working", "--revision", "2"),
     ).toBe("Objective revision changed; reload before updating");
@@ -396,7 +400,7 @@ describe("Objective commands", () => {
     );
     await run("update", "objective", "report", "--status", "ready_for_review");
     expect(JSON.parse(await run("get", "objective", "report"))).toMatchObject({
-      status: "ready_for_review",
+      status: "OBJECTIVE_STATUS_READY_FOR_REVIEW",
     });
     expect(await run("approve", "objective", "report")).toBe(
       "objective/report approved; it is completed (revision 5).\n",
@@ -421,7 +425,7 @@ describe("Objective commands", () => {
       "Sent to the conversation of Objective report.\nThe Objective moved from blocked back to working.",
     );
     expect(JSON.parse(await run("get", "objective", "report"))).toMatchObject({
-      status: "working",
+      status: "OBJECTIVE_STATUS_WORKING",
     });
   });
 
@@ -450,9 +454,9 @@ describe("Objective commands", () => {
       "objective/notes completed (revision 2).\n",
     );
     expect(JSON.parse(await run("get", "objective", "notes"))).toMatchObject({
-      status: "completed",
+      status: "OBJECTIVE_STATUS_COMPLETED",
       completionSummary: "Notes written.",
-      revision: 2,
+      revision: "2",
     });
     // Nothing reopens a completed Objective: its conversation is over.
     expect(await fail("message", "objective", "notes", "Reopen?")).toMatch(/completed/u);

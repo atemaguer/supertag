@@ -67,6 +67,21 @@ at a time; a route that moves is removed.
 | `ConversationService.ListConversations` | `read_conversation` | The caller's conversations |
 | `ConversationService.ListMessages` | `read_conversation` | One conversation's messages |
 | `EventService.Watch` | `watch_events` | Streams change notices |
+| `InboxService.ListInboxItems` | `read_coordination_inbox` | The items waiting on a person |
+| `InboxService.ListApprovals` | `list_approvals` | Approval requests |
+| `InboxService.Approve` | `decide_approval` | Approves a pending approval request |
+| `InboxService.Deny` | `decide_approval` | Denies a pending approval request with a reason |
+| `InboxService.AnswerQuestion` | `message_objective` | Answers a question item as the Objective's next turn |
+| `ObjectiveService.CreateObjective` | `create_objective` | Creates an Objective and starts it |
+| `ObjectiveService.ListObjectives` | `list_objectives` | Objectives, newest first |
+| `ObjectiveService.GetObjective` | `read_objective` | One Objective |
+| `ObjectiveService.DescribeObjective` | `read_objective` | The operator's view of an Objective |
+| `ObjectiveService.MessageObjective` | `message_objective` | Sends the owner's next turn |
+| `ObjectiveService.UpdateObjective` | `update_objective` | Changes status, deadline, budget, or runtime actions |
+| `ObjectiveService.ApproveObjective` | `update_objective` | Completes an Objective submitted for review |
+| `ObjectiveService.CancelObjective` | `cancel_objective` | Cancels an Objective and its open Tasks |
+| `ObjectiveService.PauseObjective` | `update_objective` | Holds new turns |
+| `ObjectiveService.ResumeObjective` | `update_objective` | Lets work start again |
 
 Each RPC is a `POST` to `/PACKAGE.SERVICE/METHOD` on the API port, such as
 `/supertag.operator.v1.OrganizationService/GetStatus`. The listener speaks the Connect and
@@ -114,10 +129,14 @@ RPC:
 | `(supertag.operator.v1.requires_admin_token)` | Only the admin token may call the RPC; an Operator Token gets `permission_denied` |
 | `(supertag.operator.v1.allow_anonymous)` | A call without a credential is accepted |
 | `(supertag.operator.v1.audit_action)` | The `action` the [audit log](#audit-log) records for each authenticated call |
+| `(supertag.operator.v1.allow_scoped_credential)` | A [scoped coordination credential](../operations/control-plane.md#scoped-coordination-credentials) may call the RPC when it carries the action, for the Objectives its scope names only |
 
 Every RPC declares an action. An RPC that only reads sets `idempotency_level = NO_SIDE_EFFECTS`;
-every other RPC declares an audit action. Scoped coordination credentials are refused until the
-coordination routes move to RPCs.
+every other RPC declares an audit action. A scoped coordination credential gets
+`permission_denied` from an RPC without `allow_scoped_credential`, and from one that names an
+Objective outside its scope. Every `InboxService` RPC, `EventService.Watch`, and
+`ObjectiveService.GetObjective`, `DescribeObjective`, `MessageObjective`, and `ApproveObjective`
+accept one.
 
 ### RPC errors
 
@@ -317,20 +336,115 @@ Control Plane restarted, the first event is a `resync`: the client rereads every
 token the server did not issue fails with `invalid_argument`. A notice may stand for several
 changes, and the same change may arrive twice, so treat each one as a reason to reread.
 
-The caller sees only what it could read through the other RPCs:
+The caller sees only what it could read through the other RPCs. The admin token and Operator
+Tokens carry every action and have no Objective scope. A scoped coordination credential needs
+`watch_events` to call `Watch` at all, and sees no conversations, Sessions, or Tags:
 
 | Kind | Who sees it |
 | --- | --- |
 | `WATCH_KIND_CONVERSATION_MESSAGE` | Messages in the caller's own conversations, with `read_conversation` |
-| `WATCH_KIND_SESSION`, `WATCH_KIND_TASK` | Everything, for the admin token and Operator Tokens, except that a conversation's Session and its Tasks, work Sessions included, reach only the operator whose conversation it is |
+| `WATCH_KIND_SESSION` | Every Session, for the admin token and Operator Tokens, except that a conversation's Session and its work Sessions reach only the operator whose conversation it is |
+| `WATCH_KIND_TASK` | The same, for Tasks; a scoped credential with `read_objective` sees the Tasks of Objectives in its scope |
 | `WATCH_KIND_TAG` | Every Tag, for the admin token and Operator Tokens |
 | `WATCH_KIND_OBJECTIVE` | Objectives in the credential's Objective scope, with `read_objective` |
 | `WATCH_KIND_INBOX_ITEM` | Inbox items of those Objectives, with `read_coordination_inbox` |
 | `WATCH_KIND_APPROVAL` | Approval requests of those Objectives, with `list_approvals`; a request outside any Objective reaches only a credential without an Objective scope |
+| `WATCH_KIND_WORKSTREAM_POST` | Posts to every Team's Workstream, for the admin token and Operator Tokens; a scoped credential with `read_objective` sees posts to the Teams of Objectives in its scope. `teamId` names the Team |
+
+`supertag watch inbox` and `supertag watch objective` follow this stream and reread on each notice.
 
 A kind the caller may not see is left out silently, even when `kinds` names it. The comment on
 each `WatchKind` value in [`event.proto`](../../spec/proto/supertag/operator/v1/event.proto) says
 which ID fields its changes set.
+
+### Inbox
+
+`InboxService` serves `supertag list inbox`, `supertag list approval`, `supertag approve request`,
+`supertag deny request`, and the terminal UI's **Waiting on you** list.
+
+`ListInboxItems` lists what waits on a person, the longest waiting first. Items are derived from
+existing records: approval requests, questions an Objective's owner asked, budget and deadline
+limits, Tasks that need an operator, and Tasks held for an MCP login. Reading an item does not
+resolve it. Each item has a `key`, such as `approval:ID` or `question:TASK_ID`, and an
+`occurrence`. A Task that needs the same decision again after another Task Attempt is a new
+occurrence with the same `key`, so a client that shows each item once keys on `occurrence`.
+
+- `operatorEligible` is true for items an operator decides. `supertag list inbox` shows only those
+  unless `--all` is set.
+- `tagNames` names the Tags in `nextActorTagIds` and `excludedActorTagIds`.
+- Approval items are listed only for a credential that also carries `list_approvals`.
+- Each kind is scanned up to a bound. A kind with more candidates is named in `truncatedKinds`.
+- Pages use `pageSize` (0 means 50, at most 100), `pageToken`, and `nextPageToken`.
+
+```sh
+curl -s https://control.example.com/supertag.operator.v1.InboxService/ListInboxItems \
+  -H "Authorization: Bearer $SUPERTAG_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"objectiveId": "objective-release", "kind": "INBOX_ITEM_KIND_QUESTION"}'
+```
+
+`ListApprovals` lists approval requests, the most recently created first, filtered by
+`objectiveId` and `status`. Pages use `pageSize` (0 means 100, at most 500) and `pageToken`.
+
+`Approve` takes an optional `scope` (`APPROVAL_SCOPE_ONCE` or `APPROVAL_SCOPE_OBJECTIVE`) and
+`validUntil`. `Deny` requires a `reason`, which the Session that asked reads. Both continue the
+waiting Session, and both fail with `failed_precondition` for a request that is no longer pending.
+Repeating your own decision with the same scope returns the decided request instead, so a retry is
+safe. The audit log records them as `approval.approve` and `approval.deny`. See
+[Approval requests](coordination.md#approval-requests).
+
+`AnswerQuestion` takes a question item's `key` and the answer `text`, and sends it as the owner's
+next turn, exactly as `MessageObjective` does. Once the owner took another turn or the Objective
+closed, it fails with `failed_precondition`. A repeat with the same `idempotencyKey` returns the
+first call's turn.
+
+### Objectives
+
+`ObjectiveService` serves `supertag create objective`, `list objective`, `get objective`,
+`describe objective`, `message objective`, `approve objective`, `complete objective`,
+`cancel objective`, `pause objective`, `resume objective`, and the terminal UI's Objective view.
+Applying an Objective manifest with `supertag apply` still uses `POST /api/v1/objectives`. The
+complete Objective contract is in [Objectives](../../spec/objectives.md).
+
+`CreateObjective` takes the `outcome`, the `owner` Tag's name, and optionally an `id`, a `team` by
+name or ID, a `deadline`, a `budget`, `runtimeActions`, `workspaces`, and `ongoing`. It starts the
+owner's first turn and returns `startedTaskId`, or `notStarted` with the reason it could not.
+`warnings` names each condition that would hold the Objective's turns. With `dryRun` it checks and
+warns, and stores nothing. Repeating it with the same `id` and definition returns the same
+Objective and starts nothing new.
+
+```sh
+curl -s https://control.example.com/supertag.operator.v1.ObjectiveService/CreateObjective \
+  -H "Authorization: Bearer $SUPERTAG_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"owner": "release-manager", "outcome": "Ship the 0.4 release.",
+       "budget": {"limitMinor": "5000", "currency": "USD"}}'
+```
+
+`DescribeObjective` returns the operator's view, as `supertag describe objective` shows it:
+conditions, what needs the operator, approval counts, the Team, deadline and budget limits, spend
+against the budget, the conversation, each Session with its latest Task's delivery and report,
+high findings, the newest Workstream posts, Volume writes, and one page of Tasks with their Task
+Attempts. `pageSize` (0 means 50, at most 100) and `pageToken` page through the Tasks only. The view
+is observed records, not a transactional snapshot. See
+[Overview fields](coordination.md#overview-fields).
+
+`MessageObjective` sends `text` as the owner's next turn, with an optional `idempotencyKey`. It
+moves a `blocked`, `limited`, or `ready_for_review` Objective back to `working`, and fails with
+`failed_precondition` for a completed or cancelled Objective. See
+[Operator messages](coordination.md#operator-messages).
+
+`UpdateObjective` takes `expectedRevision` and at least one of `status`, `completionSummary`,
+`deadline`, `budgetLimitMinor`, and `runtimeActions`. `OBJECTIVE_STATUS_COMPLETED` needs a
+`completionSummary`. Only `CancelObjective` cancels, and only the owner sets
+`OBJECTIVE_STATUS_LIMITED`. A stale `expectedRevision` fails with `failed_precondition`.
+`ApproveObjective` completes an Objective that is `ready_for_review`.
+
+`CancelObjective` cancels an Objective and its open Tasks, with an optional `reason`, and records
+the caller in the Objective's change history. It returns the Objective, `changed`, and
+`cancelledTaskIds`. Repeating it succeeds with `changed` false; a completed Objective fails with
+`failed_precondition`. `PauseObjective` and `ResumeObjective` return `changed` the same way. See
+[Cancelling an Objective](coordination.md#cancelling-an-objective).
 
 ## Organization spend
 
@@ -386,7 +500,7 @@ The response has `asOf`, `workerHosts`, `tags`, and `objectives`:
   `unpricedTokens` count those Task Attempts and their reported tokens. These fields are absent
   when there are no unpriced Task Attempts. `spentMinor` excludes their unknown cost.
 
-The operator inbox is not part of this response. Read it from `GET /api/v1/coordination/inbox`.
+The operator inbox is not part of this response. Read it with `InboxService.ListInboxItems`.
 
 ## Worklet API
 
@@ -537,9 +651,6 @@ GET  /api/v1/tasks/:id/events
 POST /api/v1/tasks/:id/cancel
 POST /api/v1/objectives
 GET  /api/v1/objectives/:id
-POST /api/v1/objectives/:id/cancel
-POST /api/v1/objectives/:id/pause
-POST /api/v1/objectives/:id/resume
 GET  /api/v1/sessions
 GET  /api/v1/sessions/:id
 GET  /api/v1/sessions/:id/states
@@ -817,15 +928,12 @@ See [Credential storage](credential-storage.md) for the server-side vault and cl
 
 ## Tag messaging administration (Experimental)
 
-`/api/v1/tag-messaging/*` manages Objectives, Teams, Workstream posts, messaging grants and
-message history with the administrative credential. It exposes no declarative Mailbox resource.
+`/api/v1/tag-messaging/*` manages Teams, Workstream posts, messaging grants and message history
+with the administrative credential. It exposes no declarative Mailbox resource. Objectives are
+served by [`ObjectiveService`](#objectives).
 
 | Request | Operation |
 | --- | --- |
-| `POST /api/v1/tag-messaging/objectives` | Create an Objective and start its conversation; `?dryRun=true` validates and stores nothing |
-| `GET /api/v1/tag-messaging/objectives?tagId=&limit=&offset=` | List Objectives |
-| `GET /api/v1/tag-messaging/objectives/:id` | One Objective |
-| `PATCH /api/v1/tag-messaging/objectives/:id` | Update status, completion summary, budget, deadline or runtime actions |
 | `GET /api/v1/tag-messaging/teams?tagId=` | Every Team, or the Teams one Tag belongs to |
 | `POST /api/v1/tag-messaging/teams` | Create a Team |
 | `GET /api/v1/tag-messaging/teams/:idOrName` | One Team |
@@ -837,18 +945,9 @@ message history with the administrative credential. It exposes no declarative Ma
 | `GET /api/v1/tag-messaging/messages?tagId=&beforeCreatedAt=&beforeId=&limit=` | Messages a Tag sent or received, newest first |
 
 A grant is a pair: the recipient accepts messages from the sender. Tags that share a Team need
-none. The complete Objective contract is in [Objectives](../../spec/objectives.md) and the
-Workstream contract in [Workstreams](../../spec/workstreams.md). The CLI exposes these routes as
-`supertag create objective`, `supertag create team`, `supertag list workstream-post`,
-`supertag grant mailbox` and `supertag list message`.
-
-`POST /api/v1/objectives/:id/cancel` cancels an Objective and its open Tasks. It requires the
-admin token or an Operator Token, records the caller in the Objective's change history, and
-accepts an optional `{"reason": "..."}` body. It returns an `ObjectiveCancellation` resource whose
-status reports `changed`, `phase`, `cancelledAt`, `reason` and `cancelledTaskIds`. Repeating it
-returns 200 with `changed: false`; a completed Objective returns 409. `POST
-/api/v1/objectives/:id/pause` and `/resume` return `ObjectivePause` and `ObjectiveResume` the same
-way. See [Cancelling an Objective](coordination.md#cancelling-an-objective).
+none. The Workstream contract is in [Workstreams](../../spec/workstreams.md). The CLI exposes these
+routes as `supertag create team`, `supertag list workstream-post`, `supertag grant mailbox` and
+`supertag list message`.
 
 ## Coordination operations (Experimental)
 
@@ -857,43 +956,7 @@ execution credential. It offers only the tools that Task's turn may use; see
 [Coordination tools](coordination.md#coordination-tools). The Control Plane derives the acting Tag
 from the credential and refuses a tool the turn does not get.
 
-The operator routes under `/api/v1/coordination` use separate bearer credentials whose configured
-actions and Objective scopes are checked before the operation runs.
-
-| Request | Operation |
-| --- | --- |
-| `GET /api/v1/coordination/inbox` | The operator inbox; filters are `objectiveId`, `kind`, `status`, `nextActorId`, `asOf`, `cursor` and `limit` |
-| `GET /api/v1/coordination/approvals` | List approval requests; `status` accepts `pending`, `approved`, `denied`, `expired` or `all` |
-| `POST /api/v1/coordination/approvals/:id/approve` | Optional body `scope` (`once` or `objective`), `validUntil` and `reason` |
-| `POST /api/v1/coordination/approvals/:id/deny` | Body `{"reason": "TEXT"}` |
-| `POST /api/v1/coordination/objectives/:id/messages` | Body `{text, idempotencyKey?}`; delivers the next turn of the Objective's conversation |
-| `POST /api/v1/coordination/objectives/:id/approve` | Body `{}`; completes a `ready_for_review` Objective |
-| `GET /api/v1/coordination/objectives/:id/overview` | The Objective overview |
-
-Unknown or repeated query parameters are rejected. The CLI exposes these as
-`supertag list inbox`, `supertag list approval`, `supertag approve request`,
-`supertag deny request`, `supertag message objective`, `supertag approve objective` and
-`supertag describe objective`.
-
-`POST .../messages` returns `{duplicate, taskId, statusChange?}`. The same `idempotencyKey` with
-the same text returns the original delivery, and `statusChange` names the status the Objective
-left when the message moved it back to `working`. A message to a completed or cancelled Objective
-returns 409. See [Operator messages](coordination.md#operator-messages).
-
-`GET .../inbox` projects pending state over existing records; it introduces no workflow resource.
-Each page includes `tagNames` for its Tag decision makers. The API returns the full view, and the
-CLI filters `supertag list inbox` to operator decisions unless `--all` is set. Kinds use
-underscores over HTTP and hyphens in the CLI. See [Operator inbox](coordination.md#operator-inbox).
-
-`GET .../overview` requires `read_objective` and access to that Objective: a scoped credential
-naming `objectiveIds` reaches only those Objectives. Optional query parameters
-are `limit` (1–100, default 50) and `offset` (default 0). The response carries
-`projectionVersion`, `capturedAt`, `objective`, `conditions`, `attention`, `approvals`, `limits`,
-`pool`, `conversation`, `sessions`, `highFindings`, `posts`, `team`, `tagNames`, `writes`,
-`pageUsage`, `tasks`, `total`, `offset` and `nextOffset`. Counts cover the whole Objective;
-provider usage covers only the Task page, and missing Task Attempt reports are listed explicitly.
-These are observations across durable records, not a transactional snapshot. See
-[Overview fields](coordination.md#overview-fields).
+Operators coordinate through [`InboxService`](#inbox) and [`ObjectiveService`](#objectives).
 
 ### Read a Task's progress
 
@@ -1060,29 +1123,26 @@ Session storage contract but requires an explicitly supplied durable adapter.
 
 ### Continuing Objectives and operator attention
 
-Creation accepts `ongoing: true` for a continuing responsibility that only an operator may mark
+`CreateObjective` accepts `ongoing: true` for a continuing responsibility that only an operator may mark
 completed. The default is `false`: the owner completes it after assessing the outcome and
 settling outstanding work.
 
-The coordination inbox accepts `kind=task_attention`. These metadata-only entries identify a Task
-that needs an operator. Their `reason` explains why inspection is needed; `permittedActions` is
-empty, because recovery depends on the result and possible external effects. Reading an entry
-does not resolve it. An entry for an uncertain Task Attempt carries `uncertainAttempt`
+Inbox items of kind `INBOX_ITEM_KIND_TASK_ATTENTION` identify a Task that needs an operator.
+Their `reason` explains why inspection is needed. Reading an item does not resolve it. An item for an uncertain Task Attempt carries `uncertainAttempt`
 (`attemptId`, `workerHostId`, `workerId`), and its first `commands` entry is the
 `supertag recover worklet` command for it. See
 [Uncertain Task Attempts](scheduling-and-recovery.md#uncertain-task-attempts).
 
 ### Objective allocation recovery
 
-Administrative `update_objective` accepts an optional nonnegative integer `budgetLimitMinor` with
+`ObjectiveService.UpdateObjective` accepts an optional nonnegative `budgetLimitMinor` with
 `expectedRevision`. It must increase an active Objective's finite limit; it cannot remove a limit
 or change its currency. Agent callers are rejected. The resource-change history records the
 operator and the old and new values atomically.
 
-Administrative `update_objective` also accepts `deadline`, an ISO timestamp, with
-`expectedRevision`. It may replace a deadline that already passed, and the change is audited the
-same way. Agent callers that send `deadline` receive 403. The same rules apply to the
-administrative `PATCH /api/v1/tag-messaging/objectives/:id` route.
+`UpdateObjective` also accepts `deadline` with `expectedRevision`. It may replace a deadline that
+already passed, and the change is audited the same way. A Tag's `update_objective` tool call that
+sends `deadline` is refused.
 
 The Objective's read-only `limitState` records the Control Plane's limit observations: the
 reported spend of a monetary budget, the 80% warning, exhaustion, deadline warnings, and deadline
@@ -1090,17 +1150,16 @@ passage. Each entry names the limit or deadline it was observed against, so entr
 limit stop applying after a change. The rules are in
 [The budget pool](coordination.md#the-budget-pool) and [Deadlines](coordination.md#deadlines).
 
-The inbox accepts `kind=objective_limit`. Each item carries the event in `reason`, an `objective`
-evidence entry, and an `update_objective` action that requires `budgetLimitMinor` or `deadline`.
+An `INBOX_ITEM_KIND_OBJECTIVE_LIMIT` item carries the event in `reason`, an `objective` evidence
+entry, and commands that raise the budget or move the deadline.
 For an approaching deadline, `reason` calculates the time left when the inbox is read: a warning
 created an hour before the deadline says about 27 minutes left when it is read 27 minutes before
 it, and says the deadline has passed afterwards. Configured Gateway notices are sent once per item
 and revalidated before delivery.
 
-Operator inbox projection version 8 is current. Its kinds are `approval`, `question`,
-`objective_budget`, `objective_limit`, `task_attention` and `mcp_login`; older cursors must be
-refreshed. A `question` item stands for an Objective whose latest turn called `ask`. An
-`mcp_login` item marks a queued Task held because its Worker Host's login to an MCP server
+The inbox kinds are `INBOX_ITEM_KIND_APPROVAL`, `QUESTION`, `OBJECTIVE_BUDGET`, `OBJECTIVE_LIMIT`,
+`TASK_ATTENTION`, and `MCP_LOGIN`. A question item stands for an Objective whose latest turn called `ask`. An
+MCP login item marks a queued Task held because its Worker Host's login to an MCP server
 lapsed; its key is `mcp_login:TASK_ID:SERVER`, and its commands are `supertag mcp login SERVER`,
 then `supertag describe objective ID`. See [MCP OAuth login](supertag-yaml.md#mcp-oauth-login)
 and [Operator inbox](coordination.md#operator-inbox).

@@ -2,10 +2,13 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CoordinationInboxPage, SurfaceTagAuthorizationSnapshot } from "@supertag/core";
+import { Code } from "@connectrpc/connect";
+import type { SurfaceTagAuthorizationSnapshot } from "@supertag/core";
 import { expect, it } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
+import { inboxClient, objectiveClient } from "../apps/cli/src/operator-client.js";
 import { objectiveSessionKey } from "../packages/core/src/index.js";
+import { InboxItemKind } from "../packages/operator-api/src/index.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
 
 it("serves the redacted operator inbox through the authenticated Control Plane", async () => {
@@ -139,69 +142,66 @@ it("serves the redacted operator inbox through the authenticated Control Plane",
         },
       ],
     });
-    const headers = {
-      authorization: "Bearer inbox-admin",
-      "content-type": "application/json",
-    };
+    const list = (body: unknown, token?: string) =>
+      fetch(`${runtime?.url}/supertag.operator.v1.InboxService/ListInboxItems`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+        },
+        body: JSON.stringify(body),
+      });
 
-    const response = await fetch(
-      `${runtime.url}/api/v1/coordination/inbox?objectiveId=inbox-objective&kind=approval&status=pending&limit=10`,
-      { headers },
+    // The inbox as `curl` reads it: a JSON POST.
+    const response = await list(
+      { objectiveId: "inbox-objective", kind: "INBOX_ITEM_KIND_APPROVAL", pageSize: 10 },
+      "inbox-admin",
     );
     const responseText = await response.text();
     expect(response.status, responseText).toBe(200);
-    const page = JSON.parse(responseText) as CoordinationInboxPage;
-    expect(page.projectionVersion).toBe(8);
+    const page = JSON.parse(responseText) as {
+      items: { commands?: string[]; occurrence?: string }[];
+    };
     expect(page.items).toHaveLength(1);
     expect(page.items[0]).toMatchObject({
       key: `approval:${request.id}`,
-      kind: "approval",
+      occurrence: `approval:${request.id}`,
+      kind: "INBOX_ITEM_KIND_APPROVAL",
       objectiveId: "inbox-objective",
       operatorEligible: true,
       approval: {
         requestId: request.id,
+        kind: "APPROVAL_KIND_SURFACE_ACTION",
         summary: "Write the report",
         requestingTagId: owner.id,
+        requestingTag: "Inbox owner",
         taskId: task.id,
         blocking: true,
       },
-      redaction: { level: "metadata_only" },
     });
     // The approval's own action arguments stay out of the projection.
-    expect(JSON.stringify(page)).not.toContain("files:write");
+    expect(responseText).not.toContain("files:write");
     expect(page.items[0]?.commands?.[0]).toBe(`supertag approve request ${request.id}`);
 
     // An operator without list_approvals may not read approvals at all.
-    const reader = { authorization: "Bearer inbox-reader-token" };
-    const forbidden = await fetch(
-      `${runtime.url}/api/v1/coordination/inbox?objectiveId=inbox-objective&kind=approval`,
-      { headers: reader },
-    );
-    expect(forbidden.status).toBe(403);
-    const unscoped = await fetch(
-      `${runtime.url}/api/v1/coordination/inbox?objectiveId=inbox-objective`,
-      { headers: reader },
-    );
-    const unscopedPage = (await unscoped.json()) as CoordinationInboxPage;
-    expect(unscopedPage.items.some((item) => item.kind === "approval")).toBe(false);
-
-    const unknownQuery = await fetch(
-      `${runtime.url}/api/v1/coordination/inbox?objective=inbox-objective`,
-      { headers },
-    );
-    expect(unknownQuery.status).toBe(400);
-    await expect(unknownQuery.json()).resolves.toMatchObject({
-      error: "Unknown coordination inbox query parameter: objective",
+    const reader = inboxClient({ url: runtime.url, token: "inbox-reader-token" });
+    await expect(
+      reader.listInboxItems({ objectiveId: "inbox-objective", kind: InboxItemKind.APPROVAL }),
+    ).rejects.toMatchObject({ code: Code.PermissionDenied });
+    const scoped = await reader.listInboxItems({});
+    expect(scoped.items.some((item) => item.kind === InboxItemKind.APPROVAL)).toBe(false);
+    // Its scope names one Objective, so it reaches no other.
+    await expect(reader.listInboxItems({ objectiveId: "other" })).rejects.toMatchObject({
+      code: Code.PermissionDenied,
     });
+    // Nor any RPC that does not accept scoped coordination credentials.
+    await expect(
+      objectiveClient({ url: runtime.url, token: "inbox-reader-token" }).listObjectives({}),
+    ).rejects.toMatchObject({ code: Code.PermissionDenied });
 
-    const duplicateQuery = await fetch(
-      `${runtime.url}/api/v1/coordination/inbox?objectiveId=inbox-objective&objectiveId=other`,
-      { headers },
-    );
-    expect(duplicateQuery.status).toBe(400);
-
-    const unauthorized = await fetch(`${runtime.url}/api/v1/coordination/inbox`);
-    expect(unauthorized.status).toBe(401);
+    expect((await list({ pageToken: "not-a-cursor" }, "inbox-admin")).status).toBe(400);
+    expect((await list({ pageSize: -1 }, "inbox-admin")).status).toBe(400);
+    expect((await list({})).status).toBe(401);
   } finally {
     await runtime?.close();
     await store.disconnect().catch(() => undefined);

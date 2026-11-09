@@ -1,4 +1,5 @@
 import { expect, it, vi } from "vitest";
+import { fakeOperatorRpc } from "../../tests/support/fake-operator-rpc.js";
 import { ControlPlaneClient } from "./src/control-plane-client.js";
 import { renderListTable, runListCommand } from "./src/list-command.js";
 
@@ -31,63 +32,58 @@ it("lists Tags as an operator table by default and preserves the collection in J
   }
 });
 
-it("lists every Objective without --owner and filters by the owner's Tag ID with it", async () => {
+it("lists every Objective without --owner and filters by the owner's name with it", async () => {
   const request = vi
     .spyOn(ControlPlaneClient.prototype, "request")
-    .mockImplementation(async (path: string) =>
-      path === "/api/v1/tags"
-        ? { items: [{ metadata: { id: "tag-lead", name: "lead" } }] }
-        : {
-            items: [
-              {
-                id: "ship-sso",
-                status: "working",
-                ownerTagId: "tag-lead",
-                spentMinor: 0,
-                budgetLimitMinor: 3000,
-                budgetCurrency: "USD",
-                limitState: { reportedSpend: { amountMinor: 1380, currency: "USD" } },
-              },
-            ],
-          },
-    );
-  const getTag = vi
-    .spyOn(ControlPlaneClient.prototype, "getTag")
-    .mockResolvedValue({ metadata: { name: "lead", id: "tag-lead" } } as never);
+    .mockResolvedValue({ items: [{ metadata: { id: "tag-lead", name: "lead" } }] });
+  const rpc = fakeOperatorRpc({
+    "ObjectiveService/ListObjectives": () => ({
+      objectives: [
+        {
+          id: "ship-sso",
+          status: "OBJECTIVE_STATUS_WORKING",
+          ownerTagId: "tag-lead",
+          ownerTag: "lead",
+          revision: "1",
+          budget: { limitMinor: "3000", currency: "USD" },
+          spend: { amountMinor: "1380", currency: "USD" },
+        },
+      ],
+    }),
+  });
   try {
     const table = await runListCommand(target, ["objective"]);
     expect(table).toMatch(/ship-sso +working +lead +\$13\.80 \/ \$30\.00/);
-    expect(request).toHaveBeenCalledWith("/api/v1/tag-messaging/objectives?");
+    expect(request).toHaveBeenCalledWith("/api/v1/tags");
     expect(
-      JSON.parse(await runListCommand(target, ["objective", "--output", "json"])).items[0]
+      JSON.parse(await runListCommand(target, ["objective", "--output", "json"])).objectives[0]
         .ownerTagId,
     ).toBe("tag-lead");
     await runListCommand(target, ["objective", "--owner", "lead", "--limit", "5"]);
-    expect(getTag).toHaveBeenCalledWith("lead");
-    expect(request).toHaveBeenCalledWith("/api/v1/tag-messaging/objectives?tagId=tag-lead&limit=5");
+    expect(rpc.called("ObjectiveService/ListObjectives").map(({ body }) => body)).toEqual([
+      {},
+      {},
+      { owner: "lead", pageSize: 5 },
+    ]);
   } finally {
     request.mockRestore();
-    getTag.mockRestore();
+    rpc.fetch.mockRestore();
   }
 });
 
 it("keeps the detailed operator inbox view for text output", async () => {
-  const request = vi.spyOn(ControlPlaneClient.prototype, "request").mockResolvedValue({
-    projectionVersion: 7,
-    asOf: "now",
-    items: [],
-    tagNames: {},
-    truncatedKinds: [],
+  const rpc = fakeOperatorRpc({
+    "InboxService/ListInboxItems": () => ({ asOf: "2026-09-30T00:01:00Z" }),
   });
   try {
     const text = await runListCommand(target, ["inbox", "--objective", "ship-sso"]);
     expect(text).toContain("Operator inbox (0 items");
     expect(text).not.toContain("SUMMARY");
-    expect(JSON.parse(await runListCommand(target, ["inbox", "--output", "json"])).items).toEqual(
-      [],
-    );
+    expect(JSON.parse(await runListCommand(target, ["inbox", "--output", "json"]))).toEqual({
+      asOf: "2026-09-30T00:01:00Z",
+    });
   } finally {
-    request.mockRestore();
+    rpc.fetch.mockRestore();
   }
 });
 

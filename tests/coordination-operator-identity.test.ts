@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { Code } from "@connectrpc/connect";
 import { expect, it } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
-import { organizationClient } from "../apps/cli/src/operator-client.js";
+import {
+  inboxClient,
+  objectiveClient,
+  organizationClient,
+} from "../apps/cli/src/operator-client.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
 
 it("binds coordination operators to server-side identity and least-privilege scopes", async () => {
@@ -51,23 +55,22 @@ it("binds coordination operators to server-side identity and least-privilege sco
         },
       ],
     });
-    const scopedHeaders = {
-      authorization: "Bearer scoped-reviewer-token",
-      "content-type": "application/json",
-      "x-operator-id": "forged-from-request",
-    };
-    const message = (token: string, objectiveId: string, text: string) =>
-      fetch(`${runtime?.url}/api/v1/coordination/objectives/${objectiveId}/messages`, {
+    const url = runtime.url;
+    const message = (token: string, id: string, text: string, headers: object = {}) =>
+      fetch(`${url}/supertag.operator.v1.ObjectiveService/MessageObjective`, {
         method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ text }),
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({ id, text }),
       });
 
     // The server's own identity is used, never the one the request claims.
-    const sent = await fetch(
-      `${runtime.url}/api/v1/coordination/objectives/${source.id}/messages`,
-      { method: "POST", headers: scopedHeaders, body: JSON.stringify({ text: "Reviewed" }) },
-    );
+    const sent = await message("scoped-reviewer-token", source.id, "Reviewed", {
+      "x-operator-id": "forged-from-request",
+    });
     const sentText = await sent.text();
     expect(sent.status, sentText).toBe(200);
     const turn = await store.findTaskById((JSON.parse(sentText) as { taskId: string }).taskId);
@@ -77,21 +80,19 @@ it("binds coordination operators to server-side identity and least-privilege sco
     expect((await message("scoped-reviewer-token", denied.id, "Reviewed")).status).toBe(403);
 
     // An action the credential does not carry is refused, even on an Objective it may read.
-    const forbiddenAction = await fetch(
-      `${runtime.url}/api/v1/coordination/objectives/${source.id}/overview`,
-      { headers: scopedHeaders },
-    );
-    expect(forbiddenAction.status).toBe(403);
+    await expect(
+      objectiveClient({ url, token: "scoped-reviewer-token" }).describeObjective({ id: source.id }),
+    ).rejects.toMatchObject({ code: Code.PermissionDenied });
 
-    const revoked = await fetch(
-      `${runtime.url}/api/v1/coordination/inbox?objectiveId=${source.id}`,
-      { headers: { authorization: "Bearer revoked-reviewer-token" } },
-    );
-    expect(revoked.status).toBe(401);
+    await expect(
+      inboxClient({ url, token: "revoked-reviewer-token" }).listInboxItems({
+        objectiveId: source.id,
+      }),
+    ).rejects.toMatchObject({ code: Code.Unauthenticated });
 
     // A coordination credential is not a management credential.
     await expect(
-      organizationClient({ url: runtime.url, token: "scoped-reviewer-token" }).getStatus({}),
+      organizationClient({ url, token: "scoped-reviewer-token" }).getStatus({}),
     ).rejects.toMatchObject({ code: Code.PermissionDenied });
 
     // Break glass reaches the Objective the scoped credential may not.
@@ -130,10 +131,10 @@ it("loads scoped operator credentials from the Control Plane secret file", async
     process.env["SUPERTAG_COORDINATION_OPERATORS_FILE"] = credentialsPath;
     runtime = await startControlPlaneRuntime({ host: "127.0.0.1", port: 0, databaseUrl });
 
-    const response = await fetch(`${runtime.url}/api/v1/coordination/inbox`, {
-      headers: { authorization: "Bearer file-scoped-token" },
-    });
-    expect(response.status, await response.text()).toBe(200);
+    const page = await inboxClient({ url: runtime.url, token: "file-scoped-token" }).listInboxItems(
+      {},
+    );
+    expect(page.items).toEqual([]);
   } finally {
     await runtime?.close();
     if (previous === undefined) delete process.env["SUPERTAG_COORDINATION_OPERATORS_FILE"];

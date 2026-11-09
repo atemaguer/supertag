@@ -1,9 +1,9 @@
-import type { ObjectiveOverview } from "@supertag/control-plane";
 import { describe, expect, it } from "vitest";
 import { formatObjectiveOverview } from "./src/objective-overview.js";
+import type { ObjectiveOverviewView } from "./src/objective-protos.js";
 
 /** The overview of an Objective stopped at its budget, with one work Session beneath it. */
-function limitedView(overrides: Partial<ObjectiveOverview> = {}): ObjectiveOverview {
+function limitedView(overrides: Partial<ObjectiveOverviewView> = {}): ObjectiveOverviewView {
   return {
     objective: {
       id: "launch",
@@ -12,29 +12,20 @@ function limitedView(overrides: Partial<ObjectiveOverview> = {}): ObjectiveOverv
       ownerTagId: "owner",
       revision: 3,
       completionSummary: null,
-      limitState: {
-        summary: {
-          text: "Progress: code done. Open: review. Blocker: budget. Next: raise it.",
-          at: "2026-10-03T07:00:00Z",
-        },
-        reportedSpend: { amountMinor: 125, currency: "USD", unknownAttemptIds: [] },
-      },
+      limitSummary: "Progress: code done. Open: review. Blocker: budget. Next: raise it.",
+      reportedSpendMinor: 125,
     },
     pool: { limitMinor: 100, currency: "USD", spentMinor: 125 },
-    objectiveSpend: { attempts: 2, reportedCostByCurrency: { USD: 125 } },
+    unpricedModels: {},
     tagNames: { owner: "planner" },
     team: null,
     conditions: [],
     attention: [],
     sessions: [],
     highFindings: [],
-    conversation: [],
-    posts: [],
     writes: [],
-    tasks: [],
-    pageUsage: { taskIds: [], provider: { observedCostByCurrency: {} } },
     ...overrides,
-  } as unknown as ObjectiveOverview;
+  } as unknown as ObjectiveOverviewView;
 }
 
 describe("limited Objective description", () => {

@@ -17,7 +17,7 @@ import {
   sanitizeApprovalText,
   TagMessagingError,
 } from "@supertag/core";
-import { and, desc, eq, gte, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, or } from "drizzle-orm";
 import { runDialectTransaction } from "./dialect-transaction.js";
 
 type Flow<T> = Generator<any, T, any>;
@@ -181,6 +181,12 @@ export class DrizzleApprovalRequestStore implements ApprovalRequestStore {
       filter.kind === undefined ? undefined : eq(t.kind, filter.kind),
       filter.status === undefined ? undefined : eq(t.status, filter.status),
       filter.decidedAfter === undefined ? undefined : gte(t.decidedAt, filter.decidedAfter),
+      filter.before === undefined
+        ? undefined
+        : or(
+            lt(t.createdAt, filter.before.createdAt),
+            and(eq(t.createdAt, filter.before.createdAt), lt(t.id, filter.before.id)),
+          ),
     ].filter((condition) => condition !== undefined);
     const rows = await this.db
       .select()

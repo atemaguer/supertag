@@ -1,7 +1,6 @@
-import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { type DescMethod, getOption, type MessageInitShape } from "@bufbuild/protobuf";
-import { MethodOptions_IdempotencyLevel, timestampFromDate } from "@bufbuild/protobuf/wkt";
+import { type DescMethod, getOption } from "@bufbuild/protobuf";
+import { MethodOptions_IdempotencyLevel } from "@bufbuild/protobuf/wkt";
 import {
   Code,
   ConnectError,
@@ -12,61 +11,53 @@ import {
 } from "@connectrpc/connect";
 import { codeToHttpStatus } from "@connectrpc/connect/protocol-connect";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
-import type { ControlPlane } from "@supertag/control-plane";
-import { type Store, TagMessagingError } from "@supertag/core";
+import type { ChangeFeed } from "@supertag/control-plane";
+import { TagMessagingError } from "@supertag/core";
 import {
   action,
   allow_anonymous,
+  allow_scoped_credential,
   audit_action,
-  ControllerPhase,
-  ControlPlanePhase,
   ConversationService,
   ErrorDetailSchema,
   ErrorReason,
   EventService,
-  type FieldViolationSchema,
+  InboxService,
+  ObjectiveService,
   OrganizationService,
   requires_admin_token,
 } from "@supertag/operator-api";
 import { type AuditTrail, auditTargetKind } from "./audit-trail.js";
-import type { OperatorAuthentication } from "./control-plane-api.js";
 import { conversationService } from "./conversation-rpc.js";
 import { eventService } from "./event-rpc.js";
-import type { SurfaceController } from "./gateway-surfaces.js";
-import { type MessageFollows, STREAM_HEARTBEAT_MS } from "./message-follow.js";
+import { inboxService } from "./inbox-rpc.js";
+import type { MessageFollower } from "./message-follow.js";
+import { objectiveService } from "./objective-rpc.js";
+import {
+  type OperatorAuthentication,
+  type OperatorPrincipal,
+  operatorAuditTarget,
+  operatorError,
+  operatorPrincipal,
+  STREAM_HEARTBEAT_MS,
+} from "./operator-rpc-context.js";
+import {
+  type OperatorControl,
+  type OperatorQueries,
+  type OperatorReadStore,
+  operatorRpcClass,
+} from "./operator-seams.js";
+import { organizationService } from "./organization-rpc.js";
 
 /** Every operator RPC is served under this path prefix: `/supertag.operator.v1.SERVICE/METHOD`. */
 export const OPERATOR_RPC_PATH_PREFIX = "/supertag.operator.v1.";
 
 const OPERATOR_RPC_MAX_BYTES = 1_000_000;
 
-type Principal = Exclude<OperatorAuthentication, { readonly kind: "refused" }>;
-
-/** The authenticated caller of an operator RPC; undefined for an anonymous call it allows. */
-export const operatorPrincipal = createContextKey<Principal | undefined>(undefined, {
-  description: "operator principal",
-});
-
-/**
- * What an audited RPC changed, as `Kind/NAME` or `Kind/ID`. It starts as the service's kind, such
- * as `Objective`, and the RPC sets it once it knows the target. A failed call records only the kind.
- */
-export const operatorAuditTarget = createContextKey<{ target: string } | undefined>(undefined, {
-  description: "operator audit target",
-});
-
 /** The credential the request gate authenticated, before the RPC's own access check. */
-const authenticatedCaller = createContextKey<Principal | undefined>(undefined, {
+const authenticatedCaller = createContextKey<OperatorPrincipal | undefined>(undefined, {
   description: "authenticated operator caller",
 });
-
-/** The operator who holds a conversation: the admin token is `admin`, an Operator Token its own. */
-export function conversationOperator(context: HandlerContext): string {
-  const caller = context.values.get(operatorPrincipal);
-  if (caller === undefined)
-    throw operatorError(Code.Internal, ErrorReason.INTERNAL, "Control Plane internal error");
-  return caller.kind === "break-glass" ? "admin" : caller.principal.operatorId;
-}
 
 /** What the request gate and the audit interceptor need, whatever services are registered. */
 export interface OperatorRpcDependencies {
@@ -84,28 +75,17 @@ export interface OperatorRpcDependencies {
   readonly reauthenticateMs?: number;
 }
 
-/** A refusal carrying the `ErrorDetail` every operator RPC error has. */
-export function operatorError(
-  code: Code,
-  reason: ErrorReason,
-  message: string,
-  fields: readonly MessageInitShape<typeof FieldViolationSchema>[] = [],
-): ConnectError {
-  return new ConnectError(message, code, undefined, [
-    { desc: ErrorDetailSchema, value: { reason, fields: [...fields] } },
-  ]);
-}
-
-/** What the operator services read and act on. */
+/**
+ * What the operator services read and act on. `read` and `data_write` RPCs use only the store
+ * reads, the queries, the change feed and the follower; every `control` RPC changes state through
+ * `control`.
+ */
 export interface OperatorServices {
-  readonly controlPlane: Pick<
-    ControlPlane,
-    "isAccepting" | "controllerStatuses" | "messageTag" | "streamTaskReply" | "changes"
-  >;
-  readonly surfaceController: Pick<SurfaceController, "name" | "status">;
-  readonly startedAt: string;
-  readonly store: Store;
-  readonly follows: MessageFollows;
+  readonly store: OperatorReadStore;
+  readonly queries: OperatorQueries;
+  readonly control: OperatorControl;
+  readonly changes: ChangeFeed;
+  readonly follows: MessageFollower;
   /** Aborted once the API Server drains; open streams then end with `Unavailable`. */
   readonly draining: () => AbortSignal;
 }
@@ -144,51 +124,30 @@ export function createOperatorRpcHandler(
     });
 }
 
-/** Registers every operator service. */
+/** Registers every operator service. Throws when an RPC has no class in `OPERATOR_RPC_CLASSES`. */
 export function registerOperatorRoutes(router: ConnectRouter, dependencies: OperatorServices) {
-  router.service(ConversationService, conversationService(dependencies));
-  router.service(
-    EventService,
-    eventService({ changes: dependencies.controlPlane.changes, draining: dependencies.draining }),
-  );
-  router.service(OrganizationService, {
-    getStatus() {
-      const accepting = dependencies.controlPlane.isAccepting;
-      const controllers = [
-        ...dependencies.controlPlane.controllerStatuses,
-        {
-          name: dependencies.surfaceController.name,
-          phase:
-            dependencies.surfaceController.status().errors.length === 0 ? "running" : "degraded",
-        },
-      ];
-      return {
-        metadata: {
-          id: "control-plane",
-          name: "control-plane",
-          resourceVersion: createHash("sha256")
-            .update(JSON.stringify({ accepting, controllers }))
-            .digest("hex"),
-          createdAt: timestampFromDate(new Date(dependencies.startedAt)),
-          updatedAt: timestampFromDate(new Date()),
-        },
-        phase: accepting ? ControlPlanePhase.ACCEPTING : ControlPlanePhase.DRAINING,
-        controllers: controllers.map(({ name, phase }) => ({
-          name,
-          phase: CONTROLLER_PHASES[phase] ?? ControllerPhase.UNSPECIFIED,
-        })),
-      };
-    },
-  });
+  const { store, queries, control, changes, follows, draining } = dependencies;
+  router.service(ConversationService, conversationService({ store, control, follows, draining }));
+  router.service(InboxService, inboxService({ store, queries, control }));
+  router.service(ObjectiveService, objectiveService({ store, queries, control }));
+  router.service(EventService, eventService({ changes, store, draining }));
+  router.service(OrganizationService, organizationService({ queries }));
+  for (const handler of router.handlers) assertRpcClass(handler.method);
 }
 
-const CONTROLLER_PHASES: Readonly<Record<string, ControllerPhase>> = {
-  running: ControllerPhase.RUNNING,
-  degraded: ControllerPhase.DEGRADED,
-  draining: ControllerPhase.DRAINING,
-  stopped: ControllerPhase.STOPPED,
-  disabled: ControllerPhase.DISABLED,
-};
+/** Every operator RPC has a class, and it is `read` exactly when the RPC has no side effects. */
+function assertRpcClass(method: DescMethod): void {
+  const name = `${method.parent.typeName}.${method.name}`;
+  const rpcClass = operatorRpcClass(method);
+  if (rpcClass === undefined) throw new Error(`${name} has no class in OPERATOR_RPC_CLASSES`);
+  const readOnly = method.idempotency === MethodOptions_IdempotencyLevel.NO_SIDE_EFFECTS;
+  if (readOnly !== (rpcClass === "read"))
+    throw new Error(
+      readOnly
+        ? `${name} sets idempotency_level = NO_SIDE_EFFECTS, so its class must be read`
+        : `${name} can change state, so its class must not be read`,
+    );
+}
 
 /** Every RPC names its operator action, and is either read-only or audited. */
 function assertMethodOptions(method: DescMethod): void {
@@ -231,7 +190,7 @@ function authentication(
 async function authenticated(
   dependencies: OperatorRpcDependencies,
   header: string | undefined,
-): Promise<Principal> {
+): Promise<OperatorPrincipal> {
   const caller = await dependencies.authenticate(header);
   if (caller === undefined)
     throw operatorError(
@@ -291,12 +250,11 @@ function authorization(): Interceptor {
         throw operatorError(Code.Internal, ErrorReason.INTERNAL, "Control Plane internal error");
       return next(request);
     }
-    // Scoped coordination credentials reach only the coordination API until it moves here.
-    if (caller.kind === "coordination")
+    if (caller.kind === "coordination" && !getOption(request.method, allow_scoped_credential))
       throw operatorError(
         Code.PermissionDenied,
         ErrorReason.PERMISSION_DENIED,
-        "This operator credential is limited to the coordination API",
+        `A scoped coordination credential may not call ${request.method.name}`,
       );
     if (getOption(request.method, requires_admin_token) && caller.kind !== "break-glass")
       throw operatorError(

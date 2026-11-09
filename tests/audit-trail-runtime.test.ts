@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Code } from "@connectrpc/connect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runApprovalCommand } from "../apps/cli/src/approvals.ts";
 import { runAuditCommand } from "../apps/cli/src/audit-command.ts";
@@ -15,6 +16,7 @@ import {
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { runObjectiveCommand } from "../apps/cli/src/objectives.ts";
+import { inboxClient, objectiveClient } from "../apps/cli/src/operator-client.ts";
 import { runResourceCommand } from "../apps/cli/src/resources.ts";
 import type { AuditEntry, Store } from "../packages/core/src/index.ts";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.ts";
@@ -182,9 +184,10 @@ for (const dialect of ["sqlite", "postgresql"] as const)
       const decide = await createApproval(store, fixture);
       await runApprovalCommand(operator, ["approve", approve.id]);
       await runApprovalCommand(operator, ["deny", deny.id, "--reason", "Wait for the freeze"]);
-      const decided = await call(tokenSecret, `/api/v1/coordination/approvals/${decide.id}/deny`, {
+      // Deny as `curl` sends it: a Connect JSON POST.
+      const decided = await call(tokenSecret, "/supertag.operator.v1.InboxService/Deny", {
         method: "POST",
-        body: JSON.stringify({ reason: "Not now" }),
+        body: JSON.stringify({ id: decide.id, reason: "Not now" }),
       });
       expect(decided.status, await decided.clone().text()).toBe(200);
       await runObjectiveCommand(operator, [
@@ -222,21 +225,14 @@ for (const dialect of ["sqlite", "postgresql"] as const)
         fixture.owner.id,
       );
       await runObjectiveCommand(operator, ["approve", reviewed.id]);
-      const cancelled = await call(
-        tokenSecret,
-        `/api/v1/objectives/${fixture.objective.id}/cancel`,
-        { method: "POST", body: JSON.stringify({ reason: "Superseded" }) },
-      );
-      expect(cancelled.status, await cancelled.clone().text()).toBe(200);
+      await objectiveClient(operator).cancelObjective({
+        id: fixture.objective.id,
+        reason: "Superseded",
+      });
       // A scoped coordination credential is recorded under its configured operator ID.
-      expect(
-        (
-          await call(SCOPED, `/api/v1/coordination/objectives/${fixture.objective.id}/approve`, {
-            method: "POST",
-            body: "{}",
-          })
-        ).status,
-      ).toBe(409);
+      await expect(
+        objectiveClient({ url, token: SCOPED }).approveObjective({ id: fixture.objective.id }),
+      ).rejects.toMatchObject({ code: Code.FailedPrecondition });
 
       await runResourceCommand(client, "delete", ["tag", "reviewer"]);
       expect(
@@ -351,7 +347,7 @@ for (const dialect of ["sqlite", "postgresql"] as const)
             action: "objective.approve",
             target: "Objective",
             outcome: "failed",
-            status: 409,
+            status: 400,
           },
           {
             actor: token,
@@ -421,12 +417,17 @@ for (const dialect of ["sqlite", "postgresql"] as const)
         ["PUT", `/api/v1/tags/${secret}/extra/${underscored}`],
         ["POST", `/api/v1/coordination/${secret.replaceAll("-", "_")}`],
         ["POST", `/api/v1/coordination/approvals/missing/${secret}`],
-        ["POST", "/api/v1/coordination/approvals/sk_live_missing_approval/deny"],
         ["DELETE", `/api/v1/${encodeURIComponent(`${secret}/${underscored}`)}`],
       ] as const) {
         const response = await call(ADMIN, path, { method, body: "{}" });
         expect(response.status, path).toBeGreaterThanOrEqual(400);
       }
+      // An RPC records its method and, once it fails, only the target's kind.
+      const denied = await call(ADMIN, "/supertag.operator.v1.InboxService/Deny", {
+        method: "POST",
+        body: JSON.stringify({ id: "sk_live_missing_approval", reason: "No" }),
+      });
+      expect(denied.status).toBe(404);
       // A known route records its template. A failed request keeps only the target's kind, so a
       // credential-shaped name in a recognized route is never stored either.
       expect((await call(ADMIN, "/api/v1/tags/missing", { method: "DELETE" })).status).toBe(404);
@@ -458,7 +459,7 @@ for (const dialect of ["sqlite", "postgresql"] as const)
             action: "approval.deny",
             target: "ApprovalRequest",
             method: "POST",
-            path: "/api/v1/coordination/approvals/{id}/deny",
+            path: "/supertag.operator.v1.InboxService/Deny",
             outcome: "failed",
           },
         ]),
@@ -526,14 +527,9 @@ describe("audit reads and sinks", () => {
     const between = new Date().toISOString();
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect((await tag(ADMIN, "second")).status).toBe(201);
-    expect(
-      (
-        await call(SCOPED, "/api/v1/coordination/approvals/missing/approve", {
-          method: "POST",
-          body: "{}",
-        })
-      ).status,
-    ).toBe(404);
+    await expect(
+      inboxClient({ url, token: SCOPED }).approve({ id: "missing" }),
+    ).rejects.toMatchObject({ code: Code.NotFound });
 
     expect((await audit()).map((entry) => entry.target)).toEqual([
       "ApprovalRequest",
@@ -834,11 +830,6 @@ describe("audit classification", () => {
       target: "WorkerHost/build",
       route: "/api/v1/worker-hosts/{id}/credential",
     });
-    expect(classify("PATCH", "/api/v1/tag-messaging/objectives/launch")).toEqual({
-      action: "objective.update",
-      target: "Objective/launch",
-      route: "/api/v1/tag-messaging/objectives/{id}",
-    });
     // An unmatched path is the caller's and might hold a credential, so none of it is kept.
     for (const [method, path] of [
       ["POST", "/api/v1/somewhere-new"],
@@ -851,22 +842,13 @@ describe("audit classification", () => {
         action: "request",
         target: "UnknownRoute",
       });
-    // There is no generic coordination command route any more: a name that is not a known
-    // operator route keeps nothing of the path.
-    expect(classify("POST", "/api/v1/coordination/st_op_secret")).toEqual({
-      action: "request",
-      target: "UnknownRoute",
-    });
-    expect(classify("POST", "/api/v1/coordination/approvals/r-1/approve")).toEqual({
-      action: "approval.approve",
-      target: "ApprovalRequest/r-1",
-      route: "/api/v1/coordination/approvals/{id}/approve",
-    });
-    expect(classify("POST", "/api/v1/coordination/objectives/o-1/messages")).toEqual({
-      action: "objective.message",
-      target: "Objective/o-1",
-      route: "/api/v1/coordination/objectives/{id}/messages",
-    });
+    // Coordination is served by operator RPCs, so no coordination path keeps anything.
+    for (const path of [
+      "/api/v1/coordination/st_op_secret",
+      "/api/v1/coordination/approvals/r-1/approve",
+      "/api/v1/coordination/objectives/o-1/messages",
+    ])
+      expect(classify("POST", path), path).toEqual({ action: "request", target: "UnknownRoute" });
   });
 
   it("never names a Tag operation's or surface enrollment's target from its request ID", () => {

@@ -1,7 +1,8 @@
 name: Release SuperTag CLI installer
 
 # The CLI ships through npm (publish.yml). Each release carries install.sh, which installs that npm
-# package with the system's Node.js, so `releases/latest/download/install.sh` always works.
+# package with the system's Node.js, so `releases/latest/download/install.sh` always works. The
+# release also carries the terminal UI binaries and their SHA256SUMS, which install.sh verifies.
 on:
   release:
     types:
@@ -9,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing release tag to receive install.sh
+        description: Existing release tag to receive install.sh and the terminal UI binaries
         required: true
         type: string
 
@@ -36,3 +37,44 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
         run: gh release upload "$RELEASE_TAG" install.sh --clobber
+
+  terminal-ui:
+    if: github.repository == 'atemaguer/supertag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.release_tag }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/tui/go.mod
+          cache-dependency-path: apps/tui/go.sum
+      - name: Build the terminal UI binaries
+        run: |
+          version=$(node -p 'require("./packages/supertag-ai/package.json").version')
+          [ "$version" = "${RELEASE_TAG#v}" ] || {
+            echo "packages/supertag-ai is $version but the release is $RELEASE_TAG" >&2
+            exit 1
+          }
+          apps/tui/build.sh
+      - name: Check the binaries report the release version
+        working-directory: apps/tui/dist
+        run: test "$(./supertag-tui-linux-amd64 --version)" = "${RELEASE_TAG#v}"
+      - name: Write SHA256SUMS
+        working-directory: apps/tui/dist
+        run: |
+          sha256sum supertag-tui-darwin-arm64 supertag-tui-darwin-amd64 \
+            supertag-tui-linux-arm64 supertag-tui-linux-amd64 > SHA256SUMS
+          cat SHA256SUMS
+      - name: Upload the binaries and SHA256SUMS
+        working-directory: apps/tui/dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$RELEASE_TAG" --clobber \
+            supertag-tui-darwin-arm64 supertag-tui-darwin-amd64 \
+            supertag-tui-linux-arm64 supertag-tui-linux-amd64 SHA256SUMS

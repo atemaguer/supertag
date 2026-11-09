@@ -12,6 +12,7 @@ import {
 } from "../packages/core/src/index.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
 import { createIsolatedPostgresDatabase } from "./support/database.js";
+import { overviewViewOf } from "./support/objective-overview-view.js";
 
 const postgres = process.env["SUPERTAG_POSTGRES_URL"];
 
@@ -186,7 +187,9 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         objectiveId: objectives[0]?.id as string,
       });
       expect(view.team).toMatchObject({ id: team.id, maxConcurrency: null });
-      expect(formatObjectiveOverview(view)).toContain("limited only by Worker Host capacity");
+      expect(formatObjectiveOverview(overviewViewOf(view))).toContain(
+        "limited only by Worker Host capacity",
+      );
     });
 
     it("holds turns over the Team's limit, counting every Objective that names it", async () => {
@@ -213,7 +216,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
 
       const view = await f.controller.readObjectiveOverview({ objectiveId: here.id });
       expect(view.team).toMatchObject({ maxConcurrency: 1 });
-      expect(formatObjectiveOverview(view)).toContain(
+      expect(formatObjectiveOverview(overviewViewOf(view))).toContain(
         "at most 1 turns at once across its Objectives",
       );
     });

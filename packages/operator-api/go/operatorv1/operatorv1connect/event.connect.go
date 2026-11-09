@@ -66,12 +66,16 @@ type EventServiceClient interface {
 	//
 	//   - `WATCH_KIND_CONVERSATION_MESSAGE`: messages in the caller's own
 	//     conversations, as `ConversationService.GetMessage` reads them. The
-	//     credential needs the `read_conversation` action.
+	//     credential needs the `read_conversation` action. A scoped coordination
+	//     credential has no conversations and sees none.
 	//   - `WATCH_KIND_SESSION` and `WATCH_KIND_TASK`: every Session and Task for
 	//     the admin token and Operator Tokens, except that a conversation's
 	//     Session and its Tasks, work Sessions included, reach only the operator
-	//     whose conversation it is.
-	//   - `WATCH_KIND_TAG`: every Tag, for the admin token and Operator Tokens.
+	//     whose conversation it is. A scoped coordination credential with the
+	//     `read_objective` action sees only the Tasks of Objectives its scope
+	//     allows, by `objective_id`, and no Sessions.
+	//   - `WATCH_KIND_TAG`: every Tag, for the admin token and Operator Tokens. A
+	//     scoped coordination credential sees none.
 	//   - `WATCH_KIND_OBJECTIVE`: Objectives the credential's Objective scope
 	//     allows, with the `read_objective` action.
 	//   - `WATCH_KIND_INBOX_ITEM`: inbox items of Objectives the credential's
@@ -80,6 +84,14 @@ type EventServiceClient interface {
 	//     Objective scope allows, with the `list_approvals` action. A request
 	//     outside any Objective reaches only a credential without an Objective
 	//     scope.
+	//   - `WATCH_KIND_WORKSTREAM_POST`: posts to every Team's Workstream for the
+	//     admin token and Operator Tokens. A scoped coordination credential with
+	//     the `read_objective` action sees posts to the Teams of Objectives its
+	//     scope allows, as `ObjectiveService.DescribeObjective` shows them.
+	//
+	// The admin token and Operator Tokens carry every action and have no
+	// Objective scope. A scoped coordination credential needs the
+	// `watch_events` action to call `Watch` at all.
 	//
 	// A kind the caller may not see is left out silently, even when `kinds`
 	// names it.
@@ -146,12 +158,16 @@ type EventServiceHandler interface {
 	//
 	//   - `WATCH_KIND_CONVERSATION_MESSAGE`: messages in the caller's own
 	//     conversations, as `ConversationService.GetMessage` reads them. The
-	//     credential needs the `read_conversation` action.
+	//     credential needs the `read_conversation` action. A scoped coordination
+	//     credential has no conversations and sees none.
 	//   - `WATCH_KIND_SESSION` and `WATCH_KIND_TASK`: every Session and Task for
 	//     the admin token and Operator Tokens, except that a conversation's
 	//     Session and its Tasks, work Sessions included, reach only the operator
-	//     whose conversation it is.
-	//   - `WATCH_KIND_TAG`: every Tag, for the admin token and Operator Tokens.
+	//     whose conversation it is. A scoped coordination credential with the
+	//     `read_objective` action sees only the Tasks of Objectives its scope
+	//     allows, by `objective_id`, and no Sessions.
+	//   - `WATCH_KIND_TAG`: every Tag, for the admin token and Operator Tokens. A
+	//     scoped coordination credential sees none.
 	//   - `WATCH_KIND_OBJECTIVE`: Objectives the credential's Objective scope
 	//     allows, with the `read_objective` action.
 	//   - `WATCH_KIND_INBOX_ITEM`: inbox items of Objectives the credential's
@@ -160,6 +176,14 @@ type EventServiceHandler interface {
 	//     Objective scope allows, with the `list_approvals` action. A request
 	//     outside any Objective reaches only a credential without an Objective
 	//     scope.
+	//   - `WATCH_KIND_WORKSTREAM_POST`: posts to every Team's Workstream for the
+	//     admin token and Operator Tokens. A scoped coordination credential with
+	//     the `read_objective` action sees posts to the Teams of Objectives its
+	//     scope allows, as `ObjectiveService.DescribeObjective` shows them.
+	//
+	// The admin token and Operator Tokens carry every action and have no
+	// Objective scope. A scoped coordination credential needs the
+	// `watch_events` action to call `Watch` at all.
 	//
 	// A kind the caller may not see is left out silently, even when `kinds`
 	// names it.

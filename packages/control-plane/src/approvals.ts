@@ -55,6 +55,18 @@ export interface ApprovalSummary {
 
 const TERMINAL_TASK = ["completed", "failed", "cancelled"];
 
+/** Whether a decided request already records this operator's decision, so repeating it is a no-op. */
+function sameDecision(
+  request: ApprovalRequest,
+  input: ApprovalDecisionInput,
+  operatorId: string,
+): boolean {
+  if (request.decidedByKind !== "operator" || request.decidedBy !== operatorId) return false;
+  return input.decision === "approve"
+    ? request.status === "approved" && request.scope === (input.scope ?? "once")
+    : request.status === "denied";
+}
+
 /** Called once an action request is decided. */
 export type ApprovalDecisionListener = (request: ApprovalRequest) => Promise<void>;
 
@@ -182,6 +194,7 @@ export class ApprovalCoordinator {
         403,
         "The Permission Sets that require this approval name other operator approvers",
       );
+    if (sameDecision(request, input, operatorId)) return request;
     return this.decide(request, input, operatorId);
   }
 
@@ -189,24 +202,49 @@ export class ApprovalCoordinator {
     return this.store.getApprovalRequest(id);
   }
 
+  /**
+   * One page of requests, the most recently created first, and where the next page starts when
+   * the store had more. Changes nothing: a pending request whose Task finished reads as expired
+   * until `expireFinished` records it, so it leaves a `pending` page shorter than `limit`.
+   */
   async list(filter: {
     readonly objectiveId?: string;
     readonly status?: ApprovalRequestStatus;
+    readonly before?: { readonly createdAt: string; readonly id: string };
     readonly limit?: number;
-  }): Promise<readonly ApprovalRequest[]> {
-    const requests = await this.store.listApprovalRequests(filter);
-    // Requests whose Task already finished can never be used; expire them lazily.
-    return Promise.all(
-      requests.map(async (request) =>
-        request.status === "pending" && (await this.taskFinished(request))
-          ? ((await this.store.expireApprovalRequest(request.id)) ?? request)
-          : request,
+  }): Promise<{
+    readonly requests: readonly ApprovalRequest[];
+    readonly next?: { readonly createdAt: string; readonly id: string };
+  }> {
+    const limit = filter.limit ?? 100;
+    const requests = await this.store.listApprovalRequests({ ...filter, limit });
+    const last = requests.at(-1);
+    const values = await Promise.all(
+      requests.map(
+        async (request): Promise<ApprovalRequest> =>
+          request.status === "pending" && (await this.taskFinished(request))
+            ? { ...request, status: "expired" }
+            : request,
       ),
-    ).then((values) =>
-      filter.status === undefined
-        ? values
-        : values.filter((value) => value.status === filter.status),
     );
+    return {
+      requests:
+        filter.status === undefined
+          ? values
+          : values.filter((value) => value.status === filter.status),
+      ...(requests.length === limit && last !== undefined
+        ? { next: { createdAt: last.createdAt, id: last.id } }
+        : {}),
+    };
+  }
+
+  /** Expires pending requests whose Task finished: nothing can use them any more. */
+  async expireFinished(): Promise<void> {
+    for (const request of await this.store.listApprovalRequests({
+      status: "pending",
+      limit: 500,
+    }))
+      if (await this.taskFinished(request)) await this.store.expireApprovalRequest(request.id);
   }
 
   /** One digest per Objective of pending requests. The key changes whenever the pending set changes. */

@@ -1,27 +1,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { resolveOwnerObjectiveRuntimeActions } from "@supertag/control-plane";
 import {
-  generateObjectiveId,
   mailboxObject,
   mailboxText,
-  type Objective,
-  objectiveClosed,
-  parseCreateObjective,
   parseCreateTeam,
-  parseObjectiveStatus,
   parseUpdateTeam,
   type Store,
   TagMessagingError,
   type Team,
 } from "@supertag/core";
-
-/** What the operator routes need from a running Control Plane; omitted where none runs. */
-export interface MailboxAdminControlPlane {
-  /** Admission checks for creation warnings. */
-  readonly runnable: (objective: Objective) => Promise<{ readonly reasons: readonly string[] }>;
-  /** Admits the first turn of a new Objective's conversation. */
-  readonly start: (objective: Objective) => Promise<{ readonly taskId: string }>;
-}
 
 /** Called only after administrative authentication for /api/v1/tag-messaging routes. */
 export async function handleMailboxAdminRequest(
@@ -29,13 +15,10 @@ export async function handleMailboxAdminRequest(
   response: ServerResponse,
   url: URL,
   store: Store,
-  controlPlane?: MailboxAdminControlPlane,
 ): Promise<void> {
   await guarded(response, async () => {
     const route = url.pathname.slice("/api/v1/tag-messaging".length);
-    if (route === "/objectives" || route.startsWith("/objectives/"))
-      await objectives(request, response, url, route, store, controlPlane);
-    else if (route === "/teams" || route.startsWith("/teams/"))
+    if (route === "/teams" || route.startsWith("/teams/"))
       await teams(request, response, url, route, store);
     else if (route.startsWith("/workstreams/")) {
       const match = /^\/workstreams\/([^/]+)\/posts$/u.exec(route);
@@ -105,126 +88,6 @@ export async function handleMailboxAdminRequest(
       respond(response, 404, { error: "not_found" });
     }
   });
-}
-
-async function objectives(
-  request: IncomingMessage,
-  response: ServerResponse,
-  url: URL,
-  route: string,
-  store: Store,
-  controlPlane: MailboxAdminControlPlane | undefined,
-): Promise<void> {
-  if (route === "/objectives" && request.method === "POST") {
-    const record = mailboxObject(await readBody(request), [
-      "id",
-      "outcome",
-      "deadline",
-      "budgetLimitMinor",
-      "budgetCurrency",
-      "runtimeActions",
-      "ownerTagId",
-      "teamId",
-      "ongoing",
-      "workspaces",
-    ]);
-    const { ownerTagId, ...definition } = record;
-    // Like Kubernetes generateName: an omitted ID comes from the outcome's first words.
-    if (definition["id"] === undefined && typeof definition["outcome"] === "string")
-      definition["id"] = generateObjectiveId(definition["outcome"]);
-    const dryRun = url.searchParams.get("dryRun") === "true";
-    const parsed = parseCreateObjective(definition);
-    const owner = mailboxText(ownerTagId, "ownerTagId");
-    // Runtime actions resolve once against the owner's Permission Sets and are frozen into the
-    // record. A retry without them returns the existing Objective, even if grants changed since.
-    const requested =
-      definition["runtimeActions"] === undefined ? undefined : parsed.runtimeActions;
-    const prior =
-      requested === undefined
-        ? await store.getObjective(parsed.id).catch(() => undefined)
-        : undefined;
-    const runtime = await resolveOwnerObjectiveRuntimeActions(store, {
-      objectiveId: parsed.id,
-      ownerTagId: owner,
-      ...(requested === undefined ? {} : { requested }),
-    });
-    const objective = await store.createObjective(
-      {
-        ...parsed,
-        runtimeActions:
-          prior?.ownerTagId === owner ? (prior.runtimeActions ?? []) : runtime.runtimeActions,
-        ownerTagId: owner,
-      },
-      { dryRun },
-    );
-    // Warnings name conditions that would hold the Objective's Tasks or limit what they may do;
-    // creation still succeeds.
-    const warnings =
-      objective.status === "completed"
-        ? []
-        : [
-            ...(prior ? [] : runtime.warnings),
-            ...(controlPlane ? (await controlPlane.runnable(objective)).reasons : []),
-          ];
-    // Creating starts the Objective's conversation. Starting is idempotent, so a retried create
-    // returns the same first Task. A condition that prevents starting leaves the Objective created.
-    let started: { readonly taskId: string } | undefined;
-    let notStarted: string | undefined;
-    if (!dryRun && controlPlane && !objectiveClosed(objective.status)) {
-      try {
-        started = { taskId: (await controlPlane.start(objective)).taskId };
-      } catch (error) {
-        if (!(error instanceof TagMessagingError)) throw error;
-        notStarted = error.message;
-      }
-    }
-    respond(response, 200, {
-      ...objective,
-      warnings,
-      ...(started === undefined ? {} : { started }),
-      ...(notStarted === undefined ? {} : { notStarted }),
-      ...(dryRun ? { dryRun: true } : {}),
-    });
-    return;
-  }
-  if (route === "/objectives" && request.method === "GET") {
-    respond(response, 200, {
-      items: await store.listObjectives(
-        url.searchParams.has("tagId")
-          ? mailboxText(url.searchParams.get("tagId"), "tagId")
-          : undefined,
-        url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : 100,
-        url.searchParams.has("offset") ? Number(url.searchParams.get("offset")) : 0,
-      ),
-    });
-    return;
-  }
-  const match = /^\/objectives\/([^/]+)$/u.exec(route);
-  if (!match) {
-    respond(response, 404, { error: "not_found" });
-    return;
-  }
-  const id = decodeURIComponent(match[1] ?? "");
-  if (request.method === "GET") respond(response, 200, await store.getObjective(id));
-  else if (request.method === "PATCH") {
-    const update = parseObjectiveStatus(await readBody(request));
-    if (update.runtimeActions === undefined)
-      respond(response, 200, await store.updateObjectiveStatus(id, update));
-    else {
-      // A new list is bounded by the owner's Permission Sets as they are now.
-      const current = await store.getObjective(id);
-      const runtime = await resolveOwnerObjectiveRuntimeActions(store, {
-        objectiveId: id,
-        ownerTagId: current.ownerTagId,
-        requested: update.runtimeActions,
-      });
-      const updated = await store.updateObjectiveStatus(id, {
-        ...update,
-        runtimeActions: runtime.runtimeActions,
-      });
-      respond(response, 200, { ...updated, warnings: runtime.warnings });
-    }
-  } else respond(response, 404, { error: "not_found" });
 }
 
 async function teams(
