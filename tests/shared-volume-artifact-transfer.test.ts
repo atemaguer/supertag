@@ -441,11 +441,10 @@ it("shares an artifact between two unreachable Worker Hosts through a shared Vol
     // Listings say where each copy is: on the shared Volume, never on the Control Plane.
     const listed = JSON.parse(
       await runArtifactCommand(operator, "list", ["--task", produceTaskId]),
-    ) as { items: { metadata: { id: string }; status: unknown }[] };
-    expect(listed.items.find((item) => item.metadata.id === reportId)?.status).toEqual({
-      locations: [{ kind: "volume", volume: "shared" }],
-      ephemeralOnly: false,
-    });
+    ) as { artifacts: { id: string; copies: unknown; ephemeralOnly?: boolean }[] };
+    const listedReport = listed.artifacts.find((item) => item.id === reportId);
+    expect(listedReport?.copies).toEqual([{ volume: { volume: "shared" } }]);
+    expect(listedReport?.ephemeralOnly).toBeUndefined();
   } finally {
     for (const connection of connections) await connection.stop();
     await runtime?.close();

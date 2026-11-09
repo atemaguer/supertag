@@ -1,7 +1,10 @@
 import { parseArgs } from "node:util";
+import { type JsonValue, toJson } from "@bufbuild/protobuf";
 import type { WorkstreamPost } from "@supertag/core";
-import type { ControlPlaneClient } from "./control-plane-client.js";
-import { runTeamCommand } from "./teams.js";
+import { ListWorkstreamPostsResponseSchema } from "@supertag/operator-api";
+import { isoOf } from "./objective-protos.js";
+import { mailboxClient, type OperatorClientOptions } from "./operator-client.js";
+import { refusedAsError } from "./tag-conversation.js";
 
 export function workstreamHelp(): string {
   return `Usage:
@@ -14,11 +17,11 @@ sequence number, oldest first.
 `;
 }
 
-/** Lists a Team's Workstream posts; `args` are the `list workstream-post` options. */
+/** Lists a Team's Workstream posts as proto3 JSON; `args` are the `list workstream-post` options. */
 export async function listWorkstreamPosts(
-  client: ControlPlaneClient,
+  client: { readonly operator: OperatorClientOptions },
   args: readonly string[],
-): Promise<unknown> {
+): Promise<JsonValue> {
   const { values, positionals } = parseArgs({
     args: [...args],
     allowPositionals: true,
@@ -30,27 +33,59 @@ export async function listWorkstreamPosts(
     },
   });
   if (positionals.length > 0 || !values.team) throw new Error(workstreamHelp());
-  const team = JSON.parse(await runTeamCommand(client, ["get", values.team])) as {
-    readonly id: string;
-  };
-  const query = new URLSearchParams();
-  if (values.limit !== undefined) query.set("limit", values.limit);
-  if (values["after-sequence"] !== undefined) query.set("afterSequence", values["after-sequence"]);
-  return client.request(
-    `/api/v1/tag-messaging/workstreams/${encodeURIComponent(team.id)}/posts?${query}`,
+  const limit = values.limit === undefined ? 0 : mailboxLimit(values.limit);
+  const after =
+    values["after-sequence"] === undefined
+      ? undefined
+      : wholeNumber(values["after-sequence"], "afterSequence");
+  const page = await refusedAsError(() =>
+    mailboxClient(client.operator).listWorkstreamPosts({
+      team: values.team as string,
+      pageSize: limit,
+      ...(after === undefined ? {} : { afterSequence: BigInt(after) }),
+    }),
   );
+  return toJson(ListWorkstreamPostsResponseSchema, page);
 }
 
 /** Reads a Team's Workstream posts after a sequence number, oldest first, one page per call. */
-export function workstreamPosts(client: Pick<ControlPlaneClient, "request">) {
+export function workstreamPosts(client: { readonly operator: OperatorClientOptions }) {
+  const mailbox = mailboxClient(client.operator);
   return async (
     teamId: string,
     afterSequence: number,
     limit: number,
   ): Promise<readonly WorkstreamPost[]> =>
     (
-      await client.request<{ readonly items: readonly WorkstreamPost[] }>(
-        `/api/v1/tag-messaging/workstreams/${encodeURIComponent(teamId)}/posts?${new URLSearchParams({ afterSequence: String(afterSequence), limit: String(limit) })}`,
+      await refusedAsError(() =>
+        mailbox.listWorkstreamPosts({
+          team: teamId,
+          afterSequence: BigInt(afterSequence),
+          pageSize: limit,
+        }),
       )
-    ).items;
+    ).posts.map((post) => ({
+      id: post.id,
+      teamId: post.teamId,
+      authorTagId: post.authorTagId,
+      to: post.toTagIds,
+      body: post.body,
+      ...(post.sourceTaskId === "" ? {} : { sourceTaskId: post.sourceTaskId }),
+      sequence: Number(post.sequence),
+      createdAt: isoOf(post.createdAt) ?? "",
+    }));
+}
+
+/** A `--limit` of messages or posts: an integer from 1 to 200. */
+export function mailboxLimit(value: string): number {
+  const limit = wholeNumber(value, "limit");
+  if (limit < 1 || limit > 200) throw new Error("limit must be between 1 and 200");
+  return limit;
+}
+
+function wholeNumber(value: string, flag: string): number {
+  const number = Number(value);
+  if (!/^\d+$/u.test(value) || !Number.isSafeInteger(number))
+    throw new Error(`${flag} must be an integer`);
+  return number;
 }

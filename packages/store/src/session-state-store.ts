@@ -7,7 +7,7 @@ import type {
   SessionStateSummary,
 } from "@supertag/core";
 import { TagMessagingError } from "@supertag/core";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, lt, or, sql } from "drizzle-orm";
 import { runDialectTransaction } from "./dialect-transaction.js";
 
 type Flow<T> = Generator<any, T, any>;
@@ -181,6 +181,12 @@ export class DrizzleSessionStateStore implements SessionStatePersistence {
           eq(s.sessionId, input.sessionId),
           input.taskId === undefined ? undefined : eq(s.taskId, input.taskId),
           input.nativeId === undefined ? undefined : eq(s.nativeId, input.nativeId),
+          input.before === undefined
+            ? undefined
+            : or(
+                lt(s.createdAt, input.before.createdAt),
+                and(eq(s.createdAt, input.before.createdAt), lt(s.id, input.before.id)),
+              ),
         ),
       )
       .orderBy(desc(s.createdAt), desc(s.id))

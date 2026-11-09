@@ -75,17 +75,15 @@ export async function createOrganization(api) {
     actors[name] = { hostId, credential: enrolled.credential.token, tagId: tag.metadata.id };
   }
   // One flat Team: the manager owns the Objective and may give work Sessions to the analyst.
-  await api.request("POST", "/api/v1/tag-messaging/teams", {
+  const members = ["Support manager", "Support analyst"];
+  await api.rpc("TeamService", "CreateTeam", {
     id: teamId,
     name: "Support",
-    memberTagIds: [actors.manager.tagId, actors.analyst.tagId],
+    members,
     maxConcurrency: 2,
   });
-  for (const [senderTagId, recipientTagId] of [
-    [actors.manager.tagId, actors.analyst.tagId],
-    [actors.analyst.tagId, actors.manager.tagId],
-  ])
-    await api.request("PUT", "/api/v1/tag-messaging/grants", { senderTagId, recipientTagId });
+  for (const [sender, recipient] of [members, members.toReversed()])
+    await api.rpc("MailboxService", "GrantMailbox", { sender, recipient });
   // Creating the Objective starts its conversation; it is ongoing, so it rests between messages.
   await api.rpc("ObjectiveService", "CreateObjective", {
     id: objectiveId,

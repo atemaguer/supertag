@@ -42,7 +42,10 @@ export interface TeamStore {
   listTeams(): Promise<readonly Team[]>;
   /** The Teams the Tag is a member of, by name. */
   listTeamsOfTag(tagId: string): Promise<readonly Team[]>;
-  /** Refused with 409 when `expectedRevision` is not the current revision. */
+  /**
+   * Refused with 409 when `expectedRevision` is not the current revision, unless the Team already
+   * has every value the input sets: then it changes nothing and returns the Team.
+   */
   updateTeam(id: string, input: UpdateTeamInput): Promise<Team>;
   /**
    * Deletes the Team and its Workstream posts. Refused with 409 while an Objective that is not

@@ -1029,6 +1029,29 @@ export class DrizzleMailboxStore
     });
   }
 
+  async changeTagMessagingGrant(grant: TagMessagingGrant, granted: boolean): Promise<boolean> {
+    const sender = mailboxText(grant.senderTagId, "senderTagId");
+    const recipient = mailboxText(grant.recipientTagId, "recipientTagId");
+    if (sender === recipient)
+      throw new TagMessagingError(400, "A Tag needs no grant to message itself");
+    const self = this;
+    return this.surfaceTransaction(function* (tx) {
+      yield* self.lockActiveTags(tx, [recipient, sender]);
+      const t = self.tables.tagMessagingGrants;
+      const pair = and(eq(t.senderTagId, sender), eq(t.recipientTagId, recipient));
+      const [existing] = yield tx
+        .select({ senderTagId: t.senderTagId })
+        .from(t)
+        .where(pair)
+        .limit(1);
+      if ((existing !== undefined) === granted) return false;
+      if (granted)
+        yield tx.insert(t).values({ senderTagId: sender, recipientTagId: recipient }).returning();
+      else yield tx.delete(t).where(pair).returning();
+      return true;
+    });
+  }
+
   async listTagMessagingGrants(tagId: string): Promise<readonly TagMessagingGrant[]> {
     await this.activeTag(tagId);
     const t = this.tables.tagMessagingGrants;

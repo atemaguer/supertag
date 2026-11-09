@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { handleOperatorArtifacts } from "../apps/cli/src/artifact-resources.ts";
+import { artifactsWithLocations } from "../apps/cli/src/artifact-resources.ts";
 import { taskStorage } from "../apps/cli/src/task-storage.ts";
 import { FileArtifactStore, S3ArtifactStore } from "../packages/runtime/sdk/src/artifact-store.ts";
 
@@ -108,13 +108,8 @@ it("batches producing Attempts once across an artifact list page", async () => {
   if (!third) throw new Error("Missing third artifact");
   third.taskId = "task-2";
   store.listCapturedArtifacts.mockResolvedValue(page);
-  const end = vi.fn();
-  await handleOperatorArtifacts(
-    new URL("http://localhost/api/v1/artifacts"),
-    { writeHead: vi.fn(), end } as never,
-    store as never,
-  );
-  expect(JSON.parse(end.mock.calls[0]?.[0]).items).toHaveLength(3);
+  const placed = await artifactsWithLocations(store as never, page.artifacts as never);
+  expect(placed).toHaveLength(3);
   expect(store.listTaskAttempts).toHaveBeenCalledTimes(1);
   expect(store.listTaskAttempts).toHaveBeenCalledWith(["task-1", "task-2"]);
 });

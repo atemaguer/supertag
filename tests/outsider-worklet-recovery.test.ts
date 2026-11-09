@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, it } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
+import { workClient } from "../apps/cli/src/operator-client.js";
 import {
   objectiveSessionKey,
   type SurfaceTagAuthorizationSnapshot,
@@ -159,11 +160,7 @@ for (const termination of process.env["SUPERTAG_LIVE_CLEANUP_RECOVERY"] === "1"
           return task;
         };
         const cancel = async (taskId: string) => {
-          const response = await fetch(`${runtime.url}/api/v1/tasks/${taskId}/cancel`, {
-            method: "POST",
-            headers: { authorization: "Bearer test-admin" },
-          });
-          expect([200, 202]).toContain(response.status);
+          await workClient({ url: runtime.url, token: "test-admin" }).cancelTask({ id: taskId });
         };
         const connect = async () => {
           if (!runtime.workletGrpcUrl) throw new Error("Missing gRPC endpoint");

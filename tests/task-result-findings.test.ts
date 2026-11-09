@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { taskResourceFromStore } from "../apps/cli/src/control-plane-resources.ts";
+import { taskResourceFromStore } from "../apps/cli/src/work-views.ts";
 import type { SurfaceTagAuthorizationSnapshot, Task } from "../packages/core/src/index.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
 import { createIsolatedPostgresDatabase } from "./support/database.js";

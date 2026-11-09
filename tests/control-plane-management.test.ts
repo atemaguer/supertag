@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { main } from "../apps/cli/src/index.ts";
+import { workClient } from "../apps/cli/src/operator-client.ts";
 import type { CredentialValue, GatewayCredentialVault } from "../packages/core/src/index.ts";
 import { ControllerPhase, ControlPlanePhase } from "../packages/operator-api/src/index.ts";
 import { DrizzleStore } from "../packages/store/src/index.ts";
@@ -312,20 +313,11 @@ spec:
       expect(output.join("")).toContain("+ Role Engineering Reviewer");
       expect(output.join("")).toContain("~ Tag engineering   spec.roles: + Engineering Reviewer");
 
-      const tasksResponse = await fetch(`${runtime.url}/api/v1/tasks`, {
-        headers: adminHeaders,
-      });
-      await expect(tasksResponse.json()).resolves.toMatchObject({
-        kind: "ResourceList",
-        items: [],
-      });
-      const sessionsResponse = await fetch(`${runtime.url}/api/v1/sessions`, {
-        headers: adminHeaders,
-      });
-      await expect(sessionsResponse.json()).resolves.toMatchObject({
-        kind: "ResourceList",
-        items: [],
-      });
+      const work = workClient(client.operator);
+      await expect(work.listTasks({})).resolves.toMatchObject({ tasks: [] });
+      await expect(work.listSessions({})).resolves.toMatchObject({ sessions: [] });
+      for (const route of ["/api/v1/tasks", "/api/v1/sessions"])
+        expect((await fetch(`${runtime.url}${route}`, { headers: adminHeaders })).status).toBe(404);
       await expect(client.request("/api/v1/metrics")).resolves.toMatchObject({
         kind: "MetricSnapshot",
         values: {

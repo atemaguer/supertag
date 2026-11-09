@@ -69,15 +69,28 @@ func (m *model) refresh() {
 		m.viewport.SetContent(m.renderObjective())
 	case paneInbox:
 		m.viewport.SetContent(m.renderItem())
+	case paneDiff:
+		m.viewport.SetContent(m.renderDiffPane())
+	case paneConversations:
+		m.viewport.SetContent(m.renderPicker())
+	case paneTeam:
+		m.viewport.SetContent(m.renderTeam())
 	default:
 		atBottom := m.viewport.AtBottom()
 		m.viewport.SetContent(m.renderConversation())
-		if atBottom {
+		c := m.shown()
+		switch {
+		case c != nil && c.selected != nil:
+			m.viewport.EnsureVisible(c.selectedLine, 0, 0)
+		case atBottom:
 			m.viewport.GotoBottom()
 		}
 	}
 }
 
+// renderConversation renders the shown conversation. Each entry is rendered once per width,
+// except work Session lines and branch lines, which change as they are selected, expanded and
+// read. It records the selected line's position for refresh to keep it in view.
 func (m model) renderConversation() string {
 	tag := m.selectedTag()
 	if tag == "" {
@@ -86,32 +99,70 @@ func (m model) renderConversation() string {
 	name := terminalText(tag)
 	width := m.paneWidth()
 	wrap := lipgloss.NewStyle().Width(width)
-	c := m.conversations[tag]
+	conversation := m.currentConversation(tag)
+	c := m.conversations[convKey(tag, conversation)]
 	if c == nil || (len(c.entries) == 0 && c.draft == "") {
-		return faint.Render(wrap.Render("Say something to " + name + ". This is your default conversation with it."))
+		if conversation == defaultConversation {
+			return faint.Render(wrap.Render("Say something to " + name + ". This is your default conversation with it."))
+		}
+		return faint.Render(wrap.Render("Say something to " + name + " to start the conversation " + terminalText(conversation) + "."))
 	}
-	if c.renderedWidth != width {
-		c.rendered.Reset()
-		c.renderedCount, c.renderedWidth = 0, width
+	if c.cacheWidth != width {
+		c.cache, c.cacheWidth = nil, width
 	}
-	for _, e := range c.entries[c.renderedCount:] {
-		switch e.kind {
-		case entryYou:
-			c.rendered.WriteString(bold.Render("you") + "\n" + wrap.Render(e.text) + "\n\n")
-		case entryReply:
-			c.rendered.WriteString(headerStyle.Render(name) + "\n" + m.md.render(e.text, width) + "\n\n")
-		case entryDim:
-			c.rendered.WriteString(faint.Render(wrap.Render(e.text)) + "\n")
-		case entryError:
-			c.rendered.WriteString(errorStyle.Render(wrap.Render(e.text)) + "\n\n")
+	working, reports := anchors(c)
+	var out strings.Builder
+	lines := 0
+	write := func(s string) {
+		out.WriteString(s)
+		lines += strings.Count(s, "\n")
+	}
+	isSelected := func(t target) bool { return c.selected != nil && *c.selected == t }
+	for i, e := range c.entries {
+		anchor := e.kind == entryWork && working[e.session] == i
+		if i >= len(c.cache) {
+			rendered := ""
+			if !anchor {
+				rendered = m.renderEntry(e, name, width)
+			}
+			c.cache = append(c.cache, rendered)
+		}
+		if anchor {
+			t := target{session: e.session}
+			if isSelected(t) {
+				c.selectedLine = lines
+			}
+			write(m.renderWorkLine(e, isSelected(t), width))
+			continue
+		}
+		write(c.cache[i])
+		if e.kind == entryReport && reports[e.session] == i && m.work[e.session].branch() != nil {
+			t := target{session: e.session, branch: true}
+			if isSelected(t) {
+				c.selectedLine = lines
+			}
+			write(m.renderBranchLine(e.session, isSelected(t), width) + "\n\n")
 		}
 	}
-	c.renderedCount = len(c.entries)
-	out := c.rendered.String()
+	text := out.String()
 	if c.draft != "" {
-		out += headerStyle.Render(name) + "\n" + faint.Render(wrap.Render(c.draft))
+		text += headerStyle.Render(name) + "\n" + faint.Render(wrap.Render(c.draft))
 	}
-	return strings.TrimRight(out, "\n")
+	return strings.TrimRight(text, "\n")
+}
+
+// renderEntry renders an entry that does not change once added.
+func (m model) renderEntry(e entry, name string, width int) string {
+	wrap := lipgloss.NewStyle().Width(width)
+	switch e.kind {
+	case entryYou:
+		return bold.Render("you") + "\n" + wrap.Render(e.text) + "\n\n"
+	case entryReply, entryReport:
+		return headerStyle.Render(name) + "\n" + m.md.render(e.text, width) + "\n\n"
+	case entryError:
+		return errorStyle.Render(wrap.Render(e.text)) + "\n\n"
+	}
+	return faint.Render(wrap.Render(e.text)) + "\n"
 }
 
 // railContent is the rail's text width: railWidth less its right border and padding.
@@ -156,7 +207,8 @@ func (m model) renderRail(height int) string {
 
 	section("Tags", "")
 	for i, tag := range m.tags {
-		add(row{rowTag, i}, terminalText(tag.Name()), terminalText(railState(tag, m.open[tag.Name()])))
+		open := m.open[convKey(tag.Name(), m.currentConversation(tag.Name()))]
+		add(row{rowTag, i}, terminalText(tag.Name()), terminalText(railState(tag, open)))
 	}
 	if len(m.objectives) > 0 || m.objectivesErr != "" {
 		section("Objectives", m.objectivesErr)
@@ -172,6 +224,12 @@ func (m model) renderRail(height int) string {
 	for i, item := range m.inbox.Items {
 		add(row{rowInbox, i}, m.inboxRow(item), "")
 	}
+	if len(m.teams) > 0 || m.teamsErr != "" {
+		section("Teams", m.teamsErr)
+		for i, team := range m.teams {
+			add(row{rowTeam, i}, terminalText(team.GetName()), teamState(team))
+		}
+	}
 
 	first := max(cursorLine-height+1, 0)
 	lines = lines[first:min(first+height, len(lines))]
@@ -179,7 +237,7 @@ func (m model) renderRail(height int) string {
 }
 
 // railState is what the rail shows beside a Tag: its phase, or how many work Sessions of the
-// default conversation are still open while the Tag is active.
+// conversation it shows are still open while the Tag is active.
 func railState(tag client.Tag, open int) string {
 	if open > 0 && tag.Status.Phase == "active" {
 		return fmt.Sprintf("%d open", open)
@@ -212,7 +270,12 @@ func (m model) View() tea.View {
 	bodyHeight := max(m.height-1, 2)
 	header := headerStyle.Render(truncate(m.paneTitle(), m.paneWidth()))
 	bottom := m.input.View()
-	if !m.inputShown() {
+	switch {
+	case m.notice.text != "" && m.notice.err:
+		bottom = errorStyle.Render(truncate(m.notice.text, m.paneWidth()))
+	case m.notice.text != "":
+		bottom = okStyle.Render(truncate(m.notice.text, m.paneWidth()))
+	case !m.inputShown():
 		bottom = faint.Render(truncate(m.paneHint(), m.paneWidth()))
 	}
 	pane := lipgloss.JoinVertical(lipgloss.Left, header, m.viewport.View(), bottom)
@@ -236,8 +299,21 @@ func (m model) paneTitle() string {
 		return "Objective · " + terminalText(name)
 	case paneInbox:
 		return "Waiting on you · " + itemKindName(m.item.GetKind())
+	case paneDiff:
+		return "Diff · " + m.diff.title
+	case paneConversations:
+		return terminalText(m.picker.tag) + " · conversations"
+	case paneTeam:
+		name := m.teamID
+		if view, ok := m.teamViews[m.teamID]; ok {
+			name = view.Team.GetName()
+		} else if team := m.listedTeam(m.teamID); team != nil {
+			name = team.GetName()
+		}
+		return "Team · " + terminalText(name)
 	}
-	return fmt.Sprintf("%s · %s", terminalText(m.selectedTag()), conversationName)
+	tag := m.selectedTag()
+	return fmt.Sprintf("%s · %s", terminalText(tag), terminalText(m.currentConversation(tag)))
 }
 
 // paneHint ends a pane that has no input line: the keys that act on it.
@@ -257,6 +333,16 @@ func (m model) paneHint() string {
 			return "a approve · d deny"
 		}
 		return "Run the command above to act on it."
+	case paneDiff:
+		return m.diffHint()
+	case paneConversations:
+		return m.pickerHint()
+	case paneTeam:
+		return "Live · its Workstream updates as members post"
+	case paneConversation:
+		if c := m.shown(); c != nil && c.selected != nil {
+			return m.selectionHint(*c.selected)
+		}
 	}
 	return ""
 }

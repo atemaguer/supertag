@@ -22,7 +22,6 @@ import type {
   ManagedResourceKind,
   Objective,
   Role,
-  Session,
   Store,
   SurfaceAccount,
   SurfaceProvider,
@@ -38,7 +37,6 @@ import type {
 import {
   type ApplyVolumeInput,
   type ApplyWorkspaceInput,
-  ArtifactCatalogError,
   DEFAULT_WORKSPACE_DELIVERY,
   normalizeApprovers,
   OPERATOR_TOKEN_PREFIX,
@@ -70,7 +68,6 @@ import {
 import { pruneApplySet } from "./apply-set-prune.js";
 import { registerArtifactGrpcRoutes } from "./artifact-grpc.js";
 import { handleArtifactRequest } from "./artifact-http.js";
-import { handleOperatorArtifacts } from "./artifact-resources.js";
 import {
   type AuditNote,
   AuditTrail,
@@ -89,13 +86,11 @@ import {
   permissionSetResource,
   resourceList,
   roleResource,
-  sessionResource,
   surfaceAccountResource,
   type TagLocationSpec,
   type TagOrganization,
   tagLocationScopeFields,
   tagResource,
-  taskResourceFromStore,
   volumeResource,
   workerHostCredentialIssuance,
   workerHostResource,
@@ -108,7 +103,6 @@ import { registerCoordinationGrpcRoutes } from "./coordination-grpc.js";
 import { handleCoordinationRequest } from "./coordination-http.js";
 import { canonicalJson, locationKey, sameValue } from "./field-management.js";
 import type { SurfaceController } from "./gateway-surfaces.js";
-import { handleMailboxAdminRequest } from "./mailbox-http.js";
 import {
   conflictMessage,
   type ManagedPlan,
@@ -128,7 +122,11 @@ import {
   parseObjectiveManifest,
   planObjectiveManifest,
 } from "./objective-manifest.js";
-import { controlPlaneControl, controlPlaneQueries } from "./operator-control-plane.js";
+import {
+  controlPlaneControl,
+  controlPlaneDataWrites,
+  controlPlaneQueries,
+} from "./operator-control-plane.js";
 import {
   createOperatorRpcHandler,
   OPERATOR_RPC_PATH_PREFIX,
@@ -250,6 +248,7 @@ export class ControlPlaneApiServer {
         registerOperatorRoutes(router, {
           store: dependencies.store,
           queries: controlPlaneQueries(dependencies),
+          writes: controlPlaneDataWrites(dependencies),
           control: controlPlaneControl(dependencies),
           changes: dependencies.controlPlane.changes,
           follows: this.#follows,
@@ -516,23 +515,6 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
     );
     return;
   }
-  // Artifact metadata and download locations are for administrators, not coordination credentials.
-  if (url.pathname.startsWith("/api/v1/artifacts")) {
-    const download = /^\/api\/v1\/artifacts\/([^/]+)\/download$/u.exec(url.pathname);
-    if (download?.[1] && context.request.method === "POST") {
-      await handleOperatorArtifactDownload(
-        context,
-        decodeURIComponent(download[1]),
-        authentication.principal.operatorId,
-      );
-      return;
-    }
-    if (
-      context.request.method === "GET" &&
-      (await handleOperatorArtifacts(url, context.response, context.store))
-    )
-      return;
-  }
   if (
     url.pathname === "/api/v1/operator-tokens" ||
     url.pathname.startsWith("/api/v1/operator-tokens/")
@@ -547,10 +529,6 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
       return;
     }
     await handleOperatorTokenRequest(context, url);
-    return;
-  }
-  if (url.pathname.startsWith("/api/v1/tag-messaging/")) {
-    await handleMailboxAdminRequest(context.request, context.response, url, context.store);
     return;
   }
   if (
@@ -1363,130 +1341,6 @@ async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL
         await workspaceEnvironments(context.store, workspace, hosts),
       ),
     );
-    return;
-  }
-
-  if (context.request.method === "GET" && url.pathname === "/api/v1/tasks") {
-    writeJson(
-      context.response,
-      200,
-      resourceList(
-        await Promise.all(
-          (await context.store.listTasks()).map((task) =>
-            taskResourceFromStore(context.store, task),
-          ),
-        ),
-      ),
-    );
-    return;
-  }
-
-  if (context.request.method === "GET" && url.pathname === "/api/v1/sessions") {
-    writeJson(
-      context.response,
-      200,
-      resourceList(await sessionResources(context.store, await context.store.listSessions())),
-    );
-    return;
-  }
-
-  const taskEventsMatch = /^\/api\/v1\/tasks\/([^/]+)\/events$/u.exec(url.pathname);
-  if (context.request.method === "GET" && taskEventsMatch?.[1] !== undefined) {
-    const taskId = decodeURIComponent(taskEventsMatch[1]);
-    if ((await context.store.findTaskById(taskId)) === undefined) {
-      writeJson(context.response, 404, {
-        error: "not_found",
-        message: `Task ${taskId} does not exist`,
-      });
-      return;
-    }
-    writeJson(context.response, 200, {
-      apiVersion: CONTROL_PLANE_API_VERSION,
-      kind: "TaskEventList",
-      metadata: { taskId },
-      items: await context.store.listTaskEvents(taskId),
-    });
-    return;
-  }
-
-  const taskExecutionMatch = /^\/api\/v1\/tasks\/([^/]+)\/execution$/u.exec(url.pathname);
-  if (context.request.method === "GET" && taskExecutionMatch?.[1]) {
-    const taskId = decodeURIComponent(taskExecutionMatch[1]);
-    if (!(await context.store.findTaskById(taskId))) {
-      writeJson(context.response, 404, { error: "not_found", message: "Task does not exist" });
-      return;
-    }
-    writeJson(context.response, 200, await context.controlPlane.inspectTaskExecution(taskId));
-    return;
-  }
-
-  const taskMatch = /^\/api\/v1\/tasks\/([^/]+)$/u.exec(url.pathname);
-  if (context.request.method === "GET" && taskMatch?.[1] !== undefined) {
-    const task = await context.store.findTaskById(decodeURIComponent(taskMatch[1]));
-    if (task === undefined) {
-      writeJson(context.response, 404, { error: "not_found", message: "Task does not exist" });
-      return;
-    }
-    writeJson(
-      context.response,
-      200,
-      await taskResourceFromStore(context.store, task, { storage: true }),
-    );
-    return;
-  }
-
-  const taskCancelMatch = /^\/api\/v1\/tasks\/([^/]+)\/cancel$/u.exec(url.pathname);
-  if (context.request.method === "POST" && taskCancelMatch?.[1] !== undefined) {
-    const result = await context.controlPlane.requestTaskCancellation(
-      decodeURIComponent(taskCancelMatch[1]),
-      authentication.principal,
-    );
-    writeJson(context.response, result.accepted ? 202 : 200, {
-      apiVersion: CONTROL_PLANE_API_VERSION,
-      kind: "TaskCancellation",
-      metadata: { taskId: result.task.id },
-      status: { accepted: result.accepted, phase: result.task.status },
-    });
-    return;
-  }
-
-  const nativeSessionMatch = /^\/api\/v1\/sessions\/([^/]+)\/states(?:\/([^/]+))?$/u.exec(
-    url.pathname,
-  );
-  if (context.request.method === "GET" && nativeSessionMatch?.[1]) {
-    const sessionId = decodeURIComponent(nativeSessionMatch[1]);
-    if (!(await context.store.findSessionById(sessionId))) {
-      writeJson(context.response, 404, { error: "not_found" });
-      return;
-    }
-    context.response.setHeader("cache-control", "no-store");
-    if (nativeSessionMatch[2]) {
-      const state = await context.store.findSessionState(decodeURIComponent(nativeSessionMatch[2]));
-      if (!state || state.sessionId !== sessionId) {
-        writeJson(context.response, 404, { error: "not_found" });
-        return;
-      }
-      writeJson(context.response, 200, state);
-      return;
-    }
-    const nativeId = url.searchParams.get("nativeId");
-    const states = await context.store.listSessionStates({
-      sessionId,
-      limit: 100,
-      ...(nativeId === null ? {} : { nativeId }),
-    });
-    writeJson(context.response, 200, { states });
-    return;
-  }
-  const sessionMatch = /^\/api\/v1\/sessions\/([^/]+)$/u.exec(url.pathname);
-  if (context.request.method === "GET" && sessionMatch?.[1] !== undefined) {
-    const session = await context.store.findSessionById(decodeURIComponent(sessionMatch[1]));
-    if (session === undefined) {
-      writeJson(context.response, 404, { error: "not_found", message: "Session does not exist" });
-      return;
-    }
-    const [resource] = await sessionResources(context.store, [session]);
-    writeJson(context.response, 200, resource);
     return;
   }
 
@@ -3189,28 +3043,6 @@ async function applySurfaceAccountManifest(
   writeJson(context.response, existing === undefined ? 201 : 200, surfaceAccountResource(account));
 }
 
-/** Sessions as resources, each with the status of its latest Task. */
-async function sessionResources(
-  store: ControlPlaneApiRequestContext["store"],
-  sessions: readonly Session[],
-) {
-  const summaries = await store.sessionTaskSummaries(sessions.map((session) => session.id));
-  const tags = new Map(
-    (
-      await Promise.all(
-        [...new Set(sessions.map((session) => session.tagId))].map((id) => store.findTagById(id)),
-      )
-    ).flatMap((tag) => (tag === undefined ? [] : [[tag.id, tag.name] as const])),
-  );
-  return sessions.map((session) => {
-    const tag = tags.get(session.tagId);
-    return sessionResource(session, {
-      ...summaries.get(session.id),
-      ...(tag === undefined ? {} : { tag }),
-    });
-  });
-}
-
 /** A stored account in manifest form, as field management compares it. */
 function storedSurfaceAccountSpec(account: SurfaceAccount): SurfaceAccountManifestSpec {
   if (account.provider === "cli") throw new Error("The CLI conversation account is built in");
@@ -3421,56 +3253,6 @@ async function handleObjectiveManifestRequest(
       reasons[error.statusCode] ?? "Invalid",
       error.message,
     );
-  }
-}
-
-/**
- * Where an administrator's `supertag download artifact` can read one file: the producing host's
- * transfer endpoint with a short-lived grant bound to the file and operator, and the Volume copies
- * the operator's own machine may map. Metadata only; the Control Plane holds no bytes to serve.
- */
-async function handleOperatorArtifactDownload(
-  context: ControlPlaneApiRequestContext,
-  artifactId: string,
-  operatorId: string,
-): Promise<void> {
-  const catalog = new ArtifactCatalog(
-    context.store,
-    context.controlPlane.objectives,
-    context.artifactTransfers === undefined ? undefined : { sign: context.artifactTransfers.sign },
-  );
-  try {
-    const resolved = await catalog.resolveOperatorDownload(
-      operatorId,
-      artifactId,
-      await readJsonBody(context.request),
-      {
-        publicUrl: context.publicUrl,
-        operatorAddress: context.request.socket.remoteAddress,
-        hostConnectionIsLoopback: (workerHostId, generation) =>
-          context.workletApi?.isHostConnectionLoopback(workerHostId, generation) === true,
-      },
-    );
-    context.response.writeHead(200, {
-      "content-type": "application/json",
-      "cache-control": "no-store",
-    });
-    context.response.end(JSON.stringify(resolved));
-  } catch (error) {
-    if (error instanceof TagMessagingError || error instanceof ArtifactCatalogError) {
-      writeStatusError(
-        context.response,
-        error.statusCode,
-        error.statusCode === 404 ? "NotFound" : "Invalid",
-        error.message,
-      );
-      return;
-    }
-    if (error instanceof Error && error.message === "Request body must be valid JSON") {
-      writeStatusError(context.response, 400, "Invalid", error.message);
-      return;
-    }
-    throw error;
   }
 }
 

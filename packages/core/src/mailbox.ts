@@ -71,6 +71,11 @@ export interface TagMessageHistoryPage {
 export interface TagMailboxStore {
   /** Replaces the Tags the recipient accepts messages from; an empty list removes every grant. */
   setTagMessagingGrants(recipientTagId: string, senderTagIds: readonly string[]): Promise<void>;
+  /**
+   * Grants or revokes one sender's grant at the recipient in one transaction, leaving the
+   * recipient's other grants alone. True when it changed the grant, false when it already held.
+   */
+  changeTagMessagingGrant(grant: TagMessagingGrant, granted: boolean): Promise<boolean>;
   /** Grants in which the Tag is the sender or the recipient. */
   listTagMessagingGrants(tagId: string): Promise<readonly TagMessagingGrant[]>;
   /** True when the two Tags share a Team, or the recipient has a grant for the sender. */

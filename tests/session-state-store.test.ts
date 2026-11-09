@@ -151,7 +151,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
           };
           return { input, task, attempt };
         }
-        return { store, other, work, url };
+        return { store, other, work, url, owner, objective };
       }
       it("updates stored transcripts, survives reconnect, and seals resumable state", async () => {
         const f = await fixture();
@@ -228,6 +228,20 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         expect(records).toHaveLength(2);
         expect(records.every((record) => record.status === "stored")).toBe(true);
         expect(records[0]?.id).toBe(next.ref.id);
+        const [newest, older] = records;
+        expect(
+          await f.store.listSessionStates({
+            sessionId: task.sessionId,
+            limit: 1,
+            before: { createdAt: newest?.createdAt as string, id: newest?.id as string },
+          }),
+        ).toEqual([older]);
+        expect(
+          await f.store.listSessionStates({
+            sessionId: task.sessionId,
+            before: { createdAt: older?.createdAt as string, id: older?.id as string },
+          }),
+        ).toEqual([]);
       });
 
       it("rejects foreign ownership, ref and harness changes, oversized payloads, and invalid limits", async () => {
@@ -262,6 +276,34 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             workerProfile: { id: "test", revision: "1" },
           }),
         ).rejects.toThrow("another Task Attempt");
+      });
+
+      it("lists Tasks after a cursor and by Objective", async () => {
+        const f = await fixture();
+        const first = await f.work();
+        const second = await f.work();
+        const all = await f.store.listTasks({ tagId: f.owner.id });
+        expect(all.map((task) => task.id).toSorted()).toEqual(
+          [first.task.id, second.task.id].toSorted(),
+        );
+        const [newest, older] = all;
+        expect(
+          await f.store.listTasks({
+            tagId: f.owner.id,
+            limit: 1,
+            before: { createdAt: newest?.createdAt as string, id: newest?.id as string },
+          }),
+        ).toEqual([older]);
+        expect(
+          await f.store.listTasks({
+            tagId: f.owner.id,
+            before: { createdAt: older?.createdAt as string, id: older?.id as string },
+          }),
+        ).toEqual([]);
+        expect(
+          (await f.store.listTasks({ objectiveId: f.objective.id })).map((task) => task.id),
+        ).toEqual(all.filter((task) => task.objectiveId === f.objective.id).map((task) => task.id));
+        expect(await f.store.listTasks({ objectiveId: "no-such-objective" })).toEqual([]);
       });
 
       it("rejects reordered writes while accepting exact version retries", async () => {

@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { takeOutputFlag } from "../apps/cli/src/output-flag.ts";
 import { runTaskCommand } from "../apps/cli/src/tasks.ts";
 import { runWorkerHostOperation } from "../apps/cli/src/worker-hosts.ts";
+import { fakeOperatorRpc } from "./support/fake-operator-rpc.ts";
 
 const client = (response: unknown) => ({
   calls: [] as string[],
@@ -22,29 +23,28 @@ describe("one-line summaries for commands that change something", () => {
   });
 
   it("summarizes Task cancellation, with the record under --output json", async () => {
-    const record = {
-      kind: "TaskCancellation",
-      metadata: { taskId: "t1" },
-      status: { accepted: true, phase: "cancelled" },
-    };
-    expect(await runTaskCommand(client(record), "cancel", ["t1"])).toBe("task/t1 cancelled.\n");
+    const operator = { operator: { url: "http://127.0.0.1:1", token: "t" } };
+    const cancelled = (record: Record<string, unknown>) =>
+      fakeOperatorRpc({ "WorkService/CancelTask": () => record });
+    const record = { taskId: "t1", accepted: true, status: "TASK_STATUS_CANCELLED" };
+    cancelled(record);
+    expect(await runTaskCommand(operator, "cancel", ["t1"])).toBe("task/t1 cancelled.\n");
+    vi.restoreAllMocks();
+    cancelled({ ...record, status: "TASK_STATUS_RUNNING" });
+    expect(await runTaskCommand(operator, "cancel", ["t1"])).toBe(
+      "task/t1 cancellation requested; it is running until its Worker stops.\n",
+    );
+    vi.restoreAllMocks();
+    cancelled({ taskId: "t1", status: "TASK_STATUS_COMPLETED" });
+    expect(await runTaskCommand(operator, "cancel", ["t1"])).toBe(
+      "task/t1 is already completed; nothing to cancel.\n",
+    );
+    vi.restoreAllMocks();
+    cancelled(record);
     expect(
-      await runTaskCommand(
-        client({ ...record, status: { accepted: true, phase: "running" } }),
-        "cancel",
-        ["t1"],
-      ),
-    ).toBe("task/t1 cancellation requested; it is running until its Worker stops.\n");
-    expect(
-      await runTaskCommand(
-        client({ ...record, status: { accepted: false, phase: "completed" } }),
-        "cancel",
-        ["t1"],
-      ),
-    ).toBe("task/t1 is already completed; nothing to cancel.\n");
-    expect(
-      JSON.parse(await runTaskCommand(client(record), "cancel", ["t1", "--output", "json"])),
+      JSON.parse(await runTaskCommand(operator, "cancel", ["t1", "--output", "json"])),
     ).toEqual(record);
+    vi.restoreAllMocks();
   });
 
   it("summarizes draining and resuming a Worker Host", async () => {

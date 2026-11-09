@@ -324,7 +324,7 @@ func TestReadTarget(t *testing.T) {
 func followed(t *testing.T, m model, events ...client.FollowEvent) model {
 	t.Helper()
 	for _, event := range events {
-		m = update(t, m, followMsg{tag: m.selectedTag(), event: event})
+		m = update(t, m, followMsg{tag: m.selectedTag(), conversation: m.currentConversation(m.selectedTag()), event: event})
 	}
 	return m
 }
@@ -341,7 +341,7 @@ func TestServerTextIsFilteredForTheTerminal(t *testing.T) {
 		client.FollowEvent{Kind: client.EventTurnError, Text: "Tag lead could not answer: \x1b[2Jgone"},
 		client.FollowEvent{Kind: client.EventDelta, Text: "draft \x1bP1$r\x1b\\"},
 	)
-	m = update(t, m, followMsg{tag: m.selectedTag(), event: client.FollowEvent{Kind: client.EventError, Text: "boom\x1b[8m hidden"}})
+	m = update(t, m, followMsg{tag: m.selectedTag(), conversation: m.currentConversation(m.selectedTag()), event: client.FollowEvent{Kind: client.EventError, Text: "boom\x1b[8m hidden"}})
 	view := m.View().Content
 	// Only the renderer's own SGR sequences may reach the terminal.
 	for _, raw := range []string{"\x1b[8m", "\x1b[28m", "\x1b[2J", "\x1bP", "\x1b_", "\x1b]", "\a"} {

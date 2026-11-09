@@ -177,9 +177,10 @@ async function verify(state, report) {
     );
     const receipt = report.provider.operations[operationId];
     assert(receipt, `${operationId} has no provider receipt`);
-    const events = (
-      await api.request("GET", `/api/v1/tasks/${encodeURIComponent(session.latestTask.id)}/events`)
-    ).items;
+    const { events = [] } = await api.rpc("WorkService", "ListTaskEvents", {
+      taskId: session.latestTask.id,
+      pageSize: 1000,
+    });
     assert(
       events.some(
         (event) =>

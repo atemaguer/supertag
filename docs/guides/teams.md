@@ -48,7 +48,8 @@ supertag update team metering --member backend --member frontend --member qa --m
 ```
 
 The CLI reads the Team's current revision for you and retries once after an unrelated change.
-Pass `--revision N` to fail on any concurrent change instead.
+Pass `--revision N` to fail on any concurrent change instead. A stale revision still succeeds,
+without a change, when the Team already has the values you set.
 
 ## 3. Name the Team on an Objective
 

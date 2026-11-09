@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { fakeOperatorRpc } from "../../tests/support/fake-operator-rpc.js";
+import { fakeWorkRpc } from "../../tests/support/fake-work-rpc.js";
 import { ControlPlaneClient } from "./src/control-plane-client.js";
 import { renderListTable, runListCommand } from "./src/list-command.js";
 
@@ -16,6 +17,7 @@ it("lists Tags as an operator table by default and preserves the collection in J
     ],
   };
   const request = vi.spyOn(ControlPlaneClient.prototype, "request").mockResolvedValue(collection);
+  const rpc = fakeOperatorRpc({ "WorkService/ListTasks": () => ({}) });
   try {
     const table = await runListCommand(target, ["tag"]);
     expect(table).toContain("NAME");
@@ -29,6 +31,7 @@ it("lists Tags as an operator table by default and preserves the collection in J
     expect(request).toHaveBeenCalledWith("/api/v1/tags");
   } finally {
     request.mockRestore();
+    rpc.fetch.mockRestore();
   }
 });
 
@@ -164,15 +167,6 @@ it("shows busy Tags and running attempts against host capacity", async () => {
     .mockResolvedValueOnce({
       items: [
         {
-          metadata: { id: "task-1" },
-          spec: { tagId: "tag-1" },
-          status: { attempt: { phase: "running" } },
-        },
-      ],
-    })
-    .mockResolvedValueOnce({
-      items: [
-        {
           metadata: { id: "host-1", name: "laptop" },
           status: {
             connectionStatus: "connected",
@@ -180,20 +174,113 @@ it("shows busy Tags and running attempts against host capacity", async () => {
           },
         },
       ],
-    })
-    .mockResolvedValueOnce({
-      items: [
-        {
-          metadata: { id: "task-1" },
-          status: { attempt: { phase: "running", workerHostId: "host-1", workerId: "worker-1" } },
-        },
-      ],
     });
+  const rpc = fakeWorkRpc([
+    {
+      metadata: { id: "task-1" },
+      spec: { tagId: "tag-1" },
+      status: {
+        phase: "running",
+        attempt: { phase: "running", workerHostId: "host-1", workerId: "worker-1" },
+      },
+    },
+  ]);
   try {
     expect(await runListCommand(target, ["tag"])).toContain("task-1");
     expect(await runListCommand(target, ["worker-host"])).toContain("codex 1/2");
   } finally {
     request.mockRestore();
+    rpc.fetch.mockRestore();
+  }
+});
+
+it("lists Tasks and Sessions over WorkService, as tables and as the RPCs' messages", async () => {
+  const rpc = fakeWorkRpc(
+    [
+      {
+        metadata: { id: "task-1" },
+        spec: { tagId: "tag-1", sessionId: "session-1", objectiveId: "ship" },
+        status: { phase: "completed" },
+      },
+    ],
+    {
+      "WorkService/ListSessions": () => ({
+        sessions: [
+          {
+            id: "session-1",
+            tag: "builder",
+            title: "Fix the build",
+            parentSessionId: "session-0",
+            latestTaskStatus: "TASK_STATUS_COMPLETED",
+            lastInteractionAt: "2026-11-01T00:00:00Z",
+          },
+        ],
+      }),
+    },
+  );
+  try {
+    expect(await runListCommand(target, ["task"])).toMatch(/task-1 +completed +tag-1 +ship/u);
+    expect(await runListCommand(target, ["session"])).toMatch(
+      /session-1 +builder +Fix the build +session-0 +completed +2026-11-01T00:00:00\.000Z/u,
+    );
+    expect(JSON.parse(await runListCommand(target, ["task", "--output", "json"]))).toMatchObject({
+      tasks: [{ id: "task-1", status: "TASK_STATUS_COMPLETED" }],
+    });
+  } finally {
+    rpc.fetch.mockRestore();
+  }
+});
+
+it("lists Teams, messages, grants and Workstream posts with the Tag names the RPCs return", async () => {
+  const rpc = fakeOperatorRpc({
+    "TeamService/ListTeams": () => ({
+      teams: [
+        { id: "crew", name: "Crew", members: [{ tagId: "a", tag: "alpha" }, { tagId: "b" }] },
+      ],
+    }),
+    "MailboxService/ListTagMessages": () => ({
+      messages: [
+        {
+          id: "m1",
+          senderTagId: "a",
+          recipientTagId: "b",
+          status: "TAG_MESSAGE_STATUS_HANDLED",
+          createdAt: "2026-11-01T00:00:00Z",
+          text: "Ship it\nplease",
+        },
+      ],
+      tagNames: { a: "alpha" },
+    }),
+    "MailboxService/ListMailboxGrants": () => ({
+      grants: [{ senderTagId: "a", recipientTagId: "b" }],
+      tagNames: { a: "alpha", b: "beta" },
+    }),
+    "MailboxService/ListWorkstreamPosts": () => ({
+      posts: [
+        {
+          sequence: "3",
+          authorTagId: "a",
+          toTagIds: ["b"],
+          createdAt: "2026-11-01T00:00:00Z",
+          body: "Done",
+        },
+      ],
+      tagNames: { a: "alpha", b: "beta" },
+    }),
+  });
+  try {
+    expect(await runListCommand(target, ["team"])).toMatch(/Crew +alpha, b +-/u);
+    expect(await runListCommand(target, ["message", "--mailbox", "beta"])).toMatch(
+      /m1 +alpha +b +handled +2026-11-01T00:00:00\.000Z +Ship it please$/mu,
+    );
+    expect(await runListCommand(target, ["mailbox-grant", "--mailbox", "beta"])).toMatch(
+      /alpha +beta/u,
+    );
+    expect(await runListCommand(target, ["workstream-post", "--team", "crew"])).toMatch(
+      /3 +alpha +beta +2026-11-01T00:00:00\.000Z +Done/u,
+    );
+  } finally {
+    rpc.fetch.mockRestore();
   }
 });
 

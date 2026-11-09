@@ -733,7 +733,10 @@ export interface Task {
 export interface TaskListFilter {
   readonly tagId?: string;
   readonly sessionId?: string;
+  readonly objectiveId?: string;
   readonly status?: TaskStatus;
+  /** Lists the Tasks that come after this one, newest first. */
+  readonly before?: { readonly createdAt: string; readonly id: string };
   readonly limit?: number;
 }
 

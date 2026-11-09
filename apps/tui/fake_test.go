@@ -4,26 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
 	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1/operatorv1connect"
 )
 
 // fakeControlPlane serves GET /api/v1/tags and the generated ConversationService,
-// ObjectiveService, InboxService and EventService handlers. Unset functions answer with an empty
-// history, no conversations, no Objectives, an empty inbox, and a watch stream that only stays
-// open.
+// ObjectiveService, InboxService, WorkService, TeamService, MailboxService and EventService
+// handlers. Unset functions answer with an empty history, no conversations, no Objectives, an
+// empty inbox, no Sessions, no Task events, no Teams, and a watch stream that only stays open.
 type fakeControlPlane struct {
 	operatorv1connect.UnimplementedConversationServiceHandler
 	operatorv1connect.UnimplementedObjectiveServiceHandler
 	operatorv1connect.UnimplementedInboxServiceHandler
 	operatorv1connect.UnimplementedEventServiceHandler
+	operatorv1connect.UnimplementedWorkServiceHandler
+	operatorv1connect.UnimplementedTeamServiceHandler
+	operatorv1connect.UnimplementedMailboxServiceHandler
 
 	token   string
 	tags    func(http.ResponseWriter)
@@ -40,17 +45,26 @@ type fakeControlPlane struct {
 	approve    func(*operatorv1.ApproveRequest) error
 	deny       func(*operatorv1.DenyRequest) error
 	answer     func(*operatorv1.AnswerQuestionRequest) error
+	// sessions answers GetSession, nil meaning NotFound; taskEvents answers ListTaskEvents;
+	// teamList answers ListTeams and GetTeam; posts answers ListWorkstreamPosts.
+	sessions   func(id string) *operatorv1.Session
+	taskEvents func(*operatorv1.ListTaskEventsRequest) []*operatorv1.TaskEvent
+	teamList   func() []*operatorv1.Team
+	posts      func(*operatorv1.ListWorkstreamPostsRequest) *operatorv1.ListWorkstreamPostsResponse
 
-	mu        sync.Mutex
-	badAuth   int
-	tagReads  int
-	sent      []*operatorv1.SendMessageRequest
-	followed  map[string]int
-	resumed   map[string][]int64
-	described map[string]int
-	approved  []*operatorv1.ApproveRequest
-	denied    []*operatorv1.DenyRequest
-	answered  []*operatorv1.AnswerQuestionRequest
+	mu                sync.Mutex
+	conversationLists []string
+	sessionReads      map[string]int
+	postReads         map[string]int
+	badAuth           int
+	tagReads          int
+	sent              []*operatorv1.SendMessageRequest
+	followed          map[string]int
+	resumed           map[string][]int64
+	described         map[string]int
+	approved          []*operatorv1.ApproveRequest
+	denied            []*operatorv1.DenyRequest
+	answered          []*operatorv1.AnswerQuestionRequest
 }
 
 func (f *fakeControlPlane) start(t *testing.T) *httptest.Server {
@@ -59,11 +73,15 @@ func (f *fakeControlPlane) start(t *testing.T) *httptest.Server {
 		f.token = "secret"
 	}
 	f.followed, f.resumed, f.described = map[string]int{}, map[string][]int64{}, map[string]int{}
+	f.sessionReads, f.postReads = map[string]int{}, map[string]int{}
 	mux := http.NewServeMux()
 	mux.Handle(operatorv1connect.NewConversationServiceHandler(f))
 	mux.Handle(operatorv1connect.NewObjectiveServiceHandler(f))
 	mux.Handle(operatorv1connect.NewInboxServiceHandler(f))
 	mux.Handle(operatorv1connect.NewEventServiceHandler(f))
+	mux.Handle(operatorv1connect.NewWorkServiceHandler(f))
+	mux.Handle(operatorv1connect.NewTeamServiceHandler(f))
+	mux.Handle(operatorv1connect.NewMailboxServiceHandler(f))
 	mux.HandleFunc("GET /api/v1/tags", func(w http.ResponseWriter, _ *http.Request) {
 		f.mu.Lock()
 		f.tagReads++
@@ -105,12 +123,93 @@ func (f *fakeControlPlane) ListMessages(_ context.Context, req *connect.Request[
 	return connect.NewResponse(res), nil
 }
 
-func (f *fakeControlPlane) ListConversations(context.Context, *connect.Request[operatorv1.ListConversationsRequest]) (*connect.Response[operatorv1.ListConversationsResponse], error) {
+func (f *fakeControlPlane) ListConversations(_ context.Context, req *connect.Request[operatorv1.ListConversationsRequest]) (*connect.Response[operatorv1.ListConversationsResponse], error) {
+	f.mu.Lock()
+	f.conversationLists = append(f.conversationLists, req.Msg.GetTag())
+	f.mu.Unlock()
 	res := &operatorv1.ListConversationsResponse{}
 	if f.open != nil {
-		res.Conversations = f.open()
+		for _, c := range f.open() {
+			if req.Msg.GetTag() == "" || c.GetTag() == req.Msg.GetTag() {
+				res.Conversations = append(res.Conversations, c)
+			}
+		}
 	}
 	return connect.NewResponse(res), nil
+}
+
+func (f *fakeControlPlane) GetSession(_ context.Context, req *connect.Request[operatorv1.GetSessionRequest]) (*connect.Response[operatorv1.Session], error) {
+	f.mu.Lock()
+	f.sessionReads[req.Msg.GetId()]++
+	f.mu.Unlock()
+	var session *operatorv1.Session
+	if f.sessions != nil {
+		session = f.sessions(req.Msg.GetId())
+	}
+	if session == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("Session "+req.Msg.GetId()+" was not found"))
+	}
+	return connect.NewResponse(session), nil
+}
+
+func (f *fakeControlPlane) ListTaskEvents(_ context.Context, req *connect.Request[operatorv1.ListTaskEventsRequest]) (*connect.Response[operatorv1.ListTaskEventsResponse], error) {
+	res := &operatorv1.ListTaskEventsResponse{}
+	if f.taskEvents != nil {
+		for _, event := range f.taskEvents(req.Msg) {
+			if event.GetSequence() > req.Msg.GetAfterSequence() {
+				res.Events = append(res.Events, event)
+			}
+		}
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (f *fakeControlPlane) team(name string) *operatorv1.Team {
+	if f.teamList == nil {
+		return nil
+	}
+	for _, team := range f.teamList() {
+		if team.GetId() == name || team.GetName() == name {
+			return team
+		}
+	}
+	return nil
+}
+
+func (f *fakeControlPlane) ListTeams(context.Context, *connect.Request[operatorv1.ListTeamsRequest]) (*connect.Response[operatorv1.ListTeamsResponse], error) {
+	res := &operatorv1.ListTeamsResponse{}
+	if f.teamList != nil {
+		res.Teams = f.teamList()
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (f *fakeControlPlane) GetTeam(_ context.Context, req *connect.Request[operatorv1.GetTeamRequest]) (*connect.Response[operatorv1.Team], error) {
+	team := f.team(req.Msg.GetTeam())
+	if team == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("Team "+req.Msg.GetTeam()+" was not found"))
+	}
+	return connect.NewResponse(team), nil
+}
+
+func (f *fakeControlPlane) ListWorkstreamPosts(_ context.Context, req *connect.Request[operatorv1.ListWorkstreamPostsRequest]) (*connect.Response[operatorv1.ListWorkstreamPostsResponse], error) {
+	f.mu.Lock()
+	f.postReads[req.Msg.GetTeam()]++
+	f.mu.Unlock()
+	if f.team(req.Msg.GetTeam()) == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("Team "+req.Msg.GetTeam()+" was not found"))
+	}
+	res := &operatorv1.ListWorkstreamPostsResponse{}
+	if f.posts != nil {
+		res = f.posts(req.Msg)
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (f *fakeControlPlane) count(counts map[string]int, key string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return counts[key]
 }
 
 func (f *fakeControlPlane) FollowMessage(ctx context.Context, req *connect.Request[operatorv1.FollowMessageRequest], stream *connect.ServerStream[operatorv1.FollowEvent]) error {
@@ -296,4 +395,35 @@ func approvalItem(objective, id, summary string) *operatorv1.InboxItem {
 		Kind: operatorv1.InboxItemKind_INBOX_ITEM_KIND_APPROVAL, OperatorEligible: true, Reason: "An approval request waits.",
 		Approval: &operatorv1.InboxApproval{RequestId: id, Summary: summary, RequestingTag: "builder", TaskId: "task-push", Blocking: true},
 		Commands: []string{"supertag approve request " + id, "supertag deny request " + id + " --reason TEXT"}}
+}
+
+// commandEvent is a recorded Worker event of a command that starts or ends.
+func commandEvent(task string, sequence int64, id, line, status string) *operatorv1.TaskEvent {
+	payload, err := structpb.NewStruct(map[string]any{"command": map[string]any{"id": id, "command": line, "status": status}})
+	if err != nil {
+		panic(err)
+	}
+	return &operatorv1.TaskEvent{Id: fmt.Sprintf("e%d", sequence), TaskId: task, Sequence: sequence, Type: "execution.command.updated", Payload: payload}
+}
+
+// toolEvent is a recorded Worker event of a tool call that starts.
+func toolEvent(task string, sequence int64, id, provider, operation string) *operatorv1.TaskEvent {
+	payload, err := structpb.NewStruct(map[string]any{"call": map[string]any{"id": id, "provider": provider, "operation": operation}})
+	if err != nil {
+		panic(err)
+	}
+	return &operatorv1.TaskEvent{Id: fmt.Sprintf("e%d", sequence), TaskId: task, Sequence: sequence, Type: "execution.tool.call.started", Payload: payload}
+}
+
+// delivered is a work Session whose latest Task delivered branch at head from base on ref, with
+// a pull request when pr is set.
+func delivered(id, task, branch, base, head, ref, pr string) *operatorv1.Session {
+	delivery := &operatorv1.TaskDelivery{Workspace: &operatorv1.WorkspaceDelivery{Name: "app", Mode: operatorv1.WorkspaceDeliveryMode_WORKSPACE_DELIVERY_MODE_BRANCH,
+		Branch: branch, Base: base, Head: head, Ref: ref}}
+	if pr != "" {
+		delivery.Workspace.Mode = operatorv1.WorkspaceDeliveryMode_WORKSPACE_DELIVERY_MODE_PULL_REQUEST
+		delivery.PullRequest = &operatorv1.PullRequestDelivery{Repository: "acme/app", Number: 7, Url: pr, State: operatorv1.PullRequestState_PULL_REQUEST_STATE_READY}
+	}
+	return &operatorv1.Session{Id: id, Tag: "lead", Title: "Fix", LatestTaskId: task, LatestTaskStatus: operatorv1.TaskStatus_TASK_STATUS_COMPLETED,
+		Delivery: &operatorv1.SessionDelivery{TaskId: task, Delivery: delivery, Checkout: &operatorv1.TaskFiles{WorkerHostId: "laptop"}}}
 }

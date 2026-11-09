@@ -468,7 +468,7 @@ describe("Objective commands", () => {
     ).toBe("team/crew created.\n");
     expect(
       JSON.parse(await run("update", "team", "crew", "--name", "crew-2", "--output", "json")),
-    ).toMatchObject({ name: "crew-2", maxConcurrency: 1, revision: 2 });
+    ).toMatchObject({ name: "crew-2", maxConcurrency: 1, revision: "2" });
     await run(
       "create",
       "objective",
@@ -501,9 +501,9 @@ describe("Objective commands", () => {
     expect(listing).not.toMatch(/TYPE/u);
     const json = JSON.parse(
       await run("list", "workstream-post", "--team", "crew", "--output", "json"),
-    ) as { items: readonly { sequence: number; body: string }[] };
-    expect(json.items).toHaveLength(1);
-    expect(json.items[0]).toMatchObject({ sequence: 1, body: "Which region first?" });
+    ) as { posts: readonly { sequence: string; body: string }[] };
+    expect(json.posts).toHaveLength(1);
+    expect(json.posts[0]).toMatchObject({ sequence: "1", body: "Which region first?" });
     // A Team an open Objective names stays until the Objective closes.
     expect(await fail("delete", "team", "crew")).toContain("cannot be deleted");
   });

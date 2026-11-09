@@ -2,11 +2,14 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Code } from "@connectrpc/connect";
 import { expect, it, vi } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
+import { workClient } from "../apps/cli/src/operator-client.js";
 import { loadServicesFile } from "../apps/cli/src/supertag-yaml.js";
 import { ArtifactCatalog } from "../packages/control-plane/src/index.js";
 import { ArtifactCatalogError } from "../packages/core/src/index.js";
+import { DrizzleStore } from "../packages/store/src/index.js";
 import { migrateSqlite } from "./support/database.js";
 
 it.each([
@@ -25,6 +28,9 @@ it.each([
     const resolve = vi
       .spyOn(ArtifactCatalog.prototype, "resolveOperatorDownload")
       .mockRejectedValue(new ArtifactCatalogError(404, "No artifact"));
+    const cataloged = vi
+      .spyOn(DrizzleStore.prototype, "findCapturedArtifact")
+      .mockResolvedValue({ id: "missing", sessionId: "unknown-session", entries: [] } as never);
     vi.stubEnv("SUPERTAG_COORDINATION_URL", undefined);
     // macOS does not bind every numeric loopback form. Keep the configured host
     // for the policy check, but route these test sockets through 127.0.0.1.
@@ -55,22 +61,21 @@ it.each([
         ...(yaml ? { coordinationUrl: service.url } : {}),
       });
       const connectionUrl = runtime.url.replace(/^http:\/\/.*:/u, "http://127.0.0.1:");
-      const response = await fetch(`${connectionUrl}/api/v1/artifacts/missing/download`, {
-        method: "POST",
-        headers: {
-          authorization: "Bearer locality-test-admin",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ path: "file.txt" }),
-      });
-      expect(response.status).toBe(404);
-      await response.body?.cancel();
+      await expect(
+        workClient({ url: connectionUrl, token: "locality-test-admin" }).resolveArtifactDownload({
+          artifactId: "missing",
+          path: "file.txt",
+        }),
+      ).rejects.toMatchObject({ code: Code.NotFound });
       expect(resolve).toHaveBeenCalledOnce();
       expect(resolve.mock.calls[0]?.[3]?.publicUrl).toBe(local ? runtime.url : undefined);
+      // The peer is the listener socket's, never a header.
+      expect(resolve.mock.calls[0]?.[3]?.operatorAddress).toMatch(/127\.0\.0\.1$/u);
     } finally {
       await runtime?.close();
       binding?.mockRestore();
       resolve.mockRestore();
+      cataloged.mockRestore();
       vi.unstubAllEnvs();
       await rm(directory, { recursive: true, force: true });
     }

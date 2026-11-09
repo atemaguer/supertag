@@ -95,11 +95,14 @@ func startAll(t *testing.T, m model) model {
 	return run(t, m, tea.Batch(m.reloadTags(), m.reloadConversations(), m.reloadObjectives(), m.reloadInbox()))
 }
 
-// press feeds one key and runs what it starts.
-func press(t *testing.T, m model, msg tea.KeyPressMsg) model {
+// press feeds keys one by one and runs what each starts.
+func press(t *testing.T, m model, keys ...tea.KeyPressMsg) model {
 	t.Helper()
-	next, cmd := m.Update(msg)
-	return run(t, next.(model), cmd)
+	for _, k := range keys {
+		next, cmd := m.Update(k)
+		m = run(t, next.(model), cmd)
+	}
+	return m
 }
 
 func letter(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Text: string(r)} }
@@ -118,6 +121,8 @@ func moveTo(t *testing.T, m model, label string) model {
 			text = objectiveName(m.objectives[r.index])
 		case rowInbox:
 			text = m.inboxRow(m.inbox.Items[r.index])
+		case rowTeam:
+			text = m.teams[r.index].GetName()
 		default:
 			text = m.tags[r.index].Name()
 		}

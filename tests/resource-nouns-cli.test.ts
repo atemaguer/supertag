@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vitest";
-import type { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
+import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { runResourceCommand } from "../apps/cli/src/resources.ts";
+import { fakeOperatorRpc } from "./support/fake-operator-rpc.ts";
 
 const canonical = [
   "tag",
@@ -28,11 +29,30 @@ const aliases = [
   "__proto__",
 ];
 
-it.each(canonical)("lists canonical resource %s", async (kind) => {
-  const request = vi.fn().mockResolvedValue({ items: [] });
-  const client = { request } as unknown as ControlPlaneClient;
-  await runResourceCommand(client, "get", [kind]);
-  expect(request).toHaveBeenCalledWith(`/api/v1/${kind}s`);
+const listedByRpc: Readonly<Record<string, string>> = {
+  task: "WorkService/ListTasks",
+  session: "WorkService/ListSessions",
+};
+
+it.each(canonical.filter((kind) => !(kind in listedByRpc)))(
+  "lists canonical resource %s",
+  async (kind) => {
+    const request = vi.fn().mockResolvedValue({ items: [] });
+    const client = { request } as unknown as ControlPlaneClient;
+    await runResourceCommand(client, "get", [kind]);
+    expect(request).toHaveBeenCalledWith(`/api/v1/${kind}s`);
+  },
+);
+
+it.each(Object.entries(listedByRpc))("lists canonical resource %s", async (kind, method) => {
+  const rpc = fakeOperatorRpc({ [method]: () => ({}) });
+  try {
+    const client = new ControlPlaneClient({ url: "http://127.0.0.1:1", token: "unused" });
+    await runResourceCommand(client, "get", [kind]);
+    expect(rpc.called(method)).toHaveLength(1);
+  } finally {
+    rpc.fetch.mockRestore();
+  }
 });
 
 it.each(aliases)("rejects noncanonical resource %s before requesting", async (kind) => {

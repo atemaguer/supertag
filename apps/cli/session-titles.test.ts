@@ -1,6 +1,6 @@
 import { inboxSessionKey, objectiveSessionKey, type Session } from "@supertag/core";
 import { describe, expect, it } from "vitest";
-import { sessionResource } from "./src/control-plane-resources.js";
+import { sessionResource } from "./src/work-views.js";
 
 function session(sessionKey: string, origin: Record<string, unknown> = {}): Session {
   const at = "2026-11-08T12:00:00.000Z";

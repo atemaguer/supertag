@@ -22,6 +22,677 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type CreateTeamRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The Team's ID: 1 to 200 characters without whitespace or control
+	// characters, other than `.` and `..`. Empty uses `name`, which must then
+	// be a valid ID.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// The Team's name: 1 to 200 characters without control characters,
+	// unique among Teams. Leading and trailing whitespace is removed.
+	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// The member Tags, by name: 1 to 100 of them. Repeated names count once.
+	Members []string `protobuf:"bytes,3,rep,name=members,proto3" json:"members,omitempty"`
+	// At most this many turns run at once across the Sessions of every open
+	// Objective that names the Team; later turns wait. From 1 to 1,000. Unset:
+	// only Worker Host capacity limits them.
+	MaxConcurrency *int32 `protobuf:"varint,4,opt,name=max_concurrency,json=maxConcurrency,proto3,oneof" json:"max_concurrency,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *CreateTeamRequest) Reset() {
+	*x = CreateTeamRequest{}
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateTeamRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateTeamRequest) ProtoMessage() {}
+
+func (x *CreateTeamRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateTeamRequest.ProtoReflect.Descriptor instead.
+func (*CreateTeamRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_operator_v1_team_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *CreateTeamRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *CreateTeamRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CreateTeamRequest) GetMembers() []string {
+	if x != nil {
+		return x.Members
+	}
+	return nil
+}
+
+func (x *CreateTeamRequest) GetMaxConcurrency() int32 {
+	if x != nil && x.MaxConcurrency != nil {
+		return *x.MaxConcurrency
+	}
+	return 0
+}
+
+type ListTeamsRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Lists only Teams this Tag is a member of, by name. Empty lists every
+	// Team.
+	Member string `protobuf:"bytes,1,opt,name=member,proto3" json:"member,omitempty"`
+	// At most this many Teams; 0 means 100, and more than 500 means 500.
+	PageSize int32 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// The `next_page_token` of the previous page.
+	PageToken     string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTeamsRequest) Reset() {
+	*x = ListTeamsRequest{}
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTeamsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTeamsRequest) ProtoMessage() {}
+
+func (x *ListTeamsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTeamsRequest.ProtoReflect.Descriptor instead.
+func (*ListTeamsRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_operator_v1_team_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ListTeamsRequest) GetMember() string {
+	if x != nil {
+		return x.Member
+	}
+	return ""
+}
+
+func (x *ListTeamsRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *ListTeamsRequest) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
+}
+
+type ListTeamsResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The Teams, by name.
+	Teams []*Team `protobuf:"bytes,1,rep,name=teams,proto3" json:"teams,omitempty"`
+	// Fetches the next page. Empty on the last page.
+	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTeamsResponse) Reset() {
+	*x = ListTeamsResponse{}
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTeamsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTeamsResponse) ProtoMessage() {}
+
+func (x *ListTeamsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTeamsResponse.ProtoReflect.Descriptor instead.
+func (*ListTeamsResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_operator_v1_team_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ListTeamsResponse) GetTeams() []*Team {
+	if x != nil {
+		return x.Teams
+	}
+	return nil
+}
+
+func (x *ListTeamsResponse) GetNextPageToken() string {
+	if x != nil {
+		return x.NextPageToken
+	}
+	return ""
+}
+
+type GetTeamRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The Team's name or ID. A name that is also another Team's ID names that
+	// Team.
+	Team          string `protobuf:"bytes,1,opt,name=team,proto3" json:"team,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetTeamRequest) Reset() {
+	*x = GetTeamRequest{}
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetTeamRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetTeamRequest) ProtoMessage() {}
+
+func (x *GetTeamRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetTeamRequest.ProtoReflect.Descriptor instead.
+func (*GetTeamRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_operator_v1_team_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GetTeamRequest) GetTeam() string {
+	if x != nil {
+		return x.Team
+	}
+	return ""
+}
+
+type UpdateTeamRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The Team's name or ID.
+	Team string `protobuf:"bytes,1,opt,name=team,proto3" json:"team,omitempty"`
+	// The Team's `revision` as the caller read it, from 1. The update applies
+	// only while it is still the Team's revision.
+	ExpectedRevision int64 `protobuf:"varint,2,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
+	// The new name. Unset leaves the name.
+	Name *string `protobuf:"bytes,3,opt,name=name,proto3,oneof" json:"name,omitempty"`
+	// The members that replace the current ones. Unset leaves them.
+	Members *TeamMembers `protobuf:"bytes,4,opt,name=members,proto3" json:"members,omitempty"`
+	// The new turn limit. Unset leaves the limit.
+	Concurrency   *TeamConcurrency `protobuf:"bytes,5,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateTeamRequest) Reset() {
+	*x = UpdateTeamRequest{}
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateTeamRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateTeamRequest) ProtoMessage() {}
+
+func (x *UpdateTeamRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateTeamRequest.ProtoReflect.Descriptor instead.
+func (*UpdateTeamRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_operator_v1_team_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *UpdateTeamRequest) GetTeam() string {
+	if x != nil {
+		return x.Team
+	}
+	return ""
+}
+
+func (x *UpdateTeamRequest) GetExpectedRevision() int64 {
+	if x != nil {
+		return x.ExpectedRevision
+	}
+	return 0
+}
+
+func (x *UpdateTeamRequest) GetName() string {
+	if x != nil && x.Name != nil {
+		return *x.Name
+	}
+	return ""
+}
+
+func (x *UpdateTeamRequest) GetMembers() *TeamMembers {
+	if x != nil {
+		return x.Members
+	}
+	return nil
+}
+
+func (x *UpdateTeamRequest) GetConcurrency() *TeamConcurrency {
+	if x != nil {
+		return x.Concurrency
+	}
+	return nil
+}
+
+// A Team's member Tags.
+type TeamMembers struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The Tags, by name: 1 to 100 of them. Repeated names count once.
+	Tags          []string `protobuf:"bytes,1,rep,name=tags,proto3" json:"tags,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TeamMembers) Reset() {
+	*x = TeamMembers{}
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TeamMembers) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TeamMembers) ProtoMessage() {}
+
+func (x *TeamMembers) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TeamMembers.ProtoReflect.Descriptor instead.
+func (*TeamMembers) Descriptor() ([]byte, []int) {
+	return file_supertag_operator_v1_team_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *TeamMembers) GetTags() []string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
+// A Team's turn limit.
+type TeamConcurrency struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// At most this many turns run at once, from 1 to 1,000. 0 removes the
+	// limit, so only Worker Host capacity limits them.
+	MaxConcurrency int32 `protobuf:"varint,1,opt,name=max_concurrency,json=maxConcurrency,proto3" json:"max_concurrency,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *TeamConcurrency) Reset() {
+	*x = TeamConcurrency{}
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TeamConcurrency) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TeamConcurrency) ProtoMessage() {}
+
+func (x *TeamConcurrency) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TeamConcurrency.ProtoReflect.Descriptor instead.
+func (*TeamConcurrency) Descriptor() ([]byte, []int) {
+	return file_supertag_operator_v1_team_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *TeamConcurrency) GetMaxConcurrency() int32 {
+	if x != nil {
+		return x.MaxConcurrency
+	}
+	return 0
+}
+
+type DeleteTeamRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The Team's name or ID.
+	Team          string `protobuf:"bytes,1,opt,name=team,proto3" json:"team,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteTeamRequest) Reset() {
+	*x = DeleteTeamRequest{}
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteTeamRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteTeamRequest) ProtoMessage() {}
+
+func (x *DeleteTeamRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteTeamRequest.ProtoReflect.Descriptor instead.
+func (*DeleteTeamRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_operator_v1_team_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *DeleteTeamRequest) GetTeam() string {
+	if x != nil {
+		return x.Team
+	}
+	return ""
+}
+
+type DeleteTeamResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The deleted Team's ID.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// The deleted Team's name.
+	Name          string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteTeamResponse) Reset() {
+	*x = DeleteTeamResponse{}
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteTeamResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteTeamResponse) ProtoMessage() {}
+
+func (x *DeleteTeamResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteTeamResponse.ProtoReflect.Descriptor instead.
+func (*DeleteTeamResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_operator_v1_team_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *DeleteTeamResponse) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *DeleteTeamResponse) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+// One Team.
+type Team struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The Team's ID.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// Its name.
+	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// Its member Tags, by Tag ID.
+	Members []*TeamMember `protobuf:"bytes,3,rep,name=members,proto3" json:"members,omitempty"`
+	// At most this many turns run at once across the Sessions of every open
+	// Objective that names it. Unset: only Worker Host capacity limits them.
+	MaxConcurrency *int32 `protobuf:"varint,4,opt,name=max_concurrency,json=maxConcurrency,proto3,oneof" json:"max_concurrency,omitempty"`
+	// Increases with every change, from 1. Pass it as `expected_revision`.
+	Revision int64 `protobuf:"varint,5,opt,name=revision,proto3" json:"revision,omitempty"`
+	// When it was created.
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// When it last changed.
+	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Team) Reset() {
+	*x = Team{}
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Team) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Team) ProtoMessage() {}
+
+func (x *Team) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Team.ProtoReflect.Descriptor instead.
+func (*Team) Descriptor() ([]byte, []int) {
+	return file_supertag_operator_v1_team_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *Team) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *Team) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *Team) GetMembers() []*TeamMember {
+	if x != nil {
+		return x.Members
+	}
+	return nil
+}
+
+func (x *Team) GetMaxConcurrency() int32 {
+	if x != nil && x.MaxConcurrency != nil {
+		return *x.MaxConcurrency
+	}
+	return 0
+}
+
+func (x *Team) GetRevision() int64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+func (x *Team) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *Team) GetUpdatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return nil
+}
+
+// One member Tag of a Team.
+type TeamMember struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The Tag's ID.
+	TagId string `protobuf:"bytes,1,opt,name=tag_id,json=tagId,proto3" json:"tag_id,omitempty"`
+	// The Tag's name. Empty when the Tag was deleted.
+	Tag           string `protobuf:"bytes,2,opt,name=tag,proto3" json:"tag,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TeamMember) Reset() {
+	*x = TeamMember{}
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TeamMember) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TeamMember) ProtoMessage() {}
+
+func (x *TeamMember) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TeamMember.ProtoReflect.Descriptor instead.
+func (*TeamMember) Descriptor() ([]byte, []int) {
+	return file_supertag_operator_v1_team_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *TeamMember) GetTagId() string {
+	if x != nil {
+		return x.TagId
+	}
+	return ""
+}
+
+func (x *TeamMember) GetTag() string {
+	if x != nil {
+		return x.Tag
+	}
+	return ""
+}
+
 // One post to a Team's Workstream, which the Team's members read.
 type WorkstreamPost struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -48,7 +719,7 @@ type WorkstreamPost struct {
 
 func (x *WorkstreamPost) Reset() {
 	*x = WorkstreamPost{}
-	mi := &file_supertag_operator_v1_team_proto_msgTypes[0]
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -60,7 +731,7 @@ func (x *WorkstreamPost) String() string {
 func (*WorkstreamPost) ProtoMessage() {}
 
 func (x *WorkstreamPost) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_team_proto_msgTypes[0]
+	mi := &file_supertag_operator_v1_team_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -73,7 +744,7 @@ func (x *WorkstreamPost) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkstreamPost.ProtoReflect.Descriptor instead.
 func (*WorkstreamPost) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_team_proto_rawDescGZIP(), []int{0}
+	return file_supertag_operator_v1_team_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *WorkstreamPost) GetId() string {
@@ -136,7 +807,54 @@ var File_supertag_operator_v1_team_proto protoreflect.FileDescriptor
 
 const file_supertag_operator_v1_team_proto_rawDesc = "" +
 	"\n" +
-	"\x1fsupertag/operator/v1/team.proto\x12\x14supertag.operator.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x8c\x02\n" +
+	"\x1fsupertag/operator/v1/team.proto\x12\x14supertag.operator.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\"supertag/operator/v1/options.proto\"\x93\x01\n" +
+	"\x11CreateTeamRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
+	"\amembers\x18\x03 \x03(\tR\amembers\x12,\n" +
+	"\x0fmax_concurrency\x18\x04 \x01(\x05H\x00R\x0emaxConcurrency\x88\x01\x01B\x12\n" +
+	"\x10_max_concurrency\"f\n" +
+	"\x10ListTeamsRequest\x12\x16\n" +
+	"\x06member\x18\x01 \x01(\tR\x06member\x12\x1b\n" +
+	"\tpage_size\x18\x02 \x01(\x05R\bpageSize\x12\x1d\n" +
+	"\n" +
+	"page_token\x18\x03 \x01(\tR\tpageToken\"m\n" +
+	"\x11ListTeamsResponse\x120\n" +
+	"\x05teams\x18\x01 \x03(\v2\x1a.supertag.operator.v1.TeamR\x05teams\x12&\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"$\n" +
+	"\x0eGetTeamRequest\x12\x12\n" +
+	"\x04team\x18\x01 \x01(\tR\x04team\"\xfc\x01\n" +
+	"\x11UpdateTeamRequest\x12\x12\n" +
+	"\x04team\x18\x01 \x01(\tR\x04team\x12+\n" +
+	"\x11expected_revision\x18\x02 \x01(\x03R\x10expectedRevision\x12\x17\n" +
+	"\x04name\x18\x03 \x01(\tH\x00R\x04name\x88\x01\x01\x12;\n" +
+	"\amembers\x18\x04 \x01(\v2!.supertag.operator.v1.TeamMembersR\amembers\x12G\n" +
+	"\vconcurrency\x18\x05 \x01(\v2%.supertag.operator.v1.TeamConcurrencyR\vconcurrencyB\a\n" +
+	"\x05_name\"!\n" +
+	"\vTeamMembers\x12\x12\n" +
+	"\x04tags\x18\x01 \x03(\tR\x04tags\":\n" +
+	"\x0fTeamConcurrency\x12'\n" +
+	"\x0fmax_concurrency\x18\x01 \x01(\x05R\x0emaxConcurrency\"'\n" +
+	"\x11DeleteTeamRequest\x12\x12\n" +
+	"\x04team\x18\x01 \x01(\tR\x04team\"8\n" +
+	"\x12DeleteTeamResponse\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"\xba\x02\n" +
+	"\x04Team\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12:\n" +
+	"\amembers\x18\x03 \x03(\v2 .supertag.operator.v1.TeamMemberR\amembers\x12,\n" +
+	"\x0fmax_concurrency\x18\x04 \x01(\x05H\x00R\x0emaxConcurrency\x88\x01\x01\x12\x1a\n" +
+	"\brevision\x18\x05 \x01(\x03R\brevision\x129\n" +
+	"\n" +
+	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
+	"\n" +
+	"updated_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAtB\x12\n" +
+	"\x10_max_concurrency\"5\n" +
+	"\n" +
+	"TeamMember\x12\x15\n" +
+	"\x06tag_id\x18\x01 \x01(\tR\x05tagId\x12\x10\n" +
+	"\x03tag\x18\x02 \x01(\tR\x03tag\"\x8c\x02\n" +
 	"\x0eWorkstreamPost\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
 	"\ateam_id\x18\x02 \x01(\tR\x06teamId\x12\"\n" +
@@ -147,7 +865,16 @@ const file_supertag_operator_v1_team_proto_rawDesc = "" +
 	"\x0esource_task_id\x18\x06 \x01(\tR\fsourceTaskId\x12\x1a\n" +
 	"\bsequence\x18\a \x01(\x03R\bsequence\x129\n" +
 	"\n" +
-	"created_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAtBNZLgithub.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1b\x06proto3"
+	"created_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt2\xc3\x04\n" +
+	"\vTeamService\x12q\n" +
+	"\n" +
+	"CreateTeam\x12'.supertag.operator.v1.CreateTeamRequest\x1a\x1a.supertag.operator.v1.Team\"\x1e\x8a\xb5\x18\vmanage_team\xa2\xb5\x18\vteam.create\x12n\n" +
+	"\tListTeams\x12&.supertag.operator.v1.ListTeamsRequest\x1a'.supertag.operator.v1.ListTeamsResponse\"\x10\x8a\xb5\x18\tread_team\x90\x02\x01\x12]\n" +
+	"\aGetTeam\x12$.supertag.operator.v1.GetTeamRequest\x1a\x1a.supertag.operator.v1.Team\"\x10\x8a\xb5\x18\tread_team\x90\x02\x01\x12q\n" +
+	"\n" +
+	"UpdateTeam\x12'.supertag.operator.v1.UpdateTeamRequest\x1a\x1a.supertag.operator.v1.Team\"\x1e\x8a\xb5\x18\vmanage_team\xa2\xb5\x18\vteam.update\x12\x7f\n" +
+	"\n" +
+	"DeleteTeam\x12'.supertag.operator.v1.DeleteTeamRequest\x1a(.supertag.operator.v1.DeleteTeamResponse\"\x1e\x8a\xb5\x18\vmanage_team\xa2\xb5\x18\vteam.deleteBNZLgithub.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1b\x06proto3"
 
 var (
 	file_supertag_operator_v1_team_proto_rawDescOnce sync.Once
@@ -161,18 +888,45 @@ func file_supertag_operator_v1_team_proto_rawDescGZIP() []byte {
 	return file_supertag_operator_v1_team_proto_rawDescData
 }
 
-var file_supertag_operator_v1_team_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_supertag_operator_v1_team_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_supertag_operator_v1_team_proto_goTypes = []any{
-	(*WorkstreamPost)(nil),        // 0: supertag.operator.v1.WorkstreamPost
-	(*timestamppb.Timestamp)(nil), // 1: google.protobuf.Timestamp
+	(*CreateTeamRequest)(nil),     // 0: supertag.operator.v1.CreateTeamRequest
+	(*ListTeamsRequest)(nil),      // 1: supertag.operator.v1.ListTeamsRequest
+	(*ListTeamsResponse)(nil),     // 2: supertag.operator.v1.ListTeamsResponse
+	(*GetTeamRequest)(nil),        // 3: supertag.operator.v1.GetTeamRequest
+	(*UpdateTeamRequest)(nil),     // 4: supertag.operator.v1.UpdateTeamRequest
+	(*TeamMembers)(nil),           // 5: supertag.operator.v1.TeamMembers
+	(*TeamConcurrency)(nil),       // 6: supertag.operator.v1.TeamConcurrency
+	(*DeleteTeamRequest)(nil),     // 7: supertag.operator.v1.DeleteTeamRequest
+	(*DeleteTeamResponse)(nil),    // 8: supertag.operator.v1.DeleteTeamResponse
+	(*Team)(nil),                  // 9: supertag.operator.v1.Team
+	(*TeamMember)(nil),            // 10: supertag.operator.v1.TeamMember
+	(*WorkstreamPost)(nil),        // 11: supertag.operator.v1.WorkstreamPost
+	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
 }
 var file_supertag_operator_v1_team_proto_depIdxs = []int32{
-	1, // 0: supertag.operator.v1.WorkstreamPost.created_at:type_name -> google.protobuf.Timestamp
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	9,  // 0: supertag.operator.v1.ListTeamsResponse.teams:type_name -> supertag.operator.v1.Team
+	5,  // 1: supertag.operator.v1.UpdateTeamRequest.members:type_name -> supertag.operator.v1.TeamMembers
+	6,  // 2: supertag.operator.v1.UpdateTeamRequest.concurrency:type_name -> supertag.operator.v1.TeamConcurrency
+	10, // 3: supertag.operator.v1.Team.members:type_name -> supertag.operator.v1.TeamMember
+	12, // 4: supertag.operator.v1.Team.created_at:type_name -> google.protobuf.Timestamp
+	12, // 5: supertag.operator.v1.Team.updated_at:type_name -> google.protobuf.Timestamp
+	12, // 6: supertag.operator.v1.WorkstreamPost.created_at:type_name -> google.protobuf.Timestamp
+	0,  // 7: supertag.operator.v1.TeamService.CreateTeam:input_type -> supertag.operator.v1.CreateTeamRequest
+	1,  // 8: supertag.operator.v1.TeamService.ListTeams:input_type -> supertag.operator.v1.ListTeamsRequest
+	3,  // 9: supertag.operator.v1.TeamService.GetTeam:input_type -> supertag.operator.v1.GetTeamRequest
+	4,  // 10: supertag.operator.v1.TeamService.UpdateTeam:input_type -> supertag.operator.v1.UpdateTeamRequest
+	7,  // 11: supertag.operator.v1.TeamService.DeleteTeam:input_type -> supertag.operator.v1.DeleteTeamRequest
+	9,  // 12: supertag.operator.v1.TeamService.CreateTeam:output_type -> supertag.operator.v1.Team
+	2,  // 13: supertag.operator.v1.TeamService.ListTeams:output_type -> supertag.operator.v1.ListTeamsResponse
+	9,  // 14: supertag.operator.v1.TeamService.GetTeam:output_type -> supertag.operator.v1.Team
+	9,  // 15: supertag.operator.v1.TeamService.UpdateTeam:output_type -> supertag.operator.v1.Team
+	8,  // 16: supertag.operator.v1.TeamService.DeleteTeam:output_type -> supertag.operator.v1.DeleteTeamResponse
+	12, // [12:17] is the sub-list for method output_type
+	7,  // [7:12] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_supertag_operator_v1_team_proto_init() }
@@ -180,15 +934,19 @@ func file_supertag_operator_v1_team_proto_init() {
 	if File_supertag_operator_v1_team_proto != nil {
 		return
 	}
+	file_supertag_operator_v1_options_proto_init()
+	file_supertag_operator_v1_team_proto_msgTypes[0].OneofWrappers = []any{}
+	file_supertag_operator_v1_team_proto_msgTypes[4].OneofWrappers = []any{}
+	file_supertag_operator_v1_team_proto_msgTypes[9].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_operator_v1_team_proto_rawDesc), len(file_supertag_operator_v1_team_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   1,
+			NumMessages:   12,
 			NumExtensions: 0,
-			NumServices:   0,
+			NumServices:   1,
 		},
 		GoTypes:           file_supertag_operator_v1_team_proto_goTypes,
 		DependencyIndexes: file_supertag_operator_v1_team_proto_depIdxs,

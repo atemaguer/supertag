@@ -22,6 +22,7 @@ import {
 } from "./local-state.js";
 import {
   OPERATOR_API_VERSION,
+  type OperatorClientOptions,
   operatorErrorMessage,
   organizationClient,
 } from "./operator-client.js";
@@ -166,6 +167,11 @@ export class ControlPlaneClient {
   /** The Control Plane URL this client talks to. */
   get url(): string {
     return this.#target.url;
+  }
+
+  /** How the generated operator RPC clients reach the same Control Plane with the same token. */
+  get operator(): OperatorClientOptions {
+    return { url: this.#target.url, token: this.#target.token, warnOnSkew: true };
   }
 
   async status(): Promise<GetStatusResponse> {

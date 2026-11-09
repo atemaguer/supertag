@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { artifactTransferVerificationKey } from "../apps/cli/src/artifact-transfer-key.js";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
-import { conversationClient } from "../apps/cli/src/operator-client.js";
+import { conversationClient, workClient } from "../apps/cli/src/operator-client.js";
+import { artifactRow, taskView } from "../apps/cli/src/work-protos.js";
 import {
   DurableLocalWorklet,
   FileArtifactStore,
@@ -251,15 +252,12 @@ async function captureWithoutControlPlaneBytes(advertise: boolean) {
     // The catalog knows the artifact, its producer, and which host holds its copy.
     const admin = (path: string) =>
       fetch(`${controlPlaneUrl}${path}`, { headers: { authorization: "Bearer test-admin" } });
-    const listed = (await (await admin(`/api/v1/artifacts?task=${taskId}`)).json()) as {
-      items: { metadata: { id: string }; spec: { attemptId: string; entries: unknown[] } }[];
-    };
-    expect(listed.items).toEqual([
+    const work = workClient({ url: controlPlaneUrl, token: "test-admin" });
+    const listed = await work.listArtifacts({ taskId });
+    expect(listed.artifacts).toEqual([
       expect.objectContaining({
-        metadata: expect.objectContaining({ id: attempt.artifactId }),
-        spec: expect.objectContaining({
-          entries: [expect.objectContaining({ digest, sizeBytes: bytes.byteLength })],
-        }),
+        id: attempt.artifactId,
+        entries: [expect.objectContaining({ digest, sizeBytes: BigInt(bytes.byteLength) })],
       }),
     ]);
     expect(
@@ -273,10 +271,8 @@ async function captureWithoutControlPlaneBytes(advertise: boolean) {
         ? [expect.objectContaining({ workerHostId: "producer-host", transferBaseUrl })]
         : [],
     );
-    const task = (await (await admin(`/api/v1/tasks/${taskId}`)).json()) as {
-      status: { storage: { artifacts: { locations: unknown[] }[] } };
-    };
-    expect(task.status.storage.artifacts).toEqual([
+    const task = taskView(await work.getTask({ id: taskId }));
+    expect(task.status.storage?.artifacts).toEqual([
       expect.objectContaining({
         locations: [
           {
@@ -301,12 +297,12 @@ async function captureWithoutControlPlaneBytes(advertise: boolean) {
         status: "available",
       }),
     ).toEqual([]);
-    const disconnected = await (await admin(`/api/v1/tasks/${taskId}`)).json();
-    expect(disconnected.status.storage.artifacts).toEqual(task.status.storage.artifacts);
-    const disconnectedList = await (await admin(`/api/v1/artifacts?task=${taskId}`)).json();
-    expect(disconnectedList.items[0].status.locations).toEqual(
-      task.status.storage.artifacts[0]?.locations,
-    );
+    const disconnected = taskView(await work.getTask({ id: taskId }));
+    expect(disconnected.status.storage?.artifacts).toEqual(task.status.storage?.artifacts);
+    const disconnectedList = await work.listArtifacts({ taskId });
+    expect(artifactRow(disconnectedList.artifacts[0] as never).status).toMatchObject({
+      locations: task.status.storage?.artifacts[0]?.locations,
+    });
     // An operator cannot fetch the bytes from the Control Plane either.
     const content = await admin(
       `/api/v1/artifacts/${encodeURIComponent(attempt.artifactId)}/content?path=outputs%2Freport.bin`,

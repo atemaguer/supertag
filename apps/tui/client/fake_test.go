@@ -14,14 +14,17 @@ import (
 	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1/operatorv1connect"
 )
 
-// fakeControlPlane serves the generated ConversationService, ObjectiveService, InboxService and
-// EventService handlers, each RPC answered by the test's function, and records every call's
-// headers.
+// fakeControlPlane serves the generated ConversationService, ObjectiveService, InboxService,
+// WorkService, TeamService, MailboxService and EventService handlers, each RPC answered by the
+// test's function, and records every call's headers.
 type fakeControlPlane struct {
 	operatorv1connect.UnimplementedConversationServiceHandler
 	operatorv1connect.UnimplementedObjectiveServiceHandler
 	operatorv1connect.UnimplementedInboxServiceHandler
 	operatorv1connect.UnimplementedEventServiceHandler
+	operatorv1connect.UnimplementedWorkServiceHandler
+	operatorv1connect.UnimplementedTeamServiceHandler
+	operatorv1connect.UnimplementedMailboxServiceHandler
 
 	send          func(*operatorv1.SendMessageRequest) (*operatorv1.Message, error)
 	list          func(*operatorv1.ListMessagesRequest) (*operatorv1.ListMessagesResponse, error)
@@ -35,6 +38,11 @@ type fakeControlPlane struct {
 	approve       func(*operatorv1.ApproveRequest) (*operatorv1.Approval, error)
 	deny          func(*operatorv1.DenyRequest) (*operatorv1.Approval, error)
 	answer        func(*operatorv1.AnswerQuestionRequest) (*operatorv1.MessageObjectiveResponse, error)
+	session       func(*operatorv1.GetSessionRequest) (*operatorv1.Session, error)
+	taskEvents    func(*operatorv1.ListTaskEventsRequest) (*operatorv1.ListTaskEventsResponse, error)
+	teams         func(*operatorv1.ListTeamsRequest) (*operatorv1.ListTeamsResponse, error)
+	team          func(*operatorv1.GetTeamRequest) (*operatorv1.Team, error)
+	posts         func(*operatorv1.ListWorkstreamPostsRequest) (*operatorv1.ListWorkstreamPostsResponse, error)
 
 	mu    sync.Mutex
 	calls []call
@@ -63,6 +71,9 @@ func (f *fakeControlPlane) handler() http.Handler {
 	mux.Handle(operatorv1connect.NewObjectiveServiceHandler(f))
 	mux.Handle(operatorv1connect.NewInboxServiceHandler(f))
 	mux.Handle(operatorv1connect.NewEventServiceHandler(f))
+	mux.Handle(operatorv1connect.NewWorkServiceHandler(f))
+	mux.Handle(operatorv1connect.NewTeamServiceHandler(f))
+	mux.Handle(operatorv1connect.NewMailboxServiceHandler(f))
 	mux.HandleFunc("/api/v1/tags", func(w http.ResponseWriter, r *http.Request) {
 		if f.tags == nil {
 			http.NotFound(w, r)
@@ -148,6 +159,26 @@ func (f *fakeControlPlane) Deny(_ context.Context, req *connect.Request[operator
 
 func (f *fakeControlPlane) AnswerQuestion(_ context.Context, req *connect.Request[operatorv1.AnswerQuestionRequest]) (*connect.Response[operatorv1.MessageObjectiveResponse], error) {
 	return unary(f.answer, req)
+}
+
+func (f *fakeControlPlane) GetSession(_ context.Context, req *connect.Request[operatorv1.GetSessionRequest]) (*connect.Response[operatorv1.Session], error) {
+	return unary(f.session, req)
+}
+
+func (f *fakeControlPlane) ListTaskEvents(_ context.Context, req *connect.Request[operatorv1.ListTaskEventsRequest]) (*connect.Response[operatorv1.ListTaskEventsResponse], error) {
+	return unary(f.taskEvents, req)
+}
+
+func (f *fakeControlPlane) ListTeams(_ context.Context, req *connect.Request[operatorv1.ListTeamsRequest]) (*connect.Response[operatorv1.ListTeamsResponse], error) {
+	return unary(f.teams, req)
+}
+
+func (f *fakeControlPlane) GetTeam(_ context.Context, req *connect.Request[operatorv1.GetTeamRequest]) (*connect.Response[operatorv1.Team], error) {
+	return unary(f.team, req)
+}
+
+func (f *fakeControlPlane) ListWorkstreamPosts(_ context.Context, req *connect.Request[operatorv1.ListWorkstreamPostsRequest]) (*connect.Response[operatorv1.ListWorkstreamPostsResponse], error) {
+	return unary(f.posts, req)
 }
 
 func newFake(t *testing.T, f *fakeControlPlane) *Client {

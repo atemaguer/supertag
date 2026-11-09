@@ -1,7 +1,12 @@
-import { type ControlPlane, resolveOwnerObjectiveRuntimeActions } from "@supertag/control-plane";
-import type { Store } from "@supertag/core";
+import {
+  ArtifactCatalog,
+  type ControlPlane,
+  resolveOwnerObjectiveRuntimeActions,
+} from "@supertag/control-plane";
+import type { AnyArtifactTransferGrantClaims, Store, TagMessagingGrant } from "@supertag/core";
+import type { RemoteWorkletServer } from "@supertag/worker-transport";
 import type { SurfaceController } from "./gateway-surfaces.js";
-import type { OperatorControl, OperatorQueries } from "./operator-seams.js";
+import type { OperatorControl, OperatorDataWrites, OperatorQueries } from "./operator-seams.js";
 
 /**
  * The operator queries of this process's Control Plane. Beyond the store, the inbox view reads
@@ -34,16 +39,39 @@ export function controlPlaneQueries(sources: {
   };
 }
 
+/** The operator data writes, made by this process's Control Plane. */
+export function controlPlaneDataWrites(sources: {
+  readonly controlPlane: Pick<ControlPlane, "inspectTaskExecution">;
+}): OperatorDataWrites {
+  return { inspectTaskExecution: (taskId) => sources.controlPlane.inspectTaskExecution(taskId) };
+}
+
 /** The operator state transitions, made by this process's Control Plane. */
 export function controlPlaneControl(sources: {
   readonly controlPlane: Pick<
     ControlPlane,
-    "isAccepting" | "messageTag" | "objectives" | "startObjective"
+    "isAccepting" | "messageTag" | "objectives" | "requestTaskCancellation" | "startObjective"
   >;
   readonly store: Store;
+  /** Signs artifact transfer grants; without it no Worker Host serves an operator directly. */
+  readonly artifactTransfers?: {
+    readonly sign: (claims: AnyArtifactTransferGrantClaims) => string;
+  };
+  /** The configured public Control Plane URL, never a request's Host header. */
+  readonly publicUrl?: string | undefined;
+  readonly workletApi?: Pick<RemoteWorkletServer, "isHostConnectionLoopback">;
 }): OperatorControl {
   const { controlPlane, store } = sources;
   const objectives = controlPlane.objectives;
+  const artifacts = new ArtifactCatalog(
+    store,
+    objectives,
+    sources.artifactTransfers === undefined ? undefined : { sign: sources.artifactTransfers.sign },
+  );
+  const changeGrant = async (grant: TagMessagingGrant, granted: boolean) => ({
+    grant: { senderTagId: grant.senderTagId, recipientTagId: grant.recipientTagId },
+    changed: await store.changeTagMessagingGrant(grant, granted),
+  });
   return {
     accepting: async () => controlPlane.isAccepting,
     messageTag: (input) => controlPlane.messageTag(input),
@@ -107,5 +135,23 @@ export function controlPlaneControl(sources: {
     cancelObjective: (input, principal) => objectives.cancelObjective(input, principal),
     pauseObjective: (input, principal) => objectives.pauseObjective(input, principal),
     resumeObjective: (input, principal) => objectives.resumeObjective(input, principal),
+    cancelTask: (taskId, principal) => controlPlane.requestTaskCancellation(taskId, principal),
+    resolveArtifactDownload: ({ artifactId, path, operatorId, operatorAddress }) =>
+      artifacts.resolveOperatorDownload(
+        operatorId,
+        artifactId,
+        { path },
+        {
+          publicUrl: sources.publicUrl,
+          operatorAddress,
+          hostConnectionIsLoopback: (workerHostId, generation) =>
+            sources.workletApi?.isHostConnectionLoopback(workerHostId, generation) === true,
+        },
+      ),
+    createTeam: (input) => store.createTeam(input),
+    updateTeam: (id, input) => store.updateTeam(id, input),
+    deleteTeam: (id) => store.deleteTeam(id),
+    grantMailbox: (grant) => changeGrant(grant, true),
+    revokeMailbox: (grant) => changeGrant(grant, false),
   };
 }

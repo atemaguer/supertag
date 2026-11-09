@@ -1,10 +1,10 @@
 import {
   artifactVolumeKey,
   type CapturedArtifact,
-  type Store,
   type TaskAttempt,
   type WorkerHost,
 } from "@supertag/core";
+import type { OperatorReadStore } from "./operator-seams.js";
 
 /** Most artifacts `describe task` places; a Task with more says so. */
 export const TASK_STORAGE_ARTIFACTS = 20;
@@ -60,7 +60,7 @@ export interface TaskStorage {
  */
 export async function taskStorage(
   store: Pick<
-    Store,
+    OperatorReadStore,
     | "listTaskAttempts"
     | "hasArtifactUpload"
     | "listCapturedArtifacts"
@@ -136,7 +136,7 @@ export interface ArtifactCopyLocations {
  */
 export async function artifactCopyLocations(
   store: Pick<
-    Store,
+    OperatorReadStore,
     "listArtifactStorageLocations" | "listArtifactVolumeLocations" | "hasArtifactUpload"
   >,
   artifact: Pick<CapturedArtifact, "entries" | "taskId" | "attemptId">,

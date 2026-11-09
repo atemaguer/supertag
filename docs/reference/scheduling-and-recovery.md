@@ -108,9 +108,9 @@ Unmet requirements: labels:gpu
 The record changes only when the requirement changes. Once a qualifying host appears, the next
 check records the Task as `compatible`.
 
-`supertag get task ID` carries the same record under `status.scheduling`, with fields `status`
-(`incompatible` or `compatible`), `unmetRequirements`, `reason`, `unsandboxedCommands`,
-`workspaceRefusals`, `observedAt` and `sequence`.
+`supertag get task ID` carries the same record under `scheduling`, with fields `status`
+(`SCHEDULING_STATUS_INCOMPATIBLE` or `SCHEDULING_STATUS_COMPATIBLE`), `unmetRequirements`,
+`reason`, `unsandboxedCommands`, `workspaceRefusals`, `observedAt` and `sequence`.
 
 Other holds are silent. A turn waits without a record while its Session already runs a turn,
 while its Objective is paused or closed, and while the Sessions of every Objective naming its
@@ -276,7 +276,7 @@ uncertain instead of a running Task with an expired lease:
 | `supertag describe objective` | The Task as `uncertain`, its reason and recover command, and the inbox item under "Needs you" |
 | Operator inbox | A `task-attention` item whose first command is the exact `supertag recover worklet` command |
 | `supertag ps` | The host's uncertain Task Attempts, with the commands to stop the host, recover, and start it |
-| `supertag get task` | `status.attempt` with its uncertainty |
+| `supertag get task` | `latestAttempt` with its uncertainty |
 
 An uncertain Task of a work Session reports nothing to the Session that started it until an
 operator settles it.

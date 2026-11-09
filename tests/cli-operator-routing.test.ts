@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { normalizeActionFirstCommand } from "../apps/cli/src/action-command.js";
 import * as controlPlane from "../apps/cli/src/control-plane-client.js";
 import { main } from "../apps/cli/src/index.js";
+import { fakeOperatorRpc } from "./support/fake-operator-rpc.js";
 
 afterEach(() => vi.restoreAllMocks());
 it.each([
@@ -48,19 +49,14 @@ it("routes artifact reads to JSON API without rendering instructions or prompts"
     url: "http://127.0.0.1:1",
     token: "unused",
   });
-  const resource = {
-    apiVersion: "supertag/v1",
-    kind: "Artifact",
-    metadata: { id: "artifact/one" },
-    spec: { entries: [] },
-  };
-  const request = vi
-    .spyOn(controlPlane.ControlPlaneClient.prototype, "request")
-    .mockResolvedValue(resource);
+  const artifact = { id: "artifact/one", title: "Report", kind: "output" };
+  const rpc = fakeOperatorRpc({ "WorkService/GetArtifact": () => artifact });
   const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   expect(await main(["get", "artifact", "artifact/one"])).toBe(0);
-  expect(request).toHaveBeenCalledWith("/api/v1/artifacts/artifact%2Fone");
-  expect(JSON.parse(write.mock.calls.map(([v]) => String(v)).join(""))).toEqual(resource);
+  expect(rpc.called("WorkService/GetArtifact").map((call) => call.body)).toEqual([
+    { id: "artifact/one" },
+  ]);
+  expect(JSON.parse(write.mock.calls.map(([v]) => String(v)).join(""))).toEqual(artifact);
 });
 it("preserves explicit JSON for general resource inspection", async () => {
   vi.spyOn(controlPlane, "resolveControlPlaneTarget").mockResolvedValue({

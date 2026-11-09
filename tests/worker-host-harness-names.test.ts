@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.js";
 import { renderListTable, runListCommand } from "../apps/cli/src/list-command.js";
 import { runResourceCommand } from "../apps/cli/src/resources.js";
+import { fakeWorkRpc } from "./support/fake-work-rpc.ts";
 
 const workers = [
   { id: "local-claude", type: "supertag", profileCapabilities: [{ harness: "claude-code" }] },
@@ -36,15 +37,16 @@ it("describes each Worker's harnesses with a fallback for custom Workers", async
 
 afterEach(() => vi.restoreAllMocks());
 it("labels running capacity by harness while preserving shared Worker capacity", async () => {
-  vi.spyOn(ControlPlaneClient.prototype, "request")
-    .mockResolvedValueOnce({ items: [resource] })
-    .mockResolvedValueOnce({
-      items: [
-        {
-          status: { attempt: { phase: "running", workerHostId: "host", workerId: "local-codex" } },
-        },
-      ],
-    });
+  vi.spyOn(ControlPlaneClient.prototype, "request").mockResolvedValueOnce({ items: [resource] });
+  fakeWorkRpc([
+    {
+      metadata: { id: "task" },
+      status: {
+        phase: "running",
+        attempt: { phase: "running", workerHostId: "host", workerId: "local-codex" },
+      },
+    },
+  ]);
   const output = await runListCommand({ url: "http://127.0.0.1:1", token: "unused" }, [
     "worker-host",
   ]);

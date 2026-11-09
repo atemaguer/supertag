@@ -1049,6 +1049,13 @@ export class DrizzleStore implements Store {
       ...args,
     );
   }
+  changeTagMessagingGrant(
+    ...args: Parameters<TagMailboxStore["changeTagMessagingGrant"]>
+  ): ReturnType<TagMailboxStore["changeTagMessagingGrant"]> {
+    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).changeTagMessagingGrant(
+      ...args,
+    );
+  }
   listTagMessagingGrants(
     ...args: Parameters<TagMailboxStore["listTagMessagingGrants"]>
   ): ReturnType<TagMailboxStore["listTagMessagingGrants"]> {
@@ -2241,7 +2248,16 @@ export class DrizzleStore implements Store {
       filter.sessionId === undefined
         ? undefined
         : eq(t.sessionId, required(filter.sessionId, "Session id")),
+      filter.objectiveId === undefined
+        ? undefined
+        : eq(t.objectiveId, required(filter.objectiveId, "Objective id")),
       filter.status === undefined ? undefined : eq(t.status, filter.status),
+      filter.before === undefined
+        ? undefined
+        : or(
+            lt(t.createdAt, filter.before.createdAt),
+            and(eq(t.createdAt, filter.before.createdAt), gt(t.id, filter.before.id)),
+          ),
     ]);
     return (
       await this.#db

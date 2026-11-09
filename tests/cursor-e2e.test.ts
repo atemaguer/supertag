@@ -6,7 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { expect, it } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
-import { conversationClient } from "../apps/cli/src/operator-client.js";
+import { conversationClient, workClient } from "../apps/cli/src/operator-client.js";
 import {
   type CursorRunner,
   createCursorWorker,
@@ -200,11 +200,10 @@ it("runs a Cursor Task through Control Plane and Worklet with MCP, usage, resume
     // Cancel only once the runner holds the work, so the Worker must stop what it started.
     await expect.poll(() => cancelPid !== undefined, { timeout: 20_000 }).toBe(true);
     expect((await store.findTaskById(cancelTask))?.status).toBe("running");
-    const cancelResponse = await fetch(`${runtime.url}/api/v1/tasks/${cancelTask}/cancel`, {
-      method: "POST",
-      headers: { Authorization: "Bearer cursor-admin" },
+    const cancellation = await workClient({ url: runtime.url, token: "cursor-admin" }).cancelTask({
+      id: cancelTask,
     });
-    expect(cancelResponse.status, await cancelResponse.text()).toBe(202);
+    expect(cancellation.accepted).toBe(true);
     await cancelled;
     await expect
       .poll(async () => (await store.listTaskAttempts(cancelTask))[0]?.status, { timeout: 20_000 })

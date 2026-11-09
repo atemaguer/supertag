@@ -168,7 +168,7 @@ first message. A work Session it started shows its own title, and the conversati
 under `PARENT`. An Objective's conversation is titled `Objective ID`, and the Session that handles
 the Tag's Mailbox messages is titled `Inbox`. `STATUS` shows the latest Task's status: `pending`, `running`, `completed`,
 `failed`, or `cancelled`.
-`supertag get session ID` reports `status.audience: private`, and
+`supertag get session ID` reports `"audience": "SESSION_AUDIENCE_PRIVATE"`, and
 `supertag describe session ID` shows its Tasks.
 
 ## Rules

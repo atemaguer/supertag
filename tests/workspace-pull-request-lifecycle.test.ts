@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { taskResourceFromStore } from "../apps/cli/src/control-plane-resources.js";
 import { createWorkspacePullRequestHandler } from "../apps/cli/src/gateway-surfaces.js";
+import { taskResourceFromStore } from "../apps/cli/src/work-views.js";
 import { ControlPlane } from "../packages/control-plane/src/index.js";
 import {
   WORKSPACE_PULL_REQUEST_RETRY,

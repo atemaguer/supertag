@@ -47,6 +47,8 @@ async function request(state, method, path, body) {
     throw new Error(`${method} ${path}: ${response.status} ${JSON.stringify(value)}`);
   return value;
 }
+const rpc = (state, service, method, body = {}) =>
+  request(state, "POST", `/supertag.operator.v1.${service}/${method}`, body);
 async function waitUntil(check, timeout = 60000) {
   const deadline = Date.now() + timeout;
   let last;
@@ -374,21 +376,16 @@ async function bootstrap() {
     );
     await save(state);
   }
-  const team = await request(state, "POST", "/api/v1/tag-messaging/teams", {
+  const managers = ["Shared claude manager", "Shared codex manager"];
+  const team = await rpc(state, "TeamService", "CreateTeam", {
     id: "shared-review",
     name: "Independent review",
-    memberTagIds: [state.tagIds.claude, state.tagIds.codex],
+    members: managers,
     maxConcurrency: 2,
   });
   state.teamId = team.id;
-  for (const [senderTagId, recipientTagId] of [
-    [state.tagIds.claude, state.tagIds.codex],
-    [state.tagIds.codex, state.tagIds.claude],
-  ])
-    await request(state, "PUT", "/api/v1/tag-messaging/grants", {
-      senderTagId,
-      recipientTagId,
-    });
+  for (const [sender, recipient] of [managers, managers.toReversed()])
+    await rpc(state, "MailboxService", "GrantMailbox", { sender, recipient });
   state.ready = true;
   await save(state);
   print({
@@ -476,28 +473,27 @@ async function status() {
       id: state.objectiveId,
     },
   ).catch(() => undefined);
-  const tasks = (await request(state, "GET", "/api/v1/tasks")).items;
+  const { tasks = [] } = await rpc(state, "WorkService", "ListTasks", { pageSize: 500 });
   const attempts = await Promise.all(
     tasks.map(async (task) => ({
-      taskId: task.metadata.id,
+      taskId: task.id,
       events: (
-        await request(state, "GET", `/api/v1/tasks/${encodeURIComponent(task.metadata.id)}/events`)
-      ).items,
+        await rpc(state, "WorkService", "ListTaskEvents", { taskId: task.id, pageSize: 1000 })
+      ).events,
     })),
   );
   const messages = [
     ...new Map(
       (
         await Promise.all(
-          Object.values(state.tagIds).map(
-            async (tagId) =>
+          Object.keys(state.tagIds).map(
+            async (name) =>
               (
-                await request(
-                  state,
-                  "GET",
-                  `/api/v1/tag-messaging/messages?tagId=${encodeURIComponent(tagId)}`,
-                )
-              ).items,
+                await rpc(state, "MailboxService", "ListTagMessages", {
+                  tag: `Shared ${name} manager`,
+                  pageSize: 200,
+                })
+              ).messages ?? [],
           ),
         )
       )
@@ -509,13 +505,12 @@ async function status() {
     stateDirectory,
     managementUrl: state.managementUrl,
     objective,
-    posts: (
-      await request(
-        state,
-        "GET",
-        `/api/v1/tag-messaging/workstreams/${encodeURIComponent(state.teamId ?? "")}/posts`,
-      ).catch(() => ({ items: [] }))
-    ).items,
+    posts:
+      (
+        await rpc(state, "MailboxService", "ListWorkstreamPosts", {
+          team: state.teamId ?? "",
+        }).catch(() => ({}))
+      ).posts ?? [],
     tasks,
     attempts,
     messages,
@@ -549,14 +544,12 @@ async function cleanup() {
     throw new Error("Invalid example state; cleanup cannot verify owned resources");
   // Request cancellation before stopping execution; retained journals describe any uncertainty.
   if (state.started) {
-    const tasks = await request(state, "GET", "/api/v1/tasks").catch(() => ({ items: [] }));
-    const active = tasks.items.filter((task) =>
-      ["pending", "running", "queued", "dispatched"].includes(task.status?.phase),
-    );
+    const { tasks: active = [] } = await rpc(state, "WorkService", "ListTasks", {
+      statuses: ["TASK_STATUS_PENDING", "TASK_STATUS_RUNNING"],
+      pageSize: 500,
+    }).catch(() => ({}));
     const cancel = (task) =>
-      request(state, "POST", `/api/v1/tasks/${encodeURIComponent(task.metadata.id)}/cancel`).catch(
-        () => undefined,
-      );
+      rpc(state, "WorkService", "CancelTask", { id: task.id }).catch(() => undefined);
     if (state.workerHosts === "docker") await Promise.all(active.map(cancel));
     else for (const task of active) await cancel(task);
   }

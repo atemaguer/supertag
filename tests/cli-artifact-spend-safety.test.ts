@@ -7,6 +7,7 @@ import { runArtifactCommand } from "../apps/cli/src/artifacts.js";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.js";
 import { formatSpend } from "../apps/cli/src/spend.js";
 import { validateArtifactPath } from "../packages/core/src/index.js";
+import { fakeOperatorRpc } from "./support/fake-operator-rpc.js";
 
 vi.mock("../apps/cli/src/artifact-volume.js", () => ({
   artifactVolumeReader: () => async () => Buffer.from("safe bytes"),
@@ -86,17 +87,20 @@ it.each([false, true])(
       digest: `sha256:${createHash("sha256").update(content).digest("hex")}`,
       sizeBytes: content.length,
     };
-    const client = new ControlPlaneClient({ baseUrl: "http://localhost", token: "test" });
-    const request = vi
-      .spyOn(client, "request")
-      .mockResolvedValueOnce({ spec: { entries: [entry] } })
-      .mockResolvedValueOnce({
+    const client = new ControlPlaneClient({ url: "http://localhost", token: "test" });
+    const rpc = fakeOperatorRpc({
+      "WorkService/GetArtifact": () => ({
+        id: "artifact",
+        entries: [{ ...entry, sizeBytes: String(entry.sizeBytes) }],
+      }),
+      "WorkService/ResolveArtifactDownload": () => ({
         artifactId: "artifact",
         ...entry,
+        sizeBytes: String(entry.sizeBytes),
         volumes: [{ volume: "test" }],
-        locations: [],
-        holders: { workerHostIds: [], volumes: ["test"] },
-      });
+        holders: { volumes: ["test"] },
+      }),
+    });
     try {
       const output = await runArtifactCommand(client, "download", [
         "artifact",
@@ -114,7 +118,7 @@ it.each([false, true])(
         expect(output.trimEnd()).not.toMatch(/[\p{Cc}\p{Cf}]/u);
       }
     } finally {
-      request.mockRestore();
+      rpc.fetch.mockRestore();
       await rm(directory, { recursive: true, force: true });
     }
   },

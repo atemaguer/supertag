@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"strings"
 	"time"
 
@@ -13,9 +14,12 @@ import (
 	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
 )
 
-// conversationName is the conversation the TUI shows: the same one as
+// defaultConversation is the conversation a Tag opens on: the same one as
 // `supertag message tag NAME TEXT`.
-const conversationName = "default"
+const defaultConversation = "default"
+
+// conversationPlaceholder is the input's placeholder in a conversation.
+const conversationPlaceholder = "Message the Tag · ↑ work Sessions · ctrl+o conversations"
 
 // historyPage is how many past messages a conversation shows when its Tag is first selected.
 const historyPage = 50
@@ -30,6 +34,7 @@ var watchKinds = []operatorv1.WatchKind{
 	operatorv1.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE,
 	operatorv1.WatchKind_WATCH_KIND_OBJECTIVE,
 	operatorv1.WatchKind_WATCH_KIND_TASK,
+	operatorv1.WatchKind_WATCH_KIND_SESSION,
 	operatorv1.WatchKind_WATCH_KIND_INBOX_ITEM,
 	operatorv1.WatchKind_WATCH_KIND_APPROVAL,
 	operatorv1.WatchKind_WATCH_KIND_WORKSTREAM_POST,
@@ -50,6 +55,11 @@ const (
 	paneConversation pane = iota
 	paneObjective
 	paneInbox
+	// paneDiff shows a work Session branch's diff, or why it cannot.
+	paneDiff
+	// paneConversations lists the selected Tag's conversations to switch to or start.
+	paneConversations
+	paneTeam
 )
 
 // decision is where deciding the shown approval request stands.
@@ -78,34 +88,54 @@ const (
 	entryReply
 	entryDim
 	entryError
+	// entryWork is a work Session's "working" line, which expands to show its activity and
+	// report.
+	entryWork
+	// entryReport is a work Session's report; its branch line follows the latest one.
+	entryReport
 )
 
 // entry is one shown item; its text is already filtered for the terminal.
 type entry struct {
 	kind entryKind
 	text string
+	// session is the work Session an entryWork or entryReport belongs to.
+	session string
 }
 
-// conversation is what the TUI shows of one Tag's default conversation: its newest page of
-// history, then what happened since the TUI started.
+// conversation is what the TUI shows of one of the caller's conversations with a Tag: its newest
+// page of history, then what happened since the TUI started.
 type conversation struct {
 	entries []entry
 	// draft is the reply text streaming in; the final reply replaces it.
 	draft string
-	// loading and loaded track the history, which loads when the Tag is first selected. Sending
-	// waits for it, so a message is not shown both live and from history.
+	// loading and loaded track the history, which loads when the conversation is first shown.
+	// Sending waits for it, so a message is not shown both live and from history.
 	loading, loaded bool
-	// rendered is the first renderedCount entries rendered at renderedWidth. Entries never
-	// change once added, so each is rendered once per width, not on every streamed token.
-	rendered      strings.Builder
-	renderedCount int
-	renderedWidth int
+	// cache holds each entry rendered at cacheWidth, "" for an entry that renders anew each time.
+	// Other entries never change once added, so each is rendered once per width, not on every
+	// streamed token.
+	cache      []string
+	cacheWidth int
+	// selected is the work Session or branch line chosen with up and down; nil while the input
+	// has the keys.
+	selected *target
+	// selectedLine is the line of the selected target in the last rendering.
+	selectedLine int
 }
 
 // add appends an entry, filtering its text for the terminal.
 func (c *conversation) add(kind entryKind, text string) {
-	c.entries = append(c.entries, entry{kind, terminalLines(text)})
+	c.entries = append(c.entries, entry{kind: kind, text: terminalLines(text)})
 }
+
+// addFor appends an entry of a work Session.
+func (c *conversation) addFor(kind entryKind, session, text string) {
+	c.entries = append(c.entries, entry{kind: kind, text: terminalLines(text), session: session})
+}
+
+// convKey names a conversation in the model's maps.
+func convKey(tag, name string) string { return tag + "\x00" + name }
 
 type (
 	tagsMsg struct {
@@ -118,21 +148,21 @@ type (
 	}
 	pollMsg    struct{}
 	historyMsg struct {
-		tag   string
-		items []client.HistoryItem
-		err   error
+		tag, conversation string
+		items             []client.HistoryItem
+		err               error
 	}
 	sentMsg struct {
-		tag     string
-		message *operatorv1.Message
-		err     error
+		tag, conversation string
+		message           *operatorv1.Message
+		err               error
 	}
 	followMsg struct {
-		tag    string
-		event  client.FollowEvent
-		events <-chan client.FollowEvent
+		tag, conversation string
+		event             client.FollowEvent
+		events            <-chan client.FollowEvent
 	}
-	followDoneMsg struct{ tag string }
+	followDoneMsg struct{}
 	watchMsg      struct {
 		update  client.WatchUpdate
 		updates <-chan client.WatchUpdate
@@ -195,11 +225,40 @@ type model struct {
 
 	tags []client.Tag
 	// selected is the Tag whose conversation the conversation pane shows.
-	selected      int
-	focus         focus
+	selected int
+	focus    focus
+	// conversations are what is shown of each conversation, by convKey; current names the
+	// conversation each Tag shows, the default one when unset.
 	conversations map[string]*conversation
-	// open counts each Tag's work Sessions in the default conversation that have not finished.
+	current       map[string]string
+	// open counts the work Sessions of each conversation, by convKey, that have not finished.
 	open map[string]int
+	// work is what was read of each work Session shown, by ID; expanded holds those whose lines
+	// show their activity and report.
+	work     map[string]*workDetail
+	expanded map[string]bool
+	// diff is the diff pane's content; picker the conversation list's.
+	diff   *diffView
+	picker *picker
+	// notice is what came of the last action on a conversation's selection, such as opening a
+	// pull request; the next key clears it.
+	notice note
+
+	// teams are the organization's Teams; teamID the one the Team pane shows, and teamViews what
+	// was last read of each Team shown.
+	teams      []*operatorv1.Team
+	teamsErr   string
+	teamID     string
+	teamViews  map[string]client.TeamView
+	teamErrs   map[string]string
+	teamReload *reload
+	teamView   *reload
+
+	// git runs git for diffs in cwd, the directory the TUI started in; openURL opens a web
+	// address with the platform's opener.
+	git     gitRunner
+	cwd     string
+	openURL func(string) error
 
 	// objectives are the open Objectives; inbox is what waits on the operator. Each error is why
 	// its section could not be read, filtered for the terminal.
@@ -242,15 +301,26 @@ type model struct {
 func newModel(ctx context.Context, c *client.Client, f *client.Follower, w *client.Watcher) model {
 	input := textinput.New()
 	input.Prompt = "> "
-	input.Placeholder = "Message the Tag"
+	input.Placeholder = conversationPlaceholder
 	input.Focus()
+	cwd, _ := os.Getwd()
 	return model{
 		ctx:            ctx,
 		client:         c,
 		follower:       f,
 		watcher:        w,
 		conversations:  map[string]*conversation{},
+		current:        map[string]string{},
 		open:           map[string]int{},
+		work:           map[string]*workDetail{},
+		expanded:       map[string]bool{},
+		teamViews:      map[string]client.TeamView{},
+		teamErrs:       map[string]string{},
+		teamReload:     &reload{},
+		teamView:       &reload{},
+		git:            runGit,
+		cwd:            cwd,
+		openURL:        openURL,
 		overviews:      map[string]*operatorv1.ObjectiveOverview{},
 		overviewErrs:   map[string]string{},
 		drafts:         map[string]string{},
@@ -269,7 +339,7 @@ func newModel(ctx context.Context, c *client.Client, f *client.Follower, w *clie
 }
 
 func (m model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.reloadTags(), m.reloadConversations(), m.reloadObjectives(), m.reloadInbox(), m.pollAfter(), textinput.Blink}
+	cmds := []tea.Cmd{m.reloadTags(), m.reloadConversations(), m.reloadObjectives(), m.reloadInbox(), m.reloadTeams(), m.pollAfter(), textinput.Blink}
 	if m.watcher != nil {
 		cmds = append(cmds, waitForWatch(m.watcher.Run(m.ctx)))
 	}
@@ -318,30 +388,31 @@ func (m model) reloadOverview() tea.Cmd {
 
 // reloadAll rereads everything the TUI shows.
 func (m model) reloadAll() tea.Cmd {
-	return tea.Batch(m.reloadTags(), m.reloadConversations(), m.reloadObjectives(), m.reloadInbox(), m.reloadOverview())
+	return tea.Batch(m.reloadTags(), m.reloadConversations(), m.reloadObjectives(), m.reloadInbox(), m.reloadOverview(),
+		m.reloadTeams(), m.reloadTeam(), m.reloadPicker())
 }
 
-func (m model) loadHistory(tag string) tea.Cmd {
+func (m model) loadHistory(tag, name string) tea.Cmd {
 	return func() tea.Msg {
-		page, _, err := m.client.ListMessages(m.ctx, tag, conversationName, historyPage, "")
-		return historyMsg{tag: tag, items: client.History(tag, page), err: err}
+		page, _, err := m.client.ListMessages(m.ctx, tag, name, historyPage, "")
+		return historyMsg{tag: tag, conversation: name, items: client.History(tag, page), err: err}
 	}
 }
 
-func (m model) send(tag, text string) tea.Cmd {
+func (m model) send(tag, name, text string) tea.Cmd {
 	return func() tea.Msg {
-		message, err := m.client.SendMessage(m.ctx, tag, conversationName, text)
-		return sentMsg{tag: tag, message: message, err: err}
+		message, err := m.client.SendMessage(m.ctx, tag, name, text)
+		return sentMsg{tag: tag, conversation: name, message: message, err: err}
 	}
 }
 
-func waitFor(tag string, events <-chan client.FollowEvent) tea.Cmd {
+func waitFor(tag, name string, events <-chan client.FollowEvent) tea.Cmd {
 	return func() tea.Msg {
 		event, ok := <-events
 		if !ok {
-			return followDoneMsg{tag: tag}
+			return followDoneMsg{}
 		}
-		return followMsg{tag: tag, event: event, events: events}
+		return followMsg{tag: tag, conversation: name, event: event, events: events}
 	}
 }
 
@@ -362,13 +433,30 @@ func (m model) selectedTag() string {
 	return m.tags[m.selected].Name()
 }
 
-func (m model) conversation(tag string) *conversation {
-	c, ok := m.conversations[tag]
+// currentConversation names the conversation tag shows.
+func (m model) currentConversation(tag string) string {
+	if name := m.current[tag]; name != "" {
+		return name
+	}
+	return defaultConversation
+}
+
+func (m model) conversation(tag, name string) *conversation {
+	c, ok := m.conversations[convKey(tag, name)]
 	if !ok {
 		c = &conversation{}
-		m.conversations[tag] = c
+		m.conversations[convKey(tag, name)] = c
 	}
 	return c
+}
+
+// shown is the conversation the selected Tag shows, or nil without Tags.
+func (m model) shown() *conversation {
+	tag := m.selectedTag()
+	if tag == "" {
+		return nil
+	}
+	return m.conversation(tag, m.currentConversation(tag))
 }
 
 // selectTag shows the selected Tag's conversation, loading its history the first time.
@@ -381,12 +469,13 @@ func (m *model) selectTag() tea.Cmd {
 	if tag == "" {
 		return nil
 	}
-	c := m.conversation(tag)
+	name := m.currentConversation(tag)
+	c := m.conversation(tag, name)
 	if c.loaded || c.loading {
 		return nil
 	}
 	c.loading = true
-	return m.loadHistory(tag)
+	return m.loadHistory(tag, name)
 }
 
 func (m *model) fail(err error) {
@@ -488,9 +577,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil {
 			m.open = map[string]int{}
 			for _, c := range msg.conversations {
-				if c.GetName() == conversationName {
-					m.open[c.GetTag()] = int(c.GetOpenWorkSessionCount())
-				}
+				m.open[convKey(c.GetTag(), c.GetName())] = int(c.GetOpenWorkSessionCount())
 			}
 		}
 		return m, again
@@ -525,18 +612,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sentMsg:
 		if msg.err != nil {
 			m.fail(msg.err)
-			m.addEntry(msg.tag, entryError, msg.err.Error())
+			m.addEntry(msg.tag, msg.conversation, entryError, msg.err.Error())
 			return m, nil
 		}
 		m.connected, m.status = true, "connected"
-		return m, waitFor(msg.tag, m.follower.Follow(m.ctx, msg.tag, msg.message, nil))
+		return m, waitFor(msg.tag, msg.conversation, m.follower.Follow(m.ctx, msg.tag, msg.message, nil))
 
 	case followMsg:
-		m.apply(msg.tag, msg.event)
-		return m, waitFor(msg.tag, msg.events)
+		cmd := m.apply(msg.tag, msg.conversation, msg.event)
+		return m, tea.Batch(cmd, waitFor(msg.tag, msg.conversation, msg.events))
 
 	case followDoneMsg:
 		return m, nil
+
+	case workMsg:
+		return m, m.workRead(msg)
+
+	case diffMsg:
+		m.diffRead(msg)
+		return m, nil
+
+	case openedMsg:
+		m.opened(msg)
+		return m, nil
+
+	case pickerMsg:
+		return m, m.pickerRead(msg)
+
+	case teamsMsg:
+		return m, m.teamsRead(msg)
+
+	case teamMsg:
+		return m, m.teamRead(msg)
 
 	case tea.KeyPressMsg:
 		return m.key(msg)
@@ -561,20 +668,40 @@ func (m model) changed(change *operatorv1.WatchChange) tea.Cmd {
 	case operatorv1.WatchKind_WATCH_KIND_TAG:
 		return m.reloadTags()
 	case operatorv1.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE:
-		return m.reloadConversations()
+		var picker tea.Cmd
+		if m.pane == paneConversations && m.picker != nil && m.picker.tag == change.GetTag() {
+			picker = m.reloadPicker()
+		}
+		return tea.Batch(m.reloadConversations(), picker)
 	case operatorv1.WatchKind_WATCH_KIND_OBJECTIVE:
 		return tea.Batch(m.reloadObjectives(), shown(change.GetId()))
+	case operatorv1.WatchKind_WATCH_KIND_SESSION:
+		if _, known := m.work[change.GetId()]; known {
+			return m.reloadWork(change.GetId())
+		}
+		return nil
 	case operatorv1.WatchKind_WATCH_KIND_TASK:
+		var work tea.Cmd
+		if id := change.GetSessionId(); m.expanded[id] {
+			work = m.reloadWork(id)
+		}
 		// A Task's end changes its Objective's spend and Sessions; other Tasks change neither.
 		if change.GetObjectiveId() == "" {
-			return nil
+			return work
 		}
-		return tea.Batch(m.reloadObjectives(), shown(change.GetObjectiveId()))
+		return tea.Batch(work, m.reloadObjectives(), shown(change.GetObjectiveId()))
 	case operatorv1.WatchKind_WATCH_KIND_INBOX_ITEM, operatorv1.WatchKind_WATCH_KIND_APPROVAL:
 		return tea.Batch(m.reloadInbox(), shown(change.GetObjectiveId()))
 	case operatorv1.WatchKind_WATCH_KIND_WORKSTREAM_POST:
-		if m.pane == paneObjective && change.GetTeamId() != "" && change.GetTeamId() == m.shownTeam() {
+		team := change.GetTeamId()
+		if team == "" {
+			return nil
+		}
+		if m.pane == paneObjective && team == m.shownTeam() {
 			return m.reloadOverview()
+		}
+		if m.pane == paneTeam && team == m.teamID {
+			return m.reloadTeam()
 		}
 	}
 	return nil
@@ -599,7 +726,7 @@ func (m model) tagsCmd() tea.Cmd {
 
 func (m model) conversationsCmd() tea.Cmd {
 	return func() tea.Msg {
-		conversations, err := m.client.ListConversations(m.ctx)
+		conversations, err := m.client.ListConversations(m.ctx, "")
 		return conversationsMsg{conversations: conversations, err: err}
 	}
 }
@@ -628,29 +755,30 @@ func (m model) overviewCmd(id string) tea.Cmd {
 // showHistory adds a conversation's past messages, oldest first, and follows those that still
 // have a reply or work to show.
 func (m *model) showHistory(msg historyMsg) tea.Cmd {
-	c := m.conversation(msg.tag)
+	c := m.conversation(msg.tag, msg.conversation)
 	c.loading, c.loaded = false, true
 	if msg.err != nil {
-		m.addEntry(msg.tag, entryError, "Could not load the conversation history: "+msg.err.Error())
+		m.addEntry(msg.tag, msg.conversation, entryError, "Could not load the conversation history: "+msg.err.Error())
 		return nil
 	}
 	var cmds []tea.Cmd
 	for _, item := range msg.items {
 		c.add(entryYou, item.Message.GetText())
 		for _, event := range item.Events {
-			m.apply(msg.tag, event)
+			cmds = append(cmds, m.apply(msg.tag, msg.conversation, event))
 		}
 		if item.Follow {
-			cmds = append(cmds, waitFor(msg.tag, m.follower.Follow(m.ctx, msg.tag, item.Message, item.Shown)))
+			cmds = append(cmds, waitFor(msg.tag, msg.conversation, m.follower.Follow(m.ctx, msg.tag, item.Message, item.Shown)))
 		}
 	}
-	if m.showsConversation(msg.tag) {
+	if m.showsConversation(msg.tag, msg.conversation) {
 		m.refresh()
 	}
 	return tea.Batch(cmds...)
 }
 
 func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.notice = note{}
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
@@ -662,6 +790,9 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.refresh()
 			return m, nil
 		}
+		if m.back() {
+			return m, m.syncInput()
+		}
 		return m, tea.Quit
 	case "tab", "shift+tab":
 		return m.toggleFocus()
@@ -671,6 +802,8 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "pgdown":
 		m.viewport.PageDown()
 		return m, nil
+	case "ctrl+o":
+		return m, m.openPicker()
 	}
 	if m.decision == decisionConfirm {
 		if msg.String() == "enter" {
@@ -701,6 +834,20 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.decision == decisionNone && (msg.String() == "a" || msg.String() == "d") && m.approvalShown() {
 		return m.decide(msg.String())
+	}
+	switch m.pane {
+	case paneConversation:
+		if next, cmd, ok := m.selectionKey(msg); ok {
+			return next, cmd
+		}
+	case paneConversations:
+		if next, cmd, ok := m.pickerKey(msg); ok {
+			return next, cmd
+		}
+	case paneDiff:
+		if msg.String() == "o" {
+			return m, m.openPullRequest(m.diff.pr)
+		}
 	}
 	switch msg.String() {
 	case "enter":
@@ -737,12 +884,15 @@ func (m *model) submit() tea.Cmd {
 	switch m.pane {
 	case paneConversation:
 		tag := m.selectedTag()
-		if tag == "" || !m.conversation(tag).loaded {
+		name := m.currentConversation(tag)
+		if tag == "" || !m.conversation(tag, name).loaded {
 			return nil
 		}
 		m.input.Reset()
-		m.addEntry(tag, entryYou, text)
-		return m.send(tag, text)
+		m.addEntry(tag, name, entryYou, text)
+		return m.send(tag, name, text)
+	case paneConversations:
+		return m.startConversation(text)
 	case paneInbox:
 		item := m.item
 		if m.decision == decisionReason {
@@ -873,7 +1023,10 @@ func (m *model) syncInput() tea.Cmd {
 func (m model) inputShown() bool {
 	switch m.pane {
 	case paneConversation:
-		return true
+		c := m.shown()
+		return c == nil || c.selected == nil
+	case paneConversations:
+		return m.picker != nil && m.picker.naming
 	case paneInbox:
 		if m.decision == decisionReason {
 			return true
@@ -907,6 +1060,7 @@ const (
 	rowTag rowKind = iota
 	rowObjective
 	rowInbox
+	rowTeam
 )
 
 // row is one selectable rail row: index is into tags, objectives or inbox items.
@@ -917,7 +1071,7 @@ type row struct {
 
 // rows are the rail's selectable rows, section by section.
 func (m model) rows() []row {
-	rows := make([]row, 0, len(m.tags)+len(m.objectives)+len(m.inbox.Items))
+	rows := make([]row, 0, len(m.tags)+len(m.objectives)+len(m.inbox.Items)+len(m.teams))
 	for i := range m.tags {
 		rows = append(rows, row{rowTag, i})
 	}
@@ -926,6 +1080,9 @@ func (m model) rows() []row {
 	}
 	for i := range m.inbox.Items {
 		rows = append(rows, row{rowInbox, i})
+	}
+	for i := range m.teams {
+		rows = append(rows, row{rowTeam, i})
 	}
 	return rows
 }
@@ -936,6 +1093,8 @@ func (m model) rowKey(r row) string {
 		return "objective:" + m.objectives[r.index].GetId()
 	case rowInbox:
 		return "inbox:" + m.inbox.Items[r.index].GetOccurrence()
+	case rowTeam:
+		return "team:" + m.teams[r.index].GetId()
 	}
 	return "tag:" + m.tags[r.index].Name()
 }
@@ -947,8 +1106,67 @@ func (m model) paneKey() string {
 		return "objective:" + m.objectiveID
 	case paneInbox:
 		return "inbox:" + m.item.GetOccurrence()
+	case paneTeam:
+		return "team:" + m.teamID
 	}
 	return "tag:" + m.selectedTag()
+}
+
+// draftKey names the unsent input of what the pane shows: each conversation keeps its own. The
+// diff pane and the conversation list keep none.
+func (m model) draftKey() string {
+	switch m.pane {
+	case paneConversation:
+		tag := m.selectedTag()
+		return "conversation:" + convKey(tag, m.currentConversation(tag))
+	case paneDiff, paneConversations:
+		return ""
+	}
+	return m.paneKey()
+}
+
+// saveDraft keeps the input for the pane's return, and empties it.
+func (m *model) saveDraft() {
+	if key := m.draftKey(); key != "" {
+		m.drafts[key] = m.input.Value()
+	}
+	m.input.Reset()
+}
+
+// back leaves the diff pane or the conversation list for the conversation, or clears the
+// conversation's selection; false when there is nothing to go back from.
+func (m *model) back() bool {
+	switch m.pane {
+	case paneConversation:
+		if c := m.shown(); c != nil && c.selected != nil {
+			c.selected = nil
+			m.refresh()
+			return true
+		}
+	case paneConversations:
+		if m.picker != nil && m.picker.naming {
+			m.picker.naming, m.picker.note = false, note{}
+			m.input.Reset()
+			m.refresh()
+			return true
+		}
+		m.showConversation()
+		return true
+	case paneDiff:
+		m.viewport.SoftWrap = false
+		m.showConversation()
+		return true
+	}
+	return false
+}
+
+// showConversation shows the selected Tag's current conversation in the main pane.
+func (m *model) showConversation() {
+	m.pane = paneConversation
+	m.input.Placeholder = conversationPlaceholder
+	m.input.SetValue(m.drafts[m.draftKey()])
+	m.viewport.GotoBottom()
+	m.refresh()
 }
 
 // placeCursor keeps the cursor on the row the pane shows after the rail's lists change, or
@@ -975,21 +1193,25 @@ func (m *model) choose() tea.Cmd {
 	if m.rowKey(r) == m.paneKey() {
 		return nil
 	}
-	m.drafts[m.paneKey()] = m.input.Value()
+	m.saveDraft()
 	m.decision, m.itemNote = decisionNone, note{}
+	m.viewport.SoftWrap = false
 	var cmd tea.Cmd
 	switch r.kind {
 	case rowTag:
 		m.pane, m.selected = paneConversation, r.index
-		m.input.Placeholder = "Message the Tag"
+		m.input.Placeholder = conversationPlaceholder
 	case rowObjective:
 		m.pane, m.objectiveID = paneObjective, m.objectives[r.index].GetId()
 		cmd = m.reloadOverview()
 	case rowInbox:
 		m.pane, m.item = paneInbox, m.inbox.Items[r.index]
 		m.input.Placeholder = "Type your answer"
+	case rowTeam:
+		m.pane, m.teamID = paneTeam, m.teams[r.index].GetId()
+		cmd = m.reloadTeam()
 	}
-	m.input.SetValue(m.drafts[m.paneKey()])
+	m.input.SetValue(m.drafts[m.draftKey()])
 	focusCmd := m.syncInput()
 	m.refresh()
 	if m.pane == paneConversation {
@@ -1000,11 +1222,13 @@ func (m *model) choose() tea.Cmd {
 	return tea.Batch(focusCmd, cmd)
 }
 
-// apply adds one follow event to its Tag's conversation, as `supertag message tag` prints it.
-// Every field from the server or an agent is filtered for the terminal, as the CLI does.
-func (m *model) apply(tag string, event client.FollowEvent) {
-	c := m.conversation(tag)
+// apply adds one follow event to its conversation, as `supertag message tag` prints it, and
+// rereads a work Session that reported or whose shown activity grew. Every field from the server
+// or an agent is filtered for the terminal, as the CLI does.
+func (m *model) apply(tag, name string, event client.FollowEvent) tea.Cmd {
+	c := m.conversation(tag, name)
 	dim := func(text string) { c.add(entryDim, text) }
+	var cmd tea.Cmd
 	title := terminalText(event.Title)
 	switch event.Kind {
 	case client.EventWaiting:
@@ -1020,6 +1244,9 @@ func (m *model) apply(tag string, event client.FollowEvent) {
 			line = "  " + line
 		}
 		dim(line)
+		if event.WorkSession != "" && m.expanded[event.WorkSession] {
+			cmd = m.reloadWork(event.WorkSession)
+		}
 	case client.EventReply:
 		c.draft = ""
 		c.add(entryReply, event.Reply.GetText())
@@ -1027,10 +1254,17 @@ func (m *model) apply(tag string, event client.FollowEvent) {
 		c.draft = ""
 		c.add(entryError, event.Text)
 	case client.EventWorking:
-		dim("· working: " + title)
+		if event.WorkSession == "" {
+			dim("· working: " + title)
+		} else {
+			c.addFor(entryWork, event.WorkSession, "· working: "+title)
+		}
 	case client.EventReport:
 		dim("· " + event.Status + ": " + title)
-		c.add(entryReply, event.Text)
+		c.addFor(entryReport, event.WorkSession, event.Text)
+		if event.WorkSession != "" {
+			cmd = m.reloadWork(event.WorkSession)
+		}
 	case client.EventApproval:
 		dim("· approval needed: " + title)
 		c.add(entryReply, event.Text)
@@ -1046,19 +1280,20 @@ func (m *model) apply(tag string, event client.FollowEvent) {
 		c.add(entryError, event.Text)
 		m.connected, m.status = false, event.Text
 	}
-	if m.showsConversation(tag) {
+	if m.showsConversation(tag, name) {
+		m.refresh()
+	}
+	return cmd
+}
+
+func (m *model) addEntry(tag, name string, kind entryKind, text string) {
+	m.conversation(tag, name).add(kind, text)
+	if m.showsConversation(tag, name) {
 		m.refresh()
 	}
 }
 
-func (m *model) addEntry(tag string, kind entryKind, text string) {
-	m.conversation(tag).add(kind, text)
-	if m.showsConversation(tag) {
-		m.refresh()
-	}
-}
-
-// showsConversation says whether the main pane shows tag's conversation.
-func (m model) showsConversation(tag string) bool {
-	return m.pane == paneConversation && tag == m.selectedTag()
+// showsConversation says whether the main pane shows tag's conversation name.
+func (m model) showsConversation(tag, name string) bool {
+	return m.pane == paneConversation && tag == m.selectedTag() && name == m.currentConversation(tag)
 }

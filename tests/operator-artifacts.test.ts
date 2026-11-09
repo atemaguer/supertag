@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Code } from "@connectrpc/connect";
 import { afterEach, expect, it, vi } from "vitest";
 import { runArtifactCommand, unreachableReport } from "../apps/cli/src/artifacts.js";
 import {
@@ -10,6 +11,8 @@ import {
   type ControlPlaneApiServerDependencies,
 } from "../apps/cli/src/control-plane-api.js";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.js";
+import { workClient } from "../apps/cli/src/operator-client.js";
+import { artifactRow } from "../apps/cli/src/work-protos.js";
 import type { AnyArtifactTransferGrantClaims } from "../packages/core/src/index.js";
 import {
   FileArtifactStore,
@@ -44,6 +47,12 @@ async function fixture(
     createdAt: new Date().toISOString(),
     taskId: "task-one",
     attemptId: "attempt-one",
+    sessionId: "session-one",
+    tagId: "tag-one",
+    title: "Evidence",
+    kind: "output",
+    operationId: "operation-one",
+    inputs: [],
     entries: [entry],
   };
   const signed: AnyArtifactTransferGrantClaims[] = [];
@@ -52,6 +61,7 @@ async function fixture(
     recordAuditEntry: vi.fn(async () => undefined),
     listCapturedArtifacts: vi.fn(async () => ({ artifacts: [artifact], nextCursor: "next" })),
     findCapturedArtifact: vi.fn(async (id: string) => (id === artifact.id ? artifact : undefined)),
+    findSessionById: vi.fn(async () => undefined),
     listTaskAttempts: vi.fn(async () => [
       { id: "attempt-one", workerSnapshot: { workerHostId: "producer-host" } },
     ]),
@@ -78,7 +88,7 @@ async function fixture(
     coordinationOperatorCredentials: [
       { operatorId: "coordinator", token: "coordination-only", actions: ["*"] },
     ],
-    controlPlane: { objectives: {} },
+    controlPlane: { objectives: {}, isAccepting: true },
     workletApi: {
       start() {},
       async stop() {},
@@ -126,35 +136,37 @@ async function fixture(
     content,
     signed,
     client: new ControlPlaneClient({ url: origin, token: "administrator" }),
+    work: (token: string | null = "administrator") =>
+      workClient({ url: origin, ...(token === null ? {} : { token }) }),
     get: (route: string) =>
       fetch(origin + route, { headers: { authorization: "Bearer administrator" } }),
   };
 }
-it("authenticates every operator artifact route before metadata access", async () => {
+it("authenticates every operator artifact RPC before metadata access", async () => {
   const f = await fixture();
-  for (const path of ["/api/v1/artifacts", f.path])
-    for (const token of [undefined, "wrong"]) {
-      const response = await fetch(f.origin + path, {
-        headers: token ? { authorization: `Bearer ${token}` } : {},
-      });
-      expect(response.status).toBe(401);
-      await response.arrayBuffer();
-    }
+  for (const token of [null, "wrong"]) {
+    await expect(f.work(token).listArtifacts({})).rejects.toMatchObject({
+      code: Code.Unauthenticated,
+    });
+    await expect(f.work(token).getArtifact({ id: f.artifact.id })).rejects.toMatchObject({
+      code: Code.Unauthenticated,
+    });
+  }
   expect(f.store.listCapturedArtifacts).not.toHaveBeenCalled();
   expect(f.store.findCapturedArtifact).not.toHaveBeenCalled();
-  const list = await f.get("/api/v1/artifacts?task=task-one&limit=2&cursor=previous");
-  expect(await list.json()).toMatchObject({
-    kind: "ArtifactList",
-    metadata: { nextCursor: "next" },
+  const list = await f.work().listArtifacts({
+    taskId: "task-one",
+    pageSize: 2,
+    pageToken: "previous",
   });
+  expect(list.nextPageToken).toBe("next");
   expect(f.store.listCapturedArtifacts).toHaveBeenCalledWith({
     taskId: "task-one",
     limit: 2,
     cursor: "previous",
   });
-  expect(await (await f.get(f.path)).json()).toMatchObject({
-    kind: "Artifact",
-    metadata: { id: f.artifact.id },
+  expect(await f.work().getArtifact({ id: f.artifact.id })).toMatchObject({
+    id: f.artifact.id,
   });
 });
 it("serves no artifact bytes: the content route is gone", async () => {
@@ -290,25 +302,16 @@ it("keeps artifact metadata and download grants from coordination-only credentia
   const f = await fixture({
     hosts: [{ workerHostId: "producer-host", transferBaseUrl: "http://127.0.0.1:9" }],
   });
-  for (const [method, path] of [
-    ["GET", "/api/v1/artifacts"],
-    ["GET", f.path],
-    ["POST", `${f.path}/download`],
-  ] as const) {
-    const response = await fetch(f.origin + path, {
-      method,
-      headers: { authorization: "Bearer coordination-only", "content-type": "application/json" },
-      ...(method === "POST" ? { body: JSON.stringify({ path: f.entry.path }) } : {}),
-    });
-    expect(response.status, path).toBe(403);
-    await response.arrayBuffer();
-  }
-  const unauthenticated = await fetch(`${f.origin}${f.path}/download`, {
-    method: "POST",
-    body: JSON.stringify({ path: f.entry.path }),
-  });
-  expect(unauthenticated.status).toBe(401);
-  await unauthenticated.arrayBuffer();
+  const scoped = f.work("coordination-only");
+  for (const call of [
+    () => scoped.listArtifacts({}),
+    () => scoped.getArtifact({ id: f.artifact.id }),
+    () => scoped.resolveArtifactDownload({ artifactId: f.artifact.id, path: f.entry.path }),
+  ])
+    await expect(call()).rejects.toMatchObject({ code: Code.PermissionDenied });
+  await expect(
+    f.work(null).resolveArtifactDownload({ artifactId: f.artifact.id, path: f.entry.path }),
+  ).rejects.toMatchObject({ code: Code.Unauthenticated });
   expect(f.signed).toEqual([]);
   expect(f.store.findCapturedArtifact).not.toHaveBeenCalled();
 });
@@ -317,37 +320,28 @@ it("resolves locations, never bytes, and lists where each copy is", async () => 
   const f = await fixture({
     hosts: [{ workerHostId: "producer-host", transferBaseUrl: "https://producer.example" }],
   });
-  const response = await fetch(`${f.origin}${f.path}/download`, {
-    method: "POST",
-    headers: { authorization: "Bearer administrator", "content-type": "application/json" },
-    body: JSON.stringify({ path: f.entry.path }),
-  });
-  expect(response.headers.get("cache-control")).toBe("no-store");
-  const text = await response.text();
-  expect(text.includes(f.content.toString())).toBe(false);
-  const resolved = JSON.parse(text) as { locations: { transferUrl: string; grant: string }[] };
-  expect(resolved.locations[0]?.transferUrl).toBe(
+  const resolved = await f
+    .work()
+    .resolveArtifactDownload({ artifactId: f.artifact.id, path: f.entry.path });
+  expect(
+    JSON.stringify(resolved, (_key, value) => (typeof value === "bigint" ? 0 : value)),
+  ).not.toContain(f.content.toString());
+  expect(resolved.transfers[0]?.transferUrl).toBe(
     `https://producer.example/v1/artifacts/${f.entry.digest.slice("sha256:".length)}`,
   );
   // The serving host accepts the grant only for this file.
   expect(() =>
-    verifyArtifactTransferGrant(resolved.locations[0]?.grant ?? "", keys.publicKey, {
+    verifyArtifactTransferGrant(resolved.transfers[0]?.grant ?? "", keys.publicKey, {
       sourceWorkerHostId: "producer-host",
       digest: `sha256:${"0".repeat(64)}`,
     }),
   ).toThrow("does not match");
-  const unknownPath = await fetch(`${f.origin}${f.path}/download`, {
-    method: "POST",
-    headers: { authorization: "Bearer administrator", "content-type": "application/json" },
-    body: JSON.stringify({ path: "outputs/other.txt" }),
-  });
-  expect(unknownPath.status).toBe(404);
-  await unknownPath.arrayBuffer();
-  const list = (await (await f.get("/api/v1/artifacts")).json()) as {
-    items: { status: unknown }[];
-  };
+  await expect(
+    f.work().resolveArtifactDownload({ artifactId: f.artifact.id, path: "outputs/other.txt" }),
+  ).rejects.toMatchObject({ code: Code.NotFound });
+  const list = await f.work().listArtifacts({});
   // Held only on an ephemeral host without a Volume: flagged.
-  expect(list.items[0]?.status).toEqual({
+  expect(artifactRow(list.artifacts[0] as never)["status"]).toEqual({
     locations: [
       { kind: "worker-host", workerHostId: "producer-host", ephemeral: true, removed: false },
     ],
@@ -373,13 +367,11 @@ it.each([
   "does not offer a serving host's loopback endpoint to an operator: %s",
   async (transferBaseUrl) => {
     const f = await fixture({ hosts: [{ workerHostId: "producer-host", transferBaseUrl }] });
-    const resolved = await f.client.request(`${f.path}/download`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: f.entry.path }),
-    });
+    const resolved = await f
+      .work()
+      .resolveArtifactDownload({ artifactId: f.artifact.id, path: f.entry.path });
     expect(resolved).toMatchObject({
-      locations: [],
+      transfers: [],
       holders: { workerHostIds: ["producer-host"] },
     });
     expect(f.signed).toEqual([]);
@@ -388,8 +380,8 @@ it.each([
 
 it("lists an endpoint-free producing host and flags its ephemeral copy", async () => {
   const f = await fixture();
-  const list = await (await f.get("/api/v1/artifacts")).json();
-  expect(list.items[0].status).toEqual({
+  const list = await f.work().listArtifacts({});
+  expect(artifactRow(list.artifacts[0] as never)["status"]).toEqual({
     locations: [
       { kind: "worker-host", workerHostId: "producer-host", ephemeral: true, removed: false },
     ],
@@ -405,10 +397,11 @@ it("lists only locations that downloads can serve for the producing Attempt", as
     ],
     volumes: [{ volumeId: "volume-1", key: "private/key", workerHostId: "unrelated-host" }],
   });
-  for (const route of ["/api/v1/artifacts", f.path]) {
-    const body = await (await f.get(route)).json();
-    const resource = route === f.path ? body : body.items[0];
-    expect(resource.status).toEqual({
+  for (const artifact of [
+    (await f.work().listArtifacts({})).artifacts[0],
+    await f.work().getArtifact({ id: f.artifact.id }),
+  ]) {
+    expect(artifactRow(artifact as never)["status"]).toEqual({
       locations: [
         { kind: "worker-host", workerHostId: "producer-host", ephemeral: true, removed: false },
       ],
@@ -425,19 +418,22 @@ it.each(["192.0.2.1", null])(
       operatorAddress,
       hosts: [{ workerHostId: "producer-host", transferBaseUrl: "http://127.0.0.1:9" }],
     });
-    const response = await fetch(`${f.origin}${f.path}/download`, {
-      method: "POST",
-      headers: {
-        authorization: "Bearer administrator",
-        "content-type": "application/json",
-        forwarded: "for=127.0.0.1",
-        "x-forwarded-for": "127.0.0.1",
-        host: "localhost",
+    const response = await fetch(
+      `${f.origin}/supertag.operator.v1.WorkService/ResolveArtifactDownload`,
+      {
+        method: "POST",
+        headers: {
+          authorization: "Bearer administrator",
+          "content-type": "application/json",
+          forwarded: "for=127.0.0.1",
+          "x-forwarded-for": "127.0.0.1",
+          host: "localhost",
+        },
+        body: JSON.stringify({ artifactId: f.artifact.id, path: f.entry.path }),
       },
-      body: JSON.stringify({ path: f.entry.path }),
-    });
+    );
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ locations: [] });
+    expect(await response.json()).not.toHaveProperty("transfers");
     expect(f.signed).toEqual([]);
   },
 );
@@ -449,11 +445,9 @@ it("withholds loopback endpoints behind a same-server public proxy", async () =>
     operatorAddress: "127.0.0.1",
     hosts: [{ workerHostId: "producer-host", transferBaseUrl: "http://127.0.0.1:9" }],
   });
-  const resolved = await f.client.request(`${f.path}/download`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path: f.entry.path }),
-  });
-  expect(resolved).toMatchObject({ locations: [] });
+  const resolved = await f
+    .work()
+    .resolveArtifactDownload({ artifactId: f.artifact.id, path: f.entry.path });
+  expect(resolved.transfers).toEqual([]);
   expect(f.signed).toEqual([]);
 });

@@ -28,6 +28,11 @@ export const operatorPrincipal = createContextKey<OperatorPrincipal | undefined>
   description: "operator principal",
 });
 
+/** The caller's address as the API listener's socket reports it; never read from a header. */
+export const operatorPeerAddress = createContextKey<string | undefined>(undefined, {
+  description: "operator peer address",
+});
+
 /**
  * What an audited RPC changed, as `Kind/NAME` or `Kind/ID`. It starts as the service's kind, such
  * as `Objective`, and the RPC sets it once it knows the target. A failed call records only the kind.

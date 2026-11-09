@@ -27,12 +27,14 @@ defaults to 0, ordered by sequence. Without it, the newest posts are returned. `
 integer from 1 to 100, default 50. Retain the last returned sequence to read the next page; an
 empty page leaves the cursor unchanged. Reads consume nothing and create no delivery state.
 
-## Administrative endpoint
+## Operator RPC
 
-`GET /api/v1/tag-messaging/workstreams/:teamIdOrName/posts?afterSequence=&limit=` returns
-`{items: WorkstreamPost[]}` and requires an API Server administrative bearer credential. The Team
-is matched by ID first, then by name; a Team that does not exist returns 404. The CLI exposes it
-as `supertag list workstream-post --team TEAM`.
+`supertag.operator.v1.MailboxService/ListWorkstreamPosts` takes `team`, an optional
+`afterSequence`, `pageSize` (0 means 50, at most 200), and `pageToken`, and returns `posts` with
+`tagNames`. It needs the admin token or an Operator Token with the `read_mailbox` action. The Team
+is matched by ID first, then by name; a Team that does not exist fails with `NotFound`. The CLI
+exposes it as `supertag list workstream-post --team TEAM`. See
+[Mailbox](../docs/reference/control-plane-api.md#mailbox).
 
 ## Coordination tools
 

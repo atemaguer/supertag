@@ -1,0 +1,1471 @@
+syntax = "proto3";
+package supertag.operator.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "supertag/operator/v1/common.proto";
+import "supertag/operator/v1/options.proto";
+import "supertag/operator/v1/task.proto";
+
+option go_package = "github.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1";
+
+// Sessions, Tasks and artifacts as an operator inspects them: `supertag list
+// task`, `get task`, `describe task`, `events task`, `cancel task`, `list
+// session`, `get session`, `describe session`, `list artifact`, `get
+// artifact` and `download artifact`, and the terminal UI's review of a work
+// Session's delivered branch.
+//
+// A Session is one conversation of a Tag. Each turn of it is a Task, and each
+// try at running a Task is a Task Attempt. A work Session is a Session that a
+// turn started for one piece of work; its `parent_session_id` names the
+// Session that started it.
+//
+// Every view is built from the records the Control Plane stores; only
+// `InspectTaskExecution` asks a Worker Host. The Control Plane keeps no
+// artifact bytes and no repository contents: a Task's files, its branch and
+// its artifacts stay on the Worker Host or Volume that holds them, and the
+// views say where. A client that shows a diff computes it from its own
+// checkout.
+//
+// Access. The admin token and Operator Tokens may call every RPC. A scoped
+// coordination credential is refused with `PermissionDenied`. A CLI
+// conversation's Session, the work Sessions its turns started, and their
+// Tasks, events, native archives and artifacts reach only the operator whose
+// conversation it is, as in `ConversationService`: another caller's lists
+// leave them out, and naming one fails with `NotFound`, exactly as for one
+// that does not exist.
+//
+// Every RPC that names a Task, Session, native archive or artifact fails with
+// `InvalidArgument` for an empty ID and `NotFound` for one that does not
+// exist. A call while the Control Plane drains fails with `Unavailable` and
+// `ERROR_REASON_DRAINING`.
+service WorkService {
+  // Lists Tasks, the most recently created first, as `supertag list task`
+  // shows them. Each Task is the view `GetTask` returns without `storage`.
+  //
+  // It fails with `NotFound` when `tag` names a Tag that does not exist, and
+  // `InvalidArgument` for a malformed `page_token`.
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_task";
+  }
+
+  // Reads one Task as `supertag get task` and `describe task` show it: its
+  // request, how it runs, each Task Attempt, the latest Task Attempt's
+  // placement and failure, what it delivered, and where its files and
+  // artifacts are kept.
+  rpc GetTask(GetTaskRequest) returns (Task) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_task";
+  }
+
+  // Lists a Task's recorded events in sequence order, as `supertag events
+  // task` shows them: what the Control Plane and the Worker recorded about
+  // the Task and each of its Task Attempts, commands and tool calls
+  // included. It fails with `InvalidArgument` for a malformed `page_token`.
+  rpc ListTaskEvents(ListTaskEventsRequest) returns (ListTaskEventsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_task";
+  }
+
+  // Reports how the Task's latest Task Attempt ran against its execution
+  // limits and where it ran, and, for a durable Task Attempt, asks the
+  // Worker Host that ran it for its execution receipt. When the Control Plane
+  // reaches that Worker Host, the Worker events the receipt names and the
+  // Control Plane has not recorded are recorded first, so the report and
+  // `ListTaskEvents` include them. A Worker Host the Control Plane cannot
+  // reach makes `availability` `TASK_EXECUTION_AVAILABILITY_UNAVAILABLE`,
+  // not an error.
+  rpc InspectTaskExecution(InspectTaskExecutionRequest) returns (InspectTaskExecutionResponse) {
+    option (supertag.operator.v1.action) = "read_task";
+    option (supertag.operator.v1.audit_action) = "task.inspect";
+  }
+
+  // Cancels a pending or running Task, as `supertag cancel task` does. A
+  // pending Task is cancelled at once. A running Task's Worker is told to
+  // stop, and the Task stays `TASK_STATUS_RUNNING` until the Worker reports
+  // it stopped; repeating the call meanwhile asks the Worker again, which is
+  // harmless. Cancelling a Task that already finished changes nothing and
+  // succeeds with `accepted` false.
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse) {
+    option (supertag.operator.v1.action) = "cancel_task";
+    option (supertag.operator.v1.audit_action) = "task.cancel";
+  }
+
+  // Lists Sessions, the most recent interaction first, as `supertag list
+  // session` shows them. Each Session is the view `GetSession` returns
+  // without `delivery`.
+  //
+  // It fails with `NotFound` when `tag` names a Tag that does not exist, and
+  // `InvalidArgument` for a malformed `page_token`.
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_session";
+  }
+
+  // Reads one Session as `supertag get session` and `describe session` show
+  // it, with `delivery`: what its latest delivering Task delivered, such as a
+  // work Session's branch, base and head commits and pull request, and the
+  // Worker Host whose checkout holds the branch.
+  rpc GetSession(GetSessionRequest) returns (Session) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_session";
+  }
+
+  // Lists a Session's native archives, the most recently created first, as
+  // `supertag describe session` counts them: what each harness saved of its
+  // own conversation so a later Task can resume it. The archives' contents
+  // are left out; `GetSessionState` reads one whole.
+  rpc ListSessionStates(ListSessionStatesRequest) returns (ListSessionStatesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_session";
+  }
+
+  // Reads one native archive with its contents. It fails with `NotFound`
+  // when the archive belongs to another Session.
+  rpc GetSessionState(GetSessionStateRequest) returns (SessionState) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_session_state";
+  }
+
+  // Lists captured artifacts, the oldest first, as `supertag list artifact`
+  // shows them, each with where its copies are. It fails with
+  // `InvalidArgument` for a malformed `page_token`.
+  rpc ListArtifacts(ListArtifactsRequest) returns (ListArtifactsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_artifact";
+  }
+
+  // Reads one artifact's catalog record, as `supertag get artifact` shows
+  // it: its files with their digests and sizes, and where its copies are.
+  rpc GetArtifact(GetArtifactRequest) returns (Artifact) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (supertag.operator.v1.action) = "read_artifact";
+  }
+
+  // Says where the caller can read one artifact file, for `supertag download
+  // artifact`: the serving Worker Host's transfer endpoint with a short-lived
+  // grant for this file and caller, and the Volume copies the caller may read
+  // with its own Volume credentials. The bytes never pass through the Control
+  // Plane. The client fetches them from a location and checks them against
+  // `digest` and `size_bytes` before keeping them.
+  //
+  // Only copies of the Worker Host whose Task Attempt captured the artifact
+  // are offered. When there is none, `transfers` and `volumes` are empty and
+  // `holders` names where the file is. Each call issues new grants. It fails
+  // with `InvalidArgument` for an empty `path`, and `NotFound` when the
+  // artifact has no file at `path`.
+  rpc ResolveArtifactDownload(ResolveArtifactDownloadRequest) returns (ArtifactDownload) {
+    option (supertag.operator.v1.action) = "download_artifact";
+    option (supertag.operator.v1.audit_action) = "artifact.download";
+  }
+}
+
+message ListTasksRequest {
+  // Lists only this Tag's Tasks, by name. Empty lists every Tag's.
+  string tag = 1;
+  // Lists only this Session's Tasks. Empty lists every Session's.
+  string session_id = 2;
+  // Lists only this Objective's Tasks. Empty lists Tasks in and outside
+  // Objectives.
+  string objective_id = 3;
+  // Lists only Tasks with one of these statuses. Empty lists every status.
+  repeated TaskStatus statuses = 4;
+  // At most this many Tasks; 0 means 100, and more than 500 means 500.
+  int32 page_size = 5;
+  // The `next_page_token` of the previous page.
+  string page_token = 6;
+}
+
+message ListTasksResponse {
+  // The Tasks, the most recently created first.
+  repeated Task tasks = 1;
+  // Fetches the next page. Empty on the last page. A page before the last can
+  // hold fewer Tasks than `page_size`, or none, when most Tasks it passed are
+  // ones the caller cannot see or that do not match.
+  string next_page_token = 2;
+}
+
+message GetTaskRequest {
+  // The Task's ID.
+  string id = 1;
+}
+
+message ListTaskEventsRequest {
+  // The Task's ID.
+  string task_id = 1;
+  // Lists only events after this `TaskEvent.sequence`. 0 lists from the
+  // first. A client that follows a running Task passes the last sequence it
+  // received.
+  int64 after_sequence = 2;
+  // At most this many events; 0 means 500, and more than 1,000 means 1,000.
+  int32 page_size = 3;
+  // The `next_page_token` of the previous page.
+  string page_token = 4;
+}
+
+message ListTaskEventsResponse {
+  // The events, in sequence order.
+  repeated TaskEvent events = 1;
+  // Fetches the next page. Empty on the last page.
+  string next_page_token = 2;
+}
+
+message InspectTaskExecutionRequest {
+  // The Task's ID.
+  string task_id = 1;
+}
+
+message CancelTaskRequest {
+  // The Task's ID.
+  string id = 1;
+}
+
+message CancelTaskResponse {
+  // The Task's ID.
+  string task_id = 1;
+  // Whether this call cancelled the Task or asked its Worker to stop. False
+  // when the Task had already finished, or its result was being recorded.
+  bool accepted = 2;
+  // The Task's status after the call: `TASK_STATUS_CANCELLED` once
+  // cancelled, `TASK_STATUS_RUNNING` until a running Task's Worker stops, or
+  // the status a finished Task ended with.
+  TaskStatus status = 3;
+}
+
+message ListSessionsRequest {
+  // Lists only this Tag's Sessions, by name. Empty lists every Tag's.
+  string tag = 1;
+  // Lists only the work Sessions this Session started. Empty lists Sessions
+  // whatever started them.
+  string parent_session_id = 2;
+  // Lists only this Objective's Sessions: its own conversation and the work
+  // Sessions started under it. Empty lists Sessions in and outside
+  // Objectives.
+  string objective_id = 3;
+  // At most this many Sessions; 0 means 100, and more than 500 means 500.
+  int32 page_size = 4;
+  // The `next_page_token` of the previous page.
+  string page_token = 5;
+}
+
+message ListSessionsResponse {
+  // The Sessions, the most recent interaction first.
+  repeated Session sessions = 1;
+  // Fetches the next page. Empty on the last page.
+  string next_page_token = 2;
+}
+
+message GetSessionRequest {
+  // The Session's ID. A work Session's ID is `WorkSession.id` in
+  // `ConversationService`.
+  string id = 1;
+}
+
+message ListSessionStatesRequest {
+  // The Session's ID.
+  string session_id = 1;
+  // Lists only archives of this harness-native conversation ID. Empty lists
+  // every archive.
+  string native_id = 2;
+  // At most this many archives; 0 means 100, and more than 100 means 100.
+  int32 page_size = 3;
+  // The `next_page_token` of the previous page.
+  string page_token = 4;
+}
+
+message ListSessionStatesResponse {
+  // The archives, the most recently created first, without `data`.
+  repeated SessionState states = 1;
+  // Fetches the next page. Empty on the last page.
+  string next_page_token = 2;
+}
+
+message GetSessionStateRequest {
+  // The Session's ID.
+  string session_id = 1;
+  // The archive's ID, as `SessionState.id`.
+  string id = 2;
+}
+
+message ListArtifactsRequest {
+  // Lists only this Task's artifacts. Empty lists every Task's.
+  string task_id = 1;
+  // At most this many artifacts; 0 means 20, and more than 100 means 100.
+  int32 page_size = 2;
+  // The `next_page_token` of the previous page.
+  string page_token = 3;
+}
+
+message ListArtifactsResponse {
+  // The artifacts, the oldest first.
+  repeated Artifact artifacts = 1;
+  // Fetches the next page. Empty on the last page.
+  string next_page_token = 2;
+}
+
+message GetArtifactRequest {
+  // The artifact's ID.
+  string id = 1;
+}
+
+message ResolveArtifactDownloadRequest {
+  // The artifact's ID.
+  string artifact_id = 1;
+  // The file's exact path within the artifact, as `ArtifactEntry.path`, at
+  // most 1,024 characters.
+  string path = 2;
+}
+
+// One Task: a turn of a Session, and how it ran.
+message Task {
+  // The Task's ID.
+  string id = 1;
+  // Changes whenever the view changes, apart from `storage`. Compare it for
+  // equality only.
+  string resource_version = 2;
+  // The ID of the Tag that runs it.
+  string tag_id = 3;
+  // That Tag's name. Empty when the Tag no longer exists.
+  string tag = 4;
+  // Its Session's ID.
+  string session_id = 5;
+  // The Objective its Session belongs to. Empty outside an Objective.
+  string objective_id = 6;
+  // How it is doing.
+  TaskStatus status = 7;
+  // When it was created.
+  google.protobuf.Timestamp created_at = 8;
+  // When it last changed.
+  google.protobuf.Timestamp updated_at = 9;
+  // When it started running. Unset until it did.
+  google.protobuf.Timestamp started_at = 10;
+  // When it ended. Unset while it is open.
+  google.protobuf.Timestamp ended_at = 11;
+  // What the Task requires of the Worker that runs it, as recorded when it
+  // was accepted.
+  TaskExecution execution = 12;
+  // What started the Task, as recorded when it was accepted: the inbound
+  // event, delegation or schedule, with its references. The record's fields
+  // depend on what started it, so it is a JSON object. Collaboration
+  // surfaces shape parts of it, so it is untrusted text.
+  google.protobuf.Struct trigger = 13;
+  // The named Workspace and the Task's branch, recorded when it was
+  // accepted. Unset for a Task without a named Workspace.
+  TaskWorkspace workspace = 14;
+  // How the Task ended, as the Control Plane recorded it: a JSON object such
+  // as `{"status": "completed"}` with the reason for a failure or
+  // cancellation. Unset while it is open.
+  google.protobuf.Struct outcome = 15;
+  // The findings its result carries, or why they are unreadable. Unset when
+  // it has none.
+  TaskFindings findings = 16;
+  // How the harness, model and effort were chosen, and what the latest Task
+  // Attempt ran with. Unset when nothing was recorded.
+  ExecutionResolution resolution = 17;
+  // Skills delivered to the latest Task Attempt.
+  repeated DeliveredSkill skills = 18;
+  // The prepared Workspace environment the latest Task Attempt used, when
+  // its Worker reported one.
+  PreparedWorkspace prepared_workspace = 19;
+  // Every Task Attempt, oldest first.
+  repeated TaskAttempt attempts = 20;
+  // The latest Task Attempt in detail. Unset before one started.
+  LatestTaskAttempt latest_attempt = 21;
+  // The last placement check of the Task's requirements against the bound
+  // Worker Hosts. Unset before one was recorded. Clients show it while the
+  // Task is `TASK_STATUS_PENDING`.
+  SchedulingCheck scheduling = 22;
+  // The pull request a Worker opened for `WORKSPACE_DELIVERY_MODE_PULL_REQUEST`
+  // delivery, from the moment it was recorded, before `delivery` carries it.
+  PullRequestDelivery pull_request = 23;
+  // What the Task delivered. Unset until the Worker recorded a delivery.
+  TaskDelivery delivery = 24;
+  // Where the latest Task Attempt's files and the Task's artifacts are
+  // kept. Set by `GetTask` only.
+  TaskStorage storage = 25;
+}
+
+// What a Task requires of the Worker that runs it.
+message TaskExecution {
+  // The harness, such as `codex`. Empty: any harness the profile offers.
+  string harness = 1;
+  // The model the Worker passes to its harness. Empty: the host's default.
+  string model = 2;
+  // The reasoning effort, such as `low`. Empty: the harness's default.
+  string effort = 3;
+  // The Worker Profile the Task must run with. Unset: any matching profile.
+  WorkerProfileRef profile = 4;
+  // Capabilities a Worker must have.
+  repeated CapabilityRequirement requires = 5;
+  // Capabilities a Worker should have, used to choose between Workers.
+  repeated CapabilityRequirement prefers = 6;
+  // Which files the Worker collects as outputs. Unset: none beyond the
+  // Workspace delivery.
+  OutputPolicy outputs = 7;
+  // Limits the harness must enforce. Unset: none.
+  ExecutionLimits limits = 8;
+}
+
+// A Worker Profile at one revision.
+message WorkerProfileRef {
+  // The profile's ID.
+  string id = 1;
+  // Its revision.
+  string revision = 2;
+}
+
+// A Worker capability at a version.
+message CapabilityRequirement {
+  // The capability's ID, such as `supertag.execution.local-process`.
+  string id = 1;
+  // Its version.
+  int32 version = 2;
+}
+
+// What the Worker does with the Workspace's git state when it collects
+// outputs.
+enum OutputGitMode {
+  OUTPUT_GIT_MODE_UNSPECIFIED = 0;
+  // Records the commit, without its files.
+  OUTPUT_GIT_MODE_REFERENCE = 1;
+  // Captures the git state as an artifact.
+  OUTPUT_GIT_MODE_CAPTURE = 2;
+  // Leaves git state out.
+  OUTPUT_GIT_MODE_IGNORE = 3;
+}
+
+// Which files a Worker collects as a Task's outputs. Paths and patterns are
+// relative to the Workspace.
+message OutputPolicy {
+  // The directory outputs are collected from.
+  string directory = 1;
+  // Patterns each of which must match at least one collected file.
+  repeated string required = 2;
+  // Further patterns to keep.
+  repeated string include = 3;
+  // Patterns to leave out.
+  repeated string exclude = 4;
+  // What happens to the git state.
+  OutputGitMode git = 5;
+  // At most this many files. Unset: the Worker's default.
+  optional int32 max_files = 6;
+  // At most this many bytes. Unset: the Worker's default.
+  optional int64 max_bytes = 7;
+}
+
+// Limits a harness enforces on one Task Attempt.
+message ExecutionLimits {
+  // At most this many native child agents. Unset: no limit.
+  optional int32 max_native_agents = 1;
+  // Interrupt once reported tokens reach this. A report may overshoot it.
+  // Unset: no limit.
+  optional int64 max_reported_tokens = 2;
+  // The provider's budget over reported cost. Enforcement may stop after the
+  // budget is crossed. Unset: no limit.
+  Money max_reported_cost = 3;
+}
+
+// The named Workspace a Task works in.
+message TaskWorkspace {
+  // The Workspace's name.
+  string name = 1;
+  // The Task's branch.
+  string branch = 2;
+  // The ref the branch starts from, when the Workspace names one.
+  string ref = 3;
+  // How the Workspace delivers.
+  WorkspaceDeliveryMode delivery = 4;
+}
+
+// How severe a Task finding is.
+enum TaskFindingSeverity {
+  TASK_FINDING_SEVERITY_UNSPECIFIED = 0;
+  TASK_FINDING_SEVERITY_HIGH = 1;
+  TASK_FINDING_SEVERITY_MEDIUM = 2;
+  TASK_FINDING_SEVERITY_LOW = 3;
+}
+
+// One review finding a Task's result carries.
+message TaskFinding {
+  // The finding's ID within the result, such as `F1`.
+  string id = 1;
+  // How severe it is.
+  TaskFindingSeverity severity = 2;
+  // What was found, in one sentence. The Tag wrote it, so it is untrusted
+  // text.
+  string summary = 3;
+  // Where, such as `file:line`, when the Tag said.
+  string location = 4;
+}
+
+// The findings of a Task's result.
+message TaskFindings {
+  // The findings, high first, then medium, then low, each severity in the
+  // result's order. Empty when `unreadable` is set.
+  repeated TaskFinding findings = 1;
+  // Why the stored findings do not validate. Empty when they do.
+  string unreadable = 2;
+}
+
+// Who chose a Task's harness, model and effort.
+enum ExecutionSource {
+  EXECUTION_SOURCE_UNSPECIFIED = 0;
+  // The Tag's or Role's defaults.
+  EXECUTION_SOURCE_DEFAULT = 1;
+  // The delegating actor chose them.
+  EXECUTION_SOURCE_CHOSEN = 2;
+}
+
+// Where an Attempt's model came from.
+enum ModelSource {
+  MODEL_SOURCE_UNSPECIFIED = 0;
+  // The Task named it.
+  MODEL_SOURCE_TASK = 1;
+  // The Worker Host's default for the profile.
+  MODEL_SOURCE_HOST_DEFAULT = 2;
+}
+
+// How a Task's harness, model and effort were resolved when it was accepted,
+// and what its latest Task Attempt ran with.
+message ExecutionResolution {
+  // Who chose them. Unspecified when nothing was recorded.
+  ExecutionSource source = 1;
+  // The Tag that chose them, with `EXECUTION_SOURCE_CHOSEN`. Empty when the
+  // delegating actor was not a Tag.
+  string chosen_by_tag_id = 2;
+  // That Tag's name. Empty when it no longer exists or `chosen_by_tag_id` is
+  // empty.
+  string chosen_by_tag = 3;
+  // The harness. Empty: any.
+  string harness = 4;
+  // The model. Empty: the host's default.
+  string model = 5;
+  // The effort. Empty: the harness's default.
+  string effort = 6;
+  // What the latest Task Attempt ran with. Unset before one started.
+  AttemptExecution latest_attempt = 7;
+}
+
+// What one Task Attempt ran with.
+message AttemptExecution {
+  // The harness. Empty when it was not recorded.
+  string harness = 1;
+  // The model. Empty: the harness's default.
+  string model = 2;
+  // Where the model came from.
+  ModelSource model_source = 3;
+  // The effort. Empty when none was asked for.
+  string effort = 4;
+  // Why the effort was ignored, in one sentence, when the harness has no
+  // effort option. Empty otherwise.
+  string effort_ignored = 5;
+}
+
+// A Skill delivered to a Task Attempt.
+message DeliveredSkill {
+  // The Skill's name.
+  string name = 1;
+  // Where it came from, such as `host service`.
+  string source = 2;
+  // Its `sha256:` digest.
+  string digest = 3;
+}
+
+// A prepared Workspace environment as a Task Attempt's Worker reported it.
+message PreparedWorkspace {
+  // The environment's `sha256:` digest.
+  string digest = 1;
+  // The environment provider, such as `local` or `e2b`.
+  string provider = 2;
+  // The commit the environment was prepared from.
+  string trusted_commit = 3;
+}
+
+// Provider-reported cost of one Task Attempt.
+message ReportedCost {
+  // The amount.
+  Money cost = 1;
+  // Whether it comes from a model price estimate.
+  bool estimated = 2;
+}
+
+// One Task Attempt.
+message TaskAttempt {
+  // The Task Attempt's ID.
+  string id = 1;
+  // Its number within the Task, from 1.
+  int32 number = 2;
+  // How it is doing.
+  TaskAttemptStatus status = 3;
+  // When it started.
+  google.protobuf.Timestamp started_at = 4;
+  // When it ended. Unset while it runs.
+  google.protobuf.Timestamp ended_at = 5;
+  // Its provider-reported cost. Unset when none was reported.
+  ReportedCost reported_cost = 6;
+  // Live sources attached at its start.
+  repeated LiveMount live_mounts = 7;
+  // What the Workspace's `copy` mounts placed in its environment. Each lists
+  // at most its first 20 objects; `object_count` and `total_bytes` cover all
+  // of them.
+  repeated MountManifest mount_manifests = 8;
+  // What it wrote back to the sources of `copy` mounts.
+  repeated MountOutputManifest mount_output_manifests = 9;
+}
+
+// How a mount may be used.
+enum MountAccess {
+  MOUNT_ACCESS_UNSPECIFIED = 0;
+  MOUNT_ACCESS_READ_ONLY = 1;
+  MOUNT_ACCESS_READ_WRITE = 2;
+}
+
+// A live source attached to a Task Attempt: not a snapshot, so its content
+// is not pinned.
+message LiveMount {
+  // The Volume's name.
+  string volume = 1;
+  // The Volume's source, without credentials.
+  string source = 2;
+  // The key prefix within the source. Empty: the entire source.
+  string prefix = 3;
+  // Where it is mounted in the environment.
+  string path = 4;
+  // How it may be used.
+  MountAccess access = 5;
+  // When the provider attached it.
+  google.protobuf.Timestamp attached_at = 6;
+}
+
+// What one `copy` mount placed in a Task Attempt's environment.
+message MountManifest {
+  // The Volume's name.
+  string volume = 1;
+  // The Volume's source when it was copied, never a credential.
+  string source = 2;
+  // Where the copy is in the environment.
+  string path = 3;
+  // How it may be used.
+  MountAccess access = 4;
+  // How many objects were copied.
+  int32 object_count = 5;
+  // How many bytes were copied.
+  int64 total_bytes = 6;
+  // The `sha256:` digest over the source and every object. Two Task
+  // Attempts that copied the same content have the same digest.
+  string digest = 7;
+  // When it was copied.
+  google.protobuf.Timestamp copied_at = 8;
+  // The copied objects, in key order.
+  repeated MountObject objects = 9;
+}
+
+// One object a `copy` mount placed. The Worker reported it, so its text is
+// untrusted.
+message MountObject {
+  // The key relative to the Volume's source.
+  string key = 1;
+  // Its size in bytes.
+  int64 size = 2;
+  // The object store's ETag, when it reports one.
+  string etag = 3;
+  // The object store's version ID, when versioning is on.
+  string version_id = 4;
+  // The `sha256:` digest of the copied bytes, for a source without ETags.
+  string sha256 = 5;
+}
+
+// How a write-back to a `copy` mount's source ended.
+enum MountOutputStatus {
+  MOUNT_OUTPUT_STATUS_UNSPECIFIED = 0;
+  // Every changed object was uploaded.
+  MOUNT_OUTPUT_STATUS_COMPLETE = 1;
+  // Some changed objects were uploaded.
+  MOUNT_OUTPUT_STATUS_PARTIAL = 2;
+  // The Worker Host refused the upload, such as for a bound it exceeded.
+  MOUNT_OUTPUT_STATUS_REFUSED = 3;
+}
+
+// What a Task Attempt wrote back to one `copy` mount's source.
+message MountOutputManifest {
+  // The Volume's name.
+  string volume = 1;
+  // The Volume's source, never a credential.
+  string source = 2;
+  // Where the copy was in the environment.
+  string path = 3;
+  // How the write-back ended.
+  MountOutputStatus status = 4;
+  // When it ended.
+  google.protobuf.Timestamp uploaded_at = 5;
+  // The objects uploaded.
+  repeated MountUpload objects = 6;
+  // Unchanged objects not uploaded.
+  int32 skipped = 7;
+  // The object that failed and why, including a refused bound. Unset when
+  // none failed.
+  MountUploadError error = 8;
+  // Changed keys not uploaded, the failed key included.
+  repeated string not_attempted = 9;
+}
+
+// One object a Task Attempt uploaded to a mount's source.
+message MountUpload {
+  // The key relative to the Volume's source.
+  string key = 1;
+  // Its size in bytes.
+  int64 size = 2;
+  // The `sha256:` digest of its bytes.
+  string sha256 = 3;
+}
+
+// Why a write-back to a mount's source failed.
+message MountUploadError {
+  // The key that failed.
+  string key = 1;
+  // Why, as the Worker Host reported it.
+  string reason = 2;
+}
+
+// The latest Task Attempt of a Task, in detail.
+message LatestTaskAttempt {
+  // The Task Attempt's ID.
+  string id = 1;
+  // Its number within the Task, from 1.
+  int32 number = 2;
+  // How it is doing.
+  TaskAttemptStatus status = 3;
+  // The Worker Profile it runs with.
+  WorkerProfileRef worker_profile = 4;
+  // Whether its Worker journals execution, so the Control Plane can recover
+  // its events and `InspectTaskExecution` can read its receipt.
+  bool durable_execution = 5;
+  // The failure its Worker recorded. Unset when none was.
+  RecordedEvent failure = 6;
+  // Problems its Worker recorded that did not change the outcome, such as an
+  // incomplete native archive, at most 8, oldest first.
+  repeated RecordedEvent warnings = 7;
+  // The command it reports running now. Unset unless it runs one.
+  RunningCommand running_command = 8;
+  // The Worker that runs it. Empty when not recorded.
+  string worker_id = 9;
+  // The Worker Host that runs it. Empty when not recorded.
+  string worker_host_id = 10;
+  // The Worklet that runs it. Empty when not recorded.
+  string worklet_id = 11;
+  // How the Worker Host was selected. Unset when not recorded.
+  PlacementSelection selection = 12;
+  // Its most recent event. Unset when it has none.
+  TaskEventRef last_event = 13;
+  // Where its harness and tools ran, and whether cleanup is confirmed.
+  ExecutionPlacement placement = 14;
+}
+
+// A message a Worker recorded on a Task Attempt.
+message RecordedEvent {
+  // The message. The Worker applied its redaction policy; it is untrusted
+  // text.
+  string message = 1;
+  // When it was recorded.
+  google.protobuf.Timestamp at = 2;
+  // The `TaskEvent.sequence` it was recorded in.
+  int64 sequence = 3;
+}
+
+// A command a running Task Attempt reports running.
+message RunningCommand {
+  // The command, on one line. The Tag wrote it, so it is untrusted text.
+  string command = 1;
+  // When the Control Plane recorded its start.
+  google.protobuf.Timestamp started_at = 2;
+}
+
+// How a Task Attempt's Worker Host was selected.
+message PlacementSelection {
+  // The Worker Hosts that could have run it.
+  repeated string allowed_worker_host_ids = 1;
+  // The capacity reservation it was placed with. Unset when none was
+  // recorded.
+  PlacementReservation reservation = 2;
+}
+
+// Where a placement reservation stands.
+enum PlacementReservationPhase {
+  PLACEMENT_RESERVATION_PHASE_UNSPECIFIED = 0;
+  // Held for the Task Attempt.
+  PLACEMENT_RESERVATION_PHASE_RESERVED = 1;
+  // Used: the Task Attempt started on the reserved Worker Host.
+  PLACEMENT_RESERVATION_PHASE_CONSUMED = 2;
+  // It expired before it was used.
+  PLACEMENT_RESERVATION_PHASE_EXPIRED = 3;
+}
+
+// A reservation of Worker Host capacity for a Task Attempt.
+message PlacementReservation {
+  // The reservation's ID.
+  string id = 1;
+  // When it expires unless used.
+  google.protobuf.Timestamp expires_at = 2;
+  // Where it stands.
+  PlacementReservationPhase phase = 3;
+}
+
+// Names one recorded Task event.
+message TaskEventRef {
+  // The event's type, such as `execution.completed`.
+  string type = 1;
+  // Its `TaskEvent.sequence`.
+  int64 sequence = 2;
+  // When it was recorded.
+  google.protobuf.Timestamp at = 3;
+}
+
+// Whether a Task Attempt's placement is known.
+enum PlacementStatus {
+  PLACEMENT_STATUS_UNSPECIFIED = 0;
+  // No Task Attempt started.
+  PLACEMENT_STATUS_NOT_STARTED = 1;
+  // It runs, and its Worker has not reported where yet.
+  PLACEMENT_STATUS_PENDING = 2;
+  // Its Worker reported where it runs.
+  PLACEMENT_STATUS_AVAILABLE = 3;
+  // It ended without reporting where it ran.
+  PLACEMENT_STATUS_UNKNOWN = 4;
+}
+
+// Whether a Task Attempt's harness and tools ran in one environment.
+enum PlacementMode {
+  PLACEMENT_MODE_UNSPECIFIED = 0;
+  // In one environment.
+  PLACEMENT_MODE_COLOCATED = 1;
+  // The harness in one, its tools and Workspace in another.
+  PLACEMENT_MODE_SPLIT = 2;
+}
+
+// Whether a Task Attempt's execution is confirmed stopped and cleaned up.
+enum CleanupStatus {
+  CLEANUP_STATUS_UNSPECIFIED = 0;
+  // No Task Attempt started.
+  CLEANUP_STATUS_NOT_STARTED = 1;
+  // It runs.
+  CLEANUP_STATUS_PENDING = 2;
+  // A terminal execution event is recorded, which the Worker sends only
+  // after closing both environments.
+  CLEANUP_STATUS_CONFIRMED = 3;
+  // Neither is recorded, or cleanup failed. Missing evidence does not prove
+  // execution stopped.
+  CLEANUP_STATUS_UNKNOWN = 4;
+}
+
+// Where a Task Attempt's harness and tools ran.
+message ExecutionPlacement {
+  // Whether the placement is known.
+  PlacementStatus status = 1;
+  // Whether harness and tools ran in one environment. Unspecified until
+  // known.
+  PlacementMode mode = 2;
+  // Whether execution is confirmed stopped.
+  CleanupStatus cleanup = 3;
+  // The cleanup failure its Worker recorded. Unset when none was.
+  CleanupFailure cleanup_failure = 4;
+  // The harness that ran. Unset until known.
+  HarnessIdentity harness = 5;
+  // The environment the harness ran in. With
+  // `PLACEMENT_MODE_COLOCATED` it is `execution_environment`. Unset until
+  // known.
+  ExecutionEnvironment harness_runtime = 6;
+  // The environment the tools and Workspace ran in. Unset until known.
+  ExecutionEnvironment execution_environment = 7;
+}
+
+// A cleanup failure a Worker recorded.
+message CleanupFailure {
+  // The `TaskEvent.sequence` it was recorded in.
+  int64 sequence = 1;
+  // When it was recorded.
+  google.protobuf.Timestamp at = 2;
+  // What failed, in one sentence.
+  string summary = 3;
+  // What could not be cleaned up, at most 8.
+  repeated CleanupItem items = 4;
+}
+
+// One thing a Worker could not clean up.
+message CleanupItem {
+  // Its ID within the failure, such as `cleanup-1`.
+  string id = 1;
+  // What it is, at most 160 characters. Untrusted text.
+  string text = 2;
+}
+
+// A harness that ran a Task Attempt.
+message HarnessIdentity {
+  // The harness's ID, such as `codex`.
+  string id = 1;
+  // Its version.
+  string version = 2;
+  // What the Worker reported about how it was resolved, such as the MCP
+  // clients it configured, as a JSON object. Set by `InspectTaskExecution`
+  // only.
+  google.protobuf.Struct provenance = 3;
+}
+
+// Where an execution environment runs.
+enum EnvironmentPlacement {
+  ENVIRONMENT_PLACEMENT_UNSPECIFIED = 0;
+  // On the Worker Host.
+  ENVIRONMENT_PLACEMENT_LOCAL = 1;
+  // In a remote sandbox, such as E2B or Modal.
+  ENVIRONMENT_PLACEMENT_REMOTE = 2;
+  // In an environment the provider manages, whose location is not reported.
+  ENVIRONMENT_PLACEMENT_MANAGED = 3;
+}
+
+// An environment a Task Attempt ran in.
+message ExecutionEnvironment {
+  // The environment's ID, as its provider names it.
+  string id = 1;
+  // The provider, such as `local-harness-runtime` or `e2b`.
+  string provider = 2;
+  // Where it runs.
+  EnvironmentPlacement placement = 3;
+  // Credential-free identity and lifetime evidence from the provider, as a
+  // JSON object. Set by `InspectTaskExecution` only.
+  google.protobuf.Struct provenance = 4;
+}
+
+// Whether the bound Worker Hosts can place a Task.
+enum SchedulingStatus {
+  SCHEDULING_STATUS_UNSPECIFIED = 0;
+  // A bound Worker Host meets every requirement.
+  SCHEDULING_STATUS_COMPATIBLE = 1;
+  // None does. The Task waits.
+  SCHEDULING_STATUS_INCOMPATIBLE = 2;
+}
+
+// The last check of a Task's requirements against its Tag's bound Worker
+// Hosts.
+message SchedulingCheck {
+  // Whether a bound Worker Host can place it.
+  SchedulingStatus status = 1;
+  // The requirements no bound Worker Host meets, such as `labels:gpu` or
+  // `workspace.checkout-or-clone:NAME`.
+  repeated string unmet_requirements = 2;
+  // Why the Task waits, in one sentence, with
+  // `SCHEDULING_STATUS_INCOMPATIBLE`. Empty otherwise.
+  string reason = 3;
+  // Worker Hosts whose matching harnesses would run commands unsandboxed
+  // without the host's opt-in, with `SCHEDULING_STATUS_INCOMPATIBLE`.
+  repeated UnsandboxedCommandHold unsandboxed_commands = 4;
+  // Why Workspace environment providers refuse the Task, each in one
+  // sentence, with `SCHEDULING_STATUS_INCOMPATIBLE`.
+  repeated string workspace_refusals = 5;
+  // When the check ran.
+  google.protobuf.Timestamp observed_at = 6;
+  // The `TaskEvent.sequence` it was recorded in.
+  int64 sequence = 7;
+}
+
+// A Worker Host whose matching harnesses run commands unsandboxed, which
+// its host service has not allowed.
+message UnsandboxedCommandHold {
+  // The Worker Host's ID.
+  string worker_host_id = 1;
+  // The harnesses.
+  repeated string harnesses = 2;
+}
+
+// Where a Task's files and artifacts are kept. The Control Plane is never
+// one of the places.
+message TaskStorage {
+  // Where the latest Task Attempt's files are. Unset before a Task Attempt
+  // recorded its Worker Host.
+  TaskFiles task_files = 1;
+  // The Task's artifacts, at most 20, oldest first.
+  repeated TaskArtifactStorage artifacts = 2;
+  // The Task captured more artifacts than `artifacts` shows. List them with
+  // `ListArtifacts` and `task_id`.
+  bool more_artifacts = 3;
+}
+
+// Where a Task Attempt's files are: a Workspace checkout on its Worker Host,
+// or a remote sandbox.
+message TaskFiles {
+  // The Worker Host that ran the Task Attempt.
+  string worker_host_id = 1;
+  // Whether that Worker Host joined with an ephemeral Auth Key, so its files
+  // are lost when it stops.
+  bool ephemeral = 2;
+  // The remote sandbox provider the Task Attempt ran in, whose files are
+  // lost when the sandbox stops. Empty for files on the Worker Host.
+  string sandbox = 3;
+  // The Control Plane has no placement record for the Task Attempt, so where
+  // its files are is unknown.
+  bool placement_unknown = 4;
+}
+
+// Where one of a Task's artifacts is kept.
+message TaskArtifactStorage {
+  // The artifact's ID.
+  string artifact_id = 1;
+  // Its title. The Tag wrote it, so it is untrusted text.
+  string title = 2;
+  // How many files it has.
+  int32 files = 3;
+  // Where its copies are.
+  repeated ArtifactCopy copies = 4;
+  // Some file is held only on an ephemeral Worker Host, with no Volume copy,
+  // so it may be lost or already gone.
+  bool ephemeral_only = 5;
+}
+
+// One place an artifact's files are kept.
+message ArtifactCopy {
+  oneof place {
+    // On a Worker Host.
+    WorkerHostCopy worker_host = 1;
+    // On a Volume.
+    VolumeCopy volume = 2;
+  }
+}
+
+// An artifact copy on a Worker Host.
+message WorkerHostCopy {
+  // The Worker Host's ID.
+  string worker_host_id = 1;
+  // Whether the Worker Host joined with an ephemeral Auth Key, so the copy is
+  // lost when it stops.
+  bool ephemeral = 2;
+  // Whether the Worker Host was removed, so the copy is gone.
+  bool removed = 3;
+}
+
+// An artifact copy on a Volume.
+message VolumeCopy {
+  // The Volume's name, or its ID when the name is not known.
+  string volume = 1;
+}
+
+// One event recorded about a Task or one of its Task Attempts.
+message TaskEvent {
+  // The event's ID.
+  string id = 1;
+  // The Task's ID.
+  string task_id = 2;
+  // The Task Attempt it is about. Empty for an event about the Task.
+  string attempt_id = 3;
+  // Its place in the Task's events, from 1.
+  int64 sequence = 4;
+  // What happened, such as `task.created`, `execution.started` or
+  // `command.updated`.
+  string type = 5;
+  // The event's record, a JSON object whose fields depend on `type`. Worker
+  // events carry what the Worker reported after its redaction policy, so
+  // they are untrusted text. Unset for an event without one.
+  google.protobuf.Struct payload = 6;
+  // When it was recorded.
+  google.protobuf.Timestamp created_at = 7;
+}
+
+// Whether a Task Attempt's execution receipt could be read.
+enum TaskExecutionAvailability {
+  TASK_EXECUTION_AVAILABILITY_UNSPECIFIED = 0;
+  // No Task Attempt started.
+  TASK_EXECUTION_AVAILABILITY_NOT_STARTED = 1;
+  // The latest Task Attempt does not journal execution, so it has no
+  // receipt.
+  TASK_EXECUTION_AVAILABILITY_UNSUPPORTED = 2;
+  // The Worker Host that ran it could not be reached, or has no receipt.
+  TASK_EXECUTION_AVAILABILITY_UNAVAILABLE = 3;
+  // `receipt` carries the receipt.
+  TASK_EXECUTION_AVAILABILITY_AVAILABLE = 4;
+}
+
+message InspectTaskExecutionResponse {
+  // Whether the receipt could be read.
+  TaskExecutionAvailability availability = 1;
+  // The latest Task Attempt's ID. Empty before one started.
+  string attempt_id = 2;
+  // The Worker's durable execution receipt, as a JSON object with its status
+  // and the last journal sequence, with `TASK_EXECUTION_AVAILABILITY_AVAILABLE`.
+  google.protobuf.Struct receipt = 3;
+  // How the latest Task Attempt ran against its execution limits, from
+  // recorded events only.
+  ExecutionLimitReport limits = 4;
+  // Where it ran, with the harness's and environments' provenance.
+  ExecutionPlacement placement = 5;
+}
+
+// How a Task Attempt ran against its execution limits.
+message ExecutionLimitReport {
+  // The limits the Task asked for.
+  ExecutionLimits requested = 1;
+  // The limits the harness reported it installed. Unset when it reported
+  // none.
+  AppliedExecutionLimits applied = 2;
+  // What was observed.
+  ExecutionObservation observed = 3;
+  // How complete the evidence is.
+  LimitCompleteness completeness = 4;
+  // What the evidence shows.
+  LimitOutcome outcome = 5;
+}
+
+// The limits a harness installed for a Task Attempt.
+message AppliedExecutionLimits {
+  // The native child agent limit. Unset when none was installed.
+  AppliedLimit max_native_agents = 1;
+  // The reported token limit. Unset when none was installed.
+  AppliedLimit max_reported_tokens = 2;
+  // The reported cost limit. Unset when none was installed.
+  AppliedCostLimit max_reported_cost = 3;
+}
+
+// A count limit a harness installed.
+message AppliedLimit {
+  // The limit.
+  int64 limit = 1;
+  // How it is enforced: `provider-native`, `harness-guard` or
+  // `interrupt-on-report`.
+  string method = 2;
+}
+
+// A cost limit a harness installed.
+message AppliedCostLimit {
+  // The limit.
+  Money limit = 1;
+  // How it is enforced: `provider-budget`.
+  string method = 2;
+}
+
+// What a Task Attempt was observed to use.
+message ExecutionObservation {
+  // The usage its harness last reported. Unset when it reported none.
+  ExecutionUsage usage = 1;
+  // The most native child agents active at once.
+  int32 peak_native_agents = 2;
+}
+
+// Cumulative usage a harness reported for one Task Attempt, excluding
+// earlier history. Not a billing record.
+message ExecutionUsage {
+  // Input tokens.
+  int64 input_tokens = 1;
+  // Output tokens, reasoning tokens included.
+  int64 output_tokens = 2;
+  // Input tokens served from the provider's cache.
+  int64 cached_input_tokens = 3;
+  // Tokens written to the provider's prompt cache. Unset when not reported.
+  optional int64 cache_write_tokens = 4;
+  // Reasoning tokens, part of `output_tokens`. Unset when not reported.
+  optional int64 reasoning_tokens = 5;
+  // All tokens.
+  int64 total_tokens = 6;
+  // False when the reports do not cover the whole Task Attempt and every
+  // child agent.
+  bool complete = 7;
+  // The provider-reported cost. Unset when none was reported.
+  ReportedCost reported_cost = 8;
+  // A model the harness has no price for, so cost is unknown. Empty
+  // otherwise.
+  string unpriced_model = 9;
+}
+
+// How complete the evidence about a Task Attempt's limits is.
+message LimitCompleteness {
+  // Every requested limit has evidence of the harness control that enforced
+  // it.
+  bool applied = 1;
+  // Whether usage reports are complete. Unset when no token or cost limit
+  // was requested or installed.
+  optional bool usage = 2;
+  // Whether the Task Attempt ended.
+  bool terminal = 3;
+  // Whether every requested or installed limit can be classified.
+  bool complete = 4;
+}
+
+// What the evidence shows about a Task Attempt's limits.
+enum LimitOutcomeStatus {
+  LIMIT_OUTCOME_STATUS_UNSPECIFIED = 0;
+  // No limit was requested or installed.
+  LIMIT_OUTCOME_STATUS_NOT_REQUESTED = 1;
+  // The Task Attempt runs; the outcome is not known yet.
+  LIMIT_OUTCOME_STATUS_PENDING = 2;
+  // It stayed within every limit.
+  LIMIT_OUTCOME_STATUS_WITHIN_LIMITS = 3;
+  // It reached at least one limit.
+  LIMIT_OUTCOME_STATUS_THRESHOLD_REACHED = 4;
+  // The evidence cannot tell.
+  LIMIT_OUTCOME_STATUS_UNKNOWN = 5;
+}
+
+// The outcome of a Task Attempt's limits.
+message LimitOutcome {
+  // What the evidence shows.
+  LimitOutcomeStatus status = 1;
+  // Which limits were reached. Each is unset when the evidence cannot yet
+  // tell, or no such limit applies.
+  LimitThresholds threshold_reached = 2;
+}
+
+// Which limits a Task Attempt reached.
+message LimitThresholds {
+  // The native child agent limit.
+  optional bool max_native_agents = 1;
+  // The reported token limit.
+  optional bool max_reported_tokens = 2;
+  // The reported cost limit.
+  optional bool max_reported_cost = 3;
+}
+
+// Where a Session stands.
+enum SessionPhase {
+  SESSION_PHASE_UNSPECIFIED = 0;
+  // It takes new turns.
+  SESSION_PHASE_OPEN = 1;
+}
+
+// Who a Session's replies are for.
+enum SessionAudience {
+  SESSION_AUDIENCE_UNSPECIFIED = 0;
+  // Everyone in its location.
+  SESSION_AUDIENCE_SHARED = 1;
+  // The one requester who started it.
+  SESSION_AUDIENCE_PRIVATE = 2;
+}
+
+// One Session.
+message Session {
+  // The Session's ID.
+  string id = 1;
+  // Changes whenever the Session changes. Compare it for equality only.
+  string resource_version = 2;
+  // The ID of its Tag.
+  string tag_id = 3;
+  // That Tag's name. Empty when the Tag no longer exists.
+  string tag = 4;
+  // The key its turns are routed by, such as a thread or a CLI conversation.
+  string session_key = 5;
+  // Where it started, as recorded when it opened: a JSON object whose fields
+  // depend on what started it, such as a work Session's `title`.
+  // Collaboration surfaces shape parts of it, so it is untrusted text.
+  google.protobuf.Struct origin = 6;
+  // Where it stands.
+  SessionPhase phase = 7;
+  // Who its replies are for.
+  SessionAudience audience = 8;
+  // The Session that started this work Session. Empty for a Session no turn
+  // started.
+  string parent_session_id = 9;
+  // The Objective it belongs to: the Objective's own conversation, or a work
+  // Session started under it. Empty otherwise.
+  string objective_id = 10;
+  // A work Session's title, or how the Session began, such as its first
+  // request shortened to 60 characters, `Objective ID` or `Inbox`. Empty
+  // when there is nothing to name it by. Untrusted text.
+  string title = 11;
+  // Its latest Task's ID. Empty before it has one.
+  string latest_task_id = 12;
+  // Its latest Task's status. Unspecified before it has one.
+  TaskStatus latest_task_status = 13;
+  // When it last had a turn.
+  google.protobuf.Timestamp last_interaction_at = 14;
+  // When it was created.
+  google.protobuf.Timestamp created_at = 15;
+  // When it last changed.
+  google.protobuf.Timestamp updated_at = 16;
+  // What its latest delivering Task delivered. Set by `GetSession` only, and
+  // unset when no Task of it delivered anything.
+  SessionDelivery delivery = 17;
+}
+
+// What a Session's latest delivering Task delivered, for review. A client
+// shows the branch's changes by diffing `base` and `head` of
+// `delivery.workspace` in its own checkout of the Workspace; the Control
+// Plane keeps no repository contents.
+message SessionDelivery {
+  // The Task that delivered it: the latest Task of the Session whose
+  // delivery the Worker recorded.
+  string task_id = 1;
+  // What it delivered: the Workspace branch with its base and head commits,
+  // patches, the pull request with its web address, and outputs.
+  TaskDelivery delivery = 2;
+  // Where the branch's checkout is. Unset when the Task Attempt recorded no
+  // Worker Host.
+  TaskFiles checkout = 3;
+}
+
+// Whether a native archive can resume.
+enum SessionStateStatus {
+  SESSION_STATE_STATUS_UNSPECIFIED = 0;
+  // Stored, and not verified for resumption.
+  SESSION_STATE_STATUS_STORED = 1;
+  // A later Task of the Session resumes it with the same harness, reply
+  // audience and Workspace.
+  SESSION_STATE_STATUS_RESUMABLE = 2;
+}
+
+// What a harness saved of its own conversation after one Task Attempt. It
+// keeps conversation state, not Workspace files.
+message SessionState {
+  // The archive's ID.
+  string id = 1;
+  // Its Session's ID.
+  string session_id = 2;
+  // The Task that produced it.
+  string task_id = 3;
+  // The Task Attempt that produced it.
+  string attempt_id = 4;
+  // The harness that saved it, such as `codex`.
+  string harness_id = 5;
+  // The harness's own ID for the conversation. Empty when the harness has
+  // none.
+  string native_id = 6;
+  // How the harness refers to the archive, as a JSON object with its `id`,
+  // `format` and `uri`.
+  google.protobuf.Struct ref = 7;
+  // Whether it can resume.
+  SessionStateStatus status = 8;
+  // Orders the archive's writes; a later write has a higher version.
+  int64 write_version = 9;
+  // What a resuming harness must be compatible with. Empty until it is
+  // resumable.
+  string compatibility = 10;
+  // The Worker Profile that produced it. Unset until it is resumable.
+  WorkerProfileRef worker_profile = 11;
+  // When it was created.
+  google.protobuf.Timestamp created_at = 12;
+  // When it last changed.
+  google.protobuf.Timestamp updated_at = 13;
+  // The archive itself, a JSON object in the harness's own format. It holds
+  // the native conversation, tool results included, so it is sensitive and
+  // untrusted. Set by `GetSessionState` only.
+  google.protobuf.Struct data = 14;
+}
+
+// One captured artifact: immutable files a Task Attempt produced. The
+// catalog records what the files are; Worker Hosts and Volumes keep the
+// bytes.
+message Artifact {
+  // The artifact's ID.
+  string id = 1;
+  // The Task that captured it.
+  string task_id = 2;
+  // The Task Attempt that captured it.
+  string attempt_id = 3;
+  // The ID of the Tag that ran it.
+  string tag_id = 4;
+  // The Objective it belongs to. Empty outside an Objective.
+  string objective_id = 5;
+  // Its Session's ID.
+  string session_id = 6;
+  // The Worker's ID for the capture, which makes a repeated capture
+  // idempotent.
+  string operation_id = 7;
+  // The harness conversation that produced it. Unset when not reported.
+  HarnessSession harness_session = 8;
+  // Its title. The Tag wrote it, so it is untrusted text.
+  string title = 9;
+  // Its summary. Untrusted text. Empty without one.
+  string summary = 10;
+  // What kind of artifact it is, such as `patch` or `output`.
+  string kind = 11;
+  // Its files, by path.
+  repeated ArtifactEntry entries = 12;
+  // Files of other artifacts that were supplied to the Task Attempt, which
+  // does not mean each was used.
+  repeated ArtifactSelection inputs = 13;
+  // When it was captured.
+  google.protobuf.Timestamp created_at = 14;
+  // Where its copies are.
+  repeated ArtifactCopy copies = 15;
+  // Some file is held only on an ephemeral Worker Host, with no Volume copy,
+  // so it may be lost or already gone.
+  bool ephemeral_only = 16;
+}
+
+// A harness conversation, by its native ID.
+message HarnessSession {
+  // The harness, such as `codex`.
+  string harness_id = 1;
+  // The harness's ID for the conversation.
+  string id = 2;
+}
+
+// One file of an artifact.
+message ArtifactEntry {
+  // Its path within the artifact.
+  string path = 1;
+  // Its content address, `supertag-artifact:` and its digest.
+  string uri = 2;
+  // Its `sha256:` digest.
+  string digest = 3;
+  // Its size in bytes.
+  int64 size_bytes = 4;
+  // Its media type, when the Worker recorded one.
+  string media_type = 5;
+}
+
+// Files selected from one artifact.
+message ArtifactSelection {
+  // The artifact's ID.
+  string artifact_id = 1;
+  // The files' paths.
+  repeated string paths = 2;
+}
+
+// Where the caller can read one artifact file. See `ResolveArtifactDownload`.
+message ArtifactDownload {
+  // The artifact's ID.
+  string artifact_id = 1;
+  // The file's path within the artifact.
+  string path = 2;
+  // The file's `sha256:` digest. A client keeps only bytes that match it.
+  string digest = 3;
+  // The file's size in bytes.
+  int64 size_bytes = 4;
+  // The serving Worker Hosts' transfer endpoints, each with a grant.
+  repeated ArtifactTransfer transfers = 5;
+  // Copies on Volumes, which the client reads with its own credentials.
+  repeated ArtifactVolumeLocation volumes = 6;
+  // Where the file is held, for a client that can reach none of the copies.
+  ArtifactHolders holders = 7;
+  // When the grants expire.
+  google.protobuf.Timestamp expires_at = 8;
+}
+
+// A Worker Host transfer endpoint that serves one artifact file.
+message ArtifactTransfer {
+  // The Worker Host's ID.
+  string worker_host_id = 1;
+  // The endpoint's address.
+  string transfer_url = 2;
+  // The grant to present to the endpoint, for this file and caller only,
+  // until `ArtifactDownload.expires_at`. It is a credential: clients never
+  // log or store it.
+  string grant = 3;
+}
+
+// An artifact file's copy on a Volume.
+message ArtifactVolumeLocation {
+  // The Volume's name.
+  string volume = 1;
+  // The Volume's source, such as `s3://bucket/prefix/`.
+  string source = 2;
+  // The name of the Volume's credential, which the reading machine maps to
+  // its own secret. Never a value. Empty when the Volume names none.
+  string credential = 3;
+  // The copy's key beneath `source`.
+  string key = 4;
+}
+
+// Where an artifact file is held.
+message ArtifactHolders {
+  // Worker Hosts holding a copy, the one whose Task Attempt captured it
+  // first.
+  repeated string worker_host_ids = 1;
+  // Volumes holding a copy, by name.
+  repeated string volumes = 2;
+}

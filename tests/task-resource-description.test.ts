@@ -1,12 +1,15 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { runResourceCommand } from "../apps/cli/src/resources.ts";
+import { fakeWorkRpc } from "./support/fake-work-rpc.ts";
+
+const serveTask = (view: Record<string, unknown>) => fakeWorkRpc([view]);
 
 afterEach(() => vi.restoreAllMocks());
 
 it("does not present a prior Attempt's wait conditions as a resumed Attempt's current wait", async () => {
   const client = new ControlPlaneClient({ url: "http://127.0.0.1:1", token: "unused" });
-  vi.spyOn(client, "request").mockResolvedValue({
+  serveTask({
     apiVersion: "supertag/v1",
     kind: "Task",
     metadata: { id: "resumed" },
@@ -32,7 +35,7 @@ it("does not present a prior Attempt's wait conditions as a resumed Attempt's cu
 
 it("lists each Task Attempt with its provider-reported cost", async () => {
   const client = new ControlPlaneClient({ url: "http://127.0.0.1:1", token: "unused" });
-  vi.spyOn(client, "request").mockResolvedValue({
+  serveTask({
     apiVersion: "supertag/v1",
     kind: "Task",
     metadata: { id: "objective:start" },
@@ -83,7 +86,7 @@ it.each(["unknown", "confirmed"])(
   "describes cancelled Task cleanup %s conservatively",
   async (cleanup) => {
     const client = new ControlPlaneClient({ url: "http://127.0.0.1:1", token: "unused" });
-    vi.spyOn(client, "request").mockResolvedValue({
+    serveTask({
       kind: "Task",
       metadata: { id: "cancelled" },
       spec: {},
@@ -104,7 +107,7 @@ it("shows the running command as plain, truncated text with its elapsed time", a
   try {
     const client = new ControlPlaneClient({ url: "http://127.0.0.1:1", token: "unused" });
     const describeWith = async (attempt: Record<string, unknown>) => {
-      vi.spyOn(client, "request").mockResolvedValue({
+      serveTask({
         apiVersion: "supertag/v1",
         kind: "Task",
         metadata: { id: "build" },
@@ -169,7 +172,7 @@ it("lists each Attempt's copied mounts and marks a mount whose content changed",
     reportedCost: null,
     ...(mountManifests === undefined ? {} : { mountManifests }),
   });
-  vi.spyOn(client, "request").mockResolvedValue({
+  serveTask({
     apiVersion: "supertag/v1",
     kind: "Task",
     metadata: { id: "train" },
@@ -211,7 +214,7 @@ it("lists each Attempt's copied mounts and marks a mount whose content changed",
 
 it("describes live mounts per Task Attempt without implying pinned content", async () => {
   const client = new ControlPlaneClient({ url: "http://127.0.0.1:1", token: "unused" });
-  vi.spyOn(client, "request").mockResolvedValue({
+  serveTask({
     apiVersion: "supertag/v1",
     kind: "Task",
     metadata: { id: "train" },

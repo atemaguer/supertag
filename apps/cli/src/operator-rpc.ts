@@ -6,6 +6,7 @@ import {
   ConnectError,
   type ConnectRouter,
   createContextKey,
+  createContextValues,
   type HandlerContext,
   type Interceptor,
 } from "@connectrpc/connect";
@@ -23,14 +24,18 @@ import {
   ErrorReason,
   EventService,
   InboxService,
+  MailboxService,
   ObjectiveService,
   OrganizationService,
   requires_admin_token,
+  TeamService,
+  WorkService,
 } from "@supertag/operator-api";
 import { type AuditTrail, auditTargetKind } from "./audit-trail.js";
 import { conversationService } from "./conversation-rpc.js";
 import { eventService } from "./event-rpc.js";
 import { inboxService } from "./inbox-rpc.js";
+import { mailboxService } from "./mailbox-rpc.js";
 import type { MessageFollower } from "./message-follow.js";
 import { objectiveService } from "./objective-rpc.js";
 import {
@@ -38,16 +43,20 @@ import {
   type OperatorPrincipal,
   operatorAuditTarget,
   operatorError,
+  operatorPeerAddress,
   operatorPrincipal,
   STREAM_HEARTBEAT_MS,
 } from "./operator-rpc-context.js";
 import {
   type OperatorControl,
+  type OperatorDataWrites,
   type OperatorQueries,
   type OperatorReadStore,
   operatorRpcClass,
 } from "./operator-seams.js";
 import { organizationService } from "./organization-rpc.js";
+import { teamService } from "./team-rpc.js";
+import { workService } from "./work-rpc.js";
 
 /** Every operator RPC is served under this path prefix: `/supertag.operator.v1.SERVICE/METHOD`. */
 export const OPERATOR_RPC_PATH_PREFIX = "/supertag.operator.v1.";
@@ -76,13 +85,14 @@ export interface OperatorRpcDependencies {
 }
 
 /**
- * What the operator services read and act on. `read` and `data_write` RPCs use only the store
- * reads, the queries, the change feed and the follower; every `control` RPC changes state through
- * `control`.
+ * What the operator services read and act on. `read` RPCs use only the store reads, the queries,
+ * the change feed and the follower; `data_write` RPCs add records through `writes`; every
+ * `control` RPC changes state through `control`.
  */
 export interface OperatorServices {
   readonly store: OperatorReadStore;
   readonly queries: OperatorQueries;
+  readonly writes: OperatorDataWrites;
   readonly control: OperatorControl;
   readonly changes: ChangeFeed;
   readonly follows: MessageFollower;
@@ -105,6 +115,8 @@ export function createOperatorRpcHandler(
     grpcWeb: true,
     grpc: false,
     readMaxBytes: OPERATOR_RPC_MAX_BYTES,
+    contextValues: (request) =>
+      createContextValues().set(operatorPeerAddress, request.socket.remoteAddress),
     requestGate: authentication(dependencies),
     interceptors: [
       auditing(dependencies.auditTrail),
@@ -126,12 +138,15 @@ export function createOperatorRpcHandler(
 
 /** Registers every operator service. Throws when an RPC has no class in `OPERATOR_RPC_CLASSES`. */
 export function registerOperatorRoutes(router: ConnectRouter, dependencies: OperatorServices) {
-  const { store, queries, control, changes, follows, draining } = dependencies;
+  const { store, queries, writes, control, changes, follows, draining } = dependencies;
   router.service(ConversationService, conversationService({ store, control, follows, draining }));
   router.service(InboxService, inboxService({ store, queries, control }));
   router.service(ObjectiveService, objectiveService({ store, queries, control }));
   router.service(EventService, eventService({ changes, store, draining }));
   router.service(OrganizationService, organizationService({ queries }));
+  router.service(WorkService, workService({ store, writes, control }));
+  router.service(TeamService, teamService({ store, control }));
+  router.service(MailboxService, mailboxService({ store, control }));
   for (const handler of router.handlers) assertRpcClass(handler.method);
 }
 

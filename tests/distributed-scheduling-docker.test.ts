@@ -176,16 +176,14 @@ suite("distributed scheduling across Docker Worker Hosts", () => {
     expect((await attempts()).filter((row) => row["taskId"] === disconnect)).toHaveLength(1);
     expect((await taskRow(disconnect))?.["status"]).toBe("running");
 
-    const taskResource = await api("GET", `/api/v1/tasks/${drained}`);
-    expect(taskResource).toMatchObject({
-      status: {
-        attempt: {
-          workerHostId: "host-b",
-          workletId: "host-b-worklet",
-          selection: {
-            allowedWorkerHostIds: expect.arrayContaining(["host-b"]),
-            reservation: { phase: "consumed" },
-          },
+    const task = await api("POST", "/supertag.operator.v1.WorkService/GetTask", { id: drained });
+    expect(task).toMatchObject({
+      latestAttempt: {
+        workerHostId: "host-b",
+        workletId: "host-b-worklet",
+        selection: {
+          allowedWorkerHostIds: expect.arrayContaining(["host-b"]),
+          reservation: { phase: "PLACEMENT_RESERVATION_PHASE_CONSUMED" },
         },
       },
     });

@@ -6,15 +6,24 @@ import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { parseArgs, promisify } from "node:util";
+import { toJson } from "@bufbuild/protobuf";
 import { probeInvalidExecutionCredential } from "../apps/cli/src/deploy.js";
-import { conversationClient, organizationClient } from "../apps/cli/src/operator-client.js";
-import { ReplyStatus } from "../packages/operator-api/src/index.js";
 import {
-  array,
+  conversationClient,
+  organizationClient,
+  workClient,
+} from "../apps/cli/src/operator-client.js";
+import { taskView } from "../apps/cli/src/work-protos.js";
+import {
+  ListSessionStatesResponseSchema,
+  ReplyStatus,
+  SessionStateSchema,
+  TaskEventSchema,
+} from "../packages/operator-api/src/index.js";
+import {
   assertNoSecrets,
   digest,
   hasExactLine,
-  integer,
   isToolCallStarted,
   type JsonRecord,
   nativeSessionEvidence,
@@ -54,6 +63,33 @@ class Api {
     if (!response.ok)
       throw new Error(`Control Plane ${method} ${path} failed with HTTP ${response.status}`);
     return record(value, `${method} ${path} response`);
+  }
+
+  /** The work RPCs, and the options each call takes. */
+  work() {
+    return {
+      client: workClient({ url: this.origin, token: this.token }),
+      options: {
+        signal: runAbort.signal,
+        timeoutMs: Math.min(this.timeout, 30_000),
+      },
+    };
+  }
+
+  /** A Session's native archives, and each archive with its contents. */
+  async sessionStates(sessionId: string): Promise<{ body: JsonRecord; details: JsonRecord[] }> {
+    const { client, options } = this.work();
+    const listed = await client.listSessionStates({ sessionId }, options);
+    const details = await Promise.all(
+      listed.states.map(
+        async (state) =>
+          toJson(
+            SessionStateSchema,
+            await client.getSessionState({ sessionId, id: state.id }, options),
+          ) as JsonRecord,
+      ),
+    );
+    return { body: toJson(ListSessionStatesResponseSchema, listed) as JsonRecord, details };
   }
 
   /** The conversation RPCs, and the options each call takes. */
@@ -232,20 +268,9 @@ try {
   assertNoSecrets(continuitySpec, [nativeSecret], "first turn durable Task spec");
   const sessionId = firstTurn.sessionId;
   const firstSessionArchive = await poll(async () => {
-    const body = await api.request(
-      "GET",
-      `/api/v1/sessions/${encodeURIComponent(sessionId)}/states`,
-    );
-    for (const state of array(body["states"], "Session states").map((item) =>
-      record(item, "Session state"),
-    )) {
-      const detail = await api.request(
-        "GET",
-        `/api/v1/sessions/${encodeURIComponent(sessionId)}/states/${encodeURIComponent(text(state["id"], "Session state id"))}`,
-      );
-      if (JSON.stringify(detail).includes(nativeSecret)) return { body, detail };
-    }
-    return undefined;
+    const { body, details } = await api.sessionStates(sessionId);
+    const detail = details.find((item) => JSON.stringify(item).includes(nativeSecret));
+    return detail === undefined ? undefined : { body, detail };
   }, "first turn native Session archive containing the protected tool result");
   const firstSession = nativeSessionEvidence(firstSessionArchive.body);
   assert.equal(firstSession.nativeIds.length, 1, "The first turn must persist one native identity");
@@ -317,9 +342,7 @@ try {
   assert.equal(attemptB.profile.id, profileId);
   const recalled = secondTurn.reply.trim();
   assert.equal(recalled, nativeSecret, "Fresh Worker did not recall the exact native value");
-  const sessionEvidence = nativeSessionEvidence(
-    await api.request("GET", `/api/v1/sessions/${encodeURIComponent(sessionId)}/states`),
-  );
+  const sessionEvidence = nativeSessionEvidence((await api.sessionStates(sessionId)).body);
   assert.deepEqual(sessionEvidence.nativeIds, firstSession.nativeIds);
   const continuityEvents = await taskEvents(api, secondTurn.taskId);
   const attemptBToolCalls = continuityEvents.filter(
@@ -382,20 +405,9 @@ try {
   );
   const consumerSessionId = consumerTurn.sessionId;
   const consumerArchive = await poll(async () => {
-    const body = await api.request(
-      "GET",
-      `/api/v1/sessions/${encodeURIComponent(consumerSessionId)}/states`,
-    );
-    for (const state of array(body["states"], "consumer Session states").map((item) =>
-      record(item, "consumer Session state"),
-    )) {
-      const detail = await api.request(
-        "GET",
-        `/api/v1/sessions/${encodeURIComponent(consumerSessionId)}/states/${encodeURIComponent(text(state["id"], "consumer Session state id"))}`,
-      );
-      if (JSON.stringify(detail).includes(artifactSecret)) return { body, detail };
-    }
-    return undefined;
+    const { body, details } = await api.sessionStates(consumerSessionId);
+    const detail = details.find((item) => JSON.stringify(item).includes(artifactSecret));
+    return detail === undefined ? undefined : { body, detail };
   }, "consumer native archive containing the artifact bytes");
   const consumerNativeEvidence = nativeSessionEvidence(consumerArchive.body);
   checks.push({
@@ -493,25 +505,18 @@ async function capturedEvidence(
   apiClient: Api,
   taskId: string,
 ): Promise<{ artifactId: string; path: string; digest: string; sizeBytes: number }> {
-  const page = await apiClient.request(
-    "GET",
-    `/api/v1/artifacts?task=${encodeURIComponent(taskId)}`,
-  );
-  for (const item of array(page["items"], "artifacts").map((value) => record(value, "artifact"))) {
-    const spec = record(item["spec"], "artifact spec");
-    for (const entry of array(spec["entries"], "artifact entries").map((value) =>
-      record(value, "artifact entry"),
-    )) {
-      const path = text(entry["path"], "artifact path");
-      if (!path.endsWith("evidence.txt")) continue;
+  const { client, options } = apiClient.work();
+  const page = await client.listArtifacts({ taskId, pageSize: 100 }, options);
+  for (const artifact of page.artifacts)
+    for (const entry of artifact.entries) {
+      if (!entry.path.endsWith("evidence.txt")) continue;
       return {
-        artifactId: text(record(item["metadata"], "artifact metadata")["id"], "artifact id"),
-        path,
-        digest: text(entry["digest"], "artifact digest"),
-        sizeBytes: integer(entry["sizeBytes"], "artifact size"),
+        artifactId: artifact.id,
+        path: entry.path,
+        digest: entry.digest,
+        sizeBytes: Number(entry.sizeBytes),
       };
     }
-  }
   throw new Error(`Task ${taskId} captured no evidence.txt artifact`);
 }
 
@@ -650,7 +655,8 @@ function connectionGeneration(host: JsonRecord): number {
 
 async function pollTask(apiClient: Api, taskId: string): Promise<JsonRecord> {
   return poll(async () => {
-    const task = await apiClient.request("GET", `/api/v1/tasks/${encodeURIComponent(taskId)}`);
+    const { client, options } = apiClient.work();
+    const task = taskView(await client.getTask({ id: taskId }, options)) as unknown as JsonRecord;
     const phase = text(record(task["status"], "Task status")["phase"], "Task phase");
     if (["failed", "cancelled"].includes(phase))
       throw new Error(
@@ -661,8 +667,15 @@ async function pollTask(apiClient: Api, taskId: string): Promise<JsonRecord> {
 }
 
 async function taskEvents(apiClient: Api, taskId: string): Promise<JsonRecord[]> {
-  const body = await apiClient.request("GET", `/api/v1/tasks/${encodeURIComponent(taskId)}/events`);
-  return array(body["items"], "Task events").map((item) => record(item, "Task event"));
+  const { client, options } = apiClient.work();
+  const events: JsonRecord[] = [];
+  let pageToken = "";
+  do {
+    const page = await client.listTaskEvents({ taskId, pageSize: 1000, pageToken }, options);
+    for (const event of page.events) events.push(toJson(TaskEventSchema, event) as JsonRecord);
+    pageToken = page.nextPageToken;
+  } while (pageToken !== "");
+  return events;
 }
 
 async function negativeAuthentication(
@@ -671,8 +684,13 @@ async function negativeAuthentication(
   selectedTransport: string,
   caFile?: string,
 ): Promise<void> {
-  const response = await fetch(`${management}/api/v1/tasks`, {
-    headers: { authorization: `Bearer invalid-${randomUUID()}` },
+  const response = await fetch(`${management}/supertag.operator.v1.WorkService/ListTasks`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer invalid-${randomUUID()}`,
+      "content-type": "application/json",
+    },
+    body: "{}",
     redirect: "error",
     signal: AbortSignal.any([AbortSignal.timeout(15_000), runAbort.signal]),
   });

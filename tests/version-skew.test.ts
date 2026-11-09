@@ -207,16 +207,19 @@ describe("the Control Plane version header", () => {
     }
   });
 
-  it("names the unknown fields it rejects", async () => {
+  it("sends its version with an operator RPC's refusal", async () => {
     const url = await realControlPlane();
-    const response = await fetch(`${url}/api/v1/tag-messaging/teams`, {
+    const response = await fetch(`${url}/supertag.operator.v1.TeamService/CreateTeam`, {
       method: "POST",
       headers: { authorization: `Bearer ${ADMIN}`, "content-type": "application/json" },
-      body: JSON.stringify({ name: "launch", memberTagIds: [], rocket: 1 }),
+      body: JSON.stringify({ name: "launch", members: [] }),
     });
     expect(response.status).toBe(400);
     expect(response.headers.get("SuperTag-Version")).toBe(SUPERTAG_VERSION);
-    expect(await response.json()).toMatchObject({ message: "Unknown field: rocket" });
+    expect(await response.json()).toMatchObject({
+      code: "invalid_argument",
+      message: "A Team needs at least one member",
+    });
   });
 });
 

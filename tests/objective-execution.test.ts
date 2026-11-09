@@ -5,6 +5,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { expect, it, vi } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
+import { workClient } from "../apps/cli/src/operator-client.js";
 import { createCodexWorker } from "../packages/runtime/harnesses/codex/src/index.js";
 import {
   COORDINATION_CAPABILITY,
@@ -286,15 +287,10 @@ it("finishing an Objective does not exempt its completing Attempt from cancellat
     expect((await store.findTaskById(ownerTaskId))?.status).toBe("running");
     expect(aborted).toBe(false);
     {
-      const cancelled = await fetch(
-        `${runtime.url}/api/v1/tasks/${encodeURIComponent(ownerTaskId)}/cancel`,
-        {
-          method: "POST",
-          headers: { Authorization: "Bearer test-admin", "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        },
-      );
-      expect(cancelled.status, await cancelled.text()).toBe(202);
+      const cancelled = await workClient({ url: runtime.url, token: "test-admin" }).cancelTask({
+        id: ownerTaskId,
+      });
+      expect(cancelled.accepted).toBe(true);
     }
     await expect.poll(() => aborted, { timeout: 25_000 }).toBe(true);
   } finally {

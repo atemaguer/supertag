@@ -170,6 +170,77 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       expect(team.memberTagIds).toContain(f.sender.id);
     }, 30_000);
 
+    it("changes one sender's grant at a time, so concurrent grants and revokes all hold", async () => {
+      const f = await fixture();
+      const sender = (index: number) =>
+        f.store.createTag({ name: `sender-${index}-${randomUUID()}` });
+      const senders = await Promise.all([0, 1, 2, 3, 4, 5].map(sender));
+      const granted = await Promise.all(
+        senders.map((tag) =>
+          f.store.changeTagMessagingGrant(
+            { senderTagId: tag.id, recipientTagId: f.recipient.id },
+            true,
+          ),
+        ),
+      );
+      expect(granted).toEqual(senders.map(() => true));
+      const recipients = async () =>
+        (await f.store.listTagMessagingGrants(f.recipient.id))
+          .filter((grant) => grant.recipientTagId === f.recipient.id)
+          .map((grant) => grant.senderTagId)
+          .toSorted();
+      expect(await recipients()).toEqual(senders.map((tag) => tag.id).toSorted());
+      expect(
+        await f.store.changeTagMessagingGrant(
+          { senderTagId: senders[0]?.id as string, recipientTagId: f.recipient.id },
+          true,
+        ),
+      ).toBe(false);
+      const [kept, ...revoked] = senders;
+      expect(
+        await Promise.all(
+          revoked.map((tag) =>
+            f.store.changeTagMessagingGrant(
+              { senderTagId: tag.id, recipientTagId: f.recipient.id },
+              false,
+            ),
+          ),
+        ),
+      ).toEqual(revoked.map(() => true));
+      expect(await recipients()).toEqual([kept?.id]);
+      expect(
+        await f.store.changeTagMessagingGrant(
+          { senderTagId: revoked[0]?.id as string, recipientTagId: f.recipient.id },
+          false,
+        ),
+      ).toBe(false);
+      await expect(
+        f.store.changeTagMessagingGrant(
+          { senderTagId: f.recipient.id, recipientTagId: f.recipient.id },
+          true,
+        ),
+      ).rejects.toMatchObject({ statusCode: 400 });
+    }, 30_000);
+
+    it("returns a Team unchanged when a retried update already holds", async () => {
+      const f = await fixture();
+      const team = await f.store.createTeam({
+        id: randomUUID(),
+        name: `team-${randomUUID()}`,
+        memberTagIds: [f.sender.id],
+      });
+      const change = { expectedRevision: team.revision, name: `renamed-${randomUUID()}` };
+      const applied = await f.store.updateTeam(team.id, change);
+      expect(applied.revision).toBe(team.revision + 1);
+      expect(await f.store.updateTeam(team.id, change)).toEqual(applied);
+      await expect(
+        f.store.updateTeam(team.id, { ...change, name: `other-${randomUUID()}` }),
+      ).rejects.toMatchObject({ statusCode: 409 });
+      await expect(
+        f.store.updateTeam(team.id, { expectedRevision: team.revision, maxConcurrency: 2 }),
+      ).rejects.toMatchObject({ statusCode: 409 });
+    }, 30_000);
+
     it("admits a turn for the first message only while no inbox turn waits for it", async () => {
       const f = await fixture();
       const first = await f.send(f.sender, f.recipient, "One");

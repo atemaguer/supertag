@@ -10,6 +10,7 @@ require (
 	connectrpc.com/connect v1.21.1
 	github.com/atemaguer/supertag/packages/operator-api/go v0.0.0
 	github.com/charmbracelet/x/ansi v0.11.9
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
@@ -38,7 +39,6 @@ require (
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
-	google.golang.org/protobuf v1.36.12 // indirect
 )
 
 replace github.com/atemaguer/supertag/packages/operator-api/go => ../../packages/operator-api/go

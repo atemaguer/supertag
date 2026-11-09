@@ -201,15 +201,6 @@ const ROUTES: readonly Route[] = [
   ],
   [
     "POST",
-    /^\/api\/v1\/tasks\/([^/]+)\/cancel$/u,
-    (match) => ({
-      action: "task.cancel",
-      target: named("Task", id(match)),
-      route: "/api/v1/tasks/{id}/cancel",
-    }),
-  ],
-  [
-    "POST",
     /^\/api\/v1\/apply-sets\/([^/]+)\/prune$/u,
     (match, _method, dryRun) => ({
       action: `prune${dryRun}`,
@@ -243,29 +234,6 @@ const ROUTES: readonly Route[] = [
       action: method === "DELETE" ? "tag.worker-host.remove" : "tag.worker-host.add",
       target: named("Tag", id(match)),
       route: "/api/v1/tags/{name}/worker-hosts/{id}",
-    }),
-  ],
-  [
-    "POST",
-    /^\/api\/v1\/tag-messaging\/teams$/u,
-    () => ({ action: "team.create", target: "Team", route: "/api/v1/tag-messaging/teams" }),
-  ],
-  [
-    undefined,
-    /^\/api\/v1\/tag-messaging\/teams\/([^/]+)$/u,
-    (match, method) => ({
-      action: method === "DELETE" ? "team.delete" : "team.update",
-      target: named("Team", id(match)),
-      route: "/api/v1/tag-messaging/teams/{id}",
-    }),
-  ],
-  [
-    undefined,
-    /^\/api\/v1\/tag-messaging\/grants$/u,
-    (_match, method) => ({
-      action: method === "DELETE" ? "mailbox-grant.revoke" : "mailbox-grant.add",
-      target: "Mailbox",
-      route: "/api/v1/tag-messaging/grants",
     }),
   ],
 ];

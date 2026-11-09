@@ -36,6 +36,8 @@ export interface SessionStatePersistence {
     readonly sessionId: string;
     readonly taskId?: string;
     readonly nativeId?: string;
+    /** Lists the archives that come after this one, newest first. */
+    readonly before?: { readonly createdAt: string; readonly id: string };
     readonly limit?: number;
   }): Promise<readonly SessionStateSummary[]>;
   /** Seals native data only after the Control Plane has verified successful execution. */

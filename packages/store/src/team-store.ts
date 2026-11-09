@@ -8,6 +8,7 @@ import {
   TagMessagingError,
   type Team,
   type TeamStore,
+  type UpdateTeamInput,
 } from "@supertag/core";
 import { and, asc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { runDialectTransaction } from "./dialect-transaction.js";
@@ -120,8 +121,12 @@ export class DrizzleTeamStore implements TeamStore {
       .where(eq(t.id, mailboxText(id, "teamId")))
       .limit(1);
     if (!prior) throw new TagMessagingError(404, "Team not found");
-    if (prior.revision !== expectedRevision)
+    if (prior.revision !== expectedRevision) {
+      // A retry of a change that holds already, such as one whose reply was lost, returns the Team.
+      if (prior.revision > expectedRevision && teamHolds(teamFromRow(prior), changes))
+        return teamFromRow(prior);
       throw new TagMessagingError(409, "Team revision changed; reload before updating");
+    }
     if (changes.memberTagIds !== undefined) {
       const known = new Set<string>(prior.memberTagIds);
       yield* this.activeMembers(
@@ -224,6 +229,16 @@ export class DrizzleTeamStore implements TeamStore {
   deleteTeam(id: string): Promise<boolean> {
     return this.transaction((tx) => this.delete(tx, id));
   }
+}
+
+function teamHolds(team: Team, changes: Omit<UpdateTeamInput, "expectedRevision">): boolean {
+  const members = (ids: readonly string[]) => [...new Set(ids)].sort().join("\n");
+  return (
+    (changes.name === undefined || changes.name === team.name) &&
+    (changes.memberTagIds === undefined ||
+      members(changes.memberTagIds) === members(team.memberTagIds)) &&
+    (changes.maxConcurrency === undefined || changes.maxConcurrency === team.maxConcurrency)
+  );
 }
 
 export function teamFromRow(row: any): Team {

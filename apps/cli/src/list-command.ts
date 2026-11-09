@@ -1,16 +1,35 @@
 import { parseArgs } from "node:util";
 import { fromJsonString } from "@bufbuild/protobuf";
-import { ListApprovalsResponseSchema, ListObjectivesResponseSchema } from "@supertag/operator-api";
+import {
+  ListApprovalsResponseSchema,
+  ListArtifactsResponseSchema,
+  ListMailboxGrantsResponseSchema,
+  ListObjectivesResponseSchema,
+  ListTagMessagesResponseSchema,
+  ListTeamsResponseSchema,
+  ListWorkstreamPostsResponseSchema,
+  TagMessageStatus,
+} from "@supertag/operator-api";
 import { stringify as stringifyYaml } from "yaml";
 import { runApprovalCommand, runInboxCommand } from "./approvals.js";
 import { runArtifactCommand } from "./artifacts.js";
 import { ControlPlaneClient, type ControlPlaneTarget } from "./control-plane-client.js";
 import { runTagMessagingCommand } from "./messaging.js";
 import { money } from "./money.js";
-import { approvalRecord, type ObjectiveView, objectiveView } from "./objective-protos.js";
+import {
+  approvalRecord,
+  enumTable,
+  isoOf,
+  type ObjectiveView,
+  objectiveView,
+} from "./objective-protos.js";
 import { runObjectiveCommand } from "./objectives.js";
+import { workClient } from "./operator-client.js";
+import { refusedAsError } from "./tag-conversation.js";
 import { runTeamCommand } from "./teams.js";
 import { terminalText } from "./terminal-text.js";
+import { artifactRow, sessionView, taskView } from "./work-protos.js";
+import { allSessions, recentTasks, workSessionsJson, workTasksJson } from "./work-reads.js";
 import { workerHarnessNames } from "./worker-harness-names.js";
 import { listWorkstreamPosts } from "./workstreams.js";
 
@@ -26,11 +45,11 @@ const paths: Record<string, string> = {
   "worker-profile": "worker-profiles",
   "auth-key": "auth-keys",
   "operator-token": "operator-tokens",
-  task: "tasks",
-  session: "sessions",
 };
 const kinds = new Set([
   ...Object.keys(paths),
+  "task",
+  "session",
   "objective",
   "team",
   "workstream-post",
@@ -195,11 +214,64 @@ const columns: Record<string, readonly [string, string][]> = {
 /** Fields of each kind that hold Tag IDs, shown as names in text tables. */
 const TAG_FIELDS: Readonly<Record<string, readonly string[]>> = {
   objective: ["ownerTagId"],
-  team: ["memberTagIds"],
-  message: ["senderTagId", "recipientTagId"],
-  "mailbox-grant": ["senderTagId", "recipientTagId"],
-  "workstream-post": ["authorTagId", "to"],
 };
+
+const MESSAGE_STATUS = enumTable(
+  [
+    ["pending", TagMessageStatus.PENDING],
+    ["handled", TagMessageStatus.HANDLED],
+    ["failed", TagMessageStatus.FAILED],
+  ] as const,
+  TagMessageStatus.UNSPECIFIED,
+);
+
+/**
+ * The rows a text table shows for the kinds whose JSON is an operator RPC's response, with Tag
+ * IDs shown as the names the response carries.
+ */
+function rpcRows(kind: string, response: string): Row[] | undefined {
+  const named = (names: Readonly<Record<string, string>>) => (id: string) => names[id] ?? id;
+  if (kind === "team")
+    return fromJsonString(ListTeamsResponseSchema, response).teams.map((team) => ({
+      name: team.name,
+      memberTagIds: team.members.map((member) => member.tag || member.tagId),
+      maxConcurrency: team.maxConcurrency,
+    }));
+  if (kind === "message") {
+    const page = fromJsonString(ListTagMessagesResponseSchema, response);
+    const name = named(page.tagNames);
+    return page.messages.map((message) => ({
+      id: message.id,
+      senderTagId: name(message.senderTagId),
+      recipientTagId: name(message.recipientTagId),
+      status: MESSAGE_STATUS.word(message.status),
+      createdAt: isoOf(message.createdAt),
+      text: message.text,
+    }));
+  }
+  if (kind === "mailbox-grant") {
+    const page = fromJsonString(ListMailboxGrantsResponseSchema, response);
+    const name = named(page.tagNames);
+    return page.grants.map((grant) => ({
+      senderTagId: name(grant.senderTagId),
+      recipientTagId: name(grant.recipientTagId),
+    }));
+  }
+  if (kind === "workstream-post") {
+    const page = fromJsonString(ListWorkstreamPostsResponseSchema, response);
+    const name = named(page.tagNames);
+    return page.posts.map((post) => ({
+      sequence: Number(post.sequence),
+      authorTagId: name(post.authorTagId),
+      to: post.toTagIds.map(name),
+      createdAt: isoOf(post.createdAt),
+      body: post.body,
+    }));
+  }
+  if (kind === "artifact")
+    return fromJsonString(ListArtifactsResponseSchema, response).artifacts.map(artifactRow);
+  return undefined;
+}
 
 /** An Objective as a table row names its fields. */
 function objectiveRow(objective: ObjectiveView): Row {
@@ -313,7 +385,17 @@ export async function runListCommand(
   );
   const client = new ControlPlaneClient(target);
   let value: unknown;
-  if (kind in paths) {
+  if (kind === "task" || kind === "session") {
+    if (options.length) throw new Error(`Usage: supertag list ${kind} [--output text|json|yaml]`);
+    const work = workClient(client.operator);
+    if (kind === "task") {
+      const tasks = await refusedAsError(() => recentTasks(work));
+      value = output === "text" ? { items: tasks.map(taskView) } : workTasksJson(tasks);
+    } else {
+      const sessions = await refusedAsError(() => allSessions(work));
+      value = output === "text" ? { items: sessions.map(sessionView) } : workSessionsJson(sessions);
+    }
+  } else if (kind in paths) {
     if (options.length) throw new Error(`Usage: supertag list ${kind} [--output text|json|yaml]`);
     value = await client.request(`/api/v1/${paths[kind]}`);
   } else {
@@ -364,6 +446,8 @@ export async function runListCommand(
       value = {
         items: fromJsonString(ListApprovalsResponseSchema, response).approvals.map(approvalRecord),
       };
+    const rows = output === "text" ? rpcRows(kind, response) : undefined;
+    if (rows !== undefined) value = { items: rows };
   }
   const tagFields = TAG_FIELDS[kind];
   if (output === "text" && tagFields !== undefined) {
@@ -390,7 +474,9 @@ export async function runListCommand(
     };
   }
   if (output === "text" && (kind === "tag" || kind === "worker-host")) {
-    const tasks = items(await client.request("/api/v1/tasks"));
+    const tasks = (await refusedAsError(() => recentTasks(workClient(client.operator)))).map(
+      taskView,
+    );
     const running = tasks
       .map(record)
       .filter((task) => field(task, "status.attempt.phase") === "running");

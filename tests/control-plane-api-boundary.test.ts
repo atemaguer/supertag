@@ -3,15 +3,18 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { toJsonString } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlPlaneApiServer, isControlPlaneApiPath } from "../apps/cli/src/control-plane-api.ts";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { runObjectiveCommand } from "../apps/cli/src/objectives.js";
-import { organizationClient } from "../apps/cli/src/operator-client.ts";
+import { organizationClient, workClient } from "../apps/cli/src/operator-client.ts";
 import { runResourceCommand } from "../apps/cli/src/resources.ts";
+import { taskView } from "../apps/cli/src/work-protos.ts";
 import { ControlPlane } from "../packages/control-plane/src/index.ts";
 import { emptyTagContextPlan } from "../packages/core/src/index.ts";
+import { SessionStateStatus, TaskSchema } from "../packages/operator-api/src/index.ts";
 import {
   executionWarningProgress,
   LocalWorklet,
@@ -27,6 +30,13 @@ import { DrizzleStore, FileGatewayCredentialVault } from "../packages/store/src/
 import { migrateSqlite } from "./support/database.ts";
 import { durableTestWorklet } from "./support/durable-test-worklet.js";
 import { sharedTokenAuthentication } from "./support/worklet-authentication.js";
+
+/** A Task as `get task` reads it over `WorkService.GetTask`, in the view `describe task` shows. */
+async function taskViewOf(url: string, id: string) {
+  const task = await workClient({ url, token: "administrative-token" }).getTask({ id });
+  expect(toJsonString(TaskSchema, task)).not.toContain("never-render-this");
+  return taskView(task) as ReturnType<typeof JSON.parse>;
+}
 
 describe("Control Plane API boundary", () => {
   const cleanups: Array<() => Promise<void>> = [];
@@ -240,53 +250,48 @@ describe("Control Plane API boundary", () => {
         transcripts: [{ entries: ["private native conversation B"] }],
       },
     });
-    const base = `${fixture.url}/api/v1/sessions/${task.sessionId}/states`;
-    const headers = { authorization: "Bearer administrative-token" };
-    for (const suffix of ["", `/${first.id}`]) {
-      expect((await fetch(`${base}${suffix}`)).status).toBe(401);
-      expect(
-        (
-          await fetch(`${base}${suffix}`, {
-            headers: { authorization: "Bearer coordination-only" },
-          })
-        ).status,
-      ).toBe(403);
+    const work = (token?: string) =>
+      workClient({ url: fixture.url, ...(token === undefined ? {} : { token }) });
+    const sessionId = task.sessionId;
+    for (const call of [
+      (client: ReturnType<typeof work>) => client.listSessionStates({ sessionId }),
+      (client: ReturnType<typeof work>) => client.getSessionState({ sessionId, id: first.id }),
+    ]) {
+      await expect(call(work())).rejects.toMatchObject({ code: Code.Unauthenticated });
+      await expect(call(work("coordination-only"))).rejects.toMatchObject({
+        code: Code.PermissionDenied,
+      });
     }
-    const listed = await fetch(base, { headers });
-    expect(listed.status).toBe(200);
-    expect(listed.headers.get("cache-control")).toBe("no-store");
-    const listing = (await listed.json()) as { states: Array<Record<string, unknown>> };
-    expect(listing.states).toEqual(
+    const admin = work("administrative-token");
+    const listing = await admin.listSessionStates({ sessionId });
+    expect(listing.states.map(({ id, nativeId, status }) => ({ id, nativeId, status }))).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: first.id, nativeId: "codex-thread-a", status: "resumable" }),
-        expect.objectContaining({ id: second.id, nativeId: "claude-session-b", status: "stored" }),
+        { id: first.id, nativeId: "codex-thread-a", status: SessionStateStatus.RESUMABLE },
+        { id: second.id, nativeId: "claude-session-b", status: SessionStateStatus.STORED },
       ]),
     );
     expect(listing.states).toHaveLength(2);
-    expect(listing.states.every((state) => !("data" in state))).toBe(true);
-    expect(JSON.stringify(listing)).not.toContain("private native conversation");
-    const filtered = await fetch(`${base}?nativeId=codex-thread-a`, { headers });
-    await expect(filtered.json()).resolves.toMatchObject({ states: [{ id: first.id }] });
-    const missingNative = await fetch(`${base}?nativeId=missing`, { headers });
-    await expect(missingNative.json()).resolves.toEqual({ states: [] });
-    const exact = await fetch(`${base}/${second.id}`, { headers });
-    expect(exact.status).toBe(200);
-    expect(exact.headers.get("cache-control")).toBe("no-store");
-    await expect(exact.json()).resolves.toMatchObject({ id: second.id, data: second.data });
+    expect(listing.states.every((state) => state.data === undefined)).toBe(true);
+    expect(JSON.stringify(listing.states.map((state) => state.ref))).not.toContain(
+      "private native conversation",
+    );
+    const filtered = await admin.listSessionStates({ sessionId, nativeId: "codex-thread-a" });
+    expect(filtered.states.map((state) => state.id)).toEqual([first.id]);
+    expect((await admin.listSessionStates({ sessionId, nativeId: "missing" })).states).toEqual([]);
+    const exact = await admin.getSessionState({ sessionId, id: second.id });
+    expect(exact).toMatchObject({ id: second.id, data: second.data });
     const otherSession = await store.openSession({
       tagId: owner.id,
       sessionKey: "unrelated-session",
       origin: {},
       at,
     });
-    expect(
-      (
-        await fetch(`${fixture.url}/api/v1/sessions/${otherSession.id}/states/${first.id}`, {
-          headers,
-        })
-      ).status,
-    ).toBe(404);
-    expect((await fetch(`${base}/missing-state`, { headers })).status).toBe(404);
+    await expect(
+      admin.getSessionState({ sessionId: otherSession.id, id: first.id }),
+    ).rejects.toMatchObject({ code: Code.NotFound });
+    await expect(admin.getSessionState({ sessionId, id: "missing-state" })).rejects.toMatchObject({
+      code: Code.NotFound,
+    });
     expect(await store.listArtifacts()).toEqual([]);
   });
 
@@ -597,7 +602,7 @@ describe("Control Plane API boundary", () => {
     const profile = { id: "diagnostic", revision: "1" };
     const id = (await openConversationTask(store, owner, { profile })).id;
     const client = new ControlPlaneClient({ url: fixture.url, token: "administrative-token" });
-    const queued = JSON.parse(await runResourceCommand(client, "get", ["task", id]));
+    const queued = await taskViewOf(fixture.url, id);
     expect(queued).toMatchObject({
       apiVersion: "supertag/v1",
       kind: "Task",
@@ -684,7 +689,7 @@ describe("Control Plane API boundary", () => {
     expect(described).toContain("Tool execution environment: shared-tools (docker, remote)");
     expect(described).toContain("Execution cleanup evidence: pending");
     expect(described).not.toContain("never-render-this");
-    const running = JSON.parse(await runResourceCommand(client, "get", ["task", id]));
+    const running = await taskViewOf(fixture.url, id);
     expect(running.metadata.resourceVersion).not.toBe(queued.metadata.resourceVersion);
     expect(JSON.stringify(running)).not.toContain("never-render-this");
     expect(await store.listTaskEvents(id)).toEqual(storedBefore);
@@ -710,7 +715,7 @@ describe("Control Plane API boundary", () => {
       type: "command.updated",
       payload: { command: { id: "cmd-2", command: "git status", status: "completed" } },
     });
-    const commanded = JSON.parse(await runResourceCommand(client, "get", ["task", id]));
+    const commanded = await taskViewOf(fixture.url, id);
     expect(commanded.status.attempt.runningCommand).toMatchObject({ command: "pnpm test:verify" });
     expect(await runResourceCommand(client, "describe", ["task", id])).toMatch(
       /^Command: running `pnpm test:verify` for \d+s$/mu,
@@ -748,7 +753,7 @@ describe("Control Plane API boundary", () => {
         },
       },
     });
-    const uncertain = JSON.parse(await runResourceCommand(client, "get", ["task", id]));
+    const uncertain = await taskViewOf(fixture.url, id);
     expect(uncertain.status.attempt.phase).toBe("running");
     expect(uncertain.status.attempt.failure).toBeNull();
     expect(uncertain.status.attempt.placement).toMatchObject({
@@ -771,7 +776,7 @@ describe("Control Plane API boundary", () => {
     expect(uncertainDescription).toContain("Original execution error: native request timed out");
     expect(uncertainDescription).toContain(cleanupMessage);
     await store.appendTaskEvent({ taskId: id, attemptId: attempt.id, type: "execution.completed" });
-    const ended = JSON.parse(await runResourceCommand(client, "get", ["task", id]));
+    const ended = await taskViewOf(fixture.url, id);
     expect(ended.status.attempt.placement.cleanup).toBe("confirmed");
     expect(ended.status.attempt.placement.cleanupFailure).toBeNull();
     expect(ended.metadata.resourceVersion).not.toBe(priorVersion);
@@ -784,7 +789,7 @@ describe("Control Plane API boundary", () => {
       type: "progress.updated",
       payload: { progress: executionWarningProgress([archiveWarning]) },
     });
-    const warned = JSON.parse(await runResourceCommand(client, "get", ["task", id]));
+    const warned = await taskViewOf(fixture.url, id);
     expect(warned.status.attempt.failure).toBeNull();
     expect(warned.status.attempt.warnings).toMatchObject([{ message: archiveWarning }]);
     expect(await runResourceCommand(client, "describe", ["task", id])).toContain(
@@ -798,7 +803,7 @@ describe("Control Plane API boundary", () => {
       startedAt: at,
     });
     await store.closeTaskAttempt({ attemptId: second.id, status: "failed", endedAt: at });
-    const unknown = JSON.parse(await runResourceCommand(client, "get", ["task", id]));
+    const unknown = await taskViewOf(fixture.url, id);
     expect(unknown.status.attempt).toMatchObject({
       id: second.id,
       workerHostId: null,
@@ -825,7 +830,7 @@ describe("Control Plane API boundary", () => {
         },
       },
     });
-    const failed = JSON.parse(await runResourceCommand(client, "get", ["task", id]));
+    const failed = await taskViewOf(fixture.url, id);
     expect(failed.status.attempt.failure.message).toBe(failureMessage);
     expect(JSON.stringify(failed)).not.toContain("never-render-this");
     const failureText = await runResourceCommand(client, "describe", ["task", id]);
@@ -837,7 +842,7 @@ describe("Control Plane API boundary", () => {
       workerSnapshot: { durableExecution: true },
       startedAt: at,
     });
-    const retried = JSON.parse(await runResourceCommand(client, "get", ["task", id]));
+    const retried = await taskViewOf(fixture.url, id);
     expect(retried.status.attempt.id).toBe(third.id);
     expect(retried.status.attempt.failure).toBeNull();
     expect(await runResourceCommand(client, "describe", ["task", id])).not.toContain(

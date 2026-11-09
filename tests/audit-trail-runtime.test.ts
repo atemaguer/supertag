@@ -809,16 +809,11 @@ describe("audit classification", () => {
       target: "ApplySet/platform",
       route: "/api/v1/apply-sets/{name}/prune",
     });
-    expect(classify("POST", "/api/v1/tasks/t-1/cancel")).toEqual({
-      action: "task.cancel",
-      target: "Task/t-1",
-      route: "/api/v1/tasks/{id}/cancel",
-    });
     // A path segment that is not a plain name or ID is left out of the target.
-    expect(classify("POST", "/api/v1/tasks/task%20one/cancel")).toEqual({
-      action: "task.cancel",
-      target: "Task",
-      route: "/api/v1/tasks/{id}/cancel",
+    expect(classify("POST", "/api/v1/worker-hosts/build%20one/drain")).toEqual({
+      action: "worker-host.drain",
+      target: "WorkerHost",
+      route: "/api/v1/worker-hosts/{id}/drain",
     });
     expect(classify("POST", "/api/v1/worker-hosts/build/drain")).toEqual({
       action: "worker-host.drain",

@@ -96,8 +96,9 @@ Each operator RPC has a class in `OPERATOR_RPC_CLASSES` (`apps/cli/src/operator-
 `read`, `data_write` (adds records such as messages, posts, progress events and artifacts) or
 `control` (changes the state of Objectives, Tasks, approvals, hosts, credentials or resources). A
 `read` RPC sets `idempotency_level = NO_SIDE_EFFECTS`, and no other class does. Service modules
-read the store through `OperatorReadStore` and `OperatorQueries` and make every state transition
-through `OperatorControl`, whose methods take plain data and are idempotent. They never import the
+read the store through `OperatorReadStore` and `OperatorQueries`, add records through
+`OperatorDataWrites`, and make every state transition through `OperatorControl`, whose methods take
+plain data and are idempotent. They never import the
 `ControlPlane`, the full `Store` or the in-memory `ChangeNotifications`, so a stateless Gateway
 can later serve them with `OperatorControl` as a call to the Control Plane.
 `tests/operator-rpc-seams.test.ts` checks the classes and the imports.

@@ -19,6 +19,7 @@ import {
   readWorkerHostCredential,
   writeWorkerHostCredential,
 } from "../apps/cli/src/worker-hosts.ts";
+import { fakeWorkRpc } from "./support/fake-work-rpc.ts";
 
 const EPHEMERAL_LINE =
   "Ephemeral storage: Task files and artifacts on this host are lost if it stops.";
@@ -151,17 +152,15 @@ describe("supertag ps", () => {
 describe("describe task", () => {
   async function describeTask(storage: unknown, delivery?: unknown): Promise<string> {
     const client = new ControlPlaneClient({ url: "http://127.0.0.1:1", token: "unused" });
-    vi.spyOn(client, "request").mockImplementation(async (path: string) =>
-      path === "/api/v1/tags"
-        ? { items: [] }
-        : {
-            apiVersion: "supertag/v1",
-            kind: "Task",
-            metadata: { id: "task-1" },
-            spec: { tagId: "builder", sessionId: "session" },
-            status: { phase: "completed", storage, ...(delivery ? { delivery } : {}) },
-          },
-    );
+    fakeWorkRpc([
+      {
+        apiVersion: "supertag/v1",
+        kind: "Task",
+        metadata: { id: "task-1" },
+        spec: { tagId: "builder", sessionId: "session" },
+        status: { phase: "completed", storage, ...(delivery ? { delivery } : {}) },
+      },
+    ]);
     return runResourceCommand(client, "describe", ["task", "task-1"]);
   }
 

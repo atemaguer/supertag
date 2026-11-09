@@ -105,6 +105,9 @@ func TestListMessagesAndConversations(t *testing.T) {
 			return &operatorv1.ListMessagesResponse{Messages: []*operatorv1.Message{{TaskId: "t2"}, {TaskId: "t1"}}, NextPageToken: "p2"}, nil
 		},
 		conversations: func(req *operatorv1.ListConversationsRequest) (*operatorv1.ListConversationsResponse, error) {
+			if req.GetTag() == "lead" {
+				return &operatorv1.ListConversationsResponse{Conversations: []*operatorv1.Conversation{{Tag: "lead", Name: "billing"}}}, nil
+			}
 			if req.GetPageToken() == "" {
 				return &operatorv1.ListConversationsResponse{Conversations: []*operatorv1.Conversation{{Tag: "lead", Name: "default"}}, NextPageToken: "next"}, nil
 			}
@@ -116,9 +119,13 @@ func TestListMessagesAndConversations(t *testing.T) {
 	if err != nil || len(messages) != 2 || messages[0].GetTaskId() != "t2" || next != "p2" {
 		t.Fatalf("ListMessages() = %v, %q, %v", messages, next, err)
 	}
-	conversations, err := c.ListConversations(context.Background())
+	conversations, err := c.ListConversations(context.Background(), "")
 	if err != nil || len(conversations) != 2 || conversations[1].GetOpenWorkSessionCount() != 2 {
 		t.Fatalf("ListConversations() = %v, %v", conversations, err)
+	}
+	conversations, err = c.ListConversations(context.Background(), "lead")
+	if err != nil || len(conversations) != 1 || conversations[0].GetName() != "billing" {
+		t.Fatalf("ListConversations(lead) = %v, %v", conversations, err)
 	}
 }
 

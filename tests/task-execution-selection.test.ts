@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
-import { conversationClient } from "../apps/cli/src/operator-client.js";
+import { conversationClient, workClient } from "../apps/cli/src/operator-client.js";
+import { TaskStatus } from "../packages/operator-api/src/index.js";
 import {
   LocalWorklet,
   type TaskAttemptSpec,
@@ -161,15 +162,9 @@ it("schedules each Tag's Task onto the Worker its harness names and persists the
     // A Tag pinned to a harness no bound Worker Host provides is never placed.
     expect(await store.listTaskAttempts(pendingTask)).toHaveLength(0);
     expect((await store.findTaskById(pendingTask))?.status).toBe("pending");
-    const readResponse = await fetch(`${runtime.url}/api/v1/tasks/${pendingTask}`, {
-      headers: { Authorization: "Bearer selection-admin" },
-    });
-    const readBody = await readResponse.text();
-    expect(readResponse.status, readBody).toBe(200);
-    expect(JSON.parse(readBody)).toMatchObject({
-      metadata: { id: pendingTask },
-      status: { phase: "pending" },
-    });
+    expect(
+      await workClient({ url: runtime.url, token: "selection-admin" }).getTask({ id: pendingTask }),
+    ).toMatchObject({ id: pendingTask, status: TaskStatus.PENDING });
 
     // With no effort configured, the Task starts at low effort.
     expect((await store.findTaskById(researchTask))?.execution).toMatchObject({

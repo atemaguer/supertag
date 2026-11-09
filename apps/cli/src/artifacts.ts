@@ -3,17 +3,21 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import type { ArtifactHolders, CapturedArtifact, ResolvedArtifactTransfer } from "@supertag/core";
+import { toJsonString } from "@bufbuild/protobuf";
+import type { ArtifactHolders, ResolvedArtifactTransfer } from "@supertag/core";
+import { ArtifactSchema, ListArtifactsResponseSchema } from "@supertag/operator-api";
 import {
   FileArtifactStore,
   type ResourceRef,
   WorkletArtifactTransferClient,
 } from "@supertag/worker-sdk";
 import { artifactVolumeReader } from "./artifact-volume.js";
-import type { ControlPlaneClient } from "./control-plane-client.js";
+import { type OperatorClientOptions, workClient } from "./operator-client.js";
 import { takeOutputFlag } from "./output-flag.js";
 import { loadServicesFile, readVolumeCredential } from "./supertag-yaml.js";
+import { refusedAsError } from "./tag-conversation.js";
 import { terminalText } from "./terminal-text.js";
+import { artifactTransferOf } from "./work-protos.js";
 
 export function artifactHelp(): string {
   return `Usage:
@@ -42,7 +46,7 @@ export interface ArtifactDownloadOptions {
 }
 
 export async function runArtifactCommand(
-  client: ControlPlaneClient,
+  client: { readonly operator: OperatorClientOptions },
   command: string,
   given: readonly string[],
   options: ArtifactDownloadOptions = {},
@@ -59,11 +63,9 @@ export async function runArtifactCommand(
           ? { path: { type: "string" }, out: { type: "string" } }
           : {},
   });
+  const work = workClient(client.operator);
   if (command === "list") {
     if (positionals.length) throw new Error(artifactHelp());
-    const query = new URLSearchParams();
-    for (const key of ["task", "limit", "cursor"] as const)
-      if (typeof values[key] === "string") query.set(key, values[key]);
     if (
       values.limit !== undefined &&
       (!/^\d+$/u.test(String(values.limit)) ||
@@ -71,7 +73,14 @@ export async function runArtifactCommand(
         Number(values.limit) > 100)
     )
       throw new Error("--limit must be an integer between 1 and 100");
-    return `${JSON.stringify(await client.request(`/api/v1/artifacts?${query}`), null, 2)}\n`;
+    const page = await refusedAsError(() =>
+      work.listArtifacts({
+        taskId: typeof values.task === "string" ? values.task : "",
+        pageSize: values.limit === undefined ? 0 : Number(values.limit),
+        pageToken: typeof values.cursor === "string" ? values.cursor : "",
+      }),
+    );
+    return `${toJsonString(ListArtifactsResponseSchema, page, { prettySpaces: 2 })}\n`;
   }
   if (!["get", "download"].includes(command) || positionals.length !== 1 || !positionals[0]?.trim())
     throw new Error(artifactHelp());
@@ -84,25 +93,19 @@ export async function runArtifactCommand(
   )
     throw new Error(artifactHelp());
   const artifactId = positionals[0];
-  const url = `/api/v1/artifacts/${encodeURIComponent(artifactId)}`;
-  const resource = await client.request<{ spec: Omit<CapturedArtifact, "id" | "createdAt"> }>(url);
-  if (command === "get") return `${JSON.stringify(resource, null, 2)}\n`;
-  const entry = resource.spec.entries.find((item) => item.path === values.path);
-  if (!entry) throw new Error("Select an exact --path from supertag get artifact ID");
-  const resolved = await client.request<ResolvedArtifactTransfer>(`${url}/download`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path: entry.path }),
-  });
+  const artifact = await refusedAsError(() => work.getArtifact({ id: artifactId }));
+  if (command === "get") return `${toJsonString(ArtifactSchema, artifact, { prettySpaces: 2 })}\n`;
+  const found = artifact.entries.find((item) => item.path === values.path);
+  if (!found) throw new Error("Select an exact --path from supertag get artifact ID");
+  const entry = { path: found.path, digest: found.digest, sizeBytes: Number(found.sizeBytes) };
+  const resolved = artifactTransferOf(
+    await refusedAsError(() => work.resolveArtifactDownload({ artifactId, path: entry.path })),
+  );
   if (
-    resolved?.artifactId !== artifactId ||
+    resolved.artifactId !== artifactId ||
     resolved.path !== entry.path ||
     resolved.digest !== entry.digest ||
-    resolved.sizeBytes !== entry.sizeBytes ||
-    !Array.isArray(resolved.volumes) ||
-    !Array.isArray(resolved.locations) ||
-    !Array.isArray(resolved.holders?.workerHostIds) ||
-    !Array.isArray(resolved.holders?.volumes)
+    resolved.sizeBytes !== entry.sizeBytes
   )
     throw new Error("The Control Plane's download locations do not match the artifact catalog");
   const content = await readCopy(resolved, options);

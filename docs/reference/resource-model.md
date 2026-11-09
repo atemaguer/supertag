@@ -81,12 +81,12 @@ hosts. None of these resources becomes a separate actor.
   when a turn starts is handled together in that turn. See [Mailbox](coordination.md#mailbox).
 - **Session** preserves automatic continuity for one Tag conversation. Its audience is `shared`
   or `private`, derived from the conversation: a direct chat or a CLI conversation is private to
-  its one person, and reported as `status.audience`. A Tag's conversation Tasks can list, search, and read its shared Sessions and
+  its one person, and reported as `audience`. A Tag's conversation Tasks can list, search, and read its shared Sessions and
   their own person's private ones. See
   [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-one-memory). A [work Session](../concepts/tasks.md#session)
-  reports its conversation as read-only `spec.parentSessionId`; `status.latestTaskStatus` is the
-  status of a Session's latest Task, `status.tag` the Tag's name, and `status.title` a work
-  Session's title or a conversation's first request.
+  reports its conversation as `parentSessionId`. In `supertag get session`, `latestTaskStatus` is
+  the status of a Session's latest Task, `tag` the Tag's name, and `title` a work Session's title
+  or a conversation's first request.
 - **Task** records one turn of a Session. Its result can carry
   [findings](coordination.md#review-findings): problems the Task reports about its own work, each
   with a severity, a summary and an optional location. A finding is part of the result, not a

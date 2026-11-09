@@ -210,7 +210,7 @@ it("does not forward management endpoints or similarly named routes", async () =
     "/internal/v1/coordination/rebind/extra",
     "/internal/v1/sessions/save/extra",
     "/internal/v1/sessions/load?other=1",
-    "/api/v1/sessions/session/states",
+    "/supertag.operator.v1.WorkService/ListSessionStates",
     "/internal/v1/sessions/load",
     "/internal/v1/sessions/save",
   ]) {

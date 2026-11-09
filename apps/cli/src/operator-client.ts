@@ -4,8 +4,11 @@ import {
   ConversationService,
   EventService,
   InboxService,
+  MailboxService,
   ObjectiveService,
   OrganizationService,
+  TeamService,
+  WorkService,
 } from "@supertag/operator-api";
 import {
   CLIENT_VERSION_HEADER,
@@ -71,6 +74,18 @@ export function inboxClient(options: OperatorClientOptions) {
 
 export function objectiveClient(options: OperatorClientOptions) {
   return createClient(ObjectiveService, operatorTransport(options));
+}
+
+export function workClient(options: OperatorClientOptions) {
+  return createClient(WorkService, operatorTransport(options));
+}
+
+export function teamClient(options: OperatorClientOptions) {
+  return createClient(TeamService, operatorTransport(options));
+}
+
+export function mailboxClient(options: OperatorClientOptions) {
+  return createClient(MailboxService, operatorTransport(options));
 }
 
 /**

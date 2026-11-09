@@ -23,6 +23,7 @@ import {
 } from "./delivery-view.js";
 import { locationKey } from "./field-management.js";
 import { money } from "./money.js";
+import { workClient } from "./operator-client.js";
 import { runningCommandText } from "./running-command.js";
 import { hostStorageLines, sandboxStorage, UNKNOWN_TASK_STORAGE } from "./storage-durability.js";
 import { isSupertagYamlInput, SUPERTAG_YAML } from "./supertag-yaml.js";
@@ -35,8 +36,18 @@ import {
   type SurfaceAccountManifest,
   verifySurfaceAccount,
 } from "./surface-account-manifest.js";
+import { refusedAsError } from "./tag-conversation.js";
 import { runTeamCommand } from "./teams.js";
 import { terminalJson, terminalText } from "./terminal-text.js";
+import { sessionStateView, sessionView, taskView } from "./work-protos.js";
+import {
+  allSessions,
+  recentTasks,
+  workSessionJson,
+  workSessionsJson,
+  workTaskJson,
+  workTasksJson,
+} from "./work-reads.js";
 import { workerHarnessNames } from "./worker-harness-names.js";
 
 interface Resource {
@@ -145,57 +156,68 @@ export async function runResourceCommand(
       .map(exportManifest)
       .join("---\n");
   }
+  const human = output === "text" || (values.output === undefined && process.stdout.isTTY === true);
+  if (descriptor.path === "tasks" || descriptor.path === "sessions") {
+    const work = workClient(client.operator);
+    if (command === "describe" && output === "text" && name !== undefined)
+      return descriptor.path === "tasks"
+        ? describeTaskOf(client, await refusedAsError(() => work.getTask({ id: name })))
+        : describeSessionOf(work, await refusedAsError(() => work.getSession({ id: name })));
+    const value = await refusedAsError(async () =>
+      descriptor.path === "tasks"
+        ? name === undefined
+          ? workTasksJson(await recentTasks(work))
+          : workTaskJson(await work.getTask({ id: name }))
+        : name === undefined
+          ? workSessionsJson(await allSessions(work))
+          : workSessionJson(await work.getSession({ id: name })),
+    );
+    return terminalJson(value, human);
+  }
   const resource =
     name === undefined
       ? await client.request<ResourceList>(`/api/v1/${descriptor.path}`)
       : await client.request<Resource>(`/api/v1/${descriptor.path}/${encodeURIComponent(name)}`);
   if (command === "describe" && output === "text" && name !== undefined && "kind" in resource) {
-    if (resource.kind === "Task") {
-      const tagId = isRecord(resource.spec) ? resource.spec["tagId"] : undefined;
-      const tags = await client.request<ResourceList>("/api/v1/tags").catch(() => undefined);
-      // Keep unresolved Tag IDs out of the human-readable description.
-      const tagName = (Array.isArray(tags?.items) ? tags.items : []).find(
-        (item) => isRecord(item?.metadata) && item.metadata["id"] === tagId,
-      )?.metadata["name"];
-      const url = (client as { readonly url?: string }).url;
-      const checkouts = url === undefined ? undefined : await localCheckouts(url);
-      const tagNames = new Map<string, string>();
-      for (const item of Array.isArray(tags?.items) ? tags.items : [])
-        if (
-          isRecord(item?.metadata) &&
-          typeof item.metadata["id"] === "string" &&
-          typeof item.metadata["name"] === "string"
-        )
-          tagNames.set(item.metadata["id"], item.metadata["name"]);
-      return describeTask(resource, {
-        tagNames,
-        ...(typeof tagName === "string" ? { tagName } : {}),
-        ...(checkouts === undefined ? {} : { checkouts }),
-      });
-    }
     if (resource.kind === "WorkerHost") return describeWorkerHost(resource);
     if (resource.kind === "Tag") return describeTag(resource);
     if (resource.kind === "Workspace") return describeWorkspace(resource, Date.now());
     if (resource.kind === "Volume") return describeVolume(resource);
-    if (resource.kind === "Session") {
-      const states = await client.request<{ states: readonly Record<string, unknown>[] }>(
-        `/api/v1/sessions/${encodeURIComponent(name)}/states`,
-      );
-      const tagId = isRecord(resource.spec) ? resource.spec["tagId"] : undefined;
-      const tags = await client.request<ResourceList>("/api/v1/tags").catch(() => undefined);
-      const tagName = (Array.isArray(tags?.items) ? tags.items : []).find(
-        (item) => isRecord(item?.metadata) && item.metadata["id"] === tagId,
-      )?.metadata["name"];
-      return describeSession(
-        resource,
-        states.states,
-        typeof tagName === "string" ? tagName : undefined,
-      );
-    }
   }
-  return terminalJson(
-    resource,
-    output === "text" || (values.output === undefined && process.stdout.isTTY === true),
+  return terminalJson(resource, human);
+}
+
+/** `describe task`: the Task as the Control Plane recorded it, with this machine's checkouts. */
+async function describeTaskOf(
+  client: ControlPlaneClient,
+  task: Parameters<typeof taskView>[0],
+): Promise<string> {
+  const url = (client as { readonly url?: string }).url;
+  const checkouts = url === undefined ? undefined : await localCheckouts(url);
+  const chosen = task.resolution;
+  const tagNames = new Map<string, string>();
+  if (task.tag !== "") tagNames.set(task.tagId, task.tag);
+  if (chosen !== undefined && chosen.chosenByTag !== "")
+    tagNames.set(chosen.chosenByTagId, chosen.chosenByTag);
+  return describeTask(taskView(task) as unknown as Resource, {
+    tagNames,
+    ...(task.tag === "" ? {} : { tagName: task.tag }),
+    ...(checkouts === undefined ? {} : { checkouts }),
+  });
+}
+
+/** `describe session`: the Session with the native archives it returned, at most 100. */
+async function describeSessionOf(
+  work: ReturnType<typeof workClient>,
+  session: Parameters<typeof sessionView>[0],
+): Promise<string> {
+  const states = await refusedAsError(() =>
+    work.listSessionStates({ sessionId: session.id, pageSize: 100 }),
+  );
+  return describeSession(
+    sessionView(session) as unknown as Resource,
+    states.states.map(sessionStateView),
+    session.tag === "" ? undefined : session.tag,
   );
 }
 
@@ -2161,7 +2183,20 @@ async function watchResources(
   const path = descriptorFor(kind).path;
   const pathname =
     name === undefined ? `/api/v1/${path}` : `/api/v1/${path}/${encodeURIComponent(name)}`;
-  const first = await client.request<Resource | ResourceList>(pathname);
+  const work = path === "tasks" || path === "sessions" ? workClient(client.operator) : undefined;
+  const read = (): Promise<Resource | ResourceList> =>
+    work === undefined
+      ? client.request<Resource | ResourceList>(pathname)
+      : (refusedAsError(async () =>
+          path === "tasks"
+            ? name === undefined
+              ? workTasksJson(await recentTasks(work))
+              : workTaskJson(await work.getTask({ id: name }))
+            : name === undefined
+              ? workSessionsJson(await allSessions(work))
+              : workSessionJson(await work.getSession({ id: name })),
+        ) as Promise<unknown> as Promise<Resource | ResourceList>);
+  const first = await read();
   const human = values.output === undefined && process.stdout.isTTY === true;
   const rendered = terminalJson(first, human);
   if (values.once === true) return rendered;
@@ -2176,7 +2211,7 @@ async function watchResources(
     while (!stopped) {
       await new Promise((resolve) => setTimeout(resolve, 1_000));
       if (stopped) break;
-      const next = await client.request<Resource | ResourceList>(pathname);
+      const next = await read();
       const version = watchedVersion(next);
       if (version !== priorVersion) {
         process.stdout.write(terminalJson(next, human));

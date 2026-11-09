@@ -55,6 +55,9 @@ type FollowEvent struct {
 	Reply  *operatorv1.Reply
 	// Indent marks activity of a work Session, shown under its "working" line.
 	Indent bool
+	// WorkSession is the ID of the work Session the event is about: its activity, that it is
+	// working, its report, an approval notice, or why it did not continue. Empty otherwise.
+	WorkSession string
 }
 
 // Shown is what has been shown of one message, so a resumed stream, which may send the
@@ -155,12 +158,12 @@ func (s *Shown) workSession(session *operatorv1.WorkSession) []FollowEvent {
 		s.tasks[id] = task
 		// A work Session that had no Task yet is still the same piece of work.
 		if !known || previous != "" {
-			events = append(events, FollowEvent{Kind: EventWorking, Title: session.GetTitle()})
+			events = append(events, FollowEvent{Kind: EventWorking, Title: session.GetTitle(), WorkSession: id})
 		}
 	}
 	for _, approval := range session.GetApprovals() {
 		if s.once("approval:" + approval.GetRequestId()) {
-			events = append(events, FollowEvent{Kind: EventApproval, Title: session.GetTitle(), Text: approval.GetText()})
+			events = append(events, FollowEvent{Kind: EventApproval, Title: session.GetTitle(), Text: approval.GetText(), WorkSession: id})
 		}
 	}
 	reportKey := "report:" + task
@@ -168,10 +171,10 @@ func (s *Shown) workSession(session *operatorv1.WorkSession) []FollowEvent {
 		reportKey = "report:" + id
 	}
 	if session.GetReportStatus() == operatorv1.ReplyStatus_REPLY_STATUS_REPLIED && session.GetReport() != nil && s.once(reportKey) {
-		events = append(events, FollowEvent{Kind: EventReport, Title: session.GetTitle(), Status: reportEnding(session), Text: session.GetReport().GetText()})
+		events = append(events, FollowEvent{Kind: EventReport, Title: session.GetTitle(), Status: reportEnding(session), Text: session.GetReport().GetText(), WorkSession: id})
 	}
 	if session.GetNotContinued() != "" && s.once("stopped:"+task) {
-		events = append(events, FollowEvent{Kind: EventNotContinued, Title: session.GetTitle(), Text: session.GetNotContinued()})
+		events = append(events, FollowEvent{Kind: EventNotContinued, Title: session.GetTitle(), Text: session.GetNotContinued(), WorkSession: id})
 	}
 	return events
 }
@@ -473,7 +476,7 @@ func (f *Follower) stream(ctx context.Context, state *followState, emit func(...
 				continue
 			}
 			if id := activity.GetWorkSessionId(); id != "" {
-				emit(FollowEvent{Kind: EventActivity, Title: shown.title(id), Text: line, Indent: true})
+				emit(FollowEvent{Kind: EventActivity, Title: shown.title(id), Text: line, Indent: true, WorkSession: id})
 			} else if !shown.replied {
 				emit(FollowEvent{Kind: EventActivity, Text: line})
 			}

@@ -11,7 +11,7 @@ import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { surfaceTools } from "../apps/cli/src/coordination-http.ts";
 import { main } from "../apps/cli/src/index.ts";
-import { conversationClient } from "../apps/cli/src/operator-client.ts";
+import { conversationClient, workClient } from "../apps/cli/src/operator-client.ts";
 import { runTagConversationCommand } from "../apps/cli/src/tag-conversation.ts";
 import { sentNowhere } from "../packages/control-plane/src/outbound-presentation.ts";
 import { SessionContinuity } from "../packages/control-plane/src/session-continuity.ts";
@@ -32,6 +32,7 @@ import {
   type Message,
   MessageSchema,
   ReplyStatus,
+  TaskStatus,
   type WorkSession,
   WorkSessionStatus,
 } from "../packages/operator-api/src/index.ts";
@@ -746,14 +747,11 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         const conversationRow = table.split("\n").find((line) => line.startsWith(record.sessionId));
         expect(conversationRow).toContain("planner");
         expect(conversationRow).not.toMatch(/^\S+\s+-\s/u);
-        const resource = await client().request<{
-          spec: Record<string, unknown>;
-          status: Record<string, unknown>;
-        }>(`/api/v1/sessions/${started.id}`);
-        expect(resource.spec["parentSessionId"]).toBe(record.sessionId);
-        expect(resource.status["latestTaskStatus"]).toBe("completed");
-        expect(resource.status["tag"]).toBe("planner");
-        expect(resource.status["title"]).toBe(started.title);
+        const resource = await workClient(client().operator).getSession({ id: started.id });
+        expect(resource.parentSessionId).toBe(record.sessionId);
+        expect(resource.latestTaskStatus).toBe(TaskStatus.COMPLETED);
+        expect(resource.tag).toBe("planner");
+        expect(resource.title).toBe(started.title);
       });
 
       it("prints the acknowledgement, then each work Session and its report", async () => {
@@ -826,7 +824,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         // Cancelling the queued sixth reports it as cancelled.
         const sixth = queued[5];
         if (!sixth?.taskId) throw new Error("missing sixth work Session");
-        await client().request(`/api/v1/tasks/${sixth.taskId}/cancel`, { method: "POST" });
+        await workClient(client().operator).cancelTask({ id: sixth.taskId });
         script.release();
         await vi.waitFor(
           async () =>

@@ -13,6 +13,7 @@ import { WorkletConnection } from "../packages/runtime/transport/src/index.js";
 import { FileGatewayCredentialVault } from "../packages/store/src/index.js";
 import { migrateSqlite } from "./support/database.js";
 import { durableTestWorklet } from "./support/durable-test-worklet.js";
+import { fakeWorkRpc } from "./support/fake-work-rpc.ts";
 
 const CONTROL_PLANE = "https://control.example.com";
 
@@ -267,7 +268,8 @@ describe("Worker Host label commands", () => {
         },
       },
     };
-    const client = { request: async () => task } as unknown as ControlPlaneClient;
+    fakeWorkRpc([task]);
+    const client = new ControlPlaneClient({ url: "http://127.0.0.1:1", token: "unused" });
     const text = await runResourceCommand(client, "describe", ["task", "task-1"]);
     expect(text).toContain("Unmet requirements: labels:macos,gpu,workspace:app");
     expect(text).toContain("No bound Worker Host has labels: macos, gpu, workspace:app.");
@@ -292,7 +294,8 @@ describe("Worker Host label commands", () => {
         },
       },
     };
-    const client = { request: async () => task } as unknown as ControlPlaneClient;
+    fakeWorkRpc([task]);
+    const client = new ControlPlaneClient({ url: "http://127.0.0.1:1", token: "unused" });
     const text = await runResourceCommand(client, "describe", ["task", "task-2"]);
     expect(text).toContain("Waiting: no bound Worker Host provides MCP server sentry.");
     expect(text).toContain("No bound Worker Host has labels: mcp:sentry.");

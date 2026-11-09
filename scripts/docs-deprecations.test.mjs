@@ -5,12 +5,12 @@ import { deprecatedDocProblems, documentedApiEndpoints } from "./docs-deprecatio
 
 test("extracts API routes even when HTTP verbs are padded", () => {
   const routes = documentedApiEndpoints(
-    "```text\nGET  /api/v1/tasks/:id\nPUT  /api/v1/tags/:name/worker-hosts/:workerHostId\nPOST /api/v1/tasks/:id/cancel\n```",
+    "```text\nGET  /api/v1/auth-keys/:name\nPUT  /api/v1/tags/:name/worker-hosts/:workerHostId\nPOST /api/v1/auth-keys/:name/revoke\n```",
   );
   assert.deepEqual(routes, [
-    { line: 2, method: "GET", path: "/api/v1/tasks/:id" },
+    { line: 2, method: "GET", path: "/api/v1/auth-keys/:name" },
     { line: 3, method: "PUT", path: "/api/v1/tags/:name/worker-hosts/:workerHostId" },
-    { line: 4, method: "POST", path: "/api/v1/tasks/:id/cancel" },
+    { line: 4, method: "POST", path: "/api/v1/auth-keys/:name/revoke" },
   ]);
 });
 

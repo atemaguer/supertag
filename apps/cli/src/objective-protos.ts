@@ -43,7 +43,7 @@ import {
 } from "@supertag/operator-api";
 
 /** One enum's domain words and protobuf values, read in both directions. */
-function enumTable<W extends string, E extends number>(
+export function enumTable<W extends string, E extends number>(
   pairs: readonly (readonly [W, E])[],
   unspecified: E,
 ) {
@@ -134,7 +134,7 @@ const APPROVAL_TARGET = enumTable(
   ApprovalTarget.UNSPECIFIED,
 );
 
-const TASK_STATUS = enumTable(
+export const TASK_STATUS = enumTable(
   [
     ["pending", TaskStatus.PENDING],
     ["running", TaskStatus.RUNNING],
@@ -145,7 +145,7 @@ const TASK_STATUS = enumTable(
   TaskStatus.UNSPECIFIED,
 );
 
-const ATTEMPT_STATUS = enumTable(
+export const ATTEMPT_STATUS = enumTable(
   [
     ["running", TaskAttemptStatus.RUNNING],
     ["completed", TaskAttemptStatus.COMPLETED],
@@ -206,7 +206,7 @@ const CONVERSATION_AUTHOR = enumTable(
   ObjectiveConversationAuthor.UNSPECIFIED,
 );
 
-const DELIVERY_MODE = enumTable(
+export const DELIVERY_MODE = enumTable(
   [
     ["patch", WorkspaceDeliveryMode.PATCH],
     ["branch", WorkspaceDeliveryMode.BRANCH],
@@ -231,7 +231,7 @@ export function timestampOf(iso: string | null | undefined): Timestamp | undefin
   return Number.isNaN(date.getTime()) ? undefined : timestampFromDate(date);
 }
 
-function isoOf(timestamp: Timestamp | undefined): string | null {
+export function isoOf(timestamp: Timestamp | undefined): string | null {
   return timestamp === undefined ? null : timestampDate(timestamp).toISOString();
 }
 

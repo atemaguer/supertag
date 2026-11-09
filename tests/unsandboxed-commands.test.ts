@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
-import { conversationClient } from "../apps/cli/src/operator-client.js";
+import { conversationClient, workClient } from "../apps/cli/src/operator-client.js";
 import { describeTask } from "../apps/cli/src/resources.js";
+import { taskView } from "../apps/cli/src/work-protos.js";
 import { commandPlacement, placeTask } from "../packages/control-plane/src/label-placement.js";
 import { objectiveRunnableReasons } from "../packages/control-plane/src/objective-runnable.js";
 import {
@@ -372,12 +373,10 @@ it("holds a claude-code Task that runs commands until its host opts in, and runs
         unsandboxedCommands: [{ workerHostId: "laptop", harnesses: ["claude-code"] }],
       });
     expect(observed.some((entry) => entry.spec.taskId === commandsTask)).toBe(false);
-    const resource = await (
-      await fetch(`${runtime.url}/api/v1/tasks/${commandsTask}`, {
-        headers: { Authorization: "Bearer sandbox-admin" },
-      })
-    ).json();
-    expect(describeTask(resource)).toContain(REASON);
+    const resource = taskView(
+      await workClient({ url: runtime.url, token: "sandbox-admin" }).getTask({ id: commandsTask }),
+    );
+    expect(describeTask(resource as never)).toContain(REASON);
 
     // With the opt-in, the host reports that claude-code may run commands, and the Task runs.
     await connect("laptop", laptop, [

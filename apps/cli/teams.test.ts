@@ -1,11 +1,14 @@
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
+import { fakeOperatorRpc } from "../../tests/support/fake-operator-rpc.js";
 import { normalizeActionFirstCommand } from "./src/action-command.js";
 import { ControlPlaneClient } from "./src/control-plane-client.js";
 import { runTeamCommand, teamHelp } from "./src/teams.js";
 
-const TEAMS = "/api/v1/tag-messaging/teams";
-
 const client = () => new ControlPlaneClient({ url: "http://control.invalid", token: "test" });
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 /** The internal command the public, action-first `supertag ... team` form normalizes to. */
 function teamArgs(...args: string[]): string[] {
@@ -13,14 +16,13 @@ function teamArgs(...args: string[]): string[] {
   return [command as string, ...rest];
 }
 
-function tagIds() {
-  return vi
-    .spyOn(ControlPlaneClient.prototype, "getTag")
-    .mockImplementation(
-      async (name: string) =>
-        ({ metadata: { id: `${name}-id` } }) as Awaited<ReturnType<ControlPlaneClient["getTag"]>>,
-    );
-}
+const team = (revision: number, extra: Record<string, unknown> = {}) => ({
+  id: "research",
+  name: "research",
+  members: [{ tagId: "backend-id", tag: "backend" }],
+  revision: String(revision),
+  ...extra,
+});
 
 it("documents only the flat Team commands", () => {
   const help = teamHelp();
@@ -46,155 +48,96 @@ it("documents only the flat Team commands", () => {
 });
 
 it("creates a Team from repeated --member and an optional --max-concurrency", async () => {
-  const request = vi.spyOn(ControlPlaneClient.prototype, "request").mockResolvedValue({
-    id: "research",
-    name: "research",
-    memberTagIds: ["backend-id", "frontend-id"],
-    maxConcurrency: 2,
-    revision: 1,
-  });
-  const getTag = tagIds();
-  try {
-    expect(
-      await runTeamCommand(
-        client(),
-        teamArgs(
-          "create",
-          "team",
-          "research",
-          "--member",
-          "backend",
-          "--member",
-          "frontend",
-          "--max-concurrency",
-          "2",
-        ),
-      ),
-    ).toBe("team/research created.\n");
-    const [path, options] = request.mock.calls[0] ?? [];
-    expect(path).toBe(TEAMS);
-    expect(JSON.parse(String(options?.body))).toEqual({
-      id: "research",
-      name: "research",
-      memberTagIds: ["backend-id", "frontend-id"],
-      maxConcurrency: 2,
-    });
-  } finally {
-    request.mockRestore();
-    getTag.mockRestore();
-  }
-});
-
-it("leaves maxConcurrency out when no limit is given and clears it with an empty value", async () => {
-  const request = vi
-    .spyOn(ControlPlaneClient.prototype, "request")
-    .mockImplementation(async (_path, init) =>
-      init === undefined
-        ? ({ id: "research", name: "research", revision: 4 } as never)
-        : ({ id: "research", name: "research", maxConcurrency: null, revision: 5 } as never),
-    );
-  const getTag = tagIds();
-  try {
-    await runTeamCommand(client(), teamArgs("create", "team", "research", "--member", "backend"));
-    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).not.toHaveProperty(
-      "maxConcurrency",
-    );
-    request.mockClear();
-    expect(
-      await runTeamCommand(
-        client(),
-        teamArgs("update", "team", "research", "--max-concurrency", ""),
-      ),
-    ).toBe("team/research updated (revision 5).\n");
-    const write = request.mock.calls.find(([, init]) => init?.method === "PATCH");
-    expect(write?.[0]).toBe(`${TEAMS}/research`);
-    // Without --revision the command reads the current revision and fences the write with it.
-    expect(JSON.parse(String(write?.[1]?.body))).toEqual({
-      maxConcurrency: null,
-      expectedRevision: 4,
-    });
-  } finally {
-    request.mockRestore();
-    getTag.mockRestore();
-  }
-});
-
-it("replaces the whole member list on update and fences with an explicit revision", async () => {
-  const request = vi
-    .spyOn(ControlPlaneClient.prototype, "request")
-    .mockResolvedValue({ id: "research", name: "Research", revision: 8 });
-  const getTag = tagIds();
-  try {
+  const rpc = fakeOperatorRpc({ "TeamService/CreateTeam": () => team(1, { maxConcurrency: 2 }) });
+  expect(
     await runTeamCommand(
       client(),
       teamArgs(
-        "update",
+        "create",
         "team",
         "research",
         "--member",
-        "qa",
-        "--member",
         "backend",
-        "--name",
-        "Research",
-        "--revision",
-        "7",
+        "--member",
+        "frontend",
+        "--max-concurrency",
+        "2",
       ),
-    );
-    const write = request.mock.calls.find(([, init]) => init?.method === "PATCH");
-    expect(JSON.parse(String(write?.[1]?.body))).toEqual({
+    ),
+  ).toBe("team/research created.\n");
+  expect(rpc.called("TeamService/CreateTeam").map((call) => call.body)).toEqual([
+    { id: "research", name: "research", members: ["backend", "frontend"], maxConcurrency: 2 },
+  ]);
+});
+
+it("leaves maxConcurrency out when no limit is given and clears it with an empty value", async () => {
+  const rpc = fakeOperatorRpc({
+    "TeamService/CreateTeam": () => team(1),
+    "TeamService/GetTeam": () => team(4, { maxConcurrency: 3 }),
+    "TeamService/UpdateTeam": () => team(5),
+  });
+  await runTeamCommand(client(), teamArgs("create", "team", "research", "--member", "backend"));
+  expect(rpc.called("TeamService/CreateTeam")[0]?.body).not.toHaveProperty("maxConcurrency");
+  expect(
+    await runTeamCommand(client(), teamArgs("update", "team", "research", "--max-concurrency", "")),
+  ).toBe("team/research updated (revision 5).\n");
+  // Without --revision the command reads the current revision and fences the write with it.
+  expect(rpc.called("TeamService/UpdateTeam").map((call) => call.body)).toEqual([
+    { team: "research", expectedRevision: "4", concurrency: {} },
+  ]);
+});
+
+it("replaces the whole member list on update and fences with an explicit revision", async () => {
+  const rpc = fakeOperatorRpc({ "TeamService/UpdateTeam": () => team(8, { name: "Research" }) });
+  await runTeamCommand(
+    client(),
+    teamArgs(
+      "update",
+      "team",
+      "research",
+      "--member",
+      "qa",
+      "--member",
+      "backend",
+      "--name",
+      "Research",
+      "--revision",
+      "7",
+    ),
+  );
+  expect(rpc.called("TeamService/UpdateTeam").map((call) => call.body)).toEqual([
+    {
+      team: "research",
+      expectedRevision: "7",
       name: "Research",
-      memberTagIds: ["qa-id", "backend-id"],
-      expectedRevision: 7,
-    });
-  } finally {
-    request.mockRestore();
-    getTag.mockRestore();
-  }
+      members: { tags: ["qa", "backend"] },
+    },
+  ]);
 });
 
 it.each(["-1", "1.5", "0", "NaN", "9007199254740992"])(
   "rejects --max-concurrency %j before sending a request",
   async (value) => {
-    const request = vi.spyOn(ControlPlaneClient.prototype, "request");
-    const getTag = tagIds();
-    try {
-      await expect(
-        runTeamCommand(
-          client(),
-          teamArgs(
-            "create",
-            "team",
-            "research",
-            "--member",
-            "backend",
-            `--max-concurrency=${value}`,
-          ),
-        ),
-      ).rejects.toThrow("--max-concurrency must be a positive integer");
-      expect(request).not.toHaveBeenCalled();
-    } finally {
-      request.mockRestore();
-      getTag.mockRestore();
-    }
+    const rpc = fakeOperatorRpc({});
+    await expect(
+      runTeamCommand(
+        client(),
+        teamArgs("create", "team", "research", "--member", "backend", `--max-concurrency=${value}`),
+      ),
+    ).rejects.toThrow("--max-concurrency must be a positive integer");
+    expect(rpc.calls).toEqual([]);
   },
 );
 
 it("deletes a Team by name and reports the help for an unknown command", async () => {
-  const request = vi
-    .spyOn(ControlPlaneClient.prototype, "request")
-    .mockImplementation(async (_path, init) =>
-      init?.method === "DELETE"
-        ? ({ deleted: true } as never)
-        : ({ id: "research-id", name: "research", revision: 1 } as never),
-    );
-  try {
-    expect(await runTeamCommand(client(), ["delete", "research"])).toBe("team/research deleted.\n");
-    expect(request.mock.calls.at(-1)).toEqual([`${TEAMS}/research-id`, { method: "DELETE" }]);
-    await expect(runTeamCommand(client(), ["history", "research"])).rejects.toThrow(
-      "supertag create team NAME",
-    );
-  } finally {
-    request.mockRestore();
-  }
+  const rpc = fakeOperatorRpc({
+    "TeamService/DeleteTeam": () => ({ id: "research-id", name: "research" }),
+  });
+  expect(await runTeamCommand(client(), ["delete", "research"])).toBe("team/research deleted.\n");
+  expect(rpc.called("TeamService/DeleteTeam").map((call) => call.body)).toEqual([
+    { team: "research" },
+  ]);
+  await expect(runTeamCommand(client(), ["history", "research"])).rejects.toThrow(
+    "supertag create team NAME",
+  );
 });

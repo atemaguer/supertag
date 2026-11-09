@@ -1,11 +1,16 @@
 import { parseArgs } from "node:util";
-import type { Team } from "@supertag/core";
-import { type ControlPlaneClient, ControlPlaneRequestError } from "./control-plane-client.js";
+import { create, type DescMessage, type MessageShape, toJsonString } from "@bufbuild/protobuf";
+import {
+  DeleteTeamResponseSchema,
+  ListTeamsResponseSchema,
+  type Team,
+  TeamSchema,
+} from "@supertag/operator-api";
+import { type OperatorClientOptions, teamClient } from "./operator-client.js";
 import { takeOutputFlag } from "./output-flag.js";
 import { withCurrentRevision } from "./revision.js";
+import { refusedAsError } from "./tag-conversation.js";
 import { terminalText } from "./terminal-text.js";
-
-const TEAMS = "/api/v1/tag-messaging/teams";
 
 export function teamHelp(): string {
   return `Usage:
@@ -28,7 +33,7 @@ create, update, and delete print a one-line summary; add --output json for the f
 }
 
 export async function runTeamCommand(
-  client: ControlPlaneClient,
+  client: { readonly operator: OperatorClientOptions },
   args: readonly string[],
 ): Promise<string> {
   const [command, ...given] = args;
@@ -58,20 +63,14 @@ export async function runTeamCommand(
     positionals.length !== (command === "list" ? 0 : 1)
   )
     throw new Error(teamHelp());
-  if (command === "list") return json(await client.request(TEAMS));
+  const teams = teamClient(client.operator);
+  if (command === "list") return json(ListTeamsResponseSchema, await allTeams(teams));
   const name = positionals[0] as string;
-  const memberTagIds = async (list: string): Promise<string[]> =>
-    Promise.all(
-      list
-        .split(",")
-        .map((member) => member.trim())
-        .filter(Boolean)
-        .map(async (member) => {
-          const tag = await client.getTag(member);
-          if (!tag.metadata.id) throw new Error(`Tag ${member} has no ID`);
-          return tag.metadata.id;
-        }),
-    );
+  const members = (list: string): string[] =>
+    list
+      .split(",")
+      .map((member) => member.trim())
+      .filter(Boolean);
   const concurrency = (value: string): number | null => {
     if (value === "") return null;
     const limit = Number(value);
@@ -82,68 +81,74 @@ export async function runTeamCommand(
   if (command === "create") {
     if (!values.members) throw new Error(teamHelp());
     const limit = values.concurrency === undefined ? null : concurrency(values.concurrency);
-    const team = await client.request<Team>(TEAMS, {
-      method: "POST",
-      body: JSON.stringify({
+    const team = await refusedAsError(() =>
+      teams.createTeam({
         id: name,
         name,
-        memberTagIds: await memberTagIds(values.members),
+        members: members(values.members as string),
         ...(limit === null ? {} : { maxConcurrency: limit }),
       }),
-    });
-    return output.json ? json(team) : `team/${terminalText(team.name)} created.\n`;
+    );
+    return output.json ? json(TeamSchema, team) : `team/${terminalText(team.name)} created.\n`;
   }
-  const team = await findTeam(client, name);
-  const path = `${TEAMS}/${encodeURIComponent(team.id)}`;
-  if (command === "get") return json(team);
+  if (command === "get")
+    return json(TeamSchema, await refusedAsError(() => teams.getTeam({ team: name })));
   if (command === "delete") {
-    const result = await client.request(path, { method: "DELETE" });
-    return output.json ? json(result) : `team/${terminalText(team.name)} deleted.\n`;
+    const result = await refusedAsError(() => teams.deleteTeam({ team: name }));
+    return output.json
+      ? json(DeleteTeamResponseSchema, result)
+      : `team/${terminalText(result.name)} deleted.\n`;
   }
-  const change: Record<string, unknown> = {
+  const change = {
     ...(values.name === undefined ? {} : { name: values.name }),
-    ...(values.members === undefined ? {} : { memberTagIds: await memberTagIds(values.members) }),
+    ...(values.members === undefined ? {} : { members: { tags: members(values.members) } }),
     ...(values.concurrency === undefined
       ? {}
-      : { maxConcurrency: concurrency(values.concurrency) }),
+      : { concurrency: { maxConcurrency: concurrency(values.concurrency) ?? 0 } }),
   };
-  if (Object.keys(change).length === 0) throw new Error(teamHelp());
-  const updated = await withCurrentRevision({
-    explicit: values.revision,
-    resource: `Team ${name}`,
-    read: () => client.request<Record<string, unknown>>(path),
-    fields: Object.keys(change),
-    write: (expectedRevision) =>
-      client.request<Team>(path, {
-        method: "PATCH",
-        body: JSON.stringify({ ...change, expectedRevision }),
-      }),
-  });
+  const fields = [
+    ...(values.name === undefined ? [] : ["name"]),
+    ...(values.members === undefined ? [] : ["memberTagIds"]),
+    ...(values.concurrency === undefined ? [] : ["maxConcurrency"]),
+  ];
+  if (fields.length === 0) throw new Error(teamHelp());
+  const updated = await refusedAsError(() =>
+    withCurrentRevision({
+      explicit: values.revision,
+      resource: `Team ${name}`,
+      read: async () => teamRecord(await teams.getTeam({ team: name })),
+      fields,
+      write: (expectedRevision) =>
+        teams.updateTeam({ team: name, expectedRevision: BigInt(expectedRevision), ...change }),
+    }),
+  );
   return output.json
-    ? json(updated)
+    ? json(TeamSchema, updated)
     : `team/${terminalText(updated.name)} updated (revision ${updated.revision}).\n`;
 }
 
-/**
- * A Team by name, or by ID. A Team name may contain spaces, which is not a valid identifier, so
- * a refused lookup falls back to matching the name in the listing as a missing one does.
- */
-async function findTeam(client: ControlPlaneClient, name: string): Promise<Team> {
-  try {
-    return await client.request<Team>(`${TEAMS}/${encodeURIComponent(name)}`);
-  } catch (error) {
-    if (
-      !(error instanceof ControlPlaneRequestError) ||
-      (error.status !== 404 && error.status !== 400)
-    )
-      throw error;
-  }
-  const { items } = await client.request<{ readonly items: readonly Team[] }>(TEAMS);
-  const team = items.find((candidate) => candidate.name === name);
-  if (team === undefined) throw new Error(`Team ${terminalText(name)} does not exist`);
-  return team;
+/** Every Team, by name, one page after another. */
+async function allTeams(teams: ReturnType<typeof teamClient>) {
+  const all: Team[] = [];
+  let pageToken = "";
+  do {
+    const page = await refusedAsError(() => teams.listTeams({ pageSize: 500, pageToken }));
+    all.push(...page.teams);
+    pageToken = page.nextPageToken;
+  } while (pageToken !== "");
+  return create(ListTeamsResponseSchema, { teams: all });
 }
 
-function json(value: unknown): string {
-  return `${JSON.stringify(value, null, 2)}\n`;
+/** A Team as `withCurrentRevision` compares it: the fields `update team` changes. */
+function teamRecord(team: Team): Record<string, unknown> {
+  return {
+    name: team.name,
+    memberTagIds: team.members.map((member) => member.tagId),
+    maxConcurrency: team.maxConcurrency ?? null,
+    revision: Number(team.revision),
+  };
+}
+
+function json<Desc extends DescMessage>(schema: Desc, message: MessageShape<Desc>): string {
+  return `${toJsonString(schema, message, { prettySpaces: 2 })}\n`;
 }

@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { taskResourceFromStore } from "../apps/cli/src/control-plane-resources.ts";
 import { describeTask } from "../apps/cli/src/resources.ts";
+import { taskResourceFromStore } from "../apps/cli/src/work-views.ts";
 import { mountManifestDigest } from "../packages/core/src/index.js";
 import { DrizzleStore, migrateDatabase } from "../packages/store/src/index.js";
 

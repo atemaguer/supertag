@@ -18,8 +18,11 @@ const SERVICE_MODULES = [
   "conversation-rpc.ts",
   "event-rpc.ts",
   "inbox-rpc.ts",
+  "mailbox-rpc.ts",
   "objective-rpc.ts",
   "organization-rpc.ts",
+  "team-rpc.ts",
+  "work-rpc.ts",
 ];
 
 /** Where the narrow interfaces are defined from the full store and Control Plane types. */
@@ -72,6 +75,7 @@ describe("the operator RPC seams", () => {
   registerOperatorRoutes(router, {
     store: {} as never,
     queries: {} as never,
+    writes: {} as never,
     control: {} as never,
     changes: {} as never,
     follows: {} as never,
@@ -95,7 +99,8 @@ describe("the operator RPC seams", () => {
   });
 
   it("gives the read store only reads", () => {
-    for (const method of OPERATOR_READ_STORE_METHODS) expect(method).toMatch(/^(find|get|list)/u);
+    for (const method of OPERATOR_READ_STORE_METHODS)
+      expect(method).toMatch(/^(find|get|has|list)|Summaries$/u);
   });
 
   it("keeps service modules off the Control Plane runtime and the full store", () => {
@@ -120,6 +125,8 @@ describe("the operator RPC seams", () => {
     }
     expect(seen).toContain("message-follow.ts");
     expect(seen).toContain("conversation-messages.ts");
+    expect(seen).toContain("work-views.ts");
+    expect(seen).toContain("task-storage.ts");
     expect(violations).toEqual([]);
   });
 

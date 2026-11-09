@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
+import { workClient } from "../apps/cli/src/operator-client.js";
+import { taskView } from "../apps/cli/src/work-protos.js";
 import { HostServiceWorklet, hostArtifactVolumeStore } from "../apps/cli/src/worker.js";
 import {
   COORDINATION_CAPABILITY,
@@ -276,12 +278,10 @@ it("stores a captured artifact on the producing host's artifact Volume, and the 
       }),
     ]);
     expect(await store.listVolumeIdsHoldingArtifacts()).toEqual([volume.id]);
-    const task = (await (
-      await fetch(`${controlPlaneUrl}/api/v1/tasks/${encodeURIComponent(startTaskId)}`, {
-        headers: { authorization: "Bearer test-admin" },
-      })
-    ).json()) as { status: { storage: { artifacts: { locations: unknown[] }[] } } };
-    expect(task.status.storage.artifacts).toEqual([
+    const task = taskView(
+      await workClient({ url: controlPlaneUrl, token: "test-admin" }).getTask({ id: startTaskId }),
+    );
+    expect(task.status.storage?.artifacts).toEqual([
       expect.objectContaining({
         locations: expect.arrayContaining([{ kind: "volume", volume: "artifacts" }]),
       }),

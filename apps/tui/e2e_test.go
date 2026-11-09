@@ -19,11 +19,14 @@ import (
 )
 
 // The end-to-end test runs the built binary through plain `supertag` (the Node CLI from this
-// checkout) under tmux, against a fake Control Plane serving one earlier message as history, one
-// scripted conversation turn (a streamed reply with a command that starts one work Session, which
-// then reports), one open Objective, and an inbox holding the Objective owner's question and an
-// approval request. It answers the question and approves the request in place. It needs tmux,
-// node_modules and ./build.sh output, so it runs only with SUPERTAG_TUI_E2E=1:
+// checkout) under tmux, in a git checkout holding the work Session's branch, against a fake
+// Control Plane serving one earlier message as history, one scripted conversation turn (a
+// streamed reply with a command that starts one work Session, which then reports and delivers a
+// branch with a pull request), one open Objective, an inbox holding the Objective owner's question
+// and an approval request, and one Team with a Workstream post. It expands the work Session,
+// shows the branch's diff, opens the pull request with a stand-in for the platform opener, starts
+// a new conversation, answers the question and approves the request in place, and shows the Team.
+// It needs tmux, git, node_modules and ./build.sh output, so it runs only with SUPERTAG_TUI_E2E=1:
 //
 //	SUPERTAG_TUI_E2E=1 go test -run TestEndToEnd -v .
 const (
@@ -37,9 +40,11 @@ const (
 	fakeQuestion  = "Does apply_discount accept percentages over 100?"
 	fakeEarlier   = "Which module computes discounts?"
 	fakeAnswer    = "The `pricing` module does, in **apply_discount**."
+	fakeBranch    = "supertag/session/b3861d05"
+	fakePR        = "https://github.com/acme/app/pull/12"
 )
 
-func endToEndControlPlane() *fakeControlPlane {
+func endToEndControlPlane(base, head string) *fakeControlPlane {
 	work := workSession("ses-work-1", fakeWorkTitle, fakeWorkTask, "")
 	done := workSession("ses-work-1", fakeWorkTitle, fakeWorkTask, fakeReport)
 	inbox := coordinationFake()
@@ -52,8 +57,27 @@ func endToEndControlPlane() *fakeControlPlane {
 		approve:    inbox.approve,
 		deny:       inbox.deny,
 		answer:     inbox.answer,
+		sessions: func(id string) *operatorv1.Session {
+			if id != "ses-work-1" {
+				return nil
+			}
+			return delivered(id, fakeWorkTask, fakeBranch, base, head, "main", fakePR)
+		},
+		taskEvents: func(*operatorv1.ListTaskEventsRequest) []*operatorv1.TaskEvent {
+			return []*operatorv1.TaskEvent{
+				commandEvent(fakeWorkTask, 1, "c1", "pytest -q tests/test_discount.py", "running"),
+				toolEvent(fakeWorkTask, 2, "u1", "github", "create_pull_request"),
+			}
+		},
+		teamList: func() []*operatorv1.Team { return []*operatorv1.Team{billingTeam()} },
+		posts: func(*operatorv1.ListWorkstreamPostsRequest) *operatorv1.ListWorkstreamPostsResponse {
+			return &operatorv1.ListWorkstreamPostsResponse{
+				Posts:    []*operatorv1.WorkstreamPost{{Id: "p1", TeamId: "team-billing", AuthorTagId: "tag-builder", Body: "The fix is on the branch.", Sequence: 1}},
+				TagNames: map[string]string{"tag-builder": "builder"},
+			}
+		},
 		history: func(req *operatorv1.ListMessagesRequest) []*operatorv1.Message {
-			if req.GetTag() != fakeTag {
+			if req.GetTag() != fakeTag || req.GetConversation() != "default" {
 				return nil
 			}
 			earlier := &operatorv1.Message{TaskId: "task-earlier", Tag: fakeTag, Conversation: "default", Text: fakeEarlier,
@@ -127,13 +151,23 @@ func TestEndToEnd(t *testing.T) {
 		}
 	}
 
-	fake := endToEndControlPlane()
+	checkout, base, head := gitRepo(t, fakeBranch)
+	fake := endToEndControlPlane(base, head)
 	server := fake.start(t)
+
+	// The stand-in opener records the address it was given instead of starting a browser.
+	bin := t.TempDir()
+	opened := filepath.Join(t.TempDir(), "opened")
+	for _, name := range []string{"open", "xdg-open"} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$SUPERTAG_TUI_OPENED\"\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	session := fmt.Sprintf("tuispike-%d", os.Getpid())
 	// HOME is a fresh directory so the CLI resolves only the environment's target.
-	command := fmt.Sprintf("env HOME=%s SUPERTAG_CONTROL_PLANE=%s SUPERTAG_OPERATOR_TOKEN=%s %s --conditions=development %s; echo supertag exited $?; sleep 60",
-		shellQuote(t.TempDir()), server.URL, fakeToken, shellQuote(tsx), shellQuote(cli))
+	command := fmt.Sprintf("cd %s && env HOME=%s PATH=%s SUPERTAG_TUI_OPENED=%s SUPERTAG_CONTROL_PLANE=%s SUPERTAG_OPERATOR_TOKEN=%s %s --conditions=development %s; echo supertag exited $?; sleep 60",
+		shellQuote(checkout), shellQuote(t.TempDir()), shellQuote(bin+":"+os.Getenv("PATH")), shellQuote(opened), server.URL, fakeToken, shellQuote(tsx), shellQuote(cli))
 	run := func(args ...string) string {
 		t.Helper()
 		out, err := exec.Command(tmux, args...).CombinedOutput()
@@ -206,6 +240,53 @@ func TestEndToEnd(t *testing.T) {
 	fake.mu.Unlock()
 
 	keys := func(keys ...string) { run(append([]string{"send-keys", "-t", session}, keys...)...) }
+	waitFor("the branch line", 10*time.Second, func(pane string) bool {
+		return strings.Contains(pane, "Branch "+fakeBranch+"   [d] diff  [o] open")
+	})
+	keys("Up")
+	keys("Up")
+	keys("Enter")
+	pane = waitFor("the expanded work Session", 10*time.Second, func(pane string) bool {
+		return strings.Contains(pane, "Activity:") && strings.Contains(pane, "· using: github.create_pull_request")
+	})
+	t.Logf("expanded work Session:\n%s", pane)
+	for _, want := range []string{"▾ working: " + fakeWorkTitle, "Session ses-work-1 · Task " + fakeWorkTask + " completed",
+		"Pull request " + fakePR + " (ready for review)"} {
+		if !strings.Contains(pane, want) {
+			t.Errorf("the expanded work Session does not show %q", want)
+		}
+	}
+	keys("d")
+	pane = waitFor("the diff", 10*time.Second, func(pane string) bool {
+		return strings.Contains(pane, "Diff · "+fakeBranch) && strings.Contains(pane, "+    if percent > 100:")
+	})
+	t.Logf("diff:\n%s", pane)
+	if strings.Contains(pane, "\x1b[2J") || !strings.Contains(pane, " [2Jtoo much") {
+		t.Errorf("the diff's escape sequence was not shown as text")
+	}
+	keys("o")
+	waitFor("the pull request to open", 10*time.Second, func(pane string) bool {
+		data, err := os.ReadFile(opened)
+		return err == nil && strings.TrimSpace(string(data)) == fakePR && strings.Contains(pane, "Opened "+fakePR)
+	})
+	// Each escape waits for its effect, so the terminal does not read two as one Alt sequence.
+	keys("Escape")
+	waitFor("the conversation", 10*time.Second, func(pane string) bool {
+		return strings.Contains(pane, "lead · default") && strings.Contains(pane, "esc back")
+	})
+	keys("Escape")
+	waitFor("the input", 10*time.Second, func(pane string) bool { return strings.Contains(pane, "ctrl+o conversations") })
+	keys("C-o")
+	waitFor("the conversation list", 10*time.Second, func(pane string) bool {
+		return strings.Contains(pane, "lead · conversations") && strings.Contains(pane, "+ New conversation")
+	})
+	keys("n")
+	keys("-l", "billing-fix")
+	keys("Enter")
+	waitFor("the new conversation", 10*time.Second, func(pane string) bool {
+		return strings.Contains(pane, "lead · billing-fix") && strings.Contains(pane, "to start the conversation billing-fix")
+	})
+
 	waitFor("the rail's Objectives and inbox", 10*time.Second, func(pane string) bool {
 		return strings.Contains(pane, "$41.23/$300") && strings.Contains(pane, "Waiting on you (2)")
 	})
@@ -242,6 +323,23 @@ func TestEndToEnd(t *testing.T) {
 		return strings.Contains(pane, "Approved once.") && strings.Contains(pane, "Waiting on you (0)")
 	})
 	t.Logf("after approving:\n%s", pane)
+
+	keys("Tab")
+	for range 4 {
+		keys("Up")
+	}
+	for range 3 {
+		keys("Down")
+	}
+	pane = waitFor("the Team view", 10*time.Second, func(pane string) bool {
+		return strings.Contains(pane, "Team billing (team-billing)") && strings.Contains(pane, "The fix is on the branch.")
+	})
+	t.Logf("Team view:\n%s", pane)
+	for _, want := range []string{"Members: lead, builder, deleted Tag tag-gone", "Turns: at most 2 at once across its Objectives"} {
+		if !strings.Contains(pane, want) {
+			t.Errorf("the Team view does not show %q", want)
+		}
+	}
 
 	fake.mu.Lock()
 	if len(fake.answered) != 1 || fake.answered[0].GetKey() != "question:task-own" || fake.answered[0].GetText() != "No, cap it at 100." {

@@ -1,7 +1,8 @@
 // Package client talks to a SuperTag Control Plane: the operator API's ConversationService,
-// ObjectiveService, InboxService and EventService through the generated Connect client, a
-// follower that turns one message's FollowMessage stream into the events a terminal UI shows, and
-// a watcher that keeps the UI's view of Tags, conversations, Objectives and the inbox current.
+// ObjectiveService, InboxService, WorkService, TeamService, MailboxService and EventService
+// through the generated Connect client, a follower that turns one message's FollowMessage stream
+// into the events a terminal UI shows, and a watcher that keeps the UI's view of Tags,
+// conversations, Objectives, Teams and the inbox current.
 package client
 
 import (
@@ -71,6 +72,9 @@ type Client struct {
 	objectives    operatorv1connect.ObjectiveServiceClient
 	inbox         operatorv1connect.InboxServiceClient
 	events        operatorv1connect.EventServiceClient
+	work          operatorv1connect.WorkServiceClient
+	teams         operatorv1connect.TeamServiceClient
+	mailbox       operatorv1connect.MailboxServiceClient
 }
 
 // New returns a client for target; version is sent as the client version. Only the URL's origin
@@ -96,6 +100,9 @@ func New(target Target, version string) (*Client, error) {
 	c.objectives = operatorv1connect.NewObjectiveServiceClient(httpClient, c.origin, options...)
 	c.inbox = operatorv1connect.NewInboxServiceClient(httpClient, c.origin, options...)
 	c.events = operatorv1connect.NewEventServiceClient(httpClient, c.origin, options...)
+	c.work = operatorv1connect.NewWorkServiceClient(httpClient, c.origin, options...)
+	c.teams = operatorv1connect.NewTeamServiceClient(httpClient, c.origin, options...)
+	c.mailbox = operatorv1connect.NewMailboxServiceClient(httpClient, c.origin, options...)
 	return c, nil
 }
 
@@ -210,15 +217,16 @@ func (c *Client) ListMessages(ctx context.Context, tag, conversation string, pag
 // gets an answer.
 const maxConversationPages = 10
 
-// ListConversations returns the caller's conversations with every Tag, the most recent first.
-func (c *Client) ListConversations(ctx context.Context) ([]*operatorv1.Conversation, error) {
+// ListConversations returns the caller's conversations with the named Tag, or with every Tag when
+// tag is empty, the most recent first.
+func (c *Client) ListConversations(ctx context.Context, tag string) ([]*operatorv1.Conversation, error) {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
 	var all []*operatorv1.Conversation
 	token := ""
 	for range maxConversationPages {
 		res, err := c.conversations.ListConversations(ctx, connect.NewRequest(&operatorv1.ListConversationsRequest{
-			PageSize: 100, PageToken: token,
+			Tag: tag, PageSize: 100, PageToken: token,
 		}))
 		if err != nil {
 			return nil, apiError(err)

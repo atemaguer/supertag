@@ -555,8 +555,6 @@ Endpoints:
   GET  /api/v1/operator-tokens/:name
   POST /api/v1/operator-tokens/:name/revoke
   GET  /api/v1/worker-profiles
-  GET  /api/v1/tasks
-  GET  /api/v1/sessions
   POST /api/v1/surface-enrollments
   POST /api/v1/tag-operations
   POST /webhooks/slack/:externalAccountId

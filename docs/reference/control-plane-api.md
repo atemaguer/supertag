@@ -82,6 +82,28 @@ at a time; a route that moves is removed.
 | `ObjectiveService.CancelObjective` | `cancel_objective` | Cancels an Objective and its open Tasks |
 | `ObjectiveService.PauseObjective` | `update_objective` | Holds new turns |
 | `ObjectiveService.ResumeObjective` | `update_objective` | Lets work start again |
+| `WorkService.ListTasks` | `read_task` | Tasks, the most recently created first |
+| `WorkService.GetTask` | `read_task` | One Task with its Task Attempts, placement, delivery, and storage |
+| `WorkService.ListTaskEvents` | `read_task` | A Task's recorded events, in sequence order |
+| `WorkService.InspectTaskExecution` | `read_task` | How the latest Task Attempt ran, with the Worker Host's receipt |
+| `WorkService.CancelTask` | `cancel_task` | Cancels a pending or running Task |
+| `WorkService.ListSessions` | `read_session` | Sessions, the most recent interaction first |
+| `WorkService.GetSession` | `read_session` | One Session and what its latest delivering Task delivered |
+| `WorkService.ListSessionStates` | `read_session` | A Session's native archives, without their contents |
+| `WorkService.GetSessionState` | `read_session_state` | One native archive with its contents |
+| `WorkService.ListArtifacts` | `read_artifact` | Captured artifacts and where their copies are |
+| `WorkService.GetArtifact` | `read_artifact` | One artifact's files and copies |
+| `WorkService.ResolveArtifactDownload` | `download_artifact` | Where the caller can read one artifact file |
+| `TeamService.CreateTeam` | `manage_team` | Creates a Team |
+| `TeamService.ListTeams` | `read_team` | Teams, by name |
+| `TeamService.GetTeam` | `read_team` | One Team |
+| `TeamService.UpdateTeam` | `manage_team` | Changes a Team's name, members, or turn limit |
+| `TeamService.DeleteTeam` | `manage_team` | Deletes a Team and its Workstream posts |
+| `MailboxService.ListTagMessages` | `read_mailbox` | Messages a Tag sent or received, newest first |
+| `MailboxService.GrantMailbox` | `manage_mailbox` | Lets one Tag accept messages from another |
+| `MailboxService.RevokeMailbox` | `manage_mailbox` | Removes that grant |
+| `MailboxService.ListMailboxGrants` | `read_mailbox` | The grants in which a Tag is the sender or the recipient |
+| `MailboxService.ListWorkstreamPosts` | `read_mailbox` | A Team's Workstream posts |
 
 Each RPC is a `POST` to `/PACKAGE.SERVICE/METHOD` on the API port, such as
 `/supertag.operator.v1.OrganizationService/GetStatus`. The listener speaks the Connect and
@@ -115,8 +137,9 @@ curl -s https://control.example.com/supertag.operator.v1.OrganizationService/Get
 ```
 
 Bodies use proto3 JSON. Field names are lowerCamelCase, enums are their value names, times are
-RFC 3339 strings, and 64-bit integers are strings. Send `Content-Type: application/proto` for the
-binary encoding instead. The generated clients in TypeScript and Go handle all of this.
+RFC 3339 strings, and 64-bit integers are strings. A request field the message does not define is
+ignored, not refused. Send `Content-Type: application/proto` for the binary encoding instead. The
+generated clients in TypeScript and Go handle all of this.
 
 Authentication is the same `Authorization: Bearer` header as the routes above. The Control Plane
 checks the credential before it reads the request body. Method options in
@@ -446,6 +469,113 @@ the caller in the Objective's change history. It returns the Objective, `changed
 `failed_precondition`. `PauseObjective` and `ResumeObjective` return `changed` the same way. See
 [Cancelling an Objective](coordination.md#cancelling-an-objective).
 
+### Work
+
+`WorkService` serves `supertag list task`, `get task`, `describe task`, `events task`,
+`cancel task`, `watch task`, `list session`, `get session`, `describe session`, `watch session`,
+`list artifact`, `get artifact`, and `download artifact`. The busy-Task column of
+`supertag list tag` and `list worker-host` reads `ListTasks` too. The terminal UI expands a work
+Session line with `GetSession` and `ListTaskEvents`, and reads the branch it shows from
+`GetSession`.
+
+A Session is one conversation of a Tag. Each turn of it is a Task, and each try at running a Task
+is a Task Attempt. Every view comes from records the Control Plane stores. Only
+`InspectTaskExecution` asks a Worker Host.
+
+A CLI conversation is private to the operator who holds it. Its Session, the work Sessions its
+turns started, and their Tasks, events, native archives, and artifacts reach that operator only.
+Other callers' lists leave them out, and naming one fails with `not_found`. The admin token is
+the operator `admin`, so it does not see an Operator Token holder's conversations either.
+
+| RPC | Order | `pageSize` |
+| --- | --- | --- |
+| `ListTasks` | Most recently created first | 0 means 100, at most 500 |
+| `ListTaskEvents` | Sequence order, after `afterSequence` | 0 means 500, at most 1,000 |
+| `ListSessions` | Most recent interaction first | 0 means 100, at most 500 |
+| `ListSessionStates` | Most recently created first | 0 means 100, at most 100 |
+| `ListArtifacts` | Oldest first | 0 means 20, at most 100 |
+
+`ListTasks` filters by `tag` name, `sessionId`, `objectiveId`, and `statuses`. `ListSessions`
+filters by `tag`, `parentSessionId`, and `objectiveId`. A page token names a position in the list,
+so any Control Plane can continue it. An empty `nextPageToken` marks the last page. A `ListTasks`
+page before the last can hold fewer Tasks than `pageSize`, or none, when most of the Tasks it
+passed are hidden from you or do not match.
+
+```sh
+curl -s https://control.example.com/supertag.operator.v1.WorkService/ListTasks \
+  -H "Authorization: Bearer $SUPERTAG_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"tag": "release-manager", "statuses": ["TASK_STATUS_RUNNING"]}'
+```
+
+`GetTask` returns what `get task` and `describe task` show; see
+[Read a Task's progress](#read-a-tasks-progress). `CancelTask` cancels a pending Task at once. For a
+running Task it tells the Worker to stop, and the status stays `TASK_STATUS_RUNNING` until the
+Worker reports it stopped. Repeating the call asks the Worker again. For a Task that already
+finished it changes nothing and returns `accepted` false. The audit log records `task.cancel`.
+
+`GetSession` adds `delivery`: what the Session's latest delivering Task delivered. For a work
+Session that is the branch with its base and head commits, any pull request, and `checkout`, the
+Worker Host whose checkout holds the branch. The Control Plane keeps no repository contents, so a
+client that shows a diff computes it from its own checkout. A conversation's `WorkSession.id` in
+[`ConversationService`](#conversations) is the Session ID to pass.
+
+Artifacts and native archives are described in [Artifact inspection](#artifact-inspection) and
+[Session persistence](#session-persistence).
+
+### Teams
+
+`TeamService` serves `supertag create team`, `list team`, `get team`, `update team`, and
+`delete team`, and the terminal UI's Teams list and Team view. A Team is a flat list of member
+Tags with an optional turn limit; see [Teams](coordination.md#teams). Requests name a Team by
+name or ID, and members by Tag name. Each `Team.members` entry carries the Tag's ID and name; a
+deleted Tag's name is empty.
+
+`CreateTeam` takes `name`, `members`, and an optional `id` and `maxConcurrency`. Repeating it with
+the same ID and definition returns the existing Team. Another Team with the ID or name fails with
+`already_exists` and `ERROR_REASON_CONFLICT`.
+
+`UpdateTeam` takes `expectedRevision` and at least one of `name`, `members.tags`, and
+`concurrency`. A `concurrency.maxConcurrency` of 0 removes the limit. A stale revision fails with
+`failed_precondition`, unless the Team already has every value the request sets: then nothing
+changes and the Team is returned, so retrying an applied change succeeds. New members take part
+from their next turn.
+
+`DeleteTeam` also deletes the Team's Workstream posts. It fails with `failed_precondition` while
+an Objective that is not completed or cancelled names the Team.
+
+`ListTeams` lists Teams by name, optionally only those a `member` Tag belongs to. Pages use
+`pageSize` (0 means 100, at most 500) and `pageToken`.
+
+```sh
+curl -s https://control.example.com/supertag.operator.v1.TeamService/CreateTeam \
+  -H "Authorization: Bearer $SUPERTAG_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "launch", "members": ["release-manager", "builder"], "maxConcurrency": 2}'
+```
+
+### Mailbox
+
+`MailboxService` serves `supertag list message`, `grant mailbox`, `revoke mailbox`,
+`list mailbox-grant`, and `list workstream-post`, and the Workstream posts in the terminal UI's
+Team view. Requests name Tags by name, and responses carry `tagNames` for the Tag IDs they
+contain. There is no declarative Mailbox resource.
+
+A grant lets the `recipient` accept messages from the `sender`. Tags that share a Team need none.
+`GrantMailbox` and `RevokeMailbox` return `changed` false when there was nothing to change, so a
+retry is safe. `ListMailboxGrants` lists the grants in which a Tag is the sender or the recipient;
+Team membership is not listed.
+
+`ListTagMessages` lists the messages a Tag sent or received, newest first, each with its status.
+`ListWorkstreamPosts` lists a Team's posts, oldest first. Without `afterSequence` it returns the
+newest page. With `afterSequence` it continues from that sequence, and `nextPageToken` pages on
+while more follow. To follow new posts, call again with the last `sequence` when
+[`EventService.Watch`](#event-stream) sends a `WATCH_KIND_WORKSTREAM_POST` change. Both take
+`pageSize` (0 means 50, at most 200).
+
+The Workstream contract is in [Workstreams](../../spec/workstreams.md). See
+[Send messages between Tags](../guides/tag-messaging.md).
+
 ## Organization spend
 
 `GET /api/v1/spend` returns cost and tokens across Task Attempts. Codex costs use model price estimates; `estimatedCostAttempts` counts those Task Attempts in each group. Each Task Attempt
@@ -645,16 +775,8 @@ POST /api/v1/operator-tokens
 GET  /api/v1/operator-tokens/:name
 POST /api/v1/operator-tokens/:name/revoke
 GET  /api/v1/worker-profiles
-GET  /api/v1/tasks
-GET  /api/v1/tasks/:id
-GET  /api/v1/tasks/:id/events
-POST /api/v1/tasks/:id/cancel
 POST /api/v1/objectives
 GET  /api/v1/objectives/:id
-GET  /api/v1/sessions
-GET  /api/v1/sessions/:id
-GET  /api/v1/sessions/:id/states
-GET  /api/v1/sessions/:id/states/:stateId
 GET  /api/v1/surface-accounts
 POST /api/v1/surface-accounts
 GET  /api/v1/surface-accounts/:name
@@ -851,7 +973,7 @@ An unknown, repeated, or invalid query parameter returns `400`.
 | Field | Meaning |
 | --- | --- |
 | `actor` | `control-plane-break-glass`, `token:NAME`, a scoped credential's `operatorId`, or `slack:USER` or `lark:USER` for a person in an Objective's thread |
-| `action` | What was done, such as `apply`, `apply.dry-run`, `delete`, `prune`, `operator-token.create`, `operator-token.revoke`, `auth-key.create`, `auth-key.revoke`, `approval.approve`, `approval.deny`, `objective.message`, `objective.reopen`, `objective.approve`, `objective.cancel`, `task.cancel`, or `coordination.COMMAND` for a command the Control Plane recognizes (`coordination.command` otherwise). A write to a route the Control Plane doesn't recognize is `request` on `UnknownRoute`, and nothing from its path is kept, because a path might hold a credential. |
+| `action` | What was done, such as `apply`, `apply.dry-run`, `delete`, `prune`, `operator-token.create`, `operator-token.revoke`, `auth-key.create`, `auth-key.revoke`, `approval.approve`, `approval.deny`, `objective.message`, `objective.reopen`, `objective.approve`, `objective.cancel`, `task.cancel`, `task.inspect`, `artifact.download`, `team.create`, `team.update`, `team.delete`, `mailbox-grant.add`, `mailbox-grant.revoke`, or `coordination.COMMAND` for a command the Control Plane recognizes (`coordination.command` otherwise). A write to a route the Control Plane doesn't recognize is `request` on `UnknownRoute`, and nothing from its path is kept, because a path might hold a credential. |
 | `target` | `Kind/NAME` or `Kind/ID`, such as `Tag/reviewer` or `ApprovalRequest/ID`; only the kind when the request named no valid target, failed, or was a dry run |
 | `outcome` | `succeeded`, or `failed` for an error response or an interrupted request |
 | `status` | The HTTP status. For a change from an Objective's thread, only a refused change has one: the status the API would return. |
@@ -926,29 +1048,6 @@ broader administrative audit log remains planned.
 
 See [Credential storage](credential-storage.md) for the server-side vault and client-side operator credential boundaries.
 
-## Tag messaging administration (Experimental)
-
-`/api/v1/tag-messaging/*` manages Teams, Workstream posts, messaging grants and message history
-with the administrative credential. It exposes no declarative Mailbox resource. Objectives are
-served by [`ObjectiveService`](#objectives).
-
-| Request | Operation |
-| --- | --- |
-| `GET /api/v1/tag-messaging/teams?tagId=` | Every Team, or the Teams one Tag belongs to |
-| `POST /api/v1/tag-messaging/teams` | Create a Team |
-| `GET /api/v1/tag-messaging/teams/:idOrName` | One Team |
-| `PATCH /api/v1/tag-messaging/teams/:idOrName` | Update its name, members or `maxConcurrency` with `expectedRevision` |
-| `DELETE /api/v1/tag-messaging/teams/:idOrName` | Delete a Team; refused while an open Objective names it |
-| `GET /api/v1/tag-messaging/workstreams/:teamIdOrName/posts?afterSequence=&limit=` | A Team's Workstream posts |
-| `GET /api/v1/tag-messaging/grants?tagId=` | Grants in which the Tag is the sender or the recipient |
-| `PUT` or `DELETE /api/v1/tag-messaging/grants` | Add or remove one grant, with body `{senderTagId, recipientTagId}` |
-| `GET /api/v1/tag-messaging/messages?tagId=&beforeCreatedAt=&beforeId=&limit=` | Messages a Tag sent or received, newest first |
-
-A grant is a pair: the recipient accepts messages from the sender. Tags that share a Team need
-none. The Workstream contract is in [Workstreams](../../spec/workstreams.md). The CLI exposes these
-routes as `supertag create team`, `supertag list workstream-post`, `supertag grant mailbox` and
-`supertag list message`.
-
 ## Coordination operations (Experimental)
 
 `POST /internal/v1/coordination/mcp` is the MCP endpoint a running Task Attempt calls with its
@@ -961,27 +1060,33 @@ Operators coordinate through [`InboxService`](#inbox) and [`ObjectiveService`](#
 ### Read a Task's progress
 
 A Task is one turn of a Tag's Session. An execution Task Attempt records a particular Worker
-run of that Task. Use `supertag get task ID` for the JSON resource or `supertag describe task ID`
-for a readable summary. `supertag events task ID` shows its stored event history.
+run of that Task. Use `supertag get task ID` for the JSON `Task` or `supertag describe task ID`
+for a readable summary. `supertag events task ID` shows its stored event history. All three call
+[`WorkService`](#work).
 
-Task reads include the existing `apiVersion`, `kind`, `metadata`, `spec`, and `status` envelope.
-The status adds these observations when records exist:
+`WorkService.GetTask` returns the Task's request, status, and times, and these observations when
+records exist:
 
-- `spec.objectiveId`: the Objective whose Session the Task belongs to, when it has one.
+- `tag`: the Tag's name, beside `tagId`.
+- `objectiveId`: the Objective whose Session the Task belongs to, when it has one.
 - `findings`: the [findings](coordination.md#review-findings) its result carried, by severity, or
   why the stored findings are unreadable.
-- `attempts`: every Task Attempt, oldest first, with its phase, times and provider-reported cost
-  when known.
-- `attempt`: the latest Task Attempt, its Worker Profile, recorded Worker/Host/Worklet identities,
-  last event, execution placement, and the recorded failure message when its latest terminal event
-  failed. Error stacks and additional error fields are omitted; messages retain the Worker's event
-  redaction. A new Task Attempt does not inherit an earlier error. The harness runtime hosts the agent process; the tool
-  execution environment receives its workspace operations. They may be on different machines.
+- `attempts`: every Task Attempt, oldest first, with its status, times, provider-reported cost
+  when known, and mounts.
+- `latestAttempt`: the latest Task Attempt, its Worker Profile, recorded Worker, Worker Host, and
+  Worklet identities, last event, execution placement, warnings, and the recorded failure message
+  when its latest terminal event failed. Error stacks and additional error fields are omitted;
+  messages keep the Worker's event redaction. A new Task Attempt does not inherit an earlier
+  error. The harness runtime hosts the agent process; the tool execution environment receives its
+  workspace operations. They may be on different machines.
 - `scheduling`: the last stored scheduling check, its time, and unmet requirements. `status` is
-  `compatible`, `incompatible`, or `waiting`. A `waiting` check carries `wait`: `reason` is
-  `capacity` with `hosts` (each `workerHostId`, `harnesses`, `capacity`, and `busyTaskIds`), or
-  `unavailable` when no eligible host has a matching Worker connected. A later check supersedes an
+  `SCHEDULING_STATUS_COMPATIBLE` or `SCHEDULING_STATUS_INCOMPATIBLE`. A later check supersedes an
   earlier one. Describe shows this only for queued work.
+- `delivery`: what the Task delivered: a Workspace branch with its base and head commits,
+  patches, a pull request, or outputs.
+- `storage`: where the Task's files and artifact copies are kept. `ListTasks` leaves it out.
+
+Free-form records stay JSON objects: `trigger`, `outcome`, and each event's `payload`.
 
 These reads use stored evidence and do not contact a Worklet. Unknown host identity is shown as
 “not recorded”; it is never inferred from another Worker's current advertisement. Missing terminal
@@ -989,14 +1094,18 @@ execution evidence does not prove a process stopped. A pending Task without a sc
 is not automatically classified as a capacity or connectivity problem. For a receipt from the
 execution owner, use the separate execution inspection below.
 
-The resource version changes when these observations change, even if the Task's phase does not.
-`get` and `watch` keep JSON output; `describe task ID` presents the summary in plain text.
+`resourceVersion` changes when these observations change, even if the Task's status does not.
+`get` and `watch` print JSON; `describe task ID` presents the summary in plain text.
 
 ### Inspect the latest Task execution
 
-`GET /api/v1/tasks/:id/execution` returns `availability` (`available`, `unavailable`,
-`unsupported`, or `not_started`) and the latest `attemptId` when present. An available response
-includes the durable Worklet receipt, status, and last event sequence.
+`WorkService.InspectTaskExecution` returns `availability` (`TASK_EXECUTION_AVAILABILITY_AVAILABLE`,
+`UNAVAILABLE`, `UNSUPPORTED`, or `NOT_STARTED`) and the latest `attemptId` when present. An
+available response includes the durable Worklet `receipt`, with its status and last event
+sequence. When the Control Plane reaches the Worker Host, it first records the Worker events the
+receipt names and it lacks, so the response and `ListTaskEvents` include them. A Worker Host it
+cannot reach makes `availability` `TASK_EXECUTION_AVAILABILITY_UNAVAILABLE`, not an error. The
+audit log records `task.inspect`.
 
 Every response also includes a `limits` projection. It reports the Task's requested limits, the
 effective controls recorded by the harness in `execution.limits.applied`, the latest cumulative
@@ -1024,7 +1133,7 @@ Task Attempt without the event remains `unknown`. A recorded cleanup failure als
 `unknown`, even while the stored Task Attempt phase is still `running`. The phase alone does not tell
 you whether a process is currently executing.
 
-`placement.cleanupFailure` contains the latest Task Attempt's retained cleanup diagnostic, or `null`.
+`placement.cleanupFailure` contains the latest Task Attempt's retained cleanup diagnostic, or is unset.
 It includes the event sequence and time plus bounded, redacted error messages identifying failed
 cleanup stages. When execution failed before cleanup also failed, the diagnostic preserves the
 original execution error too. A later terminal execution event clears this diagnostic from the
@@ -1040,37 +1149,39 @@ aggregate Worklet descriptor captured before receipt-based recording was availab
 values are unconfirmed provenance; they are not rewritten into a confirmed binding when a
 receipt conflicts with them. The identity mismatch remains an error requiring inspection.
 
-The same projection appears at `status.attempt.placement` in the Task resource.
+The same projection appears at `latestAttempt.placement` in `GetTask`.
 `supertag describe task ID` distinguishes a waiting assignment from confirmed cleanup and prints retained cleanup
 errors. These are stored observations, not a live health check of the Worker Host.
 
-This is an authenticated operator read; it neither retries execution nor changes Task state. The
-CLI exposes it through `supertag describe task ID`.
+It neither retries execution nor changes Task state; it only records Worker events the Control
+Plane missed. `supertag describe task ID` shows the stored placement from `GetTask` without asking
+the Worker Host.
 
 ## Artifact inspection
 
-An **artifact** is a captured result with an immutable file manifest. These administrative reads
-use the same operator authentication as Task inspection:
+An **artifact** is a captured result with an immutable file manifest. Three
+[`WorkService`](#work) RPCs read artifacts:
 
-| Route | Result |
+| RPC | Result |
 | --- | --- |
-| `GET /api/v1/artifacts?task=ID&limit=20&cursor=CURSOR` | Captured artifacts, with an optional Task filter and a next-page cursor. Limit is 1–100. |
-| `GET /api/v1/artifacts/:id` | One artifact manifest, including file paths, digests, sizes, and source Task. |
-| `POST /api/v1/artifacts/:id/download` | Where one file can be read, for body `{ "path": PATH }`. Never file content. |
+| `ListArtifacts` | Captured artifacts, oldest first, with an optional `taskId` filter. `pageSize` 0 means 20, at most 100. |
+| `GetArtifact` | One artifact's files with their paths, digests, and sizes, and its source Task. |
+| `ResolveArtifactDownload` | Where one file at `path` can be read. Never file content. |
 
-These routes need the admin token or an Operator Token; a coordination-only credential is refused.
-Each Artifact's `status.locations` lists where its copies are: `worker-host` entries with
-`workerHostId`, `ephemeral`, and `removed`, and `volume` entries with the Volume's name.
-`status.ephemeralOnly` is true when some file is held only on ephemeral Worker Hosts and no Volume.
+Each artifact's `copies` lists where its copies are: `workerHost` entries with `workerHostId`,
+`ephemeral`, and `removed`, and `volume` entries with the Volume's name. `ephemeralOnly` is true
+when some file is held only on ephemeral Worker Hosts and no Volume.
 
-The Control Plane stores no artifact bytes, so no route returns file content. The bytes stay on the
-Worker Hosts and Volumes that hold copies. The download route returns the file's digest and size,
-the Volume copies with each Volume's source, credential name, and key, and the producing Worker
-Host's transfer URL with a signed grant. The grant is bound to that file, that host, and the
-requesting operator, and expires after 60 seconds. `holders` lists every Worker Host and Volume
-that holds the file. The caller reads a Volume copy with its own mapping for the credential name and
-must check the digest. Tasks consume artifacts through exact artifact inputs, preserving the
-existing Worker-to-Worker transfer permissions.
+The Control Plane stores no artifact bytes, so no RPC returns file content. The bytes stay on the
+Worker Hosts and Volumes that hold copies, and move over plain HTTP from them to the caller.
+`ResolveArtifactDownload` returns the file's `digest` and `sizeBytes`, `volumes` with each
+Volume's source, credential name, and key, and `transfers` with the producing Worker Host's
+`transferUrl` and a signed `grant`. The grant is bound to that file, that host, and the requesting
+operator, and expires at `expiresAt`, 60 seconds later. Each call issues new grants. `holders`
+lists every Worker Host and Volume that holds the file. The caller reads a Volume copy with its own
+mapping for the credential name and must check the digest. The audit log records
+`artifact.download`. Tasks consume artifacts through exact artifact inputs, preserving the existing
+Worker-to-Worker transfer permissions.
 
 See the [CLI walkthrough](../operations/cli.md) for listing results without writing an API client.
 
@@ -1082,21 +1193,21 @@ that can restore its native files and provide compatible tools and workspace acc
 uses its SDK's Session storage callbacks to preserve main and subagent transcript entries.
 Conversation storage does not restore workspace files, running processes, or a sandbox.
 
-Use the administrative API to inspect stored state:
+Two [`WorkService`](#work) RPCs read the stored state:
 
-| Request | Response |
+| RPC | Response |
 | --- | --- |
-| `GET /api/v1/sessions/:id/states` | A `states` array, newest first, containing up to 100 metadata records and each record's `nativeId`; transcript payloads are omitted. Add `?nativeId=...` to select a native conversation. |
-| `GET /api/v1/sessions/:id/states/:stateId` | The matching record, including its native `data` payload. A state belonging to another Session returns 404. |
+| `ListSessionStates` | A Session's native archives, newest first, each with its `nativeId`; the `data` payloads are left out. Set `nativeId` to select one native conversation. |
+| `GetSessionState` | One archive, including its native `data`. An archive of another Session fails with `not_found`. It needs the `read_session_state` action. |
 
-Both requests require the administrative bearer credential and return `Cache-Control: no-store`.
 Native IDs identify a Codex thread or Claude conversation; the SuperTag Session ID groups the
 work across these native conversations. The API retrieves stored state rather than starting an
 execution. Continue the conversation through its existing Session; the Control Plane selects a
 compatible resume point when admitting the next Task.
 
-A record's `status` is `stored` while its native data is available but has not been approved for
-automatic resumption. Successful execution can promote it to `resumable`. A partially synchronized
+An archive's `status` is `SESSION_STATE_STATUS_STORED` while its native data is available but has
+not been approved for automatic resumption. Successful execution can promote it to
+`SESSION_STATE_STATUS_RESUMABLE`. A partially synchronized
 or failed Task Attempt can therefore remain inspectable without becoming a resume point. Even a
 `resumable` record resumes only for the same Tag and Session, the same reply audience, and the
 harness that produced it, and that harness must be able to load it where it runs; a newer
