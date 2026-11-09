@@ -1,4 +1,4 @@
-import type { DescMethod } from "@bufbuild/protobuf";
+import type { DescMethod, MessageInitShape } from "@bufbuild/protobuf";
 import type {
   CoordinationOperatorPrincipal,
   ObjectiveController,
@@ -22,6 +22,16 @@ import type {
   UpdateTeamInput,
   WorkerHost,
 } from "@supertag/core";
+import type {
+  ApplyManifestsRequest,
+  ApplyManifestsResponseSchema,
+  DeleteResourceRequest,
+  DeleteResourceResponseSchema,
+  DiffManifestsRequest,
+  DiffManifestsResponseSchema,
+  ResourceKind,
+  ResourceSchema,
+} from "@supertag/operator-api";
 import type { VerifiedSurfaceAccount } from "@supertag/surface-sdk";
 
 /**
@@ -109,6 +119,11 @@ export const OPERATOR_RPC_CLASSES: Readonly<Record<string, OperatorRpcClass>> = 
   "supertag.operator.v1.MailboxService/RevokeMailbox": "control",
   "supertag.operator.v1.MailboxService/ListMailboxGrants": "read",
   "supertag.operator.v1.MailboxService/ListWorkstreamPosts": "read",
+  "supertag.operator.v1.ResourceService/GetResource": "read",
+  "supertag.operator.v1.ResourceService/ListResources": "read",
+  "supertag.operator.v1.ResourceService/DiffManifests": "read",
+  "supertag.operator.v1.ResourceService/ApplyManifests": "control",
+  "supertag.operator.v1.ResourceService/DeleteResource": "control",
 };
 
 /** An RPC's class; undefined when `OPERATOR_RPC_CLASSES` does not name it. */
@@ -219,6 +234,24 @@ export interface OperatorQueries {
    * runs one that is not scheduled through the store.
    */
   readonly listWorkerHosts: () => Promise<readonly WorkerHost[]>;
+  /**
+   * One resource by kind and name, with its manifest when asked. Fails as `GetResource` does;
+   * the kind is never `UNSPECIFIED`.
+   */
+  readonly getResource: (request: {
+    readonly kind: ResourceKind;
+    readonly name: string;
+    readonly manifest: boolean;
+  }) => Promise<MessageInitShape<typeof ResourceSchema>>;
+  /** Every resource of one kind, in `ListResources` order, with manifests when asked. */
+  readonly listResources: (request: {
+    readonly kind: ResourceKind;
+    readonly manifest: boolean;
+  }) => Promise<readonly MessageInitShape<typeof ResourceSchema>[]>;
+  /** What applying these documents would change; fails as `DiffManifests` does. */
+  readonly diffManifests: (
+    request: DiffManifestsRequest,
+  ) => Promise<MessageInitShape<typeof DiffManifestsResponseSchema>>;
 }
 
 /**
@@ -406,6 +439,18 @@ export interface OperatorControl {
     readonly location: OperatorSurfaceLocation;
     readonly present: boolean;
   }) => Promise<ResolvedSurfaceLocation & { readonly changed: boolean }>;
+  /**
+   * Applies manifest documents. Applying the same documents again changes nothing more: a
+   * started Objective is not started again and a pruned member is not pruned again.
+   */
+  readonly applyManifests: (
+    request: ApplyManifestsRequest,
+    principal: CoordinationOperatorPrincipal,
+  ) => Promise<MessageInitShape<typeof ApplyManifestsResponseSchema>>;
+  /** Deletes or retires one resource; a repeat once it is gone fails with `NotFound`. */
+  readonly deleteResource: (
+    request: DeleteResourceRequest,
+  ) => Promise<MessageInitShape<typeof DeleteResourceResponseSchema>>;
   /** Activates or deactivates a Context Set or Permission Set in one of a Tag's locations. */
   readonly setSetActivation: (input: {
     readonly kind: "context-set" | "permission-set";

@@ -6,6 +6,7 @@ import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { main } from "../apps/cli/src/index.ts";
 import { migrateSqlite } from "./support/database.ts";
+import { getResource, listResources } from "./support/resources.ts";
 
 const header = (kind: string, name: string) =>
   `apiVersion: supertag/v1\nkind: ${kind}\nmetadata:\n  name: ${name}\n`;
@@ -89,9 +90,7 @@ describe("Volume manifests", () => {
         "",
       ].join("\n"),
     );
-    const datasets = await client.request<{ kind: string; spec: unknown; status: unknown }>(
-      "/api/v1/volumes/datasets",
-    );
+    const datasets = await getResource(client, "volumes", "datasets");
     expect(datasets).toMatchObject({
       kind: "Volume",
       spec: { source: "s3://acme-data/datasets/v3/", credential: "acme-data" },
@@ -152,7 +151,7 @@ describe("Volume manifests", () => {
       `${header("Volume", "data")}spec:\n  source: s3://acme-data\n  credential: AKIAIOSFODNN7EXAMPLE\n`,
     );
     expect(await fail("apply", "-f", secret)).toContain("never a secret value");
-    const listed = await client.request<{ items: unknown[] }>("/api/v1/volumes");
+    const listed = await listResources(client, "volumes");
     expect(listed.items).toEqual([]);
   });
 
@@ -175,7 +174,7 @@ ${header("Volume", "modal")}spec:
     expect(description).toContain(
       "Credential: team-data (a name; each Worker Host maps it to exact-name modal-volume consent)",
     );
-    const resource = await client.request<{ spec: unknown }>("/api/v1/volumes/modal");
+    const resource = await getResource(client, "volumes", "modal");
     expect(resource.spec).toEqual({
       source: "modal-volume://training/models/",
       credential: "team-data",
@@ -192,9 +191,7 @@ ${header("Volume", "modal")}spec:
     expect(await run("apply", "-f", withoutShared, "--set", "data", "--prune")).toContain(
       "Volume/shared deleted\n",
     );
-    const listed = await client.request<{ items: { metadata: { name: string } }[] }>(
-      "/api/v1/volumes",
-    );
+    const listed = await listResources(client, "volumes");
     expect(listed.items.map((item) => item.metadata.name)).toEqual(["datasets"]);
   });
 });

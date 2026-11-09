@@ -9,7 +9,6 @@ import { FileSkillResolver, type UncertainAttempt } from "@supertag/worker-sdk";
 import { SUPERTAG_BUILD_IDENTITY } from "./build-identity.js";
 import {
   ControlPlaneClient,
-  ControlPlaneRequestError,
   type ControlPlaneTarget,
   ensureLocalAdminToken,
   normalizeControlPlaneUrl,
@@ -45,7 +44,11 @@ import {
 } from "./local-state.js";
 import { FileMcpLoginStore, lapsedMcpLogins } from "./mcp-oauth.js";
 import { hostClient } from "./operator-client.js";
-import { enrollWorkerHostCredential, getWorkerHostResource } from "./operator-resources.js";
+import {
+  enrollWorkerHostCredential,
+  findResourceView,
+  getWorkerHostResource,
+} from "./operator-resources.js";
 import { hostServiceStorageWarnings } from "./storage-durability.js";
 import {
   availableHostVolumeCredentials,
@@ -733,22 +736,20 @@ export async function bindLocalTags(
 ): Promise<void> {
   const client = new ControlPlaneClient(target);
   for (const tag of tags) {
-    try {
-      const resource = await client.request<TagResource>(`/api/v1/tags/${encodeURIComponent(tag)}`);
-      if (resource.status?.phase === "retired") {
-        notice(`Tag ${tag} was deleted, so Worker Host ${workerHostId} was not bound to it.`);
-        continue;
-      }
-      if (resource.spec.workerHosts.includes(workerHostId)) continue;
-      await refusedAsError(() => hostClient(client.operator).bindWorkerHost({ tag, workerHostId }));
-      notice(`Bound Worker Host ${workerHostId} to Tag ${tag}.`);
-    } catch (error) {
-      if (error instanceof ControlPlaneRequestError && error.status === 404) {
-        notice(`Tag ${tag} does not exist, so Worker Host ${workerHostId} was not bound to it.`);
-        continue;
-      }
-      throw error;
+    const resource = (await findResourceView(client.operator, "tags", tag)) as
+      | TagResource
+      | undefined;
+    if (resource === undefined) {
+      notice(`Tag ${tag} does not exist, so Worker Host ${workerHostId} was not bound to it.`);
+      continue;
     }
+    if (resource.status?.phase === "retired") {
+      notice(`Tag ${tag} was deleted, so Worker Host ${workerHostId} was not bound to it.`);
+      continue;
+    }
+    if (resource.spec.workerHosts.includes(workerHostId)) continue;
+    await refusedAsError(() => hostClient(client.operator).bindWorkerHost({ tag, workerHostId }));
+    notice(`Bound Worker Host ${workerHostId} to Tag ${tag}.`);
   }
 }
 

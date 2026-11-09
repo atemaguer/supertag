@@ -29,6 +29,7 @@ import {
   MailboxService,
   ObjectiveService,
   OrganizationService,
+  ResourceService,
   requires_admin_token,
   SurfaceService,
   TeamService,
@@ -42,9 +43,12 @@ import { eventService } from "./event-rpc.js";
 import { hostService } from "./host-rpc.js";
 import { inboxService } from "./inbox-rpc.js";
 import { mailboxService } from "./mailbox-rpc.js";
+import { MANIFEST_INPUT_MAX_BYTES } from "./manifest-documents.js";
 import type { MessageFollower } from "./message-follow.js";
 import { objectiveService } from "./objective-rpc.js";
 import {
+  type OperatorAuditChange,
+  type OperatorAuditNote,
   type OperatorAuthentication,
   type OperatorPrincipal,
   operatorAuditTarget,
@@ -61,6 +65,7 @@ import {
   operatorRpcClass,
 } from "./operator-seams.js";
 import { organizationService } from "./organization-rpc.js";
+import { resourceService } from "./resource-rpc.js";
 import { surfaceService } from "./surface-rpc.js";
 import { teamService } from "./team-rpc.js";
 import { workService } from "./work-rpc.js";
@@ -69,6 +74,9 @@ import { workService } from "./work-rpc.js";
 export const OPERATOR_RPC_PATH_PREFIX = "/supertag.operator.v1.";
 
 const OPERATOR_RPC_MAX_BYTES = 1_000_000;
+
+/** The protocols every operator service is served with. */
+const OPERATOR_PROTOCOLS = { connect: true, grpcWeb: true, grpc: false } as const;
 
 /** The credential the request gate authenticated, before the RPC's own access check. */
 const authenticatedCaller = createContextKey<OperatorPrincipal | undefined>(undefined, {
@@ -120,9 +128,7 @@ export function createOperatorRpcHandler(
   routes: (router: ConnectRouter) => void,
 ): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
   const adapter = connectNodeAdapter({
-    connect: true,
-    grpcWeb: true,
-    grpc: false,
+    ...OPERATOR_PROTOCOLS,
     readMaxBytes: OPERATOR_RPC_MAX_BYTES,
     contextValues: (request) =>
       createContextValues().set(operatorPeerAddress, request.socket.remoteAddress),
@@ -160,6 +166,11 @@ export function registerOperatorRoutes(router: ConnectRouter, dependencies: Oper
   router.service(WorkService, workService({ store, writes, control }));
   router.service(TeamService, teamService({ store, control }));
   router.service(MailboxService, mailboxService({ store, control }));
+  router.service(ResourceService, resourceService({ queries, control }), {
+    ...OPERATOR_PROTOCOLS,
+    // It takes a whole manifest input in one call.
+    readMaxBytes: MANIFEST_INPUT_MAX_BYTES,
+  });
   for (const handler of router.handlers) assertRpcClass(handler.method);
 }
 
@@ -306,15 +317,17 @@ function authorization(): Interceptor {
 /**
  * Records one audit entry for each authenticated call to an RPC that declares `audit_action`, once
  * the RPC returns or fails, and stores it before answering, so any API Server process lists it to
- * a call that begins after this one returned. Refusals by the request gate are not recorded, as on
- * the HTTP API.
+ * a call that begins after this one returned. A successful call that lists several changes records
+ * one entry per change instead. Refusals by the request gate are not recorded, as on the HTTP API.
  */
 function auditing(auditTrail: Pick<AuditTrail, "record">): Interceptor {
   return (next) => async (request) => {
     const auditAction = getOption(request.method, audit_action);
     const caller = request.contextValues.get(authenticatedCaller);
     if (auditAction === "" || caller === undefined) return next(request);
-    const note = { target: request.method.parent.name.replace(/Service$/u, "") };
+    const note: OperatorAuditNote = {
+      target: request.method.parent.name.replace(/Service$/u, ""),
+    };
     request.contextValues.set(operatorAuditTarget, note);
     let failure: Code | undefined;
     try {
@@ -323,17 +336,25 @@ function auditing(auditTrail: Pick<AuditTrail, "record">): Interceptor {
       failure = ConnectError.from(error).code;
       throw error;
     } finally {
-      await auditTrail.record({
-        at: new Date().toISOString(),
-        actor: caller.principal.operatorId,
-        action: auditAction,
-        target: failure === undefined ? note.target : auditTargetKind(note.target),
-        outcome: failure === undefined ? "succeeded" : "failed",
-        status: failure === undefined ? 200 : codeToHttpStatus(failure),
-        source: "api",
-        method: request.requestMethod,
-        path: `/${request.method.parent.typeName}/${request.method.name}`,
-      });
+      if (note.preview !== true) {
+        const changes: readonly OperatorAuditChange[] =
+          failure === undefined && note.changes !== undefined && note.changes.length > 0
+            ? note.changes
+            : [{ target: note.target, ...(failure === undefined ? {} : { failure }) }];
+        const at = new Date().toISOString();
+        for (const change of changes)
+          await auditTrail.record({
+            at,
+            actor: caller.principal.operatorId,
+            action: change.action ?? auditAction,
+            target: change.failure === undefined ? change.target : auditTargetKind(change.target),
+            outcome: change.failure === undefined ? "succeeded" : "failed",
+            status: change.failure === undefined ? 200 : codeToHttpStatus(change.failure),
+            source: "api",
+            method: request.requestMethod,
+            path: `/${request.method.parent.typeName}/${request.method.name}`,
+          });
+      }
     }
   };
 }

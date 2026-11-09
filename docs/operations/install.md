@@ -27,9 +27,9 @@ since SuperTag runs the CLIs you install. Add `~/.local/bin` to your `PATH` if i
 
 The script also installs the experimental terminal UI on macOS and Linux, on arm64 and amd64. It
 downloads the release's `supertag-tui` binary with curl or wget and checks it against the
-release's `SHA256SUMS`. Run `supertag` with no arguments in a terminal to open it. Its Ctrl-P
-switches between this machine's Control Plane and the ones saved with
-`supertag connect control-plane`. If the
+release's `SHA256SUMS`. Run `supertag` with no arguments in a terminal to open it. Its Ctrl-K
+opens a command palette, and Ctrl-P switches between this machine's Control Plane and the ones
+saved with `supertag connect control-plane`. If the
 download or the check fails, the script installs the CLI anyway and prints one line saying why
 the terminal UI was not installed. Run the script again to add it.
 To choose the locations or a version, set these before `sh`:

@@ -14,8 +14,10 @@ import {
   getWorkerHostResource,
   listWorkerHostResources,
 } from "../../apps/cli/src/operator-resources.ts";
+import type { ResourcePath } from "../../apps/cli/src/resource-protos.ts";
 import type { ServiceEnvironment } from "../../apps/cli/src/up-service.ts";
 import { migrateSqlite } from "./database.ts";
+import { applyManifests, getResource, listResources } from "./resources.ts";
 
 export const TIMEOUT = 180_000;
 
@@ -162,22 +164,26 @@ export async function writeServices(context: ServicesContext, text: string): Pro
   return path;
 }
 
-/** Calls the local Control Plane the way any supertag command finds it. */
-export async function api(path: string, init: RequestInit = {}) {
-  const target = await resolveControlPlaneTarget();
-  if (target === undefined) throw new Error("no local operator credential");
-  const response = await fetch(`${target.url}${path}`, {
-    ...init,
-    headers: { authorization: `Bearer ${target.token}`, "content-type": "application/json" },
-  });
-  return response.json() as Promise<
-    Record<string, unknown> & {
-      spec: Record<string, unknown>;
-      status: Record<string, unknown>;
-      items: { metadata: { name: string }; spec: Record<string, unknown> }[];
-    }
-  >;
+/** One resource of the local Control Plane, found the way any supertag command finds it. */
+export async function localResource(path: ResourcePath, name: string) {
+  return getResource<LocalResource>({ operator: await localTarget() }, path, name);
 }
+
+/** Every resource of a kind on the local Control Plane. */
+export async function localResources(path: ResourcePath) {
+  return listResources<LocalResource>({ operator: await localTarget() }, path);
+}
+
+/** Applies manifests to the local Control Plane as one input. */
+export async function applyLocal(manifests: readonly unknown[]) {
+  return applyManifests({ operator: await localTarget() }, manifests);
+}
+
+type LocalResource = Record<string, unknown> & {
+  metadata: { name: string; id: string };
+  spec: Record<string, unknown>;
+  status: Record<string, unknown>;
+};
 
 async function localTarget() {
   const target = await resolveControlPlaneTarget();
@@ -217,26 +223,10 @@ export async function sharedControlPlane(context: ServicesContext) {
     reply: async () => {},
   });
   context.cleanups.push(() => runtime.close());
-  const shared = async (path: string, init: RequestInit = {}) =>
-    (await (
-      await fetch(`${runtime.url}${path}`, {
-        ...init,
-        headers: { authorization: `Bearer ${SHARED_ADMIN}`, "content-type": "application/json" },
-      })
-    ).json()) as Record<string, unknown> & {
-      spec: Record<string, unknown>;
-      status: Record<string, unknown>;
-      secret: string;
-    };
-  await shared("/api/v1/tags", {
-    method: "POST",
-    body: JSON.stringify({
-      apiVersion: "supertag/v1",
-      kind: "Tag",
-      metadata: { name: "lead" },
-      spec: {},
-    }),
-  });
+  const admin = { url: runtime.url, token: SHARED_ADMIN };
+  await applyManifests({ operator: admin }, [
+    { apiVersion: "supertag/v1", kind: "Tag", metadata: { name: "lead" }, spec: {} },
+  ]);
   const authKey = async (name: string) =>
     (
       await hostClient({ url: runtime.url, token: SHARED_ADMIN }).createAuthKey({
@@ -244,10 +234,10 @@ export async function sharedControlPlane(context: ServicesContext) {
         tags: ["lead"],
       })
     ).secret;
-  const admin = { url: runtime.url, token: SHARED_ADMIN };
   return {
     url: runtime.url,
-    shared,
+    resource: (path: ResourcePath, name: string) =>
+      getResource<LocalResource>({ operator: admin }, path, name),
     authKey,
     workerHost: (id: string) => getWorkerHostResource(admin, id),
     authKeyResource: (name: string) => getAuthKeyResource(admin, name),

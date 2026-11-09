@@ -25,7 +25,12 @@ import {
 } from "./objective-protos.js";
 import { runObjectiveCommand } from "./objectives.js";
 import { workClient } from "./operator-client.js";
-import { isOperatorResourcePath, listOperatorResources } from "./operator-resources.js";
+import {
+  isOperatorResourcePath,
+  listOperatorResources,
+  listResourceViews,
+} from "./operator-resources.js";
+import { isResourcePath } from "./resource-protos.js";
 import { refusedAsError } from "./tag-conversation.js";
 import { runTeamCommand } from "./teams.js";
 import { terminalText } from "./terminal-text.js";
@@ -401,7 +406,9 @@ export async function runListCommand(
     const path = paths[kind] ?? "";
     value = isOperatorResourcePath(path)
       ? await listOperatorResources(client.operator, path)
-      : await client.request(`/api/v1/${path}`);
+      : isResourcePath(path)
+        ? await listResourceViews(client.operator, path)
+        : undefined;
   } else {
     let response: string;
     if (kind === "objective") {
@@ -457,7 +464,7 @@ export async function runListCommand(
   if (output === "text" && tagFields !== undefined) {
     // Text tables name Tags; JSON and YAML keep the IDs the API returns.
     const names = new Map(
-      items(await client.request("/api/v1/tags"))
+      items(await client.listTags())
         .map(record)
         .map((tag) => [field(tag, "metadata.id"), field(tag, "metadata.name")]),
     );

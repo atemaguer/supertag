@@ -1,13 +1,10 @@
 import { dirname } from "node:path";
-import {
-  ControlPlaneClient,
-  ControlPlaneRequestError,
-  ensureLocalAdminToken,
-} from "./control-plane-client.js";
+import { ControlPlaneClient, ensureLocalAdminToken } from "./control-plane-client.js";
 import { CONTROL_PLANE_API_VERSION } from "./control-plane-resources.js";
 import { environmentOperatorToken } from "./local-state.js";
+import { applyManifest, findResourceView } from "./operator-resources.js";
 import { git, remoteSource } from "./repository-name.js";
-import { type ProvisionInput, provisionManifests, type SurfaceVerifier } from "./resources.js";
+import { type ProvisionInput, provisionManifests } from "./resources.js";
 import {
   type ControlPlaneService,
   defaultSupertagYamlPath,
@@ -25,7 +22,6 @@ export async function provisionControlPlane(
   file: ServicesFile,
   service: ControlPlaneService,
   url: string,
-  options: { readonly verifySurface?: SurfaceVerifier } = {},
 ): Promise<readonly string[]> {
   const client = await provisioningClient(file, url);
   const lines: string[] = [];
@@ -36,7 +32,6 @@ export async function provisionControlPlane(
     const created = await provisionManifests(client, inputs, {
       resolveSecret: (name) => readSecret(file, name),
       baseDirectory: dirname(file.files[0] ?? defaultSupertagYamlPath()),
-      ...(options.verifySurface === undefined ? {} : { verifySurface: options.verifySurface }),
     });
     lines.push(...created.split("\n").filter(Boolean));
   }
@@ -72,12 +67,7 @@ async function createWorkspace(
   name: string,
   checkout: string,
 ): Promise<boolean> {
-  try {
-    await client.request(`/api/v1/workspaces/${encodeURIComponent(name)}`);
-    return false;
-  } catch (error) {
-    if (!(error instanceof ControlPlaneRequestError && error.status === 404)) throw error;
-  }
+  if ((await findResourceView(client.operator, "workspaces", name)) !== undefined) return false;
   const origin = await git(checkout, ["remote", "get-url", "origin"]);
   const source = origin === undefined ? undefined : remoteSource(origin);
   const originHead = await git(checkout, [
@@ -89,9 +79,8 @@ async function createWorkspace(
   const ref =
     (originHead?.includes("/") ? originHead.slice(originHead.indexOf("/") + 1) : undefined) ??
     (await git(checkout, ["symbolic-ref", "--quiet", "--short", "HEAD"]));
-  await client.request("/api/v1/workspaces", {
-    method: "POST",
-    body: JSON.stringify({
+  await applyManifest(client.operator, {
+    manifest: {
       apiVersion: CONTROL_PLANE_API_VERSION,
       kind: "Workspace",
       metadata: { name },
@@ -100,7 +89,8 @@ async function createWorkspace(
         ...(ref ? { ref } : {}),
         delivery: "branch",
       },
-    }),
+    },
+    source: `supertag.yaml host Workspace ${name}`,
   });
   return true;
 }

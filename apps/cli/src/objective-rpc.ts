@@ -28,7 +28,7 @@ import {
   requiredId,
 } from "./inbox-rpc.js";
 import { OBJECTIVE_STATUS, objectiveMessage, overviewMessage } from "./objective-protos.js";
-import { operatorAuditTarget, operatorError } from "./operator-rpc-context.js";
+import { noteAuditPreview, operatorAuditTarget, operatorError } from "./operator-rpc-context.js";
 import type { OperatorControl, OperatorQueries, OperatorReadStore } from "./operator-seams.js";
 
 /** A key is 1 to 200 characters without whitespace or control characters. */
@@ -68,6 +68,7 @@ export function objectiveService(
           : request.id;
       const note = context.values.get(operatorAuditTarget);
       if (note !== undefined && id !== "") note.target = `Objective/${id}`;
+      if (request.dryRun) noteAuditPreview(context);
       const parsed = parseCreateObjective({
         id,
         outcome: request.outcome,

@@ -21,12 +21,14 @@ import { serviceManager, unitName } from "../apps/cli/src/up-service.ts";
 import { SUPERTAG_VERSION } from "../apps/cli/src/version.ts";
 import { machineWorkerConcurrency } from "../apps/cli/src/worker-concurrency.ts";
 import {
-  api,
+  applyLocal,
   bindLocalWorkerHost,
   CLI,
   fakeHarness,
   fakeServices,
   freePort,
+  localResource,
+  localResources,
   localWorkerHost,
   localWorkerHosts,
   repository,
@@ -89,13 +91,13 @@ describe("supertag up with a control-plane service", () => {
 ${entries}`;
       await writeServices(context, configuration(manifest("lead")));
       await foreground(async () => {
-        expect((await api("/api/v1/tags/lead")).metadata).toMatchObject({ name: "lead" });
+        expect((await localResource("tags", "lead")).metadata).toMatchObject({ name: "lead" });
         expect(printed()).toContain("Tag/lead created (provision)");
       });
       await writeServices(context, configuration(manifest("lead") + manifest("helper")));
       context.output.length = 0;
       await foreground(async () => {
-        expect((await api("/api/v1/tags/helper")).metadata).toMatchObject({ name: "helper" });
+        expect((await localResource("tags", "helper")).metadata).toMatchObject({ name: "helper" });
         expect(printed()).toContain("Tag/helper created (provision)");
         expect(printed()).not.toContain("Tag/lead created (provision)");
       });
@@ -132,8 +134,10 @@ ${entries}`;
           await new Promise((done) => setTimeout(done, 100));
         }
         expect((await readStatus(hostSlot("laptop")))?.state).toBe("ready");
-        expect((await api("/api/v1/tags/lead")).metadata).toMatchObject({ name: "lead" });
-        expect((await api("/api/v1/workspaces/shop")).metadata).toMatchObject({ name: "shop" });
+        expect((await localResource("tags", "lead")).metadata).toMatchObject({ name: "lead" });
+        expect((await localResource("workspaces", "shop")).metadata).toMatchObject({
+          name: "shop",
+        });
         expect(printed().match(/Tag\/lead created \(provision\)/g)).toHaveLength(1);
         expect(printed().match(/Workspace\/shop created for host service laptop/g)).toHaveLength(1);
         expect(printed()).toContain("control-plane | Tag/lead created (provision)");
@@ -167,7 +171,7 @@ ${entries}  laptop:
       await writeServices(context, configuration(tag("lead")));
       await bringUp({ names: ["control-plane"], cliCommand: CLI });
       const background = await readStatus(controlPlaneSlot());
-      const lead = (await api("/api/v1/tags/lead")).metadata;
+      const lead = (await localResource("tags", "lead")).metadata;
       expect(printed().match(/Workspace\/shop created for host service laptop/g)).toHaveLength(1);
       // The provision list is not one of the Control Plane's settings, so adding to it leaves the
       // background Control Plane unchanged, and only the new entry is missing.
@@ -190,10 +194,10 @@ ${entries}  laptop:
           "The local Control Plane already runs in the background; leaving it.",
         );
         expect((await readStatus(controlPlaneSlot()))?.pid).toBe(background?.pid);
-        expect((await api("/api/v1/tags/helper")).metadata).toMatchObject({ name: "helper" });
+        expect((await localResource("tags", "helper")).metadata).toMatchObject({ name: "helper" });
         expect(printed().match(/Tag\/helper created \(provision\)/g)).toHaveLength(1);
         // What exists is left alone and never created again.
-        expect((await api("/api/v1/tags/lead")).metadata).toEqual(lead);
+        expect((await localResource("tags", "lead")).metadata).toEqual(lead);
         expect(printed()).not.toContain("Tag/lead created");
         expect(printed()).not.toContain("Workspace/shop created");
       } finally {
@@ -256,7 +260,7 @@ ${entries}  laptop:
             url: `http://127.0.0.1:${port}`,
             token: await ensureLocalAdminToken(),
           });
-          expect((await api("/api/v1/tags")).items).toEqual([]);
+          expect((await localResources("tags")).items).toEqual([]);
           expect((await localWorkerHosts()).items).toEqual([]);
           await expect(bringUp({ foreground: true })).rejects.toThrow(
             /already running in the foreground[\s\S]*supertag down control-plane/,
@@ -502,15 +506,14 @@ describe("host services", () => {
       });
 
       // ps reports both, with the host's Worker Host, connection, Tags, and Task Attempts.
-      await api("/api/v1/tags", {
-        method: "POST",
-        body: JSON.stringify({
+      await applyLocal([
+        {
           apiVersion: "supertag/v1",
           kind: "Tag",
           metadata: { name: "lead" },
           spec: {},
-        }),
-      });
+        },
+      ]);
       await bindLocalWorkerHost("lead", "laptop");
       const rows = await listServices();
       expect(rows[1]).toMatchObject({
@@ -597,7 +600,7 @@ describe("host services", () => {
       );
 
       // The host's Workspaces exist on its Control Plane, created with defaults by up.
-      expect((await api("/api/v1/workspaces/shop")).spec).toMatchObject({
+      expect((await localResource("workspaces", "shop")).spec).toMatchObject({
         ref: "main",
         delivery: "branch",
       });
@@ -812,15 +815,14 @@ secrets:
 `;
       await writeServices(context, both);
       await bringUp({ cliCommand: CLI });
-      await api("/api/v1/tags", {
-        method: "POST",
-        body: JSON.stringify({
+      await applyLocal([
+        {
           apiVersion: "supertag/v1",
           kind: "Tag",
           metadata: { name: "lead" },
           spec: {},
-        }),
-      });
+        },
+      ]);
       await bindLocalWorkerHost("lead", "laptop");
 
       // The file drops the host: up and ps say how to remove it, and leave it running.
@@ -846,7 +848,7 @@ secrets:
       expect(printed()).toMatch(
         /Stopped host service laptop \(process \d+\)\.\nUnbound Worker Host laptop from Tag lead\.\nRevoked Worker Host laptop\.\nRemoved host service laptop from this machine/u,
       );
-      expect((await api("/api/v1/tags/lead")).spec.workerHosts).toEqual([]);
+      expect((await localResource("tags", "lead")).spec.workerHosts).toEqual([]);
       expect((await localWorkerHost("laptop")).status).toMatchObject({
         phase: "revoked",
       });

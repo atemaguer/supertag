@@ -124,7 +124,7 @@ func moveTo(t *testing.T, m model, label string) model {
 		case rowTeam:
 			text = m.teams[r.index].GetName()
 		default:
-			text = m.tags[r.index].Name()
+			text = tagName(m.tags[r.index])
 		}
 		if strings.Contains(text, label) {
 			return m

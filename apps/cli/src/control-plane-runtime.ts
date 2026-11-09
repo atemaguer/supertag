@@ -47,6 +47,7 @@ import {
   createWorkspacePullRequestHandler,
   SurfaceController,
 } from "./gateway-surfaces.js";
+import type { SurfaceVerifier } from "./manifest-apply.js";
 import { createNotificationDeliverySender } from "./operator-notification-delivery.js";
 import { SUPERTAG_VERSION } from "./version.js";
 
@@ -87,6 +88,8 @@ export interface ControlPlaneRuntimeOptions {
   readonly reply?: OutboundReplyHandler;
   /** Directory for the default file credential vault; defaults to SUPERTAG_STATE_DIR. */
   readonly stateDirectory?: string;
+  /** Replaces the provider check of applied Surface Account credentials; for tests. */
+  readonly verifySurface?: SurfaceVerifier;
 }
 
 export type { ControlPlaneOperatorCredential } from "./control-plane-api.js";
@@ -312,6 +315,7 @@ export async function startControlPlaneRuntime(
     coordinationOperatorCredentials,
     auditTrail,
     ...(workletApi === undefined ? {} : { workletApi }),
+    ...(options.verifySurface === undefined ? {} : { verifySurface: options.verifySurface }),
   });
   const requestContext: Omit<HttpRequestContext, "request" | "response"> = {
     apiServer,
@@ -527,16 +531,7 @@ Remote Worker Hosts join with an Auth Key (supertag create auth-key) before conn
 
 Endpoints:
   POST /supertag.operator.v1.SERVICE/METHOD   (operator RPCs: Connect and gRPC-Web)
-  GET  /api/v1/tags
-  POST /api/v1/tags
-  GET  /api/v1/permission-sets
-  POST /api/v1/permission-sets
-  GET  /api/v1/context-sets
-  POST /api/v1/context-sets
-  GET  /api/v1/roles
-  POST /api/v1/roles
   POST /api/v1/worker-host-joins        (authorized by an Auth Key)
-  GET  /api/v1/worker-profiles
   POST /webhooks/slack/:externalAccountId
   POST /webhooks/github/:externalAccountId
   POST /webhooks/linear

@@ -19,6 +19,7 @@ import {
   migrateDatabase,
 } from "../packages/store/src/index.js";
 import { durableTestWorklet } from "./support/durable-test-worklet.js";
+import { applyManifests } from "./support/resources.ts";
 
 /** Applies an Objective manifest; apply starts an Objective that has not started yet. */
 async function applyObjective(
@@ -27,18 +28,11 @@ async function applyObjective(
   name: string,
   spec: Record<string, unknown>,
 ) {
-  const response = await fetch(`${url}/api/v1/objectives`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      apiVersion: "supertag/v1",
-      kind: "Objective",
-      metadata: { name },
-      spec,
-    }),
-  });
-  expect([200, 201], await response.clone().text()).toContain(response.status);
-  return (await response.json()) as Record<string, unknown>;
+  const applied = await applyManifests({ operator: { url, token } }, [
+    { apiVersion: "supertag/v1", kind: "Objective", metadata: { name }, spec },
+  ]);
+  expect(applied.complete, JSON.stringify(applied.results)).toBe(true);
+  return applied;
 }
 
 /** The Tasks of an Objective's own conversation, oldest first. */

@@ -12,6 +12,7 @@ import {
 import { bringUp, type UpOptions } from "../apps/cli/src/up.ts";
 import { DEPLOYMENT_RUNTIME } from "../deploy/shared/src/index.ts";
 import { inspectDatabaseMigrationReadiness, migrateDatabase } from "../packages/store/src/index.js";
+import { getResource, listResources } from "./support/resources.ts";
 import {
   CLI,
   fakeServices,
@@ -117,8 +118,9 @@ async function containerCommand(
   }
 }
 
-async function adminRequest(url: string, path: string): Promise<Response> {
-  return fetch(new URL(path, `${url}/`), { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } });
+/** A Tag of the Control Plane at `url`, read with the admin token. */
+function adminResource(url: string, name: string): Promise<{ readonly metadata: unknown }> {
+  return getResource({ operator: { url, token: ADMIN_TOKEN } }, "tags", name);
 }
 
 describe("the container command, supertag up --foreground control-plane", () => {
@@ -148,7 +150,12 @@ services:
             url: `http://127.0.0.1:${port}`,
             resolved: { notify: "slack:C0123456789", restart: "unless-stopped" },
           });
-          expect((await adminRequest(`http://127.0.0.1:${port}`, "/api/v1/tags")).status).toBe(200);
+          await expect(
+            listResources(
+              { operator: { url: `http://127.0.0.1:${port}`, token: ADMIN_TOKEN } },
+              "tags",
+            ),
+          ).resolves.toMatchObject({ kind: "ResourceList" });
         },
         { services: services.environment },
       );
@@ -190,7 +197,13 @@ services:
         });
         const port = Number(new URL(status.url ?? "").port);
         expect(port).not.toBe(filePort);
-        expect((await adminRequest(`http://127.0.0.1:${port}`, "/healthz")).ok).toBe(true);
+        expect(
+          (
+            await fetch(`http://127.0.0.1:${port}/healthz`, {
+              headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+            })
+          ).ok,
+        ).toBe(true);
       });
     },
     TIMEOUT,
@@ -233,9 +246,7 @@ services:
       let lead: unknown;
       await containerCommand(async (status) => {
         expect(status).toMatchObject({ mode: "foreground", url: `http://127.0.0.1:${port}` });
-        const response = await adminRequest(status.url ?? "", "/api/v1/tags/lead");
-        expect(response.status).toBe(200);
-        lead = ((await response.json()) as { metadata: unknown }).metadata;
+        lead = (await adminResource(status.url ?? "", "lead")).metadata;
         expect(context.printed().match(/Tag\/lead created \(provision\)/g)).toHaveLength(1);
       });
       // The platform migrates in its release step, never the Control Plane at startup.
@@ -248,9 +259,8 @@ services:
       await writeServices(context, provisioned("lead", "helper"));
       context.output.length = 0;
       await containerCommand(async (status) => {
-        expect((await adminRequest(status.url ?? "", "/api/v1/tags/helper")).status).toBe(200);
-        const response = await adminRequest(status.url ?? "", "/api/v1/tags/lead");
-        expect(((await response.json()) as { metadata: unknown }).metadata).toEqual(lead);
+        await expect(adminResource(status.url ?? "", "helper")).resolves.toBeDefined();
+        expect((await adminResource(status.url ?? "", "lead")).metadata).toEqual(lead);
         expect(context.printed().match(/Tag\/helper created \(provision\)/g)).toHaveLength(1);
         expect(context.printed()).not.toContain("Tag/lead created");
       });

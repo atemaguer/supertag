@@ -33,11 +33,29 @@ export const operatorPeerAddress = createContextKey<string | undefined>(undefine
   description: "operator peer address",
 });
 
+/** One change an audited RPC made, when one call makes several. */
+export interface OperatorAuditChange {
+  /** The change's action; the RPC's `audit_action` when unset. */
+  readonly action?: string;
+  /** `Kind/NAME` or `Kind/ID`; a failed change records only the kind. */
+  readonly target: string;
+  /** Set when this change failed although the call succeeded. */
+  readonly failure?: Code;
+}
+
+export interface OperatorAuditNote {
+  target: string;
+  preview?: boolean;
+  changes?: readonly OperatorAuditChange[];
+}
+
 /**
  * What an audited RPC changed, as `Kind/NAME` or `Kind/ID`. It starts as the service's kind, such
  * as `Objective`, and the RPC sets it once it knows the target. A failed call records only the kind.
+ * A call that only previews a change, such as a dry run, sets `preview` and is not recorded. A call
+ * that succeeds after making several changes lists them in `changes`, one entry each.
  */
-export const operatorAuditTarget = createContextKey<{ target: string } | undefined>(undefined, {
+export const operatorAuditTarget = createContextKey<OperatorAuditNote | undefined>(undefined, {
   description: "operator audit target",
 });
 
@@ -69,6 +87,21 @@ export function drainingError() {
 export function noteAuditTarget(context: HandlerContext, target: string): void {
   const note = context.values.get(operatorAuditTarget);
   if (note !== undefined) note.target = target;
+}
+
+/** Lists what a successful audited call changed, recorded as one entry each instead of one for the call. */
+export function noteAuditChanges(
+  context: HandlerContext,
+  changes: readonly OperatorAuditChange[],
+): void {
+  const note = context.values.get(operatorAuditTarget);
+  if (note !== undefined) note.changes = changes;
+}
+
+/** Marks an audited RPC's call as a preview that changes nothing, which the audit trail skips. */
+export function noteAuditPreview(context: HandlerContext): void {
+  const note = context.values.get(operatorAuditTarget);
+  if (note !== undefined) note.preview = true;
 }
 
 /** A request field that must not be empty, trimmed; `InvalidArgument` naming it otherwise. */

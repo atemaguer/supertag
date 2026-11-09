@@ -6,6 +6,7 @@ import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.
 import { hostClient } from "../apps/cli/src/operator-client.ts";
 import { FileGatewayCredentialVault } from "../packages/store/src/index.ts";
 import { migrateSqlite } from "./support/database.ts";
+import { applyManifests, getResource } from "./support/resources.ts";
 
 describe("Worker Hosts joined with an Auth Key", () => {
   const cleanups: Array<() => Promise<void>> = [];
@@ -29,24 +30,19 @@ describe("Worker Hosts joined with an Auth Key", () => {
       reply: async () => {},
     });
     cleanups.push(() => started.close());
-    const api = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
-      const response = await fetch(`${started.url}${path}`, {
-        ...init,
-        headers: { authorization: `Bearer ${adminToken}`, "content-type": "application/json" },
-      });
-      expect(response.ok).toBe(true);
-      return (await response.json()) as T;
-    };
-    const applyTag = (workerHosts: readonly string[]) =>
-      api<{ spec: { workerHosts: string[] } }>("/api/v1/tags", {
-        method: "POST",
-        body: JSON.stringify({
+    const resources = { operator: { url: started.url, token: adminToken } };
+    const applyTag = async (workerHosts: readonly string[]) => {
+      const applied = await applyManifests(resources, [
+        {
           apiVersion: "supertag/v1",
           kind: "Tag",
           metadata: { name: "builder" },
           spec: { workerHosts },
-        }),
-      });
+        },
+      ]);
+      expect(applied.complete).toBe(true);
+      return getResource<{ spec: { workerHosts: string[] } }>(resources, "tags", "builder");
+    };
     const join_ = async (key: string, name: string) => {
       const { secret } = await hostClient({ url: started.url, token: adminToken }).createAuthKey({
         name: key,

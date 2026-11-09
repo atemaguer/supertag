@@ -2,6 +2,7 @@ syntax = "proto3";
 package supertag.operator.v1;
 
 import "google/protobuf/timestamp.proto";
+import "supertag/operator/v1/options.proto";
 
 option go_package = "github.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1";
 
@@ -57,11 +58,11 @@ message TaskDelivery {
 enum WorkspaceDeliveryMode {
   WORKSPACE_DELIVERY_MODE_UNSPECIFIED = 0;
   // As patch artifacts.
-  WORKSPACE_DELIVERY_MODE_PATCH = 1;
+  WORKSPACE_DELIVERY_MODE_PATCH = 1 [(supertag.operator.v1.manifest_value) = "patch"];
   // As a branch in the Workspace's checkout on the Worker Host.
-  WORKSPACE_DELIVERY_MODE_BRANCH = 2;
+  WORKSPACE_DELIVERY_MODE_BRANCH = 2 [(supertag.operator.v1.manifest_value) = "branch"];
   // As a GitHub pull request.
-  WORKSPACE_DELIVERY_MODE_PULL_REQUEST = 3;
+  WORKSPACE_DELIVERY_MODE_PULL_REQUEST = 3 [(supertag.operator.v1.manifest_value) = "pull-request"];
 }
 
 // The branch a Task committed to in its Workspace.

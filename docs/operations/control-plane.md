@@ -330,7 +330,8 @@ The audit log answers "who changed what, and did it work?" The Control Plane kee
 database, so it survives restarts and needs no log store. It records one entry for each change an
 operator makes:
 
-- applies and deletes, including dry runs and apply-set pruning
+- applies and deletes: an apply records each resource it applied or failed to apply as
+  `resource.apply`, and each apply-set member it pruned as `resource.prune`
 - Operator Token and Auth Key creation and revocation
 - approval decisions, from `supertag approve request` and `supertag deny request`
 - Objective messages, approvals, reopens, pauses, resumes, and cancellation, including `@SuperTag approve` and
@@ -346,18 +347,18 @@ supertag audit --since 2026-10-01T00:00:00Z
 ```text
 TIME                      ACTOR           ACTION             TARGET                   OUTCOME
 2026-10-01T09:31:12.408Z  token:laptop-2  objective.message  Objective/release-notes  succeeded (200)
-2026-10-01T09:30:00.120Z  token:laptop-2  apply              Tag/reviewer             succeeded (201)
+2026-10-01T09:30:00.120Z  token:laptop-2  resource.apply     Tag/reviewer             succeeded (200)
 ```
 
 The actor is `control-plane-break-glass` for the admin token, `token:NAME` for an Operator Token, a
 scoped credential's `operatorId`, or `slack:USER` and `lark:USER` for a person in an Objective's
-thread. The target is `Kind/NAME` or `Kind/ID`; a failed or dry-run management request records only
+thread. The target is `Kind/NAME` or `Kind/ID`; a failed request records only
 the kind, because a name it did not resolve could hold a credential. The outcome is `succeeded` or
 `failed`, with the HTTP status when there is one. Entries come newest first. `--actor NAME` keeps one operator's
 entries, `--limit N` returns up to 500 (50 by default), and `--output json` prints the entries as
 JSON.
 
-Reads are not recorded. An entry never contains a credential, a secret value, a digest, or a
+Reads, plans such as `supertag diff`, and dry runs are not recorded. An entry never contains a credential, a secret value, a digest, or a
 request body, so message text and denial reasons stay out too. Any operator credential except a
 scoped coordination credential may read the log.
 
@@ -366,14 +367,12 @@ control-plane` writes it to standard error. Under `supertag up`, it goes to the 
 the file `logging.audit` names in `supertag.yaml`:
 
 ```json
-{"type":"supertag.audit","id":"5f0c…","at":"2026-10-01T09:30:00.120Z","actor":"token:laptop-2","action":"apply","target":"Tag/reviewer","outcome":"succeeded","status":201,"source":"api","method":"POST","path":"/api/v1/tags"}
+{"type":"supertag.audit","at":"2026-10-01T09:30:00.120Z","actor":"token:laptop-2","action":"resource.apply","target":"Tag/reviewer","outcome":"succeeded","status":200,"source":"api","method":"POST","path":"/supertag.operator.v1.ResourceService/ApplyManifests","id":"5f0c…"}
 ```
 
-`path` is the route the request
-matched, as a template such as `/api/v1/tags/{name}`, or the RPC's procedure, such as
-`/supertag.operator.v1.HostService/DrainWorkerHost`, never the request's own path. A write to a
-route the Control Plane doesn't recognize is recorded as `request` on `UnknownRoute`, with no
-`path`, so a credential pasted into a URL never reaches the log. A failure to write the line or the
+`path` is the RPC's procedure, such as `/supertag.operator.v1.HostService/DrainWorkerHost`. A
+request the Control Plane doesn't recognize is refused and not recorded, so a credential pasted
+into a URL never reaches the log. A failure to write the line or the
 entry is reported on standard error and never fails the change itself, even when the report fails
 too.
 
@@ -409,7 +408,7 @@ Control Plane to refuse an issued token while retaining its configuration record
 can call only the operator RPCs that accept scoped credentials: every `InboxService` RPC,
 `ObjectiveService.GetObjective`, `DescribeObjective`, `MessageObjective` and `ApproveObjective`, and
 `EventService.Watch`. Each also needs the RPC's action, and reaches only the Objectives the scope
-names. The Control Plane refuses scoped tokens on every other RPC and every `/api/v1/` route. The CLI
+names. The Control Plane refuses scoped tokens on every other RPC. The CLI
 uses the credential saved by `supertag connect control-plane`, so `supertag list inbox`,
 `supertag approve request`, `supertag describe objective` and the other commands those RPCs serve
 work with a scoped token. See [Operator RPCs](../reference/control-plane-api.md#operator-rpcs-experimental).

@@ -21,7 +21,7 @@ option go_package = "github.com/atemaguer/supertag/packages/operator-api/go/oper
 // applies to a Tag only in the locations it is activated for.
 //
 // The webhooks collaboration surfaces call stay plain HTTP. Applying and
-// deleting SurfaceAccount manifests is not part of this service.
+// deleting SurfaceAccount manifests is `ResourceService`'s.
 //
 // Access. The admin token and Operator Tokens may call every RPC; a scoped
 // coordination credential is refused with `PermissionDenied`. Every caller
@@ -320,12 +320,15 @@ message SurfaceSecretReferences {
 // Where a SurfaceAccount manifest takes one secret from. Never the value.
 message SurfaceSecretReference {
   oneof source {
-    // A named secret its caller resolves.
-    string secret_ref = 1;
-    // An environment variable.
-    string env = 2;
-    // A file path.
-    string file = 3;
+    option (supertag.operator.v1.manifest_oneof) = {required: true};
+    // A named secret its caller resolves, such as an entry in the `secrets`
+    // map of `supertag.yaml`.
+    string secret_ref = 1 [(supertag.operator.v1.manifest_field) = {min_length: 1}];
+    // An environment variable the applying caller reads.
+    string env = 2 [(supertag.operator.v1.manifest_field) = {min_length: 1}];
+    // A file the applying caller reads. A relative path starts from the
+    // manifest's directory.
+    string file = 3 [(supertag.operator.v1.manifest_field) = {min_length: 1}];
   }
 }
 

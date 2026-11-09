@@ -12,6 +12,7 @@ import { WorkletConnection } from "../packages/runtime/transport/src/index.ts";
 import { FileGatewayCredentialVault } from "../packages/store/src/index.ts";
 import { migrateSqlite } from "./support/database.ts";
 import { durableTestWorklet } from "./support/durable-test-worklet.js";
+import { applyManifests, getResource } from "./support/resources.ts";
 
 interface Joined {
   readonly metadata: { readonly workerHostId: string };
@@ -42,13 +43,10 @@ describe("Auth Key API", () => {
       reply: async () => {},
     });
     cleanups.push(() => started.close());
-    const admin = { authorization: `Bearer ${adminToken}`, "content-type": "application/json" };
-    const api = (path: string, init: RequestInit = {}) =>
-      fetch(`${started.url}${path}`, { ...init, headers: { ...admin, ...init.headers } });
     const options = { url: started.url, token: adminToken };
     return {
       url: started.url,
-      api,
+      resources: { operator: options },
       vaultPath,
       hosts: hostClient(options),
       workerHost: (id: string) => getWorkerHostResource(options, id),
@@ -70,20 +68,19 @@ describe("Auth Key API", () => {
   }
 
   it("issues a key once, joins a host bound to its Tags, and never shows the secret again", async () => {
-    const { url, api, vaultPath, hosts, workerHost, authKey } = await runtime();
+    const { url, resources, vaultPath, hosts, workerHost, authKey } = await runtime();
     expect(
       (
-        await api("/api/v1/tags", {
-          method: "POST",
-          body: JSON.stringify({
+        await applyManifests(resources, [
+          {
             apiVersion: "supertag/v1",
             kind: "Tag",
             metadata: { name: "builder" },
             spec: {},
-          }),
-        })
-      ).status,
-    ).toBe(201);
+          },
+        ])
+      ).complete,
+    ).toBe(true);
 
     // Only operators may manage keys.
     await expect(hostClient({ url }).listAuthKeys({})).rejects.toMatchObject({
@@ -140,7 +137,7 @@ describe("Auth Key API", () => {
       status: { phase: "used", redemptionCount: 1, usedAt: expect.any(String) },
     });
 
-    await expect((await api("/api/v1/tags/builder")).json()).resolves.toMatchObject({
+    await expect(getResource(resources, "tags", "builder")).resolves.toMatchObject({
       spec: { workerHosts: ["laptop"] },
     });
     await expect(workerHost("laptop")).resolves.toMatchObject({
@@ -163,16 +160,15 @@ describe("Auth Key API", () => {
   });
 
   it("rejects revoked keys and lets reusable keys join hosts under NAME-2", async () => {
-    const { url, api, hosts, workerHost } = await runtime();
-    await api("/api/v1/tags", {
-      method: "POST",
-      body: JSON.stringify({
+    const { url, resources, hosts, workerHost } = await runtime();
+    await applyManifests(resources, [
+      {
         apiVersion: "supertag/v1",
         kind: "Tag",
         metadata: { name: "builder" },
         spec: {},
-      }),
-    });
+      },
+    ]);
     const issued = await hosts.createAuthKey({
       name: "ci",
       tags: ["builder"],
@@ -214,16 +210,15 @@ describe("Auth Key API", () => {
   });
 
   it("lets a Worker Host revoke only itself with its own credential", async () => {
-    const { url, api, hosts, workerHost } = await runtime();
-    await api("/api/v1/tags", {
-      method: "POST",
-      body: JSON.stringify({
+    const { url, resources, hosts, workerHost } = await runtime();
+    await applyManifests(resources, [
+      {
         apiVersion: "supertag/v1",
         kind: "Tag",
         metadata: { name: "builder" },
         spec: {},
-      }),
-    });
+      },
+    ]);
     const issued = await hosts.createAuthKey({ name: "fleet", tags: ["builder"], reusable: true });
     const a = (await (await joinHost(url, issued.secret, "host-a")).json()) as Joined;
     const b = (await (await joinHost(url, issued.secret, "host-b")).json()) as Joined;

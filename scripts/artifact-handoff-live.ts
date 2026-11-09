@@ -13,6 +13,7 @@ import {
   type ControlPlaneRuntimeHandle,
   startControlPlaneRuntime,
 } from "../apps/cli/src/control-plane-runtime.js";
+import { resourceClient } from "../apps/cli/src/operator-client.js";
 import type { ResolvedArtifactTransfer } from "../packages/core/src/index.js";
 import { ClaudeCodeHarness } from "../packages/runtime/harnesses/claude-code/src/index.js";
 import { CodexHarness } from "../packages/runtime/harnesses/codex/src/index.js";
@@ -329,23 +330,24 @@ async function runPair(directory: string, producerProvider: Provider, consumerPr
       stateDirectory: join(directory, "server"),
       worklet,
     });
-    const response = await fetch(new URL("/api/v1/objectives", runtime.url), {
-      method: "POST",
-      headers: { authorization: `Bearer ${adminToken}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        apiVersion: "supertag/v1",
-        kind: "Objective",
-        metadata: { name: objectiveId },
-        spec: {
-          owner: owner.name,
-          outcome: "Exchange verified research through durable artifacts",
-          team: "Handoff team",
-          runtimeActions: ["files:write", "commands:execute"],
+    const applied = await resourceClient({ url: runtime.url, token: adminToken }).applyManifests({
+      documents: [
+        {
+          manifest: {
+            apiVersion: "supertag/v1",
+            kind: "Objective",
+            metadata: { name: objectiveId },
+            spec: {
+              owner: owner.name,
+              outcome: "Exchange verified research through durable artifacts",
+              team: "Handoff team",
+              runtimeActions: ["files:write", "commands:execute"],
+            },
+          },
         },
-      }),
+      ],
     });
-    assert(response.ok, `Applying the Objective failed (${response.status})`);
-    await response.body?.cancel();
+    assert(applied.complete, `Applying the Objective failed: ${JSON.stringify(applied.results)}`);
     const deadline = Date.now() + 600_000;
     while ((await store.getObjective(objectiveId)).status !== "completed") {
       const status = (await store.getObjective(objectiveId)).status;

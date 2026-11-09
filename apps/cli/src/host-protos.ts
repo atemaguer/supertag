@@ -92,13 +92,15 @@ function known<Name extends string, Value>(
   return name;
 }
 
-const optionalTimestamp = <K extends string>(key: K, iso: string | undefined) =>
+export const optionalTimestamp = <K extends string>(key: K, iso: string | undefined) =>
   (iso === undefined ? {} : { [key]: timestampOf(iso) }) as Partial<Record<K, Timestamp>>;
 
-const optionalIso = <K extends string>(key: K, timestamp: Timestamp | undefined) =>
+export const optionalIso = <K extends string>(key: K, timestamp: Timestamp | undefined) =>
   (timestamp === undefined ? {} : { [key]: isoOf(timestamp) }) as Partial<Record<K, string>>;
 
-function metadataMessage(metadata: ResourceMetadata): MessageInitShape<typeof MetadataSchema> {
+export function metadataMessage(
+  metadata: ResourceMetadata,
+): MessageInitShape<typeof MetadataSchema> {
   return {
     id: metadata.id,
     name: metadata.name ?? "",
@@ -108,7 +110,7 @@ function metadataMessage(metadata: ResourceMetadata): MessageInitShape<typeof Me
   };
 }
 
-function metadataView(metadata: Metadata | undefined): ResourceMetadata {
+export function metadataView(metadata: Metadata | undefined): ResourceMetadata {
   if (metadata === undefined) throw new Error("Control Plane returned a resource without metadata");
   return {
     id: metadata.id,

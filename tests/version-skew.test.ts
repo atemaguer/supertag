@@ -19,6 +19,7 @@ import {
   versionWarningSuppressed,
 } from "../apps/cli/src/version.ts";
 import { migrateSqlite } from "./support/database.ts";
+import { listResources } from "./support/resources.ts";
 
 const ADMIN = "version-skew-admin";
 const cleanups: Array<() => Promise<void>> = [];
@@ -74,7 +75,7 @@ async function fakeControlPlane(
   version: string | undefined,
   reply: { readonly status: number; readonly body: unknown } = {
     status: 200,
-    body: { apiVersion: "supertag/v1", kind: "List", items: [] },
+    body: {},
   },
 ): Promise<FakeControlPlane> {
   const requests: IncomingHttpHeaders[] = [];
@@ -228,7 +229,7 @@ describe("the CLI against a Control Plane", () => {
     const server = await fakeControlPlane(SUPERTAG_VERSION);
     const client = new ControlPlaneClient({ url: server.url, token: ADMIN });
     await client.listTags();
-    await client.request("/api/v1/roles");
+    await listResources(client, "roles");
     expect(server.requests.map((headers) => headers["supertag-client-version"])).toEqual([
       SUPERTAG_VERSION,
       SUPERTAG_VERSION,
@@ -276,42 +277,26 @@ describe("the CLI against a Control Plane", () => {
     expect(stderr()).toBe("");
   });
 
-  it("names both versions when a different Control Plane rejects a request", async () => {
+  it("names both versions when a different Control Plane does not serve an RPC", async () => {
     vi.stubEnv("SUPERTAG_NO_VERSION_WARNING", "1");
     const older = "0.1.0";
-    const rejected = { status: 400, body: { error: "bad", message: "Unknown field: start" } };
-    const skewed = await fakeControlPlane(older, rejected);
+    const missing = { status: 404, body: { message: "Admin route not found" } };
+    const skewed = await fakeControlPlane(older, missing);
     const error = await new ControlPlaneClient({ url: skewed.url, token: ADMIN })
       .listTags()
       .catch((caught: unknown) => caught as Error);
     expect(error.message).toBe(
-      `Unknown field: start\nHint: this CLI is ${SUPERTAG_VERSION} but the Control Plane is ${older}, which may not support this request. ${
+      `Control Plane does not support this SuperTag operator API\nHint: this CLI is ${SUPERTAG_VERSION} but the Control Plane is ${older}, which may not support this request. ${
         compareVersions(SUPERTAG_VERSION, older) === -1
           ? "Upgrade the CLI or use one that matches the Control Plane"
           : "Upgrade the Control Plane or use a matching CLI"
       }.`,
     );
 
-    const unversioned = await fakeControlPlane(undefined, {
-      status: 404,
-      body: { message: "Admin route not found" },
-    });
+    const unversioned = await fakeControlPlane(undefined, missing);
     await expect(
       new ControlPlaneClient({ url: unversioned.url, token: ADMIN }).listTags(),
     ).rejects.toThrow("the Control Plane does not report its version");
-
-    const matching = await fakeControlPlane(SUPERTAG_VERSION, rejected);
-    await expect(
-      new ControlPlaneClient({ url: matching.url, token: ADMIN }).listTags(),
-    ).rejects.toThrow(/^Unknown field: start$/u);
-
-    const missing = await fakeControlPlane(older, {
-      status: 404,
-      body: { message: "Task does not exist" },
-    });
-    await expect(
-      new ControlPlaneClient({ url: missing.url, token: ADMIN }).listTags(),
-    ).rejects.toThrow(/^Task does not exist$/u);
   });
 });
 

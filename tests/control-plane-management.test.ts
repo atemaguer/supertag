@@ -10,9 +10,15 @@ import { main } from "../apps/cli/src/index.ts";
 import { hostClient, organizationClient, workClient } from "../apps/cli/src/operator-client.ts";
 import { listWorkerHostResources } from "../apps/cli/src/operator-resources.ts";
 import type { CredentialValue, GatewayCredentialVault } from "../packages/core/src/index.ts";
-import { ControllerPhase, ControlPlanePhase } from "../packages/operator-api/src/index.ts";
+import {
+  ControllerPhase,
+  ControlPlanePhase,
+  ManifestOutcome,
+  PlanAction,
+} from "../packages/operator-api/src/index.ts";
 import { DrizzleStore } from "../packages/store/src/index.ts";
 import { migrateSqlite as migrateSqliteDatabase } from "./support/database.ts";
+import { applyManifests, getResource, listResources } from "./support/resources.ts";
 
 describe("remote Control Plane management", () => {
   afterEach(() => {
@@ -68,15 +74,14 @@ describe("remote Control Plane management", () => {
       expect(idempotentCreate.metadata.id).toBe(existingTag.metadata.id);
       expect(idempotentCreate.metadata.resourceVersion).toBe(existingTag.metadata.resourceVersion);
       await expect(
-        client.request("/api/v1/tags", {
-          method: "POST",
-          body: JSON.stringify({
+        applyManifests(client, [
+          {
             apiVersion: "supertag/v1",
             kind: "Tag",
             metadata: { name: "engineering" },
             spec: { workerProfile: { id: "removed", revision: "1" } },
-          }),
-        }),
+          },
+        ]),
       ).rejects.toThrow("Tag spec contains unknown fields: workerProfile");
       await expect(client.status()).resolves.toMatchObject({
         metadata: { name: "control-plane" },
@@ -112,10 +117,8 @@ describe("remote Control Plane management", () => {
         authorization: `Bearer ${token}`,
         "content-type": "application/json",
       };
-      const permissionResponse = await fetch(`${runtime.url}/api/v1/permission-sets`, {
-        method: "POST",
-        headers: adminHeaders,
-        body: JSON.stringify({
+      const permissionSet = await applyManifests(client, [
+        {
           apiVersion: "supertag/v1",
           kind: "PermissionSet",
           metadata: { name: "shared-engineering" },
@@ -130,10 +133,14 @@ describe("remote Control Plane management", () => {
               { target: "runtime", action: "commands:execute" },
             ],
           },
-        }),
-      });
-      expect(permissionResponse.status).toBe(201);
-      await expect(permissionResponse.json()).resolves.toMatchObject({
+        },
+      ]);
+      expect(permissionSet.results).toMatchObject([
+        { outcome: ManifestOutcome.APPLIED, action: PlanAction.CREATE },
+      ]);
+      await expect(
+        getResource(client, "permission-sets", "shared-engineering"),
+      ).resolves.toMatchObject({
         kind: "PermissionSet",
         metadata: { name: "shared-engineering" },
         spec: {
@@ -157,10 +164,8 @@ describe("remote Control Plane management", () => {
       expect(output.join("")).toContain("No changes. The Control Plane matches the input.");
       expect(output.join("")).toContain("PermissionSet/shared-engineering configured");
 
-      const contextResponse = await fetch(`${runtime.url}/api/v1/context-sets`, {
-        method: "POST",
-        headers: adminHeaders,
-        body: JSON.stringify({
+      const contextSet = await applyManifests(client, [
+        {
           apiVersion: "supertag/v1",
           kind: "ContextSet",
           metadata: { name: "shared-guidelines" },
@@ -175,13 +180,17 @@ describe("remote Control Plane management", () => {
               },
             ],
           },
-        }),
-      });
-      expect(contextResponse.status).toBe(201);
-      await expect(contextResponse.json()).resolves.toMatchObject({
-        kind: "ContextSet",
-        metadata: { name: "shared-guidelines" },
-      });
+        },
+      ]);
+      expect(contextSet.results).toMatchObject([
+        { outcome: ManifestOutcome.APPLIED, action: PlanAction.CREATE },
+      ]);
+      await expect(getResource(client, "context-sets", "shared-guidelines")).resolves.toMatchObject(
+        {
+          kind: "ContextSet",
+          metadata: { name: "shared-guidelines" },
+        },
+      );
 
       const roleManifestPath = join(directory, "role.yaml");
       await writeFile(
@@ -201,10 +210,7 @@ spec:
       );
       await expect(main(["diff", "-f", roleManifestPath])).resolves.toBe(0);
       await expect(main(["apply", "-f", roleManifestPath])).resolves.toBe(0);
-      const unassignedRole = await client.request<{
-        readonly spec: Record<string, unknown>;
-        readonly status: Record<string, unknown>;
-      }>("/api/v1/roles/Engineering%20Reviewer");
+      const unassignedRole = await getResource(client, "roles", "Engineering Reviewer");
       expect(unassignedRole.spec).toEqual({
         purpose: "Review engineering changes before release.",
         instructions: "Require evidence and state unresolved risk.",
@@ -213,9 +219,8 @@ spec:
       });
       expect(unassignedRole.status).toEqual({ phase: "active", assignedTags: [] });
       await expect(
-        client.request("/api/v1/roles", {
-          method: "POST",
-          body: JSON.stringify({
+        applyManifests(client, [
+          {
             apiVersion: "supertag/v1",
             kind: "Role",
             metadata: { name: "Engineering Reviewer" },
@@ -226,8 +231,8 @@ spec:
               permissionSets: ["shared-engineering"],
               tags: ["engineering"],
             },
-          }),
-        }),
+          },
+        ]),
       ).rejects.toThrow("Role spec contains unknown fields: tags");
 
       const tagManifestPath = join(directory, "tag.yaml");
@@ -264,12 +269,7 @@ spec:
         },
       });
       expect(configuredTag.metadata.resourceVersion).not.toBe(existingTag.metadata.resourceVersion);
-      const assignedRole = await client.request<{
-        readonly kind: string;
-        readonly metadata: { readonly name: string };
-        readonly spec: Record<string, unknown>;
-        readonly status: Record<string, unknown>;
-      }>("/api/v1/roles/Engineering%20Reviewer");
+      const assignedRole = await getResource(client, "roles", "Engineering Reviewer");
       expect(assignedRole).toMatchObject({
         kind: "Role",
         metadata: { name: "Engineering Reviewer" },
@@ -280,31 +280,29 @@ spec:
         assignedTags: ["engineering"],
       });
       // Every Role is declared; nothing is seeded, so only the declared Role is listed.
-      const roles = await client.request<{
-        readonly items: readonly { readonly metadata: { readonly name: string } }[];
-      }>("/api/v1/roles");
+      const roles = await listResources(client, "roles");
       expect(roles.items.map((role) => role.metadata.name)).toEqual(["Engineering Reviewer"]);
 
-      const clearedTag = await client.request<typeof configuredTag>("/api/v1/tags", {
-        method: "POST",
-        body: JSON.stringify({
+      await applyManifests(client, [
+        {
           apiVersion: "supertag/v1",
           kind: "Tag",
           metadata: { name: "engineering" },
           spec: { roles: [] },
-        }),
-      });
+        },
+      ]);
+      const clearedTag = await client.getTag("engineering");
       expect(clearedTag.spec.roles).toEqual([]);
       expect(clearedTag.metadata.resourceVersion).not.toBe(configuredTag.metadata.resourceVersion);
-      const restoredTag = await client.request<typeof configuredTag>("/api/v1/tags", {
-        method: "POST",
-        body: JSON.stringify({
+      await applyManifests(client, [
+        {
           apiVersion: "supertag/v1",
           kind: "Tag",
           metadata: { name: "engineering" },
           spec: { roles: ["Engineering Reviewer"], workerHosts: [] },
-        }),
-      });
+        },
+      ]);
+      const restoredTag = await client.getTag("engineering");
       expect(restoredTag.spec.roles).toEqual(["Engineering Reviewer"]);
       expect(restoredTag.metadata.resourceVersion).not.toBe(configuredTag.metadata.resourceVersion);
       const createExistingTag = await client.createTag({ name: "engineering" });
@@ -341,19 +339,21 @@ spec:
         kind: "ResourceList",
         items: [expect.objectContaining({ kind: "WorkerHost" })],
       });
-      await expect(client.request("/api/v1/worker-profiles")).resolves.toMatchObject({
+      await expect(listResources(client, "worker-profiles")).resolves.toMatchObject({
         kind: "ResourceList",
         items: [expect.objectContaining({ kind: "WorkerProfile" })],
       });
 
-      const unauthorized = await fetch(`${runtime.url}/api/v1/tags`);
+      const unauthorized = await fetch(
+        `${runtime.url}/supertag.operator.v1.ResourceService/ListResources`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind: "RESOURCE_KIND_TAG" }),
+        },
+      );
       expect(unauthorized.status).toBe(401);
-      await expect(unauthorized.json()).resolves.toMatchObject({
-        kind: "Status",
-        status: "Failure",
-        reason: "Unauthorized",
-        code: 401,
-      });
+      await expect(unauthorized.json()).resolves.toMatchObject({ code: "unauthenticated" });
 
       const tags = await client.listTags();
       expect(tags.kind).toBe("ResourceList");

@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/atemaguer/supertag/main/spec/manifests/workspace.schema.json",
+  "title": "SuperTag Workspace manifest",
+  "description": "A Workspace manifest, as supertag apply -f reads it. Its spec is supertag.operator.v1.WorkspaceSpec in supertag/operator/v1/resource.proto; this file is generated from it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "supertag/v1"
+    },
+    "kind": {
+      "const": "Workspace"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "description": "The resource's name, unique within its kind.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+          "minLength": 1
+        }
+      }
+    },
+    "spec": {
+      "$ref": "#/$defs/WorkspaceSpec"
+    }
+  },
+  "$defs": {
+    "WorkspaceSpec": {
+      "description": "A Workspace's declared fields, and the `spec` of a `Workspace` manifest. Every field is optional, and a manifest may leave out `spec`. A field an earlier apply set that a later manifest omits returns to its default.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "description": "The git remote hosts without a checkout clone. Embedded credentials are refused. Required with `mounts`, and a github.com remote with `pull-request` delivery.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "ref": {
+          "description": "The base of each new Session branch. Empty: the checkout's current branch, or the source's default branch in a clone, else `main`.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "setup": {
+          "description": "One shell command, on one line, run once in each new Task worktree.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "mcp": {
+          "description": "Server names selected from the trusted checkout's `.mcp.json`, without duplicates.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$"
+          },
+          "maxItems": 64
+        },
+        "skills": {
+          "description": "Skill names selected from the host checkout, without duplicates.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$"
+          },
+          "maxItems": 64
+        },
+        "skillCatalog": {
+          "description": "Skills from a GitHub repository, selected for every Task.",
+          "$ref": "#/$defs/WorkspaceSkillCatalog"
+        },
+        "mounts": {
+          "description": "Volumes attached at absolute paths outside the checkout. Paths may not overlap each other, staged files or protected system locations.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkspaceMount"
+          },
+          "maxItems": 64
+        },
+        "delivery": {
+          "description": "How Tasks deliver their changes. Unset: `branch`.",
+          "enum": [
+            "patch",
+            "branch",
+            "pull-request"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "delivery"
+            ],
+            "properties": {
+              "delivery": {
+                "const": "pull-request"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "source"
+            ]
+          }
+        }
+      ]
+    },
+    "WorkspaceSkillCatalog": {
+      "description": "Skills from a GitHub repository at one revision.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "path",
+        "revision",
+        "skills"
+      ],
+      "properties": {
+        "repository": {
+          "description": "The repository as `OWNER/REPO`.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "path": {
+          "description": "The directory within it that holds the Skills.",
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$",
+          "maxLength": 512
+        },
+        "revision": {
+          "description": "The branch, tag or commit to read.",
+          "type": "string",
+          "minLength": 1
+        },
+        "skills": {
+          "description": "The Skill names, distinct from `WorkspaceSpec.skills`.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      }
+    },
+    "WorkspaceMount": {
+      "description": "One Volume attached to a Workspace's Tasks.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "volume",
+        "path"
+      ],
+      "properties": {
+        "volume": {
+          "description": "The Volume's name.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+        },
+        "path": {
+          "description": "The absolute path it appears at, outside the checkout.",
+          "type": "string",
+          "pattern": "^/"
+        },
+        "access": {
+          "description": "How the Task may use it. Unset: `read-only`.",
+          "enum": [
+            "read-only",
+            "read-write"
+          ]
+        },
+        "strategy": {
+          "description": "How it is attached. Unset: `copy`.",
+          "enum": [
+            "copy",
+            "mount"
+          ]
+        },
+        "maxBytes": {
+          "description": "The most bytes a copy may hold. Unset: only the 20 GiB limit of every Task Attempt.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

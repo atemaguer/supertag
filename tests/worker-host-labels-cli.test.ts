@@ -22,6 +22,7 @@ import { migrateSqlite } from "./support/database.js";
 import { durableTestWorklet } from "./support/durable-test-worklet.js";
 import { fakeOperatorRpc } from "./support/fake-operator-rpc.ts";
 import { fakeWorkRpc } from "./support/fake-work-rpc.ts";
+import { applyManifests, getResource } from "./support/resources.ts";
 
 const CONTROL_PLANE = "https://control.example.com";
 
@@ -130,7 +131,7 @@ describe("Worker Host label commands", () => {
 
     await writeTag("[GPU, linux]");
     await runResourceCommand(client, "apply", ["-f", manifest]);
-    const tag = await client.request<{ spec: Record<string, unknown> }>("/api/v1/tags/trainer");
+    const tag = await getResource(client, "tags", "trainer");
     expect(tag.spec["runsOn"]).toEqual(["gpu", "linux"]);
     expect(await runResourceCommand(client, "diff", ["-f", manifest])).toContain("No changes.");
     const exported = await runResourceCommand(client, "get", [
@@ -181,15 +182,14 @@ describe("Worker Host label commands", () => {
     });
     cleanups.push(() => runtime.close());
     const client = new ControlPlaneClient({ url: runtime.url, token });
-    await client.request("/api/v1/tags", {
-      method: "POST",
-      body: JSON.stringify({
+    await applyManifests(client, [
+      {
         apiVersion: "supertag/v1",
         kind: "Tag",
         metadata: { name: "trainer" },
         spec: {},
-      }),
-    });
+      },
+    ]);
     const hosts = hostClient(client.operator);
     const created = await hosts.createAuthKey({
       name: "gpu-pool",

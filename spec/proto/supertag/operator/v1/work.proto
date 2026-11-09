@@ -617,8 +617,10 @@ message TaskAttempt {
 // How a mount may be used.
 enum MountAccess {
   MOUNT_ACCESS_UNSPECIFIED = 0;
-  MOUNT_ACCESS_READ_ONLY = 1;
-  MOUNT_ACCESS_READ_WRITE = 2;
+  // Nothing the Task changes is saved to the Volume's source.
+  MOUNT_ACCESS_READ_ONLY = 1 [(supertag.operator.v1.manifest_value) = "read-only"];
+  // Changes are saved to the Volume's source.
+  MOUNT_ACCESS_READ_WRITE = 2 [(supertag.operator.v1.manifest_value) = "read-write"];
 }
 
 // A live source attached to a Task Attempt: not a snapshot, so its content

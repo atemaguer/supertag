@@ -62,7 +62,7 @@ describe("supertag audit", () => {
     expect(await main(["create", "tag", "reviewer"])).toBe(0);
     expect(await main(["audit", "--actor", "control-plane-break-glass", "--limit", "10"])).toBe(0);
     expect(output()).toMatch(
-      /^\S+Z\s+control-plane-break-glass\s+apply\s+Tag\/reviewer\s+succeeded \(201\)$/mu,
+      /^\S+Z\s+control-plane-break-glass\s+resource\.apply\s+Tag\/reviewer\s+succeeded \(200\)$/mu,
     );
     expect(output()).not.toContain(ADMIN);
     await expect(main(["audit", "--limit", "1000"])).rejects.toThrow(

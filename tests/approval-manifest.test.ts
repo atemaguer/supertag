@@ -6,6 +6,7 @@ import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { main } from "../apps/cli/src/index.ts";
 import { migrateSqlite } from "./support/database.ts";
+import { getResource } from "./support/resources.ts";
 
 describe("Permission Set approval manifests", () => {
   afterEach(() => {
@@ -63,10 +64,7 @@ describe("Permission Set approval manifests", () => {
           "",
         ].join("\n");
       const path = join(directory, "permission-set.yaml");
-      const get = () =>
-        client.request<{ spec: Record<string, unknown> }>(
-          "/api/v1/permission-sets/release-engineering",
-        );
+      const get = () => getResource(client, "permission-sets", "release-engineering");
 
       // A manifest without the new fields behaves as before.
       await writeFile(path, manifest({ approval: false }));

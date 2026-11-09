@@ -10,10 +10,8 @@ import { runApprovalCommand } from "../apps/cli/src/approvals.ts";
 import { runAuditCommand } from "../apps/cli/src/audit-command.ts";
 import {
   AuditTrail,
-  classifyManagementRequest,
   fileAuditSink,
   type ManagementAuditEvent,
-  noteRequestBody,
 } from "../apps/cli/src/audit-trail.ts";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
@@ -86,6 +84,18 @@ async function runtime(
         ...init.headers,
       },
     });
+  const rpc = (token: string, method: string, body: unknown) =>
+    call(token, `/supertag.operator.v1.ResourceService/${method}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  /** Applies one manifest as `curl` sends it: a Connect JSON POST. */
+  const apply = (token: string, manifest: unknown) =>
+    rpc(token, "ApplyManifests", { documents: [{ manifest }] });
+  const remove = (token: string, name: string) =>
+    rpc(token, "DeleteResource", { kind: "RESOURCE_KIND_TAG", name });
+  const tag = (token: string, name: string) =>
+    apply(token, { apiVersion: "supertag/v1", kind: "Tag", metadata: { name }, spec: {} });
   const audit = async (
     token = ADMIN,
     request: MessageInitShape<typeof ListAuditEntriesRequestSchema> = {},
@@ -93,7 +103,7 @@ async function runtime(
     (await organizationClient({ url: started.url, token }).listAuditEntries(request)).entries.map(
       auditEntryView,
     );
-  return { url: started.url, store, events, call, audit, directory };
+  return { url: started.url, store, events, call, rpc, apply, remove, tag, audit, directory };
 }
 
 const summary = ({ actor, action, target, outcome, status }: AuditEntry) => ({
@@ -107,7 +117,7 @@ const summary = ({ actor, action, target, outcome, status }: AuditEntry) => ({
 for (const dialect of ["sqlite", "postgresql"] as const)
   describe.skipIf(dialect === "postgresql" && !postgres)(`audit trail (${dialect})`, () => {
     it("records every operator change with actor, action, target, time, and outcome, and never a secret", async () => {
-      const { url, store, events, call, audit, directory } = await runtime(dialect);
+      const { url, store, events, call, apply, audit, directory } = await runtime(dialect);
       const startedAt = new Date().toISOString();
 
       // Operator Token management, by the admin token.
@@ -123,11 +133,12 @@ for (const dialect of ["sqlite", "postgresql"] as const)
         "apiVersion: supertag/v1\nkind: Tag\nmetadata:\n  name: reviewer\nspec: {}\n",
       );
       await runResourceCommand(client, "apply", ["-f", manifest]);
-      const invalid = await call(tokenSecret, "/api/v1/roles", {
-        method: "POST",
-        body: JSON.stringify({ apiVersion: "supertag/v1", kind: "Role", metadata: { name: "x" } }),
+      const invalid = await apply(tokenSecret, {
+        apiVersion: "supertag/v1",
+        kind: "Role",
+        metadata: { name: "x" },
       });
-      expect(invalid.status).toBeGreaterThanOrEqual(400);
+      expect(invalid.status).toBe(400);
 
       // Auth Key management.
       const authKeySecret = (await hosts.createAuthKey({ name: "build-hosts", tags: ["reviewer"] }))
@@ -224,17 +235,17 @@ for (const dialect of ["sqlite", "postgresql"] as const)
           },
           {
             actor: token,
-            action: "apply",
+            action: "resource.apply",
             target: "Tag/reviewer",
             outcome: "succeeded",
-            status: 201,
+            status: 200,
           },
           {
             actor: token,
-            action: "apply",
+            action: "resource.apply",
             target: "Role",
             outcome: "failed",
-            status: expect.any(Number),
+            status: 400,
           },
           {
             actor: token,
@@ -329,7 +340,7 @@ for (const dialect of ["sqlite", "postgresql"] as const)
           },
           {
             actor: token,
-            action: "delete",
+            action: "resource.delete",
             target: "Tag/reviewer",
             outcome: "succeeded",
             status: 200,
@@ -384,38 +395,29 @@ for (const dialect of ["sqlite", "postgresql"] as const)
       expect(stored).not.toMatch(/stop_[a-f0-9]{8}|secretDigest|"spec"/u);
     }, 60_000);
 
-    it("keeps no part of an unmatched path and records route templates, never request paths", async () => {
-      const { store, events, call, audit } = await runtime(dialect);
+    it("records an RPC's method, and only its target's kind once it fails", async () => {
+      const { store, events, call, remove, audit } = await runtime(dialect);
       const secret = "unmatched-path-credential-value";
-      const underscored = "sk_live_unmatched_path_credential";
+      // No HTTP management route is left to record; unknown paths are refused and not recorded.
       for (const [method, path] of [
         ["POST", `/api/v1/${secret}`],
-        ["POST", `/api/v1/${underscored}?dryRun=true`],
-        ["DELETE", `/api/v1/no-such-kind/${secret}`],
-        ["PUT", `/api/v1/tags/${secret}/extra/${underscored}`],
-        ["POST", `/api/v1/coordination/${secret.replaceAll("-", "_")}`],
+        ["DELETE", `/api/v1/worker-hosts/${secret}`],
         ["POST", `/api/v1/coordination/approvals/missing/${secret}`],
-        ["DELETE", `/api/v1/${encodeURIComponent(`${secret}/${underscored}`)}`],
       ] as const) {
         const response = await call(ADMIN, path, { method, body: "{}" });
         expect(response.status, path).toBeGreaterThanOrEqual(400);
       }
-      // An RPC records its method and, once it fails, only the target's kind.
       const denied = await call(ADMIN, "/supertag.operator.v1.InboxService/Deny", {
         method: "POST",
         body: JSON.stringify({ id: "sk_live_missing_approval", reason: "No" }),
       });
       expect(denied.status).toBe(404);
-      // A known route records its template. A failed request keeps only the target's kind, so a
-      // credential-shaped name in a recognized route is never stored either.
-      expect((await call(ADMIN, "/api/v1/tags/missing", { method: "DELETE" })).status).toBe(404);
+      // A failed call keeps only the target's kind, so a credential-shaped name is never stored.
+      expect((await remove(ADMIN, "missing")).status).toBe(404);
       const recognized = "sk_live_recognized_route_credential";
-      expect((await call(ADMIN, `/api/v1/tags/${recognized}`, { method: "DELETE" })).status).toBe(
-        404,
-      );
+      expect((await remove(ADMIN, recognized)).status).toBe(404);
 
       const entries = await audit();
-      expect(entries).toHaveLength(10);
       expect(
         entries.map(({ action, target, method, path, outcome }) => ({
           action,
@@ -424,42 +426,33 @@ for (const dialect of ["sqlite", "postgresql"] as const)
           path,
           outcome,
         })),
-      ).toEqual(
-        expect.arrayContaining([
-          {
-            action: "delete",
-            target: "Tag",
-            method: "DELETE",
-            path: "/api/v1/tags/{name}",
-            outcome: "failed",
-          },
-          {
-            action: "approval.deny",
-            target: "ApprovalRequest",
-            method: "POST",
-            path: "/supertag.operator.v1.InboxService/Deny",
-            outcome: "failed",
-          },
-        ]),
-      );
-      const unmatched = entries.filter((entry) => entry.target === "UnknownRoute");
-      expect(unmatched).toHaveLength(7);
-      for (const entry of unmatched) {
-        expect(entry.action).toBe("request");
-        expect(entry.path).toBeUndefined();
-        expect(entry.outcome).toBe("failed");
-      }
+      ).toEqual([
+        {
+          action: "resource.delete",
+          target: "Tag",
+          method: "POST",
+          path: "/supertag.operator.v1.ResourceService/DeleteResource",
+          outcome: "failed",
+        },
+        {
+          action: "resource.delete",
+          target: "Tag",
+          method: "POST",
+          path: "/supertag.operator.v1.ResourceService/DeleteResource",
+          outcome: "failed",
+        },
+        {
+          action: "approval.deny",
+          target: "ApprovalRequest",
+          method: "POST",
+          path: "/supertag.operator.v1.InboxService/Deny",
+          outcome: "failed",
+        },
+      ]);
       const stored = JSON.stringify(await store.listAuditEntries({ limit: 500 }));
       const sunk = events.map((event) => JSON.stringify(event)).join("\n");
-      expect(events).toHaveLength(10);
-      for (const value of [
-        secret,
-        underscored,
-        secret.replaceAll("-", "_"),
-        "no-such-kind",
-        "missing",
-        recognized,
-      ]) {
+      expect(events).toHaveLength(3);
+      for (const value of [secret, "sk_live_missing_approval", "missing", recognized]) {
         expect(stored).not.toContain(value);
         expect(sunk).not.toContain(value);
       }
@@ -467,44 +460,116 @@ for (const dialect of ["sqlite", "postgresql"] as const)
   });
 
 describe("audit reads and sinks", () => {
-  it("keeps only the target kind for a dry run, which creates nothing", async () => {
-    const { store, events, call, audit } = await runtime("sqlite");
+  it("records nothing for a plan or a dry-run delete, which change nothing", async () => {
+    const { store, events, rpc, tag, audit } = await runtime("sqlite");
     const name = "sk_live_dry_run_credential";
-    const response = await call(ADMIN, "/api/v1/tags?dryRun=true", {
-      method: "POST",
-      body: JSON.stringify({
-        apiVersion: "supertag/v1",
-        kind: "Tag",
-        metadata: { name },
-        spec: {},
-      }),
+    const response = await rpc(ADMIN, "DiffManifests", {
+      documents: [
+        { manifest: { apiVersion: "supertag/v1", kind: "Tag", metadata: { name }, spec: {} } },
+      ],
     });
-    expect(response.status).toBeLessThan(400);
-    const entries = await audit();
-    expect(entries.map(({ action, target, outcome }) => ({ action, target, outcome }))).toEqual([
-      { action: "apply.dry-run", target: "Tag", outcome: "succeeded" },
-    ]);
+    expect(response.status).toBe(200);
+    expect(await audit()).toEqual([]);
+    expect((await tag(ADMIN, "kept")).status).toBe(200);
+    const previewed = await rpc(ADMIN, "DeleteResource", {
+      kind: "RESOURCE_KIND_TAG",
+      name: "kept",
+      dryRun: true,
+    });
+    expect(previewed.status).toBe(200);
+    expect((await audit()).map((entry) => entry.target)).toEqual(["Tag/kept"]);
     expect(JSON.stringify(await store.listAuditEntries({ limit: 500 }))).not.toContain(name);
     expect(events.map((event) => JSON.stringify(event)).join("\n")).not.toContain(name);
   });
 
+  it("records each resource an apply changed, failed to change, or pruned", async () => {
+    const { url, rpc, audit } = await runtime("sqlite");
+    const tag = (name: string, spec: object = {}) => ({
+      manifest: { apiVersion: "supertag/v1", kind: "Tag", metadata: { name }, spec },
+    });
+    const applied = async (body: object) => {
+      const response = await rpc(ADMIN, "ApplyManifests", body);
+      expect(response.status, await response.clone().text()).toBe(200);
+      return (await response.json()) as { complete?: boolean };
+    };
+    const latest = async (count: number) =>
+      (await audit())
+        .slice(0, count)
+        .map(({ action, target, outcome, status, path }) => ({
+          action,
+          target,
+          outcome,
+          status,
+          path,
+        }))
+        // One call's entries share a time, so they are listed in no particular order.
+        .toSorted((left, right) => left.target.localeCompare(right.target));
+    const path = "/supertag.operator.v1.ResourceService/ApplyManifests";
+
+    await applied({ documents: [tag("reviewer"), tag("builder")], applySet: "team" });
+    expect(await latest(2)).toEqual(
+      ["Tag/builder", "Tag/reviewer"].map((target) => ({
+        action: "resource.apply",
+        target,
+        outcome: "succeeded",
+        status: 200,
+        path,
+      })),
+    );
+
+    await applied({ documents: [tag("builder")], applySet: "team", prune: true });
+    expect(await latest(2)).toEqual([
+      { action: "resource.apply", target: "Tag/builder", outcome: "succeeded", status: 200, path },
+      { action: "resource.prune", target: "Tag/reviewer", outcome: "succeeded", status: 200, path },
+    ]);
+
+    await surfaceClient({ url, token: ADMIN }).setUpSurface({
+      provider: SurfaceProvider.SLACK,
+      externalAccountId: "T-AUDIT-APPLY",
+      displayName: "Audit apply",
+      authMethod: "slack-socket-mode",
+      configuration: { transport: "socket" },
+      secrets: { botToken: "xoxb-audit-apply", appToken: "xapp-audit-apply" },
+    });
+    const location = { locations: [{ provider: "slack", channelId: "C0SHARED" }] };
+    await applied({ documents: [tag("holder", location)] });
+    const before = (await audit()).length;
+    // Only the write finds that another Tag already answers in the channel.
+    const partial = await applied({
+      documents: [
+        {
+          manifest: {
+            apiVersion: "supertag/v1",
+            kind: "Volume",
+            metadata: { name: "datasets" },
+            spec: { source: "file:///srv/data", credential: "data" },
+          },
+        },
+        tag("taker", location),
+        tag("later", { acceptsMessagesFrom: ["taker"] }),
+      ],
+    });
+    expect(partial.complete ?? false).toBe(false);
+    expect((await audit()).length - before).toBe(2);
+    expect(await latest(2)).toEqual([
+      { action: "resource.apply", target: "Tag", outcome: "failed", status: 400, path },
+      {
+        action: "resource.apply",
+        target: "Volume/datasets",
+        outcome: "succeeded",
+        status: 200,
+        path,
+      },
+    ]);
+  });
+
   it("filters by actor, time, and limit, validates its query, and stays read-only", async () => {
-    const { url, call, audit } = await runtime("sqlite");
-    const tag = (token: string, name: string) =>
-      call(token, "/api/v1/tags", {
-        method: "POST",
-        body: JSON.stringify({
-          apiVersion: "supertag/v1",
-          kind: "Tag",
-          metadata: { name },
-          spec: {},
-        }),
-      });
-    expect((await tag(ADMIN, "first")).status).toBe(201);
+    const { url, tag, audit } = await runtime("sqlite");
+    expect((await tag(ADMIN, "first")).status).toBe(200);
     await new Promise((resolve) => setTimeout(resolve, 5));
     const between = new Date().toISOString();
     await new Promise((resolve) => setTimeout(resolve, 5));
-    expect((await tag(ADMIN, "second")).status).toBe(201);
+    expect((await tag(ADMIN, "second")).status).toBe(200);
     await expect(
       inboxClient({ url, token: SCOPED }).approve({ id: "missing" }),
     ).rejects.toMatchObject({ code: Code.NotFound });
@@ -527,7 +592,7 @@ describe("audit reads and sinks", () => {
     });
     expect(first.entries.map((entry) => entry.target)).toEqual(["ApprovalRequest", "Tag/second"]);
     // A change recorded between pages neither repeats nor shifts the next page.
-    expect((await tag(ADMIN, "third")).status).toBe(201);
+    expect((await tag(ADMIN, "third")).status).toBe(200);
     const next = await organizationClient({ url, token: ADMIN }).listAuditEntries({
       pageSize: 2,
       pageToken: first.nextPageToken,
@@ -561,22 +626,15 @@ describe("audit reads and sinks", () => {
   });
 
   it("supertag audit prints entries as text or JSON and validates its flags", async () => {
-    const { url, call } = await runtime("sqlite");
-    const response = await call(ADMIN, "/api/v1/tags", {
-      method: "POST",
-      body: JSON.stringify({
-        apiVersion: "supertag/v1",
-        kind: "Tag",
-        metadata: { name: "cli" },
-        spec: {},
-      }),
-    });
-    expect(response.status).toBe(201);
+    const { url, tag } = await runtime("sqlite");
+    expect((await tag(ADMIN, "cli")).status).toBe(200);
     const client = new ControlPlaneClient({ url, token: ADMIN });
     const text = await runAuditCommand(client, []);
     const [header, row] = text.trimEnd().split("\n");
     expect(header).toMatch(/^TIME\s+ACTOR\s+ACTION\s+TARGET\s+OUTCOME$/u);
-    expect(row).toMatch(/control-plane-break-glass\s+apply\s+Tag\/cli\s+succeeded \(201\)$/u);
+    expect(row).toMatch(
+      /control-plane-break-glass\s+resource\.apply\s+Tag\/cli\s+succeeded \(200\)$/u,
+    );
     const json = JSON.parse(
       await runAuditCommand(client, [
         "--output",
@@ -591,7 +649,7 @@ describe("audit reads and sinks", () => {
     expect(json.items).toEqual([
       expect.objectContaining({
         actor: "control-plane-break-glass",
-        action: "apply",
+        action: "resource.apply",
         target: "Tag/cli",
       }),
     ]);
@@ -613,9 +671,9 @@ describe("audit reads and sinks", () => {
     const directory = await mkdtemp(join(tmpdir(), "supertag-audit-file-"));
     cleanups.push(() => rm(directory, { recursive: true, force: true }));
     const file = join(directory, "audit.jsonl");
-    const { url, call, audit, store } = await runtime("sqlite", { sink: fileAuditSink(file) });
+    const { url, remove, audit, store } = await runtime("sqlite", { sink: fileAuditSink(file) });
     const secret = await issueOperatorToken(url, ADMIN, "file-sink");
-    expect((await call(ADMIN, "/api/v1/tags/missing", { method: "DELETE" })).status).toBe(404);
+    expect((await remove(ADMIN, "missing")).status).toBe(404);
     const [newest, oldest] = await audit();
     // The file catches up asynchronously; wait until both lines are written.
     let lines: string[] = [];
@@ -629,7 +687,7 @@ describe("audit reads and sinks", () => {
       { type: "supertag.audit", ...newest },
     ]);
     expect(parsed[1]).toMatchObject({
-      action: "delete",
+      action: "resource.delete",
       target: "Tag",
       outcome: "failed",
       status: 404,
@@ -644,19 +702,10 @@ describe("audit reads and sinks", () => {
   it("never fails a request when the file sink or the database cannot record it", async () => {
     const reported: unknown[] = [];
     const missing = join(tmpdir(), `supertag-missing-${Date.now()}`, "audit.jsonl");
-    const { call, audit } = await runtime("sqlite", {
+    const { tag, audit } = await runtime("sqlite", {
       sink: fileAuditSink(missing, (error) => reported.push(error)),
     });
-    const response = await call(ADMIN, "/api/v1/tags", {
-      method: "POST",
-      body: JSON.stringify({
-        apiVersion: "supertag/v1",
-        kind: "Tag",
-        metadata: { name: "kept" },
-        spec: {},
-      }),
-    });
-    expect(response.status).toBe(201);
+    expect((await tag(ADMIN, "kept")).status).toBe(200);
     // The database still has the entry the file could not take.
     expect((await audit()).map((entry) => entry.target)).toEqual(["Tag/kept"]);
     for (let attempt = 0; attempt < 50 && reported.length === 0; attempt++)
@@ -736,7 +785,7 @@ describe("audit reads and sinks", () => {
   });
 
   it("answers management requests when recording and its error reporter throw synchronously", async () => {
-    const { call } = await runtime("sqlite", { sink: thrown("sink is full") });
+    const { tag, remove } = await runtime("sqlite", { sink: thrown("sink is full") });
     const record = vi
       .spyOn(DrizzleStore.prototype, "recordAuditEntry")
       .mockImplementation(thrown("database is down"));
@@ -757,17 +806,8 @@ describe("audit reads and sinks", () => {
       stderr.mockRestore();
     });
 
-    const created = await call(ADMIN, "/api/v1/tags", {
-      method: "POST",
-      body: JSON.stringify({
-        apiVersion: "supertag/v1",
-        kind: "Tag",
-        metadata: { name: "kept" },
-        spec: {},
-      }),
-    });
-    expect(created.status).toBe(201);
-    expect((await call(ADMIN, "/api/v1/tags/kept", { method: "DELETE" })).status).toBe(200);
+    expect((await tag(ADMIN, "kept")).status).toBe(200);
+    expect((await remove(ADMIN, "kept")).status).toBe(200);
     // The Control Plane keeps serving after both recordings failed.
     for (let attempt = 0; attempt < 50 && reported.length < 4; attempt++)
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -778,66 +818,7 @@ describe("audit reads and sinks", () => {
       expect.stringContaining("sink is full"),
       expect.stringContaining("database is down"),
     ]);
-    expect((await call(ADMIN, "/api/v1/tags/kept", { method: "DELETE" })).status).toBe(404);
-  });
-});
-
-describe("audit classification", () => {
-  const classify = (method: string, path: string) =>
-    classifyManagementRequest(method, new URL(path, "http://control-plane"));
-
-  it("names a meaningful action and target for each management write", () => {
-    expect(classify("DELETE", "/api/v1/permission-sets/release?dryRun=true")).toEqual({
-      action: "delete.dry-run",
-      target: "PermissionSet/release",
-      route: "/api/v1/permission-sets/{name}",
-    });
-    expect(classify("POST", "/api/v1/apply-sets/platform/prune")).toEqual({
-      action: "prune",
-      target: "ApplySet/platform",
-      route: "/api/v1/apply-sets/{name}/prune",
-    });
-    // A path segment that is not a plain name or ID is left out of the target.
-    expect(classify("DELETE", "/api/v1/tags/build%20one")).toEqual({
-      action: "delete",
-      target: "Tag",
-      route: "/api/v1/tags/{name}",
-    });
-    // An unmatched path is the caller's and might hold a credential, so none of it is kept.
-    for (const [method, path] of [
-      ["POST", "/api/v1/somewhere-new"],
-      ["POST", "/api/v1/sk_live_secret"],
-      ["DELETE", "/api/v1/unknown-kind/st_op_secret"],
-      ["PATCH", "/api/v1/tags/builder"],
-      ["POST", "/other/st_op_secret"],
-      // Worker Hosts, Auth Keys, Operator Tokens and surfaces are operator RPCs, not routes.
-      ["POST", "/api/v1/worker-hosts/build/drain"],
-      ["DELETE", "/api/v1/worker-hosts/build/credential"],
-      ["POST", "/api/v1/auth-keys"],
-      ["POST", "/api/v1/operator-tokens/laptop/revoke"],
-      ["POST", "/api/v1/tag-operations"],
-      ["POST", "/api/v1/surface-enrollments"],
-    ])
-      expect(classify(method as string, path as string), path).toEqual({
-        action: "request",
-        target: "UnknownRoute",
-      });
-    // Coordination is served by operator RPCs, so no coordination path keeps anything.
-    for (const path of [
-      "/api/v1/coordination/st_op_secret",
-      "/api/v1/coordination/approvals/r-1/approve",
-      "/api/v1/coordination/objectives/o-1/messages",
-    ])
-      expect(classify("POST", path), path).toEqual({ action: "request", target: "UnknownRoute" });
-  });
-
-  it("reads only a well-formed name from a body and nothing else", () => {
-    const apply = classify("POST", "/api/v1/tags");
-    noteRequestBody(apply, { metadata: { name: "builder" }, spec: { secret: "s3cret" } });
-    expect(apply).toEqual({ action: "apply", target: "Tag/builder", route: "/api/v1/tags" });
-    const odd = classify("POST", "/api/v1/roles");
-    noteRequestBody(odd, { metadata: { name: "has spaces and\nnewlines" } });
-    expect(odd).toEqual({ action: "apply", target: "Role", route: "/api/v1/roles" });
+    expect((await remove(ADMIN, "kept")).status).toBe(404);
   });
 });
 

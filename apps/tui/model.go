@@ -60,6 +60,8 @@ const (
 	// paneConversations lists the selected Tag's conversations to switch to or start.
 	paneConversations
 	paneTeam
+	// paneNewObjective declares a new Objective owned by the selected Tag.
+	paneNewObjective
 )
 
 // decision is where deciding the shown approval request stands.
@@ -139,7 +141,7 @@ func convKey(tag, name string) string { return tag + "\x00" + name }
 
 type (
 	tagsMsg struct {
-		tags []client.Tag
+		tags []*operatorv1.Tag
 		err  error
 	}
 	conversationsMsg struct {
@@ -223,7 +225,7 @@ type model struct {
 	follower *client.Follower
 	watcher  *client.Watcher
 
-	tags []client.Tag
+	tags []*operatorv1.Tag
 	// selected is the Tag whose conversation the conversation pane shows.
 	selected int
 	focus    focus
@@ -240,6 +242,8 @@ type model struct {
 	// diff is the diff pane's content; picker the conversation list's.
 	diff   *diffView
 	picker *picker
+	// form is the new Objective form while it shows.
+	form *objectiveForm
 	// notice is what came of the last action on a conversation's selection, such as opening a
 	// pull request; the next key clears it.
 	notice note
@@ -441,7 +445,7 @@ func (m model) selectedTag() string {
 	if m.selected < 0 || m.selected >= len(m.tags) {
 		return ""
 	}
-	return m.tags[m.selected].Name()
+	return tagName(m.tags[m.selected])
 }
 
 // currentConversation names the conversation tag shows.
@@ -514,7 +518,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tags = msg.tags
 		m.selected = 0
 		for i, tag := range m.tags {
-			if tag.Name() == current {
+			if tagName(tag) == current {
 				m.selected = i
 			}
 		}
@@ -579,6 +583,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case answeredMsg:
 		return m, m.answered(msg)
+
+	case createdMsg:
+		return m, m.objectiveCreated(msg)
 
 	case conversationsMsg:
 		var again tea.Cmd
@@ -669,6 +676,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	if m.focus == focusInput {
 		m.input, cmd = m.input.Update(msg)
+		if m.pane == paneNewObjective && m.form != nil {
+			var field tea.Cmd
+			m.form.fields[m.form.field], field = m.form.fields[m.form.field].Update(msg)
+			cmd = tea.Batch(cmd, field)
+		}
 	}
 	return m, cmd
 }
@@ -861,6 +873,10 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if next, cmd, ok := m.pickerKey(msg); ok {
 			return next, cmd
 		}
+	case paneNewObjective:
+		if next, cmd, ok := m.formKey(msg); ok {
+			return next, cmd
+		}
 	case paneDiff:
 		if msg.String() == "o" {
 			return m, m.openPullRequest(m.diff.pr)
@@ -1026,14 +1042,24 @@ func (m model) toggleFocus() (tea.Model, tea.Cmd) {
 	return m, m.syncInput()
 }
 
-// syncInput focuses the input when the pane is focused and has an input line, and blurs it
-// otherwise.
+// syncInput focuses the input when the pane is focused and has an input line, or the new
+// Objective form's field that takes the keys, and blurs the others.
 func (m *model) syncInput() tea.Cmd {
+	var cmd tea.Cmd
+	if f := m.form; f != nil {
+		for i := range f.fields {
+			if m.pane == paneNewObjective && m.focus == focusInput && i == f.field && !f.sending && f.created == nil {
+				cmd = f.fields[i].Focus()
+			} else {
+				f.fields[i].Blur()
+			}
+		}
+	}
 	if m.focus == focusInput && m.inputShown() {
 		return m.input.Focus()
 	}
 	m.input.Blur()
-	return nil
+	return cmd
 }
 
 // inputShown says whether the pane ends with the input line, rather than a hint.
@@ -1113,7 +1139,7 @@ func (m model) rowKey(r row) string {
 	case rowTeam:
 		return "team:" + m.teams[r.index].GetId()
 	}
-	return "tag:" + m.tags[r.index].Name()
+	return "tag:" + tagName(m.tags[r.index])
 }
 
 // paneKey names what the main pane shows, as rowKey names a row.
@@ -1136,7 +1162,7 @@ func (m model) draftKey() string {
 	case paneConversation:
 		tag := m.selectedTag()
 		return "conversation:" + convKey(tag, m.currentConversation(tag))
-	case paneDiff, paneConversations:
+	case paneDiff, paneConversations, paneNewObjective:
 		return ""
 	}
 	return m.paneKey()
@@ -1150,8 +1176,8 @@ func (m *model) saveDraft() {
 	m.input.Reset()
 }
 
-// back leaves the diff pane or the conversation list for the conversation, or clears the
-// conversation's selection; false when there is nothing to go back from.
+// back leaves the diff pane, the conversation list or the new Objective form for the
+// conversation, or clears the conversation's selection; false when there is nothing to go back from.
 func (m *model) back() bool {
 	switch m.pane {
 	case paneConversation:
@@ -1171,6 +1197,10 @@ func (m *model) back() bool {
 		return true
 	case paneDiff:
 		m.viewport.SoftWrap = false
+		m.showConversation()
+		return true
+	case paneNewObjective:
+		m.form = nil
 		m.showConversation()
 		return true
 	}
@@ -1211,7 +1241,7 @@ func (m *model) choose() tea.Cmd {
 		return nil
 	}
 	m.saveDraft()
-	m.decision, m.itemNote = decisionNone, note{}
+	m.decision, m.itemNote, m.form = decisionNone, note{}, nil
 	m.viewport.SoftWrap = false
 	var cmd tea.Cmd
 	switch r.kind {

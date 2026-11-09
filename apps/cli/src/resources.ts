@@ -1,6 +1,9 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
+import { type JsonObject, type MessageInitShape, toJson } from "@bufbuild/protobuf";
+import { ValueSchema } from "@bufbuild/protobuf/wkt";
+import { Code, ConnectError } from "@connectrpc/connect";
 import type { TaskDelivery } from "@supertag/core";
 import {
   parseApplySetName,
@@ -12,7 +15,20 @@ import {
   unsandboxedCommandHoldsOf,
   unsandboxedCommandsReason,
 } from "@supertag/core";
-import type { VerifiedSurfaceAccount } from "@supertag/surface-sdk";
+import {
+  type ApplyManifestsResponse,
+  DeletionAction,
+  ErrorDetailSchema,
+  type FieldChange,
+  FieldChangeAction,
+  type ManifestDocumentSchema,
+  ManifestOutcome,
+  type ManifestPlan,
+  PlanAction,
+  PruneAction,
+  type PruneResult,
+  ResourceKind,
+} from "@supertag/operator-api";
 import { parseAllDocuments, stringify as stringifyYaml } from "yaml";
 import type { ControlPlaneClient } from "./control-plane-client.js";
 import {
@@ -21,25 +37,34 @@ import {
   type LocalCheckouts,
   localCheckouts,
 } from "./delivery-view.js";
-import { locationKey } from "./field-management.js";
-import { money } from "./money.js";
-import { workClient } from "./operator-client.js";
+import { nameOf, SURFACE_PROVIDERS } from "./host-protos.js";
 import {
+  APPLY_ORDER,
+  label,
+  MANIFEST_INPUT_MAX_BYTES,
+  type ManifestDocument,
+  manifestDocuments,
+  messageOf,
+} from "./manifest-documents.js";
+import { money } from "./money.js";
+import { operatorErrorMessage, resourceClient, workClient } from "./operator-client.js";
+import {
+  findResourceView,
   getOperatorResource,
+  getResourceView,
   isOperatorResourcePath,
   listOperatorResources,
+  listResourceViews,
+  resourceManifests,
 } from "./operator-resources.js";
+import { isResourcePath, resourceKindEntry, resourceKindOfPath } from "./resource-protos.js";
 import { runningCommandText } from "./running-command.js";
 import { hostStorageLines, sandboxStorage, UNKNOWN_TASK_STORAGE } from "./storage-durability.js";
 import { isSupertagYamlInput, SUPERTAG_YAML } from "./supertag-yaml.js";
 import {
-  declaredConfiguration,
-  isSurfaceProvider,
   parseSurfaceAccountManifest,
   resolveSurfaceSecrets,
   type SecretResolver,
-  type SurfaceAccountManifest,
-  verifySurfaceAccount,
 } from "./surface-account-manifest.js";
 import { refusedAsError } from "./tag-conversation.js";
 import { runTeamCommand } from "./teams.js";
@@ -69,32 +94,21 @@ interface ResourceList {
 }
 
 const resources = {
-  tag: { path: "tags", mutable: true },
-  "permission-set": { path: "permission-sets", mutable: true },
-  "context-set": { path: "context-sets", mutable: true },
-  role: { path: "roles", mutable: true },
-  "surface-account": { path: "surface-accounts", mutable: true },
-  "worker-host": { path: "worker-hosts", mutable: false },
-  "worker-profile": { path: "worker-profiles", mutable: false },
-  task: { path: "tasks", mutable: false },
-  session: { path: "sessions", mutable: false },
-  volume: { path: "volumes", mutable: true },
-  workspace: { path: "workspaces", mutable: true },
-  "auth-key": { path: "auth-keys", mutable: false },
-  "operator-token": { path: "operator-tokens", mutable: false },
-  objective: { path: "objectives", mutable: true },
+  tag: { path: "tags" },
+  "permission-set": { path: "permission-sets" },
+  "context-set": { path: "context-sets" },
+  role: { path: "roles" },
+  "surface-account": { path: "surface-accounts" },
+  "worker-host": { path: "worker-hosts" },
+  "worker-profile": { path: "worker-profiles" },
+  task: { path: "tasks" },
+  session: { path: "sessions" },
+  volume: { path: "volumes" },
+  workspace: { path: "workspaces" },
+  "auth-key": { path: "auth-keys" },
+  "operator-token": { path: "operator-tokens" },
+  objective: { path: "objectives" },
 } as const;
-
-// Manifest kinds use PascalCase; they are not CLI noun aliases.
-const manifestResources = new Map(
-  Object.entries(resources).map(([noun, descriptor]) => [
-    noun
-      .split("-")
-      .map((word) => word[0]?.toUpperCase() + word.slice(1))
-      .join(""),
-    descriptor,
-  ]),
-);
 
 export type ResourceCommand = "apply" | "delete" | "describe" | "diff" | "get" | "watch";
 
@@ -137,26 +151,14 @@ export async function runResourceCommand(
     throw new Error(`Usage: supertag ${command} KIND [NAME]`);
   const descriptor = descriptorFor(kind);
   if (output === "yaml") {
-    if (!(descriptor.path in APPLY_ORDER))
+    if (!(descriptor.path in APPLY_ORDER) || !isResourcePath(descriptor.path))
       throw new Error(
         "YAML manifests are available for volume, workspace, surface, tag, role, permission-set, context-set, and objective",
       );
     if (descriptor.path === "objectives" && name === undefined)
       throw new Error("Usage: supertag get objective ID --output yaml");
-    if (name !== undefined) {
-      const resource = await readResource(client, descriptor.path, name);
-      if (descriptor.path === "surface-accounts" && !declaredByManifest(resource))
-        throw new Error(
-          `Surface Account ${name} was set up with supertag setup surface, so it has no manifest or secret references to export. To manage it declaratively, write a SurfaceAccount manifest for the same provider account and apply it; apply adopts the account once its credentials verify.`,
-        );
-      return exportManifest(resource);
-    }
-    // Interactively set up Surface Accounts have no secret references, so a listing exports only
-    // resources a manifest can reproduce.
-    const list = await readResources(client, descriptor.path);
-    return list.items
-      .filter((item) => item.kind !== "SurfaceAccount" || declaredByManifest(item))
-      .map(exportManifest)
+    return (await resourceManifests(client.operator, descriptor.path, name))
+      .map((manifest) => stringifyYaml(manifest))
       .join("---\n");
   }
   const human = output === "text" || (values.output === undefined && process.stdout.isTTY === true);
@@ -190,18 +192,26 @@ export async function runResourceCommand(
   return terminalJson(resource, human);
 }
 
-/** Lists the resources at a path: Worker Hosts, Auth Keys, Operator Tokens and Surface Accounts by RPC. */
-function readResources(client: ControlPlaneClient, path: string): Promise<ResourceList> {
-  return isOperatorResourcePath(path)
-    ? (listOperatorResources(client.operator, path) as Promise<unknown> as Promise<ResourceList>)
-    : client.request<ResourceList>(`/api/v1/${path}`);
+/** Lists the resources at a path, through the operator RPC that serves them. */
+async function readResources(client: ControlPlaneClient, path: string): Promise<ResourceList> {
+  if (isOperatorResourcePath(path))
+    return (await listOperatorResources(client.operator, path)) as unknown as ResourceList;
+  if (isResourcePath(path))
+    return (await listResourceViews(client.operator, path)) as unknown as ResourceList;
+  throw new Error(`Unknown resource path: ${path}`);
 }
 
 /** Reads one resource at a path by name, as `readResources` lists them. */
-function readResource(client: ControlPlaneClient, path: string, name: string): Promise<Resource> {
-  return isOperatorResourcePath(path)
-    ? (getOperatorResource(client.operator, path, name) as Promise<unknown> as Promise<Resource>)
-    : client.request<Resource>(`/api/v1/${path}/${encodeURIComponent(name)}`);
+async function readResource(
+  client: ControlPlaneClient,
+  path: string,
+  name: string,
+): Promise<Resource> {
+  if (isOperatorResourcePath(path))
+    return (await getOperatorResource(client.operator, path, name)) as unknown as Resource;
+  if (isResourcePath(path))
+    return (await getResourceView(client.operator, path, name)) as unknown as Resource;
+  throw new Error(`Unknown resource path: ${path}`);
 }
 
 /** `describe task`: the Task as the Control Plane recorded it, with this machine's checkouts. */
@@ -238,13 +248,6 @@ async function describeSessionOf(
   );
 }
 
-interface ResourceDeletion {
-  readonly dryRun: boolean;
-  readonly action: "retire" | "delete";
-  readonly removed: readonly string[];
-  readonly notes: readonly string[];
-}
-
 const DELETE_USAGE =
   "Usage: supertag delete tag|role|permission-set|context-set|volume|workspace|surface NAME [--dry-run]";
 
@@ -273,19 +276,27 @@ async function deleteResource(
     throw new Error(
       `Objectives are cancelled, not deleted, so their history stays: supertag cancel objective ${name}`,
     );
-  if (!(descriptor.path in APPLY_ORDER) || !(descriptor.path in DELETE_LABELS))
+  if (
+    !(descriptor.path in APPLY_ORDER) ||
+    !(descriptor.path in DELETE_LABELS) ||
+    !isResourcePath(descriptor.path)
+  )
     throw new Error(`${kind} cannot be deleted. ${DELETE_USAGE}`);
+  const path = descriptor.path;
   const dryRun = values["dry-run"] === true;
-  const result = await client.request<ResourceDeletion>(
-    `/api/v1/${descriptor.path}/${encodeURIComponent(name)}${dryRun ? "?dryRun=true" : ""}`,
-    { method: "DELETE" },
+  const result = await refusedAsError(() =>
+    resourceClient(client.operator).deleteResource({
+      kind: resourceKindOfPath(path),
+      name,
+      dryRun,
+    }),
   );
   const label = `${DELETE_LABELS[descriptor.path] ?? kind} ${name}`;
-  const verb = result.action === "retire" ? "retired" : "deleted";
+  const verb = result.action === DeletionAction.RETIRE ? "retired" : "deleted";
   const lines = [
     dryRun
       ? `Dry run: ${label} would be ${verb}. Nothing was changed.`
-      : `${label} ${verb}.${result.action === "retire" ? " Its history is kept." : ""}`,
+      : `${label} ${verb}.${result.action === DeletionAction.RETIRE ? " Its history is kept." : ""}`,
   ];
   if (result.removed.length > 0)
     lines.push(
@@ -1141,40 +1152,10 @@ function describeSession(
 }
 
 /** One manifest from `-f`, with the file and position it came from. */
-interface ManifestDocument {
-  readonly source: string;
-  readonly resource: Resource;
-  readonly name: string;
-  readonly path: string;
-  readonly index: number;
+interface InputDocument extends ManifestDocument {
   /** Relative `file:` secret references resolve against this directory. */
   readonly directory: string;
 }
-
-/**
- * Referenced resources may precede their referrers in files; apply them first. Surface
- * Accounts come first because Tag locations and Permission Sets name them.
- */
-const APPLY_ORDER: Readonly<Record<string, number>> = {
-  "surface-accounts": 0,
-  volumes: 1,
-  workspaces: 2,
-  "context-sets": 3,
-  "permission-sets": 4,
-  roles: 5,
-  tags: 6,
-  objectives: 7,
-};
-
-const REFERENCE_KINDS = {
-  roles: "Role",
-  "permission-sets": "Permission Set",
-  "context-sets": "Context Set",
-  tags: "Tag",
-  workspaces: "Workspace",
-} as const;
-
-type ReferencePath = keyof typeof REFERENCE_KINDS;
 
 /** What `apply` and `diff` were asked to do beyond reading the input. */
 interface ManifestOptions {
@@ -1183,15 +1164,9 @@ interface ManifestOptions {
   readonly force: boolean;
   /** Resolves `{ secretRef: NAME }` SurfaceAccount secrets; absent for `apply -f`. */
   readonly resolveSecret?: SecretResolver;
-  /** Provider verification for SurfaceAccount secrets; the setup verification by default. */
-  readonly verifySurface?: SurfaceVerifier;
+  /** Applies only documents whose resource does not exist yet. */
+  readonly createOnly?: boolean;
 }
-
-/** Verifies resolved SurfaceAccount secrets with the provider, as setup does. */
-export type SurfaceVerifier = (
-  manifest: SurfaceAccountManifest,
-  secrets: Readonly<Record<string, string>>,
-) => Promise<VerifiedSurfaceAccount>;
 
 /** Options for {@link applyManifests}. */
 export interface ApplyManifestsOptions {
@@ -1211,8 +1186,6 @@ export interface ApplyManifestsOptions {
   readonly baseDirectory?: string;
   /** Names the input in messages, such as `supertag.yaml provision`. Defaults to `manifest`. */
   readonly source?: string;
-  /** Replaces provider verification; intended for tests. */
-  readonly verifySurface?: SurfaceVerifier;
   /**
    * Create resources that do not exist yet and leave existing ones untouched, as supertag.yaml
    * provisioning does on every `supertag up`.
@@ -1222,9 +1195,8 @@ export interface ApplyManifestsOptions {
 
 /**
  * Applies, or with `command: "diff"` plans, already parsed manifests through the same pipeline
- * as `supertag apply -f`: validation of the whole input before any write, dependency order,
- * field ownership, apply sets, and prune. supertag.yaml provisioning passes its `provision:`
- * manifests here with a `resolveSecret` backed by its `secrets:` map.
+ * as `supertag apply -f`. supertag.yaml provisioning passes its `provision:` manifests here with
+ * a `resolveSecret` backed by its `secrets:` map.
  */
 export async function applyManifests(
   client: ControlPlaneClient,
@@ -1235,7 +1207,7 @@ export async function applyManifests(
     throw new Error("prune requires applySet; pruning removes only members of that set");
   const label = options.source ?? "manifest";
   const directory = options.baseDirectory ?? process.cwd();
-  const parsed = manifestDocuments(
+  const documents = inputDocuments(
     manifests.map((value, index) => ({
       source: manifests.length === 1 ? label : `${label}[${index}]`,
       value,
@@ -1243,27 +1215,13 @@ export async function applyManifests(
     })),
     label,
   );
-  const documents = options.createOnly === true ? await missingDocuments(client, parsed) : parsed;
-  if (documents.length === 0) return "";
   return runManifests(client, options.command ?? "apply", documents, {
     ...(options.applySet === undefined ? {} : { applySet: parseApplySetName(options.applySet) }),
     prune: options.prune === true,
     force: options.force === true,
     ...(options.resolveSecret === undefined ? {} : { resolveSecret: options.resolveSecret }),
-    ...(options.verifySurface === undefined ? {} : { verifySurface: options.verifySurface }),
+    ...(options.createOnly === true ? { createOnly: true } : {}),
   });
-}
-
-/** Documents whose resource does not exist yet. */
-async function missingDocuments(
-  client: ControlPlaneClient,
-  documents: readonly ManifestDocument[],
-): Promise<readonly ManifestDocument[]> {
-  const missing: ManifestDocument[] = [];
-  for (const document of documents)
-    if ((await getOptional(client, document.path, document.name)) === undefined)
-      missing.push(document);
-  return missing;
 }
 
 /** One `provision:` entry of a control-plane service: a manifest path, or an inline manifest. */
@@ -1284,7 +1242,6 @@ export async function provisionManifests(
     readonly resolveSecret?: SecretResolver;
     /** Inline manifests' relative `file:` references resolve here. */
     readonly baseDirectory: string;
-    readonly verifySurface?: SurfaceVerifier;
   },
 ): Promise<string> {
   const entries: { source: string; value: unknown; directory: string }[] = [];
@@ -1304,74 +1261,19 @@ export async function provisionManifests(
         directory: options.baseDirectory,
       });
   }
-  const documents = await missingDocuments(
+  const applied = await runManifests(
     client,
-    manifestDocuments(entries, "supertag.yaml provision", errors),
+    "apply",
+    inputDocuments(entries, "supertag.yaml provision", errors),
+    {
+      applySet: "provision",
+      prune: false,
+      force: false,
+      createOnly: true,
+      ...(options.resolveSecret === undefined ? {} : { resolveSecret: options.resolveSecret }),
+    },
   );
-  if (documents.length === 0) return "";
-  const applied = await runManifests(client, "apply", documents, {
-    applySet: "provision",
-    prune: false,
-    force: false,
-    ...(options.resolveSecret === undefined ? {} : { resolveSecret: options.resolveSecret }),
-    ...(options.verifySurface === undefined ? {} : { verifySurface: options.verifySurface }),
-  });
   return applied.replace(/^(\S+) configured/gmu, "$1 created (provision)");
-}
-
-/** What validating a SurfaceAccount established before anything is written. */
-interface SurfacePreparation {
-  readonly manifest: SurfaceAccountManifest;
-  /** Present when apply must store credentials: the account is new, or something changed. */
-  readonly verified?: VerifiedSurfaceAccount;
-  /** The provider account it names, once known: stored, or just verified. */
-  readonly externalAccountId?: string;
-  /** No account has this name yet, so Tag locations cannot resolve it before apply. */
-  readonly pending: boolean;
-}
-
-interface ManifestValidation {
-  readonly plans: ReadonlyMap<ManifestDocument, PlannedResource>;
-  readonly surfaces: ReadonlyMap<ManifestDocument, SurfacePreparation>;
-}
-
-interface FieldChange {
-  readonly path: string;
-  readonly action: "add" | "remove" | "change";
-  readonly before?: unknown;
-  readonly after?: unknown;
-}
-
-interface FieldConflict {
-  readonly path: string;
-  readonly manager: string;
-}
-
-/** A server dry run: the merged spec and what applying the manifest would change. */
-interface PlannedResource extends Resource {
-  readonly plan: {
-    readonly action: "create" | "update" | "unchanged";
-    readonly changes: readonly FieldChange[];
-    readonly conflicts: readonly FieldConflict[];
-    /** Objectives only: changes apply cannot make, such as a new outcome. */
-    readonly refusals?: readonly { readonly path: string; readonly reason: string }[];
-    /** Objectives only: applying starts the Objective. */
-    readonly start?: boolean;
-    /** Objectives only: why applying leaves the Objective unchanged. */
-    readonly held?: string;
-    /** Surface Accounts, when apply sent resolved values: whether they match the vault. */
-    readonly secrets?: "changed" | "unchanged";
-  };
-  /** Surface Accounts only: the provider account the name already holds. */
-  readonly current?: { readonly provider: string; readonly externalAccountId: string };
-}
-
-interface PruneItem {
-  readonly kind: string;
-  readonly name: string;
-  /** Objectives are cancelled and keep their history; other kinds are deleted. */
-  readonly action: "delete" | "cancel" | "skip";
-  readonly reason?: string;
 }
 
 async function runManifestCommand(
@@ -1405,31 +1307,179 @@ async function runManifestCommand(
     prune: values.prune === true,
     force: values["force-conflicts"] === true,
   };
-  return runManifests(client, command, await readManifestDocuments(values.filename), options);
+  const { entries, errors } = await readManifestEntries(values.filename);
+  return runManifests(client, command, inputDocuments(entries, values.filename, errors), options);
 }
 
+/**
+ * Sends the input to the Control Plane, which validates, plans and applies it. Apply first
+ * resolves each Surface Account's secret references where the CLI runs; the values go only to
+ * the Control Plane.
+ */
 async function runManifests(
   client: ControlPlaneClient,
   command: "apply" | "diff",
-  documents: readonly ManifestDocument[],
+  documents: readonly InputDocument[],
   options: ManifestOptions,
 ): Promise<string> {
-  const { plans, surfaces } = await validateManifestDocuments(client, documents, command, options);
-  if (command === "diff")
-    return renderPlan(
-      orderForApply(documents),
-      plans,
-      options.prune ? await pruneSet(client, documents, options, true) : [],
+  const resources = resourceClient(client.operator);
+  const request = {
+    applySet: options.applySet ?? "",
+    prune: options.prune,
+    forceConflicts: options.force,
+  };
+  if (command === "diff") {
+    const planned = await refusedAsError(() =>
+      resources
+        .diffManifests({
+          ...request,
+          documents: documents.map((document) => documentMessage(document)),
+        })
+        .catch((error: unknown) => {
+          throw oversizedInputError(error);
+        }),
     );
-  assertNoConflicts(
-    documents,
-    plans,
-    "Run supertag diff to review, then apply with --force-conflicts to take ownership.",
-  );
-  const applied = await applyManifestDocuments(client, documents, options, surfaces);
-  if (!options.prune) return applied;
-  const prunedNow = await pruneSet(client, documents, options, false);
-  return `${applied}${prunedNow.map(pruneLine).join("")}`;
+    return renderPlan(documents, planned.plans, planned.pruned);
+  }
+  const secrets = await resolveSecrets(client, documents, options);
+  let applied: ApplyManifestsResponse;
+  try {
+    applied = await resources.applyManifests({
+      ...request,
+      createOnly: options.createOnly === true,
+      documents: documents.map((document) => documentMessage(document, secrets.get(document))),
+    });
+  } catch (error) {
+    if (!(error instanceof ConnectError)) throw error;
+    const oversized = oversizedInputError(error);
+    if (oversized !== error) throw oversized;
+    const detail = error.findDetails(ErrorDetailSchema)[0];
+    const owned = detail?.fields.some((field) => field.manager !== "") === true;
+    throw new Error(
+      owned
+        ? `${operatorErrorMessage(error)}\nRun supertag diff to review, then apply with --force-conflicts to take ownership.`
+        : operatorErrorMessage(error),
+    );
+  }
+  return renderApplied(documents, applied);
+}
+
+/** Guidance for an input the Control Plane refused for its size, which has no detail; else `error`. */
+function oversizedInputError(error: unknown): unknown {
+  if (
+    error instanceof ConnectError &&
+    error.code === Code.ResourceExhausted &&
+    error.findDetails(ErrorDetailSchema).length === 0
+  )
+    return new Error(
+      `The input is larger than the ${MANIFEST_INPUT_MAX_BYTES / 1_000_000} MB the Control Plane takes in one apply or diff. Split it into smaller inputs, such as one directory each; with --prune, give each input its own --set, because pruning removes the set's members an input does not declare.`,
+    );
+  return error;
+}
+
+function documentMessage(
+  document: InputDocument,
+  secrets?: Readonly<Record<string, string>>,
+): MessageInitShape<typeof ManifestDocumentSchema> {
+  return {
+    manifest: JSON.parse(JSON.stringify(document.resource)) as JsonObject,
+    source: document.source,
+    ...(secrets === undefined ? {} : { secrets: { ...secrets } }),
+  };
+}
+
+/**
+ * The secret values each Surface Account references, read where the CLI runs. Provisioning skips
+ * accounts that already exist, which it leaves untouched. A reference that cannot be resolved
+ * refuses the whole input before anything is sent.
+ */
+async function resolveSecrets(
+  client: ControlPlaneClient,
+  documents: readonly InputDocument[],
+  options: ManifestOptions,
+): Promise<ReadonlyMap<InputDocument, Readonly<Record<string, string>>>> {
+  const resolved = new Map<InputDocument, Readonly<Record<string, string>>>();
+  const errors: string[] = [];
+  for (const document of documents) {
+    if (document.path !== "surface-accounts") continue;
+    if (
+      options.createOnly === true &&
+      (await findResourceView(client.operator, "surface-accounts", document.name)) !== undefined
+    )
+      continue;
+    try {
+      resolved.set(
+        document,
+        await resolveSurfaceSecrets(parseSurfaceAccountManifest(document.resource), {
+          baseDirectory: document.directory,
+          ...(options.resolveSecret === undefined ? {} : { resolveSecret: options.resolveSecret }),
+        }),
+      );
+    } catch (error) {
+      errors.push(`${document.source}: ${label(document)}: ${messageOf(error)}`);
+    }
+  }
+  if (errors.length > 0)
+    throw new Error(`Nothing was applied. Invalid manifests:\n  ${errors.toSorted().join("\n  ")}`);
+  return resolved;
+}
+
+/** What apply did, one line per document; warnings go to standard error. */
+function renderApplied(
+  documents: readonly InputDocument[],
+  applied: ApplyManifestsResponse,
+): string {
+  const lines: string[] = [];
+  const done: string[] = [];
+  for (const result of applied.results) {
+    const document = documents[result.document];
+    const name = document === undefined ? result.name : label(document);
+    if (result.outcome !== ManifestOutcome.APPLIED) continue;
+    done.push(name);
+    if (document?.path === "surface-accounts") {
+      const verified = result.verification;
+      lines.push(
+        verified === undefined
+          ? `${name} configured; credentials unchanged`
+          : `${name} configured; verified ${nameOf(SURFACE_PROVIDERS, verified.provider) ?? "unknown"} account ${verified.displayName} (${verified.externalAccountId})`,
+      );
+      continue;
+    }
+    // Objectives report conditions that would hold their Tasks; the write still succeeded.
+    for (const warning of result.warnings)
+      process.stderr.write(`Warning: ${terminalText(name)}: ${terminalText(warning)}\n`);
+    if (result.notStarted !== "")
+      process.stderr.write(
+        `Warning: ${terminalText(name)}: the Objective was not started: ${terminalText(result.notStarted).replace(/\.?$/u, ".")} Apply again once that is fixed to start it.\n`,
+      );
+    if (result.startedTaskId !== "")
+      lines.push(`${name} started with Task ${result.startedTaskId}`);
+    lines.push(`${name} configured`);
+  }
+  const failed = applied.results.find((result) => result.outcome === ManifestOutcome.FAILED);
+  if (failed !== undefined) {
+    const document = documents[failed.document];
+    const notApplied = applied.results
+      .filter(
+        (result) =>
+          result.outcome === ManifestOutcome.FAILED ||
+          result.outcome === ManifestOutcome.NOT_APPLIED,
+      )
+      .map((result) => {
+        const item = documents[result.document];
+        return item === undefined ? result.name : label(item);
+      });
+    throw new Error(
+      [
+        `${document === undefined ? failed.name : label(document)} (${document?.source ?? `documents[${failed.document}]`}) failed: ${failed.failureMessage}`,
+        `Applied: ${done.join(", ") || "none"}`,
+        `Not applied: ${notApplied.join(", ") || "none"}`,
+      ].join("\n"),
+    );
+  }
+  return [...lines, ...applied.pruned.map(pruneLine)]
+    .map((line) => `${terminalText(line)}\n`)
+    .join("");
 }
 
 /**
@@ -1445,36 +1495,6 @@ async function rejectSupertagYaml(path: string): Promise<void> {
     throw new Error(
       `${path} is a ${SUPERTAG_YAML}, which lists the services supertag up runs and is not a resource manifest. Apply resources as manifests, each with apiVersion: supertag/v1, kind, metadata.name, and spec, such as: supertag apply -f tag.yaml. A control-plane service can also create them on every supertag up with provision.`,
     );
-}
-
-function assertNoConflicts(
-  documents: readonly ManifestDocument[],
-  plans: ReadonlyMap<ManifestDocument, PlannedResource>,
-  guidance: string,
-): void {
-  const refusals = orderForApply(documents).flatMap((document) =>
-    (plans.get(document)?.plan.refusals ?? []).map(
-      (refusal) => `${label(document)}: ${refusal.path}: ${refusal.reason}`,
-    ),
-  );
-  if (refusals.length > 0)
-    throw new Error(
-      `Nothing was applied. The input changes what cannot change:\n  ${refusals.join("\n  ")}`,
-    );
-  const conflicts = orderForApply(documents).flatMap((document) =>
-    (plans.get(document)?.plan.conflicts ?? []).map(
-      (conflict) => `${label(document)}: ${conflict.path} is owned by ${conflict.manager}`,
-    ),
-  );
-  if (conflicts.length > 0)
-    throw new Error(
-      `Nothing was applied. The input changes fields another manager owns:\n  ${conflicts.join("\n  ")}\n${guidance}`,
-    );
-}
-
-async function readManifestDocuments(path: string): Promise<readonly ManifestDocument[]> {
-  const { entries, errors } = await readManifestEntries(path);
-  return manifestDocuments(entries, path, errors);
 }
 
 /** The manifests in a file or a directory's .yaml, .yml, and .json files, with parse errors. */
@@ -1514,500 +1534,73 @@ async function readManifestEntries(path: string): Promise<{
   return { entries, errors };
 }
 
-/** Checks each manifest's shape and kind, and that the input defines each resource once. */
-function manifestDocuments(
+/**
+ * The input's documents, checked for shape, kind and duplicates before any secret is read; the
+ * Control Plane checks everything else.
+ */
+function inputDocuments(
   entries: readonly {
     readonly source: string;
     readonly value: unknown;
     readonly directory: string;
   }[],
   input: string,
-  errors: string[] = [],
-): readonly ManifestDocument[] {
-  const documents: ManifestDocument[] = [];
-  for (const { source, value, directory } of entries) {
-    try {
-      const resource = parseManifest(value);
-      const descriptor = manifestResources.get(resource.kind);
-      if (descriptor === undefined) throw new Error(`Unknown manifest kind: ${resource.kind}`);
-      if (!descriptor.mutable) throw new Error(`${resource.kind} is observed state`);
-      if (!(descriptor.path in APPLY_ORDER)) throw new Error(`${resource.kind} cannot be applied`);
-      // Literal secrets and malformed references fail here, before anything leaves the CLI.
-      if (descriptor.path === "surface-accounts") parseSurfaceAccountManifest(resource);
-      documents.push({
-        source,
-        resource,
-        name: requiredName(resource),
-        path: descriptor.path,
-        index: documents.length,
-        directory,
-      });
-    } catch (error) {
-      errors.push(`${source}: ${messageOf(error)}`);
-    }
-  }
-  const seen = new Map<string, ManifestDocument>();
-  for (const document of documents) {
-    const key = `${document.path}/${document.name}`;
-    const prior = seen.get(key);
-    if (prior)
-      errors.push(
-        `${document.source}: ${label(document)} is also defined in ${prior.source}; define each resource once`,
-      );
-    else seen.set(key, document);
-  }
-  if (errors.length > 0) throw new Error(`Invalid manifests:\n  ${errors.join("\n  ")}`);
-  if (documents.length === 0) throw new Error(`${input} contains no manifests`);
-  return documents;
+  errors: readonly string[] = [],
+): readonly InputDocument[] {
+  const checked = manifestDocuments(entries, errors);
+  if (checked.errors.length > 0)
+    throw new Error(`Invalid manifests:\n  ${checked.errors.join("\n  ")}`);
+  if (checked.documents.length === 0) throw new Error(`${input} contains no manifests`);
+  return checked.documents.map((document) => ({
+    ...document,
+    directory: entries[document.entry]?.directory ?? process.cwd(),
+  }));
 }
 
-function manifestQuery(options: ManifestOptions, dryRun: boolean): string {
-  const query = new URLSearchParams();
-  if (dryRun) query.set("dryRun", "true");
-  if (options.applySet !== undefined) query.set("applySet", options.applySet);
-  if (options.force) query.set("force", "true");
-  const text = query.toString();
-  return text === "" ? "" : `?${text}`;
+function pruneLine(item: PruneResult): string {
+  const name = `${resourceKindName(item.kind)}/${item.name}`;
+  if (item.action === PruneAction.DELETE) return `${name} deleted`;
+  if (item.action === PruneAction.CANCEL) return `${name} cancelled; its history is kept`;
+  return `${name} ${notRemoved(item)}: ${item.reason || "still in use"}`;
 }
 
-async function pruneSet(
-  client: ControlPlaneClient,
-  documents: readonly ManifestDocument[],
-  options: ManifestOptions,
-  dryRun: boolean,
-): Promise<readonly PruneItem[]> {
-  const result = await client.request<{ items: readonly PruneItem[] }>(
-    `/api/v1/apply-sets/${encodeURIComponent(options.applySet ?? "")}/prune${dryRun ? "?dryRun=true" : ""}`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        keep: documents.map((document) => ({ kind: document.resource.kind, name: document.name })),
-      }),
-    },
-  );
-  return result.items;
+function notRemoved(item: PruneResult): string {
+  return item.kind === ResourceKind.OBJECTIVE ? "not cancelled" : "not deleted";
 }
 
-function pruneLine(item: PruneItem): string {
-  if (item.action === "delete") return `${item.kind}/${item.name} deleted\n`;
-  if (item.action === "cancel") return `${item.kind}/${item.name} cancelled; its history is kept\n`;
-  return `${item.kind}/${item.name} ${notRemoved(item)}: ${item.reason ?? "still in use"}\n`;
-}
-
-function notRemoved(item: PruneItem): string {
-  return item.kind === "Objective" ? "not cancelled" : "not deleted";
-}
-
-/**
- * Checks every document before anything changes: the API Server validates and plans each one
- * without writing, and each reference must be defined in the input or already exist. Apply also
- * resolves and verifies Surface Account secrets here, so a rejected credential leaves
- * everything unchanged.
- */
-async function validateManifestDocuments(
-  client: ControlPlaneClient,
-  documents: readonly ManifestDocument[],
-  command: "apply" | "diff",
-  options: ManifestOptions,
-): Promise<ManifestValidation> {
-  const errors: string[] = [];
-  const planned = new Map<ManifestDocument, PlannedResource>();
-  const surfaces = new Map<ManifestDocument, SurfacePreparation>();
-  const plan = (document: ManifestDocument, body: unknown) =>
-    client.request<PlannedResource>(`/api/v1/${document.path}${manifestQuery(options, true)}`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-  // Surface Accounts first: Tag locations in the same input may name them.
-  await Promise.all(
-    documents
-      .filter((document) => document.path === "surface-accounts")
-      .map(async (document) => {
-        try {
-          const prepared = await prepareSurfaceAccount(client, document, command, options, plan);
-          planned.set(document, prepared.plan);
-          surfaces.set(document, prepared.surface);
-        } catch (error) {
-          errors.push(`${document.source}: ${label(document)}: ${messageOf(error)}`);
-        }
-      }),
-  );
-  const identities = new Map<string, ManifestDocument>();
-  for (const [document, surface] of surfaces) {
-    if (surface.externalAccountId === undefined) continue;
-    const identity = `${surface.manifest.provider}:${surface.externalAccountId}`;
-    const prior = identities.get(identity);
-    if (prior === undefined) identities.set(identity, document);
-    else
-      errors.push(
-        `${document.source}: ${label(document)} names the same ${surface.manifest.provider} account as ${label(prior)} (${surface.externalAccountId}); declare each account once`,
-      );
-  }
-  const pending = await pendingTagLocations(client, documents, surfaces);
-  await Promise.all(
-    documents
-      .filter((document) => document.path !== "surface-accounts")
-      .map(async (document) => {
-        try {
-          const indices = pending.get(document);
-          planned.set(
-            document,
-            indices === undefined
-              ? await plan(document, document.resource)
-              : withPendingLocations(
-                  await plan(document, withoutLocations(document.resource, indices)),
-                  document.resource,
-                  indices,
-                ),
-          );
-        } catch (error) {
-          errors.push(`${document.source}: ${label(document)}: ${messageOf(error)}`);
-        }
-      }),
-  );
-  const defined = new Set(documents.map((document) => `${document.path}/${document.name}`));
-  const existing = new Map<string, Promise<boolean>>();
-  const exists = (path: ReferencePath, name: string) => {
-    const key = `${path}/${name}`;
-    if (!existing.has(key))
-      existing.set(
-        key,
-        getOptional(client, path, name).then(
-          (resource) =>
-            resource !== undefined &&
-            (path !== "roles" ||
-              !isRecord(resource.status) ||
-              resource.status["phase"] === "active"),
-        ),
-      );
-    return existing.get(key) as Promise<boolean>;
-  };
-  for (const document of documents) {
-    if (!planned.has(document)) continue;
-    for (const [path, name] of manifestReferences(document.path, document.resource.spec)) {
-      if (defined.has(`${path}/${name}`) || (await exists(path, name))) continue;
-      errors.push(
-        `${document.source}: ${label(document)} references ${REFERENCE_KINDS[path]} ${name}, which is neither in this input nor on the Control Plane`,
-      );
-    }
-  }
-  if (errors.length > 0)
-    throw new Error(
-      `${command === "apply" ? "Nothing was applied. " : ""}Invalid manifests:\n  ${errors.toSorted().join("\n  ")}`,
-    );
-  return { plans: planned, surfaces };
-}
-
-/**
- * Plans one Surface Account. `diff` never reads secrets, so it compares only the declared
- * fields and references. `apply` resolves the secrets and asks the Control Plane whether they
- * match the stored credential; when the account is new or anything changed, it verifies them
- * with the provider, as setup does, before any resource in the input is written.
- */
-async function prepareSurfaceAccount(
-  client: ControlPlaneClient,
-  document: ManifestDocument,
-  command: "apply" | "diff",
-  options: ManifestOptions,
-  plan: (document: ManifestDocument, body: unknown) => Promise<PlannedResource>,
-): Promise<{ readonly plan: PlannedResource; readonly surface: SurfacePreparation }> {
-  const manifest = parseSurfaceAccountManifest(document.resource);
-  const credentials =
-    command === "apply"
-      ? await resolveSurfaceSecrets(manifest, {
-          baseDirectory: document.directory,
-          ...(options.resolveSecret === undefined ? {} : { resolveSecret: options.resolveSecret }),
-        })
-      : undefined;
-  const planned = await plan(
-    document,
-    credentials === undefined ? document.resource : { ...document.resource, credentials },
-  );
-  const current = planned.current;
-  const surface: SurfacePreparation = {
-    manifest,
-    pending: planned.plan.action === "create",
-    ...(current === undefined ? {} : { externalAccountId: current.externalAccountId }),
-  };
-  const blocked = (planned.plan.refusals ?? []).length > 0 || planned.plan.conflicts.length > 0;
-  const unchanged = planned.plan.action === "unchanged" && planned.plan.secrets === "unchanged";
-  if (credentials === undefined || blocked || unchanged) return { plan: planned, surface };
-  let verified: VerifiedSurfaceAccount;
-  try {
-    verified = await (options.verifySurface ?? verifySurfaceAccount)(manifest, credentials);
-  } catch (error) {
-    throw new Error(`provider verification failed: ${messageOf(error)}`);
-  }
-  if (current !== undefined && current.externalAccountId !== verified.externalAccountId)
-    throw new Error(
-      `${document.name} is ${current.provider} account ${current.externalAccountId}, but its credentials belong to ${verified.externalAccountId}. Delete it, then apply the other account under a new name`,
-    );
-  if (current === undefined) {
-    const holder = await getOptional(
-      client,
-      "surface-accounts",
-      `${verified.provider}:${verified.externalAccountId}`,
-    );
-    if (holder !== undefined && declaredByManifest(holder))
-      throw new Error(
-        `${verified.provider} account ${verified.externalAccountId} is already declared as SurfaceAccount ${String(holder.metadata["name"])}`,
-      );
-  }
-  return {
-    plan: planned,
-    surface: { ...surface, verified, externalAccountId: verified.externalAccountId },
-  };
-}
-
-/** A Surface Account a manifest applied records where its secrets came from. */
-function declaredByManifest(resource: Resource): boolean {
-  return isRecord(resource.spec) && isRecord(resource.spec["secrets"]);
-}
-
-/**
- * Tag locations that name a Surface Account this input creates. The Control Plane cannot
- * resolve them until that account exists, so they are planned on the client and applied after it.
- * A location is pending when its account matches the new account's name or verified provider
- * ID, or, with no account given, when the new account is the provider's only one.
- */
-async function pendingTagLocations(
-  client: ControlPlaneClient,
-  documents: readonly ManifestDocument[],
-  surfaces: ReadonlyMap<ManifestDocument, SurfacePreparation>,
-): Promise<ReadonlyMap<ManifestDocument, readonly number[]>> {
-  const created = [...surfaces.values()].filter((surface) => surface.pending);
-  const tags = documents.filter((document) => document.path === "tags");
-  if (created.length === 0 || tags.length === 0) return new Map();
-  const accounts = (await readResources(client, "surface-accounts")).items;
-  const pending = new Map<ManifestDocument, number[]>();
-  for (const document of tags) {
-    const spec = isRecord(document.resource.spec) ? document.resource.spec : {};
-    const locations = Array.isArray(spec["locations"]) ? spec["locations"] : [];
-    locations.forEach((location: unknown, index: number) => {
-      if (!isRecord(location)) return;
-      const provider = location["provider"];
-      const account = location["account"];
-      const candidates = created.filter((surface) => surface.manifest.provider === provider);
-      if (candidates.length === 0) return;
-      const existing = accounts.filter(
-        (item) => isRecord(item.spec) && item.spec["provider"] === provider,
-      );
-      const matches =
-        typeof account === "string"
-          ? !existing.some(
-              (item) =>
-                item.metadata["name"] === account ||
-                item.metadata["id"] === account ||
-                (isRecord(item.spec) && item.spec["externalAccountId"] === account),
-            ) &&
-            candidates.some(
-              (surface) =>
-                surface.manifest.name === account || surface.externalAccountId === account,
-            )
-          : account === undefined && existing.length === 0 && candidates.length === 1;
-      if (matches) pending.set(document, [...(pending.get(document) ?? []), index]);
-    });
-  }
-  return pending;
-}
-
-function withoutLocations(resource: Resource, indices: readonly number[]): Resource {
-  const spec = isRecord(resource.spec) ? resource.spec : {};
-  const locations = Array.isArray(spec["locations"]) ? spec["locations"] : [];
-  return {
-    ...resource,
-    spec: { ...spec, locations: locations.filter((_, index) => !indices.includes(index)) },
-  };
-}
-
-/** Adds the locations the Control Plane could not plan yet, as additions. */
-function withPendingLocations(
-  planned: PlannedResource,
-  resource: Resource,
-  indices: readonly number[],
-): PlannedResource {
-  const spec = isRecord(resource.spec) ? resource.spec : {};
-  const locations = Array.isArray(spec["locations"]) ? spec["locations"] : [];
-  const additions = indices
-    .map((index) => locations[index])
-    .filter(isRecord)
-    .map((location) => ({
-      path: `spec.locations[${locationKey(location)}]`,
-      action: "add" as const,
-      after: location,
-    }));
-  return {
-    ...planned,
-    plan: {
-      ...planned.plan,
-      action: planned.plan.action === "unchanged" ? "update" : planned.plan.action,
-      changes: [...planned.plan.changes, ...additions],
-    },
-  };
-}
-
-function manifestReferences(path: string, spec: unknown): readonly [ReferencePath, string][] {
-  if (!isRecord(spec)) return [];
-  const names = (value: unknown) =>
-    Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-  if (path === "roles")
-    return [
-      ...names(spec["contextSets"]).map(
-        (name) => ["context-sets", name] as [ReferencePath, string],
-      ),
-      ...names(spec["permissionSets"]).map(
-        (name) => ["permission-sets", name] as [ReferencePath, string],
-      ),
-    ];
-  if (path === "objectives") {
-    const references: [ReferencePath, string][] = [];
-    if (typeof spec["owner"] === "string") references.push(["tags", spec["owner"]]);
-    for (const name of names(spec["workspaces"])) references.push(["workspaces", name]);
-    if (isRecord(spec["team"]))
-      for (const name of names(spec["team"]["members"])) references.push(["tags", name]);
-    return references;
-  }
-  if (path !== "tags") return [];
-  const references: [ReferencePath, string][] = names(spec["roles"]).map((name) => ["roles", name]);
-  for (const location of Array.isArray(spec["locations"]) ? spec["locations"] : [])
-    if (isRecord(location)) {
-      for (const name of names(location["permissionSets"]))
-        references.push(["permission-sets", name]);
-      for (const name of names(location["contextSets"])) references.push(["context-sets", name]);
-      for (const name of names(location["workspaces"])) references.push(["workspaces", name]);
-    }
-  for (const name of names(spec["acceptsMessagesFrom"])) references.push(["tags", name]);
-  return references;
-}
-
-/** Referenced kinds first; within a kind, input order. */
-function orderForApply(documents: readonly ManifestDocument[]): readonly ManifestDocument[] {
-  return documents.toSorted(
-    (left, right) =>
-      (APPLY_ORDER[left.path] ?? 0) - (APPLY_ORDER[right.path] ?? 0) || left.index - right.index,
-  );
-}
-
-/**
- * Applies in dependency order. A Tag that accepts messages from a Tag later in the input needs
- * that sender to exist, so the sender is first created empty. Not transactional.
- */
-async function applyManifestDocuments(
-  client: ControlPlaneClient,
-  documents: readonly ManifestDocument[],
-  options: ManifestOptions,
-  surfaces: ReadonlyMap<ManifestDocument, SurfacePreparation> = new Map(),
-): Promise<string> {
-  const ordered = orderForApply(documents);
-  const tagsInInput = new Map(
-    ordered
-      .filter((document) => document.path === "tags")
-      .map((document) => [document.name, document]),
-  );
-  const created = new Set<string>();
-  const applied: ManifestDocument[] = [];
-  const lines: string[] = [];
-  const post = (body: unknown, path: string) =>
-    client.request<
-      Resource & {
-        readonly warnings?: readonly string[];
-        readonly started?: { readonly taskId: string };
-        readonly notStarted?: string;
-      }
-    >(`/api/v1/${path}${manifestQuery(options, false)}`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-  for (const document of ordered) {
-    try {
-      if (document.path === "tags" && isRecord(document.resource.spec)) {
-        const grants = document.resource.spec["acceptsMessagesFrom"];
-        for (const grant of Array.isArray(grants) ? grants : []) {
-          const sender = tagsInInput.get(String(grant));
-          if (
-            !sender ||
-            sender === document ||
-            applied.includes(sender) ||
-            created.has(sender.name)
-          )
-            continue;
-          if ((await getOptional(client, "tags", sender.name)) !== undefined) continue;
-          await post({ ...sender.resource, spec: {} }, "tags");
-          created.add(sender.name);
-        }
-      }
-      // A Surface Account carries the provider-verified account only when it must be stored.
-      const verified = surfaces.get(document)?.verified;
-      const result = await post(
-        verified === undefined ? document.resource : { ...document.resource, verified },
-        document.path,
-      );
-      if (document.path === "surface-accounts") {
-        applied.push(document);
-        lines.push(
-          verified === undefined
-            ? `${label(document)} configured; credentials unchanged\n`
-            : `${label(document)} configured; verified ${verified.provider} account ${verified.displayName} (${verified.externalAccountId})\n`,
-        );
-        continue;
-      }
-      // Objectives report conditions that would hold their Tasks; the write still succeeded.
-      for (const warning of result.warnings ?? [])
-        process.stderr.write(
-          `Warning: ${terminalText(label(document))}: ${terminalText(warning)}\n`,
-        );
-      if (result.notStarted !== undefined)
-        process.stderr.write(
-          `Warning: ${terminalText(label(document))}: the Objective was not started: ${terminalText(result.notStarted).replace(/\.?$/u, ".")} Apply again once that is fixed to start it.\n`,
-        );
-      if (result.started !== undefined)
-        lines.push(`${label(document)} started with Task ${result.started.taskId}\n`);
-    } catch (error) {
-      const notApplied = ordered.filter((item) => !applied.includes(item));
-      throw new Error(
-        [
-          `${label(document)} (${document.source}) failed: ${messageOf(error)}`,
-          `Applied: ${applied.map(label).join(", ") || "none"}`,
-          `Not applied: ${notApplied.map(label).join(", ") || "none"}`,
-        ].join("\n"),
-      );
-    }
-    applied.push(document);
-    lines.push(`${label(document)} configured\n`);
-  }
-  return lines.join("");
+function resourceKindName(kind: ResourceKind): string {
+  return resourceKindEntry(kind)?.kind ?? "Resource";
 }
 
 /** A Terraform-style plan: one line per resource that changes, then a summary. */
 function renderPlan(
-  documents: readonly ManifestDocument[],
-  plans: ReadonlyMap<ManifestDocument, PlannedResource>,
-  pruned: readonly PruneItem[],
+  documents: readonly InputDocument[],
+  plans: readonly ManifestPlan[],
+  pruned: readonly PruneResult[],
 ): string {
   const rows: { readonly head: string; readonly details: readonly string[] }[] = [];
   const counts = { create: 0, update: 0, delete: 0, cancel: 0, conflict: 0, kept: 0 };
-  for (const document of documents) {
-    const plan = plans.get(document)?.plan;
-    if (plan === undefined) continue;
-    const name = `${document.resource.kind} ${document.name}`;
-    const start = plan.start === true ? ["starts the Objective"] : [];
-    if (plan.held !== undefined) {
+  for (const plan of plans) {
+    const document = documents[plan.document];
+    const name = `${document?.resource.kind ?? resourceKindName(plan.kind)} ${document?.name ?? plan.name}`;
+    const start = plan.startsObjective ? ["starts the Objective"] : [];
+    if (plan.held !== "") {
       rows.push({ head: `= ${name}`, details: [plan.held] });
-    } else if ((plan.refusals ?? []).length > 0) {
-      for (const refusal of plan.refusals ?? []) {
+    } else if (plan.refusals.length > 0) {
+      for (const refusal of plan.refusals) {
         counts.conflict += 1;
         rows.push({ head: `! ${name}`, details: [`${refusal.path}: ${refusal.reason}`] });
       }
-    } else if (plan.action === "create") {
+    } else if (plan.action === PlanAction.CREATE) {
       counts.create += 1;
       rows.push({
         head: `+ ${name}`,
         details:
-          document.path === "surface-accounts"
+          document?.path === "surface-accounts"
             ? [`${surfaceProvider(document)}; apply reads and verifies its secrets`]
             : start,
       });
-    } else if (plan.action === "update") {
+    } else if (plan.action === PlanAction.UPDATE) {
       counts.update += 1;
       rows.push({ head: `~ ${name}`, details: [...describeChanges(plan.changes), ...start] });
     }
@@ -2027,18 +1620,18 @@ function renderPlan(
     }
   }
   for (const item of pruned) {
-    const name = `${item.kind} ${item.name}`;
-    if (item.action === "delete") {
+    const name = `${resourceKindName(item.kind)} ${item.name}`;
+    if (item.action === PruneAction.DELETE) {
       counts.delete += 1;
       rows.push({ head: `- ${name}`, details: [] });
-    } else if (item.action === "cancel") {
+    } else if (item.action === PruneAction.CANCEL) {
       counts.cancel += 1;
       rows.push({ head: `- ${name}`, details: ["cancel; its history is kept"] });
     } else {
       counts.kept += 1;
       rows.push({
         head: `= ${name}`,
-        details: [`${notRemoved(item)}: ${item.reason ?? "still in use"}`],
+        details: [`${notRemoved(item)}: ${item.reason || "still in use"}`],
       });
     }
   }
@@ -2066,7 +1659,7 @@ function renderPlan(
   return `${lines.map(terminalText).join("\n")}\nPlan: ${summary}.\n${secrets}`;
 }
 
-function surfaceProvider(document: ManifestDocument): string {
+function surfaceProvider(document: InputDocument): string {
   const spec = isRecord(document.resource.spec) ? document.resource.spec : {};
   return String(spec["provider"]);
 }
@@ -2081,7 +1674,12 @@ function describeChanges(changes: readonly FieldChange[]): readonly string[] {
     const path = option === null ? change.path : `spec.${option[1]}.${option[2]}`;
     const entry = option === null ? /^(spec\.[A-Za-z]+)\[(.*)\]$/su.exec(change.path) : null;
     if (entry?.[1] !== undefined && entry[2] !== undefined) {
-      const symbol = change.action === "add" ? "+" : change.action === "remove" ? "-" : "~";
+      const symbol =
+        change.action === FieldChangeAction.ADD
+          ? "+"
+          : change.action === FieldChangeAction.REMOVE
+            ? "-"
+            : "~";
       const items = lists.get(entry[1]) ?? [];
       if (!lists.has(entry[1])) {
         lists.set(entry[1], items);
@@ -2090,13 +1688,15 @@ function describeChanges(changes: readonly FieldChange[]): readonly string[] {
       items.push(`${symbol} ${entry[2]}`);
       continue;
     }
+    const before = change.before === undefined ? undefined : toJson(ValueSchema, change.before);
+    const after = change.after === undefined ? undefined : toJson(ValueSchema, change.after);
     lines.push(
       `${path}: ${
-        change.action === "add"
-          ? `+ ${shortValue(change.after)}`
-          : change.action === "remove"
-            ? `- ${shortValue(change.before)}`
-            : `${shortValue(change.before)} -> ${shortValue(change.after)}`
+        change.action === FieldChangeAction.ADD
+          ? `+ ${shortValue(after)}`
+          : change.action === FieldChangeAction.REMOVE
+            ? `- ${shortValue(before)}`
+            : `${shortValue(before)} -> ${shortValue(after)}`
       }`,
     );
   }
@@ -2110,76 +1710,6 @@ function shortValue(value: unknown): string {
   const text = typeof value === "string" ? value : JSON.stringify(value);
   const quoted = typeof value === "string" && /[\s,]/u.test(text) ? JSON.stringify(text) : text;
   return quoted.length > 60 ? `${quoted.slice(0, 57)}...` : quoted;
-}
-
-async function getOptional(
-  client: ControlPlaneClient,
-  path: string,
-  name: string,
-): Promise<Resource | undefined> {
-  try {
-    return await readResource(client, path, name);
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("does not exist")) return undefined;
-    throw error;
-  }
-}
-
-function label(document: ManifestDocument): string {
-  return `${document.resource.kind}/${document.name}`;
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-/** The apply-able form of a stored resource: identity, desired fields, no server bookkeeping. */
-function exportManifest(resource: Resource): string {
-  return stringifyYaml({
-    apiVersion: resource.apiVersion,
-    kind: resource.kind,
-    metadata: { name: resource.metadata["name"] },
-    spec:
-      resource.kind === "Objective"
-        ? objectiveManifestSpec(resource.spec)
-        : resource.kind === "SurfaceAccount"
-          ? surfaceAccountManifestSpec(resource.spec)
-          : pruneManagedFields(resource.spec),
-  });
-}
-
-/**
- * A Surface Account's declarable fields: the options verification recorded, in manifest form,
- * and the secret references from the last apply. Secret values never leave the vault.
- */
-function surfaceAccountManifestSpec(spec: unknown): Record<string, unknown> {
-  const record = isRecord(spec) ? spec : {};
-  const provider = record["provider"];
-  if (!isSurfaceProvider(provider)) throw new Error("Surface Account provider is invalid");
-  return {
-    provider,
-    displayName: record["displayName"],
-    configuration: declaredConfiguration({
-      provider,
-      authMethod: String(record["authMethod"]),
-      externalAccountId: String(record["externalAccountId"]),
-      configuration: isRecord(record["configuration"]) ? record["configuration"] : {},
-    }),
-    secrets: record["secrets"],
-  };
-}
-
-/** An Objective's declarable fields, leaving out defaults so the manifest stays short. */
-function objectiveManifestSpec(spec: unknown): Record<string, unknown> {
-  const record = isRecord(spec) ? spec : {};
-  const empty = (value: unknown) =>
-    value === undefined ||
-    value === false ||
-    (Array.isArray(value) && value.length === 0) ||
-    (isRecord(value) && Object.keys(value).length === 0);
-  return Object.fromEntries(
-    Object.entries(record).filter(([field, value]) => field === "runtimeActions" || !empty(value)),
-  );
 }
 
 async function watchResources(
@@ -2245,20 +1775,7 @@ function watchedVersion(resource: Resource | ResourceList): string {
   return String(resource.metadata?.["resourceVersion"] ?? JSON.stringify(resource));
 }
 
-function parseManifest(value: unknown): Resource {
-  if (
-    !isRecord(value) ||
-    typeof value["kind"] !== "string" ||
-    typeof value["apiVersion"] !== "string" ||
-    !isRecord(value["metadata"])
-  ) {
-    throw new Error("Manifest requires apiVersion, kind, and metadata");
-  }
-  requiredName(value as unknown as Resource);
-  return value as unknown as Resource;
-}
-
-function descriptorFor(kind: string): { readonly path: string; readonly mutable: boolean } {
+function descriptorFor(kind: string): { readonly path: string } {
   if (!Object.hasOwn(resources, kind))
     throw new Error(
       `Unknown resource kind: ${kind}. Use one of: ${Object.keys(resources).join(", ")}`,
@@ -2267,32 +1784,6 @@ function descriptorFor(kind: string): { readonly path: string; readonly mutable:
   return descriptor;
 }
 
-function requiredName(resource: Resource): string {
-  const name = resource.metadata["name"];
-  if (typeof name !== "string" || name.trim() === "")
-    throw new Error(`${resource.kind} metadata.name is required`);
-  return name.trim();
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** A resource spec without the identifiers and timestamps the Control Plane adds. */
-export function pruneManagedFields(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(pruneManagedFields);
-  if (!isRecord(value)) return value;
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(
-        ([key]) =>
-          key !== "id" &&
-          key !== "createdAt" &&
-          key !== "updatedAt" &&
-          key !== "createdBy" &&
-          key !== "permissionSetId" &&
-          key !== "contextSetId",
-      )
-      .map(([key, child]) => [key, pruneManagedFields(child)]),
-  );
 }

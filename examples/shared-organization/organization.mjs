@@ -49,6 +49,16 @@ async function request(state, method, path, body) {
 }
 const rpc = (state, service, method, body = {}) =>
   request(state, "POST", `/supertag.operator.v1.${service}/${method}`, body);
+async function apply(state, manifest) {
+  const result = await rpc(state, "ResourceService", "ApplyManifests", {
+    documents: [{ manifest }],
+  });
+  if (!result.complete)
+    throw new Error(
+      `${manifest.kind} ${manifest.metadata.name}: ${JSON.stringify(result.results)}`,
+    );
+  return result;
+}
 async function waitUntil(check, timeout = 60000) {
   const deadline = Date.now() + timeout;
   let last;
@@ -313,10 +323,8 @@ async function bootstrap() {
   }
   await run(process.execPath, [sdkBin(), "migrate"], { env: await cpEnvironment(state) });
   await startControlPlane(state);
-  await request(
+  await apply(
     state,
-    "POST",
-    "/api/v1/permission-sets",
     resource("PermissionSet", "shared-workspace", {
       permissions: ["files:write", "commands:execute", "web:fetch"].map((action) => ({
         target: "runtime",
@@ -327,10 +335,8 @@ async function bootstrap() {
   state.tagIds = {};
   for (const name of ["claude", "codex"]) {
     const role = name === "claude" ? "Delivery manager" : "Review manager";
-    await request(
+    await apply(
       state,
-      "POST",
-      "/api/v1/roles",
       resource("Role", role, {
         purpose:
           name === "claude"
@@ -341,12 +347,11 @@ async function bootstrap() {
         permissionSets: ["shared-workspace"],
       }),
     );
-    const tag = await request(
-      state,
-      "POST",
-      "/api/v1/tags",
-      resource("Tag", `Shared ${name} manager`, { roles: [role] }),
-    );
+    await apply(state, resource("Tag", `Shared ${name} manager`, { roles: [role] }));
+    const { tag } = await rpc(state, "ResourceService", "GetResource", {
+      kind: "RESOURCE_KIND_TAG",
+      name: `Shared ${name} manager`,
+    });
     state.tagIds[name] = tag.metadata.id;
     const hostId = `shared-${name}-host`;
     const enrollment = await rpc(state, "HostService", "EnrollWorkerHost", { id: hostId });
@@ -424,10 +429,14 @@ async function start() {
     await save(state);
   }
   await waitUntil(async () => {
-    const profiles = await request(state, "GET", "/api/v1/worker-profiles");
+    const { resources = [] } = await rpc(state, "ResourceService", "ListResources", {
+      kind: "RESOURCE_KIND_WORKER_PROFILE",
+    });
     return ["shared-claude", "shared-codex"].every((id) =>
-      profiles.items.some(
-        (profile) => profile.spec.ref.id === id && profile.status.phase === "available",
+      resources.some(
+        ({ workerProfile }) =>
+          workerProfile.spec.ref.id === id &&
+          workerProfile.status.phase === "WORKER_PROFILE_PHASE_AVAILABLE",
       ),
     );
   });

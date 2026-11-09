@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/atemaguer/supertag/main/spec/manifests/role.schema.json",
+  "title": "SuperTag Role manifest",
+  "description": "A Role manifest, as supertag apply -f reads it. Its spec is supertag.operator.v1.RoleSpec in supertag/operator/v1/resource.proto; this file is generated from it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "supertag/v1"
+    },
+    "kind": {
+      "const": "Role"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "description": "The resource's name, unique within its kind.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "spec": {
+      "$ref": "#/$defs/RoleSpec"
+    }
+  },
+  "$defs": {
+    "RoleSpec": {
+      "description": "A Role's declared policy, and the `spec` of a `Role` manifest. Apply merges its set lists entry by entry.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "purpose"
+      ],
+      "properties": {
+        "purpose": {
+          "description": "What the responsibility is for, in one sentence.",
+          "type": "string",
+          "minLength": 1
+        },
+        "instructions": {
+          "description": "Instructions every Task of its Tags receives.",
+          "type": "string"
+        },
+        "contextSets": {
+          "description": "Its Context Sets, by name, without duplicates.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "permissionSets": {
+          "description": "Its Permission Sets, by name, without duplicates.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "execution": {
+          "description": "The default harness, models and efforts for its Tags.",
+          "$ref": "#/$defs/ExecutionSettings"
+        }
+      }
+    },
+    "ExecutionSettings": {
+      "description": "The harness, models and reasoning efforts a Role or Tag allows. A Tag's settings override its Roles' field by field; when several Roles set a field, the first Role by name wins. `execution` is one field to the field manager rules.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "harness": {
+          "description": "The one harness Tasks run on, such as `codex` or `claude-code`. Empty allows any harness the Worker Host offers.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$"
+        },
+        "model": {
+          "description": "The models allowed; the first is the default. Empty allows any, and uses the Worker Host's default.",
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "maxItems": 32
+            }
+          ]
+        },
+        "effort": {
+          "description": "The efforts allowed; the first is the default. Empty starts Tasks at `low` and allows `medium` and `high`.",
+          "anyOf": [
+            {
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

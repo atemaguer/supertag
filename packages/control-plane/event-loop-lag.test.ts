@@ -27,12 +27,17 @@ describe("event-loop lag monitoring", () => {
     const monitor = new EventLoopLagMonitor(warn);
     monitor.start();
     try {
-      await monitor.run("http: GET /api/v1/objectives", async () => {
-        await Promise.resolve();
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_100);
-      });
+      await monitor.run(
+        "http: POST /supertag.operator.v1.ResourceService/ApplyManifests",
+        async () => {
+          await Promise.resolve();
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_100);
+        },
+      );
       expect(warn).toHaveBeenCalledWith(
-        expect.objectContaining({ activity: "http: GET /api/v1/objectives" }),
+        expect.objectContaining({
+          activity: "http: POST /supertag.operator.v1.ResourceService/ApplyManifests",
+        }),
       );
     } finally {
       monitor.stop();

@@ -44,6 +44,20 @@ when it has a local operator credential, and each one saved with `supertag conne
 Enter switches to the one under the cursor, and esc goes back. Switching ends every stream and call
 to the Control Plane you leave and reads everything anew from the next; unsent input stays behind.
 
+Ctrl-K, or `/` on an empty input line or where the pane has none, opens the command palette.
+Type to filter its commands, move with up and down, and press enter to run one; esc goes back:
+
+- **New conversation** names a new conversation with the selected Tag, as `n` in the Ctrl-O list.
+- **Switch conversation** opens the Ctrl-O list.
+- **Create Objective** opens a form for an Objective owned by the selected Tag: its outcome, the
+  Team its owner may hand work to (empty, it works alone), and a budget such as `300 USD` or
+  `$12.50` (empty, no budget). Up and down move between the fields; enter moves to the next and,
+  on the budget, creates the Objective, which starts at once. The pane then says whether its
+  owner took its first turn, with any warnings, and enter shows the Objective. When it could not
+  start, such as for an owner without a connected Worker Host, `r` starts it once that is fixed.
+- **Switch Control Plane** opens the Ctrl-P list, when there is more than one.
+- **Open inbox** shows the first item waiting on you, with the rail on it.
+
 Tab moves between the rail and the main pane; up and down (or `k` and `j`) move through the rail,
 and enter opens the row. Esc quits when there is nothing to go back from, and Ctrl-C quits.
 Every text from the server, an agent or a diff is filtered for the terminal, so an escape sequence
@@ -52,16 +66,16 @@ shows as text.
 It talks to the Control Plane through the operator API's generated Go client in
 `packages/operator-api/go`, using the Connect protocol over HTTP/1.1. `ConversationService` sends
 messages, lists your conversations and their history, and follows each reply, resuming a dropped
-stream where it left off. `ObjectiveService` lists the open Objectives and describes the selected
-one. `InboxService` lists the inbox, answers questions and decides approval requests.
-`WorkService.GetSession` reads a work Session's delivery, and `ListTaskEvents` its latest Task's
+stream where it left off. `ObjectiveService` lists the open Objectives, describes the selected
+one, and creates the Objectives the palette declares. `InboxService` lists the inbox, answers
+questions and decides approval requests. `WorkService.GetSession` reads a work Session's delivery, and `ListTaskEvents` its latest Task's
 commands and tool calls. `TeamService` lists and reads the Teams, and
 `MailboxService.ListWorkstreamPosts` reads the shown Team's Workstream. `EventService.Watch` keeps
 the rail, the Objective view, the Team view and expanded work Sessions current, including how many
 work Sessions of each shown conversation are still open. While that stream is down, the TUI
 rereads what it shows every five seconds. `HostService.ListWorkerHosts` feeds the status bar,
 reread every 15 seconds; when the Control Plane refuses it, the status bar leaves the Worker Hosts
-out. The Tags themselves come from `GET /api/v1/tags`. See
+out. `ResourceService.ListResources` lists the active Tags. See
 `contributing/tui-design.md`.
 
 Build with `./build.sh`, which cross-compiles static binaries for macOS and Linux (arm64 and

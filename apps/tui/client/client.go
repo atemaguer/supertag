@@ -1,6 +1,6 @@
 // Package client talks to a SuperTag Control Plane: the operator API's ConversationService,
-// ObjectiveService, InboxService, WorkService, TeamService, MailboxService, HostService and
-// EventService through the generated Connect client, a follower that turns one message's
+// ObjectiveService, InboxService, WorkService, TeamService, MailboxService, HostService,
+// ResourceService and EventService through the generated Connect client, a follower that turns one message's
 // FollowMessage stream into the events a terminal UI shows, and a watcher that keeps the UI's view
 // of Tags, conversations, Objectives, Teams and the inbox current.
 package client
@@ -9,10 +9,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -30,19 +28,6 @@ type Target struct {
 	Token string `json:"token"`
 	Name  string `json:"name,omitempty"`
 }
-
-// Tag is the part of a Tag resource the UI shows.
-type Tag struct {
-	Metadata struct {
-		Name string `json:"name"`
-	} `json:"metadata"`
-	Status struct {
-		Phase string `json:"phase"`
-	} `json:"status"`
-}
-
-// Name is the Tag's name.
-func (t Tag) Name() string { return t.Metadata.Name }
 
 // APIError is a request the Control Plane refused, with the sentence it gave.
 type APIError struct {
@@ -76,6 +61,7 @@ type Client struct {
 	teams         operatorv1connect.TeamServiceClient
 	mailbox       operatorv1connect.MailboxServiceClient
 	hosts         operatorv1connect.HostServiceClient
+	resources     operatorv1connect.ResourceServiceClient
 }
 
 // New returns a client for target; version is sent as the client version. Only the URL's origin
@@ -105,6 +91,7 @@ func New(target Target, version string) (*Client, error) {
 	c.teams = operatorv1connect.NewTeamServiceClient(httpClient, c.origin, options...)
 	c.mailbox = operatorv1connect.NewMailboxServiceClient(httpClient, c.origin, options...)
 	c.hosts = operatorv1connect.NewHostServiceClient(httpClient, c.origin, options...)
+	c.resources = operatorv1connect.NewResourceServiceClient(httpClient, c.origin, options...)
 	return c, nil
 }
 
@@ -140,30 +127,33 @@ func (headers) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.S
 	return next
 }
 
-// ListTags returns the organization's Tags, read from the resource route `GET /api/v1/tags`.
-func (c *Client) ListTags(ctx context.Context) ([]Tag, error) {
+// maxTagPages bounds ListTags, so an organization with very many Tags still gets an answer.
+const maxTagPages = 10
+
+// ListTags returns the organization's active Tags by name, read with ResourceService.
+func (c *Client) ListTags(ctx context.Context) ([]*operatorv1.Tag, error) {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.origin+"/api/v1/tags", nil)
-	if err != nil {
-		return nil, err
+	var tags []*operatorv1.Tag
+	token := ""
+	for range maxTagPages {
+		res, err := c.resources.ListResources(ctx, connect.NewRequest(&operatorv1.ListResourcesRequest{
+			Kind: operatorv1.ResourceKind_RESOURCE_KIND_TAG, PageSize: 500, PageToken: token,
+		}))
+		if err != nil {
+			return nil, apiError(err)
+		}
+		for _, resource := range res.Msg.GetResources() {
+			if tag := resource.GetTag(); tag != nil {
+				tags = append(tags, tag)
+			}
+		}
+		token = res.Msg.GetNextPageToken()
+		if token == "" {
+			break
+		}
 	}
-	c.setHeaders(req.Header)
-	res, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-	if res.StatusCode >= 300 {
-		return nil, responseError(res)
-	}
-	var list struct {
-		Items []Tag `json:"items"`
-	}
-	if err := json.NewDecoder(res.Body).Decode(&list); err != nil {
-		return nil, fmt.Errorf("reading the Tags: %w", err)
-	}
-	return list.Items, nil
+	return tags, nil
 }
 
 // SendMessage sends text to the Tag in the named conversation. A retry after a failure that may
@@ -265,46 +255,6 @@ func apiError(err error) error {
 		message = "Control Plane refused the call: " + connectErr.Code().String()
 	}
 	return &APIError{Code: connectErr.Code(), Message: message}
-}
-
-// responseError reads an HTTP refusal's sentence the way the CLI does: `message`, else an `error`
-// that is a sentence, else the HTTP status.
-func responseError(res *http.Response) error {
-	var body struct {
-		Message string `json:"message"`
-		Error   string `json:"error"`
-	}
-	_ = json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&body)
-	message := body.Message
-	if message == "" && strings.ContainsAny(body.Error, " \t\n") {
-		message = body.Error
-	}
-	if message == "" {
-		message = fmt.Sprintf("Control Plane returned HTTP %d", res.StatusCode)
-	}
-	return &APIError{Code: httpCode(res.StatusCode), Message: message}
-}
-
-func httpCode(status int) connect.Code {
-	switch {
-	case status == http.StatusBadRequest:
-		return connect.CodeInvalidArgument
-	case status == http.StatusUnauthorized:
-		return connect.CodeUnauthenticated
-	case status == http.StatusForbidden:
-		return connect.CodePermissionDenied
-	case status == http.StatusNotFound:
-		return connect.CodeNotFound
-	case status == http.StatusConflict:
-		return connect.CodeFailedPrecondition
-	case status == http.StatusTooManyRequests:
-		return connect.CodeResourceExhausted
-	case status == http.StatusServiceUnavailable:
-		return connect.CodeUnavailable
-	case status >= 500:
-		return connect.CodeInternal
-	}
-	return connect.CodeUnknown
 }
 
 // transient reports whether a failed call is worth retrying: the Control Plane could not be

@@ -3,12 +3,12 @@ import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { parseArgs } from "node:util";
+import type { JsonObject } from "@bufbuild/protobuf";
 import { githubRepositoryFromSource } from "@supertag/core";
 import { stateDirectory } from "@supertag/store";
 import { Document, parseDocument } from "yaml";
 import {
   ControlPlaneClient,
-  ControlPlaneRequestError,
   type ControlPlaneTarget,
   ensureLocalAdminToken,
 } from "./control-plane-client.js";
@@ -30,9 +30,15 @@ import {
   runningProcess,
 } from "./local-state.js";
 import { machineName as machineHostname } from "./machine-name.js";
+import {
+  applyManifest,
+  findResourceView,
+  listResourceViews,
+  resourceManifests,
+} from "./operator-resources.js";
 import { type Choice, linePrompter, type Prompter } from "./prompts.js";
 import { git, remoteSource, sanitizeName, workspaceNameFor } from "./repository-name.js";
-import { pruneManagedFields } from "./resources.js";
+import type { ResourcePath } from "./resource-protos.js";
 import {
   type ControlPlaneService,
   controlPlaneOf,
@@ -747,26 +753,35 @@ async function ensureResources(
   update: boolean,
 ): Promise<readonly string[]> {
   const lines: string[] = [];
-  const read = async (path: string, name: string) =>
-    client
-      .request<{ spec: Record<string, unknown> }>(`/api/v1/${path}/${encodeURIComponent(name)}`)
-      .then((resource) => ({ spec: pruneManagedFields(resource.spec) as Record<string, unknown> }))
-      .catch((error: unknown) => {
-        if (error instanceof ControlPlaneRequestError && error.status === 404) return undefined;
-        throw error;
-      });
-  const apply = async (path: string, kind: string, name: string, spec: Record<string, unknown>) =>
-    client.request(`/api/v1/${path}?applySet=init`, {
-      method: "POST",
-      body: JSON.stringify({
+  const read = async (path: ResourcePath, name: string) =>
+    (await findResourceView(client.operator, path, name)) === undefined
+      ? undefined
+      : {
+          spec:
+            (
+              (await resourceManifests(client.operator, path, name))[0] as {
+                readonly spec?: Record<string, unknown>;
+              }
+            ).spec ?? {},
+        };
+  const apply = async (
+    _path: ResourcePath,
+    kind: string,
+    name: string,
+    spec: Record<string, unknown>,
+  ) =>
+    applyManifest(client.operator, {
+      applySet: "init",
+      manifest: {
         apiVersion: CONTROL_PLANE_API_VERSION,
         kind,
         metadata: { name },
-        spec,
-      }),
+        spec: JSON.parse(JSON.stringify(spec)) as JsonObject,
+      },
+      source: `supertag init ${kind}/${name}`,
     });
   const ensure = async (
-    path: string,
+    path: ResourcePath,
     kind: string,
     label: string,
     name: string,
@@ -840,11 +855,13 @@ async function currentAccess(): Promise<Access> {
   const url = running === undefined ? undefined : (await readStatus(controlPlaneSlot()))?.url;
   if (url === undefined) return "edit";
   const token = environmentOperatorToken() || (await ensureLocalAdminToken());
-  const resource = await new ControlPlaneClient({ url, token })
-    .request<{ spec: { permissions?: unknown[] } }>(
-      `/api/v1/permission-sets/${INIT_PERMISSION_SET}`,
-    )
-    .catch(() => undefined);
+  const resource = (await findResourceView(
+    { url, token },
+    "permission-sets",
+    INIT_PERMISSION_SET,
+  ).catch(() => undefined)) as
+    | { readonly spec: { readonly permissions?: readonly unknown[] } }
+    | undefined;
   const actions = (resource?.spec.permissions ?? []).map((permission) =>
     isRecord(permission) ? permission["action"] : undefined,
   );
@@ -861,9 +878,9 @@ async function currentTag(host: HostService | undefined): Promise<string | undef
   const url = running === undefined ? undefined : (await readStatus(controlPlaneSlot()))?.url;
   if (workerHostId === undefined || url === undefined) return undefined;
   const token = environmentOperatorToken() || (await ensureLocalAdminToken());
-  const tags = await new ControlPlaneClient({ url, token })
-    .request<{ readonly items: readonly TagResource[] }>("/api/v1/tags")
-    .catch(() => undefined);
+  const tags = (await listResourceViews({ url, token }, "tags").catch(() => undefined)) as
+    | { readonly items: readonly TagResource[] }
+    | undefined;
   return tags?.items.find((tag) => (tag.spec.workerHosts ?? []).includes(workerHostId))?.metadata
     .name;
 }

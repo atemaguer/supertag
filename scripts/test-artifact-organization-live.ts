@@ -299,8 +299,16 @@ try {
   }
   await eventually(
     async () =>
-      rows((await api("GET", "/api/v1/worker-profiles"))["items"]).filter(
-        (item) => record(item["status"])["phase"] === "available",
+      rows(
+        (
+          await api("POST", "/supertag.operator.v1.ResourceService/ListResources", {
+            kind: "RESOURCE_KIND_WORKER_PROFILE",
+          })
+        )["resources"],
+      ).filter(
+        (item) =>
+          record(record(item["workerProfile"])["status"])["phase"] ===
+          "WORKER_PROFILE_PHASE_AVAILABLE",
       ).length === 2,
   );
   const resource = (kind: string, name: string, spec: object) => ({
@@ -309,9 +317,25 @@ try {
     metadata: { name },
     spec,
   });
-  await api(
-    "POST",
-    "/api/v1/permission-sets",
+  const apply = async (manifest: object) => {
+    const applied = await api("POST", "/supertag.operator.v1.ResourceService/ApplyManifests", {
+      documents: [{ manifest }],
+    });
+    if (applied["complete"] !== true)
+      throw new Error(`Apply failed: ${JSON.stringify(applied["results"])}`);
+  };
+  const tagId = async (name: string) =>
+    record(
+      record(
+        (
+          await api("POST", "/supertag.operator.v1.ResourceService/GetResource", {
+            kind: "RESOURCE_KIND_TAG",
+            name,
+          })
+        )["tag"],
+      )["metadata"],
+    )["id"] as string;
+  await apply(
     resource("PermissionSet", "artifact-work", {
       permissions: ["files:write", "commands:execute", "web:fetch"].map((action) => ({
         target: "runtime",
@@ -331,9 +355,7 @@ try {
       "Independently verify the source artifact, its calculations and recommendation, and submit a review artifact that quotes the exact producer native session reference and SOURCE_NONCE from its source report. Do not claim Objective owner authority.",
     ],
   ] as const)
-    await api(
-      "POST",
-      "/api/v1/roles",
+    await apply(
       resource("Role", role, {
         purpose: role,
         instructions: `${context} ${instructions}`,
@@ -341,30 +363,17 @@ try {
         contextSets: [],
       }),
     );
-  const owner = record(
-    (
-      await api(
-        "POST",
-        "/api/v1/tags",
-        resource("Tag", "Delivery owner", {
-          roles: ["Delivery owner"],
-          workerHosts: ["worker-a"],
-        }),
-      )
-    )["metadata"],
-  )["id"] as string;
-  const reviewer = record(
-    (
-      await api(
-        "POST",
-        "/api/v1/tags",
-        resource("Tag", "Independent reviewer", {
-          roles: ["Independent reviewer"],
-          workerHosts: ["worker-b"],
-        }),
-      )
-    )["metadata"],
-  )["id"] as string;
+  await apply(
+    resource("Tag", "Delivery owner", { roles: ["Delivery owner"], workerHosts: ["worker-a"] }),
+  );
+  const owner = await tagId("Delivery owner");
+  await apply(
+    resource("Tag", "Independent reviewer", {
+      roles: ["Independent reviewer"],
+      workerHosts: ["worker-b"],
+    }),
+  );
+  const reviewer = await tagId("Independent reviewer");
 
   const practices = 17,
     weeklyMinutes = 43,
@@ -372,9 +381,7 @@ try {
     expectedMinutes = practices * weeklyMinutes * weeks;
   // The only work request issued by the runner: applying the Objective starts its conversation.
   // Every work Session after that is a model decision.
-  await api(
-    "POST",
-    "/api/v1/objectives",
+  await apply(
     resource("Objective", objectiveId, {
       owner: "Delivery owner",
       outcome: [

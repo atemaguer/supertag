@@ -67,7 +67,7 @@ for (const dialect of ["sqlite", "postgresql"] as const)
         status: 400,
         source: "api",
         method: "POST",
-        path: "/api/v1/tags",
+        path: "/supertag.operator.v1.ResourceService/ApplyManifests",
       });
       await store.recordAuditEntry({
         at: at(3),

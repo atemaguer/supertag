@@ -48,6 +48,8 @@ type app struct {
 	choosing  bool
 	choice    int
 	choiceErr string
+	// palette is the command palette while it shows.
+	palette *palette
 
 	width, height int
 }
@@ -106,13 +108,31 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.forward(msg.msg)
 	case tea.WindowSizeMsg:
 		a.width, a.height = msg.Width, msg.Height
+		if a.palette != nil {
+			a.palette.filter.SetWidth(max(a.width-6, 10))
+		}
 	case tea.KeyPressMsg:
+		if a.palette != nil {
+			return a, a.paletteKeyPress(msg)
+		}
 		if a.choosing {
 			return a, a.chooseKey(msg)
 		}
 		if msg.String() == switchKey && len(a.contexts) > 1 {
 			a.choosing, a.choice, a.choiceErr = true, a.current, ""
 			return a, nil
+		}
+		if msg.String() == paletteKey || (msg.String() == "/" && a.inner.slashOpensPalette()) {
+			return a, a.openPalette()
+		}
+	default:
+		if a.palette != nil {
+			var cmd tea.Cmd
+			a.palette.filter, cmd = a.palette.filter.Update(msg)
+			if _, paste := msg.(tea.PasteMsg); paste {
+				return a, cmd
+			}
+			return a, tea.Batch(cmd, a.forward(msg))
 		}
 	}
 	return a, a.forward(msg)
@@ -195,10 +215,14 @@ func ownMessage(msg tea.Msg) bool {
 }
 
 func (a *app) View() tea.View {
-	if !a.choosing || a.width == 0 {
+	if (!a.choosing && a.palette == nil) || a.width == 0 {
 		return a.inner.View()
 	}
-	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, a.renderChoices(), a.inner.renderStatus()))
+	shown := a.renderChoices
+	if a.palette != nil {
+		shown = a.renderPalette
+	}
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, shown(), a.inner.renderStatus()))
 	v.AltScreen = true
 	return v
 }

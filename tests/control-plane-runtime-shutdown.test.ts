@@ -69,7 +69,16 @@ describe("Control Plane runtime shutdown", () => {
       executionAccepted.resolve();
       await releaseExecution.promise;
       // A draining runtime refuses a new management request rather than serving it.
-      internalApiStatus = (await fetch(`${runtime.url}/api/v1/tags`)).status;
+      internalApiStatus = (
+        await fetch(`${runtime.url}/supertag.operator.v1.ResourceService/ListResources`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${adminToken}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ kind: "RESOURCE_KIND_TAG" }),
+        })
+      ).status;
       yield* execute(spec, signal);
     });
     const credential = await enrollWorkerHost(runtime.url, adminToken, "shutdown-host");

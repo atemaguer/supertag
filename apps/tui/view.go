@@ -8,7 +8,7 @@ import (
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/atemaguer/supertag/apps/tui/client"
+	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
 )
 
 const railWidth = 24
@@ -58,6 +58,11 @@ func (m *model) layout() {
 	m.viewport.SetWidth(m.paneWidth())
 	m.viewport.SetHeight(max(m.height-3, 1))
 	m.input.SetWidth(m.paneWidth() - 3)
+	if m.form != nil {
+		for i := range m.form.fields {
+			m.form.fields[i].SetWidth(m.paneWidth() - 3)
+		}
+	}
 	m.refresh()
 }
 
@@ -75,6 +80,8 @@ func (m *model) refresh() {
 		m.viewport.SetContent(m.renderPicker())
 	case paneTeam:
 		m.viewport.SetContent(m.renderTeam())
+	case paneNewObjective:
+		m.viewport.SetContent(m.renderObjectiveForm())
 	default:
 		atBottom := m.viewport.AtBottom()
 		m.viewport.SetContent(m.renderConversation())
@@ -207,8 +214,8 @@ func (m model) renderRail(height int) string {
 
 	section("Tags", "")
 	for i, tag := range m.tags {
-		open := m.open[convKey(tag.Name(), m.currentConversation(tag.Name()))]
-		add(row{rowTag, i}, terminalText(tag.Name()), terminalText(railState(tag, open)))
+		open := m.open[convKey(tagName(tag), m.currentConversation(tagName(tag)))]
+		add(row{rowTag, i}, terminalText(tagName(tag)), terminalText(railState(tag, open)))
 	}
 	if len(m.objectives) > 0 || m.objectivesErr != "" {
 		section("Objectives", m.objectivesErr)
@@ -236,22 +243,33 @@ func (m model) renderRail(height int) string {
 	return railStyle.Width(railWidth).Height(height).MaxHeight(height).Render(strings.Join(lines, "\n"))
 }
 
-// railState is what the rail shows beside a Tag: its phase, or how many work Sessions of the
-// conversation it shows are still open while the Tag is active.
-func railState(tag client.Tag, open int) string {
-	if open > 0 && tag.Status.Phase == "active" {
-		return fmt.Sprintf("%d open", open)
-	}
-	return tag.Status.Phase
+// tagName is a Tag's name.
+func tagName(tag *operatorv1.Tag) string { return tag.GetMetadata().GetName() }
+
+// tagPhases are the words the rail shows for a Tag's phase, as `supertag get tags` prints it.
+var tagPhases = map[operatorv1.TagPhase]string{
+	operatorv1.TagPhase_TAG_PHASE_ACTIVE:  "active",
+	operatorv1.TagPhase_TAG_PHASE_RETIRED: "retired",
 }
 
-// renderStatus is the status line: the Control Plane, its Worker Hosts, how to switch to another
-// Control Plane when there is one, and whether it is reachable.
+// railState is what the rail shows beside a Tag: its phase, or how many work Sessions of the
+// conversation it shows are still open while the Tag is active.
+func railState(tag *operatorv1.Tag, open int) string {
+	phase := tag.GetStatus().GetPhase()
+	if open > 0 && phase == operatorv1.TagPhase_TAG_PHASE_ACTIVE {
+		return fmt.Sprintf("%d open", open)
+	}
+	return tagPhases[phase]
+}
+
+// renderStatus is the status line: the Control Plane, its Worker Hosts, how to open the command
+// palette and to switch to another Control Plane when there is one, and whether it is reachable.
 func (m model) renderStatus() string {
 	left := " " + contextLabel(m.client.Target()) + "  "
 	if hosts := m.hostSummary(); hosts != "" {
 		left += hosts + "  "
 	}
+	left += "ctrl+k commands  "
 	if m.switchable {
 		left += "ctrl+p Control Planes  "
 	}
@@ -314,6 +332,8 @@ func (m model) paneTitle() string {
 			name = team.GetName()
 		}
 		return "Team · " + terminalText(name)
+	case paneNewObjective:
+		return "New Objective · owned by " + terminalText(m.form.owner)
 	}
 	tag := m.selectedTag()
 	return fmt.Sprintf("%s · %s", terminalText(tag), terminalText(m.currentConversation(tag)))
@@ -342,6 +362,8 @@ func (m model) paneHint() string {
 		return m.pickerHint()
 	case paneTeam:
 		return "Live · its Workstream updates as members post"
+	case paneNewObjective:
+		return m.formHint()
 	case paneConversation:
 		if c := m.shown(); c != nil && c.selected != nil {
 			return m.selectionHint(*c.selected)

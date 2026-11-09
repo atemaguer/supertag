@@ -353,10 +353,14 @@ async function run() {
       });
     }
     await waitUntil(async () => {
-      const profiles = await api.request("GET", "/api/v1/worker-profiles");
+      const { resources = [] } = await api.rpc("ResourceService", "ListResources", {
+        kind: "RESOURCE_KIND_WORKER_PROFILE",
+      });
       return ["support-manager", "support-analyst"].every((id) =>
-        profiles.items.some(
-          (profile) => profile.spec.ref.id === id && profile.status.phase === "available",
+        resources.some(
+          ({ workerProfile }) =>
+            workerProfile.spec.ref.id === id &&
+            workerProfile.status.phase === "WORKER_PROFILE_PHASE_AVAILABLE",
         ),
       );
     });

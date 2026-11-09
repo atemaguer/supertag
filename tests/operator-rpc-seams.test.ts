@@ -23,6 +23,7 @@ const SERVICE_MODULES = [
   "mailbox-rpc.ts",
   "objective-rpc.ts",
   "organization-rpc.ts",
+  "resource-rpc.ts",
   "surface-rpc.ts",
   "team-rpc.ts",
   "work-rpc.ts",

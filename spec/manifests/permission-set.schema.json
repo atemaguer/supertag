@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/atemaguer/supertag/main/spec/manifests/permission-set.schema.json",
+  "title": "SuperTag PermissionSet manifest",
+  "description": "A PermissionSet manifest, as supertag apply -f reads it. Its spec is supertag.operator.v1.PermissionSetSpec in supertag/operator/v1/resource.proto; this file is generated from it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "supertag/v1"
+    },
+    "kind": {
+      "const": "PermissionSet"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "description": "The resource's name, unique within its kind.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "spec": {
+      "$ref": "#/$defs/PermissionSetSpec"
+    }
+  },
+  "$defs": {
+    "PermissionSetSpec": {
+      "description": "A Permission Set's declared permissions, and the `spec` of a `PermissionSet` manifest. Apply merges approvers and permissions entry by entry; a permission is keyed by its target, scope or resource, and action.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "permissions"
+      ],
+      "properties": {
+        "approvers": {
+          "description": "Who may decide its gated permissions: `operator:OPERATOR_ID` or `tag:TAG`, by name or ID. Repeated entries count once.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^\\s*(operator|tag):\\s*\\S"
+          },
+          "maxItems": 50
+        },
+        "permissions": {
+          "description": "Its permissions.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Permission"
+          }
+        }
+      }
+    },
+    "Permission": {
+      "description": "One permission. In a manifest it is `target` beside the target's fields, `action` and `approval`.",
+      "oneOf": [
+        {
+          "description": "An action on a collaboration surface through one Surface Account.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "target",
+            "surfaceAccountId",
+            "scope",
+            "action"
+          ],
+          "properties": {
+            "target": {
+              "const": "surface"
+            },
+            "surfaceAccountId": {
+              "description": "The Surface Account's ID.",
+              "type": "string",
+              "minLength": 1
+            },
+            "scope": {
+              "description": "Where on the account, such as a channel or `owner/repo`.",
+              "type": "string",
+              "minLength": 1
+            },
+            "reference": {
+              "description": "A canonical, non-secret locator for the resource, used to pick the target when a request names it.",
+              "type": "string"
+            },
+            "action": {
+              "description": "The action, such as `commands:execute`, `issues:comment`, or for MCP `server/tool`, where the tool may be `*`.",
+              "type": "string",
+              "minLength": 1
+            },
+            "approval": {
+              "description": "Whether using it needs a decision first.",
+              "enum": [
+                "required"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A harness or runtime capability, such as `commands:execute`.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "target",
+            "action"
+          ],
+          "properties": {
+            "target": {
+              "const": "runtime"
+            },
+            "action": {
+              "description": "The action, such as `commands:execute`, `issues:comment`, or for MCP `server/tool`, where the tool may be `*`.",
+              "type": "string",
+              "minLength": 1
+            },
+            "approval": {
+              "description": "Whether using it needs a decision first.",
+              "enum": [
+                "required"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Tools of an MCP server.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "target",
+            "action"
+          ],
+          "properties": {
+            "target": {
+              "const": "mcp"
+            },
+            "resource": {
+              "description": "Limits the grant to calls whose arguments name this resource, for servers with a resource mapping. Empty: any call.",
+              "type": "string"
+            },
+            "action": {
+              "description": "The action, such as `commands:execute`, `issues:comment`, or for MCP `server/tool`, where the tool may be `*`.",
+              "type": "string",
+              "minLength": 1
+            },
+            "approval": {
+              "description": "Whether using it needs a decision first.",
+              "enum": [
+                "required"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

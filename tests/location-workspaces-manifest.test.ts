@@ -7,6 +7,7 @@ import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.
 import { main } from "../apps/cli/src/index.ts";
 import { DrizzleStore } from "../packages/store/src/index.js";
 import { migrateSqlite } from "./support/database.ts";
+import { applyManifests, getResource } from "./support/resources.ts";
 
 const header = (kind: string, name: string) =>
   `apiVersion: supertag/v1\nkind: ${kind}\nmetadata:\n  name: ${name}\n`;
@@ -88,9 +89,7 @@ describe("Workspaces on Tag locations", () => {
     expect(error).toBeInstanceOf(Error);
     return (error as Error).message;
   };
-  const locations = async () =>
-    (await client.request<{ spec: { locations: Record<string, unknown>[] } }>("/api/v1/tags/lead"))
-      .spec.locations;
+  const locations = async () => (await getResource(client, "tags", "lead")).spec.locations;
 
   it("applies, stores in order, exports, and describes a location's Workspaces", async () => {
     const path = await write(
@@ -144,7 +143,7 @@ describe("Workspaces on Tag locations", () => {
 `;
     const path = await write("selected.yaml", selected);
     await run("apply", "-f", path);
-    expect((await client.request("/api/v1/workspaces/app")).spec).toMatchObject({
+    expect((await getResource(client, "workspaces", "app")).spec).toMatchObject({
       mcp: ["sentry"],
       skills: ["docs-conventions"],
       skillCatalog: {
@@ -161,7 +160,7 @@ describe("Workspaces on Tag locations", () => {
       "-f",
       await write("fewer.yaml", `${header("Workspace", "app")}spec:\n  skills: [testing]\n`),
     );
-    const spec = (await client.request("/api/v1/workspaces/app")).spec;
+    const spec = (await getResource(client, "workspaces", "app")).spec;
     expect(spec.skills).toEqual(["testing"]);
     expect(spec.mcp).toBeUndefined();
     expect(spec.skillCatalog).toBeUndefined();
@@ -178,32 +177,38 @@ describe("Workspaces on Tag locations", () => {
     expect(refused).toContain("references Workspace ghost");
 
     await expect(
-      client.request("/api/v1/tags", {
-        method: "POST",
-        body: JSON.stringify({
-          apiVersion: "supertag/v1",
-          kind: "Tag",
-          metadata: { name: "lead" },
-          spec: {
-            locations: [{ provider: "slack", channelId: "C0LEAD", workspaces: ["app", "ghost"] }],
+      applyManifests(
+        client,
+        [
+          {
+            apiVersion: "supertag/v1",
+            kind: "Tag",
+            metadata: { name: "lead" },
+            spec: {
+              locations: [{ provider: "slack", channelId: "C0LEAD", workspaces: ["app", "ghost"] }],
+            },
           },
-        }),
-      }),
+        ],
+        { imperative: true },
+      ),
     ).rejects.toThrow("spec.locations[0].workspaces: Workspace ghost does not exist");
     await expect(
-      client.request("/api/v1/tags", {
-        method: "POST",
-        body: JSON.stringify({
-          apiVersion: "supertag/v1",
-          kind: "Tag",
-          metadata: { name: "lead" },
-          spec: {
-            locations: [{ provider: "slack", channelId: "C0LEAD", workspaces: ["app", "app"] }],
+      applyManifests(
+        client,
+        [
+          {
+            apiVersion: "supertag/v1",
+            kind: "Tag",
+            metadata: { name: "lead" },
+            spec: {
+              locations: [{ provider: "slack", channelId: "C0LEAD", workspaces: ["app", "app"] }],
+            },
           },
-        }),
-      }),
+        ],
+        { imperative: true },
+      ),
     ).rejects.toThrow("must not contain duplicates");
-    await expect(client.request("/api/v1/tags/lead")).rejects.toThrow();
+    await expect(getResource(client, "tags", "lead")).rejects.toThrow();
   });
 
   it("treats Workspaces as part of the location's value for field ownership", async () => {

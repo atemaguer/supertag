@@ -18,8 +18,9 @@ option go_package = "github.com/atemaguer/supertag/packages/operator-api/go/oper
 //   `next_page_token` means the last page. A page token is opaque.
 // - A call the Control Plane refuses returns a Connect error code with one
 //   `ErrorDetail`. A body the Connect protocol itself rejects, one that is
-//   not valid JSON for the request message or is over 1 MB, gets only the
-//   code. The credential is checked before the body is read.
+//   not valid JSON for the request message or is over 1 MB (16 MB for a
+//   `ResourceService` RPC), gets only the code. The credential is checked
+//   before the body is read.
 
 // An amount of money in the smallest unit of its currency.
 message Money {
@@ -88,6 +89,9 @@ message FieldViolation {
   string path = 1;
   // What is wrong with it.
   string description = 2;
+  // For a conflict over a manifest field, the field manager that owns it,
+  // such as `apply` or an apply set's name. Empty otherwise.
+  string manager = 3;
 }
 
 // The detail every refused call carries beside its Connect error code.

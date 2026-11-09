@@ -6,6 +6,7 @@ import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { main } from "../apps/cli/src/index.ts";
 import { migrateSqlite } from "./support/database.ts";
+import { getResource } from "./support/resources.ts";
 
 describe("target: mcp Permission Set manifests", () => {
   afterEach(() => {
@@ -56,9 +57,7 @@ describe("target: mcp Permission Set manifests", () => {
       const path = join(directory, "permission-set.yaml");
       await writeFile(path, manifest(grants));
       await expect(main(["apply", "-f", path])).resolves.toBe(0);
-      const stored = await client.request<{ spec: { permissions: Record<string, unknown>[] } }>(
-        "/api/v1/permission-sets/triage",
-      );
+      const stored = await getResource(client, "permission-sets", "triage");
       expect(
         stored.spec.permissions.map(({ target, action, resource, approval }) => ({
           target,
@@ -88,9 +87,7 @@ describe("target: mcp Permission Set manifests", () => {
         ]),
       );
       await expect(main(["apply", "-f", path])).resolves.toBe(0);
-      const changed = await client.request<{ spec: { permissions: Record<string, unknown>[] } }>(
-        "/api/v1/permission-sets/triage",
-      );
+      const changed = await getResource(client, "permission-sets", "triage");
       expect(JSON.stringify(changed.spec)).toContain("repository:acme/web");
       expect(JSON.stringify(changed.spec)).not.toContain("repository:acme/api");
 

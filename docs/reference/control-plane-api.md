@@ -37,11 +37,11 @@ Authorization: Bearer <admin-token-or-operator-token>
 Use HTTPS outside loopback. Set `SUPERTAG_ADMIN_TOKEN` for every non-loopback Control Plane. A
 loopback Control Plane generates a local credential under `~/.supertag` when none is configured.
 
-The admin token may call every route and RPC. An [Operator Token](resource-model.md#operator-tokens),
+The admin token may call every RPC. An [Operator Token](resource-model.md#operator-tokens),
 a `stop_` secret, may call every one except [`AccessService`](#operator-tokens), which refuses it
 with `permission_denied`. A revoked or expired Operator Token is refused as unauthenticated, with a
 message that says which. Scoped coordination
-credentials reach only the coordination routes. The Control Plane records the caller as
+credentials reach only the RPCs that accept them. The Control Plane records the caller as
 `control-plane-break-glass`, `token:NAME`, or the scoped credential's `operatorId` on approvals,
 Objective messages, and Objective and Team changes, and in the [audit log](#audit-log) entry for
 every management write. See [Manage a remote Control Plane](../operations/control-plane.md#manage-a-remote-control-plane).
@@ -53,11 +53,11 @@ the token or its server-side logical credential ID.
 
 ## Operator RPCs (Experimental)
 
-The Control Plane also serves operator RPCs defined in protobuf, in the package
+The Control Plane serves its operator API as RPCs defined in protobuf, in the package
 `supertag.operator.v1` under
 [`spec/proto/supertag/operator/v1/`](../../spec/proto/supertag/operator/v1/). The proto comments
-are the reference for each message and field. These RPCs replace the `/api/v1/` routes one service
-at a time; a route that moves is removed.
+are the reference for each message and field. Only the [Worker HTTP routes](#worker-http-routes)
+remain under `/api/v1/`.
 
 ### RPC list
 
@@ -135,6 +135,11 @@ at a time; a route that moves is removed.
 | `SurfaceService.RemoveTagLocation` | `manage_tag_location` | Stops a Tag answering in a location |
 | `SurfaceService.ActivateSet` | `manage_set_activation` | Activates a Context Set or Permission Set in a location |
 | `SurfaceService.DeactivateSet` | `manage_set_activation` | Deactivates it |
+| `ResourceService.GetResource` | `read_resource` | One configuration resource, optionally with its manifest |
+| `ResourceService.ListResources` | `read_resource` | The resources of one kind, by name |
+| `ResourceService.DiffManifests` | `read_resource` | Plans an apply without changing anything |
+| `ResourceService.ApplyManifests` | `apply_resource` | Applies manifests on the Control Plane |
+| `ResourceService.DeleteResource` | `delete_resource` | Deletes or retires one resource |
 
 ### Calling an RPC
 
@@ -213,8 +218,8 @@ detail is a `supertag.operator.v1.ErrorDetail` whose `reason` is stable; branch 
 
 `canceled`, `deadline_exceeded`, and `unimplemented` carry `ERROR_REASON_UNSPECIFIED`; the code
 says why. A body the Connect protocol itself rejects gets only the code, with no detail: one that
-is not valid JSON for the request message (`invalid_argument`) or is over 1 MB
-(`resource_exhausted`). The credential is checked first, so an anonymous caller still gets
+is not valid JSON for the request message (`invalid_argument`) or is over 1 MB, or 16 MB for a
+`ResourceService` RPC (`resource_exhausted`). The credential is checked first, so an anonymous caller still gets
 `unauthenticated`.
 
 A call without a credential reveals nothing but the error:
@@ -459,8 +464,8 @@ first call's turn.
 `ObjectiveService` serves `supertag create objective`, `list objective`, `get objective`,
 `describe objective`, `message objective`, `approve objective`, `complete objective`,
 `cancel objective`, `pause objective`, `resume objective`, and the terminal UI's Objective view.
-Applying an Objective manifest with `supertag apply` still uses `POST /api/v1/objectives`. The
-complete Objective contract is in [Objectives](../../spec/objectives.md).
+Applying an Objective manifest with `supertag apply` goes through
+[`ResourceService.ApplyManifests`](#resources). The complete Objective contract is in [Objectives](../../spec/objectives.md).
 
 `CreateObjective` takes the `outcome`, the `owner` Tag's name, and optionally an `id`, a `team` by
 name or ID, a `deadline`, a `budget`, `runtimeActions`, `workspaces`, and `ongoing`. It starts the
@@ -661,7 +666,7 @@ curl -s https://control.example.com/supertag.operator.v1.OrganizationService/Get
 Host, Auth Key, Operator Token, and surface changes, approval decisions, Objective messages, and
 every other call that can change state. A call to an RPC that declares an audit action is recorded
 with `path` set to its procedure, such as `/supertag.operator.v1.HostService/DrainWorkerHost`.
-Reads are not recorded. A change whose call returned before `ListAuditEntries` began is listed.
+Reads, plans, and dry runs are not recorded. A change whose call returned before `ListAuditEntries` began is listed.
 `supertag audit` reads this RPC.
 
 | Field | Meaning |
@@ -693,12 +698,12 @@ Reads are not recorded. A change whose call returned before `ListAuditEntries` b
 | Field | Meaning |
 | --- | --- |
 | `actor` | `control-plane-break-glass`, `token:NAME`, a scoped credential's `operatorId`, or `slack:USER` or `lark:USER` for a person in an Objective's thread |
-| `action` | What was done, such as `apply`, `apply.dry-run`, `delete`, `prune`, `worker-host.enroll`, `worker-host.credential.rotate`, `worker-host.credential.revoke`, `worker-host.drain`, `worker-host.resume`, `tag.worker-host.add`, `tag.worker-host.remove`, `auth-key.create`, `auth-key.revoke`, `operator-token.create`, `operator-token.revoke`, `surface.enroll`, `tag.location.add`, `tag.location.remove`, `tag.set.activate`, `tag.set.deactivate`, `approval.approve`, `approval.deny`, `objective.message`, `objective.reopen`, `objective.approve`, `objective.cancel`, `task.cancel`, `task.inspect`, `artifact.download`, `team.create`, `team.update`, `team.delete`, `mailbox-grant.add`, `mailbox-grant.revoke`, or `coordination.COMMAND` for a command the Control Plane recognizes (`coordination.command` otherwise). A write to a route the Control Plane doesn't recognize is `request` on `UnknownRoute`, and nothing from its path is kept, because a path might hold a credential. |
-| `target` | `Kind/NAME` or `Kind/ID`, such as `Tag/reviewer` or `ApprovalRequest/ID`; only the kind when the request named no valid target, failed, or was a dry run |
+| `action` | What was done, such as `resource.apply`, `resource.prune`, `resource.delete`, `worker-host.enroll`, `worker-host.credential.rotate`, `worker-host.credential.revoke`, `worker-host.drain`, `worker-host.resume`, `tag.worker-host.add`, `tag.worker-host.remove`, `auth-key.create`, `auth-key.revoke`, `operator-token.create`, `operator-token.revoke`, `surface.enroll`, `tag.location.add`, `tag.location.remove`, `tag.set.activate`, `tag.set.deactivate`, `approval.approve`, `approval.deny`, `objective.message`, `objective.reopen`, `objective.approve`, `objective.cancel`, `task.cancel`, `task.inspect`, `artifact.download`, `team.create`, `team.update`, `team.delete`, `mailbox-grant.add`, `mailbox-grant.revoke`, or `coordination.COMMAND` for a command the Control Plane recognizes (`coordination.command` otherwise). A request the Control Plane doesn't recognize is refused and not recorded, because its path might hold a credential. An `ApplyManifests` call records one `resource.apply` entry for each document it applied or failed to apply, and one `resource.prune` entry for each apply-set member pruning deleted or cancelled. |
+| `target` | `Kind/NAME` or `Kind/ID`, such as `Tag/reviewer` or `ApprovalRequest/ID`; only the kind when the request named no valid target or failed |
 | `outcome` | `AUDIT_OUTCOME_SUCCEEDED`, or `AUDIT_OUTCOME_FAILED` for an error response or an interrupted request |
 | `status` | The HTTP status. For an RPC it is the status its Connect code maps to, such as `200`, `404` for `not_found`, or `409` for `already_exists`. For a change from an Objective's thread, only a refused change has one: the status the API would return. |
 | `source` | `AUDIT_SOURCE_API` for a Control Plane API call, `AUDIT_SOURCE_GATEWAY` for an Objective thread in Slack or Lark |
-| `method`, `path` | For API entries, the call's method and the route it matched as a template, such as `/api/v1/tags/{name}`, or the RPC's procedure. The call's own path is never stored, and `path` is empty for an unrecognized route. |
+| `method`, `path` | For API entries, the call's method and the RPC's procedure, such as `/supertag.operator.v1.ResourceService/ApplyManifests`. |
 
 An entry never contains a credential, a secret value, a digest, or a request body. The Control
 Plane writes each entry to its database and to one more sink, standard error or the file
@@ -823,8 +828,84 @@ curl -s https://control.example.com/supertag.operator.v1.SurfaceService/AddTagLo
   -d '{"tag": "builder", "location": {"provider": "SURFACE_PROVIDER_SLACK", "channelId": "C0123456789"}}'
 ```
 
-Applying and deleting SurfaceAccount manifests is described under
-[Declarative resources](#declarative-resources).
+Applying and deleting SurfaceAccount manifests is described under [Resources](#resources).
+
+### Resources
+
+`ResourceService` serves `supertag apply -f`, `diff -f`, `get`, `list`, `describe`, `watch`, and
+`delete` for configuration resources: Tags, Roles, Permission Sets, Context Sets, Volumes,
+Workspaces, Surface Accounts, and Worker Profiles, which are observed and never applied. It also
+serves `create tag`, the starter resources `supertag init` writes, the Workspaces `supertag up`
+provisions, and the terminal UI's Tag rail. The admin token and Operator Tokens may call every RPC;
+a scoped coordination credential gets `permission_denied`. Every RPC that names a resource takes
+its `kind`, such as `RESOURCE_KIND_TAG`, and its `name`.
+
+`GetResource` reads one resource, and `ListResources` lists one kind by name, 100 to a page by
+default and at most 500. Each `Resource` holds one kind's message with `metadata`, `spec`, and
+`status`. With `manifest`, it also holds the resource's manifest, which
+`supertag get tag NAME --output yaml` prints for a Tag. A retired Tag is still read by name while no active Tag holds it, with
+`status.phase` `TAG_PHASE_RETIRED`; listings leave retired Tags and Surface Accounts out.
+
+`ApplyManifests` takes manifest `documents` as the client parsed them, each with a `source` that
+names it in messages, such as `tags.yaml document 2`. The Control Plane checks the whole input
+before it writes anything, then merges each field under its
+[field manager](resource-model.md#field-managers-and-apply-sets) and applies the documents in
+dependency order. These request fields select the manager:
+
+| Field | Effect |
+| --- | --- |
+| none | Writes as field manager `apply`. |
+| `applySet` | Writes as field manager `applySet` and records each resource as a member of that apply set. |
+| `prune` | With `applySet`, then deletes the set's members the input no longer declares, as `DeleteResource` does, and reports each in `pruned`. A member still in use is kept. |
+| `forceConflicts` | Applies changes to fields another manager owns and takes ownership of them. |
+| `imperative` | Writes as field manager `cli`: each listed field replaces the stored one, and unlisted fields stay. `supertag create tag` uses it. |
+| `createOnly` | Applies only documents whose resource doesn't exist yet. `supertag up` uses it. |
+
+The whole input goes in one call, of at most 16 MB. The response has one result per document,
+with its `outcome`, `warnings`, and, for an Objective, `startedTaskId` or `notStarted`. Applying is
+not one transaction. When a document fails, those before it stay applied, the rest are not
+applied, and the call succeeds with `complete` false. A failed document's `failure` has the
+reason, and `failureMessage` says why; a failure of the Control Plane itself, such as a lost
+database connection, has `ERROR_REASON_INTERNAL` and names no internal detail. Applying the same
+input again changes nothing more, so a retry is safe.
+
+An invalid input fails with `invalid_argument` and the message `supertag apply` prints, such as
+`Nothing was applied. Invalid manifests:` and one line per problem. A change to another manager's
+field fails with `failed_precondition`, reason `ERROR_REASON_CONFLICT`. Its `fields` name each
+field's path and its `manager`. A change to a field that cannot change, such as an Objective's
+outcome, fails the same way.
+
+A SurfaceAccount document's `secrets` hold the values the client resolved from the manifest's
+references. The Control Plane verifies new or changed credentials with the provider, as
+`supertag setup surface` does, and stores them in its credential vault. They never appear in a
+response, a log, or the audit log.
+
+`DiffManifests` takes the same documents and flags, and changes nothing. Each plan has an
+`action` (`PLAN_ACTION_CREATE`, `PLAN_ACTION_UPDATE`, or `PLAN_ACTION_UNCHANGED`), the field
+`changes`, and the `conflicts` and `refusals` an apply would hit. It never reads secrets, and
+refuses a document that carries them.
+
+```sh
+curl -s https://control.example.com/supertag.operator.v1.ResourceService/ApplyManifests \
+  -H "Authorization: Bearer $SUPERTAG_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"documents": [{"manifest": {"apiVersion": "supertag/v1", "kind": "Tag", "metadata": {"name": "builder"}, "spec": {"roles": ["Builder"]}}}]}'
+```
+
+`DeleteResource` deletes one resource under the rules in [Deletion](resource-model.md#deletion).
+Tags, Roles, and Surface Accounts retire; sets, Volumes, and Workspaces are deleted. Its response
+has the `action` (`DELETION_ACTION_RETIRE` or `DELETION_ACTION_DELETE`), `removed`, and `notes`.
+`removed` describes, for people, the configuration that went with the resource, such as
+`Worker Host build-01 binding`. `notes` describes effects outside the Control Plane, such as Auth
+Keys that can no longer join. With `dryRun` it gives the same answer, or the same refusal, and
+changes nothing. A resource still in use fails with `failed_precondition`, and the message names
+every reference, such as
+`permission-set deploy is in use by Role Engineer and Tag release (location slack:C01).` A missing
+resource, or a repeat after it is gone, fails with `not_found`. Objectives are cancelled with
+`ObjectiveService.CancelObjective`, never deleted.
+
+The JSON Schemas in [`spec/manifests/`](../../spec/manifests/) describe each manifest kind. They are
+generated from the protos, as is `manifest.schema.json` for a manifest of any kind.
 
 ## Worklet API
 
@@ -883,7 +964,7 @@ a separately configured listener in that process.
 
 ## Resource shape
 
-Persistent resources use a common envelope:
+`supertag get` and `list --output json` print resources in a common envelope:
 
 ```json
 {
@@ -915,7 +996,7 @@ Persistent resources use a common envelope:
 
 - `metadata` identifies and versions the resource.
 - `spec` is user-controlled desired state.
-- `status` is observed state maintained by the Control Plane and represented by the API Server.
+- `status` is observed state maintained by the Control Plane.
 - `resourceVersion` changes when the represented resource changes and must be treated as opaque.
 
 Resource names make creation idempotent. Repeating Tag creation with the same name returns the
@@ -925,148 +1006,24 @@ execution requirements belong to Tasks.
 The current `supertag watch` command observes change by polling these resource versions.
 [`EventService.Watch`](#event-stream) streams notices of changes instead.
 
-## API v1
+## Worker HTTP routes
 
-### Endpoints
+Besides the operator RPCs, the Worklet API, health checks, and collaboration surface webhooks,
+the Control Plane serves four plain HTTP routes for Worker Hosts:
 
 ```text
-GET  /api/v1/tags
-POST /api/v1/tags
-GET  /api/v1/tags/:name
-DELETE /api/v1/tags/:name
-GET  /api/v1/permission-sets
-POST /api/v1/permission-sets
-GET  /api/v1/permission-sets/:name
-DELETE /api/v1/permission-sets/:name
-GET  /api/v1/context-sets
-POST /api/v1/context-sets
-GET  /api/v1/context-sets/:name
-DELETE /api/v1/context-sets/:name
-GET  /api/v1/roles
-POST /api/v1/roles
-GET  /api/v1/roles/:name
-DELETE /api/v1/roles/:name
-GET  /api/v1/workspaces
-POST /api/v1/workspaces
-GET  /api/v1/workspaces/:name
-DELETE /api/v1/workspaces/:name
-POST /api/v1/apply-sets/:name/prune
-POST /api/v1/worker-host-joins
-GET  /api/v1/worker-profiles
-POST /api/v1/objectives
-GET  /api/v1/objectives/:id
-POST /api/v1/surface-accounts
-DELETE /api/v1/surface-accounts/:name
+POST   /api/v1/worker-host-joins
+DELETE /api/v1/worker-hosts/:id/credential
+POST   /api/v1/worker-hosts/:id/drain
+POST   /api/v1/worker-hosts/:id/resume
 ```
 
-A Worker Host's own credential also reaches `DELETE /api/v1/worker-hosts/:id/credential` and
-`POST /api/v1/worker-hosts/:id/drain` and `/resume`; see [Worklet API](#worklet-api).
-
-### Declarative resources
-
-Tags, Roles, Permission Sets, Context Sets, and Workspaces support declarative creation and
-reconciliation with [field managers](resource-model.md#field-managers-and-apply-sets). Each `POST`
-merges the request into the stored resource as one manager: it removes fields that manager set and
-the request omits, keeps fields other managers own, and answers `409` with reason `Conflict` when
-the request changes another manager's value. The failure's `details.conflicts` lists each `path`
-and `manager`. These query parameters select the manager:
-
-| Parameter | Effect |
-| --- | --- |
-| none | Writes as field manager `apply`. |
-| `applySet=NAME` | Writes as field manager `NAME` and records the resource as a member of apply set `NAME`. |
-| `force=true` | Applies conflicting changes and takes ownership of those fields. |
-| `fieldManager=cli` | An imperative write: each listed field replaces the stored one, unlisted fields stay, and changes belong to `cli`. `supertag create tag` uses it. |
-
-Role specs define purpose, instructions, Context Sets, and
-Permission Sets; their status reports `assignedTags` as read-only observed state and identifies
-built-in Roles without exposing their internal identity. `Tag.status.locations` reports the
-collaboration surface locations with account display names and enabled state.
-
-Add `?dryRun=true` to any of these `POST` endpoints to validate and plan a manifest without writing
-it. The response holds the complete `spec` the resource would have after the merge, in the form a
-stored resource reports, such as a GitHub `repo` resolved to its `repoId`. Its `plan` reports
-`action` (`create`, `update`, or `unchanged`), `changes` (each `path`, `action`, and values), and
-`conflicts`. A dry run checks structure, Surface Accounts, locations, and Worker Hosts. It does not check that named Roles, sets, or sender Tags
-exist; `supertag apply` checks those against the whole input. Worker Profile resources expose
-observed state. Collection responses use a `ResourceList` envelope
-and include a collection resource version.
-
-`POST /api/v1/surface-accounts` applies a
-[SurfaceAccount manifest](resource-model.md#declared-surface-accounts) under the same field
-managers and query parameters. Its secrets are references. Two optional body fields carry
-credential material, write-only:
-
-| Field | With | Effect |
-| --- | --- | --- |
-| `credentials` | `dryRun=true` | The resolved secret values. The plan adds `secrets`: `changed` or `unchanged`, compared with the vault in constant time. Nothing is stored or echoed. |
-| `verified` | a write | The account as the CLI verified it with the provider: `provider`, `externalAccountId`, `displayName`, `authMethod`, `configuration`, and `secrets`. The Control Plane stores it as `SurfaceService.SetUpSurface` does, with the manifest's name and references. |
-
-A write without `verified` only records field ownership and set membership, and fails if anything
-would change. A dry run on an existing account also returns `current`, its `provider` and
-`externalAccountId`. Changing `provider`, or `verified` for another provider account than the name
-holds, is refused with `409`. [`SurfaceService.GetSurfaceAccount`](#collaboration-surfaces) reads
-an account by manifest name or by `PROVIDER:EXTERNAL_ID`; its `secrets` lists the declared
-references.
-
-`POST /api/v1/apply-sets/:name/prune` takes `{ "keep": [{ "kind": "Tag", "name": "builder" }] }`,
-the resources in the latest input. It deletes the set's other members, Tags first and Surface
-Accounts last, with the same protection as `DELETE`, and returns an `ApplySetPrune` whose `items` list each
-member's `kind`, `name`, `action` (`delete` or `skip`), and skip `reason`. With `?dryRun=true` it
-reports the same decisions without deleting.
-
-### Deleting resources
-
-`DELETE /api/v1/{tags,roles,permission-sets,context-sets,workspaces,surface-accounts}/:name`
-deletes one configuration resource under the rules in [Deletion](resource-model.md#deletion). Tags,
-Roles, and Surface Accounts retire; sets and Workspaces are deleted. Only the administrative credential reaches these routes.
-Coordination credentials and Tags acting through coordination tools cannot delete anything.
-
-A successful request returns `200` with a `ResourceDeletion`:
-
-```json
-{
-  "apiVersion": "supertag/v1",
-  "kind": "ResourceDeletion",
-  "metadata": { "kind": "Tag", "name": "release" },
-  "dryRun": false,
-  "action": "retire",
-  "removed": [
-    "location slack:C01 with Permission Set deploy",
-    "Worker Host build-01 binding",
-    "membership in apply set engineering"
-  ],
-  "notes": []
-}
-```
-
-`action` is `retire` or `delete`. `removed` describes, for people, the configuration that went with
-the resource; `notes` describes effects outside the Control Plane, such as Auth Keys that can no
-longer join or Worker Hosts that still declare a deleted Workspace. Add `?dryRun=true` to get the
-same response, or the same refusal, without changing anything.
-
-A resource that is still in use returns `409` with reason `Conflict`. The message names every
-reference, and `details.references` lists them:
-
-```json
-{
-  "kind": "Status",
-  "status": "Failure",
-  "reason": "Conflict",
-  "code": 409,
-  "message": "permission-set deploy is in use by Role Engineer and Tag release (location slack:C01).",
-  "details": { "references": ["Role Engineer", "Tag release (location slack:C01)"] }
-}
-```
-
-A built-in Role returns `409` with an empty `details.references`. A missing resource, or a Tag or
-Role that is already retired, returns `404`. `GET /api/v1/tags/:name` still returns a retired Tag,
-with `status.phase: retired` and `status.retiredAt`, while no active Tag holds the name;
-`GET /api/v1/tags` lists only active Tags.
+Joining is authorized by an Auth Key, and the others by the Worker Host's own credential; see
+[Worklet API](#worklet-api).
 
 ### Errors
 
-Administrative API errors use a structured `Status` document with a reason, HTTP code, message,
+Errors from these routes use a structured `Status` document with a reason, HTTP code, message,
 and optional details. A request with a field the Control Plane does not know fails with HTTP 400,
 and the message names the field, such as `Unknown field: start`.
 

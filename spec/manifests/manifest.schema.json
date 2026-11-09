@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/atemaguer/supertag/main/spec/manifests/manifest.schema.json",
+  "title": "SuperTag manifest",
+  "description": "One manifest of any kind that supertag apply -f reads: ContextSet, Objective, PermissionSet, Role, SurfaceAccount, Tag, Volume, Workspace. Generated from the operator API protos; do not edit.",
+  "oneOf": [
+    {
+      "$ref": "context-set.schema.json"
+    },
+    {
+      "$ref": "objective.schema.json"
+    },
+    {
+      "$ref": "permission-set.schema.json"
+    },
+    {
+      "$ref": "role.schema.json"
+    },
+    {
+      "$ref": "surface-account.schema.json"
+    },
+    {
+      "$ref": "tag.schema.json"
+    },
+    {
+      "$ref": "volume.schema.json"
+    },
+    {
+      "$ref": "workspace.schema.json"
+    }
+  ]
+}

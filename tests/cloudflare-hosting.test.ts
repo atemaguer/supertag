@@ -27,7 +27,7 @@ describe("Cloudflare request routing and lifecycle", () => {
   it("forwards API, webhook, artifact catalog and WebSocket requests intact to one instance", async () => {
     const { container, env } = fixture();
     for (const path of [
-      "/api/v1/tags",
+      "/supertag.operator.v1.ResourceService/ListResources",
       "/webhooks/github",
       "/internal/v1/artifacts/catalog/upload",
       "/worklets",
@@ -39,10 +39,13 @@ describe("Cloudflare request routing and lifecycle", () => {
       expect(container.fetch).toHaveBeenLastCalledWith(request);
       expect(env.CONTROL_PLANE.getByName).toHaveBeenLastCalledWith("control-plane");
     }
-    const post = new Request("https://supertag.example.com/api/v1/tags", {
-      method: "POST",
-      body: "payload",
-    });
+    const post = new Request(
+      "https://supertag.example.com/supertag.operator.v1.ResourceService/ApplyManifests",
+      {
+        method: "POST",
+        body: "payload",
+      },
+    );
     await routeRequest(post, env);
     expect(container.fetch).toHaveBeenLastCalledWith(post);
     expect(await post.text()).toBe("payload");

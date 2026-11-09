@@ -5,7 +5,6 @@ import {
   type ControlPlaneTarget,
   resolveControlPlaneTarget,
 } from "./control-plane-client.js";
-import type { TagResource } from "./control-plane-resources.js";
 import {
   hostCredentialPath,
   hostServiceDirectory,
@@ -116,7 +115,7 @@ async function unbindFromTags(
   workerHostId: string,
 ): Promise<readonly string[]> {
   const client = new ControlPlaneClient(target);
-  const list = await client.request<{ readonly items: readonly TagResource[] }>("/api/v1/tags");
+  const list = await client.listTags();
   const unbound: string[] = [];
   for (const tag of list.items) {
     const name = tag.metadata.name;

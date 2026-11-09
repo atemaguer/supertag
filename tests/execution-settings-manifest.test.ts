@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { main } from "../apps/cli/src/index.ts";
+import type { ResourcePath } from "../apps/cli/src/resource-protos.ts";
 import { migrateSqlite } from "./support/database.ts";
+import { getResource } from "./support/resources.ts";
 
 const header = (kind: string, name: string) =>
   `apiVersion: supertag/v1\nkind: ${kind}\nmetadata:\n  name: ${name}\n`;
@@ -73,13 +75,17 @@ describe("Role and Tag execution settings in manifests", () => {
     expect(error).toBeInstanceOf(Error);
     return (error as Error).message;
   };
-  const resource = (path: string) =>
-    client.request<{ spec: Record<string, unknown>; status: Record<string, unknown> }>(path);
+  const resource = (path: ResourcePath, name: string) =>
+    getResource<{ spec: Record<string, unknown>; status: Record<string, unknown> }>(
+      client,
+      path,
+      name,
+    );
 
   it("applies, exports, and removes a Role's execution settings", async () => {
     const path = await write("role.yaml", reviewerRole);
     await run("apply", "-f", path);
-    expect((await resource("/api/v1/roles/Reviewer")).spec["execution"]).toEqual({
+    expect((await resource("roles", "Reviewer")).spec["execution"]).toEqual({
       harness: "codex",
       model: ["gpt-6-sol", "gpt-6-max"],
       effort: ["medium", "high"],
@@ -101,7 +107,7 @@ describe("Role and Tag execution settings in manifests", () => {
         `${header("Role", "Reviewer")}spec:\n  purpose: Review changes.\n  execution:\n    model: gpt-6-sol\n`,
       ),
     );
-    expect((await resource("/api/v1/roles/Reviewer")).spec["execution"]).toEqual({
+    expect((await resource("roles", "Reviewer")).spec["execution"]).toEqual({
       model: ["gpt-6-sol"],
     });
     // Dropping the field removes what this manager set.
@@ -110,7 +116,7 @@ describe("Role and Tag execution settings in manifests", () => {
       "-f",
       await write("bare.yaml", `${header("Role", "Reviewer")}spec:\n  purpose: Review changes.\n`),
     );
-    expect((await resource("/api/v1/roles/Reviewer")).spec["execution"]).toBeUndefined();
+    expect((await resource("roles", "Reviewer")).spec["execution"]).toBeUndefined();
   });
 
   it("rejects invalid execution settings with the field and allowed values", async () => {
@@ -139,7 +145,7 @@ describe("Role and Tag execution settings in manifests", () => {
         `${reviewerRole}---\n${header("Tag", "reviewer")}spec:\n  roles: [Reviewer]\n  execution:\n    effort: high\n`,
       ),
     );
-    const tag = await resource("/api/v1/tags/reviewer");
+    const tag = await resource("tags", "reviewer");
     expect(tag.spec["execution"]).toEqual({ effort: ["high"] });
     expect(tag.status["execution"]).toEqual({
       harness: "codex",
@@ -166,12 +172,12 @@ describe("Role and Tag execution settings in manifests", () => {
       "spec.execution is owned by team-a",
     );
     await run("apply", "-f", conflicting, "--set", "team-b", "--force-conflicts");
-    expect((await resource("/api/v1/tags/builder")).spec["execution"]).toEqual({
+    expect((await resource("tags", "builder")).spec["execution"]).toEqual({
       effort: ["high"],
     });
     // A manifest without execution leaves another manager's settings alone.
     await run("apply", "-f", await write("bare.yaml", `${header("Tag", "builder")}spec: {}\n`));
-    expect((await resource("/api/v1/tags/builder")).spec["execution"]).toEqual({
+    expect((await resource("tags", "builder")).spec["execution"]).toEqual({
       effort: ["high"],
     });
   });

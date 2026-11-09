@@ -2,7 +2,6 @@ import { parseArgs } from "node:util";
 import { shellWord, uncertainAttemptRecoverCommand } from "@supertag/core";
 import { SUPERTAG_BUILD_IDENTITY } from "./build-identity.js";
 import { ControlPlaneClient, ensureLocalAdminToken } from "./control-plane-client.js";
-import type { TagResource } from "./control-plane-resources.js";
 import { lowDiskWarning, readHostDiskSpace } from "./disk-space.js";
 import type { HostEnvironmentProvider } from "./host-environment.js";
 import { storedHostCredential } from "./host-service.js";
@@ -220,9 +219,7 @@ async function tagsByHost(): Promise<ReadonlyMap<string, readonly string[]> | un
   if (url === undefined) return undefined;
   try {
     const token = environmentOperatorToken() || (await ensureLocalAdminToken());
-    const list = await new ControlPlaneClient({ url, token }).request<{
-      readonly items: readonly TagResource[];
-    }>("/api/v1/tags");
+    const list = await new ControlPlaneClient({ url, token }).listTags();
     const byHost = new Map<string, string[]>();
     for (const tag of list.items)
       for (const host of tag.spec.workerHosts ?? []) {

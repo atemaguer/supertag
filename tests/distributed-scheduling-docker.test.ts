@@ -88,18 +88,24 @@ suite("distributed scheduling across Docker Worker Hosts", () => {
       await enrollAndLaunch(host);
 
     // The Tag's harness pins its turns to the general Worker Hosts.
-    const tag = await api("POST", "/api/v1/tags", {
-      apiVersion: CONTROL_PLANE_API_VERSION,
-      kind: "Tag",
-      metadata: { name: "Scheduler manager" },
-      spec: { execution: { harness: "fixture-general" } },
+    const applied = await api("POST", "/supertag.operator.v1.ResourceService/ApplyManifests", {
+      documents: [
+        {
+          manifest: {
+            apiVersion: CONTROL_PLANE_API_VERSION,
+            kind: "Tag",
+            metadata: { name: "Scheduler manager" },
+            spec: { execution: { harness: "fixture-general" } },
+          },
+        },
+      ],
     });
-    expect(String((tag["metadata"] as Row)["id"])).not.toHaveLength(0);
+    expect(applied["complete"]).toBe(true);
     for (const hostId of ["host-a", "host-b", "host-c"])
-      await api(
-        "PUT",
-        `/api/v1/tags/${encodeURIComponent("Scheduler manager")}/worker-hosts/${hostId}`,
-      );
+      await api("POST", "/supertag.operator.v1.HostService/BindWorkerHost", {
+        tag: "Scheduler manager",
+        workerHostId: hostId,
+      });
   }, 180_000);
 
   afterAll(async () => {

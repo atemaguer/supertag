@@ -100,25 +100,22 @@ describe("Control Plane API boundary", () => {
   it("preserves administrative authentication without starting a Gateway", async () => {
     const fixture = await apiFixture();
 
-    const missingToken = await fetch(`${fixture.url}/api/v1/tags`);
+    const listTags = (headers: Record<string, string>) =>
+      fetch(`${fixture.url}/supertag.operator.v1.ResourceService/ListResources`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify({ kind: "RESOURCE_KIND_TAG" }),
+      });
+    const missingToken = await listTags({});
     expect(missingToken.status).toBe(401);
     await expect(missingToken.json()).resolves.toMatchObject({
-      kind: "Status",
-      status: "Failure",
-      reason: "Unauthorized",
-      code: 401,
+      code: "unauthenticated",
+      message: "A valid Control Plane admin token or Operator Token is required",
     });
 
-    const scopedToken = await fetch(`${fixture.url}/api/v1/tags`, {
-      headers: { authorization: "Bearer coordination-only" },
-    });
+    const scopedToken = await listTags({ authorization: "Bearer coordination-only" });
     expect(scopedToken.status).toBe(403);
-    await expect(scopedToken.json()).resolves.toMatchObject({
-      kind: "Status",
-      status: "Failure",
-      reason: "Forbidden",
-      code: 403,
-    });
+    await expect(scopedToken.json()).resolves.toMatchObject({ code: "permission_denied" });
   });
 
   it("serves the Objective overview to authorized operators over Connect and the CLI", async () => {
@@ -319,35 +316,49 @@ describe("Control Plane API boundary", () => {
       "content-type": "application/json",
     };
 
-    const created = await fetch(`${fixture.url}/api/v1/tags`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        apiVersion: "supertag/v1",
-        kind: "Tag",
-        metadata: { name: "api-boundary" },
-        spec: {},
-      }),
+    // As `curl` sends them: Connect JSON POSTs.
+    const rpc = (method: string, body: unknown) =>
+      fetch(`${fixture.url}/supertag.operator.v1.ResourceService/${method}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+    const created = await rpc("ApplyManifests", {
+      documents: [
+        {
+          manifest: {
+            apiVersion: "supertag/v1",
+            kind: "Tag",
+            metadata: { name: "api-boundary" },
+            spec: {},
+          },
+          source: "tag.yaml",
+        },
+      ],
     });
-    expect(created.status).toBe(201);
+    expect(created.status).toBe(200);
     await expect(created.json()).resolves.toMatchObject({
-      apiVersion: "supertag/v1",
-      kind: "Tag",
-      metadata: { name: "api-boundary" },
-      spec: { roles: [] },
-      status: { phase: "active", locations: [] },
+      results: [
+        {
+          kind: "RESOURCE_KIND_TAG",
+          name: "api-boundary",
+          outcome: "MANIFEST_OUTCOME_APPLIED",
+          action: "PLAN_ACTION_CREATE",
+        },
+      ],
+      complete: true,
     });
 
-    const listed = await fetch(`${fixture.url}/api/v1/tags`, { headers });
+    const listed = await rpc("ListResources", { kind: "RESOURCE_KIND_TAG" });
     expect(listed.status).toBe(200);
     await expect(listed.json()).resolves.toMatchObject({
-      apiVersion: "supertag/v1",
-      kind: "ResourceList",
-      items: [
-        expect.objectContaining({
-          kind: "Tag",
-          metadata: expect.objectContaining({ name: "api-boundary" }),
-        }),
+      resources: [
+        {
+          tag: {
+            metadata: expect.objectContaining({ name: "api-boundary" }),
+            status: { phase: "TAG_PHASE_ACTIVE" },
+          },
+        },
       ],
     });
 

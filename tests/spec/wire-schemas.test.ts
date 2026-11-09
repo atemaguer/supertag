@@ -1,14 +1,20 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 type Schema = Readonly<Record<string, unknown>>;
 
 const specDirectory = resolve(process.cwd(), "spec");
+/** Every schema under `spec/` and its generated `manifests/`, by its path relative to `spec/`. */
 const schemas = new Map<string, Schema>(
-  readdirSync(specDirectory)
-    .filter((name) => name.endsWith(".schema.json"))
-    .map((name) => [name, JSON.parse(readFileSync(join(specDirectory, name), "utf8")) as Schema]),
+  ["", "manifests"].flatMap((directory) =>
+    readdirSync(join(specDirectory, directory))
+      .filter((name) => name.endsWith(".schema.json"))
+      .map((name) => {
+        const file = directory === "" ? name : `${directory}/${name}`;
+        return [file, JSON.parse(readFileSync(join(specDirectory, file), "utf8")) as Schema];
+      }),
+  ),
 );
 
 function pointer(root: Schema, fragment: string): Schema {
@@ -33,7 +39,9 @@ function pointer(root: Schema, fragment: string): Schema {
 function dereference(ref: string, fromFile: string): { file: string; schema: Schema } {
   const [path = "", fragment = ""] = ref.split("#", 2);
   const file =
-    path === "" ? fromFile : basename(resolve(dirname(join(specDirectory, fromFile)), path));
+    path === ""
+      ? fromFile
+      : relative(specDirectory, resolve(dirname(join(specDirectory, fromFile)), path));
   const root = schemas.get(file);
   if (root === undefined) throw new Error(`Missing schema ${file} referenced by ${fromFile}`);
   return { file, schema: pointer(root, fragment === "" ? "" : `#${fragment}`) };
@@ -243,7 +251,7 @@ const event = {
 
 describe("language-neutral wire schemas", () => {
   it("contains valid JSON Schema documents with resolvable references", () => {
-    expect(schemas.size).toBe(14);
+    expect(schemas.size).toBe(20);
     for (const [file, schema] of schemas) {
       expect(schema.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
       visitReferences(schema, file);
@@ -414,7 +422,7 @@ describe("language-neutral wire schemas", () => {
   });
 
   it("validates Objective manifests and rejects declared status", () => {
-    const file = "objective-manifest.schema.json";
+    const file = "manifests/objective.schema.json";
     const manifest = {
       apiVersion: "supertag/v1",
       kind: "Objective",
@@ -447,7 +455,7 @@ describe("language-neutral wire schemas", () => {
   });
 
   it("validates SurfaceAccount manifests and rejects literal secrets", () => {
-    const file = "surface-account-manifest.schema.json";
+    const file = "manifests/surface-account.schema.json";
     const slack = {
       apiVersion: "supertag/v1",
       kind: "SurfaceAccount",
@@ -504,25 +512,79 @@ describe("language-neutral wire schemas", () => {
     expectInvalid(file, { ...slack, status: { phase: "connected" } });
   });
 
-  it("validates resource deletion responses", () => {
-    expectValid("resource-deletion.schema.json", {
+  it("validates a manifest of each kind generated from the protos, and rejects unknown fields", () => {
+    const file = "manifests/manifest.schema.json";
+    const manifest = (kind: string, name: string, spec?: object) => ({
       apiVersion: "supertag/v1",
-      kind: "ResourceDeletion",
-      metadata: { kind: "Tag", name: "release" },
-      dryRun: true,
-      action: "retire",
-      removed: ["location slack:C01 with Permission Set deploy"],
-      notes: [],
+      kind,
+      metadata: { name },
+      ...(spec === undefined ? {} : { spec }),
     });
-    expectInvalid("resource-deletion.schema.json", {
-      apiVersion: "supertag/v1",
-      kind: "ResourceDeletion",
-      metadata: { kind: "Task", name: "task-1" },
-      dryRun: false,
-      action: "erase",
-      removed: [],
-      notes: [],
+    const tag = manifest("Tag", "builder", {
+      roles: ["Engineer"],
+      workerHosts: ["laptop"],
+      runsOn: ["harness:codex"],
+      execution: { harness: "codex", model: ["gpt-5"], effort: ["low", "high"] },
+      locations: [
+        { provider: "slack", channelId: "C0123", permissionSets: ["deploy"], workspaces: ["app"] },
+        { provider: "github", repo: "acme/app" },
+        { provider: "teams", teamId: "team", channelId: "channel" },
+      ],
+      acceptsMessagesFrom: ["reviewer"],
     });
+    for (const valid of [
+      tag,
+      manifest("Role", "Engineer", {
+        purpose: "Ship reviewed changes.",
+        instructions: "Keep changes small.",
+        contextSets: ["guides"],
+        permissionSets: ["deploy"],
+        execution: { model: "gpt-5", effort: "low" },
+      }),
+      manifest("PermissionSet", "deploy", {
+        approvers: ["operator:admin"],
+        permissions: [
+          { target: "runtime", action: "commands:execute", approval: "required" },
+          { target: "mcp", action: "linear/*", resource: "team:ENG" },
+          {
+            target: "surface",
+            surfaceAccountId: "account-1",
+            scope: "C0123",
+            action: "chat:write",
+          },
+        ],
+      }),
+      manifest("ContextSet", "guides", {
+        items: [
+          {
+            itemKey: "skill:review",
+            type: "supertag/skill",
+            version: 1,
+            required: true,
+            config: { reference: "review" },
+          },
+        ],
+      }),
+      manifest("Volume", "datasets", { source: "s3://bucket/prefix", credential: "datasets" }),
+      manifest("Workspace", "app"),
+      manifest("Workspace", "site", {
+        source: "git@github.com:acme/site.git",
+        delivery: "pull-request",
+        mounts: [{ volume: "datasets", path: "/data", access: "read-write", maxBytes: 1024 }],
+      }),
+    ])
+      expectValid(file, valid);
+    expectInvalid(file, manifest("Tag", "builder", { workerProfile: { id: "removed" } }));
+    expectInvalid(file, { ...tag, status: { phase: "active" } });
+    expectInvalid(file, manifest("Tag", "builder", { locations: [{ provider: "slack" }] }));
+    expectInvalid(
+      file,
+      manifest("Tag", "builder", { locations: [{ provider: "github", repo: "a/b", repoId: "1" }] }),
+    );
+    expectInvalid(file, manifest("Role", "Engineer", { instructions: "No purpose." }));
+    expectInvalid(file, manifest("Workspace", "site", { delivery: "pull-request" }));
+    expectInvalid(file, manifest("Workspace", "Site"));
+    expectInvalid(file, manifest("WorkerProfile", "default@1", {}));
   });
 
   it("validates Task Attempt specs and rejects incompatible snapshots", () => {

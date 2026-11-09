@@ -183,16 +183,22 @@ describe("Operator Token API", () => {
     await expect(hostClient({ url, token: issued.secret }).listAuthKeys({})).resolves.toMatchObject(
       { authKeys: [] },
     );
-    const tag = await call(issued.secret, "/api/v1/tags", {
+    const tag = await call(issued.secret, "/supertag.operator.v1.ResourceService/ApplyManifests", {
       method: "POST",
       body: JSON.stringify({
-        apiVersion: "supertag/v1",
-        kind: "Tag",
-        metadata: { name: "builder" },
-        spec: {},
+        documents: [
+          {
+            manifest: {
+              apiVersion: "supertag/v1",
+              kind: "Tag",
+              metadata: { name: "builder" },
+              spec: {},
+            },
+          },
+        ],
       }),
     });
-    expect(tag.status, await tag.text()).toBe(201);
+    expect(tag.status, await tag.text()).toBe(200);
   });
 
   it("attributes approvals, messages, cancellations, and applies to token:NAME", async () => {
@@ -265,9 +271,11 @@ describe("Operator Token API", () => {
       expect.objectContaining({
         type: "supertag.audit",
         actor: "token:laptop-2",
+        action: "resource.apply",
+        target: "Tag/reviewer",
         method: "POST",
-        path: "/api/v1/tags",
-        status: expect.any(Number),
+        path: "/supertag.operator.v1.ResourceService/ApplyManifests",
+        status: 200,
       }),
     );
     // Reads are not audited, and the admin token is recorded as break-glass.

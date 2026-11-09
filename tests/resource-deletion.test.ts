@@ -1,15 +1,32 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Code, type ConnectError } from "@connectrpc/connect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { surfaceTools } from "../apps/cli/src/coordination-http.ts";
 import { main } from "../apps/cli/src/index.ts";
+import type { ResourcePath } from "../apps/cli/src/resource-protos.ts";
 import { artifactVolumeLabel } from "../packages/core/src/index.js";
+import {
+  ErrorDetailSchema,
+  ErrorReason,
+  ManifestOutcome,
+  PruneAction,
+  ResourceKind,
+} from "../packages/operator-api/src/index.ts";
 import { DrizzleStore } from "../packages/store/src/index.js";
 import { artifactProducer } from "./support/artifact-producer.js";
 import { migrateSqlite } from "./support/database.ts";
+import {
+  applyManifests,
+  deleteResource,
+  diffManifests,
+  getResource,
+  listResources,
+  resourceExists,
+} from "./support/resources.ts";
 
 const header = (kind: string, name: string) =>
   `apiVersion: supertag/v1\nkind: ${kind}\nmetadata:\n  name: ${name}\n`;
@@ -123,13 +140,8 @@ describe("supertag delete", () => {
     expect(error).toBeInstanceOf(Error);
     return (error as Error).message;
   };
-  const exists = (path: string) =>
-    client.request(path).then(
-      () => true,
-      () => false,
-    );
-  const phase = async (path: string) =>
-    (await client.request<{ status: { phase: string } }>(path)).status.phase;
+  const phase = async (path: ResourcePath, name: string) =>
+    (await getResource<{ status: { phase: string } }>(client, path, name)).status.phase;
 
   it("reports artifact Volume conflicts in apply, delete dry runs, and prune plans", async () => {
     const manifest = `${header("Volume", "artifacts")}spec:\n  source: file:///srv/artifacts\n  credential: artifacts\n`;
@@ -167,51 +179,51 @@ describe("supertag delete", () => {
         sizeBytes: 1,
         observedAt: at,
       });
-      const response = await fetch(`${runtime.url}/api/v1/volumes?applySet=artifacts`, {
-        method: "POST",
-        headers: {
-          authorization: "Bearer test-administrative-token",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          apiVersion: "supertag/v1",
-          kind: "Volume",
-          metadata: { name: "artifacts" },
-          spec: { source: "file:///srv/replacement", credential: "artifacts" },
-        }),
+      const applied = await applyManifests(
+        client,
+        [
+          {
+            apiVersion: "supertag/v1",
+            kind: "Volume",
+            metadata: { name: "artifacts" },
+            spec: { source: "file:///srv/replacement", credential: "artifacts" },
+          },
+        ],
+        { applySet: "artifacts" },
+      );
+      expect(applied.complete).toBe(false);
+      expect(applied.results[0]).toMatchObject({
+        outcome: ManifestOutcome.FAILED,
+        failureMessage: expect.stringContaining("1 artifact copies"),
+        failure: { reason: ErrorReason.CONFLICT },
       });
-      expect(response.status).toBe(409);
-      expect(await response.json()).toMatchObject({
-        reason: "Conflict",
-        message: expect.stringContaining("1 artifact copies"),
-      });
-      for (const suffix of ["?dryRun=true", ""]) {
-        const deletion = await fetch(`${runtime.url}/api/v1/volumes/artifacts${suffix}`, {
-          method: "DELETE",
-          headers: { authorization: "Bearer test-administrative-token" },
+      for (const dryRun of [true, false])
+        await expect(deleteResource(client, "volumes", "artifacts", dryRun)).rejects.toMatchObject({
+          code: Code.FailedPrecondition,
+          rawMessage: expect.stringContaining("1 artifact copies"),
         });
-        expect(deletion.status).toBe(409);
-        expect(await deletion.json()).toMatchObject({
-          message: expect.stringContaining("1 artifact copies"),
-        });
-      }
       expect(await fail("delete", "volume", "artifacts", "--dry-run")).toContain(
         "1 artifact copies",
       );
-      for (const suffix of ["?dryRun=true", ""]) {
-        const plan = await client.request<{ items: { action: string; reason: string }[] }>(
-          `/api/v1/apply-sets/artifacts/prune${suffix}`,
-          { method: "POST", body: JSON.stringify({ keep: [] }) },
-        );
-        expect(plan.items).toEqual([
-          {
-            kind: "Volume",
+      // Pruning keeps a Volume that holds artifact copies, in a plan and in an apply.
+      const other = {
+        apiVersion: "supertag/v1",
+        kind: "ContextSet",
+        metadata: { name: "notes" },
+        spec: { items: [] },
+      };
+      const planned = await diffManifests(client, [other], { applySet: "artifacts", prune: true });
+      const pruned = await applyManifests(client, [other], { applySet: "artifacts", prune: true });
+      for (const items of [planned.pruned, pruned.pruned]) {
+        expect(items).toEqual([
+          expect.objectContaining({
+            kind: ResourceKind.VOLUME,
             name: "artifacts",
-            action: "skip",
+            action: PruneAction.KEEP,
             reason: expect.stringContaining("1 artifact copies"),
-          },
+          }),
         ]);
-        expect(plan.items[0]?.reason).not.toContain("could not be deleted");
+        expect(items[0]?.reason).not.toContain("could not be deleted");
       }
       await store.revokeWorkerHost({ workerHostId: "producer", revokedAt: at });
       expect(await run("delete", "volume", "artifacts", "--dry-run")).toContain("artifacts");
@@ -237,23 +249,19 @@ describe("supertag delete", () => {
     expect(await fail("delete", "role", "Engineer")).toBe(
       "role Engineer is in use by Tag release.",
     );
-    // The API reports the same refusal with the references as data.
-    await expect(
-      client.request("/api/v1/permission-sets/deploy", { method: "DELETE" }),
-    ).rejects.toMatchObject({ status: 409 });
-    const response = await fetch(`${runtime.url}/api/v1/roles/Engineer`, {
-      method: "DELETE",
-      headers: { authorization: "Bearer test-administrative-token" },
+    // The operator API reports the same refusal with the references as data.
+    await expect(deleteResource(client, "permission-sets", "deploy")).rejects.toMatchObject({
+      code: Code.FailedPrecondition,
     });
-    expect(await response.json()).toMatchObject({
-      kind: "Status",
-      reason: "Conflict",
-      details: { references: ["Tag release"] },
+    const refused = await deleteResource(client, "roles", "Engineer").catch(
+      (error: unknown) => error as ConnectError,
+    );
+    expect(refused.findDetails(ErrorDetailSchema)[0]).toMatchObject({
+      reason: ErrorReason.CONFLICT,
+      fields: [{ path: "name", description: "Tag release" }],
     });
     // Every Role is declared; there are no built-in Roles to protect.
-    const roles = await client.request<{ items: { metadata: { name: string } }[] }>(
-      "/api/v1/roles",
-    );
+    const roles = await listResources(client, "roles");
     expect(roles.items.map((role) => role.metadata.name)).toEqual(["Engineer"]);
     expect(await fail("delete", "role", "Nobody")).toBe("Role Nobody does not exist");
 
@@ -274,17 +282,17 @@ describe("supertag delete", () => {
         "",
       ].join("\n"),
     );
-    expect(await phase("/api/v1/roles/Engineer")).toBe("active");
+    expect(await phase("roles", "Engineer")).toBe("active");
     expect(await run("delete", "role", "Engineer")).toContain(
       "Role Engineer retired. Its history is kept.",
     );
-    expect(await phase("/api/v1/roles/Engineer")).toBe("retired");
+    expect(await phase("roles", "Engineer")).toBe("retired");
     expect(await run("delete", "permission-set", "deploy")).toBe(
       "Permission Set deploy deleted.\nRemoved with it:\n  its 1 permission\n",
     );
     expect(await run("delete", "context-set", "guides")).toContain("Context Set guides deleted.");
-    expect(await exists("/api/v1/permission-sets/deploy")).toBe(false);
-    expect(await exists("/api/v1/context-sets/guides")).toBe(false);
+    expect(await resourceExists(client, "permission-sets", "deploy")).toBe(false);
+    expect(await resourceExists(client, "context-sets", "guides")).toBe(false);
   });
 
   it("refuses a Workspace an open Objective names and deletes it once the Objective closes", async () => {
@@ -307,9 +315,9 @@ describe("supertag delete", () => {
     expect(await run("delete", "workspace", "api", "--dry-run")).toBe(
       "Dry run: Workspace api would be deleted. Nothing was changed.\n",
     );
-    expect(await exists("/api/v1/workspaces/api")).toBe(true);
+    expect(await resourceExists(client, "workspaces", "api")).toBe(true);
     expect(await run("delete", "workspace", "api")).toBe("Workspace api deleted.\n");
-    expect(await exists("/api/v1/workspaces/api")).toBe(false);
+    expect(await resourceExists(client, "workspaces", "api")).toBe(false);
   });
 
   it("refuses a Workspace a Tag location names", async () => {
@@ -327,7 +335,7 @@ describe("supertag delete", () => {
     expect(await fail("delete", "workspace", "api")).toBe(
       "workspace api is in use by Tag lead (location slack:C02).",
     );
-    expect(await exists("/api/v1/workspaces/api")).toBe(true);
+    expect(await resourceExists(client, "workspaces", "api")).toBe(true);
   });
 
   it("retires a Tag: refuses while it has open work, then keeps history and frees the name", async () => {
@@ -374,7 +382,7 @@ describe("supertag delete", () => {
           "",
         ].join("\n"),
       );
-      expect(await phase("/api/v1/tags/release")).toBe("active");
+      expect(await phase("tags", "release")).toBe("active");
 
       expect(await run("delete", "tag", "release")).toContain(
         "Tag release retired. Its history is kept.",
@@ -384,11 +392,7 @@ describe("supertag delete", () => {
         items: { metadata: { name: string } }[];
       };
       expect(listed.items.map((item) => item.metadata.name)).toEqual(["lead"]);
-      const retired = await client.request<{
-        metadata: { id: string };
-        spec: Record<string, unknown[]>;
-        status: { phase: string; retiredAt?: string };
-      }>("/api/v1/tags/release");
+      const retired = await getResource(client, "tags", "release");
       expect(retired.metadata.id).toBe(release.id);
       expect(retired.status).toMatchObject({ phase: "retired", retiredAt: expect.any(String) });
       expect(retired.spec).toMatchObject({
@@ -415,7 +419,7 @@ describe("supertag delete", () => {
       expect(await run("create", "tag", "release")).toContain("Created Tag release");
       const successor = await store.findTagByName("release");
       expect(successor?.id).not.toBe(release.id);
-      expect(await phase("/api/v1/tags/release")).toBe("active");
+      expect(await phase("tags", "release")).toBe("active");
       // The old Tasks still name the retired Tag, not its successor.
       expect(await store.findTagById(release.id)).toMatchObject({ status: "retired" });
     } finally {
@@ -468,18 +472,20 @@ describe("supertag delete", () => {
     expect(await run("apply", "-f", empty, "--set", "ws", "--prune")).toContain(
       "Workspace/api deleted\n",
     );
-    expect(await exists("/api/v1/workspaces/api")).toBe(false);
+    expect(await resourceExists(client, "workspaces", "api")).toBe(false);
   });
 
   it("rejects unsupported kinds and keeps deletion away from AI actors", async () => {
     expect(await fail("delete", "task", "anything")).toContain("task cannot be deleted");
     expect(await fail("delete", "tag")).toContain("Usage: supertag delete");
-    // Coordination credentials, even with every action, cannot use administrative routes.
-    const response = await fetch(`${runtime.url}/api/v1/workspaces/api`, {
-      method: "DELETE",
-      headers: { authorization: "Bearer coordination-only" },
-    });
-    expect(response.status).toBe(403);
+    // Coordination credentials, even with every action, cannot delete resources.
+    await expect(
+      deleteResource(
+        { operator: { url: runtime.url, token: "coordination-only" } },
+        "workspaces",
+        "api",
+      ),
+    ).rejects.toMatchObject({ code: Code.PermissionDenied });
     // No coordination tool deletes or retires anything.
     expect(surfaceTools.map((tool) => tool.name)).not.toContainEqual(
       expect.stringMatching(/delete|retire|remove|prune/u),

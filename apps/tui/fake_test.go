@@ -17,10 +17,9 @@ import (
 	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1/operatorv1connect"
 )
 
-// fakeControlPlane serves GET /api/v1/tags and the generated ConversationService,
-// ObjectiveService, InboxService, WorkService, TeamService, MailboxService, HostService and
-// EventService handlers. Unset functions answer with an empty history, no conversations, no
-// Objectives, an empty inbox, no Sessions, no Task events, no Teams, no Worker Hosts, and a watch
+// fakeControlPlane serves the generated ResourceService, ConversationService, ObjectiveService,
+// InboxService, WorkService, TeamService, MailboxService, HostService and EventService handlers.
+// Unset functions answer with no Tags, an empty history, no conversations, no Objectives, an empty inbox, no Sessions, no Task events, no Teams, no Worker Hosts, and a watch
 // stream that only stays open.
 type fakeControlPlane struct {
 	operatorv1connect.UnimplementedConversationServiceHandler
@@ -31,9 +30,11 @@ type fakeControlPlane struct {
 	operatorv1connect.UnimplementedTeamServiceHandler
 	operatorv1connect.UnimplementedMailboxServiceHandler
 	operatorv1connect.UnimplementedHostServiceHandler
+	operatorv1connect.UnimplementedResourceServiceHandler
 
-	token   string
-	tags    func(http.ResponseWriter)
+	token string
+	// tags answers ListResources for Tags; an error refuses it.
+	tags    func() ([]*operatorv1.Tag, error)
 	history func(*operatorv1.ListMessagesRequest) []*operatorv1.Message
 	open    func() []*operatorv1.Conversation
 	send    func(*operatorv1.SendMessageRequest) *operatorv1.Message
@@ -47,6 +48,8 @@ type fakeControlPlane struct {
 	approve    func(*operatorv1.ApproveRequest) error
 	deny       func(*operatorv1.DenyRequest) error
 	answer     func(*operatorv1.AnswerQuestionRequest) error
+	// create answers CreateObjective, nil meaning it creates the Objective `obj-new`.
+	create func(*operatorv1.CreateObjectiveRequest) (*operatorv1.CreateObjectiveResponse, error)
 	// sessions answers GetSession, nil meaning NotFound; taskEvents answers ListTaskEvents;
 	// teamList answers ListTeams and GetTeam; posts answers ListWorkstreamPosts.
 	sessions   func(id string) *operatorv1.Session
@@ -71,6 +74,7 @@ type fakeControlPlane struct {
 	approved          []*operatorv1.ApproveRequest
 	denied            []*operatorv1.DenyRequest
 	answered          []*operatorv1.AnswerQuestionRequest
+	created           []*operatorv1.CreateObjectiveRequest
 }
 
 func (f *fakeControlPlane) start(t *testing.T) *httptest.Server {
@@ -89,12 +93,7 @@ func (f *fakeControlPlane) start(t *testing.T) *httptest.Server {
 	mux.Handle(operatorv1connect.NewTeamServiceHandler(f))
 	mux.Handle(operatorv1connect.NewMailboxServiceHandler(f))
 	mux.Handle(operatorv1connect.NewHostServiceHandler(f))
-	mux.HandleFunc("GET /api/v1/tags", func(w http.ResponseWriter, _ *http.Request) {
-		f.mu.Lock()
-		f.tagReads++
-		f.mu.Unlock()
-		f.tags(w)
-	})
+	mux.Handle(operatorv1connect.NewResourceServiceHandler(f))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+f.token {
 			f.mu.Lock()
@@ -113,6 +112,41 @@ func (f *fakeControlPlane) reads() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.tagReads
+}
+
+func (f *fakeControlPlane) ListResources(_ context.Context, req *connect.Request[operatorv1.ListResourcesRequest]) (*connect.Response[operatorv1.ListResourcesResponse], error) {
+	if req.Msg.GetKind() != operatorv1.ResourceKind_RESOURCE_KIND_TAG {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("only Tags are listed here"))
+	}
+	f.mu.Lock()
+	f.tagReads++
+	f.mu.Unlock()
+	res := &operatorv1.ListResourcesResponse{}
+	if f.tags != nil {
+		tags, err := f.tags()
+		if err != nil {
+			return nil, err
+		}
+		for _, tag := range tags {
+			res.Resources = append(res.Resources, &operatorv1.Resource{Resource: &operatorv1.Resource_Tag{Tag: tag}})
+		}
+	}
+	return connect.NewResponse(res), nil
+}
+
+func (f *fakeControlPlane) CreateObjective(_ context.Context, req *connect.Request[operatorv1.CreateObjectiveRequest]) (*connect.Response[operatorv1.CreateObjectiveResponse], error) {
+	f.mu.Lock()
+	f.created = append(f.created, req.Msg)
+	f.mu.Unlock()
+	if f.create != nil {
+		res, err := f.create(req.Msg)
+		if err != nil {
+			return nil, err
+		}
+		return connect.NewResponse(res), nil
+	}
+	o := objective("obj-new", req.Msg.GetOutcome(), operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_WORKING)
+	return connect.NewResponse(&operatorv1.CreateObjectiveResponse{Objective: o, StartedTaskId: "task-new"}), nil
 }
 
 func (f *fakeControlPlane) SendMessage(_ context.Context, req *connect.Request[operatorv1.SendMessageRequest]) (*connect.Response[operatorv1.Message], error) {
@@ -327,20 +361,17 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-func tagList(w http.ResponseWriter, names ...string) {
-	items := make([]any, 0, len(names))
+// tagList is the active Tags with these names.
+func tagList(names ...string) []*operatorv1.Tag {
+	tags := make([]*operatorv1.Tag, 0, len(names))
 	for _, name := range names {
-		items = append(items, map[string]any{
-			"apiVersion": "supertag.dev/v1", "kind": "Tag",
-			"metadata": map[string]string{"name": name},
-			"spec":     map[string]any{"roles": []string{}, "workerHosts": []string{}},
-			"status":   map[string]any{"phase": "active", "locations": []any{}},
+		tags = append(tags, &operatorv1.Tag{
+			Metadata: &operatorv1.Metadata{Id: "tag-" + name, Name: name},
+			Spec:     &operatorv1.TagSpec{},
+			Status:   &operatorv1.TagStatus{Phase: operatorv1.TagPhase_TAG_PHASE_ACTIVE},
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"apiVersion": "supertag.dev/v1", "kind": "ResourceList",
-		"metadata": map[string]string{"resourceVersion": "1"}, "items": items,
-	})
+	return tags
 }
 
 func finalReply(text string) *operatorv1.Reply {

@@ -49,6 +49,36 @@ func Closed(status operatorv1.ObjectiveStatus) bool {
 	return status == operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_COMPLETED || status == operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_CANCELLED
 }
 
+// NewObjective is what the operator declares when creating an Objective.
+type NewObjective struct {
+	// ID is the Objective's ID; empty, the Control Plane generates one.
+	ID string
+	// Outcome is the statement of the result.
+	Outcome string
+	// Owner names the owner Tag.
+	Owner string
+	// Team names the Team the owner may hand work to; empty, the owner works alone.
+	Team string
+	// Budget caps the owner and all the work it starts; nil, no budget.
+	Budget *operatorv1.Budget
+}
+
+// CreateObjective creates an Objective and starts it. Repeating it with the Objective's ID and the
+// same definition starts one that could not start before, and creates nothing new. It is not
+// retried: without an ID, a repeat of a call that reached the Control Plane would create a second
+// Objective.
+func (c *Client) CreateObjective(ctx context.Context, objective NewObjective) (*operatorv1.CreateObjectiveResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
+	defer cancel()
+	res, err := c.objectives.CreateObjective(ctx, connect.NewRequest(&operatorv1.CreateObjectiveRequest{
+		Id: objective.ID, Outcome: objective.Outcome, Owner: objective.Owner, Team: objective.Team, Budget: objective.Budget,
+	}))
+	if err != nil {
+		return nil, apiError(err)
+	}
+	return res.Msg, nil
+}
+
 // DescribeObjective reads the operator's view of an Objective, as `supertag describe objective`
 // shows it.
 func (c *Client) DescribeObjective(ctx context.Context, id string) (*operatorv1.ObjectiveOverview, error) {

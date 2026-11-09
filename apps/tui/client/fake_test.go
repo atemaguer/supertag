@@ -15,7 +15,7 @@ import (
 )
 
 // fakeControlPlane serves the generated ConversationService, ObjectiveService, InboxService,
-// WorkService, TeamService, MailboxService and EventService handlers, each RPC answered by the
+// WorkService, TeamService, MailboxService, ResourceService and EventService handlers, each RPC answered by the
 // test's function, and records every call's headers.
 type fakeControlPlane struct {
 	operatorv1connect.UnimplementedConversationServiceHandler
@@ -25,14 +25,16 @@ type fakeControlPlane struct {
 	operatorv1connect.UnimplementedWorkServiceHandler
 	operatorv1connect.UnimplementedTeamServiceHandler
 	operatorv1connect.UnimplementedMailboxServiceHandler
+	operatorv1connect.UnimplementedResourceServiceHandler
 
 	send          func(*operatorv1.SendMessageRequest) (*operatorv1.Message, error)
 	list          func(*operatorv1.ListMessagesRequest) (*operatorv1.ListMessagesResponse, error)
 	conversations func(*operatorv1.ListConversationsRequest) (*operatorv1.ListConversationsResponse, error)
 	follow        func(context.Context, *operatorv1.FollowMessageRequest, *connect.ServerStream[operatorv1.FollowEvent]) error
 	watch         func(context.Context, *operatorv1.WatchRequest, *connect.ServerStream[operatorv1.WatchEvent]) error
-	tags          http.HandlerFunc
+	resources     func(*operatorv1.ListResourcesRequest) (*operatorv1.ListResourcesResponse, error)
 	objectives    func(*operatorv1.ListObjectivesRequest) (*operatorv1.ListObjectivesResponse, error)
+	create        func(*operatorv1.CreateObjectiveRequest) (*operatorv1.CreateObjectiveResponse, error)
 	describe      func(*operatorv1.DescribeObjectiveRequest) (*operatorv1.ObjectiveOverview, error)
 	inbox         func(*operatorv1.ListInboxItemsRequest) (*operatorv1.ListInboxItemsResponse, error)
 	approve       func(*operatorv1.ApproveRequest) (*operatorv1.Approval, error)
@@ -74,13 +76,7 @@ func (f *fakeControlPlane) handler() http.Handler {
 	mux.Handle(operatorv1connect.NewWorkServiceHandler(f))
 	mux.Handle(operatorv1connect.NewTeamServiceHandler(f))
 	mux.Handle(operatorv1connect.NewMailboxServiceHandler(f))
-	mux.HandleFunc("/api/v1/tags", func(w http.ResponseWriter, r *http.Request) {
-		if f.tags == nil {
-			http.NotFound(w, r)
-			return
-		}
-		f.tags(w, r)
-	})
+	mux.Handle(operatorv1connect.NewResourceServiceHandler(f))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.calls = append(f.calls, call{
@@ -139,6 +135,14 @@ func unary[Req, Res any](fn func(*Req) (*Res, error), req *connect.Request[Req])
 
 func (f *fakeControlPlane) ListObjectives(_ context.Context, req *connect.Request[operatorv1.ListObjectivesRequest]) (*connect.Response[operatorv1.ListObjectivesResponse], error) {
 	return unary(f.objectives, req)
+}
+
+func (f *fakeControlPlane) CreateObjective(_ context.Context, req *connect.Request[operatorv1.CreateObjectiveRequest]) (*connect.Response[operatorv1.CreateObjectiveResponse], error) {
+	return unary(f.create, req)
+}
+
+func (f *fakeControlPlane) ListResources(_ context.Context, req *connect.Request[operatorv1.ListResourcesRequest]) (*connect.Response[operatorv1.ListResourcesResponse], error) {
+	return unary(f.resources, req)
 }
 
 func (f *fakeControlPlane) DescribeObjective(_ context.Context, req *connect.Request[operatorv1.DescribeObjectiveRequest]) (*connect.Response[operatorv1.ObjectiveOverview], error) {

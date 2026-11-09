@@ -6,6 +6,7 @@ import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { main } from "../apps/cli/src/index.ts";
 import { migrateSqlite } from "./support/database.ts";
+import { getResource, resourceExists } from "./support/resources.ts";
 
 interface TagSpec {
   readonly roles: readonly string[];
@@ -126,12 +127,7 @@ describe("organization manifests", () => {
     return output.join("");
   };
   const tag = async (name: string) =>
-    (await client.request<{ spec: TagSpec }>(`/api/v1/tags/${name}`)).spec;
-  const exists = (path: string) =>
-    client.request(path).then(
-      () => true,
-      () => false,
-    );
+    (await getResource<{ spec: TagSpec }>(client, "tags", name)).spec;
 
   it("applies Tags listed before their Role, sets, and each other, then reports no drift", async () => {
     const path = await write("organization.yaml", organization);
@@ -168,13 +164,9 @@ describe("organization manifests", () => {
     );
 
     // Reapplying changes nothing.
-    const before = await client.request<{ metadata: { resourceVersion: string } }>(
-      "/api/v1/tags/builder",
-    );
+    const before = await getResource(client, "tags", "builder");
     await run("apply", "-f", path);
-    const after = await client.request<{ metadata: { resourceVersion: string } }>(
-      "/api/v1/tags/builder",
-    );
+    const after = await getResource(client, "tags", "builder");
     expect(after.metadata.resourceVersion).toBe(before.metadata.resourceVersion);
     expect(await run("diff", "-f", path)).toContain("No changes.");
   });
@@ -240,8 +232,8 @@ ${header("Tag", "reviewer")}spec:
       expect(error.message).toContain("references Context Set missing-context");
       expect(error.message).toContain("references Tag missing-sender");
     });
-    expect(await exists("/api/v1/context-sets/eng-guidelines")).toBe(false);
-    expect(await exists("/api/v1/tags/builder")).toBe(false);
+    expect(await resourceExists(client, "context-sets", "eng-guidelines")).toBe(false);
+    expect(await resourceExists(client, "tags", "builder")).toBe(false);
 
     // With a second Slack account, a location must select one.
     await client.setupSurface({
@@ -279,7 +271,7 @@ ${header("Tag", "reviewer")}spec:
   it("rejects the same kind and name defined twice", async () => {
     const path = await write("duplicate.yaml", `${sets}---\n${sets}`);
     await expect(main(["apply", "-f", path])).rejects.toThrow("define each resource once");
-    expect(await exists("/api/v1/context-sets/eng-guidelines")).toBe(false);
+    expect(await resourceExists(client, "context-sets", "eng-guidelines")).toBe(false);
   });
 
   it("stops at the first failed document and reports what was and was not applied", async () => {
@@ -301,8 +293,8 @@ ${header("Tag", "reviewer")}spec:
       );
       expect(error.message).toContain("Not applied: Tag/builder, Tag/reviewer");
     });
-    expect(await exists("/api/v1/roles/Engineer")).toBe(true);
-    expect(await exists("/api/v1/tags/builder")).toBe(false);
+    expect(await resourceExists(client, "roles", "Engineer")).toBe(true);
+    expect(await resourceExists(client, "tags", "builder")).toBe(false);
   });
 
   it("removes locations, activations, and grants the manifest set and now omits", async () => {
@@ -341,9 +333,7 @@ ${header("Tag", "reviewer")}spec:
         permissionSets: ["eng-runtime"],
       },
     ]);
-    const contextSet = await client.request<{ status: { bindings: readonly string[] } }>(
-      "/api/v1/context-sets/eng-guidelines",
-    );
+    const contextSet = await getResource(client, "context-sets", "eng-guidelines");
     expect(contextSet.status.bindings).toHaveLength(1); // reviewer's location only
   });
 

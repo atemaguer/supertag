@@ -32,8 +32,9 @@ export interface AuditEntry {
   readonly source: AuditSource;
   readonly method?: string;
   /**
-   * The route the request matched, as a template such as `/api/v1/tags/{name}`. It is never the
-   * request's own path, and is absent when the request matched no management route.
+   * The RPC procedure the request called, such as
+   * `/supertag.operator.v1.ResourceService/ApplyManifests`. It is absent for changes that did not
+   * arrive as a request.
    */
   readonly path?: string;
 }

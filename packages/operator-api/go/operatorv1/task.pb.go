@@ -653,7 +653,7 @@ var File_supertag_operator_v1_task_proto protoreflect.FileDescriptor
 
 const file_supertag_operator_v1_task_proto_rawDesc = "" +
 	"\n" +
-	"\x1fsupertag/operator/v1/task.proto\x12\x14supertag.operator.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa2\x02\n" +
+	"\x1fsupertag/operator/v1/task.proto\x12\x14supertag.operator.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\"supertag/operator/v1/options.proto\"\xa2\x02\n" +
 	"\fTaskDelivery\x12E\n" +
 	"\tworkspace\x18\x01 \x01(\v2'.supertag.operator.v1.WorkspaceDeliveryR\tworkspace\x12=\n" +
 	"\apatches\x18\x02 \x03(\v2#.supertag.operator.v1.PatchDeliveryR\apatches\x12L\n" +
@@ -700,12 +700,13 @@ const file_supertag_operator_v1_task_proto_rawDesc = "" +
 	"\x1bTASK_ATTEMPT_STATUS_RUNNING\x10\x01\x12!\n" +
 	"\x1dTASK_ATTEMPT_STATUS_COMPLETED\x10\x02\x12\x1e\n" +
 	"\x1aTASK_ATTEMPT_STATUS_FAILED\x10\x03\x12!\n" +
-	"\x1dTASK_ATTEMPT_STATUS_CANCELLED\x10\x04*\xb1\x01\n" +
+	"\x1dTASK_ATTEMPT_STATUS_CANCELLED\x10\x04*\xda\x01\n" +
 	"\x15WorkspaceDeliveryMode\x12'\n" +
-	"#WORKSPACE_DELIVERY_MODE_UNSPECIFIED\x10\x00\x12!\n" +
-	"\x1dWORKSPACE_DELIVERY_MODE_PATCH\x10\x01\x12\"\n" +
-	"\x1eWORKSPACE_DELIVERY_MODE_BRANCH\x10\x02\x12(\n" +
-	"$WORKSPACE_DELIVERY_MODE_PULL_REQUEST\x10\x03*\x91\x01\n" +
+	"#WORKSPACE_DELIVERY_MODE_UNSPECIFIED\x10\x00\x12,\n" +
+	"\x1dWORKSPACE_DELIVERY_MODE_PATCH\x10\x01\x1a\tҵ\x18\x05patch\x12.\n" +
+	"\x1eWORKSPACE_DELIVERY_MODE_BRANCH\x10\x02\x1a\n" +
+	"ҵ\x18\x06branch\x12:\n" +
+	"$WORKSPACE_DELIVERY_MODE_PULL_REQUEST\x10\x03\x1a\x10ҵ\x18\fpull-request*\x91\x01\n" +
 	"\x10PullRequestState\x12\"\n" +
 	"\x1ePULL_REQUEST_STATE_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18PULL_REQUEST_STATE_DRAFT\x10\x01\x12\x1c\n" +
@@ -758,6 +759,7 @@ func file_supertag_operator_v1_task_proto_init() {
 	if File_supertag_operator_v1_task_proto != nil {
 		return
 	}
+	file_supertag_operator_v1_options_proto_init()
 	file_supertag_operator_v1_task_proto_msgTypes[1].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

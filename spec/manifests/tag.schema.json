@@ -1,0 +1,439 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/atemaguer/supertag/main/spec/manifests/tag.schema.json",
+  "title": "SuperTag Tag manifest",
+  "description": "A Tag manifest, as supertag apply -f reads it. Its spec is supertag.operator.v1.TagSpec in supertag/operator/v1/resource.proto; this file is generated from it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "supertag/v1"
+    },
+    "kind": {
+      "const": "Tag"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "description": "The resource's name, unique within its kind.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "spec": {
+      "$ref": "#/$defs/TagSpec"
+    }
+  },
+  "$defs": {
+    "TagSpec": {
+      "description": "A Tag's declared configuration, and the `spec` of a `Tag` manifest. Apply merges each list entry by entry: a Role name, a Worker Host ID, a label, a location by provider and scope ID, and a sender Tag.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "roles": {
+          "description": "The Roles it holds, by name.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "workerHosts": {
+          "description": "The Worker Hosts that may run its Tasks, by ID. An empty pool is valid, but its Tasks are refused until a host is bound. A manifest that lists them is authoritative and unbinds hosts that joined with an Auth Key but are missing.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "runsOn": {
+          "description": "Labels a bound Worker Host must carry to run its Tasks; placement only. Labels are lowercased.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,62}$"
+          },
+          "maxItems": 64
+        },
+        "execution": {
+          "description": "The harness, models and efforts it allows, overriding its Roles'.",
+          "$ref": "#/$defs/ExecutionSettings"
+        },
+        "locations": {
+          "description": "Where it answers, each with the sets activated there and the Workspaces its Objectives get.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TagLocation"
+          }
+        },
+        "acceptsMessagesFrom": {
+          "description": "The Tags it accepts Mailbox messages from beyond its Teams, by name.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "ExecutionSettings": {
+      "description": "The harness, models and reasoning efforts a Role or Tag allows. A Tag's settings override its Roles' field by field; when several Roles set a field, the first Role by name wins. `execution` is one field to the field manager rules.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "harness": {
+          "description": "The one harness Tasks run on, such as `codex` or `claude-code`. Empty allows any harness the Worker Host offers.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$"
+        },
+        "model": {
+          "description": "The models allowed; the first is the default. Empty allows any, and uses the Worker Host's default.",
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "maxItems": 32
+            }
+          ]
+        },
+        "effort": {
+          "description": "The efforts allowed; the first is the default. Empty starts Tasks at `low` and allows `medium` and `high`.",
+          "anyOf": [
+            {
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ]
+            },
+            {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "TagLocation": {
+      "description": "One place on a collaboration surface where a Tag answers. In a manifest it is `provider` beside that provider's scope fields, such as `provider: slack` with `channelId`. A stored Tag reports the resolved `account` and stable IDs, such as `repo_id` for a GitHub repository.",
+      "oneOf": [
+        {
+          "description": "A Slack channel.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "channelId"
+          ],
+          "properties": {
+            "provider": {
+              "const": "slack"
+            },
+            "channelId": {
+              "description": "The channel ID, such as `C0123456789`. Slack IDs are uppercased.",
+              "type": "string",
+              "minLength": 1
+            },
+            "account": {
+              "description": "Selects the Surface Account by its external account ID or manifest name, when the provider has several. Empty selects the provider's only one.",
+              "type": "string",
+              "minLength": 1
+            },
+            "permissionSets": {
+              "description": "Permission Sets activated here, by name.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "contextSets": {
+              "description": "Context Sets activated here, by name.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "workspaces": {
+              "description": "The Workspaces an Objective created here names, in order. A GitHub location without any gives its Objectives every Workspace whose `source` is that repository.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+              },
+              "maxItems": 16
+            }
+          }
+        },
+        {
+          "description": "A GitHub repository.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider"
+          ],
+          "properties": {
+            "provider": {
+              "const": "github"
+            },
+            "repo": {
+              "description": "The repository as `owner/name`, which the Control Plane resolves with the account's credentials.",
+              "type": "string",
+              "minLength": 1
+            },
+            "repoId": {
+              "description": "The repository's ID.",
+              "type": "string",
+              "minLength": 1
+            },
+            "account": {
+              "description": "Selects the Surface Account by its external account ID or manifest name, when the provider has several. Empty selects the provider's only one.",
+              "type": "string",
+              "minLength": 1
+            },
+            "permissionSets": {
+              "description": "Permission Sets activated here, by name.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "contextSets": {
+              "description": "Context Sets activated here, by name.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "workspaces": {
+              "description": "The Workspaces an Objective created here names, in order. A GitHub location without any gives its Objectives every Workspace whose `source` is that repository.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+              },
+              "maxItems": 16
+            }
+          },
+          "allOf": [
+            {
+              "oneOf": [
+                {
+                  "required": [
+                    "repo"
+                  ]
+                },
+                {
+                  "required": [
+                    "repoId"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "description": "A Lark chat.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "chatId"
+          ],
+          "properties": {
+            "provider": {
+              "const": "lark"
+            },
+            "chatId": {
+              "description": "The chat ID.",
+              "type": "string",
+              "minLength": 1
+            },
+            "account": {
+              "description": "Selects the Surface Account by its external account ID or manifest name, when the provider has several. Empty selects the provider's only one.",
+              "type": "string",
+              "minLength": 1
+            },
+            "permissionSets": {
+              "description": "Permission Sets activated here, by name.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "contextSets": {
+              "description": "Context Sets activated here, by name.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "workspaces": {
+              "description": "The Workspaces an Objective created here names, in order. A GitHub location without any gives its Objectives every Workspace whose `source` is that repository.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+              },
+              "maxItems": 16
+            }
+          }
+        },
+        {
+          "description": "A Linear team.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider"
+          ],
+          "properties": {
+            "provider": {
+              "const": "linear"
+            },
+            "team": {
+              "description": "The team's name or key, which the Control Plane resolves with the account's credentials.",
+              "type": "string",
+              "minLength": 1
+            },
+            "teamId": {
+              "description": "The team's UUID.",
+              "type": "string",
+              "minLength": 1
+            },
+            "account": {
+              "description": "Selects the Surface Account by its external account ID or manifest name, when the provider has several. Empty selects the provider's only one.",
+              "type": "string",
+              "minLength": 1
+            },
+            "permissionSets": {
+              "description": "Permission Sets activated here, by name.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "contextSets": {
+              "description": "Context Sets activated here, by name.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "workspaces": {
+              "description": "The Workspaces an Objective created here names, in order. A GitHub location without any gives its Objectives every Workspace whose `source` is that repository.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+              },
+              "maxItems": 16
+            }
+          },
+          "allOf": [
+            {
+              "oneOf": [
+                {
+                  "required": [
+                    "team"
+                  ]
+                },
+                {
+                  "required": [
+                    "teamId"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "description": "A Microsoft Teams channel.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "teamId",
+            "channelId"
+          ],
+          "properties": {
+            "provider": {
+              "const": "teams"
+            },
+            "teamId": {
+              "description": "The team ID.",
+              "type": "string",
+              "minLength": 1
+            },
+            "channelId": {
+              "description": "The channel ID.",
+              "type": "string",
+              "minLength": 1
+            },
+            "account": {
+              "description": "Selects the Surface Account by its external account ID or manifest name, when the provider has several. Empty selects the provider's only one.",
+              "type": "string",
+              "minLength": 1
+            },
+            "permissionSets": {
+              "description": "Permission Sets activated here, by name.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "contextSets": {
+              "description": "Context Sets activated here, by name.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "workspaces": {
+              "description": "The Workspaces an Objective created here names, in order. A GitHub location without any gives its Objectives every Workspace whose `source` is that repository.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+              },
+              "maxItems": 16
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -9,6 +9,7 @@ import {
   MailboxService,
   ObjectiveService,
   OrganizationService,
+  ResourceService,
   SurfaceService,
   TeamService,
   WorkService,
@@ -101,6 +102,10 @@ export function accessClient(options: OperatorClientOptions) {
 
 export function surfaceClient(options: OperatorClientOptions) {
   return createClient(SurfaceService, operatorTransport(options));
+}
+
+export function resourceClient(options: OperatorClientOptions) {
+  return createClient(ResourceService, operatorTransport(options));
 }
 
 /**

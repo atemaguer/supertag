@@ -188,6 +188,22 @@ it("filters inbox detail fields as well as recovery commands", async () => {
 
 const target = { url: "http://127.0.0.1:1", token: "unused" };
 
+/** A Permission Set as `get` prints it, and as `ResourceService` sends it in proto JSON. */
+function permissionSet(name: string, resourceVersion: string) {
+  const at = "2026-11-01T00:00:00.000Z";
+  return {
+    apiVersion: "supertag/v1",
+    kind: "PermissionSet",
+    metadata: { id: "set-1", name, resourceVersion, createdAt: at, updatedAt: at },
+    spec: { permissions: [] },
+    status: { phase: "active", bindings: [] },
+  };
+}
+
+function permissionSetMessage(resource: ReturnType<typeof permissionSet>) {
+  return { permissionSet: { metadata: resource.metadata, spec: {}, status: {} } };
+}
+
 it.each(["\u3164", "\u2800", "\u115f", "\u1160", "\uffa0"])(
   "replaces invisible filler %j",
   (filler) => {
@@ -238,10 +254,21 @@ it("sanitizes apply warnings and refusal reasons", async () => {
       "apiVersion: supertag/v1\nkind: Objective\nmetadata: { name: objective }\nspec: { owner: owner, outcome: outcome }\n",
     );
     const client = new ControlPlaneClient(target);
-    vi.spyOn(client, "request").mockResolvedValue({
-      plan: { action: "create", conflicts: [] },
-      warnings: [hostile],
-      notStarted: hostile,
+    fakeOperatorRpc({
+      "ResourceService/ApplyManifests": () => ({
+        results: [
+          {
+            document: 0,
+            kind: "RESOURCE_KIND_OBJECTIVE",
+            name: "objective",
+            outcome: "MANIFEST_OUTCOME_APPLIED",
+            action: "PLAN_ACTION_CREATE",
+            warnings: [hostile],
+            notStarted: hostile,
+          },
+        ],
+        complete: true,
+      }),
     });
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     await runResourceCommand(client, "apply", ["-f", file]);
@@ -252,12 +279,71 @@ it("sanitizes apply warnings and refusal reasons", async () => {
   }
 });
 
+it("sanitizes what apply prints from the Control Plane", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "terminal-apply-"));
+  try {
+    const file = join(directory, "input.yaml");
+    await writeFile(join(directory, "signing.txt"), "signing-value\n");
+    await writeFile(
+      file,
+      [
+        "apiVersion: supertag/v1\nkind: Objective\nmetadata: { name: objective }\nspec: { owner: owner, outcome: outcome }",
+        "apiVersion: supertag/v1\nkind: SurfaceAccount\nmetadata: { name: acme }\nspec:\n  provider: slack\n  configuration: { transport: http }\n  secrets:\n    botToken: { file: signing.txt }\n    signingSecret: { file: signing.txt }",
+      ].join("\n---\n"),
+    );
+    const client = new ControlPlaneClient(target);
+    fakeOperatorRpc({
+      "ResourceService/ApplyManifests": () => ({
+        results: [
+          {
+            document: 0,
+            kind: "RESOURCE_KIND_OBJECTIVE",
+            name: "objective",
+            outcome: "MANIFEST_OUTCOME_APPLIED",
+            action: "PLAN_ACTION_CREATE",
+            startedTaskId: hostile,
+          },
+          {
+            document: 1,
+            kind: "RESOURCE_KIND_SURFACE_ACCOUNT",
+            name: "acme",
+            outcome: "MANIFEST_OUTCOME_APPLIED",
+            action: "PLAN_ACTION_CREATE",
+            verification: {
+              provider: "SURFACE_PROVIDER_SLACK",
+              displayName: hostile,
+              externalAccountId: hostile,
+            },
+          },
+        ],
+        complete: true,
+        pruned: [
+          {
+            kind: "RESOURCE_KIND_TAG",
+            name: hostile,
+            action: "PRUNE_ACTION_KEEP",
+            reason: hostile,
+          },
+          { kind: "RESOURCE_KIND_TAG", name: hostile, action: "PRUNE_ACTION_DELETE" },
+        ],
+      }),
+    });
+    const output = await runResourceCommand(client, "apply", ["-f", file]);
+    const lines = output.trimEnd().split("\n");
+    expect(lines).toHaveLength(5);
+    for (const line of lines.filter((line) => line.includes("visible"))) safe(line);
+    expect(lines.filter((line) => line.includes("visible"))).toHaveLength(4);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 it.each(["describe", "get", "watch"] as const)(
   "sanitizes %s fallback only for human terminal output",
   async (command) => {
     const client = new ControlPlaneClient(target);
-    const resource = { kind: "PermissionSet", metadata: { name: "before\u009b2J\u202eafter" } };
-    vi.spyOn(client, "request").mockResolvedValue(resource);
+    const resource = permissionSet("before\u009b2J\u202eafter", "1");
+    fakeOperatorRpc({ "ResourceService/GetResource": () => permissionSetMessage(resource) });
     Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
     const args = ["permission-set", "name", ...(command === "watch" ? ["--once"] : [])];
     const text = await runResourceCommand(client, command, args);
@@ -300,9 +386,12 @@ it.each([false, true])("filters subsequent watch frames (explicit JSON: %s)", as
   try {
     Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
     const client = new ControlPlaneClient(target);
-    const first = { metadata: { name: "first\u009b\u202e", resourceVersion: "1" } };
-    const next = { metadata: { name: "next\u009b\u202e", resourceVersion: "2" } };
-    vi.spyOn(client, "request").mockResolvedValueOnce(first).mockResolvedValue(next);
+    const first = permissionSet("first\u009b\u202e", "1");
+    const next = permissionSet("next\u009b\u202e", "2");
+    let reads = 0;
+    fakeOperatorRpc({
+      "ResourceService/GetResource": () => permissionSetMessage(reads++ === 0 ? first : next),
+    });
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     watching = runResourceCommand(client, "watch", [
       "permission-set",

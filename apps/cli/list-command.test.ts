@@ -2,45 +2,74 @@ import { expect, it, vi } from "vitest";
 import { workerHostJson } from "../../tests/support/fake-host-rpc.js";
 import { fakeOperatorRpc } from "../../tests/support/fake-operator-rpc.js";
 import { fakeWorkRpc } from "../../tests/support/fake-work-rpc.js";
-import { ControlPlaneClient } from "./src/control-plane-client.js";
 import { renderListTable, runListCommand } from "./src/list-command.js";
 
 const target = { url: "http://control.invalid", token: "test" };
 
 it("lists Tags as an operator table by default and preserves the collection in JSON and YAML", async () => {
-  const collection = {
-    items: [
-      {
-        metadata: { name: "builder", id: "tag-1" },
-        spec: { roles: ["builder"], workerHosts: ["laptop"] },
-        status: { phase: "active", execution: { harness: "codex", model: ["gpt-5"] } },
-      },
-    ],
-  };
-  const request = vi.spyOn(ControlPlaneClient.prototype, "request").mockResolvedValue(collection);
-  const rpc = fakeOperatorRpc({ "WorkService/ListTasks": () => ({}) });
+  const rpc = fakeOperatorRpc({
+    "ResourceService/ListResources": () => ({
+      resources: [
+        {
+          tag: {
+            metadata: {
+              id: "tag-1",
+              name: "builder",
+              resourceVersion: "1",
+              createdAt: "2026-11-01T00:00:00.000Z",
+              updatedAt: "2026-11-01T00:00:00.000Z",
+            },
+            spec: { roles: ["builder"], workerHosts: ["laptop"] },
+            status: {
+              phase: "TAG_PHASE_ACTIVE",
+              execution: { harness: "codex", model: ["gpt-5"] },
+            },
+          },
+        },
+      ],
+    }),
+    "WorkService/ListTasks": () => ({}),
+  });
   try {
     const table = await runListCommand(target, ["tag"]);
     expect(table).toContain("NAME");
     expect(table).toContain("WORKER HOSTS");
     expect(table).toContain("builder");
     expect(table).toContain("laptop");
-    expect(JSON.parse(await runListCommand(target, ["tag", "--output", "json"]))).toEqual(
-      collection,
-    );
+    expect(JSON.parse(await runListCommand(target, ["tag", "--output", "json"]))).toMatchObject({
+      apiVersion: "supertag/v1",
+      kind: "ResourceList",
+      items: [
+        {
+          kind: "Tag",
+          metadata: { name: "builder", id: "tag-1" },
+          spec: { roles: ["builder"], workerHosts: ["laptop"], runsOn: [], locations: [] },
+          status: { phase: "active", execution: { harness: "codex", model: ["gpt-5"] } },
+        },
+      ],
+    });
     expect(await runListCommand(target, ["tag", "--output=yaml"])).toContain("name: builder");
-    expect(request).toHaveBeenCalledWith("/api/v1/tags");
+    expect(rpc.called("ResourceService/ListResources")[0]?.body).toMatchObject({
+      kind: "RESOURCE_KIND_TAG",
+    });
   } finally {
-    request.mockRestore();
     rpc.fetch.mockRestore();
   }
 });
 
 it("lists every Objective without --owner and filters by the owner's name with it", async () => {
-  const request = vi
-    .spyOn(ControlPlaneClient.prototype, "request")
-    .mockResolvedValue({ items: [{ metadata: { id: "tag-lead", name: "lead" } }] });
   const rpc = fakeOperatorRpc({
+    "ResourceService/ListResources": () => ({
+      resources: [
+        {
+          tag: {
+            metadata: { id: "tag-lead", name: "lead" },
+            spec: {},
+            status: { phase: "TAG_PHASE_ACTIVE" },
+          },
+        },
+      ],
+    }),
     "ObjectiveService/ListObjectives": () => ({
       objectives: [
         {
@@ -58,7 +87,7 @@ it("lists every Objective without --owner and filters by the owner's name with i
   try {
     const table = await runListCommand(target, ["objective"]);
     expect(table).toMatch(/ship-sso +working +lead +\$13\.80 \/ \$30\.00/);
-    expect(request).toHaveBeenCalledWith("/api/v1/tags");
+    expect(rpc.called("ResourceService/ListResources")).toHaveLength(1);
     expect(
       JSON.parse(await runListCommand(target, ["objective", "--output", "json"])).objectives[0]
         .ownerTagId,
@@ -70,7 +99,6 @@ it("lists every Objective without --owner and filters by the owner's name with i
       { owner: "lead", pageSize: 5 },
     ]);
   } finally {
-    request.mockRestore();
     rpc.fetch.mockRestore();
   }
 });
@@ -92,12 +120,12 @@ it("keeps the detailed operator inbox view for text output", async () => {
 });
 
 it("rejects plural kinds before making a request", async () => {
-  const request = vi.spyOn(ControlPlaneClient.prototype, "request");
+  const rpc = fakeOperatorRpc({});
   try {
     await expect(runListCommand(target, ["tags"])).rejects.toThrow("did you mean `list tag`?");
-    expect(request).not.toHaveBeenCalled();
+    expect(rpc.fetch).not.toHaveBeenCalled();
   } finally {
-    request.mockRestore();
+    rpc.fetch.mockRestore();
   }
 });
 
@@ -154,26 +182,6 @@ it("shows Worker Host connection and advertised harnesses", () => {
 });
 
 it("shows busy Tags and running attempts against host capacity", async () => {
-  const request = vi
-    .spyOn(ControlPlaneClient.prototype, "request")
-    .mockResolvedValueOnce({
-      items: [
-        {
-          metadata: { id: "tag-1", name: "builder" },
-          spec: { roles: [], workerHosts: ["host-1"] },
-          status: {},
-        },
-      ],
-    })
-    .mockResolvedValueOnce({
-      items: [
-        {
-          metadata: { id: "tag-1", name: "builder" },
-          spec: { roles: [], workerHosts: ["host-1"] },
-          status: {},
-        },
-      ],
-    });
   const rpc = fakeWorkRpc(
     [
       {
@@ -186,6 +194,17 @@ it("shows busy Tags and running attempts against host capacity", async () => {
       },
     ],
     {
+      "ResourceService/ListResources": () => ({
+        resources: [
+          {
+            tag: {
+              metadata: { id: "tag-1", name: "builder" },
+              spec: { workerHosts: ["host-1"] },
+              status: { phase: "TAG_PHASE_ACTIVE" },
+            },
+          },
+        ],
+      }),
       "HostService/ListWorkerHosts": () => ({
         workerHosts: [
           workerHostJson({
@@ -203,7 +222,6 @@ it("shows busy Tags and running attempts against host capacity", async () => {
     expect(await runListCommand(target, ["tag"])).toContain("task-1");
     expect(await runListCommand(target, ["worker-host"])).toContain("codex 1/2");
   } finally {
-    request.mockRestore();
     rpc.fetch.mockRestore();
   }
 });

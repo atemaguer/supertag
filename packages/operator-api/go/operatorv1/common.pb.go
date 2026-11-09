@@ -299,7 +299,10 @@ type FieldViolation struct {
 	// The field path in the request, such as `spec.roles`.
 	Path string `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
 	// What is wrong with it.
-	Description   string `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	Description string `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	// For a conflict over a manifest field, the field manager that owns it,
+	// such as `apply` or an apply set's name. Empty otherwise.
+	Manager       string `protobuf:"bytes,3,opt,name=manager,proto3" json:"manager,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -344,6 +347,13 @@ func (x *FieldViolation) GetPath() string {
 func (x *FieldViolation) GetDescription() string {
 	if x != nil {
 		return x.Description
+	}
+	return ""
+}
+
+func (x *FieldViolation) GetManager() string {
+	if x != nil {
+		return x.Manager
 	}
 	return ""
 }
@@ -419,10 +429,11 @@ const file_supertag_operator_v1_common_proto_rawDesc = "" +
 	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
 	"updated_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\v\n" +
-	"\tHeartbeat\"F\n" +
+	"\tHeartbeat\"`\n" +
 	"\x0eFieldViolation\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12 \n" +
-	"\vdescription\x18\x02 \x01(\tR\vdescription\"\x86\x01\n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x18\n" +
+	"\amanager\x18\x03 \x01(\tR\amanager\"\x86\x01\n" +
 	"\vErrorDetail\x129\n" +
 	"\x06reason\x18\x01 \x01(\x0e2!.supertag.operator.v1.ErrorReasonR\x06reason\x12<\n" +
 	"\x06fields\x18\x02 \x03(\v2$.supertag.operator.v1.FieldViolationR\x06fields*\x8e\x03\n" +

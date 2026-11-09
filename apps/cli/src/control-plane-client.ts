@@ -27,16 +27,10 @@ import {
   organizationClient,
   surfaceClient,
 } from "./operator-client.js";
+import { applyManifest, getResourceView, listResourceViews } from "./operator-resources.js";
 import { refusedAsError } from "./tag-conversation.js";
 import { runTagLocationCommand } from "./tag-locations.js";
 import type { TagCommand } from "./tags.js";
-import {
-  CLIENT_VERSION_HEADER,
-  SUPERTAG_VERSION,
-  VERSION_HEADER,
-  versionMismatchHint,
-  warnOnVersionSkew,
-} from "./version.js";
 
 const DEFAULT_CONTROL_PLANE_NAME = "default";
 const CONFIG_VERSION = 1;
@@ -209,15 +203,14 @@ export class ControlPlaneClient {
   }
 
   async listTags(): Promise<ControlPlaneResourceList<TagResource>> {
-    return this.#request<ControlPlaneResourceList<TagResource>>("/api/v1/tags", {
-      method: "GET",
-    });
+    return (await listResourceViews(
+      this.operator,
+      "tags",
+    )) as ControlPlaneResourceList<TagResource>;
   }
 
   async getTag(name: string): Promise<TagResource> {
-    return this.#request<TagResource>(`/api/v1/tags/${encodeURIComponent(name)}`, {
-      method: "GET",
-    });
+    return (await getResourceView(this.operator, "tags", name)) as TagResource;
   }
 
   async runTagCommand(command: TagCommand, args: readonly string[]): Promise<string> {
@@ -236,74 +229,18 @@ export class ControlPlaneClient {
     readonly workerHosts?: readonly string[];
   }): Promise<TagResource> {
     // An imperative write: listed fields replace, the rest stay, and changes belong to `cli`.
-    return this.#request<TagResource>("/api/v1/tags?fieldManager=cli", {
-      method: "POST",
-      body: JSON.stringify({
+    await applyManifest(this.operator, {
+      imperative: true,
+      manifest: {
         apiVersion: CONTROL_PLANE_API_VERSION,
         kind: "Tag",
         metadata: { name: input.name },
-        spec: { workerHosts: input.workerHosts },
-      }),
-    });
-  }
-
-  request<T>(pathname: string, init: RequestInit = { method: "GET" }): Promise<T> {
-    return this.#request<T>(pathname, init);
-  }
-
-  async #response(pathname: string, init: RequestInit): Promise<Response> {
-    const url = new URL(pathname, `${this.#target.url}/`);
-    if (url.origin !== new URL(this.#target.url).origin || url.username || url.password)
-      throw new Error("Control Plane requests must stay on the configured origin");
-    const response = await fetch(url, {
-      ...init,
-      signal: init.signal ?? AbortSignal.timeout(30_000),
-      redirect: "error",
-      headers: {
-        authorization: `Bearer ${this.#target.token}`,
-        "content-type": "application/json",
-        [CLIENT_VERSION_HEADER]: SUPERTAG_VERSION,
-        ...init.headers,
+        spec: input.workerHosts === undefined ? {} : { workerHosts: [...input.workerHosts] },
       },
+      source: `Tag/${input.name}`,
     });
-    const controlPlaneVersion = response.headers.get(VERSION_HEADER)?.trim() || undefined;
-    warnOnVersionSkew(controlPlaneVersion);
-    if (!response.ok) {
-      const body = await response.json().catch(() => undefined);
-      const message =
-        isRecord(body) && typeof body["message"] === "string"
-          ? body["message"]
-          : // Coordination routes report a sentence in `error`; others use a short code there.
-            isRecord(body) && typeof body["error"] === "string" && /\s/u.test(body["error"])
-            ? body["error"]
-            : `Control Plane returned HTTP ${response.status}`;
-      // An older Control Plane rejects fields and routes it does not know with a bare 400 or 404.
-      const hint = mayBeUnsupportedRequest(response.status, body)
-        ? versionMismatchHint(SUPERTAG_VERSION, controlPlaneVersion)
-        : undefined;
-      throw new ControlPlaneRequestError(
-        hint === undefined ? message : `${message}\n${hint}`,
-        response.status,
-        controlPlaneVersion,
-      );
-    }
-    return response;
+    return this.getTag(input.name);
   }
-
-  async #request<T>(pathname: string, init: RequestInit): Promise<T> {
-    return (await this.#response(pathname, init)).json().catch(() => undefined) as Promise<T>;
-  }
-}
-
-/**
- * Whether a refusal looks like one an older Control Plane gives for a field or route it does not
- * know: any 400, a 405, or a 404 that names no missing resource.
- */
-function mayBeUnsupportedRequest(status: number, body: unknown): boolean {
-  if (status === 400 || status === 405) return true;
-  if (status !== 404) return false;
-  const message = isRecord(body) && typeof body["message"] === "string" ? body["message"] : "";
-  return message === "" || /route not found|unknown .*command/iu.test(message);
 }
 
 function parseCreateTagArgs(args: readonly string[]): {

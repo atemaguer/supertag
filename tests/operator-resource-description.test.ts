@@ -80,11 +80,14 @@ it("summarizes native archive metadata without exposing archived content", async
 });
 it("quotes operator follow-up commands safely and distinguishes empty bindings", async () => {
   const api = client();
-  vi.spyOn(api, "request").mockResolvedValue({
-    kind: "Tag",
-    metadata: { name: "team'; $(touch stolen)" },
-    spec: { roles: ["reviewer"], workerHosts: [] },
-    status: { phase: "active" },
+  fakeOperatorRpc({
+    "ResourceService/GetResource": () => ({
+      tag: {
+        metadata: { name: "team'; $(touch stolen)" },
+        spec: { roles: ["reviewer"] },
+        status: { phase: "TAG_PHASE_ACTIVE" },
+      },
+    }),
   });
   const output = await runResourceCommand(api, "describe", ["tag", "team"]);
   expect(output).toContain("No Worker Host is bound");

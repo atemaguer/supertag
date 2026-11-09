@@ -23,6 +23,7 @@ import {
 import { connectDurableTestWorklet } from "./support/durable-test-connection.js";
 import { FakeS3 } from "./support/fake-s3.ts";
 import { hostArtifactStore } from "./support/host-artifact-store.js";
+import { applyManifests } from "./support/resources.ts";
 import { enrollWorkerHost } from "./support/worker-host-enrollment.js";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -425,17 +426,11 @@ async function applyAndStart(
   name: string,
   spec: Record<string, unknown>,
 ): Promise<string> {
-  const response = await fetch(`${controlPlaneUrl}/api/v1/objectives`, {
-    method: "POST",
-    headers: { authorization: "Bearer test-admin", "content-type": "application/json" },
-    body: JSON.stringify({
-      apiVersion: "supertag/v1",
-      kind: "Objective",
-      metadata: { name },
-      spec,
-    }),
-  });
-  expect(response.status, await response.clone().text()).toBeLessThan(300);
+  const applied = await applyManifests(
+    { operator: { url: controlPlaneUrl, token: "test-admin" } },
+    [{ apiVersion: "supertag/v1", kind: "Objective", metadata: { name }, spec }],
+  );
+  expect(applied.complete, JSON.stringify(applied.results)).toBe(true);
   let taskId: string | undefined;
   await expect
     .poll(

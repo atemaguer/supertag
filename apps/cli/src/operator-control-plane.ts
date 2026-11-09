@@ -14,6 +14,7 @@ import {
 import { ErrorReason } from "@supertag/operator-api";
 import type { RemoteWorkletServer } from "@supertag/worker-transport";
 import type { SurfaceController } from "./gateway-surfaces.js";
+import type { ManifestApplyContext } from "./manifest-apply.js";
 import { operatorError } from "./operator-rpc-context.js";
 import type {
   OperatorControl,
@@ -22,6 +23,7 @@ import type {
   OperatorSurfaceLocation,
   ResolvedSurfaceLocation,
 } from "./operator-seams.js";
+import { controlPlaneResourceControl, controlPlaneResourceQueries } from "./resource-operations.js";
 import {
   AccountSelectionError,
   type SurfaceTarget,
@@ -34,14 +36,17 @@ import {
  * its notification delivery configuration, the Objective view its embedded Worklet, and
  * GetStatus its controllers.
  */
-export function controlPlaneQueries(sources: {
-  readonly controlPlane: Pick<
-    ControlPlane,
-    "isAccepting" | "controllerStatuses" | "objectives" | "listWorkerHosts"
-  >;
-  readonly surfaceController: Pick<SurfaceController, "name" | "status">;
-  readonly startedAt: string;
-}): OperatorQueries {
+export function controlPlaneQueries(
+  sources: {
+    readonly controlPlane: Pick<
+      ControlPlane,
+      "isAccepting" | "controllerStatuses" | "objectives" | "listWorkerHosts"
+    >;
+    readonly surfaceController: Pick<SurfaceController, "name" | "status">;
+    readonly startedAt: string;
+  },
+  resources: ManifestApplyContext,
+): OperatorQueries {
   const { controlPlane, surfaceController } = sources;
   const objectives = controlPlane.objectives;
   return {
@@ -61,6 +66,7 @@ export function controlPlaneQueries(sources: {
       ],
     }),
     listWorkerHosts: () => controlPlane.listWorkerHosts(),
+    ...controlPlaneResourceQueries(resources),
   };
 }
 
@@ -72,36 +78,39 @@ export function controlPlaneDataWrites(sources: {
 }
 
 /** The operator state transitions, made by this process's Control Plane. */
-export function controlPlaneControl(sources: {
-  readonly controlPlane: Pick<
-    ControlPlane,
-    | "createAuthKey"
-    | "createOperatorToken"
-    | "enrollWorkerHost"
-    | "isAccepting"
-    | "listWorkerHosts"
-    | "messageTag"
-    | "objectives"
-    | "requestTaskCancellation"
-    | "revokeAuthKey"
-    | "revokeOperatorToken"
-    | "revokeWorkerHostCredential"
-    | "rotateWorkerHostCredential"
-    | "setWorkerHostDraining"
-    | "setupSurfaceAccount"
-    | "startObjective"
-  >;
-  readonly store: Store;
-  /** Holds Surface Account credentials, which resolve locations named by name. */
-  readonly credentialVault: GatewayCredentialVault;
-  /** Signs artifact transfer grants; without it no Worker Host serves an operator directly. */
-  readonly artifactTransfers?: {
-    readonly sign: (claims: AnyArtifactTransferGrantClaims) => string;
-  };
-  /** The configured public Control Plane URL, never a request's Host header. */
-  readonly publicUrl?: string | undefined;
-  readonly workletApi?: Pick<RemoteWorkletServer, "isHostConnectionLoopback">;
-}): OperatorControl {
+export function controlPlaneControl(
+  sources: {
+    readonly controlPlane: Pick<
+      ControlPlane,
+      | "createAuthKey"
+      | "createOperatorToken"
+      | "enrollWorkerHost"
+      | "isAccepting"
+      | "listWorkerHosts"
+      | "messageTag"
+      | "objectives"
+      | "requestTaskCancellation"
+      | "revokeAuthKey"
+      | "revokeOperatorToken"
+      | "revokeWorkerHostCredential"
+      | "rotateWorkerHostCredential"
+      | "setWorkerHostDraining"
+      | "setupSurfaceAccount"
+      | "startObjective"
+    >;
+    readonly store: Store;
+    /** Holds Surface Account credentials, which resolve locations named by name. */
+    readonly credentialVault: GatewayCredentialVault;
+    /** Signs artifact transfer grants; without it no Worker Host serves an operator directly. */
+    readonly artifactTransfers?: {
+      readonly sign: (claims: AnyArtifactTransferGrantClaims) => string;
+    };
+    /** The configured public Control Plane URL, never a request's Host header. */
+    readonly publicUrl?: string | undefined;
+    readonly workletApi?: Pick<RemoteWorkletServer, "isHostConnectionLoopback">;
+  },
+  resources: ManifestApplyContext,
+): OperatorControl {
   const { controlPlane, store } = sources;
   const objectives = controlPlane.objectives;
   const artifacts = new ArtifactCatalog(
@@ -197,6 +206,7 @@ export function controlPlaneControl(sources: {
     ...workerHostControl(controlPlane, store),
     ...accessControl(controlPlane),
     ...surfaceControl(controlPlane, store, sources.credentialVault),
+    ...controlPlaneResourceControl(resources),
   };
 }
 

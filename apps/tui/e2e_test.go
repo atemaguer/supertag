@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,7 +24,8 @@ import (
 // branch with a pull request), one open Objective, an inbox holding the Objective owner's question
 // and an approval request, and one Team with a Workstream post. It expands the work Session,
 // shows the branch's diff, opens the pull request with a stand-in for the platform opener, starts
-// a new conversation, answers the question and approves the request in place, and shows the Team.
+// a new conversation, answers the question and approves the request in place, shows the Team,
+// creates an Objective from the command palette and opens the emptied inbox from it.
 // It needs tmux, git, node_modules and ./build.sh output, so it runs only with SUPERTAG_TUI_E2E=1:
 //
 //	SUPERTAG_TUI_E2E=1 go test -run TestEndToEnd -v .
@@ -50,7 +50,7 @@ func endToEndControlPlane(base, head string) *fakeControlPlane {
 	inbox := coordinationFake()
 	return &fakeControlPlane{
 		token:      fakeToken,
-		tags:       func(w http.ResponseWriter) { tagList(w, "lead", "builder") },
+		tags:       tags("lead", "builder"),
 		objectives: func() []*operatorv1.Objective { return []*operatorv1.Objective{billingOverview().GetObjective()} },
 		overview:   inbox.overview,
 		items:      inbox.items,
@@ -341,7 +341,41 @@ func TestEndToEnd(t *testing.T) {
 		}
 	}
 
+	// Moving through the rail selected builder, so the palette's Tag commands are about builder.
+	keys("C-k")
+	waitFor("the command palette", 10*time.Second, func(pane string) bool {
+		return strings.Contains(pane, "Commands") && strings.Contains(pane, "Create Objective     owned by builder")
+	})
+	keys("-l", "objective")
+	keys("Enter")
+	waitFor("the new Objective form", 10*time.Second, func(pane string) bool {
+		return strings.Contains(pane, "New Objective · owned by builder") && strings.Contains(pane, "Teams: billing")
+	})
+	keys("-l", "Invoices round half-even, with tests")
+	keys("Enter")
+	keys("-l", "billing")
+	keys("Enter")
+	keys("-l", "300 USD")
+	keys("Enter")
+	pane = waitFor("the created Objective", 10*time.Second, func(pane string) bool {
+		return strings.Contains(pane, "Created Objective obj-new.") && strings.Contains(pane, "builder took its first turn as Task task-new.")
+	})
+	t.Logf("created Objective:\n%s", pane)
+	keys("Enter")
+	waitFor("the new Objective's view", 10*time.Second, func(pane string) bool {
+		return strings.Contains(pane, "Objective · obj-new")
+	})
+	keys("/")
+	waitFor("the command palette", 10*time.Second, func(pane string) bool { return strings.Contains(pane, "Open inbox           0 waiting") })
+	keys("-l", "inbox")
+	keys("Enter")
+	waitFor("the empty inbox", 10*time.Second, func(pane string) bool { return strings.Contains(pane, "Nothing waits on you.") })
+
 	fake.mu.Lock()
+	if len(fake.created) != 1 || fake.created[0].GetOutcome() != "Invoices round half-even, with tests" || fake.created[0].GetOwner() != "builder" ||
+		fake.created[0].GetTeam() != "billing" || fake.created[0].GetBudget().GetLimitMinor() != 30000 || fake.created[0].GetBudget().GetCurrency() != "USD" {
+		t.Errorf("created = %v", fake.created)
+	}
 	if len(fake.answered) != 1 || fake.answered[0].GetKey() != "question:task-own" || fake.answered[0].GetText() != "No, cap it at 100." {
 		t.Errorf("answered = %v", fake.answered)
 	}

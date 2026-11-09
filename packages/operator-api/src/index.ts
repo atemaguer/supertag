@@ -12,6 +12,7 @@ export * from "./gen/supertag/operator/v1/mailbox_pb.js";
 export * from "./gen/supertag/operator/v1/objective_pb.js";
 export * from "./gen/supertag/operator/v1/options_pb.js";
 export * from "./gen/supertag/operator/v1/organization_pb.js";
+export * from "./gen/supertag/operator/v1/resource_pb.js";
 export * from "./gen/supertag/operator/v1/surface_pb.js";
 export * from "./gen/supertag/operator/v1/task_pb.js";
 export * from "./gen/supertag/operator/v1/team_pb.js";

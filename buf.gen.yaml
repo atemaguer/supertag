@@ -36,3 +36,8 @@ plugins:
       - supertag.operator.v1
     opt:
       - module=github.com/atemaguer/supertag/packages/operator-api/go/operatorv1
+  - local: [node, scripts/protoc-gen-manifest-schema.mjs]
+    out: spec/manifests
+    strategy: all
+    types:
+      - supertag.operator.v1

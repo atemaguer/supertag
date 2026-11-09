@@ -7,7 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { main } from "../apps/cli/src/index.ts";
+import type { ResourcePath } from "../apps/cli/src/resource-protos.ts";
 import { migrateSqlite } from "./support/database.ts";
+import { applyManifests, getResource } from "./support/resources.ts";
 import { enrollWorkerHost } from "./support/worker-host-enrollment.ts";
 
 // The CLI owns the YAML dependency; read manifests with the same parser apply uses.
@@ -97,24 +99,23 @@ describe("example organizations", () => {
 
   it("adopts the resources supertag init created when applied over them", async () => {
     // init applies these under its own apply set; see ensureResources in apps/cli/src/init.ts.
-    const init = (path: string, kind: string, name: string, spec: object) =>
-      client.request(`/api/v1/${path}?applySet=init`, {
-        method: "POST",
-        body: JSON.stringify({ apiVersion: "supertag/v1", kind, metadata: { name }, spec }),
+    const init = (kind: string, name: string, spec: object) =>
+      applyManifests(client, [{ apiVersion: "supertag/v1", kind, metadata: { name }, spec }], {
+        applySet: "init",
       });
-    await init("permission-sets", "PermissionSet", "local-tools", {
+    await init("PermissionSet", "local-tools", {
       permissions: [
         { target: "runtime", action: "commands:execute" },
         { target: "runtime", action: "files:write" },
       ],
     });
-    await init("roles", "Role", "Lead", {
+    await init("Role", "Lead", {
       purpose: "Own Objectives: plan the work, do or delegate each part, and review the results.",
       instructions: "Work from repository evidence.",
       contextSets: [],
       permissionSets: ["local-tools"],
     });
-    await init("tags", "Tag", "lead", { roles: ["Lead"] });
+    await init("Tag", "lead", { roles: ["Lead"] });
 
     const path = join(examples, "solo", "organization.yaml");
     // The README's adoption steps: diff shows init's fields, then one forced apply takes them.
@@ -141,8 +142,10 @@ describe("example organizations", () => {
       for (const document of documents) {
         const collection = paths[document.kind];
         expect(collection, `unexpected kind ${document.kind}`).toBeDefined();
-        const stored = await client.request<{ spec: object }>(
-          `/api/v1/${collection}/${encodeURIComponent(document.metadata.name)}`,
+        const stored = await getResource<{ spec: object }>(
+          client,
+          collection as ResourcePath,
+          document.metadata.name,
         );
         expect(stored.spec, `${document.kind}/${document.metadata.name}`).toMatchObject(
           normalized(document.spec),

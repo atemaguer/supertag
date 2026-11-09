@@ -106,15 +106,25 @@ suite("Team delegation through production APIs on distributed Docker Workers", (
         { ...credentials, WORKER_ID: host, SUPERTAG_WORKLET_CREDENTIAL: token },
       );
     }
-    const makeTag = async (label: string, host: string) =>
-      (
-        await api("POST", "/api/v1/tags", {
-          apiVersion: CONTROL_PLANE_API_VERSION,
-          kind: "Tag",
-          metadata: { name: label },
-          spec: { workerHosts: [host] },
-        })
-      )["metadata"] as { id: string };
+    const makeTag = async (label: string, host: string) => {
+      await api("POST", "/supertag.operator.v1.ResourceService/ApplyManifests", {
+        documents: [
+          {
+            manifest: {
+              apiVersion: CONTROL_PLANE_API_VERSION,
+              kind: "Tag",
+              metadata: { name: label },
+              spec: { workerHosts: [host] },
+            },
+          },
+        ],
+      });
+      const read = await api("POST", "/supertag.operator.v1.ResourceService/GetResource", {
+        kind: "RESOURCE_KIND_TAG",
+        name: label,
+      });
+      return (read["tag"] as { metadata: { id: string } }).metadata;
+    };
     research = (await makeTag("Research manager", "worker-a"))["id"];
     reviewer = (await makeTag("Review manager", "worker-b"))["id"];
   }, 180_000);
@@ -143,21 +153,27 @@ suite("Team delegation through production APIs on distributed Docker Workers", (
     });
     // Applying the manifest creates its Team and starts the Objective's conversation, which
     // starts a work Session of its own and, after its report, delegates the review.
-    await api("POST", "/api/v1/objectives", {
-      apiVersion: CONTROL_PLANE_API_VERSION,
-      kind: "Objective",
-      metadata: { name: "pooled-objective" },
-      spec: {
-        owner: "Research manager",
-        outcome: "Independently verify one shared conclusion",
-        team: {
-          name: "Research",
-          members: ["Research manager", "Review manager"],
-          maxConcurrency: 1,
+    await api("POST", "/supertag.operator.v1.ResourceService/ApplyManifests", {
+      documents: [
+        {
+          manifest: {
+            apiVersion: CONTROL_PLANE_API_VERSION,
+            kind: "Objective",
+            metadata: { name: "pooled-objective" },
+            spec: {
+              owner: "Research manager",
+              outcome: "Independently verify one shared conclusion",
+              team: {
+                name: "Research",
+                members: ["Research manager", "Review manager"],
+                maxConcurrency: 1,
+              },
+              runtimeActions: [],
+              budget: { minor: 100 },
+            },
+          },
         },
-        runtimeActions: [],
-        budget: { minor: 100 },
-      },
+      ],
     });
     await eventually(async () => {
       try {

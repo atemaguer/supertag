@@ -1,4 +1,6 @@
+import type { JsonObject } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
+import { ManifestOutcome } from "@supertag/operator-api";
 import {
   type AuthKeyResource,
   type ControlPlaneResourceList,
@@ -18,8 +20,15 @@ import {
   hostClient,
   type OperatorClientOptions,
   operatorErrorMessage,
+  resourceClient,
   surfaceClient,
 } from "./operator-client.js";
+import {
+  type ResourcePath,
+  type ResourceView,
+  resourceKindOfPath,
+  resourceView,
+} from "./resource-protos.js";
 import { refusedAsError } from "./tag-conversation.js";
 
 /**
@@ -183,6 +192,103 @@ export function getOperatorResource(
   if (path === "auth-keys") return getAuthKeyResource(options, name);
   if (path === "operator-tokens") return getOperatorTokenResource(options, name);
   return getSurfaceAccountResource(options, name);
+}
+
+/** Every resource of a `ResourceService` kind, as the resource list `get KIND` prints. */
+export function listResourceViews(
+  options: OperatorClientOptions,
+  path: ResourcePath,
+): Promise<ControlPlaneResourceList<ResourceView>> {
+  const resources = resourceClient(options);
+  const kind = resourceKindOfPath(path);
+  return refusedAsError(async () =>
+    resourceList(
+      (
+        await allPages(
+          (pageToken) => resources.listResources({ kind, pageSize: 500, pageToken }),
+          (page) => page.resources,
+        )
+      ).map((resource) => resourceView(resource)),
+    ),
+  );
+}
+
+/** One resource of a `ResourceService` kind by name, as `get KIND NAME` prints it. */
+export function getResourceView(
+  options: OperatorClientOptions,
+  path: ResourcePath,
+  name: string,
+): Promise<ResourceView> {
+  return refusedAsError(async () =>
+    resourceView(
+      await resourceClient(options).getResource({ kind: resourceKindOfPath(path), name }),
+      true,
+    ),
+  );
+}
+
+/** One resource by name, or undefined when it does not exist. */
+export async function findResourceView(
+  options: OperatorClientOptions,
+  path: ResourcePath,
+  name: string,
+): Promise<ResourceView | undefined> {
+  try {
+    return resourceView(
+      await resourceClient(options).getResource({ kind: resourceKindOfPath(path), name }),
+      true,
+    );
+  } catch (error) {
+    if (error instanceof ConnectError && error.code === Code.NotFound) return undefined;
+    if (error instanceof ConnectError) throw new Error(operatorErrorMessage(error));
+    throw error;
+  }
+}
+
+/** Applies one manifest, as `init`, provisioning and `create tag` do, and fails unless it applied. */
+export async function applyManifest(
+  options: OperatorClientOptions,
+  request: {
+    readonly manifest: JsonObject;
+    readonly source: string;
+    readonly applySet?: string;
+    readonly imperative?: boolean;
+  },
+): Promise<void> {
+  const applied = await refusedAsError(() =>
+    resourceClient(options).applyManifests({
+      ...(request.applySet === undefined ? {} : { applySet: request.applySet }),
+      imperative: request.imperative === true,
+      documents: [{ manifest: request.manifest, source: request.source }],
+    }),
+  );
+  if (applied.complete) return;
+  const failed = applied.results.find((result) => result.outcome === ManifestOutcome.FAILED);
+  throw new Error(failed?.failureMessage || `${request.source} was not applied`);
+}
+
+/**
+ * Manifests a manifest can reproduce: one resource's by name, or every resource's of the kind.
+ * Surface Accounts set up interactively have no manifest; a listing leaves them out.
+ */
+export function resourceManifests(
+  options: OperatorClientOptions,
+  path: ResourcePath,
+  name?: string,
+): Promise<readonly unknown[]> {
+  const resources = resourceClient(options);
+  const kind = resourceKindOfPath(path);
+  return refusedAsError(async () =>
+    name === undefined
+      ? (
+          await allPages(
+            (pageToken) =>
+              resources.listResources({ kind, pageSize: 500, pageToken, manifest: true }),
+            (page) => page.resources,
+          )
+        ).map((resource) => resource.manifest ?? {})
+      : [(await resources.getResource({ kind, name, manifest: true })).manifest ?? {}],
+  );
 }
 
 /**

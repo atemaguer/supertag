@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { main } from "../apps/cli/src/index.ts";
+import type { SurfaceVerifier } from "../apps/cli/src/manifest-apply.ts";
 import {
   getSurfaceAccountResource,
   listSurfaceAccountResources,
@@ -13,6 +14,7 @@ import { applyManifests } from "../apps/cli/src/resources.ts";
 import { DrizzleStore } from "../packages/store/src/index.ts";
 import type { VerifiedSurfaceAccount } from "../packages/surfaces/sdk/src/index.ts";
 import { migrateSqlite } from "./support/database.ts";
+import { getResource, listResources } from "./support/resources.ts";
 
 const BOT = "xoxb-acme-bot-value";
 const SIGNING = "acme-signing-value";
@@ -42,6 +44,16 @@ spec:
 `;
 
 describe("SurfaceAccount manifests", () => {
+  const token = "test-administrative-token";
+  const startRuntime = (options: { readonly verifySurface?: SurfaceVerifier } = {}) =>
+    startControlPlaneRuntime({
+      host: "127.0.0.1",
+      port: 0,
+      databaseUrl: `file:${databasePath}`,
+      adminToken: token,
+      surfaceRefreshIntervalMs: 3_600_000,
+      ...options,
+    });
   let directory: string;
   let databasePath: string;
   let serverState: string;
@@ -58,14 +70,7 @@ describe("SurfaceAccount manifests", () => {
     databasePath = join(serverState, "supertag.db");
     await migrateSqlite(databasePath);
     vi.stubEnv("SUPERTAG_STATE_DIR", serverState);
-    const token = "test-administrative-token";
-    runtime = await startControlPlaneRuntime({
-      host: "127.0.0.1",
-      port: 0,
-      databaseUrl: `file:${databasePath}`,
-      adminToken: token,
-      surfaceRefreshIntervalMs: 3_600_000,
-    });
+    runtime = await startRuntime();
     output = [];
     errors = [];
     vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
@@ -383,7 +388,7 @@ spec:
     );
     expect(message).not.toContain("xoxb-rejected");
     expect((await listSurfaceAccountResources(client.operator)).items).toEqual([]);
-    expect((await client.request<{ items: unknown[] }>("/api/v1/tags")).items).toEqual([]);
+    expect((await listResources(client, "tags")).items).toEqual([]);
 
     // Unset references fail the same way, naming the reference.
     vi.stubEnv("ACME_BOT", "");
@@ -412,9 +417,7 @@ spec:
         "",
       ].join("\n"),
     );
-    const builder = await client.request<{ spec: { locations: unknown[] } }>(
-      "/api/v1/tags/builder",
-    );
+    const builder = await getResource(client, "tags", "builder");
     // The Tag records the provider account it resolved, so its plan stays stable.
     expect(builder.spec.locations).toEqual([
       expect.objectContaining({ provider: "slack", account: "T123", channelId: "C0123" }),
@@ -468,11 +471,14 @@ spec:
         secrets: { ...secrets },
       };
     };
+    // Provider verification runs on the Control Plane, which this one fakes.
+    await runtime.close();
+    runtime = await startRuntime({ verifySurface });
+    client = new ControlPlaneClient({ url: runtime.url, token });
     expect(
       await applyManifests(client, [builder, manifest], {
         source: "supertag.yaml provision",
         resolveSecret,
-        verifySurface,
       }),
     ).toBe(
       [

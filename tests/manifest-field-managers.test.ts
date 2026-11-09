@@ -1,13 +1,17 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { toJson } from "@bufbuild/protobuf";
+import { ValueSchema } from "@bufbuild/protobuf/wkt";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { main } from "../apps/cli/src/index.ts";
 import { listWorkerHostResources } from "../apps/cli/src/operator-resources.ts";
+import { FieldChangeAction, PlanAction } from "../packages/operator-api/src/index.ts";
 import { DrizzleStore } from "../packages/store/src/index.js";
 import { migrateSqlite } from "./support/database.ts";
+import { diffManifests, getResource, resourceExists } from "./support/resources.ts";
 
 interface TagSpec {
   readonly roles: readonly string[];
@@ -132,12 +136,7 @@ describe("field managers and apply sets", () => {
     return (error as Error).message;
   };
   const tag = async (name: string) =>
-    (await client.request<{ spec: TagSpec }>(`/api/v1/tags/${name}`)).spec;
-  const exists = (path: string) =>
-    client.request(path).then(
-      () => true,
-      () => false,
-    );
+    (await getResource<{ spec: TagSpec }>(client, "tags", name)).spec;
   /** Forgets field ownership, as for a resource created before field managers existed. */
   const forgetOwnership = async (kind: "Role" | "Tag", name: string) => {
     const store = new DrizzleStore({ url: `file:${databasePath}` });
@@ -291,10 +290,9 @@ describe("field managers and apply sets", () => {
   permissionSets: [eng-runtime]
 `;
     await run("apply", "-f", await write("trimmed-role.yaml", trimmedRole));
-    expect(
-      (await client.request<{ spec: { contextSets: string[] } }>("/api/v1/roles/Engineer")).spec
-        .contextSets,
-    ).toEqual(["eng-guidelines"]);
+    expect((await getResource(client, "roles", "Engineer")).spec.contextSets).toEqual([
+      "eng-guidelines",
+    ]);
 
     // ...and changing one conflicts.
     const changed = await write(
@@ -343,15 +341,13 @@ describe("field managers and apply sets", () => {
     expect(await run("diff", "-f", withoutReviewer, "--set", "team-a", "--prune")).toBe(
       "- Tag reviewer\nPlan: 0 to create, 0 to update, 1 to delete, 0 conflicts.\n",
     );
-    expect(await exists("/api/v1/tags/reviewer")).toBe(true);
+    expect(await resourceExists(client, "tags", "reviewer")).toBe(true);
     expect(await run("apply", "-f", withoutReviewer, "--set", "team-a", "--prune")).toContain(
       "Tag/reviewer deleted\n",
     );
     // Deleting a Tag retires it; its name stays readable until a new Tag takes it.
-    expect(
-      (await client.request<{ status: { phase: string } }>("/api/v1/tags/reviewer")).status.phase,
-    ).toBe("retired");
-    expect(await exists("/api/v1/tags/planner")).toBe(true);
+    expect((await getResource(client, "tags", "reviewer")).status.phase).toBe("retired");
+    expect(await resourceExists(client, "tags", "planner")).toBe(true);
 
     // A member still in use stays in the set and is reported, not deleted.
     const tagsOnly = await write("team-a-tags.yaml", builder);
@@ -364,7 +360,7 @@ describe("field managers and apply sets", () => {
         "",
       ].join("\n"),
     );
-    expect(await exists("/api/v1/roles/Engineer")).toBe(true);
+    expect(await resourceExists(client, "roles", "Engineer")).toBe(true);
 
     // Once builder no longer uses them, the next prune deletes them in reverse apply order.
     const bare = await write("team-a-bare.yaml", `${header("Tag", "builder")}spec: {}\n`);
@@ -377,11 +373,11 @@ describe("field managers and apply sets", () => {
         "",
       ].join("\n"),
     );
-    const retired = await client.request<{ status: { phase: string } }>("/api/v1/roles/Engineer");
+    const retired = await getResource(client, "roles", "Engineer");
     expect(retired.status.phase).toBe("retired");
-    expect(await exists("/api/v1/permission-sets/eng-runtime")).toBe(false);
-    expect(await exists("/api/v1/context-sets/eng-guidelines")).toBe(false);
-    expect(await exists("/api/v1/tags/planner")).toBe(true);
+    expect(await resourceExists(client, "permission-sets", "eng-runtime")).toBe(false);
+    expect(await resourceExists(client, "context-sets", "eng-guidelines")).toBe(false);
+    expect(await resourceExists(client, "tags", "planner")).toBe(true);
   });
 
   it("prints a plan with creates, updates, deletes, and conflicts", async () => {
@@ -417,34 +413,34 @@ describe("field managers and apply sets", () => {
       ].join("\n"),
     );
     // A plan changes nothing.
-    expect(await exists("/api/v1/tags/ios-dev")).toBe(false);
-    expect(await exists("/api/v1/tags/reviewer")).toBe(true);
+    expect(await resourceExists(client, "tags", "ios-dev")).toBe(false);
+    expect(await resourceExists(client, "tags", "reviewer")).toBe(true);
   });
 
-  it("answers a server dry run with the merged spec and plan, without writing", async () => {
-    const planned = await client.request<{
-      spec: TagSpec;
-      plan: { action: string; changes: { path: string; action: string }[] };
-    }>("/api/v1/tags?dryRun=true", {
-      method: "POST",
-      body: JSON.stringify({
+  it("plans an input without writing", async () => {
+    const { plans } = await diffManifests(client, [
+      {
         apiVersion: "supertag/v1",
         kind: "Tag",
         metadata: { name: "dry" },
         spec: { locations: [{ provider: "slack", channelId: "C0DRY" }] },
-      }),
-    });
-    expect(planned.plan.action).toBe("create");
-    expect(planned.plan.changes).toEqual([
-      expect.objectContaining({ path: "spec.locations[slack:C0DRY]", action: "add" }),
+      },
     ]);
-    expect(planned.spec).toEqual({
-      roles: [],
-      workerHosts: [],
-      runsOn: [],
-      locations: [{ provider: "slack", account: "T_ORG", channelId: "C0DRY" }],
-      acceptsMessagesFrom: [],
-    });
-    expect(await exists("/api/v1/tags/dry")).toBe(false);
+    expect(plans).toHaveLength(1);
+    expect(plans[0]?.action).toBe(PlanAction.CREATE);
+    expect(
+      plans[0]?.changes.map((change) => ({
+        path: change.path,
+        action: change.action,
+        after: change.after === undefined ? undefined : toJson(ValueSchema, change.after),
+      })),
+    ).toEqual([
+      {
+        path: "spec.locations[slack:C0DRY]",
+        action: FieldChangeAction.ADD,
+        after: { provider: "slack", account: "T_ORG", channelId: "C0DRY" },
+      },
+    ]);
+    expect(await resourceExists(client, "tags", "dry")).toBe(false);
   });
 });

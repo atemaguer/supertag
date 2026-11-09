@@ -17,10 +17,10 @@ import { loadServicesFile } from "../apps/cli/src/supertag-yaml.ts";
 import { bringDown, type UpOptions, type UpResult } from "../apps/cli/src/up.ts";
 import { migrateSqlite } from "./support/database.ts";
 import {
-  api,
   CLI,
   fakeHarness,
   git,
+  localResource,
   localWorkerHost,
   repository,
   TIMEOUT,
@@ -386,12 +386,12 @@ describe("supertag init", () => {
       );
       expect(await readdir(root)).toEqual([".git"]);
 
-      expect((await api("/api/v1/workspaces/shop")).spec).toMatchObject({
+      expect((await localResource("workspaces", "shop")).spec).toMatchObject({
         source: "git@github.com:acme/shop.git",
         ref: "main",
         delivery: "branch",
       });
-      expect((await api("/api/v1/tags/lead")).spec).toMatchObject({
+      expect((await localResource("tags", "lead")).spec).toMatchObject({
         roles: ["Lead"],
         workerHosts: ["studio-mac"],
       });
@@ -434,7 +434,7 @@ describe("supertag init", () => {
       expect(printed().match(/local Control Plane (in|already)/g)).toHaveLength(1);
       expect((await runningProcess(controlPlaneSlot())).pid).toBe(controlPlanePid);
       expect((await runningProcess(hostSlot("studio-mac"))).pid).toBe(hostPid);
-      expect((await api("/api/v1/tags/lead")).spec).toMatchObject({
+      expect((await localResource("tags", "lead")).spec).toMatchObject({
         runsOn: ["harness:codex"],
         workerHosts: ["studio-mac"],
       });
@@ -516,10 +516,10 @@ describe("supertag init", () => {
     });
     // The Control Plane comes up first, then everything.
     expect(fake.calls.map((call) => call.names)).toEqual([["control-plane"], undefined]);
-    expect((await api("/api/v1/workspaces/site")).spec).toMatchObject({
+    expect((await localResource("workspaces", "site")).spec).toMatchObject({
       delivery: "pull-request",
     });
-    expect((await api("/api/v1/permission-sets/local-tools")).spec).toMatchObject({
+    expect((await localResource("permission-sets", "local-tools")).spec).toMatchObject({
       permissions: [],
     });
     expect(printed()).toContain("Opening pull requests also needs a GitHub surface");
@@ -557,7 +557,7 @@ describe("supertag init", () => {
     );
     expect(printed()).toContain("~ Permission Set local-tools");
     expect(printed()).not.toContain("+ Tag");
-    expect((await api("/api/v1/permission-sets/local-tools")).spec).toMatchObject({
+    expect((await localResource("permission-sets", "local-tools")).spec).toMatchObject({
       permissions: expect.arrayContaining([
         expect.objectContaining({ target: "runtime", action: "files:write" }),
         expect.objectContaining({ target: "runtime", action: "commands:execute" }),

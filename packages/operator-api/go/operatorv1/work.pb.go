@@ -242,8 +242,10 @@ type MountAccess int32
 
 const (
 	MountAccess_MOUNT_ACCESS_UNSPECIFIED MountAccess = 0
-	MountAccess_MOUNT_ACCESS_READ_ONLY   MountAccess = 1
-	MountAccess_MOUNT_ACCESS_READ_WRITE  MountAccess = 2
+	// Nothing the Task changes is saved to the Volume's source.
+	MountAccess_MOUNT_ACCESS_READ_ONLY MountAccess = 1
+	// Changes are saved to the Volume's source.
+	MountAccess_MOUNT_ACCESS_READ_WRITE MountAccess = 2
 )
 
 // Enum value maps for MountAccess.
@@ -7803,11 +7805,12 @@ const file_supertag_operator_v1_work_proto_rawDesc = "" +
 	"\vModelSource\x12\x1c\n" +
 	"\x18MODEL_SOURCE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11MODEL_SOURCE_TASK\x10\x01\x12\x1d\n" +
-	"\x19MODEL_SOURCE_HOST_DEFAULT\x10\x02*d\n" +
+	"\x19MODEL_SOURCE_HOST_DEFAULT\x10\x02*\x83\x01\n" +
 	"\vMountAccess\x12\x1c\n" +
-	"\x18MOUNT_ACCESS_UNSPECIFIED\x10\x00\x12\x1a\n" +
-	"\x16MOUNT_ACCESS_READ_ONLY\x10\x01\x12\x1b\n" +
-	"\x17MOUNT_ACCESS_READ_WRITE\x10\x02*\x9c\x01\n" +
+	"\x18MOUNT_ACCESS_UNSPECIFIED\x10\x00\x12)\n" +
+	"\x16MOUNT_ACCESS_READ_ONLY\x10\x01\x1a\rҵ\x18\tread-only\x12+\n" +
+	"\x17MOUNT_ACCESS_READ_WRITE\x10\x02\x1a\x0eҵ\x18\n" +
+	"read-write*\x9c\x01\n" +
 	"\x11MountOutputStatus\x12#\n" +
 	"\x1fMOUNT_OUTPUT_STATUS_UNSPECIFIED\x10\x00\x12 \n" +
 	"\x1cMOUNT_OUTPUT_STATUS_COMPLETE\x10\x01\x12\x1f\n" +

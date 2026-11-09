@@ -1,8 +1,5 @@
 import type { ManagedResourceKind, ResourceManagementStore } from "@supertag/core";
-import { parseApplySetName } from "@supertag/core";
 import {
-  APPLY_MANAGER,
-  CLI_MANAGER,
   type FieldChange,
   type FieldConflict,
   type FieldMerge,
@@ -15,7 +12,7 @@ import {
   unflattenSpec,
 } from "./field-management.js";
 
-/** How one declarative write was requested, from its query parameters. */
+/** How one declarative write was requested. */
 export interface ManagedWriteOptions {
   readonly dryRun: boolean;
   readonly force: boolean;
@@ -23,25 +20,6 @@ export interface ManagedWriteOptions {
   readonly imperative: boolean;
   readonly manager: string;
   readonly applySet?: string;
-}
-
-export function managedWriteOptions(url: URL): ManagedWriteOptions {
-  const dryRun = url.searchParams.get("dryRun") === "true";
-  const force = url.searchParams.get("force") === "true";
-  const fieldManager = url.searchParams.get("fieldManager");
-  const applySetValue = url.searchParams.get("applySet");
-  if (fieldManager !== null && fieldManager !== APPLY_MANAGER && fieldManager !== CLI_MANAGER)
-    throw new Error("fieldManager must be apply or cli; apply as a set with applySet=NAME");
-  if (fieldManager === CLI_MANAGER && applySetValue !== null)
-    throw new Error("fieldManager=cli cannot be combined with applySet");
-  const applySet = applySetValue === null ? undefined : parseApplySetName(applySetValue);
-  return {
-    dryRun,
-    force,
-    imperative: fieldManager === CLI_MANAGER,
-    manager: applySet ?? (fieldManager === CLI_MANAGER ? CLI_MANAGER : APPLY_MANAGER),
-    ...(applySet === undefined ? {} : { applySet }),
-  };
 }
 
 /** The outcome of merging a manifest into the stored resource, before anything is written. */

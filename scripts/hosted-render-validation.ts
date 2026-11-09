@@ -228,35 +228,49 @@ try {
   ]);
   protectedValues.push(credentialA, credentialB);
 
-  await api.request("POST", "/api/v1/permission-sets", {
-    apiVersion: "supertag/v1",
-    kind: "PermissionSet",
-    metadata: { name: permissionSetName },
-    spec: {
-      permissions: ["files:read", "files:write", "commands:execute"].map((action) => ({
-        target: "runtime",
-        action,
-      })),
+  const applied = await api.request(
+    "POST",
+    "/supertag.operator.v1.ResourceService/ApplyManifests",
+    {
+      documents: [
+        {
+          manifest: {
+            apiVersion: "supertag/v1",
+            kind: "PermissionSet",
+            metadata: { name: permissionSetName },
+            spec: {
+              permissions: ["files:read", "files:write", "commands:execute"].map((action) => ({
+                target: "runtime",
+                action,
+              })),
+            },
+          },
+        },
+        {
+          manifest: {
+            apiVersion: "supertag/v1",
+            kind: "Role",
+            metadata: { name: roleName },
+            spec: {
+              purpose: "Run the bounded hosted transport and persistence validation",
+              instructions: "Do only what each message asks and do not start work Sessions.",
+              permissionSets: [permissionSetName],
+              contextSets: [],
+            },
+          },
+        },
+        {
+          manifest: {
+            apiVersion: "supertag/v1",
+            kind: "Tag",
+            metadata: { name: tagName },
+            spec: { roles: [roleName], workerHosts: [hostA, hostB] },
+          },
+        },
+      ],
     },
-  });
-  await api.request("POST", "/api/v1/roles", {
-    apiVersion: "supertag/v1",
-    kind: "Role",
-    metadata: { name: roleName },
-    spec: {
-      purpose: "Run the bounded hosted transport and persistence validation",
-      instructions: "Do only what each message asks and do not start work Sessions.",
-      permissionSets: [permissionSetName],
-      contextSets: [],
-    },
-  });
-
-  await api.request("POST", "/api/v1/tags", {
-    apiVersion: "supertag/v1",
-    kind: "Tag",
-    metadata: { name: tagName },
-    spec: { roles: [roleName], workerHosts: [hostA, hostB] },
-  });
+  );
+  assert.equal(applied["complete"], true);
 
   const phaseA = join(outputDirectory, "phase-a");
   const continuityWorkspace = join(outputDirectory, "continuity-workspace");

@@ -793,7 +793,7 @@ spec:
 
 The [collaboration surface guides](../surfaces/README.md#declare-a-surface-account-in-a-manifest) list each
 provider's options and secrets, and the
-[SurfaceAccount schema](../../spec/surface-account-manifest.schema.json) gives the exact shape.
+[SurfaceAccount schema](../../spec/manifests/surface-account.schema.json) gives the exact shape.
 
 The rules:
 

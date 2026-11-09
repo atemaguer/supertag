@@ -23,9 +23,18 @@ export function apiClient(url, adminToken) {
   /** Calls an operator RPC over the Connect protocol with a JSON body. */
   const rpc = (service, method, input) =>
     request("POST", `/supertag.operator.v1.${service}/${method}`, input);
+  /** Applies one manifest and fails unless it applied. */
+  const apply = async (manifest) => {
+    const result = await rpc("ResourceService", "ApplyManifests", { documents: [{ manifest }] });
+    if (!result.complete)
+      throw new Error(
+        `${manifest.kind} ${manifest.metadata.name}: ${JSON.stringify(result.results)}`,
+      );
+    return result;
+  };
   return {
-    request,
     rpc,
+    apply,
     /** Delivers an operator message to the Objective's conversation. */
     message: (text, idempotencyKey) =>
       rpc("ObjectiveService", "MessageObjective", { id: objectiveId, text, idempotencyKey }),
@@ -34,9 +43,7 @@ export function apiClient(url, adminToken) {
   };
 }
 export async function createOrganization(api) {
-  await api.request(
-    "POST",
-    "/api/v1/permission-sets",
+  await api.apply(
     resource("PermissionSet", "support-work", {
       permissions: ["files:write", "commands:execute"].map((action) => ({
         target: "runtime",
@@ -49,9 +56,7 @@ export async function createOrganization(api) {
     const hostId = `support-${name}-host`;
     const enrolled = await api.rpc("HostService", "EnrollWorkerHost", { id: hostId });
     const instructions = await readFile(new URL(`./roles/${name}.md`, import.meta.url), "utf8");
-    await api.request(
-      "POST",
-      "/api/v1/roles",
+    await api.apply(
       resource("Role", `Support ${name}`, {
         purpose:
           name === "manager"
@@ -62,11 +67,13 @@ export async function createOrganization(api) {
         permissionSets: ["support-work"],
       }),
     );
-    const tag = await api.request(
-      "POST",
-      "/api/v1/tags",
+    await api.apply(
       resource("Tag", `Support ${name}`, { roles: [`Support ${name}`], workerHosts: [hostId] }),
     );
+    const { tag } = await api.rpc("ResourceService", "GetResource", {
+      kind: "RESOURCE_KIND_TAG",
+      name: `Support ${name}`,
+    });
     actors[name] = { hostId, credential: enrolled.token, tagId: tag.metadata.id };
   }
   // One flat Team: the manager owns the Objective and may give work Sessions to the analyst.

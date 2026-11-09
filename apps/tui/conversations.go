@@ -197,7 +197,7 @@ func (m *model) startConversation(name string) tea.Cmd {
 func (m *model) switchConversation(name string) tea.Cmd {
 	tag := m.picker.tag
 	for i, t := range m.tags {
-		if t.Name() == tag {
+		if tagName(t) == tag {
 			m.selected = i
 		}
 	}

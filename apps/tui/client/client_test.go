@@ -13,20 +13,62 @@ import (
 	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1/operatorv1connect"
 )
 
-func TestListTags(t *testing.T) {
-	f := &fakeControlPlane{tags: func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			t.Errorf("method = %s", r.Method)
+func tagResource(name string) *operatorv1.Resource {
+	return &operatorv1.Resource{Resource: &operatorv1.Resource_Tag{Tag: &operatorv1.Tag{
+		Metadata: &operatorv1.Metadata{Name: name}, Status: &operatorv1.TagStatus{Phase: operatorv1.TagPhase_TAG_PHASE_ACTIVE},
+	}}}
+}
+
+func TestListTagsReadsEveryPageOfTagResources(t *testing.T) {
+	var requests []*operatorv1.ListResourcesRequest
+	f := &fakeControlPlane{resources: func(req *operatorv1.ListResourcesRequest) (*operatorv1.ListResourcesResponse, error) {
+		requests = append(requests, req)
+		if req.GetPageToken() == "" {
+			return &operatorv1.ListResourcesResponse{Resources: []*operatorv1.Resource{tagResource("builder")}, NextPageToken: "p2"}, nil
 		}
-		_, _ = w.Write([]byte(`{"kind":"ResourceList","items":[{"kind":"Tag","metadata":{"name":"lead"},"status":{"phase":"active"}}]}`))
+		return &operatorv1.ListResourcesResponse{Resources: []*operatorv1.Resource{tagResource("lead"), {}}}, nil
 	}}
 	c := newFake(t, f)
 	tags, err := c.ListTags(context.Background())
-	if err != nil || len(tags) != 1 || tags[0].Name() != "lead" || tags[0].Status.Phase != "active" {
-		t.Fatalf("ListTags() = %+v, %v", tags, err)
+	if err != nil || len(tags) != 2 || tags[0].GetMetadata().GetName() != "builder" || tags[1].GetMetadata().GetName() != "lead" ||
+		tags[1].GetStatus().GetPhase() != operatorv1.TagPhase_TAG_PHASE_ACTIVE {
+		t.Fatalf("ListTags() = %v, %v", tags, err)
 	}
-	if calls := f.callsTo("/api/v1/tags"); len(calls) != 1 || calls[0].authorization != "Bearer secret" || calls[0].version != "0.0.0-test" {
+	if len(requests) != 2 || requests[0].GetKind() != operatorv1.ResourceKind_RESOURCE_KIND_TAG || requests[0].GetManifest() || requests[1].GetPageToken() != "p2" {
+		t.Fatalf("requests = %v", requests)
+	}
+	calls := f.callsTo(operatorv1connect.ResourceServiceListResourcesProcedure)
+	if len(calls) != 2 || calls[0].authorization != "Bearer secret" || calls[0].version != "0.0.0-test" || calls[0].contentType != "application/json" {
 		t.Fatalf("calls = %+v", calls)
+	}
+}
+
+func TestCreateObjectiveIsSentOnce(t *testing.T) {
+	var requests []*operatorv1.CreateObjectiveRequest
+	f := &fakeControlPlane{create: func(req *operatorv1.CreateObjectiveRequest) (*operatorv1.CreateObjectiveResponse, error) {
+		requests = append(requests, req)
+		if len(requests) == 1 {
+			return &operatorv1.CreateObjectiveResponse{Objective: &operatorv1.Objective{Id: "ship-sso-7f3k"}, Warnings: []string{"No Worker Host is connected."}}, nil
+		}
+		return nil, connect.NewError(connect.CodeUnavailable, errors.New("restarting"))
+	}}
+	c := newFake(t, f)
+	res, err := c.CreateObjective(context.Background(), NewObjective{Outcome: "Ship SSO", Owner: "lead", Team: "billing",
+		Budget: &operatorv1.Budget{LimitMinor: 30000, Currency: "USD"}})
+	if err != nil || res.GetObjective().GetId() != "ship-sso-7f3k" || len(res.GetWarnings()) != 1 {
+		t.Fatalf("CreateObjective() = %v, %v", res, err)
+	}
+	got := requests[0]
+	if got.GetOutcome() != "Ship SSO" || got.GetOwner() != "lead" || got.GetTeam() != "billing" || got.GetId() != "" ||
+		got.GetBudget().GetLimitMinor() != 30000 || got.GetBudget().GetCurrency() != "USD" || got.GetDryRun() {
+		t.Fatalf("request = %v", got)
+	}
+	var apiErr *APIError
+	if _, err := c.CreateObjective(context.Background(), NewObjective{Outcome: "x", Owner: "lead"}); !errors.As(err, &apiErr) || apiErr.Code != connect.CodeUnavailable {
+		t.Fatalf("CreateObjective() error = %v", err)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("%d requests, want no retry", len(requests))
 	}
 }
 
@@ -69,9 +111,8 @@ func TestRefusalsCarryTheControlPlaneSentence(t *testing.T) {
 			sends++
 			return nil, connect.NewError(connect.CodeNotFound, errors.New("Tag ghost was not found"))
 		},
-		tags: func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusForbidden)
-			_, _ = w.Write([]byte(`{"error":"forbidden"}`))
+		resources: func(*operatorv1.ListResourcesRequest) (*operatorv1.ListResourcesResponse, error) {
+			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("This credential cannot read resources."))
 		},
 	}
 	c := newFake(t, f)
@@ -83,7 +124,8 @@ func TestRefusalsCarryTheControlPlaneSentence(t *testing.T) {
 	if sends != 1 {
 		t.Fatalf("a refusal was sent %d times", sends)
 	}
-	if _, err := c.ListTags(context.Background()); err == nil || err.Error() != "Control Plane returned HTTP 403" {
+	if _, err := c.ListTags(context.Background()); !errors.As(err, &apiErr) || apiErr.Code != connect.CodePermissionDenied ||
+		err.Error() != "This credential cannot read resources." {
 		t.Fatalf("ListTags() error = %v", err)
 	}
 

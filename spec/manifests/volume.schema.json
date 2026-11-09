@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/atemaguer/supertag/main/spec/manifests/volume.schema.json",
+  "title": "SuperTag Volume manifest",
+  "description": "A Volume manifest, as supertag apply -f reads it. Its spec is supertag.operator.v1.VolumeSpec in supertag/operator/v1/resource.proto; this file is generated from it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "supertag/v1"
+    },
+    "kind": {
+      "const": "Volume"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "description": "The resource's name, unique within its kind.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+          "minLength": 1
+        }
+      }
+    },
+    "spec": {
+      "$ref": "#/$defs/VolumeSpec"
+    }
+  },
+  "$defs": {
+    "VolumeSpec": {
+      "description": "A Volume's source and credential name, and the `spec` of a `Volume` manifest. Apply replaces it whole.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "credential"
+      ],
+      "properties": {
+        "source": {
+          "description": "Where the data lives: `s3://BUCKET/PREFIX`, `r2://BUCKET/PREFIX`, `file:///ABSOLUTE/PATH` on the Worker Host, and for native mounts `gs://BUCKET/PREFIX/` or `modal-volume://NAME/PREFIX/`. S3 and R2 accept the `region`, `endpoint` and `forcePathStyle` query parameters. Credentials, fragments, and `.` or `..` segments are refused.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "credential": {
+          "description": "The name each Worker Host maps to a secret, a provider-held reference or its consent. Never a secret value: one that looks like a key is refused.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

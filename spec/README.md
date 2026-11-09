@@ -25,9 +25,12 @@ stability is defined by the project-wide
 machine: at most one `control-plane` service and any number of `host` services, with `secrets`,
 `env_file`, and `${VAR}` interpolation. It is a configuration file, not a wire message, so it
 rejects unknown fields instead of ignoring them; keys that start with `x-` are ignored. See [supertag.yaml and local state](../docs/reference/supertag-yaml.md).
-`objective-manifest.schema.json` describes the `Objective` manifest that `supertag apply -f`
-reads. It also rejects unknown fields, and it has no `status`: an Objective's status is observed,
-never declared. See [Declared Objectives](../docs/reference/resource-model.md#declared-objectives).
+`manifests/` holds one schema per manifest kind that `supertag apply -f` reads, such as
+`manifests/tag.schema.json`, and `manifests/manifest.schema.json` for a manifest of any kind. They
+are generated from the operator API protos in `proto/supertag/operator/v1/` by `pnpm
+proto:generate`; edit the protos, not the schemas. Like `supertag.yaml`, a manifest rejects unknown
+fields, and it has no `status`: a resource's status is observed, never declared. See
+[Declared Objectives](../docs/reference/resource-model.md#declared-objectives).
 
 The [Worker service-provider contract](worker-spi.md) defines
 language-neutral extension behavior for Workers, harnesses, execution
@@ -73,7 +76,7 @@ Checked-in examples under `fixtures/worklet-transport/VERSION/` describe the cur
 
 [Objectives](objectives.md) define an outcome a Tag owns, with a budget, a deadline and a status;
 [objective.schema.json](objective.schema.json) is the response shape and
-[objective-manifest.schema.json](objective-manifest.schema.json) the declared form.
+[manifests/objective.schema.json](manifests/objective.schema.json) the declared form.
 
 [Workstreams](workstreams.md) are Teams' shared records of posts, with
 [workstream.schema.json](workstream.schema.json) as the shape of one post. The
@@ -83,7 +86,3 @@ concurrency limit.
 Tag-to-Tag messages are plain text delivered as Tasks of the recipient's inbox; the rules are in
 [Mailbox](../docs/reference/coordination.md#mailbox). They are separate from the
 [Worklet execution transport](worklet-transport.md).
-
-[resource-deletion.schema.json](resource-deletion.schema.json) defines the response to deleting a
-Tag, Role, Permission Set, Context Set, or Workspace, including a dry run. See
-[Deleting resources](../docs/reference/control-plane-api.md#deleting-resources).

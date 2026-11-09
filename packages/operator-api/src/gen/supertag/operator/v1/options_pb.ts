@@ -2,16 +2,223 @@
 // @generated from file supertag/operator/v1/options.proto (package supertag.operator.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenExtension, GenFile } from "@bufbuild/protobuf/codegenv2";
-import { extDesc, fileDesc } from "@bufbuild/protobuf/codegenv2";
-import type { MethodOptions } from "@bufbuild/protobuf/wkt";
+import type { GenExtension, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { extDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { EnumValueOptions, FieldOptions, MessageOptions, MethodOptions, OneofOptions } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_descriptor } from "@bufbuild/protobuf/wkt";
+import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file supertag/operator/v1/options.proto.
  */
 export const file_supertag_operator_v1_options: GenFile = /*@__PURE__*/
-  fileDesc("CiJzdXBlcnRhZy9vcGVyYXRvci92MS9vcHRpb25zLnByb3RvEhRzdXBlcnRhZy5vcGVyYXRvci52MTo4CgZhY3Rpb24SHi5nb29nbGUucHJvdG9idWYuTWV0aG9kT3B0aW9ucxjRhgMgASgJUgZhY3Rpb246SQoPYWxsb3dfYW5vbnltb3VzEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMY0oYDIAEoCFIOYWxsb3dBbm9ueW1vdXM6UgoUcmVxdWlyZXNfYWRtaW5fdG9rZW4SHi5nb29nbGUucHJvdG9idWYuTWV0aG9kT3B0aW9ucxjThgMgASgIUhJyZXF1aXJlc0FkbWluVG9rZW46QwoMYXVkaXRfYWN0aW9uEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMY1IYDIAEoCVILYXVkaXRBY3Rpb246WAoXYWxsb3dfc2NvcGVkX2NyZWRlbnRpYWwSHi5nb29nbGUucHJvdG9idWYuTWV0aG9kT3B0aW9ucxjVhgMgASgIUhVhbGxvd1Njb3BlZENyZWRlbnRpYWxCTlpMZ2l0aHViLmNvbS9hdGVtYWd1ZXIvc3VwZXJ0YWcvcGFja2FnZXMvb3BlcmF0b3ItYXBpL2dvL29wZXJhdG9ydjE7b3BlcmF0b3J2MWIGcHJvdG8z", [file_google_protobuf_descriptor]);
+  fileDesc("CiJzdXBlcnRhZy9vcGVyYXRvci92MS9vcHRpb25zLnByb3RvEhRzdXBlcnRhZy5vcGVyYXRvci52MSJmCgxNYW5pZmVzdEtpbmQSDAoEa2luZBgBIAEoCRIxCgRuYW1lGAIgASgLMiMuc3VwZXJ0YWcub3BlcmF0b3IudjEuTWFuaWZlc3RGaWVsZBIVCg1zcGVjX29wdGlvbmFsGAMgASgIIr8CCg1NYW5pZmVzdEZpZWxkEhAKCHJlcXVpcmVkGAEgASgIEhMKC291dHB1dF9vbmx5GAIgASgIEg8KB3BhdHRlcm4YAyABKAkSFwoKbWluX2xlbmd0aBgEIAEoDUgAiAEBEhcKCm1heF9sZW5ndGgYBSABKA1IAYgBARIUCgdtaW5pbXVtGAYgASgDSAKIAQESFAoHbWF4aW11bRgHIAEoA0gDiAEBEhYKCW1pbl9pdGVtcxgIIAEoDUgEiAEBEhYKCW1heF9pdGVtcxgJIAEoDUgFiAEBEhYKDmFjY2VwdHNfc2luZ2xlGAogASgIQg0KC19taW5fbGVuZ3RoQg0KC19tYXhfbGVuZ3RoQgoKCF9taW5pbXVtQgoKCF9tYXhpbXVtQgwKCl9taW5faXRlbXNCDAoKX21heF9pdGVtcyJHCg1NYW5pZmVzdE9uZW9mEhAKCHJlcXVpcmVkGAEgASgIEg0KBWZpZWxkGAIgASgJEhUKDWRpc2NyaW1pbmF0b3IYAyABKAkiYQoTTWFuaWZlc3RSZXF1aXJlbWVudBIMCgRwYXRoGAEgASgJEg4KBmVxdWFscxgCIAEoCRIQCghyZXF1aXJlZBgDIAMoCRIaChJvdGhlcndpc2VfcmVxdWlyZWQYBCADKAk6OAoGYWN0aW9uEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMY0YYDIAEoCVIGYWN0aW9uOkkKD2FsbG93X2Fub255bW91cxIeLmdvb2dsZS5wcm90b2J1Zi5NZXRob2RPcHRpb25zGNKGAyABKAhSDmFsbG93QW5vbnltb3VzOlIKFHJlcXVpcmVzX2FkbWluX3Rva2VuEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMY04YDIAEoCFIScmVxdWlyZXNBZG1pblRva2VuOkMKDGF1ZGl0X2FjdGlvbhIeLmdvb2dsZS5wcm90b2J1Zi5NZXRob2RPcHRpb25zGNSGAyABKAlSC2F1ZGl0QWN0aW9uOlgKF2FsbG93X3Njb3BlZF9jcmVkZW50aWFsEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMY1YYDIAEoCFIVYWxsb3dTY29wZWRDcmVkZW50aWFsOmEKCG1hbmlmZXN0Eh8uZ29vZ2xlLnByb3RvYnVmLk1lc3NhZ2VPcHRpb25zGNaGAyABKAsyIi5zdXBlcnRhZy5vcGVyYXRvci52MS5NYW5pZmVzdEtpbmRSCG1hbmlmZXN0OoEBChVtYW5pZmVzdF9yZXF1aXJlbWVudHMSHy5nb29nbGUucHJvdG9idWYuTWVzc2FnZU9wdGlvbnMY14YDIAMoCzIpLnN1cGVydGFnLm9wZXJhdG9yLnYxLk1hbmlmZXN0UmVxdWlyZW1lbnRSFG1hbmlmZXN0UmVxdWlyZW1lbnRzOmsKDm1hbmlmZXN0X2ZpZWxkEh0uZ29vZ2xlLnByb3RvYnVmLkZpZWxkT3B0aW9ucxjYhgMgASgLMiMuc3VwZXJ0YWcub3BlcmF0b3IudjEuTWFuaWZlc3RGaWVsZFINbWFuaWZlc3RGaWVsZDprCg5tYW5pZmVzdF9vbmVvZhIdLmdvb2dsZS5wcm90b2J1Zi5PbmVvZk9wdGlvbnMY2YYDIAEoCzIjLnN1cGVydGFnLm9wZXJhdG9yLnYxLk1hbmlmZXN0T25lb2ZSDW1hbmlmZXN0T25lb2Y6SgoObWFuaWZlc3RfdmFsdWUSIS5nb29nbGUucHJvdG9idWYuRW51bVZhbHVlT3B0aW9ucxjahgMgASgJUg1tYW5pZmVzdFZhbHVlQk5aTGdpdGh1Yi5jb20vYXRlbWFndWVyL3N1cGVydGFnL3BhY2thZ2VzL29wZXJhdG9yLWFwaS9nby9vcGVyYXRvcnYxO29wZXJhdG9ydjFiBnByb3RvMw", [file_google_protobuf_descriptor]);
+
+/**
+ * One manifest kind.
+ *
+ * @generated from message supertag.operator.v1.ManifestKind
+ */
+export type ManifestKind = Message<"supertag.operator.v1.ManifestKind"> & {
+  /**
+   * The kind, such as `Tag`, as `kind` names it.
+   *
+   * @generated from field: string kind = 1;
+   */
+  kind: string;
+
+  /**
+   * The rules for `metadata.name`. It is always a required string.
+   *
+   * @generated from field: supertag.operator.v1.ManifestField name = 2;
+   */
+  name?: ManifestField | undefined;
+
+  /**
+   * A manifest may leave out `spec`, which then takes every default.
+   *
+   * @generated from field: bool spec_optional = 3;
+   */
+  specOptional: boolean;
+};
+
+/**
+ * Describes the message supertag.operator.v1.ManifestKind.
+ * Use `create(ManifestKindSchema)` to create a new message.
+ */
+export const ManifestKindSchema: GenMessage<ManifestKind> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_options, 0);
+
+/**
+ * How one field is written and checked in manifests. For a repeated field,
+ * the string and number rules apply to each item and the item rules to the
+ * list.
+ *
+ * @generated from message supertag.operator.v1.ManifestField
+ */
+export type ManifestField = Message<"supertag.operator.v1.ManifestField"> & {
+  /**
+   * The field must be present.
+   *
+   * @generated from field: bool required = 1;
+   */
+  required: boolean;
+
+  /**
+   * The Control Plane sets the field. It is not part of the manifest form,
+   * and a manifest that sets it is invalid.
+   *
+   * @generated from field: bool output_only = 2;
+   */
+  outputOnly: boolean;
+
+  /**
+   * A string must match this regular expression.
+   *
+   * @generated from field: string pattern = 3;
+   */
+  pattern: string;
+
+  /**
+   * A string's least length, in characters.
+   *
+   * @generated from field: optional uint32 min_length = 4;
+   */
+  minLength?: number | undefined;
+
+  /**
+   * A string's greatest length, in characters.
+   *
+   * @generated from field: optional uint32 max_length = 5;
+   */
+  maxLength?: number | undefined;
+
+  /**
+   * A number's least value.
+   *
+   * @generated from field: optional int64 minimum = 6;
+   */
+  minimum?: bigint | undefined;
+
+  /**
+   * A number's greatest value.
+   *
+   * @generated from field: optional int64 maximum = 7;
+   */
+  maximum?: bigint | undefined;
+
+  /**
+   * A list's least number of items.
+   *
+   * @generated from field: optional uint32 min_items = 8;
+   */
+  minItems?: number | undefined;
+
+  /**
+   * A list's greatest number of items.
+   *
+   * @generated from field: optional uint32 max_items = 9;
+   */
+  maxItems?: number | undefined;
+
+  /**
+   * A repeated field also accepts one item in place of a list of one, as
+   * `model: gpt-6-sol` for `model: [gpt-6-sol]`.
+   *
+   * @generated from field: bool accepts_single = 10;
+   */
+  acceptsSingle: boolean;
+};
+
+/**
+ * Describes the message supertag.operator.v1.ManifestField.
+ * Use `create(ManifestFieldSchema)` to create a new message.
+ */
+export const ManifestFieldSchema: GenMessage<ManifestField> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_options, 1);
+
+/**
+ * How one oneof is written and checked in manifests. Without this option a
+ * oneof's members are ordinary optional fields of which at most one is set.
+ *
+ * @generated from message supertag.operator.v1.ManifestOneof
+ */
+export type ManifestOneof = Message<"supertag.operator.v1.ManifestOneof"> & {
+  /**
+   * Exactly one member must be set.
+   *
+   * @generated from field: bool required = 1;
+   */
+  required: boolean;
+
+  /**
+   * Writes the oneof as one field with this name, whose value is the set
+   * member's manifest form.
+   *
+   * @generated from field: string field = 2;
+   */
+  field: string;
+
+  /**
+   * Writes the set member inline beside a field with this name, whose value
+   * is the member's JSON name. Each member is a message.
+   *
+   * @generated from field: string discriminator = 3;
+   */
+  discriminator: string;
+};
+
+/**
+ * Describes the message supertag.operator.v1.ManifestOneof.
+ * Use `create(ManifestOneofSchema)` to create a new message.
+ */
+export const ManifestOneofSchema: GenMessage<ManifestOneof> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_options, 2);
+
+/**
+ * A rule that makes fields required depending on another field's value.
+ * Paths are dotted manifest field names relative to the message, such as
+ * `configuration.transport`.
+ *
+ * @generated from message supertag.operator.v1.ManifestRequirement
+ */
+export type ManifestRequirement = Message<"supertag.operator.v1.ManifestRequirement"> & {
+  /**
+   * The field whose value decides.
+   *
+   * @generated from field: string path = 1;
+   */
+  path: string;
+
+  /**
+   * The value that selects `required`. Any other value, or no value,
+   * selects `otherwise_required`.
+   *
+   * @generated from field: string equals = 2;
+   */
+  equals: string;
+
+  /**
+   * The fields required when `path` equals `equals`.
+   *
+   * @generated from field: repeated string required = 3;
+   */
+  required: string[];
+
+  /**
+   * The fields required otherwise.
+   *
+   * @generated from field: repeated string otherwise_required = 4;
+   */
+  otherwiseRequired: string[];
+};
+
+/**
+ * Describes the message supertag.operator.v1.ManifestRequirement.
+ * Use `create(ManifestRequirementSchema)` to create a new message.
+ */
+export const ManifestRequirementSchema: GenMessage<ManifestRequirement> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_options, 3);
 
 /**
  * The operator action the caller's credential must carry, such as `status`.
@@ -64,4 +271,45 @@ export const audit_action: GenExtension<MethodOptions, string> = /*@__PURE__*/
  */
 export const allow_scoped_credential: GenExtension<MethodOptions, boolean> = /*@__PURE__*/
   extDesc(file_supertag_operator_v1_options, 4);
+
+/**
+ * Makes this message the `spec` of a manifest kind.
+ *
+ * @generated from extension: supertag.operator.v1.ManifestKind manifest = 50006;
+ */
+export const manifest: GenExtension<MessageOptions, ManifestKind> = /*@__PURE__*/
+  extDesc(file_supertag_operator_v1_options, 5);
+
+/**
+ * Rules a manifest's fields must satisfy together, beyond the rules of
+ * each field.
+ *
+ * @generated from extension: repeated supertag.operator.v1.ManifestRequirement manifest_requirements = 50007;
+ */
+export const manifest_requirements: GenExtension<MessageOptions, ManifestRequirement[]> = /*@__PURE__*/
+  extDesc(file_supertag_operator_v1_options, 6);
+
+/**
+ * How the field is written and checked in manifests.
+ *
+ * @generated from extension: supertag.operator.v1.ManifestField manifest_field = 50008;
+ */
+export const manifest_field: GenExtension<FieldOptions, ManifestField> = /*@__PURE__*/
+  extDesc(file_supertag_operator_v1_options, 7);
+
+/**
+ * How the oneof is written and checked in manifests.
+ *
+ * @generated from extension: supertag.operator.v1.ManifestOneof manifest_oneof = 50009;
+ */
+export const manifest_oneof: GenExtension<OneofOptions, ManifestOneof> = /*@__PURE__*/
+  extDesc(file_supertag_operator_v1_options, 8);
+
+/**
+ * The value's spelling in manifests, such as `read-only`.
+ *
+ * @generated from extension: string manifest_value = 50010;
+ */
+export const manifest_value: GenExtension<EnumValueOptions, string> = /*@__PURE__*/
+  extDesc(file_supertag_operator_v1_options, 9);
 

@@ -13,6 +13,7 @@ import {
 } from "../apps/cli/src/drain.ts";
 import { hostSlot, runningProcess, writeStatus } from "../apps/cli/src/local-state.ts";
 import { provisionControlPlane } from "../apps/cli/src/provision.ts";
+import { resourceKindEntry } from "../apps/cli/src/resource-protos.ts";
 import {
   type ControlPlaneService,
   controlPlaneOf,
@@ -21,7 +22,15 @@ import {
 import { runDownCommand } from "../apps/cli/src/up.ts";
 import type { VerifiedSurfaceAccount } from "../packages/surfaces/sdk/src/index.ts";
 import { migrateSqlite } from "./support/database.ts";
-import { api, repository, useServicesContext, writeServices } from "./support/services.ts";
+import { diffManifests } from "./support/resources.ts";
+import {
+  applyLocal,
+  localResource,
+  localResources,
+  repository,
+  useServicesContext,
+  writeServices,
+} from "./support/services.ts";
 
 const context = useServicesContext();
 
@@ -255,7 +264,23 @@ describe("provision", () => {
   it("creates missing resources on every up, never changes existing ones, and records them in the provision set", async () => {
     const database = join(context.directory, "provision.db");
     await migrateSqlite(database);
+    const verified: Record<string, string>[] = [];
+    const verifySurface = async (
+      _manifest: unknown,
+      secrets: Readonly<Record<string, string>>,
+    ): Promise<VerifiedSurfaceAccount> => {
+      verified.push({ ...secrets });
+      return {
+        provider: "slack",
+        externalAccountId: "T777",
+        displayName: "Acme",
+        authMethod: "slack-socket-mode",
+        configuration: { transport: "socket", botId: "B1", botUserId: "U1" },
+        secrets: { ...secrets },
+      };
+    };
     const runtime = await startControlPlaneRuntime({
+      verifySurface,
       host: "127.0.0.1",
       port: 0,
       databaseUrl: `file:${database}`,
@@ -306,22 +331,7 @@ secrets:
     await writeFile(join(context.state, "slack-app.txt"), "xapp-from-file\n");
     const file = await loadServicesFile();
     const service = controlPlaneOf(file) as ControlPlaneService;
-    const verified: Record<string, string>[] = [];
-    const verifySurface = async (
-      _manifest: unknown,
-      secrets: Readonly<Record<string, string>>,
-    ): Promise<VerifiedSurfaceAccount> => {
-      verified.push({ ...secrets });
-      return {
-        provider: "slack",
-        externalAccountId: "T777",
-        displayName: "Acme",
-        authMethod: "slack-socket-mode",
-        configuration: { transport: "socket", botId: "B1", botUserId: "U1" },
-        secrets: { ...secrets },
-      };
-    };
-    const lines = await provisionControlPlane(file, service, runtime.url, { verifySurface });
+    const lines = await provisionControlPlane(file, service, runtime.url);
     expect(lines).toEqual([
       expect.stringMatching(
         /^SurfaceAccount\/acme-slack created \(provision\); verified slack account/,
@@ -334,26 +344,23 @@ secrets:
     // secretRef resolved through supertag.yaml's secrets map; values never in the output.
     expect(verified).toEqual([{ botToken: "xoxb-from-environment", appToken: "xapp-from-file" }]);
     expect(lines.join("")).not.toContain("xoxb-from-environment");
-    expect((await api("/api/v1/workspaces/shop")).spec).toMatchObject({
+    expect((await localResource("workspaces", "shop")).spec).toMatchObject({
       source: "git@github.com:acme/shop.git",
       ref: "main",
       delivery: "branch",
     });
 
     // An existing resource is never changed by up: a later edit survives.
-    await api("/api/v1/tags", {
-      method: "POST",
-      body: JSON.stringify({
+    await applyLocal([
+      {
         apiVersion: "supertag/v1",
         kind: "Tag",
         metadata: { name: "lead" },
         spec: { roles: ["Lead"], runsOn: ["harness:codex"] },
-      }),
-    });
-    await expect(
-      provisionControlPlane(file, service, runtime.url, { verifySurface }),
-    ).resolves.toEqual([]);
-    expect((await api("/api/v1/tags/lead")).spec).toMatchObject({ runsOn: ["harness:codex"] });
+      },
+    ]);
+    await expect(provisionControlPlane(file, service, runtime.url)).resolves.toEqual([]);
+    expect((await localResource("tags", "lead")).spec).toMatchObject({ runsOn: ["harness:codex"] });
     expect(verified).toHaveLength(1);
 
     // A resource added later, or deleted, is created on the next up.
@@ -361,18 +368,19 @@ secrets:
       join(org, "context.yaml"),
       "apiVersion: supertag/v1\nkind: ContextSet\nmetadata: { name: handbook }\nspec: { items: [] }\n",
     );
-    const created = await provisionControlPlane(file, service, runtime.url, { verifySurface });
+    const created = await provisionControlPlane(file, service, runtime.url);
     expect(created).toEqual(["ContextSet/handbook created (provision)"]);
 
     // Membership in the provision set lets apply --set provision --prune take over.
-    const prune = (await api("/api/v1/apply-sets/provision/prune?dryRun=true", {
-      method: "POST",
-      body: JSON.stringify({ keep: [] }),
-    })) as unknown as { items: { kind: string; name: string }[] };
-    expect(prune.items.map((item) => `${item.kind}/${item.name}`).toSorted()).toEqual(
-      expect.arrayContaining(["ContextSet/handbook", "PermissionSet/tools", "Role/Lead"]),
+    const { pruned } = await diffManifests(
+      { operator: { url: runtime.url, token: await ensureLocalAdminToken() } },
+      [{ apiVersion: "supertag/v1", kind: "Tag", metadata: { name: "lead" }, spec: {} }],
+      { applySet: "provision", prune: true },
     );
-    expect(prune.items.map((item) => item.name)).not.toContain("shop");
+    expect(
+      pruned.map((item) => `${resourceKindEntry(item.kind)?.kind}/${item.name}`).toSorted(),
+    ).toEqual(expect.arrayContaining(["ContextSet/handbook", "PermissionSet/tools", "Role/Lead"]));
+    expect(pruned.map((item) => item.name)).not.toContain("shop");
   }, 120_000);
 
   it("reports a missing manifest path and an unknown secret without creating anything", async () => {
@@ -405,7 +413,7 @@ secrets:
     await expect(
       provisionControlPlane(file, controlPlaneOf(file) as ControlPlaneService, runtime.url),
     ).rejects.toThrow(/supertag\.yaml provision: .*missing-dir: /);
-    expect((await api("/api/v1/tags")).items).toEqual([]);
+    expect((await localResources("tags")).items).toEqual([]);
   });
 
   describe("admin token", () => {

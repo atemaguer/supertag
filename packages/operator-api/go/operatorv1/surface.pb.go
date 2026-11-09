@@ -1258,17 +1258,19 @@ type isSurfaceSecretReference_Source interface {
 }
 
 type SurfaceSecretReference_SecretRef struct {
-	// A named secret its caller resolves.
+	// A named secret its caller resolves, such as an entry in the `secrets`
+	// map of `supertag.yaml`.
 	SecretRef string `protobuf:"bytes,1,opt,name=secret_ref,json=secretRef,proto3,oneof"`
 }
 
 type SurfaceSecretReference_Env struct {
-	// An environment variable.
+	// An environment variable the applying caller reads.
 	Env string `protobuf:"bytes,2,opt,name=env,proto3,oneof"`
 }
 
 type SurfaceSecretReference_File struct {
-	// A file path.
+	// A file the applying caller reads. A relative path starts from the
+	// manifest's directory.
 	File string `protobuf:"bytes,3,opt,name=file,proto3,oneof"`
 }
 
@@ -1361,13 +1363,13 @@ const file_supertag_operator_v1_surface_proto_rawDesc = "" +
 	"references\x1ak\n" +
 	"\x0fReferencesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12B\n" +
-	"\x05value\x18\x02 \x01(\v2,.supertag.operator.v1.SurfaceSecretReferenceR\x05value:\x028\x01\"m\n" +
-	"\x16SurfaceSecretReference\x12\x1f\n" +
+	"\x05value\x18\x02 \x01(\v2,.supertag.operator.v1.SurfaceSecretReferenceR\x05value:\x028\x01\"\x8d\x01\n" +
+	"\x16SurfaceSecretReference\x12'\n" +
 	"\n" +
-	"secret_ref\x18\x01 \x01(\tH\x00R\tsecretRef\x12\x12\n" +
-	"\x03env\x18\x02 \x01(\tH\x00R\x03env\x12\x14\n" +
-	"\x04file\x18\x03 \x01(\tH\x00R\x04fileB\b\n" +
-	"\x06source*Z\n" +
+	"secret_ref\x18\x01 \x01(\tB\x06µ\x18\x02 \x01H\x00R\tsecretRef\x12\x1a\n" +
+	"\x03env\x18\x02 \x01(\tB\x06µ\x18\x02 \x01H\x00R\x03env\x12\x1c\n" +
+	"\x04file\x18\x03 \x01(\tB\x06µ\x18\x02 \x01H\x00R\x04fileB\x10\n" +
+	"\x06source\x12\x06ʵ\x18\x02\b\x01*Z\n" +
 	"\aSetKind\x12\x18\n" +
 	"\x14SET_KIND_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14SET_KIND_CONTEXT_SET\x10\x01\x12\x1b\n" +

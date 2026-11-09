@@ -6,6 +6,7 @@ import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { main } from "../apps/cli/src/index.ts";
 import { migrateSqlite } from "./support/database.ts";
+import { applyManifests, getResource } from "./support/resources.ts";
 
 const header = (kind: string, name: string) =>
   `apiVersion: supertag/v1\nkind: ${kind}\nmetadata:\n  name: ${name}\n`;
@@ -84,9 +85,7 @@ describe("Workspace manifests", () => {
         "\n",
       ),
     );
-    const app = await client.request<{ spec: Record<string, unknown>; status: unknown }>(
-      "/api/v1/workspaces/app",
-    );
+    const app = await getResource(client, "workspaces", "app");
     expect(app.spec).toEqual({
       ref: "main",
       setup: "pnpm install --frozen-lockfile",
@@ -95,7 +94,7 @@ describe("Workspace manifests", () => {
     // Getting one Workspace also lists the hosts that serve it by environment provider.
     expect(app.status).toEqual({ phase: "active", workerHosts: [], environments: [] });
     // An empty spec takes every default.
-    expect((await client.request<{ spec: unknown }>("/api/v1/workspaces/docs")).spec).toEqual({
+    expect((await getResource(client, "workspaces", "docs")).spec).toEqual({
       delivery: "branch",
     });
 
@@ -143,7 +142,7 @@ describe("Workspace manifests", () => {
       "~ Workspace app   spec.setup: - make\nPlan: 0 to create, 1 to update, 0 to delete, 0 conflicts.\n",
     );
     await run("apply", "-f", trimmed);
-    expect((await client.request<{ spec: unknown }>("/api/v1/workspaces/app")).spec).toEqual({
+    expect((await getResource(client, "workspaces", "app")).spec).toEqual({
       delivery: "branch",
     });
   });
@@ -154,7 +153,7 @@ describe("Workspace manifests", () => {
       `${header("Workspace", "app")}spec:\n  source: https://github.com/acme/app.git\n  mounts:\n    - volume: datasets\n      path: /mnt/datasets\n      maxBytes: 1024\n`,
     );
     await run("apply", "-f", path);
-    const app = await client.request<{ spec: Record<string, unknown> }>("/api/v1/workspaces/app");
+    const app = await getResource(client, "workspaces", "app");
     expect(app.spec["mounts"]).toEqual([
       {
         volume: "datasets",
@@ -183,7 +182,7 @@ describe("Workspace manifests", () => {
     expect(errors).toContain("https://gitlab.example.com/acme/lab.git is not one");
     expect(errors).toContain("must not embed credentials");
     expect(errors).toContain("Workspace metadata.name must be 1-63 lowercase");
-    await expect(client.request("/api/v1/workspaces/app")).rejects.toThrow("does not exist");
+    await expect(getResource(client, "workspaces", "app")).rejects.toThrow("does not exist");
   });
 
   it("accepts a git source and names Workspaces on Objectives, rejecting unknown names", async () => {
@@ -195,15 +194,14 @@ describe("Workspace manifests", () => {
         `${header("Workspace", "app")}spec:\n  source: git@github.com:acme/app.git\n`,
       ),
     );
-    await client.request("/api/v1/tags", {
-      method: "POST",
-      body: JSON.stringify({
+    await applyManifests(client, [
+      {
         apiVersion: "supertag/v1",
         kind: "Tag",
         metadata: { name: "owner" },
         spec: { roles: [] },
-      }),
-    });
+      },
+    ]);
     const created = JSON.parse(
       await run(
         "create",
