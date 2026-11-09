@@ -63,7 +63,9 @@ an outcome and a way to check when it is done.
 > the billing reconciliation suite passes. Stay within $5,000. Ask me before migrating
 > existing plans or doing anything that charges a customer.
 
-Here is how one Tag could split that work:
+One Tag can split the work across three work Sessions.
+
+![One Tag starts work Sessions for metering and invoicing, the usage dashboard, and reconciliation and load tests. The operator approves migration and customer charges.](assets/images/supertag-work-sessions.png)
 
 | Work Session | What it reports back to `lead` |
 | --- | --- |

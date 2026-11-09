@@ -44,3 +44,4 @@ changelog.d/
 assets/images/*
 !assets/images/supertag-mascot-round.png
 !assets/images/supertag-meet-the-tags.png
+!assets/images/supertag-work-sessions.png
