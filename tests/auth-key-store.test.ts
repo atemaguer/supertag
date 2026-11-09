@@ -227,6 +227,45 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       ).toEqual(["runner", "runner-2", "runner-3"]);
     });
 
+    it("finds a key by its secret only, and enrolls one host for one join request", async () => {
+      const stores = await fixture();
+      const builder = await stores[0].createTag({ name: "builder" });
+      const key = secret();
+      await stores[0].createAuthKey({
+        name: "retry",
+        tagIds: [builder.id],
+        reusable: true,
+        ephemeral: false,
+        createdAt: new Date().toISOString(),
+        ...key,
+      });
+      await expect(stores[0].findAuthKeyBySecret(key)).resolves.toMatchObject({ name: "retry" });
+      await expect(
+        stores[0].findAuthKeyBySecret({ ...key, secretDigest: "0".repeat(64) }),
+      ).resolves.toBeUndefined();
+
+      const prefix = `join/${randomBytes(8).toString("hex")}/`;
+      const request = (store: (typeof stores)[number], name: string) =>
+        store.redeemAuthKey({
+          ...redemption(key, name),
+          credentialId: `${prefix}${randomUUID()}`,
+          joinCredentialPrefix: prefix,
+        });
+      const results = await Promise.all(
+        Array.from({ length: 4 }, (_, index) => request(stores[index % 2], `same-${index}`)),
+      );
+      expect(results.filter((result) => result.status === "redeemed")).toHaveLength(1);
+      expect(results.filter((result) => result.status === "repeated")).toHaveLength(3);
+      const ids = new Set(
+        results.map((result) => ("workerHost" in result ? result.workerHost.id : result.status)),
+      );
+      expect(ids.size).toBe(1);
+      expect(await stores[0].listWorkerHosts()).toHaveLength(1);
+      expect((await stores[0].findAuthKeyByName("retry"))?.redemptionCount).toBe(1);
+      expect((await request(stores[0], "later")).status).toBe("repeated");
+      expect((await stores[0].redeemAuthKey(redemption(key, "other"))).status).toBe("redeemed");
+    });
+
     it("lets exactly one concurrent redemption of a one-off key succeed", async () => {
       const stores = await fixture();
       const builder = await stores[0].createTag({ name: "builder" });

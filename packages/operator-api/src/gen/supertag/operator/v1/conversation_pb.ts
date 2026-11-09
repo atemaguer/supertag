@@ -580,6 +580,8 @@ export type FollowEvent = Message$1<"supertag.operator.v1.FollowEvent"> & {
   sequence: bigint;
 
   /**
+   * What happened. Exactly one is set.
+   *
    * @generated from oneof supertag.operator.v1.FollowEvent.part
    */
   part: {
@@ -759,22 +761,31 @@ export type Activity = Message$1<"supertag.operator.v1.Activity"> & {
   text: string;
 
   /**
+   * What the activity is. A client that does not recognize the member set
+   * shows `text`.
+   *
    * @generated from oneof supertag.operator.v1.Activity.detail
    */
   detail: {
     /**
+     * A command starting or ending.
+     *
      * @generated from field: supertag.operator.v1.CommandActivity command = 3;
      */
     value: CommandActivity;
     case: "command";
   } | {
     /**
+     * A tool call starting or ending.
+     *
      * @generated from field: supertag.operator.v1.ToolActivity tool = 4;
      */
     value: ToolActivity;
     case: "tool";
   } | {
     /**
+     * A new Task Attempt of the Task.
+     *
      * @generated from field: supertag.operator.v1.RetryActivity retry = 5;
      */
     value: RetryActivity;
@@ -811,6 +822,8 @@ export type CommandActivity = Message$1<"supertag.operator.v1.CommandActivity"> 
   command: string;
 
   /**
+   * `ACTIVITY_STATUS_RUNNING` when it starts, then once more when it ends.
+   *
    * @generated from field: supertag.operator.v1.ActivityStatus status = 3;
    */
   status: ActivityStatus;
@@ -844,6 +857,8 @@ export type ToolActivity = Message$1<"supertag.operator.v1.ToolActivity"> & {
   tool: string;
 
   /**
+   * `ACTIVITY_STATUS_RUNNING` when it starts, then once more when it ends.
+   *
    * @generated from field: supertag.operator.v1.ActivityStatus status = 3;
    */
   status: ActivityStatus;
@@ -1200,6 +1215,14 @@ export const ActivityStatusSchema: GenEnum<ActivityStatus> = /*@__PURE__*/
  * Each one reports its result back into the conversation as a later turn, and
  * the message that started it carries that report.
  *
+ * Access. The admin token and Operator Tokens may call every RPC; a scoped
+ * coordination credential is refused with `PermissionDenied`.
+ *
+ * Every RPC that names a Tag takes its name, and fails with `NotFound` for an
+ * empty name or a Tag that does not exist or was deleted. A call while
+ * the Control Plane drains fails with `Unavailable` and
+ * `ERROR_REASON_DRAINING`.
+ *
  * @generated from service supertag.operator.v1.ConversationService
  */
 export const ConversationService: GenService<{
@@ -1214,10 +1237,8 @@ export const ConversationService: GenService<{
    * too.
    *
    * It fails with `InvalidArgument` for empty text or a malformed
-   * conversation name, `NotFound` for a Tag that does not exist,
-   * `Unavailable` with `ERROR_REASON_DRAINING` while the Control Plane drains,
-   * and `FailedPrecondition` with `ERROR_REASON_CONFLICT` when the Tag does
-   * not accept the message, with the message saying why.
+   * conversation name, and `FailedPrecondition` with `ERROR_REASON_CONFLICT`
+   * when the Tag does not accept the message, with the message saying why.
    *
    * @generated from rpc supertag.operator.v1.ConversationService.SendMessage
    */
@@ -1315,8 +1336,9 @@ export const ConversationService: GenService<{
     output: typeof FollowEventSchema;
   },
   /**
-   * Lists the caller's conversations, the most recent message first. It fails
-   * with `NotFound` when `tag` names a Tag that does not exist.
+   * Lists the caller's conversations, the most recent message first. Empty
+   * `tag` lists every Tag's. It fails with `NotFound` when `tag` names a Tag
+   * that does not exist, and `InvalidArgument` for a malformed `page_token`.
    *
    * @generated from rpc supertag.operator.v1.ConversationService.ListConversations
    */
@@ -1328,7 +1350,8 @@ export const ConversationService: GenService<{
   /**
    * Lists the messages the caller sent in one conversation, newest first, each
    * as `GetMessage` returns it. A conversation the caller never wrote in has
-   * no messages. It fails with `NotFound` when the Tag does not exist.
+   * no messages. It fails with `InvalidArgument` for a malformed
+   * `page_token`.
    *
    * @generated from rpc supertag.operator.v1.ConversationService.ListMessages
    */

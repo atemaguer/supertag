@@ -11,10 +11,11 @@ import {
 } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { stateDirectory as defaultStateDirectory } from "@supertag/store";
 import type { ControlPlaneClient } from "./control-plane-client.js";
 import { workerHostCredentialView, workerHostView } from "./host-protos.js";
-import { hostClient } from "./operator-client.js";
+import { hostClient, operatorErrorMessage } from "./operator-client.js";
 import { takeOutputFlag } from "./output-flag.js";
 import { refusedAsError } from "./tag-conversation.js";
 
@@ -140,27 +141,19 @@ export async function revokeOwnWorkerHostCredential(
     throw new Error(
       `No operator credentials are available, and no joined credential for Worker Host ${id} is stored on this machine. Run: supertag connect control-plane URL`,
     );
-  const response = await request(
-    new URL(`/api/v1/worker-hosts/${encodeURIComponent(id)}/credential`, `${stored.controlPlane}/`),
-    {
-      method: "DELETE",
-      headers: { authorization: `Bearer ${stored.token}` },
-      redirect: "error",
-      signal: AbortSignal.timeout(30_000),
-    },
-  );
-  if (!response.ok && response.status !== 401) {
-    const body = (await response.json().catch(() => undefined)) as
-      | { message?: unknown }
-      | undefined;
-    throw new Error(
-      typeof body?.message === "string"
-        ? body.message
-        : `Control Plane returned HTTP ${response.status}`,
-    );
+  try {
+    await hostClient({
+      url: stored.controlPlane,
+      token: stored.token,
+      workerHostId: id,
+      fetch: request,
+    }).revokeWorkerHostCredential({ id });
+  } catch (error) {
+    if (error instanceof ConnectError && error.code === Code.Unauthenticated)
+      throw new Error(`The stored credential for Worker Host ${id} is no longer accepted`);
+    if (error instanceof ConnectError) throw new Error(operatorErrorMessage(error));
+    throw error;
   }
-  if (response.status === 401)
-    throw new Error(`The stored credential for Worker Host ${id} is no longer accepted`);
   await unlink(found.path).catch(() => undefined);
   if (found.service !== undefined)
     return `Revoked Worker Host ${id} with its own credential and removed ${found.path}. Host service ${found.service} can no longer connect; stop it with supertag down ${found.service}.\n`;

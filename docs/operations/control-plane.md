@@ -468,7 +468,7 @@ routing and TLS, not authenticated host registration or long-lived stream stabil
 
 `OrganizationService.GetMetrics` reports `rpc`: call counts, duration buckets, active streams,
 connection counts, Worklet queue pressure and closure codes for the API Server process that answered.
-See [Metrics](../reference/control-plane-api.md#metrics) for reset and duration semantics. Watch changes
+See [Metrics](../reference/operator-api/organization.md#getmetrics) for reset and duration semantics. Watch changes
 over time: increasing queue rejection counts, persistent errors or repeated connection closures
 are reasons to inspect capacity, networking and credentials. Choose alert thresholds from your
 workload's measured baseline.

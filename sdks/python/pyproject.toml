@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "supertag"
 version = "0.2.0-alpha.6"
-description = "Extensible Python SDK for SuperTag Workers, Harnesses, and Control Plane connectivity"
+description = "Extensible Python SDK for SuperTag Workers, Harnesses, Control Plane connectivity, and the operator API"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 authors = [{ name = "SuperTag maintainers" }]
-keywords = ["agents", "codex", "control-plane", "harness", "openai", "supertag", "workers"]
+keywords = ["agents", "codex", "connectrpc", "control-plane", "harness", "openai", "supertag", "workers"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -26,9 +26,14 @@ dependencies = ["websockets>=13,<17"]
 [project.optional-dependencies]
 agents = ["openai-agents>=0.8,<0.9"]
 codex = ["openai-codex>=0.144.4,<0.145"]
+operator = ["connect-python>=0.9,<0.10", "protobuf>=7.35.1,<8"]
 dev = [
+  "connect-python>=0.9,<0.10",
+  "grpcio-tools==1.85.1",
   "openai-agents>=0.8,<0.9",
   "openai-codex>=0.144.4,<0.145",
+  "protobuf>=7.35.1,<8",
+  "protoc-gen-connect-python==0.9.0",
   "pytest>=8,<9",
   "pytest-asyncio>=0.24,<2",
   "ruff>=0.15,<0.16",
@@ -51,6 +56,7 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py310"
 line-length = 100
+extend-exclude = ["src/supertag/operator/v1"]
 
 [tool.ruff.lint]
 select = ["B", "C4", "E", "F", "I"]

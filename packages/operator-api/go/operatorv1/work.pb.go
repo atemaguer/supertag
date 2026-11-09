@@ -85,9 +85,13 @@ type TaskFindingSeverity int32
 
 const (
 	TaskFindingSeverity_TASK_FINDING_SEVERITY_UNSPECIFIED TaskFindingSeverity = 0
-	TaskFindingSeverity_TASK_FINDING_SEVERITY_HIGH        TaskFindingSeverity = 1
-	TaskFindingSeverity_TASK_FINDING_SEVERITY_MEDIUM      TaskFindingSeverity = 2
-	TaskFindingSeverity_TASK_FINDING_SEVERITY_LOW         TaskFindingSeverity = 3
+	// High. `supertag describe objective` and `OrganizationService.GetOrganization`
+	// list the high findings of each Session's latest result.
+	TaskFindingSeverity_TASK_FINDING_SEVERITY_HIGH TaskFindingSeverity = 1
+	// Medium.
+	TaskFindingSeverity_TASK_FINDING_SEVERITY_MEDIUM TaskFindingSeverity = 2
+	// Low.
+	TaskFindingSeverity_TASK_FINDING_SEVERITY_LOW TaskFindingSeverity = 3
 )
 
 // Enum value maps for TaskFindingSeverity.
@@ -185,7 +189,7 @@ func (ExecutionSource) EnumDescriptor() ([]byte, []int) {
 	return file_supertag_operator_v1_work_proto_rawDescGZIP(), []int{2}
 }
 
-// Where an Attempt's model came from.
+// Where a Task Attempt's model came from.
 type ModelSource int32
 
 const (
@@ -5138,6 +5142,8 @@ func (x *TaskArtifactStorage) GetEphemeralOnly() bool {
 // One place an artifact's files are kept.
 type ArtifactCopy struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Where the copy is. Exactly one is set.
+	//
 	// Types that are valid to be assigned to Place:
 	//
 	//	*ArtifactCopy_WorkerHost

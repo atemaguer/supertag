@@ -9,6 +9,7 @@ import { runArtifactCommand, unreachableReport } from "../apps/cli/src/artifacts
 import {
   ControlPlaneApiServer,
   type ControlPlaneApiServerDependencies,
+  isControlPlaneApiPath,
 } from "../apps/cli/src/control-plane-api.js";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.js";
 import { workClient } from "../apps/cli/src/operator-client.js";
@@ -109,12 +110,16 @@ async function fixture(
       Object.defineProperty(request.socket, "remoteAddress", {
         value: copies.operatorAddress ?? undefined,
       });
-    void api
-      .handle(request, response, new URL(request.url ?? "/", "http://localhost"))
-      .catch(() => {
-        response.writeHead(500);
-        response.end();
-      });
+    const url = new URL(request.url ?? "/", "http://localhost");
+    if (!isControlPlaneApiPath(url.pathname)) {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "not_found" }));
+      return;
+    }
+    void api.handle(request, response, url).catch(() => {
+      response.writeHead(500);
+      response.end();
+    });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();

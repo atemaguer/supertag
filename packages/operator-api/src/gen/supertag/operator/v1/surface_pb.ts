@@ -593,6 +593,8 @@ export const SurfaceSecretReferencesSchema: GenMessage<SurfaceSecretReferences> 
  */
 export type SurfaceSecretReference = Message<"supertag.operator.v1.SurfaceSecretReference"> & {
   /**
+   * Where the secret comes from. A manifest sets exactly one.
+   *
    * @generated from oneof supertag.operator.v1.SurfaceSecretReference.source
    */
   source: {

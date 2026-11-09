@@ -14,6 +14,7 @@ import {
   TeamService,
   WorkService,
 } from "@supertag/operator-api";
+import { WORKER_HOST_ID_HEADER } from "./operator-rpc-context.js";
 import {
   CLIENT_VERSION_HEADER,
   SUPERTAG_VERSION,
@@ -26,10 +27,12 @@ import {
 export const OPERATOR_API_VERSION = OrganizationService.typeName.split(".")[2] ?? "v1";
 
 export interface OperatorClientOptions {
-  /** The Control Plane URL. Only its origin is used, as for every `/api/v1/` request. */
+  /** The Control Plane URL. Only its origin is used. */
   readonly url: string;
   /** Sent as `authorization: Bearer TOKEN`; absent for an anonymous call. */
   readonly token?: string;
+  /** The Worker Host whose own credential `token` is, sent as `x-supertag-worker-host-id`. */
+  readonly workerHostId?: string;
   /** Warn on stderr when the Control Plane runs a different SuperTag release. */
   readonly warnOnSkew?: boolean;
   readonly fetch?: typeof fetch;
@@ -39,6 +42,8 @@ export interface OperatorClientOptions {
 export function operatorTransport(options: OperatorClientOptions) {
   const headers: Interceptor = (next) => async (request) => {
     if (options.token !== undefined) request.header.set("authorization", `Bearer ${options.token}`);
+    if (options.workerHostId !== undefined)
+      request.header.set(WORKER_HOST_ID_HEADER, options.workerHostId);
     request.header.set(CLIENT_VERSION_HEADER, SUPERTAG_VERSION);
     try {
       const response = await next(request);

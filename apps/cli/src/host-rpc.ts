@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { create } from "@bufbuild/protobuf";
 import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { Code, type HandlerContext, type ServiceImpl } from "@connectrpc/connect";
@@ -5,6 +6,7 @@ import {
   type AuthKey as AuthKeyRecord,
   parseAuthKeyName,
   parseWorkerHostLabels,
+  parseWorkerHostName,
   type WorkerHost as WorkerHostRecord,
 } from "@supertag/core";
 import {
@@ -22,7 +24,15 @@ import {
 import { authKeyMessage, workerHostMessage } from "./host-protos.js";
 import { assertAccepting } from "./inbox-rpc.js";
 import { pageOf } from "./operator-pages.js";
-import { noteAuditTarget, operatorError, requiredField } from "./operator-rpc-context.js";
+import {
+  IDEMPOTENCY_KEY,
+  noteAuditActor,
+  noteAuditTarget,
+  operatorError,
+  operatorPrincipal,
+  presentedAuthKey,
+  requiredField,
+} from "./operator-rpc-context.js";
 import type { OperatorControl, OperatorQueries, OperatorReadStore } from "./operator-seams.js";
 
 /** The most Tags an Auth Key binds. */
@@ -45,12 +55,15 @@ export interface HostServiceDependencies {
   >;
   /** Every Worker Host, the embedded Worklet's own host included. */
   readonly queries: Pick<OperatorQueries, "listWorkerHosts">;
-  /** Enrolls, drains, binds and revokes Worker Hosts, and creates and revokes Auth Keys. */
+  /**
+   * Enrolls, joins, drains, binds and revokes Worker Hosts, and creates and revokes Auth Keys.
+   */
   readonly control: Pick<
     OperatorControl,
     | "accepting"
     | "createAuthKey"
     | "enrollWorkerHost"
+    | "joinWorkerHost"
     | "revokeAuthKey"
     | "revokeWorkerHostCredential"
     | "rotateWorkerHostCredential"
@@ -126,6 +139,7 @@ export function hostService(
   ) => {
     noteAuditTarget(context, "WorkerHost");
     const id = workerHostId(request.id);
+    assertOwnWorkerHost(context, id);
     noteAuditTarget(context, `WorkerHost/${id}`);
     await assertAccepting(control);
     const host = await control.setWorkerHostDraining({ id, draining });
@@ -189,9 +203,13 @@ export function hostService(
     async revokeWorkerHostCredential(request, context) {
       noteAuditTarget(context, "WorkerHost");
       const id = workerHostId(request.id);
+      const self = assertOwnWorkerHost(context, id);
       noteAuditTarget(context, `WorkerHost/${id}`);
       await assertAccepting(control);
-      const revoked = await control.revokeWorkerHostCredential(id);
+      const revoked = await control.revokeWorkerHostCredential({
+        id,
+        reason: self ? "SelfRevoked" : "OperatorRevoked",
+      });
       const [message] = await hostMessages([revoked]);
       if (message === undefined) throw missingWorkerHost();
       return message;
@@ -199,6 +217,40 @@ export function hostService(
 
     drainWorkerHost: (request, context) => setDraining(request, context, true),
     resumeWorkerHost: (request, context) => setDraining(request, context, false),
+    async joinWorkerHost(request, context) {
+      noteAuditTarget(context, "WorkerHost");
+      const authKey = context.values.get(presentedAuthKey);
+      if (authKey === undefined)
+        throw operatorError(Code.Internal, ErrorReason.INTERNAL, "Control Plane internal error");
+      const name = invalidAsArgument("name", () => parseWorkerHostName(request.name));
+      if (request.idempotencyKey !== "" && !IDEMPOTENCY_KEY.test(request.idempotencyKey))
+        throw operatorError(
+          Code.InvalidArgument,
+          ErrorReason.INVALID_ARGUMENT,
+          "An idempotency key is 1 to 200 characters without whitespace or control characters",
+          [{ path: "idempotency_key", description: "1 to 200 characters without whitespace" }],
+        );
+      await assertAccepting(control);
+      const joined = await control.joinWorkerHost({
+        authKey,
+        name,
+        idempotencyKey: request.idempotencyKey || randomUUID(),
+      });
+      noteAuditActor(context, `auth-key:${joined.authKey.name}`);
+      noteAuditTarget(context, `WorkerHost/${joined.workerHost.id}`);
+      const names = await tagNames();
+      return {
+        credential: create(WorkerHostCredentialSchema, {
+          workerHostId: joined.workerHost.id,
+          issuedAt: timestampFromDate(new Date(joined.workerHost.updatedAt)),
+          token: joined.token,
+        }),
+        authKey: joined.authKey.name,
+        tags: joined.authKey.tagIds.map((id) => names.get(id) ?? id),
+        ephemeral: joined.workerHost.ephemeral,
+      };
+    },
+
     bindWorkerHost: (request, context) => bind(request, context, true),
     unbindWorkerHost: (request, context) => bind(request, context, false),
 
@@ -269,6 +321,22 @@ export function hostService(
       return message;
     },
   };
+}
+
+/**
+ * Refuses a Worker Host credential that names another host; true when the caller is the host
+ * itself.
+ */
+function assertOwnWorkerHost(context: HandlerContext, id: string): boolean {
+  const caller = context.values.get(operatorPrincipal);
+  if (caller?.kind !== "worker-host") return false;
+  if (caller.workerHostId !== id)
+    throw operatorError(
+      Code.PermissionDenied,
+      ErrorReason.PERMISSION_DENIED,
+      "A Worker Host credential acts only on its own Worker Host",
+    );
+  return true;
 }
 
 function workerHostId(id: string): string {

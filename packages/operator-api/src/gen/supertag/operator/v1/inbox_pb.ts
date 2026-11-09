@@ -263,6 +263,8 @@ export const InboxItemSchema: GenMessage<InboxItem> = /*@__PURE__*/
  */
 export type InboxEvidence = Message<"supertag.operator.v1.InboxEvidence"> & {
   /**
+   * The record. Exactly one is set.
+   *
    * @generated from oneof supertag.operator.v1.InboxEvidence.record
    */
   record: {
@@ -965,7 +967,7 @@ export enum InboxItemKind {
 
   /**
    * A Task needs an operator, such as a running Task whose Task Attempt is
-   * uncertain. `uncertain_attempt` names that Attempt.
+   * uncertain. `uncertain_attempt` names that Task Attempt.
    *
    * @generated from enum value: INBOX_ITEM_KIND_TASK_ATTENTION = 5;
    */
@@ -1245,8 +1247,8 @@ export const ApprovalTargetSchema: GenEnum<ApprovalTarget> = /*@__PURE__*/
  * - An approval request outside any Objective, which a Tag's inbox turn
  *   asked for, reaches only a credential without an Objective scope.
  *
- * Every RPC that changes state fails with `Unavailable` and
- * `ERROR_REASON_DRAINING` while the Control Plane drains.
+ * A call while the Control Plane drains fails with `Unavailable` and
+ * `ERROR_REASON_DRAINING`.
  *
  * @generated from service supertag.operator.v1.InboxService
  */

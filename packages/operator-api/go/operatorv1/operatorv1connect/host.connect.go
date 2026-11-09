@@ -54,6 +54,9 @@ const (
 	// HostServiceResumeWorkerHostProcedure is the fully-qualified name of the HostService's
 	// ResumeWorkerHost RPC.
 	HostServiceResumeWorkerHostProcedure = "/supertag.operator.v1.HostService/ResumeWorkerHost"
+	// HostServiceJoinWorkerHostProcedure is the fully-qualified name of the HostService's
+	// JoinWorkerHost RPC.
+	HostServiceJoinWorkerHostProcedure = "/supertag.operator.v1.HostService/JoinWorkerHost"
 	// HostServiceBindWorkerHostProcedure is the fully-qualified name of the HostService's
 	// BindWorkerHost RPC.
 	HostServiceBindWorkerHostProcedure = "/supertag.operator.v1.HostService/BindWorkerHost"
@@ -107,20 +110,45 @@ type HostServiceClient interface {
 	// revoked: a revoked host must be enrolled under a new ID. It fails with
 	// `InvalidArgument` for an `expected_credential_revision` below 1.
 	RotateWorkerHostCredential(context.Context, *connect.Request[operatorv1.RotateWorkerHostCredentialRequest]) (*connect.Response[operatorv1.WorkerHostCredential], error)
-	// Revokes a Worker Host, as `supertag revoke worker-host-credential` does
-	// with operator access. Its credential stops working at once, its
-	// connection ends, and it takes no new Tasks. A revoked host stays readable
-	// and its ID is never enrolled again. Revoking a revoked host changes
-	// nothing and returns it.
+	// Revokes a Worker Host, as `supertag revoke worker-host-credential` does.
+	// Its credential stops working at once, its connection ends, and it takes
+	// no new Tasks. A revoked host stays readable and its ID is never enrolled
+	// again. Revoking a revoked host changes nothing and returns it.
+	//
+	// A host may revoke itself with its own credential, and its
+	// `revocation_reason` is then `SelfRevoked`. Its credential no longer
+	// works afterward, so a repeat fails with `Unauthenticated`.
 	RevokeWorkerHostCredential(context.Context, *connect.Request[operatorv1.RevokeWorkerHostCredentialRequest]) (*connect.Response[operatorv1.WorkerHost], error)
 	// Drains a Worker Host, as `supertag drain worker-host` does: it finishes
 	// the work it accepted and takes no new Tasks until it is resumed. Draining
-	// a draining host changes nothing. The host returned has no `storage`.
+	// a draining host changes nothing. The host returned has no `storage`. A
+	// host may drain itself with its own credential, as `supertag up` and
+	// `supertag down` do before they restart or stop a host service.
 	DrainWorkerHost(context.Context, *connect.Request[operatorv1.DrainWorkerHostRequest]) (*connect.Response[operatorv1.WorkerHost], error)
 	// Ends a drain, as `supertag resume worker-host` does: the host takes new
 	// Tasks again. Resuming a host that is not draining changes nothing. The
-	// host returned has no `storage`.
+	// host returned has no `storage`. A host may resume itself with its own
+	// credential, as a host service does when it starts after `supertag up` or
+	// `supertag down` drained it.
 	ResumeWorkerHost(context.Context, *connect.Request[operatorv1.ResumeWorkerHostRequest]) (*connect.Response[operatorv1.WorkerHost], error)
+	// Joins a machine as a new Worker Host by redeeming the Auth Key sent as
+	// the bearer token, as `supertag connect worklet --auth-key` does. The
+	// host is enrolled under `name`, or `NAME-2`, `NAME-3` and so on when that
+	// ID is taken, bound to the key's Tags and given its labels. It returns the
+	// host's first credential, which only this call returns.
+	//
+	// A repeat with the same Auth Key and `idempotency_key` enrolls nothing:
+	// it returns the host the first call enrolled, whatever its `name`, with a
+	// new credential that replaces the one the first call returned, until that
+	// host first connects. After that, or once the host is revoked, a repeat
+	// fails with `AlreadyExists`. It fails with `Unauthenticated` for an Auth
+	// Key the Control Plane does not know, `PermissionDenied` for a revoked,
+	// expired or used one, `FailedPrecondition` and `ERROR_REASON_CONFLICT`
+	// when one of the key's Tags was deleted, and `InvalidArgument` for a
+	// malformed `name` or `idempotency_key`. A call with an unknown Auth Key is
+	// refused before its request is read and is not recorded in the audit
+	// trail.
+	JoinWorkerHost(context.Context, *connect.Request[operatorv1.JoinWorkerHostRequest]) (*connect.Response[operatorv1.JoinWorkerHostResponse], error)
 	// Binds a Worker Host to a Tag, as `supertag update tag --add-worker-host`
 	// does, so the host may run the Tag's Tasks. Binding a host that is
 	// already bound changes nothing and succeeds with `changed` false. It fails
@@ -214,6 +242,12 @@ func NewHostServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(hostServiceMethods.ByName("ResumeWorkerHost")),
 			connect.WithClientOptions(opts...),
 		),
+		joinWorkerHost: connect.NewClient[operatorv1.JoinWorkerHostRequest, operatorv1.JoinWorkerHostResponse](
+			httpClient,
+			baseURL+HostServiceJoinWorkerHostProcedure,
+			connect.WithSchema(hostServiceMethods.ByName("JoinWorkerHost")),
+			connect.WithClientOptions(opts...),
+		),
 		bindWorkerHost: connect.NewClient[operatorv1.BindWorkerHostRequest, operatorv1.BindWorkerHostResponse](
 			httpClient,
 			baseURL+HostServiceBindWorkerHostProcedure,
@@ -264,6 +298,7 @@ type hostServiceClient struct {
 	revokeWorkerHostCredential *connect.Client[operatorv1.RevokeWorkerHostCredentialRequest, operatorv1.WorkerHost]
 	drainWorkerHost            *connect.Client[operatorv1.DrainWorkerHostRequest, operatorv1.WorkerHost]
 	resumeWorkerHost           *connect.Client[operatorv1.ResumeWorkerHostRequest, operatorv1.WorkerHost]
+	joinWorkerHost             *connect.Client[operatorv1.JoinWorkerHostRequest, operatorv1.JoinWorkerHostResponse]
 	bindWorkerHost             *connect.Client[operatorv1.BindWorkerHostRequest, operatorv1.BindWorkerHostResponse]
 	unbindWorkerHost           *connect.Client[operatorv1.UnbindWorkerHostRequest, operatorv1.UnbindWorkerHostResponse]
 	createAuthKey              *connect.Client[operatorv1.CreateAuthKeyRequest, operatorv1.CreateAuthKeyResponse]
@@ -305,6 +340,11 @@ func (c *hostServiceClient) DrainWorkerHost(ctx context.Context, req *connect.Re
 // ResumeWorkerHost calls supertag.operator.v1.HostService.ResumeWorkerHost.
 func (c *hostServiceClient) ResumeWorkerHost(ctx context.Context, req *connect.Request[operatorv1.ResumeWorkerHostRequest]) (*connect.Response[operatorv1.WorkerHost], error) {
 	return c.resumeWorkerHost.CallUnary(ctx, req)
+}
+
+// JoinWorkerHost calls supertag.operator.v1.HostService.JoinWorkerHost.
+func (c *hostServiceClient) JoinWorkerHost(ctx context.Context, req *connect.Request[operatorv1.JoinWorkerHostRequest]) (*connect.Response[operatorv1.JoinWorkerHostResponse], error) {
+	return c.joinWorkerHost.CallUnary(ctx, req)
 }
 
 // BindWorkerHost calls supertag.operator.v1.HostService.BindWorkerHost.
@@ -371,20 +411,45 @@ type HostServiceHandler interface {
 	// revoked: a revoked host must be enrolled under a new ID. It fails with
 	// `InvalidArgument` for an `expected_credential_revision` below 1.
 	RotateWorkerHostCredential(context.Context, *connect.Request[operatorv1.RotateWorkerHostCredentialRequest]) (*connect.Response[operatorv1.WorkerHostCredential], error)
-	// Revokes a Worker Host, as `supertag revoke worker-host-credential` does
-	// with operator access. Its credential stops working at once, its
-	// connection ends, and it takes no new Tasks. A revoked host stays readable
-	// and its ID is never enrolled again. Revoking a revoked host changes
-	// nothing and returns it.
+	// Revokes a Worker Host, as `supertag revoke worker-host-credential` does.
+	// Its credential stops working at once, its connection ends, and it takes
+	// no new Tasks. A revoked host stays readable and its ID is never enrolled
+	// again. Revoking a revoked host changes nothing and returns it.
+	//
+	// A host may revoke itself with its own credential, and its
+	// `revocation_reason` is then `SelfRevoked`. Its credential no longer
+	// works afterward, so a repeat fails with `Unauthenticated`.
 	RevokeWorkerHostCredential(context.Context, *connect.Request[operatorv1.RevokeWorkerHostCredentialRequest]) (*connect.Response[operatorv1.WorkerHost], error)
 	// Drains a Worker Host, as `supertag drain worker-host` does: it finishes
 	// the work it accepted and takes no new Tasks until it is resumed. Draining
-	// a draining host changes nothing. The host returned has no `storage`.
+	// a draining host changes nothing. The host returned has no `storage`. A
+	// host may drain itself with its own credential, as `supertag up` and
+	// `supertag down` do before they restart or stop a host service.
 	DrainWorkerHost(context.Context, *connect.Request[operatorv1.DrainWorkerHostRequest]) (*connect.Response[operatorv1.WorkerHost], error)
 	// Ends a drain, as `supertag resume worker-host` does: the host takes new
 	// Tasks again. Resuming a host that is not draining changes nothing. The
-	// host returned has no `storage`.
+	// host returned has no `storage`. A host may resume itself with its own
+	// credential, as a host service does when it starts after `supertag up` or
+	// `supertag down` drained it.
 	ResumeWorkerHost(context.Context, *connect.Request[operatorv1.ResumeWorkerHostRequest]) (*connect.Response[operatorv1.WorkerHost], error)
+	// Joins a machine as a new Worker Host by redeeming the Auth Key sent as
+	// the bearer token, as `supertag connect worklet --auth-key` does. The
+	// host is enrolled under `name`, or `NAME-2`, `NAME-3` and so on when that
+	// ID is taken, bound to the key's Tags and given its labels. It returns the
+	// host's first credential, which only this call returns.
+	//
+	// A repeat with the same Auth Key and `idempotency_key` enrolls nothing:
+	// it returns the host the first call enrolled, whatever its `name`, with a
+	// new credential that replaces the one the first call returned, until that
+	// host first connects. After that, or once the host is revoked, a repeat
+	// fails with `AlreadyExists`. It fails with `Unauthenticated` for an Auth
+	// Key the Control Plane does not know, `PermissionDenied` for a revoked,
+	// expired or used one, `FailedPrecondition` and `ERROR_REASON_CONFLICT`
+	// when one of the key's Tags was deleted, and `InvalidArgument` for a
+	// malformed `name` or `idempotency_key`. A call with an unknown Auth Key is
+	// refused before its request is read and is not recorded in the audit
+	// trail.
+	JoinWorkerHost(context.Context, *connect.Request[operatorv1.JoinWorkerHostRequest]) (*connect.Response[operatorv1.JoinWorkerHostResponse], error)
 	// Binds a Worker Host to a Tag, as `supertag update tag --add-worker-host`
 	// does, so the host may run the Tag's Tasks. Binding a host that is
 	// already bound changes nothing and succeeds with `changed` false. It fails
@@ -474,6 +539,12 @@ func NewHostServiceHandler(svc HostServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(hostServiceMethods.ByName("ResumeWorkerHost")),
 		connect.WithHandlerOptions(opts...),
 	)
+	hostServiceJoinWorkerHostHandler := connect.NewUnaryHandler(
+		HostServiceJoinWorkerHostProcedure,
+		svc.JoinWorkerHost,
+		connect.WithSchema(hostServiceMethods.ByName("JoinWorkerHost")),
+		connect.WithHandlerOptions(opts...),
+	)
 	hostServiceBindWorkerHostHandler := connect.NewUnaryHandler(
 		HostServiceBindWorkerHostProcedure,
 		svc.BindWorkerHost,
@@ -528,6 +599,8 @@ func NewHostServiceHandler(svc HostServiceHandler, opts ...connect.HandlerOption
 			hostServiceDrainWorkerHostHandler.ServeHTTP(w, r)
 		case HostServiceResumeWorkerHostProcedure:
 			hostServiceResumeWorkerHostHandler.ServeHTTP(w, r)
+		case HostServiceJoinWorkerHostProcedure:
+			hostServiceJoinWorkerHostHandler.ServeHTTP(w, r)
 		case HostServiceBindWorkerHostProcedure:
 			hostServiceBindWorkerHostHandler.ServeHTTP(w, r)
 		case HostServiceUnbindWorkerHostProcedure:
@@ -575,6 +648,10 @@ func (UnimplementedHostServiceHandler) DrainWorkerHost(context.Context, *connect
 
 func (UnimplementedHostServiceHandler) ResumeWorkerHost(context.Context, *connect.Request[operatorv1.ResumeWorkerHostRequest]) (*connect.Response[operatorv1.WorkerHost], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.operator.v1.HostService.ResumeWorkerHost is not implemented"))
+}
+
+func (UnimplementedHostServiceHandler) JoinWorkerHost(context.Context, *connect.Request[operatorv1.JoinWorkerHostRequest]) (*connect.Response[operatorv1.JoinWorkerHostResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.operator.v1.HostService.JoinWorkerHost is not implemented"))
 }
 
 func (UnimplementedHostServiceHandler) BindWorkerHost(context.Context, *connect.Request[operatorv1.BindWorkerHostRequest]) (*connect.Response[operatorv1.BindWorkerHostResponse], error) {

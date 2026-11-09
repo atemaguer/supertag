@@ -52,8 +52,8 @@ const (
 
 // ResourceServiceClient is a client for the supertag.operator.v1.ResourceService service.
 type ResourceServiceClient interface {
-	// Reads one resource, as `supertag get KIND NAME` and `describe KIND NAME`
-	// show it. A Workspace read this way also reports
+	// Reads one resource, as `supertag get` and `supertag describe` of a named
+	// resource show it. A Workspace read this way also reports
 	// `WorkspaceStatus.environments`, which `ListResources` leaves out. A Tag is
 	// read by name even once retired; when several retired Tags share the name
 	// and no active Tag holds it, the latest retired is returned.
@@ -64,8 +64,8 @@ type ResourceServiceClient interface {
 	// secret references to export, and with `InvalidArgument` for `manifest` on
 	// a Worker Profile.
 	GetResource(context.Context, *connect.Request[operatorv1.GetResourceRequest]) (*connect.Response[operatorv1.Resource], error)
-	// Lists the resources of one kind, as `supertag get KIND` and `supertag
-	// list KIND` show them. Tags, Roles, Permission Sets, Context Sets, Volumes,
+	// Lists the resources of one kind, as `supertag get` and `supertag list` of
+	// a kind show them. Tags, Roles, Permission Sets, Context Sets, Volumes,
 	// Workspaces and Surface Accounts come by name; Worker Profiles by Worker
 	// Host ID, then in the order each host advertises them. Retired Tags and
 	// retired Surface Accounts are left out.
@@ -137,8 +137,8 @@ type ResourceServiceClient interface {
 	//     malformed `apply_set`, or `imperative` with `apply_set`, `prune` or an
 	//     Objective.
 	ApplyManifests(context.Context, *connect.Request[operatorv1.ApplyManifestsRequest]) (*connect.Response[operatorv1.ApplyManifestsResponse], error)
-	// Deletes or retires one resource, as `supertag delete KIND NAME` does, with
-	// what goes with it. Deletion never erases history: a retired Tag, Role or
+	// Deletes or retires one resource, as `supertag delete` of a resource does,
+	// with what goes with it. Deletion never erases history: a retired Tag, Role or
 	// Surface Account keeps its record, and Tasks keep the policy and Workspace
 	// they recorded. Deleting also removes the resource's field-manager record
 	// and apply-set membership. With `dry_run` it answers the same way and
@@ -236,8 +236,8 @@ func (c *resourceServiceClient) DeleteResource(ctx context.Context, req *connect
 
 // ResourceServiceHandler is an implementation of the supertag.operator.v1.ResourceService service.
 type ResourceServiceHandler interface {
-	// Reads one resource, as `supertag get KIND NAME` and `describe KIND NAME`
-	// show it. A Workspace read this way also reports
+	// Reads one resource, as `supertag get` and `supertag describe` of a named
+	// resource show it. A Workspace read this way also reports
 	// `WorkspaceStatus.environments`, which `ListResources` leaves out. A Tag is
 	// read by name even once retired; when several retired Tags share the name
 	// and no active Tag holds it, the latest retired is returned.
@@ -248,8 +248,8 @@ type ResourceServiceHandler interface {
 	// secret references to export, and with `InvalidArgument` for `manifest` on
 	// a Worker Profile.
 	GetResource(context.Context, *connect.Request[operatorv1.GetResourceRequest]) (*connect.Response[operatorv1.Resource], error)
-	// Lists the resources of one kind, as `supertag get KIND` and `supertag
-	// list KIND` show them. Tags, Roles, Permission Sets, Context Sets, Volumes,
+	// Lists the resources of one kind, as `supertag get` and `supertag list` of
+	// a kind show them. Tags, Roles, Permission Sets, Context Sets, Volumes,
 	// Workspaces and Surface Accounts come by name; Worker Profiles by Worker
 	// Host ID, then in the order each host advertises them. Retired Tags and
 	// retired Surface Accounts are left out.
@@ -321,8 +321,8 @@ type ResourceServiceHandler interface {
 	//     malformed `apply_set`, or `imperative` with `apply_set`, `prune` or an
 	//     Objective.
 	ApplyManifests(context.Context, *connect.Request[operatorv1.ApplyManifestsRequest]) (*connect.Response[operatorv1.ApplyManifestsResponse], error)
-	// Deletes or retires one resource, as `supertag delete KIND NAME` does, with
-	// what goes with it. Deletion never erases history: a retired Tag, Role or
+	// Deletes or retires one resource, as `supertag delete` of a resource does,
+	// with what goes with it. Deletion never erases history: a retired Tag, Role or
 	// Surface Account keeps its record, and Tasks keep the policy and Workspace
 	// they recorded. Deleting also removes the resource's field-manager record
 	// and apply-set membership. With `dry_run` it answers the same way and

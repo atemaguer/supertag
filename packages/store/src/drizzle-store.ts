@@ -862,6 +862,13 @@ export class DrizzleStore implements Store {
       ...args,
     );
   }
+  findAuthKeyBySecret(
+    ...args: Parameters<AuthKeyStore["findAuthKeyBySecret"]>
+  ): ReturnType<AuthKeyStore["findAuthKeyBySecret"]> {
+    return new DrizzleAuthKeyStore(this.#db, this.#tables, this.provider).findAuthKeyBySecret(
+      ...args,
+    );
+  }
   listAuthKeys(
     ...args: Parameters<AuthKeyStore["listAuthKeys"]>
   ): ReturnType<AuthKeyStore["listAuthKeys"]> {

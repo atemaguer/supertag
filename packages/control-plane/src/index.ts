@@ -283,7 +283,7 @@ const EPHEMERAL_WORKER_HOST_SWEEP_INTERVAL_MS = 10_000;
 export class AuthKeyRedemptionError extends TagMessagingError {
   constructor(
     statusCode: number,
-    readonly reason: "invalid" | "expired" | "revoked" | "used" | "tag-missing",
+    readonly reason: "invalid" | "expired" | "revoked" | "used" | "tag-missing" | "joined",
     message: string,
   ) {
     super(statusCode, message);
@@ -967,12 +967,30 @@ export class ControlPlane {
   }
 
   /**
+   * The Auth Key a presented secret names, whatever its phase; undefined for malformed or unknown
+   * text. Reads only, so it suits authenticating a join before its request is read.
+   */
+  async findAuthKeyBySecret(secret: string): Promise<AuthKey | undefined> {
+    if (!isAuthKeySecret(secret)) return undefined;
+    return this.#store.findAuthKeyBySecret({
+      lookupId: authKeyLookupId(secret),
+      secretDigest: storedSecretDigest(secret),
+    });
+  }
+
+  /**
    * Redeems an Auth Key: enrolls a new Worker Host under `workerHostName` (or `NAME-2`, `NAME-3`
    * on collision), binds the key's Tags, and returns the host's first credential once.
+   *
+   * `idempotencyKey` names the join request. A repeat with the same key and Auth Key enrolls
+   * nothing and returns the host the first call enrolled, whatever its name, with a new
+   * credential that replaces the unseen one, while that host has never connected. Once it has,
+   * or after it was revoked, a repeat is refused as `joined`.
    */
   async redeemAuthKey(
     secret: string,
     workerHostName: string,
+    idempotencyKey: string = randomUUID(),
   ): Promise<{
     readonly workerHost: WorkerHost;
     readonly token: string;
@@ -981,16 +999,21 @@ export class ControlPlane {
     const name = parseWorkerHostName(workerHostName);
     if (!isAuthKeySecret(secret))
       throw new AuthKeyRedemptionError(401, "invalid", "Auth Key is invalid");
+    const lookupId = authKeyLookupId(secret);
+    const joinCredentialPrefix = `control-plane/worker-host-join/${createHash("sha256")
+      .update(`${lookupId}\n${idempotencyKey}`)
+      .digest("hex")}/`;
     const token = workerHostToken();
-    const credentialId = workerHostCredentialId(`join/${randomUUID()}`, 1);
+    const credentialId = `${joinCredentialPrefix}credential/1/${randomBytes(16).toString("hex")}`;
     await this.#credentialVault.store(credentialId, workerHostCredentialDigest(token));
     let result: Awaited<ReturnType<Store["redeemAuthKey"]>>;
     try {
       result = await this.#store.redeemAuthKey({
-        lookupId: authKeyLookupId(secret),
+        lookupId,
         secretDigest: storedSecretDigest(secret),
         workerHostName: name,
         credentialId,
+        joinCredentialPrefix,
         redeemedAt: new Date().toISOString(),
       });
     } catch (error) {
@@ -1000,7 +1023,24 @@ export class ControlPlane {
     if (result.status === "redeemed")
       return { workerHost: result.workerHost, token, authKey: result.authKey };
     await this.#credentialVault.delete(credentialId).catch(() => undefined);
-    throw authKeyRedemptionError(result.status);
+    if (result.status !== "repeated") throw authKeyRedemptionError(result.status);
+    const joined = result.workerHost;
+    const refused = new AuthKeyRedemptionError(
+      409,
+      "joined",
+      `This join request already joined Worker Host ${joined.id}, and its credential is not shown again`,
+    );
+    if (joined.enrollmentStatus !== "active" || joined.lastAuthenticatedAt !== undefined)
+      throw refused;
+    const reissued = await this.rotateWorkerHostCredential(
+      joined.id,
+      joined.credentialRevision,
+    ).catch((error: unknown) => {
+      if (error instanceof TagMessagingError && error.statusCode === 409) return undefined;
+      throw error;
+    });
+    if (reissued === undefined) throw refused;
+    return { workerHost: reissued.workerHost, token: reissued.token, authKey: result.authKey };
   }
 
   /**
@@ -1107,21 +1147,54 @@ export class ControlPlane {
     return current?.connectionStatus === "connected" ? current : undefined;
   }
 
-  /** Authenticates an active Host's own credential, whether or not it is connected. */
+  /**
+   * Authenticates an active Host's own credential, whether or not it is connected, and records a
+   * mismatch on the host.
+   */
   async authenticateWorkerHostCredential(
     workerHostId: string,
     credential: string | undefined,
   ): Promise<WorkerHost | undefined> {
+    const verified = await this.#verifyWorkerHostCredential(workerHostId, credential);
+    if (verified.status === "mismatch") {
+      await this.#store.recordWorkerHostAuthenticationFailure(
+        verified.workerHostId,
+        new Date().toISOString(),
+      );
+      return undefined;
+    }
+    return verified.status === "matched" ? verified.workerHost : undefined;
+  }
+
+  /**
+   * The active Worker Host whose own credential this is, or undefined. Unlike
+   * {@link authenticateWorkerHostCredential} it writes nothing, so callers that anyone can reach
+   * learn the answer without a database write.
+   */
+  async verifyWorkerHostCredential(
+    workerHostId: string,
+    credential: string | undefined,
+  ): Promise<WorkerHost | undefined> {
+    const verified = await this.#verifyWorkerHostCredential(workerHostId, credential);
+    return verified.status === "matched" ? verified.workerHost : undefined;
+  }
+
+  async #verifyWorkerHostCredential(
+    workerHostId: string,
+    credential: string | undefined,
+  ): Promise<
+    | { readonly status: "matched"; readonly workerHost: WorkerHost }
+    | { readonly status: "mismatch"; readonly workerHostId: string }
+    | { readonly status: "unknown" }
+  > {
     const id = requiredText(workerHostId, "Worker Host id");
     const current = await this.#store.findWorkerHostById(id);
     if (current === undefined || current.enrollmentStatus !== "active" || credential === undefined)
-      return undefined;
+      return { status: "unknown" };
     const stored = await this.#credentialVault.resolve(current.credentialId);
-    if (!workerHostCredentialMatches(credential, stored)) {
-      await this.#store.recordWorkerHostAuthenticationFailure(id, new Date().toISOString());
-      return undefined;
-    }
-    return current;
+    return workerHostCredentialMatches(credential, stored)
+      ? { status: "matched", workerHost: current }
+      : { status: "mismatch", workerHostId: id };
   }
 
   async observeWorkerHostConnection(

@@ -406,16 +406,11 @@ describe("connect worklet", () => {
       hostname: "ci",
       stateDirectory: state,
       fetch: async () =>
-        new Response(
-          JSON.stringify({
-            apiVersion: "supertag/v1",
-            kind: "WorkerHostCredential",
-            metadata: { workerHostId: "ci-7" },
-            credential: { token: "host-token" },
-            status: { ephemeral: true, tags: [] },
-          }),
-          { status: 201, headers: { "content-type": "application/json" } },
-        ),
+        Response.json({
+          credential: { workerHostId: "ci-7", token: "host-token" },
+          authKey: "ci",
+          ephemeral: true,
+        }),
     });
     expect(credential).toMatchObject({ workerHostId: "ci-7", source: "auth-key", ephemeral: true });
     await expect(readFile(join(state, "worker-hosts", "ci-7.json"))).rejects.toThrow();

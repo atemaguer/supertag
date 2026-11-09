@@ -31,6 +31,17 @@ extend google.protobuf.MethodOptions {
   // credential is refused with `PermissionDenied`, whatever actions it
   // carries.
   bool allow_scoped_credential = 50005;
+  // Take an Auth Key as the bearer token in place of an operator credential.
+  // A call without a bearer token, or with one that is not an Auth Key the
+  // Control Plane knows, fails with `Unauthenticated` before its body is
+  // read. The RPC redeems the key, so it checks then whether the key was
+  // revoked, has expired or was used.
+  bool requires_auth_key = 50011;
+  // Also accept a Worker Host's own credential, sent as the bearer token with
+  // the host's ID in the `x-supertag-worker-host-id` header. It carries no
+  // operator actions: this option alone admits it, and the RPC acts only on
+  // that Worker Host and refuses any other with `PermissionDenied`.
+  bool allow_worker_host_credential = 50012;
 }
 
 // Manifests. A manifest is the YAML or JSON document `supertag apply -f`

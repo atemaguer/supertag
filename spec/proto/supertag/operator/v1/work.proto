@@ -481,8 +481,12 @@ message TaskWorkspace {
 // How severe a Task finding is.
 enum TaskFindingSeverity {
   TASK_FINDING_SEVERITY_UNSPECIFIED = 0;
+  // High. `supertag describe objective` and `OrganizationService.GetOrganization`
+  // list the high findings of each Session's latest result.
   TASK_FINDING_SEVERITY_HIGH = 1;
+  // Medium.
   TASK_FINDING_SEVERITY_MEDIUM = 2;
+  // Low.
   TASK_FINDING_SEVERITY_LOW = 3;
 }
 
@@ -517,7 +521,7 @@ enum ExecutionSource {
   EXECUTION_SOURCE_CHOSEN = 2;
 }
 
-// Where an Attempt's model came from.
+// Where a Task Attempt's model came from.
 enum ModelSource {
   MODEL_SOURCE_UNSPECIFIED = 0;
   // The Task named it.
@@ -1024,6 +1028,7 @@ message TaskArtifactStorage {
 
 // One place an artifact's files are kept.
 message ArtifactCopy {
+  // Where the copy is. Exactly one is set.
   oneof place {
     // On a Worker Host.
     WorkerHostCopy worker_host = 1;

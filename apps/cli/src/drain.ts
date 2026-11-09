@@ -1,5 +1,6 @@
 import { stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { ConnectError } from "@connectrpc/connect";
 import {
   hostCredentialPath,
   hostServiceDirectory,
@@ -8,10 +9,14 @@ import {
   runningProcess,
   type ServiceSlot,
 } from "./local-state.js";
+import { hostClient, operatorErrorMessage } from "./operator-client.js";
 import { readWorkerHostCredential } from "./worker-hosts.js";
 
 /** The Task Attempt time limit assumed for a host service that recorded none. */
 const DEFAULT_ATTEMPT_TIME_LIMIT_MS = 60 * 60_000;
+
+/** How long `up` and `down` wait for the Control Plane to drain or resume their own host. */
+const OWN_HOST_TIMEOUT_MS = 10_000;
 
 /** A draining host waits at most this long past its longest remaining Task Attempt time limit. */
 export const DRAIN_GRACE_MS = 30_000;
@@ -162,26 +167,19 @@ export async function drainHost(
     : undefined;
   const url = status?.url ?? credential?.controlPlane;
   if (credential !== undefined && url !== undefined) {
-    const request = options.fetch ?? fetch;
-    const answer = await request(
-      new URL(
-        `/api/v1/worker-hosts/${encodeURIComponent(credential.workerHostId)}/drain`,
-        `${url}/`,
-      ),
-      {
-        method: "POST",
-        headers: { authorization: `Bearer ${credential.token}` },
-        redirect: "error",
-        signal: AbortSignal.timeout(10_000),
-      },
-    ).catch((error: unknown) => error as Error);
-    if (answer instanceof Response && answer.ok)
+    const failure = await ownHost(url, credential, options.fetch)
+      .drainWorkerHost({ id: credential.workerHostId }, { timeoutMs: OWN_HOST_TIMEOUT_MS })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    if (failure === undefined)
       await writeFile(drainMarkerPath(slot.service), `${credential.workerHostId}\n`, {
         mode: 0o600,
       });
     else
       options.write(
-        `Could not drain Worker Host ${credential.workerHostId} (${answer instanceof Response ? `HTTP ${answer.status}` : answer.message}); new Task Attempts may still arrive while it stops.\n`,
+        `Could not drain Worker Host ${credential.workerHostId} (${failureText(failure)}); new Task Attempts may still arrive while it stops.\n`,
       );
   }
   const signal = interruptible(options.signal);
@@ -234,19 +232,32 @@ export async function resumeIfDrained(
 ): Promise<boolean> {
   const marker = drainMarkerPath(service);
   if (!(await stat(marker).catch(() => undefined))) return false;
-  const answer = await fetch(
-    new URL(
-      `/api/v1/worker-hosts/${encodeURIComponent(credential.workerHostId)}/resume`,
-      `${managementUrl}/`,
-    ),
-    {
-      method: "POST",
-      headers: { authorization: `Bearer ${credential.token}` },
-      redirect: "error",
-      signal: AbortSignal.timeout(10_000),
-    },
-  ).catch(() => undefined);
-  if (answer === undefined || !answer.ok) return false;
+  const resumed = await ownHost(managementUrl, credential)
+    .resumeWorkerHost({ id: credential.workerHostId }, { timeoutMs: OWN_HOST_TIMEOUT_MS })
+    .then(
+      () => true,
+      () => false,
+    );
+  if (!resumed) return false;
   await unlink(marker).catch(() => undefined);
   return true;
+}
+
+/** Calls `HostService` as the Worker Host itself, with its own credential. */
+function ownHost(
+  url: string,
+  credential: { readonly workerHostId: string; readonly token: string },
+  request?: typeof fetch,
+) {
+  return hostClient({
+    url,
+    token: credential.token,
+    workerHostId: credential.workerHostId,
+    ...(request === undefined ? {} : { fetch: request }),
+  });
+}
+
+function failureText(error: unknown): string {
+  if (error instanceof ConnectError) return operatorErrorMessage(error);
+  return error instanceof Error ? error.message : String(error);
 }

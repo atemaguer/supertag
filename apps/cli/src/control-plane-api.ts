@@ -3,18 +3,9 @@ import { readFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Code, ConnectError } from "@connectrpc/connect";
 import type { ControlPlane, CoordinationOperatorPrincipal } from "@supertag/control-plane";
-import {
-  ArtifactCatalog,
-  AuthKeyRedemptionError,
-  SessionPersistence,
-} from "@supertag/control-plane";
+import { ArtifactCatalog, SessionPersistence } from "@supertag/control-plane";
 import type { AnyArtifactTransferGrantClaims, GatewayCredentialVault, Store } from "@supertag/core";
-import {
-  OPERATOR_TOKEN_PREFIX,
-  operatorTokenOperatorId,
-  parseWorkerHostName,
-  TagMessagingError,
-} from "@supertag/core";
+import { OPERATOR_TOKEN_PREFIX, operatorTokenOperatorId } from "@supertag/core";
 import {
   type RemoteWorkletServer,
   RpcTelemetry,
@@ -25,11 +16,6 @@ import {
 import { registerArtifactGrpcRoutes } from "./artifact-grpc.js";
 import { handleArtifactRequest } from "./artifact-http.js";
 import { AuditTrail, type ManagementAuditEvent } from "./audit-trail.js";
-import {
-  CONTROL_PLANE_API_VERSION,
-  workerHostCredentialIssuance,
-  workerHostResource,
-} from "./control-plane-resources.js";
 import { registerCoordinationGrpcRoutes } from "./coordination-grpc.js";
 import { handleCoordinationRequest } from "./coordination-http.js";
 import type { SurfaceController } from "./gateway-surfaces.js";
@@ -50,8 +36,6 @@ import { registerSessionGrpcRoutes } from "./session-grpc.js";
 import { handleSessionRequest } from "./session-http.js";
 import { verifySurfaceAccount } from "./surface-account-manifest.js";
 import { SUPERTAG_VERSION, VERSION_HEADER } from "./version.js";
-
-const MAX_API_BODY_BYTES = 1_000_000;
 
 export interface ControlPlaneOperatorCredential {
   readonly token: string;
@@ -100,13 +84,9 @@ const CONTROL_PLANE_BREAK_GLASS_PRINCIPAL: CoordinationOperatorPrincipal = {
   scopes: { actions: ["*"] },
 };
 
-/** Whether `ControlPlaneApiServer.handle` serves this path: the HTTP API or an operator RPC. */
+/** Whether `ControlPlaneApiServer.handle` serves this path: an operator RPC or a Worker route. */
 export function isControlPlaneApiPath(pathname: string): boolean {
-  return (
-    pathname.startsWith("/api/") ||
-    pathname.startsWith("/internal/v1/") ||
-    pathname.startsWith(OPERATOR_RPC_PATH_PREFIX)
-  );
+  return pathname.startsWith("/internal/v1/") || pathname.startsWith(OPERATOR_RPC_PATH_PREFIX);
 }
 
 /** Internal API component for Control Plane resources, admission, and status. */
@@ -142,7 +122,10 @@ export class ControlPlaneApiServer {
     this.#operatorRpc = createOperatorRpcHandler(
       {
         auditTrail: this.#auditTrail,
-        authenticate: (authorization) => authenticateOperator(dependencies, authorization),
+        authenticate: (authorization, workerHostId) =>
+          authenticateOperator(dependencies, authorization, workerHostId),
+        authenticateAuthKey: async (secret) =>
+          (await dependencies.controlPlane.findAuthKeyBySecret(secret)) !== undefined,
         accepting: () => this.#acceptingManagement,
       },
       (router) =>
@@ -298,12 +281,8 @@ export class ControlPlaneApiServer {
     // The Gateway sets this too; an embedded API Server may be served without one.
     response.setHeader(VERSION_HEADER, SUPERTAG_VERSION);
     const operatorRpc = url.pathname.startsWith(OPERATOR_RPC_PATH_PREFIX);
-    const internal = url.pathname.startsWith("/internal/v1/");
     // Operator RPCs refuse in their own protocol once draining.
-    if (
-      !operatorRpc &&
-      ((internal && !this.#acceptingInternal) || (!internal && !this.#acceptingManagement))
-    ) {
+    if (!operatorRpc && !this.#acceptingInternal) {
       writeJson(response, 503, { error: "control_plane_draining" });
       return;
     }
@@ -324,11 +303,7 @@ export class ControlPlaneApiServer {
         await this.#operatorRpc(request, response);
         return;
       }
-      if (internal) {
-        await handleInternalApiRequest(context, url);
-        return;
-      }
-      await handleApiRequest(context, url);
+      await handleInternalApiRequest(context, url);
     } finally {
       this.#activeRequests.delete(activeRequest);
       releaseRequest?.();
@@ -384,169 +359,6 @@ async function handleInternalApiRequest(
   writeJson(context.response, 404, { error: "not_found" });
 }
 
-async function handleApiRequest(context: ControlPlaneApiRequestContext, url: URL): Promise<void> {
-  // Joining is authorized only by the Auth Key in the Authorization header.
-  if (context.request.method === "POST" && url.pathname === "/api/v1/worker-host-joins") {
-    await handleWorkerHostJoin(context);
-    return;
-  }
-  const authentication = await authenticateOperator(
-    context,
-    header(context.request, "authorization"),
-  );
-  if (authentication === undefined || authentication.kind === "refused") {
-    if (authentication === undefined && (await handleWorkerHostSelfRevocation(context, url)))
-      return;
-    if (authentication === undefined && (await handleWorkerHostSelfDrain(context, url))) return;
-    writeStatusError(
-      context.response,
-      401,
-      "Unauthorized",
-      authentication?.message ?? "A valid Control Plane admin token or Operator Token is required",
-    );
-    return;
-  }
-  if (authentication.kind === "coordination") {
-    writeStatusError(
-      context.response,
-      403,
-      "Forbidden",
-      "A scoped coordination credential may call only the operator RPCs that accept one",
-    );
-    return;
-  }
-  writeStatusError(context.response, 404, "NotFound", "Admin route not found");
-}
-
-/**
- * Redeems the Auth Key in the Authorization header: enrolls a new Worker Host, binds the key's
- * Tags, and returns the host's credential once.
- */
-async function handleWorkerHostJoin(context: ControlPlaneApiRequestContext): Promise<void> {
-  const authorization = header(context.request, "authorization");
-  const secret = authorization?.startsWith("Bearer ")
-    ? authorization.slice("Bearer ".length).trim()
-    : "";
-  if (!secret) {
-    writeStatusError(context.response, 401, "Unauthorized", "An Auth Key is required to join");
-    return;
-  }
-  let name: string;
-  try {
-    name = parseWorkerHostJoin(await readJsonBody(context.request));
-  } catch (error) {
-    writeStatusError(context.response, 400, "Invalid", errorText(error));
-    return;
-  }
-  try {
-    const joined = await context.controlPlane.redeemAuthKey(secret, name);
-    const tagNames = await tagNamesById(context.store);
-    writeOneTimeCredential(context.response, 201, {
-      ...workerHostCredentialIssuance(
-        joined.workerHost.id,
-        joined.token,
-        joined.workerHost.updatedAt,
-      ),
-      status: {
-        authKey: joined.authKey.name,
-        tags: joined.authKey.tagIds.map((id) => tagNames.get(id) ?? id),
-        ephemeral: joined.workerHost.ephemeral,
-      },
-    });
-  } catch (error) {
-    if (error instanceof AuthKeyRedemptionError || error instanceof TagMessagingError) {
-      writeStatusError(
-        context.response,
-        error.statusCode,
-        error instanceof AuthKeyRedemptionError ? authKeyFailureReason(error.reason) : "Invalid",
-        error.message,
-      );
-      return;
-    }
-    throw error;
-  }
-}
-
-function authKeyFailureReason(reason: AuthKeyRedemptionError["reason"]): string {
-  if (reason === "invalid") return "Unauthorized";
-  if (reason === "tag-missing") return "Conflict";
-  return "Forbidden";
-}
-
-/** A Worker Host may revoke its own credential with that credential. */
-async function handleWorkerHostSelfRevocation(
-  context: ControlPlaneApiRequestContext,
-  url: URL,
-): Promise<boolean> {
-  if (context.request.method !== "DELETE") return false;
-  const match = /^\/api\/v1\/worker-hosts\/([^/]+)\/credential$/u.exec(url.pathname);
-  const authorization = header(context.request, "authorization");
-  if (match?.[1] === undefined || !authorization?.startsWith("Bearer ")) return false;
-  const id = decodeURIComponent(match[1]);
-  const host = await context.controlPlane.authenticateWorkerHostCredential(
-    id,
-    authorization.slice("Bearer ".length),
-  );
-  if (host === undefined) return false;
-  await context.controlPlane.revokeWorkerHostCredential(host.id, "SelfRevoked");
-  context.response.writeHead(204);
-  context.response.end();
-  return true;
-}
-
-/**
- * A Worker Host may drain or resume itself with its own credential, as `supertag up` and
- * `supertag down` do before restarting or stopping a host service.
- */
-async function handleWorkerHostSelfDrain(
-  context: ControlPlaneApiRequestContext,
-  url: URL,
-): Promise<boolean> {
-  if (context.request.method !== "POST") return false;
-  const match = /^\/api\/v1\/worker-hosts\/([^/]+)\/(drain|resume)$/u.exec(url.pathname);
-  const authorization = header(context.request, "authorization");
-  if (match?.[1] === undefined || !authorization?.startsWith("Bearer ")) return false;
-  const host = await context.controlPlane.authenticateWorkerHostCredential(
-    decodeURIComponent(match[1]),
-    authorization.slice("Bearer ".length),
-  );
-  if (host === undefined) return false;
-  await context.controlPlane.setWorkerHostDraining(host.id, match[2] === "drain");
-  const workerHost = (await context.controlPlane.listWorkerHosts()).find(
-    (candidate) => candidate.id === host.id,
-  );
-  if (workerHost === undefined) {
-    writeStatusError(context.response, 404, "NotFound", "Worker Host does not exist");
-    return true;
-  }
-  writeJson(context.response, 200, workerHostResource(workerHost));
-  return true;
-}
-
-function parseWorkerHostJoin(value: unknown): string {
-  if (
-    !isRecord(value) ||
-    value["apiVersion"] !== CONTROL_PLANE_API_VERSION ||
-    value["kind"] !== "WorkerHostJoin" ||
-    !isRecord(value["metadata"]) ||
-    (value["spec"] !== undefined && !isRecord(value["spec"]))
-  )
-    throw new Error("WorkerHostJoin resource is invalid");
-  if (Object.keys(value["metadata"]).some((key) => key !== "name"))
-    throw new Error("WorkerHostJoin metadata accepts only name");
-  if (isRecord(value["spec"]) && Object.keys(value["spec"]).length > 0)
-    throw new Error("WorkerHostJoin spec must be empty; the Auth Key decides Tags");
-  return parseWorkerHostName(value["metadata"]["name"]);
-}
-
-async function tagNamesById(store: Store): Promise<ReadonlyMap<string, string>> {
-  return new Map((await store.listTags({ includeRetired: true })).map((tag) => [tag.id, tag.name]));
-}
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function bearerToken(authorization: string | undefined): string | undefined {
   return authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : undefined;
 }
@@ -558,13 +370,17 @@ function hasBearerToken(authorization: string | undefined, expected: string): bo
   return timingSafeEqual(actualDigest, expectedDigest);
 }
 
-/** Authenticates an `authorization` header value; undefined when it holds no known credential. */
+/**
+ * Authenticates an `authorization` header value, as a Worker Host's own credential when
+ * `workerHostId` names the host; undefined when it holds no known credential.
+ */
 async function authenticateOperator(
   context: Pick<
     ControlPlaneApiServerDependencies,
     "adminToken" | "coordinationOperatorCredentials" | "controlPlane"
   >,
   authorization: string | undefined,
+  workerHostId: string | undefined,
 ): Promise<OperatorAuthentication | undefined> {
   if (context.adminToken !== undefined && hasBearerToken(authorization, context.adminToken))
     return { kind: "break-glass", principal: CONTROL_PLANE_BREAK_GLASS_PRINCIPAL };
@@ -593,6 +409,15 @@ async function authenticateOperator(
         message: "This Operator Token has expired; ask an admin for a new one",
       };
     // An unknown stop_ value may still be a static coordination credential.
+  }
+  if (workerHostId?.trim() && bearer !== undefined) {
+    const host = await context.controlPlane.verifyWorkerHostCredential(workerHostId, bearer);
+    if (host !== undefined)
+      return {
+        kind: "worker-host",
+        workerHostId: host.id,
+        principal: { operatorId: `worker-host:${host.id}`, scopes: { actions: [] } },
+      };
   }
   for (const credential of context.coordinationOperatorCredentials) {
     if (!hasBearerToken(authorization, credential.token)) continue;
@@ -701,62 +526,7 @@ function tokenDigest(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-async function readJsonBody(request: IncomingMessage): Promise<unknown> {
-  const rawBody = await readBody(request);
-  try {
-    return JSON.parse(rawBody) as unknown;
-  } catch {
-    throw new Error("Request body must be valid JSON");
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function header(request: IncomingMessage, name: string): string | undefined {
-  const value = request.headers[name];
-  return Array.isArray(value) ? value[0] : value;
-}
-
-async function readBody(request: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buffer.length;
-    if (size > MAX_API_BODY_BYTES) {
-      throw new Error("Request body exceeds the one-megabyte limit");
-    }
-    chunks.push(buffer);
-  }
-  return Buffer.concat(chunks).toString("utf8");
-}
-
 function writeJson(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   response.end(`${JSON.stringify(body)}\n`);
-}
-
-function writeOneTimeCredential(response: ServerResponse, status: number, body: unknown): void {
-  response.setHeader("cache-control", "no-store");
-  writeJson(response, status, body);
-}
-
-function writeStatusError(
-  response: ServerResponse,
-  status: number,
-  reason: string,
-  message: string,
-  details: Readonly<Record<string, unknown>> = {},
-): void {
-  writeJson(response, status, {
-    apiVersion: CONTROL_PLANE_API_VERSION,
-    kind: "Status",
-    status: "Failure",
-    reason,
-    code: status,
-    message,
-    details,
-  });
 }

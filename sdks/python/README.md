@@ -17,6 +17,9 @@ the same language-neutral Worker boundary as the TypeScript SDK:
 - a Codex harness powered by the official `openai-codex` SDK
 - an OpenAI Agents harness powered by the official `openai-agents` SDK
 
+It also includes a client for the operator API that the CLI uses; see
+[Call the operator API](#call-the-operator-api).
+
 For the SuperTag CLI and Control Plane, see [Requirements](../../docs/operations/requirements.md).
 Python Worker dependencies are declared separately in [pyproject.toml](pyproject.toml).
 
@@ -79,6 +82,88 @@ outward from its Worker Host, so the host does not need a public inbound port.
 The examples store their journals in `<state directory>/python-worklets/<worklet-id>`, where the
 state directory is `SUPERTAG_STATE_DIR` when set, otherwise `~/.supertag`.
 Keep each journal across restarts; run only one application per journal.
+
+## Call the operator API
+
+The operator API is how the CLI and other tools manage a Control Plane: send a Tag a message,
+read the inbox, or apply resources. The Control Plane serves it as RPCs defined in
+protobuf, in the package `supertag.operator.v1`. A Tag is a persistent AI identity with its own
+responsibilities and permissions. The
+[operator API reference](../../docs/reference/operator-api/README.md) lists
+every RPC.
+
+The `operator` extra installs the client and its dependencies, `connect-python` and `protobuf`.
+The first SDK release after `0.2.0a6` publishes it; `0.2.0a6` has no `supertag.operator`. Once
+that release is on PyPI, install it with:
+
+```sh
+python -m pip install --pre 'supertag[operator]'
+```
+
+`OperatorClient` calls the services asynchronously, and `OperatorClientSync` calls them
+synchronously. Each has one attribute per service: `access`, `conversation`, `event`, `host`,
+`inbox`, `mailbox`, `objective`, `organization`, `resource`, `surface`, `team`, and `work`. Pass
+the Control Plane URL and the admin token or an
+[Operator Token](../../docs/reference/glossary.md#operator-token), a named credential for one
+teammate or machine:
+
+```python
+import os
+
+from supertag.operator import OperatorClientSync
+from supertag.operator.v1 import organization_pb2
+
+with OperatorClientSync(
+    os.environ["SUPERTAG_CONTROL_PLANE"], os.environ["SUPERTAG_OPERATOR_TOKEN"]
+) as client:
+    status = client.organization.get_status(organization_pb2.GetStatusRequest())
+    print(organization_pb2.ControlPlanePhase.Name(status.phase))
+```
+
+It prints `CONTROL_PLANE_PHASE_ACCEPTING` while the Control Plane accepts new work.
+
+The client sends each call as a Connect request with a JSON body over plain HTTPS, so it works
+through ordinary proxies, and sends the token as `authorization: Bearer TOKEN`. It uses only the
+URL's scheme, host, and port. Leave the token out for an RPC that accepts anonymous calls.
+
+Request and response messages come from the protos. Each proto file has a module of messages,
+such as `supertag.operator.v1.conversation_pb2`, and a module of service clients, such as
+`supertag.operator.v1.conversation_connect`. Method names are the RPC names in `snake_case`:
+`ConversationService.FollowMessage` is `client.conversation.follow_message`.
+
+Calls have no deadline. Pass `timeout_ms` to bound one call. The two server streams,
+`conversation.follow_message` and `event.watch`, are iterators that yield each event until the
+stream ends. Both send a heartbeat after 15 seconds without another event. To stop following
+early, close the iterator with `await stream.aclose()`, or `stream.close()` with
+`OperatorClientSync`; that cancels the call.
+
+[`examples/message_tag.py`](https://github.com/atemaguer/supertag/blob/main/sdks/python/examples/message_tag.py)
+sends a Tag a message and prints the reply as the Tag writes it:
+
+```sh
+export SUPERTAG_CONTROL_PLANE='https://control-plane.example.com'
+export SUPERTAG_OPERATOR_TOKEN='admin-token-or-operator-token'
+python examples/message_tag.py TAG 'What changed in the last release?'
+```
+
+A refused call raises `ConnectError` with a `code`, such as `Code.PERMISSION_DENIED`, and a
+`message` for people. `error_detail(error)` returns its `ErrorDetail`, whose stable `reason` is
+what code should branch on:
+
+```python
+from supertag.operator import ConnectError, error_detail
+from supertag.operator.v1 import common_pb2, inbox_pb2
+
+try:
+    items = client.inbox.list_inbox_items(inbox_pb2.ListInboxItemsRequest())
+except ConnectError as error:
+    detail = error_detail(error)
+    if detail is not None and detail.reason == common_pb2.ERROR_REASON_DRAINING:
+        ...  # The Control Plane is shutting down; retry against its replacement.
+    raise
+```
+
+See [RPC errors](../../docs/reference/control-plane-api.md#rpc-errors) for each code and reason.
 
 ## Compose a custom Worker
 

@@ -402,6 +402,22 @@ var file_supertag_operator_v1_options_proto_extTypes = []protoimpl.ExtensionInfo
 		Filename:      "supertag/operator/v1/options.proto",
 	},
 	{
+		ExtendedType:  (*descriptorpb.MethodOptions)(nil),
+		ExtensionType: (*bool)(nil),
+		Field:         50011,
+		Name:          "supertag.operator.v1.requires_auth_key",
+		Tag:           "varint,50011,opt,name=requires_auth_key",
+		Filename:      "supertag/operator/v1/options.proto",
+	},
+	{
+		ExtendedType:  (*descriptorpb.MethodOptions)(nil),
+		ExtensionType: (*bool)(nil),
+		Field:         50012,
+		Name:          "supertag.operator.v1.allow_worker_host_credential",
+		Tag:           "varint,50012,opt,name=allow_worker_host_credential",
+		Filename:      "supertag/operator/v1/options.proto",
+	},
+	{
 		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
 		ExtensionType: (*ManifestKind)(nil),
 		Field:         50006,
@@ -477,6 +493,21 @@ var (
 	//
 	// optional bool allow_scoped_credential = 50005;
 	E_AllowScopedCredential = &file_supertag_operator_v1_options_proto_extTypes[4]
+	// Take an Auth Key as the bearer token in place of an operator credential.
+	// A call without a bearer token, or with one that is not an Auth Key the
+	// Control Plane knows, fails with `Unauthenticated` before its body is
+	// read. The RPC redeems the key, so it checks then whether the key was
+	// revoked, has expired or was used.
+	//
+	// optional bool requires_auth_key = 50011;
+	E_RequiresAuthKey = &file_supertag_operator_v1_options_proto_extTypes[5]
+	// Also accept a Worker Host's own credential, sent as the bearer token with
+	// the host's ID in the `x-supertag-worker-host-id` header. It carries no
+	// operator actions: this option alone admits it, and the RPC acts only on
+	// that Worker Host and refuses any other with `PermissionDenied`.
+	//
+	// optional bool allow_worker_host_credential = 50012;
+	E_AllowWorkerHostCredential = &file_supertag_operator_v1_options_proto_extTypes[6]
 )
 
 // Extension fields to descriptorpb.MessageOptions.
@@ -484,12 +515,12 @@ var (
 	// Makes this message the `spec` of a manifest kind.
 	//
 	// optional supertag.operator.v1.ManifestKind manifest = 50006;
-	E_Manifest = &file_supertag_operator_v1_options_proto_extTypes[5]
+	E_Manifest = &file_supertag_operator_v1_options_proto_extTypes[7]
 	// Rules a manifest's fields must satisfy together, beyond the rules of
 	// each field.
 	//
 	// repeated supertag.operator.v1.ManifestRequirement manifest_requirements = 50007;
-	E_ManifestRequirements = &file_supertag_operator_v1_options_proto_extTypes[6]
+	E_ManifestRequirements = &file_supertag_operator_v1_options_proto_extTypes[8]
 )
 
 // Extension fields to descriptorpb.FieldOptions.
@@ -497,7 +528,7 @@ var (
 	// How the field is written and checked in manifests.
 	//
 	// optional supertag.operator.v1.ManifestField manifest_field = 50008;
-	E_ManifestField = &file_supertag_operator_v1_options_proto_extTypes[7]
+	E_ManifestField = &file_supertag_operator_v1_options_proto_extTypes[9]
 )
 
 // Extension fields to descriptorpb.OneofOptions.
@@ -505,7 +536,7 @@ var (
 	// How the oneof is written and checked in manifests.
 	//
 	// optional supertag.operator.v1.ManifestOneof manifest_oneof = 50009;
-	E_ManifestOneof = &file_supertag_operator_v1_options_proto_extTypes[8]
+	E_ManifestOneof = &file_supertag_operator_v1_options_proto_extTypes[10]
 )
 
 // Extension fields to descriptorpb.EnumValueOptions.
@@ -513,7 +544,7 @@ var (
 	// The value's spelling in manifests, such as `read-only`.
 	//
 	// optional string manifest_value = 50010;
-	E_ManifestValue = &file_supertag_operator_v1_options_proto_extTypes[9]
+	E_ManifestValue = &file_supertag_operator_v1_options_proto_extTypes[11]
 )
 
 var File_supertag_operator_v1_options_proto protoreflect.FileDescriptor
@@ -563,7 +594,9 @@ const file_supertag_operator_v1_options_proto_rawDesc = "" +
 	"\x0fallow_anonymous\x12\x1e.google.protobuf.MethodOptions\x18҆\x03 \x01(\bR\x0eallowAnonymous:R\n" +
 	"\x14requires_admin_token\x12\x1e.google.protobuf.MethodOptions\x18ӆ\x03 \x01(\bR\x12requiresAdminToken:C\n" +
 	"\faudit_action\x12\x1e.google.protobuf.MethodOptions\x18Ԇ\x03 \x01(\tR\vauditAction:X\n" +
-	"\x17allow_scoped_credential\x12\x1e.google.protobuf.MethodOptions\x18Ն\x03 \x01(\bR\x15allowScopedCredential:a\n" +
+	"\x17allow_scoped_credential\x12\x1e.google.protobuf.MethodOptions\x18Ն\x03 \x01(\bR\x15allowScopedCredential:L\n" +
+	"\x11requires_auth_key\x12\x1e.google.protobuf.MethodOptions\x18ۆ\x03 \x01(\bR\x0frequiresAuthKey:a\n" +
+	"\x1callow_worker_host_credential\x12\x1e.google.protobuf.MethodOptions\x18܆\x03 \x01(\bR\x19allowWorkerHostCredential:a\n" +
 	"\bmanifest\x12\x1f.google.protobuf.MessageOptions\x18ֆ\x03 \x01(\v2\".supertag.operator.v1.ManifestKindR\bmanifest:\x81\x01\n" +
 	"\x15manifest_requirements\x12\x1f.google.protobuf.MessageOptions\x18׆\x03 \x03(\v2).supertag.operator.v1.ManifestRequirementR\x14manifestRequirements:k\n" +
 	"\x0emanifest_field\x12\x1d.google.protobuf.FieldOptions\x18؆\x03 \x01(\v2#.supertag.operator.v1.ManifestFieldR\rmanifestField:k\n" +
@@ -601,19 +634,21 @@ var file_supertag_operator_v1_options_proto_depIdxs = []int32{
 	4,  // 3: supertag.operator.v1.requires_admin_token:extendee -> google.protobuf.MethodOptions
 	4,  // 4: supertag.operator.v1.audit_action:extendee -> google.protobuf.MethodOptions
 	4,  // 5: supertag.operator.v1.allow_scoped_credential:extendee -> google.protobuf.MethodOptions
-	5,  // 6: supertag.operator.v1.manifest:extendee -> google.protobuf.MessageOptions
-	5,  // 7: supertag.operator.v1.manifest_requirements:extendee -> google.protobuf.MessageOptions
-	6,  // 8: supertag.operator.v1.manifest_field:extendee -> google.protobuf.FieldOptions
-	7,  // 9: supertag.operator.v1.manifest_oneof:extendee -> google.protobuf.OneofOptions
-	8,  // 10: supertag.operator.v1.manifest_value:extendee -> google.protobuf.EnumValueOptions
-	0,  // 11: supertag.operator.v1.manifest:type_name -> supertag.operator.v1.ManifestKind
-	3,  // 12: supertag.operator.v1.manifest_requirements:type_name -> supertag.operator.v1.ManifestRequirement
-	1,  // 13: supertag.operator.v1.manifest_field:type_name -> supertag.operator.v1.ManifestField
-	2,  // 14: supertag.operator.v1.manifest_oneof:type_name -> supertag.operator.v1.ManifestOneof
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	11, // [11:15] is the sub-list for extension type_name
-	1,  // [1:11] is the sub-list for extension extendee
+	4,  // 6: supertag.operator.v1.requires_auth_key:extendee -> google.protobuf.MethodOptions
+	4,  // 7: supertag.operator.v1.allow_worker_host_credential:extendee -> google.protobuf.MethodOptions
+	5,  // 8: supertag.operator.v1.manifest:extendee -> google.protobuf.MessageOptions
+	5,  // 9: supertag.operator.v1.manifest_requirements:extendee -> google.protobuf.MessageOptions
+	6,  // 10: supertag.operator.v1.manifest_field:extendee -> google.protobuf.FieldOptions
+	7,  // 11: supertag.operator.v1.manifest_oneof:extendee -> google.protobuf.OneofOptions
+	8,  // 12: supertag.operator.v1.manifest_value:extendee -> google.protobuf.EnumValueOptions
+	0,  // 13: supertag.operator.v1.manifest:type_name -> supertag.operator.v1.ManifestKind
+	3,  // 14: supertag.operator.v1.manifest_requirements:type_name -> supertag.operator.v1.ManifestRequirement
+	1,  // 15: supertag.operator.v1.manifest_field:type_name -> supertag.operator.v1.ManifestField
+	2,  // 16: supertag.operator.v1.manifest_oneof:type_name -> supertag.operator.v1.ManifestOneof
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	13, // [13:17] is the sub-list for extension type_name
+	1,  // [1:13] is the sub-list for extension extendee
 	0,  // [0:1] is the sub-list for field type_name
 }
 
@@ -630,7 +665,7 @@ func file_supertag_operator_v1_options_proto_init() {
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_operator_v1_options_proto_rawDesc), len(file_supertag_operator_v1_options_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   4,
-			NumExtensions: 10,
+			NumExtensions: 12,
 			NumServices:   0,
 		},
 		GoTypes:           file_supertag_operator_v1_options_proto_goTypes,

@@ -13,24 +13,26 @@ option go_package = "github.com/atemaguer/supertag/packages/operator-api/go/oper
 // worker-host`, `resume worker-host`, `rotate worker-host-credential`,
 // `revoke worker-host-credential`, `update tag --add-worker-host` and
 // `--remove-worker-host`, `create auth-key`, `list auth-key`, `get auth-key`
-// and `revoke auth-key`.
+// and `revoke auth-key`, and joining with an Auth Key in `supertag connect
+// worklet` and `supertag up`.
 //
 // A Worker Host is a machine that runs Tasks for the Tags bound to it. Its
 // Worklet connects to the Control Plane with the host's credential. An
 // operator enrolls a host and receives its first credential, or creates an
-// Auth Key that a machine redeems to join by itself. Redeeming an Auth Key,
-// and the calls a host makes with its own credential, such as draining itself
-// before `supertag down`, are not part of this service; they keep the
-// transport the host uses.
+// Auth Key that a machine redeems with `JoinWorkerHost` to join by itself.
 //
 // Every view is built from what each host last reported to the Control
 // Plane, never a live probe of the machine. A Control Plane that runs its own
 // Worklet in process, without a Worker Host record, lists that Worklet's host
 // too, and its ID cannot be enrolled.
 //
-// Access. The admin token and Operator Tokens may call every RPC; a scoped
-// coordination credential is refused with `PermissionDenied`. Every caller
-// sees every Worker Host and Auth Key.
+// Access. The admin token and Operator Tokens may call every RPC except
+// `JoinWorkerHost`, which takes an Auth Key instead; a scoped coordination
+// credential is refused with `PermissionDenied`. Every caller sees every
+// Worker Host and Auth Key. A Worker Host's own credential may drain, resume
+// and revoke that host, as `supertag up`, `supertag down` and `supertag
+// revoke worker-host-credential` do without operator access, and may call
+// nothing else.
 //
 // Every RPC that names a Worker Host takes its ID, and fails with
 // `InvalidArgument` for an empty one and, unless it says otherwise,
@@ -87,30 +89,63 @@ service HostService {
     option (supertag.operator.v1.audit_action) = "worker-host.credential.rotate";
   }
 
-  // Revokes a Worker Host, as `supertag revoke worker-host-credential` does
-  // with operator access. Its credential stops working at once, its
-  // connection ends, and it takes no new Tasks. A revoked host stays readable
-  // and its ID is never enrolled again. Revoking a revoked host changes
-  // nothing and returns it.
+  // Revokes a Worker Host, as `supertag revoke worker-host-credential` does.
+  // Its credential stops working at once, its connection ends, and it takes
+  // no new Tasks. A revoked host stays readable and its ID is never enrolled
+  // again. Revoking a revoked host changes nothing and returns it.
+  //
+  // A host may revoke itself with its own credential, and its
+  // `revocation_reason` is then `SelfRevoked`. Its credential no longer
+  // works afterward, so a repeat fails with `Unauthenticated`.
   rpc RevokeWorkerHostCredential(RevokeWorkerHostCredentialRequest) returns (WorkerHost) {
     option (supertag.operator.v1.action) = "manage_worker_host_credential";
+    option (supertag.operator.v1.allow_worker_host_credential) = true;
     option (supertag.operator.v1.audit_action) = "worker-host.credential.revoke";
   }
 
   // Drains a Worker Host, as `supertag drain worker-host` does: it finishes
   // the work it accepted and takes no new Tasks until it is resumed. Draining
-  // a draining host changes nothing. The host returned has no `storage`.
+  // a draining host changes nothing. The host returned has no `storage`. A
+  // host may drain itself with its own credential, as `supertag up` and
+  // `supertag down` do before they restart or stop a host service.
   rpc DrainWorkerHost(DrainWorkerHostRequest) returns (WorkerHost) {
     option (supertag.operator.v1.action) = "manage_worker_host";
+    option (supertag.operator.v1.allow_worker_host_credential) = true;
     option (supertag.operator.v1.audit_action) = "worker-host.drain";
   }
 
   // Ends a drain, as `supertag resume worker-host` does: the host takes new
   // Tasks again. Resuming a host that is not draining changes nothing. The
-  // host returned has no `storage`.
+  // host returned has no `storage`. A host may resume itself with its own
+  // credential, as a host service does when it starts after `supertag up` or
+  // `supertag down` drained it.
   rpc ResumeWorkerHost(ResumeWorkerHostRequest) returns (WorkerHost) {
     option (supertag.operator.v1.action) = "manage_worker_host";
+    option (supertag.operator.v1.allow_worker_host_credential) = true;
     option (supertag.operator.v1.audit_action) = "worker-host.resume";
+  }
+
+  // Joins a machine as a new Worker Host by redeeming the Auth Key sent as
+  // the bearer token, as `supertag connect worklet --auth-key` does. The
+  // host is enrolled under `name`, or `NAME-2`, `NAME-3` and so on when that
+  // ID is taken, bound to the key's Tags and given its labels. It returns the
+  // host's first credential, which only this call returns.
+  //
+  // A repeat with the same Auth Key and `idempotency_key` enrolls nothing:
+  // it returns the host the first call enrolled, whatever its `name`, with a
+  // new credential that replaces the one the first call returned, until that
+  // host first connects. After that, or once the host is revoked, a repeat
+  // fails with `AlreadyExists`. It fails with `Unauthenticated` for an Auth
+  // Key the Control Plane does not know, `PermissionDenied` for a revoked,
+  // expired or used one, `FailedPrecondition` and `ERROR_REASON_CONFLICT`
+  // when one of the key's Tags was deleted, and `InvalidArgument` for a
+  // malformed `name` or `idempotency_key`. A call with an unknown Auth Key is
+  // refused before its request is read and is not recorded in the audit
+  // trail.
+  rpc JoinWorkerHost(JoinWorkerHostRequest) returns (JoinWorkerHostResponse) {
+    option (supertag.operator.v1.action) = "join_worker_host";
+    option (supertag.operator.v1.requires_auth_key) = true;
+    option (supertag.operator.v1.audit_action) = "worker-host.join";
   }
 
   // Binds a Worker Host to a Tag, as `supertag update tag --add-worker-host`
@@ -221,6 +256,29 @@ message DrainWorkerHostRequest {
 message ResumeWorkerHostRequest {
   // The Worker Host's ID.
   string id = 1;
+}
+
+message JoinWorkerHostRequest {
+  // The ID the host asks for, such as the machine's hostname: 1 to 63
+  // lowercase letters, digits, dots, hyphens or underscores, starting with a
+  // letter or digit.
+  string name = 1;
+  // Makes a retry safe, as described on `JoinWorkerHost`. A key is 1 to 200
+  // characters without whitespace or control characters. Empty enrolls a new
+  // host on every call.
+  string idempotency_key = 2;
+}
+
+message JoinWorkerHostResponse {
+  // The new host's first credential.
+  WorkerHostCredential credential = 1;
+  // The name of the Auth Key it redeemed.
+  string auth_key = 2;
+  // The Tags it is bound to, by name.
+  repeated string tags = 3;
+  // It joined with an ephemeral Auth Key, so it is revoked after it
+  // disconnects with no open Task Attempts.
+  bool ephemeral = 4;
 }
 
 message BindWorkerHostRequest {

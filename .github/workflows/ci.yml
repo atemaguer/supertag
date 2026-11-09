@@ -35,8 +35,7 @@ jobs:
             packages/operator-api/go/go.sum
       - run: pnpm install --frozen-lockfile
       - run: pnpm proto:check
-      # The protobuf contract may break freely until the first release; restore
-      # `pnpm proto:breaking "$BASE_SHA" --self-test` against the release tag then.
+      - run: pnpm proto:breaking --self-test
       - run: pnpm test:proto:python
       - run: pnpm test:proto:go
       - run: go -C packages/operator-api/go vet ./...

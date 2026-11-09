@@ -41,3 +41,8 @@ plugins:
     strategy: all
     types:
       - supertag.operator.v1
+  - local: [node, scripts/protoc-gen-operator-docs.mjs]
+    out: docs/reference/operator-api
+    strategy: all
+    types:
+      - supertag.operator.v1

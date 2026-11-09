@@ -1,5 +1,6 @@
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { SurfaceController } from "./gateway-surfaces.js";
+import { OPERATOR_RPC_PATH_PREFIX } from "./operator-rpc.js";
 import { SUPERTAG_VERSION, VERSION_HEADER } from "./version.js";
 
 export interface GatewayDependencies {
@@ -111,7 +112,7 @@ function allowedDuringDrain(request: IncomingMessage): boolean {
   return (
     (request.method === "GET" &&
       (pathname === "/health" || pathname === "/healthz" || pathname === "/readyz")) ||
-    pathname.startsWith("/api/") ||
+    pathname.startsWith(OPERATOR_RPC_PATH_PREFIX) ||
     pathname.startsWith("/internal/v1/")
   );
 }

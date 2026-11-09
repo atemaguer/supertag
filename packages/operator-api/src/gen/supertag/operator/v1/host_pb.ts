@@ -15,7 +15,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file supertag/operator/v1/host.proto.
  */
 export const file_supertag_operator_v1_host: GenFile = /*@__PURE__*/
-  fileDesc("Ch9zdXBlcnRhZy9vcGVyYXRvci92MS9ob3N0LnByb3RvEhRzdXBlcnRhZy5vcGVyYXRvci52MSI/ChZMaXN0V29ya2VySG9zdHNSZXF1ZXN0EhEKCXBhZ2Vfc2l6ZRgBIAEoBRISCgpwYWdlX3Rva2VuGAIgASgJImoKF0xpc3RXb3JrZXJIb3N0c1Jlc3BvbnNlEjYKDHdvcmtlcl9ob3N0cxgBIAMoCzIgLnN1cGVydGFnLm9wZXJhdG9yLnYxLldvcmtlckhvc3QSFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJIiIKFEdldFdvcmtlckhvc3RSZXF1ZXN0EgoKAmlkGAEgASgJIiUKF0Vucm9sbFdvcmtlckhvc3RSZXF1ZXN0EgoKAmlkGAEgASgJIlUKIVJvdGF0ZVdvcmtlckhvc3RDcmVkZW50aWFsUmVxdWVzdBIKCgJpZBgBIAEoCRIkChxleHBlY3RlZF9jcmVkZW50aWFsX3JldmlzaW9uGAIgASgDIi8KIVJldm9rZVdvcmtlckhvc3RDcmVkZW50aWFsUmVxdWVzdBIKCgJpZBgBIAEoCSIkChZEcmFpbldvcmtlckhvc3RSZXF1ZXN0EgoKAmlkGAEgASgJIiUKF1Jlc3VtZVdvcmtlckhvc3RSZXF1ZXN0EgoKAmlkGAEgASgJIjwKFUJpbmRXb3JrZXJIb3N0UmVxdWVzdBILCgN0YWcYASABKAkSFgoOd29ya2VyX2hvc3RfaWQYAiABKAkiXAoWQmluZFdvcmtlckhvc3RSZXNwb25zZRILCgN0YWcYASABKAkSDgoGdGFnX2lkGAIgASgJEhQKDHdvcmtlcl9ob3N0cxgDIAMoCRIPCgdjaGFuZ2VkGAQgASgIIj4KF1VuYmluZFdvcmtlckhvc3RSZXF1ZXN0EgsKA3RhZxgBIAEoCRIWCg53b3JrZXJfaG9zdF9pZBgCIAEoCSJeChhVbmJpbmRXb3JrZXJIb3N0UmVzcG9uc2USCwoDdGFnGAEgASgJEg4KBnRhZ19pZBgCIAEoCRIUCgx3b3JrZXJfaG9zdHMYAyADKAkSDwoHY2hhbmdlZBgEIAEoCCJnChRDcmVhdGVBdXRoS2V5UmVxdWVzdBIMCgRuYW1lGAEgASgJEgwKBHRhZ3MYAiADKAkSDgoGbGFiZWxzGAMgAygJEhAKCHJldXNhYmxlGAQgASgIEhEKCWVwaGVtZXJhbBgFIAEoCCJYChVDcmVhdGVBdXRoS2V5UmVzcG9uc2USLwoIYXV0aF9rZXkYASABKAsyHS5zdXBlcnRhZy5vcGVyYXRvci52MS5BdXRoS2V5Eg4KBnNlY3JldBgCIAEoCSI8ChNMaXN0QXV0aEtleXNSZXF1ZXN0EhEKCXBhZ2Vfc2l6ZRgBIAEoBRISCgpwYWdlX3Rva2VuGAIgASgJImEKFExpc3RBdXRoS2V5c1Jlc3BvbnNlEjAKCWF1dGhfa2V5cxgBIAMoCzIdLnN1cGVydGFnLm9wZXJhdG9yLnYxLkF1dGhLZXkSFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJIiEKEUdldEF1dGhLZXlSZXF1ZXN0EgwKBG5hbWUYASABKAkiJAoUUmV2b2tlQXV0aEtleVJlcXVlc3QSDAoEbmFtZRgBIAEoCSKuCQoKV29ya2VySG9zdBIwCghtZXRhZGF0YRgBIAEoCzIeLnN1cGVydGFnLm9wZXJhdG9yLnYxLk1ldGFkYXRhEhAKCGRyYWluaW5nGAIgASgIEjQKBXBoYXNlGAMgASgOMiUuc3VwZXJ0YWcub3BlcmF0b3IudjEuV29ya2VySG9zdFBoYXNlEjMKCmRpc2tfc3BhY2UYBCABKAsyHy5zdXBlcnRhZy5vcGVyYXRvci52MS5EaXNrU3BhY2USEQoJZXBoZW1lcmFsGAUgASgIEjgKB3N0b3JhZ2UYBiABKAsyJy5zdXBlcnRhZy5vcGVyYXRvci52MS5Xb3JrZXJIb3N0U3RvcmFnZRIQCghhdXRoX2tleRgHIAEoCRIbChNjcmVkZW50aWFsX3JldmlzaW9uGAggASgDEh0KFWNvbm5lY3Rpb25fZ2VuZXJhdGlvbhgJIAEoAxJFChFjb25uZWN0aW9uX3N0YXR1cxgKIAEoDjIqLnN1cGVydGFnLm9wZXJhdG9yLnYxLldvcmtlckhvc3RDb25uZWN0aW9uEhIKCndvcmtsZXRfaWQYCyABKAkSHQoQcHJvdG9jb2xfdmVyc2lvbhgMIAEoBUgAiAEBEiUKGGR1cmFibGVfcHJvdG9jb2xfdmVyc2lvbhgNIAEoBUgBiAEBEiUKGGNvbnRyb2xfcHJvdG9jb2xfdmVyc2lvbhgOIAEoBUgCiAEBEigKB3dvcmtlcnMYDyADKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EhIKCndvcmtzcGFjZXMYECADKAkSDgoGbGFiZWxzGBEgAygJEhYKDmdyYW50ZWRfbGFiZWxzGBIgAygJEg0KBXJlYWR5GBMgASgIEjkKFWxhc3RfYXV0aGVudGljYXRlZF9hdBgUIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASIwobZmFpbGVkX2F1dGhlbnRpY2F0aW9uX2NvdW50GBUgASgFEkIKHmxhc3RfYXV0aGVudGljYXRpb25fZmFpbHVyZV9hdBgWIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMAoMbGFzdF9zZWVuX2F0GBcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIwCgxjb25uZWN0ZWRfYXQYGCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjMKD2Rpc2Nvbm5lY3RlZF9hdBgZIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKcmV2b2tlZF9hdBgaIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASGQoRcmV2b2NhdGlvbl9yZWFzb24YGyABKAkSFwoPYWN0aXZlX2F0dGVtcHRzGBwgASgFEhAKCGNhcGFjaXR5GB0gASgFEhcKD2F2YWlsYWJsZV9zbG90cxgeIAEoBUITChFfcHJvdG9jb2xfdmVyc2lvbkIbChlfZHVyYWJsZV9wcm90b2NvbF92ZXJzaW9uQhsKGV9jb250cm9sX3Byb3RvY29sX3ZlcnNpb24iNAoJRGlza1NwYWNlEhIKCmZyZWVfYnl0ZXMYASABKAMSEwoLdG90YWxfYnl0ZXMYAiABKAMiQQoRV29ya2VySG9zdFN0b3JhZ2USEQoJc2FuZGJveGVzGAEgAygJEhkKEXBsYWNlbWVudF91bmtub3duGAIgASgIImwKFFdvcmtlckhvc3RDcmVkZW50aWFsEhYKDndvcmtlcl9ob3N0X2lkGAEgASgJEi0KCWlzc3VlZF9hdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDQoFdG9rZW4YAyABKAki2AIKB0F1dGhLZXkSMAoIbWV0YWRhdGEYASABKAsyHi5zdXBlcnRhZy5vcGVyYXRvci52MS5NZXRhZGF0YRIMCgR0YWdzGAIgAygJEg4KBmxhYmVscxgDIAMoCRIQCghyZXVzYWJsZRgEIAEoCBIRCgllcGhlbWVyYWwYBSABKAgSMQoFcGhhc2UYBiABKA4yIi5zdXBlcnRhZy5vcGVyYXRvci52MS5BdXRoS2V5UGhhc2USLgoKZXhwaXJlc19hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKwoHdXNlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASGAoQcmVkZW1wdGlvbl9jb3VudBgJIAEoBRIuCgpyZXZva2VkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCrUAQoPV29ya2VySG9zdFBoYXNlEiEKHVdPUktFUl9IT1NUX1BIQVNFX1VOU1BFQ0lGSUVEEAASHwobV09SS0VSX0hPU1RfUEhBU0VfQ09OTkVDVEVEEAESHgoaV09SS0VSX0hPU1RfUEhBU0VfRFJBSU5JTkcQAhIbChdXT1JLRVJfSE9TVF9QSEFTRV9SRUFEWRADEh0KGVdPUktFUl9IT1NUX1BIQVNFX1JFVk9LRUQQBBIhCh1XT1JLRVJfSE9TVF9QSEFTRV9VTlJFQUNIQUJMRRAFKo0BChRXb3JrZXJIb3N0Q29ubmVjdGlvbhImCiJXT1JLRVJfSE9TVF9DT05ORUNUSU9OX1VOU1BFQ0lGSUVEEAASJAogV09SS0VSX0hPU1RfQ09OTkVDVElPTl9DT05ORUNURUQQARInCiNXT1JLRVJfSE9TVF9DT05ORUNUSU9OX0RJU0NPTk5FQ1RFRBACKpoBCgxBdXRoS2V5UGhhc2USHgoaQVVUSF9LRVlfUEhBU0VfVU5TUEVDSUZJRUQQABIZChVBVVRIX0tFWV9QSEFTRV9BQ1RJVkUQARIXChNBVVRIX0tFWV9QSEFTRV9VU0VEEAISGgoWQVVUSF9LRVlfUEhBU0VfRVhQSVJFRBADEhoKFkFVVEhfS0VZX1BIQVNFX1JFVk9LRUQQBDKYDwoLSG9zdFNlcnZpY2UShwEKD0xpc3RXb3JrZXJIb3N0cxIsLnN1cGVydGFnLm9wZXJhdG9yLnYxLkxpc3RXb3JrZXJIb3N0c1JlcXVlc3QaLS5zdXBlcnRhZy5vcGVyYXRvci52MS5MaXN0V29ya2VySG9zdHNSZXNwb25zZSIXkAIBirUYEHJlYWRfd29ya2VyX2hvc3QSdgoNR2V0V29ya2VySG9zdBIqLnN1cGVydGFnLm9wZXJhdG9yLnYxLkdldFdvcmtlckhvc3RSZXF1ZXN0GiAuc3VwZXJ0YWcub3BlcmF0b3IudjEuV29ya2VySG9zdCIXkAIBirUYEHJlYWRfd29ya2VyX2hvc3QSmwEKEEVucm9sbFdvcmtlckhvc3QSLS5zdXBlcnRhZy5vcGVyYXRvci52MS5FbnJvbGxXb3JrZXJIb3N0UmVxdWVzdBoqLnN1cGVydGFnLm9wZXJhdG9yLnYxLldvcmtlckhvc3RDcmVkZW50aWFsIiyKtRgSbWFuYWdlX3dvcmtlcl9ob3N0orUYEndvcmtlci1ob3N0LmVucm9sbBLFAQoaUm90YXRlV29ya2VySG9zdENyZWRlbnRpYWwSNy5zdXBlcnRhZy5vcGVyYXRvci52MS5Sb3RhdGVXb3JrZXJIb3N0Q3JlZGVudGlhbFJlcXVlc3QaKi5zdXBlcnRhZy5vcGVyYXRvci52MS5Xb3JrZXJIb3N0Q3JlZGVudGlhbCJCirUYHW1hbmFnZV93b3JrZXJfaG9zdF9jcmVkZW50aWFsorUYHXdvcmtlci1ob3N0LmNyZWRlbnRpYWwucm90YXRlErsBChpSZXZva2VXb3JrZXJIb3N0Q3JlZGVudGlhbBI3LnN1cGVydGFnLm9wZXJhdG9yLnYxLlJldm9rZVdvcmtlckhvc3RDcmVkZW50aWFsUmVxdWVzdBogLnN1cGVydGFnLm9wZXJhdG9yLnYxLldvcmtlckhvc3QiQoq1GB1tYW5hZ2Vfd29ya2VyX2hvc3RfY3JlZGVudGlhbKK1GB13b3JrZXItaG9zdC5jcmVkZW50aWFsLnJldm9rZRKOAQoPRHJhaW5Xb3JrZXJIb3N0Eiwuc3VwZXJ0YWcub3BlcmF0b3IudjEuRHJhaW5Xb3JrZXJIb3N0UmVxdWVzdBogLnN1cGVydGFnLm9wZXJhdG9yLnYxLldvcmtlckhvc3QiK4q1GBJtYW5hZ2Vfd29ya2VyX2hvc3SitRgRd29ya2VyLWhvc3QuZHJhaW4SkQEKEFJlc3VtZVdvcmtlckhvc3QSLS5zdXBlcnRhZy5vcGVyYXRvci52MS5SZXN1bWVXb3JrZXJIb3N0UmVxdWVzdBogLnN1cGVydGFnLm9wZXJhdG9yLnYxLldvcmtlckhvc3QiLIq1GBJtYW5hZ2Vfd29ya2VyX2hvc3SitRgSd29ya2VyLWhvc3QucmVzdW1lEpgBCg5CaW5kV29ya2VySG9zdBIrLnN1cGVydGFnLm9wZXJhdG9yLnYxLkJpbmRXb3JrZXJIb3N0UmVxdWVzdBosLnN1cGVydGFnLm9wZXJhdG9yLnYxLkJpbmRXb3JrZXJIb3N0UmVzcG9uc2UiK4q1GBBiaW5kX3dvcmtlcl9ob3N0orUYE3RhZy53b3JrZXItaG9zdC5hZGQSoQEKEFVuYmluZFdvcmtlckhvc3QSLS5zdXBlcnRhZy5vcGVyYXRvci52MS5VbmJpbmRXb3JrZXJIb3N0UmVxdWVzdBouLnN1cGVydGFnLm9wZXJhdG9yLnYxLlVuYmluZFdvcmtlckhvc3RSZXNwb25zZSIuirUYEGJpbmRfd29ya2VyX2hvc3SitRgWdGFnLndvcmtlci1ob3N0LnJlbW92ZRKQAQoNQ3JlYXRlQXV0aEtleRIqLnN1cGVydGFnLm9wZXJhdG9yLnYxLkNyZWF0ZUF1dGhLZXlSZXF1ZXN0Gisuc3VwZXJ0YWcub3BlcmF0b3IudjEuQ3JlYXRlQXV0aEtleVJlc3BvbnNlIiaKtRgPbWFuYWdlX2F1dGhfa2V5orUYD2F1dGgta2V5LmNyZWF0ZRJ7CgxMaXN0QXV0aEtleXMSKS5zdXBlcnRhZy5vcGVyYXRvci52MS5MaXN0QXV0aEtleXNSZXF1ZXN0Giouc3VwZXJ0YWcub3BlcmF0b3IudjEuTGlzdEF1dGhLZXlzUmVzcG9uc2UiFJACAYq1GA1yZWFkX2F1dGhfa2V5EmoKCkdldEF1dGhLZXkSJy5zdXBlcnRhZy5vcGVyYXRvci52MS5HZXRBdXRoS2V5UmVxdWVzdBodLnN1cGVydGFnLm9wZXJhdG9yLnYxLkF1dGhLZXkiFJACAYq1GA1yZWFkX2F1dGhfa2V5EoIBCg1SZXZva2VBdXRoS2V5Eiouc3VwZXJ0YWcub3BlcmF0b3IudjEuUmV2b2tlQXV0aEtleVJlcXVlc3QaHS5zdXBlcnRhZy5vcGVyYXRvci52MS5BdXRoS2V5IiaKtRgPbWFuYWdlX2F1dGhfa2V5orUYD2F1dGgta2V5LnJldm9rZUJOWkxnaXRodWIuY29tL2F0ZW1hZ3Vlci9zdXBlcnRhZy9wYWNrYWdlcy9vcGVyYXRvci1hcGkvZ28vb3BlcmF0b3J2MTtvcGVyYXRvcnYxYgZwcm90bzM", [file_google_protobuf_struct, file_google_protobuf_timestamp, file_supertag_operator_v1_common, file_supertag_operator_v1_options]);
+  fileDesc("Ch9zdXBlcnRhZy9vcGVyYXRvci92MS9ob3N0LnByb3RvEhRzdXBlcnRhZy5vcGVyYXRvci52MSI/ChZMaXN0V29ya2VySG9zdHNSZXF1ZXN0EhEKCXBhZ2Vfc2l6ZRgBIAEoBRISCgpwYWdlX3Rva2VuGAIgASgJImoKF0xpc3RXb3JrZXJIb3N0c1Jlc3BvbnNlEjYKDHdvcmtlcl9ob3N0cxgBIAMoCzIgLnN1cGVydGFnLm9wZXJhdG9yLnYxLldvcmtlckhvc3QSFwoPbmV4dF9wYWdlX3Rva2VuGAIgASgJIiIKFEdldFdvcmtlckhvc3RSZXF1ZXN0EgoKAmlkGAEgASgJIiUKF0Vucm9sbFdvcmtlckhvc3RSZXF1ZXN0EgoKAmlkGAEgASgJIlUKIVJvdGF0ZVdvcmtlckhvc3RDcmVkZW50aWFsUmVxdWVzdBIKCgJpZBgBIAEoCRIkChxleHBlY3RlZF9jcmVkZW50aWFsX3JldmlzaW9uGAIgASgDIi8KIVJldm9rZVdvcmtlckhvc3RDcmVkZW50aWFsUmVxdWVzdBIKCgJpZBgBIAEoCSIkChZEcmFpbldvcmtlckhvc3RSZXF1ZXN0EgoKAmlkGAEgASgJIiUKF1Jlc3VtZVdvcmtlckhvc3RSZXF1ZXN0EgoKAmlkGAEgASgJIj4KFUpvaW5Xb3JrZXJIb3N0UmVxdWVzdBIMCgRuYW1lGAEgASgJEhcKD2lkZW1wb3RlbmN5X2tleRgCIAEoCSKLAQoWSm9pbldvcmtlckhvc3RSZXNwb25zZRI+CgpjcmVkZW50aWFsGAEgASgLMiouc3VwZXJ0YWcub3BlcmF0b3IudjEuV29ya2VySG9zdENyZWRlbnRpYWwSEAoIYXV0aF9rZXkYAiABKAkSDAoEdGFncxgDIAMoCRIRCgllcGhlbWVyYWwYBCABKAgiPAoVQmluZFdvcmtlckhvc3RSZXF1ZXN0EgsKA3RhZxgBIAEoCRIWCg53b3JrZXJfaG9zdF9pZBgCIAEoCSJcChZCaW5kV29ya2VySG9zdFJlc3BvbnNlEgsKA3RhZxgBIAEoCRIOCgZ0YWdfaWQYAiABKAkSFAoMd29ya2VyX2hvc3RzGAMgAygJEg8KB2NoYW5nZWQYBCABKAgiPgoXVW5iaW5kV29ya2VySG9zdFJlcXVlc3QSCwoDdGFnGAEgASgJEhYKDndvcmtlcl9ob3N0X2lkGAIgASgJIl4KGFVuYmluZFdvcmtlckhvc3RSZXNwb25zZRILCgN0YWcYASABKAkSDgoGdGFnX2lkGAIgASgJEhQKDHdvcmtlcl9ob3N0cxgDIAMoCRIPCgdjaGFuZ2VkGAQgASgIImcKFENyZWF0ZUF1dGhLZXlSZXF1ZXN0EgwKBG5hbWUYASABKAkSDAoEdGFncxgCIAMoCRIOCgZsYWJlbHMYAyADKAkSEAoIcmV1c2FibGUYBCABKAgSEQoJZXBoZW1lcmFsGAUgASgIIlgKFUNyZWF0ZUF1dGhLZXlSZXNwb25zZRIvCghhdXRoX2tleRgBIAEoCzIdLnN1cGVydGFnLm9wZXJhdG9yLnYxLkF1dGhLZXkSDgoGc2VjcmV0GAIgASgJIjwKE0xpc3RBdXRoS2V5c1JlcXVlc3QSEQoJcGFnZV9zaXplGAEgASgFEhIKCnBhZ2VfdG9rZW4YAiABKAkiYQoUTGlzdEF1dGhLZXlzUmVzcG9uc2USMAoJYXV0aF9rZXlzGAEgAygLMh0uc3VwZXJ0YWcub3BlcmF0b3IudjEuQXV0aEtleRIXCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAkiIQoRR2V0QXV0aEtleVJlcXVlc3QSDAoEbmFtZRgBIAEoCSIkChRSZXZva2VBdXRoS2V5UmVxdWVzdBIMCgRuYW1lGAEgASgJIq4JCgpXb3JrZXJIb3N0EjAKCG1ldGFkYXRhGAEgASgLMh4uc3VwZXJ0YWcub3BlcmF0b3IudjEuTWV0YWRhdGESEAoIZHJhaW5pbmcYAiABKAgSNAoFcGhhc2UYAyABKA4yJS5zdXBlcnRhZy5vcGVyYXRvci52MS5Xb3JrZXJIb3N0UGhhc2USMwoKZGlza19zcGFjZRgEIAEoCzIfLnN1cGVydGFnLm9wZXJhdG9yLnYxLkRpc2tTcGFjZRIRCgllcGhlbWVyYWwYBSABKAgSOAoHc3RvcmFnZRgGIAEoCzInLnN1cGVydGFnLm9wZXJhdG9yLnYxLldvcmtlckhvc3RTdG9yYWdlEhAKCGF1dGhfa2V5GAcgASgJEhsKE2NyZWRlbnRpYWxfcmV2aXNpb24YCCABKAMSHQoVY29ubmVjdGlvbl9nZW5lcmF0aW9uGAkgASgDEkUKEWNvbm5lY3Rpb25fc3RhdHVzGAogASgOMiouc3VwZXJ0YWcub3BlcmF0b3IudjEuV29ya2VySG9zdENvbm5lY3Rpb24SEgoKd29ya2xldF9pZBgLIAEoCRIdChBwcm90b2NvbF92ZXJzaW9uGAwgASgFSACIAQESJQoYZHVyYWJsZV9wcm90b2NvbF92ZXJzaW9uGA0gASgFSAGIAQESJQoYY29udHJvbF9wcm90b2NvbF92ZXJzaW9uGA4gASgFSAKIAQESKAoHd29ya2VycxgPIAMoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSEgoKd29ya3NwYWNlcxgQIAMoCRIOCgZsYWJlbHMYESADKAkSFgoOZ3JhbnRlZF9sYWJlbHMYEiADKAkSDQoFcmVhZHkYEyABKAgSOQoVbGFzdF9hdXRoZW50aWNhdGVkX2F0GBQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIjChtmYWlsZWRfYXV0aGVudGljYXRpb25fY291bnQYFSABKAUSQgoebGFzdF9hdXRoZW50aWNhdGlvbl9mYWlsdXJlX2F0GBYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIwCgxsYXN0X3NlZW5fYXQYFyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjAKDGNvbm5lY3RlZF9hdBgYIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASMwoPZGlzY29ubmVjdGVkX2F0GBkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgpyZXZva2VkX2F0GBogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIZChFyZXZvY2F0aW9uX3JlYXNvbhgbIAEoCRIXCg9hY3RpdmVfYXR0ZW1wdHMYHCABKAUSEAoIY2FwYWNpdHkYHSABKAUSFwoPYXZhaWxhYmxlX3Nsb3RzGB4gASgFQhMKEV9wcm90b2NvbF92ZXJzaW9uQhsKGV9kdXJhYmxlX3Byb3RvY29sX3ZlcnNpb25CGwoZX2NvbnRyb2xfcHJvdG9jb2xfdmVyc2lvbiI0CglEaXNrU3BhY2USEgoKZnJlZV9ieXRlcxgBIAEoAxITCgt0b3RhbF9ieXRlcxgCIAEoAyJBChFXb3JrZXJIb3N0U3RvcmFnZRIRCglzYW5kYm94ZXMYASADKAkSGQoRcGxhY2VtZW50X3Vua25vd24YAiABKAgibAoUV29ya2VySG9zdENyZWRlbnRpYWwSFgoOd29ya2VyX2hvc3RfaWQYASABKAkSLQoJaXNzdWVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBINCgV0b2tlbhgDIAEoCSLYAgoHQXV0aEtleRIwCghtZXRhZGF0YRgBIAEoCzIeLnN1cGVydGFnLm9wZXJhdG9yLnYxLk1ldGFkYXRhEgwKBHRhZ3MYAiADKAkSDgoGbGFiZWxzGAMgAygJEhAKCHJldXNhYmxlGAQgASgIEhEKCWVwaGVtZXJhbBgFIAEoCBIxCgVwaGFzZRgGIAEoDjIiLnN1cGVydGFnLm9wZXJhdG9yLnYxLkF1dGhLZXlQaGFzZRIuCgpleHBpcmVzX2F0GAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIrCgd1c2VkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIYChByZWRlbXB0aW9uX2NvdW50GAkgASgFEi4KCnJldm9rZWRfYXQYCiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wKtQBCg9Xb3JrZXJIb3N0UGhhc2USIQodV09SS0VSX0hPU1RfUEhBU0VfVU5TUEVDSUZJRUQQABIfChtXT1JLRVJfSE9TVF9QSEFTRV9DT05ORUNURUQQARIeChpXT1JLRVJfSE9TVF9QSEFTRV9EUkFJTklORxACEhsKF1dPUktFUl9IT1NUX1BIQVNFX1JFQURZEAMSHQoZV09SS0VSX0hPU1RfUEhBU0VfUkVWT0tFRBAEEiEKHVdPUktFUl9IT1NUX1BIQVNFX1VOUkVBQ0hBQkxFEAUqjQEKFFdvcmtlckhvc3RDb25uZWN0aW9uEiYKIldPUktFUl9IT1NUX0NPTk5FQ1RJT05fVU5TUEVDSUZJRUQQABIkCiBXT1JLRVJfSE9TVF9DT05ORUNUSU9OX0NPTk5FQ1RFRBABEicKI1dPUktFUl9IT1NUX0NPTk5FQ1RJT05fRElTQ09OTkVDVEVEEAIqmgEKDEF1dGhLZXlQaGFzZRIeChpBVVRIX0tFWV9QSEFTRV9VTlNQRUNJRklFRBAAEhkKFUFVVEhfS0VZX1BIQVNFX0FDVElWRRABEhcKE0FVVEhfS0VZX1BIQVNFX1VTRUQQAhIaChZBVVRIX0tFWV9QSEFTRV9FWFBJUkVEEAMSGgoWQVVUSF9LRVlfUEhBU0VfUkVWT0tFRBAEMsAQCgtIb3N0U2VydmljZRKHAQoPTGlzdFdvcmtlckhvc3RzEiwuc3VwZXJ0YWcub3BlcmF0b3IudjEuTGlzdFdvcmtlckhvc3RzUmVxdWVzdBotLnN1cGVydGFnLm9wZXJhdG9yLnYxLkxpc3RXb3JrZXJIb3N0c1Jlc3BvbnNlIheQAgGKtRgQcmVhZF93b3JrZXJfaG9zdBJ2Cg1HZXRXb3JrZXJIb3N0Eiouc3VwZXJ0YWcub3BlcmF0b3IudjEuR2V0V29ya2VySG9zdFJlcXVlc3QaIC5zdXBlcnRhZy5vcGVyYXRvci52MS5Xb3JrZXJIb3N0IheQAgGKtRgQcmVhZF93b3JrZXJfaG9zdBKbAQoQRW5yb2xsV29ya2VySG9zdBItLnN1cGVydGFnLm9wZXJhdG9yLnYxLkVucm9sbFdvcmtlckhvc3RSZXF1ZXN0Giouc3VwZXJ0YWcub3BlcmF0b3IudjEuV29ya2VySG9zdENyZWRlbnRpYWwiLIq1GBJtYW5hZ2Vfd29ya2VyX2hvc3SitRgSd29ya2VyLWhvc3QuZW5yb2xsEsUBChpSb3RhdGVXb3JrZXJIb3N0Q3JlZGVudGlhbBI3LnN1cGVydGFnLm9wZXJhdG9yLnYxLlJvdGF0ZVdvcmtlckhvc3RDcmVkZW50aWFsUmVxdWVzdBoqLnN1cGVydGFnLm9wZXJhdG9yLnYxLldvcmtlckhvc3RDcmVkZW50aWFsIkKKtRgdbWFuYWdlX3dvcmtlcl9ob3N0X2NyZWRlbnRpYWyitRgdd29ya2VyLWhvc3QuY3JlZGVudGlhbC5yb3RhdGUSvwEKGlJldm9rZVdvcmtlckhvc3RDcmVkZW50aWFsEjcuc3VwZXJ0YWcub3BlcmF0b3IudjEuUmV2b2tlV29ya2VySG9zdENyZWRlbnRpYWxSZXF1ZXN0GiAuc3VwZXJ0YWcub3BlcmF0b3IudjEuV29ya2VySG9zdCJGirUYHW1hbmFnZV93b3JrZXJfaG9zdF9jcmVkZW50aWFsorUYHXdvcmtlci1ob3N0LmNyZWRlbnRpYWwucmV2b2tl4LUYARKSAQoPRHJhaW5Xb3JrZXJIb3N0Eiwuc3VwZXJ0YWcub3BlcmF0b3IudjEuRHJhaW5Xb3JrZXJIb3N0UmVxdWVzdBogLnN1cGVydGFnLm9wZXJhdG9yLnYxLldvcmtlckhvc3QiL4q1GBJtYW5hZ2Vfd29ya2VyX2hvc3SitRgRd29ya2VyLWhvc3QuZHJhaW7gtRgBEpUBChBSZXN1bWVXb3JrZXJIb3N0Ei0uc3VwZXJ0YWcub3BlcmF0b3IudjEuUmVzdW1lV29ya2VySG9zdFJlcXVlc3QaIC5zdXBlcnRhZy5vcGVyYXRvci52MS5Xb3JrZXJIb3N0IjCKtRgSbWFuYWdlX3dvcmtlcl9ob3N0orUYEndvcmtlci1ob3N0LnJlc3VtZeC1GAESmQEKDkpvaW5Xb3JrZXJIb3N0Eisuc3VwZXJ0YWcub3BlcmF0b3IudjEuSm9pbldvcmtlckhvc3RSZXF1ZXN0Giwuc3VwZXJ0YWcub3BlcmF0b3IudjEuSm9pbldvcmtlckhvc3RSZXNwb25zZSIsirUYEGpvaW5fd29ya2VyX2hvc3SitRgQd29ya2VyLWhvc3Quam9pbti1GAESmAEKDkJpbmRXb3JrZXJIb3N0Eisuc3VwZXJ0YWcub3BlcmF0b3IudjEuQmluZFdvcmtlckhvc3RSZXF1ZXN0Giwuc3VwZXJ0YWcub3BlcmF0b3IudjEuQmluZFdvcmtlckhvc3RSZXNwb25zZSIrirUYEGJpbmRfd29ya2VyX2hvc3SitRgTdGFnLndvcmtlci1ob3N0LmFkZBKhAQoQVW5iaW5kV29ya2VySG9zdBItLnN1cGVydGFnLm9wZXJhdG9yLnYxLlVuYmluZFdvcmtlckhvc3RSZXF1ZXN0Gi4uc3VwZXJ0YWcub3BlcmF0b3IudjEuVW5iaW5kV29ya2VySG9zdFJlc3BvbnNlIi6KtRgQYmluZF93b3JrZXJfaG9zdKK1GBZ0YWcud29ya2VyLWhvc3QucmVtb3ZlEpABCg1DcmVhdGVBdXRoS2V5Eiouc3VwZXJ0YWcub3BlcmF0b3IudjEuQ3JlYXRlQXV0aEtleVJlcXVlc3QaKy5zdXBlcnRhZy5vcGVyYXRvci52MS5DcmVhdGVBdXRoS2V5UmVzcG9uc2UiJoq1GA9tYW5hZ2VfYXV0aF9rZXmitRgPYXV0aC1rZXkuY3JlYXRlEnsKDExpc3RBdXRoS2V5cxIpLnN1cGVydGFnLm9wZXJhdG9yLnYxLkxpc3RBdXRoS2V5c1JlcXVlc3QaKi5zdXBlcnRhZy5vcGVyYXRvci52MS5MaXN0QXV0aEtleXNSZXNwb25zZSIUkAIBirUYDXJlYWRfYXV0aF9rZXkSagoKR2V0QXV0aEtleRInLnN1cGVydGFnLm9wZXJhdG9yLnYxLkdldEF1dGhLZXlSZXF1ZXN0Gh0uc3VwZXJ0YWcub3BlcmF0b3IudjEuQXV0aEtleSIUkAIBirUYDXJlYWRfYXV0aF9rZXkSggEKDVJldm9rZUF1dGhLZXkSKi5zdXBlcnRhZy5vcGVyYXRvci52MS5SZXZva2VBdXRoS2V5UmVxdWVzdBodLnN1cGVydGFnLm9wZXJhdG9yLnYxLkF1dGhLZXkiJoq1GA9tYW5hZ2VfYXV0aF9rZXmitRgPYXV0aC1rZXkucmV2b2tlQk5aTGdpdGh1Yi5jb20vYXRlbWFndWVyL3N1cGVydGFnL3BhY2thZ2VzL29wZXJhdG9yLWFwaS9nby9vcGVyYXRvcnYxO29wZXJhdG9ydjFiBnByb3RvMw", [file_google_protobuf_struct, file_google_protobuf_timestamp, file_supertag_operator_v1_common, file_supertag_operator_v1_options]);
 
 /**
  * @generated from message supertag.operator.v1.ListWorkerHostsRequest
@@ -194,6 +194,77 @@ export const ResumeWorkerHostRequestSchema: GenMessage<ResumeWorkerHostRequest> 
   messageDesc(file_supertag_operator_v1_host, 7);
 
 /**
+ * @generated from message supertag.operator.v1.JoinWorkerHostRequest
+ */
+export type JoinWorkerHostRequest = Message<"supertag.operator.v1.JoinWorkerHostRequest"> & {
+  /**
+   * The ID the host asks for, such as the machine's hostname: 1 to 63
+   * lowercase letters, digits, dots, hyphens or underscores, starting with a
+   * letter or digit.
+   *
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * Makes a retry safe, as described on `JoinWorkerHost`. A key is 1 to 200
+   * characters without whitespace or control characters. Empty enrolls a new
+   * host on every call.
+   *
+   * @generated from field: string idempotency_key = 2;
+   */
+  idempotencyKey: string;
+};
+
+/**
+ * Describes the message supertag.operator.v1.JoinWorkerHostRequest.
+ * Use `create(JoinWorkerHostRequestSchema)` to create a new message.
+ */
+export const JoinWorkerHostRequestSchema: GenMessage<JoinWorkerHostRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_host, 8);
+
+/**
+ * @generated from message supertag.operator.v1.JoinWorkerHostResponse
+ */
+export type JoinWorkerHostResponse = Message<"supertag.operator.v1.JoinWorkerHostResponse"> & {
+  /**
+   * The new host's first credential.
+   *
+   * @generated from field: supertag.operator.v1.WorkerHostCredential credential = 1;
+   */
+  credential?: WorkerHostCredential | undefined;
+
+  /**
+   * The name of the Auth Key it redeemed.
+   *
+   * @generated from field: string auth_key = 2;
+   */
+  authKey: string;
+
+  /**
+   * The Tags it is bound to, by name.
+   *
+   * @generated from field: repeated string tags = 3;
+   */
+  tags: string[];
+
+  /**
+   * It joined with an ephemeral Auth Key, so it is revoked after it
+   * disconnects with no open Task Attempts.
+   *
+   * @generated from field: bool ephemeral = 4;
+   */
+  ephemeral: boolean;
+};
+
+/**
+ * Describes the message supertag.operator.v1.JoinWorkerHostResponse.
+ * Use `create(JoinWorkerHostResponseSchema)` to create a new message.
+ */
+export const JoinWorkerHostResponseSchema: GenMessage<JoinWorkerHostResponse> = /*@__PURE__*/
+  messageDesc(file_supertag_operator_v1_host, 9);
+
+/**
  * @generated from message supertag.operator.v1.BindWorkerHostRequest
  */
 export type BindWorkerHostRequest = Message<"supertag.operator.v1.BindWorkerHostRequest"> & {
@@ -217,7 +288,7 @@ export type BindWorkerHostRequest = Message<"supertag.operator.v1.BindWorkerHost
  * Use `create(BindWorkerHostRequestSchema)` to create a new message.
  */
 export const BindWorkerHostRequestSchema: GenMessage<BindWorkerHostRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_operator_v1_host, 8);
+  messageDesc(file_supertag_operator_v1_host, 10);
 
 /**
  * @generated from message supertag.operator.v1.BindWorkerHostResponse
@@ -257,7 +328,7 @@ export type BindWorkerHostResponse = Message<"supertag.operator.v1.BindWorkerHos
  * Use `create(BindWorkerHostResponseSchema)` to create a new message.
  */
 export const BindWorkerHostResponseSchema: GenMessage<BindWorkerHostResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_operator_v1_host, 9);
+  messageDesc(file_supertag_operator_v1_host, 11);
 
 /**
  * @generated from message supertag.operator.v1.UnbindWorkerHostRequest
@@ -283,7 +354,7 @@ export type UnbindWorkerHostRequest = Message<"supertag.operator.v1.UnbindWorker
  * Use `create(UnbindWorkerHostRequestSchema)` to create a new message.
  */
 export const UnbindWorkerHostRequestSchema: GenMessage<UnbindWorkerHostRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_operator_v1_host, 10);
+  messageDesc(file_supertag_operator_v1_host, 12);
 
 /**
  * @generated from message supertag.operator.v1.UnbindWorkerHostResponse
@@ -323,7 +394,7 @@ export type UnbindWorkerHostResponse = Message<"supertag.operator.v1.UnbindWorke
  * Use `create(UnbindWorkerHostResponseSchema)` to create a new message.
  */
 export const UnbindWorkerHostResponseSchema: GenMessage<UnbindWorkerHostResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_operator_v1_host, 11);
+  messageDesc(file_supertag_operator_v1_host, 13);
 
 /**
  * @generated from message supertag.operator.v1.CreateAuthKeyRequest
@@ -381,7 +452,7 @@ export type CreateAuthKeyRequest = Message<"supertag.operator.v1.CreateAuthKeyRe
  * Use `create(CreateAuthKeyRequestSchema)` to create a new message.
  */
 export const CreateAuthKeyRequestSchema: GenMessage<CreateAuthKeyRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_operator_v1_host, 12);
+  messageDesc(file_supertag_operator_v1_host, 14);
 
 /**
  * @generated from message supertag.operator.v1.CreateAuthKeyResponse
@@ -408,7 +479,7 @@ export type CreateAuthKeyResponse = Message<"supertag.operator.v1.CreateAuthKeyR
  * Use `create(CreateAuthKeyResponseSchema)` to create a new message.
  */
 export const CreateAuthKeyResponseSchema: GenMessage<CreateAuthKeyResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_operator_v1_host, 13);
+  messageDesc(file_supertag_operator_v1_host, 15);
 
 /**
  * @generated from message supertag.operator.v1.ListAuthKeysRequest
@@ -434,7 +505,7 @@ export type ListAuthKeysRequest = Message<"supertag.operator.v1.ListAuthKeysRequ
  * Use `create(ListAuthKeysRequestSchema)` to create a new message.
  */
 export const ListAuthKeysRequestSchema: GenMessage<ListAuthKeysRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_operator_v1_host, 14);
+  messageDesc(file_supertag_operator_v1_host, 16);
 
 /**
  * @generated from message supertag.operator.v1.ListAuthKeysResponse
@@ -460,7 +531,7 @@ export type ListAuthKeysResponse = Message<"supertag.operator.v1.ListAuthKeysRes
  * Use `create(ListAuthKeysResponseSchema)` to create a new message.
  */
 export const ListAuthKeysResponseSchema: GenMessage<ListAuthKeysResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_operator_v1_host, 15);
+  messageDesc(file_supertag_operator_v1_host, 17);
 
 /**
  * @generated from message supertag.operator.v1.GetAuthKeyRequest
@@ -479,7 +550,7 @@ export type GetAuthKeyRequest = Message<"supertag.operator.v1.GetAuthKeyRequest"
  * Use `create(GetAuthKeyRequestSchema)` to create a new message.
  */
 export const GetAuthKeyRequestSchema: GenMessage<GetAuthKeyRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_operator_v1_host, 16);
+  messageDesc(file_supertag_operator_v1_host, 18);
 
 /**
  * @generated from message supertag.operator.v1.RevokeAuthKeyRequest
@@ -498,7 +569,7 @@ export type RevokeAuthKeyRequest = Message<"supertag.operator.v1.RevokeAuthKeyRe
  * Use `create(RevokeAuthKeyRequestSchema)` to create a new message.
  */
 export const RevokeAuthKeyRequestSchema: GenMessage<RevokeAuthKeyRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_operator_v1_host, 17);
+  messageDesc(file_supertag_operator_v1_host, 19);
 
 /**
  * One Worker Host, as the Control Plane last recorded it.
@@ -742,7 +813,7 @@ export type WorkerHost = Message<"supertag.operator.v1.WorkerHost"> & {
  * Use `create(WorkerHostSchema)` to create a new message.
  */
 export const WorkerHostSchema: GenMessage<WorkerHost> = /*@__PURE__*/
-  messageDesc(file_supertag_operator_v1_host, 18);
+  messageDesc(file_supertag_operator_v1_host, 20);
 
 /**
  * Space on one filesystem, in bytes.
@@ -770,7 +841,7 @@ export type DiskSpace = Message<"supertag.operator.v1.DiskSpace"> & {
  * Use `create(DiskSpaceSchema)` to create a new message.
  */
 export const DiskSpaceSchema: GenMessage<DiskSpace> = /*@__PURE__*/
-  messageDesc(file_supertag_operator_v1_host, 19);
+  messageDesc(file_supertag_operator_v1_host, 21);
 
 /**
  * Where a Worker Host's Task Attempts kept their files.
@@ -800,7 +871,7 @@ export type WorkerHostStorage = Message<"supertag.operator.v1.WorkerHostStorage"
  * Use `create(WorkerHostStorageSchema)` to create a new message.
  */
 export const WorkerHostStorageSchema: GenMessage<WorkerHostStorage> = /*@__PURE__*/
-  messageDesc(file_supertag_operator_v1_host, 20);
+  messageDesc(file_supertag_operator_v1_host, 22);
 
 /**
  * A Worker Host credential, returned once when it is issued.
@@ -836,7 +907,7 @@ export type WorkerHostCredential = Message<"supertag.operator.v1.WorkerHostCrede
  * Use `create(WorkerHostCredentialSchema)` to create a new message.
  */
 export const WorkerHostCredentialSchema: GenMessage<WorkerHostCredential> = /*@__PURE__*/
-  messageDesc(file_supertag_operator_v1_host, 21);
+  messageDesc(file_supertag_operator_v1_host, 23);
 
 /**
  * One Auth Key, without its secret.
@@ -922,7 +993,7 @@ export type AuthKey = Message<"supertag.operator.v1.AuthKey"> & {
  * Use `create(AuthKeySchema)` to create a new message.
  */
 export const AuthKeySchema: GenMessage<AuthKey> = /*@__PURE__*/
-  messageDesc(file_supertag_operator_v1_host, 22);
+  messageDesc(file_supertag_operator_v1_host, 24);
 
 /**
  * A Worker Host's phase. Revocation wins over everything else, then a lost
@@ -1062,24 +1133,26 @@ export const AuthKeyPhaseSchema: GenEnum<AuthKeyPhase> = /*@__PURE__*/
  * worker-host`, `resume worker-host`, `rotate worker-host-credential`,
  * `revoke worker-host-credential`, `update tag --add-worker-host` and
  * `--remove-worker-host`, `create auth-key`, `list auth-key`, `get auth-key`
- * and `revoke auth-key`.
+ * and `revoke auth-key`, and joining with an Auth Key in `supertag connect
+ * worklet` and `supertag up`.
  *
  * A Worker Host is a machine that runs Tasks for the Tags bound to it. Its
  * Worklet connects to the Control Plane with the host's credential. An
  * operator enrolls a host and receives its first credential, or creates an
- * Auth Key that a machine redeems to join by itself. Redeeming an Auth Key,
- * and the calls a host makes with its own credential, such as draining itself
- * before `supertag down`, are not part of this service; they keep the
- * transport the host uses.
+ * Auth Key that a machine redeems with `JoinWorkerHost` to join by itself.
  *
  * Every view is built from what each host last reported to the Control
  * Plane, never a live probe of the machine. A Control Plane that runs its own
  * Worklet in process, without a Worker Host record, lists that Worklet's host
  * too, and its ID cannot be enrolled.
  *
- * Access. The admin token and Operator Tokens may call every RPC; a scoped
- * coordination credential is refused with `PermissionDenied`. Every caller
- * sees every Worker Host and Auth Key.
+ * Access. The admin token and Operator Tokens may call every RPC except
+ * `JoinWorkerHost`, which takes an Auth Key instead; a scoped coordination
+ * credential is refused with `PermissionDenied`. Every caller sees every
+ * Worker Host and Auth Key. A Worker Host's own credential may drain, resume
+ * and revoke that host, as `supertag up`, `supertag down` and `supertag
+ * revoke worker-host-credential` do without operator access, and may call
+ * nothing else.
  *
  * Every RPC that names a Worker Host takes its ID, and fails with
  * `InvalidArgument` for an empty one and, unless it says otherwise,
@@ -1156,11 +1229,14 @@ export const HostService: GenService<{
     output: typeof WorkerHostCredentialSchema;
   },
   /**
-   * Revokes a Worker Host, as `supertag revoke worker-host-credential` does
-   * with operator access. Its credential stops working at once, its
-   * connection ends, and it takes no new Tasks. A revoked host stays readable
-   * and its ID is never enrolled again. Revoking a revoked host changes
-   * nothing and returns it.
+   * Revokes a Worker Host, as `supertag revoke worker-host-credential` does.
+   * Its credential stops working at once, its connection ends, and it takes
+   * no new Tasks. A revoked host stays readable and its ID is never enrolled
+   * again. Revoking a revoked host changes nothing and returns it.
+   *
+   * A host may revoke itself with its own credential, and its
+   * `revocation_reason` is then `SelfRevoked`. Its credential no longer
+   * works afterward, so a repeat fails with `Unauthenticated`.
    *
    * @generated from rpc supertag.operator.v1.HostService.RevokeWorkerHostCredential
    */
@@ -1172,7 +1248,9 @@ export const HostService: GenService<{
   /**
    * Drains a Worker Host, as `supertag drain worker-host` does: it finishes
    * the work it accepted and takes no new Tasks until it is resumed. Draining
-   * a draining host changes nothing. The host returned has no `storage`.
+   * a draining host changes nothing. The host returned has no `storage`. A
+   * host may drain itself with its own credential, as `supertag up` and
+   * `supertag down` do before they restart or stop a host service.
    *
    * @generated from rpc supertag.operator.v1.HostService.DrainWorkerHost
    */
@@ -1184,7 +1262,9 @@ export const HostService: GenService<{
   /**
    * Ends a drain, as `supertag resume worker-host` does: the host takes new
    * Tasks again. Resuming a host that is not draining changes nothing. The
-   * host returned has no `storage`.
+   * host returned has no `storage`. A host may resume itself with its own
+   * credential, as a host service does when it starts after `supertag up` or
+   * `supertag down` drained it.
    *
    * @generated from rpc supertag.operator.v1.HostService.ResumeWorkerHost
    */
@@ -1192,6 +1272,32 @@ export const HostService: GenService<{
     methodKind: "unary";
     input: typeof ResumeWorkerHostRequestSchema;
     output: typeof WorkerHostSchema;
+  },
+  /**
+   * Joins a machine as a new Worker Host by redeeming the Auth Key sent as
+   * the bearer token, as `supertag connect worklet --auth-key` does. The
+   * host is enrolled under `name`, or `NAME-2`, `NAME-3` and so on when that
+   * ID is taken, bound to the key's Tags and given its labels. It returns the
+   * host's first credential, which only this call returns.
+   *
+   * A repeat with the same Auth Key and `idempotency_key` enrolls nothing:
+   * it returns the host the first call enrolled, whatever its `name`, with a
+   * new credential that replaces the one the first call returned, until that
+   * host first connects. After that, or once the host is revoked, a repeat
+   * fails with `AlreadyExists`. It fails with `Unauthenticated` for an Auth
+   * Key the Control Plane does not know, `PermissionDenied` for a revoked,
+   * expired or used one, `FailedPrecondition` and `ERROR_REASON_CONFLICT`
+   * when one of the key's Tags was deleted, and `InvalidArgument` for a
+   * malformed `name` or `idempotency_key`. A call with an unknown Auth Key is
+   * refused before its request is read and is not recorded in the audit
+   * trail.
+   *
+   * @generated from rpc supertag.operator.v1.HostService.JoinWorkerHost
+   */
+  joinWorkerHost: {
+    methodKind: "unary";
+    input: typeof JoinWorkerHostRequestSchema;
+    output: typeof JoinWorkerHostResponseSchema;
   },
   /**
    * Binds a Worker Host to a Tag, as `supertag update tag --add-worker-host`

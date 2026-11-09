@@ -1,6 +1,7 @@
 import { Code } from "@connectrpc/connect";
 import {
   ArtifactCatalog,
+  AuthKeyRedemptionError,
   type ControlPlane,
   resolveOwnerObjectiveRuntimeActions,
 } from "@supertag/control-plane";
@@ -89,6 +90,7 @@ export function controlPlaneControl(
       | "listWorkerHosts"
       | "messageTag"
       | "objectives"
+      | "redeemAuthKey"
       | "requestTaskCancellation"
       | "revokeAuthKey"
       | "revokeOperatorToken"
@@ -217,6 +219,7 @@ type HostControl = Pick<
   | "revokeWorkerHostCredential"
   | "setWorkerHostDraining"
   | "setTagWorkerHost"
+  | "joinWorkerHost"
   | "createAuthKey"
   | "revokeAuthKey"
 >;
@@ -227,6 +230,7 @@ function workerHostControl(
     | "createAuthKey"
     | "enrollWorkerHost"
     | "listWorkerHosts"
+    | "redeemAuthKey"
     | "revokeAuthKey"
     | "revokeWorkerHostCredential"
     | "rotateWorkerHostCredential"
@@ -266,8 +270,8 @@ function workerHostControl(
         "A revoked Worker Host must be enrolled under a new ID",
       );
     },
-    async revokeWorkerHostCredential(id) {
-      const revoked = await controlPlane.revokeWorkerHostCredential(id);
+    async revokeWorkerHostCredential({ id, reason }) {
+      const revoked = await controlPlane.revokeWorkerHostCredential(id, reason);
       if (revoked === undefined) throw missingHost();
       return revoked;
     },
@@ -301,6 +305,20 @@ function workerHostControl(
         .map((binding) => binding.workerHostId)
         .toSorted();
       return { workerHostIds, changed };
+    },
+    async joinWorkerHost({ authKey, name, idempotencyKey }) {
+      try {
+        return await controlPlane.redeemAuthKey(authKey, name, idempotencyKey);
+      } catch (error) {
+        if (!(error instanceof AuthKeyRedemptionError)) throw error;
+        if (error.reason === "invalid")
+          throw operatorError(Code.Unauthenticated, ErrorReason.UNAUTHENTICATED, error.message);
+        if (error.reason === "tag-missing")
+          throw operatorError(Code.FailedPrecondition, ErrorReason.CONFLICT, error.message);
+        if (error.reason === "joined")
+          throw operatorError(Code.AlreadyExists, ErrorReason.CONFLICT, error.message);
+        throw operatorError(Code.PermissionDenied, ErrorReason.PERMISSION_DENIED, error.message);
+      }
     },
     async createAuthKey(input) {
       try {

@@ -2440,9 +2440,9 @@ export const TaskExplanationKindSchema: GenEnum<TaskExplanationKind> = /*@__PURE
  * its scope names only: any other Objective fails with `PermissionDenied`.
  *
  * Every RPC that names an Objective fails with `InvalidArgument` for an empty
- * `id` and `NotFound` for an Objective that does not exist. Every RPC that
- * changes an Objective fails with `Unavailable` and `ERROR_REASON_DRAINING`
- * while the Control Plane drains. A refusal because of the Objective's state,
+ * `id` and `NotFound` for an Objective that does not exist. A call while the
+ * Control Plane drains fails with `Unavailable` and `ERROR_REASON_DRAINING`.
+ * A refusal because of the Objective's state,
  * such as a stale revision or a cancelled Objective, is `FailedPrecondition`
  * with `ERROR_REASON_CONFLICT`, and the message says why.
  *

@@ -173,6 +173,8 @@ type WatchEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Resumes the stream after this event. It is opaque.
 	ResumeToken string `protobuf:"bytes,1,opt,name=resume_token,json=resumeToken,proto3" json:"resume_token,omitempty"`
+	// What the event is. Exactly one is set.
+	//
 	// Types that are valid to be assigned to Event:
 	//
 	//	*WatchEvent_Change

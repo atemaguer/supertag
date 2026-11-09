@@ -319,6 +319,7 @@ message SurfaceSecretReferences {
 
 // Where a SurfaceAccount manifest takes one secret from. Never the value.
 message SurfaceSecretReference {
+  // Where the secret comes from. A manifest sets exactly one.
   oneof source {
     option (supertag.operator.v1.manifest_oneof) = {required: true};
     // A named secret its caller resolves, such as an entry in the `secrets`

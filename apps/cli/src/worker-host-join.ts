@@ -1,15 +1,15 @@
+import { randomUUID } from "node:crypto";
+import { Code, ConnectError } from "@connectrpc/connect";
 import {
   isAuthKeySecret,
   workerHostNameCandidate,
   workerHostNameFromHostname,
 } from "@supertag/core";
+import type { JoinWorkerHostResponse } from "@supertag/operator-api";
 import { stateDirectory as defaultStateDirectory } from "@supertag/store";
 import type { ControlPlaneTarget } from "./control-plane-client.js";
-import {
-  CONTROL_PLANE_API_VERSION,
-  type WorkerHostCredentialIssuance,
-} from "./control-plane-resources.js";
 import { machineName as machineHostname } from "./machine-name.js";
+import { hostClient, operatorErrorMessage } from "./operator-client.js";
 import { enrollWorkerHostCredential } from "./operator-resources.js";
 import {
   findStoredWorkerHostCredentials,
@@ -48,6 +48,12 @@ export interface WorkletCredentialOptions {
   readonly storeEphemeral?: boolean;
   readonly fetch?: typeof fetch;
 }
+
+/** The codes of a join that never reached the Control Plane, or got no answer in time. */
+const UNREACHED = new Set([Code.Unknown, Code.DeadlineExceeded, Code.Canceled]);
+
+/** Most calls one join makes when the Control Plane gives no answer. */
+const JOIN_ATTEMPTS = 3;
 
 /** Most `NAME-N` IDs tried when an operator enrolls this machine under its hostname. */
 const MAX_OPERATOR_NAME_ATTEMPTS = 20;
@@ -110,14 +116,6 @@ async function storedCredential(
   return found[0];
 }
 
-interface JoinResponse extends WorkerHostCredentialIssuance {
-  readonly status?: {
-    readonly authKey?: string;
-    readonly tags?: readonly string[];
-    readonly ephemeral?: boolean;
-  };
-}
-
 /** A Worker Host credential an Auth Key was redeemed for. */
 export interface RedeemedAuthKey {
   readonly workerHostId: string;
@@ -138,53 +136,40 @@ export async function redeemAuthKey(options: {
   const { authKey, name } = options;
   if (!isAuthKeySecret(authKey))
     throw new Error("The Auth Key is malformed; it starts with stak_ followed by 64 hex digits");
-  const request = options.fetch ?? fetch;
-  let response: Response;
-  try {
-    response = await request(new URL("/api/v1/worker-host-joins", `${options.controlPlane}/`), {
-      method: "POST",
-      headers: { authorization: `Bearer ${authKey}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        apiVersion: CONTROL_PLANE_API_VERSION,
-        kind: "WorkerHostJoin",
-        metadata: { name },
-        spec: {},
-      }),
-      redirect: "error",
-      signal: AbortSignal.timeout(30_000),
-    });
-  } catch (error) {
-    throw new Error(
-      `Could not reach the Control Plane management API at ${options.controlPlane} to join. Set SUPERTAG_CONTROL_PLANE to its management URL.`,
-      { cause: error },
-    );
+  const client = hostClient({
+    url: options.controlPlane,
+    token: authKey,
+    ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+  });
+  // One idempotency key for every attempt, so a retry after a lost answer joins the same host.
+  const idempotencyKey = randomUUID();
+  let joined: JoinWorkerHostResponse | undefined;
+  for (let attempt = 1; joined === undefined; attempt += 1) {
+    try {
+      joined = await client.joinWorkerHost({ name, idempotencyKey });
+    } catch (error) {
+      if (error instanceof ConnectError && !UNREACHED.has(error.code))
+        throw new Error(`Joining with the Auth Key failed: ${operatorErrorMessage(error)}`);
+      if (
+        attempt >= JOIN_ATTEMPTS ||
+        (error instanceof ConnectError && error.code === Code.Canceled)
+      )
+        throw new Error(
+          `Could not reach the Control Plane management API at ${options.controlPlane} to join. Set SUPERTAG_CONTROL_PLANE to its management URL.`,
+          { cause: error },
+        );
+    }
   }
-  const body = (await response.json().catch(() => undefined)) as
-    | (JoinResponse & { readonly message?: unknown })
-    | undefined;
-  if (!response.ok) {
-    const message =
-      typeof body?.message === "string"
-        ? body.message
-        : `Control Plane returned HTTP ${response.status}`;
-    throw new Error(`Joining with the Auth Key failed: ${message}`);
-  }
-  const workerHostId = body?.metadata?.workerHostId;
-  const token = body?.credential?.token;
-  if (
-    body?.apiVersion !== CONTROL_PLANE_API_VERSION ||
-    body.kind !== "WorkerHostCredential" ||
-    typeof workerHostId !== "string" ||
-    typeof token !== "string" ||
-    !token
-  )
+  const workerHostId = joined.credential?.workerHostId;
+  const token = joined.credential?.token;
+  if (!workerHostId || !token)
     throw new Error("Control Plane returned an invalid Worker Host credential");
-  const ephemeral = body.status?.ephemeral === true;
-  const tags = body.status?.tags?.length ? ` for Tags ${body.status.tags.join(", ")}` : "";
+  const ephemeral = joined.ephemeral;
+  const tags = joined.tags.length > 0 ? ` for Tags ${joined.tags.join(", ")}` : "";
   return {
     workerHostId,
     token,
-    tags: body.status?.tags ?? [],
+    tags: joined.tags,
     ephemeral,
     notice: `Joined as ${ephemeral ? "ephemeral " : ""}Worker Host ${workerHostId}${tags}.`,
   };

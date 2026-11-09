@@ -34,7 +34,7 @@ empty page leaves the cursor unchanged. Reads consume nothing and create no deli
 `tagNames`. It needs the admin token or an Operator Token with the `read_mailbox` action. The Team
 is matched by ID first, then by name; a Team that does not exist fails with `NotFound`. The CLI
 exposes it as `supertag list workstream-post --team TEAM`. See
-[Mailbox](../docs/reference/control-plane-api.md#mailbox).
+[MailboxService](../docs/reference/operator-api/mailbox.md).
 
 ## Coordination tools
 

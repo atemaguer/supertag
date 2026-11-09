@@ -937,19 +937,6 @@ export function workerProfileResourcesFromHost(
   }));
 }
 
-export function workerHostCredentialIssuance(
-  workerHostId: string,
-  token: string,
-  issuedAt: string,
-): WorkerHostCredentialIssuance {
-  return {
-    apiVersion: CONTROL_PLANE_API_VERSION,
-    kind: "WorkerHostCredential",
-    metadata: { workerHostId, issuedAt },
-    credential: { token },
-  };
-}
-
 export function resourceList<Item extends { readonly metadata: ResourceMetadata }>(
   items: readonly Item[],
 ): ControlPlaneResourceList<Item> {

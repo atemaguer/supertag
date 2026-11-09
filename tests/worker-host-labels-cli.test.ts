@@ -207,24 +207,15 @@ describe("Worker Host label commands", () => {
     await expect(
       hosts.createAuthKey({ name: "bad-labels", tags: ["trainer"], labels: ["no spaces"] }),
     ).rejects.toThrow("is invalid");
-    const joined = (await (
-      await fetch(`${runtime.url}/api/v1/worker-host-joins`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${issued.secret}`, "content-type": "application/json" },
-        body: JSON.stringify({
-          apiVersion: "supertag/v1",
-          kind: "WorkerHostJoin",
-          metadata: { name: "gpu-1" },
-          spec: {},
-        }),
-      })
-    ).json()) as { credential: { token: string } };
+    const joined = await hostClient({ url: runtime.url, token: issued.secret }).joinWorkerHost({
+      name: "gpu-1",
+    });
     const worklet = new LocalWorklet("gpu-1-worklet", "gpu-1", [new StaticWorker()], {
       labels: ["rack:b"],
     });
     const connection = new WorkletConnection({
       url: `${runtime.url.replace(/^http/u, "ws")}/worklets`,
-      credential: joined.credential.token,
+      credential: joined.credential?.token ?? "",
       worklet,
       durableWorklet: durableTestWorklet(worklet),
       reconnectIntervalMs: 5,

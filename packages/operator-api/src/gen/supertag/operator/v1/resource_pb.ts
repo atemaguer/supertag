@@ -3635,9 +3635,9 @@ export const LarkDomainSchema: GenEnum<LarkDomain> = /*@__PURE__*/
 
 /**
  * The organization's configuration as manifests: `supertag apply -f`, `diff
- * -f`, `get KIND [NAME]`, `describe KIND NAME`, `delete KIND NAME`, the
- * `provision:` entries `supertag up` applies, the starter resources
- * `supertag init` writes, and `create tag`.
+ * -f`, `get`, `describe` and `delete` of a resource, the `provision:`
+ * entries `supertag up` applies, the starter resources `supertag init`
+ * writes, and `create tag`.
  *
  * A manifest declares one resource: `apiVersion: supertag/v1`, `kind`,
  * `metadata.name` and `spec`. `ApplyManifests` and `DiffManifests` take
@@ -3671,15 +3671,15 @@ export const LarkDomainSchema: GenEnum<LarkDomain> = /*@__PURE__*/
  *
  * Every RPC that names a resource takes its kind and name, and fails with
  * `InvalidArgument` for an unset kind or an empty name, and `NotFound` for a
- * resource that does not exist. An RPC that changes state fails with
- * `Unavailable` and `ERROR_REASON_DRAINING` while the Control Plane drains.
+ * resource that does not exist. A call while the Control Plane drains fails
+ * with `Unavailable` and `ERROR_REASON_DRAINING`.
  *
  * @generated from service supertag.operator.v1.ResourceService
  */
 export const ResourceService: GenService<{
   /**
-   * Reads one resource, as `supertag get KIND NAME` and `describe KIND NAME`
-   * show it. A Workspace read this way also reports
+   * Reads one resource, as `supertag get` and `supertag describe` of a named
+   * resource show it. A Workspace read this way also reports
    * `WorkspaceStatus.environments`, which `ListResources` leaves out. A Tag is
    * read by name even once retired; when several retired Tags share the name
    * and no active Tag holds it, the latest retired is returned.
@@ -3698,8 +3698,8 @@ export const ResourceService: GenService<{
     output: typeof ResourceSchema;
   },
   /**
-   * Lists the resources of one kind, as `supertag get KIND` and `supertag
-   * list KIND` show them. Tags, Roles, Permission Sets, Context Sets, Volumes,
+   * Lists the resources of one kind, as `supertag get` and `supertag list` of
+   * a kind show them. Tags, Roles, Permission Sets, Context Sets, Volumes,
    * Workspaces and Surface Accounts come by name; Worker Profiles by Worker
    * Host ID, then in the order each host advertises them. Retired Tags and
    * retired Surface Accounts are left out.
@@ -3795,8 +3795,8 @@ export const ResourceService: GenService<{
     output: typeof ApplyManifestsResponseSchema;
   },
   /**
-   * Deletes or retires one resource, as `supertag delete KIND NAME` does, with
-   * what goes with it. Deletion never erases history: a retired Tag, Role or
+   * Deletes or retires one resource, as `supertag delete` of a resource does,
+   * with what goes with it. Deletion never erases history: a retired Tag, Role or
    * Surface Account keeps its record, and Tasks keep the policy and Workspace
    * they recorded. Deleting also removes the resource's field-manager record
    * and apply-set membership. With `dry_run` it answers the same way and

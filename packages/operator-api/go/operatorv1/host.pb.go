@@ -590,6 +590,137 @@ func (x *ResumeWorkerHostRequest) GetId() string {
 	return ""
 }
 
+type JoinWorkerHostRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The ID the host asks for, such as the machine's hostname: 1 to 63
+	// lowercase letters, digits, dots, hyphens or underscores, starting with a
+	// letter or digit.
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Makes a retry safe, as described on `JoinWorkerHost`. A key is 1 to 200
+	// characters without whitespace or control characters. Empty enrolls a new
+	// host on every call.
+	IdempotencyKey string `protobuf:"bytes,2,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *JoinWorkerHostRequest) Reset() {
+	*x = JoinWorkerHostRequest{}
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JoinWorkerHostRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JoinWorkerHostRequest) ProtoMessage() {}
+
+func (x *JoinWorkerHostRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JoinWorkerHostRequest.ProtoReflect.Descriptor instead.
+func (*JoinWorkerHostRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *JoinWorkerHostRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *JoinWorkerHostRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+type JoinWorkerHostResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The new host's first credential.
+	Credential *WorkerHostCredential `protobuf:"bytes,1,opt,name=credential,proto3" json:"credential,omitempty"`
+	// The name of the Auth Key it redeemed.
+	AuthKey string `protobuf:"bytes,2,opt,name=auth_key,json=authKey,proto3" json:"auth_key,omitempty"`
+	// The Tags it is bound to, by name.
+	Tags []string `protobuf:"bytes,3,rep,name=tags,proto3" json:"tags,omitempty"`
+	// It joined with an ephemeral Auth Key, so it is revoked after it
+	// disconnects with no open Task Attempts.
+	Ephemeral     bool `protobuf:"varint,4,opt,name=ephemeral,proto3" json:"ephemeral,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JoinWorkerHostResponse) Reset() {
+	*x = JoinWorkerHostResponse{}
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JoinWorkerHostResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JoinWorkerHostResponse) ProtoMessage() {}
+
+func (x *JoinWorkerHostResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JoinWorkerHostResponse.ProtoReflect.Descriptor instead.
+func (*JoinWorkerHostResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *JoinWorkerHostResponse) GetCredential() *WorkerHostCredential {
+	if x != nil {
+		return x.Credential
+	}
+	return nil
+}
+
+func (x *JoinWorkerHostResponse) GetAuthKey() string {
+	if x != nil {
+		return x.AuthKey
+	}
+	return ""
+}
+
+func (x *JoinWorkerHostResponse) GetTags() []string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
+func (x *JoinWorkerHostResponse) GetEphemeral() bool {
+	if x != nil {
+		return x.Ephemeral
+	}
+	return false
+}
+
 type BindWorkerHostRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The Tag's name.
@@ -602,7 +733,7 @@ type BindWorkerHostRequest struct {
 
 func (x *BindWorkerHostRequest) Reset() {
 	*x = BindWorkerHostRequest{}
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[8]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -614,7 +745,7 @@ func (x *BindWorkerHostRequest) String() string {
 func (*BindWorkerHostRequest) ProtoMessage() {}
 
 func (x *BindWorkerHostRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[8]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -627,7 +758,7 @@ func (x *BindWorkerHostRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BindWorkerHostRequest.ProtoReflect.Descriptor instead.
 func (*BindWorkerHostRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{8}
+	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *BindWorkerHostRequest) GetTag() string {
@@ -660,7 +791,7 @@ type BindWorkerHostResponse struct {
 
 func (x *BindWorkerHostResponse) Reset() {
 	*x = BindWorkerHostResponse{}
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[9]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -672,7 +803,7 @@ func (x *BindWorkerHostResponse) String() string {
 func (*BindWorkerHostResponse) ProtoMessage() {}
 
 func (x *BindWorkerHostResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[9]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -685,7 +816,7 @@ func (x *BindWorkerHostResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BindWorkerHostResponse.ProtoReflect.Descriptor instead.
 func (*BindWorkerHostResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{9}
+	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *BindWorkerHostResponse) GetTag() string {
@@ -728,7 +859,7 @@ type UnbindWorkerHostRequest struct {
 
 func (x *UnbindWorkerHostRequest) Reset() {
 	*x = UnbindWorkerHostRequest{}
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[10]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -740,7 +871,7 @@ func (x *UnbindWorkerHostRequest) String() string {
 func (*UnbindWorkerHostRequest) ProtoMessage() {}
 
 func (x *UnbindWorkerHostRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[10]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -753,7 +884,7 @@ func (x *UnbindWorkerHostRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnbindWorkerHostRequest.ProtoReflect.Descriptor instead.
 func (*UnbindWorkerHostRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{10}
+	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *UnbindWorkerHostRequest) GetTag() string {
@@ -786,7 +917,7 @@ type UnbindWorkerHostResponse struct {
 
 func (x *UnbindWorkerHostResponse) Reset() {
 	*x = UnbindWorkerHostResponse{}
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[11]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -798,7 +929,7 @@ func (x *UnbindWorkerHostResponse) String() string {
 func (*UnbindWorkerHostResponse) ProtoMessage() {}
 
 func (x *UnbindWorkerHostResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[11]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -811,7 +942,7 @@ func (x *UnbindWorkerHostResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnbindWorkerHostResponse.ProtoReflect.Descriptor instead.
 func (*UnbindWorkerHostResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{11}
+	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *UnbindWorkerHostResponse) GetTag() string {
@@ -871,7 +1002,7 @@ type CreateAuthKeyRequest struct {
 
 func (x *CreateAuthKeyRequest) Reset() {
 	*x = CreateAuthKeyRequest{}
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[12]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -883,7 +1014,7 @@ func (x *CreateAuthKeyRequest) String() string {
 func (*CreateAuthKeyRequest) ProtoMessage() {}
 
 func (x *CreateAuthKeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[12]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -896,7 +1027,7 @@ func (x *CreateAuthKeyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateAuthKeyRequest.ProtoReflect.Descriptor instead.
 func (*CreateAuthKeyRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{12}
+	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *CreateAuthKeyRequest) GetName() string {
@@ -947,7 +1078,7 @@ type CreateAuthKeyResponse struct {
 
 func (x *CreateAuthKeyResponse) Reset() {
 	*x = CreateAuthKeyResponse{}
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[13]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -959,7 +1090,7 @@ func (x *CreateAuthKeyResponse) String() string {
 func (*CreateAuthKeyResponse) ProtoMessage() {}
 
 func (x *CreateAuthKeyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[13]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -972,7 +1103,7 @@ func (x *CreateAuthKeyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateAuthKeyResponse.ProtoReflect.Descriptor instead.
 func (*CreateAuthKeyResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{13}
+	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *CreateAuthKeyResponse) GetAuthKey() *AuthKey {
@@ -1001,7 +1132,7 @@ type ListAuthKeysRequest struct {
 
 func (x *ListAuthKeysRequest) Reset() {
 	*x = ListAuthKeysRequest{}
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[14]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1013,7 +1144,7 @@ func (x *ListAuthKeysRequest) String() string {
 func (*ListAuthKeysRequest) ProtoMessage() {}
 
 func (x *ListAuthKeysRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[14]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1026,7 +1157,7 @@ func (x *ListAuthKeysRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAuthKeysRequest.ProtoReflect.Descriptor instead.
 func (*ListAuthKeysRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{14}
+	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ListAuthKeysRequest) GetPageSize() int32 {
@@ -1055,7 +1186,7 @@ type ListAuthKeysResponse struct {
 
 func (x *ListAuthKeysResponse) Reset() {
 	*x = ListAuthKeysResponse{}
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[15]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1067,7 +1198,7 @@ func (x *ListAuthKeysResponse) String() string {
 func (*ListAuthKeysResponse) ProtoMessage() {}
 
 func (x *ListAuthKeysResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[15]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1080,7 +1211,7 @@ func (x *ListAuthKeysResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAuthKeysResponse.ProtoReflect.Descriptor instead.
 func (*ListAuthKeysResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{15}
+	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ListAuthKeysResponse) GetAuthKeys() []*AuthKey {
@@ -1107,7 +1238,7 @@ type GetAuthKeyRequest struct {
 
 func (x *GetAuthKeyRequest) Reset() {
 	*x = GetAuthKeyRequest{}
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[16]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1119,7 +1250,7 @@ func (x *GetAuthKeyRequest) String() string {
 func (*GetAuthKeyRequest) ProtoMessage() {}
 
 func (x *GetAuthKeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[16]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1132,7 +1263,7 @@ func (x *GetAuthKeyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAuthKeyRequest.ProtoReflect.Descriptor instead.
 func (*GetAuthKeyRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{16}
+	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *GetAuthKeyRequest) GetName() string {
@@ -1152,7 +1283,7 @@ type RevokeAuthKeyRequest struct {
 
 func (x *RevokeAuthKeyRequest) Reset() {
 	*x = RevokeAuthKeyRequest{}
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[17]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1164,7 +1295,7 @@ func (x *RevokeAuthKeyRequest) String() string {
 func (*RevokeAuthKeyRequest) ProtoMessage() {}
 
 func (x *RevokeAuthKeyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[17]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1177,7 +1308,7 @@ func (x *RevokeAuthKeyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeAuthKeyRequest.ProtoReflect.Descriptor instead.
 func (*RevokeAuthKeyRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{17}
+	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *RevokeAuthKeyRequest) GetName() string {
@@ -1276,7 +1407,7 @@ type WorkerHost struct {
 
 func (x *WorkerHost) Reset() {
 	*x = WorkerHost{}
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[18]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1288,7 +1419,7 @@ func (x *WorkerHost) String() string {
 func (*WorkerHost) ProtoMessage() {}
 
 func (x *WorkerHost) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[18]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1301,7 +1432,7 @@ func (x *WorkerHost) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerHost.ProtoReflect.Descriptor instead.
 func (*WorkerHost) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{18}
+	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *WorkerHost) GetMetadata() *Metadata {
@@ -1527,7 +1658,7 @@ type DiskSpace struct {
 
 func (x *DiskSpace) Reset() {
 	*x = DiskSpace{}
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[19]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1539,7 +1670,7 @@ func (x *DiskSpace) String() string {
 func (*DiskSpace) ProtoMessage() {}
 
 func (x *DiskSpace) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[19]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1552,7 +1683,7 @@ func (x *DiskSpace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiskSpace.ProtoReflect.Descriptor instead.
 func (*DiskSpace) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{19}
+	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *DiskSpace) GetFreeBytes() int64 {
@@ -1584,7 +1715,7 @@ type WorkerHostStorage struct {
 
 func (x *WorkerHostStorage) Reset() {
 	*x = WorkerHostStorage{}
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[20]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1596,7 +1727,7 @@ func (x *WorkerHostStorage) String() string {
 func (*WorkerHostStorage) ProtoMessage() {}
 
 func (x *WorkerHostStorage) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[20]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1609,7 +1740,7 @@ func (x *WorkerHostStorage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerHostStorage.ProtoReflect.Descriptor instead.
 func (*WorkerHostStorage) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{20}
+	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *WorkerHostStorage) GetSandboxes() []string {
@@ -1642,7 +1773,7 @@ type WorkerHostCredential struct {
 
 func (x *WorkerHostCredential) Reset() {
 	*x = WorkerHostCredential{}
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[21]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1654,7 +1785,7 @@ func (x *WorkerHostCredential) String() string {
 func (*WorkerHostCredential) ProtoMessage() {}
 
 func (x *WorkerHostCredential) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[21]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1667,7 +1798,7 @@ func (x *WorkerHostCredential) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerHostCredential.ProtoReflect.Descriptor instead.
 func (*WorkerHostCredential) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{21}
+	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *WorkerHostCredential) GetWorkerHostId() string {
@@ -1722,7 +1853,7 @@ type AuthKey struct {
 
 func (x *AuthKey) Reset() {
 	*x = AuthKey{}
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[22]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1734,7 +1865,7 @@ func (x *AuthKey) String() string {
 func (*AuthKey) ProtoMessage() {}
 
 func (x *AuthKey) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_host_proto_msgTypes[22]
+	mi := &file_supertag_operator_v1_host_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1747,7 +1878,7 @@ func (x *AuthKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthKey.ProtoReflect.Descriptor instead.
 func (*AuthKey) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{22}
+	return file_supertag_operator_v1_host_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *AuthKey) GetMetadata() *Metadata {
@@ -1844,7 +1975,17 @@ const file_supertag_operator_v1_host_proto_rawDesc = "" +
 	"\x16DrainWorkerHostRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\")\n" +
 	"\x17ResumeWorkerHostRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"O\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"T\n" +
+	"\x15JoinWorkerHostRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12'\n" +
+	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\"\xb1\x01\n" +
+	"\x16JoinWorkerHostResponse\x12J\n" +
+	"\n" +
+	"credential\x18\x01 \x01(\v2*.supertag.operator.v1.WorkerHostCredentialR\n" +
+	"credential\x12\x19\n" +
+	"\bauth_key\x18\x02 \x01(\tR\aauthKey\x12\x12\n" +
+	"\x04tags\x18\x03 \x03(\tR\x04tags\x12\x1c\n" +
+	"\tephemeral\x18\x04 \x01(\bR\tephemeral\"O\n" +
 	"\x15BindWorkerHostRequest\x12\x10\n" +
 	"\x03tag\x18\x01 \x01(\tR\x03tag\x12$\n" +
 	"\x0eworker_host_id\x18\x02 \x01(\tR\fworkerHostId\"~\n" +
@@ -1965,15 +2106,16 @@ const file_supertag_operator_v1_host_proto_rawDesc = "" +
 	"\x15AUTH_KEY_PHASE_ACTIVE\x10\x01\x12\x17\n" +
 	"\x13AUTH_KEY_PHASE_USED\x10\x02\x12\x1a\n" +
 	"\x16AUTH_KEY_PHASE_EXPIRED\x10\x03\x12\x1a\n" +
-	"\x16AUTH_KEY_PHASE_REVOKED\x10\x042\x98\x0f\n" +
+	"\x16AUTH_KEY_PHASE_REVOKED\x10\x042\xc0\x10\n" +
 	"\vHostService\x12\x87\x01\n" +
 	"\x0fListWorkerHosts\x12,.supertag.operator.v1.ListWorkerHostsRequest\x1a-.supertag.operator.v1.ListWorkerHostsResponse\"\x17\x8a\xb5\x18\x10read_worker_host\x90\x02\x01\x12v\n" +
 	"\rGetWorkerHost\x12*.supertag.operator.v1.GetWorkerHostRequest\x1a .supertag.operator.v1.WorkerHost\"\x17\x8a\xb5\x18\x10read_worker_host\x90\x02\x01\x12\x9b\x01\n" +
 	"\x10EnrollWorkerHost\x12-.supertag.operator.v1.EnrollWorkerHostRequest\x1a*.supertag.operator.v1.WorkerHostCredential\",\x8a\xb5\x18\x12manage_worker_host\xa2\xb5\x18\x12worker-host.enroll\x12\xc5\x01\n" +
-	"\x1aRotateWorkerHostCredential\x127.supertag.operator.v1.RotateWorkerHostCredentialRequest\x1a*.supertag.operator.v1.WorkerHostCredential\"B\x8a\xb5\x18\x1dmanage_worker_host_credential\xa2\xb5\x18\x1dworker-host.credential.rotate\x12\xbb\x01\n" +
-	"\x1aRevokeWorkerHostCredential\x127.supertag.operator.v1.RevokeWorkerHostCredentialRequest\x1a .supertag.operator.v1.WorkerHost\"B\x8a\xb5\x18\x1dmanage_worker_host_credential\xa2\xb5\x18\x1dworker-host.credential.revoke\x12\x8e\x01\n" +
-	"\x0fDrainWorkerHost\x12,.supertag.operator.v1.DrainWorkerHostRequest\x1a .supertag.operator.v1.WorkerHost\"+\x8a\xb5\x18\x12manage_worker_host\xa2\xb5\x18\x11worker-host.drain\x12\x91\x01\n" +
-	"\x10ResumeWorkerHost\x12-.supertag.operator.v1.ResumeWorkerHostRequest\x1a .supertag.operator.v1.WorkerHost\",\x8a\xb5\x18\x12manage_worker_host\xa2\xb5\x18\x12worker-host.resume\x12\x98\x01\n" +
+	"\x1aRotateWorkerHostCredential\x127.supertag.operator.v1.RotateWorkerHostCredentialRequest\x1a*.supertag.operator.v1.WorkerHostCredential\"B\x8a\xb5\x18\x1dmanage_worker_host_credential\xa2\xb5\x18\x1dworker-host.credential.rotate\x12\xbf\x01\n" +
+	"\x1aRevokeWorkerHostCredential\x127.supertag.operator.v1.RevokeWorkerHostCredentialRequest\x1a .supertag.operator.v1.WorkerHost\"F\x8a\xb5\x18\x1dmanage_worker_host_credential\xa2\xb5\x18\x1dworker-host.credential.revoke\xe0\xb5\x18\x01\x12\x92\x01\n" +
+	"\x0fDrainWorkerHost\x12,.supertag.operator.v1.DrainWorkerHostRequest\x1a .supertag.operator.v1.WorkerHost\"/\x8a\xb5\x18\x12manage_worker_host\xa2\xb5\x18\x11worker-host.drain\xe0\xb5\x18\x01\x12\x95\x01\n" +
+	"\x10ResumeWorkerHost\x12-.supertag.operator.v1.ResumeWorkerHostRequest\x1a .supertag.operator.v1.WorkerHost\"0\x8a\xb5\x18\x12manage_worker_host\xa2\xb5\x18\x12worker-host.resume\xe0\xb5\x18\x01\x12\x99\x01\n" +
+	"\x0eJoinWorkerHost\x12+.supertag.operator.v1.JoinWorkerHostRequest\x1a,.supertag.operator.v1.JoinWorkerHostResponse\",\x8a\xb5\x18\x10join_worker_host\xa2\xb5\x18\x10worker-host.joinص\x18\x01\x12\x98\x01\n" +
 	"\x0eBindWorkerHost\x12+.supertag.operator.v1.BindWorkerHostRequest\x1a,.supertag.operator.v1.BindWorkerHostResponse\"+\x8a\xb5\x18\x10bind_worker_host\xa2\xb5\x18\x13tag.worker-host.add\x12\xa1\x01\n" +
 	"\x10UnbindWorkerHost\x12-.supertag.operator.v1.UnbindWorkerHostRequest\x1a..supertag.operator.v1.UnbindWorkerHostResponse\".\x8a\xb5\x18\x10bind_worker_host\xa2\xb5\x18\x16tag.worker-host.remove\x12\x90\x01\n" +
 	"\rCreateAuthKey\x12*.supertag.operator.v1.CreateAuthKeyRequest\x1a+.supertag.operator.v1.CreateAuthKeyResponse\"&\x8a\xb5\x18\x0fmanage_auth_key\xa2\xb5\x18\x0fauth-key.create\x12{\n" +
@@ -1995,7 +2137,7 @@ func file_supertag_operator_v1_host_proto_rawDescGZIP() []byte {
 }
 
 var file_supertag_operator_v1_host_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_supertag_operator_v1_host_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_supertag_operator_v1_host_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_supertag_operator_v1_host_proto_goTypes = []any{
 	(WorkerHostPhase)(0),                      // 0: supertag.operator.v1.WorkerHostPhase
 	(WorkerHostConnection)(0),                 // 1: supertag.operator.v1.WorkerHostConnection
@@ -2008,78 +2150,83 @@ var file_supertag_operator_v1_host_proto_goTypes = []any{
 	(*RevokeWorkerHostCredentialRequest)(nil), // 8: supertag.operator.v1.RevokeWorkerHostCredentialRequest
 	(*DrainWorkerHostRequest)(nil),            // 9: supertag.operator.v1.DrainWorkerHostRequest
 	(*ResumeWorkerHostRequest)(nil),           // 10: supertag.operator.v1.ResumeWorkerHostRequest
-	(*BindWorkerHostRequest)(nil),             // 11: supertag.operator.v1.BindWorkerHostRequest
-	(*BindWorkerHostResponse)(nil),            // 12: supertag.operator.v1.BindWorkerHostResponse
-	(*UnbindWorkerHostRequest)(nil),           // 13: supertag.operator.v1.UnbindWorkerHostRequest
-	(*UnbindWorkerHostResponse)(nil),          // 14: supertag.operator.v1.UnbindWorkerHostResponse
-	(*CreateAuthKeyRequest)(nil),              // 15: supertag.operator.v1.CreateAuthKeyRequest
-	(*CreateAuthKeyResponse)(nil),             // 16: supertag.operator.v1.CreateAuthKeyResponse
-	(*ListAuthKeysRequest)(nil),               // 17: supertag.operator.v1.ListAuthKeysRequest
-	(*ListAuthKeysResponse)(nil),              // 18: supertag.operator.v1.ListAuthKeysResponse
-	(*GetAuthKeyRequest)(nil),                 // 19: supertag.operator.v1.GetAuthKeyRequest
-	(*RevokeAuthKeyRequest)(nil),              // 20: supertag.operator.v1.RevokeAuthKeyRequest
-	(*WorkerHost)(nil),                        // 21: supertag.operator.v1.WorkerHost
-	(*DiskSpace)(nil),                         // 22: supertag.operator.v1.DiskSpace
-	(*WorkerHostStorage)(nil),                 // 23: supertag.operator.v1.WorkerHostStorage
-	(*WorkerHostCredential)(nil),              // 24: supertag.operator.v1.WorkerHostCredential
-	(*AuthKey)(nil),                           // 25: supertag.operator.v1.AuthKey
-	(*Metadata)(nil),                          // 26: supertag.operator.v1.Metadata
-	(*structpb.Struct)(nil),                   // 27: google.protobuf.Struct
-	(*timestamppb.Timestamp)(nil),             // 28: google.protobuf.Timestamp
+	(*JoinWorkerHostRequest)(nil),             // 11: supertag.operator.v1.JoinWorkerHostRequest
+	(*JoinWorkerHostResponse)(nil),            // 12: supertag.operator.v1.JoinWorkerHostResponse
+	(*BindWorkerHostRequest)(nil),             // 13: supertag.operator.v1.BindWorkerHostRequest
+	(*BindWorkerHostResponse)(nil),            // 14: supertag.operator.v1.BindWorkerHostResponse
+	(*UnbindWorkerHostRequest)(nil),           // 15: supertag.operator.v1.UnbindWorkerHostRequest
+	(*UnbindWorkerHostResponse)(nil),          // 16: supertag.operator.v1.UnbindWorkerHostResponse
+	(*CreateAuthKeyRequest)(nil),              // 17: supertag.operator.v1.CreateAuthKeyRequest
+	(*CreateAuthKeyResponse)(nil),             // 18: supertag.operator.v1.CreateAuthKeyResponse
+	(*ListAuthKeysRequest)(nil),               // 19: supertag.operator.v1.ListAuthKeysRequest
+	(*ListAuthKeysResponse)(nil),              // 20: supertag.operator.v1.ListAuthKeysResponse
+	(*GetAuthKeyRequest)(nil),                 // 21: supertag.operator.v1.GetAuthKeyRequest
+	(*RevokeAuthKeyRequest)(nil),              // 22: supertag.operator.v1.RevokeAuthKeyRequest
+	(*WorkerHost)(nil),                        // 23: supertag.operator.v1.WorkerHost
+	(*DiskSpace)(nil),                         // 24: supertag.operator.v1.DiskSpace
+	(*WorkerHostStorage)(nil),                 // 25: supertag.operator.v1.WorkerHostStorage
+	(*WorkerHostCredential)(nil),              // 26: supertag.operator.v1.WorkerHostCredential
+	(*AuthKey)(nil),                           // 27: supertag.operator.v1.AuthKey
+	(*Metadata)(nil),                          // 28: supertag.operator.v1.Metadata
+	(*structpb.Struct)(nil),                   // 29: google.protobuf.Struct
+	(*timestamppb.Timestamp)(nil),             // 30: google.protobuf.Timestamp
 }
 var file_supertag_operator_v1_host_proto_depIdxs = []int32{
-	21, // 0: supertag.operator.v1.ListWorkerHostsResponse.worker_hosts:type_name -> supertag.operator.v1.WorkerHost
-	25, // 1: supertag.operator.v1.CreateAuthKeyResponse.auth_key:type_name -> supertag.operator.v1.AuthKey
-	25, // 2: supertag.operator.v1.ListAuthKeysResponse.auth_keys:type_name -> supertag.operator.v1.AuthKey
-	26, // 3: supertag.operator.v1.WorkerHost.metadata:type_name -> supertag.operator.v1.Metadata
-	0,  // 4: supertag.operator.v1.WorkerHost.phase:type_name -> supertag.operator.v1.WorkerHostPhase
-	22, // 5: supertag.operator.v1.WorkerHost.disk_space:type_name -> supertag.operator.v1.DiskSpace
-	23, // 6: supertag.operator.v1.WorkerHost.storage:type_name -> supertag.operator.v1.WorkerHostStorage
-	1,  // 7: supertag.operator.v1.WorkerHost.connection_status:type_name -> supertag.operator.v1.WorkerHostConnection
-	27, // 8: supertag.operator.v1.WorkerHost.workers:type_name -> google.protobuf.Struct
-	28, // 9: supertag.operator.v1.WorkerHost.last_authenticated_at:type_name -> google.protobuf.Timestamp
-	28, // 10: supertag.operator.v1.WorkerHost.last_authentication_failure_at:type_name -> google.protobuf.Timestamp
-	28, // 11: supertag.operator.v1.WorkerHost.last_seen_at:type_name -> google.protobuf.Timestamp
-	28, // 12: supertag.operator.v1.WorkerHost.connected_at:type_name -> google.protobuf.Timestamp
-	28, // 13: supertag.operator.v1.WorkerHost.disconnected_at:type_name -> google.protobuf.Timestamp
-	28, // 14: supertag.operator.v1.WorkerHost.revoked_at:type_name -> google.protobuf.Timestamp
-	28, // 15: supertag.operator.v1.WorkerHostCredential.issued_at:type_name -> google.protobuf.Timestamp
-	26, // 16: supertag.operator.v1.AuthKey.metadata:type_name -> supertag.operator.v1.Metadata
-	2,  // 17: supertag.operator.v1.AuthKey.phase:type_name -> supertag.operator.v1.AuthKeyPhase
-	28, // 18: supertag.operator.v1.AuthKey.expires_at:type_name -> google.protobuf.Timestamp
-	28, // 19: supertag.operator.v1.AuthKey.used_at:type_name -> google.protobuf.Timestamp
-	28, // 20: supertag.operator.v1.AuthKey.revoked_at:type_name -> google.protobuf.Timestamp
-	3,  // 21: supertag.operator.v1.HostService.ListWorkerHosts:input_type -> supertag.operator.v1.ListWorkerHostsRequest
-	5,  // 22: supertag.operator.v1.HostService.GetWorkerHost:input_type -> supertag.operator.v1.GetWorkerHostRequest
-	6,  // 23: supertag.operator.v1.HostService.EnrollWorkerHost:input_type -> supertag.operator.v1.EnrollWorkerHostRequest
-	7,  // 24: supertag.operator.v1.HostService.RotateWorkerHostCredential:input_type -> supertag.operator.v1.RotateWorkerHostCredentialRequest
-	8,  // 25: supertag.operator.v1.HostService.RevokeWorkerHostCredential:input_type -> supertag.operator.v1.RevokeWorkerHostCredentialRequest
-	9,  // 26: supertag.operator.v1.HostService.DrainWorkerHost:input_type -> supertag.operator.v1.DrainWorkerHostRequest
-	10, // 27: supertag.operator.v1.HostService.ResumeWorkerHost:input_type -> supertag.operator.v1.ResumeWorkerHostRequest
-	11, // 28: supertag.operator.v1.HostService.BindWorkerHost:input_type -> supertag.operator.v1.BindWorkerHostRequest
-	13, // 29: supertag.operator.v1.HostService.UnbindWorkerHost:input_type -> supertag.operator.v1.UnbindWorkerHostRequest
-	15, // 30: supertag.operator.v1.HostService.CreateAuthKey:input_type -> supertag.operator.v1.CreateAuthKeyRequest
-	17, // 31: supertag.operator.v1.HostService.ListAuthKeys:input_type -> supertag.operator.v1.ListAuthKeysRequest
-	19, // 32: supertag.operator.v1.HostService.GetAuthKey:input_type -> supertag.operator.v1.GetAuthKeyRequest
-	20, // 33: supertag.operator.v1.HostService.RevokeAuthKey:input_type -> supertag.operator.v1.RevokeAuthKeyRequest
-	4,  // 34: supertag.operator.v1.HostService.ListWorkerHosts:output_type -> supertag.operator.v1.ListWorkerHostsResponse
-	21, // 35: supertag.operator.v1.HostService.GetWorkerHost:output_type -> supertag.operator.v1.WorkerHost
-	24, // 36: supertag.operator.v1.HostService.EnrollWorkerHost:output_type -> supertag.operator.v1.WorkerHostCredential
-	24, // 37: supertag.operator.v1.HostService.RotateWorkerHostCredential:output_type -> supertag.operator.v1.WorkerHostCredential
-	21, // 38: supertag.operator.v1.HostService.RevokeWorkerHostCredential:output_type -> supertag.operator.v1.WorkerHost
-	21, // 39: supertag.operator.v1.HostService.DrainWorkerHost:output_type -> supertag.operator.v1.WorkerHost
-	21, // 40: supertag.operator.v1.HostService.ResumeWorkerHost:output_type -> supertag.operator.v1.WorkerHost
-	12, // 41: supertag.operator.v1.HostService.BindWorkerHost:output_type -> supertag.operator.v1.BindWorkerHostResponse
-	14, // 42: supertag.operator.v1.HostService.UnbindWorkerHost:output_type -> supertag.operator.v1.UnbindWorkerHostResponse
-	16, // 43: supertag.operator.v1.HostService.CreateAuthKey:output_type -> supertag.operator.v1.CreateAuthKeyResponse
-	18, // 44: supertag.operator.v1.HostService.ListAuthKeys:output_type -> supertag.operator.v1.ListAuthKeysResponse
-	25, // 45: supertag.operator.v1.HostService.GetAuthKey:output_type -> supertag.operator.v1.AuthKey
-	25, // 46: supertag.operator.v1.HostService.RevokeAuthKey:output_type -> supertag.operator.v1.AuthKey
-	34, // [34:47] is the sub-list for method output_type
-	21, // [21:34] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	23, // 0: supertag.operator.v1.ListWorkerHostsResponse.worker_hosts:type_name -> supertag.operator.v1.WorkerHost
+	26, // 1: supertag.operator.v1.JoinWorkerHostResponse.credential:type_name -> supertag.operator.v1.WorkerHostCredential
+	27, // 2: supertag.operator.v1.CreateAuthKeyResponse.auth_key:type_name -> supertag.operator.v1.AuthKey
+	27, // 3: supertag.operator.v1.ListAuthKeysResponse.auth_keys:type_name -> supertag.operator.v1.AuthKey
+	28, // 4: supertag.operator.v1.WorkerHost.metadata:type_name -> supertag.operator.v1.Metadata
+	0,  // 5: supertag.operator.v1.WorkerHost.phase:type_name -> supertag.operator.v1.WorkerHostPhase
+	24, // 6: supertag.operator.v1.WorkerHost.disk_space:type_name -> supertag.operator.v1.DiskSpace
+	25, // 7: supertag.operator.v1.WorkerHost.storage:type_name -> supertag.operator.v1.WorkerHostStorage
+	1,  // 8: supertag.operator.v1.WorkerHost.connection_status:type_name -> supertag.operator.v1.WorkerHostConnection
+	29, // 9: supertag.operator.v1.WorkerHost.workers:type_name -> google.protobuf.Struct
+	30, // 10: supertag.operator.v1.WorkerHost.last_authenticated_at:type_name -> google.protobuf.Timestamp
+	30, // 11: supertag.operator.v1.WorkerHost.last_authentication_failure_at:type_name -> google.protobuf.Timestamp
+	30, // 12: supertag.operator.v1.WorkerHost.last_seen_at:type_name -> google.protobuf.Timestamp
+	30, // 13: supertag.operator.v1.WorkerHost.connected_at:type_name -> google.protobuf.Timestamp
+	30, // 14: supertag.operator.v1.WorkerHost.disconnected_at:type_name -> google.protobuf.Timestamp
+	30, // 15: supertag.operator.v1.WorkerHost.revoked_at:type_name -> google.protobuf.Timestamp
+	30, // 16: supertag.operator.v1.WorkerHostCredential.issued_at:type_name -> google.protobuf.Timestamp
+	28, // 17: supertag.operator.v1.AuthKey.metadata:type_name -> supertag.operator.v1.Metadata
+	2,  // 18: supertag.operator.v1.AuthKey.phase:type_name -> supertag.operator.v1.AuthKeyPhase
+	30, // 19: supertag.operator.v1.AuthKey.expires_at:type_name -> google.protobuf.Timestamp
+	30, // 20: supertag.operator.v1.AuthKey.used_at:type_name -> google.protobuf.Timestamp
+	30, // 21: supertag.operator.v1.AuthKey.revoked_at:type_name -> google.protobuf.Timestamp
+	3,  // 22: supertag.operator.v1.HostService.ListWorkerHosts:input_type -> supertag.operator.v1.ListWorkerHostsRequest
+	5,  // 23: supertag.operator.v1.HostService.GetWorkerHost:input_type -> supertag.operator.v1.GetWorkerHostRequest
+	6,  // 24: supertag.operator.v1.HostService.EnrollWorkerHost:input_type -> supertag.operator.v1.EnrollWorkerHostRequest
+	7,  // 25: supertag.operator.v1.HostService.RotateWorkerHostCredential:input_type -> supertag.operator.v1.RotateWorkerHostCredentialRequest
+	8,  // 26: supertag.operator.v1.HostService.RevokeWorkerHostCredential:input_type -> supertag.operator.v1.RevokeWorkerHostCredentialRequest
+	9,  // 27: supertag.operator.v1.HostService.DrainWorkerHost:input_type -> supertag.operator.v1.DrainWorkerHostRequest
+	10, // 28: supertag.operator.v1.HostService.ResumeWorkerHost:input_type -> supertag.operator.v1.ResumeWorkerHostRequest
+	11, // 29: supertag.operator.v1.HostService.JoinWorkerHost:input_type -> supertag.operator.v1.JoinWorkerHostRequest
+	13, // 30: supertag.operator.v1.HostService.BindWorkerHost:input_type -> supertag.operator.v1.BindWorkerHostRequest
+	15, // 31: supertag.operator.v1.HostService.UnbindWorkerHost:input_type -> supertag.operator.v1.UnbindWorkerHostRequest
+	17, // 32: supertag.operator.v1.HostService.CreateAuthKey:input_type -> supertag.operator.v1.CreateAuthKeyRequest
+	19, // 33: supertag.operator.v1.HostService.ListAuthKeys:input_type -> supertag.operator.v1.ListAuthKeysRequest
+	21, // 34: supertag.operator.v1.HostService.GetAuthKey:input_type -> supertag.operator.v1.GetAuthKeyRequest
+	22, // 35: supertag.operator.v1.HostService.RevokeAuthKey:input_type -> supertag.operator.v1.RevokeAuthKeyRequest
+	4,  // 36: supertag.operator.v1.HostService.ListWorkerHosts:output_type -> supertag.operator.v1.ListWorkerHostsResponse
+	23, // 37: supertag.operator.v1.HostService.GetWorkerHost:output_type -> supertag.operator.v1.WorkerHost
+	26, // 38: supertag.operator.v1.HostService.EnrollWorkerHost:output_type -> supertag.operator.v1.WorkerHostCredential
+	26, // 39: supertag.operator.v1.HostService.RotateWorkerHostCredential:output_type -> supertag.operator.v1.WorkerHostCredential
+	23, // 40: supertag.operator.v1.HostService.RevokeWorkerHostCredential:output_type -> supertag.operator.v1.WorkerHost
+	23, // 41: supertag.operator.v1.HostService.DrainWorkerHost:output_type -> supertag.operator.v1.WorkerHost
+	23, // 42: supertag.operator.v1.HostService.ResumeWorkerHost:output_type -> supertag.operator.v1.WorkerHost
+	12, // 43: supertag.operator.v1.HostService.JoinWorkerHost:output_type -> supertag.operator.v1.JoinWorkerHostResponse
+	14, // 44: supertag.operator.v1.HostService.BindWorkerHost:output_type -> supertag.operator.v1.BindWorkerHostResponse
+	16, // 45: supertag.operator.v1.HostService.UnbindWorkerHost:output_type -> supertag.operator.v1.UnbindWorkerHostResponse
+	18, // 46: supertag.operator.v1.HostService.CreateAuthKey:output_type -> supertag.operator.v1.CreateAuthKeyResponse
+	20, // 47: supertag.operator.v1.HostService.ListAuthKeys:output_type -> supertag.operator.v1.ListAuthKeysResponse
+	27, // 48: supertag.operator.v1.HostService.GetAuthKey:output_type -> supertag.operator.v1.AuthKey
+	27, // 49: supertag.operator.v1.HostService.RevokeAuthKey:output_type -> supertag.operator.v1.AuthKey
+	36, // [36:50] is the sub-list for method output_type
+	22, // [22:36] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_supertag_operator_v1_host_proto_init() }
@@ -2089,14 +2236,14 @@ func file_supertag_operator_v1_host_proto_init() {
 	}
 	file_supertag_operator_v1_common_proto_init()
 	file_supertag_operator_v1_options_proto_init()
-	file_supertag_operator_v1_host_proto_msgTypes[18].OneofWrappers = []any{}
+	file_supertag_operator_v1_host_proto_msgTypes[20].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_operator_v1_host_proto_rawDesc), len(file_supertag_operator_v1_host_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   23,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

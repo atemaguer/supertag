@@ -57,6 +57,12 @@ export interface RedeemAuthKeyInput {
   readonly workerHostName: string;
   /** Vault address of the new host's first credential. */
   readonly credentialId: string;
+  /**
+   * The start of `credentialId` that names one join request, such as `join/abc/`: lowercase
+   * letters, digits, `/` and `-`. A redemption whose first credential started with it already
+   * enrolled a host, so this one enrolls nothing and returns that host as `repeated`.
+   */
+  readonly joinCredentialPrefix?: string;
   readonly redeemedAt: string;
 }
 
@@ -64,7 +70,8 @@ export type AuthKeyRedemptionFailure = "invalid" | "expired" | "revoked" | "used
 
 export type AuthKeyRedemption =
   | {
-      readonly status: "redeemed";
+      /** `repeated` when an earlier redemption with the same join request enrolled the host. */
+      readonly status: "redeemed" | "repeated";
       readonly authKey: AuthKey;
       readonly workerHost: WorkerHost;
     }
@@ -74,6 +81,14 @@ export interface AuthKeyStore {
   /** Creates a key. Names are unique for the life of the Control Plane. */
   createAuthKey(input: CreateAuthKeyInput): Promise<AuthKey>;
   findAuthKeyByName(name: string): Promise<AuthKey | undefined>;
+  /**
+   * The key whose secret has this lookup ID and digest, whatever its phase; undefined for an
+   * unknown secret. Reads only.
+   */
+  findAuthKeyBySecret(input: {
+    readonly lookupId: string;
+    readonly secretDigest: string;
+  }): Promise<AuthKey | undefined>;
   listAuthKeys(): Promise<readonly AuthKey[]>;
   /** Idempotent. Blocks new redemptions; hosts that already joined keep their enrollment. */
   revokeAuthKey(name: string, revokedAt: string): Promise<AuthKey | undefined>;

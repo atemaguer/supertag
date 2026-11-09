@@ -19,6 +19,7 @@ import {
   action,
   allow_anonymous,
   allow_scoped_credential,
+  allow_worker_host_credential,
   audit_action,
   ConversationService,
   ErrorDetailSchema,
@@ -31,6 +32,7 @@ import {
   OrganizationService,
   ResourceService,
   requires_admin_token,
+  requires_auth_key,
   SurfaceService,
   TeamService,
   WorkService,
@@ -55,7 +57,9 @@ import {
   operatorError,
   operatorPeerAddress,
   operatorPrincipal,
+  presentedAuthKey,
   STREAM_HEARTBEAT_MS,
+  WORKER_HOST_ID_HEADER,
 } from "./operator-rpc-context.js";
 import {
   type OperatorControl,
@@ -86,10 +90,19 @@ const authenticatedCaller = createContextKey<OperatorPrincipal | undefined>(unde
 /** What the request gate and the audit interceptor need, whatever services are registered. */
 export interface OperatorRpcDependencies {
   readonly auditTrail: Pick<AuditTrail, "record">;
-  /** Resolves an `authorization` header value; undefined when it names no known credential. */
+  /**
+   * Resolves an `authorization` header value, and the Worker Host a host's own credential names;
+   * undefined when they name no known credential.
+   */
   readonly authenticate: (
     authorization: string | undefined,
+    workerHostId?: string,
   ) => Promise<OperatorAuthentication | undefined>;
+  /**
+   * Whether a bearer token is an Auth Key the Control Plane knows, in any phase, for an RPC that
+   * sets `requires_auth_key`; it reads only. Without it no Auth Key is known.
+   */
+  readonly authenticateAuthKey?: (secret: string) => Promise<boolean>;
   /** False once the API Server drains; new calls then fail with `Unavailable`. */
   readonly accepting: () => boolean;
   /**
@@ -207,7 +220,8 @@ function assertMethodOptions(method: DescMethod): void {
 
 /**
  * Runs before the request body is read: refuses every call while draining, and every call without
- * a valid credential unless the RPC allows anonymous callers.
+ * a valid credential unless the RPC allows anonymous callers. An RPC that takes an Auth Key gets
+ * the bearer token to redeem once it is a known key; the RPC checks the key's phase.
  */
 function authentication(
   dependencies: OperatorRpcDependencies,
@@ -217,8 +231,29 @@ function authentication(
       if (!dependencies.accepting())
         throw operatorError(Code.Unavailable, ErrorReason.DRAINING, "Control Plane is draining");
       const header = context.requestHeader.get("authorization") ?? undefined;
+      if (getOption(context.method, requires_auth_key)) {
+        const authKey = header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : "";
+        if (authKey === "")
+          throw operatorError(
+            Code.Unauthenticated,
+            ErrorReason.UNAUTHENTICATED,
+            "An Auth Key is required to join",
+          );
+        if (!(await dependencies.authenticateAuthKey?.(authKey)))
+          throw operatorError(
+            Code.Unauthenticated,
+            ErrorReason.UNAUTHENTICATED,
+            "Auth Key is invalid",
+          );
+        context.values.set(presentedAuthKey, authKey);
+        return;
+      }
       if (header === undefined && getOption(context.method, allow_anonymous)) return;
-      context.values.set(authenticatedCaller, await authenticated(dependencies, header));
+      const workerHostId = context.requestHeader.get(WORKER_HOST_ID_HEADER) ?? undefined;
+      context.values.set(
+        authenticatedCaller,
+        await authenticated(dependencies, header, workerHostId),
+      );
     } catch (error) {
       throw toOperatorError(error);
     }
@@ -229,8 +264,9 @@ function authentication(
 async function authenticated(
   dependencies: OperatorRpcDependencies,
   header: string | undefined,
+  workerHostId: string | undefined,
 ): Promise<OperatorPrincipal> {
-  const caller = await dependencies.authenticate(header);
+  const caller = await dependencies.authenticate(header, workerHostId);
   if (caller === undefined)
     throw operatorError(
       Code.Unauthenticated,
@@ -258,9 +294,12 @@ function reauthentication(dependencies: OperatorRpcDependencies): Interceptor {
     if (!response.stream || request.contextValues.get(authenticatedCaller) === undefined)
       return response;
     const header = request.header.get("authorization") ?? undefined;
+    const workerHostId = request.header.get(WORKER_HOST_ID_HEADER) ?? undefined;
     return {
       ...response,
-      message: rechecking(response.message, everyMs, () => authenticated(dependencies, header)),
+      message: rechecking(response.message, everyMs, () =>
+        authenticated(dependencies, header, workerHostId),
+      ),
     };
   };
 }
@@ -285,8 +324,21 @@ function authorization(): Interceptor {
   return (next) => async (request) => {
     const caller = request.contextValues.get(authenticatedCaller);
     if (caller === undefined) {
-      if (!getOption(request.method, allow_anonymous))
+      if (
+        !getOption(request.method, allow_anonymous) &&
+        request.contextValues.get(presentedAuthKey) === undefined
+      )
         throw operatorError(Code.Internal, ErrorReason.INTERNAL, "Control Plane internal error");
+      return next(request);
+    }
+    if (caller.kind === "worker-host") {
+      if (!getOption(request.method, allow_worker_host_credential))
+        throw operatorError(
+          Code.PermissionDenied,
+          ErrorReason.PERMISSION_DENIED,
+          `A Worker Host credential may not call ${request.method.name}`,
+        );
+      request.contextValues.set(operatorPrincipal, caller);
       return next(request);
     }
     if (caller.kind === "coordination" && !getOption(request.method, allow_scoped_credential))
@@ -318,13 +370,15 @@ function authorization(): Interceptor {
  * Records one audit entry for each authenticated call to an RPC that declares `audit_action`, once
  * the RPC returns or fails, and stores it before answering, so any API Server process lists it to
  * a call that begins after this one returned. A successful call that lists several changes records
- * one entry per change instead. Refusals by the request gate are not recorded, as on the HTTP API.
+ * one entry per change instead. Refusals by the request gate are not recorded, and it refuses an
+ * unknown Auth Key, so a call with an Auth Key is recorded under the actor the RPC notes.
  */
 function auditing(auditTrail: Pick<AuditTrail, "record">): Interceptor {
   return (next) => async (request) => {
     const auditAction = getOption(request.method, audit_action);
     const caller = request.contextValues.get(authenticatedCaller);
-    if (auditAction === "" || caller === undefined) return next(request);
+    const authKey = request.contextValues.get(presentedAuthKey) !== undefined;
+    if (auditAction === "" || (caller === undefined && !authKey)) return next(request);
     const note: OperatorAuditNote = {
       target: request.method.parent.name.replace(/Service$/u, ""),
     };
@@ -336,7 +390,7 @@ function auditing(auditTrail: Pick<AuditTrail, "record">): Interceptor {
       failure = ConnectError.from(error).code;
       throw error;
     } finally {
-      if (note.preview !== true) {
+      if (note.preview !== true && (caller !== undefined || failure !== Code.Unauthenticated)) {
         const changes: readonly OperatorAuditChange[] =
           failure === undefined && note.changes !== undefined && note.changes.length > 0
             ? note.changes
@@ -345,7 +399,7 @@ function auditing(auditTrail: Pick<AuditTrail, "record">): Interceptor {
         for (const change of changes)
           await auditTrail.record({
             at,
-            actor: caller.principal.operatorId,
+            actor: caller?.principal.operatorId ?? note.actor ?? "auth-key",
             action: change.action ?? auditAction,
             target: change.failure === undefined ? change.target : auditTargetKind(change.target),
             outcome: change.failure === undefined ? "succeeded" : "failed",

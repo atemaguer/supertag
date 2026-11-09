@@ -28,11 +28,13 @@ import {
   requiredId,
 } from "./inbox-rpc.js";
 import { OBJECTIVE_STATUS, objectiveMessage, overviewMessage } from "./objective-protos.js";
-import { noteAuditPreview, operatorAuditTarget, operatorError } from "./operator-rpc-context.js";
+import {
+  IDEMPOTENCY_KEY,
+  noteAuditPreview,
+  operatorAuditTarget,
+  operatorError,
+} from "./operator-rpc-context.js";
 import type { OperatorControl, OperatorQueries, OperatorReadStore } from "./operator-seams.js";
-
-/** A key is 1 to 200 characters without whitespace or control characters. */
-const IDEMPOTENCY_KEY = /^[^\s\p{Cc}]{1,200}$/u;
 
 export interface ObjectiveServiceDependencies {
   readonly store: OperatorReadStore;

@@ -16,13 +16,11 @@ import type { MessageFollower } from "./message-follow.js";
 import {
   conversationOperator,
   drainingError,
+  IDEMPOTENCY_KEY,
   operatorAuditTarget,
   operatorError,
 } from "./operator-rpc-context.js";
 import type { OperatorControl, OperatorReadStore } from "./operator-seams.js";
-
-/** A key is 1 to 200 characters without whitespace or control characters. */
-const IDEMPOTENCY_KEY = /^[^\s\p{Cc}]{1,200}$/u;
 
 export interface ConversationServiceDependencies {
   readonly store: OperatorReadStore;

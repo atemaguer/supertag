@@ -1440,6 +1440,8 @@ type AuditEntry struct {
 	At *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=at,proto3" json:"at,omitempty"`
 	// Who acted: `control-plane-break-glass` for the admin token,
 	// `token:NAME` for an Operator Token, a scoped credential's operator ID,
+	// `worker-host:ID` for a Worker Host's own credential, `auth-key:NAME` for
+	// a host that joined with an Auth Key (`auth-key` when the join failed),
 	// or `PROVIDER:USER` for a person in an Objective thread.
 	Actor string `protobuf:"bytes,3,opt,name=actor,proto3" json:"actor,omitempty"`
 	// What was done, such as `apply`, `auth-key.create` or

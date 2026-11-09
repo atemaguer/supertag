@@ -114,7 +114,7 @@ describe("the Connect operator API over plain HTTP", () => {
     await expect(response.json()).resolves.toMatchObject({ code: "permission_denied" });
   });
 
-  it("calls the origin of a Control Plane URL that has a path, like every /api/v1/ request", async () => {
+  it("calls only the origin of a Control Plane URL that has a path", async () => {
     const status = await organizationClient({ url: `${url}/supertag`, token: ADMIN }).getStatus({});
     expect(status.phase).toBe(ControlPlanePhase.ACCEPTING);
   });

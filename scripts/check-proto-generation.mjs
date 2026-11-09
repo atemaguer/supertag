@@ -45,7 +45,9 @@ try {
         readFile(resolve(output.destination, path)),
       ]);
       if (!expected.equals(actual))
-        throw new Error(`Stale protobuf binding: ${path}; run pnpm proto:generate`);
+        throw new Error(
+          `Stale generated file: ${join(output.destination, path)}; run pnpm proto:generate`,
+        );
     }
   }
 } finally {

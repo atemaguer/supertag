@@ -59,6 +59,8 @@ export type WatchEvent = Message<"supertag.operator.v1.WatchEvent"> & {
   resumeToken: string;
 
   /**
+   * What the event is. Exactly one is set.
+   *
    * @generated from oneof supertag.operator.v1.WatchEvent.event
    */
   event: {
@@ -343,7 +345,8 @@ export const EventService: GenService<{
    *
    * The admin token and Operator Tokens carry every action and have no
    * Objective scope. A scoped coordination credential needs the
-   * `watch_events` action to call `Watch` at all.
+   * `watch_events` action to call `Watch` at all. A call while the Control
+   * Plane drains fails with `Unavailable` and `ERROR_REASON_DRAINING`.
    *
    * A kind the caller may not see is left out silently, even when `kinds`
    * names it.

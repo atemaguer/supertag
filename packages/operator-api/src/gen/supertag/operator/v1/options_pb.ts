@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/operator/v1/options.proto.
  */
 export const file_supertag_operator_v1_options: GenFile = /*@__PURE__*/
-  fileDesc("CiJzdXBlcnRhZy9vcGVyYXRvci92MS9vcHRpb25zLnByb3RvEhRzdXBlcnRhZy5vcGVyYXRvci52MSJmCgxNYW5pZmVzdEtpbmQSDAoEa2luZBgBIAEoCRIxCgRuYW1lGAIgASgLMiMuc3VwZXJ0YWcub3BlcmF0b3IudjEuTWFuaWZlc3RGaWVsZBIVCg1zcGVjX29wdGlvbmFsGAMgASgIIr8CCg1NYW5pZmVzdEZpZWxkEhAKCHJlcXVpcmVkGAEgASgIEhMKC291dHB1dF9vbmx5GAIgASgIEg8KB3BhdHRlcm4YAyABKAkSFwoKbWluX2xlbmd0aBgEIAEoDUgAiAEBEhcKCm1heF9sZW5ndGgYBSABKA1IAYgBARIUCgdtaW5pbXVtGAYgASgDSAKIAQESFAoHbWF4aW11bRgHIAEoA0gDiAEBEhYKCW1pbl9pdGVtcxgIIAEoDUgEiAEBEhYKCW1heF9pdGVtcxgJIAEoDUgFiAEBEhYKDmFjY2VwdHNfc2luZ2xlGAogASgIQg0KC19taW5fbGVuZ3RoQg0KC19tYXhfbGVuZ3RoQgoKCF9taW5pbXVtQgoKCF9tYXhpbXVtQgwKCl9taW5faXRlbXNCDAoKX21heF9pdGVtcyJHCg1NYW5pZmVzdE9uZW9mEhAKCHJlcXVpcmVkGAEgASgIEg0KBWZpZWxkGAIgASgJEhUKDWRpc2NyaW1pbmF0b3IYAyABKAkiYQoTTWFuaWZlc3RSZXF1aXJlbWVudBIMCgRwYXRoGAEgASgJEg4KBmVxdWFscxgCIAEoCRIQCghyZXF1aXJlZBgDIAMoCRIaChJvdGhlcndpc2VfcmVxdWlyZWQYBCADKAk6OAoGYWN0aW9uEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMY0YYDIAEoCVIGYWN0aW9uOkkKD2FsbG93X2Fub255bW91cxIeLmdvb2dsZS5wcm90b2J1Zi5NZXRob2RPcHRpb25zGNKGAyABKAhSDmFsbG93QW5vbnltb3VzOlIKFHJlcXVpcmVzX2FkbWluX3Rva2VuEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMY04YDIAEoCFIScmVxdWlyZXNBZG1pblRva2VuOkMKDGF1ZGl0X2FjdGlvbhIeLmdvb2dsZS5wcm90b2J1Zi5NZXRob2RPcHRpb25zGNSGAyABKAlSC2F1ZGl0QWN0aW9uOlgKF2FsbG93X3Njb3BlZF9jcmVkZW50aWFsEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMY1YYDIAEoCFIVYWxsb3dTY29wZWRDcmVkZW50aWFsOmEKCG1hbmlmZXN0Eh8uZ29vZ2xlLnByb3RvYnVmLk1lc3NhZ2VPcHRpb25zGNaGAyABKAsyIi5zdXBlcnRhZy5vcGVyYXRvci52MS5NYW5pZmVzdEtpbmRSCG1hbmlmZXN0OoEBChVtYW5pZmVzdF9yZXF1aXJlbWVudHMSHy5nb29nbGUucHJvdG9idWYuTWVzc2FnZU9wdGlvbnMY14YDIAMoCzIpLnN1cGVydGFnLm9wZXJhdG9yLnYxLk1hbmlmZXN0UmVxdWlyZW1lbnRSFG1hbmlmZXN0UmVxdWlyZW1lbnRzOmsKDm1hbmlmZXN0X2ZpZWxkEh0uZ29vZ2xlLnByb3RvYnVmLkZpZWxkT3B0aW9ucxjYhgMgASgLMiMuc3VwZXJ0YWcub3BlcmF0b3IudjEuTWFuaWZlc3RGaWVsZFINbWFuaWZlc3RGaWVsZDprCg5tYW5pZmVzdF9vbmVvZhIdLmdvb2dsZS5wcm90b2J1Zi5PbmVvZk9wdGlvbnMY2YYDIAEoCzIjLnN1cGVydGFnLm9wZXJhdG9yLnYxLk1hbmlmZXN0T25lb2ZSDW1hbmlmZXN0T25lb2Y6SgoObWFuaWZlc3RfdmFsdWUSIS5nb29nbGUucHJvdG9idWYuRW51bVZhbHVlT3B0aW9ucxjahgMgASgJUg1tYW5pZmVzdFZhbHVlQk5aTGdpdGh1Yi5jb20vYXRlbWFndWVyL3N1cGVydGFnL3BhY2thZ2VzL29wZXJhdG9yLWFwaS9nby9vcGVyYXRvcnYxO29wZXJhdG9ydjFiBnByb3RvMw", [file_google_protobuf_descriptor]);
+  fileDesc("CiJzdXBlcnRhZy9vcGVyYXRvci92MS9vcHRpb25zLnByb3RvEhRzdXBlcnRhZy5vcGVyYXRvci52MSJmCgxNYW5pZmVzdEtpbmQSDAoEa2luZBgBIAEoCRIxCgRuYW1lGAIgASgLMiMuc3VwZXJ0YWcub3BlcmF0b3IudjEuTWFuaWZlc3RGaWVsZBIVCg1zcGVjX29wdGlvbmFsGAMgASgIIr8CCg1NYW5pZmVzdEZpZWxkEhAKCHJlcXVpcmVkGAEgASgIEhMKC291dHB1dF9vbmx5GAIgASgIEg8KB3BhdHRlcm4YAyABKAkSFwoKbWluX2xlbmd0aBgEIAEoDUgAiAEBEhcKCm1heF9sZW5ndGgYBSABKA1IAYgBARIUCgdtaW5pbXVtGAYgASgDSAKIAQESFAoHbWF4aW11bRgHIAEoA0gDiAEBEhYKCW1pbl9pdGVtcxgIIAEoDUgEiAEBEhYKCW1heF9pdGVtcxgJIAEoDUgFiAEBEhYKDmFjY2VwdHNfc2luZ2xlGAogASgIQg0KC19taW5fbGVuZ3RoQg0KC19tYXhfbGVuZ3RoQgoKCF9taW5pbXVtQgoKCF9tYXhpbXVtQgwKCl9taW5faXRlbXNCDAoKX21heF9pdGVtcyJHCg1NYW5pZmVzdE9uZW9mEhAKCHJlcXVpcmVkGAEgASgIEg0KBWZpZWxkGAIgASgJEhUKDWRpc2NyaW1pbmF0b3IYAyABKAkiYQoTTWFuaWZlc3RSZXF1aXJlbWVudBIMCgRwYXRoGAEgASgJEg4KBmVxdWFscxgCIAEoCRIQCghyZXF1aXJlZBgDIAMoCRIaChJvdGhlcndpc2VfcmVxdWlyZWQYBCADKAk6OAoGYWN0aW9uEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMY0YYDIAEoCVIGYWN0aW9uOkkKD2FsbG93X2Fub255bW91cxIeLmdvb2dsZS5wcm90b2J1Zi5NZXRob2RPcHRpb25zGNKGAyABKAhSDmFsbG93QW5vbnltb3VzOlIKFHJlcXVpcmVzX2FkbWluX3Rva2VuEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMY04YDIAEoCFIScmVxdWlyZXNBZG1pblRva2VuOkMKDGF1ZGl0X2FjdGlvbhIeLmdvb2dsZS5wcm90b2J1Zi5NZXRob2RPcHRpb25zGNSGAyABKAlSC2F1ZGl0QWN0aW9uOlgKF2FsbG93X3Njb3BlZF9jcmVkZW50aWFsEh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMY1YYDIAEoCFIVYWxsb3dTY29wZWRDcmVkZW50aWFsOkwKEXJlcXVpcmVzX2F1dGhfa2V5Eh4uZ29vZ2xlLnByb3RvYnVmLk1ldGhvZE9wdGlvbnMY24YDIAEoCFIPcmVxdWlyZXNBdXRoS2V5OmEKHGFsbG93X3dvcmtlcl9ob3N0X2NyZWRlbnRpYWwSHi5nb29nbGUucHJvdG9idWYuTWV0aG9kT3B0aW9ucxjchgMgASgIUhlhbGxvd1dvcmtlckhvc3RDcmVkZW50aWFsOmEKCG1hbmlmZXN0Eh8uZ29vZ2xlLnByb3RvYnVmLk1lc3NhZ2VPcHRpb25zGNaGAyABKAsyIi5zdXBlcnRhZy5vcGVyYXRvci52MS5NYW5pZmVzdEtpbmRSCG1hbmlmZXN0OoEBChVtYW5pZmVzdF9yZXF1aXJlbWVudHMSHy5nb29nbGUucHJvdG9idWYuTWVzc2FnZU9wdGlvbnMY14YDIAMoCzIpLnN1cGVydGFnLm9wZXJhdG9yLnYxLk1hbmlmZXN0UmVxdWlyZW1lbnRSFG1hbmlmZXN0UmVxdWlyZW1lbnRzOmsKDm1hbmlmZXN0X2ZpZWxkEh0uZ29vZ2xlLnByb3RvYnVmLkZpZWxkT3B0aW9ucxjYhgMgASgLMiMuc3VwZXJ0YWcub3BlcmF0b3IudjEuTWFuaWZlc3RGaWVsZFINbWFuaWZlc3RGaWVsZDprCg5tYW5pZmVzdF9vbmVvZhIdLmdvb2dsZS5wcm90b2J1Zi5PbmVvZk9wdGlvbnMY2YYDIAEoCzIjLnN1cGVydGFnLm9wZXJhdG9yLnYxLk1hbmlmZXN0T25lb2ZSDW1hbmlmZXN0T25lb2Y6SgoObWFuaWZlc3RfdmFsdWUSIS5nb29nbGUucHJvdG9idWYuRW51bVZhbHVlT3B0aW9ucxjahgMgASgJUg1tYW5pZmVzdFZhbHVlQk5aTGdpdGh1Yi5jb20vYXRlbWFndWVyL3N1cGVydGFnL3BhY2thZ2VzL29wZXJhdG9yLWFwaS9nby9vcGVyYXRvcnYxO29wZXJhdG9ydjFiBnByb3RvMw", [file_google_protobuf_descriptor]);
 
 /**
  * One manifest kind.
@@ -273,12 +273,35 @@ export const allow_scoped_credential: GenExtension<MethodOptions, boolean> = /*@
   extDesc(file_supertag_operator_v1_options, 4);
 
 /**
+ * Take an Auth Key as the bearer token in place of an operator credential.
+ * A call without a bearer token, or with one that is not an Auth Key the
+ * Control Plane knows, fails with `Unauthenticated` before its body is
+ * read. The RPC redeems the key, so it checks then whether the key was
+ * revoked, has expired or was used.
+ *
+ * @generated from extension: bool requires_auth_key = 50011;
+ */
+export const requires_auth_key: GenExtension<MethodOptions, boolean> = /*@__PURE__*/
+  extDesc(file_supertag_operator_v1_options, 5);
+
+/**
+ * Also accept a Worker Host's own credential, sent as the bearer token with
+ * the host's ID in the `x-supertag-worker-host-id` header. It carries no
+ * operator actions: this option alone admits it, and the RPC acts only on
+ * that Worker Host and refuses any other with `PermissionDenied`.
+ *
+ * @generated from extension: bool allow_worker_host_credential = 50012;
+ */
+export const allow_worker_host_credential: GenExtension<MethodOptions, boolean> = /*@__PURE__*/
+  extDesc(file_supertag_operator_v1_options, 6);
+
+/**
  * Makes this message the `spec` of a manifest kind.
  *
  * @generated from extension: supertag.operator.v1.ManifestKind manifest = 50006;
  */
 export const manifest: GenExtension<MessageOptions, ManifestKind> = /*@__PURE__*/
-  extDesc(file_supertag_operator_v1_options, 5);
+  extDesc(file_supertag_operator_v1_options, 7);
 
 /**
  * Rules a manifest's fields must satisfy together, beyond the rules of
@@ -287,7 +310,7 @@ export const manifest: GenExtension<MessageOptions, ManifestKind> = /*@__PURE__*
  * @generated from extension: repeated supertag.operator.v1.ManifestRequirement manifest_requirements = 50007;
  */
 export const manifest_requirements: GenExtension<MessageOptions, ManifestRequirement[]> = /*@__PURE__*/
-  extDesc(file_supertag_operator_v1_options, 6);
+  extDesc(file_supertag_operator_v1_options, 8);
 
 /**
  * How the field is written and checked in manifests.
@@ -295,7 +318,7 @@ export const manifest_requirements: GenExtension<MessageOptions, ManifestRequire
  * @generated from extension: supertag.operator.v1.ManifestField manifest_field = 50008;
  */
 export const manifest_field: GenExtension<FieldOptions, ManifestField> = /*@__PURE__*/
-  extDesc(file_supertag_operator_v1_options, 7);
+  extDesc(file_supertag_operator_v1_options, 9);
 
 /**
  * How the oneof is written and checked in manifests.
@@ -303,7 +326,7 @@ export const manifest_field: GenExtension<FieldOptions, ManifestField> = /*@__PU
  * @generated from extension: supertag.operator.v1.ManifestOneof manifest_oneof = 50009;
  */
 export const manifest_oneof: GenExtension<OneofOptions, ManifestOneof> = /*@__PURE__*/
-  extDesc(file_supertag_operator_v1_options, 8);
+  extDesc(file_supertag_operator_v1_options, 10);
 
 /**
  * The value's spelling in manifests, such as `read-only`.
@@ -311,5 +334,5 @@ export const manifest_oneof: GenExtension<OneofOptions, ManifestOneof> = /*@__PU
  * @generated from extension: string manifest_value = 50010;
  */
 export const manifest_value: GenExtension<EnumValueOptions, string> = /*@__PURE__*/
-  extDesc(file_supertag_operator_v1_options, 9);
+  extDesc(file_supertag_operator_v1_options, 11);
 

@@ -531,7 +531,6 @@ Remote Worker Hosts join with an Auth Key (supertag create auth-key) before conn
 
 Endpoints:
   POST /supertag.operator.v1.SERVICE/METHOD   (operator RPCs: Connect and gRPC-Web)
-  POST /api/v1/worker-host-joins        (authorized by an Auth Key)
   POST /webhooks/slack/:externalAccountId
   POST /webhooks/github/:externalAccountId
   POST /webhooks/linear

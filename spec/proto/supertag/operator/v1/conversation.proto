@@ -22,6 +22,14 @@ option go_package = "github.com/atemaguer/supertag/packages/operator-api/go/oper
 // Permission or Context Sets apply. A turn may hand work to work Sessions.
 // Each one reports its result back into the conversation as a later turn, and
 // the message that started it carries that report.
+//
+// Access. The admin token and Operator Tokens may call every RPC; a scoped
+// coordination credential is refused with `PermissionDenied`.
+//
+// Every RPC that names a Tag takes its name, and fails with `NotFound` for an
+// empty name or a Tag that does not exist or was deleted. A call while
+// the Control Plane drains fails with `Unavailable` and
+// `ERROR_REASON_DRAINING`.
 service ConversationService {
   // Sends one message to the Tag as the caller and returns it before the Tag
   // answers, usually with `status` `REPLY_STATUS_WAITING`. Follow the reply
@@ -33,10 +41,8 @@ service ConversationService {
   // too.
   //
   // It fails with `InvalidArgument` for empty text or a malformed
-  // conversation name, `NotFound` for a Tag that does not exist,
-  // `Unavailable` with `ERROR_REASON_DRAINING` while the Control Plane drains,
-  // and `FailedPrecondition` with `ERROR_REASON_CONFLICT` when the Tag does
-  // not accept the message, with the message saying why.
+  // conversation name, and `FailedPrecondition` with `ERROR_REASON_CONFLICT`
+  // when the Tag does not accept the message, with the message saying why.
   rpc SendMessage(SendMessageRequest) returns (Message) {
     option (supertag.operator.v1.action) = "message_tag";
     option (supertag.operator.v1.audit_action) = "tag.message";
@@ -122,8 +128,9 @@ service ConversationService {
     option (supertag.operator.v1.action) = "read_conversation";
   }
 
-  // Lists the caller's conversations, the most recent message first. It fails
-  // with `NotFound` when `tag` names a Tag that does not exist.
+  // Lists the caller's conversations, the most recent message first. Empty
+  // `tag` lists every Tag's. It fails with `NotFound` when `tag` names a Tag
+  // that does not exist, and `InvalidArgument` for a malformed `page_token`.
   rpc ListConversations(ListConversationsRequest) returns (ListConversationsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
     option (supertag.operator.v1.action) = "read_conversation";
@@ -131,7 +138,8 @@ service ConversationService {
 
   // Lists the messages the caller sent in one conversation, newest first, each
   // as `GetMessage` returns it. A conversation the caller never wrote in has
-  // no messages. It fails with `NotFound` when the Tag does not exist.
+  // no messages. It fails with `InvalidArgument` for a malformed
+  // `page_token`.
   rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
     option (supertag.operator.v1.action) = "read_conversation";
@@ -367,6 +375,7 @@ message FollowEvent {
   // Orders the stream's events and resumes it as `after_sequence`. 0 only on
   // `heartbeat`, which is never resumed from.
   int64 sequence = 1;
+  // What happened. Exactly one is set.
   oneof part {
     // The message was delivered into a running turn, which answers it, or,
     // with an empty `task_id`, that delivery was withdrawn.
@@ -424,9 +433,14 @@ message Activity {
   // `retrying (Task Attempt N)`. Empty when a command or tool call ends. A
   // client shows it when it does not recognize `detail`.
   string text = 2;
+  // What the activity is. A client that does not recognize the member set
+  // shows `text`.
   oneof detail {
+    // A command starting or ending.
     CommandActivity command = 3;
+    // A tool call starting or ending.
     ToolActivity tool = 4;
+    // A new Task Attempt of the Task.
     RetryActivity retry = 5;
   }
 }
@@ -438,6 +452,7 @@ message CommandActivity {
   // The command line. The Tag wrote it, so it is untrusted: the Worker removes
   // control characters and cuts it to 200 characters.
   string command = 2;
+  // `ACTIVITY_STATUS_RUNNING` when it starts, then once more when it ends.
   ActivityStatus status = 3;
 }
 
@@ -447,6 +462,7 @@ message ToolActivity {
   string id = 1;
   // The tool as `PROVIDER.OPERATION`, such as `github.create_pull_request`.
   string tool = 2;
+  // `ACTIVITY_STATUS_RUNNING` when it starts, then once more when it ends.
   ActivityStatus status = 3;
 }
 

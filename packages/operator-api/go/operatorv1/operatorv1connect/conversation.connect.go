@@ -62,10 +62,8 @@ type ConversationServiceClient interface {
 	// too.
 	//
 	// It fails with `InvalidArgument` for empty text or a malformed
-	// conversation name, `NotFound` for a Tag that does not exist,
-	// `Unavailable` with `ERROR_REASON_DRAINING` while the Control Plane drains,
-	// and `FailedPrecondition` with `ERROR_REASON_CONFLICT` when the Tag does
-	// not accept the message, with the message saying why.
+	// conversation name, and `FailedPrecondition` with `ERROR_REASON_CONFLICT`
+	// when the Tag does not accept the message, with the message saying why.
 	SendMessage(context.Context, *connect.Request[operatorv1.SendMessageRequest]) (*connect.Response[operatorv1.Message], error)
 	// Reads one message: its reply once the Tag answered, and each work Session
 	// its turn started with that work Session's report. It fails with `NotFound`
@@ -139,12 +137,14 @@ type ConversationServiceClient interface {
 	// `supertag message tag --output json` does, cancels when every work
 	// Session it holds has `report_status` `REPLY_STATUS_REPLIED`.
 	FollowMessage(context.Context, *connect.Request[operatorv1.FollowMessageRequest]) (*connect.ServerStreamForClient[operatorv1.FollowEvent], error)
-	// Lists the caller's conversations, the most recent message first. It fails
-	// with `NotFound` when `tag` names a Tag that does not exist.
+	// Lists the caller's conversations, the most recent message first. Empty
+	// `tag` lists every Tag's. It fails with `NotFound` when `tag` names a Tag
+	// that does not exist, and `InvalidArgument` for a malformed `page_token`.
 	ListConversations(context.Context, *connect.Request[operatorv1.ListConversationsRequest]) (*connect.Response[operatorv1.ListConversationsResponse], error)
 	// Lists the messages the caller sent in one conversation, newest first, each
 	// as `GetMessage` returns it. A conversation the caller never wrote in has
-	// no messages. It fails with `NotFound` when the Tag does not exist.
+	// no messages. It fails with `InvalidArgument` for a malformed
+	// `page_token`.
 	ListMessages(context.Context, *connect.Request[operatorv1.ListMessagesRequest]) (*connect.Response[operatorv1.ListMessagesResponse], error)
 }
 
@@ -243,10 +243,8 @@ type ConversationServiceHandler interface {
 	// too.
 	//
 	// It fails with `InvalidArgument` for empty text or a malformed
-	// conversation name, `NotFound` for a Tag that does not exist,
-	// `Unavailable` with `ERROR_REASON_DRAINING` while the Control Plane drains,
-	// and `FailedPrecondition` with `ERROR_REASON_CONFLICT` when the Tag does
-	// not accept the message, with the message saying why.
+	// conversation name, and `FailedPrecondition` with `ERROR_REASON_CONFLICT`
+	// when the Tag does not accept the message, with the message saying why.
 	SendMessage(context.Context, *connect.Request[operatorv1.SendMessageRequest]) (*connect.Response[operatorv1.Message], error)
 	// Reads one message: its reply once the Tag answered, and each work Session
 	// its turn started with that work Session's report. It fails with `NotFound`
@@ -320,12 +318,14 @@ type ConversationServiceHandler interface {
 	// `supertag message tag --output json` does, cancels when every work
 	// Session it holds has `report_status` `REPLY_STATUS_REPLIED`.
 	FollowMessage(context.Context, *connect.Request[operatorv1.FollowMessageRequest], *connect.ServerStream[operatorv1.FollowEvent]) error
-	// Lists the caller's conversations, the most recent message first. It fails
-	// with `NotFound` when `tag` names a Tag that does not exist.
+	// Lists the caller's conversations, the most recent message first. Empty
+	// `tag` lists every Tag's. It fails with `NotFound` when `tag` names a Tag
+	// that does not exist, and `InvalidArgument` for a malformed `page_token`.
 	ListConversations(context.Context, *connect.Request[operatorv1.ListConversationsRequest]) (*connect.Response[operatorv1.ListConversationsResponse], error)
 	// Lists the messages the caller sent in one conversation, newest first, each
 	// as `GetMessage` returns it. A conversation the caller never wrote in has
-	// no messages. It fails with `NotFound` when the Tag does not exist.
+	// no messages. It fails with `InvalidArgument` for a malformed
+	// `page_token`.
 	ListMessages(context.Context, *connect.Request[operatorv1.ListMessagesRequest]) (*connect.Response[operatorv1.ListMessagesResponse], error)
 }
 

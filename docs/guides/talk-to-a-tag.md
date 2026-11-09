@@ -216,7 +216,7 @@ the Tag's Mailbox messages is titled `Inbox`. `STATUS` shows the latest Task's s
   the message started or continued, with its status and report. A work Session waiting on you has
   status `WORK_SESSION_STATUS_WAITING` and its `question`; one waiting for approval lists
   `approvals`, and the command returns there. While no bound Worker Host can run the turn,
-  `waitingReason` says why. See [`Message`](../reference/control-plane-api.md#conversations).
+  `waitingReason` says why. See [`Message`](../reference/operator-api/conversation.md#message).
 - **Ctrl-C stops showing the reply, not the work.** The Tag keeps working. The command prints the
   `supertag describe task` command that follows the Task.
 
@@ -240,7 +240,7 @@ the Tag's Mailbox messages is titled `Inbox`. `STATUS` shows the latest Task's s
 
 ## Reference
 
-- [`ConversationService`: sending, reading, and following messages](../reference/control-plane-api.md#conversations)
+- [`ConversationService`: sending, reading, and following messages](../reference/operator-api/conversation.md)
 
 ## Next
 

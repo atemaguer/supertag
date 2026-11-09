@@ -39,16 +39,16 @@ afterEach(async () => {
 });
 
 function joinResponse(workerHostId: string, ephemeral = false): Response {
-  return new Response(
-    JSON.stringify({
-      apiVersion: "supertag/v1",
-      kind: "WorkerHostCredential",
-      metadata: { workerHostId, issuedAt: "2026-09-30T00:00:00.000Z" },
-      credential: { token: `token-for-${workerHostId}` },
-      status: { authKey: "laptop", tags: ["builder"], ephemeral },
-    }),
-    { status: 201, headers: { "content-type": "application/json" } },
-  );
+  return Response.json({
+    credential: {
+      workerHostId,
+      issuedAt: "2026-09-30T00:00:00Z",
+      token: `token-for-${workerHostId}`,
+    },
+    authKey: "laptop",
+    tags: ["builder"],
+    ephemeral,
+  });
 }
 
 describe("Auth Key commands", () => {
@@ -244,10 +244,10 @@ describe("Worklet credential resolution", () => {
       notice: "Joined as Worker Host build-01-2 for Tags builder.",
     });
     const [url, init] = request.mock.calls[0] ?? [];
-    expect(String(url)).toBe(`${CONTROL_PLANE}/api/v1/worker-host-joins`);
+    expect(String(url)).toBe(`${CONTROL_PLANE}/supertag.operator.v1.HostService/JoinWorkerHost`);
     expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${AUTH_KEY}`);
-    expect(JSON.parse(String(init?.body))).toMatchObject({ metadata: { name: "build-01" } });
-    expect(String(init?.body)).not.toContain(AUTH_KEY);
+    const body = new TextDecoder().decode(init?.body as Uint8Array);
+    expect(JSON.parse(body)).toEqual({ name: "build-01", idempotencyKey: expect.any(String) });
     const path = workerHostCredentialPath("build-01-2", state);
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
       version: 1,
@@ -260,6 +260,29 @@ describe("Worklet credential resolution", () => {
     await expect(
       resolveWorkletCredential({ controlPlane: CONTROL_PLANE, stateDirectory: state }),
     ).resolves.toMatchObject({ workerHostId: "build-01-2", source: "stored" });
+  });
+
+  it("retries a join whose answer was lost with the same idempotency key", async () => {
+    const state = await stateDirectory();
+    const request = vi.fn(async (_url: URL | RequestInfo, _init?: RequestInit) => {
+      if (request.mock.calls.length === 1) throw new TypeError("fetch failed");
+      return joinResponse("build-01");
+    });
+    await expect(
+      resolveWorkletCredential({
+        controlPlane: CONTROL_PLANE,
+        authKey: AUTH_KEY,
+        requestedWorkerHostId: "build-01",
+        stateDirectory: state,
+        fetch: request as unknown as typeof fetch,
+      }),
+    ).resolves.toMatchObject({ workerHostId: "build-01", source: "auth-key" });
+    const keys = request.mock.calls.map(
+      ([, init]) => JSON.parse(new TextDecoder().decode(init?.body as Uint8Array)).idempotencyKey,
+    );
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toEqual(expect.any(String));
+    expect(keys[1]).toBe(keys[0]);
   });
 
   it("keeps an ephemeral host's credential only in memory", async () => {
@@ -279,11 +302,11 @@ describe("Worklet credential resolution", () => {
 
   it("reports a rejected Auth Key and rejects malformed keys before calling the API", async () => {
     const state = await stateDirectory();
-    const request = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ message: "Auth Key has expired; ask for a new key" }), {
-          status: 403,
-        }),
+    const request = vi.fn(async () =>
+      Response.json(
+        { code: "permission_denied", message: "Auth Key has expired; ask for a new key" },
+        { status: 403 },
+      ),
     );
     await expect(
       resolveWorkletCredential({
@@ -293,6 +316,18 @@ describe("Worklet credential resolution", () => {
         fetch: request as unknown as typeof fetch,
       }),
     ).rejects.toThrow("Joining with the Auth Key failed: Auth Key has expired");
+    await expect(
+      resolveWorkletCredential({
+        controlPlane: CONTROL_PLANE,
+        authKey: AUTH_KEY,
+        stateDirectory: state,
+        fetch: (async () => {
+          throw new TypeError("fetch failed");
+        }) as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(
+      `Could not reach the Control Plane management API at ${CONTROL_PLANE} to join`,
+    );
     request.mockClear();
     await expect(
       resolveWorkletCredential({
@@ -385,23 +420,51 @@ describe("Worklet credential resolution", () => {
   });
 });
 
+/** `RevokeWorkerHostCredential`'s answer for a host that revoked itself. */
+function revokedHost(id: string): Response {
+  return Response.json({ metadata: { id, name: id }, revocationReason: "SelfRevoked" });
+}
+
 describe("Worker Host self-revocation", () => {
+  it("reports a credential the Control Plane no longer accepts and keeps the file", async () => {
+    const state = await stateDirectory();
+    await storeWorkerHostCredential(
+      { workerHostId: "laptop", token: "host-secret", controlPlane: CONTROL_PLANE },
+      state,
+    );
+    const refused = (async () =>
+      Response.json(
+        { code: "unauthenticated", message: "A valid credential is required" },
+        { status: 401 },
+      )) as unknown as typeof fetch;
+    await expect(revokeOwnWorkerHostCredential(["laptop"], refused, state)).rejects.toThrow(
+      "The stored credential for Worker Host laptop is no longer accepted",
+    );
+    await expect(stat(workerHostCredentialPath("laptop", state))).resolves.toBeDefined();
+  });
+
   it("revokes with the stored credential and removes it", async () => {
     const state = await stateDirectory();
     await storeWorkerHostCredential(
       { workerHostId: "laptop", token: "host-secret", controlPlane: CONTROL_PLANE },
       state,
     );
-    const request = vi.fn(
-      async (_url: URL | RequestInfo, _init?: RequestInit) => new Response(null, { status: 204 }),
+    const request = vi.fn(async (_url: URL | RequestInfo, _init?: RequestInit) =>
+      revokedHost("laptop"),
     );
     await expect(
       revokeOwnWorkerHostCredential(["laptop"], request as unknown as typeof fetch, state),
     ).resolves.toContain("Revoked Worker Host laptop with its own credential");
     const [url, init] = request.mock.calls[0] ?? [];
-    expect(String(url)).toBe(`${CONTROL_PLANE}/api/v1/worker-hosts/laptop/credential`);
-    expect(init?.method).toBe("DELETE");
+    expect(String(url)).toBe(
+      `${CONTROL_PLANE}/supertag.operator.v1.HostService/RevokeWorkerHostCredential`,
+    );
+    expect(init?.method).toBe("POST");
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer host-secret");
+    expect(new Headers(init?.headers).get("x-supertag-worker-host-id")).toBe("laptop");
+    expect(JSON.parse(new TextDecoder().decode(init?.body as Uint8Array))).toEqual({
+      id: "laptop",
+    });
     await expect(stat(workerHostCredentialPath("laptop", state))).rejects.toMatchObject({
       code: "ENOENT",
     });
@@ -424,8 +487,8 @@ describe("Worker Host self-revocation", () => {
       token: "other-secret",
       controlPlane: CONTROL_PLANE,
     });
-    const request = vi.fn(
-      async (_url: URL | RequestInfo, _init?: RequestInit) => new Response(null, { status: 204 }),
+    const request = vi.fn(async (_url: URL | RequestInfo, _init?: RequestInit) =>
+      revokedHost("laptop-2"),
     );
     const message = await revokeOwnWorkerHostCredential(
       ["laptop-2"],
@@ -434,9 +497,9 @@ describe("Worker Host self-revocation", () => {
     );
     expect(message).toContain("Revoked Worker Host laptop-2 with its own credential");
     expect(message).toContain("Host service laptop can no longer connect");
-    const [url, init] = request.mock.calls[0] ?? [];
-    expect(String(url)).toBe(`${CONTROL_PLANE}/api/v1/worker-hosts/laptop-2/credential`);
+    const [, init] = request.mock.calls[0] ?? [];
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer service-secret");
+    expect(new Headers(init?.headers).get("x-supertag-worker-host-id")).toBe("laptop-2");
     await expect(stat(join(state, "hosts", "laptop", "credential.json"))).rejects.toMatchObject({
       code: "ENOENT",
     });
@@ -455,9 +518,7 @@ describe("Worker Host self-revocation", () => {
       token: "host-secret",
       controlPlane: CONTROL_PLANE,
     });
-    const request = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response(null, { status: 204 }));
+    const request = vi.spyOn(globalThis, "fetch").mockResolvedValue(revokedHost("laptop"));
     vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     expect(await main(["revoke", "worker-host-credential", "laptop"])).toBe(0);
     expect(request).toHaveBeenCalledTimes(1);

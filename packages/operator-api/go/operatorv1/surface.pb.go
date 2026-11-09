@@ -1179,6 +1179,8 @@ func (x *SurfaceSecretReferences) GetReferences() map[string]*SurfaceSecretRefer
 // Where a SurfaceAccount manifest takes one secret from. Never the value.
 type SurfaceSecretReference struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// Where the secret comes from. A manifest sets exactly one.
+	//
 	// Types that are valid to be assigned to Source:
 	//
 	//	*SurfaceSecretReference_SecretRef

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  workerHostCredentialIssuance,
   workerHostResource,
   workerProfileResourcesFromHost,
 } from "../apps/cli/src/control-plane-resources.ts";
@@ -109,20 +108,5 @@ describe("Worker Host resources", () => {
 
     expect(JSON.stringify(resource)).not.toContain("must-not-escape");
     expect(resource.status.workers).toHaveLength(1);
-  });
-
-  it("isolates the one-time credential in a dedicated issuance response", () => {
-    const issuance = workerHostCredentialIssuance(
-      "host-a",
-      "one-time-token",
-      "2026-09-14T00:02:00.000Z",
-    );
-
-    expect(issuance).toEqual({
-      apiVersion: "supertag/v1",
-      kind: "WorkerHostCredential",
-      metadata: { workerHostId: "host-a", issuedAt: "2026-09-14T00:02:00.000Z" },
-      credential: { token: "one-time-token" },
-    });
   });
 });

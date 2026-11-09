@@ -377,6 +377,37 @@ An advanced implementation may instead implement the language-neutral Worker bou
 
 Use `run_worker_conformance()` to test lifecycle, identity, event ordering, and cancellation. The schemas and fixtures under [`spec/`](../../spec) remain the language-neutral source of truth.
 
+## Optional: Call the operator API
+
+A Python application can also manage the Control Plane through the operator API, the RPCs the CLI
+calls: send a Tag a message, read the inbox, or watch events. The client is in the `operator`
+extra, which the first SDK release after `0.2.0a6` publishes; `0.2.0a6` has no
+`supertag.operator`. Once that release is on PyPI, install it with:
+
+```sh
+python -m pip install --pre 'supertag[operator]'
+```
+
+Then call an RPC with the admin token or an
+[Operator Token](../reference/glossary.md#operator-token), a named credential for one teammate or
+machine:
+
+```python
+from supertag.operator import OperatorClientSync
+from supertag.operator.v1 import organization_pb2
+
+with OperatorClientSync(
+    "https://control-plane.example.com", "admin-token-or-operator-token"
+) as client:
+    status = client.organization.get_status(organization_pb2.GetStatusRequest())
+```
+
+`OperatorClient` is the asynchronous form. The clients and messages come from the same protos as
+the CLI's. See [Call the operator API](../../sdks/python/README.md#call-the-operator-api) for
+streams and errors, and the
+[operator API reference](../reference/operator-api/README.md) for every
+RPC.
+
 ## If something goes wrong
 
 - **Authentication fails.** The second `LocalWorklet` argument must match the enrolled Worker Host
@@ -393,3 +424,4 @@ Use `run_worker_conformance()` to test lifecycle, identity, event ordering, and 
 - [Add a custom Context type](custom-context.md) for a complete Context Resolver example.
 - [Worker reference](../reference/worker.md) for the language-neutral Worker contract.
 - [Python SDK README](../../sdks/python/README.md#durable-worklets) for durable restart behavior.
+- [Call the operator API](../../sdks/python/README.md#call-the-operator-api) from Python.

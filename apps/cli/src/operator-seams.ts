@@ -80,6 +80,7 @@ export const OPERATOR_RPC_CLASSES: Readonly<Record<string, OperatorRpcClass>> = 
   "supertag.operator.v1.HostService/RevokeWorkerHostCredential": "control",
   "supertag.operator.v1.HostService/DrainWorkerHost": "control",
   "supertag.operator.v1.HostService/ResumeWorkerHost": "control",
+  "supertag.operator.v1.HostService/JoinWorkerHost": "control",
   "supertag.operator.v1.HostService/BindWorkerHost": "control",
   "supertag.operator.v1.HostService/UnbindWorkerHost": "control",
   "supertag.operator.v1.HostService/CreateAuthKey": "control",
@@ -396,8 +397,14 @@ export interface OperatorControl {
     readonly id: string;
     readonly expectedCredentialRevision: number;
   }) => Promise<{ readonly workerHost: WorkerHost; readonly token: string }>;
-  /** Revokes a Worker Host; revoking a revoked host returns it unchanged. */
-  readonly revokeWorkerHostCredential: (id: string) => Promise<WorkerHost>;
+  /**
+   * Revokes a Worker Host, recording whether an operator or the host itself revoked it; revoking
+   * a revoked host returns it unchanged.
+   */
+  readonly revokeWorkerHostCredential: (input: {
+    readonly id: string;
+    readonly reason: "OperatorRevoked" | "SelfRevoked";
+  }) => Promise<WorkerHost>;
   /** Drains or resumes a Worker Host; setting what it already has changes nothing. */
   readonly setWorkerHostDraining: (input: {
     readonly id: string;
@@ -409,6 +416,22 @@ export interface OperatorControl {
     readonly workerHostId: string;
     readonly bound: boolean;
   }) => Promise<{ readonly workerHostIds: readonly string[]; readonly changed: boolean }>;
+  /**
+   * Redeems an Auth Key to enroll a new Worker Host under `name`, or `NAME-2` and so on when that
+   * ID is taken, bound to the key's Tags, and returns its first credential. A repeat with the same
+   * Auth Key and idempotency key enrolls nothing and returns the same host with a new credential
+   * that replaces the unseen one, until the host first connects; after that, or once the host is
+   * revoked, it is refused as `AlreadyExists`. Fails otherwise as `JoinWorkerHost` does.
+   */
+  readonly joinWorkerHost: (input: {
+    readonly authKey: string;
+    readonly name: string;
+    readonly idempotencyKey: string;
+  }) => Promise<{
+    readonly workerHost: WorkerHost;
+    readonly token: string;
+    readonly authKey: AuthKey;
+  }>;
   /** Creates an Auth Key; a name already used is refused as `AlreadyExists`. */
   readonly createAuthKey: (input: {
     readonly name: string;

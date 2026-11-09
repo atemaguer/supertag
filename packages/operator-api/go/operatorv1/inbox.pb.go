@@ -37,7 +37,7 @@ const (
 	// An Objective reached a budget or deadline limit. `reason` says which.
 	InboxItemKind_INBOX_ITEM_KIND_OBJECTIVE_LIMIT InboxItemKind = 4
 	// A Task needs an operator, such as a running Task whose Task Attempt is
-	// uncertain. `uncertain_attempt` names that Attempt.
+	// uncertain. `uncertain_attempt` names that Task Attempt.
 	InboxItemKind_INBOX_ITEM_KIND_TASK_ATTENTION InboxItemKind = 5
 	// A Task is held until an MCP server is logged in to.
 	InboxItemKind_INBOX_ITEM_KIND_MCP_LOGIN InboxItemKind = 6
@@ -793,6 +793,8 @@ func (x *InboxItem) GetNotification() *InboxNotification {
 // A record an inbox item was derived from.
 type InboxEvidence struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// The record. Exactly one is set.
+	//
 	// Types that are valid to be assigned to Record:
 	//
 	//	*InboxEvidence_Task

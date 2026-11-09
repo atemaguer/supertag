@@ -702,6 +702,8 @@ export type AuditEntry = Message<"supertag.operator.v1.AuditEntry"> & {
   /**
    * Who acted: `control-plane-break-glass` for the admin token,
    * `token:NAME` for an Operator Token, a scoped credential's operator ID,
+   * `worker-host:ID` for a Worker Host's own credential, `auth-key:NAME` for
+   * a host that joined with an Auth Key (`auth-key` when the join failed),
    * or `PROVIDER:USER` for a person in an Objective thread.
    *
    * @generated from field: string actor = 3;

@@ -363,7 +363,7 @@ Attempts finish. If they finish at $3,080, the Objective shows an $80 overrun an
   against it. The increase is audited in the Objective's change history.
 
 The API rules are in
-[Objective allocation recovery](control-plane-api.md#objective-allocation-recovery). For the
+[`UpdateObjective`](operator-api/objective.md#updateobjective). For the
 procedure, see [Respond to budget and operator requests](../guides/objective-decisions.md).
 
 ## Deadlines
@@ -639,7 +639,7 @@ Task events record each step with the Permission Sets and the decider: `approval
 `approval.granted-by-scope`, `approval.approved`, `approval.denied` and `approval.consumed`.
 
 The operator API mirrors the CLI with `InboxService.ListApprovals`, `Approve` and `Deny`; see
-[Inbox](control-plane-api.md#inbox). Scoped operator credentials need the `list_approvals` and
+[Inbox](operator-api/inbox.md). Scoped operator credentials need the `list_approvals` and
 `decide_approval` actions.
 
 ## Review findings
@@ -730,16 +730,16 @@ turns; it does not check Worker capacity, profile compatibility or approvals.
 ### Access
 
 The overview requires the `read_objective` action plus access to the requested Objective. See
-[Objectives](control-plane-api.md#objectives) in the API reference.
+[Objectives](operator-api/objective.md) in the API reference.
 
 ## Operator inbox
 
 `supertag list inbox` is a redacted projection over pending stored state. It creates no resource
 and grants no authority: the operator acts through the same commands as always. Filter it by
 Objective or kind. `supertag watch inbox` follows the
-[event stream](control-plane-api.md#event-stream), rereads the inbox whenever an item changes, and
+[event stream](operator-api/event.md#watch), rereads the inbox whenever an item changes, and
 prints each new item occurrence once. `--output json` prints `InboxService` messages as proto JSON;
-see [Inbox](control-plane-api.md#inbox).
+see [Inbox](operator-api/inbox.md).
 
 | Kind | Appears when |
 | --- | --- |
@@ -801,7 +801,8 @@ in [Operator notifications](../operations/control-plane.md#operator-notification
 `supertag describe task TASK_ID` reports the latest Task Attempt's host receipt when available.
 `unavailable` means the Control Plane cannot currently obtain one; it does not establish that
 execution failed. For the field meanings, see
-[Inspect the latest Task execution](control-plane-api.md#inspect-the-latest-task-execution).
+[`InspectTaskExecution`](operator-api/work.md#inspecttaskexecution) and
+[Execution evidence](control-plane-api.md#execution-evidence).
 General recovery rules are in [Scheduling and interrupted
 execution](scheduling-and-recovery.md).
 

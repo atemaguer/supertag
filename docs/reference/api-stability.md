@@ -80,10 +80,10 @@ at any time.
 | --- | --- | --- |
 | `SessionStateStore` and continuity resolution | Beta | Exact-ref matching and resume → replay → fresh behavior |
 | Shipped Codex, Claude Code, local execution, E2B, MCP, and collaboration surface providers | Experimental | Provider IDs and documented configuration only; implementation details are not contracts |
-| Control-plane resource API and CLI commands | Beta | Documented resource shapes and commands; output prose is not machine-stable |
-| [Operator RPCs](control-plane-api.md#operator-rpcs-experimental): the `supertag.operator.v1` protobuf package served with Connect and gRPC-Web on the API port | Experimental | Package, services, RPCs, method options, messages, the `ErrorDetail` reasons, and their proto3 JSON form; fields may change before release, and a change `buf breaking` flags is deliberate |
+| Control Plane resources and CLI commands | Beta | Documented resource shapes and commands; output prose is not machine-stable |
+| [Operator RPCs](control-plane-api.md#operator-rpcs-experimental): the `supertag.operator.v1` protobuf package served with Connect and gRPC-Web on the API port, documented in the generated [operator API reference](operator-api/README.md) | Experimental | Package, services, RPCs, method options, messages, the `ErrorDetail` reasons, and their proto3 JSON form; fields may change before release, and a change `buf breaking` flags is deliberate. The reference is generated from the proto comments, which define each RPC's behavior; error message prose is not machine-stable |
 | `supertag message objective ID TEXT` and `supertag recover worklet --host NAME` | Beta | Flag names and meaning: deliver the next turn of an Objective's conversation; select the host service whose journal recovery writes. Error prose is not machine-stable |
-| `supertag message tag`, [`ConversationService` and `EventService`](control-plane-api.md#conversations), the `FollowEventAdapter` in `@supertag/operator-api`, and the coordination tools `create_objective`, `read_objective`, `update_objective`, `list_objectives`, `list_sessions`, `search_sessions`, `read_session`, `start_session`, `continue_session`, `ask`, `send_message`, `post`, and `read_workstream` | Experimental | RPCs, `Message` and `WorkSession` fields, `FollowEvent` parts (`joined`, `waiting`, `textDelta`, `activity`, `finish`, `error`, `workSessionChanged`, `end`, `heartbeat`) and their order and resume rules, `WatchEvent` kinds, resume tokens and `resync`, the adapter's AI SDK UI message chunks (`text-*`, `data-joined`, `data-waiting`, `data-activity`, `data-reply`, `data-work-session`, `finish`, `error`), the `--output json` message record, tool names and inputs, and work Session limits (four per turn, eight unfinished per conversation, four running, and none started or continued once less than 5% of the turn's or Objective's budget pool is left), and one branch per work Session; output prose is not machine-stable |
+| `supertag message tag`, [`ConversationService`](operator-api/conversation.md) and [`EventService`](operator-api/event.md), the `FollowEventAdapter` in `@supertag/operator-api`, and the coordination tools `create_objective`, `read_objective`, `update_objective`, `list_objectives`, `list_sessions`, `search_sessions`, `read_session`, `start_session`, `continue_session`, `ask`, `send_message`, `post`, and `read_workstream` | Experimental | RPCs, `Message` and `WorkSession` fields, `FollowEvent` parts (`joined`, `waiting`, `textDelta`, `activity`, `finish`, `error`, `workSessionChanged`, `end`, `heartbeat`) and their order and resume rules, `WatchEvent` kinds, resume tokens and `resync`, the adapter's AI SDK UI message chunks (`text-*`, `data-joined`, `data-waiting`, `data-activity`, `data-reply`, `data-work-session`, `finish`, `error`), the `--output json` message record, tool names and inputs, and work Session limits (four per turn, eight unfinished per conversation, four running, and none started or continued once less than 5% of the turn's or Objective's budget pool is left), and one branch per work Session; output prose is not machine-stable |
 | `supertag-ai/control-plane` embedding API | Experimental | Control Plane service boundary; no persistence-schema compatibility promise |
 | Conformance helpers and test fixtures | Beta | Published assertions and fixtures; helper implementation details may change |
 | Undocumented exports, package internals, and database tables | Internal | No compatibility promise |
@@ -133,6 +133,11 @@ composition. `RuntimeInputPipeline` is internal and is not exported from `supert
 `supertag.runtime.__all__`. Python remote Worklets use protocol 18 only, authenticate with
 `credential`, and require `DurableLocalWorklet` with a persistent journal.
 
+The Python SDK's operator API client, `supertag.operator`, installed with the `operator` extra, is
+Experimental: `OperatorClient`, `OperatorClientSync`, `error_detail`, `ErrorDetail`, `Code`,
+`ConnectError`, `OPERATOR_API_VERSION`, and the generated `supertag.operator.v1` modules. They
+follow the operator protos and change with them.
+
 ## Release policy
 
 SuperTag uses semantic version numbers, with these pre-1.0 rules:
@@ -172,8 +177,8 @@ prerelease difference is supported, but prereleases can still change commands.
 
 `supertag version` prints both versions and the pair's support. Other commands print at most one
 warning per command to stderr, never to stdout. Set `SUPERTAG_NO_VERSION_WARNING=1` to silence it,
-for example in CI. When a Control Plane on another version rejects a request with HTTP 400, or
-with a 404 for an unknown route, the CLI adds a hint naming both versions.
+for example in CI. When a Control Plane on another version does not serve an RPC the CLI calls, it
+answers `unimplemented`, and the CLI adds a hint naming both versions.
 
 Every Control Plane response carries a `SuperTag-Version` header, including errors. The
 unauthenticated `GET /healthz` also returns `version` in its body and nothing else about the

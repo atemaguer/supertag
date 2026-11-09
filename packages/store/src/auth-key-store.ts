@@ -16,7 +16,7 @@ import {
   TagMessagingError,
   workerHostNameCandidate,
 } from "@supertag/core";
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, like, sql } from "drizzle-orm";
 import { runDialectTransaction } from "./dialect-transaction.js";
 import {
   firstCredentialRow,
@@ -30,6 +30,10 @@ type Flow<T> = Generator<any, T, any>;
 /** Upper bound on `NAME-N` candidates tried for one join before giving up. */
 const MAX_NAME_CANDIDATES = 1000;
 const DIGEST = /^[a-f0-9]{64}$/u;
+const JOIN_CREDENTIAL_PREFIX = /^[a-z0-9][a-z0-9/-]*\/$/u;
+
+/** Rolls back a reusable key's redemption that a concurrent one with the same join request beat. */
+class RepeatedJoin extends Error {}
 
 export class DrizzleAuthKeyStore implements AuthKeyStore {
   constructor(
@@ -95,6 +99,28 @@ export class DrizzleAuthKeyStore implements AuthKeyStore {
     return row ? authKeyFromRow(row) : undefined;
   }
 
+  async findAuthKeyBySecret(input: {
+    readonly lookupId: string;
+    readonly secretDigest: string;
+  }): Promise<AuthKey | undefined> {
+    if (!DIGEST.test(input.secretDigest)) return undefined;
+    const table = this.tables.authKeys;
+    const [row] = await this.db
+      .select()
+      .from(table)
+      .where(eq(table.lookupId, input.lookupId))
+      .limit(1);
+    if (
+      !row ||
+      !timingSafeEqual(
+        Buffer.from(String(row.secretDigest), "hex"),
+        Buffer.from(input.secretDigest, "hex"),
+      )
+    )
+      return undefined;
+    return authKeyFromRow(row);
+  }
+
   async listAuthKeys(): Promise<readonly AuthKey[]> {
     const table = this.tables.authKeys;
     const rows = await this.db.select().from(table).orderBy(asc(table.createdAt), asc(table.name));
@@ -118,10 +144,25 @@ export class DrizzleAuthKeyStore implements AuthKeyStore {
   }
 
   async redeemAuthKey(input: RedeemAuthKeyInput): Promise<AuthKeyRedemption> {
+    try {
+      return await this.#redeemAuthKey(input);
+    } catch (error) {
+      if (!(error instanceof RepeatedJoin)) throw error;
+      return this.#redeemAuthKey(input);
+    }
+  }
+
+  #redeemAuthKey(input: RedeemAuthKeyInput): Promise<AuthKeyRedemption> {
     const baseName = parseWorkerHostName(input.workerHostName);
     const redeemedAt = input.redeemedAt;
     const credentialId = input.credentialId.trim();
     if (!credentialId) throw new Error("Worker Host credential id must not be empty");
+    const prefix = input.joinCredentialPrefix;
+    if (
+      prefix !== undefined &&
+      (!JOIN_CREDENTIAL_PREFIX.test(prefix) || !credentialId.startsWith(prefix))
+    )
+      throw new Error("The join credential prefix must be a plain prefix of the credential id");
     const presented = DIGEST.test(input.secretDigest)
       ? Buffer.from(input.secretDigest, "hex")
       : undefined;
@@ -147,6 +188,29 @@ export class DrizzleAuthKeyStore implements AuthKeyStore {
           return { status: "invalid" };
         if (key.revokedAt != null) return { status: "revoked" };
         if (Date.parse(key.expiresAt) <= Date.parse(redeemedAt)) return { status: "expired" };
+        // A repeat of a join request that enrolled a host returns that host and changes nothing.
+        function* repeated(): Flow<AuthKeyRedemption | undefined> {
+          if (prefix === undefined) return undefined;
+          const [first] = yield tx
+            .select({ workerHostId: credentials.workerHostId })
+            .from(credentials)
+            .where(and(like(credentials.credentialId, `${prefix}%`), eq(credentials.revision, 1)))
+            .limit(1);
+          if (!first) return undefined;
+          const [host] = yield tx
+            .select()
+            .from(hosts)
+            .where(eq(hosts.id, first.workerHostId))
+            .limit(1);
+          if (!host || host.authKey !== key.name) return undefined;
+          return {
+            status: "repeated",
+            authKey: authKeyFromRow(key),
+            workerHost: workerHostFromRow(host),
+          };
+        }
+        const earlier = yield* repeated();
+        if (earlier !== undefined) return earlier;
         if (!key.reusable && key.usedAt != null) return { status: "used" };
         const tagIds = stringArray(key.tagIds);
         // A retired Tag is gone from the organization, so a key naming one cannot join.
@@ -174,6 +238,13 @@ export class DrizzleAuthKeyStore implements AuthKeyStore {
             ),
           )
           .returning();
+        // The key row is now locked, so a concurrent redemption of the same request has
+        // committed or waits; PostgreSQL reads what it committed.
+        const concurrent = yield* repeated();
+        if (concurrent !== undefined) {
+          if (used) throw new RepeatedJoin();
+          return concurrent;
+        }
         if (!used) return { status: key.reusable ? "revoked" : "used" };
 
         let created: any;

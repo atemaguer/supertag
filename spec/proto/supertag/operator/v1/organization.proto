@@ -317,6 +317,8 @@ message AuditEntry {
   google.protobuf.Timestamp at = 2;
   // Who acted: `control-plane-break-glass` for the admin token,
   // `token:NAME` for an Operator Token, a scoped credential's operator ID,
+  // `worker-host:ID` for a Worker Host's own credential, `auth-key:NAME` for
+  // a host that joined with an Auth Key (`auth-key` when the join failed),
   // or `PROVIDER:USER` for a person in an Objective thread.
   string actor = 3;
   // What was done, such as `apply`, `auth-key.create` or

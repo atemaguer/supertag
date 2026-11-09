@@ -2453,6 +2453,8 @@ export const TaskArtifactStorageSchema: GenMessage<TaskArtifactStorage> = /*@__P
  */
 export type ArtifactCopy = Message<"supertag.operator.v1.ArtifactCopy"> & {
   /**
+   * Where the copy is. Exactly one is set.
+   *
    * @generated from oneof supertag.operator.v1.ArtifactCopy.place
    */
   place: {
@@ -3777,16 +3779,23 @@ export enum TaskFindingSeverity {
   UNSPECIFIED = 0,
 
   /**
+   * High. `supertag describe objective` and `OrganizationService.GetOrganization`
+   * list the high findings of each Session's latest result.
+   *
    * @generated from enum value: TASK_FINDING_SEVERITY_HIGH = 1;
    */
   HIGH = 1,
 
   /**
+   * Medium.
+   *
    * @generated from enum value: TASK_FINDING_SEVERITY_MEDIUM = 2;
    */
   MEDIUM = 2,
 
   /**
+   * Low.
+   *
    * @generated from enum value: TASK_FINDING_SEVERITY_LOW = 3;
    */
   LOW = 3,
@@ -3831,7 +3840,7 @@ export const ExecutionSourceSchema: GenEnum<ExecutionSource> = /*@__PURE__*/
   enumDesc(file_supertag_operator_v1_work, 2);
 
 /**
- * Where an Attempt's model came from.
+ * Where a Task Attempt's model came from.
  *
  * @generated from enum supertag.operator.v1.ModelSource
  */

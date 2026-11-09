@@ -31,8 +31,8 @@ option go_package = "github.com/atemaguer/supertag/packages/operator-api/go/oper
 // - An approval request outside any Objective, which a Tag's inbox turn
 //   asked for, reaches only a credential without an Objective scope.
 //
-// Every RPC that changes state fails with `Unavailable` and
-// `ERROR_REASON_DRAINING` while the Control Plane drains.
+// A call while the Control Plane drains fails with `Unavailable` and
+// `ERROR_REASON_DRAINING`.
 service InboxService {
   // Lists the items waiting on a person, the longest waiting first. Every
   // item is pending.
@@ -149,7 +149,7 @@ enum InboxItemKind {
   // An Objective reached a budget or deadline limit. `reason` says which.
   INBOX_ITEM_KIND_OBJECTIVE_LIMIT = 4;
   // A Task needs an operator, such as a running Task whose Task Attempt is
-  // uncertain. `uncertain_attempt` names that Attempt.
+  // uncertain. `uncertain_attempt` names that Task Attempt.
   INBOX_ITEM_KIND_TASK_ATTENTION = 5;
   // A Task is held until an MCP server is logged in to.
   INBOX_ITEM_KIND_MCP_LOGIN = 6;
@@ -206,6 +206,7 @@ message InboxItem {
 
 // A record an inbox item was derived from.
 message InboxEvidence {
+  // The record. Exactly one is set.
   oneof record {
     // A Task.
     TaskEvidence task = 1;

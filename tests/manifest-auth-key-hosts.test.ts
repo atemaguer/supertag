@@ -48,19 +48,8 @@ describe("Worker Hosts joined with an Auth Key", () => {
         name: key,
         tags: ["builder"],
       });
-      const response = await fetch(`${started.url}/api/v1/worker-host-joins`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" },
-        body: JSON.stringify({
-          apiVersion: "supertag/v1",
-          kind: "WorkerHostJoin",
-          metadata: { name },
-          spec: {},
-        }),
-      });
-      expect(response.status).toBe(201);
-      return ((await response.json()) as { metadata: { workerHostId: string } }).metadata
-        .workerHostId;
+      const joined = await hostClient({ url: started.url, token: secret }).joinWorkerHost({ name });
+      return joined.credential?.workerHostId ?? "";
     };
 
     await applyTag([]);

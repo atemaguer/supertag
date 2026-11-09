@@ -1252,6 +1252,8 @@ type FollowEvent struct {
 	// Orders the stream's events and resumes it as `after_sequence`. 0 only on
 	// `heartbeat`, which is never resumed from.
 	Sequence int64 `protobuf:"varint,1,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	// What happened. Exactly one is set.
+	//
 	// Types that are valid to be assigned to Part:
 	//
 	//	*FollowEvent_Joined
@@ -1616,6 +1618,9 @@ type Activity struct {
 	// `retrying (Task Attempt N)`. Empty when a command or tool call ends. A
 	// client shows it when it does not recognize `detail`.
 	Text string `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	// What the activity is. A client that does not recognize the member set
+	// shows `text`.
+	//
 	// Types that are valid to be assigned to Detail:
 	//
 	//	*Activity_Command
@@ -1709,14 +1714,17 @@ type isActivity_Detail interface {
 }
 
 type Activity_Command struct {
+	// A command starting or ending.
 	Command *CommandActivity `protobuf:"bytes,3,opt,name=command,proto3,oneof"`
 }
 
 type Activity_Tool struct {
+	// A tool call starting or ending.
 	Tool *ToolActivity `protobuf:"bytes,4,opt,name=tool,proto3,oneof"`
 }
 
 type Activity_Retry struct {
+	// A new Task Attempt of the Task.
 	Retry *RetryActivity `protobuf:"bytes,5,opt,name=retry,proto3,oneof"`
 }
 
@@ -1733,7 +1741,8 @@ type CommandActivity struct {
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// The command line. The Tag wrote it, so it is untrusted: the Worker removes
 	// control characters and cuts it to 200 characters.
-	Command       string         `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`
+	Command string `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`
+	// `ACTIVITY_STATUS_RUNNING` when it starts, then once more when it ends.
 	Status        ActivityStatus `protobuf:"varint,3,opt,name=status,proto3,enum=supertag.operator.v1.ActivityStatus" json:"status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1796,7 +1805,8 @@ type ToolActivity struct {
 	// Pairs the call's start with its end.
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// The tool as `PROVIDER.OPERATION`, such as `github.create_pull_request`.
-	Tool          string         `protobuf:"bytes,2,opt,name=tool,proto3" json:"tool,omitempty"`
+	Tool string `protobuf:"bytes,2,opt,name=tool,proto3" json:"tool,omitempty"`
+	// `ACTIVITY_STATUS_RUNNING` when it starts, then once more when it ends.
 	Status        ActivityStatus `protobuf:"varint,3,opt,name=status,proto3,enum=supertag.operator.v1.ActivityStatus" json:"status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
