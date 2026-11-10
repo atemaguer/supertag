@@ -88,13 +88,18 @@ terminal UI, press `m`, and enter it. For example, “Overdue ticket 42: first r
 90 minutes against a 30-minute target. Plan: enterprise.” Press Enter to send it as the
 manager's next turn.
 
-For new monitoring integrations, use the
-[`ObjectiveService.MessageObjective` operator API](../reference/operator-api/objective.md#messageobjective).
-Existing scripts can still use the deprecated CLI command. Pass `-` for standard input and
-`--output json` for a machine-readable response.
+For a monitoring script, use
+[`ObjectiveService.MessageObjective`](../reference/operator-api/objective.md#messageobjective).
+Check [`InboxService.ListInboxItems`](../reference/operator-api/inbox.md#listinboxitems) first and
+hold the report while the manager waits for an answer. Configure the API credentials and save
+`call-operator-api.py` from the
+[operator API example](../reference/control-plane-api.md#send-messages-and-answer-questions).
+Send the report's `summary` as `text` and give it a key unique to that report. Reuse the same key
+when retrying delivery.
 
 ```sh
-jq -r '.summary' overdue-report.json | supertag message objective support-policy - --output json
+jq '{id: "support-policy", text: .summary, idempotencyKey: "ticket-42-overdue-report-1"}' overdue-report.json |
+  python3 call-operator-api.py ObjectiveService/MessageObjective
 ```
 
 If the Objective has a Slack or Lark home thread, you can also reply there. See

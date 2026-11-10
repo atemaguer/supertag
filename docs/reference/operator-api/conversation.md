@@ -6,8 +6,8 @@
 read its errors is in the [Control Plane API Server](../control-plane-api.md) guide; the conventions every
 RPC follows are in [Shared messages and options](shared.md#conventions).
 
-An operator's CLI conversations with Tags: `supertag message tag`, the
-terminal UI, and the desktop app.
+An operator's private conversations with Tags in the terminal UI or
+through the operator API.
 
 A conversation is one Session between the caller and a Tag, named by the
 caller. The same name continues the same Session, so the Tag sees the
@@ -144,11 +144,10 @@ holds. `finish.reply` is the whole reply; it replaces any text deltas.
 
 The stream stays open until `end`, until the client cancels the call, or
 until the Control Plane drains, which ends it with `Unavailable`. The
-server sets no deadline; a client that stops following earlier cancels
-the call, and the Tag keeps working. A client that wants to stop once
-each work Session has reported, including one waiting on approval, as
-`supertag message tag --output json` does, cancels when every work
-Session it holds has `report_status` `REPLY_STATUS_REPLIED`.
+server sets no deadline. Canceling the call stops following while the Tag
+keeps working. After `finish`, a client can cancel once every work Session
+it tracks has `report_status` `REPLY_STATUS_REPLIED`, including Sessions
+that have reported while waiting on approval.
 
 ### ListConversations
 
@@ -364,7 +363,7 @@ Task Attempt.
 | Field | JSON | Type | Description |
 | --- | --- | --- | --- |
 | `work_session_id` | `workSessionId` | `string` | The work Session the activity belongs to. Empty for the message's own turn. |
-| `text` | `text` | `string` | One line for a start or a retry, as `supertag message tag` shows it without its leading dot: `running: COMMAND`, `using: TOOL`, or `retrying (Task Attempt N)`. Empty when a command or tool call ends. A client shows it when it does not recognize `detail`. |
+| `text` | `text` | `string` | One line for a start or a retry, such as `running: COMMAND`, `using: TOOL`, or `retrying (Task Attempt N)`. Empty when a command or tool call ends. A client shows it when it does not recognize `detail`. |
 | `command` | `command` | [`CommandActivity`](#commandactivity) | One of `detail`. A command starting or ending. |
 | `tool` | `tool` | [`ToolActivity`](#toolactivity) | One of `detail`. A tool call starting or ending. |
 | `retry` | `retry` | [`RetryActivity`](#retryactivity) | One of `detail`. A new Task Attempt of the Task. |

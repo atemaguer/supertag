@@ -5,7 +5,7 @@ description: Operate SuperTag from a coding-agent conversation, running the user
 
 # Operate SuperTag
 
-Act as the user's operator through the configured `supertag` CLI. A Tag is a persistent AI identity with its own responsibilities and permissions;
+Act as the user's operator through the configured `supertag` CLI and operator API. A Tag is a persistent AI identity with its own responsibilities and permissions;
 an Objective records an outcome owned by one Tag. SuperTag runs the team; this conversation
 helps the user direct it. Installing this skill does not grant operator access or permission
 to change resources. Respect the user's existing authorization and the agent's execution policy.
@@ -90,19 +90,16 @@ warnings about missing or estimated team spend.
 
 ## Read pending questions before messaging
 
-Use the [operator API](../../docs/reference/control-plane-api.md) in new integrations.
-[`InboxService.AnswerQuestion`](../../docs/reference/operator-api/inbox.md#answerquestion)
-answers a pending question by its inbox key.
-[`ObjectiveService.MessageObjective`](../../docs/reference/operator-api/objective.md#messageobjective)
-sends a general follow-up, and
-[`ConversationService.SendMessage`](../../docs/reference/operator-api/conversation.md#sendmessage)
-sends a message to a Tag. The deprecated CLI commands below still support standard input and JSON
-for existing operator workflows.
+Use the [operator API messaging examples](https://github.com/atemaguer/supertag/blob/main/docs/reference/control-plane-api.md#send-messages-and-answer-questions).
+`SUPERTAG_CONTROL_PLANE_URL` must point to the API origin of the Control Plane the CLI uses.
+Use the `SUPERTAG_OPERATOR_TOKEN` supplied through the session's secret configuration. Keep the
+token out of shell commands and logs. If API access is unavailable, surface the question to the
+user so they can answer it under **Waiting on you** in the terminal UI.
 
-A message to an Objective is a turn in its conversation. Read the current inbox and description
-before sending anything, because the Objective's next turn runs on what you say. An answer can
-move a blocked Objective back to working. If the question changed, reassess whether the reply
-still answers it. Quote the question you are answering in the reply:
+Read pending questions before messaging. Check the current inbox and Objective description
+because a general follow-up becomes the owner's next turn. Quote the question you are answering
+in the reply. If the question changed, reassess whether the reply still answers it. Create a
+private file for the answer.
 
 ```sh
 umask 077
@@ -110,35 +107,25 @@ mktemp
 ```
 
 Write `You asked: "QUESTION_FROM_INBOX". ANSWER_WITHIN_AGREED_SCOPE.` to the returned path
-with your file-writing tool, inserting the actual question and answer as data. Replace
-`PATH_FROM_MKTEMP` below with that path, then run:
+with your file-writing tool. Call `InboxService.AnswerQuestion` with the exact `key` from the
+current operator-eligible question, `text` read from the private file, and an `idempotencyKey`
+for this answer. Reuse that idempotency key and payload on retry. Remove the private file when finished
+and reread the inbox to verify that the question no longer waits.
 
-```sh
-message_file='PATH_FROM_MKTEMP'
-(
-  trap 'rm -f -- "$message_file"' EXIT
-  supertag message objective OBJECTIVE_ID - --output json < "$message_file"
-)
-```
+Call `ObjectiveService.MessageObjective` for a general Objective follow-up. To ask a Tag
+something outside an Objective, use `ConversationService.SendMessage` with the Tag and conversation
+name. Read message text from a private file for either call. A Tag conversation is private to the
+operator credential and uses only the Tag's Roles' permissions. Use
+`ConversationService.GetMessage` or `ConversationService.FollowMessage` with the Tag name and
+returned Task ID to read the reply.
 
-The trap removes the private file even if the command fails. Reread
-`supertag list inbox --objective OBJECTIVE_ID --output json` afterwards: the `INBOX_ITEM_KIND_QUESTION` item
-is gone once the answer started the next turn.
-
-To ask a Tag something outside an Objective, such as what it is working on, use
-`supertag message tag TAG - --session NAME --output json` with the same private-file pattern. The
-conversation is private to your operator credential and uses only the Tag's Roles' permissions.
-It prints the message in its proto3 JSON form; fields left empty are omitted. A `workSessions`
-entry with status `WORK_SESSION_STATUS_WAITING` and `approvals` is a work Session waiting on a
-recorded approval request; each approval's `requestId` names it. Ask the user, then run
+A `workSessions` entry with status `WORK_SESSION_STATUS_WAITING` and `approvals` is a work Session
+waiting on a recorded approval request. Each approval's `requestId` names it. Ask the user, then run
 `supertag approve request ID` or `supertag deny request ID --reason TEXT`. Either decision
-continues the work Session on its own; do not message the Tag to resume it. An entry with
-`notContinued` was not continued, because the Tag's permissions changed or too little of its
-budget pool is left; its text says which. The `--output json` command returns once every entry's
-`reportStatus` is `REPLY_STATUS_REPLIED`, including at that waiting report, and
-`supertag describe session ID` shows the work Session's next Task. An entry with status
-`WORK_SESSION_STATUS_WAITING` and a `question` waits for the user's answer, which your next
-message in that conversation passes on.
+continues the work Session on its own. When an entry carries `notContinued`, read its reason
+before reporting the status. `supertag describe session ID` shows the work Session's next Task.
+An entry with status `WORK_SESSION_STATUS_WAITING` and a `question` waits for the user's answer,
+which your next message in that conversation passes on.
 
 Answer routine implementation questions only when the user's own instructions already settle
 them. Ask the user about scope changes, new commands or configuration, merges, spending increases,

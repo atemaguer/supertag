@@ -13,12 +13,12 @@ the conventions every RPC follows and the messages several services use.
 | Service | Serves |
 | --- | --- |
 | [`AccessService`](access.md) | Operator Tokens: `supertag create operator-token`, `list operator-token`, `get operator-token` and `revoke operator-token`. |
-| [`ConversationService`](conversation.md) | An operator's CLI conversations with Tags: `supertag message tag`, the terminal UI, and the desktop app. |
+| [`ConversationService`](conversation.md) | An operator's private conversations with Tags in the terminal UI or through the operator API. |
 | [`EventService`](event.md) | Tells an operator's client what changed, so it rereads only that. |
 | [`HostService`](host.md) | Worker Hosts and the Auth Keys that join them: `supertag list worker-host`, `get worker-host`, `describe worker-host`, `enroll worker-host`, `drain worker-host`, `resume worker-host`, `rotate worker-host-credential`, `revoke worker-host-credential`, `update tag --add-worker-host` and `--remove-worker-host`, `create auth-key`, `list auth-key`, `get auth-key` and `revoke auth-key`, and joining with an Auth Key in `supertag connect worklet` and `supertag up`. |
 | [`InboxService`](inbox.md) | What waits on a person, across Tags and Objectives: `supertag list inbox`, `watch inbox`, `list approval`, `approve request` and `deny request`. |
 | [`MailboxService`](mailbox.md) | What Tags say to one another, as an operator sees it: `supertag list message`, `grant mailbox`, `revoke mailbox`, `list mailbox-grant` and `list workstream-post`. |
-| [`ObjectiveService`](objective.md) | An operator's Objectives: `supertag create objective`, `list objective`, `get objective`, `describe objective`, `watch objective`, `message objective`, `approve objective`, `update objective`, `complete objective`, `cancel objective`, `pause objective` and `resume objective`. |
+| [`ObjectiveService`](objective.md) | An operator's Objectives: `supertag create objective`, `list objective`, `get objective`, `describe objective`, `watch objective`, `approve objective`, `update objective`, `complete objective`, `cancel objective`, `pause objective` and `resume objective`. |
 | [`OrganizationService`](organization.md) | Reads the state of the Control Plane and the organization it runs as a whole: `supertag status`, `spend` and `audit`, and the operational metrics a monitoring system scrapes. |
 | [`ResourceService`](resource.md) | The organization's configuration as manifests: `supertag apply -f`, `diff -f`, `get`, `describe` and `delete` of a resource, the `provision:` entries `supertag up` applies, the starter resources `supertag init` writes, and `create tag`. |
 | [`SurfaceService`](surface.md) | Collaboration surface connections and where Tags answer on them: `supertag setup surface`, `list surface`, `get surface`, `update tag --add-location` and `--remove-location`, and `activate` and `deactivate` of a Context Set or Permission Set. |

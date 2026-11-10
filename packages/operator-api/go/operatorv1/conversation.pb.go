@@ -1613,8 +1613,7 @@ type Activity struct {
 	// The work Session the activity belongs to. Empty for the message's own
 	// turn.
 	WorkSessionId string `protobuf:"bytes,1,opt,name=work_session_id,json=workSessionId,proto3" json:"work_session_id,omitempty"`
-	// One line for a start or a retry, as `supertag message tag` shows it
-	// without its leading dot: `running: COMMAND`, `using: TOOL`, or
+	// One line for a start or a retry, such as `running: COMMAND`, `using: TOOL`, or
 	// `retrying (Task Attempt N)`. Empty when a command or tool call ends. A
 	// client shows it when it does not recognize `detail`.
 	Text string `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`

@@ -131,11 +131,10 @@ type ConversationServiceClient interface {
 	//
 	// The stream stays open until `end`, until the client cancels the call, or
 	// until the Control Plane drains, which ends it with `Unavailable`. The
-	// server sets no deadline; a client that stops following earlier cancels
-	// the call, and the Tag keeps working. A client that wants to stop once
-	// each work Session has reported, including one waiting on approval, as
-	// `supertag message tag --output json` does, cancels when every work
-	// Session it holds has `report_status` `REPLY_STATUS_REPLIED`.
+	// server sets no deadline. Canceling the call stops following while the Tag
+	// keeps working. After `finish`, a client can cancel once every work Session
+	// it tracks has `report_status` `REPLY_STATUS_REPLIED`, including Sessions
+	// that have reported while waiting on approval.
 	FollowMessage(context.Context, *connect.Request[operatorv1.FollowMessageRequest]) (*connect.ServerStreamForClient[operatorv1.FollowEvent], error)
 	// Lists the caller's conversations, the most recent message first. Empty
 	// `tag` lists every Tag's. It fails with `NotFound` when `tag` names a Tag
@@ -312,11 +311,10 @@ type ConversationServiceHandler interface {
 	//
 	// The stream stays open until `end`, until the client cancels the call, or
 	// until the Control Plane drains, which ends it with `Unavailable`. The
-	// server sets no deadline; a client that stops following earlier cancels
-	// the call, and the Tag keeps working. A client that wants to stop once
-	// each work Session has reported, including one waiting on approval, as
-	// `supertag message tag --output json` does, cancels when every work
-	// Session it holds has `report_status` `REPLY_STATUS_REPLIED`.
+	// server sets no deadline. Canceling the call stops following while the Tag
+	// keeps working. After `finish`, a client can cancel once every work Session
+	// it tracks has `report_status` `REPLY_STATUS_REPLIED`, including Sessions
+	// that have reported while waiting on approval.
 	FollowMessage(context.Context, *connect.Request[operatorv1.FollowMessageRequest], *connect.ServerStream[operatorv1.FollowEvent]) error
 	// Lists the caller's conversations, the most recent message first. Empty
 	// `tag` lists every Tag's. It fails with `NotFound` when `tag` names a Tag

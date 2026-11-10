@@ -24,11 +24,14 @@ describe("operator documentation discovery", () => {
   });
   it.each(operatorPages)("guards pending-question replies in %s", (page) => {
     const content = readFileSync(resolve(root, page), "utf8");
-    // A message is the Objective's next turn, so the pages make the operator read the pending
-    // question first and quote it, and send through a file rather than the command line.
+    // The operator reads and quotes the pending question and answers its exact inbox key,
+    // keeping the answer text in a file.
     expect(content).toMatch(/quote\s+the\s+question/iu);
     expect(content).toMatch(/pending questions\s+\*{0,2}before\s+(?:sending|messaging)/iu);
-    expect(content).toMatch(/message objective[^\n]* - --output json < "\$message_file"/u);
+    expect(content).toContain("InboxService.AnswerQuestion");
+    expect(content).toMatch(/exact\s+`key` from the\s+current operator-eligible question/u);
+    expect(content).toMatch(/`text` read from the private file/u);
+    expect(content).not.toMatch(/supertag message (?:tag|objective)/u);
   });
   it.each(operatorPages)("guards administrator credentials in %s", (page) => {
     const content = readFileSync(resolve(root, page), "utf8");

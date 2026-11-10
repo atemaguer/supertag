@@ -124,29 +124,72 @@ whether a scoped coordination credential or a Worker Host's own credential may, 
 Auth Key instead, and the action the audit log records. An RPC that
 only reads sets `idempotency_level = NO_SIDE_EFFECTS`; every other RPC declares an audit action.
 
-### Examples
+### Send messages and answer questions
 
-Send a message to a Tag. The response returns before the Tag answers:
+To send a message yourself, open `supertag` in a terminal. Choose a Tag and type in its
+conversation, or open an Objective and press `m` to send a follow-up. Answer pending questions
+under **Waiting on you**. See [Talk to a Tag](../guides/talk-to-a-tag.md).
+
+For automation, choose the RPC for the kind of message you want to send.
+
+| To | Call | Identify the target with |
+| --- | --- | --- |
+| Send to a Tag's private conversation | [`ConversationService.SendMessage`](operator-api/conversation.md#sendmessage) | `tag` and an optional `conversation` name |
+| Send a follow-up or report to an Objective | [`ObjectiveService.MessageObjective`](operator-api/objective.md#messageobjective) | The Objective's `id` |
+| Answer a specific pending question | [`InboxService.AnswerQuestion`](operator-api/inbox.md#answerquestion) | The question's `key` from [`ListInboxItems`](operator-api/inbox.md#listinboxitems) |
+
+Check the inbox before sending a general Objective follow-up. A follow-up sent while a question
+waits can become the answer to that question.
+
+All three take `text` and accept an `idempotencyKey`. Assign one key per message and reuse it
+when retrying that same message. The response includes the Task ID of the turn it starts.
+To read or stream an accessible reply, use
+[`GetMessage`](operator-api/conversation.md#getmessage) or
+[`FollowMessage`](operator-api/conversation.md#followmessage) with the returned Tag and Task ID.
+
+The following script calls a unary RPC using Python's standard library. Set
+`SUPERTAG_CONTROL_PLANE_URL` to the API base URL and supply `SUPERTAG_OPERATOR_TOKEN` through
+the job's environment or secret store. Save the script as `call-operator-api.py`.
+
+```python
+import os
+import sys
+from urllib.request import Request, urlopen
+
+rpc = sys.argv[1]
+base_url = os.environ["SUPERTAG_CONTROL_PLANE_URL"].rstrip("/")
+request = Request(
+    f"{base_url}/supertag.operator.v1.{rpc}",
+    data=sys.stdin.buffer.read(),
+    headers={
+        "Authorization": f"Bearer {os.environ['SUPERTAG_OPERATOR_TOKEN']}",
+        "Content-Type": "application/json",
+        "Connect-Protocol-Version": "1",
+    },
+    method="POST",
+)
+with urlopen(request, timeout=30) as response:
+    print(response.read().decode("utf-8"))
+```
+
+Send an Objective report with the file contents as `text`.
 
 ```sh
-curl -s https://control.example.com/supertag.operator.v1.ConversationService/SendMessage \
-  -H "Authorization: Bearer $SUPERTAG_ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"tag": "planner", "conversation": "billing", "text": "Which step is riskiest?",
-       "idempotencyKey": "billing-0007"}'
+jq -n --rawfile text report.txt \
+  '{id: "billing-export", text: $text, idempotencyKey: "billing-export-run-42"}' |
+  python3 call-operator-api.py ObjectiveService/MessageObjective
 ```
 
-```json
-{
-  "taskId": "01JC8V3W6Q4Z9T2N5R7K1M0XHB",
-  "tag": "planner",
-  "conversation": "billing",
-  "sessionId": "01JC8T9F2D6S1Q8V4N3B7W5YKE",
-  "text": "Which step is riskiest?",
-  "createdAt": "2026-11-08T09:41:12.345Z",
-  "status": "REPLY_STATUS_WAITING"
-}
+To answer a pending question, set `question_key` to the observed inbox key and `answer_key`
+to a stable key for that answer. Send the answer from its file.
+
+```sh
+jq -n --rawfile text answer.txt --arg key "$question_key" --arg retry "$answer_key" \
+  '{key: $key, text: $text, idempotencyKey: $retry}' |
+  python3 call-operator-api.py InboxService/AnswerQuestion
 ```
+
+### Examples
 
 Create an Objective with a budget:
 

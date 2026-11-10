@@ -7,13 +7,14 @@ read its errors is in the [Control Plane API Server](../control-plane-api.md) gu
 RPC follows are in [Shared messages and options](shared.md#conventions).
 
 An operator's Objectives: `supertag create objective`, `list objective`,
-`get objective`, `describe objective`, `watch objective`, `message
-objective`, `approve objective`, `update objective`, `complete objective`,
+`get objective`, `describe objective`, `watch objective`, `approve objective`,
+`update objective`, `complete objective`,
 `cancel objective`, `pause objective` and `resume objective`.
 
 An Objective is an outcome its owner Tag works toward in a conversation of
 its own, with a budget, a deadline, and a status. The owner may hand work to
-work Sessions of its Team's members. Applying an `Objective` manifest is
+work Sessions of its Team's members. The terminal UI and automation send
+follow-ups through `MessageObjective`. Applying an `Objective` manifest is
 `ResourceService`'s.
 
 Access. The admin token and Operator Tokens may call every RPC. An RPC that

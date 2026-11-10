@@ -78,19 +78,13 @@ another member. See [Define and complete an Objective](objectives.md).
 
 ## Send messages from scripts
 
-Use the [operator API](../reference/control-plane-api.md) for new integrations. Call
+Use the [operator API](../reference/control-plane-api.md#send-messages-and-answer-questions). Call
 [`ConversationService.SendMessage`](../reference/operator-api/conversation.md#sendmessage)
 to send to a Tag, or
 [`ObjectiveService.MessageObjective`](../reference/operator-api/objective.md#messageobjective)
-to send to an Objective.
-
-The CLI messaging commands are deprecated. Existing scripts can still pass `-` to read from
-standard input and use `--output json` for a machine-readable response.
-
-```sh
-supertag message tag planner - --session billing --output json < question.md
-supertag message objective billing-export - --output json < update.md
-```
+to send to an Objective. After sending to a Tag, pass its name and the returned Task ID to
+[`ConversationService.FollowMessage`](../reference/operator-api/conversation.md#followmessage)
+to follow its reply and work Session reports.
 
 For a coding agent that operates SuperTag from a separate conversation, see
 [Run SuperTag from your coding agent](coding-agent-operator.md).
@@ -114,8 +108,8 @@ the Tag's Mailbox messages is titled `Inbox`. `STATUS` shows the latest Task's s
 - **The conversation is private to you.** The admin token and each Operator Token have their own
   conversations, even with the same name. Other people's conversations with the Tag can't read it.
   See [shared and private Sessions](../concepts/multiplayer.md#shared-and-private-sessions).
-- **The Tag answers with its Roles' permissions only.** A CLI conversation has no location, so no
-  location's Permission Sets or Context Sets apply.
+- **The Tag answers with its Roles' permissions only.** A terminal conversation has no location,
+  so no location's Permission Sets or Context Sets apply.
 - **The Tag remembers its other conversations.** It sees its open Objectives and can search its
   shared Sessions, such as Slack threads and GitHub issues, when a question needs them.
 - **Messages from other Tags arrive elsewhere.** A Tag's inbox is its own thread of turns, so a
@@ -149,28 +143,20 @@ the Tag's Mailbox messages is titled `Inbox`. `STATUS` shows the latest Task's s
   continued work Session counts against your current message's limits, like a new one. If the
   Tag's permissions changed since the work Session last ran, the Tag starts a new work Session
   instead.
-- `--output json` waits for the reply and every report, and prints the message in its proto3 JSON
-  form: the `conversation`, `sessionId`, `taskId`, `reply`, and `workSessions`, each work Session
-  the message started or continued, with its status and report. A work Session waiting on you has
-  status `WORK_SESSION_STATUS_WAITING` and its `question`; one waiting for approval lists
-  `approvals`, and the command returns there. While no bound Worker Host can run the turn,
-  `waitingReason` says why. See [`Message`](../reference/operator-api/conversation.md#message).
-- **Ctrl-C stops showing the reply, not the work.** The Tag keeps working. The command prints the
-  `supertag describe task` command that follows the Task.
+- **Ctrl-C closes the terminal UI.** The Tag keeps working. Open `supertag` again and select the
+  same conversation to see the reply and work Session reports.
 
 ## If something goes wrong
 
-- **The command prints `· waiting: REASON` and no reply.** No Worker Host bound to the Tag can run
-  your turn yet, for example `· waiting: no bound Worker Host provides MCP server notes`. The
-  command prints the reason once and keeps waiting; the turn starts when the reason is fixed. See
+- **The conversation shows `· waiting: REASON`.** No Worker Host bound to the Tag can run
+  your turn yet. For example, `· waiting: no bound Worker Host provides MCP server notes` names
+  a missing MCP server. The turn starts when you fix the reason. See
   [A Tag stops answering](troubleshooting.md#a-tag-stops-answering).
-- **The command stops waiting after 10 minutes without progress.** The Tag is still working. Follow
-  the Task with the `supertag describe task` command the message prints. Its reply stays in the
-  conversation, so your next message there sees it.
-- **A message sent while the Tag is still replying.** If the Tag's harness accepts input while it
-  works, your message joins the running reply, and the command prints that reply. Otherwise the
-  message waits its turn. A reply that finishes before the Tag reads your message gives the
-  message its own turn, and the command prints that turn's reply.
+- **The terminal UI stops following a reply after losing its connection.** Open `supertag` again
+  and select the same conversation. The reply and work Session reports appear there as they arrive.
+- **You send a message while the Tag is still replying.** If the Tag's harness accepts input while
+  it works, your message can join the turn in progress. Otherwise it waits for its own turn.
+  A joined message the Tag has yet to read when the turn ends gets a turn of its own.
 - **`The requesting Task already finished; request expired`.** The work Session no longer waits
   on that request: it moved on to a later Task, or its Task ended without waiting on it. If the
   work Session still needs the action, its next call creates a new request and notice.

@@ -162,10 +162,9 @@ next.
 ### Operator messages
 
 A message delivers the next turn of the conversation, attributed to the operator. Send it from
-the terminal UI or through
-[`ObjectiveService.MessageObjective`](operator-api/objective.md#messageobjective). Existing
-scripts can use the [deprecated CLI commands](../guides/talk-to-a-tag.md#send-messages-from-scripts)
-while migrating.
+the Objective view in the terminal UI with `m`. For scripts, call
+[`ObjectiveService.MessageObjective`](operator-api/objective.md#messageobjective). See
+[Send messages and answer questions](control-plane-api.md#send-messages-and-answer-questions).
 
 In a Slack or Lark home thread, a plain reply also delivers the next turn. `@SuperTag approve`
 acts as `supertag approve objective`, and `@SuperTag pause` and `@SuperTag resume` act as the
