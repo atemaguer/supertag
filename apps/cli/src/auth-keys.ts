@@ -64,14 +64,15 @@ export async function runAuthKeyCommand(
     ...(issued.spec.ephemeral ? ["ephemeral"] : []),
   ].join(", ");
   const granted = issued.spec.labels ?? [];
+  const workletUrl = "'" + controlPlaneUrl.replaceAll("'", "'\\''") + "'";
   return `Created Auth Key ${name} (${kind}) for Tags ${issued.spec.tags.join(", ")}.
 ${granted.length === 0 ? "" : `Hosts that join with it get labels ${granted.join(", ")}.\n`}It expires at ${issued.status.expiresAt}.
 
 Secret (shown only now; store it in a secret manager):
   ${issued.secret}
 
-On the machine to join, run:
-  SUPERTAG_AUTH_KEY=<secret> supertag connect worklet --control-plane ${controlPlaneUrl} --harness codex
+On the machine to join, replace <secret> with the key above and run:
+  SUPERTAG_AUTH_KEY='<secret>' supertag connect worklet --transport websocket --worklet-url ${workletUrl} --harness codex
 `;
 }
 

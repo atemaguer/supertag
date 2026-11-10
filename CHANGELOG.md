@@ -24,6 +24,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- A deleted Team can be created again with the same ID while preserving its revision history.
+- Creating an Auth Key prints a valid Worklet join command.
 - Retrying the same Objective creation in the terminal UI after a lost response
   reuses its ID, so it creates only one Objective.
 - The terminal UI refreshes the Teams list and open Team details after Team edits.

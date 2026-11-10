@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { DatabaseProvider } from "@supertag/core";
-import { and, asc, eq, gt } from "drizzle-orm";
+import { and, asc, eq, gt, max } from "drizzle-orm";
 import { runDialectTransaction } from "./dialect-transaction.js";
 import {
   parseResourceChangeListInput,
@@ -29,6 +29,24 @@ export function* appendResourceChange(
     })
     .returning();
   return created as ResourceChange;
+}
+
+/**
+ * The last revision recorded for a resource ID, or 0 when it has no history. A resource ID
+ * created again after deletion continues from here, so no incarnation reuses a revision.
+ */
+export function* lastResourceRevision(
+  tx: any,
+  tables: any,
+  resourceType: ResourceChange["resourceType"],
+  resourceId: string,
+): Generator<any, number, any> {
+  const t = tables.resourceChanges;
+  const [row] = yield tx
+    .select({ revision: max(t.toRevision) })
+    .from(t)
+    .where(and(eq(t.resourceType, resourceType), eq(t.resourceId, resourceId)));
+  return Number(row?.revision ?? 0);
 }
 
 export class DrizzleResourceChangeStore implements ResourceChangeStore {

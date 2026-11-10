@@ -120,7 +120,9 @@ describe("Auth Key commands", () => {
       "Created Auth Key ci (reusable, ephemeral) for Tags builder, reviewer",
     );
     expect(output).toContain("It expires at 2026-12-29T00:00:00.000Z.");
-    expect(output).toContain(`supertag connect worklet --control-plane ${CONTROL_PLANE}`);
+    expect(output).toContain(
+      `SUPERTAG_AUTH_KEY='<secret>' supertag connect worklet --transport websocket --worklet-url '${CONTROL_PLANE}' --harness codex`,
+    );
     expect(rpc.called("HostService/CreateAuthKey")[0]?.body).toEqual({
       name: "ci",
       tags: ["builder", "reviewer"],
