@@ -92,7 +92,10 @@ describe("EventService.Watch", () => {
         kind: "coordination",
         principal: {
           operatorId: "coordinator",
-          scopes: { actions: ["watch_events", "read_objective"], objectiveIds: ["objective-1"] },
+          scopes: {
+            actions: ["watch_events", "read_objective", "read_team"],
+            objectiveIds: ["objective-1"],
+          },
         },
       },
     } satisfies Record<string, OperatorAuthentication>);

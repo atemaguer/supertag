@@ -83,8 +83,8 @@ func (m model) teamCmd(id string) tea.Cmd {
 }
 
 // teamChanged rereads what a Team change touches: the Teams list always, since the change may
-// add, rename or remove a row, and the Team's details only when the Team pane or the shown
-// Objective shows that Team. The Control Plane sends the change only to a caller that may read
+// add, rename or remove a row, and the Team's details only when the Team pane shows that Team.
+// The Control Plane sends the change only to a caller that may read
 // Teams, and the rereads go through the same reads, so nothing outside the caller's view is read.
 func (m model) teamChanged(change *operatorv1.WatchChange) tea.Cmd {
 	id := change.GetTeamId()
@@ -92,12 +92,8 @@ func (m model) teamChanged(change *operatorv1.WatchChange) tea.Cmd {
 		id = change.GetId()
 	}
 	var detail tea.Cmd
-	switch {
-	case id == "":
-	case m.pane == paneTeam && id == m.teamID:
+	if id != "" && m.pane == paneTeam && id == m.teamID {
 		detail = m.reloadTeam()
-	case m.pane == paneObjective && id == m.shownTeam():
-		detail = m.reloadOverview()
 	}
 	return tea.Batch(m.reloadTeams(), detail)
 }
@@ -131,11 +127,12 @@ func (m *model) teamsRead(msg teamsMsg) tea.Cmd {
 	}
 	reads.listApplied = msg.read
 	m.teams, m.teamsErr = msg.teams, ""
-	if m.pane == paneTeam && m.teamID != "" {
+	if m.pane == paneTeam && m.teamID != "" && msg.read > reads.viewApplied[m.teamID] {
 		if team := m.listedTeam(m.teamID); team != nil {
 			delete(reads.gone, m.teamID)
 		} else {
-			// The shown Team left a list read after it was chosen: it was deleted.
+			// A pre-deletion detail read can still be in flight. Do not let it restore this Team.
+			reads.viewApplied[m.teamID] = msg.read
 			m.forgetTeam(m.teamID)
 		}
 	}
@@ -157,7 +154,10 @@ func (m *model) forgetTeam(id string) {
 
 func (m *model) teamRead(msg teamMsg) tea.Cmd {
 	var again tea.Cmd
-	if m.teamView.done() && m.pane == paneTeam {
+	if m.pane != paneTeam {
+		// There is no pane to refresh. Let the next visit start its own read.
+		*m.teamView = reload{}
+	} else if m.teamView.done() {
 		again = m.teamCmd(m.teamID)
 	}
 	reads := m.teamReads
@@ -166,7 +166,9 @@ func (m *model) teamRead(msg teamMsg) tea.Cmd {
 	}
 	var apiErr *client.APIError
 	switch {
-	case errors.As(msg.err, &apiErr) && apiErr.Code == connect.CodeNotFound:
+	case (msg.err == nil && msg.view.Team.GetId() != msg.id) ||
+		(errors.As(msg.err, &apiErr) && apiErr.Code == connect.CodeNotFound):
+		// GetTeam also accepts names. A different Team with this name is not this ID.
 		reads.viewApplied[msg.id] = msg.read
 		m.forgetTeam(msg.id)
 	case msg.err != nil:
@@ -211,13 +213,13 @@ func (m model) renderTeam() string {
 		text = errorStyle.Render(wrap.Render("Could not read the Team: "+err)) + "\n\n"
 	}
 	if !read {
-		team := m.listedTeam(m.teamID)
-		if name, gone := m.teamReads.gone[m.teamID]; gone && team == nil {
+		if name, gone := m.teamReads.gone[m.teamID]; gone {
 			if name == "" {
 				name = m.teamID
 			}
 			return text + faint.Render(wrap.Render(terminalText("Team "+name+" was deleted. Choose another row.")))
 		}
+		team := m.listedTeam(m.teamID)
 		if team == nil {
 			return text + faint.Render("Reading the Team…")
 		}

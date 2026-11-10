@@ -158,6 +158,43 @@ func TestADeletedShownTeamSaysSo(t *testing.T) {
 	}
 }
 
+func TestLeavingTheTeamPaneDoesNotStallQueuedRefresh(t *testing.T) {
+	_, store, m := teamsShown(t)
+	inFlight := m.reloadTeam()
+	m = watched(t, m, teamChange("team-billing"))
+	m = press(t, m, key(tea.KeyUp))
+	if m.pane == paneTeam {
+		t.Fatal("the test did not leave the Team pane")
+	}
+	m = run(t, m, inFlight)
+
+	changed := billingTeam()
+	changed.Revision = 5
+	store.set(changed, openTeam())
+	m = press(t, m, key(tea.KeyDown))
+	if got := screen(m); !strings.Contains(got, "Revision: 5") {
+		t.Fatalf("the reopened Team did not refresh:\n%s", got)
+	}
+}
+
+func TestDeletionRejectsLateDetailsAndNameFallback(t *testing.T) {
+	_, store, m := teamsShown(t)
+	stale := m.reloadTeam()()
+	alias := &operatorv1.Team{Id: "team-alias", Name: "team-billing", Revision: 99}
+	store.set(openTeam(), alias)
+	m = watched(t, m, teamChange("team-billing"))
+
+	next, pending := m.Update(stale)
+	m = next.(model)
+	if got := screen(m); !strings.Contains(got, "Team billing was deleted.") {
+		t.Fatalf("a late read restored the deleted Team:\n%s", got)
+	}
+	m = run(t, m, pending)
+	if got := screen(m); !strings.Contains(got, "Team billing was deleted.") || strings.Contains(got, "Revision: 99") {
+		t.Fatalf("the detail pane showed a different Team with the same name:\n%s", got)
+	}
+}
+
 func TestTeamChangesReadOnlyWhatTheCallerMayRead(t *testing.T) {
 	fake, store, m := teamsShown(t)
 	_, gets := fake.teamReadCounts()
