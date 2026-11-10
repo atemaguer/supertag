@@ -368,7 +368,7 @@ The package bundles SuperTag's internal runtime modules behind deliberate public
 For Python applications, install the matching SDK from PyPI:
 
 ```sh
-python -m pip install 'supertag==0.2.0a7'
+python -m pip install 'supertag==0.2.0a8'
 ```
 
 See [Build a Python Worker](docs/guides/python-workers.md) for optional harness integrations.

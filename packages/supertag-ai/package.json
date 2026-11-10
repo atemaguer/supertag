@@ -1,6 +1,6 @@
 {
   "name": "supertag-ai",
-  "version": "0.2.0-alpha.7",
+  "version": "0.2.0-alpha.8",
   "description": "SuperTag runs persistent AI actors for engineering work on the coding agents you already use.",
   "type": "module",
   "license": "Apache-2.0",

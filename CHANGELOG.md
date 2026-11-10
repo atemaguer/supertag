@@ -9,8 +9,11 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.2.0-alpha.8] - 2026-11-10
+
 ### Added
 
+- The Python SDK's `operator` extra includes synchronous and asynchronous Control Plane clients.
 - Added a live two-Team Objective walkthrough with a Worklet restart, independent commit review,
   and operator acceptance.
 - Added a runnable Objective walkthrough with an expected transcript showing delegation,

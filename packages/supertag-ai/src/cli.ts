@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-process.env["SUPERTAG_CLI_VERSION"] = "0.2.0-alpha.7";
+process.env["SUPERTAG_CLI_VERSION"] = "0.2.0-alpha.8";
 process.env["SUPERTAG_EMBEDDED_CLI"] = "1";
 
 const { cliFailureExitCode, formatCliFailure, main } = await import(
