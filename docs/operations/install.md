@@ -17,7 +17,7 @@ The installer script installs SuperTag's npm package into its own directory, wit
 npm's global prefix. It needs Node.js 22.13.0 or newer and npm, and works on macOS and Linux:
 
 ```sh
-curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
+curl -fsSL https://unpkg.com/supertag-ai@latest/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 supertag --version
 ```
@@ -27,11 +27,10 @@ It installs SuperTag under `~/.local/share/supertag`, with the `supertag` comman
 since SuperTag runs the CLIs you install. Add the `export` line to your shell startup file to use
 the command in new terminals.
 
-The script also installs the terminal UI on macOS and Linux, on arm64 and amd64. It checks the
-downloaded binary against the release's `SHA256SUMS`. The macOS binary has no Developer ID
-signature or notarization.
-If the download or checksum fails, the script installs the CLI and explains why it skipped the
-terminal UI. Run the script again to add it.
+The npm release includes the terminal UI for macOS and Linux, on arm64 and amd64. The installer
+checks your platform's binary against the package's `SHA256SUMS` and verifies its version. The
+macOS binary has no Developer ID signature or notarization. If the terminal UI check fails, the
+script installs the CLI and explains why it skipped the terminal UI.
 To choose the locations or a version, set these before `sh`:
 
 | Variable | Default |
@@ -49,9 +48,8 @@ npm install -g supertag-ai
 supertag --version
 ```
 
-The current release is `0.2.0-alpha.7`. The package includes the CLI, SDK, and bundled
-documentation. A SuperTag source checkout is not required. The npm package does not include the
-terminal UI, so plain `supertag` prints help; use the installer script to get the terminal UI.
+The npm package includes the CLI, SDK, and documentation. Releases that ship the installer
+also include the terminal UI, which opens when you run plain `supertag` on a supported platform.
 
 npm also downloads the Claude Code and Codex CLI copies that the vendor SDKs bundle, which
 SuperTag doesn't use; the installer script leaves them out. Ensure npm's global prefix's `bin`

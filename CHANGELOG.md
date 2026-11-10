@@ -11,6 +11,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Added
 
+- Added a live two-Team Objective walkthrough with a Worklet restart, independent commit review,
+  and operator acceptance.
 - Added a runnable Objective walkthrough with an expected transcript showing delegation,
   a question, an approval, and work Session recovery after an injected Worker error.
 - Completed work Session replies in Slack can show a result card with the recorded branch
@@ -25,6 +27,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- Bundle the installer and matching terminal UI binaries in the public npm release so new users
+  can install without GitHub repository access.
 - Listing Auth Keys shows when each key expires.
 - Manifest diff reports Role instructions that exceed the 32 KiB limit.
 - A deleted Team can be created again with the same ID while preserving its revision history.

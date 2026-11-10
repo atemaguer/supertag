@@ -1,8 +1,7 @@
 name: Release SuperTag CLI installer
 
-# The CLI ships through npm (publish.yml). Each release carries install.sh, which installs that npm
-# package with the system's Node.js, so `releases/latest/download/install.sh` always works. The
-# release also carries the terminal UI binaries and their SHA256SUMS, which install.sh verifies.
+# The public installer and terminal UI ship through npm (publish.yml). The GitHub release also
+# carries a copy of install.sh, the terminal UI binaries, and their SHA256SUMS.
 on:
   release:
     types:
@@ -25,6 +24,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.release_tag }}
       - name: Pin the installer to this release
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
