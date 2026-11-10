@@ -45,14 +45,18 @@ Coding agents are good at one clear task. Bigger work turns into several agent s
 side, and you become the manager between them: briefing each one, checking progress, answering
 questions, and reconciling results.
 
-SuperTag gives that work a persistent owner. A **Tag** is a persistent AI identity with its own
-responsibilities and permissions. It keeps the outcome in view across sessions and runs each
-piece of work in a separate **work Session**, a thread for that piece. You steer the owner and
-review the results it brings back.
+SuperTag gives that work a persistent owner.
 
-Start with one Tag. Add a **Team**, a flat list of member Tags, when the work needs distinct
-roles or permissions. An owner can then assign work Sessions to other Tags in its Team. See the
-[first Team walkthrough](docs/guides/first-team.md).
+- **You steer a Tag.** A Tag is a persistent AI identity with its own responsibilities and
+  permissions. Give it an outcome, guide it when decisions come up, and return to the same Tag
+  when there is more work in its area.
+- **The Tag manages work Sessions.** A work Session is a thread for one piece of work. The Tag
+  starts Sessions, follows their progress, and reviews how their results fit together. It brings
+  you the results and the decisions that need your input.
+- **A Team brings together Tags with different responsibilities and permissions.** One Tag
+  owns the outcome and coordinates the other members. Each member works within its own assigned
+  permissions. You steer the Tag that owns the outcome. See the
+  [first Team walkthrough](docs/guides/first-team.md).
 
 ## See it work
 
@@ -73,8 +77,9 @@ One Tag can split the work across three work Sessions.
 | Usage dashboard | A dashboard that reads the usage records and shows how they were counted |
 | Reconciliation and load tests | Evidence that the invoices match the usage records and the pipeline handles the expected load |
 
-`lead` reviews what the Sessions report and brings the branches and evidence back to you. You
-decide whether to migrate existing plans or allow customer charges.
+`lead` checks how the pieces fit together and brings you the branches and test results. You
+decide whether to migrate existing plans or allow customer charges. When the next billing issue
+comes up, you can go back to the same Tag.
 
 <details>
 <summary>See a real run for a small edit</summary>
@@ -101,21 +106,13 @@ Tests: python3 -m unittest -v ran 5 tests, all passing.
 
 </details>
 
-## What a Tag does for you
-
-| Instead of | A Tag | So you |
-| --- | --- | --- |
-| Briefing every session and carrying context from one to the next | Keeps one memory of what it owns, across sessions and across the terminal, Slack, and GitHub | Never re-explain the work |
-| Every session waiting on you for its next step | Plans the steps, runs each in its own Session, and asks only the questions and approvals you kept | Answer decisions, not prompts |
-| Work landing in your checkout or a chat transcript | Works in a separate git worktree per Session and delivers a branch, within the budget you set | Review one branch at a time |
-
 ## How you use SuperTag
 
 | | Step | What happens |
 | --- | --- | --- |
-| **01** | **Talk to a Tag** | Open `supertag`, or mention the Tag in Slack or on a GitHub issue. A question gets an answer. Longer work gets a **Session**, a separate thread of work that reports back to the conversation. [Talk to a Tag](docs/guides/talk-to-a-tag.md) |
+| **01** | **Talk to a Tag** | Open `supertag`, or mention the Tag in Slack or on a GitHub issue. Ask a question or give it a piece of work. [Talk to a Tag](docs/guides/talk-to-a-tag.md) |
 | **02** | **Give it an outcome** | An Objective records done-when evidence, constraints, a budget, a deadline, and the approvals you keep. The owner starts work Sessions, reviews their results, and decides what runs next. [Write an Objective](docs/guides/write-an-objective.md) |
-| **03** | **Review the branches** | With branch delivery, each repository work Session can bring back its own branch. Review it, then merge it or ask the owner for changes. |
+| **03** | **Review what the Tag brings back** | With branch delivery, a repository work Session uses its own git worktree and can deliver a branch. Review the change, then merge it or ask the Tag for a revision. |
 
 Create an Objective from the terminal UI's command palette, or keep it as a short manifest in
 your repository and apply it with `supertag apply -f`.
@@ -271,7 +268,8 @@ For automation, see the [operator API](docs/reference/control-plane-api.md) or
 ### Next: run your first Team
 
 Say you need to move 12 production services from shared API keys to short-lived credentials
-issued to each service. Keep requests working throughout the migration.
+issued to each service. Give `lead` the Objective to migrate the services while keeping requests
+working. The other Tags each own an area of the migration.
 
 ![The lead Tag owns the 12-service migration and delegates to the identity, migration, verification, and rollout Tags. A person approves production cutovers and retirement of shared keys.](assets/images/supertag-team-migration.png)
 
@@ -283,10 +281,10 @@ issued to each service. Keep requests working throughout the migration.
 | `verification` | Has read-only access to test results and telemetry. Checks each wave against its error and latency limits. |
 | `rollout` | Uses configured staging tools to rehearse each cutover and rollback. |
 
-Configure each Tag's access separately. `lead` starts work Sessions with the other Tags and
-records their test and rehearsal results in the Team's Workstream. You use that evidence to
-approve each production cutover and decide when to retire the shared keys. The same Tags keep
-their responsibilities for future migrations.
+You steer `lead`. It starts and manages work Sessions with the other Tags and records their test
+and rehearsal results in the Team's Workstream. You use that evidence to approve each production
+cutover and decide when to retire the shared keys. The same Tags keep their responsibilities
+for future migrations.
 
 [Add a builder and run your first Team](docs/guides/first-team.md) for a small, runnable exercise.
 
