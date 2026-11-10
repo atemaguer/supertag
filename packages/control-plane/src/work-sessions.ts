@@ -22,6 +22,7 @@ import {
   workSessionReportDeliveryId,
   workspacesForGitHubRepository,
 } from "@supertag/core";
+import { isGitHubPullRequestUrl, type SurfaceResultCard } from "@supertag/surface-sdk";
 import { type DeliveryTurnContext, deliveryTurnMessages } from "./objective-sessions.js";
 
 /**
@@ -503,4 +504,32 @@ function bounded(text: string, max: number): string {
   const trimmed = text.trim();
   if (trimmed.length <= max) return trimmed || "(no result text)";
   return `${trimmed.slice(0, max - 12)}\n[truncated]`;
+}
+
+/**
+ * The recorded branch commit and GitHub pull request of a completed work Task.
+ */
+export function workSessionResultCard(
+  task: Task,
+  events: readonly TaskEvent[],
+): SurfaceResultCard | undefined {
+  if (task.status !== "completed" || task.workspacePlan.status !== "workspace") return undefined;
+  const delivered = taskDelivery({
+    workspacePlan: task.workspacePlan,
+    ...(task.result === undefined ? {} : { result: task.result }),
+    events,
+  });
+  const pullRequest = delivered?.pullRequest;
+  const url = pullRequest?.url;
+  const branch = delivered?.workspace?.head === undefined ? undefined : delivered.workspace.branch;
+  const card = {
+    ...(pullRequest !== undefined &&
+    isGitHubPullRequestUrl(url) &&
+    url.toLowerCase() ===
+      `https://github.com/${pullRequest.repository}/pull/${pullRequest.number}`.toLowerCase()
+      ? { pullRequestUrl: url }
+      : {}),
+    ...(branch === undefined ? {} : { branch }),
+  };
+  return Object.keys(card).length === 0 ? undefined : card;
 }

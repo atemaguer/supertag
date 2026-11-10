@@ -131,6 +131,7 @@ const bindings: Readonly<Record<SurfaceProvider, GatewaySurfaceBinding>> = {
     async reply(event, presentation, account, delivery, secrets) {
       return postSlackThreadReply(event, presentation, {
         botToken: requiredSurfaceSecret(secrets, "botToken", account),
+        ...(presentation.resultCard === undefined ? {} : { resultCard: presentation.resultCard }),
         ...(delivery.replaceExternalMessageId === undefined
           ? {}
           : { replaceMessageTs: delivery.replaceExternalMessageId }),
