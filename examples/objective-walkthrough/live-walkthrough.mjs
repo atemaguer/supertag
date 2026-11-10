@@ -72,7 +72,7 @@ function organization() {
     manifest("Role", "Demo Lead", {
       purpose: "Coordinate the Objective, and relay decisions to and from the operator.",
       instructions: "Delegate each step in the Objective. Leave code edits to builder.",
-      permissionSets: ["demo-read"],
+      permissionSets: ["demo-edit"],
       execution,
     }),
     manifest("Role", "Demo Builder", {
@@ -312,6 +312,19 @@ async function run() {
     );
     event("Builder Worklet restarted and the same Session resumed.");
 
+    const deliveredTask = await waitFor("implementation delivery", () =>
+      describe().tasks.find(
+        (task) =>
+          task.id === queued.id &&
+          ["TASK_STATUS_COMPLETED", "TASK_STATUS_FAILED", "TASK_STATUS_CANCELLED"].includes(
+            task.status,
+          ),
+      ),
+    );
+    assert.equal(deliveredTask.status, "TASK_STATUS_COMPLETED", deliveredTask.response);
+    const deliveredSha = git("rev-parse", `supertag/session/${implementation.id.slice(0, 8)}`);
+    assert.notEqual(deliveredSha, base, "The builder did not deliver a commit");
+
     const verdict = await waitFor("the independent review verdict in the lead Mailbox", () => {
       const { messages = [], tagNames = {} } = mailbox();
       const reply = messages.find(
@@ -335,12 +348,7 @@ async function run() {
       assert.ok(request, "The Review Team must approve the exact SHA it received from lead");
       return { reply, sha };
     });
-    const deliveredTask = describe().tasks.find((task) => task.id === queued.id);
-    assert.equal(deliveredTask?.status, "TASK_STATUS_COMPLETED");
-    assert.equal(
-      git("rev-parse", `supertag/session/${implementation.id.slice(0, 8)}`),
-      verdict.sha,
-    );
+    assert.equal(verdict.sha, deliveredSha);
     assert.equal(git("diff", "--name-only", base, verdict.sha), "status.sh");
     const script = git("show", `${verdict.sha}:status.sh`);
     assert.equal(script, initialScript + schemaLine);

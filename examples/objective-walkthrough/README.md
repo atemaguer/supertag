@@ -12,7 +12,8 @@ The delivery Team's lead owns an Objective to change a small shell command. The 
 two-line output is the contract shared with a separate review Team. The builder can edit the
 repository. The reviewer can inspect Git and run read-only checks. The lead delegates both
 the inventory and the implementation, then asks the reviewer to inspect the exact delivered
-commit.
+commit. The lead has permission to write files so its Objective can delegate that permission
+to the builder.
 
 Install SuperTag and a full, signed-in Codex CLI that can use `gpt-6.1-sol`. Run from this
 checkout on macOS or Linux with Node.js 22.13 or later and Git.
