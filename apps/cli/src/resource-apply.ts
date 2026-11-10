@@ -37,6 +37,7 @@ import {
   parseWorkspaceSpec,
   TagMessagingError,
 } from "@supertag/core";
+import { parseRoleInstructions } from "@supertag/store";
 import type { VerifiedSurfaceAccount } from "@supertag/surface-sdk";
 import { type PruneItem, pruneApplySet } from "./apply-set-prune.js";
 import {
@@ -1439,8 +1440,7 @@ function parseDesiredRole(value: unknown): DesiredRole {
     return values.map((item) => item.trim());
   };
   const purpose = requiredString(resource.spec["purpose"], "Role spec.purpose");
-  const instructions = stringValue(resource.spec["instructions"] ?? "");
-  if (instructions === undefined) throw new Error("Role spec.instructions must be text");
+  const instructions = parseRoleInstructions(resource.spec["instructions"] ?? "");
   const contextSets = strings("contextSets");
   const permissionSets = strings("permissionSets");
   return {

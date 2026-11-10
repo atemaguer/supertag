@@ -174,7 +174,7 @@ const columns: Record<string, readonly [string, string][]> = {
   "auth-key": [
     ["NAME", "metadata.name"],
     ["STATE", "status.phase"],
-    ["EXPIRES", "spec.expiresAt"],
+    ["EXPIRES", "status.expiresAt"],
   ],
   "operator-token": [
     ["NAME", "metadata.name"],

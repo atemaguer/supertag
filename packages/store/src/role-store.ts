@@ -364,7 +364,9 @@ export class DrizzleRoleStore implements RoleStore {
       const next = {
         purpose: input.purpose === undefined ? prior.purpose : purpose(input.purpose),
         instructions:
-          input.instructions === undefined ? prior.instructions : instructions(input.instructions),
+          input.instructions === undefined
+            ? prior.instructions
+            : parseRoleInstructions(input.instructions),
         contextSetIds:
           input.contextSetIds === undefined
             ? prior.contextSetIds
@@ -545,7 +547,7 @@ function roleDefinition(input: CreateRoleInput) {
   return {
     name: roleName(input.name),
     purpose: purpose(input.purpose),
-    instructions: instructions(input.instructions ?? ""),
+    instructions: parseRoleInstructions(input.instructions ?? ""),
     contextSetIds: stringIds(input.contextSetIds ?? [], "Context Set"),
     permissionSetIds: stringIds(input.permissionSetIds ?? [], "Permission Set"),
     ...executionField(input.execution),
@@ -678,7 +680,7 @@ function purpose(value: unknown): string {
   return normalized;
 }
 
-function instructions(value: unknown): string {
+export function parseRoleInstructions(value: unknown): string {
   if (typeof value !== "string") throw new TagMessagingError(400, "Role instructions must be text");
   const normalized = value.trim();
   if (new TextEncoder().encode(normalized).length > 32_768)
