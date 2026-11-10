@@ -88,6 +88,9 @@ type EventServiceClient interface {
 	//     admin token and Operator Tokens. A scoped coordination credential with
 	//     the `read_objective` action sees posts to the Teams of Objectives its
 	//     scope allows, as `ObjectiveService.DescribeObjective` shows them.
+	//   - `WATCH_KIND_TEAM`: every Team, for the admin token and Operator Tokens
+	//     with the `read_team` action. A scoped coordination credential sees
+	//     none.
 	//
 	// The admin token and Operator Tokens carry every action and have no
 	// Objective scope. A scoped coordination credential needs the
@@ -181,6 +184,9 @@ type EventServiceHandler interface {
 	//     admin token and Operator Tokens. A scoped coordination credential with
 	//     the `read_objective` action sees posts to the Teams of Objectives its
 	//     scope allows, as `ObjectiveService.DescribeObjective` shows them.
+	//   - `WATCH_KIND_TEAM`: every Team, for the admin token and Operator Tokens
+	//     with the `read_team` action. A scoped coordination credential sees
+	//     none.
 	//
 	// The admin token and Operator Tokens carry every action and have no
 	// Objective scope. A scoped coordination credential needs the

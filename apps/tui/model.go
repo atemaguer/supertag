@@ -37,6 +37,7 @@ var watchKinds = []operatorv1.WatchKind{
 	operatorv1.WatchKind_WATCH_KIND_INBOX_ITEM,
 	operatorv1.WatchKind_WATCH_KIND_APPROVAL,
 	operatorv1.WatchKind_WATCH_KIND_WORKSTREAM_POST,
+	operatorv1.WatchKind_WATCH_KIND_TEAM,
 }
 
 type focus int
@@ -258,6 +259,8 @@ type model struct {
 	teamErrs   map[string]string
 	teamReload *reload
 	teamView   *reload
+	// teamReads numbers Team reads, so a reply older than one already shown is dropped.
+	teamReads *teamReads
 
 	// git runs git for diffs in cwd, the directory the TUI started in; openURL opens a web
 	// address with the platform's opener.
@@ -333,6 +336,7 @@ func newModel(ctx context.Context, c *client.Client, f *client.Follower, w *clie
 		teamErrs:          map[string]string{},
 		teamReload:        &reload{},
 		teamView:          &reload{},
+		teamReads:         newTeamReads(),
 		git:               runGit,
 		cwd:               cwd,
 		openURL:           openURL,
@@ -730,7 +734,14 @@ func (m model) changed(change *operatorv1.WatchChange) tea.Cmd {
 	}
 	switch change.GetKind() {
 	case operatorv1.WatchKind_WATCH_KIND_TAG:
-		return m.reloadTags()
+		// A Tag's name or deletion shows in the member list of the shown Team.
+		var team tea.Cmd
+		if m.pane == paneTeam && m.shownTeamHasMember(change.GetId()) {
+			team = m.reloadTeam()
+		}
+		return tea.Batch(m.reloadTags(), team)
+	case operatorv1.WatchKind_WATCH_KIND_TEAM:
+		return m.teamChanged(change)
 	case operatorv1.WatchKind_WATCH_KIND_CONVERSATION_MESSAGE:
 		var picker tea.Cmd
 		if m.pane == paneConversations && m.picker != nil && m.picker.tag == change.GetTag() {

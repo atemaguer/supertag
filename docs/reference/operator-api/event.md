@@ -70,6 +70,9 @@ RPCs, with the same actions and scope:
   admin token and Operator Tokens. A scoped coordination credential with
   the `read_objective` action sees posts to the Teams of Objectives its
   scope allows, as `ObjectiveService.DescribeObjective` shows them.
+- `WATCH_KIND_TEAM`: every Team, for the admin token and Operator Tokens
+  with the `read_team` action. A scoped coordination credential sees
+  none.
 
 The admin token and Operator Tokens carry every action and have no
 Objective scope. A scoped coordination credential needs the
@@ -142,3 +145,4 @@ What kind of thing changed.
 | `WATCH_KIND_APPROVAL` | An approval request was created, decided, or expired. `id` is the request's ID; `task_id` names the Task that asked, and `objective_id` its Objective when it has one. |
 | `WATCH_KIND_CONVERSATION_MESSAGE` | A message in one of the caller's conversations was sent, got its reply, or one of its work Sessions changed. `id` is the message's Task ID, as `Message.task_id`; `tag`, `conversation`, and `session_id` name its conversation. Reread it with `ConversationService.GetMessage`. |
 | `WATCH_KIND_WORKSTREAM_POST` | A Team's Workstream got a post. `id` is the post's ID and `team_id` its Team's. Reread the Objectives the Team serves with `ObjectiveService.DescribeObjective`, which carries the newest posts. |
+| `WATCH_KIND_TEAM` | A Team was created, changed, including its name, members or turn limit, or deleted. `id` and `team_id` are the Team's ID. Reread it with `TeamService.GetTeam`, which fails with `NotFound` once it is deleted. |

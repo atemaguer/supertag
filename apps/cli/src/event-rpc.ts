@@ -34,6 +34,7 @@ const WATCH_KINDS: Readonly<Record<ChangeKind, WatchKind>> = {
   approval: WatchKind.APPROVAL,
   conversation_message: WatchKind.CONVERSATION_MESSAGE,
   workstream_post: WatchKind.WORKSTREAM_POST,
+  team: WatchKind.TEAM,
 };
 
 type WatchEventInit = MessageInitShape<typeof WatchEventSchema>;
@@ -161,7 +162,8 @@ function changeEvent(
         id: notice.id,
         ...(kind === WatchKind.APPROVAL ||
         kind === WatchKind.INBOX_ITEM ||
-        kind === WatchKind.WORKSTREAM_POST
+        kind === WatchKind.WORKSTREAM_POST ||
+        kind === WatchKind.TEAM
           ? {}
           : set("tag", notice.tag)),
         ...(kind === WatchKind.TASK || kind === WatchKind.CONVERSATION_MESSAGE
@@ -174,7 +176,9 @@ function changeEvent(
         ...(kind === WatchKind.SESSION || kind === WatchKind.CONVERSATION_MESSAGE
           ? set("conversation", notice.conversation)
           : {}),
-        ...(kind === WatchKind.WORKSTREAM_POST ? set("teamId", notice.teamId) : {}),
+        ...(kind === WatchKind.WORKSTREAM_POST || kind === WatchKind.TEAM
+          ? set("teamId", notice.teamId)
+          : {}),
         reason: notice.reason,
         changedAt: timestampFromDate(new Date(notice.changedAt)),
       },
@@ -185,7 +189,7 @@ function changeEvent(
 /**
  * Which notices the caller may see: what it could read through the other RPCs, with the same
  * actions and Objective scope, and of the kinds it asked for. A scoped coordination credential
- * reads no conversations, Sessions or Tags, and only the Tasks and Team posts of its Objectives.
+ * reads no conversations, Sessions, Tags or Teams, and only the Tasks and Team posts of its Objectives.
  */
 async function visibility(
   context: HandlerContext,
@@ -252,6 +256,9 @@ async function visibility(
           (may("read_objective") &&
             (teams === undefined || (notice.teamId !== undefined && teams.has(notice.teamId))))
         );
+      case "team":
+        // As `TeamService` reads them: never for a scoped coordination credential.
+        return !scoped && may("read_team");
     }
   };
 }

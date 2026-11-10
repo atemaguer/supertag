@@ -66,6 +66,8 @@ type fakeControlPlane struct {
 	conversationLists []string
 	sessionReads      map[string]int
 	postReads         map[string]int
+	teamGets          map[string]int
+	teamListReads     int
 	badAuth           int
 	tagReads          int
 	hostReads         int
@@ -85,7 +87,7 @@ func (f *fakeControlPlane) start(t *testing.T) *httptest.Server {
 		f.token = "secret"
 	}
 	f.followed, f.resumed, f.described = map[string]int{}, map[string][]int64{}, map[string]int{}
-	f.sessionReads, f.postReads = map[string]int{}, map[string]int{}
+	f.sessionReads, f.postReads, f.teamGets = map[string]int{}, map[string]int{}, map[string]int{}
 	mux := http.NewServeMux()
 	mux.Handle(operatorv1connect.NewConversationServiceHandler(f))
 	mux.Handle(operatorv1connect.NewObjectiveServiceHandler(f))
@@ -242,6 +244,9 @@ func (f *fakeControlPlane) team(name string) *operatorv1.Team {
 }
 
 func (f *fakeControlPlane) ListTeams(context.Context, *connect.Request[operatorv1.ListTeamsRequest]) (*connect.Response[operatorv1.ListTeamsResponse], error) {
+	f.mu.Lock()
+	f.teamListReads++
+	f.mu.Unlock()
 	res := &operatorv1.ListTeamsResponse{}
 	if f.teamList != nil {
 		res.Teams = f.teamList()
@@ -250,6 +255,9 @@ func (f *fakeControlPlane) ListTeams(context.Context, *connect.Request[operatorv
 }
 
 func (f *fakeControlPlane) GetTeam(_ context.Context, req *connect.Request[operatorv1.GetTeamRequest]) (*connect.Response[operatorv1.Team], error) {
+	f.mu.Lock()
+	f.teamGets[req.Msg.GetTeam()]++
+	f.mu.Unlock()
 	team := f.team(req.Msg.GetTeam())
 	if team == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("Team "+req.Msg.GetTeam()+" was not found"))
