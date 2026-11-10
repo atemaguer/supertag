@@ -125,6 +125,10 @@ Tasks from one conversation, without another mention. This holds after a Control
 for ordinary requests and for conversations about an **Objective**, an outcome a Tag owns with
 success criteria.
 
+A completed [work Session](../concepts/tasks.md#session) can show a result card beside its
+reply. The card shows the branch that holds its changes and links to any GitHub pull request
+recorded for the work.
+
 ## Link a channel to a repository
 
 To have `@SuperTag objective ...` in a channel work in a repository, name a **Workspace**, a named

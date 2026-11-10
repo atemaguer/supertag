@@ -13,6 +13,8 @@ within the pre-1.0 compatibility policy described in
 
 - Added a runnable Objective walkthrough with an expected transcript showing delegation,
   a question, an approval, and work Session recovery after an injected Worker error.
+- Completed work Session replies in Slack can show a result card with the recorded branch
+  and a link to the pull request.
 
 ### Changed
 

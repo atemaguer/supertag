@@ -29,6 +29,26 @@ export type InboundEventSink = (event: InboundSurfaceEvent) => Promise<void>;
 export interface SurfacePresentation {
   readonly kind: OutboundPresentation;
   readonly markdown: string;
+  /**
+   * Verified delivery of a completed work Task, for surfaces that render a result card beside the
+   * Markdown. Present only on a final result reporting a completed work Session.
+   */
+  readonly resultCard?: SurfaceResultCard;
+}
+
+/** Recorded delivery values only; a field is absent when the Task recorded nothing for it. */
+export interface SurfaceResultCard {
+  /** A GitHub pull request URL, `https://github.com/<owner>/<repo>/pull/<number>`. */
+  readonly pullRequestUrl?: string;
+  readonly branch?: string;
+}
+
+export function isGitHubPullRequestUrl(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= 3000 &&
+    /^https:\/\/github\.com\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\/pull\/[1-9][0-9]*$/u.test(value)
+  );
 }
 
 /** Surface delivery behavior used by the Gateway without provider-specific branching. */

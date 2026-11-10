@@ -1,6 +1,11 @@
 import type { InboundSurfaceEvent } from "@supertag/core";
-import type { SurfacePresentation, SurfaceReplyCapabilities } from "@supertag/surface-sdk";
+import type {
+  SurfacePresentation,
+  SurfaceReplyCapabilities,
+  SurfaceResultCard,
+} from "@supertag/surface-sdk";
 import { renderSlackPresentation } from "./render.js";
+import { renderSlackResultCardBlocks } from "./result-card.js";
 
 interface SlackReplyResponse {
   readonly ok: boolean;
@@ -15,6 +20,8 @@ export const slackReplyCapabilities = {
 export interface SlackThreadReplyOptions {
   readonly botToken: string;
   readonly replaceMessageTs?: string;
+  /** Verified delivery data; when present, adds a Block Kit result card beside the text. */
+  readonly resultCard?: SurfaceResultCard;
   readonly request?: typeof fetch;
 }
 
@@ -40,30 +47,39 @@ export async function postSlackThreadReply(
   const replacing = options.replaceMessageTs?.trim();
   const method =
     replacing === undefined || replacing.length === 0 ? "chat.postMessage" : "chat.update";
-  const response = await (options.request ?? fetch)(`https://slack.com/api/${method}`, {
-    method: "POST",
-    redirect: "error",
-    headers: {
-      authorization: `Bearer ${options.botToken}`,
-      "content-type": "application/json; charset=utf-8",
-    },
-    body: JSON.stringify({
-      channel,
-      ...(replacing === undefined || replacing.length === 0
-        ? { thread_ts: threadTs }
-        : { ts: replacing }),
-      ...renderSlackPresentation(presentation),
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Slack ${method} failed with HTTP ${response.status}`);
-  }
-
-  const payload = await response.json();
-  if (!isSlackReplyResponse(payload)) {
-    throw new Error(`Slack ${method} returned an invalid response`);
-  }
+  const send = async (body: object) => {
+    const response = await (options.request ?? fetch)(`https://slack.com/api/${method}`, {
+      method: "POST",
+      redirect: "error",
+      headers: {
+        authorization: `Bearer ${options.botToken}`,
+        "content-type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(`Slack ${method} failed with HTTP ${response.status}`);
+    const payload: unknown = await response.json();
+    if (!isSlackReplyResponse(payload))
+      throw new Error(`Slack ${method} returned an invalid response`);
+    return payload;
+  };
+  const text = {
+    channel,
+    ...(method === "chat.postMessage" ? { thread_ts: threadTs } : { ts: replacing }),
+    ...renderSlackPresentation(presentation),
+  };
+  const clearCard = method === "chat.update" && event.internal?.kind === "session_report";
+  const fallback = clearCard ? { ...text, attachments: [] } : text;
+  const card = resultCardBlocks(options.resultCard);
+  let payload = await send({ ...fallback, ...card });
+  // Slack rejected this payload before sending it. An uncertain delivery is handled by the
+  // caller's retry policy so this fallback cannot create a second message.
+  if (
+    card.attachments !== undefined &&
+    !payload.ok &&
+    (payload.error === "invalid_blocks" || payload.error === "invalid_attachments")
+  )
+    payload = await send(fallback);
   if (!payload.ok) {
     throw new Error(`Slack ${method} failed: ${payload.error ?? "unknown_error"}`);
   }
@@ -105,6 +121,21 @@ export async function postSlackMessage(
   if (!payload.ok)
     throw new Error(`Slack chat.postMessage failed: ${payload.error ?? "unknown_error"}`);
   return payload.ts === undefined ? {} : { externalMessageId: payload.ts };
+}
+
+/**
+ * A result card as a Block Kit attachment, so Slack still shows the message `text` above it.
+ * Returns nothing, leaving the message text-only, when there is no data or rendering fails.
+ */
+function resultCardBlocks(data: SurfaceResultCard | undefined): {
+  readonly attachments?: readonly { readonly blocks: unknown[] }[];
+} {
+  try {
+    const blocks = renderSlackResultCardBlocks(data);
+    return blocks === undefined || blocks.length === 0 ? {} : { attachments: [{ blocks }] };
+  } catch {
+    return {};
+  }
 }
 
 function requiredCallbackField(event: InboundSurfaceEvent, field: string): string {

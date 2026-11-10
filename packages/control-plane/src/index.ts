@@ -74,6 +74,7 @@ import {
   workSessionBranch,
   workSessionDelivery,
   workSessionEvent,
+  workSessionResultCard,
   workSessionsPerTurn,
   workSessionWorkspace,
 } from "./work-sessions.js";
@@ -153,6 +154,7 @@ import {
 import type {
   SurfacePresentation,
   SurfaceReplyCapabilities,
+  SurfaceResultCard,
   VerifiedSurfaceAccount,
 } from "@supertag/surface-sdk";
 import {
@@ -4612,7 +4614,11 @@ export class ControlPlane {
       }
       const receipt = await this.#reply(
         outbound.event,
-        { kind: outbound.presentation, markdown: outbound.text },
+        {
+          kind: outbound.presentation,
+          markdown: outbound.text,
+          ...(await this.#sessionReportResultCard(outbound)),
+        },
         account,
         acknowledgement?.externalMessageId === undefined ||
           this.#reply.capabilities?.(outbound.event, account).replacement !== true
@@ -4634,6 +4640,34 @@ export class ControlPlane {
       this.#reportDispatchError(error);
     }
     return true;
+  }
+
+  /**
+   * The result card for a Slack final result reporting a completed work Session, read from the
+   * work Task's recorded delivery. Every other reply, or any failure to read it, stays text-only.
+   */
+  async #sessionReportResultCard(
+    outbound: OutboundReply,
+  ): Promise<{ readonly resultCard?: SurfaceResultCard }> {
+    const report = outbound.event.internal;
+    if (
+      outbound.presentation !== "final-result" ||
+      outbound.event.provider !== "slack" ||
+      report?.kind !== "session_report" ||
+      report.status !== "completed"
+    )
+      return {};
+    try {
+      const task = await this.#store.findTaskById(report.workTaskId);
+      if (task?.status !== "completed" || task.sessionId !== report.workSessionId) return {};
+      const card = workSessionResultCard(
+        task,
+        workerEvents(await this.#store.listTaskEvents(task.id)),
+      );
+      return card === undefined ? {} : { resultCard: card };
+    } catch {
+      return {};
+    }
   }
 
   #markOperatorInboxChanged(): void {

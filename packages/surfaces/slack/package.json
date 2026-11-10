@@ -18,9 +18,12 @@
     "typecheck": "tsc --build --pretty false"
   },
   "dependencies": {
+    "@chat-adapter/slack": "4.44.0",
+    "@json-render/chat": "0.22.0",
     "@slack/socket-mode": "3.0.0",
-    "@supertag/surface-sdk": "workspace:*",
     "@supertag/core": "workspace:*",
+    "@supertag/surface-sdk": "workspace:*",
+    "chat": "4.44.0",
     "zod": "4.4.3"
   }
 }
