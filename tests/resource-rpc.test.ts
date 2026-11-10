@@ -150,6 +150,26 @@ describe("ResourceService", () => {
       );
   });
 
+  it("enforces the same UTF-8 Role instruction limit in diff and apply", async () => {
+    const role = (instructions: string) =>
+      document(manifest("Role", "reviewer", { purpose: "Review.", instructions }));
+    const atLimit = "é".repeat(16_384);
+    const { plans } = await resources.diffManifests({ documents: [role(atLimit)] });
+    expect(plans[0]?.action).toBe(PlanAction.CREATE);
+
+    const tooLarge = { documents: [role(`${atLimit}é`)] };
+    for (const request of [
+      () => resources.diffManifests(tooLarge),
+      () => resources.applyManifests(tooLarge),
+    ]) {
+      expect(await refusal(request())).toMatchObject({
+        code: Code.InvalidArgument,
+        message: expect.stringContaining("Role instructions exceed 32 KiB"),
+      });
+    }
+    expect((await resources.listResources({ kind: ResourceKind.ROLE })).resources).toEqual([]);
+  });
+
   it("pages a listing and refuses kinds it does not list", async () => {
     await resources.applyManifests({
       documents: ["a", "b", "c"].map((name) =>

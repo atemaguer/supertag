@@ -24,6 +24,8 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- Listing Auth Keys shows when each key expires.
+- Manifest diff reports Role instructions that exceed the 32 KiB limit.
 - A deleted Team can be created again with the same ID while preserving its revision history.
 - Creating an Auth Key prints a valid Worklet join command.
 - Retrying the same Objective creation in the terminal UI after a lost response

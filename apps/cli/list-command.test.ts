@@ -57,6 +57,27 @@ it("lists Tags as an operator table by default and preserves the collection in J
   }
 });
 
+it("shows Auth Key expiry from the operator API in the table", async () => {
+  const rpc = fakeOperatorRpc({
+    "HostService/ListAuthKeys": () => ({
+      authKeys: [
+        {
+          metadata: { id: "key-ci", name: "ci" },
+          phase: "AUTH_KEY_PHASE_ACTIVE",
+          expiresAt: "2026-12-29T00:00:00Z",
+        },
+      ],
+    }),
+  });
+  try {
+    const table = await runListCommand(target, ["auth-key"]);
+    expect(table).toContain("EXPIRES");
+    expect(table).toMatch(/ci\s+active\s+2026-12-29T00:00:00\.000Z/u);
+  } finally {
+    rpc.fetch.mockRestore();
+  }
+});
+
 it("lists every Objective without --owner and filters by the owner's name with it", async () => {
   const rpc = fakeOperatorRpc({
     "ResourceService/ListResources": () => ({

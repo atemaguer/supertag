@@ -31,6 +31,7 @@ export {
   sqliteMigrationsFolder,
 } from "./migrations.js";
 export { stateDirectory } from "./paths.js";
+export { parseRoleInstructions } from "./role-store.js";
 export {
   VaultGatewayCredentialVault,
   type VaultGatewayCredentialVaultOptions,
