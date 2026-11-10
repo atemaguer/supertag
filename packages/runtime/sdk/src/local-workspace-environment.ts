@@ -161,6 +161,22 @@ export class LocalWorkspaceEnvironment implements WorkspaceEnvironment {
         throw new Error(
           `Task worktree ${worktree} is not on branch ${plan.branch} of this repository; remove it to recreate it`,
         );
+      // Resume only at a verified head: the harness HEAD must be the newest copy of the branch
+      // and hold the Control Plane's pinned head. A clean worktree behind its origin copy is
+      // recreated, so the fast-forward happens from the branch; any other mismatch is held.
+      const head = (await host.run(tree, ["rev-parse", "HEAD"])).trim();
+      const verdict = await this.#verify(repository, plan, head);
+      if (verdict !== "current") {
+        if (verdict === "behind" && (await clean())) {
+          await host.discardWorktree(repository, worktree);
+          return undefined;
+        }
+        const error = new Error(
+          `Task worktree ${worktree} is at commit ${head.slice(0, 12)}, which ${verdict === "behind" ? "is behind the branch's origin copy" : "does not continue from the branch's pinned or origin head"}${(await clean()) ? "" : " and has uncommitted changes"}; it was kept as it is. Commit or copy its work, bring the branch up to date with its origin copy, then retry`,
+        );
+        error.name = "WorkspaceSetupError";
+        throw error;
+      }
       if (reviewHead) await host.assertContains(tree, reviewHead, "HEAD");
       const base = await this.recordedBase(tree, plan, repository);
       const trusted = needsTrusted
@@ -180,6 +196,41 @@ export class LocalWorkspaceEnvironment implements WorkspaceEnvironment {
     }
     await host.discardWorktree(repository, worktree);
     return undefined;
+  }
+
+  /** How a kept worktree's `head` relates to the branch's origin copy and the pinned head. */
+  async #verify(
+    repository: WorkspaceRepository,
+    plan: TaskNamedWorkspacePlan,
+    head: string,
+  ): Promise<"current" | "behind" | "incompatible"> {
+    const host = this.#host;
+    const contains = (ancestor: string, commit: string) =>
+      ancestor === commit
+        ? Promise.resolve(true)
+        : host.run(repository.path, ["merge-base", "--is-ancestor", ancestor, commit]).then(
+            () => true,
+            () => false,
+          );
+    const remote = host.remoteBranch(plan.branch);
+    let newest = head;
+    let behind = false;
+    if (repository.managed && (await host.hasRef(repository.path, remote))) {
+      const origin = await host.commit(repository.path, remote, `Branch ${remote} is unreadable`);
+      if (await contains(origin, head)) newest = head;
+      else if (await contains(head, origin)) {
+        newest = origin;
+        behind = true;
+      } else return "incompatible";
+    }
+    const pinned =
+      plan.branchPin === plan.branch &&
+      typeof plan.branchPinHead === "string" &&
+      /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u.test(plan.branchPinHead)
+        ? plan.branchPinHead
+        : undefined;
+    if (pinned !== undefined && !(await contains(pinned, newest))) return "incompatible";
+    return behind ? "behind" : "current";
   }
 
   /**

@@ -39,19 +39,46 @@ export interface GitHubPullRequestPublisherOptions {
 interface PullRequestState {
   readonly number: number;
   readonly url: string;
-  readonly state: string;
+  readonly state: "open" | "closed";
   readonly draft: boolean;
   readonly merged: boolean;
+  readonly headRef: string;
+  readonly headSha: string;
+  readonly headRepository: string | undefined;
+  readonly baseRef: string;
+  readonly baseRepository: string | undefined;
 }
+
+/** What GitHub says about the branch's pull requests before SuperTag pushes. */
+type PullRequestLookup =
+  | { readonly kind: "new" }
+  | { readonly kind: "open"; readonly pullRequest: PullRequestState }
+  | { readonly kind: "closed"; readonly pullRequest: PullRequestState }
+  | { readonly kind: "hold"; readonly reason: string };
+
+/** Page size of the branch discovery; a full page means the answer may be truncated. */
+const LOOKUP_PAGE = 100;
 
 /**
  * Pull-request delivery on GitHub, modeled on dependency update bots: one pull request per
  * Session on its `supertag/session/<id>` branch, opened as a draft after the first completed
- * Task Attempt with commits and updated by later Attempts and later Tasks of the Session. Once a
- * person merges it, the Session's next delivery opens a new one; one a person closed unmerged is
- * neither reopened nor pushed to. The Tag must hold `pull-requests:create` on the repository,
- * pushes and API calls use the host's separate Git credential, and an `approval: required` rule
- * on the action holds each opening push until a person decides. SuperTag never merges.
+ * Task Attempt with commits and updated by later Attempts and later Tasks of the Session.
+ *
+ * Before pushing, it reads the recorded pull request by number. With no record it discovers
+ * the branch's pull requests, then reads the one it found by number. It checks repository, head, base,
+ * and state there. It pushes only in two cases. A branch with no pull request and no branch on
+ * GitHub is new work, opened after `approval: required`. A branch whose whole history is one
+ * open, matching pull request is updated. Anything else holds: nothing is pushed and the branch
+ * stays on the Worker Host. That covers a merged or closed pull request, more than one pull
+ * request in the branch's history, a branch on GitHub with no pull request, and a malformed,
+ * inconsistent, or truncated answer. After an approval wait it looks again, and after the push it
+ * reads the pull request again before updating it. The Tag must hold `pull-requests:create` on
+ * the repository; pushes and API calls use the host's separate Git credential. SuperTag never
+ * merges.
+ *
+ * Limits: GitHub offers no compare-and-swap between its API and a push, so a person can still
+ * merge, close, or open a pull request between the last read and the push or the update. The
+ * first delivery without a recorded pull request relies on GitHub's branch and pull request lists.
  */
 export class GitHubPullRequestPublisher implements WorkspacePullRequestPublisher {
   readonly #credentials: GitHubWorkerCredentialProvider;
@@ -93,22 +120,43 @@ export class GitHubPullRequestPublisher implements WorkspacePullRequestPublisher
       };
     const credential = await this.#credentials.resolve(resource.surfaceAccountId);
     const api = new GitHubPullRequestApi(credential, this.#request, input.signal);
-    // A merged pull request is done: the Session's later work opens a new one from its branch.
-    const found = await api.find(repository, plan.branch);
-    const existing = found?.merged === true ? undefined : found;
     const pullRequestOf = (state: PullRequestState): WorkspacePullRequest => ({
       surfaceAccountId: resource.surfaceAccountId,
       repository: repository.fullName,
       number: state.number,
       url: state.url,
     });
-    if (existing?.state === "closed")
-      return {
-        status: "closed",
-        pullRequest: pullRequestOf(existing),
-        message: `Pull request ${repository.fullName}#${existing.number} was closed on GitHub; SuperTag did not reopen it or push branch ${plan.branch}. Reopen it for this Session's later Tasks to update it`,
-      };
+    const held = (reason: string): WorkspacePullRequestOutcome => ({
+      status: "failed",
+      message: `SuperTag held pull request delivery on ${repository.fullName}: ${reason}. Branch ${plan.branch} was not pushed and stays on this Worker Host at ${input.head.slice(0, 12)}; resolve it on GitHub, or continue the work in a new Session.`,
+    });
+    const pin = plan.branchPinPullRequest;
+    if (
+      pin !== undefined &&
+      (plan.branchPin !== plan.branch ||
+        pin.repository.toLowerCase() !== repository.fullName.toLowerCase())
+    )
+      return held(
+        `the recorded pull request ${pin.repository}#${pin.number} belongs to a different branch or repository`,
+      );
     const baseBranch = plan.ref ?? (await api.defaultBranch(repository));
+    const lookup = () =>
+      pin === undefined
+        ? lookupPullRequest(api, repository, plan.branch, baseBranch)
+        : readPullRequest(api, repository, plan.branch, baseBranch, pin.number);
+    const found = await lookup();
+    if (found.kind === "hold") return held(found.reason);
+    if (found.kind === "closed")
+      return found.pullRequest.merged
+        ? held(
+            `pull request #${found.pullRequest.number} from this branch was already merged, so new commits would not reach it`,
+          )
+        : {
+            status: "closed",
+            pullRequest: pullRequestOf(found.pullRequest),
+            message: `Pull request ${repository.fullName}#${found.pullRequest.number} was closed on GitHub; SuperTag did not reopen it or push branch ${plan.branch}. Reopen it for this Session's later Tasks to update it`,
+          };
+    const existing = found.kind === "open" ? found.pullRequest : undefined;
     if (existing === undefined) {
       // Opening the pull request is the gated action; later pushes update the same one.
       const decision = await this.#approve(
@@ -120,30 +168,94 @@ export class GitHubPullRequestPublisher implements WorkspacePullRequestPublisher
         input,
       );
       if (decision !== undefined) return decision;
+      // The approval may have waited; GitHub may have changed meanwhile.
+      const again = await lookup();
+      if (again.kind !== "new")
+        return held(
+          "the branch's pull requests on GitHub changed while the approval was pending; a later Task Attempt looks again",
+        );
     }
     await input.push(
       repository.https ? { username: "x-access-token", password: credential.token } : undefined,
     );
+    // From here the branch is on GitHub at input.head; every failure reports partial delivery.
+    const pushed = `Pushed branch ${plan.branch} to ${repository.fullName} at ${input.head}`;
+    const partial = (reason: string): WorkspacePullRequestOutcome => ({
+      status: "failed",
+      message: `${pushed}, but ${reason}. Check the branch on GitHub. If it has no pull request, open one from that branch before retrying.`,
+    });
+    // After a request that may have reached GitHub, its outcome is unknown, not failed.
+    const uncertain = (request: string, error: unknown) =>
+      partial(
+        `the outcome of ${request} is uncertain (${error instanceof Error ? error.message : String(error)})`,
+      );
+    const exact = (pullRequest: PullRequestState) =>
+      pullRequest.state === "open" &&
+      !pullRequest.merged &&
+      matches(pullRequest, repository, plan.branch, baseBranch) &&
+      pullRequest.headSha === input.head;
     const title = pullRequestTitle(input);
     const body = pullRequestBody(input, baseBranch);
     if (existing !== undefined) {
-      await api.update(repository, existing.number, { title, body });
-      return { status: "updated", pullRequest: pullRequestOf(existing), draft: existing.draft };
+      let current: PullRequestState;
+      try {
+        current = await api.get(repository, existing.number);
+      } catch (error) {
+        return partial(
+          `SuperTag could not read pull request #${existing.number} again, so it did not update it (${error instanceof Error ? error.message : String(error)})`,
+        );
+      }
+      // GitHub may lag in moving the head to the pushed commit, so only identity is required here.
+      const same =
+        current.state === "open" &&
+        !current.merged &&
+        matches(current, repository, plan.branch, baseBranch);
+      if (current.number !== existing.number || !same)
+        return partial(
+          `pull request #${existing.number} changed on GitHub after the push (it is ${current.merged ? "merged" : current.state}, or its head or base no longer match), so SuperTag did not update it`,
+        );
+      try {
+        await api.update(repository, existing.number, { title, body });
+      } catch (error) {
+        return uncertain(`updating pull request #${existing.number}'s title and body`, error);
+      }
+      return { status: "updated", pullRequest: pullRequestOf(current), draft: current.draft };
     }
-    const created = await api.create(repository, {
-      title,
-      body,
-      head: plan.branch,
-      base: baseBranch,
-      draft: true,
-    });
+    let created: PullRequestState | undefined;
+    try {
+      created = await api.create(repository, {
+        title,
+        body,
+        head: plan.branch,
+        base: baseBranch,
+        draft: true,
+      });
+    } catch (error) {
+      return uncertain("opening the pull request", error);
+    }
     if (created !== undefined)
-      return { status: "opened", pullRequest: pullRequestOf(created), draft: created.draft };
-    // Another Attempt opened it first; update that one instead of opening a second.
-    const raced = await api.find(repository, plan.branch);
-    if (raced === undefined) throw new Error("GitHub rejected the pull request");
-    await api.update(repository, raced.number, { title, body });
-    return { status: "updated", pullRequest: pullRequestOf(raced), draft: raced.draft };
+      return exact(created)
+        ? { status: "opened", pullRequest: pullRequestOf(created), draft: created.draft }
+        : partial(
+            `GitHub's answer to opening the pull request (#${created.number}) does not match the branch, base, repository, or pushed commit, so the outcome is uncertain`,
+          );
+    // 422: perhaps another Attempt opened it first. Adopt only that exact open pull request; the
+    // push already delivered its head, so it is not edited.
+    const raced = await lookup().catch(
+      (error: unknown): PullRequestLookup => ({
+        kind: "hold",
+        reason: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    if (raced.kind === "open" && exact(raced.pullRequest))
+      return {
+        status: "updated",
+        pullRequest: pullRequestOf(raced.pullRequest),
+        draft: raced.pullRequest.draft,
+      };
+    return partial(
+      `GitHub rejected opening a pull request (HTTP 422) and lists no single open pull request from it into ${baseBranch} at that commit, so none was opened or adopted`,
+    );
   }
 
   async #approve(
@@ -248,19 +360,59 @@ class GitHubPullRequestApi {
     this.#base = apiBaseUrl(credential.apiBaseUrl);
   }
 
-  async find(
+  /**
+   * The branch's pull requests in every state, or a reason the answer cannot be trusted:
+   * a malformed or truncated response.
+   */
+  async list(
     repository: GitHubSourceRepository,
     branch: string,
-  ): Promise<PullRequestState | undefined> {
+    pageSize: number,
+  ): Promise<PullRequestState[] | string> {
     const query = new URLSearchParams({
       head: `${repository.owner}:${branch}`,
       state: "all",
-      per_page: "10",
+      per_page: String(pageSize),
     });
     const list = await this.#json("GET", `${repoPath(repository)}/pulls?${query}`, undefined);
-    const entries = Array.isArray(list) ? list.map(pullRequestState) : [];
-    // Prefer an open pull request; otherwise the most recent one.
-    return entries.find((entry) => entry.state === "open") ?? entries[0];
+    if (!Array.isArray(list)) return "GitHub answered the pull request lookup with a non-list";
+    if (list.length >= pageSize)
+      return `GitHub lists ${list.length} or more pull requests for the branch, so the lookup is incomplete`;
+    try {
+      return list.map(pullRequestState);
+    } catch (error) {
+      return `the pull request lookup was malformed (${error instanceof Error ? error.message : String(error)})`;
+    }
+  }
+
+  /** One pull request by number: the authoritative read of its identity and state. */
+  async get(repository: GitHubSourceRepository, number: number): Promise<PullRequestState> {
+    return pullRequestState(
+      await this.#json("GET", `${repoPath(repository)}/pulls/${number}`, undefined),
+    );
+  }
+
+  /** An empty successful lookup proves absence. A 404 can also mean missing access. */
+  async branchHead(
+    repository: GitHubSourceRepository,
+    branch: string,
+  ): Promise<string | undefined> {
+    const path = `${repoPath(repository)}/git/matching-refs/heads/${encodeURIComponent(branch)}`;
+    const refs = await this.#json("GET", path, undefined);
+    const prefix = `refs/heads/${branch}`;
+    if (
+      !Array.isArray(refs) ||
+      refs.some(
+        (ref) => !isRecord(ref) || typeof ref["ref"] !== "string" || !ref["ref"].startsWith(prefix),
+      )
+    )
+      throw new Error("GitHub returned invalid branch references");
+    const exact = refs.find((ref) => ref["ref"] === prefix);
+    if (exact === undefined) return undefined;
+    const object = exact["object"];
+    if (!isRecord(object) || object["type"] !== "commit" || !isCommitId(object["sha"]))
+      throw new Error("GitHub returned a branch without a commit");
+    return object["sha"];
   }
 
   async defaultBranch(repository: GitHubSourceRepository): Promise<string> {
@@ -277,8 +429,8 @@ class GitHubPullRequestApi {
     const response = await this.#send("POST", `${repoPath(repository)}/pulls`, body);
     // 422 when a pull request for this head already exists.
     if (response.status === 422) return undefined;
-    if (!response.ok)
-      throw new Error(`GitHub pull request creation failed with HTTP ${response.status}`);
+    if (response.status !== 201)
+      throw new Error(`GitHub answered the creation with HTTP ${response.status}`);
     return pullRequestState(await response.json());
   }
 
@@ -288,8 +440,11 @@ class GitHubPullRequestApi {
     body: Record<string, unknown>,
   ): Promise<void> {
     const response = await this.#send("PATCH", `${repoPath(repository)}/pulls/${number}`, body);
-    if (!response.ok)
-      throw new Error(`GitHub pull request update failed with HTTP ${response.status}`);
+    if (!response.ok) throw new Error(`GitHub answered the update with HTTP ${response.status}`);
+    // An answer that does not name the same pull request leaves the update unconfirmed.
+    const updated = pullRequestState(await response.json());
+    if (updated.number !== number)
+      throw new Error(`GitHub answered the update with pull request #${updated.number}`);
   }
 
   async #json(method: string, path: string, body: unknown): Promise<unknown> {
@@ -323,17 +478,182 @@ function pullRequestState(value: unknown): PullRequestState {
   const number = value["number"];
   const url = value["html_url"];
   const state = value["state"];
+  const mergedAt = value["merged_at"];
+  const head = value["head"];
+  const base = value["base"];
   if (typeof number !== "number" || !Number.isSafeInteger(number) || number <= 0)
     throw new Error("GitHub returned an invalid pull request number");
   if (typeof url !== "string" || !url.startsWith("https://"))
     throw new Error("GitHub returned an invalid pull request URL");
+  if (state !== "open" && state !== "closed")
+    throw new Error(`GitHub returned pull request #${number} with an unknown state`);
+  // `merged_at: null` is GitHub's unmerged value; anything else but a timestamp is malformed.
+  if (mergedAt !== null && (typeof mergedAt !== "string" || !mergedAt))
+    throw new Error(`GitHub returned pull request #${number} without a valid merged_at`);
+  if (!isRecord(head) || !isRecord(base))
+    throw new Error(`GitHub returned pull request #${number} without its head and base`);
+  const headRef = head["ref"];
+  const headSha = head["sha"];
+  const baseRef = base["ref"];
+  if (
+    typeof headRef !== "string" ||
+    !headRef ||
+    typeof baseRef !== "string" ||
+    !baseRef ||
+    !isCommitId(headSha)
+  )
+    throw new Error(`GitHub returned pull request #${number} with an invalid head or base`);
+  const merged = typeof mergedAt === "string";
+  if (value["merged"] !== undefined && value["merged"] !== merged)
+    throw new Error(`GitHub returned conflicting merge status for pull request #${number}`);
+  if (merged && state !== "closed")
+    throw new Error(`GitHub returned pull request #${number} as both merged and open`);
   return {
     number,
     url,
-    state: typeof state === "string" ? state : "open",
+    state,
     draft: value["draft"] === true,
-    merged: typeof value["merged_at"] === "string",
+    merged,
+    headRef,
+    headSha,
+    headRepository: repositoryName(head["repo"]),
+    baseRef,
+    baseRepository: repositoryName(base["repo"]),
   };
+}
+
+function isCommitId(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u.test(value);
+}
+
+function repositoryName(value: unknown): string | undefined {
+  const name = isRecord(value) ? value["full_name"] : undefined;
+  return typeof name === "string" ? name.toLowerCase() : undefined;
+}
+
+/** True when the pull request is from this repository's branch into its base. */
+function matches(
+  pullRequest: PullRequestState,
+  repository: GitHubSourceRepository,
+  branch: string,
+  base: string,
+): boolean {
+  const name = repository.fullName.toLowerCase();
+  return (
+    pullRequest.headRef === branch &&
+    pullRequest.headRepository === name &&
+    pullRequest.baseRepository === name &&
+    pullRequest.baseRef === base
+  );
+}
+
+/**
+ * Decides whether delivery may push. The list endpoint only discovers pull requests; the one it
+ * finds is read again by number. Only a history of exactly one pull request is trusted: with
+ * more than one, nothing shows which belongs to this Session. With none, a branch already on
+ * GitHub means earlier delivery whose pull request GitHub does not list, so that holds too.
+ */
+async function lookupPullRequest(
+  api: GitHubPullRequestApi,
+  repository: GitHubSourceRepository,
+  branch: string,
+  base: string,
+): Promise<PullRequestLookup> {
+  const entries = await api.list(repository, branch, LOOKUP_PAGE);
+  if (typeof entries === "string") return { kind: "hold", reason: entries };
+  const name = repository.fullName.toLowerCase();
+  for (const entry of entries)
+    if (
+      entry.headRef !== branch ||
+      entry.baseRepository !== name ||
+      // A head repository GitHub no longer reports cannot be checked.
+      entry.headRepository !== name
+    )
+      return {
+        kind: "hold",
+        reason: `GitHub lists pull request #${entry.number} for the branch, but its head or repository does not match ${repository.fullName}:${branch}`,
+      };
+  if (entries.length > 1)
+    return {
+      kind: "hold",
+      reason: `GitHub lists ${entries.length} pull requests for the branch (${entries.map((entry) => `#${entry.number} ${entry.merged ? "merged" : entry.state}`).join(", ")}), so SuperTag cannot tell which belongs to this Session`,
+    };
+  const discovered = entries[0];
+  if (discovered === undefined) {
+    let exists: boolean;
+    try {
+      exists = (await api.branchHead(repository, branch)) !== undefined;
+    } catch (error) {
+      return {
+        kind: "hold",
+        reason: `SuperTag could not tell whether the branch is already on GitHub (${error instanceof Error ? error.message : String(error)})`,
+      };
+    }
+    return exists
+      ? {
+          kind: "hold",
+          reason:
+            "the branch is already on GitHub but GitHub lists no pull request for it, so SuperTag cannot tell whether earlier work was delivered",
+        }
+      : { kind: "new" };
+  }
+  return readPullRequest(api, repository, branch, base, discovered.number, discovered.merged);
+}
+
+async function readPullRequest(
+  api: GitHubPullRequestApi,
+  repository: GitHubSourceRepository,
+  branch: string,
+  base: string,
+  number: number,
+  alreadyMerged = false,
+): Promise<PullRequestLookup> {
+  let current: PullRequestState;
+  try {
+    current = await api.get(repository, number);
+  } catch (error) {
+    return {
+      kind: "hold",
+      reason: `SuperTag could not read pull request #${number} by number (${error instanceof Error ? error.message : String(error)})`,
+    };
+  }
+  const name = repository.fullName.toLowerCase();
+  if (
+    current.number !== number ||
+    current.headRef !== branch ||
+    current.headRepository !== name ||
+    current.baseRepository !== name
+  )
+    return {
+      kind: "hold",
+      reason: `GitHub's exact read of pull request #${number} does not match ${repository.fullName}:${branch}`,
+    };
+  if (alreadyMerged && !current.merged)
+    return {
+      kind: "hold",
+      reason: `GitHub disagrees about whether pull request #${number} was merged`,
+    };
+  if (current.state === "closed") return { kind: "closed", pullRequest: current };
+  if (current.baseRef !== base)
+    return {
+      kind: "hold",
+      reason: `open pull request #${current.number} targets ${current.baseRef}, not ${base}`,
+    };
+  let head: string | undefined;
+  try {
+    head = await api.branchHead(repository, branch);
+  } catch (error) {
+    return {
+      kind: "hold",
+      reason: `SuperTag could not verify the branch for pull request #${number} (${error instanceof Error ? error.message : String(error)})`,
+    };
+  }
+  if (head !== current.headSha)
+    return {
+      kind: "hold",
+      reason: `pull request #${number} names commit ${current.headSha}, but GitHub reports ${head === undefined ? "no branch" : `commit ${head} on the branch`}`,
+    };
+  return { kind: "open", pullRequest: current };
 }
 
 function repoPath(repository: GitHubSourceRepository): string {

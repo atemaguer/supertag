@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ControlPlane } from "../packages/control-plane/src/index.js";
 import { sessionBranchPin } from "../packages/control-plane/src/session-branch.js";
-import { workspaceDeliveryEvidence } from "../packages/core/src/index.js";
+import { workspaceBranchHeadPin, workspaceDeliveryEvidence } from "../packages/core/src/index.js";
 import { createClaudeCodeWorker } from "../packages/runtime/harnesses/claude-code/src/index.js";
 import {
   LocalWorklet,
@@ -309,6 +309,38 @@ describe("A Session's branch at dispatch", () => {
     delivery: "branch",
   } as const;
 
+  it("keeps a delivered head when the next attempt resolves the same branch and stops", () => {
+    const branch = "supertag/session/a";
+    const resolved = (attemptId: string, name = branch) => ({
+      type: "runtime-inputs.resolved",
+      attemptId,
+      payload: {
+        manifest: {
+          inputs: [
+            {
+              kind: "workspace",
+              resource: {
+                provenance: { provider: "supertag-workspace", workspace: "app", branch: name },
+              },
+            },
+          ],
+        },
+      },
+    });
+    const events = [
+      resolved("a-1"),
+      progress("a-1", branch, head("0"), head("4")),
+      resolved("a-2"),
+    ];
+    expect(workspaceBranchHeadPin(events, "app")).toBe(head("4"));
+    expect(
+      workspaceBranchHeadPin([...events, progress("a-2", branch, head("0"), head("0"))], "app"),
+    ).toBe(head("4"));
+    expect(
+      workspaceBranchHeadPin([...events, resolved("a-3", "supertag/session/b")], "app"),
+    ).toBeUndefined();
+  });
+
   it("pins the latest earlier Task of the Session that delivered commits", async () => {
     const pin = await sessionBranchPin(
       store([
@@ -357,6 +389,57 @@ describe("A Session's branch at dispatch", () => {
         progress("a-1", branch, head("0"), head("4")),
       ] as never;
     expect(await sessionBranchPin(f, current, plan)).toEqual({ branch, head: head("4") });
+  });
+
+  it("retains a recorded pull request when a later Task only delivered a local head", async () => {
+    const branch = "supertag/session/a";
+    const tasks = store([
+      { id: "a", createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "b", createdAt: "2026-01-02T00:00:00.000Z" },
+    ]);
+    const recorded = {
+      type: "result",
+      payload: {
+        result: {
+          references: [
+            {
+              provider: "github",
+              resourceType: "pull-request",
+              resourceId: "acme/app#12",
+              reference: "https://github.com/acme/app/pull/12",
+              relationship: "produced",
+            },
+          ],
+        },
+      },
+    };
+    tasks.listTaskEvents = async (id) =>
+      [
+        {
+          type: "runtime-inputs.resolved",
+          payload: {
+            manifest: {
+              inputs: [
+                {
+                  kind: "workspace",
+                  resource: {
+                    provenance: { provider: "supertag-workspace", workspace: "app", branch },
+                  },
+                },
+              ],
+            },
+          },
+        },
+        progress(`${id}-1`, branch, head("0"), id === "a" ? head("1") : head("2")),
+        ...(id === "a" ? [recorded] : []),
+      ] as never;
+    expect(
+      await sessionBranchPin(tasks, current, { ...plan, delivery: "pull-request" }),
+    ).toMatchObject({
+      branch,
+      head: head("2"),
+      pullRequest: { repository: "acme/app", number: 12 },
+    });
   });
 
   it("skips a Task that delivered nothing, one in another Workspace, and the Task itself", async () => {

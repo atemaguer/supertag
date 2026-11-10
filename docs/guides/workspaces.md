@@ -678,7 +678,7 @@ The pull request follows the Session's Tasks:
 | A later Task Attempt, or a later Task of the Session | The Worker pushes to the same branch and updates the same pull request |
 | A Task that pushed completes, waiting on nothing | The Control Plane marks the pull request **ready for review** |
 | A Task that pushed is cancelled | The Control Plane comments and **closes** the pull request, unless an earlier Task of the Session delivered to it |
-| A person merges the pull request | The Session's next Task that completes with commits opens a new one |
+| A person merges the pull request | Later deliveries hold and keep the commits on the Worker Host |
 | The Objective is cancelled | Each open Task is cancelled, so its pull request closes |
 
 The title comes from the Task Attempt's summary; the body adds its evidence and names the

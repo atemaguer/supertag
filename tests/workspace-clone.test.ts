@@ -318,7 +318,7 @@ describe("Workspace source clones", { timeout: 20_000 }, () => {
     expect(record?.branch).toBe(pushed?.branch);
   });
 
-  it("repins a fresh branch and adopts its pushed commit on another Worker Host", async () => {
+  it("refuses a replaced pinned branch, then repins a fresh one and adopts it on another Worker Host", async () => {
     const first = resolver({
       pullRequests: {
         async publish(input) {
@@ -352,7 +352,14 @@ describe("Workspace source clones", { timeout: 20_000 }, () => {
         },
       },
     });
-    const worktree = await worktreeOf(retry, second);
+    // The pinned continuation refuses rather than starting over on a suffixed branch.
+    await expect(worktreeOf(retry, second)).rejects.toThrow(
+      `Branch ${pushed.branch} no longer holds commit ${pushed.head.slice(0, 12)}`,
+    );
+    expect(git(origin, "rev-parse", pushed.branch)).toBe(replacement);
+    // An operator who abandons that work retries unpinned, which allocates a fresh branch.
+    const unpinned = task("task-1", { delivery: "pull-request" }, "a2");
+    const worktree = await worktreeOf(unpinned, second);
     const freshBranch = git(worktree, "branch", "--show-current");
     expect(freshBranch).not.toBe(pushed.branch);
     expect(git(worktree, "rev-parse", "HEAD")).not.toBe(replacement);
@@ -360,7 +367,7 @@ describe("Workspace source clones", { timeout: 20_000 }, () => {
     expect(git(origin, "rev-parse", pushed.branch)).toBe(replacement);
 
     await writeFile(join(worktree, "host-b.txt"), "fresh branch work\n");
-    const repushed = await second.finalize(retry, "completed");
+    const repushed = await second.finalize(unpinned, "completed");
     if (!repushed?.head) throw new Error("Missing fresh Task branch head");
     expect(repushed.branch).toBe(freshBranch);
     expect(git(origin, "rev-parse", freshBranch)).toBe(repushed.head);
@@ -457,6 +464,36 @@ describe("Workspace source clones", { timeout: 20_000 }, () => {
     expect(git(worktree, "rev-parse", "HEAD")).toBe(descendant);
     expect(await readFile(join(worktree, "host-a.txt"), "utf8")).toBe("a\n");
   });
+  describe("a kept Task worktree behind its fetched branch", () => {
+    /** Keeps task-1's worktree at H1 while origin's copy of its branch advances to H2. */
+    const stale = async () => {
+      const first = task("task-1");
+      const worktree = await worktreeOf(first);
+      const h1 = git(worktree, "rev-parse", "HEAD");
+      const branch = plan("task-1").branch;
+      const h2 = git(origin, "commit-tree", `${h1}^{tree}`, "-p", h1, "-m", "Pushed elsewhere");
+      git(origin, "update-ref", `refs/heads/${branch}`, h2);
+      const retry = task("task-1", { branchPin: branch, branchPinHead: h2 }, "a2");
+      return { worktree, h1, h2, branch, retry };
+    };
+
+    it("recreates a clean worktree at the newer pinned head instead of resuming at H1", async () => {
+      const { worktree, h2, branch, retry } = await stale();
+      const resumed = await worktreeOf(retry);
+      expect(git(resumed, "branch", "--show-current")).toBe(branch);
+      expect(git(resumed, "rev-parse", "HEAD")).toBe(h2);
+      expect(resumed).toBe(worktree);
+    });
+
+    it("holds a dirty worktree at H1 and keeps its work", async () => {
+      const { worktree, h1, retry } = await stale();
+      await writeFile(join(worktree, "draft.txt"), "unsaved\n");
+      await expect(worktreeOf(retry)).rejects.toThrow("has uncommitted changes; it was kept");
+      expect(git(worktree, "rev-parse", "HEAD")).toBe(h1);
+      expect(await readFile(join(worktree, "draft.txt"), "utf8")).toBe("unsaved\n");
+    });
+  });
+
   describe("a Session's branch", () => {
     const sessionId = "5e55104a-0000-4000-8000-000000000000";
     const branch = workSessionBranch(sessionId);

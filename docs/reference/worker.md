@@ -1555,16 +1555,33 @@ With `delivery: pull-request`, a completed Task Attempt whose branch has commits
 1. It finds the Task authorization resource whose `reference` names the source repository and
    whose actions include `pull-requests:create`. Without one, it pushes nothing.
 2. It resolves that Surface Account's Worker credential, which must list the repository scope in
-   its allowed scopes.
-3. It looks up the branch's pull request. A Session has one branch, so its later Tasks update the
-   same pull request. Once a person merges it, the Session's next delivery opens a new one from
-   the branch. One closed without merging is left closed and nothing is pushed; reopen it on
-   GitHub for later Tasks to update it.
+   its allowed scopes. On private repositories, the credential needs GitHub Contents read access
+   to check whether a branch already exists.
+3. It reads the pull request recorded for the branch by number. If there is no record, it finds
+   the branch's pull requests with GitHub's list endpoint and reads the one it found by number.
+   It checks the head and base against the intended repository and branches and verifies that
+   the pull request and branch point to the same commit. A branch with no pull request history
+   and no branch on GitHub is new work. Later Tasks update the same open pull request into
+   `ref`, or the default branch. Delivery holds when a recorded pull request cannot be verified,
+   a pull request was merged, discovery finds multiple candidates, or the branch is already on
+   GitHub without a pull request. Held commits stay on the Worker Host. To continue a pull
+   request that was closed without merging, reopen it on GitHub.
 4. Before opening a new pull request, it applies `approval: required` on `pull-requests:create`
    through `request_action_approval`. It waits up to ten minutes; a pending or denied request
-   pushes nothing.
-5. It pushes the Session's branch, then opens a draft into `ref`, or the default branch, or updates the
-   existing pull request's title and body.
+   pushes nothing. After the approval it looks up the branch again and holds if anything changed.
+5. It pushes the Session's branch. To update, it reads the pull request by number again and edits
+   its title and body only if it is still open and matching. To open, it creates a draft into
+   `ref`, or the default branch, and accepts GitHub's answer only if it names an open pull request
+   from this branch, into that base, at the pushed commit. When GitHub answers that a pull request
+   already exists, it adopts only one open, matching pull request at the pushed commit and does
+   not edit it. Any other result after the push reports partial delivery: it names the branch and
+   the pushed commit. When GitHub's answer was lost or malformed, the result says the pull
+   request's outcome is uncertain. If GitHub has the branch but no pull request, a person can
+   open a pull request from the branch before retrying.
+
+GitHub cannot lock a branch between a read and a push or an edit, so a person can still merge,
+close, or open a pull request in that interval. For deliveries without a recorded pull request
+number, SuperTag relies on GitHub listing the branch's pull requests.
 
 The result is recorded as a `changes` entry and a `references` entry with
 `resourceType: pull-request`. A delivery that did not open or update a pull request adds its

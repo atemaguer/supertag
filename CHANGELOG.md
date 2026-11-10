@@ -22,6 +22,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- Work Session retries keep their recorded branch and commit. Pull request delivery holds when
+  GitHub reports a merged, closed, or ambiguous pull request, and reports the pushed commit
+  when delivery stops after a push.
 - The terminal UI inbox detail pane follows the selection when an item is settled elsewhere,
   including after a failed action. The inbox distinguishes approvals that block a running
   Task Attempt from questions that wait for an answer in the next turn.

@@ -41,6 +41,7 @@ it("names a work Session's one branch after its short id", () => {
 
 interface WorkletOptions {
   readonly failFirstWork?: boolean;
+  readonly failFirstContinuation?: boolean;
   /** The first work Task writes nothing, as when it only asks the person. */
   readonly emptyFirstWork?: boolean;
   /** The first work Task finds its requested branch already taken by an unrelated branch. */
@@ -67,6 +68,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       /** A Tag Worklet whose work Tasks run a real Worker on a Workspace worktree. */
       function worklet(workspaces: readonly string[], options: WorkletOptions = {}): Worklet {
         let failWork = options.failFirstWork === true;
+        let failContinuation = options.failFirstContinuation === true;
         let skipWrite = options.emptyFirstWork === true;
         let occupied = options.occupiedWorkBranch === true;
         const root = join(checkout, "..", `${checkout.split("/").at(-1)}-worktrees`);
@@ -147,6 +149,15 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
                 if (failing && (event.type === "result" || event.type === "execution.completed"))
                   continue;
                 yield event;
+                if (
+                  failContinuation &&
+                  spec.workspacePlan.branchPinHead !== undefined &&
+                  event.type === "runtime-inputs.resolved"
+                ) {
+                  failContinuation = false;
+                  seen.push({ kind, spec, results: [] });
+                  throw new Error("The Worker Host went away before delivering");
+                }
               }
               seen.push({ kind, spec, results: [], files });
               if (failing) throw new Error("The Worker Host went away");
@@ -442,6 +453,33 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         expect(retried?.branchPinHead).toMatch(/^[0-9a-f]{40}/u);
         const pinned = retried?.branchPinHead ?? "";
         expect(git(checkout, "merge-base", "--is-ancestor", pinned, branch)).toBe("");
+      });
+
+      it("keeps the Session head when a continuation retries before any delivery", async () => {
+        await start(["app"], { failFirstContinuation: true });
+        const record = await send("work:Fix readme");
+        const started = record.workSessions[0];
+        if (!started?.taskId) throw new Error("missing work Session");
+        const branch = workSessionBranch(started.id);
+        const head = git(checkout, "rev-parse", branch);
+
+        await send(`continue:${started.id}|Answer: go on`);
+        await vi.waitFor(
+          async () => {
+            const tasks = await store.listTasks({ sessionId: started.id });
+            expect(tasks).toHaveLength(2);
+            expect(tasks[0]?.status).toBe("completed");
+          },
+          { timeout: 20_000 },
+        );
+        const work = seen.filter((entry) => entry.kind === "work");
+        expect(work).toHaveLength(3);
+        expect(work[2]?.spec.workspacePlan).toMatchObject({
+          branch,
+          branchPin: branch,
+          branchPinHead: head,
+        });
+        expect(git(checkout, "rev-parse", `${branch}^`)).toBe(head);
       });
 
       it("asks for a choice among several Workspaces and validates it", async () => {

@@ -3,14 +3,17 @@ import {
   type TaskEvent,
   type TaskListFilter,
   type TaskNamedWorkspacePlan,
+  type WorkspacePullRequest,
   workspaceBranchPin,
   workspaceDeliveryEvidence,
+  workspacePullRequestFromEvents,
 } from "@supertag/core";
 
 /** Where a Session's branch is: its name and the head a Worker last delivered on it. */
 export interface SessionBranchPin {
   readonly branch: string;
   readonly head: string;
+  readonly pullRequest?: WorkspacePullRequest;
 }
 
 /**
@@ -24,20 +27,23 @@ export async function sessionBranchPin(
     listTaskEvents(taskId: string): Promise<readonly TaskEvent[]>;
   },
   task: Task,
-  plan: Pick<TaskNamedWorkspacePlan, "workspace">,
+  plan: Pick<TaskNamedWorkspacePlan, "workspace" | "delivery">,
 ): Promise<SessionBranchPin | undefined> {
   const earlier = (
     await store.listTasks({ tagId: task.tagId, sessionId: task.sessionId, limit: 100 })
   ).filter((other) => other.id !== task.id && other.createdAt <= task.createdAt);
+  let pin: SessionBranchPin | undefined;
   for (const other of earlier) {
-    const delivered = deliveredBranch(
-      other,
-      workerEvents(await store.listTaskEvents(other.id)),
-      plan,
-    );
-    if (delivered !== undefined) return delivered;
+    const events = workerEvents(await store.listTaskEvents(other.id));
+    const delivered = deliveredBranch(other, events, plan);
+    if (delivered === undefined) continue;
+    pin ??= delivered;
+    if (plan.delivery !== "pull-request") return pin;
+    if (delivered.branch !== pin.branch) continue;
+    const pullRequest = workspacePullRequestFromEvents(events);
+    if (pullRequest !== undefined) return { ...pin, pullRequest };
   }
-  return undefined;
+  return pin;
 }
 
 /**

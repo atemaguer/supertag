@@ -483,55 +483,68 @@ function assertGitSource(source: string): void {
     );
 }
 
-/** The latest branch a Worker resolved for this Task, never a requested name or AI text. */
-function workspaceBranchPinRecord(
-  events: readonly { readonly type: string; readonly payload?: unknown }[],
+interface WorkspaceBranchEvent {
+  readonly type: string;
+  readonly attemptId?: string;
+  readonly payload?: unknown;
+}
+
+/** A resolved branch from the Worker's Workspace manifest. */
+function resolvedWorkspaceBranch(
+  event: WorkspaceBranchEvent,
   workspace: string,
-): { branch: string; index: number } | undefined {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event === undefined) continue;
-    if (event.type !== "runtime-inputs.resolved" || !isRecord(event.payload)) continue;
-    const manifest = event.payload["manifest"];
-    if (!isRecord(manifest) || !Array.isArray(manifest["inputs"])) continue;
-    for (const entry of manifest["inputs"]) {
-      if (!isRecord(entry) || entry["kind"] !== "workspace" || !isRecord(entry["resource"]))
-        continue;
-      const provenance = entry["resource"]["provenance"];
-      if (
-        !isRecord(provenance) ||
-        provenance["provider"] !== "supertag-workspace" ||
-        provenance["workspace"] !== workspace
-      )
-        continue;
-      const branch = provenance["branch"];
-      if (typeof branch === "string" && branch.startsWith("supertag/") && isValidGitRef(branch))
-        return { branch, index };
-    }
+): string | undefined {
+  if (event.type !== "runtime-inputs.resolved" || !isRecord(event.payload)) return undefined;
+  const manifest = event.payload["manifest"];
+  if (!isRecord(manifest) || !Array.isArray(manifest["inputs"])) return undefined;
+  for (const entry of manifest["inputs"]) {
+    if (!isRecord(entry) || entry["kind"] !== "workspace" || !isRecord(entry["resource"])) continue;
+    const provenance = entry["resource"]["provenance"];
+    if (
+      !isRecord(provenance) ||
+      provenance["provider"] !== "supertag-workspace" ||
+      provenance["workspace"] !== workspace
+    )
+      continue;
+    const branch = provenance["branch"];
+    if (typeof branch === "string" && branch.startsWith("supertag/") && isValidGitRef(branch))
+      return branch;
   }
   return undefined;
 }
 
 /** The branch a Worker most recently resolved for this Task. */
 export function workspaceBranchPin(
-  events: readonly { readonly type: string; readonly payload?: unknown }[],
+  events: readonly WorkspaceBranchEvent[],
   workspace: string,
 ): string | undefined {
-  return workspaceBranchPinRecord(events, workspace)?.branch;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    const branch = event === undefined ? undefined : resolvedWorkspaceBranch(event, workspace);
+    if (branch !== undefined) return branch;
+  }
+  return undefined;
 }
 
 /** The last Worker-recorded full commit for the Task's pinned Workspace branch. */
 export function workspaceBranchHeadPin(
-  events: readonly { readonly type: string; readonly payload?: unknown }[],
+  events: readonly WorkspaceBranchEvent[],
   workspace: string,
 ): string | undefined {
-  const pin = workspaceBranchPinRecord(events, workspace);
+  const pin = workspaceBranchPin(events, workspace);
   if (pin === undefined) return undefined;
+  const branches = new Map<string | undefined, string>();
   let head: string | undefined;
-  for (const event of events.slice(pin.index + 1)) {
-    if (event.type !== "progress.updated") continue;
+  for (const event of events) {
+    const branch = resolvedWorkspaceBranch(event, workspace);
+    if (branch !== undefined) branches.set(event.attemptId, branch);
+    if (event.type !== "progress.updated" || branches.get(event.attemptId) !== pin) continue;
     const evidence = workspaceDeliveryEvidence(event.payload);
-    if (evidence?.branch === pin.branch && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u.test(evidence.head))
+    if (
+      evidence?.branch === pin &&
+      evidence.head !== evidence.base &&
+      /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u.test(evidence.head)
+    )
       head = evidence.head;
   }
   return head;
