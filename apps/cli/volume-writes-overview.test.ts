@@ -16,6 +16,7 @@ it("summarizes files and bytes per Volume and flags partial writes", () => {
     conditions: [],
     sessions: [],
     highFindings: [],
+    commitReviews: [],
     attention: [],
     team: null,
     tagNames: { owner: "owner" },

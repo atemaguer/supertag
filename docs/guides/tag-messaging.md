@@ -93,6 +93,20 @@ that started it.
 answers with `send_message` back to `support` only when the sender needs an answer; a message
 sent only to acknowledge another is noise.
 
+## Request a commit review
+
+An [Objective](objectives.md) records an outcome owned by a Tag. Its owner can ask a Tag on
+another Team to review a delivered Git commit. Set `review.commit` to the full hash in
+`send_message`. The reviewer gets the request in its Mailbox with the Objective, commit,
+and request message ID.
+
+The reviewer uses `send_message` with the requester as `to` and its evidence as `text`.
+Set `review.requestId` to the request message ID and `review.verdict` to `approved` or
+`changes_requested`. Both directions use the usual Mailbox grants. SuperTag records the
+verdict on the Objective for that commit and brings it to the owner's Objective conversation.
+See it under **Commit reviews** in the terminal UI or `supertag describe objective`. A new
+commit needs its own request. The operator still decides whether to accept the result.
+
 ## Check that it worked
 
 ```sh

@@ -225,7 +225,12 @@ describe("approval for inherited runtime actions", () => {
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   });
 
-  async function fixture() {
+  async function fixture(
+    ownerActions: Parameters<typeof grantRuntimeActions>[2] = [
+      { action: "commands:execute", approval: "required" },
+      { action: "files:write" },
+    ],
+  ) {
     const directory = await mkdtemp(join(tmpdir(), "supertag-runtime-approval-"));
     cleanups.push(() => rm(directory, { recursive: true, force: true }));
     const url = `file:${join(directory, "state.db")}`;
@@ -239,10 +244,7 @@ describe("approval for inherited runtime actions", () => {
     if (!owner || !member) throw new Error("Missing Tags");
     for (const tag of [owner, member]) await store.bindTagWorkerHost(tag.id, "fixture");
     // Only the owner has Permission Sets; commands:execute needs approval.
-    await grantRuntimeActions(store, owner.id, [
-      { action: "commands:execute", approval: "required" },
-      { action: "files:write" },
-    ]);
+    await grantRuntimeActions(store, owner.id, ownerActions);
     const objectiveId = randomUUID();
     const { runtimeActions } = await resolveOwnerObjectiveRuntimeActions(store, {
       objectiveId,
@@ -311,6 +313,28 @@ describe("approval for inherited runtime actions", () => {
     });
     expect(narrowed.runtimeActions).toEqual(["files:write"]);
     expect(narrowed.approvals ?? []).toEqual([]);
+  });
+
+  it("delegates writing only to a member with write permission and preserves approval", async () => {
+    const f = await fixture([
+      { action: "commands:execute" },
+      { action: "files:delegate-write", approval: "required" },
+    ]);
+    const lead = await objectiveAuthorization(f.store, f.objective, f.owner, f.location);
+    expect(lead.runtimeActions).not.toContain("files:write");
+    const readOnly = await objectiveAuthorization(f.store, f.objective, f.member, f.location, lead);
+    expect(readOnly.runtimeActions).not.toContain("files:write");
+
+    await grantRuntimeActions(f.store, f.member.id, [{ action: "files:write" }]);
+    const builder = await objectiveAuthorization(f.store, f.objective, f.member, f.location, lead);
+    expect(builder.runtimeActions).toContain("files:write");
+    expect(builder.approvals).toEqual([
+      expect.objectContaining({ target: "runtime", action: "files:write" }),
+    ]);
+    const narrowed = await objectiveAuthorization(f.store, f.objective, f.member, f.location, {
+      runtimeActions: ["commands:execute"],
+    });
+    expect(narrowed.runtimeActions).not.toContain("files:write");
   });
 });
 

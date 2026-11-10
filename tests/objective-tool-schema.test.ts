@@ -106,7 +106,7 @@ it("asks a person with one question and ends the Task waiting on the answer", ()
   expect(tool("ask").description).toContain("ends this Task waiting on the answer");
 });
 
-it("sends plain text to one Tag's Mailbox, with no types and no reply correlation", () => {
+it("sends plain text and can correlate a commit review", () => {
   expect(schema("send_message")).toEqual({
     type: "object",
     additionalProperties: false,
@@ -114,11 +114,22 @@ it("sends plain text to one Tag's Mailbox, with no types and no reply correlatio
     properties: {
       to: { type: "string", minLength: 1, maxLength: 200 },
       text: { type: "string", minLength: 1, maxLength: TAG_MESSAGE_TEXT_MAX },
+      review: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          commit: { type: "string", pattern: "^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$" },
+          requestId: { type: "string", minLength: 1, maxLength: 200 },
+          verdict: { type: "string", enum: ["approved", "changes_requested"] },
+        },
+      },
     },
   });
   for (const gone of ["type", "body", "inReplyTo", "idempotencyKey", "recipientTeamId"])
     expect(schema("send_message").properties).not.toHaveProperty(gone);
-  expect(tool("send_message").description).toContain(`At most ${INBOX_SENDS_PER_TASK} per Task`);
+  expect(tool("send_message").description).toContain(
+    `At most ${INBOX_SENDS_PER_TASK} new messages per Task`,
+  );
   expect(tool("send_message").description).toContain("handles it in a later turn of its own");
 });
 

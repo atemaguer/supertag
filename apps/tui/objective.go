@@ -110,6 +110,20 @@ func describeObjective(view *operatorv1.ObjectiveOverview, inbox []*operatorv1.I
 			add(line)
 		}
 	}
+	if reviews := view.GetCommitReviews(); len(reviews) > 0 {
+		add("Commit reviews:")
+		for _, review := range reviews {
+			verdict := strings.ReplaceAll(review.GetVerdict(), "_", " ")
+			if verdict == "" {
+				verdict = "pending"
+			}
+			line := fmt.Sprintf("  %s · %s · %s", review.GetCommit(), tag(review.GetReviewerTagId()), verdict)
+			if summary := review.GetSummary(); summary != "" {
+				line += " · " + summary
+			}
+			add(line)
+		}
+	}
 	add("Owner: " + tag(objective.GetOwnerTagId()))
 	if team := view.GetTeam(); team != nil {
 		members := make([]string, 0, len(team.GetMemberTagIds()))

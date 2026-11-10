@@ -31,6 +31,11 @@ allow through its active Roles, resolved once and stored. A creation or update l
 intersected with those actions; each dropped action, and an owner with none, produces a
 `warnings` entry. A creation retry that omits `runtimeActions` returns the stored Objective.
 
+`files:delegate-write` is a delegation grant. When the Objective and the delegating turn
+both carry it, a different Team member with its own `files:write` permission can write in
+the delegated Session. The grant does not give the owner `files:write`. Approval rules on
+the grant and on the delegate's write action apply to the delegated write.
+
 `warnings` also names conditions that would hold the Objective's turns, such as an owner Tag with
 no connected Worker Host. Creation still succeeds. With `dryRun` the request is validated exactly
 as creation is, nothing is stored, and the response is the would-be Objective with its

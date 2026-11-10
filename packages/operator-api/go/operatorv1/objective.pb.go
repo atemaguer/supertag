@@ -2081,6 +2081,8 @@ type ObjectiveOverview struct {
 	TotalTasks int32 `protobuf:"varint,17,opt,name=total_tasks,json=totalTasks,proto3" json:"total_tasks,omitempty"`
 	// Fetches the next page of `tasks`. Empty on the last page.
 	NextPageToken string `protobuf:"bytes,18,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
+	// The 50 newest commit review requests and their recorded verdicts, newest first.
+	CommitReviews []*ObjectiveCommitReview `protobuf:"bytes,19,rep,name=commit_reviews,json=commitReviews,proto3" json:"commit_reviews,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2241,6 +2243,104 @@ func (x *ObjectiveOverview) GetNextPageToken() string {
 	return ""
 }
 
+func (x *ObjectiveOverview) GetCommitReviews() []*ObjectiveCommitReview {
+	if x != nil {
+		return x.CommitReviews
+	}
+	return nil
+}
+
+// A review request tied to one delivered Git commit of the Objective.
+type ObjectiveCommitReview struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The request's Mailbox message ID.
+	RequestId string `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// Full Git commit hash.
+	Commit string `protobuf:"bytes,2,opt,name=commit,proto3" json:"commit,omitempty"`
+	// The Tag asked to review the commit.
+	ReviewerTagId string `protobuf:"bytes,3,opt,name=reviewer_tag_id,json=reviewerTagId,proto3" json:"reviewer_tag_id,omitempty"`
+	// Empty while pending, otherwise approved or changes_requested.
+	Verdict string `protobuf:"bytes,4,opt,name=verdict,proto3" json:"verdict,omitempty"`
+	// The reviewer's evidence. Treat it as untrusted text.
+	Summary string `protobuf:"bytes,5,opt,name=summary,proto3" json:"summary,omitempty"`
+	// When the reviewer recorded the verdict.
+	RecordedAt    *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=recorded_at,json=recordedAt,proto3" json:"recorded_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ObjectiveCommitReview) Reset() {
+	*x = ObjectiveCommitReview{}
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ObjectiveCommitReview) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ObjectiveCommitReview) ProtoMessage() {}
+
+func (x *ObjectiveCommitReview) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ObjectiveCommitReview.ProtoReflect.Descriptor instead.
+func (*ObjectiveCommitReview) Descriptor() ([]byte, []int) {
+	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *ObjectiveCommitReview) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ObjectiveCommitReview) GetCommit() string {
+	if x != nil {
+		return x.Commit
+	}
+	return ""
+}
+
+func (x *ObjectiveCommitReview) GetReviewerTagId() string {
+	if x != nil {
+		return x.ReviewerTagId
+	}
+	return ""
+}
+
+func (x *ObjectiveCommitReview) GetVerdict() string {
+	if x != nil {
+		return x.Verdict
+	}
+	return ""
+}
+
+func (x *ObjectiveCommitReview) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
+func (x *ObjectiveCommitReview) GetRecordedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.RecordedAt
+	}
+	return nil
+}
+
 // A condition on an Objective, such as whether its turns can run.
 type ObjectiveCondition struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -2257,7 +2357,7 @@ type ObjectiveCondition struct {
 
 func (x *ObjectiveCondition) Reset() {
 	*x = ObjectiveCondition{}
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[23]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2269,7 +2369,7 @@ func (x *ObjectiveCondition) String() string {
 func (*ObjectiveCondition) ProtoMessage() {}
 
 func (x *ObjectiveCondition) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[23]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2282,7 +2382,7 @@ func (x *ObjectiveCondition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveCondition.ProtoReflect.Descriptor instead.
 func (*ObjectiveCondition) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{23}
+	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ObjectiveCondition) GetType() string {
@@ -2323,7 +2423,7 @@ type ObjectiveAttention struct {
 
 func (x *ObjectiveAttention) Reset() {
 	*x = ObjectiveAttention{}
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[24]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2335,7 +2435,7 @@ func (x *ObjectiveAttention) String() string {
 func (*ObjectiveAttention) ProtoMessage() {}
 
 func (x *ObjectiveAttention) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[24]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2348,7 +2448,7 @@ func (x *ObjectiveAttention) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveAttention.ProtoReflect.Descriptor instead.
 func (*ObjectiveAttention) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{24}
+	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ObjectiveAttention) GetKind() ObjectiveAttentionKind {
@@ -2394,7 +2494,7 @@ type ApprovalCounts struct {
 
 func (x *ApprovalCounts) Reset() {
 	*x = ApprovalCounts{}
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[25]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2406,7 +2506,7 @@ func (x *ApprovalCounts) String() string {
 func (*ApprovalCounts) ProtoMessage() {}
 
 func (x *ApprovalCounts) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[25]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2419,7 +2519,7 @@ func (x *ApprovalCounts) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApprovalCounts.ProtoReflect.Descriptor instead.
 func (*ApprovalCounts) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{25}
+	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ApprovalCounts) GetPending() int32 {
@@ -2461,7 +2561,7 @@ type ObjectiveTeam struct {
 
 func (x *ObjectiveTeam) Reset() {
 	*x = ObjectiveTeam{}
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[26]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2473,7 +2573,7 @@ func (x *ObjectiveTeam) String() string {
 func (*ObjectiveTeam) ProtoMessage() {}
 
 func (x *ObjectiveTeam) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[26]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2486,7 +2586,7 @@ func (x *ObjectiveTeam) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveTeam.ProtoReflect.Descriptor instead.
 func (*ObjectiveTeam) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{26}
+	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ObjectiveTeam) GetId() string {
@@ -2530,7 +2630,7 @@ type ObjectiveLimits struct {
 
 func (x *ObjectiveLimits) Reset() {
 	*x = ObjectiveLimits{}
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[27]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2542,7 +2642,7 @@ func (x *ObjectiveLimits) String() string {
 func (*ObjectiveLimits) ProtoMessage() {}
 
 func (x *ObjectiveLimits) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[27]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2555,7 +2655,7 @@ func (x *ObjectiveLimits) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveLimits.ProtoReflect.Descriptor instead.
 func (*ObjectiveLimits) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{27}
+	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ObjectiveLimits) GetDeadline() *DeadlineLimit {
@@ -2596,7 +2696,7 @@ type DeadlineLimit struct {
 
 func (x *DeadlineLimit) Reset() {
 	*x = DeadlineLimit{}
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[28]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2608,7 +2708,7 @@ func (x *DeadlineLimit) String() string {
 func (*DeadlineLimit) ProtoMessage() {}
 
 func (x *DeadlineLimit) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[28]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2621,7 +2721,7 @@ func (x *DeadlineLimit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeadlineLimit.ProtoReflect.Descriptor instead.
 func (*DeadlineLimit) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{28}
+	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *DeadlineLimit) GetAt() *timestamppb.Timestamp {
@@ -2689,7 +2789,7 @@ type LimitNotice struct {
 
 func (x *LimitNotice) Reset() {
 	*x = LimitNotice{}
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[29]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2701,7 +2801,7 @@ func (x *LimitNotice) String() string {
 func (*LimitNotice) ProtoMessage() {}
 
 func (x *LimitNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[29]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2714,7 +2814,7 @@ func (x *LimitNotice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LimitNotice.ProtoReflect.Descriptor instead.
 func (*LimitNotice) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{29}
+	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *LimitNotice) GetKind() string {
@@ -2765,7 +2865,7 @@ type BudgetLimit struct {
 
 func (x *BudgetLimit) Reset() {
 	*x = BudgetLimit{}
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[30]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2777,7 +2877,7 @@ func (x *BudgetLimit) String() string {
 func (*BudgetLimit) ProtoMessage() {}
 
 func (x *BudgetLimit) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[30]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2790,7 +2890,7 @@ func (x *BudgetLimit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BudgetLimit.ProtoReflect.Descriptor instead.
 func (*BudgetLimit) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{30}
+	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *BudgetLimit) GetMeasure() BudgetMeasure {
@@ -2888,7 +2988,7 @@ type ObjectiveBudgetUse struct {
 
 func (x *ObjectiveBudgetUse) Reset() {
 	*x = ObjectiveBudgetUse{}
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[31]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2900,7 +3000,7 @@ func (x *ObjectiveBudgetUse) String() string {
 func (*ObjectiveBudgetUse) ProtoMessage() {}
 
 func (x *ObjectiveBudgetUse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[31]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2913,7 +3013,7 @@ func (x *ObjectiveBudgetUse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveBudgetUse.ProtoReflect.Descriptor instead.
 func (*ObjectiveBudgetUse) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{31}
+	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ObjectiveBudgetUse) GetCurrency() string {
@@ -3020,7 +3120,7 @@ type ObjectiveConversationEntry struct {
 
 func (x *ObjectiveConversationEntry) Reset() {
 	*x = ObjectiveConversationEntry{}
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[32]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3032,7 +3132,7 @@ func (x *ObjectiveConversationEntry) String() string {
 func (*ObjectiveConversationEntry) ProtoMessage() {}
 
 func (x *ObjectiveConversationEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[32]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3045,7 +3145,7 @@ func (x *ObjectiveConversationEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveConversationEntry.ProtoReflect.Descriptor instead.
 func (*ObjectiveConversationEntry) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{32}
+	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ObjectiveConversationEntry) GetTaskId() string {
@@ -3119,7 +3219,7 @@ type ObjectiveSession struct {
 
 func (x *ObjectiveSession) Reset() {
 	*x = ObjectiveSession{}
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[33]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3131,7 +3231,7 @@ func (x *ObjectiveSession) String() string {
 func (*ObjectiveSession) ProtoMessage() {}
 
 func (x *ObjectiveSession) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[33]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3144,7 +3244,7 @@ func (x *ObjectiveSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveSession.ProtoReflect.Descriptor instead.
 func (*ObjectiveSession) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{33}
+	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ObjectiveSession) GetId() string {
@@ -3264,7 +3364,7 @@ type ObjectiveSessionTask struct {
 
 func (x *ObjectiveSessionTask) Reset() {
 	*x = ObjectiveSessionTask{}
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[34]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3276,7 +3376,7 @@ func (x *ObjectiveSessionTask) String() string {
 func (*ObjectiveSessionTask) ProtoMessage() {}
 
 func (x *ObjectiveSessionTask) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[34]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3289,7 +3389,7 @@ func (x *ObjectiveSessionTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveSessionTask.ProtoReflect.Descriptor instead.
 func (*ObjectiveSessionTask) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{34}
+	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ObjectiveSessionTask) GetId() string {
@@ -3385,7 +3485,7 @@ type TaskExplanation struct {
 
 func (x *TaskExplanation) Reset() {
 	*x = TaskExplanation{}
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[35]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3397,7 +3497,7 @@ func (x *TaskExplanation) String() string {
 func (*TaskExplanation) ProtoMessage() {}
 
 func (x *TaskExplanation) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[35]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3410,7 +3510,7 @@ func (x *TaskExplanation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskExplanation.ProtoReflect.Descriptor instead.
 func (*TaskExplanation) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{35}
+	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *TaskExplanation) GetKind() TaskExplanationKind {
@@ -3472,7 +3572,7 @@ type HighFinding struct {
 
 func (x *HighFinding) Reset() {
 	*x = HighFinding{}
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[36]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3484,7 +3584,7 @@ func (x *HighFinding) String() string {
 func (*HighFinding) ProtoMessage() {}
 
 func (x *HighFinding) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[36]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3497,7 +3597,7 @@ func (x *HighFinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HighFinding.ProtoReflect.Descriptor instead.
 func (*HighFinding) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{36}
+	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *HighFinding) GetTaskId() string {
@@ -3547,7 +3647,7 @@ type VolumeWrites struct {
 
 func (x *VolumeWrites) Reset() {
 	*x = VolumeWrites{}
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[37]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3559,7 +3659,7 @@ func (x *VolumeWrites) String() string {
 func (*VolumeWrites) ProtoMessage() {}
 
 func (x *VolumeWrites) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[37]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3572,7 +3672,7 @@ func (x *VolumeWrites) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VolumeWrites.ProtoReflect.Descriptor instead.
 func (*VolumeWrites) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{37}
+	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *VolumeWrites) GetVolume() string {
@@ -3639,7 +3739,7 @@ type ObjectiveTask struct {
 
 func (x *ObjectiveTask) Reset() {
 	*x = ObjectiveTask{}
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[38]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3651,7 +3751,7 @@ func (x *ObjectiveTask) String() string {
 func (*ObjectiveTask) ProtoMessage() {}
 
 func (x *ObjectiveTask) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[38]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3664,7 +3764,7 @@ func (x *ObjectiveTask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveTask.ProtoReflect.Descriptor instead.
 func (*ObjectiveTask) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{38}
+	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ObjectiveTask) GetId() string {
@@ -3758,7 +3858,7 @@ type ObjectiveTaskAttempt struct {
 
 func (x *ObjectiveTaskAttempt) Reset() {
 	*x = ObjectiveTaskAttempt{}
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[39]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3770,7 +3870,7 @@ func (x *ObjectiveTaskAttempt) String() string {
 func (*ObjectiveTaskAttempt) ProtoMessage() {}
 
 func (x *ObjectiveTaskAttempt) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_operator_v1_objective_proto_msgTypes[39]
+	mi := &file_supertag_operator_v1_objective_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3783,7 +3883,7 @@ func (x *ObjectiveTaskAttempt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveTaskAttempt.ProtoReflect.Descriptor instead.
 func (*ObjectiveTaskAttempt) Descriptor() ([]byte, []int) {
-	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{39}
+	return file_supertag_operator_v1_objective_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ObjectiveTaskAttempt) GetId() string {
@@ -3959,7 +4059,8 @@ const file_supertag_operator_v1_objective_proto_rawDesc = "" +
 	"\fLimitSummary\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x129\n" +
 	"\n" +
-	"written_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\twrittenAt\"\xbf\t\n" +
+	"written_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\twrittenAt\"\x93\n" +
+	"\n" +
 	"\x11ObjectiveOverview\x12;\n" +
 	"\vcaptured_at\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"capturedAt\x12=\n" +
@@ -3983,10 +4084,20 @@ const file_supertag_operator_v1_objective_proto_rawDesc = "" +
 	"\x05tasks\x18\x10 \x03(\v2#.supertag.operator.v1.ObjectiveTaskR\x05tasks\x12\x1f\n" +
 	"\vtotal_tasks\x18\x11 \x01(\x05R\n" +
 	"totalTasks\x12&\n" +
-	"\x0fnext_page_token\x18\x12 \x01(\tR\rnextPageToken\x1a;\n" +
+	"\x0fnext_page_token\x18\x12 \x01(\tR\rnextPageToken\x12R\n" +
+	"\x0ecommit_reviews\x18\x13 \x03(\v2+.supertag.operator.v1.ObjectiveCommitReviewR\rcommitReviews\x1a;\n" +
 	"\rTagNamesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"Z\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe7\x01\n" +
+	"\x15ObjectiveCommitReview\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
+	"\x06commit\x18\x02 \x01(\tR\x06commit\x12&\n" +
+	"\x0freviewer_tag_id\x18\x03 \x01(\tR\rreviewerTagId\x12\x18\n" +
+	"\averdict\x18\x04 \x01(\tR\averdict\x12\x18\n" +
+	"\asummary\x18\x05 \x01(\tR\asummary\x12;\n" +
+	"\vrecorded_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"recordedAt\"Z\n" +
 	"\x12ObjectiveCondition\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\bR\x06status\x12\x18\n" +
@@ -4214,7 +4325,7 @@ func file_supertag_operator_v1_objective_proto_rawDescGZIP() []byte {
 }
 
 var file_supertag_operator_v1_objective_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_supertag_operator_v1_objective_proto_msgTypes = make([]protoimpl.MessageInfo, 43)
+var file_supertag_operator_v1_objective_proto_msgTypes = make([]protoimpl.MessageInfo, 44)
 var file_supertag_operator_v1_objective_proto_goTypes = []any{
 	(ObjectiveStatus)(0),               // 0: supertag.operator.v1.ObjectiveStatus
 	(ObjectiveAttentionKind)(0),        // 1: supertag.operator.v1.ObjectiveAttentionKind
@@ -4245,130 +4356,133 @@ var file_supertag_operator_v1_objective_proto_goTypes = []any{
 	(*ObjectiveSpend)(nil),             // 26: supertag.operator.v1.ObjectiveSpend
 	(*LimitSummary)(nil),               // 27: supertag.operator.v1.LimitSummary
 	(*ObjectiveOverview)(nil),          // 28: supertag.operator.v1.ObjectiveOverview
-	(*ObjectiveCondition)(nil),         // 29: supertag.operator.v1.ObjectiveCondition
-	(*ObjectiveAttention)(nil),         // 30: supertag.operator.v1.ObjectiveAttention
-	(*ApprovalCounts)(nil),             // 31: supertag.operator.v1.ApprovalCounts
-	(*ObjectiveTeam)(nil),              // 32: supertag.operator.v1.ObjectiveTeam
-	(*ObjectiveLimits)(nil),            // 33: supertag.operator.v1.ObjectiveLimits
-	(*DeadlineLimit)(nil),              // 34: supertag.operator.v1.DeadlineLimit
-	(*LimitNotice)(nil),                // 35: supertag.operator.v1.LimitNotice
-	(*BudgetLimit)(nil),                // 36: supertag.operator.v1.BudgetLimit
-	(*ObjectiveBudgetUse)(nil),         // 37: supertag.operator.v1.ObjectiveBudgetUse
-	(*ObjectiveConversationEntry)(nil), // 38: supertag.operator.v1.ObjectiveConversationEntry
-	(*ObjectiveSession)(nil),           // 39: supertag.operator.v1.ObjectiveSession
-	(*ObjectiveSessionTask)(nil),       // 40: supertag.operator.v1.ObjectiveSessionTask
-	(*TaskExplanation)(nil),            // 41: supertag.operator.v1.TaskExplanation
-	(*HighFinding)(nil),                // 42: supertag.operator.v1.HighFinding
-	(*VolumeWrites)(nil),               // 43: supertag.operator.v1.VolumeWrites
-	(*ObjectiveTask)(nil),              // 44: supertag.operator.v1.ObjectiveTask
-	(*ObjectiveTaskAttempt)(nil),       // 45: supertag.operator.v1.ObjectiveTaskAttempt
-	nil,                                // 46: supertag.operator.v1.ObjectiveOverview.TagNamesEntry
-	nil,                                // 47: supertag.operator.v1.ObjectiveBudgetUse.ReportedCostByCurrencyEntry
-	nil,                                // 48: supertag.operator.v1.ObjectiveBudgetUse.UnpricedModelsEntry
-	(*timestamppb.Timestamp)(nil),      // 49: google.protobuf.Timestamp
-	(*WorkstreamPost)(nil),             // 50: supertag.operator.v1.WorkstreamPost
-	(*TaskDelivery)(nil),               // 51: supertag.operator.v1.TaskDelivery
-	(TaskAttemptStatus)(0),             // 52: supertag.operator.v1.TaskAttemptStatus
-	(TaskStatus)(0),                    // 53: supertag.operator.v1.TaskStatus
+	(*ObjectiveCommitReview)(nil),      // 29: supertag.operator.v1.ObjectiveCommitReview
+	(*ObjectiveCondition)(nil),         // 30: supertag.operator.v1.ObjectiveCondition
+	(*ObjectiveAttention)(nil),         // 31: supertag.operator.v1.ObjectiveAttention
+	(*ApprovalCounts)(nil),             // 32: supertag.operator.v1.ApprovalCounts
+	(*ObjectiveTeam)(nil),              // 33: supertag.operator.v1.ObjectiveTeam
+	(*ObjectiveLimits)(nil),            // 34: supertag.operator.v1.ObjectiveLimits
+	(*DeadlineLimit)(nil),              // 35: supertag.operator.v1.DeadlineLimit
+	(*LimitNotice)(nil),                // 36: supertag.operator.v1.LimitNotice
+	(*BudgetLimit)(nil),                // 37: supertag.operator.v1.BudgetLimit
+	(*ObjectiveBudgetUse)(nil),         // 38: supertag.operator.v1.ObjectiveBudgetUse
+	(*ObjectiveConversationEntry)(nil), // 39: supertag.operator.v1.ObjectiveConversationEntry
+	(*ObjectiveSession)(nil),           // 40: supertag.operator.v1.ObjectiveSession
+	(*ObjectiveSessionTask)(nil),       // 41: supertag.operator.v1.ObjectiveSessionTask
+	(*TaskExplanation)(nil),            // 42: supertag.operator.v1.TaskExplanation
+	(*HighFinding)(nil),                // 43: supertag.operator.v1.HighFinding
+	(*VolumeWrites)(nil),               // 44: supertag.operator.v1.VolumeWrites
+	(*ObjectiveTask)(nil),              // 45: supertag.operator.v1.ObjectiveTask
+	(*ObjectiveTaskAttempt)(nil),       // 46: supertag.operator.v1.ObjectiveTaskAttempt
+	nil,                                // 47: supertag.operator.v1.ObjectiveOverview.TagNamesEntry
+	nil,                                // 48: supertag.operator.v1.ObjectiveBudgetUse.ReportedCostByCurrencyEntry
+	nil,                                // 49: supertag.operator.v1.ObjectiveBudgetUse.UnpricedModelsEntry
+	(*timestamppb.Timestamp)(nil),      // 50: google.protobuf.Timestamp
+	(*WorkstreamPost)(nil),             // 51: supertag.operator.v1.WorkstreamPost
+	(*TaskDelivery)(nil),               // 52: supertag.operator.v1.TaskDelivery
+	(TaskAttemptStatus)(0),             // 53: supertag.operator.v1.TaskAttemptStatus
+	(TaskStatus)(0),                    // 54: supertag.operator.v1.TaskStatus
 }
 var file_supertag_operator_v1_objective_proto_depIdxs = []int32{
-	49, // 0: supertag.operator.v1.CreateObjectiveRequest.deadline:type_name -> google.protobuf.Timestamp
+	50, // 0: supertag.operator.v1.CreateObjectiveRequest.deadline:type_name -> google.protobuf.Timestamp
 	24, // 1: supertag.operator.v1.CreateObjectiveRequest.budget:type_name -> supertag.operator.v1.Budget
 	25, // 2: supertag.operator.v1.CreateObjectiveResponse.objective:type_name -> supertag.operator.v1.Objective
 	25, // 3: supertag.operator.v1.ListObjectivesResponse.objectives:type_name -> supertag.operator.v1.Objective
 	0,  // 4: supertag.operator.v1.MessageObjectiveResponse.status_change:type_name -> supertag.operator.v1.ObjectiveStatus
 	0,  // 5: supertag.operator.v1.UpdateObjectiveRequest.status:type_name -> supertag.operator.v1.ObjectiveStatus
-	49, // 6: supertag.operator.v1.UpdateObjectiveRequest.deadline:type_name -> google.protobuf.Timestamp
+	50, // 6: supertag.operator.v1.UpdateObjectiveRequest.deadline:type_name -> google.protobuf.Timestamp
 	15, // 7: supertag.operator.v1.UpdateObjectiveRequest.runtime_actions:type_name -> supertag.operator.v1.RuntimeActions
 	25, // 8: supertag.operator.v1.UpdateObjectiveResponse.objective:type_name -> supertag.operator.v1.Objective
 	25, // 9: supertag.operator.v1.CancelObjectiveResponse.objective:type_name -> supertag.operator.v1.Objective
 	25, // 10: supertag.operator.v1.PauseObjectiveResponse.objective:type_name -> supertag.operator.v1.Objective
 	25, // 11: supertag.operator.v1.ResumeObjectiveResponse.objective:type_name -> supertag.operator.v1.Objective
 	0,  // 12: supertag.operator.v1.Objective.status:type_name -> supertag.operator.v1.ObjectiveStatus
-	49, // 13: supertag.operator.v1.Objective.deadline:type_name -> google.protobuf.Timestamp
+	50, // 13: supertag.operator.v1.Objective.deadline:type_name -> google.protobuf.Timestamp
 	24, // 14: supertag.operator.v1.Objective.budget:type_name -> supertag.operator.v1.Budget
 	26, // 15: supertag.operator.v1.Objective.spend:type_name -> supertag.operator.v1.ObjectiveSpend
 	27, // 16: supertag.operator.v1.Objective.limit_summary:type_name -> supertag.operator.v1.LimitSummary
-	49, // 17: supertag.operator.v1.Objective.execution_started_at:type_name -> google.protobuf.Timestamp
-	49, // 18: supertag.operator.v1.Objective.paused_at:type_name -> google.protobuf.Timestamp
-	49, // 19: supertag.operator.v1.Objective.cancelled_at:type_name -> google.protobuf.Timestamp
-	49, // 20: supertag.operator.v1.Objective.created_at:type_name -> google.protobuf.Timestamp
-	49, // 21: supertag.operator.v1.Objective.updated_at:type_name -> google.protobuf.Timestamp
-	49, // 22: supertag.operator.v1.ObjectiveSpend.observed_at:type_name -> google.protobuf.Timestamp
-	49, // 23: supertag.operator.v1.LimitSummary.written_at:type_name -> google.protobuf.Timestamp
-	49, // 24: supertag.operator.v1.ObjectiveOverview.captured_at:type_name -> google.protobuf.Timestamp
+	50, // 17: supertag.operator.v1.Objective.execution_started_at:type_name -> google.protobuf.Timestamp
+	50, // 18: supertag.operator.v1.Objective.paused_at:type_name -> google.protobuf.Timestamp
+	50, // 19: supertag.operator.v1.Objective.cancelled_at:type_name -> google.protobuf.Timestamp
+	50, // 20: supertag.operator.v1.Objective.created_at:type_name -> google.protobuf.Timestamp
+	50, // 21: supertag.operator.v1.Objective.updated_at:type_name -> google.protobuf.Timestamp
+	50, // 22: supertag.operator.v1.ObjectiveSpend.observed_at:type_name -> google.protobuf.Timestamp
+	50, // 23: supertag.operator.v1.LimitSummary.written_at:type_name -> google.protobuf.Timestamp
+	50, // 24: supertag.operator.v1.ObjectiveOverview.captured_at:type_name -> google.protobuf.Timestamp
 	25, // 25: supertag.operator.v1.ObjectiveOverview.objective:type_name -> supertag.operator.v1.Objective
-	29, // 26: supertag.operator.v1.ObjectiveOverview.conditions:type_name -> supertag.operator.v1.ObjectiveCondition
-	30, // 27: supertag.operator.v1.ObjectiveOverview.attention:type_name -> supertag.operator.v1.ObjectiveAttention
-	31, // 28: supertag.operator.v1.ObjectiveOverview.approvals:type_name -> supertag.operator.v1.ApprovalCounts
-	46, // 29: supertag.operator.v1.ObjectiveOverview.tag_names:type_name -> supertag.operator.v1.ObjectiveOverview.TagNamesEntry
-	32, // 30: supertag.operator.v1.ObjectiveOverview.team:type_name -> supertag.operator.v1.ObjectiveTeam
-	33, // 31: supertag.operator.v1.ObjectiveOverview.limits:type_name -> supertag.operator.v1.ObjectiveLimits
-	37, // 32: supertag.operator.v1.ObjectiveOverview.budget:type_name -> supertag.operator.v1.ObjectiveBudgetUse
-	38, // 33: supertag.operator.v1.ObjectiveOverview.conversation:type_name -> supertag.operator.v1.ObjectiveConversationEntry
-	39, // 34: supertag.operator.v1.ObjectiveOverview.sessions:type_name -> supertag.operator.v1.ObjectiveSession
-	42, // 35: supertag.operator.v1.ObjectiveOverview.high_findings:type_name -> supertag.operator.v1.HighFinding
-	50, // 36: supertag.operator.v1.ObjectiveOverview.posts:type_name -> supertag.operator.v1.WorkstreamPost
-	43, // 37: supertag.operator.v1.ObjectiveOverview.writes:type_name -> supertag.operator.v1.VolumeWrites
-	44, // 38: supertag.operator.v1.ObjectiveOverview.tasks:type_name -> supertag.operator.v1.ObjectiveTask
-	1,  // 39: supertag.operator.v1.ObjectiveAttention.kind:type_name -> supertag.operator.v1.ObjectiveAttentionKind
-	49, // 40: supertag.operator.v1.ObjectiveAttention.observed_at:type_name -> google.protobuf.Timestamp
-	34, // 41: supertag.operator.v1.ObjectiveLimits.deadline:type_name -> supertag.operator.v1.DeadlineLimit
-	36, // 42: supertag.operator.v1.ObjectiveLimits.budget:type_name -> supertag.operator.v1.BudgetLimit
-	49, // 43: supertag.operator.v1.DeadlineLimit.at:type_name -> google.protobuf.Timestamp
-	35, // 44: supertag.operator.v1.DeadlineLimit.notices:type_name -> supertag.operator.v1.LimitNotice
-	49, // 45: supertag.operator.v1.LimitNotice.at:type_name -> google.protobuf.Timestamp
-	2,  // 46: supertag.operator.v1.BudgetLimit.measure:type_name -> supertag.operator.v1.BudgetMeasure
-	24, // 47: supertag.operator.v1.BudgetLimit.limit:type_name -> supertag.operator.v1.Budget
-	49, // 48: supertag.operator.v1.BudgetLimit.reported_spend_observed_at:type_name -> google.protobuf.Timestamp
-	47, // 49: supertag.operator.v1.ObjectiveBudgetUse.reported_cost_by_currency:type_name -> supertag.operator.v1.ObjectiveBudgetUse.ReportedCostByCurrencyEntry
-	48, // 50: supertag.operator.v1.ObjectiveBudgetUse.unpriced_models:type_name -> supertag.operator.v1.ObjectiveBudgetUse.UnpricedModelsEntry
-	3,  // 51: supertag.operator.v1.ObjectiveConversationEntry.author:type_name -> supertag.operator.v1.ObjectiveConversationAuthor
-	49, // 52: supertag.operator.v1.ObjectiveConversationEntry.created_at:type_name -> google.protobuf.Timestamp
-	4,  // 53: supertag.operator.v1.ObjectiveSession.status:type_name -> supertag.operator.v1.ObjectiveSessionStatus
-	49, // 54: supertag.operator.v1.ObjectiveSession.created_at:type_name -> google.protobuf.Timestamp
-	40, // 55: supertag.operator.v1.ObjectiveSession.latest_task:type_name -> supertag.operator.v1.ObjectiveSessionTask
-	4,  // 56: supertag.operator.v1.ObjectiveSessionTask.status:type_name -> supertag.operator.v1.ObjectiveSessionStatus
-	49, // 57: supertag.operator.v1.ObjectiveSessionTask.created_at:type_name -> google.protobuf.Timestamp
-	49, // 58: supertag.operator.v1.ObjectiveSessionTask.updated_at:type_name -> google.protobuf.Timestamp
-	51, // 59: supertag.operator.v1.ObjectiveSessionTask.delivery:type_name -> supertag.operator.v1.TaskDelivery
-	52, // 60: supertag.operator.v1.ObjectiveSessionTask.attempt_status:type_name -> supertag.operator.v1.TaskAttemptStatus
-	41, // 61: supertag.operator.v1.ObjectiveSessionTask.explanations:type_name -> supertag.operator.v1.TaskExplanation
-	5,  // 62: supertag.operator.v1.TaskExplanation.kind:type_name -> supertag.operator.v1.TaskExplanationKind
-	49, // 63: supertag.operator.v1.TaskExplanation.observed_at:type_name -> google.protobuf.Timestamp
-	53, // 64: supertag.operator.v1.ObjectiveTask.status:type_name -> supertag.operator.v1.TaskStatus
-	49, // 65: supertag.operator.v1.ObjectiveTask.created_at:type_name -> google.protobuf.Timestamp
-	49, // 66: supertag.operator.v1.ObjectiveTask.started_at:type_name -> google.protobuf.Timestamp
-	49, // 67: supertag.operator.v1.ObjectiveTask.ended_at:type_name -> google.protobuf.Timestamp
-	45, // 68: supertag.operator.v1.ObjectiveTask.attempts:type_name -> supertag.operator.v1.ObjectiveTaskAttempt
-	52, // 69: supertag.operator.v1.ObjectiveTaskAttempt.status:type_name -> supertag.operator.v1.TaskAttemptStatus
-	49, // 70: supertag.operator.v1.ObjectiveTaskAttempt.started_at:type_name -> google.protobuf.Timestamp
-	49, // 71: supertag.operator.v1.ObjectiveTaskAttempt.ended_at:type_name -> google.protobuf.Timestamp
-	6,  // 72: supertag.operator.v1.ObjectiveService.CreateObjective:input_type -> supertag.operator.v1.CreateObjectiveRequest
-	8,  // 73: supertag.operator.v1.ObjectiveService.ListObjectives:input_type -> supertag.operator.v1.ListObjectivesRequest
-	10, // 74: supertag.operator.v1.ObjectiveService.GetObjective:input_type -> supertag.operator.v1.GetObjectiveRequest
-	11, // 75: supertag.operator.v1.ObjectiveService.DescribeObjective:input_type -> supertag.operator.v1.DescribeObjectiveRequest
-	12, // 76: supertag.operator.v1.ObjectiveService.MessageObjective:input_type -> supertag.operator.v1.MessageObjectiveRequest
-	14, // 77: supertag.operator.v1.ObjectiveService.UpdateObjective:input_type -> supertag.operator.v1.UpdateObjectiveRequest
-	17, // 78: supertag.operator.v1.ObjectiveService.ApproveObjective:input_type -> supertag.operator.v1.ApproveObjectiveRequest
-	18, // 79: supertag.operator.v1.ObjectiveService.CancelObjective:input_type -> supertag.operator.v1.CancelObjectiveRequest
-	20, // 80: supertag.operator.v1.ObjectiveService.PauseObjective:input_type -> supertag.operator.v1.PauseObjectiveRequest
-	22, // 81: supertag.operator.v1.ObjectiveService.ResumeObjective:input_type -> supertag.operator.v1.ResumeObjectiveRequest
-	7,  // 82: supertag.operator.v1.ObjectiveService.CreateObjective:output_type -> supertag.operator.v1.CreateObjectiveResponse
-	9,  // 83: supertag.operator.v1.ObjectiveService.ListObjectives:output_type -> supertag.operator.v1.ListObjectivesResponse
-	25, // 84: supertag.operator.v1.ObjectiveService.GetObjective:output_type -> supertag.operator.v1.Objective
-	28, // 85: supertag.operator.v1.ObjectiveService.DescribeObjective:output_type -> supertag.operator.v1.ObjectiveOverview
-	13, // 86: supertag.operator.v1.ObjectiveService.MessageObjective:output_type -> supertag.operator.v1.MessageObjectiveResponse
-	16, // 87: supertag.operator.v1.ObjectiveService.UpdateObjective:output_type -> supertag.operator.v1.UpdateObjectiveResponse
-	25, // 88: supertag.operator.v1.ObjectiveService.ApproveObjective:output_type -> supertag.operator.v1.Objective
-	19, // 89: supertag.operator.v1.ObjectiveService.CancelObjective:output_type -> supertag.operator.v1.CancelObjectiveResponse
-	21, // 90: supertag.operator.v1.ObjectiveService.PauseObjective:output_type -> supertag.operator.v1.PauseObjectiveResponse
-	23, // 91: supertag.operator.v1.ObjectiveService.ResumeObjective:output_type -> supertag.operator.v1.ResumeObjectiveResponse
-	82, // [82:92] is the sub-list for method output_type
-	72, // [72:82] is the sub-list for method input_type
-	72, // [72:72] is the sub-list for extension type_name
-	72, // [72:72] is the sub-list for extension extendee
-	0,  // [0:72] is the sub-list for field type_name
+	30, // 26: supertag.operator.v1.ObjectiveOverview.conditions:type_name -> supertag.operator.v1.ObjectiveCondition
+	31, // 27: supertag.operator.v1.ObjectiveOverview.attention:type_name -> supertag.operator.v1.ObjectiveAttention
+	32, // 28: supertag.operator.v1.ObjectiveOverview.approvals:type_name -> supertag.operator.v1.ApprovalCounts
+	47, // 29: supertag.operator.v1.ObjectiveOverview.tag_names:type_name -> supertag.operator.v1.ObjectiveOverview.TagNamesEntry
+	33, // 30: supertag.operator.v1.ObjectiveOverview.team:type_name -> supertag.operator.v1.ObjectiveTeam
+	34, // 31: supertag.operator.v1.ObjectiveOverview.limits:type_name -> supertag.operator.v1.ObjectiveLimits
+	38, // 32: supertag.operator.v1.ObjectiveOverview.budget:type_name -> supertag.operator.v1.ObjectiveBudgetUse
+	39, // 33: supertag.operator.v1.ObjectiveOverview.conversation:type_name -> supertag.operator.v1.ObjectiveConversationEntry
+	40, // 34: supertag.operator.v1.ObjectiveOverview.sessions:type_name -> supertag.operator.v1.ObjectiveSession
+	43, // 35: supertag.operator.v1.ObjectiveOverview.high_findings:type_name -> supertag.operator.v1.HighFinding
+	51, // 36: supertag.operator.v1.ObjectiveOverview.posts:type_name -> supertag.operator.v1.WorkstreamPost
+	44, // 37: supertag.operator.v1.ObjectiveOverview.writes:type_name -> supertag.operator.v1.VolumeWrites
+	45, // 38: supertag.operator.v1.ObjectiveOverview.tasks:type_name -> supertag.operator.v1.ObjectiveTask
+	29, // 39: supertag.operator.v1.ObjectiveOverview.commit_reviews:type_name -> supertag.operator.v1.ObjectiveCommitReview
+	50, // 40: supertag.operator.v1.ObjectiveCommitReview.recorded_at:type_name -> google.protobuf.Timestamp
+	1,  // 41: supertag.operator.v1.ObjectiveAttention.kind:type_name -> supertag.operator.v1.ObjectiveAttentionKind
+	50, // 42: supertag.operator.v1.ObjectiveAttention.observed_at:type_name -> google.protobuf.Timestamp
+	35, // 43: supertag.operator.v1.ObjectiveLimits.deadline:type_name -> supertag.operator.v1.DeadlineLimit
+	37, // 44: supertag.operator.v1.ObjectiveLimits.budget:type_name -> supertag.operator.v1.BudgetLimit
+	50, // 45: supertag.operator.v1.DeadlineLimit.at:type_name -> google.protobuf.Timestamp
+	36, // 46: supertag.operator.v1.DeadlineLimit.notices:type_name -> supertag.operator.v1.LimitNotice
+	50, // 47: supertag.operator.v1.LimitNotice.at:type_name -> google.protobuf.Timestamp
+	2,  // 48: supertag.operator.v1.BudgetLimit.measure:type_name -> supertag.operator.v1.BudgetMeasure
+	24, // 49: supertag.operator.v1.BudgetLimit.limit:type_name -> supertag.operator.v1.Budget
+	50, // 50: supertag.operator.v1.BudgetLimit.reported_spend_observed_at:type_name -> google.protobuf.Timestamp
+	48, // 51: supertag.operator.v1.ObjectiveBudgetUse.reported_cost_by_currency:type_name -> supertag.operator.v1.ObjectiveBudgetUse.ReportedCostByCurrencyEntry
+	49, // 52: supertag.operator.v1.ObjectiveBudgetUse.unpriced_models:type_name -> supertag.operator.v1.ObjectiveBudgetUse.UnpricedModelsEntry
+	3,  // 53: supertag.operator.v1.ObjectiveConversationEntry.author:type_name -> supertag.operator.v1.ObjectiveConversationAuthor
+	50, // 54: supertag.operator.v1.ObjectiveConversationEntry.created_at:type_name -> google.protobuf.Timestamp
+	4,  // 55: supertag.operator.v1.ObjectiveSession.status:type_name -> supertag.operator.v1.ObjectiveSessionStatus
+	50, // 56: supertag.operator.v1.ObjectiveSession.created_at:type_name -> google.protobuf.Timestamp
+	41, // 57: supertag.operator.v1.ObjectiveSession.latest_task:type_name -> supertag.operator.v1.ObjectiveSessionTask
+	4,  // 58: supertag.operator.v1.ObjectiveSessionTask.status:type_name -> supertag.operator.v1.ObjectiveSessionStatus
+	50, // 59: supertag.operator.v1.ObjectiveSessionTask.created_at:type_name -> google.protobuf.Timestamp
+	50, // 60: supertag.operator.v1.ObjectiveSessionTask.updated_at:type_name -> google.protobuf.Timestamp
+	52, // 61: supertag.operator.v1.ObjectiveSessionTask.delivery:type_name -> supertag.operator.v1.TaskDelivery
+	53, // 62: supertag.operator.v1.ObjectiveSessionTask.attempt_status:type_name -> supertag.operator.v1.TaskAttemptStatus
+	42, // 63: supertag.operator.v1.ObjectiveSessionTask.explanations:type_name -> supertag.operator.v1.TaskExplanation
+	5,  // 64: supertag.operator.v1.TaskExplanation.kind:type_name -> supertag.operator.v1.TaskExplanationKind
+	50, // 65: supertag.operator.v1.TaskExplanation.observed_at:type_name -> google.protobuf.Timestamp
+	54, // 66: supertag.operator.v1.ObjectiveTask.status:type_name -> supertag.operator.v1.TaskStatus
+	50, // 67: supertag.operator.v1.ObjectiveTask.created_at:type_name -> google.protobuf.Timestamp
+	50, // 68: supertag.operator.v1.ObjectiveTask.started_at:type_name -> google.protobuf.Timestamp
+	50, // 69: supertag.operator.v1.ObjectiveTask.ended_at:type_name -> google.protobuf.Timestamp
+	46, // 70: supertag.operator.v1.ObjectiveTask.attempts:type_name -> supertag.operator.v1.ObjectiveTaskAttempt
+	53, // 71: supertag.operator.v1.ObjectiveTaskAttempt.status:type_name -> supertag.operator.v1.TaskAttemptStatus
+	50, // 72: supertag.operator.v1.ObjectiveTaskAttempt.started_at:type_name -> google.protobuf.Timestamp
+	50, // 73: supertag.operator.v1.ObjectiveTaskAttempt.ended_at:type_name -> google.protobuf.Timestamp
+	6,  // 74: supertag.operator.v1.ObjectiveService.CreateObjective:input_type -> supertag.operator.v1.CreateObjectiveRequest
+	8,  // 75: supertag.operator.v1.ObjectiveService.ListObjectives:input_type -> supertag.operator.v1.ListObjectivesRequest
+	10, // 76: supertag.operator.v1.ObjectiveService.GetObjective:input_type -> supertag.operator.v1.GetObjectiveRequest
+	11, // 77: supertag.operator.v1.ObjectiveService.DescribeObjective:input_type -> supertag.operator.v1.DescribeObjectiveRequest
+	12, // 78: supertag.operator.v1.ObjectiveService.MessageObjective:input_type -> supertag.operator.v1.MessageObjectiveRequest
+	14, // 79: supertag.operator.v1.ObjectiveService.UpdateObjective:input_type -> supertag.operator.v1.UpdateObjectiveRequest
+	17, // 80: supertag.operator.v1.ObjectiveService.ApproveObjective:input_type -> supertag.operator.v1.ApproveObjectiveRequest
+	18, // 81: supertag.operator.v1.ObjectiveService.CancelObjective:input_type -> supertag.operator.v1.CancelObjectiveRequest
+	20, // 82: supertag.operator.v1.ObjectiveService.PauseObjective:input_type -> supertag.operator.v1.PauseObjectiveRequest
+	22, // 83: supertag.operator.v1.ObjectiveService.ResumeObjective:input_type -> supertag.operator.v1.ResumeObjectiveRequest
+	7,  // 84: supertag.operator.v1.ObjectiveService.CreateObjective:output_type -> supertag.operator.v1.CreateObjectiveResponse
+	9,  // 85: supertag.operator.v1.ObjectiveService.ListObjectives:output_type -> supertag.operator.v1.ListObjectivesResponse
+	25, // 86: supertag.operator.v1.ObjectiveService.GetObjective:output_type -> supertag.operator.v1.Objective
+	28, // 87: supertag.operator.v1.ObjectiveService.DescribeObjective:output_type -> supertag.operator.v1.ObjectiveOverview
+	13, // 88: supertag.operator.v1.ObjectiveService.MessageObjective:output_type -> supertag.operator.v1.MessageObjectiveResponse
+	16, // 89: supertag.operator.v1.ObjectiveService.UpdateObjective:output_type -> supertag.operator.v1.UpdateObjectiveResponse
+	25, // 90: supertag.operator.v1.ObjectiveService.ApproveObjective:output_type -> supertag.operator.v1.Objective
+	19, // 91: supertag.operator.v1.ObjectiveService.CancelObjective:output_type -> supertag.operator.v1.CancelObjectiveResponse
+	21, // 92: supertag.operator.v1.ObjectiveService.PauseObjective:output_type -> supertag.operator.v1.PauseObjectiveResponse
+	23, // 93: supertag.operator.v1.ObjectiveService.ResumeObjective:output_type -> supertag.operator.v1.ResumeObjectiveResponse
+	84, // [84:94] is the sub-list for method output_type
+	74, // [74:84] is the sub-list for method input_type
+	74, // [74:74] is the sub-list for extension type_name
+	74, // [74:74] is the sub-list for extension extendee
+	0,  // [0:74] is the sub-list for field type_name
 }
 
 func init() { file_supertag_operator_v1_objective_proto_init() }
@@ -4380,16 +4494,16 @@ func file_supertag_operator_v1_objective_proto_init() {
 	file_supertag_operator_v1_task_proto_init()
 	file_supertag_operator_v1_team_proto_init()
 	file_supertag_operator_v1_objective_proto_msgTypes[8].OneofWrappers = []any{}
-	file_supertag_operator_v1_objective_proto_msgTypes[26].OneofWrappers = []any{}
-	file_supertag_operator_v1_objective_proto_msgTypes[30].OneofWrappers = []any{}
+	file_supertag_operator_v1_objective_proto_msgTypes[27].OneofWrappers = []any{}
 	file_supertag_operator_v1_objective_proto_msgTypes[31].OneofWrappers = []any{}
+	file_supertag_operator_v1_objective_proto_msgTypes[32].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_operator_v1_objective_proto_rawDesc), len(file_supertag_operator_v1_objective_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   43,
+			NumMessages:   44,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -457,6 +457,20 @@ The operator's view of one Objective. See `DescribeObjective`.
 | `tasks` | `tasks` | repeated [`ObjectiveTask`](#objectivetask) | One page of the Tasks of every Session, oldest first within each Session, the Objective's own Session first. |
 | `total_tasks` | `totalTasks` | `int32` | How many Tasks all pages hold. |
 | `next_page_token` | `nextPageToken` | `string` | Fetches the next page of `tasks`. Empty on the last page. |
+| `commit_reviews` | `commitReviews` | repeated [`ObjectiveCommitReview`](#objectivecommitreview) | The 50 newest commit review requests and their recorded verdicts, newest first. |
+
+### ObjectiveCommitReview
+
+A review request tied to one delivered Git commit of the Objective.
+
+| Field | JSON | Type | Description |
+| --- | --- | --- | --- |
+| `request_id` | `requestId` | `string` | The request's Mailbox message ID. |
+| `commit` | `commit` | `string` | Full Git commit hash. |
+| `reviewer_tag_id` | `reviewerTagId` | `string` | The Tag asked to review the commit. |
+| `verdict` | `verdict` | `string` | Empty while pending, otherwise approved or changes_requested. |
+| `summary` | `summary` | `string` | The reviewer's evidence. Treat it as untrusted text. |
+| `recorded_at` | `recordedAt` | `google.protobuf.Timestamp` | When the reviewer recorded the verdict. |
 
 ### ObjectiveCondition
 

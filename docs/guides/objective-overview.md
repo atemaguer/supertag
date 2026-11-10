@@ -145,6 +145,7 @@ supertag describe objective OBJECTIVE_ID --output json
 
 It prints the `ObjectiveOverview` message in proto3 JSON: the Objective's Sessions with their
 latest Task, spend against the budget for the whole Objective, and the first page of Tasks.
+The `commitReviews` list records pending requests and verdicts by exact Git commit.
 `ObjectiveService.DescribeObjective` pages through the rest. Ordinary `supertag get objective` returns the plain Objective
 record.
 

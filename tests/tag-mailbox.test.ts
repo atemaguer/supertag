@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   inboxSessionKey,
+  objectiveNoticeDeliveryId,
+  objectiveSessionKey,
   TAG_MESSAGE_TEXT_MAX,
   type Tag,
   type TagAuthorizationSnapshot,
@@ -168,6 +170,70 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       expect(await f.store.mayMessage(f.sender.id, f.recipient.id)).toBe(false);
       expect(await f.store.mayMessage(f.recipient.id, f.sender.id)).toBe(false);
       expect(team.memberTagIds).toContain(f.sender.id);
+    }, 30_000);
+
+    it("keeps one attributable verdict on the original Objective and commit", async () => {
+      const f = await fixture();
+      const objective = await f.store.createObjective({
+        id: "review",
+        ownerTagId: f.sender.id,
+        outcome: "Review the change",
+      });
+      const commit = "a".repeat(40);
+      const { message } = await f.store.deliverTagMessage({
+        senderTagId: f.sender.id,
+        recipientTagId: f.recipient.id,
+        objectiveId: objective.id,
+        text: "Review the delivered commit",
+        hops: 0,
+        review: { commit },
+      });
+      const input = {
+        requestId: message.id,
+        ownerTagId: f.sender.id,
+        reviewerTagId: f.recipient.id,
+        decision: "approved",
+        summary: "The check passed",
+        taskId: (await f.openInboxTask(f.recipient)).id,
+      } as const;
+      await expect(f.store.listUndeliveredObjectiveReviews(10)).resolves.toEqual([]);
+      await expect(
+        f.store.recordObjectiveReview({ ...input, reviewerTagId: f.stranger.id }),
+      ).rejects.toMatchObject({ statusCode: 404 });
+      const recorded = await f.store.recordObjectiveReview(input);
+      expect(recorded.review).toMatchObject({
+        commit,
+        verdict: { decision: "approved", taskId: input.taskId },
+      });
+      await expect(f.store.recordObjectiveReview(input)).resolves.toEqual(recorded);
+      await expect(
+        f.store.recordObjectiveReview({ ...input, decision: "changes_requested" }),
+      ).rejects.toMatchObject({ statusCode: 409 });
+      await expect(f.store.listObjectiveReviews(objective.id)).resolves.toEqual([recorded]);
+      await expect(f.store.listUndeliveredObjectiveReviews(10)).resolves.toEqual([recorded]);
+      const { admitted, authorization, contextPlan, route } = await f.admitInboxEvent(f.sender);
+      const eventId = objectiveNoticeDeliveryId(objective.id, `review:${message.id}`);
+      await f.store.admitInboundEvent({
+        surfaceAccountId: admitted.work.surfaceAccountId,
+        tagRouteId: route.id,
+        tagId: f.sender.id,
+        authorization,
+        contextPlan,
+        event: {
+          ...admitted.work.event,
+          eventId,
+          logicalEventId: eventId,
+          sessionKey: objectiveSessionKey(objective.id),
+          internal: {
+            kind: "delivery",
+            from: { kind: "supertag" },
+            reason: "objective_review",
+            objectiveId: objective.id,
+          },
+        },
+      });
+      await expect(f.store.listUndeliveredObjectiveReviews(10)).resolves.toEqual([]);
+      await expect(f.store.listObjectiveReviews(objective.id)).resolves.toEqual([recorded]);
     }, 30_000);
 
     it("changes one sender's grant at a time, so concurrent grants and revokes all hold", async () => {

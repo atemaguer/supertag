@@ -1,0 +1,2 @@
+ALTER TABLE "TagMessage" ADD COLUMN "review" jsonb;--> statement-breakpoint
+CREATE INDEX "TagMessage_objective_review_idx" ON "TagMessage" USING btree ("objectiveId","createdAt","id") WHERE "TagMessage"."review" is not null;

@@ -372,7 +372,7 @@ class LimitSummary(_message.Message):
     def __init__(self, text: _Optional[str] = ..., written_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class ObjectiveOverview(_message.Message):
-    __slots__ = ("captured_at", "objective", "execution_readiness", "conditions", "attention", "approvals", "tag_names", "team", "limits", "budget", "conversation", "sessions", "high_findings", "posts", "writes", "tasks", "total_tasks", "next_page_token")
+    __slots__ = ("captured_at", "objective", "execution_readiness", "conditions", "attention", "approvals", "tag_names", "team", "limits", "budget", "conversation", "sessions", "high_findings", "posts", "writes", "tasks", "total_tasks", "next_page_token", "commit_reviews")
     class TagNamesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -398,6 +398,7 @@ class ObjectiveOverview(_message.Message):
     TASKS_FIELD_NUMBER: _ClassVar[int]
     TOTAL_TASKS_FIELD_NUMBER: _ClassVar[int]
     NEXT_PAGE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    COMMIT_REVIEWS_FIELD_NUMBER: _ClassVar[int]
     captured_at: _timestamp_pb2.Timestamp
     objective: Objective
     execution_readiness: str
@@ -416,7 +417,24 @@ class ObjectiveOverview(_message.Message):
     tasks: _containers.RepeatedCompositeFieldContainer[ObjectiveTask]
     total_tasks: int
     next_page_token: str
-    def __init__(self, captured_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., objective: _Optional[_Union[Objective, _Mapping]] = ..., execution_readiness: _Optional[str] = ..., conditions: _Optional[_Iterable[_Union[ObjectiveCondition, _Mapping]]] = ..., attention: _Optional[_Iterable[_Union[ObjectiveAttention, _Mapping]]] = ..., approvals: _Optional[_Union[ApprovalCounts, _Mapping]] = ..., tag_names: _Optional[_Mapping[str, str]] = ..., team: _Optional[_Union[ObjectiveTeam, _Mapping]] = ..., limits: _Optional[_Union[ObjectiveLimits, _Mapping]] = ..., budget: _Optional[_Union[ObjectiveBudgetUse, _Mapping]] = ..., conversation: _Optional[_Iterable[_Union[ObjectiveConversationEntry, _Mapping]]] = ..., sessions: _Optional[_Iterable[_Union[ObjectiveSession, _Mapping]]] = ..., high_findings: _Optional[_Iterable[_Union[HighFinding, _Mapping]]] = ..., posts: _Optional[_Iterable[_Union[_team_pb2.WorkstreamPost, _Mapping]]] = ..., writes: _Optional[_Iterable[_Union[VolumeWrites, _Mapping]]] = ..., tasks: _Optional[_Iterable[_Union[ObjectiveTask, _Mapping]]] = ..., total_tasks: _Optional[int] = ..., next_page_token: _Optional[str] = ...) -> None: ...
+    commit_reviews: _containers.RepeatedCompositeFieldContainer[ObjectiveCommitReview]
+    def __init__(self, captured_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ..., objective: _Optional[_Union[Objective, _Mapping]] = ..., execution_readiness: _Optional[str] = ..., conditions: _Optional[_Iterable[_Union[ObjectiveCondition, _Mapping]]] = ..., attention: _Optional[_Iterable[_Union[ObjectiveAttention, _Mapping]]] = ..., approvals: _Optional[_Union[ApprovalCounts, _Mapping]] = ..., tag_names: _Optional[_Mapping[str, str]] = ..., team: _Optional[_Union[ObjectiveTeam, _Mapping]] = ..., limits: _Optional[_Union[ObjectiveLimits, _Mapping]] = ..., budget: _Optional[_Union[ObjectiveBudgetUse, _Mapping]] = ..., conversation: _Optional[_Iterable[_Union[ObjectiveConversationEntry, _Mapping]]] = ..., sessions: _Optional[_Iterable[_Union[ObjectiveSession, _Mapping]]] = ..., high_findings: _Optional[_Iterable[_Union[HighFinding, _Mapping]]] = ..., posts: _Optional[_Iterable[_Union[_team_pb2.WorkstreamPost, _Mapping]]] = ..., writes: _Optional[_Iterable[_Union[VolumeWrites, _Mapping]]] = ..., tasks: _Optional[_Iterable[_Union[ObjectiveTask, _Mapping]]] = ..., total_tasks: _Optional[int] = ..., next_page_token: _Optional[str] = ..., commit_reviews: _Optional[_Iterable[_Union[ObjectiveCommitReview, _Mapping]]] = ...) -> None: ...
+
+class ObjectiveCommitReview(_message.Message):
+    __slots__ = ("request_id", "commit", "reviewer_tag_id", "verdict", "summary", "recorded_at")
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    COMMIT_FIELD_NUMBER: _ClassVar[int]
+    REVIEWER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    VERDICT_FIELD_NUMBER: _ClassVar[int]
+    SUMMARY_FIELD_NUMBER: _ClassVar[int]
+    RECORDED_AT_FIELD_NUMBER: _ClassVar[int]
+    request_id: str
+    commit: str
+    reviewer_tag_id: str
+    verdict: str
+    summary: str
+    recorded_at: _timestamp_pb2.Timestamp
+    def __init__(self, request_id: _Optional[str] = ..., commit: _Optional[str] = ..., reviewer_tag_id: _Optional[str] = ..., verdict: _Optional[str] = ..., summary: _Optional[str] = ..., recorded_at: _Optional[_Union[datetime.datetime, _timestamp_pb2.Timestamp, _Mapping]] = ...) -> None: ...
 
 class ObjectiveCondition(_message.Message):
     __slots__ = ("type", "status", "reasons")

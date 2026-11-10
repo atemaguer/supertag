@@ -627,6 +627,14 @@ export function overviewMessage(
       summary: finding.summary,
       location: finding.location ?? "",
     })),
+    commitReviews: view.commitReviews.map((review) => ({
+      requestId: review.requestId,
+      commit: review.commit,
+      reviewerTagId: review.reviewerTagId,
+      verdict: review.verdict?.decision ?? "",
+      summary: review.verdict?.summary ?? "",
+      ...set("recordedAt", timestampOf(review.verdict?.recordedAt)),
+    })),
     posts: view.posts.map(workstreamPostMessage),
     writes: view.writes.map((write) => ({
       volume: write.volume,
@@ -926,6 +934,7 @@ export interface ObjectiveOverviewView {
     readonly summary: string;
     readonly location?: string;
   }[];
+  readonly commitReviews: ObjectiveOverview["commitReviews"];
   readonly writes: readonly {
     readonly volume: string;
     readonly files: number;
@@ -1013,6 +1022,7 @@ export function overviewView(overview: ObjectiveOverview): ObjectiveOverviewView
       summary: finding.summary,
       ...set("location", text(finding.location)),
     })),
+    commitReviews: overview.commitReviews,
     writes: overview.writes.map((write) => ({
       volume: write.volume,
       files: Number(write.files),

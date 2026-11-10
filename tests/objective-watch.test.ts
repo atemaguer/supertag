@@ -115,6 +115,7 @@ function view(overrides: Partial<ObjectiveOverview> = {}): ObjectiveOverview {
     conversation: [],
     sessions: [ownerSession()],
     highFindings: [],
+    commitReviews: [],
     posts: [],
     writes: [],
     tasks: [],

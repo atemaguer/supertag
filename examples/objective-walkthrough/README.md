@@ -12,8 +12,8 @@ The delivery Team's lead owns an Objective to change a small shell command. The 
 two-line output is the contract shared with a separate review Team. The builder can edit the
 repository. The reviewer can inspect Git and run read-only checks. The lead delegates both
 the inventory and the implementation, then asks the reviewer to inspect the exact delivered
-commit. The lead has permission to write files so its Objective can delegate that permission
-to the builder.
+commit. The lead can delegate writes through `files:delegate-write`. Its own Workspace
+is read-only, and the builder has `files:write`.
 
 Install SuperTag and a full, signed-in Codex CLI that can use `gpt-6.1-sol`. Run from this
 checkout on macOS or Linux with Node.js 22.13 or later and Git.
@@ -32,9 +32,9 @@ question. The script checks that a new Task queues in the existing implementatio
 while the Worklet is down, then restarts it and checks that Task Attempt starts. This is a
 controlled outage between Tasks in the same Session.
 
-The review Tag sends its verdict back through the lead's Mailbox, where Tags send each other
-messages. The script checks the verdict against the exact commit, checks the change and its
-output in Git, and relays the evidence into the Objective. Read the diff and type `accept`
+The review Tag records its verdict against the Mailbox request. SuperTag attaches it to the
+Objective and delivers it to the lead there. The script checks the verdict against the exact
+commit and checks the change and its output in Git. Read the diff and type `accept`
 to complete the Objective. The repository's main branch stays at its original commit.
 
 Compare the `LIVE` lines on stdout to [the expected transcript](expected-live-transcript.txt).

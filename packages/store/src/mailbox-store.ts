@@ -33,7 +33,7 @@ import {
   type WorkstreamStore,
   workspacesForGitHubRepository,
 } from "@supertag/core";
-import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { expireClosedObjectiveApprovals } from "./approval-store.js";
 import { runDialectTransaction } from "./dialect-transaction.js";
 import { lockObjective } from "./objective-lock.js";
@@ -1115,6 +1115,7 @@ export class DrizzleMailboxStore
       objectiveId: optional(input.objectiveId, "objectiveId"),
       sourceTaskId: optional(input.sourceTaskId, "sourceTaskId"),
       workstreamPostId: optional(input.workstreamPostId, "workstreamPostId"),
+      review: input.review ?? null,
       text,
       hops: input.hops,
       taskId: null,
@@ -1224,6 +1225,85 @@ export class DrizzleMailboxStore
     };
   }
 
+  async listObjectiveReviews(objectiveId: string): Promise<readonly TagMessage[]> {
+    const m = this.tables.tagMessages;
+    const rows = await this.messageQuery(this.db)
+      .where(and(eq(m.objectiveId, objectiveId), isNotNull(m.review)))
+      .orderBy(desc(m.createdAt), desc(m.id))
+      .limit(50);
+    return rows.map(messageFromRow);
+  }
+
+  async listUndeliveredObjectiveReviews(limit: number): Promise<readonly TagMessage[]> {
+    const m = this.tables.tagMessages;
+    const o = this.tables.objectives;
+    const hasVerdict =
+      this.provider === "postgresql"
+        ? sql`${m.review}->'verdict' is not null`
+        : sql`json_extract(${m.review}, '$.verdict') is not null`;
+    const rows = await this.messageQuery(this.db)
+      .innerJoin(o, eq(o.id, m.objectiveId))
+      .where(
+        and(
+          isNotNull(m.review),
+          hasVerdict,
+          eq(o.status, "working"),
+          isNull(o.pausedAt),
+          sql`not exists (select 1 from "DurableInboundEvent" e where e."tagId" = ${o.ownerTagId} and e."sessionKey" = 'objective:' || ${o.id} and e."deliveryId" = 'objective-notice:' || ${o.id} || ':review:' || ${m.id})`,
+        ),
+      )
+      .orderBy(asc(m.createdAt), asc(m.id))
+      .limit(limit);
+    return rows.map(messageFromRow);
+  }
+
+  async recordObjectiveReview(
+    input: Parameters<TagMailboxStore["recordObjectiveReview"]>[0],
+  ): ReturnType<TagMailboxStore["recordObjectiveReview"]> {
+    const self = this;
+    return this.surfaceTransaction(function* (tx) {
+      const m = self.tables.tagMessages;
+      const query = tx
+        .select()
+        .from(m)
+        .where(
+          and(
+            eq(m.id, input.requestId),
+            eq(m.recipientTagId, input.reviewerTagId),
+            eq(m.senderTagId, input.ownerTagId),
+            isNotNull(m.objectiveId),
+            isNotNull(m.review),
+          ),
+        )
+        .limit(1);
+      const [row] = yield self.provider === "postgresql" ? query.for("update") : query;
+      if (row === undefined)
+        throw new TagMessagingError(404, "Review request not found for this Tag");
+      const message = { ...messageFromRow(row), objectiveId: row.objectiveId as string };
+      const prior = message.review?.verdict;
+      if (prior !== undefined) {
+        if (prior.decision === input.decision && prior.summary === input.summary) return message;
+        throw new TagMessagingError(409, "This request already has a review verdict");
+      }
+      const [updated] = yield tx
+        .update(m)
+        .set({
+          review: {
+            ...message.review,
+            verdict: {
+              decision: input.decision,
+              summary: input.summary,
+              taskId: input.taskId,
+              recordedAt: new Date().toISOString(),
+            },
+          },
+        })
+        .where(eq(m.id, input.requestId))
+        .returning();
+      return { ...messageFromRow(updated), objectiveId: message.objectiveId };
+    });
+  }
+
   /** Messages with the status of the inbox Task that took each. */
   private messageQuery(db: any) {
     const m = this.tables.tagMessages,
@@ -1279,6 +1359,7 @@ function messageFromRow(row: any): TagMessage {
     ...(message.objectiveId == null ? {} : { objectiveId: message.objectiveId }),
     ...(message.sourceTaskId == null ? {} : { sourceTaskId: message.sourceTaskId }),
     ...(message.workstreamPostId == null ? {} : { workstreamPostId: message.workstreamPostId }),
+    ...(message.review == null ? {} : { review: message.review }),
     text: message.text,
     hops: message.hops,
     ...(message.taskId == null ? {} : { taskId: message.taskId }),

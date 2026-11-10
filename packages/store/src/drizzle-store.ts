@@ -1106,6 +1106,26 @@ export class DrizzleStore implements Store {
     );
   }
 
+  listObjectiveReviews(objectiveId: string) {
+    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).listObjectiveReviews(
+      objectiveId,
+    );
+  }
+
+  listUndeliveredObjectiveReviews(limit: number) {
+    return new DrizzleMailboxStore(
+      this.#db,
+      this.#tables,
+      this.provider,
+    ).listUndeliveredObjectiveReviews(limit);
+  }
+
+  recordObjectiveReview(input: Parameters<TagMailboxStore["recordObjectiveReview"]>[0]) {
+    return new DrizzleMailboxStore(this.#db, this.#tables, this.provider).recordObjectiveReview(
+      input,
+    );
+  }
+
   // Resolve the adapter against the current database connection after reconnect.
 
   async connect(): Promise<void> {

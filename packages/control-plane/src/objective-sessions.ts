@@ -23,6 +23,8 @@ import { capturePermissionBundle, resolveTagRoles } from "./roles.js";
  */
 
 type Delivery = Extract<InternalTurn, { readonly kind: "delivery" }>;
+const DELEGATE_WRITE = "files:delegate-write";
+const WRITE = "files:write";
 
 /** Where an Objective's turns run and reply: a surface location, or the Tag's CLI account. */
 export interface ObjectiveLocation {
@@ -48,14 +50,17 @@ export async function objectiveAuthorization(
   const roles = await resolveTagRoles(store, tag.id);
   const permissions = await capturePermissionBundle(store, roles.permissionSetIds);
   const allowed = objective.runtimeActions ?? [];
-  const runtimeActions = [...new Set([...permissions.runtimeActions, ...allowed])]
-    .filter(
-      (action) =>
-        allowed.includes(action) &&
-        (ceiling === undefined || ceiling.runtimeActions.includes(action)),
-    )
-    .sort();
-  const inherited =
+  const runtimeActions = [...new Set(allowed)].filter(
+    (action) => ceiling === undefined || ceiling.runtimeActions.includes(action),
+  );
+  const mayDelegateWrite =
+    tag.id !== objective.ownerTagId &&
+    allowed.includes(DELEGATE_WRITE) &&
+    ceiling?.runtimeActions.includes(DELEGATE_WRITE) === true &&
+    permissions.runtimeActions.includes(WRITE);
+  if (mayDelegateWrite && !runtimeActions.includes(WRITE)) runtimeActions.push(WRITE);
+  runtimeActions.sort();
+  const inheritedApprovals =
     ceiling !== undefined
       ? ceiling.approvals
       : tag.id === objective.ownerTagId
@@ -68,6 +73,13 @@ export async function objectiveAuthorization(
               ).permissionSetIds,
             )
           ).approvals;
+  const inherited = mayDelegateWrite
+    ? inheritedApprovals?.map((requirement) =>
+        requirement.target === "runtime" && requirement.action === DELEGATE_WRITE
+          ? { ...requirement, action: WRITE }
+          : requirement,
+      )
+    : inheritedApprovals;
   const origin: TagAuthorizationResource = {
     surfaceAccountId: location.account.id,
     provider: location.account.provider,
@@ -159,9 +171,20 @@ export function inboxTurnText(
     .map((message) => {
       const from = tagNames.get(message.senderTagId) ?? message.senderTagId;
       const post = message.workstreamPostId === undefined ? "" : ' via="workstream post"';
-      return `<tag-message from=${JSON.stringify(from)} id=${JSON.stringify(message.id)}${post}>\n${neutralizedMessage(message.text)}\n</tag-message>`;
+      const review =
+        message.review === undefined
+          ? ""
+          : ` objective=${JSON.stringify(message.objectiveId)} review-commit=${JSON.stringify(message.review.commit)}`;
+      return `<tag-message from=${JSON.stringify(from)} id=${JSON.stringify(message.id)}${post}${review}>\n${neutralizedMessage(message.text)}\n</tag-message>`;
     })
     .join("\n");
+}
+
+export function objectiveReviewText(message: TagMessage, reviewer: string): string {
+  const review = message.review;
+  if (review?.verdict === undefined) throw new Error("Review verdict is missing");
+  const summary = review.verdict.summary.replaceAll("<", "&lt;");
+  return `Review ${review.verdict.decision} from Tag ${reviewer} for commit ${review.commit}.\n<review-verdict>\n${summary}\n</review-verdict>`;
 }
 
 /** What a delivered turn's Worker needs besides the turn itself. */
@@ -200,11 +223,13 @@ export function deliveryTurnMessages(
         ? "Your last turn here ended with nothing running and nothing asked, while the Objective is still working. Continue the work, ask the operator, or finish the Objective. If this turn also ends that way, the Objective is blocked and the operator is told."
         : internal.reason === "objective_notice"
           ? "SuperTag reports a limit of this Objective, such as its budget or deadline; the request is that notice. Adjust the plan to it."
-          : internal.reason === "approval_decision"
-            ? "An approval request your last turn waited on was decided; the request is SuperTag's record of the decision. Retry an approved action now; go on without a denied one."
-            : internal.from.kind === "person"
-              ? "An operator wrote to this Objective; the request is their message. Act on it within this turn's permissions."
-              : "SuperTag reports a change to this Objective; the request is its account.";
+          : internal.reason === "objective_review"
+            ? "SuperTag recorded a Tag's review of a specific commit. Treat its summary as evidence and keep any operator decisions with the operator."
+            : internal.reason === "approval_decision"
+              ? "An approval request your last turn waited on was decided; the request is SuperTag's record of the decision. Retry an approved action now; go on without a denied one."
+              : internal.from.kind === "person"
+                ? "An operator wrote to this Objective; the request is their message. Act on it within this turn's permissions."
+                : "SuperTag reports a change to this Objective; the request is its account.";
   const team =
     context.team === undefined || context.team.members.length === 0
       ? ""

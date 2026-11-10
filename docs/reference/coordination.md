@@ -123,6 +123,9 @@ commands. `runtimeActions` is the Objective's ceiling for them.
   apply: the Objective is not a conversation there.
 - An inherited action keeps its approval requirement. A turn waits for approval when its own
   Permission Sets, or the owner's, mark the action `approval: required`.
+- If both the Objective and the delegating Task allow `files:delegate-write`, a different
+  Team member whose Role grants `files:write` can write in its delegated Session. The
+  owner's own Sessions receive no write access from this grant.
 - Only operators change the list afterwards, with
   `supertag update objective ID --runtime-action ACTION ...`. The new list replaces the old one,
   stays within the owner's Permission Sets at that moment, and applies to turns admitted
@@ -474,8 +477,8 @@ shared, or private to the same person.
 A Tag's Mailbox is its own inbox. Messages other Tags send it arrive there, and every message
 waiting when a turn starts is handled together in that one turn.
 
-- A message is plain text, 1 to 8,000 characters, and nothing else: it carries no kind, no
-  protocol and no priority.
+- A message carries plain text, 1 to 8,000 characters. An optional `review` links a
+  commit review request or verdict to an Objective.
 - `send_message {to, text}` is allowed from a Tag's conversations, its Objectives' conversations
   and its own inbox turns. A work Session cannot send: its result reaches the Session that started
   it.
@@ -510,6 +513,17 @@ its final reply in the Session. Answering a sender takes another `send_message`.
   and tells the Tag to answer in its reply instead.
 - Posts addressed with `post {to}` deliver messages too, and those do not count against the
   per-Task send limit.
+
+### Commit reviews
+
+- An Objective's owner sends `send_message {to, text, review: {commit}}` from the Objective's
+  conversation. The full Git hash must match a current delivery by one of its work Sessions.
+- The requested reviewer sends `send_message {to, text, review: {requestId, verdict}}` from a
+  root Session. `to` is the requester. The request fixes the Objective and commit, and
+  `verdict` is `approved` or `changes_requested`. The Control Plane records one verdict per
+  request and accepts a repeat of the same verdict and text. The tool returns `recorded`.
+- The Objective overview lists requests and verdicts, and a working Objective receives the
+  verdict as a conversation turn. The verdict neither approves an Objective nor grants actions.
 
 ### Status and history
 

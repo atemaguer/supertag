@@ -23,6 +23,7 @@ function limitedView(overrides: Partial<ObjectiveOverviewView> = {}): ObjectiveO
     attention: [],
     sessions: [],
     highFindings: [],
+    commitReviews: [],
     writes: [],
     ...overrides,
   } as unknown as ObjectiveOverviewView;

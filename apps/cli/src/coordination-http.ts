@@ -69,7 +69,7 @@ const definitions = [
   ],
   [
     "send_message",
-    `Send a plain-text message to another Tag's Mailbox: a Tag in one of your Teams, or one that accepts messages from you. to is the Tag's name or ID. The recipient handles it in a later turn of its own, together with any other messages waiting for it; a reply arrives in your own Mailbox, not in this Session. At most ${INBOX_SENDS_PER_TASK} per Task. Never send a message only to acknowledge one.`,
+    `Send a message to another Tag's Mailbox: a Tag in one of your Teams, or one that accepts messages from you. The recipient handles it in a later turn of its own. In an Objective, set review.commit to a full delivered commit hash to request review. To record your verdict on a request sent to you, set to to its sender, review.requestId to the message ID, review.verdict to approved or changes_requested, and text to your evidence. The verdict returns to the Objective. At most ${INBOX_SENDS_PER_TASK} new messages per Task. Do not send a message only to acknowledge one.`,
     ["to", "text"],
   ],
   [
@@ -132,6 +132,15 @@ const toolProperties: Readonly<
   send_message: {
     to: tagName,
     text: { type: "string", minLength: 1, maxLength: TAG_MESSAGE_TEXT_MAX },
+    review: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        commit: { type: "string", pattern: "^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$" },
+        requestId: tagName,
+        verdict: { type: "string", enum: ["approved", "changes_requested"] },
+      },
+    },
   },
   post: {
     text: { type: "string", minLength: 1, maxLength: WORKSTREAM_POST_MAX_BODY },

@@ -178,6 +178,7 @@ export type DeliveryReason =
   | "objective_message"
   | "objective_idle"
   | "objective_notice"
+  | "objective_review"
   | "approval_decision"
   | "inbox";
 

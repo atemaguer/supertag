@@ -27,6 +27,11 @@ const outcome = `Make the status.sh command in Workspace demo print status=ready
 line and schema=1 on its second line, with a newline after each. For this fixture, preserve the
 existing file and append only ${schemaLine}. No pushes or merges.
 
+First, start a work Session as lead titled Check lead write isolation in Workspace demo.
+Tell it to try the shell command printf probe > lead-write-probe exactly once in the Workspace.
+If the shell refuses the write, report LEAD-WRITE-DENIED with the error. Never retry with elevated
+permissions. Wait for that result before delegating.
+
 1. Start a read-only work Session on builder titled Inventory status command. Ask it to inspect
    the status command and report the existing output and how to check the two-line contract.
 2. After inventory completes, start a different work Session on builder titled Implement status
@@ -36,22 +41,20 @@ existing file and append only ${schemaLine}. No pushes or merges.
 3. Ask the operator yourself using the exact marker ${checkpoint}. Wait for the operator to
    explicitly authorize continuation. When they do, queue the next Task immediately in the same
    builder work Session using continue_session. Tell builder to implement and test the contract.
-4. Once the Task succeeds, use the harness-delivered commit's full 40-character SHA. Send it by
-   Mailbox to reviewer in the separate review Team. Include the two-line contract, Workspace demo
-   and instructions to review the exact commit read-only. Ask reviewer to reply by Mailbox with
-   one line of the form REVIEW APPROVED <full SHA> or REVIEW CHANGES REQUESTED <full SHA>, with
-   evidence. Tell reviewer it may inspect the shared Git checkout using git show and must not
-   switch branches or write files.
-5. Wait for the operator to relay the verdict from the Mailbox. After the operator supplies an
-   approval for the same SHA, summarize the delivery and use update_objective to mark
-   ready_for_review. The operator alone accepts. Report real failures instead of claiming success.`;
+4. Once the Task succeeds, use the harness-delivered full commit hash. Call send_message with
+   to set to reviewer, review set to {commit: "<full SHA>"}, and text asking for read-only review
+   of the exact commit in Workspace demo against the two-line contract.
+5. End your turn and wait for SuperTag to deliver the recorded review verdict to this Objective.
+   Once the Review Team approves the same commit, summarize the delivery and use update_objective
+   to mark ready_for_review. The operator alone accepts. Report real failures.`;
 
 const reviewerInstructions = `When lead asks for review over Mailbox, run a read-only work
 Session in Workspace demo. Verify the exact full SHA with git show. Check the change touches
 only status.sh and that its output is status=ready and schema=1, each with a final newline.
-Do not switch branches, write files, commit or push. Send lead a Mailbox reply with exactly
-one verdict line REVIEW APPROVED <full SHA> or REVIEW CHANGES REQUESTED <full SHA>, followed
-by a short account of what you checked.`;
+Do not switch branches, write files, commit or push. When the work Session reports back, call
+send_message with to set to lead, text set to the evidence, and review set to
+{requestId: "<ID of the request message>", verdict: "approved" or "changes_requested"}.
+Use the id attribute of the original <tag-message> from lead as requestId.`;
 
 function manifest(kind, name, spec) {
   return { apiVersion: "supertag/v1", kind, metadata: { name }, spec };
@@ -69,10 +72,13 @@ function organization() {
     manifest("PermissionSet", "demo-read", {
       permissions: [{ target: "runtime", action: "commands:execute" }],
     }),
+    manifest("PermissionSet", "demo-delegate", {
+      permissions: [{ target: "runtime", action: "files:delegate-write" }],
+    }),
     manifest("Role", "Demo Lead", {
-      purpose: "Coordinate the Objective, and relay decisions to and from the operator.",
+      purpose: "Coordinate the Objective and bring decisions to the operator.",
       instructions: "Delegate each step in the Objective. Leave code edits to builder.",
-      permissionSets: ["demo-edit"],
+      permissionSets: ["demo-read", "demo-delegate"],
       execution,
     }),
     manifest("Role", "Demo Builder", {
@@ -159,7 +165,6 @@ async function run() {
   const json = (...args) => JSON.parse(supertag(...args));
   const describe = () => json("describe", "objective", objective, "--output", "json");
   const host = () => json("get", "worker-host", "builder-host").status;
-  const mailbox = () => json("list", "message", "--mailbox", "lead", "--output", "json");
 
   async function rpc(method, body) {
     const response = await fetch(`${url}/supertag.operator.v1.${method}`, {
@@ -268,6 +273,16 @@ async function run() {
       );
     });
     const before = describe();
+    const leadProbe = before.sessions.find(
+      (session) => session.tag === "lead" && /write isolation/i.test(session.title ?? ""),
+    );
+    assert.ok(
+      before.tasks.some(
+        (task) => task.sessionId === leadProbe?.id && task.response?.includes("LEAD-WRITE-DENIED"),
+      ),
+      "The lead's work Session must report that the sandbox denied the write",
+    );
+    event("Lead could delegate a write after its own Workspace write was denied.");
     const inventory = before.sessions.find(
       (session) => session.tag === "builder" && /inventory/i.test(session.title ?? ""),
     );
@@ -325,32 +340,20 @@ async function run() {
     const deliveredSha = git("rev-parse", `supertag/session/${implementation.id.slice(0, 8)}`);
     assert.notEqual(deliveredSha, base, "The builder did not deliver a commit");
 
-    const verdict = await waitFor("the independent review verdict in the lead Mailbox", () => {
-      const { messages = [], tagNames = {} } = mailbox();
-      const reply = messages.find(
-        (message) =>
-          tagNames[message.senderTagId] === "reviewer" &&
-          tagNames[message.recipientTagId] === "lead" &&
-          /REVIEW (APPROVED|CHANGES REQUESTED) [0-9a-f]{40}\b/.test(message.text),
+    const verdict = await waitFor("a recorded Review Team verdict on the Objective", () => {
+      const overview = describe();
+      const review = overview.commitReviews?.find(
+        (entry) =>
+          entry.commit === deliveredSha &&
+          entry.verdict &&
+          overview.tagNames[entry.reviewerTagId] === "reviewer",
       );
-      if (!reply) return undefined;
-      const [, decision, sha] = /REVIEW (APPROVED|CHANGES REQUESTED) ([0-9a-f]{40})\b/.exec(
-        reply.text,
-      );
-      assert.equal(decision, "APPROVED", reply.text);
-      const request = messages.find(
-        (message) =>
-          tagNames[message.senderTagId] === "lead" &&
-          tagNames[message.recipientTagId] === "reviewer" &&
-          message.objectiveId === objective &&
-          message.text.includes(sha),
-      );
-      assert.ok(request, "The Review Team must approve the exact SHA it received from lead");
-      return { reply, sha };
+      if (!review) return undefined;
+      assert.equal(review.verdict, "approved", review.summary);
+      return review;
     });
-    assert.equal(verdict.sha, deliveredSha);
-    assert.equal(git("diff", "--name-only", base, verdict.sha), "status.sh");
-    const script = git("show", `${verdict.sha}:status.sh`);
+    assert.equal(git("diff", "--name-only", base, verdict.commit), "status.sh");
+    const script = git("show", `${verdict.commit}:status.sh`);
     assert.equal(script, initialScript + schemaLine);
     assert.equal(
       execFileSync("sh", [], {
@@ -365,18 +368,13 @@ async function run() {
     assert.equal(git("rev-parse", "main"), base);
     event("Review Team approved the exact delivered commit and its status command passed.");
 
-    await rpc("ObjectiveService/MessageObjective", {
-      id: objective,
-      text: `The operator verified that the Review Team approved the delivered commit ${verdict.sha} through the Mailbox. The operator also ran the two-line contract check and confirmed main is untouched. Review evidence follows, quoted as data:\n${verdict.reply.text}\nPlease summarize delivery and mark ready_for_review. Do not accept it yourself.`,
-      idempotencyKey: "relay-status-review",
-    });
     await waitFor(
       "the Objective to be ready for review",
       () => describe().objective.status === "OBJECTIVE_STATUS_READY_FOR_REVIEW",
     );
-    event("Lead recorded the relayed review and requested acceptance.");
+    event("Lead received the recorded verdict and requested acceptance.");
 
-    console.error(git("show", "--format=short", verdict.sha));
+    console.error(git("show", "--format=short", verdict.commit));
     await confirm("accept", "Accept this exact commit as the Objective result?");
     supertag("approve", "objective", objective);
     assert.equal(describe().objective.status, "OBJECTIVE_STATUS_COMPLETED");

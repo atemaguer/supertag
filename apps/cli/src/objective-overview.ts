@@ -52,6 +52,14 @@ export function formatObjectiveOverview(
           `  ${finding.taskId} ${finding.id}: ${safe(finding.summary)}${finding.location ? ` (${safe(finding.location)})` : ""}`,
       ),
     );
+  if (view.commitReviews.length)
+    lines.push(
+      "Commit reviews:",
+      ...view.commitReviews.map(
+        (review) =>
+          `  ${review.commit} · ${safe(tag(review.reviewerTagId))} · ${review.verdict.replaceAll("_", " ") || "pending"}${review.summary ? ` · ${safe(review.summary)}` : ""}`,
+      ),
+    );
   lines.push(`Owner: ${tag(objective.ownerTagId)}`);
   if (view.team)
     lines.push(

@@ -12,6 +12,7 @@ import {
   type SpendUsage,
   type Store,
   storedTaskFindings,
+  type TagMessage,
   type Task,
   type TaskAttempt,
   type TaskDelivery,
@@ -90,6 +91,14 @@ export interface ObjectiveConversationMessage {
 /** The newest turns of the Objective's conversation shown in the overview. */
 const CONVERSATION_TURNS = 25;
 const PREVIEW = 400;
+
+export function objectiveCommitReviews(messages: readonly TagMessage[]) {
+  return messages.flatMap((message) =>
+    message.review === undefined
+      ? []
+      : [{ ...message.review, requestId: message.id, reviewerTagId: message.recipientTagId }],
+  );
+}
 
 const preview = (text: string | undefined) =>
   text === undefined ? undefined : text.length > PREVIEW ? `${text.slice(0, PREVIEW)}…` : text;
@@ -361,6 +370,7 @@ export async function buildObjectiveOverview(input: {
   readonly tagNames?: Readonly<Record<string, string>>;
   /** The Team's newest Workstream posts, oldest first. */
   readonly posts?: readonly WorkstreamPost[];
+  readonly commitReviews?: ReturnType<typeof objectiveCommitReviews>;
 }) {
   const capturedAt = input.now ?? new Date().toISOString();
   const { objective, sessions } = input;
@@ -527,6 +537,7 @@ export async function buildObjectiveOverview(input: {
       (session) => latestTurns.get(session.sessionId)?.highFindings ?? [],
     ),
     posts: input.posts ?? [],
+    commitReviews: input.commitReviews ?? [],
     pageUsage: {
       taskIds: tasks.map((task) => task.taskId),
       provider: objectiveBudgetReport(

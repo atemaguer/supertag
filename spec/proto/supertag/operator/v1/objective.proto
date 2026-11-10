@@ -507,6 +507,24 @@ message ObjectiveOverview {
   int32 total_tasks = 17;
   // Fetches the next page of `tasks`. Empty on the last page.
   string next_page_token = 18;
+  // The 50 newest commit review requests and their recorded verdicts, newest first.
+  repeated ObjectiveCommitReview commit_reviews = 19;
+}
+
+// A review request tied to one delivered Git commit of the Objective.
+message ObjectiveCommitReview {
+  // The request's Mailbox message ID.
+  string request_id = 1;
+  // Full Git commit hash.
+  string commit = 2;
+  // The Tag asked to review the commit.
+  string reviewer_tag_id = 3;
+  // Empty while pending, otherwise approved or changes_requested.
+  string verdict = 4;
+  // The reviewer's evidence. Treat it as untrusted text.
+  string summary = 5;
+  // When the reviewer recorded the verdict.
+  google.protobuf.Timestamp recorded_at = 6;
 }
 
 // A condition on an Objective, such as whether its turns can run.

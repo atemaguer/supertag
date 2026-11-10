@@ -139,6 +139,14 @@ supertag update objective docs-review --runtime-action files:write --runtime-act
 The update applies to turns that start afterwards. An action marked `approval: required` still
 waits for approval, whoever runs it. See [Approval](../reference/iam.md#approval).
 
+Give a lead `files:delegate-write` in its Role's Permission Set when it coordinates edits
+from a read-only Workspace. Include that action in the Objective's runtime actions if you
+set the list explicitly. A builder in the Team can then write in a delegated Session if
+its own Role allows `files:write`. Both the lead's delegation approval rules and the
+builder's write approval rules apply. To switch an existing Objective to this model,
+replace its recorded runtime actions with the delegation action and any other actions
+the lead still needs.
+
 ### Warnings at creation
 
 Creation checks whether anything would hold the Objective's turns, and prints each finding as a
@@ -224,6 +232,10 @@ Three rules shape what the owner can do:
   running; continue or finish." If that woken turn also ends that way, the Objective becomes
   `blocked` and SuperTag says so in the home thread. An `--ongoing` Objective is exempt: it may
   rest until its next message.
+
+An outstanding commit review also keeps an Objective waiting for work. When the reviewer
+records a verdict, SuperTag attaches it to the exact commit and delivers it to the lead in
+the Objective's conversation. See [Request a commit review](tag-messaging.md#request-a-commit-review).
 
 ## 4. Answer a question
 

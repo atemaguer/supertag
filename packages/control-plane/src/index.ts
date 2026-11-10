@@ -20,6 +20,7 @@ import {
   objectiveSessionKey,
   objectiveStartDeliveryId,
   type TagMessage,
+  taskDelivery,
   workspaceBranchHeadPin,
   workspaceBranchPin,
   workspacePullRequestFromEvents,
@@ -48,6 +49,7 @@ import {
   objectiveAuthorization,
   objectiveBlockedText,
   objectiveHome,
+  objectiveReviewText,
   objectiveTurnText,
 } from "./objective-sessions.js";
 import { repositoryReferences, unambiguousRepositoryReference } from "./repository-references.js";
@@ -3976,7 +3978,7 @@ export class ControlPlane {
     readonly objectiveId: string;
     readonly key: string;
     readonly text: string;
-    readonly reason?: "objective_notice" | "objective_message";
+    readonly reason?: "objective_notice" | "objective_message" | "objective_review";
   }): Promise<void> {
     const eventId = objectiveNoticeDeliveryId(input.objectiveId, input.key);
     if (this.#deliveredNotices.has(eventId)) return;
@@ -4052,6 +4054,20 @@ export class ControlPlane {
 
   /** Admits an inbox turn for each Tag with Mailbox messages no turn took. */
   async #deliverPendingInboxes(): Promise<void> {
+    for (const message of await this.#store.listUndeliveredObjectiveReviews(SESSION_SWEEP_BATCH)) {
+      if (message.objectiveId === undefined || message.review?.verdict === undefined) continue;
+      try {
+        const reviewer = await this.#store.findTagById(message.recipientTagId);
+        await this.#notifyObjective({
+          objectiveId: message.objectiveId,
+          key: `review:${message.id}`,
+          reason: "objective_review",
+          text: objectiveReviewText(message, reviewer?.name ?? message.recipientTagId),
+        });
+      } catch (error) {
+        if (!(error instanceof TagMessagingError)) this.#reportDispatchError(error);
+      }
+    }
     for (const tagId of await this.#store.listTagsWithUnboundMessages(SESSION_SWEEP_BATCH)) {
       try {
         const tag = await this.#store.findTagById(tagId);
@@ -4097,6 +4113,33 @@ export class ControlPlane {
         403,
         `Tag ${recipient.name} does not accept messages from this Tag: they share no Team, and it has no grant for this Tag`,
       );
+    const review = input.review;
+    if (review !== undefined && "requestId" in review) {
+      const message = await this.#store.recordObjectiveReview({
+        requestId: review.requestId,
+        reviewerTagId: task.tagId,
+        ownerTagId: recipient.id,
+        decision: review.verdict,
+        summary: input.text,
+        taskId: task.id,
+      });
+      this.#wakeTaskController?.();
+      return {
+        messageId: message.id,
+        session: objectiveSessionKey(message.objectiveId),
+        status: "recorded",
+      };
+    }
+    if (review !== undefined) {
+      const objectiveId = task.objectiveId;
+      if (objectiveId === undefined || objectiveIdOfSessionKey(session.sessionKey) !== objectiveId)
+        throw new TagMessagingError(
+          403,
+          "Request a commit review from its Objective's conversation",
+        );
+      if (!(await this.#objectiveDeliveredCommit(objectiveId, review.commit)))
+        throw new TagMessagingError(409, "The commit is not a current delivery of this Objective");
+    }
     const history = (await this.#store.listTagMessageHistory(task.tagId, { limit: 100 })).items;
     const handled = isInboxSessionKey(session.sessionKey)
       ? history.filter((message) => message.taskId === task.id)
@@ -4125,6 +4168,7 @@ export class ControlPlane {
         hops,
         ...(task.objectiveId === undefined ? {} : { objectiveId: task.objectiveId }),
         sourceTaskId: task.id,
+        ...(review === undefined ? {} : { review }),
         ...(input.workstreamPostId === undefined
           ? {}
           : { workstreamPostId: input.workstreamPostId }),
@@ -4136,6 +4180,21 @@ export class ControlPlane {
         status: admit ? "queued" : "batched",
       };
     });
+  }
+
+  async #objectiveDeliveredCommit(objectiveId: string, commit: string): Promise<boolean> {
+    for (const session of await this.#store.listObjectiveSessions(objectiveId)) {
+      if (session.parentSessionId === undefined || session.task?.status !== "completed") continue;
+      const task = await this.#store.findTaskById(session.task.id);
+      if (task === undefined) continue;
+      const delivery = taskDelivery({
+        workspacePlan: task.workspacePlan,
+        result: task.result,
+        events: await this.#store.listTaskEvents(task.id),
+      });
+      if (delivery?.workspace?.head === commit) return true;
+    }
+    return false;
   }
 
   /** Runs one Tag's Mailbox deliveries and inbox admissions one at a time. */

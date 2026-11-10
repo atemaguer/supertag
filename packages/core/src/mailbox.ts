@@ -20,6 +20,18 @@ export const INBOX_SENDS_PER_TASK = 3;
  */
 export type TagMessageStatus = "pending" | "handled" | "failed";
 
+export type ReviewDecision = "approved" | "changes_requested";
+
+export interface CommitReview {
+  readonly commit: string;
+  readonly verdict?: {
+    readonly decision: ReviewDecision;
+    readonly summary: string;
+    readonly taskId: string;
+    readonly recordedAt: string;
+  };
+}
+
 export interface TagMessage {
   readonly id: string;
   readonly senderTagId: string;
@@ -30,6 +42,7 @@ export interface TagMessage {
   readonly sourceTaskId?: string;
   /** The Workstream post whose `to` delivered this message. */
   readonly workstreamPostId?: string;
+  readonly review?: CommitReview;
   readonly text: string;
   /** Inbox turns the chain that produced this message already passed through; 0 outside one. */
   readonly hops: number;
@@ -47,6 +60,7 @@ export interface DeliverTagMessageInput {
   readonly objectiveId?: string;
   readonly sourceTaskId?: string;
   readonly workstreamPostId?: string;
+  readonly review?: Pick<CommitReview, "commit">;
 }
 
 /** The recipient accepts messages from the sender, in addition to its Team members. */
@@ -100,6 +114,16 @@ export interface TagMailboxStore {
     tagId: string,
     options?: TagMessageHistoryOptions,
   ): Promise<TagMessageHistoryPage>;
+  listObjectiveReviews(objectiveId: string): Promise<readonly TagMessage[]>;
+  listUndeliveredObjectiveReviews(limit: number): Promise<readonly TagMessage[]>;
+  recordObjectiveReview(input: {
+    readonly requestId: string;
+    readonly reviewerTagId: string;
+    readonly ownerTagId: string;
+    readonly decision: ReviewDecision;
+    readonly summary: string;
+    readonly taskId: string;
+  }): Promise<TagMessage & { readonly objectiveId: string }>;
 }
 
 export class TagMessagingError extends Error {
@@ -148,8 +172,30 @@ export function tagMessageText(value: unknown): string {
   return value.trim();
 }
 
-/** The arguments of `send_message`: the recipient Tag's name or ID, and the text. */
-export function parseSendMessage(value: unknown): { readonly to: string; readonly text: string } {
-  const record = mailboxObject(value, ["to", "text"]);
-  return { to: mailboxText(record["to"], "to"), text: tagMessageText(record["text"]) };
+export interface TagMessageInput {
+  readonly to: string;
+  readonly text: string;
+  readonly review?:
+    | { readonly commit: string }
+    | { readonly requestId: string; readonly verdict: ReviewDecision };
+}
+
+/** The arguments of `send_message`. A review response inherits its commit from the request. */
+export function parseSendMessage(value: unknown): TagMessageInput {
+  const record = mailboxObject(value, ["to", "text", "review"]);
+  const message = { to: mailboxText(record["to"], "to"), text: tagMessageText(record["text"]) };
+  if (record["review"] === undefined) return message;
+  const review = mailboxObject(record["review"], ["commit", "requestId", "verdict"]);
+  if (typeof review["commit"] === "string" && Object.keys(review).length === 1) {
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(review["commit"]))
+      throw new TagMessagingError(400, "review.commit must be a full Git commit hash");
+    return { ...message, review: { commit: review["commit"].toLowerCase() } };
+  }
+  const verdict = review["verdict"];
+  if (review["commit"] !== undefined || (verdict !== "approved" && verdict !== "changes_requested"))
+    throw new TagMessagingError(400, "review must specify a commit or a requestId and verdict");
+  return {
+    ...message,
+    review: { requestId: mailboxText(review["requestId"], "review.requestId"), verdict },
+  };
 }

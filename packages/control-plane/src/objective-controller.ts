@@ -44,6 +44,7 @@ import {
   buildObjectiveOverview,
   type ObjectiveOverview,
   type ObjectiveOverviewInput,
+  objectiveCommitReviews,
 } from "./objective-overview.js";
 import {
   harnessSignInAttempt,
@@ -175,6 +176,7 @@ type ObjectivePersistence = Pick<
   | "listApprovalRequests"
   | "listExecutingObjectives"
   | "listObjectiveSessions"
+  | "listObjectiveReviews"
   | "listSessionTaskIds"
   | "listTagWorkerHostBindings"
   | "listTaskAttempts"
@@ -808,7 +810,7 @@ export class ObjectiveController {
       this.store.listObjectiveSessions(objective.id),
       objective.teamId === null ? undefined : this.store.getTeam(objective.teamId),
     ]);
-    return objectiveSummary({
+    const summary = objectiveSummary({
       objective,
       sessions,
       team,
@@ -818,6 +820,10 @@ export class ObjectiveController {
         ...(team?.memberTagIds ?? []),
       ]),
     });
+    return {
+      ...summary,
+      commitReviews: objectiveCommitReviews(await this.store.listObjectiveReviews(objective.id)),
+    };
   }
 
   /** Display names for Tag IDs; IDs that no longer resolve keep no entry. */
@@ -1126,9 +1132,10 @@ export class ObjectiveController {
     if (!Number.isSafeInteger(offset) || offset < 0)
       throw new TagMessagingError(400, "offset must be a nonnegative integer");
     const objective = await this.store.getObjective(objectiveId);
-    const [sessions, team] = await Promise.all([
+    const [sessions, team, reviewMessages] = await Promise.all([
       this.store.listObjectiveSessions(objectiveId),
       objective.teamId === null ? undefined : this.store.getTeam(objective.teamId),
+      this.store.listObjectiveReviews(objectiveId),
     ]);
     return buildObjectiveOverview({
       store: this.store,
@@ -1139,11 +1146,13 @@ export class ObjectiveController {
       offset,
       executionReadiness: this.executionReadiness,
       approvals: await this.approvals.summary(objectiveId),
+      commitReviews: objectiveCommitReviews(reviewMessages),
       conditions: [await this.objectiveRunnable(objective)],
       tagNames: await this.tagNames([
         objective.ownerTagId,
         ...sessions.map((session) => session.tagId),
         ...(team?.memberTagIds ?? []),
+        ...reviewMessages.map((message) => message.recipientTagId),
       ]),
       posts: team ? await this.store.listTeamPosts(team.id, { limit: 50 }) : [],
     });

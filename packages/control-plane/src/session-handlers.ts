@@ -1,4 +1,10 @@
-import type { ApprovalRequest, DurableInboundEvent, ObjectiveStatus, Task } from "@supertag/core";
+import type {
+  ApprovalRequest,
+  DurableInboundEvent,
+  ObjectiveStatus,
+  TagMessageInput,
+  Task,
+} from "@supertag/core";
 import type { ContinueSessionRequest, StartSessionRequest } from "./work-sessions.js";
 
 /** `start_session` input; `tag` delegates the work Session to another Tag. */
@@ -25,16 +31,14 @@ export interface MessageObjectiveResult {
   readonly statusChange?: ObjectiveStatus;
 }
 
-export interface SendMessageInput {
-  readonly to: string;
-  readonly text: string;
+export interface SendMessageInput extends TagMessageInput {
   readonly workstreamPostId?: string;
 }
 
 export interface SendMessageResult {
   readonly messageId: string;
   readonly session: string;
-  readonly status: "queued" | "batched";
+  readonly status: "queued" | "batched" | "recorded";
 }
 
 /** What the Control Plane does for Session tools and Objective entry points; installed by it. */

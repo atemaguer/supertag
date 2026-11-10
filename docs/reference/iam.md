@@ -157,6 +157,7 @@ Runtime permissions use the same Permission Set but have a different target:
 | --- | --- |
 | `commands:execute` | Use command or shell tools |
 | `files:write` | Edit files in a writable Task workspace |
+| `files:delegate-write` | Let an Objective's owner delegate writes to a Team member whose Role grants `files:write` |
 | `web:fetch` | Fetch a known web resource |
 | `web:search` | Search the web |
 | `browser:use` | Use browser or computer-control tools |
@@ -178,6 +179,10 @@ receives the actions within the Objective's list and, for delegated work, within
 Task's. Approval travels with the action: a Task waits when its own Permission Sets, or those of
 the Task or owner it inherits the action from, mark it `approval: required`. See
 [Objective runtime actions](coordination.md#objective-runtime-actions).
+
+When the Objective and the delegating Task include `files:delegate-write`, a different Team
+member can use its own `files:write` permission in the delegated Session. The grant gives
+the lead no direct write access. An approval rule on the grant applies to the delegated write.
 
 Prefer narrow operations over `read`, `write`, or `admin` labels.
 

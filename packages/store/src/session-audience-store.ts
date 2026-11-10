@@ -510,6 +510,7 @@ export class DrizzleSessionAudienceStore implements SessionAudienceStore, Object
           sql`not (${asked})`,
           sql`(not (${awaitsApproval}) or exists (select 1 from "TaskEvent" ne where ne."taskId" = ${t.id} and ne."type" = ${SESSION_NOT_CONTINUED_EVENT}))`,
           // Nothing of the Objective is due, running or still to report.
+          sql`not exists (select 1 from "TagMessage" m where m."objectiveId" = ${o.id} and m."review" is not null and not exists (select 1 from "DurableInboundEvent" r where r."tagId" = ${o.ownerTagId} and r."sessionKey" = ${s.sessionKey} and r."deliveryId" = 'objective-notice:' || ${o.id} || ':review:' || m."id"))`,
           sql`not exists (select 1 from "DurableInboundEvent" e join "Session" es on es."tagId" = e."tagId" and es."sessionKey" = e."sessionKey" where es."objectiveId" = ${o.id} and e."status" in ('pending', 'processing'))`,
           sql`not exists (select 1 from "Session" ws join "Task" wt on wt."sessionId" = ws."id" join "DurableInboundEvent" wi on wi."id" = wt."inboundEventId" where ws."objectiveId" = ${o.id} and ws."parentSessionId" is not null and wt."status" in ('completed', 'failed', 'cancelled') and not exists (select 1 from "DurableInboundEvent" r where r."surfaceAccountId" = wi."surfaceAccountId" and r."deliveryId" = 'session-report:' || wt."id"))`,
           sql`exists (select 1 from "Tag" g where g."id" = ${o.ownerTagId} and g."status" = 'active')`,

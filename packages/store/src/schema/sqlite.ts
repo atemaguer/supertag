@@ -1204,6 +1204,7 @@ export const tagMessages = sqliteTable(
     workstreamPostId: text("workstreamPostId").references(() => workstreamPosts.id, {
       onDelete: "set null",
     }),
+    review: text("review", { mode: "json" }),
     text: text("text").notNull(),
     hops: integer("hops").notNull().default(0),
     /** The inbox Task that handles the message; null until a turn claims it. */
@@ -1215,6 +1216,9 @@ export const tagMessages = sqliteTable(
     index("TagMessage_task_idx").on(t.taskId),
     index("TagMessage_sender_history_idx").on(t.senderTagId, t.createdAt, t.id),
     index("TagMessage_recipient_history_idx").on(t.recipientTagId, t.createdAt, t.id),
+    index("TagMessage_objective_review_idx")
+      .on(t.objectiveId, t.createdAt, t.id)
+      .where(sql`${t.review} is not null`),
   ],
 );
 export const approvalRequests = sqliteTable(
