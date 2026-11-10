@@ -3,15 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { TagAdministration } from "../apps/cli/src/tag-administration.js";
-import { renderTagOperation } from "../apps/cli/src/tag-command-adapter.js";
-import { runTagCommand } from "../apps/cli/src/tags.js";
 import {
   DrizzleStore,
   FileGatewayCredentialVault,
   migrateDatabase,
 } from "../packages/store/src/index.js";
 
-it("shares typed Tag administration across rendering adapters without owning their connection", async () => {
+it("administers typed Tag state without owning the store connection", async () => {
   const directory = await mkdtemp(join(tmpdir(), "supertag-administration-"));
   const url = `file:${join(directory, "state.db")}`;
   await migrateDatabase({ url });
@@ -20,14 +18,12 @@ it("shares typed Tag administration across rendering adapters without owning the
   const credentialVault = new FileGatewayCredentialVault({
     directory: join(directory, "credentials"),
   });
-  const dependencies = { store, credentialVault };
   const connect = vi.spyOn(store, "connect");
   const disconnect = vi.spyOn(store, "disconnect");
   try {
     const service = new TagAdministration(store, credentialVault);
-    const created = await renderTagOperation("create", ["Engineering"], dependencies);
-    const tag = await service.requireTag("Engineering");
-    expect(created).toBe(`Created Tag ${tag.name} (${tag.id}).\n`);
+    const tag = await service.create("Engineering");
+    expect(await service.requireTag("Engineering")).toEqual(tag);
     await expect(service.create(tag.name)).rejects.toThrow(
       'A Tag named "Engineering" already exists',
     );
@@ -56,17 +52,6 @@ it("shares typed Tag administration across rendering adapters without owning the
       contextSets: [contextSet],
       permissionSets: [permissionSet],
     });
-    expect(await renderTagOperation("list", [], dependencies)).toBe(
-      "NAME\tSTATUS\tAVAILABLE_IN\tPERMISSION_SETS\tCONTEXTS\nEngineering\tactive\t1\t1\t1\n",
-    );
-    let cliOutput = "";
-    await runTagCommand("show", [tag.name], dependencies, {
-      manageConnection: false,
-      write: (text) => {
-        cliOutput += text;
-      },
-    });
-    expect(await renderTagOperation("show", [tag.name], dependencies)).toBe(cliOutput);
     await expect(service.deleteContextSet("Missing", contextSet.name)).rejects.toThrow(
       'Tag "Missing" does not exist',
     );
@@ -107,12 +92,6 @@ it("shares typed Tag administration across rendering adapters without owning the
     await service.setPermissionActivation(tag.name, permissionSet.name, target, false);
     expect((await service.listContextSets(tag.name)).sets).toEqual([]);
     expect((await service.listPermissionSets(tag.name)).sets).toEqual([]);
-    await expect(
-      renderTagOperation("add", ["Missing", "slack", "--channel-id", "CADMIN"], dependencies),
-    ).rejects.toThrow('Tag "Missing" does not exist. Create it with: supertag create tag Missing');
-    await expect(
-      renderTagOperation("add", [tag.name, "lark", "--chat-id", "chat"], dependencies),
-    ).rejects.toThrow("No connected lark account exists. Run supertag setup surface lark.");
     await service.removeRoute(tag.name, target);
     expect((await service.show(tag.name)).locations).toEqual([]);
     await service.deleteContextSet(tag.name, contextSet.name);

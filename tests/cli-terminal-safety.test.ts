@@ -1,6 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { create, toBinary } from "@bufbuild/protobuf";
 import { afterEach, expect, it, vi } from "vitest";
 import { runInboxCommand } from "../apps/cli/src/approvals.ts";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
@@ -10,13 +11,8 @@ import { runObjectiveCommand } from "../apps/cli/src/objectives.ts";
 import { formatOrganizationStatus } from "../apps/cli/src/organization-status.ts";
 import { formatRows } from "../apps/cli/src/ps.ts";
 import { describeTask, runResourceCommand } from "../apps/cli/src/resources.ts";
-import { TagAdministration } from "../apps/cli/src/tag-administration.ts";
-import {
-  renderTagOperation,
-  type TagOperationDependencies,
-} from "../apps/cli/src/tag-command-adapter.ts";
-import { AccountSelectionError } from "../apps/cli/src/tag-surface-target.ts";
 import { terminalText } from "../apps/cli/src/terminal-text.ts";
+import { ErrorDetailSchema } from "../packages/operator-api/src/index.ts";
 import { fakeHostRpc, workerHostJson, workerHostResourceOf } from "./support/fake-host-rpc.ts";
 import { fakeOperatorRpc } from "./support/fake-operator-rpc.ts";
 
@@ -361,20 +357,44 @@ it.each(["describe", "get", "watch"] as const)(
 );
 
 it("sanitizes account ids and display names in ambiguous account errors", async () => {
-  vi.spyOn(TagAdministration.prototype, "addRoute").mockRejectedValue(
-    new AccountSelectionError({
-      provider: "slack",
-      selector: undefined,
-      matches: [
-        { externalAccountId: hostile, displayName: hostile },
-      ] as unknown as AccountSelectionError["selection"]["matches"],
-    }),
-  );
-  const error = await renderTagOperation(
-    "add",
-    ["tag", "slack", "--channel-id", "channel"],
-    {} as TagOperationDependencies,
-  ).catch((error: unknown) => error);
+  const detail = create(ErrorDetailSchema, { fields: [{ path: "location.account" }] });
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    if (String(input).endsWith("/AddTagLocation"))
+      return Response.json(
+        {
+          code: "failed_precondition",
+          message: "Select an account",
+          details: [
+            {
+              type: "supertag.operator.v1.ErrorDetail",
+              value: Buffer.from(toBinary(ErrorDetailSchema, detail)).toString("base64"),
+            },
+          ],
+        },
+        { status: 400 },
+      );
+    if (String(input).endsWith("/ListSurfaceAccounts"))
+      return Response.json({
+        surfaceAccounts: [
+          {
+            metadata: { id: "one", name: "one" },
+            provider: "SURFACE_PROVIDER_SLACK",
+            externalAccountId: hostile,
+            displayName: hostile,
+          },
+          {
+            metadata: { id: "two", name: "two" },
+            provider: "SURFACE_PROVIDER_SLACK",
+            externalAccountId: "second",
+            displayName: "second",
+          },
+        ],
+      });
+    throw new Error(`Unexpected request ${String(input)}`);
+  });
+  const error = await new ControlPlaneClient(target)
+    .runTagCommand("add", ["tag", "slack", "--channel-id", "channel"])
+    .catch((error: unknown) => error);
   expect(error).toBeInstanceOf(Error);
   safe((error as Error).message.replaceAll("\t", " "));
 });

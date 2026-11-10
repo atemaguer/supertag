@@ -283,6 +283,16 @@ describe("HostService, AccessService, SurfaceService and OrganizationService", (
     await expect(
       cli.runTagCommand("add", ["answerer", "slack", "--channel-id", "C1", "--account", "nope"]),
     ).rejects.toThrow('No connected slack account matches --account "nope"');
+    await expect(
+      cli.runTagCommand("add", ["answerer", "lark", "--chat-id", "chat"]),
+    ).rejects.toThrow("No connected lark account exists. Run supertag setup surface lark.");
+    await expect(
+      cli.runTagCommand("add", ["answerer", "slack", "--channel-id", " "]),
+    ).rejects.toThrow("--channel-id is required");
+    const missingName = 'missing "tag"; $(echo nope)';
+    await expect(
+      cli.runTagCommand("add", [missingName, "slack", "--channel-id", "C1"]),
+    ).rejects.toThrow(`Create it with: supertag create tag ${JSON.stringify(missingName)}`);
   });
 
   it("reads Auth Keys with their Tags' names and refuses unknown Tags", async () => {
