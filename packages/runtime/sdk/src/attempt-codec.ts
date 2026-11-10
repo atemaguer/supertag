@@ -644,6 +644,20 @@ function workspacePlan(value: unknown): void {
       )
         throw new Error("workspacePlan branchPinHead requires branchPin and a full commit id");
     }
+    if (plan["branchPinPullRequest"] !== undefined) {
+      const pin = fields(plan["branchPinPullRequest"], ["repository"]);
+      const number = pin["number"];
+      if (
+        plan["branchPin"] === undefined ||
+        plan["delivery"] !== "pull-request" ||
+        typeof number !== "number" ||
+        !Number.isSafeInteger(number) ||
+        number <= 0
+      )
+        throw new Error(
+          "workspacePlan branchPinPullRequest requires a pull request branch and number",
+        );
+    }
     choice(plan, "delivery", ["patch", "branch", "pull-request"]);
     if (plan["ref"] !== undefined) text(plan, "ref");
     if (plan["setup"] !== undefined) text(plan, "setup");

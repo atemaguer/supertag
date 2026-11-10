@@ -674,6 +674,11 @@ export interface TaskNamedWorkspacePlan {
   readonly branchPin?: string;
   /** Full Worker-recorded commit for branchPin; required to adopt it on a fresh Worker Host. */
   readonly branchPinHead?: string;
+  /** Pull request previously recorded for the pinned branch. Delivery rechecks it by number. */
+  readonly branchPinPullRequest?: Pick<
+    import("./workspace.js").WorkspacePullRequest,
+    "repository" | "number"
+  >;
   readonly delivery: WorkspaceDelivery;
   /** One shell command run once in each new Task worktree. */
   readonly setup?: string;

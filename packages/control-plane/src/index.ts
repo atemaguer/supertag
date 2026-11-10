@@ -22,6 +22,7 @@ import {
   type TagMessage,
   workspaceBranchHeadPin,
   workspaceBranchPin,
+  workspacePullRequestFromEvents,
 } from "@supertag/core";
 import {
   approvalDecisionText,
@@ -2557,11 +2558,26 @@ export class ControlPlane {
       task.workspacePlan.status === "workspace" && task.workspacePlan.mcp?.length
         ? workspaceMcpPin(await this.#store.listTaskAttempts(task.id))
         : undefined;
-    // A Task without a branch of its own yet continues the one its Session's earlier Tasks
-    // committed to, so a Worker Host without that branch adopts it rather than starting afresh.
-    const sessionPin =
-      task.workspacePlan.status === "workspace" && branchPin === undefined
+    // A Task that resolved its Session branch but stopped before delivering still needs the
+    // Session's verified head on retry. Preserve an independently resolved branch name.
+    const priorSessionPin =
+      task.workspacePlan.status === "workspace" &&
+      (branchPinHead === undefined || task.workspacePlan.delivery === "pull-request")
         ? await sessionBranchPin(this.#store, task, task.workspacePlan)
+        : undefined;
+    const sessionPin =
+      branchPinHead === undefined &&
+      (branchPin === undefined || branchPin === priorSessionPin?.branch)
+        ? priorSessionPin
+        : undefined;
+    const priorPullRequest =
+      task.workspacePlan.status === "workspace" && task.workspacePlan.delivery === "pull-request"
+        ? ((branchPin === undefined
+            ? undefined
+            : workspacePullRequestFromEvents(workspaceEvents)) ??
+          (branchPin === undefined || branchPin === priorSessionPin?.branch
+            ? priorSessionPin?.pullRequest
+            : undefined))
         : undefined;
     return {
       version: 2,
@@ -2628,6 +2644,14 @@ export class ControlPlane {
               ...(skillPins === undefined ? {} : { skillPins }),
               ...(branchPin === undefined ? {} : { branch: branchPin, branchPin }),
               ...(branchPinHead === undefined ? {} : { branchPinHead }),
+              ...(priorPullRequest === undefined
+                ? {}
+                : {
+                    branchPinPullRequest: {
+                      repository: priorPullRequest.repository,
+                      number: priorPullRequest.number,
+                    },
+                  }),
               ...(sessionPin === undefined
                 ? {}
                 : {

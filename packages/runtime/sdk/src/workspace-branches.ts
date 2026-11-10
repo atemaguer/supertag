@@ -87,7 +87,8 @@ export class WorkspaceBranches {
    * reviewer pushed, or a local commit whose push failed, stays on it. A recorded branch rewritten
    * without that head, or whose copies diverged, is refused rather than replaced. Without a
    * record, a branch the Control Plane pinned at a head another host recorded is adopted when this
-   * repository holds that head on it, and refused when the branch is not here at all. Otherwise
+   * repository holds that head on it, and otherwise refused, never allocated afresh: absent,
+   * older, divergent, or claimed by another owner here, its refs stay as they are. Otherwise
    * the owner gets a name no other branch or owner holds, starting afresh: a branch of the same
    * name that `owner` did not record, such as a person's or another Session's, is never taken.
    */
@@ -110,6 +111,14 @@ export class WorkspaceBranches {
       .split("\n")
       .filter(Boolean)
       .map((ref) => ref.replace(/^refs\/(?:heads|remotes\/origin)\//u, ""));
+    // A hard pin: the Control Plane names the branch and the full head a Worker recorded on it.
+    // It is checked before anything moves, alongside any local record.
+    const pinned =
+      plan.branchPin === plan.branch &&
+      typeof plan.branchPinHead === "string" &&
+      /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u.test(plan.branchPinHead)
+        ? plan.branchPinHead
+        : undefined;
     if (recorded) {
       if (
         Object.entries(records).some(
@@ -118,8 +127,16 @@ export class WorkspaceBranches {
         )
       )
         throw new Error("Recorded Task branch conflicts with another branch");
+      if (pinned !== undefined && recorded.branch !== plan.branch)
+        throw refusal(
+          `This Worker Host recorded branch "${recorded.branch}" for this work, but the Control Plane pinned branch "${plan.branch}" at commit ${pinned.slice(0, 12)}; no branch was changed. Run this Task on the Worker Host that recorded the pinned branch, or retry once the pin and this host's record name the same branch`,
+        );
       // A deleted name is free again only while no branch, local or on origin, has taken it.
       if (recorded.head === "deleted" && !refs.includes(recorded.branch)) {
+        if (pinned !== undefined)
+          throw refusal(
+            `Branch "${plan.branch}" holds commit ${pinned.slice(0, 12)} on another Worker Host, but this Worker Host deleted its copy and it was not pushed to this Workspace's source; run this Task on that Worker Host, or deliver the Workspace by pull request so its branch is pushed`,
+          );
         const unpinned = { ...plan, branch: recorded.branch };
         delete unpinned.branchPin;
         return unpinned;
@@ -127,6 +144,11 @@ export class WorkspaceBranches {
       if (recorded.head && recorded.head !== "deleted") {
         const copies = await this.#copies(repository, recorded.branch);
         if (copies.length === 0) {
+          // Recreating the branch at the recorded head is safe only when it holds the pin.
+          if (pinned !== undefined && !(await this.#contains(repository, pinned, recorded.head)))
+            throw refusal(
+              await this.#incompatible(repository, recorded.branch, pinned, "another Worker Host"),
+            );
           await this.host.run(repository.path, [
             "update-ref",
             `refs/heads/${recorded.branch}`,
@@ -135,36 +157,50 @@ export class WorkspaceBranches {
           ]);
           return { ...plan, branch: recorded.branch, branchPin: recorded.branch };
         }
-        if (await this.#continues(repository, copies, recorded.head))
-          return { ...plan, branch: recorded.branch, branchPin: recorded.branch };
-        throw refusal(
-          `Branch ${recorded.branch} no longer holds commit ${recorded.head.slice(0, 12)}, the last one this Worker Host recorded on it, or its local and origin copies diverged; restore the branch so it contains that commit, then retry`,
-        );
+        if (!(await this.#continues(repository, copies, recorded.head)))
+          throw refusal(
+            await this.#incompatible(
+              repository,
+              recorded.branch,
+              recorded.head,
+              "this Worker Host",
+            ),
+          );
+        if (pinned !== undefined && !(await this.#continues(repository, copies, pinned)))
+          throw refusal(
+            await this.#incompatible(repository, recorded.branch, pinned, "another Worker Host"),
+          );
+        return { ...plan, branch: recorded.branch, branchPin: recorded.branch };
       }
     }
-    // A new Worker Host has no local record. The Control Plane pins the branch a Worker recorded
-    // for this Task, or for its Session's earlier Tasks. The recorded head must remain in the
-    // branch's history here; a reused name or replaced ref is not ownership evidence.
-    if (
-      recorded === undefined &&
-      plan.branchPin === plan.branch &&
-      typeof plan.branchPinHead === "string" &&
-      /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u.test(plan.branchPinHead)
-    ) {
+    // A new Worker Host has no local record, or one without a head. The Control Plane pins the
+    // branch a Worker recorded for this Task, or for its Session's earlier Tasks. The recorded
+    // head must remain in the branch's history here; a reused name or replaced ref is not
+    // ownership evidence.
+    if (pinned !== undefined) {
+      const branchPinHead = pinned;
       const named = refs.filter((ref) => ref.toLowerCase() === plan.branch.toLowerCase());
       if (named.length === 0)
         throw refusal(
-          `Branch ${plan.branch} holds commit ${plan.branchPinHead.slice(0, 12)} on another Worker Host and was not pushed to this Workspace's source; run this Task on that Worker Host, or deliver the Workspace by pull request so its branch is pushed`,
+          `Branch ${plan.branch} holds commit ${branchPinHead.slice(0, 12)} on another Worker Host and was not pushed to this Workspace's source; run this Task on that Worker Host, or deliver the Workspace by pull request so its branch is pushed`,
         );
-      const copies =
-        named.every((ref) => ref === plan.branch) &&
-        !Object.values(records).some(
-          (other) => other.branch.toLowerCase() === plan.branch.toLowerCase(),
+      // A pinned continuation never falls through to a fresh, suffixed branch: that would start
+      // the Session over without its recorded work. Refuse and leave every ref as it is.
+      if (
+        !named.every((ref) => ref === plan.branch) ||
+        Object.entries(records).some(
+          ([id, other]) => id !== owner && other.branch.toLowerCase() === plan.branch.toLowerCase(),
         )
-          ? await this.#copies(repository, plan.branch)
-          : [];
-      if (copies.length > 0 && (await this.#continues(repository, copies, plan.branchPinHead)))
+      )
+        throw refusal(
+          `Branch ${plan.branch} is pinned at commit ${branchPinHead.slice(0, 12)}, but this Worker Host has ${named.length > 0 && !named.every((ref) => ref === plan.branch) ? `a branch whose name differs only in case (${[...new Set(named)].join(", ")})` : "it recorded for another owner"}; run this Task on the Worker Host that recorded the branch, or rename the conflicting branch, then retry`,
+        );
+      const copies = await this.#copies(repository, plan.branch);
+      if (copies.length > 0 && (await this.#continues(repository, copies, branchPinHead)))
         return plan;
+      throw refusal(
+        await this.#incompatible(repository, plan.branch, branchPinHead, "another Worker Host"),
+      );
     }
     const occupied = new Set(
       [...refs, ...Object.values(records).map((owner) => owner.branch)].map((branch) =>
@@ -196,6 +232,67 @@ export class WorkspaceBranches {
       if (await this.host.hasRef(repository.path, ref))
         copies.push(await this.host.commit(repository.path, ref, `Branch ${ref} is unreadable`));
     return copies;
+  }
+
+  /**
+   * Why a branch's copies cannot continue from `head`: each copy's observed head and how it
+   * relates to `head`, with a recovery path. Reads refs only; nothing is moved or deleted.
+   */
+  async #incompatible(
+    repository: WorkspaceRepository,
+    branch: string,
+    head: string,
+    recorder: string,
+  ): Promise<string> {
+    const ancestor = (a: string, b: string) =>
+      a === b
+        ? Promise.resolve(true)
+        : this.host.run(repository.path, ["merge-base", "--is-ancestor", a, b]).then(
+            () => true,
+            () => false,
+          );
+    const known = await this.host.run(repository.path, ["cat-file", "-e", `${head}^{commit}`]).then(
+      () => true,
+      () => false,
+    );
+    const observed: string[] = [];
+    const heads: string[] = [];
+    for (const [label, ref] of [
+      ["local", `refs/heads/${branch}`],
+      ...(repository.managed ? [["origin", `refs/remotes/origin/${branch}`]] : []),
+    ] as const) {
+      if (!(await this.host.hasRef(repository.path, ref))) {
+        observed.push(`${label} absent`);
+        continue;
+      }
+      const at = await this.host.commit(repository.path, ref, `Branch ${ref} is unreadable`);
+      heads.push(at);
+      const relation =
+        at === head
+          ? "matches"
+          : !known
+            ? "pinned commit missing here"
+            : (await ancestor(head, at))
+              ? "contains it"
+              : (await ancestor(at, head))
+                ? "older, behind it"
+                : "divergent from it";
+      observed.push(`${label} ${at.slice(0, 12)} (${relation})`);
+    }
+    const diverged =
+      heads.length === 2 &&
+      !(await ancestor(heads[0] as string, heads[1] as string)) &&
+      !(await ancestor(heads[1] as string, heads[0] as string));
+    return `Branch ${branch} no longer holds commit ${head.slice(0, 12)}, the last one ${recorder} recorded on it (pinned head ${head}), or its local and origin copies diverged; observed ${observed.join("; ")}${diverged ? "; its local and origin copies diverged" : ""}. Existing refs were left unchanged. To recover, make the branch's copies agree and contain commit ${head}: from the Worker Host that holds that commit, push it to branch "${branch}" on this Workspace's source, or merge the local and origin copies so one contains the other, then retry; or run this Task on the Worker Host that recorded the branch`;
+  }
+
+  #contains(repository: WorkspaceRepository, ancestor: string, commit: string): Promise<boolean> {
+    return ancestor === commit
+      ? Promise.resolve(true)
+      : this.host.run(repository.path, ["merge-base", "--is-ancestor", ancestor, commit]).then(
+          () => true,
+          () => false,
+        );
   }
 
   /** Whether the newer of a branch's copies holds `head`, when one copy holds the other. */

@@ -40,17 +40,71 @@ interface FakePullRequest {
   number: number;
   html_url: string;
   state: "open" | "closed";
-  merged_at?: string;
+  merged_at?: string | null;
   draft: boolean;
   head: string;
   base: string;
+  /** Commit GitHub reports for the head; defaults to the source branch's head. */
+  sha?: string;
+  /** Repository GitHub reports for the head and base; default `acme/app`. */
+  headRepo?: string | null;
+  baseRepo?: string;
   title: string;
   body: string;
 }
 
+/** An open pull request from the Session branch into main, overridable per test. */
+function fake(number: number, overrides: Partial<FakePullRequest> = {}): FakePullRequest {
+  return {
+    number,
+    html_url: `https://github.com/acme/app/pull/${number}`,
+    state: "open",
+    merged_at: null,
+    draft: true,
+    head: workSessionBranch("task-1"),
+    base: "main",
+    title: "t",
+    body: "b",
+    ...overrides,
+  };
+}
+
+/** A pull request as GitHub's REST API returns it. */
+function wireOf(pull: FakePullRequest, headSha: string) {
+  const { head, base, sha, headRepo, baseRepo, ...rest } = pull;
+  return {
+    merged_at: null,
+    ...rest,
+    head: {
+      ref: head,
+      sha: sha ?? headSha,
+      repo: headRepo === null ? null : { full_name: headRepo ?? "acme/app" },
+    },
+    base: { ref: base, repo: { full_name: baseRepo ?? "acme/app" } },
+  };
+}
+
+type Intercept = (method: string, path: string) => Response | undefined;
+
 /** A fake GitHub REST API for one repository's pull requests. */
-function fakeGitHub() {
+function fakeGitHub(headSha: () => string = () => "") {
   const pulls: FakePullRequest[] = [];
+  /** Checked first, in order; the first that answers replaces the fake's own response. */
+  const intercepts: Intercept[] = [];
+  const wire = (pull: FakePullRequest) => {
+    const { head, base, sha, headRepo, baseRepo, ...rest } = pull;
+    const repo = (name: string | null) => (name === null ? null : { full_name: name });
+    return {
+      merged_at: null,
+      ...rest,
+      head: {
+        ref: head,
+        sha: sha ?? (headSha() || "a".repeat(40)),
+        repo: repo(headRepo === undefined ? "acme/app" : headRepo),
+      },
+      base: { ref: base, repo: repo(baseRepo ?? "acme/app") },
+    };
+  };
   const calls: { method: string; path: string; body?: Record<string, unknown> }[] = [];
   const request = (async (input: string | URL, init?: RequestInit) => {
     const url = new URL(String(input));
@@ -65,11 +119,26 @@ function fakeGitHub() {
         status,
         headers: { "content-type": "application/json" },
       });
+    for (const intercept of intercepts) {
+      const response = intercept(method, `${url.pathname}${url.search}`);
+      if (response !== undefined) return response;
+    }
+    const exact = /^\/repos\/acme\/app\/pulls\/(\d+)$/u.exec(url.pathname);
+    if (method === "GET" && exact) {
+      const pull = pulls.find((candidate) => candidate.number === Number(exact[1]));
+      return pull ? json(wire(pull)) : json({ message: "not found" }, 404);
+    }
+    const branchPath = /^\/repos\/acme\/app\/git\/matching-refs\/heads\/(.+)$/u.exec(url.pathname);
+    if (method === "GET" && branchPath) {
+      const name = decodeURIComponent(branchPath[1] as string);
+      const sha = headSha();
+      return json(sha ? [{ ref: `refs/heads/${name}`, object: { sha, type: "commit" } }] : []);
+    }
     if (method === "GET" && url.pathname === "/repos/acme/app")
       return json({ default_branch: "main" });
     if (method === "GET" && url.pathname === "/repos/acme/app/pulls") {
       const head = url.searchParams.get("head")?.replace(/^acme:/u, "");
-      return json(pulls.filter((pull) => pull.head === head));
+      return json(pulls.filter((pull) => pull.head === head).map(wire));
     }
     if (method === "POST" && url.pathname === "/repos/acme/app/pulls") {
       if (pulls.some((pull) => pull.head === body?.["head"] && pull.state === "open"))
@@ -85,18 +154,18 @@ function fakeGitHub() {
         body: String(body?.["body"]),
       };
       pulls.push(pull);
-      return json(pull, 201);
+      return json(wire(pull), 201);
     }
     const match = /^\/repos\/acme\/app\/pulls\/(\d+)$/u.exec(url.pathname);
     if (method === "PATCH" && match) {
       const pull = pulls.find((candidate) => candidate.number === Number(match[1]));
       if (!pull) return json({}, 404);
       Object.assign(pull, body);
-      return json(pull);
+      return json(wire(pull));
     }
     return json({ message: "not found" }, 404);
   }) as typeof fetch;
-  return { pulls, calls, request };
+  return { pulls, calls, request, intercepts };
 }
 
 describe("pull-request delivery on GitHub", () => {
@@ -135,7 +204,11 @@ describe("pull-request delivery on GitHub", () => {
   };
   const spec = (
     attemptId: string,
-    options: { actions?: string[]; approval?: boolean } = {},
+    options: {
+      actions?: string[];
+      approval?: boolean;
+      pullRequest?: TaskNamedWorkspacePlan["branchPinPullRequest"];
+    } = {},
   ): TaskAttemptSpec =>
     ({
       version: 2,
@@ -152,7 +225,10 @@ describe("pull-request delivery on GitHub", () => {
         scope: "surface",
         objectiveId: "objective-1",
       },
-      workspacePlan: plan,
+      workspacePlan:
+        options.pullRequest === undefined
+          ? plan
+          : { ...plan, branchPin: branch, branchPinPullRequest: options.pullRequest },
       authorization: {
         runtimeActions: ["files:write"],
         resources: [
@@ -183,7 +259,7 @@ describe("pull-request delivery on GitHub", () => {
     }) as unknown as TaskAttemptSpec;
   const credentials = { resolve: async () => ({ token: "worker-token", allowedScopes: [SCOPE] }) };
   const setup = (options: Partial<GitHubPullRequestPublisherOptions> = {}) => {
-    const github = fakeGitHub();
+    const github = fakeGitHub(() => remoteHead());
     const resolver = new WorkspaceEnvironmentResolver({
       checkouts: [],
       worktreeRoot: root,
@@ -382,28 +458,370 @@ describe("pull-request delivery on GitHub", () => {
     expect(github.pulls).toHaveLength(1);
   });
 
-  it("opens a new pull request for later work once the earlier one was merged", async () => {
+  const pullsGet = (path: string) => path.startsWith("/repos/acme/app/pulls?");
+  const pushes = (github: ReturnType<typeof fakeGitHub>) =>
+    github.calls.filter((call) => call.method !== "GET");
+
+  it.each([
+    ["retained", false],
+    ["deleted", true],
+  ])("holds delivery once the earlier pull request was merged (%s branch)", async (_, deleted) => {
     const { attempt, github } = setup();
     await attempt("attempt-1", "greeting.txt");
     Object.assign(github.pulls[0] as FakePullRequest, {
       state: "closed",
       merged_at: "2026-11-08T12:00:00Z",
     });
+    if (deleted) git(origin, "update-ref", "-d", `refs/heads/${branch}`);
+    const before = remoteHead();
+    const writes = pushes(github).length;
     const second = await attempt("attempt-2", "farewell.txt", {}, "Add farewell");
     expect(second?.pullRequest).toMatchObject({
-      status: "opened",
-      draft: true,
-      pullRequest: { number: 2 },
+      status: "failed",
+      message: expect.stringMatching(/#1 from this branch was already merged.*was not pushed/u),
     });
+    expect(remoteHead()).toBe(before);
+    expect(pushes(github)).toHaveLength(writes);
+    expect(github.pulls).toHaveLength(1);
+  });
+
+  it("treats explicit merged_at: null as unmerged and updates the open pull request", async () => {
+    const { attempt, github } = setup();
+    await attempt("attempt-1", "greeting.txt");
+    (github.pulls[0] as FakePullRequest).merged_at = null;
+    const second = await attempt("attempt-2", "farewell.txt");
+    expect(second?.pullRequest).toMatchObject({ status: "updated", pullRequest: { number: 1 } });
     expect(remoteHead()).toBe(second?.head);
-    expect(github.pulls.map((pull) => [pull.number, pull.state])).toEqual([
-      [1, "closed"],
-      [2, "open"],
-    ]);
+  });
+
+  it("holds when the open pull request's head differs from the GitHub branch", async () => {
+    const { attempt, github } = setup();
+    const first = await attempt("attempt-1", "greeting.txt");
+    (github.pulls[0] as FakePullRequest).sha = "a".repeat(40);
+    const second = await attempt("attempt-2", "farewell.txt");
+    expect(second?.pullRequest).toMatchObject({
+      status: "failed",
+      message: expect.stringContaining(`GitHub reports commit ${first?.head} on the branch`),
+    });
+    expect(remoteHead()).toBe(first?.head);
+  });
+
+  it.each(["merged", "missing"] as const)(
+    "holds when the recorded pull request is %s and discovery could find a replacement",
+    async (state) => {
+      const { attempt, github } = setup();
+      const first = await attempt("attempt-1", "greeting.txt");
+      const earlier = github.pulls[0] as FakePullRequest;
+      earlier.state = "closed";
+      earlier.merged_at = "2026-11-08T12:00:00Z";
+      earlier.sha = first?.head as string;
+      github.pulls.push(fake(2));
+      if (state === "missing") github.pulls.shift();
+      github.intercepts.push((method, path) =>
+        method === "GET" && pullsGet(path)
+          ? Response.json([wireOf(fake(2), first?.head as string)])
+          : undefined,
+      );
+      git(origin, "update-ref", "-d", `refs/heads/${branch}`);
+
+      const second = await attempt("attempt-2", "farewell.txt", {
+        pullRequest: { repository: "acme/app", number: 1 },
+      });
+      expect(second?.pullRequest).toMatchObject({
+        status: "failed",
+        message: expect.stringContaining("pull request #1"),
+      });
+      expect(remoteHead()).toBe("");
+      expect(github.calls.filter(({ method }) => method === "PATCH")).toHaveLength(0);
+    },
+  );
+
+  it.each<[string, (github: ReturnType<typeof fakeGitHub>) => void]>([
+    [
+      "a non-list lookup",
+      (github) =>
+        github.intercepts.push((method, path) =>
+          method === "GET" && pullsGet(path) ? Response.json({ items: [] }) : undefined,
+        ),
+    ],
+    [
+      "an entry without merged_at",
+      (github) =>
+        github.intercepts.push((method, path) =>
+          method === "GET" && pullsGet(path)
+            ? Response.json([
+                {
+                  number: 1,
+                  html_url: "https://github.com/acme/app/pull/1",
+                  state: "open",
+                  head: { ref: branch, sha: "a", repo: { full_name: "acme/app" } },
+                  base: { ref: "main", repo: { full_name: "acme/app" } },
+                },
+              ])
+            : undefined,
+        ),
+    ],
+    ["an unknown state", (github) => github.pulls.push(fake(1, { state: "weird" as "open" }))],
+    ["a merged open entry", (github) => github.pulls.push(fake(1, { merged_at: "2026-01-01" }))],
+    ["a malformed head SHA", (github) => github.pulls.push(fake(1, { sha: "missing" }))],
+    [
+      "a conflicting merge status in an exact read",
+      (github) => {
+        const pull = fake(1);
+        github.pulls.push(pull);
+        github.intercepts.push((method, path) =>
+          method === "GET" && path === "/repos/acme/app/pulls/1"
+            ? Response.json({ ...wireOf(pull, "a".repeat(40)), merged: true })
+            : undefined,
+        );
+      },
+    ],
+    ["a fork head", (github) => github.pulls.push(fake(1, { headRepo: "mallory/app" }))],
+    ["a missing head repository", (github) => github.pulls.push(fake(1, { headRepo: null }))],
+    ["another base repository", (github) => github.pulls.push(fake(1, { baseRepo: "acme/other" }))],
+    ["two open pull requests", (github) => github.pulls.push(fake(1), fake(2))],
+    [
+      "an open pull request into another base",
+      (github) => github.pulls.push(fake(1, { base: "dev" })),
+    ],
+    [
+      "an open pull request after a merged one",
+      (github) =>
+        github.pulls.push(fake(1, { state: "closed", merged_at: "2026-11-08T12:00:00Z" }), fake(2)),
+    ],
+    [
+      "an open pull request after one closed unmerged",
+      (github) => github.pulls.push(fake(1, { state: "closed" }), fake(2)),
+    ],
+    [
+      "a branch already on GitHub with no pull request",
+      (github) =>
+        github.intercepts.push((method, path) =>
+          method === "GET" && path.includes("/git/matching-refs/")
+            ? Response.json([
+                { ref: `refs/heads/${branch}`, object: { sha: "a".repeat(40), type: "commit" } },
+              ])
+            : undefined,
+        ),
+    ],
+    [
+      "an inconclusive branch check",
+      (github) =>
+        github.intercepts.push((method, path) =>
+          method === "GET" && path.includes("/git/matching-refs/")
+            ? Response.json({ message: "Not found" }, { status: 404 })
+            : undefined,
+        ),
+    ],
+    [
+      "an exact read that disagrees with discovery",
+      (github) => {
+        github.pulls.push(fake(1));
+        github.intercepts.push((method, path) =>
+          method === "GET" && path === "/repos/acme/app/pulls/1"
+            ? Response.json({
+                ...fake(1),
+                merged_at: "2026-11-08T12:00:00Z",
+                state: "closed",
+                head: { ref: branch, sha: "a", repo: { full_name: "acme/app" } },
+                base: { ref: "main", repo: { full_name: "acme/app" } },
+              })
+            : undefined,
+        );
+      },
+    ],
+    [
+      "an exact read that fails",
+      (github) => {
+        github.pulls.push(fake(1));
+        github.intercepts.push((method, path) =>
+          method === "GET" && path === "/repos/acme/app/pulls/1"
+            ? Response.json({ message: "boom" }, { status: 500 })
+            : undefined,
+        );
+      },
+    ],
+    [
+      "a truncated lookup",
+      (github) => {
+        for (let number = 1; number <= 100; number += 1)
+          github.pulls.push(fake(number, { state: "closed" }));
+      },
+    ],
+  ])("holds without pushing on %s", async (_, arrange) => {
+    const { attempt, github } = setup();
+    arrange(github);
+    const record = await attempt("attempt-1", "greeting.txt");
+    expect(record?.pullRequest).toMatchObject({
+      status: "failed",
+      message: expect.stringContaining("SuperTag held pull request delivery on acme/app"),
+    });
+    expect(record?.pullRequest).not.toHaveProperty("pullRequest");
+    expect(remoteHead()).toBe("");
+    expect(pushes(github)).toEqual([]);
+  });
+
+  it("holds when the lookup changes while approval was pending", async () => {
+    const holder: { github?: ReturnType<typeof fakeGitHub> } = {};
+    const { github, attempt } = setup({
+      async approvals() {
+        // A person opens a pull request for the branch while the request waits.
+        holder.github?.pulls.push(fake(7));
+        return { status: "granted" };
+      },
+    });
+    holder.github = github;
+    const record = await attempt("attempt-1", "greeting.txt", { approval: true });
+    expect(record?.pullRequest).toMatchObject({
+      status: "failed",
+      message: expect.stringContaining("changed while the approval was pending"),
+    });
+    expect(remoteHead()).toBe("");
+    expect(pushes(github)).toEqual([]);
+  });
+
+  it("reports partial delivery with the pushed commit when creation fails after the push", async () => {
+    const { attempt, github } = setup();
+    github.intercepts.push((method) =>
+      method === "POST" ? Response.json({ message: "boom" }, { status: 500 }) : undefined,
+    );
+    const record = await attempt("attempt-1", "greeting.txt");
+    expect(remoteHead()).toBe(record?.head);
+    expect(record?.pullRequest).toMatchObject({
+      status: "failed",
+      message: expect.stringContaining(
+        `Pushed branch ${branch} to acme/app at ${record?.head}, but the outcome of opening the pull request is uncertain (GitHub answered the creation with HTTP 500)`,
+      ),
+    });
+  });
+
+  it("keeps the push failure diagnostic and claims no push when the push fails", async () => {
+    const { attempt, github } = setup();
+    // The temporary source refuses every push.
+    await writeFile(join(origin, "hooks", "pre-receive"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    const record = await attempt("attempt-1", "greeting.txt");
+    expect(record?.pullRequest).toMatchObject({
+      status: "failed",
+      message: expect.stringMatching(/^Pull request delivery failed: /u),
+    });
+    expect(JSON.stringify(record?.pullRequest)).not.toContain("Pushed");
+    expect(github.calls.some((call) => call.method === "POST")).toBe(false);
+  });
+
+  it("rereads the pull request after the push and does not update one merged meanwhile", async () => {
+    const { attempt, github } = setup();
+    await attempt("attempt-1", "greeting.txt");
+    const before = remoteHead();
+    github.intercepts.push((method, path) => {
+      // The push landed; a person merges the pull request before SuperTag edits it.
+      if (method === "GET" && path === "/repos/acme/app/pulls/1" && remoteHead() !== before)
+        Object.assign(github.pulls[0] as FakePullRequest, {
+          state: "closed",
+          merged_at: "2026-11-08T12:00:00Z",
+        });
+      return undefined;
+    });
+    const patches = github.calls.filter((call) => call.method === "PATCH").length;
+    const second = await attempt("attempt-2", "farewell.txt");
+    expect(remoteHead()).toBe(second?.head);
+    expect(second?.pullRequest).toMatchObject({
+      status: "failed",
+      message: expect.stringContaining(
+        `Pushed branch ${branch} to acme/app at ${second?.head}, but pull request #1 changed on GitHub after the push`,
+      ),
+    });
+    expect(github.calls.filter((call) => call.method === "PATCH")).toHaveLength(patches);
+  });
+
+  it.each<[string, Partial<FakePullRequest>]>([
+    ["another commit", { sha: "f".repeat(40) }],
+    ["another base", { base: "dev" }],
+    ["a closed pull request", { state: "closed" }],
+    ["another head repository", { headRepo: "mallory/app" }],
+  ])("does not confirm a 201 naming %s", async (_, overrides) => {
+    const { attempt, github } = setup();
+    github.intercepts.push((method) =>
+      method === "POST"
+        ? Response.json({ ...wireOf(fake(9, overrides), remoteHead()) }, { status: 201 })
+        : undefined,
+    );
+    const record = await attempt("attempt-1", "greeting.txt");
+    expect(record?.pullRequest).toMatchObject({
+      status: "failed",
+      message: expect.stringContaining(
+        `Pushed branch ${branch} to acme/app at ${record?.head}, but GitHub's answer to opening the pull request (#9) does not match`,
+      ),
+    });
+    expect(record?.pullRequest).not.toHaveProperty("pullRequest");
+    expect(github.calls.filter((call) => call.method === "PATCH")).toEqual([]);
+  });
+
+  it.each([
+    ["POST", "opening the pull request", "a lost response"],
+    ["POST", "opening the pull request", "a malformed response"],
+    ["PATCH", "updating pull request #1's title and body", "a lost response"],
+    ["PATCH", "updating pull request #1's title and body", "a malformed response"],
+  ])("reports only the push after %s with %s", async (verb, request, kind) => {
+    const { attempt, github } = setup();
+    if (verb === "PATCH") await attempt("attempt-1", "greeting.txt");
+    github.intercepts.push((method) => {
+      if (method !== verb) return undefined;
+      // GitHub committed the request; its answer never arrives intact.
+      if (kind === "a lost response") throw new TypeError("connection reset");
+      return new Response("{not json", { status: verb === "POST" ? 201 : 200 });
+    });
+    const record = await attempt("attempt-2", "farewell.txt");
+    const message = String((record?.pullRequest as { message?: string } | undefined)?.message);
+    expect(record?.pullRequest).toMatchObject({ status: "failed" });
+    expect(message).toContain(`Pushed branch ${branch} to acme/app at ${record?.head}`);
+    expect(message).toContain(`the outcome of ${request} is uncertain`);
+    expect(message).not.toMatch(/opened|updated|failed/u);
+  });
+
+  describe("on 422 after the push", () => {
+    // The racing pull request appears once SuperTag tries to create its own.
+    const race = (
+      github: ReturnType<typeof fakeGitHub>,
+      pull: (sha: string) => FakePullRequest | undefined,
+    ) =>
+      github.intercepts.push((method) => {
+        if (method !== "POST") return undefined;
+        const raced = pull(remoteHead());
+        if (raced) github.pulls.push(raced);
+        return Response.json({ message: "A pull request already exists" }, { status: 422 });
+      });
+
+    it("adopts the one open pull request that matches the pushed commit", async () => {
+      const { attempt, github } = setup();
+      race(github, (sha) => fake(3, { sha }));
+      const record = await attempt("attempt-1", "greeting.txt", {}, "Add greeting");
+      expect(record?.pullRequest).toMatchObject({ status: "updated", pullRequest: { number: 3 } });
+      // The push already delivered the head; the adopted pull request is not edited.
+      expect(github.calls.filter((call) => call.method === "PATCH")).toEqual([]);
+      expect(github.calls).toContainEqual({ method: "GET", path: "/repos/acme/app/pulls/3" });
+    });
+
+    it.each<[string, (sha: string) => FakePullRequest | undefined]>([
+      ["merged", (sha) => fake(3, { sha, state: "closed", merged_at: "2026-11-08T12:00:00Z" })],
+      ["closed", (sha) => fake(3, { sha, state: "closed" })],
+      ["wrong base", (sha) => fake(3, { sha, base: "dev" })],
+      ["wrong head", (sha) => fake(3, { sha, head: "other" })],
+      ["other commit", () => fake(3, { sha: "f".repeat(40) })],
+      ["no", () => undefined],
+    ])("leaves a %s pull request untouched and reports partial delivery", async (_, pull) => {
+      const { attempt, github } = setup();
+      race(github, pull);
+      const record = await attempt("attempt-1", "greeting.txt");
+      expect(record?.pullRequest).toMatchObject({
+        status: "failed",
+        message: expect.stringContaining(`Pushed branch ${branch} to acme/app at ${record?.head}`),
+      });
+      expect(github.calls.filter((call) => call.method === "PATCH")).toEqual([]);
+    });
   });
 
   it("records the pull request on the Task Attempt result", async () => {
-    const github = fakeGitHub();
+    const github = fakeGitHub(() => remoteHead());
     const state = await mkdtemp(join(tmpdir(), "supertag-pr-state-"));
     const fallback = await mkdtemp(join(tmpdir(), "supertag-pr-fallback-"));
     cleanups.push(() => rm(state, { recursive: true, force: true }));
