@@ -81,31 +81,6 @@ One Tag can split the work across three work Sessions.
 decide whether to migrate existing plans or allow customer charges. When the next billing issue
 comes up, you can go back to the same Tag.
 
-<details>
-<summary>See a real run for a small edit</summary>
-
-This earlier CLI transcript shows a Tag starting one work Session and reporting its result.
-Formatting is lightly trimmed.
-
-```text
-$ supertag message tag lead 'apply_discount accepts percentages over 100 and returns negative amounts. Fix it so the percent must be between 0 and 100, add a test, and tell me the branch.'
-I've started a work session to fix this. It will change apply_discount so a percent below 0 or
-above 100 raises an error, add tests for out-of-range values and the 0 and 100 edge cases, then
-commit on a new branch. When it finishes, I'll tell you the branch, the commit, and the results.
-· working: Validate apply_discount percent range
-· done: Validate apply_discount percent range
-apply_discount now raises a ValueError when the percent is below 0 or above 100, and the new
-tests pass.
-
-Branch: supertag/session/b3861d05 in the Workspace repo.
-- invoice.py: rejects any percent outside 0–100 before the discount is calculated.
-- test_invoice.py (new): 101 and -1 are rejected; apply_discount(100, 0) == 100 and
-  apply_discount(100, 100) == 0.
-Tests: python3 -m unittest -v ran 5 tests, all passing.
-```
-
-</details>
-
 ## How you use SuperTag
 
 | | Step | What happens |
