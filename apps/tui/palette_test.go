@@ -246,7 +246,7 @@ func TestThePaletteCreatesAnObjective(t *testing.T) {
 		t.Fatalf("%d creates, want one", len(created))
 	}
 	got := created[0]
-	if got.GetOutcome() != "Ship SSO / with tests" || got.GetOwner() != "lead" || got.GetTeam() != "billing" || got.GetId() != "" ||
+	if got.GetOutcome() != "Ship SSO / with tests" || got.GetOwner() != "lead" || got.GetTeam() != "billing" || !strings.HasPrefix(got.GetId(), "ship-sso-with-") ||
 		got.GetBudget().GetLimitMinor() != 125050 || got.GetBudget().GetCurrency() != "USD" {
 		t.Fatalf("request = %v", got)
 	}
