@@ -13,7 +13,7 @@ import {
 import { and, asc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { runDialectTransaction } from "./dialect-transaction.js";
 import { resourceChangeDelta } from "./resource-change.js";
-import { appendResourceChange } from "./resource-change-store.js";
+import { appendResourceChange, lastResourceRevision } from "./resource-change-store.js";
 
 const TEAM_CHANGE_FIELDS = ["maxConcurrency", "memberTagIds", "name"] as const;
 
@@ -90,7 +90,13 @@ export class DrizzleTeamStore implements TeamStore {
       .onConflictDoNothing()
       .returning();
     if (!created) throw new TagMessagingError(409, "Team ID or name is already in use");
-    const team = teamFromRow(created);
+    // Claim the ID before reading its history so a concurrent deletion cannot advance it
+    // between the history read and insertion. The initial revision stays inside this transaction.
+    const revision = (yield* lastResourceRevision(tx, this.tables, "team", row.id)) + 1;
+    if (revision !== 1) {
+      yield tx.update(t).set({ revision }).where(eq(t.id, row.id)).returning();
+    }
+    const team = teamFromRow({ ...created, revision });
     yield* appendResourceChange(tx, this.tables, {
       resourceType: "team",
       resourceId: team.id,
@@ -195,6 +201,20 @@ export class DrizzleTeamStore implements TeamStore {
       .returning();
     yield tx.delete(p).where(eq(p.teamId, id)).returning();
     yield tx.delete(t).where(eq(t.id, id)).returning();
+    yield* appendResourceChange(tx, this.tables, {
+      resourceType: "team",
+      resourceId: id,
+      fromRevision: team.revision,
+      toRevision: team.revision + 1,
+      actorTagId: null,
+      operatorId: null,
+      sourceTaskId: null,
+      changes: resourceChangeDelta(
+        teamFromRow(team) as unknown as Readonly<Record<string, unknown>>,
+        {},
+        TEAM_CHANGE_FIELDS,
+      ),
+    });
     return true;
   }
   createTeam(input: Parameters<TeamStore["createTeam"]>[0]): Promise<Team> {

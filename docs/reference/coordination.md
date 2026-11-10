@@ -553,6 +553,8 @@ number of Objectives may name one Team.
   `supertag get team NAME` read them.
 - `supertag delete team NAME` deletes the Team and its Workstream posts. It is refused with 409
   while an Objective that is not completed or cancelled names the Team.
+  A Team created again with a deleted Team's ID continues after the deleted Team's last
+  revision, so a revision read before the deletion cannot update the new Team.
 - Membership does two things: members may message one another without a grant, and an Objective
   may start work Sessions of its Team's members.
 - `--max-concurrency N` limits how many turns run at once across the Sessions of every open

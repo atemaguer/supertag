@@ -246,5 +246,46 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       });
       expect(third.map((change) => change.toRevision)).toEqual([3]);
     });
+
+    it("continues a deleted Team's revisions when its ID is created again", async () => {
+      const f = await fixture();
+      const definition = {
+        id: `launch-${randomUUID()}`,
+        name: `Launch ${randomUUID()}`,
+        memberTagIds: [f.owner.id, f.lead.id],
+      };
+      const first = await f.store.createTeam(definition);
+      await f.store.updateTeam(first.id, { expectedRevision: 1, maxConcurrency: 3 });
+      expect(await f.store.deleteTeam(first.id)).toBe(true);
+
+      const again = await f.store.createTeam(definition);
+      expect(again.revision).toBe(4);
+      // A writer still holding the deleted Team's revision cannot change the new one.
+      await expect(
+        f.store.updateTeam(again.id, { expectedRevision: 2, name: "Stale" }),
+      ).rejects.toMatchObject({ statusCode: 409 });
+      expect(
+        (await f.store.updateTeam(again.id, { expectedRevision: 4, maxConcurrency: 1 })).revision,
+      ).toBe(5);
+
+      const changes = await f.reopened.listResourceChanges({
+        resourceType: "team",
+        resourceId: first.id,
+      });
+      expect(changes.map(({ fromRevision, toRevision }) => [fromRevision, toRevision])).toEqual([
+        [0, 1],
+        [1, 2],
+        [2, 3],
+        [0, 4],
+        [4, 5],
+      ]);
+      expect(changes[2]?.changes).toMatchObject({
+        name: { previous: definition.name, next: null },
+        maxConcurrency: { previous: 3, next: null },
+      });
+      expect(changes[3]?.changes).toMatchObject({
+        name: { previous: null, next: definition.name },
+      });
+    });
   });
 }
