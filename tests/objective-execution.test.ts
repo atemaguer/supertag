@@ -185,6 +185,8 @@ it("finishing an Objective does not exempt its completing Attempt from cancellat
   await store.connect();
   let runtime: Awaited<ReturnType<typeof startControlPlaneRuntime>> | undefined;
   let aborted = false;
+  let readyToCancel = false;
+  let workerError: unknown;
   let finish = () => {};
   const released = new Promise<void>((resolve) => {
     finish = resolve;
@@ -231,28 +233,37 @@ it("finishing an Objective does not exempt its completing Attempt from cancellat
         const mcp = (id: number, body: Record<string, unknown>) =>
           fetch(`${spec.coordination?.controlPlaneUrl}/internal/v1/coordination/mcp`, {
             method: "POST",
+            signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
             headers: {
               Authorization: `Bearer ${spec.coordination?.token}`,
               "Content-Type": "application/json",
             },
             body: JSON.stringify({ jsonrpc: "2.0", id, ...body }),
           });
-        const objective = await store.getObjective("finishing");
-        const response = await mcp(1, {
-          method: "tools/call",
-          params: {
-            name: "update_objective",
-            arguments: {
-              status: "completed",
-              expectedRevision: objective.revision,
-              completionSummary: "Success criteria satisfied",
+        try {
+          const objective = await store.getObjective("finishing");
+          const response = await mcp(1, {
+            method: "tools/call",
+            params: {
+              name: "update_objective",
+              arguments: {
+                status: "completed",
+                expectedRevision: objective.revision,
+                completionSummary: "Success criteria satisfied",
+              },
             },
-          },
-        });
-        expect(response.status).toBe(200);
-        expect((await response.json()).result?.isError).not.toBe(true);
-        // Completing the Objective does not end this Attempt; it keeps its own coordination.
-        expect((await mcp(2, { method: "tools/list" })).status).toBe(200);
+          });
+          expect(response.status).toBe(200);
+          expect((await response.json()).result?.isError).not.toBe(true);
+          // Completing the Objective does not end this Attempt; it keeps its own coordination.
+          const tools = await mcp(2, { method: "tools/list" });
+          expect(tools.status).toBe(200);
+          expect((await tools.json()).result?.tools).toBeInstanceOf(Array);
+          readyToCancel = true;
+        } catch (error) {
+          workerError = error;
+          throw error;
+        }
         await released;
         signal.throwIfAborted();
         yield { ...identity, type: "execution.completed" };
@@ -273,21 +284,26 @@ it("finishing an Objective does not exempt its completing Attempt from cancellat
       outcome: "Finish",
       deadline: new Date(Date.now() + 60_000).toISOString(),
     });
+    // The write can be visible before the Worker receives its response and checks its access.
+    // Cancelling before that check would race revocation of the Worker's credential.
     await expect
-      .poll(async () => (await store.getObjective("finishing")).status, { timeout: 20_000 })
-      .toBe("completed");
+      .poll(() => readyToCancel || workerError !== undefined, { timeout: 15_000 })
+      .toBe(true);
+    expect(workerError).toBeUndefined();
+    expect((await store.getObjective("finishing")).status).toBe("completed");
     const [ownerTaskId] = await ownerTaskIds(store, "finishing");
     if (!ownerTaskId) throw new Error("Missing the Objective's own Task");
     // Completion leaves the Attempt that recorded it running, not aborted.
     expect((await store.findTaskById(ownerTaskId))?.status).toBe("running");
     expect(aborted).toBe(false);
     {
-      const cancelled = await workClient({ url: runtime.url, token: "test-admin" }).cancelTask({
-        id: ownerTaskId,
-      });
+      const cancelled = await workClient({ url: runtime.url, token: "test-admin" }).cancelTask(
+        { id: ownerTaskId },
+        { timeoutMs: 5_000 },
+      );
       expect(cancelled.accepted).toBe(true);
     }
-    await expect.poll(() => aborted, { timeout: 25_000 }).toBe(true);
+    await expect.poll(() => aborted, { timeout: 10_000 }).toBe(true);
   } finally {
     finish();
     await runtime?.close();
