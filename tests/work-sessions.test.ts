@@ -27,6 +27,7 @@ import {
   sessionRequesterKey,
 } from "../packages/core/src/index.ts";
 import {
+  ActivityStatus,
   type FollowEvent,
   type Message,
   MessageSchema,
@@ -1854,14 +1855,26 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         }
       });
 
-      it("follows a quick work Session's commands after the turn's finish", async () => {
-        const posted = await post("work:CMD probe");
+      it("follows a live work Session's commands after the turn's finish", async () => {
+        const posted = await post("work:CMD BLOCK probe");
         const events: FollowEvent[] = [];
         for await (const event of conversations().followMessage(
           { tag: "planner", taskId: posted.taskId },
-          { timeoutMs: 0 },
-        ))
+          { timeoutMs: 15_000 },
+        )) {
           events.push(event);
+          const part = event.part;
+          if (
+            part.case === "activity" &&
+            part.value.workSessionId !== "" &&
+            part.value.detail?.case === "command" &&
+            part.value.detail.value.status === ActivityStatus.COMPLETED
+          ) {
+            // Keep the Task's live activity available until the follower reads it.
+            await vi.waitFor(() => expect(script.runningWork()).toBe(1), { timeout: 5_000 });
+            script.release();
+          }
+        }
         const finish = events.findIndex((event) => event.part.case === "finish");
         const ended = events.at(-1);
         const [work] =
@@ -1874,7 +1887,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
         );
         expect(commands.map((command) => command.text)).toEqual(["running: pnpm probe", ""]);
         expect(commands[0]?.index).toBeGreaterThan(finish);
-      });
+      }, 20_000);
 
       it("continues a work Session decided while its Task still ran", async () => {
         await requireMergeApproval("github-work-sessions-early");
