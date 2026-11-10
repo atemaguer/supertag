@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -35,6 +37,8 @@ type objectiveForm struct {
 	note    note
 	// request is what was last sent; created is the Control Plane's answer once the Objective
 	// exists.
+	// request.ID is generated once per logical submission and reused while the content is
+	// unchanged, so a retry after a lost answer reaches the same Objective instead of a second one.
 	request client.NewObjective
 	created *operatorv1.CreateObjectiveResponse
 }
@@ -135,7 +139,15 @@ func (m *model) createObjective() tea.Cmd {
 	if err != nil {
 		return invalid(fieldBudget, err.Error())
 	}
-	f.request = client.NewObjective{Outcome: outcome, Owner: f.owner, Team: strings.TrimSpace(f.fields[fieldTeam].Value()), Budget: budget}
+	next := client.NewObjective{Outcome: outcome, Owner: f.owner, Team: strings.TrimSpace(f.fields[fieldTeam].Value()), Budget: budget}
+	if f.request.ID != "" && sameSubmission(f.request, next) {
+		next.ID = f.request.ID
+	} else if next.ID, err = newObjectiveID(outcome); err != nil {
+		f.note = note{text: terminalText(err.Error()), err: true}
+		m.refresh()
+		return nil
+	}
+	f.request = next
 	return m.sendForm()
 }
 
@@ -297,4 +309,32 @@ func parseBudget(text string) (*operatorv1.Budget, error) {
 		return nil, fmt.Errorf("A budget must be more than zero.")
 	}
 	return &operatorv1.Budget{LimitMinor: minor, Currency: currency}, nil
+}
+
+// sameSubmission reports whether two form submissions declare the same Objective, ignoring IDs.
+func sameSubmission(a, b client.NewObjective) bool {
+	return a.Outcome == b.Outcome && a.Owner == b.Owner && a.Team == b.Team &&
+		a.Budget.GetLimitMinor() == b.Budget.GetLimitMinor() && a.Budget.GetCurrency() == b.Budget.GetCurrency() &&
+		(a.Budget == nil) == (b.Budget == nil)
+}
+
+// objectiveSlug keeps the outcome's first words as lowercase letters and digits.
+var objectiveSlug = regexp.MustCompile(`[a-z0-9]+`)
+
+// newObjectiveID names a new submission: the outcome's first words and a random suffix, such as
+// `ship-sso-3f9a01c2`.
+func newObjectiveID(outcome string) (string, error) {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	words := objectiveSlug.FindAllString(strings.ToLower(outcome), 3)
+	slug := strings.Join(words, "-")
+	if len(slug) > 40 {
+		slug = strings.Trim(slug[:40], "-")
+	}
+	if slug == "" {
+		slug = "objective"
+	}
+	return slug + "-" + hex.EncodeToString(b[:]), nil
 }

@@ -57,6 +57,10 @@ const (
 	// Team's. Reread the Objectives the Team serves with
 	// `ObjectiveService.DescribeObjective`, which carries the newest posts.
 	WatchKind_WATCH_KIND_WORKSTREAM_POST WatchKind = 8
+	// A Team was created, changed, including its name, members or turn limit,
+	// or deleted. `id` and `team_id` are the Team's ID. Reread it with
+	// `TeamService.GetTeam`, which fails with `NotFound` once it is deleted.
+	WatchKind_WATCH_KIND_TEAM WatchKind = 9
 )
 
 // Enum value maps for WatchKind.
@@ -71,6 +75,7 @@ var (
 		6: "WATCH_KIND_APPROVAL",
 		7: "WATCH_KIND_CONVERSATION_MESSAGE",
 		8: "WATCH_KIND_WORKSTREAM_POST",
+		9: "WATCH_KIND_TEAM",
 	}
 	WatchKind_value = map[string]int32{
 		"WATCH_KIND_UNSPECIFIED":          0,
@@ -82,6 +87,7 @@ var (
 		"WATCH_KIND_APPROVAL":             6,
 		"WATCH_KIND_CONVERSATION_MESSAGE": 7,
 		"WATCH_KIND_WORKSTREAM_POST":      8,
+		"WATCH_KIND_TEAM":                 9,
 	}
 )
 
@@ -476,7 +482,7 @@ const file_supertag_operator_v1_event_proto_rawDesc = "" +
 	"changed_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tchangedAt\x12\x17\n" +
 	"\ateam_id\x18\n" +
 	" \x01(\tR\x06teamId\"\r\n" +
-	"\vWatchResync*\xfb\x01\n" +
+	"\vWatchResync*\x90\x02\n" +
 	"\tWatchKind\x12\x1a\n" +
 	"\x16WATCH_KIND_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eWATCH_KIND_TAG\x10\x01\x12\x16\n" +
@@ -486,7 +492,8 @@ const file_supertag_operator_v1_event_proto_rawDesc = "" +
 	"\x15WATCH_KIND_INBOX_ITEM\x10\x05\x12\x17\n" +
 	"\x13WATCH_KIND_APPROVAL\x10\x06\x12#\n" +
 	"\x1fWATCH_KIND_CONVERSATION_MESSAGE\x10\a\x12\x1e\n" +
-	"\x1aWATCH_KIND_WORKSTREAM_POST\x10\b2x\n" +
+	"\x1aWATCH_KIND_WORKSTREAM_POST\x10\b\x12\x13\n" +
+	"\x0fWATCH_KIND_TEAM\x10\t2x\n" +
 	"\fEventService\x12h\n" +
 	"\x05Watch\x12\".supertag.operator.v1.WatchRequest\x1a .supertag.operator.v1.WatchEvent\"\x17\x8a\xb5\x18\fwatch_events\xa8\xb5\x18\x01\x90\x02\x010\x01BNZLgithub.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1b\x06proto3"
 

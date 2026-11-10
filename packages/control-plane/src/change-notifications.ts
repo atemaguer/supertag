@@ -9,7 +9,8 @@ export type ChangeKind =
   | "inbox_item"
   | "approval"
   | "conversation_message"
-  | "workstream_post";
+  | "workstream_post"
+  | "team";
 
 /** A notice that one thing changed. It names the thing and carries none of its state. */
 export interface ChangeNotice {

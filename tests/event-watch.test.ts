@@ -92,7 +92,10 @@ describe("EventService.Watch", () => {
         kind: "coordination",
         principal: {
           operatorId: "coordinator",
-          scopes: { actions: ["watch_events", "read_objective"], objectiveIds: ["objective-1"] },
+          scopes: {
+            actions: ["watch_events", "read_objective", "read_team"],
+            objectiveIds: ["objective-1"],
+          },
         },
       },
     } satisfies Record<string, OperatorAuthentication>);
@@ -206,6 +209,7 @@ describe("EventService.Watch", () => {
       notice({ kind: "approval", id: "approval-1", taskId: "task-x" }),
       notice({ kind: "task", id: "task-objective-1", objectiveId: "objective-1" }),
       notice({ kind: "session", id: "session-objective-1" }),
+      notice({ kind: "team", id: "team-1", teamId: "team-1" }),
       notice({ kind: "tag", id: "tag-last", tag: "last" }),
       notice({ kind: "workstream_post", id: "post-team-2", teamId: "team-2" }),
       notice({ kind: "workstream_post", id: "post-team-1", teamId: "team-1" }),
@@ -220,6 +224,7 @@ describe("EventService.Watch", () => {
       "approval-1",
       "task-objective-1",
       "session-objective-1",
+      "team-1",
       "tag-last",
     ]);
     expect(ids(await watchWhile("alice", published, last))).toEqual([
@@ -229,6 +234,7 @@ describe("EventService.Watch", () => {
       "approval-1",
       "task-objective-1",
       "session-objective-1",
+      "team-1",
       "tag-last",
     ]);
     // A scoped coordination credential sees its Objectives, their Tasks and their Team's posts,
@@ -243,7 +249,11 @@ describe("EventService.Watch", () => {
         await watchWhile(ADMIN, published, (events) => ids(events).includes("post-team-1")),
       ).at(-1),
     ).toMatchObject({ kind: WatchKind.WORKSTREAM_POST, id: "post-team-1", teamId: "team-1" });
-    // Objectives in scope only; no approval outside an Objective, nor kinds it lacks actions for.
+    expect(
+      changed(await watchWhile(ADMIN, published, last)).find((change) => change.id === "team-1"),
+    ).toMatchObject({ kind: WatchKind.TEAM, id: "team-1", teamId: "team-1", tag: "" });
+    // Objectives in scope only; no approval outside an Objective, nor kinds it lacks actions for,
+    // such as Teams without `read_team`.
     expect(ids(await watchWhile("scoped", published, last))).toEqual([
       "objective-1",
       "task-objective-1",

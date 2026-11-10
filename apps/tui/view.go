@@ -344,6 +344,8 @@ func (m model) paneTitle() string {
 			name = view.Team.GetName()
 		} else if team := m.listedTeam(m.teamID); team != nil {
 			name = team.GetName()
+		} else if gone := m.teamReads.gone[m.teamID]; gone != "" {
+			name = gone
 		}
 		return "Team · " + terminalText(name)
 	case paneNewObjective:

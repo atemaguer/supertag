@@ -24,6 +24,9 @@ within the pre-1.0 compatibility policy described in
 
 ### Fixed
 
+- Retrying the same Objective creation in the terminal UI after a lost response
+  reuses its ID, so it creates only one Objective.
+- The terminal UI refreshes the Teams list and open Team details after Team edits.
 - Work Session retries keep their recorded branch and commit. Pull request delivery holds when
   GitHub reports a merged, closed, or ambiguous pull request, and reports the pushed commit
   when delivery stops after a push.

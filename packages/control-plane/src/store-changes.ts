@@ -20,7 +20,8 @@ type StoreChange =
   | { readonly kind: "objective"; readonly objective: Objective; readonly reason: string }
   | { readonly kind: "approval"; readonly request: ApprovalRequest; readonly reason: string }
   | { readonly kind: "reply"; readonly inboundEventId: string; readonly reason: string }
-  | { readonly kind: "post"; readonly post: WorkstreamPost; readonly reason: string };
+  | { readonly kind: "post"; readonly post: WorkstreamPost; readonly reason: string }
+  | { readonly kind: "team"; readonly teamId: string; readonly reason: string };
 
 interface StoreWrite {
   /** Reads what the write is about before it runs, as a Tag that it deletes. */
@@ -128,7 +129,21 @@ const STORE_WRITES: Readonly<Record<string, StoreWrite>> = {
         : [],
   },
   expireApprovalRequest: { changes: approvalWrite("expired") },
+  createTeam: { changes: (_args, team) => teamChange(team, "created") },
+  updateTeam: { changes: (_args, team) => teamChange(team, "changed") },
+  deleteTeam: {
+    changes: ([id], deleted) =>
+      deleted === true && typeof id === "string"
+        ? [{ kind: "team", teamId: id, reason: "deleted" }]
+        : [],
+  },
 };
+
+function teamChange(team: unknown, reason: string): readonly StoreChange[] {
+  return isRecord(team) && typeof team["id"] === "string"
+    ? [{ kind: "team", teamId: team["id"], reason }]
+    : [];
+}
 
 /** How long an inbox rescan waits for more changes after the one that asked for it. */
 const INBOX_SCAN_DELAY_MS = 500;
@@ -138,7 +153,7 @@ const INBOX_MAX_PAGES = 20;
 /**
  * Returns `store` with each write that changes what operators watch publishing a notice to
  * `changes`: Tags, Sessions, Tasks, Objectives, approval requests, messages in CLI conversations,
- * Workstream posts, and the inbox items they make, which it finds by rereading the inbox. A
+ * Workstream posts, Teams, and the inbox items they make, which it finds by rereading the inbox. A
  * notice is published once the write succeeds, in the order the writes finished; naming it reads
  * the store, which never fails the write.
  */
@@ -341,6 +356,16 @@ class StoreChangeObserver {
           kind: "workstream_post",
           id: change.post.id,
           teamId: change.post.teamId,
+          reason: change.reason,
+          changedAt,
+        },
+      ];
+    if (change.kind === "team")
+      return [
+        {
+          kind: "team",
+          id: change.teamId,
+          teamId: change.teamId,
           reason: change.reason,
           changedAt,
         },

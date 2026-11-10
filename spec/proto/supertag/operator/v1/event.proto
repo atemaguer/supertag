@@ -58,6 +58,9 @@ service EventService {
   //   admin token and Operator Tokens. A scoped coordination credential with
   //   the `read_objective` action sees posts to the Teams of Objectives its
   //   scope allows, as `ObjectiveService.DescribeObjective` shows them.
+  // - `WATCH_KIND_TEAM`: every Team, for the admin token and Operator Tokens
+  //   with the `read_team` action. A scoped coordination credential sees
+  //   none.
   //
   // The admin token and Operator Tokens carry every action and have no
   // Objective scope. A scoped coordination credential needs the
@@ -130,6 +133,10 @@ enum WatchKind {
   // Team's. Reread the Objectives the Team serves with
   // `ObjectiveService.DescribeObjective`, which carries the newest posts.
   WATCH_KIND_WORKSTREAM_POST = 8;
+  // A Team was created, changed, including its name, members or turn limit,
+  // or deleted. `id` and `team_id` are the Team's ID. Reread it with
+  // `TeamService.GetTeam`, which fails with `NotFound` once it is deleted.
+  WATCH_KIND_TEAM = 9;
 }
 
 // A notice that one thing changed. Only the fields its kind names are set.

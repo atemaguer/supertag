@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/operator/v1/event.proto.
  */
 export const file_supertag_operator_v1_event: GenFile = /*@__PURE__*/
-  fileDesc("CiBzdXBlcnRhZy9vcGVyYXRvci92MS9ldmVudC5wcm90bxIUc3VwZXJ0YWcub3BlcmF0b3IudjEiVAoMV2F0Y2hSZXF1ZXN0EhQKDHJlc3VtZV90b2tlbhgBIAEoCRIuCgVraW5kcxgCIAMoDjIfLnN1cGVydGFnLm9wZXJhdG9yLnYxLldhdGNoS2luZCLLAQoKV2F0Y2hFdmVudBIUCgxyZXN1bWVfdG9rZW4YASABKAkSMwoGY2hhbmdlGAIgASgLMiEuc3VwZXJ0YWcub3BlcmF0b3IudjEuV2F0Y2hDaGFuZ2VIABIzCgZyZXN5bmMYAyABKAsyIS5zdXBlcnRhZy5vcGVyYXRvci52MS5XYXRjaFJlc3luY0gAEjQKCWhlYXJ0YmVhdBgEIAEoCzIfLnN1cGVydGFnLm9wZXJhdG9yLnYxLkhlYXJ0YmVhdEgAQgcKBWV2ZW50IvcBCgtXYXRjaENoYW5nZRItCgRraW5kGAEgASgOMh8uc3VwZXJ0YWcub3BlcmF0b3IudjEuV2F0Y2hLaW5kEgoKAmlkGAIgASgJEgsKA3RhZxgDIAEoCRISCgpzZXNzaW9uX2lkGAQgASgJEg8KB3Rhc2tfaWQYBSABKAkSFAoMb2JqZWN0aXZlX2lkGAYgASgJEhQKDGNvbnZlcnNhdGlvbhgHIAEoCRIOCgZyZWFzb24YCCABKAkSLgoKY2hhbmdlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDwoHdGVhbV9pZBgKIAEoCSINCgtXYXRjaFJlc3luYyr7AQoJV2F0Y2hLaW5kEhoKFldBVENIX0tJTkRfVU5TUEVDSUZJRUQQABISCg5XQVRDSF9LSU5EX1RBRxABEhYKEldBVENIX0tJTkRfU0VTU0lPThACEhMKD1dBVENIX0tJTkRfVEFTSxADEhgKFFdBVENIX0tJTkRfT0JKRUNUSVZFEAQSGQoVV0FUQ0hfS0lORF9JTkJPWF9JVEVNEAUSFwoTV0FUQ0hfS0lORF9BUFBST1ZBTBAGEiMKH1dBVENIX0tJTkRfQ09OVkVSU0FUSU9OX01FU1NBR0UQBxIeChpXQVRDSF9LSU5EX1dPUktTVFJFQU1fUE9TVBAIMngKDEV2ZW50U2VydmljZRJoCgVXYXRjaBIiLnN1cGVydGFnLm9wZXJhdG9yLnYxLldhdGNoUmVxdWVzdBogLnN1cGVydGFnLm9wZXJhdG9yLnYxLldhdGNoRXZlbnQiF5ACAYq1GAx3YXRjaF9ldmVudHOotRgBMAFCTlpMZ2l0aHViLmNvbS9hdGVtYWd1ZXIvc3VwZXJ0YWcvcGFja2FnZXMvb3BlcmF0b3ItYXBpL2dvL29wZXJhdG9ydjE7b3BlcmF0b3J2MWIGcHJvdG8z", [file_google_protobuf_timestamp, file_supertag_operator_v1_common, file_supertag_operator_v1_options]);
+  fileDesc("CiBzdXBlcnRhZy9vcGVyYXRvci92MS9ldmVudC5wcm90bxIUc3VwZXJ0YWcub3BlcmF0b3IudjEiVAoMV2F0Y2hSZXF1ZXN0EhQKDHJlc3VtZV90b2tlbhgBIAEoCRIuCgVraW5kcxgCIAMoDjIfLnN1cGVydGFnLm9wZXJhdG9yLnYxLldhdGNoS2luZCLLAQoKV2F0Y2hFdmVudBIUCgxyZXN1bWVfdG9rZW4YASABKAkSMwoGY2hhbmdlGAIgASgLMiEuc3VwZXJ0YWcub3BlcmF0b3IudjEuV2F0Y2hDaGFuZ2VIABIzCgZyZXN5bmMYAyABKAsyIS5zdXBlcnRhZy5vcGVyYXRvci52MS5XYXRjaFJlc3luY0gAEjQKCWhlYXJ0YmVhdBgEIAEoCzIfLnN1cGVydGFnLm9wZXJhdG9yLnYxLkhlYXJ0YmVhdEgAQgcKBWV2ZW50IvcBCgtXYXRjaENoYW5nZRItCgRraW5kGAEgASgOMh8uc3VwZXJ0YWcub3BlcmF0b3IudjEuV2F0Y2hLaW5kEgoKAmlkGAIgASgJEgsKA3RhZxgDIAEoCRISCgpzZXNzaW9uX2lkGAQgASgJEg8KB3Rhc2tfaWQYBSABKAkSFAoMb2JqZWN0aXZlX2lkGAYgASgJEhQKDGNvbnZlcnNhdGlvbhgHIAEoCRIOCgZyZWFzb24YCCABKAkSLgoKY2hhbmdlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDwoHdGVhbV9pZBgKIAEoCSINCgtXYXRjaFJlc3luYyqQAgoJV2F0Y2hLaW5kEhoKFldBVENIX0tJTkRfVU5TUEVDSUZJRUQQABISCg5XQVRDSF9LSU5EX1RBRxABEhYKEldBVENIX0tJTkRfU0VTU0lPThACEhMKD1dBVENIX0tJTkRfVEFTSxADEhgKFFdBVENIX0tJTkRfT0JKRUNUSVZFEAQSGQoVV0FUQ0hfS0lORF9JTkJPWF9JVEVNEAUSFwoTV0FUQ0hfS0lORF9BUFBST1ZBTBAGEiMKH1dBVENIX0tJTkRfQ09OVkVSU0FUSU9OX01FU1NBR0UQBxIeChpXQVRDSF9LSU5EX1dPUktTVFJFQU1fUE9TVBAIEhMKD1dBVENIX0tJTkRfVEVBTRAJMngKDEV2ZW50U2VydmljZRJoCgVXYXRjaBIiLnN1cGVydGFnLm9wZXJhdG9yLnYxLldhdGNoUmVxdWVzdBogLnN1cGVydGFnLm9wZXJhdG9yLnYxLldhdGNoRXZlbnQiF5ACAYq1GAx3YXRjaF9ldmVudHOotRgBMAFCTlpMZ2l0aHViLmNvbS9hdGVtYWd1ZXIvc3VwZXJ0YWcvcGFja2FnZXMvb3BlcmF0b3ItYXBpL2dvL29wZXJhdG9ydjE7b3BlcmF0b3J2MWIGcHJvdG8z", [file_google_protobuf_timestamp, file_supertag_operator_v1_common, file_supertag_operator_v1_options]);
 
 /**
  * @generated from message supertag.operator.v1.WatchRequest
@@ -278,6 +278,15 @@ export enum WatchKind {
    * @generated from enum value: WATCH_KIND_WORKSTREAM_POST = 8;
    */
   WORKSTREAM_POST = 8,
+
+  /**
+   * A Team was created, changed, including its name, members or turn limit,
+   * or deleted. `id` and `team_id` are the Team's ID. Reread it with
+   * `TeamService.GetTeam`, which fails with `NotFound` once it is deleted.
+   *
+   * @generated from enum value: WATCH_KIND_TEAM = 9;
+   */
+  TEAM = 9,
 }
 
 /**
@@ -342,6 +351,9 @@ export const EventService: GenService<{
    *   admin token and Operator Tokens. A scoped coordination credential with
    *   the `read_objective` action sees posts to the Teams of Objectives its
    *   scope allows, as `ObjectiveService.DescribeObjective` shows them.
+   * - `WATCH_KIND_TEAM`: every Team, for the admin token and Operator Tokens
+   *   with the `read_team` action. A scoped coordination credential sees
+   *   none.
    *
    * The admin token and Operator Tokens carry every action and have no
    * Objective scope. A scoped coordination credential needs the
