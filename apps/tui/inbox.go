@@ -28,6 +28,24 @@ func (m model) inboxRow(item *operatorv1.InboxItem) string {
 	return "· " + terminalText(inboxHeadline(item))
 }
 
+// inboxWaitState says what the work behind an item is doing while it waits, so a decision that
+// holds a running Task Attempt reads differently from a Session that finished its turn:
+// "blocking" for an approval a running or waiting Task Attempt waits on, "not blocking" for one no
+// Task Attempt waits on, and "turn finished" for a question its owner's Session waits to have
+// answered as its next turn. Other kinds have none.
+func inboxWaitState(item *operatorv1.InboxItem) string {
+	switch item.GetKind() {
+	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_APPROVAL:
+		if item.GetApproval().GetBlocking() {
+			return "blocking"
+		}
+		return "not blocking"
+	case operatorv1.InboxItemKind_INBOX_ITEM_KIND_QUESTION:
+		return "turn finished"
+	}
+	return ""
+}
+
 // inboxHeadline says what an inbox item waits on in one line, as `supertag list inbox` does.
 func inboxHeadline(item *operatorv1.InboxItem) string {
 	task := "?"
@@ -117,6 +135,7 @@ func (m model) renderItem() string {
 			add("", "The question is not shown to this credential.")
 			break
 		}
+		add("", "The owner's Task finished its turn; its Session waits for your answer as its next turn.")
 		add("", "The owner asks:", "")
 		for _, line := range strings.Split(terminalLines(question.GetText()), "\n") {
 			add("  " + line)
@@ -135,6 +154,8 @@ func (m model) renderItem() string {
 		}
 		if approval.GetBlocking() {
 			add("A running Task Attempt waits on the decision.")
+		} else {
+			add("No running Task Attempt waits on the decision.")
 		}
 	default:
 		if item.GetReason() != "" {

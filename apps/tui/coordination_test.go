@@ -470,3 +470,108 @@ func TestMoney(t *testing.T) {
 		t.Errorf("shortMoney = %q", got)
 	}
 }
+
+// An item settled elsewhere leaves the inbox; the pane follows the cursor to the item that took
+// its place instead of keeping the removed one, and to the clamped row once the inbox is empty.
+func TestASettledItemHandsThePaneToTheNowSelectedItem(t *testing.T) {
+	fake := coordinationFake()
+	all := fake.items
+	gone := map[string]bool{}
+	fake.items = func() []*operatorv1.InboxItem {
+		var kept []*operatorv1.InboxItem
+		for _, item := range all() {
+			if !gone[item.GetKey()] {
+				kept = append(kept, item)
+			}
+		}
+		return kept
+	}
+	m := startAll(t, testModel(t, fake))
+	m = update(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = moveTo(t, m, "? ")
+	gone["question:task-own"] = true
+	m = run(t, m, m.reloadInbox())
+	if m.pane != paneInbox || m.item.GetKey() != "approval:apr-1" {
+		t.Fatalf("pane shows %v %q, want the approval that took the question's place", m.pane, m.item.GetKey())
+	}
+	if r := m.rows()[m.cursor]; r.kind != rowInbox || m.inbox.Items[r.index].GetKey() != "approval:apr-1" {
+		t.Fatalf("cursor is on %v, not the shown approval", r)
+	}
+	got := screen(m)
+	if strings.Contains(got, "Should 100% stay allowed?") || strings.Contains(got, "This item is settled") ||
+		!strings.Contains(got, "Push supertag/session/b3861d05 to origin") || !strings.Contains(got, "a approve · d deny") {
+		t.Fatalf("after the question left:\n%s", got)
+	}
+	gone["approval:apr-1"] = true
+	m = run(t, m, m.reloadInbox())
+	if m.pane == paneInbox {
+		t.Fatalf("pane still shows the removed %q", m.item.GetKey())
+	}
+	if want := m.rowKey(m.rows()[m.cursor]); want != m.paneKey() {
+		t.Fatalf("pane %q and cursor %q disagree", m.paneKey(), want)
+	}
+}
+
+// An approval a running Task Attempt waits on reads differently from a question whose Session
+// finished its turn, and from an approval nothing waits on.
+func TestTheInboxTellsABlockingApprovalFromAFinishedTurn(t *testing.T) {
+	fake := coordinationFake()
+	all := fake.items
+	fake.items = func() []*operatorv1.InboxItem {
+		idle := approvalItem("obj-billing", "apr-2", "Open a pull request")
+		idle.Approval.Blocking = false
+		return append(all(), idle)
+	}
+	m := startAll(t, testModel(t, fake))
+	m = update(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	for _, c := range []struct{ row, title, line, not string }{
+		{"? ", "Waiting on you · question · turn finished", "The owner's Task finished its turn; its Session waits for your answer", "blocking"},
+		{"! Push", "Waiting on you · approval · blocking", "A running Task Attempt waits on the decision.", "turn finished"},
+		{"! Open", "Waiting on you · approval · not blocking", "No running Task Attempt waits on the decision.", "A running Task Attempt waits"},
+	} {
+		m = moveTo(t, m, c.row)
+		got := screen(m)
+		if !strings.Contains(got, c.title) || !strings.Contains(got, c.line) || strings.Contains(got, c.not) {
+			t.Errorf("%s: want %q and %q without %q:\n%s", c.row, c.title, c.line, c.not, got)
+		}
+	}
+}
+
+// A failed decision leaves an error note on the item; when the item is then settled elsewhere and
+// leaves the inbox, that stale note must not keep the pane on it: the pane follows the selection.
+func TestAFailedActionNoteDoesNotStopThePaneFollowing(t *testing.T) {
+	fake := coordinationFake()
+	all := fake.items
+	gone := map[string]bool{}
+	fake.items = func() []*operatorv1.InboxItem {
+		var kept []*operatorv1.InboxItem
+		for _, item := range all() {
+			if !gone[item.GetKey()] {
+				kept = append(kept, item)
+			}
+		}
+		return kept
+	}
+	fake.approve = func(*operatorv1.ApproveRequest) error {
+		return connect.NewError(connect.CodeUnavailable, errors.New("The Control Plane is draining."))
+	}
+	m := startAll(t, testModel(t, fake))
+	m = update(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = moveTo(t, m, "! ")
+	m = press(t, m, letter('a'))
+	m = press(t, m, key(tea.KeyEnter))
+	if !m.itemNote.err || !strings.Contains(screen(m), "The Control Plane is draining.") {
+		t.Fatalf("a failed approve should leave an error note:\n%s", screen(m))
+	}
+	gone["approval:apr-1"] = true
+	m = run(t, m, m.reloadInbox())
+	if m.pane == paneInbox && m.item.GetKey() == "approval:apr-1" {
+		t.Fatalf("pane stayed on the removed approval:\n%s", screen(m))
+	}
+	if want := m.rowKey(m.rows()[m.cursor]); want != m.paneKey() {
+		t.Fatalf("pane %q and cursor %q disagree", m.paneKey(), want)
+	}
+	if got := screen(m); strings.Contains(got, "The Control Plane is draining.") || strings.Contains(got, "This item is settled") {
+		t.Fatalf("stale note shown after following:\n%s", got)
+	}
+}

@@ -1,0 +1,14 @@
+FIXTURE disposable Control Plane started (temporary SQLite state, scripted Worker)
+FIXTURE Tags lead, builder-a, builder-b on one Team; merge requires approval
+FIXTURE Objective started: add CSV export to the reports page
+FIXTURE lead split the outcome into 2 work Sessions: api -> builder-a, ui -> builder-b
+FIXTURE work Session ui reported: completed
+FIXTURE INTERRUPTION injected: scripted Worker threw an error on the api Task Attempt; report status failed
+FIXTURE lead continued work Session api: started
+FIXTURE RECOVERY observed: work Session api resumed in the same Session and reported completed
+FIXTURE QUESTION surfaced in coordination inbox (1 item): "Ship the CSV export behind a feature flag?"
+FIXTURE QUESTION answered by operator: "Yes, behind the csv-export flag."
+FIXTURE APPROVAL surfaced in coordination inbox (1 item): merge fixture/app #42, status pending
+FIXTURE APPROVAL resolved: approved; the lead's retried merge was granted
+FIXTURE dispatch errors: 1 (injected: 1)
+FIXTURE disposable state removed

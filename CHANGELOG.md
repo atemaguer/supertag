@@ -9,11 +9,22 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Added
+
+- Added a runnable Objective walkthrough with an expected transcript showing delegation,
+  a question, an approval, and work Session recovery after an injected Worker error.
+
 ### Changed
 
 - Setup and the quickstart now guide your first conversation through the terminal UI. If there
   are no Tags, SuperTag shows how to get started with `supertag init`.
 - The terminal UI can send follow-up messages to an Objective's owner.
+
+### Fixed
+
+- The terminal UI inbox detail pane follows the selection when an item is settled elsewhere,
+  including after a failed action. The inbox distinguishes approvals that block a running
+  Task Attempt from questions that wait for an answer in the next turn.
 
 ### Removed
 

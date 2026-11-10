@@ -329,7 +329,11 @@ func (m model) paneTitle() string {
 		}
 		return "Objective · " + terminalText(name)
 	case paneInbox:
-		return "Waiting on you · " + itemKindName(m.item.GetKind())
+		title := "Waiting on you · " + itemKindName(m.item.GetKind())
+		if state := inboxWaitState(m.item); state != "" {
+			title += " · " + state
+		}
+		return title
 	case paneDiff:
 		return "Diff · " + m.diff.title
 	case paneConversations:

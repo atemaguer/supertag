@@ -564,15 +564,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inboxErr = terminalText(msg.err.Error())
 			return m, again
 		}
+		left := -1
+		if m.pane == paneInbox && m.item != nil {
+			for i, item := range m.inbox.Items {
+				if item.GetOccurrence() == m.item.GetOccurrence() {
+					left = i
+				}
+			}
+		}
 		m.inbox, m.inboxErr = msg.inbox, ""
+		follow := false
 		if m.pane == paneInbox && m.item != nil {
 			if current := m.inboxItem(m.item.GetOccurrence()); current != nil {
 				m.item = current
 			} else if m.decision != decisionSending {
 				m.decision = decisionNone
+				// Settled elsewhere: show the item now selected in its place rather than a stale
+				// one. After the operator's own successful decision or answer, its outcome note stays
+				// shown; a failed one's error note does not hold the pane.
+				follow = m.itemNote.text == "" || m.itemNote.err
 			}
 		}
 		m.placeCursor()
+		if follow {
+			again = tea.Batch(again, m.followSettled(left))
+		}
 		m.syncInput()
 		m.refresh()
 		return m, again
@@ -1260,6 +1276,22 @@ func (m *model) placeCursor() {
 		}
 	}
 	m.cursor = max(min(m.cursor, len(rows)-1), 0)
+}
+
+// followSettled moves the cursor and the inbox pane off an item that left the inbox: to the item
+// that took its place, the one before it when it was last, or the row the cursor clamped to when
+// the inbox is empty.
+func (m *model) followSettled(index int) tea.Cmd {
+	if n := len(m.inbox.Items); n > 0 {
+		index = max(min(index, n-1), 0)
+		for i, r := range m.rows() {
+			if r.kind == rowInbox && r.index == index {
+				m.cursor = i
+				break
+			}
+		}
+	}
+	return m.choose()
 }
 
 // choose shows the row under the cursor in the main pane.
