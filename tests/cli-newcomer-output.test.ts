@@ -82,14 +82,14 @@ it("lists the routed coordination interfaces and documented flags in root help",
     "supertag grant mailbox RECIPIENT --sender SENDER",
     "supertag list workstream-post --team TEAM",
     "supertag list message --mailbox TAG [--limit N]",
+    "supertag message tag NAME TEXT|- [--session NAME] [--output text|json]",
+    "supertag message objective ID TEXT|- [--output text|json]",
   ])
     expect(text).toContain(entry);
   for (const removed of [
     "supertag coordinate",
     "supertag assign task",
     "supertag start objective",
-    "supertag message tag",
-    "supertag message objective",
     "--no-start",
     "events team",
     "--reply-to",
@@ -102,8 +102,6 @@ it("lists the routed coordination interfaces and documented flags in root help",
 
 describe("CLI messaging commands", () => {
   it.each([
-    ["message", "tag"],
-    ["message", "objective"],
     ["tag", "message"],
     ["objective", "message"],
   ])("rejects %s %s without sending or printing the message", async (command, resource) => {
@@ -122,6 +120,122 @@ describe("CLI messaging commands", () => {
     expect(error.mock.calls.map(([text]) => String(text)).join("")).not.toContain(message);
     expect(output).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("reads a Tag message from stdin and writes its reply as JSON", async () => {
+    const state = mkdtempSync(join(tmpdir(), "supertag-message-cli-"));
+    vi.stubEnv("SUPERTAG_STATE_DIR", state);
+    vi.stubEnv("SUPERTAG_OPERATOR_TOKEN", "test-token");
+    vi.spyOn(process.stdin, Symbol.asyncIterator).mockImplementation(async function* () {
+      yield Buffer.from("Check the invoices.\n");
+    });
+    const reply = { text: "Invoices match." };
+    const message = { taskId: "task-1", tag: "planner", conversation: "billing", reply };
+    const rpc = fakeOperatorRpc({
+      "ConversationService/SendMessage": () => message,
+      "ConversationService/FollowMessage": async function* () {
+        yield { sequence: "1", finish: { reply, message } };
+      },
+      "ConversationService/GetMessage": () => message,
+    });
+    const output = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    try {
+      expect(
+        await main([
+          "--control-plane=http://127.0.0.1:4321",
+          "message",
+          "tag",
+          "planner",
+          "-",
+          "--session",
+          "billing",
+          "--output",
+          "json",
+        ]),
+      ).toBe(0);
+      expect(rpc.called("ConversationService/SendMessage")[0]?.body).toEqual({
+        tag: "planner",
+        conversation: "billing",
+        text: "Check the invoices.\n",
+      });
+      expect(rpc.called("ConversationService/FollowMessage")[0]?.body).toEqual({
+        tag: "planner",
+        taskId: "task-1",
+      });
+      expect(JSON.parse(output.mock.calls.map(([value]) => String(value)).join(""))).toEqual(
+        message,
+      );
+    } finally {
+      rmSync(state, { recursive: true, force: true });
+    }
+  });
+
+  it("sends an Objective follow-up and returns its Task ID for automation", async () => {
+    const state = mkdtempSync(join(tmpdir(), "supertag-message-cli-"));
+    vi.stubEnv("SUPERTAG_STATE_DIR", state);
+    vi.stubEnv("SUPERTAG_OPERATOR_TOKEN", "test-token");
+    const result = { taskId: "task-1", tag: "planner" };
+    const rpc = fakeOperatorRpc({ "ObjectiveService/MessageObjective": () => result });
+    const output = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    try {
+      expect(
+        await main([
+          "--control-plane=http://127.0.0.1:4321",
+          "message",
+          "objective",
+          "billing",
+          "--output=json",
+          "--",
+          "--help",
+        ]),
+      ).toBe(0);
+      expect(rpc.calls).toEqual([
+        {
+          method: "ObjectiveService/MessageObjective",
+          body: { id: "billing", text: "--help", idempotencyKey: expect.any(String) },
+        },
+      ]);
+      expect(JSON.parse(output.mock.calls.map(([value]) => String(value)).join(""))).toEqual(
+        result,
+      );
+    } finally {
+      rmSync(state, { recursive: true, force: true });
+    }
+  });
+
+  it("follows an Objective's reply in text output", async () => {
+    const state = mkdtempSync(join(tmpdir(), "supertag-message-cli-"));
+    vi.stubEnv("SUPERTAG_STATE_DIR", state);
+    vi.stubEnv("SUPERTAG_OPERATOR_TOKEN", "test-token");
+    const result = { taskId: "task-1", tag: "planner" };
+    const reply = { text: "The staging records match." };
+    const message = { ...result, conversation: "objective:billing", reply };
+    const rpc = fakeOperatorRpc({
+      "ObjectiveService/MessageObjective": () => result,
+      "ConversationService/GetMessage": () => message,
+      "ConversationService/FollowMessage": async function* () {
+        yield { sequence: "1", finish: { reply, message } };
+        yield { sequence: "2", end: { message } };
+      },
+    });
+    const output = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+    try {
+      expect(
+        await main([
+          "--control-plane=http://127.0.0.1:4321",
+          "message",
+          "objective",
+          "billing",
+          "Check staging.",
+        ]),
+      ).toBe(0);
+      expect(rpc.called("ConversationService/FollowMessage")[0]?.body).toEqual(result);
+      expect(output.mock.calls.map(([value]) => String(value)).join("")).toBe(
+        "Sent to the conversation of Objective billing.\nThe staging records match.\n",
+      );
+    } finally {
+      rmSync(state, { recursive: true, force: true });
+    }
   });
 
   it("lists a Tag's mailbox through the operator API", async () => {

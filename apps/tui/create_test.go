@@ -43,6 +43,39 @@ func submitForm(t *testing.T, a *app, outcome string) {
 	pressApp(t, a, key(tea.KeyEnter), key(tea.KeyEnter), key(tea.KeyEnter))
 }
 
+func TestInlineGoalCreatesAnObjectiveForTheSelectedTag(t *testing.T) {
+	const outcome = "Ship SSO once the integration tests pass."
+	for _, entry := range []string{"type", "paste"} {
+		t.Run(entry, func(t *testing.T) {
+			fake := &fakeControlPlane{tags: tags("lead", "builder")}
+			a := testApp(t, fake, nil)
+			pressApp(t, a, key(tea.KeyTab), key(tea.KeyDown), key(tea.KeyEnter))
+			if entry == "type" {
+				a.inner.defaultWorkspace = "billing-checkout"
+				typeApp(t, a, "/goal "+outcome)
+			} else {
+				a.Update(tea.PasteMsg{Content: "/goal " + outcome})
+			}
+			pressApp(t, a, key(tea.KeyEnter))
+			fake.mu.Lock()
+			defer fake.mu.Unlock()
+			if len(fake.created) != 1 || len(fake.sent) != 0 {
+				t.Fatalf("creates = %v, messages = %v", fake.created, fake.sent)
+			}
+			got := fake.created[0]
+			if got.GetOwner() != "builder" || got.GetOutcome() != outcome || got.GetTeam() != "" || got.GetBudget() != nil {
+				t.Fatalf("request = %v", got)
+			}
+			if strings.Join(got.GetWorkspaces(), " ") != a.inner.defaultWorkspace {
+				t.Fatalf("Workspaces = %v, want %q", got.GetWorkspaces(), a.inner.defaultWorkspace)
+			}
+			if s := appScreen(a); !strings.Contains(s, "Created Objective obj-new.") {
+				t.Fatalf("screen:\n%s", s)
+			}
+		})
+	}
+}
+
 func TestALostCreateAnswerIsRetriedWithTheSameID(t *testing.T) {
 	fake, stored := dedupingFake(1)
 	a := testApp(t, fake, nil)

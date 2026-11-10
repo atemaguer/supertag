@@ -43,6 +43,26 @@ Commands that create or change something print a one-line summary for a person, 
 Add `--output json` to print the full record instead, for scripts. `get`, `list`, and `events`
 always print JSON.
 
+## Send messages from the CLI
+
+Use the [terminal UI](../guides/talk-to-a-tag.md) for conversations you steer yourself. A script
+can send a message to a Tag or follow up on an Objective through the same Control Plane.
+
+```sh
+printf '%s\n' 'Check whether the reconciliation suite passed.' |
+  supertag message tag lead - --session billing --output json
+supertag message objective usage-billing 'Use the staging records for the next check.' --output json
+```
+
+Pass `-` to read a message from standard input. `--session` selects a Tag conversation and
+defaults to `default`. Messages use the configured operator identity.
+
+`message tag --output json` returns the reply and reports from any work Sessions it started.
+It can return a report that asks for a decision. `message objective --output json` returns the
+acknowledgement and its Task ID as soon as the Control Plane accepts the message. With text
+output, the CLI follows replies it can read. For other Objectives, the owner replies in the
+Objective's home thread. Ctrl-C stops following while the Tag keeps working.
+
 ## See what your organization is doing
 
 `supertag status` answers "what is my organization doing right now" on one screen. It takes no

@@ -61,6 +61,8 @@ type NewObjective struct {
 	Team string
 	// Budget caps the owner and all the work it starts; nil, no budget.
 	Budget *operatorv1.Budget
+	// Workspace names the registered checkout available to the Objective's work.
+	Workspace string
 }
 
 // CreateObjective creates an Objective and starts it. Repeating it with the Objective's ID and the
@@ -70,9 +72,13 @@ type NewObjective struct {
 func (c *Client) CreateObjective(ctx context.Context, objective NewObjective) (*operatorv1.CreateObjectiveResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
-	res, err := c.objectives.CreateObjective(ctx, connect.NewRequest(&operatorv1.CreateObjectiveRequest{
+	request := &operatorv1.CreateObjectiveRequest{
 		Id: objective.ID, Outcome: objective.Outcome, Owner: objective.Owner, Team: objective.Team, Budget: objective.Budget,
-	}))
+	}
+	if objective.Workspace != "" {
+		request.Workspaces = []string{objective.Workspace}
+	}
+	res, err := c.objectives.CreateObjective(ctx, connect.NewRequest(request))
 	if err != nil {
 		return nil, apiError(err)
 	}

@@ -49,11 +49,17 @@ Enter switches to the one under the cursor, and esc goes back. Switching ends ev
 to the Control Plane you leave and reads everything anew from the next; unsent input stays behind.
 
 Ctrl-K, or `/` on an empty input line or where the pane has none, opens the command palette.
-Type to filter its commands, move with up and down, and press enter to run one; esc goes back:
+From a Tag's conversation, type `/goal <outcome>` and press enter to create an Objective that the
+Tag owns. The owner's first turn starts at once. Type `/goal` on its own to open the form.
+When you open the terminal UI in a checkout registered with the local Control Plane, new
+Objectives use that Workspace.
+
+Type to filter the palette commands, move with up and down, and press enter to run one. Esc goes
+back.
 
 - **New conversation** names a new conversation with the selected Tag, as `n` in the Ctrl-O list.
 - **Switch conversation** opens the Ctrl-O list.
-- **Create Objective** opens a form for an Objective owned by the selected Tag: its outcome, the
+- **`/goal` · Create Objective** opens a form for an Objective owned by the selected Tag: its outcome, the
   Team its owner may hand work to (empty, it works alone), and a budget such as `300 USD` or
   `$12.50` (empty, no budget). Up and down move between the fields; enter moves to the next and,
   on the budget, creates the Objective, which starts at once. The pane then says whether its
@@ -71,7 +77,7 @@ It talks to the Control Plane through the operator API's generated Go client in
 `packages/operator-api/go`, using the Connect protocol over HTTP/1.1. `ConversationService` sends
 messages, lists your conversations and their history, and follows each reply, resuming a dropped
 stream where it left off. `ObjectiveService` lists the open Objectives, describes the selected
-one, and creates the Objectives the palette declares. `InboxService` lists the inbox, answers
+one, and creates Objectives. `InboxService` lists the inbox, answers
 questions and decides approval requests. `WorkService.GetSession` reads a work Session's delivery, and `ListTaskEvents` its latest Task's
 commands and tool calls. `TeamService` lists and reads the Teams, and
 `MailboxService.ListWorkstreamPosts` reads the shown Team's Workstream. `EventService.Watch` keeps

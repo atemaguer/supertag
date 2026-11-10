@@ -1,14 +1,19 @@
 import { execFileSync, spawn } from "node:child_process";
 import { accessSync, constants } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { constants as osConstants } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   type ControlPlaneTarget,
+  normalizeControlPlaneUrl,
   resolveControlPlaneTarget,
   resolveLocalControlPlaneTarget,
   resolveSavedControlPlaneTarget,
   savedControlPlaneConnectionNames,
 } from "./control-plane-client.js";
+import { localControlPlaneUrl } from "./local-state.js";
+import { git } from "./repository-name.js";
+import { loadServicesFile } from "./supertag-yaml.js";
 import { SUPERTAG_VERSION } from "./version.js";
 
 export interface TuiOptions {
@@ -67,12 +72,49 @@ export async function runTui(options: TuiOptions = {}): Promise<number | undefin
   // A token from the environment belongs to the one Control Plane it selects, so it goes nowhere else.
   const pinned = credentialVariables.some((name) => env[name]?.trim());
   const contexts = pinned ? [] : await (options.resolveContexts ?? savedControlPlaneTargets)();
-  return launch(binary, tuiHandover(target, contexts), env);
+  const handover = tuiHandover(target, contexts);
+  const localUrl = await localControlPlaneUrl()
+    .then(normalizeControlPlaneUrl)
+    .catch(() => undefined);
+  if (localUrl !== undefined && handover.contexts.some((context) => context.url === localUrl)) {
+    const workspace = await localCheckoutWorkspace(process.cwd());
+    if (workspace !== undefined) {
+      return launch(
+        binary,
+        {
+          ...handover,
+          contexts: handover.contexts.map((context) =>
+            context.url === localUrl ? { ...context, workspace } : context,
+          ),
+        },
+        env,
+      );
+    }
+  }
+  return launch(binary, handover, env);
+}
+
+// Use a local host's registered checkout to give repository goals a Workspace.
+async function localCheckoutWorkspace(cwd: string): Promise<string | undefined> {
+  const [root, config] = await Promise.all([
+    git(cwd, ["rev-parse", "--show-toplevel"]),
+    loadServicesFile().catch(() => undefined),
+  ]);
+  if (root === undefined || config === undefined) return undefined;
+  const checkout = await realpath(root).catch(() => root);
+  const names = new Set<string>();
+  for (const service of config.services) {
+    if (service.type !== "host" || !("service" in service.controlPlane)) continue;
+    for (const [name, path] of Object.entries(service.workspaces)) {
+      if ((await realpath(path).catch(() => path)) === checkout) names.add(name);
+    }
+  }
+  return names.size === 1 ? [...names][0] : undefined;
 }
 
 /** What the terminal UI reads from fd 3: every Control Plane it may use, and which one is current. */
 export interface TuiHandover {
-  readonly contexts: readonly ControlPlaneTarget[];
+  readonly contexts: readonly (ControlPlaneTarget & { readonly workspace?: string })[];
   readonly current: number;
 }
 
@@ -224,6 +266,7 @@ function launch(binary: string, handover: TuiHandover, env: NodeJS.ProcessEnv): 
         url: target.url,
         token: target.token,
         ...(target.name === undefined ? {} : { name: target.name }),
+        ...(target.workspace === undefined ? {} : { workspace: target.workspace }),
       })),
       current: handover.current,
     };

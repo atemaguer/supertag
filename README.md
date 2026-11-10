@@ -88,26 +88,18 @@ comes up, you can go back to the same Tag.
 | | Step | What happens |
 | --- | --- | --- |
 | **01** | **Talk to a Tag** | Open `supertag`, or mention the Tag in Slack or on a GitHub issue. Ask a question or give it a piece of work. [Talk to a Tag](docs/guides/talk-to-a-tag.md) |
-| **02** | **Give it an outcome** | An Objective records done-when evidence, constraints, a budget, a deadline, and the approvals you keep. The owner starts work Sessions, reviews their results, and decides what runs next. [Write an Objective](docs/guides/write-an-objective.md) |
+| **02** | **Start a goal with `/goal`** | An Objective records the outcome, done-when evidence, constraints, and any budget or deadline you set. You keep the approvals. The owner starts work Sessions, reviews their results, and decides what runs next. [Write an Objective](docs/guides/write-an-objective.md) |
 | **03** | **Review what the Tag brings back** | With branch delivery, a repository work Session uses its own git worktree and can deliver a branch. Review the change, then merge it or ask the Tag for a revision. |
 
-Create an Objective from the terminal UI's command palette, or keep it as a short manifest in
-your repository and apply it with `supertag apply -f`.
+In `lead`'s terminal conversation, type this and press Enter.
 
-```yaml
-apiVersion: supertag/v1
-kind: Objective
-metadata:
-  name: usage-based-billing
-spec:
-  owner: lead
-  outcome: >-
-    Customers can see their metered usage, and test invoices match the usage records.
-    Done when the billing reconciliation suite passes.
-    Ask me before migrating existing plans or doing anything that charges a customer.
-  budget: { minor: 500000, currency: USD }
-  deadline: 2027-07-01T17:00:00Z
+```text
+/goal Show customers their metered usage. Done when the billing reconciliation suite passes. Ask me before migrating plans or charging customers.
 ```
+
+`lead` owns the new Objective and takes its first turn. Enter `/goal` on its own to choose a Team
+or set a budget before starting. See the [Objective guide](docs/guides/objectives.md#1-create-the-objective)
+for the command palette, CLI, and manifests.
 
 You steer the Objective through its owner. Findings come back to the conversation.
 **Waiting on you** shows questions and approval requests that need your decisions.
@@ -239,7 +231,8 @@ Select `lead`, type “Read this repository and tell me what you would improve f
 Enter. The reply appears in the conversation. Follow up there, or open the
 [terminal guide](docs/guides/talk-to-a-tag.md) to review a branch or create an Objective.
 
-For automation, see the [operator API](docs/reference/control-plane-api.md) or
+For automation, see the [CLI](docs/operations/cli.md#send-messages-from-the-cli),
+the [operator API](docs/reference/control-plane-api.md), or
 [run SuperTag from your coding agent](docs/guides/coding-agent-operator.md).
 
 ### Next: run your first Team
@@ -282,11 +275,10 @@ for GitHub, Lark/Feishu, Linear, and Microsoft Teams.
 The Tag owns the outcome across sessions and keeps its identity, responsibilities, permissions,
 and work history when a different model or harness runs the next piece.
 
-**How is an Objective different from `/goal`?** In Claude Code or Codex, `/goal` keeps one session
-working until a condition holds. An Objective is that goal owned by a Tag, with a budget, a
-deadline, and the approvals you keep. The owner can start several work Sessions and coordinate
-their results across sessions and machines. If the Objective names a Team, its owner can assign
-Sessions to other Tags.
+**What does `/goal` create in SuperTag?** It creates an Objective owned by the Tag you selected.
+The owner can start several work Sessions and coordinate their results across machines. If the
+Objective names a Team, its owner can assign Sessions to other Tags. Budgets, deadlines, and
+approval decisions apply across that work.
 
 **Do I need a cloud account?** No. `supertag init` runs everything on your laptop. Deploy a Control
 Plane only when your team shares Tags.

@@ -165,9 +165,20 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	session := fmt.Sprintf("tuispike-%d", os.Getpid())
+	state := t.TempDir()
+	services := fmt.Sprintf(`services:
+  control-plane: { type: control-plane, ports: [%q] }
+  laptop:
+    type: host
+    harnesses: [codex]
+    workspaces: { app: %q }
+`, strings.TrimPrefix(server.URL, "http://"), checkout)
+	if err := os.WriteFile(filepath.Join(state, "supertag.yaml"), []byte(services), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	// HOME is a fresh directory so the CLI resolves only the environment's target.
-	command := fmt.Sprintf("cd %s && env HOME=%s PATH=%s SUPERTAG_TUI_OPENED=%s SUPERTAG_CONTROL_PLANE=%s SUPERTAG_OPERATOR_TOKEN=%s %s --conditions=development %s; echo supertag exited $?; sleep 60",
-		shellQuote(checkout), shellQuote(t.TempDir()), shellQuote(bin+":"+os.Getenv("PATH")), shellQuote(opened), server.URL, fakeToken, shellQuote(tsx), shellQuote(cli))
+	command := fmt.Sprintf("cd %s && env HOME=%s PATH=%s SUPERTAG_STATE_DIR=%s SUPERTAG_TUI_OPENED=%s SUPERTAG_CONTROL_PLANE=%s SUPERTAG_OPERATOR_TOKEN=%s %s --conditions=development %s; echo supertag exited $?; sleep 60",
+		shellQuote(checkout), shellQuote(t.TempDir()), shellQuote(bin+":"+os.Getenv("PATH")), shellQuote(state), shellQuote(opened), server.URL, fakeToken, shellQuote(tsx), shellQuote(cli))
 	run := func(args ...string) string {
 		t.Helper()
 		out, err := exec.Command(tmux, args...).CombinedOutput()
@@ -341,12 +352,12 @@ func TestEndToEnd(t *testing.T) {
 		}
 	}
 
-	// Moving through the rail selected builder, so the palette's Tag commands are about builder.
-	keys("C-k")
+	// Moving through the rail selected builder, so /goal uses builder as the owner.
+	keys("/")
 	waitFor("the command palette", 10*time.Second, func(pane string) bool {
-		return strings.Contains(pane, "Commands") && strings.Contains(pane, "Create Objective     owned by builder")
+		return strings.Contains(pane, "Commands") && strings.Contains(pane, "/goal · Create Objective  owned by builder")
 	})
-	keys("-l", "objective")
+	keys("-l", "goal")
 	keys("Enter")
 	waitFor("the new Objective form", 10*time.Second, func(pane string) bool {
 		return strings.Contains(pane, "New Objective · owned by builder") && strings.Contains(pane, "Teams: billing")
@@ -365,15 +376,31 @@ func TestEndToEnd(t *testing.T) {
 	waitFor("the new Objective's view", 10*time.Second, func(pane string) bool {
 		return strings.Contains(pane, "Objective · obj-new")
 	})
+
 	keys("/")
-	waitFor("the command palette", 10*time.Second, func(pane string) bool { return strings.Contains(pane, "Open inbox           0 waiting") })
+	waitFor("the slash commands", 10*time.Second, func(pane string) bool { return strings.Contains(pane, "Commands") })
+	keys("-l", "goal Verify invoices agree with usage records.")
+	keys("Enter")
+	waitFor("the inline goal to start", 10*time.Second, func(pane string) bool {
+		return strings.Contains(pane, "Created Objective obj-new.") && strings.Contains(pane, "builder took its first turn as Task task-new.")
+	})
+	keys("Enter")
+	waitFor("the inline goal's view", 10*time.Second, func(pane string) bool { return strings.Contains(pane, "Objective · obj-new") })
+
+	keys("/")
+	waitFor("the command palette", 10*time.Second, func(pane string) bool {
+		return strings.Contains(pane, "Open inbox") && strings.Contains(pane, "0 waiting")
+	})
 	keys("-l", "inbox")
 	keys("Enter")
 	waitFor("the empty inbox", 10*time.Second, func(pane string) bool { return strings.Contains(pane, "Nothing waits on you.") })
 
 	fake.mu.Lock()
-	if len(fake.created) != 1 || fake.created[0].GetOutcome() != "Invoices round half-even, with tests" || fake.created[0].GetOwner() != "builder" ||
-		fake.created[0].GetTeam() != "billing" || fake.created[0].GetBudget().GetLimitMinor() != 30000 || fake.created[0].GetBudget().GetCurrency() != "USD" {
+	if len(fake.created) != 2 || fake.created[0].GetOutcome() != "Invoices round half-even, with tests" || fake.created[0].GetOwner() != "builder" ||
+		fake.created[0].GetTeam() != "billing" || fake.created[0].GetBudget().GetLimitMinor() != 30000 || fake.created[0].GetBudget().GetCurrency() != "USD" ||
+		fake.created[1].GetOutcome() != "Verify invoices agree with usage records." || fake.created[1].GetOwner() != "builder" ||
+		fake.created[1].GetTeam() != "" || fake.created[1].GetBudget() != nil ||
+		strings.Join(fake.created[0].GetWorkspaces(), " ") != "app" || strings.Join(fake.created[1].GetWorkspaces(), " ") != "app" {
 		t.Errorf("created = %v", fake.created)
 	}
 	if len(fake.answered) != 1 || fake.answered[0].GetKey() != "question:task-own" || fake.answered[0].GetText() != "No, cap it at 100." {

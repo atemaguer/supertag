@@ -87,8 +87,8 @@ func TestThePaletteOffersTheCommandsThatApply(t *testing.T) {
 	a := testApp(t, &fakeControlPlane{tags: tags("lead")}, nil)
 	pressApp(t, a, ctrlK)
 	s := appScreen(a)
-	for _, want := range []string{"Commands", "New conversation     with lead", "Switch conversation  with lead · ctrl+o",
-		"Create Objective     owned by lead", "Open inbox           0 waiting", "enter runs"} {
+	for _, want := range []string{"Commands", "New conversation", "Switch conversation", "with lead · ctrl+o",
+		"/goal · Create Objective  owned by lead", "Open inbox", "0 waiting", "enter runs"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("the palette lacks %q:\n%s", want, s)
 		}
@@ -189,8 +189,8 @@ func TestThePaletteOpensTheInbox(t *testing.T) {
 	fake := coordinationFake()
 	a := testApp(t, fake, nil)
 	pressApp(t, a, ctrlK)
-	if !strings.Contains(appScreen(a), "Open inbox           2 waiting") {
-		t.Fatalf("screen:\n%s", appScreen(a))
+	if s := appScreen(a); !strings.Contains(s, "Open inbox") || !strings.Contains(s, "2 waiting") {
+		t.Fatalf("screen:\n%s", s)
 	}
 	typeApp(t, a, "inbox")
 	pressApp(t, a, key(tea.KeyEnter))
@@ -215,7 +215,7 @@ func TestThePaletteOpensTheInbox(t *testing.T) {
 func openForm(t *testing.T, a *app) {
 	t.Helper()
 	pressApp(t, a, ctrlK)
-	typeApp(t, a, "objective")
+	typeApp(t, a, "create objective")
 	pressApp(t, a, key(tea.KeyEnter))
 	if a.inner.pane != paneNewObjective {
 		t.Fatalf("Create Objective must open the form:\n%s", appScreen(a))
