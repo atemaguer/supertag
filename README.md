@@ -273,6 +273,8 @@ For automation, see the [operator API](docs/reference/control-plane-api.md) or
 Say you need to move 12 production services from shared API keys to short-lived credentials
 issued to each service. Keep requests working throughout the migration.
 
+![The lead Tag owns the 12-service migration and delegates to the identity, migration, verification, and rollout Tags. A person approves production cutovers and retirement of shared keys.](assets/images/supertag-team-migration.png)
+
 | Tag | Responsibility and access |
 | --- | --- |
 | `lead` | Owns the Objective and sequences the rollout waves. |
