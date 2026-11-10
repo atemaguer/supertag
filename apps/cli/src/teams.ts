@@ -6,10 +6,9 @@ import {
   type Team,
   TeamSchema,
 } from "@supertag/operator-api";
-import { type OperatorClientOptions, teamClient } from "./operator-client.js";
+import { type OperatorClientOptions, refusedAsError, teamClient } from "./operator-client.js";
 import { takeOutputFlag } from "./output-flag.js";
 import { withCurrentRevision } from "./revision.js";
-import { refusedAsError } from "./tag-conversation.js";
 import { terminalText } from "./terminal-text.js";
 
 export function teamHelp(): string {

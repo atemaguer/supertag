@@ -28,9 +28,9 @@ policy change affects later Tasks without rewriting work that was already accept
 
 ## An Objective's conversation
 
-An Objective is a conversation with a goal. It runs in the thread it was created in: a Slack
-thread, a GitHub issue, or a person's CLI conversation. Each of its turns is a Task of the owner
-Tag, and the owner's reply posts to that thread.
+An Objective is a conversation with a goal. It runs where it was created, such as a Slack thread,
+a GitHub issue, or a conversation in the terminal UI. Each turn is a Task of the owner Tag, and
+the owner replies in the same conversation.
 
 Turns are delivered, never scheduled. A turn runs when the Objective starts, when a Session
 beneath it reports, when a person messages it, when an approval is decided, and when SuperTag
@@ -56,8 +56,8 @@ an execution machine does not erase the Task.
 
 A Session groups the Tasks that belong to one native conversation, such as a
 Slack thread, GitHub issue, Linear issue, Lark chat thread, Teams channel
-thread, or CLI conversation. Replies in an established Session do not need to mention `@SuperTag`
-again.
+thread, or conversation in the terminal UI. Replies in an established Session do not need to
+mention `@SuperTag` again.
 
 Continuity within a Session is automatic and limited to that conversation. Each Session maps to one
 native harness session. A new Task resumes that native session whenever the harness can load it: the
@@ -77,7 +77,7 @@ harness, lost state, and a turn that failed for a reason other than its spending
 Different threads remain different Sessions, even when they invoke the same Tag. They still share
 one memory: each conversation sees the Tag's open Objectives, and the Tag can search and read its
 other Sessions when a question needs them. A Session is **shared** or **private**, depending on its
-conversation: a direct chat or a person's CLI conversation is private to that person. See
+conversation. A direct chat or a conversation in the terminal UI is private to that person. See
 [across Sessions](multiplayer.md#across-sessions-one-tag-one-memory).
 
 A conversation, or an Objective's conversation, can hand longer work to a **work Session** with
@@ -97,9 +97,9 @@ must be active and bound to a Worker Host.
 
 When a work Session's Task completes, fails, or is cancelled, the Session that started it gets one
 report turn: a new Task that resumes that Session's native session. It carries
-the work Session's title, status, and result, and the Tag reports it to the person where the
-conversation took place: the Slack thread, the issue, or the CLI conversation. SuperTag records
-each report once, even across a restart. The report turn has the starting Task's permissions and
+the work Session's title, status, and result, and the Tag reports it to the person in the
+original conversation. SuperTag records each report once, even across a restart. The report turn
+has the starting Task's permissions and
 can't create an Objective, because no person asked for one. An Objective's owner reviews a report
 by reading it, then accepts it in its reply or sends fixes with `continue_session`.
 
@@ -175,7 +175,8 @@ A work Session keeps its edits the way an Objective Task does. It works in a Wor
 conversation has, and the Worker commits its changes to the work Session's own branch, such as
 `supertag/session/0f3c2a9e`. The conversation's Workspaces are the ones its location attaches, as
 for [an Objective created there](../reference/resource-model.md#objectives-from-a-location). A
-CLI conversation has no location, so it uses the Workspaces that the Tag's Worker Hosts declare.
+private operator conversation has no location, so it uses the Workspaces that the Tag's Worker
+Hosts declare.
 With one Workspace the work Session uses it. With several, the Tag names one when it starts the
 work Session. With none, the work Session runs without a Workspace, like its conversation.
 

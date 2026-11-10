@@ -12,9 +12,8 @@ import {
   runningProcess,
   type ServiceSlot,
 } from "./local-state.js";
-import { hostClient } from "./operator-client.js";
+import { hostClient, refusedAsError } from "./operator-client.js";
 import { displayPath, SUPERTAG_YAML } from "./supertag-yaml.js";
-import { refusedAsError } from "./tag-conversation.js";
 import type { KnownService } from "./up.js";
 import { readWorkerHostCredential, revokeOwnWorkerHostCredential } from "./worker-hosts.js";
 

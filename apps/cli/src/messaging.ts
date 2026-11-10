@@ -7,8 +7,7 @@ import {
   type MailboxGrant,
 } from "@supertag/operator-api";
 import type { ControlPlaneTarget } from "./control-plane-client.js";
-import { mailboxClient } from "./operator-client.js";
-import { refusedAsError } from "./tag-conversation.js";
+import { mailboxClient, refusedAsError } from "./operator-client.js";
 import { mailboxLimit } from "./workstreams.js";
 
 export function tagMessagingHelp(): string {

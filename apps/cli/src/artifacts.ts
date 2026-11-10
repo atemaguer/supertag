@@ -12,10 +12,9 @@ import {
   WorkletArtifactTransferClient,
 } from "@supertag/worker-sdk";
 import { artifactVolumeReader } from "./artifact-volume.js";
-import { type OperatorClientOptions, workClient } from "./operator-client.js";
+import { type OperatorClientOptions, refusedAsError, workClient } from "./operator-client.js";
 import { takeOutputFlag } from "./output-flag.js";
 import { loadServicesFile, readVolumeCredential } from "./supertag-yaml.js";
-import { refusedAsError } from "./tag-conversation.js";
 import { terminalText } from "./terminal-text.js";
 import { artifactTransferOf } from "./work-protos.js";
 

@@ -234,7 +234,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             objectiveId: f.objective.id,
             operatorEligible: true,
             question: { text: "Which export format?", truncated: false },
-            commands: [`supertag message objective ${f.objective.id} TEXT`],
+            commands: [],
             evidence: [
               { kind: "task", id: asking.task.id, status: "completed" },
               { kind: "objective", id: f.objective.id },

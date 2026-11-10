@@ -27,7 +27,7 @@ import { runListCommand } from "./list-command.js";
 import { runMcpCommand } from "./mcp-command.js";
 import { runTagMessagingCommand, tagMessagingHelp } from "./messaging.js";
 import { testConfiguredNotification, testNotificationHelp } from "./notification-command.js";
-import { objectiveHelp, objectiveMessageDeprecation, runObjectiveCommand } from "./objectives.js";
+import { isObjectiveCommand, objectiveHelp, runObjectiveCommand } from "./objectives.js";
 import {
   isOperatorTokenCommand,
   operatorTokenHelp,
@@ -38,11 +38,6 @@ import { runPsCommand } from "./ps.js";
 import { isResourceCommand, runResourceCommand } from "./resources.js";
 import { setupSurface } from "./setup.js";
 import { runSpendCommand } from "./spend.js";
-import {
-  runTagConversationCommand,
-  tagConversationHelp,
-  tagMessageDeprecation,
-} from "./tag-conversation.js";
 import { isTagCommand, tagResourceHelp } from "./tags.js";
 import { isTaskCommand, runTaskCommand, taskHelp } from "./tasks.js";
 import { runTeamCommand, teamHelp } from "./teams.js";
@@ -349,20 +344,22 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     return 0;
   }
   if (command === "objective") {
-    if (
-      provider === undefined ||
-      provider === "--help" ||
-      provider === "-h" ||
-      commandArgs.includes("--help") ||
-      commandArgs.includes("-h")
-    ) {
+    if (provider === undefined || provider === "--help" || provider === "-h") {
+      process.stdout.write(objectiveHelp());
+      return 0;
+    }
+    if (!isObjectiveCommand(provider)) {
+      process.stderr.write(
+        `Unknown Objective command: ${terminalText(provider)}\n\n${objectiveHelp()}`,
+      );
+      return 1;
+    }
+    if (commandArgs.includes("--help") || commandArgs.includes("-h")) {
       process.stdout.write(objectiveHelp());
       return 0;
     }
     const target = await resolveControlPlaneTarget(selection.controlPlaneOverride);
     if (target === undefined) throw controlPlaneRequiredError();
-    if (provider === "message")
-      warnAboutDeprecatedMessage(commandArgs, objectiveMessageDeprecation);
     process.stdout.write(await runObjectiveCommand(target, [provider, ...commandArgs]));
     return 0;
   }
@@ -404,44 +401,16 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
     process.stdout.write(await runTagMessagingCommand(target, commandArgs));
     return 0;
   }
-  if (command === "tag" && provider === "message") {
-    if (commandArgs.includes("--help") || commandArgs.includes("-h")) {
-      process.stdout.write(tagConversationHelp());
-      return 0;
-    }
-    const target = await resolveControlPlaneTarget(selection.controlPlaneOverride);
-    if (target === undefined) throw controlPlaneRequiredError();
-    warnAboutDeprecatedMessage(commandArgs, tagMessageDeprecation);
-    // Ctrl-C stops showing the reply without cancelling the Task.
-    const detach = new AbortController();
-    const stop = () => detach.abort();
-    process.once("SIGINT", stop);
-    try {
-      process.stdout.write(
-        await runTagConversationCommand(target, commandArgs, {
-          signal: detach.signal,
-          write: (text) => process.stdout.write(text),
-          warn: (text) => process.stderr.write(text),
-          interactive: process.stdout.isTTY === true,
-        }),
-      );
-    } finally {
-      process.removeListener("SIGINT", stop);
-    }
-    return detach.signal.aborted ? 130 : 0;
-  }
   if (command === "tag") {
-    if (
-      provider === undefined ||
-      provider === "--help" ||
-      provider === "-h" ||
-      commandArgs.includes("--help") ||
-      commandArgs.includes("-h")
-    ) {
+    if (provider === undefined || provider === "--help" || provider === "-h") {
       process.stdout.write(tagResourceHelp());
       return 0;
     }
     if (isTagCommand(provider)) {
+      if (commandArgs.includes("--help") || commandArgs.includes("-h")) {
+        process.stdout.write(tagResourceHelp());
+        return 0;
+      }
       const target = await resolveControlPlaneTarget(selection.controlPlaneOverride);
       if (target === undefined) throw controlPlaneRequiredError();
       process.stdout.write(
@@ -449,7 +418,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
       );
       return 0;
     }
-    process.stderr.write(`Unknown Tag command: ${provider}\n\n${tagResourceHelp()}`);
+    process.stderr.write(`Unknown Tag command: ${terminalText(provider)}\n\n${tagResourceHelp()}`);
     return 1;
   }
   if (command === "artifact") {
@@ -520,13 +489,15 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   }
 
   const { values, positionals } = parseArgs({
-    args,
+    args: [...rawSelection.args],
     allowPositionals: true,
     options: {
       help: { type: "boolean", short: "h" },
       version: { type: "boolean", short: "v" },
     },
-    strict: true,
+    // Unknown commands have no argument grammar. Accept root flags and report only the
+    // command name so that an error never echoes trailing values.
+    strict: rawSelection.args[0]?.startsWith("-") ?? true,
   });
 
   if (values.version) {
@@ -540,7 +511,7 @@ export async function main(args = process.argv.slice(2)): Promise<number> {
   }
 
   process.stderr.write(
-    `Unknown command: ${terminalText(positionals.join(" "))}\nRun supertag --help for available commands.\n`,
+    `Unknown command: ${terminalText(positionals.slice(0, 2).join(" "))}\nRun supertag --help for available commands.\n`,
   );
   return 1;
 }
@@ -549,11 +520,6 @@ function controlPlaneRequiredError(): Error {
   return new Error(
     "No Control Plane is available. Start one locally or run: supertag connect control-plane URL",
   );
-}
-
-function warnAboutDeprecatedMessage(args: readonly string[], message: string): void {
-  if (process.stdin.isTTY && process.stdout.isTTY && !args.includes("-") && !requestsJson(args))
-    process.stderr.write(`${message}\n`);
 }
 
 function helpText(): string {
@@ -605,12 +571,10 @@ Configure the organization:
   supertag delete tag|role|permission-set|context-set|volume|workspace|surface NAME [--dry-run]
 
 Direct and inspect work:
-  supertag message tag NAME TEXT|- [--session NAME] [--output text|json] (deprecated)
   supertag create objective [ID] --outcome TEXT --owner TAG [--team TEAM] [--budget-minor N --budget-currency CODE] [--deadline ISO] [--runtime-action ACTION ...] [--workspace NAME ...] [--ongoing] [--dry-run]
   supertag list objective [--owner TAG] [--limit N]
   supertag get objective ID
   supertag describe objective ID [--output text|json]
-  supertag message objective ID TEXT|- [--output text|json] (deprecated)
   supertag approve objective ID
   supertag update objective ID --status STATUS [--revision N]
   supertag update objective ID [--revision N] [--deadline ISO] [--budget-minor N] [--runtime-action ACTION ...]

@@ -47,7 +47,12 @@ import {
   messageOf,
 } from "./manifest-documents.js";
 import { money } from "./money.js";
-import { operatorErrorMessage, resourceClient, workClient } from "./operator-client.js";
+import {
+  operatorErrorMessage,
+  refusedAsError,
+  resourceClient,
+  workClient,
+} from "./operator-client.js";
 import {
   findResourceView,
   getOperatorResource,
@@ -66,7 +71,6 @@ import {
   resolveSurfaceSecrets,
   type SecretResolver,
 } from "./surface-account-manifest.js";
-import { refusedAsError } from "./tag-conversation.js";
 import { runTeamCommand } from "./teams.js";
 import { terminalJson, terminalText } from "./terminal-text.js";
 import { sessionStateView, sessionView, taskView } from "./work-protos.js";

@@ -267,7 +267,7 @@ func History(tag string, page []*operatorv1.Message) []HistoryItem {
 	return items
 }
 
-// Follower follows messages the way `supertag message tag` does on a terminal.
+// Follower streams a Tag's reply and the work Sessions it starts.
 type Follower struct {
 	Client *Client
 	// Interval is the first pause before resuming a dropped stream; pauses double to a minute.

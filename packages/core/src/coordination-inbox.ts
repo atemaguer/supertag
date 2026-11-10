@@ -229,7 +229,7 @@ export function coordinationInboxCommands(
           ? ["supertag list approval"]
           : [`supertag list approval --objective ${objective}`];
     case "question":
-      return [`supertag message objective ${objective} TEXT`];
+      return [];
     case "objective_budget":
       return [`supertag update objective ${objective} --budget-minor N`];
     case "objective_limit":

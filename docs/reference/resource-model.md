@@ -79,9 +79,9 @@ hosts. None of these resources becomes a separate actor.
   [Workstream](coordination.md#workstream).
 - **Mailbox** is a Tag's inbox for plain-text messages from other Tags. Every message waiting
   when a turn starts is handled together in that turn. See [Mailbox](coordination.md#mailbox).
-- **Session** preserves automatic continuity for one Tag conversation. Its audience is `shared`
-  or `private`, derived from the conversation: a direct chat or a CLI conversation is private to
-  its one person, and reported as `audience`. A Tag's conversation Tasks can list, search, and read its shared Sessions and
+- **Session** preserves automatic continuity for one Tag conversation. The `audience` field is
+  `shared` or `private`. A direct chat or a conversation in the terminal UI is private to one
+  person. A Tag's conversation Tasks can list, search, and read its shared Sessions and
   their own person's private ones. See
   [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-one-memory). A [work Session](../concepts/tasks.md#session)
   reports its conversation as `parentSessionId`. In `supertag get session`, `latestTaskStatus` is

@@ -105,7 +105,7 @@ Every Session has an audience, decided by the conversation it comes from. Nobody
 | Audience | Conversations | Who can see it from another Session |
 | --- | --- | --- |
 | shared | channels, threads, issues, pull requests, group chats | any Session of the same Tag |
-| private | a Lark direct chat, a person's CLI conversation | only Sessions where that same person is asking |
+| private | a Lark direct chat, a person's conversation in the terminal UI | only Sessions where that same person is asking |
 
 An Objective started in a private conversation is private too. It doesn't appear in other people's
 portfolios, and they can't read it. Its reports still go to the conversation it started in.

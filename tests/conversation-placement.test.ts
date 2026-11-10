@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.js";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.js";
+import { conversationClient } from "../apps/cli/src/operator-client.js";
 import { runResourceCommand } from "../apps/cli/src/resources.js";
-import { runTagConversationCommand } from "../apps/cli/src/tag-conversation.js";
 import { ControlPlane } from "../packages/control-plane/src/index.js";
 import {
   placeTask,
@@ -206,7 +206,7 @@ it("dispatches past a turn that cannot be placed, keeping each Session's order",
   }
 }, 20000);
 
-it("tells a CLI conversation once why its turn waits, then answers", async () => {
+it("reports once why a conversation turn waits, then answers", async () => {
   const directory = await mkdtemp(join(tmpdir(), "supertag-waiting-reason-"));
   const databaseUrl = `file:${join(directory, "state.db")}`;
   await migrateDatabase({ url: databaseUrl });
@@ -224,32 +224,37 @@ it("tells a CLI conversation once why its turn waits, then answers", async () =>
     const tag = await store.createTag({ name: "waiter" });
     await store.bindTagWorkerHost(tag.id, "wait-host");
     await store.setTagRunsOn(tag.id, ["gpu"]);
-    const output: string[] = [];
-    const conversation = runTagConversationCommand(
-      { url: runtime.url, token: "waiting-admin" },
-      ["waiter", "Hello"],
-      { timeoutMs: 15_000, write: (text) => output.push(text) },
-    );
-    await vi.waitFor(() => expect(output.join("")).toContain("· waiting:"), { timeout: 10_000 });
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    const [pending] = await store.listTasks({ tagId: tag.id });
-    const described = await runResourceCommand(
-      new ControlPlaneClient({ url: runtime.url, token: "waiting-admin" }),
-      "describe",
-      ["task", pending?.id ?? ""],
-    );
-    expect(described).toContain("Waiting: no bound Worker Host has labels gpu.");
-    expect(
-      (await store.listTaskEvents(pending?.id ?? "")).filter(
-        (event) => event.type === "task.scheduling-incompatible",
-      ),
-    ).toHaveLength(1);
-    await store.setTagRunsOn(tag.id, []);
-    await conversation;
-    const shown = output.join("");
-    expect(shown).toContain("· waiting: no bound Worker Host has labels gpu\n");
-    expect(shown.split("· waiting:")).toHaveLength(2);
-    expect(shown).toContain("Hi.");
+    const target = { url: runtime.url, token: "waiting-admin" };
+    const client = conversationClient(target);
+    const sent = await client.sendMessage({ tag: "waiter", text: "Hello" });
+    const reasons: string[] = [];
+    let reply: string | undefined;
+    for await (const { part } of client.followMessage(
+      { tag: sent.tag, taskId: sent.taskId },
+      { timeoutMs: 15_000 },
+    )) {
+      if (part.case === "finish") {
+        reply = part.value.reply?.text;
+        break;
+      }
+      if (part.case !== "waiting") continue;
+      reasons.push(part.value.reason);
+      if (reasons.length !== 1) continue;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const described = await runResourceCommand(new ControlPlaneClient(target), "describe", [
+        "task",
+        sent.taskId,
+      ]);
+      expect(described).toContain("Waiting: no bound Worker Host has labels gpu.");
+      expect(
+        (await store.listTaskEvents(sent.taskId)).filter(
+          (event) => event.type === "task.scheduling-incompatible",
+        ),
+      ).toHaveLength(1);
+      await store.setTagRunsOn(tag.id, []);
+    }
+    expect(reasons).toEqual(["no bound Worker Host has labels gpu"]);
+    expect(reply).toContain("Hi.");
   } finally {
     await runtime.close();
     await store.disconnect();

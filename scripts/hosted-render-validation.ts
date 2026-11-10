@@ -508,10 +508,7 @@ try {
   );
 }
 
-/**
- * One turn of the Tag's CLI conversation `session`: sends `message`, waits for the reply and for
- * the turn's Task to complete.
- */
+/** Sends an operator API message to the Tag and waits for the reply and Task completion. */
 async function converse(
   apiClient: Api,
   session: string,

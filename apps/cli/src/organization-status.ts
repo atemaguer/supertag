@@ -1,11 +1,10 @@
 import type { ControlPlaneTarget } from "./control-plane-client.js";
 import { money } from "./money.js";
-import { inboxClient, organizationClient } from "./operator-client.js";
+import { inboxClient, organizationClient, refusedAsError } from "./operator-client.js";
 import { organizationStatusView } from "./organization-protos.js";
 import type { OrganizationStatus, OrganizationStatusView } from "./organization-views.js";
 import { takeOutputFlag } from "./output-flag.js";
 import { runningCommandText } from "./running-command.js";
-import { refusedAsError } from "./tag-conversation.js";
 import { terminalText } from "./terminal-text.js";
 
 export function statusHelp(): string {

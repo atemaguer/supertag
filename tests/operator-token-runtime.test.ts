@@ -8,7 +8,6 @@ import type { ManagementAuditEvent } from "../apps/cli/src/control-plane-api.ts"
 import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { operatorTokenView } from "../apps/cli/src/host-protos.ts";
-import { runObjectiveCommand } from "../apps/cli/src/objectives.ts";
 import {
   accessClient,
   hostClient,
@@ -238,15 +237,11 @@ describe("Operator Token API", () => {
     });
 
     const target = { url, token: issued.secret };
-    const messaged = JSON.parse(
-      await runObjectiveCommand(target, [
-        "message",
-        objective.id,
-        "Please include CSV",
-        "--output",
-        "json",
-      ]),
-    ) as { taskId: string };
+    const messaged = await objectiveClient(target).messageObjective({
+      id: objective.id,
+      text: "Please include CSV",
+      idempotencyKey: "include-csv",
+    });
     // The message is a turn of the Objective's own Session, made by the token's operator.
     const turn = await store.findTaskById(messaged.taskId);
     expect(turn?.actor).toMatchObject({ id: "token:laptop-2" });

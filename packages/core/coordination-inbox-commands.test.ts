@@ -29,10 +29,8 @@ it("shows the budget and deadline commands for Objective limit items", () => {
   ).toEqual([`supertag update objective 'objective with '\\''quotes'\\''' --budget-minor N`]);
 });
 
-it("answers a question by messaging the Objective", () => {
-  expect(coordinationInboxCommands({ ...item, kind: "question" })).toEqual([
-    `supertag message objective 'objective with '\\''quotes'\\''' TEXT`,
-  ]);
+it("offers CLI actions only for items with a supported command", () => {
+  expect(coordinationInboxCommands({ ...item, kind: "question" })).toEqual([]);
 });
 
 it("decides an approval request, and lists them when the item carries none", () => {

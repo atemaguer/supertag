@@ -2,8 +2,7 @@ import { parseArgs } from "node:util";
 import { parseWorkerHostLabels } from "@supertag/core";
 import type { ControlPlaneClient } from "./control-plane-client.js";
 import { authKeyView } from "./host-protos.js";
-import { hostClient } from "./operator-client.js";
-import { refusedAsError } from "./tag-conversation.js";
+import { hostClient, refusedAsError } from "./operator-client.js";
 
 export type AuthKeyCommand = "create" | "revoke";
 

@@ -14,8 +14,7 @@ import (
 	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
 )
 
-// defaultConversation is the conversation a Tag opens on: the same one as
-// `supertag message tag NAME TEXT`.
+// defaultConversation is the conversation a Tag opens before an operator chooses one.
 const defaultConversation = "default"
 
 // conversationPlaceholder is the input's placeholder in a conversation.
@@ -1302,7 +1301,7 @@ func (m *model) choose() tea.Cmd {
 	return tea.Batch(focusCmd, cmd)
 }
 
-// apply adds one follow event to its conversation, as `supertag message tag` prints it, and
+// apply adds one follow event to its conversation and
 // rereads a work Session that reported or whose shown activity grew. Every field from the server
 // or an agent is filtered for the terminal, as the CLI does.
 func (m *model) apply(tag, name string, event client.FollowEvent) tea.Cmd {

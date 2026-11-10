@@ -24,14 +24,13 @@ import {
   objectiveView,
 } from "./objective-protos.js";
 import { runObjectiveCommand } from "./objectives.js";
-import { workClient } from "./operator-client.js";
+import { refusedAsError, workClient } from "./operator-client.js";
 import {
   isOperatorResourcePath,
   listOperatorResources,
   listResourceViews,
 } from "./operator-resources.js";
 import { isResourcePath } from "./resource-protos.js";
-import { refusedAsError } from "./tag-conversation.js";
 import { runTeamCommand } from "./teams.js";
 import { terminalText } from "./terminal-text.js";
 import { artifactRow, sessionView, taskView } from "./work-protos.js";

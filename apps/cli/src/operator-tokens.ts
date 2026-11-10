@@ -2,8 +2,7 @@ import { parseArgs } from "node:util";
 import { Code, ConnectError } from "@connectrpc/connect";
 import type { ControlPlaneClient } from "./control-plane-client.js";
 import { operatorTokenView } from "./host-protos.js";
-import { accessClient } from "./operator-client.js";
-import { refusedAsError } from "./tag-conversation.js";
+import { accessClient, refusedAsError } from "./operator-client.js";
 
 export type OperatorTokenCommand = "create" | "revoke";
 

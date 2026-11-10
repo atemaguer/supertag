@@ -6,7 +6,6 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
 import { conversationClient } from "../apps/cli/src/operator-client.ts";
-import { runTagConversationCommand } from "../apps/cli/src/tag-conversation.ts";
 import { type ReplyStreamPart, ReplyStreams } from "../packages/control-plane/src/reply-streams.ts";
 import {
   ActivityStatus,
@@ -458,48 +457,38 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       });
     });
 
-    it("prints the streamed reply and its command activity", async () => {
-      const written: string[] = [];
-      const command = runTagConversationCommand(
-        { url: runtime.url, token: ADMIN },
-        ["planner", "Check the repository", "--session", "cli"],
-        { write: (text) => written.push(text), interactive: true },
-      );
-      await vi.waitFor(() => expect(written.join("")).toContain("pnpm lint"));
-      release();
-      const rest = await command;
-      expect(written.join("") + rest).toBe(
-        // The turn's in-between text is not shown; its activity is, then the final reply.
-        "\u001b[2m· running: pnpm lint\u001b[22m\nAll clean.\n",
-      );
+    it("streams command activity before the final reply in one follow call", async () => {
+      const { taskId } = await send("Check the repository");
+      const events = await follow(taskId, (event) => {
+        if (linting(event)) release();
+        return ended(event);
+      });
+      const command = events.findIndex(linting);
+      const finish = events.findIndex((event) => event.part.case === "finish");
+      expect(events[command]?.part).toMatchObject({
+        case: "activity",
+        value: { detail: { case: "command", value: { command: "pnpm lint" } } },
+      });
+      expect(command).toBeLessThan(finish);
+      expect(events[finish]?.part).toMatchObject({
+        case: "finish",
+        value: { reply: { text: "All clean." } },
+      });
+      expect(events.at(-1)?.part.case).toBe("end");
     });
 
-    it("prints only the final reply when not on a terminal, and detaches on request", async () => {
-      const written: string[] = [];
-      const warned: string[] = [];
-      const detach = new AbortController();
-      const command = runTagConversationCommand(
-        { url: runtime.url, token: ADMIN },
-        ["planner", "Check the repository", "--session", "plain"],
-        {
-          write: (text) => written.push(text),
-          warn: (text) => warned.push(text),
-          signal: detach.signal,
-        },
-      );
-      await vi.waitFor(async () =>
-        expect((await store.listTasks()).map((task) => task.status)).toContain("running"),
-      );
-      detach.abort();
-      await expect(command).resolves.toBe("");
-      expect(written).toEqual([]);
-      expect(warned.join("")).toMatch(/keeps working on task\/.+supertag describe task/u);
-      // Detaching does not cancel the Task.
+    it("keeps the Task running when its follower disconnects", async () => {
+      const { taskId } = await send("Check the repository");
+      const events = await follow(taskId, linting);
+      expect(events.some(linting)).toBe(true);
+      expect((await store.findTaskById(taskId))?.status).toBe("running");
+
       release();
-      const tasks = await store.listTasks();
-      await vi.waitFor(async () =>
-        expect((await store.findTaskById(tasks[0]?.id ?? ""))?.status).toBe("completed"),
-      );
+      await vi.waitFor(async () => {
+        expect((await store.findTaskById(taskId))?.status).toBe("completed");
+        const message = await conversations().getMessage({ tag: "planner", taskId });
+        expect(message.reply?.text).toBe("All clean.");
+      });
     });
   });
 }

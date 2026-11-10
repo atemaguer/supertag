@@ -20,6 +20,7 @@ import {
   hostClient,
   type OperatorClientOptions,
   operatorErrorMessage,
+  refusedAsError,
   resourceClient,
   surfaceClient,
 } from "./operator-client.js";
@@ -29,7 +30,6 @@ import {
   resourceKindOfPath,
   resourceView,
 } from "./resource-protos.js";
-import { refusedAsError } from "./tag-conversation.js";
 
 /**
  * Worker Hosts, Auth Keys, Operator Tokens and Surface Accounts, read through their operator RPCs

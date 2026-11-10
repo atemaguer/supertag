@@ -463,7 +463,7 @@ func budgeted(o *operatorv1.Objective, spent, limit int64) *operatorv1.Objective
 func questionItem(objective, task, text string) *operatorv1.InboxItem {
 	return &operatorv1.InboxItem{Key: "question:" + task, Occurrence: "question:" + task + ":1", ObjectiveId: objective,
 		Kind: operatorv1.InboxItemKind_INBOX_ITEM_KIND_QUESTION, OperatorEligible: true, Reason: "The owner asked a question.",
-		Question: &operatorv1.InboxQuestion{Text: text}, Commands: []string{"supertag message objective " + objective + " TEXT"}}
+		Question: &operatorv1.InboxQuestion{Text: text}}
 }
 
 func approvalItem(objective, id, summary string) *operatorv1.InboxItem {

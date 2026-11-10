@@ -9,6 +9,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { parseArgs } from "node:util";
+import { conversationClient } from "../apps/cli/src/operator-client.js";
+import { ReplyStatus } from "../packages/operator-api/src/index.js";
 
 const { values } = parseArgs({
   options: { live: { type: "boolean" }, provider: { type: "string", default: "codex" } },
@@ -62,11 +64,11 @@ const prefix = ["--import", "tsx", "--conditions=development", "apps/cli/src/ind
 const children: ChildProcess[] = [];
 const deadline = Date.now() + 600000;
 let counter = 0;
-async function cli(args: string[], override: NodeJS.ProcessEnv = env, timeoutMs = 30000) {
+async function cli(args: string[]) {
   return new Promise<string>((done, reject) => {
     const child = spawn(process.execPath, [...prefix, ...args], {
       cwd: root,
-      env: override,
+      env,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let out = "",
@@ -75,7 +77,7 @@ async function cli(args: string[], override: NodeJS.ProcessEnv = env, timeoutMs 
     child.stderr.on("data", (x) => (err += x));
     const timer = setTimeout(
       () => child.kill("SIGKILL"),
-      Math.max(1, Math.min(timeoutMs, deadline - Date.now())),
+      Math.max(1, Math.min(30_000, deadline - Date.now())),
     );
     child.once("error", reject);
     child.once("exit", (code) => {
@@ -201,16 +203,26 @@ try {
     const host = JSON.parse(await cli(["get", "worker-host", "host"]));
     return host.status.connectionStatus === "connected" ? true : undefined;
   });
-  /** One CLI conversation turn; waits for the reply and returns the message record. */
-  const message = async (session: string, text: string) => {
-    const record = JSON.parse(
-      await cli(
-        ["message", "tag", "operator-worker", text, "--session", session, "--output", "json"],
-        env,
-        300000,
-      ),
-    ) as { taskId: string; sessionId: string; status: string; reply?: { text: string } };
-    if (record.status !== "replied") throw new Error(`Turn in ${session} did not reply`);
+  const conversations = conversationClient({ url: origin, token: admin });
+  /** One operator conversation turn, followed until its reply and work reports. */
+  const message = async (conversation: string, text: string) => {
+    const sent = await conversations.sendMessage({ tag: "operator-worker", conversation, text });
+    const request = { tag: sent.tag, taskId: sent.taskId };
+    for await (const { part } of conversations.followMessage(request, {
+      timeoutMs: Math.max(1, Math.min(300000, deadline - Date.now())),
+    })) {
+      if (part.case === "end" || part.case === "error") break;
+      if (part.case !== "finish" && part.case !== "workSessionChanged") continue;
+      const record = await conversations.getMessage(request);
+      if (
+        record.status === ReplyStatus.REPLIED &&
+        record.workSessions.every((session) => session.reportStatus === ReplyStatus.REPLIED)
+      )
+        break;
+    }
+    const record = await conversations.getMessage(request);
+    if (record.status !== ReplyStatus.REPLIED)
+      throw new Error(`Turn in ${conversation} did not reply`);
     return record;
   };
   /** The turn's Task, once it settled. */

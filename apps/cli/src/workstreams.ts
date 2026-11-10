@@ -3,8 +3,7 @@ import { type JsonValue, toJson } from "@bufbuild/protobuf";
 import type { WorkstreamPost } from "@supertag/core";
 import { ListWorkstreamPostsResponseSchema } from "@supertag/operator-api";
 import { isoOf } from "./objective-protos.js";
-import { mailboxClient, type OperatorClientOptions } from "./operator-client.js";
-import { refusedAsError } from "./tag-conversation.js";
+import { mailboxClient, type OperatorClientOptions, refusedAsError } from "./operator-client.js";
 
 export function workstreamHelp(): string {
   return `Usage:

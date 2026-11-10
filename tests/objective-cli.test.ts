@@ -186,13 +186,7 @@ describe("Objective commands", () => {
     return (error as Error).message;
   };
 
-  it("routes message and approve to the Objective commands", () => {
-    expect(normalizeActionFirstCommand(["message", "objective", "a", "Fix it"])).toEqual([
-      "objective",
-      "message",
-      "a",
-      "Fix it",
-    ]);
+  it("routes approve to the Objective commands", () => {
     expect(normalizeActionFirstCommand(["approve", "objective", "a"])).toEqual([
       "objective",
       "approve",
@@ -407,7 +401,7 @@ describe("Objective commands", () => {
     );
   });
 
-  it("sends an operator message as the Objective's next turn", async () => {
+  it("shows when an operator API message resumes a blocked Objective", async () => {
     // A message is a turn of the Objective's conversation, so the owner needs a Worker Host.
     await run("update", "tag", "planner", "--add-worker-host", "control-plane-static-host");
     await run(
@@ -421,9 +415,11 @@ describe("Objective commands", () => {
     );
     await run("update", "objective", "report", "--status", "blocked");
     // A message moves a blocked Objective back to working and becomes the owner's next turn.
-    expect(await run("message", "objective", "report", "Use the 2030 figures.")).toContain(
-      "Sent to the conversation of Objective report.\nThe Objective moved from blocked back to working.",
-    );
+    await objectiveClient(client.operator).messageObjective({
+      id: "report",
+      text: "Use the 2030 figures.",
+      idempotencyKey: "update-report-figures",
+    });
     expect(JSON.parse(await run("get", "objective", "report"))).toMatchObject({
       status: "OBJECTIVE_STATUS_WORKING",
     });
@@ -459,7 +455,13 @@ describe("Objective commands", () => {
       revision: "2",
     });
     // Nothing reopens a completed Objective: its conversation is over.
-    expect(await fail("message", "objective", "notes", "Reopen?")).toMatch(/completed/u);
+    await expect(
+      objectiveClient(client.operator).messageObjective({
+        id: "notes",
+        text: "Reopen?",
+        idempotencyKey: "reopen-notes",
+      }),
+    ).rejects.toThrow(/completed/u);
   });
 
   it("creates a Team the Objective names and reads its Workstream", async () => {

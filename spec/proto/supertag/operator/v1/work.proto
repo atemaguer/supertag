@@ -1253,7 +1253,7 @@ message Session {
   string tag_id = 3;
   // That Tag's name. Empty when the Tag no longer exists.
   string tag = 4;
-  // The key its turns are routed by, such as a thread or a CLI conversation.
+  // The key that routes its turns, such as a thread or a private operator conversation.
   string session_key = 5;
   // Where it started, as recorded when it opened: a JSON object whose fields
   // depend on what started it, such as a work Session's `title`.

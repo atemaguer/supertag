@@ -124,6 +124,16 @@ export function operatorErrorMessage(error: ConnectError): string {
   return hint === undefined ? message : `${message}\n${hint}`;
 }
 
+/** Runs an operator RPC and presents refusals with the Control Plane's message. */
+export async function refusedAsError<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    if (error instanceof ConnectError) throw new Error(operatorErrorMessage(error));
+    throw error;
+  }
+}
+
 function controlPlaneVersion(headers: Headers): string | undefined {
   return headers.get(VERSION_HEADER)?.trim() || undefined;
 }

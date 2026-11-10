@@ -25,10 +25,10 @@ import {
   type OperatorClientOptions,
   operatorErrorMessage,
   organizationClient,
+  refusedAsError,
   surfaceClient,
 } from "./operator-client.js";
 import { applyManifest, getResourceView, listResourceViews } from "./operator-resources.js";
-import { refusedAsError } from "./tag-conversation.js";
 import { runTagLocationCommand } from "./tag-locations.js";
 import type { TagCommand } from "./tags.js";
 

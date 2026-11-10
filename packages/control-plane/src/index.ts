@@ -691,9 +691,8 @@ export class ControlPlane {
   }
 
   /**
-   * Records why a surface Task cannot be placed, so `supertag describe task` and
-   * `supertag message tag` show what it waits for, and records the hold's end once the Task can
-   * be placed. A reason is written only when it changes, never on every dispatch pass.
+   * Records why a surface Task cannot be placed and when it becomes eligible. The terminal UI
+   * and `supertag describe task` show the reason. A reason is written only when it changes.
    */
   async #recordSurfacePlacement(task: Task, placement: TaskPlacement): Promise<void> {
     // A hold recorded before a restart, or by another Control Plane, is read once per process.
@@ -1472,10 +1471,10 @@ export class ControlPlane {
   }
 
   /**
-   * `supertag message tag`: one message from an operator to a Tag in a CLI conversation. The
+   * One message from an operator to a Tag in a private operator conversation. The
    * conversation is direct, so its Session is private to the operator, and it has no location:
    * the synthetic origin carries no Permission or Context Set activations, so the Tag answers
-   * with its Roles only. Replies are recorded, never sent anywhere; the CLI reads them.
+   * with its Roles only. The Control Plane records replies for the terminal UI and operator API.
    */
   async messageTag(input: {
     readonly tagName: string;
@@ -1659,7 +1658,7 @@ export class ControlPlane {
 
   /**
    * A person replying in an Objective's home thread directs that Objective. A plain thread reply
-   * is the next turn of the Objective's conversation, like `supertag message objective`;
+   * is the next turn of the Objective's conversation, like `MessageObjective`.
    * `@SuperTag approve` approves a ready_for_review result, and `@SuperTag pause` and
    * `@SuperTag resume` pause and resume the Objective. Anyone who may create Objectives from this
    * surface may do this. Other messages keep their ordinary Session handling.
@@ -4131,8 +4130,8 @@ export class ControlPlane {
 
   /**
    * Admits a turn of the Tag's inbox Session for a Mailbox message, in the Tag's CLI account and
-   * under its Roles only, like `supertag message tag`. The message id keys the turn, so it is
-   * admitted once; the turn takes every message waiting when it starts.
+   * under its Roles only. The message ID keys the turn, so it is admitted once. The turn takes
+   * every message waiting when it starts.
    */
   async #admitInboxTurn(
     recipient: Tag,

@@ -13,9 +13,12 @@ within the pre-1.0 compatibility policy described in
 
 - Setup and the quickstart now guide your first conversation through the terminal UI. If there
   are no Tags, SuperTag shows how to get started with `supertag init`.
-- The terminal UI can send follow-up messages to an Objective's owner. The CLI's
-  `message tag` and `message objective` commands are deprecated and remain available to scripts
-  during the transition.
+- The terminal UI can send follow-up messages to an Objective's owner.
+
+### Removed
+
+- Removed `supertag message tag` and `supertag message objective`. Send messages in the terminal UI
+  or through the operator API. Use `supertag list message --mailbox TAG` to inspect a Tag's Mailbox.
 
 ## [0.2.0-alpha.7] - 2026-11-09
 

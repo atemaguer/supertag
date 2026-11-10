@@ -3,10 +3,9 @@ import { timestampFromDate } from "@bufbuild/protobuf/wkt";
 import { parseSpendSince, type SpendReport, type SpendUsage } from "@supertag/core";
 import type { ControlPlaneTarget } from "./control-plane-client.js";
 import { money } from "./money.js";
-import { organizationClient } from "./operator-client.js";
+import { organizationClient, refusedAsError } from "./operator-client.js";
 import { SPEND_GROUPINGS, spendReportView } from "./organization-protos.js";
 import { takeOutputFlag } from "./output-flag.js";
-import { refusedAsError } from "./tag-conversation.js";
 import { terminalText } from "./terminal-text.js";
 
 export async function runSpendCommand(

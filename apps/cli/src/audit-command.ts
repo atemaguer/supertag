@@ -8,9 +8,8 @@ import {
 } from "@supertag/core";
 import type { ControlPlaneClient } from "./control-plane-client.js";
 import { CONTROL_PLANE_API_VERSION } from "./control-plane-resources.js";
-import { organizationClient } from "./operator-client.js";
+import { organizationClient, refusedAsError } from "./operator-client.js";
 import { auditEntryView } from "./organization-protos.js";
-import { refusedAsError } from "./tag-conversation.js";
 
 export function auditHelp(): string {
   return `Usage:

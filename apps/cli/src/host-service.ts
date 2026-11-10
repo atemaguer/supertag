@@ -43,7 +43,7 @@ import {
   writeStatus,
 } from "./local-state.js";
 import { FileMcpLoginStore, lapsedMcpLogins } from "./mcp-oauth.js";
-import { hostClient } from "./operator-client.js";
+import { hostClient, refusedAsError } from "./operator-client.js";
 import {
   enrollWorkerHostCredential,
   findResourceView,
@@ -61,7 +61,6 @@ import {
   serviceFingerprint,
   UNSANDBOXED_HARNESSES,
 } from "./supertag-yaml.js";
-import { refusedAsError } from "./tag-conversation.js";
 import { resolvedSummary } from "./up-serve.js";
 import { SUPERTAG_VERSION } from "./version.js";
 import {

@@ -1,12 +1,11 @@
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fromJsonString } from "@bufbuild/protobuf";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
-import { runTagConversationCommand } from "../apps/cli/src/tag-conversation.ts";
+import { conversationClient } from "../apps/cli/src/operator-client.ts";
 import { workSessionBranch } from "../packages/control-plane/src/work-sessions.ts";
-import { MessageSchema, ReplyStatus } from "../packages/operator-api/src/index.ts";
+import { ReplyStatus } from "../packages/operator-api/src/index.ts";
 import { createCodexWorker } from "../packages/runtime/harnesses/codex/src/index.ts";
 import {
   SURFACE_COORDINATION_CAPABILITY,
@@ -239,13 +238,18 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
 
       const send = async (text: string) => {
         if (!runtime) throw new Error("not started");
-        return fromJsonString(
-          MessageSchema,
-          await runTagConversationCommand(
-            { url: runtime.url, token: ADMIN },
-            ["planner", text, "--session", "plan", "--output", "json"],
-            { timeoutMs: 30_000 },
-          ),
+        const client = conversationClient({ url: runtime.url, token: ADMIN });
+        const sent = await client.sendMessage({ tag: "planner", conversation: "plan", text });
+        return vi.waitFor(
+          async () => {
+            const message = await client.getMessage({ tag: sent.tag, taskId: sent.taskId });
+            expect(message.status).toBe(ReplyStatus.REPLIED);
+            expect(
+              message.workSessions.every((session) => session.reportStatus === ReplyStatus.REPLIED),
+            ).toBe(true);
+            return message;
+          },
+          { timeout: 30_000 },
         );
       };
 

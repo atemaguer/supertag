@@ -77,8 +77,8 @@ export type DatabaseProvider = "sqlite" | "postgresql";
 export type ConnectedSurfaceProvider = "github" | "lark" | "linear" | "slack" | "teams";
 
 /**
- * Where a conversation happens: a connected surface, or `cli` for `supertag message tag`, which
- * the Control Plane answers itself without an external delivery.
+ * Where a conversation happens: a connected surface, or `cli` for a private operator
+ * conversation that the Control Plane answers without an external delivery.
  */
 export type SurfaceProvider = "cli" | ConnectedSurfaceProvider;
 

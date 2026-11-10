@@ -1,13 +1,9 @@
-import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import { type DescMessage, type MessageShape, toJsonString } from "@bufbuild/protobuf";
 import { timestampDate, timestampFromDate } from "@bufbuild/protobuf/wkt";
-import { Code, ConnectError } from "@connectrpc/connect";
 import {
   ListObjectivesResponseSchema,
-  type Message,
-  MessageObjectiveResponseSchema,
   ObjectiveOverviewSchema,
   ObjectiveSchema,
 } from "@supertag/operator-api";
@@ -25,14 +21,26 @@ import {
   overviewView,
 } from "./objective-protos.js";
 import { watchObjective } from "./objective-watch.js";
-import { eventClient, inboxClient, objectiveClient } from "./operator-client.js";
+import { eventClient, inboxClient, objectiveClient, refusedAsError } from "./operator-client.js";
 import { withCurrentRevision } from "./revision.js";
-import { followTagMessage, refusedAsError, tagConversationClient } from "./tag-conversation.js";
 import { terminalText } from "./terminal-text.js";
 import { workstreamPosts } from "./workstreams.js";
 
-export const objectiveMessageDeprecation =
-  "supertag message objective is deprecated. Run supertag in a terminal, select the Objective, and press m.";
+const objectiveCommands: ReadonlySet<string> = new Set([
+  "approve",
+  "cancel",
+  "create",
+  "get",
+  "list",
+  "pause",
+  "resume",
+  "status",
+  "watch",
+]);
+
+export function isObjectiveCommand(command: string): boolean {
+  return objectiveCommands.has(command);
+}
 
 export function objectiveHelp(): string {
   return `Usage:
@@ -41,7 +49,6 @@ export function objectiveHelp(): string {
   supertag get objective ID [--output yaml]
   supertag describe objective ID [--output text|json]
   supertag watch objective ID [--output text|json]
-  supertag message objective ID TEXT|- [--output text|json]
   supertag approve objective ID
   supertag update objective ID --status STATUS [--revision N]
   supertag update objective ID [--revision N] [--deadline ISO] [--budget-minor N] [--runtime-action ACTION ...]
@@ -65,11 +72,6 @@ with a warning. Update --runtime-action replaces the list for turns that start a
 A budget with --budget-currency caps provider-reported cost for the owner and all the work it
 starts. Repeat --workspace to name Workspaces the Objective's work may use; each must already exist.
 Use --ongoing for a responsibility that only an operator can end.
-${objectiveMessageDeprecation}
-message sends TEXT (or standard input for -) to the Objective's conversation as its next turn and
-shows the owner's reply when the Objective was created from this CLI; otherwise the reply posts
-to the thread the Objective was created in. A message answers a question the owner asked, and
-moves a blocked, limited, or ready_for_review Objective back to working.
 approve completes a ready_for_review Objective with the owner's assessment.
 Update --deadline moves the deadline, including after it passed. Update --budget-minor only increases a budget.
 Updates read the current revision when --revision is omitted and retry once after an unrelated change.
@@ -149,7 +151,7 @@ export async function runObjectiveCommand(
           ]
         : command === "list"
           ? ["owner", "limit"]
-          : command === "message" || command === "approve" || command === "watch"
+          : command === "approve" || command === "watch"
             ? ["output"]
             : command === "get" && values.overview
               ? ["overview", "output"]
@@ -167,9 +169,7 @@ export async function runObjectiveCommand(
         )
       : command === "create"
         ? positionals.length > 1
-        : command === "message"
-          ? positionals.length !== 2
-          : positionals.length !== (command === "list" ? 0 : 1))
+        : positionals.length !== (command === "list" ? 0 : 1))
   )
     throw new Error(objectiveHelp());
   if (values.output !== undefined && values.output !== "json" && values.output !== "text")
@@ -222,18 +222,6 @@ export async function runObjectiveCommand(
       ...(inbox === undefined ? {} : { inbox }),
       ...(checkouts === undefined ? {} : { checkouts }),
     });
-  }
-  if (command === "message") {
-    const text = positionals[1] === "-" ? await readStdin() : (positionals[1] ?? "");
-    if (!text.trim()) throw new Error("The message is empty");
-    const result = await refusedAsError(() =>
-      client.messageObjective({ id, text: text.trim(), idempotencyKey: randomUUID() }),
-    );
-    if (json) return jsonOf(MessageObjectiveResponseSchema, result);
-    process.stdout.write(
-      formatMessageResult(id, result.duplicate, OBJECTIVE_STATUS.word(result.statusChange)),
-    );
-    return followObjectiveReply(target, result.tag, result.taskId);
   }
   if (command === "approve") {
     const objective = await refusedAsError(() => client.approveObjective({ id }));
@@ -414,55 +402,6 @@ function budgetLimit(objective: ObjectiveView): string {
   const currency = objective.budgetCurrency;
   if (limit === null) return "none";
   return currency !== null ? money(limit, currency) : `${limit} allocation units`;
-}
-
-function formatMessageResult(
-  id: string,
-  duplicate: boolean,
-  statusChange: string | undefined,
-): string {
-  const lines = [
-    `${duplicate ? "Already sent" : "Sent"} to the conversation of Objective ${terminalText(id)}.`,
-  ];
-  if (statusChange)
-    lines.push(`The Objective moved from ${statusChange.replaceAll("_", " ")} back to working.`);
-  return `${lines.join("\n")}\n`;
-}
-
-/**
- * Shows the owner's reply to a message, as `message tag` does, when the Objective's conversation
- * is this operator's CLI conversation. Otherwise the reply posts to the Objective's home thread.
- */
-async function followObjectiveReply(
-  target: ControlPlaneTarget,
-  tag: string,
-  taskId: string,
-): Promise<string> {
-  const conversations = tagConversationClient(target);
-  let message: Message;
-  try {
-    message = await conversations.getMessage({ tag, taskId });
-  } catch (error) {
-    if (
-      error instanceof ConnectError &&
-      (error.code === Code.NotFound || error.code === Code.PermissionDenied)
-    )
-      return "The reply posts to the thread the Objective was created in.\n";
-    return refusedAsError(() => Promise.reject(error));
-  }
-  const detach = new AbortController();
-  const stop = () => detach.abort();
-  process.once("SIGINT", stop);
-  try {
-    return await followTagMessage(conversations, message, {
-      signal: detach.signal,
-      write: (text) => process.stdout.write(text),
-      warn: (text) => process.stderr.write(text),
-      interactive: process.stdout.isTTY === true,
-    });
-  } finally {
-    process.removeListener("SIGINT", stop);
-  }
 }
 
 async function readStdin(): Promise<string> {

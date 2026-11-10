@@ -15,9 +15,8 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { stateDirectory as defaultStateDirectory } from "@supertag/store";
 import type { ControlPlaneClient } from "./control-plane-client.js";
 import { workerHostCredentialView, workerHostView } from "./host-protos.js";
-import { hostClient, operatorErrorMessage } from "./operator-client.js";
+import { hostClient, operatorErrorMessage, refusedAsError } from "./operator-client.js";
 import { takeOutputFlag } from "./output-flag.js";
-import { refusedAsError } from "./tag-conversation.js";
 
 export type WorkerHostCommand = "drain" | "enroll" | "resume" | "revoke" | "rotate-credential";
 export type WorkerHostControlPlaneCommand = WorkerHostCommand;

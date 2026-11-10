@@ -3048,7 +3048,7 @@ export type Session = Message<"supertag.operator.v1.Session"> & {
   tag: string;
 
   /**
-   * The key its turns are routed by, such as a thread or a CLI conversation.
+   * The key that routes its turns, such as a thread or a private operator conversation.
    *
    * @generated from field: string session_key = 5;
    */

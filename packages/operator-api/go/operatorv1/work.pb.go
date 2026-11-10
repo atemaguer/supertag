@@ -6163,7 +6163,7 @@ type Session struct {
 	TagId string `protobuf:"bytes,3,opt,name=tag_id,json=tagId,proto3" json:"tag_id,omitempty"`
 	// That Tag's name. Empty when the Tag no longer exists.
 	Tag string `protobuf:"bytes,4,opt,name=tag,proto3" json:"tag,omitempty"`
-	// The key its turns are routed by, such as a thread or a CLI conversation.
+	// The key that routes its turns, such as a thread or a private operator conversation.
 	SessionKey string `protobuf:"bytes,5,opt,name=session_key,json=sessionKey,proto3" json:"session_key,omitempty"`
 	// Where it started, as recorded when it opened: a JSON object whose fields
 	// depend on what started it, such as a work Session's `title`.

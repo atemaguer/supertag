@@ -7,9 +7,8 @@ import {
   TaskSchema,
 } from "@supertag/operator-api";
 import { TASK_STATUS } from "./objective-protos.js";
-import { type OperatorClientOptions, workClient } from "./operator-client.js";
+import { type OperatorClientOptions, refusedAsError, workClient } from "./operator-client.js";
 import { takeOutputFlag } from "./output-flag.js";
-import { refusedAsError } from "./tag-conversation.js";
 
 export type TaskCommand = "cancel" | "events" | "execution" | "get";
 

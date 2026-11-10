@@ -993,7 +993,7 @@ One Session.
 | `resource_version` | `resourceVersion` | `string` | Changes whenever the Session changes. Compare it for equality only. |
 | `tag_id` | `tagId` | `string` | The ID of its Tag. |
 | `tag` | `tag` | `string` | That Tag's name. Empty when the Tag no longer exists. |
-| `session_key` | `sessionKey` | `string` | The key its turns are routed by, such as a thread or a CLI conversation. |
+| `session_key` | `sessionKey` | `string` | The key that routes its turns, such as a thread or a private operator conversation. |
 | `origin` | `origin` | `google.protobuf.Struct` | Where it started, as recorded when it opened: a JSON object whose fields depend on what started it, such as a work Session's `title`. Collaboration surfaces shape parts of it, so it is untrusted text. |
 | `phase` | `phase` | [`SessionPhase`](#sessionphase) | Where it stands. |
 | `audience` | `audience` | [`SessionAudience`](#sessionaudience) | Who its replies are for. |

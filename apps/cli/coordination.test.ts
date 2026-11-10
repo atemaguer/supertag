@@ -64,7 +64,7 @@ function questionItem(text: string, truncated = false): CoordinationInboxItem {
     ],
     approval: undefined,
     question: { text, createdAt: "2026-09-30T00:00:00.000Z", truncated },
-    commands: ["supertag message objective objective-a TEXT"],
+    commands: [],
   });
 }
 
@@ -197,9 +197,12 @@ it("shows the Objective's question and where to read a long one in full", async 
   );
   expect(text).toContain("Open supertag in a terminal and answer under Waiting on you.");
   const json = await runInboxCommand(target, "list", ["--output", "json"]);
-  expect(JSON.parse(json).items[0].commands).toEqual([
-    "supertag message objective objective-a TEXT",
-  ]);
+  const question = JSON.parse(json).items[0];
+  expect(question).toMatchObject({
+    key: "question:objective-a:task-9",
+    question: { text: "Which region\nshould the repair target?" },
+  });
+  expect(question).not.toHaveProperty("commands");
 });
 
 it("prints reasons and commands on one line each, so host text cannot forge a Run line", async () => {

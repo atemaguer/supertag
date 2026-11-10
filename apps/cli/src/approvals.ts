@@ -30,9 +30,8 @@ import {
   INBOX_KIND,
   inboxItemRecord,
 } from "./objective-protos.js";
-import { eventClient, inboxClient } from "./operator-client.js";
+import { eventClient, inboxClient, refusedAsError } from "./operator-client.js";
 import { operatorNotice } from "./operator-notice.js";
-import { refusedAsError } from "./tag-conversation.js";
 import { terminalText } from "./terminal-text.js";
 
 type InboxClient = ReturnType<typeof inboxClient>;

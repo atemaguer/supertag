@@ -174,13 +174,11 @@ for (const dialect of ["sqlite", "postgresql"] as const)
         body: JSON.stringify({ id: decide.id, reason: "Not now" }),
       });
       expect(decided.status, await decided.clone().text()).toBe(200);
-      await runObjectiveCommand(operator, [
-        "message",
-        fixture.objective.id,
-        "Include-the-CSV",
-        "--output",
-        "json",
-      ]);
+      await objectiveClient(operator).messageObjective({
+        id: fixture.objective.id,
+        text: "Include-the-CSV",
+        idempotencyKey: "include-csv",
+      });
       // An Objective without open Tasks, which its owner submitted for review.
       const reviewed = await store.createObjective({
         id: "reviewed",
@@ -193,13 +191,11 @@ for (const dialect of ["sqlite", "postgresql"] as const)
         fixture.owner.id,
       );
       // A message to an Objective waiting on review puts it back to work instead of approving it.
-      await runObjectiveCommand(operator, [
-        "message",
-        reviewed.id,
-        "One-more-change",
-        "--output",
-        "json",
-      ]);
+      await objectiveClient(operator).messageObjective({
+        id: reviewed.id,
+        text: "One-more-change",
+        idempotencyKey: "one-more-change",
+      });
       await store.updateObjectiveStatus(
         reviewed.id,
         {

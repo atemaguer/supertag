@@ -25,8 +25,8 @@ whole system rather than another first-class resource.
 - <a id="task"></a>**Task** — one request or assignment accepted for a Tag under a recorded policy. See
   [the task concepts](../concepts/tasks.md).
 - <a id="session"></a>**Session** — a group of Tasks from the same conversation. All of a Tag's Sessions share
-  its open Objectives and can read each other, except a private Session, such as a direct chat or a
-  CLI conversation, which only its one person's Sessions can read. A work Session is a Session a
+  its open Objectives and can read each other. Only one person's Sessions can read their private
+  Sessions, such as a direct chat or a conversation in the terminal UI. A work Session is a Session a
   conversation started for longer work; its parent is that conversation, it sees only its own
   work, and its result returns there through the Tag. See
   [across Sessions](../concepts/multiplayer.md#across-sessions-one-tag-one-memory) and
