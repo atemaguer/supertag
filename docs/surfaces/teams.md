@@ -1,6 +1,6 @@
 # Connect Microsoft Teams
 
-Connect a Microsoft Teams tenant so a **Tag**, a persistent AI identity with its own
+Connect a Microsoft Teams tenant so a **Tag**, a persistent AI actor with its own
 responsibilities and permissions, replies when someone mentions it in a channel. Teams requires a
 single-tenant Entra application, a bot or agent resource, and a Teams app installed in the target
 team.

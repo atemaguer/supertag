@@ -1,6 +1,6 @@
 # Work in a repository with Workspaces
 
-A **Tag** is a persistent AI identity with its own responsibilities and permissions. An
+A **Tag** is a persistent AI actor with its own responsibilities and permissions. An
 **Objective** is an outcome a Tag owns, and its **Tasks** are the assignments toward it. A
 **Workspace** is a named repository that an Objective's Tasks work in, such as `app`. A **Worker
 Host** is a machine that runs Tasks; it declares a local checkout, keeps a clone of the Workspace's

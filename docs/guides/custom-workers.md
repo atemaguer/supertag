@@ -5,7 +5,7 @@ Codex, Claude Code, Cursor, and OpenCode integrations do not fit the execution s
 
 A **Task** is one accepted request or assignment. A **Worker** is the code that completes it. A
 **harness** connects a Worker to an agent system such as Codex or Claude Code. A **Tag** is a
-persistent AI identity with its own responsibilities and permissions, and Tags work in Teams: flat
+persistent AI actor with its own responsibilities and permissions, and Tags work in Teams: flat
 lists of member Tags. Together, your Teams of Tags make up an **autonomous organization**: Teams may pursue
 different goals but share one set of rules and one record of the work. A **Worker Host** is a
 machine or sandbox that provides execution capacity, and a **Worklet** connects it to the **Control

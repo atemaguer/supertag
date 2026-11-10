@@ -1,6 +1,6 @@
 # Define and complete an Objective
 
-A **Tag** is a persistent AI identity with its own responsibilities and permissions. An
+A **Tag** is a persistent AI actor with its own responsibilities and permissions. An
 **Objective** is an outcome owned by a Tag, with a budget, a deadline, and a status. A **Session**
 is one Tag's thread of **Tasks**, and a Task is one turn of a Session; a **Task Attempt** is one
 execution of a Task. A **Team** is a flat list of member Tags. The **Control Plane** is the

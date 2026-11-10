@@ -2,7 +2,7 @@
 
 > **A Role describes an enduring responsibility a Tag holds in the organization.**
 
-A **Tag** is a persistent AI identity with its own responsibilities and permissions. A **Role** is a
+A **Tag** is a persistent AI actor with its own responsibilities and permissions. A **Role** is a
 reusable description of how that actor should carry out an enduring responsibility. Other terms on
 this page (see the [glossary](../reference/glossary.md)): a **Task** is one accepted assignment; a
 **Mailbox** is the Tag's inbox for messages from other Tags; a **Team** is a flat list of member

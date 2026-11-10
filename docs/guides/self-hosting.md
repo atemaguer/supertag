@@ -1,6 +1,6 @@
 # Self-host SuperTag
 
-A **Tag** is a persistent AI identity with its own responsibilities and permissions, and Tags work
+A **Tag** is a persistent AI actor with its own responsibilities and permissions, and Tags work
 in Teams: flat lists of member Tags. Together, your Teams of Tags make up an **autonomous organization**: Teams
 may pursue different goals but share one set of rules and one record of the work. Run your own
 **Control Plane** (the service that stores and coordinates the organization) with PostgreSQL, and
@@ -63,7 +63,7 @@ is optional; see [In containers and hosting platforms](../reference/supertag-yam
 Production deployments require PostgreSQL, an HTTPS address for the Control Plane, a strong
 administrative token, per-Worker-Host enrollment credentials, and durable credential storage. By
 default, a persistent volume at `SUPERTAG_STATE_DIR` preserves credentials; Cloudflare uses external
-Vault instead. PostgreSQL preserves **Tags** (persistent AI identities with their own
+Vault instead. PostgreSQL preserves **Tags** (persistent AI actors with their own
 responsibilities and permissions), **Sessions** (groups of Tasks from one conversation), Tasks,
 delivery state, and the catalog of artifacts, the output files that Tasks capture. The Control Plane
 stores no artifact bytes: Worker Hosts keep them.

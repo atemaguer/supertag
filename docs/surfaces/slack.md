@@ -1,6 +1,6 @@
 # Connect Slack
 
-Connect a Slack workspace so a **Tag**, a persistent AI identity with its own responsibilities and
+Connect a Slack workspace so a **Tag**, a persistent AI actor with its own responsibilities and
 permissions, replies when someone mentions it in a channel. Use Socket Mode for the shortest local
 setup, and HTTP ingress only when SuperTag already has a stable public HTTPS URL.
 

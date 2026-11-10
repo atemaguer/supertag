@@ -1,7 +1,7 @@
 # Collaboration surface guides
 
 Connect an external work tool so a **Tag** can receive requests and reply there. A Tag is a
-persistent AI identity with its own responsibilities and permissions. A **collaboration surface** is
+persistent AI actor with its own responsibilities and permissions. A **collaboration surface** is
 how SuperTag meets people in a tool such as Slack or GitHub: it receives events at a Tag's locations
 and replies there. See the [glossary](../reference/glossary.md) for other terms.
 

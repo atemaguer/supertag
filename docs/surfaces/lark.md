@@ -1,6 +1,6 @@
 # Connect Lark or Feishu
 
-Connect a Lark or Feishu app so a **Tag**, a persistent AI identity with its own responsibilities
+Connect a Lark or Feishu app so a **Tag**, a persistent AI actor with its own responsibilities
 and permissions, replies in group chats and direct bot chats. SuperTag's Lark collaboration surface
 uses the official Node SDK and an outbound long connection, so SuperTag does not need a public
 webhook endpoint for Lark message events.

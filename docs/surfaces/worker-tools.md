@@ -1,6 +1,6 @@
 # MCP tools for GitHub, Slack, Linear, Teams, and Lark
 
-An MCP server gives a **Task**, one request accepted for a **Tag** (a persistent AI identity with
+An MCP server gives a **Task**, one request accepted for a **Tag** (a persistent AI actor with
 its own responsibilities and permissions), tools to read or change an external service. A **Worker
 Host**, a machine or sandbox that provides execution capacity, runs the Task. There the **Worker**,
 the code that completes the Task, drives an agent system through its **harness**. Declare a preset

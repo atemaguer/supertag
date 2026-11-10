@@ -6,7 +6,7 @@ only with the smoke-test message, or leaves a **Task**—one accepted request or
 The **Control Plane** is the SuperTag service that receives requests and schedules work. A
 **collaboration surface** is an external work tool, such as Slack or GitHub, where SuperTag meets
 people; a **Surface Account** is one connected workspace or account there. A **Tag** is a persistent
-AI identity with its own responsibilities and permissions. A **Worker Host** is a machine,
+AI actor with its own responsibilities and permissions. A **Worker Host** is a machine,
 container, VM, or sandbox that provides execution capacity. Its **Worklet** connects it to the
 Control Plane, and a **Worker** on it completes Tasks.
 

@@ -2,9 +2,9 @@
 
 Start here if you want to understand SuperTag before configuring it.
 
-SuperTag gives engineering work a persistent owner: a Tag, a persistent AI identity with its own
-responsibilities and permissions. You talk to a Tag, or hand it an outcome: the result, how
-success is verified, the constraints, budget, and deadline, and which decisions need a person. It
+SuperTag gives engineering work a persistent owner. A Tag is a persistent AI actor with a stable
+identity, responsibilities, permissions, and work history. You talk to a Tag or give it an outcome
+with success criteria, constraints, a budget, a deadline, and decisions that need a person. It
 plans the work, hands pieces to other Tags on its Team, reviews what they report, and keeps going
 until the outcome is met or it needs a person's decision. Together, your Teams of
 Tags make up an **autonomous organization**: Teams may pursue different outcomes, called
@@ -30,12 +30,9 @@ Mailbox: a Tag's inbox for messages from other Tags
 
 ## Start with the actor
 
-A [Tag](tags.md) is a persistent AI identity with its own responsibilities and permissions. You
-assign work to a Tag by name. A Tag talks to people in many conversations, each its own Session with
-its own harness session, and works on assignments that each start a new one. The Tag is what
-persists across them: its configuration, its Sessions, its open assignments, and their results. People
-may experience a Tag as a teammate in Slack or another shared tool, but the Tag exists independently
-of that tool.
+You assign work to a [Tag](tags.md) by name. It can carry on conversations in several tools and
+start separate work Sessions. The same Tag keeps its configuration, open assignments, and results
+across those Sessions and when the model or harness changes.
 
 A [Role](roles.md) describes an enduring responsibility such as release management or security
 review. Assign a Role to a Tag when the same responsibility should guide that actor across many

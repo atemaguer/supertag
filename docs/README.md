@@ -1,11 +1,11 @@
 # SuperTag documentation
 
-SuperTag gives engineering work a persistent owner. A **Tag** is a persistent AI identity with its
-own responsibilities and permissions. You talk to it in your terminal, in Slack, or on a GitHub
-issue; it runs the work on your coding agents, asks when a decision is yours, and returns a git
-branch to review. For bigger work you give it an **Objective**: what done means, how it's
-verified, a budget, and a deadline. It plans the work and hands pieces to the other Tags on its
-Team.
+SuperTag gives engineering work a persistent owner. A **Tag** is a persistent AI actor with a
+stable identity, responsibilities, permissions, and work history. It exists independently of the
+model or harness executing its work. Talk to it in your terminal, in Slack, or on a GitHub issue.
+It runs work on your coding agents, asks when a decision is yours, and returns a git branch to
+review. For bigger work, give it an **Objective** with a result to verify, a budget, and a
+deadline. The Tag plans the work and hands pieces to other Tags on its Team.
 
 A **Team** is a flat list of member Tags. Together, your Teams of Tags make up an **autonomous
 organization**: Teams may pursue different Objectives but share one Control Plane, its rules, and
@@ -61,8 +61,8 @@ Follow this order on your first visit:
 
 Read these in order when you want the complete mental model:
 
-1. A [Tag](concepts/tags.md) is a persistent AI identity with its own responsibilities and
-   permissions.
+1. A [Tag](concepts/tags.md) is a persistent AI actor with a stable identity, responsibilities,
+   permissions, and work history.
 2. A [Role](concepts/roles.md) is an enduring responsibility assigned to a Tag.
 3. An [Objective](guides/objectives.md) is a desired outcome with a budget, a deadline, and a
    status. A Session is one Tag's thread of work, and a [Task](concepts/tasks.md) is one turn of

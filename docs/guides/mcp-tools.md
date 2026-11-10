@@ -12,7 +12,7 @@ server, and how long the connection survives. A **Worker Host** is the machine o
 Worker runs. Its **Worklet** connects it to the **Control Plane**, the SuperTag service that
 schedules work. See the [glossary](../reference/glossary.md) for other terms.
 
-The client choice is separate from permission. A **Tag** is a persistent AI identity with its own
+The client choice is separate from permission. A **Tag** is a persistent AI actor with its own
 responsibilities and permissions. A Tag's **Permission Set** decides which operations and resources
 a Task may use. The Worker then decides how a compatible harness reaches the server for each **Task
 Attempt**, one execution or retry of the Task. Moving a client never expands what the Task may do,

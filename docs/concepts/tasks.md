@@ -1,6 +1,6 @@
 # Tasks and Sessions
 
-A **Tag** is a persistent AI identity with its own responsibilities and permissions. A **Session**
+A **Tag** is a persistent AI actor with its own responsibilities and permissions. A **Session**
 is one thread of that Tag's work: a conversation with a person, the conversation of an
 **Objective** it owns, its inbox, or a piece of work started beneath one of those. A **Task** is
 one turn of a Session. SuperTag stores each Task so the work can be inspected, retried, or

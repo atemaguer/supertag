@@ -1,6 +1,6 @@
 # Respond to an Objective
 
-A **Tag** is a persistent AI identity with its own responsibilities and permissions. An
+A **Tag** is a persistent AI actor with its own responsibilities and permissions. An
 **Objective** is an outcome owned by a Tag, with a budget, a deadline, and a status. It works in
 **Sessions**: threads of **Tasks**, one Task per turn. A **Task Attempt** is one execution of a
 Task. The **Control Plane** is the SuperTag service that stores and runs this work. See the

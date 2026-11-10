@@ -1,6 +1,6 @@
 # Requirements
 
-These requirements prepare a computer to run SuperTag. A **Tag** is a persistent AI identity with
+These requirements prepare a computer to run SuperTag. A **Tag** is a persistent AI actor with
 its own responsibilities and permissions, and Tags work in Teams. Together, your Teams
 of Tags make up an **autonomous organization**: Teams may pursue different goals but share one set
 of rules and one record of the work. For example, a laptop can run the **Control Plane**, which

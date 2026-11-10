@@ -4,7 +4,7 @@ Use this guide when work appears stuck, results need review, or you want to comp
 with reported usage. The overview reads existing records; it does not start, approve, cancel, or
 retry work.
 
-A **Tag** is a persistent AI identity with its own responsibilities and permissions. An
+A **Tag** is a persistent AI actor with its own responsibilities and permissions. An
 **Objective** is an outcome owned by a Tag. It works in **Sessions**: threads of **Tasks**, one
 Task per turn, and each execution of a Task is a **Task Attempt**. A **Team** is a flat list of
 member Tags, and its **Workstream** is the Team's shared record of posts. A **Workspace** is a

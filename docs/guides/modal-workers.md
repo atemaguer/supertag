@@ -219,7 +219,7 @@ Confirm that the Worker Host advertises the Modal Worker:
 supertag describe worker-host worker-host-1
 ```
 
-It lists the `modal-codex` Worker and profile. A **Tag** is a persistent AI identity with its own
+It lists the `modal-codex` Worker and profile. A **Tag** is a persistent AI actor with its own
 responsibilities and permissions. After a Tag bound to this host receives a Task,
 `supertag events task TASK_ID` shows its Task Attempt events.
 

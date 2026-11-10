@@ -1,7 +1,7 @@
 # Run a Worker
 
 Connect a machine you control so that **Tasks**, the requests or assignments SuperTag accepts, run
-there with a real agent. A **Tag** is a persistent AI identity with its own responsibilities and
+there with a real agent. A **Tag** is a persistent AI actor with its own responsibilities and
 permissions, and Tags work in Teams: flat lists of member Tags. Together, your Teams of Tags make up an
 **autonomous organization**: Teams may pursue different goals but share one set of rules and one
 record of the work. The **Control Plane** stores and coordinates the organization.

@@ -36,11 +36,10 @@ resources or separately deployed services. Worker Hosts supply execution capacit
 
 ## Configuration resources
 
-- **Tag** — a persistent AI identity with its own responsibilities and permissions. It holds
-  [Roles](glossary.md#role), a [Mailbox](glossary.md#mailbox), and bindings to eligible Worker
-  Hosts. You assign work to a Tag by name. Each assignment runs as a new harness session, and the
-  Tag is what persists across those sessions: its configuration, its open assignments, and their
-  results.
+- **Tag** — a persistent AI actor with a stable identity, responsibilities, permissions, and
+  work history. It holds [Roles](glossary.md#role), a [Mailbox](glossary.md#mailbox), and bindings
+  to eligible Worker Hosts. You assign work to a Tag by name. Its configuration, open
+  assignments, and results persist across model and harness sessions.
 - **Permission Set** — reusable authority to perform surface-backed actions, use harness/runtime tools, or call tools of MCP servers.
   A permission can carry `approval: required`, and `spec.approvers` lists the operators
   (`operator:<id>`) and Tags (`tag:<name or id>`) that may decide. See [IAM approval](iam.md#approval).

@@ -1,7 +1,7 @@
 # Objective walkthrough
 
 This example follows one **Objective**, an outcome a lead Tag owns, from start to finish. A
-**Tag** is a persistent AI identity with its own responsibilities and permissions. A **Session**
+**Tag** is a persistent AI actor with its own responsibilities and permissions. A **Session**
 is one Tag's thread of work, and a **Task** is one turn of it; a **Task Attempt** is one try at
 running that Task. A **Team** is the list of Tags that may hand each other work. The
 **Control Plane** stores all of this and schedules the work.

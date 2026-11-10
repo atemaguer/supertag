@@ -1,7 +1,7 @@
 # Two managers, one shared workspace
 
 This example runs a small AI organization that builds and independently reviews a CSV utility.
-A **Tag** is a persistent AI identity with its own responsibilities and permissions. A **Role** describes its responsibilities and behavior.
+A **Tag** is a persistent AI actor with its own responsibilities and permissions. A **Role** describes its responsibilities and behavior.
 A **Team** is a flat list of Tags that may give each other work, and an **Objective** describes the
 result that organization should achieve. An Objective is a conversation its owner Tag holds: the
 owner starts **work Sessions** with `start_session`, naming another Tag in the Team to hand that

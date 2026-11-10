@@ -1,7 +1,7 @@
 # An ongoing support organization
 
 This example maintains response policies as support incidents arrive. A **Tag** is a persistent AI
-identity with its own responsibilities and permissions. Its **Role** describes its responsibility,
+actor with its own responsibilities and permissions. Its **Role** describes its responsibility,
 and a **Session** is one conversation it holds; a **Task** is one turn of a Session. A manager Tag
 reviews proposals from an analyst Tag and applies them to a small external policy service.
 Duplicate incident reports reuse the same work Session and provider operation.

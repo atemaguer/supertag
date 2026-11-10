@@ -4,7 +4,7 @@ Build and connect a **Worker**—the code that completes an accepted assignment,
 **Task**—in Python. Use the Python SDK when that execution logic is easier to build in Python.
 
 - A **harness** connects the Worker to a model or agent system.
-- A **Tag** is a persistent AI identity with its own responsibilities and permissions, and Tags work
+- A **Tag** is a persistent AI actor with its own responsibilities and permissions, and Tags work
   in Teams: flat lists of member Tags. Together, your Teams of Tags make up an **autonomous organization**: Teams
   may pursue different goals but share one set of rules and one record of the work.
 - A Python **Worklet** supervises the Workers and connects them to the **Control Plane**, the

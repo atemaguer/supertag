@@ -4,7 +4,7 @@ SuperTag multiplayer means **people can safely continue shared work across assig
 and platforms under explicit rules**.
 
 Multiplayer interaction lets several people direct the same **Tag** and continue its approved work
-across the tools their team uses. A Tag is a persistent AI identity with its own responsibilities
+across the tools their team uses. A Tag is a persistent AI actor with its own responsibilities
 and permissions. Each conversation is its own Session with its own harness session, and the Tag is
 what persists across them: its configuration, its Sessions, its open assignments, and their results.
 A shared Tag can appear
