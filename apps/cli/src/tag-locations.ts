@@ -16,7 +16,7 @@ import {
   type ScopedValues,
   shellWord,
   type TagCommand,
-} from "./tag-command-adapter.js";
+} from "./tags.js";
 import { terminalText } from "./terminal-text.js";
 
 /**

@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runTagCommand } from "../apps/cli/src/tags.ts";
+import { ControlPlaneClient } from "../apps/cli/src/control-plane-client.ts";
+import { startControlPlaneRuntime } from "../apps/cli/src/control-plane-runtime.ts";
+import { runResourceCommand } from "../apps/cli/src/resources.ts";
 import { ControlPlane } from "../packages/control-plane/src/index.ts";
 import type { InboundSurfaceEvent } from "../packages/core/src/index.ts";
 import type {
@@ -13,6 +15,7 @@ import type {
 } from "../packages/runtime/sdk/src/index.ts";
 import { DrizzleStore, FileGatewayCredentialVault } from "../packages/store/src/index.ts";
 import { migrateSqlite as migrateSqliteDatabase } from "./support/database.ts";
+import { applyManifests, getResource } from "./support/resources.ts";
 
 const directories: string[] = [];
 
@@ -740,320 +743,232 @@ describe("Tags and their routes", () => {
     }
   });
 
-  it("creates, shows, lists, adds, and removes a Slack surface through the CLI", async () => {
-    const fixture = await createStoreFixture();
-    const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    const credentialVault = new FileGatewayCredentialVault(join(fixture.directory, "secrets.json"));
+  it("creates, describes, lists and changes Slack locations through RPC and manifests", async () => {
+    const fixture = await createTagCliFixture();
+    const { client, store } = fixture;
     try {
-      await createAccount(fixture.store);
-      const dependencies = { store: fixture.store, credentialVault };
-
+      await createAccount(store);
       await expect(
-        runTagCommand("create", ["Engineering", "--worker-profile", "removed"], dependencies),
+        client.runTagCommand("create", ["engineering", "--worker-profile", "removed"]),
       ).rejects.toThrow();
-      await runTagCommand("create", ["Engineering"], dependencies);
-      await runTagCommand(
-        "add",
-        ["Engineering", "slack", "--channel-id", "c123", "--account", "T-BINDINGS"],
-        dependencies,
+      expect(await client.runTagCommand("create", ["engineering"])).toContain(
+        "Created Tag engineering",
       );
-      await runTagCommand(
-        "permission",
-        ["create", "Engineering", "engineering-access"],
-        dependencies,
-      );
-      await runTagCommand(
-        "permission",
-        [
-          "allow",
-          "Engineering",
-          "engineering-access",
-          "runtime",
-          "--actions",
-          "commands:execute,web:search",
-        ],
-        dependencies,
-      );
-      await expect(
-        runTagCommand(
-          "permission",
-          [
-            "allow",
-            "Engineering",
-            "engineering-access",
+      expect(
+        await client.runTagCommand("add", [
+          "engineering",
+          "slack",
+          "--channel-id",
+          "c123",
+          "--account",
+          "T-BINDINGS",
+        ]),
+      ).toContain("Added engineering to slack C123");
+      const applied = await applyManifests(client, [
+        {
+          apiVersion: "supertag/v1",
+          kind: "PermissionSet",
+          metadata: { name: "engineering-access" },
+          spec: {
+            permissions: [
+              { target: "runtime", action: "commands:execute" },
+              { target: "runtime", action: "web:search" },
+            ],
+          },
+        },
+        {
+          apiVersion: "supertag/v1",
+          kind: "ContextSet",
+          metadata: { name: "engineering-context" },
+          spec: {
+            items: [
+              {
+                itemKey: "skill:review",
+                type: "supertag/skill",
+                version: 1,
+                required: true,
+                config: { reference: "code-review", version: "1" },
+              },
+              {
+                itemKey: "runbook:payments",
+                type: "acme.io/runbook",
+                version: 1,
+                required: false,
+                config: { name: "payments" },
+              },
+              {
+                itemKey: "artifacts",
+                type: "supertag/artifacts",
+                version: 1,
+                required: true,
+                config: {
+                  sourceRouteId: (await store.listTagRoutes())[0]?.id,
+                  selection: { match: "shared-resource", maxAgeDays: 30, limit: 3 },
+                },
+              },
+            ],
+          },
+        },
+      ]);
+      expect(applied.results.map((result) => result.failureMessage)).toEqual(["", ""]);
+      expect(applied.complete).toBe(true);
+      for (const [command, set] of [
+        ["permission", "engineering-access"],
+        ["context", "engineering-context"],
+      ] as const) {
+        expect(
+          await client.runTagCommand(command, [
+            "activate",
+            "engineering",
+            set,
             "slack",
             "--channel-id",
             "C123",
-            "--actions",
-            "history:read",
-            "--account",
-            "T-BINDINGS",
-          ],
-          dependencies,
-        ),
-      ).rejects.toThrow("Grant tools with target: mcp instead");
-      await runTagCommand(
-        "permission",
-        [
-          "activate",
-          "Engineering",
-          "engineering-access",
-          "slack",
-          "--channel-id",
-          "C123",
-          "--account",
-          "T-BINDINGS",
-        ],
-        dependencies,
+          ]),
+        ).toContain(`Activated ${set}`);
+      }
+      expect(await store.listTagPermissionActivations()).toHaveLength(1);
+      expect(await store.listTagContextActivations()).toHaveLength(1);
+      expect(await runResourceCommand(client, "describe", ["tag", "engineering"])).toContain(
+        "engineering",
       );
-      await runTagCommand("context", ["create", "Engineering", "engineering"], dependencies);
-      await runTagCommand(
-        "context",
-        [
-          "add-artifacts",
-          "Engineering",
-          "engineering",
-          "slack",
-          "--channel-id",
-          "C123",
-          "--account",
-          "T-BINDINGS",
-          "--max-age-days",
-          "30",
-          "--limit",
-          "3",
-        ],
-        dependencies,
+      expect(await runResourceCommand(client, "get", ["tag"])).toContain("engineering");
+      expect((await getResource(client, "context-sets", "engineering-context")).spec.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "supertag/skill" }),
+          expect.objectContaining({ type: "supertag/artifacts" }),
+          expect.objectContaining({ type: "acme.io/runbook", required: false }),
+        ]),
       );
-      await runTagCommand(
-        "context",
-        ["add-skill", "Engineering", "engineering", "code-review", "--version", "1"],
-        dependencies,
-      );
-      await runTagCommand(
-        "context",
-        [
-          "add",
-          "Engineering",
-          "engineering",
-          "acme.io/runbook",
-          "runbook:payments",
-          "--version",
-          "1",
-          "--config",
-          '{"name":"payments"}',
-          "--optional",
-        ],
-        dependencies,
-      );
-      await runTagCommand(
-        "context",
-        [
-          "activate",
-          "Engineering",
-          "engineering",
-          "slack",
-          "--channel-id",
-          "C123",
-          "--account",
-          "T-BINDINGS",
-        ],
-        dependencies,
-      );
-      await runTagCommand("context", ["show", "Engineering", "engineering"], dependencies);
-      await runTagCommand("show", ["Engineering"], dependencies);
-      await runTagCommand("list", [], dependencies);
-
-      expect(output.mock.calls.map(([value]) => String(value)).join("")).toMatch(
-        /Created Tag Engineering.*Added Engineering.*Tag: Engineering.*slack:channel:C123/s,
-      );
-      expect(output.mock.calls.map(([value]) => String(value)).join("")).toContain(
-        "NAME\tSTATUS\tAVAILABLE_IN",
-      );
-      expect(output.mock.calls.map(([value]) => String(value)).join("")).toContain(
-        "commands:execute\truntime\t-",
-      );
-      expect(output.mock.calls.map(([value]) => String(value)).join("")).toMatch(
-        /Context Set: engineering.*acme\.io\/runbook\t1\tfalse.*supertag\/artifacts\t1\ttrue.*supertag\/skill\t1\ttrue.*ACTIVE_FROM.*slack:channel:C123/s,
-      );
-
-      await runTagCommand(
-        "permission",
-        [
-          "revoke",
-          "Engineering",
-          "engineering-access",
-          "runtime",
-          "--actions",
-          "commands:execute,web:search",
-        ],
-        dependencies,
-      );
-
-      await runTagCommand(
-        "remove",
-        ["Engineering", "slack", "--channel-id", "C123", "--account", "T-BINDINGS"],
-        dependencies,
-      );
-      await fixture.store.connect();
-      await expect(fixture.store.listTagRoutes()).resolves.toEqual([]);
-      await expect(fixture.store.listTagPermissions()).resolves.toEqual([]);
-      await fixture.store.disconnect();
-      expect(output.mock.calls.map(([value]) => String(value)).join("")).toContain(
-        "Removed Engineering from slack C123 on Tag Test.",
-      );
-    } finally {
-      await fixture.close();
-    }
-  });
-
-  it("resolves a GitHub repository name to its stable numeric scope through the CLI", async () => {
-    const fixture = await createStoreFixture();
-    const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    const request = vi
-      .fn<typeof fetch>()
-      .mockImplementation(async () =>
-        Response.json({ id: 987654, full_name: "atemaguer/supertag" }),
-      );
-    vi.stubGlobal("fetch", request);
-    const credentialVault = new FileGatewayCredentialVault(join(fixture.directory, "secrets.json"));
-    try {
-      const account = await fixture.store.saveSurfaceAccount({
-        provider: "github",
-        externalAccountId: "user-123",
-        displayName: "atemaguer",
-        authMethod: "github-token",
-        credentialId: "surface/github/user-123",
-        status: "connected",
-        configuration: {},
-        verifiedAt: "2026-08-01T00:00:00.000Z",
-      });
-      await credentialVault.store("surface/github/user-123", { token: "github-secret-token" });
-      const tag = await fixture.store.createTag({ name: "Engineering" });
-      const dependencies = { store: fixture.store, credentialVault };
-
-      await runTagCommand(
-        "add",
-        [
-          tag.name,
-          "github",
-          "--repo",
-          "atemaguer/supertag",
-          "--account",
-          account.externalAccountId,
-        ],
-        dependencies,
-      );
-      await runTagCommand("permission", ["create", tag.name, "engineering-access"], dependencies);
-      await runTagCommand(
-        "permission",
-        [
-          "allow",
-          tag.name,
-          "engineering-access",
-          "github",
-          "--repo",
-          "atemaguer/supertag",
-          "--actions",
-          "contents:read",
-          "--account",
-          account.externalAccountId,
-        ],
-        dependencies,
-      );
-
-      await fixture.store.connect();
-      await expect(fixture.store.listTagRoutes()).resolves.toEqual([
-        expect.objectContaining({
-          surfaceAccountId: account.id,
-          tagId: tag.id,
-          scope: "repository:987654",
-        }),
-      ]);
-      await expect(fixture.store.listTagPermissions()).resolves.toEqual([
-        expect.objectContaining({
-          surfaceAccountId: account.id,
-          scope: "repository:987654",
-          reference: "atemaguer/supertag",
-          action: "contents:read",
-        }),
-      ]);
-      await fixture.store.disconnect();
-      expect(request).toHaveBeenCalledWith(
-        "https://api.github.com/repos/atemaguer/supertag",
-        expect.objectContaining({ redirect: "error" }),
-      );
-      const headers = new Headers(request.mock.calls[0]?.[1]?.headers);
-      expect(headers.get("authorization")).toBe("Bearer github-secret-token");
-      expect(output.mock.calls.map(([value]) => String(value)).join("")).not.toContain(
-        "github-secret-token",
-      );
-    } finally {
-      await fixture.close();
-    }
-  });
-
-  it("resolves a Linear team key to its stable UUID scope through the CLI", async () => {
-    const fixture = await createStoreFixture();
-    const output = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-    const teamId = "72b2a2dc-6f4f-4423-9d34-24b5bd10634a";
-    const request = vi.fn<typeof fetch>().mockResolvedValue(
-      Response.json({
-        data: {
-          teams: {
-            nodes: [{ id: teamId, key: "ENG", name: "Engineering" }],
-            pageInfo: { hasNextPage: false, endCursor: null },
-          },
+      await applyManifests(client, [
+        {
+          apiVersion: "supertag/v1",
+          kind: "PermissionSet",
+          metadata: { name: "engineering-access" },
+          spec: { permissions: [] },
         },
-      }),
-    );
-    vi.stubGlobal("fetch", request);
-    const credentialVault = new FileGatewayCredentialVault(join(fixture.directory, "secrets.json"));
-    try {
-      const account = await fixture.store.saveSurfaceAccount({
-        provider: "linear",
-        externalAccountId: "workspace-1",
-        displayName: "Acme",
-        authMethod: "linear-api-key",
-        credentialId: "surface/linear/workspace-1",
-        status: "connected",
-        configuration: { apiBaseUrl: "https://api.linear.app/graphql" },
-        verifiedAt: "2026-08-01T00:00:00.000Z",
-      });
-      await credentialVault.store("surface/linear/workspace-1", {
-        apiKey: "lin_api_test",
-        webhookSecret: "linear-webhook-secret",
-      });
-      const tag = await fixture.store.createTag({ name: "Engineering" });
-      const dependencies = { store: fixture.store, credentialVault };
-
-      await runTagCommand(
-        "add",
-        [tag.name, "linear", "--team", "ENG", "--account", account.externalAccountId],
-        dependencies,
-      );
-
-      await fixture.store.connect();
-      await expect(fixture.store.listTagRoutes()).resolves.toEqual([
-        expect.objectContaining({
-          surfaceAccountId: account.id,
-          tagId: tag.id,
-          scope: `team:${teamId}`,
-        }),
       ]);
-      await fixture.store.disconnect();
-      const headers = new Headers(request.mock.calls[0]?.[1]?.headers);
-      expect(headers.get("authorization")).toBe("lin_api_test");
-      expect(output.mock.calls.map(([value]) => String(value)).join("")).toContain(
-        "Added Engineering to linear Engineering (ENG) on Acme",
-      );
-      expect(output.mock.calls.map(([value]) => String(value)).join("")).not.toContain(
-        "lin_api_test",
-      );
+      expect(await store.listTagPermissions()).toEqual([]);
+      expect(
+        await client.runTagCommand("remove", [
+          "engineering",
+          "slack",
+          "--channel-id",
+          "C123",
+          "--account",
+          "T-BINDINGS",
+        ]),
+      ).toContain("Removed engineering from slack C123 on Tag Test");
+      expect(await store.listTagRoutes()).toEqual([]);
+      expect(await store.listTagContextActivations()).toEqual([]);
+      expect(await store.listTagPermissionActivations()).toEqual([]);
     } finally {
       await fixture.close();
     }
   });
+
+  it.each([
+    {
+      provider: "github",
+      selector: ["--repo", "atemaguer/supertag"],
+      scope: "repository:987654",
+      secret: "github-secret-token",
+    },
+    {
+      provider: "linear",
+      selector: ["--team", "ENG"],
+      scope: "team:72b2a2dc-6f4f-4423-9d34-24b5bd10634a",
+      secret: "lin_api_test",
+    },
+  ] as const)(
+    "resolves $provider names through the live CLI RPC route",
+    async ({ provider, selector, scope, secret }) => {
+      const fixture = await createTagCliFixture();
+      const realFetch = globalThis.fetch;
+      const request = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        const url = String(input);
+        if (url.startsWith("https://api.github.com/"))
+          return Response.json({ id: 987654, full_name: "atemaguer/supertag" });
+        if (url.startsWith("https://api.linear.app/"))
+          return Response.json({
+            data: {
+              teams: {
+                nodes: [{ id: scope.slice(5), key: "ENG", name: "Engineering" }],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          });
+        return realFetch(input, init);
+      });
+      try {
+        const account = await fixture.store.saveSurfaceAccount({
+          provider,
+          externalAccountId: "provider-account",
+          displayName: "Provider account",
+          authMethod: provider === "github" ? "github-token" : "linear-api-key",
+          credentialId: `surface/${provider}/fixture`,
+          status: "connected",
+          configuration: {},
+          verifiedAt: new Date().toISOString(),
+        });
+        await fixture.credentialVault.store(
+          account.credentialId,
+          provider === "github"
+            ? { token: secret }
+            : { apiKey: secret, webhookSecret: "test-webhook-secret" },
+        );
+        const tag = await fixture.client.createTag({ name: "engineering" });
+        const output = await fixture.client.runTagCommand("add", [
+          tag.metadata.name,
+          provider,
+          ...selector,
+          "--account",
+          account.externalAccountId,
+        ]);
+        expect(await fixture.store.listTagRoutes()).toEqual([
+          expect.objectContaining({ tagId: tag.metadata.id, surfaceAccountId: account.id, scope }),
+        ]);
+        const providerCall = request.mock.calls.find(([url]) =>
+          String(url).startsWith(
+            `https://api.${provider === "github" ? "github.com" : "linear.app"}/`,
+          ),
+        );
+        expect(providerCall).toBeDefined();
+        expect(new Headers(providerCall?.[1]?.headers).get("authorization")).toBe(
+          provider === "github" ? `Bearer ${secret}` : secret,
+        );
+        if (provider === "github") {
+          expect(String(providerCall?.[0])).toBe("https://api.github.com/repos/atemaguer/supertag");
+          expect(providerCall?.[1]?.redirect).toBe("error");
+        }
+        expect(output).not.toContain(secret);
+        // Provider permissions retain the resolved stable scope through manifests.
+        await applyManifests(fixture.client, [
+          {
+            apiVersion: "supertag/v1",
+            kind: "PermissionSet",
+            metadata: { name: "provider-access" },
+            spec: {
+              permissions: [
+                {
+                  target: "surface",
+                  surfaceAccountId: account.id,
+                  scope,
+                  action: provider === "github" ? "contents:read" : "issues:read",
+                },
+              ],
+            },
+          },
+        ]);
+        expect(await fixture.store.listTagPermissions()).toEqual([
+          expect.objectContaining({ surfaceAccountId: account.id, scope }),
+        ]);
+      } finally {
+        request.mockRestore();
+        await fixture.close();
+      }
+    },
+  );
 });
 
 async function createStoreFixture() {
@@ -1237,5 +1152,29 @@ function event(channelId = "C123", suffix = "1.000"): InboundSurfaceEvent {
       threadTs: suffix,
     },
     metadata: { slackEventType: "app_mention" },
+  };
+}
+
+async function createTagCliFixture() {
+  const fixture = await createStoreFixture();
+  const credentialVault = new FileGatewayCredentialVault(join(fixture.directory, "vault.json"));
+  const runtime = await startControlPlaneRuntime({
+    host: "127.0.0.1",
+    port: 0,
+    databaseUrl: `file:${join(fixture.directory, "supertag.db")}`,
+    adminToken: "tag-cli-test",
+    workletTransport: "remote",
+    credentialVault,
+    stateDirectory: join(fixture.directory, "server"),
+    reply: async () => {},
+  });
+  return {
+    ...fixture,
+    credentialVault,
+    client: new ControlPlaneClient({ url: runtime.url, token: "tag-cli-test" }),
+    close: async () => {
+      await runtime.close();
+      await fixture.close();
+    },
   };
 }
