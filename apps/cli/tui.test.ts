@@ -241,7 +241,7 @@ it("says how to get the terminal UI when no binary is found", () => {
     "The terminal UI is not built in this checkout. Build it with: cd apps/tui && ./build.sh\n",
   );
   expect(tuiBuildHint(false)).toBe(
-    "The terminal UI is not installed. Reinstall SuperTag with the curl installer to get it: curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh\n",
+    "The terminal UI is not installed. Reinstall SuperTag with the curl installer to get it: curl -fsSL https://unpkg.com/supertag-ai@latest/install.sh | sh\n",
   );
 });
 

@@ -64,9 +64,8 @@ describe("install.sh", () => {
   it.skipIf(tuiName === undefined)(
     "places the verified terminal UI binary where the CLI looks for it",
     async () => {
-      const fixture = await packageFixture("1.2.3");
-      const tui = await tuiFixture(fixture, "1.2.3");
-      const result = await runInstaller(fixture, undefined, tui);
+      const fixture = await packageFixture("1.2.3", { version: "1.2.3" });
+      const result = await runInstaller(fixture);
       expect(result.stderr).not.toContain("terminal UI was not installed");
       expect(result.code).toBe(0);
       const packageDirectory = join(fixture.installRoot, "versions/1.2.3/node_modules/supertag-ai");
@@ -78,16 +77,17 @@ describe("install.sh", () => {
   it.skipIf(tuiName === undefined)(
     "installs the CLI without the terminal UI when its checksum does not match",
     async () => {
-      const fixture = await packageFixture("1.2.3");
-      const tui = await tuiFixture(fixture, "1.2.3", "0".repeat(64));
-      const result = await runInstaller(fixture, undefined, tui);
+      const fixture = await packageFixture("1.2.3", { version: "1.2.3", checksum: "0".repeat(64) });
+      const result = await runInstaller(fixture);
       expect(result.code).toBe(0);
       expect(result.stdout).toContain("Installed SuperTag 1.2.3");
       expect(result.stderr).toContain(
         `The terminal UI was not installed: ${tuiName} did not match its SHA256SUMS checksum.`,
       );
       const packageDirectory = join(fixture.installRoot, "versions/1.2.3/node_modules/supertag-ai");
-      await expect(stat(join(packageDirectory, "tui"))).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(stat(join(packageDirectory, "tui", tuiName ?? ""))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
       expect(await readdir(packageDirectory)).not.toContain(".tui-download");
     },
   );
@@ -95,13 +95,14 @@ describe("install.sh", () => {
   it.skipIf(tuiName === undefined)(
     "installs the CLI without a terminal UI binary from another release",
     async () => {
-      const fixture = await packageFixture("1.2.3");
-      const tui = await tuiFixture(fixture, "1.2.2");
-      const result = await runInstaller(fixture, undefined, tui);
+      const fixture = await packageFixture("1.2.3", { version: "1.2.2" });
+      const result = await runInstaller(fixture);
       expect(result.code).toBe(0);
       expect(result.stderr).toContain(`${tuiName} reports version 1.2.2, not 1.2.3`);
       await expect(
-        stat(join(fixture.installRoot, "versions/1.2.3/node_modules/supertag-ai/tui")),
+        stat(
+          join(fixture.installRoot, "versions/1.2.3/node_modules/supertag-ai/tui", tuiName ?? ""),
+        ),
       ).rejects.toMatchObject({ code: "ENOENT" });
     },
   );
@@ -119,7 +120,7 @@ describe("install.sh", () => {
 });
 
 /** A packed package named supertag-ai whose bin prints its version, bundling fake vendor CLIs. */
-async function packageFixture(version: string) {
+async function packageFixture(version: string, tui?: { version: string; checksum?: string }) {
   const root = await mkdtemp(join(tmpdir(), "supertag-installer-test-"));
   temporaryDirectories.push(root);
   const source = join(root, "package");
@@ -149,6 +150,15 @@ async function packageFixture(version: string) {
     `#!/usr/bin/env node\nconsole.log(${JSON.stringify(version)});\n`,
   );
   await chmod(join(source, "bin/supertag.js"), 0o755);
+  if (tui) {
+    const directory = join(source, "tui");
+    const name = tuiName ?? "";
+    const binary = `#!/bin/sh\necho ${tui.version}\n`;
+    const digest = tui.checksum ?? createHash("sha256").update(binary).digest("hex");
+    await mkdir(directory);
+    await writeFile(join(directory, name), binary, { mode: 0o755 });
+    await writeFile(join(directory, "SHA256SUMS"), `${digest}  ${name}\n`);
+  }
   const packed = await run("npm", ["pack", "--silent", "--pack-destination", root], {}, source);
   const tarball = join(root, packed.stdout.trim().split("\n").at(-1) ?? "");
   return {
@@ -159,32 +169,12 @@ async function packageFixture(version: string) {
   };
 }
 
-/** A release directory holding a fake terminal UI binary that reports `version`, and SHA256SUMS. */
-async function tuiFixture(
-  fixture: Awaited<ReturnType<typeof packageFixture>>,
-  version: string,
-  checksum?: string,
-) {
-  const directory = join(fixture.root, "tui-release");
-  await mkdir(directory, { recursive: true });
-  const name = tuiName ?? "";
-  const binary = `#!/bin/sh\necho ${version}\n`;
-  await writeFile(join(directory, name), binary);
-  const digest = checksum ?? createHash("sha256").update(binary).digest("hex");
-  await writeFile(join(directory, "SHA256SUMS"), `${digest}  ${name}\n`);
-  return directory;
-}
-
-async function runInstaller(
-  fixture: Awaited<ReturnType<typeof packageFixture>>,
-  path?: string,
-  tuiSource: string = fixture.root,
-) {
+async function runInstaller(fixture: Awaited<ReturnType<typeof packageFixture>>, path?: string) {
   return run("sh", [installer], {
     SUPERTAG_BIN_DIR: fixture.bin,
     SUPERTAG_INSTALL_ROOT: fixture.installRoot,
     SUPERTAG_PACKAGE_SOURCE: fixture.tarball,
-    SUPERTAG_TUI_SOURCE: tuiSource,
+    SUPERTAG_TUI_SOURCE: "",
     npm_config_cache: join(fixture.root, "npm-cache"),
     ...(path === undefined ? {} : { PATH: path }),
   });

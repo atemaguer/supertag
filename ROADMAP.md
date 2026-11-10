@@ -6,9 +6,6 @@ today is in the [documentation](docs/README.md).
 
 ## Now
 
-- **A recorded walkthrough.** One reproducible Objective, run end to end on a real repository:
-  a feature that crosses two Teams, a shared interface between them, reviewed changes, an approval
-  you keep, and an interruption the team recovers from.
 - **Cursor as a full builder.** Cursor Tasks run, edit, and use SuperTag's tools today. Its
   sandbox still finds an older Node.js and can't download a project's pinned package manager, so a
   Cursor builder can't yet run a Node project's whole check on its own.

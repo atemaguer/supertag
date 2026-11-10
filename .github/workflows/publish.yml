@@ -37,6 +37,10 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/tui/go.mod
+          cache-dependency-path: apps/tui/go.sum
       - run: npm install --global npm@11
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter supertag-ai build
@@ -48,8 +52,30 @@ jobs:
           node --input-type=module --eval 'import manifest from "./packages/supertag-ai/package.json" with { type: "json" };
           if (process.env.RELEASE_TAG !== `v${manifest.version}`) throw new Error(`Release ${process.env.RELEASE_TAG}
           does not match supertag-ai@${manifest.version}`);'
-      - name: Publish with provenance
+      - name: Bundle the installer and terminal UI
+        run: |
+          apps/tui/build.sh
+          test "$(apps/tui/dist/supertag-tui-linux-amd64 --version)" = "$(node -p 'require("./packages/supertag-ai/package.json").version')"
+          sh scripts/stage-cli-release.sh
+      - name: Publish with npm trusted publishing
         working-directory: packages/supertag-ai
         run: |
           # Until a stable 1.0 exists, each alpha is the release users should get by default.
-          npm publish --access public --provenance --tag latest
+          # npm adds provenance automatically when the source repository is public.
+          npm publish --access public --tag latest
+      - name: Verify the public installer in a clean home
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+        run: |
+          version=${RELEASE_TAG#v}
+          fresh_home=$(mktemp -d)
+          trap 'rm -rf "$fresh_home"' EXIT
+          curl --fail --silent --show-error --location --retry 8 --retry-all-errors --max-time 30 \
+            "https://unpkg.com/supertag-ai@latest/install.sh" -o "$fresh_home/install.sh"
+          grep -Fx "RELEASE_DEFAULT_VERSION=\"$version\"" "$fresh_home/install.sh"
+          env -i HOME="$fresh_home" PATH="$PATH" sh "$fresh_home/install.sh" > "$fresh_home/install.log" 2>&1 ||
+            { cat "$fresh_home/install.log"; exit 1; }
+          cat "$fresh_home/install.log"
+          test "$("$fresh_home/.local/bin/supertag" --version)" = "$version"
+          tui="$fresh_home/.local/share/supertag/versions/$version/node_modules/supertag-ai/tui/supertag-tui-linux-amd64"
+          test "$("$tui" --version)" = "$version"

@@ -24,7 +24,7 @@
 </p>
 
 ```sh
-curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
+curl -fsSL https://unpkg.com/supertag-ai@latest/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 cd your-repo && supertag init
 supertag
@@ -170,7 +170,7 @@ supported systems and tools.
 You need [Node.js and npm](docs/operations/requirements.md#system-and-tools) on macOS or Linux:
 
 ```sh
-curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh
+curl -fsSL https://unpkg.com/supertag-ai@latest/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 supertag --version
 ```

@@ -77,12 +77,12 @@ CLI refuses a binary whose `--version` differs from its own and says how to rebu
 `SUPERTAG_TUI_BINARY` points the CLI at another binary. `go test ./...` in `apps/tui` runs its
 tests; `SUPERTAG_TUI_E2E=1` adds an end-to-end run under tmux against a fake Control Plane.
 
-Each published release carries the four binaries and their `SHA256SUMS`, built at the release
-tag by `.github/workflows/release-cli.yml`. `install.sh` installs the matching binary into the
-package's `tui/` directory, where the CLI looks for it. To test the installer before a release,
-point `SUPERTAG_PACKAGE_SOURCE` at an npm-packed tarball and `SUPERTAG_TUI_SOURCE` at a
-directory holding the binaries and `SHA256SUMS`. `tests/install-script.test.ts` does this with
-fakes.
+The npm publish workflow builds the four binaries at the release tag and stages them under
+`tui/` with their `SHA256SUMS`, along with the installer script. To exercise that layout
+before a release, run `apps/tui/build.sh` and `sh scripts/stage-cli-release.sh`, then pack
+`packages/supertag-ai` with `npm pack`. Point `SUPERTAG_PACKAGE_SOURCE` at that tarball and
+run `sh install.sh` from the checkout. `tests/install-script.test.ts` tests the same layout
+with fake binaries.
 
 ### Protobuf contracts
 

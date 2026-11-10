@@ -27,8 +27,7 @@ export interface TuiOptions {
   readonly version?: string;
 }
 
-const installCommand =
-  "curl -fsSL https://github.com/atemaguer/supertag/releases/latest/download/install.sh | sh";
+const installCommand = "curl -fsSL https://unpkg.com/supertag-ai@latest/install.sh | sh";
 
 /** Credential variables the CLI reads; the TUI receives tokens on fd 3 only. */
 const credentialVariables = ["SUPERTAG_OPERATOR_TOKEN", "SUPERTAG_ADMIN_TOKEN"];

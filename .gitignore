@@ -1,6 +1,8 @@
 node_modules/
 dist/
 packages/supertag-ai/drizzle/
+packages/supertag-ai/install.sh
+packages/supertag-ai/tui/
 coverage/
 *.tsbuildinfo
 .pytest_cache/
