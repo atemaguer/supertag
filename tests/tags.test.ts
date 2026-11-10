@@ -937,8 +937,10 @@ describe("Tags and their routes", () => {
         expect(new Headers(providerCall?.[1]?.headers).get("authorization")).toBe(
           provider === "github" ? `Bearer ${secret}` : secret,
         );
-        if (provider === "github")
+        if (provider === "github") {
           expect(String(providerCall?.[0])).toBe("https://api.github.com/repos/atemaguer/supertag");
+          expect(providerCall?.[1]?.redirect).toBe("error");
+        }
         expect(output).not.toContain(secret);
         // Provider permissions retain the resolved stable scope through manifests.
         await applyManifests(fixture.client, [
