@@ -27,7 +27,7 @@ from supertag.operator.v1 import common_pb2 as supertag_dot_operator_dot_v1_dot_
 from supertag.operator.v1 import options_pb2 as supertag_dot_operator_dot_v1_dot_options__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n supertag/operator/v1/event.proto\x12\x14supertag.operator.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a!supertag/operator/v1/common.proto\x1a\"supertag/operator/v1/options.proto\"T\n\x0cWatchRequest\x12\x14\n\x0cresume_token\x18\x01 \x01(\t\x12.\n\x05kinds\x18\x02 \x03(\x0e\x32\x1f.supertag.operator.v1.WatchKind\"\xcb\x01\n\nWatchEvent\x12\x14\n\x0cresume_token\x18\x01 \x01(\t\x12\x33\n\x06\x63hange\x18\x02 \x01(\x0b\x32!.supertag.operator.v1.WatchChangeH\x00\x12\x33\n\x06resync\x18\x03 \x01(\x0b\x32!.supertag.operator.v1.WatchResyncH\x00\x12\x34\n\theartbeat\x18\x04 \x01(\x0b\x32\x1f.supertag.operator.v1.HeartbeatH\x00\x42\x07\n\x05\x65vent\"\xf7\x01\n\x0bWatchChange\x12-\n\x04kind\x18\x01 \x01(\x0e\x32\x1f.supertag.operator.v1.WatchKind\x12\n\n\x02id\x18\x02 \x01(\t\x12\x0b\n\x03tag\x18\x03 \x01(\t\x12\x12\n\nsession_id\x18\x04 \x01(\t\x12\x0f\n\x07task_id\x18\x05 \x01(\t\x12\x14\n\x0cobjective_id\x18\x06 \x01(\t\x12\x14\n\x0c\x63onversation\x18\x07 \x01(\t\x12\x0e\n\x06reason\x18\x08 \x01(\t\x12.\n\nchanged_at\x18\t \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x0f\n\x07team_id\x18\n \x01(\t\"\r\n\x0bWatchResync*\xfb\x01\n\tWatchKind\x12\x1a\n\x16WATCH_KIND_UNSPECIFIED\x10\x00\x12\x12\n\x0eWATCH_KIND_TAG\x10\x01\x12\x16\n\x12WATCH_KIND_SESSION\x10\x02\x12\x13\n\x0fWATCH_KIND_TASK\x10\x03\x12\x18\n\x14WATCH_KIND_OBJECTIVE\x10\x04\x12\x19\n\x15WATCH_KIND_INBOX_ITEM\x10\x05\x12\x17\n\x13WATCH_KIND_APPROVAL\x10\x06\x12#\n\x1fWATCH_KIND_CONVERSATION_MESSAGE\x10\x07\x12\x1e\n\x1aWATCH_KIND_WORKSTREAM_POST\x10\x08\x32x\n\x0c\x45ventService\x12h\n\x05Watch\x12\".supertag.operator.v1.WatchRequest\x1a .supertag.operator.v1.WatchEvent\"\x17\x90\x02\x01\x8a\xb5\x18\x0cwatch_events\xa8\xb5\x18\x01\x30\x01\x42NZLgithub.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n supertag/operator/v1/event.proto\x12\x14supertag.operator.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a!supertag/operator/v1/common.proto\x1a\"supertag/operator/v1/options.proto\"T\n\x0cWatchRequest\x12\x14\n\x0cresume_token\x18\x01 \x01(\t\x12.\n\x05kinds\x18\x02 \x03(\x0e\x32\x1f.supertag.operator.v1.WatchKind\"\xcb\x01\n\nWatchEvent\x12\x14\n\x0cresume_token\x18\x01 \x01(\t\x12\x33\n\x06\x63hange\x18\x02 \x01(\x0b\x32!.supertag.operator.v1.WatchChangeH\x00\x12\x33\n\x06resync\x18\x03 \x01(\x0b\x32!.supertag.operator.v1.WatchResyncH\x00\x12\x34\n\theartbeat\x18\x04 \x01(\x0b\x32\x1f.supertag.operator.v1.HeartbeatH\x00\x42\x07\n\x05\x65vent\"\xf7\x01\n\x0bWatchChange\x12-\n\x04kind\x18\x01 \x01(\x0e\x32\x1f.supertag.operator.v1.WatchKind\x12\n\n\x02id\x18\x02 \x01(\t\x12\x0b\n\x03tag\x18\x03 \x01(\t\x12\x12\n\nsession_id\x18\x04 \x01(\t\x12\x0f\n\x07task_id\x18\x05 \x01(\t\x12\x14\n\x0cobjective_id\x18\x06 \x01(\t\x12\x14\n\x0c\x63onversation\x18\x07 \x01(\t\x12\x0e\n\x06reason\x18\x08 \x01(\t\x12.\n\nchanged_at\x18\t \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x0f\n\x07team_id\x18\n \x01(\t\"\r\n\x0bWatchResync*\x90\x02\n\tWatchKind\x12\x1a\n\x16WATCH_KIND_UNSPECIFIED\x10\x00\x12\x12\n\x0eWATCH_KIND_TAG\x10\x01\x12\x16\n\x12WATCH_KIND_SESSION\x10\x02\x12\x13\n\x0fWATCH_KIND_TASK\x10\x03\x12\x18\n\x14WATCH_KIND_OBJECTIVE\x10\x04\x12\x19\n\x15WATCH_KIND_INBOX_ITEM\x10\x05\x12\x17\n\x13WATCH_KIND_APPROVAL\x10\x06\x12#\n\x1fWATCH_KIND_CONVERSATION_MESSAGE\x10\x07\x12\x1e\n\x1aWATCH_KIND_WORKSTREAM_POST\x10\x08\x12\x13\n\x0fWATCH_KIND_TEAM\x10\t2x\n\x0c\x45ventService\x12h\n\x05Watch\x12\".supertag.operator.v1.WatchRequest\x1a .supertag.operator.v1.WatchEvent\"\x17\x90\x02\x01\x8a\xb5\x18\x0cwatch_events\xa8\xb5\x18\x01\x30\x01\x42NZLgithub.com/atemaguer/supertag/packages/operator-api/go/operatorv1;operatorv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -38,7 +38,7 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_EVENTSERVICE'].methods_by_name['Watch']._loaded_options = None
   _globals['_EVENTSERVICE'].methods_by_name['Watch']._serialized_options = b'\220\002\001\212\265\030\014watch_events\250\265\030\001'
   _globals['_WATCHKIND']._serialized_start=720
-  _globals['_WATCHKIND']._serialized_end=971
+  _globals['_WATCHKIND']._serialized_end=992
   _globals['_WATCHREQUEST']._serialized_start=162
   _globals['_WATCHREQUEST']._serialized_end=246
   _globals['_WATCHEVENT']._serialized_start=249
@@ -47,6 +47,6 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_WATCHCHANGE']._serialized_end=702
   _globals['_WATCHRESYNC']._serialized_start=704
   _globals['_WATCHRESYNC']._serialized_end=717
-  _globals['_EVENTSERVICE']._serialized_start=973
-  _globals['_EVENTSERVICE']._serialized_end=1093
+  _globals['_EVENTSERVICE']._serialized_start=994
+  _globals['_EVENTSERVICE']._serialized_end=1114
 # @@protoc_insertion_point(module_scope)

@@ -23,6 +23,7 @@ class WatchKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     WATCH_KIND_APPROVAL: _ClassVar[WatchKind]
     WATCH_KIND_CONVERSATION_MESSAGE: _ClassVar[WatchKind]
     WATCH_KIND_WORKSTREAM_POST: _ClassVar[WatchKind]
+    WATCH_KIND_TEAM: _ClassVar[WatchKind]
 WATCH_KIND_UNSPECIFIED: WatchKind
 WATCH_KIND_TAG: WatchKind
 WATCH_KIND_SESSION: WatchKind
@@ -32,6 +33,7 @@ WATCH_KIND_INBOX_ITEM: WatchKind
 WATCH_KIND_APPROVAL: WatchKind
 WATCH_KIND_CONVERSATION_MESSAGE: WatchKind
 WATCH_KIND_WORKSTREAM_POST: WatchKind
+WATCH_KIND_TEAM: WatchKind
 
 class WatchRequest(_message.Message):
     __slots__ = ("resume_token", "kinds")
