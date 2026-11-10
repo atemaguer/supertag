@@ -1,6 +1,6 @@
 # Maintain an ongoing responsibility
 
-A **Tag** is a persistent AI identity with its own responsibilities and permissions. A **Role**
+A **Tag** is a persistent AI actor with its own responsibilities and permissions. A **Role**
 describes a Tag's enduring responsibility. An **Objective** is an outcome owned by a Tag, with a
 budget, a deadline, and a status; it works in **Sessions**, threads of **Tasks** with one Task per
 turn. A **Team** is a flat list of member Tags, and its **Workstream** is the Team's shared record

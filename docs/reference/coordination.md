@@ -5,7 +5,7 @@ This page is the exact contract behind SuperTag's [Objective](glossary.md#object
 [Workstream](glossary.md#workstream) guides.
 
 An **Objective** is an outcome a [Tag](glossary.md#tag) owns, with a budget, a deadline and a
-status. A **Tag** is a persistent AI identity with its own responsibilities and permissions. A
+status. A **Tag** is a persistent AI actor with its own responsibilities and permissions. A
 **Session** is one thread of that Tag's work, and a **Task** is one turn of a Session. A **Team**
 is a flat list of member Tags. A Tag's **Mailbox** is its inbox for messages from other Tags, and
 a Team's **Workstream** is its shared record of posts.

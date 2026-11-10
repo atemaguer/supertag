@@ -1,6 +1,6 @@
 # Example organizations
 
-`supertag init` creates one **Tag**, `lead`: a persistent AI identity with its own
+`supertag init` creates one **Tag**, `lead`: a persistent AI actor with its own
 responsibilities and permissions. These examples define a whole team in one manifest. Copy one,
 change a few names, and apply it.
 

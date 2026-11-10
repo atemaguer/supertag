@@ -1,6 +1,6 @@
 # Run your first Team
 
-A **Tag** is a persistent AI identity with its own responsibilities and permissions. A **Team** is
+A **Tag** is a persistent AI actor with its own responsibilities and permissions. A **Team** is
 a flat list of member Tags. An **Objective** is an outcome owned by one Tag; it works in
 **Sessions**, threads of **Tasks** with one Task per turn. Use a Team when one Tag should own an
 outcome and another should do part of the work.

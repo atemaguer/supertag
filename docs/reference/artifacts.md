@@ -4,7 +4,7 @@ An **artifact** is a saved piece of work, such as a research report, a code arch
 of related files. For example, one agent can save customer research and another can discover and
 read it after the first agent's sandbox has been removed.
 
-The artifact catalog records which **Tag** (a persistent AI identity with its own responsibilities
+The artifact catalog records which **Tag** (a persistent AI actor with its own responsibilities
 and permissions), **Task** (an accepted assignment), and **Task Attempt** (one execution of that
 Task) captured each artifact. The **Control Plane** keeps that catalog and decides which Tasks may
 use an artifact; it never stores or carries the bytes. A **Worklet** supervises a [Worker

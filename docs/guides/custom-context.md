@@ -3,7 +3,7 @@
 Teach SuperTag to supply your own kind of knowledge, such as runbooks, architecture decisions, a
 schema catalog, or an internal knowledge package, when SuperTag has no built-in handler for it.
 
-- A **Tag** is a persistent AI identity with its own responsibilities and permissions. A **Role** is
+- A **Tag** is a persistent AI actor with its own responsibilities and permissions. A **Role** is
   an enduring responsibility assigned to a Tag.
 - A **Context Set** names reusable knowledge that SuperTag may add to a **Task**, one accepted
   assignment for a Tag.

@@ -13,9 +13,9 @@ whole system rather than another first-class resource.
 
 ## Organization
 
-- <a id="tag"></a>**Tag** — a persistent AI identity with its own responsibilities and permissions.
-  You assign work to a Tag by name. Each assignment runs as a new harness session, and the Tag is
-  what persists across those sessions: its configuration, its open assignments, and their results.
+- <a id="tag"></a>**Tag** — a persistent AI actor with a stable identity, responsibilities,
+  permissions, and work history. It exists independently of the model or harness executing its
+  work. See [Tags](../concepts/tags.md).
 - <a id="role"></a>**Role** — an enduring responsibility assigned to a Tag. It can include a purpose, instructions,
   reusable knowledge, and allowed actions. See [Roles](../concepts/roles.md).
 - <a id="objective"></a>**Objective** — an outcome a Tag owns, with a budget, a deadline and a

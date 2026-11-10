@@ -1,7 +1,8 @@
 # How SuperTag fits together
 
-With SuperTag, a Tag, a persistent AI identity, owns engineering work: you talk to it or hand it an
-outcome, and it runs the work on your coding agents. Tags are grouped into Teams. Together, your
+With SuperTag, a **Tag** owns engineering work. It is a persistent AI actor with a stable identity,
+responsibilities, permissions, and work history. Talk to it or give it an outcome, and it runs the
+work on your coding agents. Tags are grouped into Teams. Together, your
 Teams of Tags make up an **autonomous organization**: Teams may pursue different outcomes but share
 one Control Plane, its rules, and its record of the work. SuperTag's architecture separates the
 durable organization and its rules from the systems that execute individual pieces of work.
@@ -10,8 +11,8 @@ If these terms are new, start with [core concepts](README.md).
 
 SuperTag has two top-level runtime components: the **Control Plane**, the service that stores and
 coordinates the organization, and **Worker Hosts**, machines or sandboxes that provide execution
-capacity. SuperTag stores each accepted turn of work as a **Task** for a **Tag**. A Tag is
-a persistent AI identity with its own responsibilities and permissions.
+capacity. SuperTag stores each accepted turn of work as a **Task** for a Tag. The Tag exists
+independently of the model or harness that executes the Task.
 
 The diagram below also uses these terms (see the [glossary](../reference/glossary.md)):
 

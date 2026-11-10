@@ -1,6 +1,6 @@
 # Install SuperTag
 
-Install SuperTag's CLI from npm to run Tags, persistent AI identities with their own
+Install SuperTag's CLI from npm to run Tags, persistent AI actors with their own
 responsibilities and permissions, on your repositories. The npm package also provides the
 TypeScript extension SDK. Python applications use the `supertag` SDK from PyPI.
 
@@ -104,7 +104,7 @@ and coordinate the connected Worker Hosts. Source contributors can use
 
 ## Match the CLI and the Control Plane
 
-A **Tag** is a persistent AI identity with its own responsibilities and permissions, and Tags work
+A **Tag** is a persistent AI actor with its own responsibilities and permissions, and Tags work
 in Teams. Together, your Teams of Tags make up an **autonomous organization**: Teams
 may pursue different goals but share one set of rules and one record of the work. The **Control
 Plane** is the service that stores your organization and accepts work. Your CLI talks to it. A

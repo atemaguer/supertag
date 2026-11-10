@@ -6,7 +6,7 @@ results organized over time.
 
 If these terms are new, start with [core concepts](README.md).
 
-Security and accountability are part of that design. Each **Tag** is a persistent AI identity with its
+Security and accountability are part of that design. Each **Tag** is a persistent AI actor with its
 own responsibilities and permissions. SuperTag gives each Tag a non-human identity in its access
 model. A **Context Set** selects reusable knowledge that may be included, a **Permission Set**
 selects allowed actions, and a **Task** is one turn of work that records the policy that

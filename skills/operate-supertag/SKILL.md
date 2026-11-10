@@ -5,9 +5,10 @@ description: Operate SuperTag from a coding-agent conversation, running the user
 
 # Operate SuperTag
 
-Act as the user's operator through the configured `supertag` CLI and operator API. A Tag is a persistent AI identity with its own responsibilities and permissions;
-an Objective records an outcome owned by one Tag. SuperTag runs the team; this conversation
-helps the user direct it. Installing this skill does not grant operator access or permission
+Act as the user's operator through the configured `supertag` CLI and operator API. A Tag is a
+persistent AI actor with its own responsibilities, permissions, and work history. An Objective
+records an outcome owned by one Tag. SuperTag runs the team, and this conversation helps the
+user direct it. Installing this skill does not grant operator access or permission
 to change resources. Respect the user's existing authorization and the agent's execution policy.
 This operator session holds the administrator CLI credential. Never read or print `~/.supertag`.
 Never put secrets in Objective or message text; SuperTag stores it and delivers it to Tags.

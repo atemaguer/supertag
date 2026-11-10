@@ -1,7 +1,7 @@
 # Worker Hosts, Worklets, Workers, and harnesses
 
 The components on this page provide the machines, code, and agent-system connections that run each
-**Task**, one turn of work for a **Tag**, a persistent AI identity with its own
+**Task**, one turn of work for a **Tag**, a persistent AI actor with its own
 responsibilities and permissions. Tags work in Teams. Together, your Teams of Tags
 make up an **autonomous organization**: Teams may pursue different goals but share one Control
 Plane, its rules, and its record of the work. The **Control Plane**, the service that stores the

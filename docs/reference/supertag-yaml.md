@@ -7,7 +7,7 @@
   your [organization](glossary.md#autonomous-organization) and schedules its work. A file has at
   most one.
 - A **`host` service** connects this machine as a **Worker Host**, a computer that runs
-  [Tasks](glossary.md#task) for Tags, the persistent AI identities with their own responsibilities
+  [Tasks](glossary.md#task) for Tags, the persistent AI actors with their own responsibilities
   and permissions. A file can have any number.
 
 Other terms on this page are defined in the glossary: [Role](glossary.md#role),

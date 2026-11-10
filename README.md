@@ -5,12 +5,13 @@
   SuperTag
 </h1>
 
-<h3>Persistent AI identities for engineering work.</h3>
+<h3>Persistent AI actors for engineering work.</h3>
 
 <p>
-  The open alternative to <a href="https://openai.com/index/introducing-dots/">dots</a>. Give a Tag
-  an outcome: it keeps that outcome across sessions, coordinates your coding agents (Claude Code,
-  Codex, Cursor, or OpenCode), and brings questions and results back to you.
+  The open alternative to <a href="https://openai.com/index/introducing-dots/">dots</a>. Give a Tag,
+  a persistent AI actor, an outcome. It keeps that outcome across sessions, coordinates your
+  coding agents (Claude Code, Codex, Cursor, or OpenCode), and brings questions and results back
+  to you.
 </p>
 
 <p>
@@ -47,9 +48,10 @@ questions, and reconciling results.
 
 SuperTag gives that work a persistent owner.
 
-- **You steer a Tag.** A Tag is a persistent AI identity with its own responsibilities and
-  permissions. Give it an outcome, guide it when decisions come up, and return to the same Tag
-  when there is more work in its area.
+- **You steer a Tag.** A Tag is a persistent AI actor with a stable identity, responsibilities,
+  permissions, and work history. It exists independently of the model or harness executing its
+  work. Give it an outcome, guide it when decisions come up, and return to the same Tag when
+  there is more work in its area.
 - **The Tag manages work Sessions.** A work Session is a thread for one piece of work. The Tag
   starts Sessions, follows their progress, and reviews how their results fit together. It brings
   you the results and the decisions that need your input.
@@ -276,9 +278,9 @@ for GitHub, Lark/Feishu, Linear, and Microsoft Teams.
 
 ## FAQ
 
-**How is a Tag different from my coding agent?** Your coding agent does the work in one session. A
-Tag is the identity that persists across those sessions: it owns the outcome, remembers what
-happened, decides what runs next, and chooses which coding agent runs each piece.
+**How is a Tag different from a coding agent session?** A session carries out a piece of work.
+The Tag owns the outcome across sessions and keeps its identity, responsibilities, permissions,
+and work history when a different model or harness runs the next piece.
 
 **How is an Objective different from `/goal`?** In Claude Code or Codex, `/goal` keeps one session
 working until a condition holds. An Objective is that goal owned by a Tag, with a budget, a
@@ -305,7 +307,7 @@ inspect, or control:
 
 | Term | Meaning |
 | --- | --- |
-| **Tag** | A persistent AI identity with its own responsibilities and permissions |
+| **Tag** | A persistent AI actor with a stable identity, responsibilities, permissions, and work history |
 | **Role** | An enduring responsibility assigned to a Tag |
 | **Team** | A flat list of member Tags, with an optional concurrency limit |
 | **Objective** | An outcome owned by a Tag, with a budget, a deadline, and criteria for deciding when it is complete |

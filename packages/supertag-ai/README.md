@@ -1,11 +1,12 @@
 # supertag-ai
 
-**Persistent AI identities for engineering work.**
+**Persistent AI actors for engineering work.**
 
-SuperTag is the open alternative to dots for engineering work. A **Tag** is a persistent AI
-identity with its own responsibilities and permissions. You talk to it in your terminal, in Slack,
-or on a GitHub issue. It runs the work on your coding agents (Claude Code, Codex, Cursor, or
-OpenCode), asks you when a decision is yours, and returns a git branch to review.
+SuperTag is the open alternative to dots for engineering work. A **Tag** is a persistent AI actor
+with a stable identity, responsibilities, permissions, and work history. It exists independently of
+the model or harness executing its work. Talk to it in your terminal, in Slack, or on a GitHub issue.
+It runs the work on your coding agents (Claude Code, Codex, Cursor, or OpenCode), asks when a
+decision is yours, and returns a git branch to review.
 
 For bigger work, give a Tag an **Objective**: an outcome with done-when evidence, a budget, a
 deadline, and the approvals you keep. For example: “People can invite teammates to a workspace and

@@ -934,8 +934,9 @@ export const ExecutionSettingsSchema: GenMessage<ExecutionSettings> = /*@__PURE_
   messageDesc(file_supertag_operator_v1_resource, 18);
 
 /**
- * A Tag: a persistent AI identity with its own responsibilities and
- * permissions.
+ * A persistent AI actor with a stable identity, responsibilities, permissions,
+ * and work history. It exists independently of the model or harness that
+ * executes its work.
  *
  * @generated from message supertag.operator.v1.Tag
  */

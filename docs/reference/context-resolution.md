@@ -2,7 +2,7 @@
 
 This page describes the implementation contract behind how a **Context Set** selects reusable
 knowledge that may be added to a **Task**, one assignment accepted for a **Tag** (a persistent
-AI identity with its own responsibilities and permissions), while a **Permission Set** selects the
+AI actor with its own responsibilities and permissions), while a **Permission Set** selects the
 actions it may perform. Start with [Context Sets and Permission
 Sets](../concepts/context-and-permissions.md) for the plain-language model.
 

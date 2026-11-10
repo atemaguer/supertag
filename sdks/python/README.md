@@ -87,7 +87,7 @@ Keep each journal across restarts; run only one application per journal.
 
 The operator API is how the CLI and other tools manage a Control Plane: send a Tag a message,
 read the inbox, or apply resources. The Control Plane serves it as RPCs defined in
-protobuf, in the package `supertag.operator.v1`. A Tag is a persistent AI identity with its own
+protobuf, in the package `supertag.operator.v1`. A Tag is a persistent AI actor with its own
 responsibilities and permissions. The
 [operator API reference](../../docs/reference/operator-api/README.md) lists
 every RPC.

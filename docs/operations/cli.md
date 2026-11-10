@@ -9,7 +9,7 @@ Run SuperTag end to end on one computer. This page uses these terms:
 - A **Worklet** connects that host to the Control Plane and advertises a **Worker Profile**, which
   tells the scheduler what kind of work its **Worker**, the code that completes a Task, can run.
 - A **harness** connects the Worker to Codex, Claude Code, Cursor, or OpenCode.
-- A **Tag** is a persistent AI identity with its own responsibilities and permissions.
+- A **Tag** is a persistent AI actor with its own responsibilities and permissions.
 - An **Objective** is an outcome a Tag owns until it is met.
 
 The [quickstart](../../README.md#get-started) gets you talking to a Tag in the terminal UI.

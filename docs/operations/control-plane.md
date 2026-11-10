@@ -1,6 +1,6 @@
 # Control Plane operations
 
-A **Tag** is a persistent AI identity with its own responsibilities and permissions, and Tags work
+A **Tag** is a persistent AI actor with its own responsibilities and permissions, and Tags work
 in Teams. Together, your Teams of Tags make up an **autonomous organization**: Teams
 may pursue different goals but share one set of rules and one record of the work. The **Control
 Plane** is the service that stores and coordinates the organization, applies policy, and schedules

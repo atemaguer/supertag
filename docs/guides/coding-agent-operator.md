@@ -3,7 +3,7 @@
 An operator thread is one lasting conversation in your coding agent that runs SuperTag for you. You
 describe a goal; it checks progress, handles routine questions, and brings decisions back. It works
 like a Project's coordinating conversation, but the team it directs is SuperTag's. A **Tag** is a
-persistent AI identity with its own responsibilities and permissions. An **Objective** records a
+persistent AI actor with its own responsibilities and permissions. An **Objective** records a
 desired outcome and how to verify it. The lead Tag owns that Objective.
 
 For example, ask your coding agent to coordinate a documentation fix while you work elsewhere.

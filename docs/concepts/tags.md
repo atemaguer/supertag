@@ -1,25 +1,24 @@
 # Tags
 
-> **Tags are the persistent AI identities that make up a SuperTag organization.**
+> **Tags are the persistent AI actors that make up a SuperTag organization.**
 
-A **Tag** is a persistent AI identity with its own responsibilities and permissions. For example, a
-reviewer Tag is responsible for reviewing changes and may read the repository but not edit it. You
-assign work to a Tag by name. A Tag talks to people in many conversations, each its own Session with
-its own harness session, and longer work runs in Sessions of its own. The Tag is what
-persists across them: its configuration, its Sessions, its open assignments, and their results. SuperTag
-calls each turn of a Tag's work a **Task**, and the Tag's inbox for messages from other Tags its
-**Mailbox**. When people call on the Tag from Slack or another shared tool, they
-experience it as an AI teammate. The same Tag can work across several tools without losing its
-identity. Tags work in Teams. Together, your Teams of Tags make up an **autonomous
-organization**: Teams may pursue different goals but share one Control Plane, its rules, and its
-record of the work.
+A **Tag** is a persistent AI actor with a stable identity, responsibilities, permissions, and
+work history. It exists independently of the model or harness executing its work. For example, a
+reviewer Tag may read a repository and review changes. It keeps that responsibility and its review
+history when its next Task runs on a different model.
+
+You assign work to a Tag by name. A Tag can talk to people in several conversations and start
+separate work Sessions. A **Session** groups turns of work, and a **Task** is one turn. The Tag's
+**Mailbox** receives messages from other Tags. The same Tag can work across several tools and
+keeps its assignments and results across Sessions. Tags work in Teams. Together, your Teams of
+Tags make up an **autonomous organization**. Teams may pursue different goals and share one
+Control Plane, its rules, and its record of the work.
 
 In security terms, the Tag is a non-human identity in SuperTag's identity and access
 management (IAM) model. Each Task still has its own requester, source, policy, and execution needs.
 
-This identity is the anchor for security and accountability. Knowledge, authority, responsibilities,
-work, and audit history attach to an accountable Tag rather than to an interchangeable model
-session or temporary execution process.
+The Tag's identity anchors security and accountability. Knowledge, authority, and audit history
+attach to the Tag across model sessions and execution processes.
 
 Terms used on this page (see the [glossary](../reference/glossary.md)):
 
@@ -34,7 +33,7 @@ Terms used on this page (see the [glossary](../reference/glossary.md)):
 - The **Control Plane** is the service that stores and coordinates the organization; a
   **collaboration surface** links it to an external work tool such as Slack.
 
-One Tag can serve as a shared AI teammate in an engineering channel. Several accountable Tags with
+One Tag can serve as a shared reviewer in an engineering channel. Several accountable Tags with
 distinct Roles can form Teams and work as an autonomous engineering team or organization.
 
 Several people can steer the same Tag, continue its work, and use approved results across Tasks,
@@ -44,7 +43,7 @@ channels, and platforms. Unrelated conversations still remain separate Sessions.
 
 | Dimension | Team-facing meaning | SuperTag mechanism |
 | --- | --- | --- |
-| Identity | Which teammate is acting | Stable Tag ID and audit identity |
+| Identity | Which Tag is acting | Stable Tag ID and audit identity |
 | Availability | Where it can be invoked | Tag added to an exact channel, repository, chat, or team |
 | Knowledge | What a Task may know | Session continuity and Context Sets |
 | Permissions | What it may do | Permission Sets and provider-native authorization |

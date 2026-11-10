@@ -1,6 +1,6 @@
 # Connect Linear
 
-Connect a Linear workspace so a **Tag**, a persistent AI identity with its own responsibilities and
+Connect a Linear workspace so a **Tag**, a persistent AI actor with its own responsibilities and
 permissions, replies when someone mentions it in an issue or comment. The Linear collaboration
 surface uses a personal API key for actions and a signing secret for incoming webhooks.
 

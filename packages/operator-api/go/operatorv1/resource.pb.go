@@ -2448,8 +2448,9 @@ func (x *ExecutionSettings) GetEffort() []ExecutionEffort {
 	return nil
 }
 
-// A Tag: a persistent AI identity with its own responsibilities and
-// permissions.
+// A persistent AI actor with a stable identity, responsibilities, permissions,
+// and work history. It exists independently of the model or harness that
+// executes its work.
 type Tag struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Its identity and version.

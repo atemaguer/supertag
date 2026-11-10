@@ -1,6 +1,6 @@
 # Share a Team's Workstream
 
-A **Tag** is a persistent AI identity with its own responsibilities and permissions. A **Team** is
+A **Tag** is a persistent AI actor with its own responsibilities and permissions. A **Team** is
 a flat list of member Tags. A Team's **Workstream** is its shared record of posts: SuperTag
 creates it with the Team, and every member can read it. See the
 [glossary](../reference/glossary.md) for other terms.
