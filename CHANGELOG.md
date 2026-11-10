@@ -15,6 +15,7 @@ within the pre-1.0 compatibility policy described in
   a question, an approval, and work Session recovery after an injected Worker error.
 - Completed work Session replies in Slack can show a result card with the recorded branch
   and a link to the pull request.
+- Start an Objective from a Tag's terminal conversation with `/goal`.
 
 ### Changed
 
@@ -37,11 +38,6 @@ within the pre-1.0 compatibility policy described in
 - The terminal UI inbox detail pane follows the selection when an item is settled elsewhere,
   including after a failed action. The inbox distinguishes approvals that block a running
   Task Attempt from questions that wait for an answer in the next turn.
-
-### Removed
-
-- Removed `supertag message tag` and `supertag message objective`. Send messages in the terminal UI
-  or through the operator API. Use `supertag list message --mailbox TAG` to inspect a Tag's Mailbox.
 
 ## [0.2.0-alpha.7] - 2026-11-09
 

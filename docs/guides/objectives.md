@@ -23,12 +23,8 @@ explicit assessment. Ordinary questions and small requests do not need an Object
 
 ## Write an Objective a Tag can finish
 
-An Objective has three parts:
-
-- **An outcome statement,** in plain language: the result, how success is verified, what must not
-  change, and when to ask a person.
-- **A budget,** as an amount and currency (`--budget-minor`, `--budget-currency`).
-- **A deadline,** as a timestamp (`--deadline`).
+Start with an outcome statement in plain language. Describe the result, how to verify it, what to
+preserve, and when to ask a person. Set a budget or deadline when you want to bound the work.
 
 Write the statement so that someone other than the owner could check the result. "Improve billing"
 gives the owner nothing to check. This does:
@@ -61,6 +57,20 @@ See [monetary budgets](../reference/coordination.md#the-budget-pool) and
 [deadlines](../reference/coordination.md#deadlines).
 
 ## 1. Create the Objective
+
+Open `supertag`, select `lead`, and enter a goal in its conversation.
+
+```text
+/goal Customers are billed for metered usage. Done when the billing reconciliation suite passes and a billing review accepts the change.
+```
+
+SuperTag creates the Objective and starts the owner's first turn. Press Enter again to open its
+progress view. In a checkout registered with the local Control Plane, the Objective uses that
+[Workspace](../reference/resource-model.md#workspaces). Enter `/goal` on its own to set a Team or
+budget in the form. You can also open the form with Ctrl-K and **Create Objective**.
+
+Use the CLI when scripting creation or setting a Workspace or deadline explicitly. You can also
+[declare the Objective in a manifest](../operations/resources.md#declare-objectives).
 
 ```sh
 supertag create objective usage-billing \

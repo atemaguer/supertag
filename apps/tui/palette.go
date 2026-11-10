@@ -35,6 +35,16 @@ type paletteCommand struct {
 type palette struct {
 	filter textinput.Model
 	cursor int
+	slash  bool
+}
+
+// goal reads inline /goal text. When the slash opened the palette, it isn't in the filter.
+func (p palette) goal() (string, bool) {
+	text := p.filter.Value()
+	if p.slash && !strings.HasPrefix(text, "/") {
+		text = "/" + text
+	}
+	return goalOutcome(text)
 }
 
 // slashOpensPalette says whether `/` opens the palette rather than being typed: on an empty input
@@ -55,7 +65,7 @@ func (a *app) commands() []paletteCommand {
 		out = append(out,
 			paletteCommand{commandNewConversation, "New conversation", "with " + tag},
 			paletteCommand{commandSwitchConversation, "Switch conversation", "with " + tag + " · ctrl+o"},
-			paletteCommand{commandCreateObjective, "Create Objective", "owned by " + tag})
+			paletteCommand{commandCreateObjective, "/goal · Create Objective", "owned by " + tag})
 	}
 	if len(a.contexts) > 1 {
 		out = append(out, paletteCommand{commandSwitchControlPlane, "Switch Control Plane", contextLabel(a.contexts[a.current]) + " · " + switchKey})
@@ -67,9 +77,12 @@ func (a *app) commands() []paletteCommand {
 	return append(out, paletteCommand{commandOpenInbox, "Open inbox", waiting})
 }
 
-// matching are the commands whose title holds every word of the filter, in any case.
+// matching filters by title, treating inline /goal text as the /goal command.
 func (a *app) matching() []paletteCommand {
 	words := strings.Fields(strings.ToLower(a.palette.filter.Value()))
+	if _, goal := a.palette.goal(); goal {
+		words = []string{"/goal"}
+	}
 	var out []paletteCommand
 	for _, c := range a.commands() {
 		title := strings.ToLower(c.title)
@@ -88,13 +101,16 @@ func (a *app) matching() []paletteCommand {
 }
 
 // openPalette shows the palette with an empty filter.
-func (a *app) openPalette() tea.Cmd {
+func (a *app) openPalette(slash bool) tea.Cmd {
 	filter := textinput.New()
 	filter.Prompt = "> "
+	if slash {
+		filter.Prompt = "/"
+	}
 	filter.Placeholder = "Type to filter"
 	filter.SetWidth(max(a.width-6, 10))
 	cmd := filter.Focus()
-	a.palette = &palette{filter: filter}
+	a.palette = &palette{filter: filter, slash: slash}
 	return cmd
 }
 
@@ -119,7 +135,8 @@ func (a *app) paletteKeyPress(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		a.palette = nil
-		return a.run(matching[p.cursor].id)
+		outcome, _ := p.goal()
+		return a.run(matching[p.cursor].id, outcome)
 	}
 	var cmd tea.Cmd
 	p.filter, cmd = p.filter.Update(msg)
@@ -128,7 +145,7 @@ func (a *app) paletteKeyPress(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 // run carries out a palette command.
-func (a *app) run(id commandID) tea.Cmd {
+func (a *app) run(id commandID, outcome string) tea.Cmd {
 	var cmd tea.Cmd
 	switch id {
 	case commandSwitchControlPlane:
@@ -139,7 +156,7 @@ func (a *app) run(id commandID) tea.Cmd {
 	case commandSwitchConversation:
 		cmd = a.inner.openPicker()
 	case commandCreateObjective:
-		cmd = a.inner.openObjectiveForm()
+		cmd = a.inner.openObjectiveForm(outcome)
 	case commandOpenInbox:
 		cmd = a.inner.openInbox()
 	}

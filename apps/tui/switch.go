@@ -83,6 +83,7 @@ func (a *app) start(i int) error {
 	a.cancel, a.current, a.inner = cancel, i, inner
 	a.generation++
 	a.inner.switchable = len(a.contexts) > 1
+	a.inner.defaultWorkspace = a.contexts[i].Workspace
 	if a.width > 0 {
 		next, _ := a.inner.Update(tea.WindowSizeMsg{Width: a.width, Height: a.height})
 		a.inner = next.(model)
@@ -123,13 +124,14 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		if msg.String() == paletteKey || (msg.String() == "/" && a.inner.slashOpensPalette()) {
-			return a, a.openPalette()
+			return a, a.openPalette(msg.String() == "/")
 		}
 	default:
 		if a.palette != nil {
 			var cmd tea.Cmd
 			a.palette.filter, cmd = a.palette.filter.Update(msg)
 			if _, paste := msg.(tea.PasteMsg); paste {
+				a.palette.cursor = max(min(a.palette.cursor, len(a.matching())-1), 0)
 				return a, cmd
 			}
 			return a, tea.Batch(cmd, a.forward(msg))

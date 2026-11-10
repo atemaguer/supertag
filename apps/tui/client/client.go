@@ -24,9 +24,10 @@ import (
 
 // Target names the Control Plane to talk to and the token to talk to it with.
 type Target struct {
-	URL   string `json:"url"`
-	Token string `json:"token"`
-	Name  string `json:"name,omitempty"`
+	URL       string `json:"url"`
+	Token     string `json:"token"`
+	Name      string `json:"name,omitempty"`
+	Workspace string `json:"workspace,omitempty"`
 }
 
 // APIError is a request the Control Plane refused, with the sentence it gave.

@@ -88,7 +88,12 @@ and share one Workstream.
 
 ## 3. Create the Objective
 
-Use the CLI here to set the Workspace explicitly.
+In your quickstart checkout, open `supertag`, select `lead`, and enter `/goal` on its own.
+Enter the outcome from the example below, choose `first-team`, and leave the budget blank.
+SuperTag uses the Workspace registered for the checkout. Copy the Objective ID shown after
+creation for the CLI commands that follow.
+
+For a shared Control Plane, or to choose a Workspace and Objective ID explicitly, use the CLI.
 
 ```sh
 supertag create objective team-greeting --owner lead --team first-team --workspace app \
@@ -108,9 +113,8 @@ Session reports. Use new Objective and Team IDs if these already exist.
 
 ## 4. Follow the work
 
-In another terminal, run `supertag` from your repository and select `team-greeting` under
-**Objectives** to follow its Sessions and see what needs your attention. The CLI also shows
-progress and results.
+Select the new Objective under **Objectives** to follow its Sessions and see what needs your
+attention. To follow along from a shell, use its ID in these commands in place of `team-greeting`.
 
 ```sh
 supertag watch objective team-greeting

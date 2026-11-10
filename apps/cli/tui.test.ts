@@ -1,4 +1,5 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -96,6 +97,39 @@ it("hands every saved Control Plane to the binary on fd 3, marking the current o
     expect(JSON.stringify(received.argv)).not.toContain(secret);
     expect(JSON.stringify(received.env)).not.toContain(secret);
   }
+});
+
+it("gives local goals the registered checkout's Workspace", async () => {
+  vi.stubEnv("SUPERTAG_STATE_DIR", directory);
+  const { binary, out } = stubBinary();
+  const root = realpathSync(
+    execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim(),
+  );
+  const local = { url: "http://127.0.0.1:4321", token };
+  writeFileSync(
+    join(directory, "supertag.yaml"),
+    `services:
+  control-plane: { type: control-plane, ports: ["4321"] }
+  laptop:
+    type: host
+    harnesses: [codex]
+    workspaces:
+      registered-checkout: ${JSON.stringify(root)}
+`,
+  );
+  expect(
+    await runTui({
+      env: { PATH: process.env["PATH"], SUPERTAG_TUI_BINARY: binary },
+      version,
+      resolveTarget: async () => local,
+      resolveContexts: async () => [local, team],
+    }),
+  ).toBe(0);
+  const received = JSON.parse(readFileSync(out, "utf8")) as Received;
+  expect(JSON.parse(received.fd3)).toEqual({
+    contexts: [{ ...local, workspace: "registered-checkout" }, team],
+    current: 0,
+  });
 });
 
 it("hands over each saved connection whose credential it can read", async () => {

@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -49,8 +50,21 @@ type createdMsg struct {
 	err      error
 }
 
-// openObjectiveForm shows the new Objective form for the selected Tag.
-func (m *model) openObjectiveForm() tea.Cmd {
+// goalOutcome recognizes /goal and leaves the rest of the line as the outcome.
+func goalOutcome(text string) (string, bool) {
+	text = strings.TrimSpace(text)
+	end := strings.IndexFunc(text, unicode.IsSpace)
+	if end < 0 {
+		return "", text == "/goal"
+	}
+	if text[:end] != "/goal" {
+		return "", false
+	}
+	return strings.TrimSpace(text[end:]), true
+}
+
+// openObjectiveForm starts an inline goal or shows the form for the selected Tag.
+func (m *model) openObjectiveForm(outcome string) tea.Cmd {
 	owner := m.selectedTag()
 	if owner == "" {
 		return nil
@@ -75,6 +89,11 @@ func (m *model) openObjectiveForm() tea.Cmd {
 	m.pane, m.focus = paneNewObjective, focusInput
 	m.placeCursor()
 	m.viewport.GotoTop()
+	if outcome != "" {
+		f.fields[fieldOutcome].SetValue(outcome)
+		f.field = fieldBudget
+		return m.createObjective()
+	}
 	m.refresh()
 	return m.syncInput()
 }
@@ -139,7 +158,10 @@ func (m *model) createObjective() tea.Cmd {
 	if err != nil {
 		return invalid(fieldBudget, err.Error())
 	}
-	next := client.NewObjective{Outcome: outcome, Owner: f.owner, Team: strings.TrimSpace(f.fields[fieldTeam].Value()), Budget: budget}
+	next := client.NewObjective{
+		Outcome: outcome, Owner: f.owner, Team: strings.TrimSpace(f.fields[fieldTeam].Value()),
+		Budget: budget, Workspace: m.defaultWorkspace,
+	}
 	if f.request.ID != "" && sameSubmission(f.request, next) {
 		next.ID = f.request.ID
 	} else if next.ID, err = newObjectiveID(outcome); err != nil {
@@ -209,6 +231,9 @@ func (m model) renderObjectiveForm() string {
 		return text
 	}
 	lines := []string{faint.Render(wrap.Render("A new Objective owned by " + owner + ". It starts when you create it: " + owner + " takes its first turn.")), ""}
+	if m.defaultWorkspace != "" {
+		lines = append(lines, faint.Render(wrap.Render("Workspace: "+terminalText(m.defaultWorkspace))), "")
+	}
 	for i, input := range f.fields {
 		label := fieldLabels[i]
 		if i == f.field && m.focus == focusInput {
@@ -313,7 +338,7 @@ func parseBudget(text string) (*operatorv1.Budget, error) {
 
 // sameSubmission reports whether two form submissions declare the same Objective, ignoring IDs.
 func sameSubmission(a, b client.NewObjective) bool {
-	return a.Outcome == b.Outcome && a.Owner == b.Owner && a.Team == b.Team &&
+	return a.Outcome == b.Outcome && a.Owner == b.Owner && a.Team == b.Team && a.Workspace == b.Workspace &&
 		a.Budget.GetLimitMinor() == b.Budget.GetLimitMinor() && a.Budget.GetCurrency() == b.Budget.GetCurrency() &&
 		(a.Budget == nil) == (b.Budget == nil)
 }

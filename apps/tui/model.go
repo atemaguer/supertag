@@ -18,7 +18,7 @@ import (
 const defaultConversation = "default"
 
 // conversationPlaceholder is the input's placeholder in a conversation.
-const conversationPlaceholder = "Message the Tag · ↑ work Sessions · ctrl+o conversations"
+const conversationPlaceholder = "Message the Tag · /goal · ↑ work Sessions · ctrl+o conversations"
 
 // historyPage is how many past messages a conversation shows when its Tag is first selected.
 const historyPage = 50
@@ -220,10 +220,11 @@ func (r *reload) done() bool {
 }
 
 type model struct {
-	ctx      context.Context
-	client   *client.Client
-	follower *client.Follower
-	watcher  *client.Watcher
+	defaultWorkspace string
+	ctx              context.Context
+	client           *client.Client
+	follower         *client.Follower
+	watcher          *client.Watcher
 
 	tags        []*operatorv1.Tag
 	tagsChecked bool
@@ -971,6 +972,10 @@ func (m *model) submit() tea.Cmd {
 	switch m.pane {
 	case paneConversation:
 		tag := m.selectedTag()
+		if outcome, goal := goalOutcome(text); goal && tag != "" {
+			m.input.Reset()
+			return m.openObjectiveForm(outcome)
+		}
 		name := m.currentConversation(tag)
 		if tag == "" || !m.conversation(tag, name).loaded {
 			return nil

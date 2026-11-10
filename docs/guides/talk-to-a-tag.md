@@ -30,11 +30,10 @@ with `supertag init`. For a shared Control Plane, ask its operator to set up a T
 | `d` on a work Session or branch | Show the diff from this checkout. |
 | `o` on a work Session or branch | Open its pull request when one exists. |
 
-To give `lead` an **Objective**, an outcome it owns, choose **Create Objective** from the
-command palette. Enter an outcome and how to verify it. Leave Team and Budget blank for this first
-run. A currency budget requires a [Worker](../concepts/workers.md) that can enforce a reported
-cost limit. Press Enter on the budget field to create the Objective, then Enter again to open
-its progress view.
+To give `lead` an **Objective**, an outcome it owns, type `/goal` followed by the outcome and how
+to verify it. Press Enter to create it, then Enter again to open its progress view. Enter `/goal`
+on its own to choose a Team or budget before starting. A currency budget requires a
+[Worker](../concepts/workers.md) that can enforce a reported cost limit.
 
 ## Continue a conversation
 
@@ -78,7 +77,10 @@ another member. See [Define and complete an Objective](objectives.md).
 
 ## Send messages from scripts
 
-Use the [operator API](../reference/control-plane-api.md#send-messages-and-answer-questions). Call
+Use [`supertag message tag` or `supertag message objective`](../operations/cli.md#send-messages-from-the-cli)
+for scripts that run the CLI. Both accept standard input and JSON output.
+
+For direct integrations, use the [operator API](../reference/control-plane-api.md#send-messages-and-answer-questions). Call
 [`ConversationService.SendMessage`](../reference/operator-api/conversation.md#sendmessage)
 to send to a Tag, or
 [`ObjectiveService.MessageObjective`](../reference/operator-api/objective.md#messageobjective)
