@@ -407,6 +407,18 @@ Before updating installation instructions for a release, publish the matching np
 packages and verify clean registry installs, the installer, versioned CLI archives, checksums,
 and documentation. Release tooling in this repository does not mean a release has been published.
 
+The npm release runs the installer check in a separate job. It waits for npm and the CDN
+to serve the release, then checks the CLI and TUI versions in a clean home. To check an
+existing release, dispatch **Verify public installer** with its tag:
+
+```sh
+gh workflow run verify-installer.yml -f release_tag=v0.2.0-alpha.8
+```
+
+Select `check_latest` to check the README's installer URL for the current release. When the
+installer check is the only failed job in a release run, **Re-run failed jobs** retries it
+on its own.
+
 ## Live Modal native mounts
 
 The opt-in suite reads `fixture.txt` from a small bucket prefix and an existing Modal Volume

@@ -13,7 +13,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: publish-supertag-ai
@@ -23,6 +22,9 @@ jobs:
   publish:
     if: github.repository == 'atemaguer/supertag'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     env:
       NODE_OPTIONS: --max-old-space-size=6144
     steps:
@@ -63,19 +65,10 @@ jobs:
           # Until a stable 1.0 exists, each alpha is the release users should get by default.
           # npm adds provenance automatically when the source repository is public.
           npm publish --access public --tag latest
-      - name: Verify the public installer in a clean home
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
-        run: |
-          version=${RELEASE_TAG#v}
-          fresh_home=$(mktemp -d)
-          trap 'rm -rf "$fresh_home"' EXIT
-          curl --fail --silent --show-error --location --retry 8 --retry-all-errors --max-time 30 \
-            "https://unpkg.com/supertag-ai@latest/install.sh" -o "$fresh_home/install.sh"
-          grep -Fx "RELEASE_DEFAULT_VERSION=\"$version\"" "$fresh_home/install.sh"
-          env -i HOME="$fresh_home" PATH="$PATH" sh "$fresh_home/install.sh" > "$fresh_home/install.log" 2>&1 ||
-            { cat "$fresh_home/install.log"; exit 1; }
-          cat "$fresh_home/install.log"
-          test "$("$fresh_home/.local/bin/supertag" --version)" = "$version"
-          tui="$fresh_home/.local/share/supertag/versions/$version/node_modules/supertag-ai/tui/supertag-tui-linux-amd64"
-          test "$("$tui" --version)" = "$version"
+
+  verify-installer:
+    needs: publish
+    uses: ./.github/workflows/verify-installer.yml
+    with:
+      release_tag: ${{ github.event.release.tag_name || inputs.release_tag }}
+      check_latest: true

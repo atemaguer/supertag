@@ -1,0 +1,41 @@
+name: Verify public installer
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+      check_latest:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published tag to verify (for example, v0.2.0-alpha.8)
+        required: true
+        type: string
+      check_latest:
+        description: Verify the README's latest URL instead of the versioned URL
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - name: Install and verify in a clean home
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          CHECK_LATEST: ${{ inputs.check_latest }}
+        run: bash scripts/verify-public-installer.sh "$RELEASE_TAG" "$CHECK_LATEST"
