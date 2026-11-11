@@ -232,37 +232,43 @@ const problems = [
   ...checkDocumentationVocabulary(root),
   ...checkOrphans(root, markdownFiles(join(root, "docs"))),
 ];
-// README explains the Objective-driven way of working before Get started.
+// Explain the Objective-driven way of working before the quickstart.
 const readme = readFileSync(join(root, "README.md"), "utf8");
-const positioningHeading = "## How you use SuperTag";
+const positioningHeading = "## How Tags work together";
+const quickstartHeading = "## Run your first Tag";
 const positioningStart = readme.indexOf(positioningHeading);
+const quickstartStart = readme.indexOf(quickstartHeading);
 const positioning =
   positioningStart < 0
     ? ""
     : readme.slice(positioningStart + positioningHeading.length).split(/^## /mu)[0];
-if (positioningStart < 0 || positioningStart > readme.indexOf("## Get started"))
-  problems.push("README.md: explain how SuperTag is meant to be used before Get started");
+if (positioningStart < 0 || quickstartStart < 0 || positioningStart > quickstartStart)
+  problems.push("README.md: explain how SuperTag is meant to be used before the quickstart");
 for (const required of [
   /Objective/u,
   /outcome/iu,
-  /done.when evidence/iu,
+  /evidence.*when it.s done/isu,
   /constraints/iu,
   /budget/iu,
   /deadline/iu,
   /steer/iu,
   /decisions/iu,
   /findings/iu,
-  /approvals/iu,
+  /approvals?/iu,
   /\]\(docs\/guides\/write-an-objective\.md\)/u,
-  /\]\(docs\/guides\/talk-to-a-tag\.md\)/u,
   /\]\(docs\/concepts\/interaction-model\.md\)/u,
 ])
   if (!required.test(positioning))
     problems.push(`README.md: usage section must include ${required}`);
 const warnings = [];
-// The first reply must lead to a runnable example of the Team promised on the first screen.
-if (!/\]\(docs\/guides\/first-team\.md\)/u.test(readme.split(/^## /mu)[0]))
-  problems.push("README.md: link the first Team walkthrough before the first section");
+// The quickstart should help readers continue after their first reply.
+const quickstart =
+  quickstartStart < 0
+    ? ""
+    : readme.slice(quickstartStart + quickstartHeading.length).split(/^## /mu)[0];
+for (const guide of ["talk-to-a-tag", "first-team"])
+  if (!quickstart.includes(`](docs/guides/${guide}.md)`))
+    problems.push(`README.md: link docs/guides/${guide}.md from the quickstart`);
 const teamGuide = join(root, "docs/guides/first-team.md");
 if (!existsSync(teamGuide)) problems.push("docs/guides/first-team.md: missing Team walkthrough");
 if (!/\]\(guides\/first-team\.md\)/u.test(readFileSync(join(root, "docs/README.md"), "utf8")))
