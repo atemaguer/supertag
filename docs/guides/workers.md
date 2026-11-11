@@ -63,9 +63,8 @@ lists them, as `claude-code` above. Without it, such Tasks go to Codex or anothe
 with a reason that names the setting. Give the Tags of such a host only trusted work, or run them
 on a host with little to lose. See
 [Unsandboxed harnesses](../reference/supertag-yaml.md#unsandboxed-harnesses).
-Cursor also requires `files:write` for a Task that has `commands:execute`. It refuses a repository
-or Task Attempt home `.cursor/sandbox.json` at start. The agent can create this file later and
-widen its sandbox, which is why shell access needs the opt-in.
+Cursor also requires `files:write` for a Task that has `commands:execute`. The Worker runs local
+commands with the host's tools and network. See [Cursor setup and limits](../operations/requirements.md#cursor-setup-and-limits).
 
 ### Run several Tasks at once
 

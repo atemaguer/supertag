@@ -108,19 +108,17 @@ The Worker does not include a general text Context resolver. If a Workspace sele
 the same name, the Workspace Skill takes precedence.
 
 For colocated local Tasks, SuperTag allows Cursor's read, search, list, and MCP tools.
-It adds edit only for `files:write` and shell only for `commands:execute`. It enables
-web search only when the Task has `web:search`; subagents remain disabled.
-Cursor's [OS sandbox](https://cursor.com/docs/agent/security/run-modes.md) limits writes to the
-workspace and temporary files and denies network access as defense in depth. Because of that,
-a package manager that must download a pinned version cannot run inside Cursor; it fails
-with `ERR_PNPM_META_FETCH_FAIL`. SuperTag does not widen the sandbox; run such checks from
-another harness. The Worker refuses
-a run if the sandbox is unavailable or a repository or Task Attempt home `.cursor/sandbox.json`
-exists. The agent can create that file mid-run and widen later shell decisions. Shell access thus
-requires `files:write` and `allow-unsandboxed-commands: [cursor]`; shell-only Permission Sets are
-refused. Reads may still reach outside the workspace, and Cursor offers no approval for each tool
-call. A private home excludes the operator's Cursor hooks, MCP servers, and rules; Cursor may still
-read `AGENTS.md` and `.cursor` files in the workspace.
+It adds edit only for `files:write` and enables web search only for `web:search`.
+Subagents and Cursor's built-in shell stay disabled. To run commands, grant both `files:write`
+and `commands:execute` and set `allow-unsandboxed-commands: [cursor]` on the host service.
+The Worker runs those commands on the host, with the host's network access, so a package manager
+can fetch the version pinned by the project. Use a trusted repository for local command access,
+or use a [remote environment](#cursor-with-a-remote-environment) to isolate its commands.
+
+SuperTag keeps Cursor's [OS sandbox](https://cursor.com/docs/agent/security/run-modes.md) enabled
+for the SDK and refuses a run if it is unavailable or a repository or Task Attempt home contains
+`.cursor/sandbox.json`. Reads may still reach outside the workspace. A private home excludes
+the operator's Cursor hooks, MCP servers, and rules; Cursor can still read workspace files.
 SuperTag supplies only the Task's admitted tools, as Cursor
 [custom tools](https://cursor.com/docs/sdk/typescript.md#custom-tools). The Worker stays their MCP
 client. Sandboxed SDK runs reject inline MCP server tools because they cannot ask for approval.
@@ -147,19 +145,13 @@ checks file paths and permissions. See [Cursor reference](../reference/worker.md
 
 ### Cursor local runtime details
 
-Cursor starts its SDK runner with a private `HOME` and private `XDG_CONFIG_HOME`,
-`XDG_DATA_HOME`, and `XDG_CACHE_HOME`. It keeps the Worker's `PATH`, with the Worker's
-Node directory first. It does not pass `COREPACK_HOME`, `PNPM_HOME`, or `npm_config_*`
-settings into that process. This keeps host configuration and credentials out of the
-Task Attempt's environment. If a `pnpm` executable on `PATH` installs the repository's
-pinned version into the host's home on demand, a Cursor Task cannot rely on that cache
-or a package download: its private home is empty and the sandbox denies network access.
-Use a Node version that meets this repository's minimum and a directly runnable pinned
-`pnpm` executable available on the Worker Host before a Cursor coding Task runs.
-The SDK's current `local.sandboxOptions` offers an enable switch but no read-path grants
-for a package store or Corepack cache. See [SDK sandbox options](https://cursor.com/docs/sdk/typescript.md),
-[Cursor run modes](https://cursor.com/docs/agent/security/run-modes.md), and
-[SDK release notes](https://cursor.com/docs/release-notes/sdk.md).
+The SDK and local commands each get a private `HOME` and private XDG directories. Commands run
+from the Task checkout and use the Worker's `PATH`, with the Worker's Node directory first.
+They do not inherit `CURSOR_API_KEY`, `COREPACK_HOME`, `PNPM_HOME`, or `npm_config_*` variables.
+Run the Worker with a Node version that meets the project's requirements and put the project’s
+package manager or a compatible Corepack shim on its `PATH`. For example, Corepack can use
+`"packageManager": "pnpm@10.15.1"` in `package.json` to install and run the pinned version.
+The private home keeps operator configuration and caches separate.
 
 For colocated local execution, Cursor's sandbox may refuse writes to `.cursor` even inside
 a writable workspace.

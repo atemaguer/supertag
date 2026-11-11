@@ -44,6 +44,7 @@ interface StartFrame {
      * runner registers them as custom tools and forwards every call to the Worker.
      */
     readonly splitTools?: readonly CursorSplitToolDefinition[];
+    readonly localCommandTool?: CursorSplitToolDefinition;
   };
 }
 
@@ -233,6 +234,7 @@ export async function executeCursorSdk(
     (request.tools.length !== 1 ||
       request.tools[0] !== "mcp" ||
       request.disallowedTools.includes("mcp") ||
+      request.localCommandTool !== undefined ||
       SPLIT_NATIVE_DENYLIST.some((name) => !request.disallowedTools.includes(name)))
   ) {
     // Reject malformed allow and deny policy before the SDK sees it. The denylist also
@@ -243,13 +245,25 @@ export async function executeCursorSdk(
     error.name = "ConfigurationError";
     throw error;
   }
+  if (
+    request.localCommandTool &&
+    (request.localCommandTool.name !== "command" ||
+      request.tools.includes("shell") ||
+      !request.disallowedTools.includes("shell"))
+  ) {
+    const error = new Error("Cursor local command access requires the native shell to be denied");
+    error.name = "ConfigurationError";
+    throw error;
+  }
+  const workspaceTools =
+    request.splitTools ?? (request.localCommandTool ? [request.localCommandTool] : undefined);
   const bridge = await cursorCustomTools(
     request.mcpServers,
     request.workspace,
     emitFrame,
     (error) => cursorSdkErrorMessage(error, key, request),
     connectMcp,
-    request.splitTools ? workspaceForwarder(request.splitTools, emitFrame) : undefined,
+    workspaceTools ? workspaceForwarder(workspaceTools, emitFrame) : undefined,
   );
   activeBridge = bridge;
   try {

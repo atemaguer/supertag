@@ -1044,7 +1044,7 @@ it("refuses a workspace call outside split execution and a reused call ID", asyn
   outside.push(call("workspace-1", "read"));
   const { splitTools: _unused, ...colocated } = workerRequest;
   await expect(Array.fromAsync(runCursor(colocated, outside.runtime))).rejects.toThrow(
-    /outside split execution/,
+    /without an executor/,
   );
 
   const reused = interactiveRuntime();

@@ -45,6 +45,7 @@ import {
   type SensitiveValue,
   sensitiveEnvironmentValues,
 } from "@supertag/worker-sdk/redaction";
+import { localCursorCommand } from "./local-command.js";
 import { type CursorSplitToolDefinition, WORKSPACE_TOOL_PREFIX } from "./mcp-custom-tools.js";
 import {
   capturePortableCursorSessionState,
@@ -128,6 +129,8 @@ export interface CursorRunRequest {
    * tools and forwards to the Worker. Absent means colocated execution.
    */
   readonly splitTools?: readonly CursorSplitToolDefinition[];
+  /** Colocated command access is handled by the Worker, not Cursor's shell. */
+  readonly localCommandTool?: CursorSplitToolDefinition;
 }
 
 export type { CursorSplitToolDefinition } from "./mcp-custom-tools.js";
@@ -145,8 +148,8 @@ export type CursorRunner = (
   request: CursorRunRequest,
   runtime: HarnessRuntime,
   signal?: AbortSignal,
-  /** Present exactly when the request is a split execution request. */
-  split?: CursorSplitExecutor,
+  /** Worker-owned workspace tools, if any. */
+  executor?: CursorSplitExecutor,
 ) => AsyncIterable<CursorRunnerEvent>;
 
 export interface CursorHarnessOptions {
@@ -239,14 +242,13 @@ export function cursorToolsForActions(actions: readonly string[]): {
   // https://cursor.com/docs/sdk/typescript.md#restricting-the-toolset
   // https://cursor.com/docs/agent/security/run-modes.md
   // Cursor does not confine reads and the SDK has no interactive approval callback. The
-  // allowlist controls edit and shell availability; shell isolation is not enforceable here.
+  // allowlist controls editing. The Worker offers commands separately under its host opt-in.
   const tools = ["read", "grep", "glob", "ls", "mcp"];
   if (actions.includes("files:write")) tools.push("edit");
-  if (actions.includes("commands:execute")) tools.push("shell");
   if (actions.includes("web:search")) tools.push("webSearch");
   return {
     tools,
-    disallowedTools: ["task", ...(actions.includes("web:search") ? [] : ["webSearch"])],
+    disallowedTools: ["shell", "task", ...(actions.includes("web:search") ? [] : ["webSearch"])],
   };
 }
 
@@ -289,12 +291,10 @@ export function cursorToolsForSplit(): {
 }
 
 function assertCursorActions(actions: readonly string[]): void {
-  // Cursor's SDK SandboxOptions is only { enabled: boolean }; unlike Codex, it cannot
-  // make shell access to the workspace read-only. https://cursor.com/docs/sdk/typescript.md
-  // https://cursor.com/docs/agent/security/run-modes.md
+  // A shell command can change files, so command access also requires files:write.
   if (actions.includes("commands:execute") && !actions.includes("files:write"))
     throw new Error(
-      "CURSOR_COMMANDS_REQUIRE_FILES_WRITE: Cursor shell access requires files:write because its sandbox cannot make the workspace read-only",
+      "CURSOR_COMMANDS_REQUIRE_FILES_WRITE: Cursor command access requires files:write",
     );
 }
 
@@ -638,6 +638,12 @@ export class CursorHarness implements Harness {
       if ((await readdir(workspace)).length > 0)
         throw new Error("Cursor split working directory must be empty");
     }
+    const commandHome = join(home, "command-home");
+    const localExecutor =
+      !split && actions.includes("commands:execute")
+        ? localCursorCommand(runtime, workspace, commandHome, metadata["timeoutMs"])
+        : undefined;
+    if (localExecutor) await mkdir(commandHome, { mode: 0o700 });
     const executor =
       split && remoteRoot !== undefined
         ? (this.#options.splitExecutor ?? createSplitExecutionBridge)({
@@ -658,7 +664,7 @@ export class CursorHarness implements Harness {
               commandsExecute: actions.includes("commands:execute"),
             },
           })
-        : undefined;
+        : localExecutor;
     const proxies: {
       name: string;
       close: () => Promise<void>;
@@ -666,7 +672,8 @@ export class CursorHarness implements Harness {
       headers: Readonly<Record<string, string>>;
     }[] = [];
     try {
-      const splitTools = executor ? validSplitTools(executor.tools) : undefined;
+      const splitTools = split && executor ? validSplitTools(executor.tools) : undefined;
+      const localCommandTool = localExecutor?.tools[0];
       const splitToolNames = splitTools?.map((tool) => tool.name);
       const prior = await resumableState(input, this.#options.workspace, splitToolNames);
       // The SDK scopes Agent.resume to the agent's stored cwd, and each Attempt may get a
@@ -721,6 +728,11 @@ export class CursorHarness implements Harness {
           ...(remoteRoot !== undefined && splitTools
             ? [splitWorkspaceGuidance(remoteRoot, splitTools)]
             : []),
+          ...(localCommandTool
+            ? [
+                "Run foreground shell commands with workspace_command from the Task workspace. Use the project's declared package manager and version when running its checks.",
+              ]
+            : []),
           ...(remoteOutputDirectory === undefined
             ? []
             : [
@@ -748,6 +760,7 @@ export class CursorHarness implements Harness {
         ...tools,
         toolInputs: input.tools,
         ...(splitTools ? { splitTools } : {}),
+        ...(localCommandTool ? { localCommandTool } : {}),
       };
       const runner = this.#options.runner ?? runCursor;
       const sensitive = [
@@ -939,7 +952,7 @@ export async function* runCursor(
   request: CursorRunRequest,
   runtime: HarnessRuntime,
   signal?: AbortSignal,
-  split?: CursorSplitExecutor,
+  executor?: CursorSplitExecutor,
 ): AsyncIterable<CursorRunnerEvent> {
   const key = process.env["CURSOR_API_KEY"];
   if (!key) throw new Error("Cursor SDK requires CURSOR_API_KEY");
@@ -951,6 +964,8 @@ export async function* runCursor(
   );
   const timeout = AbortSignal.timeout(request.timeoutMs);
   const cancellation = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  const workspaceTools =
+    request.splitTools ?? (request.localCommandTool ? [request.localCommandTool] : undefined);
   cancellation.throwIfAborted();
   // Cursor documents run.cancel() and agent.close(), but does not document cleanup of
   // SDK child processes. Track the runner and native helpers independently.
@@ -1035,7 +1050,7 @@ export async function* runCursor(
     closeRequested = true;
     await handle.write?.(Buffer.from('{"type":"close"}\n'));
   };
-  // Split execution: workspace calls from the runner run through the executor. Each call is
+  // Workspace calls from the runner run through the executor. Each call is
   // answered exactly once; a cancelled, ended or dead run answers the rest with an error.
   const inflight = new Map<string, AbortController>();
   let answers: Promise<unknown> = Promise.resolve();
@@ -1061,15 +1076,13 @@ export async function* runCursor(
     }
   };
   const callExecutor = (frame: { id: string; name: string; input: unknown }) => {
-    if (!split || request.splitTools === undefined)
-      throw new CursorProtocolError(
-        "Cursor runner requested a workspace tool outside split execution",
-      );
+    if (!executor || workspaceTools === undefined)
+      throw new CursorProtocolError("Cursor runner requested a workspace tool without an executor");
     if (inflight.has(frame.id))
       throw new CursorProtocolError("Cursor runner reused a workspace call ID");
     const controller = new AbortController();
     inflight.set(frame.id, controller);
-    if (!request.splitTools.some((tool) => tool.name === frame.name)) {
+    if (!workspaceTools.some((tool) => tool.name === frame.name)) {
       answer(frame.id, `Unknown workspace tool ${frame.name.slice(0, 64)}`, true);
       return;
     }
@@ -1080,7 +1093,7 @@ export async function* runCursor(
     ) as unknown;
     void (async () => {
       try {
-        const outcome = await split.call(
+        const outcome = await executor.call(
           frame.name,
           input,
           AbortSignal.any([cancellation, controller.signal]),
@@ -1094,7 +1107,7 @@ export async function* runCursor(
   };
   const cancel = () => {
     failInflight("Workspace tool call was cancelled");
-    void split?.cancelAll().catch(() => undefined);
+    void executor?.cancelAll().catch(() => undefined);
     void handle.write?.(Buffer.from('{"type":"cancel"}\n')).catch(() => undefined);
     killTimer = setTimeout(() => {
       if (!exited) {
@@ -1111,14 +1124,14 @@ export async function* runCursor(
     if (hardKillTimer) clearTimeout(hardKillTimer);
     const deadline = Date.now() + 5_000;
     let cleanupError: unknown;
-    let splitFailure: unknown;
+    let executorFailure: unknown;
     // End, cancellation or runner death: nothing the runner started remotely may outlive the run.
     failInflight("Workspace tool call ended with the run");
-    if (split) {
+    if (executor) {
       try {
-        await withinCleanup(split.cancelAll(), deadline);
+        await withinCleanup(executor.cancelAll(), deadline);
       } catch (cause) {
-        splitFailure = cause;
+        executorFailure = cause;
       }
     }
     try {
@@ -1163,10 +1176,13 @@ export async function* runCursor(
       throw new ExecutionCleanupError("Cursor process termination could not be confirmed", {
         cause: cleanupError,
       });
-    if (splitFailure)
-      throw new ExecutionCleanupError("Cursor remote process termination could not be confirmed", {
-        cause: splitFailure,
-      });
+    if (executorFailure)
+      throw new ExecutionCleanupError(
+        "Cursor workspace process termination could not be confirmed",
+        {
+          cause: executorFailure,
+        },
+      );
   };
   cancellation.addEventListener("abort", cancel, { once: true });
   if (cancellation.aborted) cancel();

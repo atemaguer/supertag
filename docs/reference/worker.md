@@ -943,15 +943,18 @@ marker and leaves every observed parent chain, process group, and session before
 See [Process escape limits](#process-escape-limits).
 
 For colocated local execution, the tool allowlist is read, grep, glob, ls, and MCP.
-`files:write` adds edit. `commands:execute` adds shell, but requires `files:write` and
-the host service's `allow-unsandboxed-commands: [cursor]` opt-in. `web:search` adds web
-search; subagents remain disabled. Cursor enables its
-[sandbox](https://cursor.com/docs/agent/security/run-modes.md) as
-defense in depth on macOS and Linux, and refuses a run when the sandbox is unavailable. A repository
-or Task Attempt home with `.cursor/sandbox.json` is refused, including a symlink. The agent can
-still create this file during a run and widen later shell decisions, so Cursor does not claim an
-enforced command boundary. Reads can reach outside the workspace, and Cursor cannot request
-per-call approval. A private `HOME` excludes operator hooks, MCP servers, and rules; workspace
+`files:write` adds edit and `web:search` adds web search. The native shell and subagents stay
+disabled. `commands:execute` adds the `workspace_command` custom tool when the Task has
+`files:write` and the host service opts in with `allow-unsandboxed-commands: [cursor]`.
+The Worker supervises foreground commands, which start in the Task checkout and use the
+Worker Host's network and tools. They run without an OS sandbox, with the Worker's Node
+directory first on `PATH` and with a private home.
+
+Cursor keeps its [sandbox](https://cursor.com/docs/agent/security/run-modes.md) enabled for the
+SDK on macOS and Linux and refuses a run if that sandbox is unavailable. A repository or Task
+Attempt home with `.cursor/sandbox.json` is refused, including a symlink. Reads can reach outside
+the workspace, and Cursor cannot request per-call approval. A private `HOME` excludes operator
+hooks, MCP servers, and rules; workspace
 instructions may still be read. See [Cursor tools and sandbox options](https://cursor.com/docs/sdk/typescript.md)
 and [Cursor permissions](https://cursor.com/docs/cli/reference/permissions.md).
 
