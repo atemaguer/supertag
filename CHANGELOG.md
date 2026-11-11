@@ -16,6 +16,10 @@ within the pre-1.0 compatibility policy described in
 - Modal Workers can mount writable Volumes and deliver Git commits from Codex Tasks. A Worker
   base image for Linux AMD64 and ARM64 is published to GitHub Container Registry.
 
+### Fixed
+
+- Control Plane shutdown waits for startup Session recovery before disconnecting storage.
+
 ## [0.2.0-alpha.8] - 2026-11-10
 
 ### Added

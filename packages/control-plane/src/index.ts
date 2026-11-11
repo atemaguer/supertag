@@ -1370,8 +1370,6 @@ export class ControlPlane {
     }, EPHEMERAL_WORKER_HOST_SWEEP_INTERVAL_MS);
     this.#ephemeralSweepTimer.unref();
     this.#taskControllerLoop = this.#runTaskController();
-    // A turn a stop or crash cut off is admitted now; admission is idempotent.
-    void this.#sweepSessions();
     if (this.#reply !== undefined || this.#operatorChannel !== undefined) {
       this.#deliveryControllerLoop = this.#runDeliveryController();
     }
@@ -1895,6 +1893,9 @@ export class ControlPlane {
 
   async #runTaskController(): Promise<void> {
     try {
+      // Recover turns cut off by a stop or crash. Keep the sweep in the controller so
+      // shutdown waits for it before disconnecting persistence.
+      await this.#sweepSessions();
       while (this.#running) {
         try {
           const progressed = await controlPlaneEventLoopLag.run("job: task dispatch", () =>

@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setImmediate } from "node:timers/promises";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlPlane } from "../packages/control-plane/src/index.ts";
@@ -52,6 +53,41 @@ afterEach(async () => {
 });
 
 describe("Control Plane durable lifecycle", () => {
+  it("drains the startup Session sweep before disconnecting the store after a restart", async () => {
+    const fixture = await createFixture();
+    const store = fixture.store();
+    const controlPlane = fixture.controlPlaneWithStore(store, {});
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let stopping: Promise<void> | undefined;
+    try {
+      await controlPlane.start();
+      await controlPlane.stop();
+      vi.spyOn(store, "listDueInboundEvents").mockResolvedValue([]);
+      vi.spyOn(store, "listUnreportedWorkTasks").mockImplementationOnce(async () => {
+        entered.resolve();
+        await release.promise;
+        return [];
+      });
+      const disconnect = vi.spyOn(store, "disconnect");
+      await controlPlane.start();
+      await entered.promise;
+
+      stopping = controlPlane.stop();
+      await setImmediate();
+      expect(disconnect).not.toHaveBeenCalled();
+
+      release.resolve();
+      await stopping;
+      expect(disconnect).toHaveBeenCalledOnce();
+    } finally {
+      release.resolve();
+      await (stopping ?? controlPlane.stop());
+      vi.useRealTimers();
+    }
+  });
+
   it("settles an invalid catalog submission as failure without replaying completed execution", async () => {
     const fixture = await createFixture();
     const worker = testWorker(async () => ({
