@@ -15,6 +15,7 @@ within the pre-1.0 compatibility policy described in
   verdicts appear on the Objective with the exact delivered commit.
 - Modal Workers can mount writable Volumes and deliver Git commits from Codex Tasks. A Worker
   base image for Linux AMD64 and ARM64 is published to GitHub Container Registry.
+- Release builds sign and notarize the macOS terminal UI for Apple Silicon and Intel.
 
 ### Fixed
 

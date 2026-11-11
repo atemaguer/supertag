@@ -28,9 +28,8 @@ since SuperTag runs the CLIs you install. Add the `export` line to your shell st
 the command in new terminals.
 
 The npm release includes the terminal UI for macOS and Linux, on arm64 and amd64. The installer
-checks your platform's binary against the package's `SHA256SUMS` and verifies its version. The
-macOS binary has no Developer ID signature or notarization. If the terminal UI check fails, the
-script installs the CLI and explains why it skipped the terminal UI.
+checks your platform's binary against the package's `SHA256SUMS` and verifies its version. If the
+terminal UI check fails, the script installs the CLI and explains why it skipped the terminal UI.
 To choose the locations or a version, set these before `sh`:
 
 | Variable | Default |

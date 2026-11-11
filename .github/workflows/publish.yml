@@ -19,8 +19,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  release-cli:
+    if: github.repository == 'atemaguer/supertag'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-cli.yml
+    with:
+      release_tag: ${{ github.event.release.tag_name || inputs.release_tag }}
+      upload_assets: true
+    secrets:
+      APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+      APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+      APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+      APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+      APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+
   publish:
     if: github.repository == 'atemaguer/supertag'
+    needs: release-cli
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -39,10 +55,10 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
-      - uses: actions/setup-go@v5
+      - uses: actions/download-artifact@v4
         with:
-          go-version-file: apps/tui/go.mod
-          cache-dependency-path: apps/tui/go.sum
+          name: supertag-release-tui
+          path: apps/tui/dist
       - run: npm install --global npm@11
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter supertag-ai build
@@ -56,7 +72,11 @@ jobs:
           does not match supertag-ai@${manifest.version}`);'
       - name: Bundle the installer and terminal UI
         run: |
-          apps/tui/build.sh
+          (
+            cd apps/tui/dist
+            sha256sum --check SHA256SUMS
+            chmod +x supertag-tui-*
+          )
           test "$(apps/tui/dist/supertag-tui-linux-amd64 --version)" = "$(node -p 'require("./packages/supertag-ai/package.json").version')"
           sh scripts/stage-cli-release.sh
       - name: Publish with npm trusted publishing

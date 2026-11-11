@@ -1,55 +1,57 @@
 name: Release SuperTag CLI installer
 
-# The public installer and terminal UI ship through npm (publish.yml). The GitHub release also
-# carries a copy of install.sh, the terminal UI binaries, and their SHA256SUMS.
+# The npm package and GitHub Release consume the same verified TUI build.
 on:
-  release:
-    types:
-      - published
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+      upload_assets:
+        default: false
+        type: boolean
+    secrets:
+      APPLE_DEVELOPER_ID_P12:
+        required: false
+      APPLE_DEVELOPER_ID_P12_PASSWORD:
+        required: false
+      APPLE_NOTARY_KEY:
+        required: false
+      APPLE_NOTARY_KEY_ID:
+        required: false
+      APPLE_NOTARY_ISSUER_ID:
+        required: false
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing release tag to receive install.sh and the terminal UI binaries
-        required: true
+        description: Tag to build (leave empty to test the selected branch)
         type: string
+      upload_assets:
+        description: Upload the installer and TUI binaries to the specified existing GitHub Release
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
-  publish:
-    if: github.repository == 'atemaguer/supertag'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.release.tag_name || inputs.release_tag }}
-      - name: Pin the installer to this release
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
-        run: |
-          sed -i "s/^RELEASE_DEFAULT_VERSION=\"latest\"$/RELEASE_DEFAULT_VERSION=\"${RELEASE_TAG#v}\"/" install.sh
-          grep -q "^RELEASE_DEFAULT_VERSION=\"${RELEASE_TAG#v}\"$" install.sh
-          sh -n install.sh
-      - name: Upload install.sh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
-        run: gh release upload "$RELEASE_TAG" install.sh --clobber
-
   terminal-ui:
     if: github.repository == 'atemaguer/supertag'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
+    runs-on: macos-latest
+    timeout-minutes: 35
     env:
-      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || inputs.release_tag }}
+          ref: ${{ inputs.release_tag || github.sha }}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-tooling
+          sparse-checkout: scripts/notarize-release-tui.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: apps/tui/go.mod
@@ -57,25 +59,68 @@ jobs:
       - name: Build the terminal UI binaries
         run: |
           version=$(node -p 'require("./packages/supertag-ai/package.json").version')
-          [ "$version" = "${RELEASE_TAG#v}" ] || {
+          if [ -n "$RELEASE_TAG" ] && [ "$RELEASE_TAG" != "v$version" ]; then
             echo "packages/supertag-ai is $version but the release is $RELEASE_TAG" >&2
             exit 1
-          }
+          fi
           apps/tui/build.sh
-      - name: Check the binaries report the release version
-        working-directory: apps/tui/dist
-        run: test "$(./supertag-tui-linux-amd64 --version)" = "${RELEASE_TAG#v}"
-      - name: Write SHA256SUMS
-        working-directory: apps/tui/dist
+      - name: Sign and notarize the macOS binaries
+        env:
+          APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: bash .release-tooling/scripts/notarize-release-tui.sh apps/tui/dist
+      - name: Verify the macOS binary and write SHA256SUMS
         run: |
-          sha256sum supertag-tui-darwin-arm64 supertag-tui-darwin-amd64 \
-            supertag-tui-linux-arm64 supertag-tui-linux-amd64 > SHA256SUMS
-          cat SHA256SUMS
-      - name: Upload the binaries and SHA256SUMS
-        working-directory: apps/tui/dist
+          version=$(node -p 'require("./packages/supertag-ai/package.json").version')
+          case "$(uname -m)" in
+            arm64) arch=arm64 ;;
+            x86_64) arch=amd64 ;;
+            *) exit 1 ;;
+          esac
+          cd apps/tui/dist
+          test "$(./supertag-tui-darwin-$arch --version)" = "$version"
+          shasum -a 256 supertag-tui-* > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supertag-release-tui
+          path: |
+            apps/tui/dist/supertag-tui-*
+            apps/tui/dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+  publish:
+    if: github.repository == 'atemaguer/supertag' && inputs.upload_assets
+    needs: terminal-ui
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - name: Require an existing release tag
+        run: test -n "$RELEASE_TAG"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: supertag-release-tui
+          path: apps/tui/dist
+      - name: Verify and upload the installer and binaries
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "$RELEASE_TAG" --clobber \
-            supertag-tui-darwin-arm64 supertag-tui-darwin-amd64 \
-            supertag-tui-linux-arm64 supertag-tui-linux-amd64 SHA256SUMS
+          sed -i "s/^RELEASE_DEFAULT_VERSION=\"latest\"$/RELEASE_DEFAULT_VERSION=\"${RELEASE_TAG#v}\"/" install.sh
+          grep -Fxq "RELEASE_DEFAULT_VERSION=\"${RELEASE_TAG#v}\"" install.sh
+          sh -n install.sh
+          (
+            cd apps/tui/dist
+            sha256sum --check SHA256SUMS
+          )
+          gh release upload "$RELEASE_TAG" --clobber install.sh \
+            apps/tui/dist/supertag-tui-* apps/tui/dist/SHA256SUMS
