@@ -9,6 +9,8 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+## [0.2.0-alpha.9] - 2026-11-10
+
 ### Added
 
 - Objective leads can delegate Workspace writes without write access, and cross-Team review

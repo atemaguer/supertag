@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Published tag to verify (for example, v0.2.0-alpha.8)
+        description: Published tag to verify (for example, v0.2.0-alpha.9)
         required: true
         type: string
       check_latest:

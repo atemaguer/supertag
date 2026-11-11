@@ -413,7 +413,7 @@ to serve the release, then checks the CLI and TUI versions in a clean home. To c
 existing release, dispatch **Verify public installer** with its tag:
 
 ```sh
-gh workflow run verify-installer.yml -f release_tag=v0.2.0-alpha.8
+gh workflow run verify-installer.yml -f release_tag=v0.2.0-alpha.9
 ```
 
 Select `check_latest` to check the README's installer URL for the current release. When the

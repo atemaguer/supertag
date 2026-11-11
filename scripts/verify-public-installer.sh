@@ -4,7 +4,7 @@ set -euo pipefail
 release_tag=${1:-}
 check_latest=${2:-false}
 if [[ ! $release_tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-  printf 'Expected a version tag such as v0.2.0-alpha.8, got %s\n' "$release_tag" >&2
+  printf 'Expected a version tag such as v0.2.0-alpha.9, got %s\n' "$release_tag" >&2
   exit 1
 fi
 version=${release_tag#v}
