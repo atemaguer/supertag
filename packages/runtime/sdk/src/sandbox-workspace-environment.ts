@@ -168,12 +168,17 @@ async function assertSandboxWorkspaceMountPaths(
   checkout: string,
   stagedFiles: readonly string[],
   protectedDirectories: readonly ProtectedDirectory[],
+  nativeMountSymlinkTargets: SandboxInstance["nativeMountSymlinkTargets"],
 ): Promise<void> {
   if (mounts.length === 0) return;
-  const canonical = async (path: string): Promise<string> => {
+  const canonical = async (path: string, expectedLink = ""): Promise<string> => {
     const script = [
       'probe=$1; suffix=""',
-      'if [ -L "$probe" ]; then printf "SYMLINK\\n"; exit 0; fi',
+      'if [ -L "$probe" ]; then',
+      '  parent=$(dirname "$probe")',
+      '  if [ -z "$2" ] || [ "$(readlink "$probe")" != "$2" ] ||',
+      '      [ "$(cd -P "$parent" && pwd -P)" != "$parent" ]; then printf "SYMLINK\\n"; exit 0; fi',
+      "fi",
       'while [ ! -d "$probe" ]; do',
       '  if [ -L "$probe" ]; then printf "SYMLINK\\n"; exit 0; fi',
       '  suffix="/${probe##*/}$suffix"; probe=${probe%/*}',
@@ -182,7 +187,10 @@ async function assertSandboxWorkspaceMountPaths(
       'cd -P "$probe" || exit 1',
       'printf "PATH:%s%s\\n" "$(pwd -P)" "$suffix"',
     ].join("\n");
-    const process = await environment.spawn({ command: "sh", args: ["-c", script, "sh", path] });
+    const process = await environment.spawn({
+      command: "sh",
+      args: ["-c", script, "sh", path, expectedLink],
+    });
     const result = await process.wait();
     if (result.exitCode !== 0 || !result.stdout.startsWith("PATH:")) {
       if (result.stdout.startsWith("SYMLINK"))
@@ -194,13 +202,16 @@ async function assertSandboxWorkspaceMountPaths(
   const checked = await Promise.all(
     mounts.map(async (mount) => ({
       ...mount,
-      path: await canonical(mount.path),
+      path: await canonical(
+        mount.path,
+        mount.strategy === "mount" ? nativeMountSymlinkTargets?.[mount.path] : undefined,
+      ),
     })),
   );
   assertWorkspaceMountPaths(
     checked,
     await canonical(checkout),
-    await Promise.all(stagedFiles.map(canonical)),
+    await Promise.all(stagedFiles.map((path) => canonical(path))),
   );
   const protectedPaths = await Promise.all(
     protectedDirectories.map(async ([kind, path]) => [kind, await canonical(path)] as const),
@@ -271,7 +282,7 @@ export class SandboxWorkspaceEnvironment implements WorkspaceEnvironment {
         ...this.capabilities,
         mounts: {
           strategies: options.driver.mounts.strategies,
-          access: [...new Set([...options.driver.mounts.access, "read-write" as const])],
+          access: options.driver.mounts.access,
         },
       };
     this.provider = options.driver.provider;
@@ -589,6 +600,7 @@ export class SandboxWorkspaceEnvironment implements WorkspaceEnvironment {
           ["bundle transfer directory", driver.transferDirectory],
           ["trusted MCP copy", this.mcpDirectory],
         ],
+        sandbox.nativeMountSymlinkTargets,
       );
       this.#checkouts.set(environment, {
         sandbox,
@@ -638,6 +650,7 @@ export class SandboxWorkspaceEnvironment implements WorkspaceEnvironment {
         ["bundle transfer directory", driver.transferDirectory],
         ["trusted MCP copy", this.mcpDirectory],
       ],
+      state.sandbox.nativeMountSymlinkTargets,
     );
     this.#views.set(started, view);
     return view;
@@ -853,6 +866,7 @@ class SandboxWorkspaceRuntime implements ExecutionEnvironment {
     readonly checkoutDirectory: string,
     readonly workspaceMounts: readonly WorkspaceMount[],
     readonly protectedDirectories: readonly ProtectedDirectory[],
+    readonly nativeMountSymlinkTargets: SandboxInstance["nativeMountSymlinkTargets"],
   ) {
     this.id = inner.id;
     this.rootDirectory = inner.rootDirectory;
@@ -899,6 +913,7 @@ class SandboxWorkspaceRuntime implements ExecutionEnvironment {
       this.checkoutDirectory,
       staged,
       this.protectedDirectories,
+      this.nativeMountSymlinkTargets,
     );
     for (const file of plan.files) this.#outsideCheckout(file.path, "staged file");
     for (const mount of plan.mounts) this.#outsideCheckout(mount.destination, "mount");

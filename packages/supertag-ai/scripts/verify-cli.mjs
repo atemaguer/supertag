@@ -100,7 +100,7 @@ try {
         prompt: "Packaging check",
         command: "codex",
         workspace: stateDirectory,
-        timeoutMs: 1000,
+        timeoutMs: 10_000,
         model: "gpt-5.6-luna",
         mcpServers: [],
         toolInputs: [],

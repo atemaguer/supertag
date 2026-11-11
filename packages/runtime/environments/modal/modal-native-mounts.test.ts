@@ -40,10 +40,11 @@ it("attaches provider-held bucket credentials and read-only Volume subpaths only
     }),
   }));
   const close = vi.fn();
+  const fromId = vi.fn(async () => ({}));
   vi.mocked(ModalClient).mockImplementation(function MockModalClient() {
     return {
       apps: { fromName: async () => ({}) },
-      images: { fromId: async () => ({}) },
+      images: { fromId },
       secrets: { fromName },
       volumes: { fromName: volumeFromName },
       cloudBucketMounts: { create: bucketCreate },
@@ -101,6 +102,8 @@ it("attaches provider-held bucket credentials and read-only Volume subpaths only
     },
     {
       ...consented,
+      source: "modal-volume://TrainingOutput/models/",
+      nativeCredential: { "modal-volume": "TrainingOutput" },
       path: "/mnt/writable-volume",
       access: "read-write" as const,
     },
@@ -108,12 +111,12 @@ it("attaches provider-held bucket credentials and read-only Volume subpaths only
   const sandbox = await nativeModalSandboxFactory.create({
     appName: "test",
     environment: "host-environment",
-    image: "unused",
-    imageId: "image",
+    image: "im-abcdefghijklmnopqrstuv",
     createAppIfMissing: false,
     params: { blockNetwork: true },
     nativeMounts: mounts,
   });
+  expect(fromId).toHaveBeenCalledWith("im-abcdefghijklmnopqrstuv");
   expect(fromName.mock.calls.map((c) => c[0])).toEqual([
     "dataset-access",
     "r2-access",
@@ -157,6 +160,19 @@ it("attaches provider-held bucket credentials and read-only Volume subpaths only
   }
   await sandbox.terminate({ wait: true });
   expect(close).toHaveBeenCalledOnce();
+  const volume = mounts.find((mount) => mount.volume === "volume");
+  expect(volume).toBeDefined();
+  if (!volume) throw new Error("missing Modal Volume mount");
+  await expect(
+    nativeModalSandboxFactory.create({
+      appName: "test",
+      image: "im-abcdefghijklmnopqrstuv",
+      createAppIfMissing: false,
+      params: {},
+      nativeMounts: [volume, { ...volume, path: "/mnt/duplicate" }],
+    }),
+  ).rejects.toThrow(/Modal Volume Training is already mounted/u);
+  expect(create).toHaveBeenCalledOnce();
 });
 
 it.each([

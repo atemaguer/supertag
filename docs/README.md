@@ -55,6 +55,7 @@ Follow this order on your first visit:
 | Let Tags change a repository on their own branches | [Work in a repository with Workspaces](guides/workspaces.md) |
 | Add another execution system | [Build a custom Worker or harness](guides/custom-workers.md) |
 | Run an always-on deployment | [Self-host SuperTag](guides/self-hosting.md) |
+| Host the Control Plane and run repository work on Modal | [Deploy on Modal](guides/deploy-modal.md) |
 | Compare SuperTag with other agent systems | [SuperTag and other agent systems](concepts/supertag-and-other-agent-systems.md) |
 | Look up a term | [Glossary](reference/glossary.md) |
 

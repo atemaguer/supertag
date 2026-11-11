@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join, posix } from "node:path";
 import { pathToFileURL } from "node:url";
 import { type MountManifest, mountManifestDigest } from "@supertag/core";
@@ -841,7 +841,8 @@ export async function runWorkspaceEnvironmentConformance(
   factory: WorkspaceEnvironmentConformanceFactory,
 ): Promise<ConformanceReport> {
   const findings: ConformanceFinding[] = [];
-  const scratch = await mkdtemp(join(tmpdir(), "supertag-workspace-conformance-"));
+  // Copy Volume sources must stay outside temporary directories that local Tasks can write.
+  const scratch = await mkdtemp(join(homedir(), ".supertag-workspace-conformance-"));
   let fixture: WorkspaceEnvironmentConformanceFixture | undefined;
   const prepared: PreparedWorkspace[] = [];
   let subject = "Workspace environment <unknown>";
@@ -1254,6 +1255,7 @@ export async function runWorkspaceEnvironmentConformance(
         resolve: async (volume) => ({
           volume,
           source: pathToFileURL(volumeDirectory).href,
+          consentDirectory: volumeDirectory,
           credentials: async () => {
             credentialReads += 1;
             return { accessKeyId: "unused", secretAccessKey: secret };

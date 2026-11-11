@@ -27,7 +27,7 @@ export type HostEnvironment =
       readonly provider: "modal";
       /** The Modal app that owns the sandboxes and images. */
       readonly app: string;
-      /** The registry image sandboxes start from, when the repository has no devcontainer. */
+      /** A registry image or Modal image ID for repositories without a devcontainer. */
       readonly image?: string;
     };
 
@@ -104,7 +104,7 @@ export function parseHostEnvironment(
       [provider, "image"],
       provider === "e2b"
         ? "must be an E2B template name or ID"
-        : "must be a registry image, such as node:22-bookworm, without a scheme or credentials",
+        : "must be a registry image or Modal image ID, without a scheme or credentials",
     );
     valid = false;
   }

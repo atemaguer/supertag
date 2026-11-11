@@ -1,10 +1,15 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import type { ExecutionEnvironment, ProcessHandle } from "@supertag/worker-sdk";
+import {
+  ExecutionCleanupError,
+  type ExecutionEnvironment,
+  type ProcessHandle,
+} from "@supertag/worker-sdk";
 import { WebSocket, WebSocketServer } from "ws";
 
 const MAX_FRAME_BYTES = 1024 * 1024;
 const MAX_DIAGNOSTIC_CHARACTERS = 8_000;
+const EXEC_SERVER_SHUTDOWN_GRACE_MS = 5_000;
 
 export interface CodexExecServerBridgeOptions {
   readonly environment: ExecutionEnvironment;
@@ -184,14 +189,21 @@ export async function startCodexExecServerBridge(
   }).then(() => {
     if (!closing) fail(new Error("Codex exec-server output closed unexpectedly"));
   }, fail);
-  const processDone = process.wait().then((result) => {
-    if (!closing)
-      fail(
-        new Error(
-          `Codex exec-server exited unexpectedly${result.exitCode === null ? "" : ` (${result.exitCode})`}${diagnostics ? `: ${diagnostics.trim()}` : ""}`,
-        ),
-      );
-  }, fail);
+  const processDone = process.wait().then(
+    (result) => {
+      if (!closing)
+        fail(
+          new Error(
+            `Codex exec-server exited unexpectedly${result.exitCode === null ? "" : ` (${result.exitCode})`}${diagnostics ? `: ${diagnostics.trim()}` : ""}`,
+          ),
+        );
+      return true;
+    },
+    (error: unknown) => {
+      fail(error);
+      return false;
+    },
+  );
 
   try {
     await new Promise<void>((resolve, reject) => {
@@ -237,9 +249,29 @@ export async function startCodexExecServerBridge(
       for (const socket of sockets) socket.close(1000, "Execution complete");
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await writeChain.catch(() => undefined);
-      await process.endInput?.().catch(() => undefined);
-      process.kill();
-      await Promise.allSettled([processDone, outputDone]);
+      const finished = Promise.all([processDone, outputDone]).then(([exited]) => exited);
+      // EOF shuts down Codex's stdio server. On some providers, kill() tears
+      // down the entire sandbox, which is still needed for Workspace delivery.
+      void process.endInput?.().catch(() => undefined);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const exited = await Promise.race([
+          finished,
+          new Promise<false>((resolve) => {
+            timer = setTimeout(
+              () => resolve(false),
+              Math.min(EXEC_SERVER_SHUTDOWN_GRACE_MS, options.timeoutMs),
+            );
+          }),
+        ]);
+        if (!exited) {
+          process.kill();
+          if (!(await finished))
+            throw new ExecutionCleanupError("Codex exec-server exit could not be confirmed");
+        }
+      } finally {
+        clearTimeout(timer);
+      }
       if (failure) throw failure;
     },
   };

@@ -9,6 +9,11 @@ Server built from its standard Node.js image. A **Worker Host** provides executi
 independent of using Modal sandboxes as Worker Hosts; you can use either without the other. See the
 [glossary](../reference/glossary.md) for other terms.
 
+For a hosted setup, keep the Control Plane on Modal and connect a Worker Host on a server or
+laptop. Configure that host to create a Modal sandbox for each assignment. A **Workspace** names
+the git repository it uses, and a **Volume** names storage it can mount beside the checkout. Follow
+the Worker guide to configure both. [Run a Worker in Modal sandboxes](modal-workers.md)
+
 ## Before you start
 
 - The installed `supertag` CLI, matching the release you deploy (`supertag --version`).

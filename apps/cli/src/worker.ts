@@ -1225,6 +1225,9 @@ export function createHarnessWorker(
       executionMode: context.splitHostEnvironment
         ? "app-server"
         : (spec.codexExecutionMode ?? "exec"),
+      ...(context.splitHostEnvironment && context.executionEnvironment?.id === "modal"
+        ? { sandboxMode: "provider-for-commands" }
+        : {}),
       ...(models.length === 0 ? {} : { models }),
     });
   if (harness === "cursor")

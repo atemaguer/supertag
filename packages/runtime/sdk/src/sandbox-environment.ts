@@ -46,6 +46,8 @@ export interface SandboxArtifactFiles {
 }
 export interface SandboxInstance {
   readonly id: string;
+  /** Exact native mount links created by the provider, keyed by the declared mount path. */
+  readonly nativeMountSymlinkTargets?: Readonly<Record<string, string>>;
   prepareOutputDirectory?(root: string, path: string): Promise<void>;
   listOutputFiles?(root: string, query: OutputFileQuery): Promise<readonly OutputFileEntry[]>;
   /** Fresh exclusive directory, descriptor-relative writes, no overwrites or symlink traversal.

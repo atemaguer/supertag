@@ -185,9 +185,11 @@ export interface CodexHarnessOptions {
    * Explicitly trust a remote/managed provider to enforce filesystem and network policy.
    * "external" disables Codex's nested OS sandbox (e.g. unsupported bubblewrap in a sandbox).
    * Requires admitted files:write because this mode cannot enforce read-only Tasks.
-   * Never select it solely because a provider is remote. Default "native" keeps Codex isolation.
+   * "provider-for-commands" uses external mode for split, Attempt-scoped execution only
+   * when the Task can write files and run commands and the provider can enforce shell egress.
+   * Default "native" keeps Codex isolation.
    */
-  readonly sandboxMode?: "native" | "external";
+  readonly sandboxMode?: "native" | "external" | "provider-for-commands";
   /** Explicit consent to stage only this auth.json into the selected execution environment. */
   readonly authFile?: string;
   /** Explicit model-provider endpoints, separate from agent web-tool permissions. */
@@ -274,7 +276,7 @@ export class CodexHarness implements Harness {
   readonly #maxTokens: number | undefined;
   readonly #workspace: string;
   readonly #authFile: string | undefined;
-  readonly #sandboxMode: "native" | "external";
+  readonly #sandboxMode: NonNullable<CodexHarnessOptions["sandboxMode"]>;
   readonly #command: string;
   readonly #models: readonly string[];
   readonly #timeoutMs: number;
@@ -304,8 +306,11 @@ export class CodexHarness implements Harness {
       throw new Error("Native agent and token limits require app-server mode");
     if (this.#executionMode === "app-server" && options.runner)
       throw new Error("Injected exec runner cannot implement app-server mode");
-    if (options.sandboxMode !== undefined && !["native", "external"].includes(options.sandboxMode))
-      throw new Error("Codex sandboxMode must be native or external");
+    if (
+      options.sandboxMode !== undefined &&
+      !["native", "external", "provider-for-commands"].includes(options.sandboxMode)
+    )
+      throw new Error("Codex sandboxMode must be native, external, or provider-for-commands");
     this.#sandboxMode = options.sandboxMode ?? "native";
     this.#authFile =
       options.authFile === undefined ? undefined : resolve(nonEmpty(options.authFile, "authFile"));
@@ -560,8 +565,32 @@ export class CodexHarness implements Harness {
       resumable === undefined || replayInput === undefined
         ? allContributions
         : allContributions.filter((runtimeInput) => runtimeInput.id !== replayInput.id);
+    const runtimeActions = input.attempt.authorization.runtimeActions ?? [];
+    const network: HarnessPlan["execution"]["network"] = runtimeActions.some((action) =>
+      ["browser:use", "web:fetch", "web:search"].includes(action),
+    )
+      ? { mode: "unrestricted" }
+      : environmentMcpHosts.length
+        ? { mode: "allowlist", allowedHosts: [...new Set(environmentMcpHosts)] }
+        : { mode: "none" };
+    // The remote exec-server cannot run Codex's managed proxy for loopback.
+    // Let the provider enforce isolation only where this preserves the Task's
+    // permissions; browser/search and MCP alone do not grant shell egress.
+    const useProviderSandbox =
+      this.#executionMode === "app-server" &&
+      input.profile.runtime !== undefined &&
+      input.profile.runtime.provider !== input.profile.execution.provider &&
+      input.profile.execution.lifetime.scope === "attempt" &&
+      runtimeActions.includes("files:write") &&
+      runtimeActions.includes("commands:execute") &&
+      (network.mode === "none" || runtimeActions.includes("web:fetch"));
     const metadata: CodexLaunchMetadata = {
-      sandboxMode: this.#sandboxMode,
+      sandboxMode:
+        this.#sandboxMode === "provider-for-commands"
+          ? useProviderSandbox
+            ? "external"
+            : "native"
+          : this.#sandboxMode,
       prompt: [
         codexInformationRetrievalPrompt(input.attempt, question, inputs),
         ...(workspaceAttachments.length
@@ -606,7 +635,7 @@ export class CodexHarness implements Harness {
         ),
       ),
       mcpRoutes,
-      runtimeActions: input.attempt.authorization.runtimeActions ?? [],
+      runtimeActions,
       ...(model === undefined ? {} : { model }),
       ...(effort === undefined ? {} : { effort }),
     };
@@ -650,13 +679,7 @@ export class CodexHarness implements Harness {
                 : [...artifactMounts],
         environmentVariables: {},
         secretBindings: [],
-        network: metadata.runtimeActions.some((action) =>
-          ["browser:use", "web:fetch", "web:search"].includes(action),
-        )
-          ? { mode: "unrestricted" }
-          : environmentMcpHosts.length
-            ? { mode: "allowlist", allowedHosts: [...new Set(environmentMcpHosts)] }
-            : { mode: "none" },
+        network,
       },
       metadata: metadata as unknown as Readonly<Record<string, unknown>>,
       ...(this.#outputs === undefined

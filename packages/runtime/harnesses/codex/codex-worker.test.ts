@@ -2520,6 +2520,73 @@ it("retains observed usage when the applied Codex token ceiling terminates execu
   }
 });
 
+it.each([
+  {
+    scope: "attempt",
+    actions: ["files:write", "commands:execute"],
+    sandbox: "external",
+    network: "none",
+  },
+  {
+    scope: "attempt",
+    actions: ["files:write", "commands:execute", "web:fetch"],
+    sandbox: "external",
+    network: "unrestricted",
+  },
+  {
+    scope: "attempt",
+    actions: ["files:write", "commands:execute", "web:search"],
+    sandbox: "native",
+    network: "unrestricted",
+  },
+  { scope: "attempt", actions: ["commands:execute"], sandbox: "native", network: "none" },
+  { scope: "attempt", actions: ["files:write"], sandbox: "native", network: "none" },
+  {
+    scope: "session",
+    actions: ["files:write", "commands:execute"],
+    sandbox: "native",
+    network: "none",
+  },
+] as const)(
+  "uses $sandbox isolation for $scope-scoped split execution with $actions",
+  async ({ scope, actions, sandbox, network }) => {
+    const harness = new CodexHarness({
+      workspace: fixtureWorkspace,
+      executionMode: "app-server",
+      sandboxMode: "provider-for-commands",
+    });
+    const task = taskAttemptSpec("Inspect the Workspace");
+    const base = emptyExecutionContext({
+      ...task,
+      authorization: { ...task.authorization, runtimeActions: actions },
+    });
+    const context = {
+      ...base,
+      profile: {
+        ...base.profile,
+        runtime: { provider: "local-runtime", lifetime: { scope: "attempt" as const } },
+        execution: {
+          provider: "modal",
+          lifetime: scope === "session" ? { scope, idleTimeoutSeconds: 60 } : { scope },
+        },
+      },
+    };
+    const plan = await harness.plan(context);
+    expect(plan.metadata).toMatchObject({ sandboxMode: sandbox });
+    expect(plan.execution.network).toEqual({ mode: network });
+    if (sandbox === "external") {
+      const runtime = conformanceEnvironment(fixtureWorkspace);
+      await expect(
+        harness.resolve({
+          context,
+          plan,
+          environments: { runtime, execution: { ...runtime, placement: "remote" } },
+        }),
+      ).rejects.toThrow(/explicit filesystem isolation/);
+    }
+  },
+);
+
 it.each(["local", "remote"] as const)(
   "rejects external sandbox mode without sufficient boundaries on %s",
   async (placement) => {

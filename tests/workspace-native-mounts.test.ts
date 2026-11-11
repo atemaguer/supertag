@@ -23,6 +23,8 @@ const mount = {
 } as const;
 const native = { id: "supertag.workspace.mount.native", version: 1 };
 const copy = { id: "supertag.workspace.mount.copy", version: 1 };
+const nativeWrite = { id: "supertag.workspace.mount.native.write", version: 1 };
+const copyWrite = { id: "supertag.workspace.mount.copy.write", version: 1 };
 const host = (capabilities: unknown[], labels = [volumeCredentialLabel("data")]) => ({
   id: "host",
   enrollmentStatus: "active" as const,
@@ -92,12 +94,55 @@ describe("native Workspace mounts", () => {
       status: "unmet",
     });
     expect(
-      placeWorkspaceMounts(tiers, [host([native])], [{ ...mount, access: "read-write" }]),
+      placeWorkspaceMounts(
+        tiers,
+        [host([native])],
+        [{ ...mount, access: "read-write", credential: "data" }],
+      ),
     ).toMatchObject({
       status: "unmet",
       workspaceRefusals: [expect.stringMatching(/datasets.*read-write/u)],
     });
   });
+
+  it.each([
+    ["mount", native, nativeWrite],
+    ["copy", copy, copyWrite],
+  ] as const)(
+    "places writable %s mounts only on a profile advertising write support",
+    async (strategy, read, write) => {
+      const writable = { ...mount, strategy, access: "read-write", credential: "data" } as const;
+      expect(placeWorkspaceMounts(tiers, [host([read, write])], [writable])).toEqual({
+        status: "eligible",
+        tiers: [{ ...tiers[0], requires: [read, write] }],
+      });
+      const split = host([]);
+      split.workerSnapshot.workers = [
+        { profileCapabilities: [{ capabilities: [read] }, { capabilities: [write] }] },
+      ];
+      expect(placeWorkspaceMounts(tiers, [split], [writable])).toMatchObject({ status: "unmet" });
+      const requirements = await volumeMountRequirements(
+        {
+          findVolumeByName: async () => ({ source: "s3://bucket/data/", credential: "data" }),
+          listVolumes: async () => [],
+          listWorkerHosts: async () => [],
+          listVolumeIdsHoldingArtifacts: async () => [],
+        },
+        {
+          version: 1,
+          status: "workspace",
+          workspace: "research",
+          source: "https://example.test/repo.git",
+          branch: "supertag/task",
+          delivery: "branch",
+          mounts: [writable],
+        },
+      );
+      expect(requirements).toEqual([
+        { volume: "datasets", strategy, access: "read-write", credential: "data" },
+      ]);
+    },
+  );
 
   it("rejects local mounts before accessing checkout paths", async () => {
     const resolver = new WorkspaceEnvironmentResolver({ checkouts: [], worktreeRoot: "/unused" });

@@ -29,6 +29,7 @@ import {
   FAKE_WORKSPACE,
   FakeSandboxWorld,
 } from "./support/fake-workspace-sandboxes.ts";
+import { FileArtifactStore } from "./support/file-artifact-store.js";
 import { createRepository, git, isolateGitConfiguration } from "./support/git-repository.js";
 
 const SOURCE = "https://example.com/app.git";
@@ -178,6 +179,7 @@ describe("a Worker running a remote Workspace Task", () => {
     ]);
     return createWorker({
       id: "remote-test",
+      artifactStore: new FileArtifactStore(join(root, "artifacts")),
       profiles: [
         {
           ref: { id: "remote", revision: "1" },
@@ -250,6 +252,7 @@ describe("a Worker running a remote Workspace Task", () => {
             },
           },
           execution: empty(),
+          outputs: [{ path: "report.txt" }],
         };
       },
       async start(_plan, environments, context) {
@@ -281,7 +284,7 @@ describe("a Worker running a remote Workspace Task", () => {
             calls.push(`mount:${context.workspace?.mountPath}`);
             const process = await environments.execution.spawn({
               command: "sh",
-              args: ["-c", "echo remote > work.txt"],
+              args: ["-c", "echo remote > work.txt && echo report > ../report.txt"],
               cwd: context.workspace?.mountPath ?? ".",
             });
             await process.wait();
@@ -301,7 +304,7 @@ describe("a Worker running a remote Workspace Task", () => {
       },
     });
 
-  it("starts the sandbox before tool resolution, enforces grants and approvals, and delivers", async () => {
+  it("enforces sandbox tool grants and delivers Git changes and outputs before disposing", async () => {
     const calls: string[] = [];
     const events: string[] = [];
     for await (const event of worker(calls, sandboxHarness()).execute(
@@ -315,6 +318,7 @@ describe("a Worker running a remote Workspace Task", () => {
       if (event.type === "execution.failed") throw new Error(event.error.message);
     }
     expect(events).toContain("execution.completed");
+    expect(events.indexOf("artifact.created")).toBeGreaterThan(events.indexOf("progress.updated"));
     expect(calls).not.toContain("provision");
     // Preliminary and final plans both see a Workspace with nothing to stage.
     expect(calls.filter((call) => call.startsWith("plan:"))).toEqual([

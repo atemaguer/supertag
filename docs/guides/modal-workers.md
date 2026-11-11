@@ -22,7 +22,7 @@ There are two ways to use Modal:
 
 ## Run a host service in Modal
 
-Name the Modal app, and optionally a registry image, on the host service:
+Name the Modal app and optionally a registry image or Modal image ID on the host service.
 
 ```yaml
 services:
@@ -55,9 +55,14 @@ supertag up cloud
 - Remove `allow-unsandboxed-commands` from a service with `environment`; startup refuses it.
   See [Built-in harness paths](shared-execution.md#built-in-harness-paths) for each harness's
   disabled tools, Skills, MCP placement, and repository-rule limits.
-- Codex runs through app-server on the Worker Host and exec-server in the sandbox. A host
-  service with `environment` refuses OpenCode because its provider key would enter the sandbox.
-  Use Claude Code, Codex, or Cursor for Modal, or remove `environment` for local OpenCode.
+- Codex runs app-server on the Worker Host and exec-server in the sandbox. Set `image` to a
+  registry image or Modal image ID with the same Codex CLI version installed on both sides. The
+  sandbox image also needs `python3` and Git. Keep the Codex sign-in on the Worker Host.
+  For Tasks with both `commands:execute` and `files:write`, Modal can enforce isolation for
+  Codex shell commands. Shell commands cannot reach the internet unless the Task also has
+  `web:fetch`.
+- A host service with `environment` refuses OpenCode because its provider key would enter the
+  sandbox. Remove `environment` for local OpenCode.
 - Each sandbox lives at most the Task Attempt time limit plus ten minutes, so a stopped host leaves
   nothing running.
 
@@ -66,35 +71,89 @@ supertag up cloud
 [Run in e2b or Modal sandboxes](workspaces.md#run-in-e2b-or-modal-sandboxes) for repository work
 in sandboxes.
 
-### Attach a read-only dataset
+### Build a Workspace image
 
-A **Workspace** names the git repository a Task uses. A **Volume** names external storage it can
-attach beside that checkout. Use a native mount when a shared dataset is too large to copy.
+A **Workspace** names the Git repository a Task uses. Start with SuperTag's base Dockerfile when
+your Workspace needs Node.js and Python or when you want to add project tools. It includes
+Node.js, Python 3 with virtual environment support, Git, and CA certificates. Once published,
+the GitHub Container Registry image works without a SuperTag checkout:
+
+```dockerfile
+FROM ghcr.io/atemaguer/supertag-worker-base:latest
+RUN npm install --global typescript@5.9.3
+```
+
+Pin the base by digest when you want to reproduce the same image later. To build from source, use
+the [Worker base Dockerfile](../../deploy/docker/worker/Dockerfile):
+
+```sh
+docker build --platform linux/amd64 -t supertag-worker-base:local deploy/docker/worker
+```
+
+For Codex split execution, install the version reported by `codex --version` on the Worker Host.
+Add an `npm install --global @openai/codex@VERSION` layer to your image, or pass the version as
+the `CODEX_VERSION` build argument when building the base from source.
+
+```sh
+docker build --platform linux/amd64 \
+  --build-arg CODEX_VERSION="$(codex --version | awk '{print $2}')" \
+  -t supertag-worker-base:local deploy/docker/worker
+```
+
+Push the image you want to use to a registry Modal can pull from. Set
+`services.cloud.environment.modal.image` in `supertag.yaml` to its registry reference.
+
+You can also build the base in Modal. Run this from the SuperTag checkout with the Modal Python
+SDK authenticated, then use the printed image ID in the same setting. [Modal image documentation](https://modal.com/docs/guide/images)
+
+```python
+import modal
+
+app = modal.App.lookup("supertag-workers", create_if_missing=True)
+image = modal.Image.from_dockerfile("deploy/docker/worker/Dockerfile", add_python="3.12")
+# For Codex, add a build layer with the version installed on the Worker Host.
+# image = image.run_commands("npm install --global @openai/codex@0.163.0")
+print(image.build(app).object_id)
+```
+
+### Attach persistent storage to a Workspace
+
+A **Volume** names external storage a Workspace can attach beside its checkout. Use a native mount
+when a shared dataset is too large to copy.
 A Worker Host on macOS or Linux can start these mounts in its remote Modal sandboxes.
 
-Create a Modal Secret named `dataset-access` containing the bucket credentials Modal requires.
-Keep its values in Modal; the host service maps only its name:
+Create two Modal Volumes in the host's Modal environment. Put your dataset in `training-input`
+and use `training-output` for results. A sandbox can attach each Modal Volume once. The host
+service consents to each Volume by name. [Create and populate Modal Volumes](https://modal.com/docs/guide/volumes)
 
 ```yaml
 services:
   cloud:
     type: host
     control-plane: https://supertag.example.com
-    harnesses: [codex]
+    harnesses: [claude-code]
     environment: { modal: { app: supertag-workers } }
     volume-credentials:
-      datasets: { modal-secret: dataset-access }
+      datasets: { modal-volume: training-input }
+      results: { modal-volume: training-output }
 ```
 
-Apply a Volume and a Workspace that selects it:
+Apply two Volume resources and a Workspace that mounts them.
 
 ```yaml
 apiVersion: supertag/v1
 kind: Volume
 metadata: { name: datasets }
 spec:
-  source: s3://acme-training/datasets/
+  source: modal-volume://training-input/
   credential: datasets
+---
+apiVersion: supertag/v1
+kind: Volume
+metadata: { name: results }
+spec:
+  source: modal-volume://training-output/
+  credential: results
 ---
 apiVersion: supertag/v1
 kind: Workspace
@@ -106,6 +165,10 @@ spec:
       path: /mnt/datasets
       strategy: mount
       access: read-only
+    - volume: results
+      path: /mnt/results
+      strategy: mount
+      access: read-write
 ```
 
 Save this manifest as `research.yaml`, then run:
@@ -115,22 +178,23 @@ supertag apply -f research.yaml
 supertag up cloud
 ```
 
-Modal attaches the dataset after setup, when the Task sandbox starts. Neither prepared images nor
-snapshots include mounted data. `supertag describe task TASK_ID` shows the live source, prefix,
-and attachment time. The mount has no content manifest and may change while the Task runs.
+Modal attaches the Volumes after setup, when the Task sandbox starts. An input mount with
+`access: read-only` rejects writes at the provider. Writes to `/mnt/results` persist in Modal
+and are visible independently of git branch review. Prepared images and snapshots exclude mounted
+data. `supertag describe task TASK_ID` shows the live source, prefix, access, and attachment time.
+Give the Tag an assignment in Workspace `research` to use the mounts. [Name a Workspace on an Objective](workspaces.md#3-name-the-workspace-on-an-objective)
 
-For GCS, use `gs://BUCKET/PREFIX/` and a Modal Secret. For R2, use
+To select a subdirectory, use a source such as `modal-volume://training-input/models/`. The host's
+mapping must match the Volume name exactly, including case. Modal Volume sources take no query
+parameters.
+
+For S3 or GCS, use `s3://BUCKET/PREFIX/` or `gs://BUCKET/PREFIX/` and map the credential to a
+Modal Secret with `{ modal-secret: SECRET_NAME }`. For R2, use
 `r2://BUCKET/PREFIX/?endpoint=https%3A%2F%2FACCOUNT.r2.cloudflarestorage.com` and a Modal Secret.
 S3 also accepts a host mapping of `{ modal-oidc-role: ARN }`. That role must trust Modal's OIDC
 identity and grant the required read access.
 
-To mount an existing Modal Volume, set the Volume resource's source to
-`modal-volume://training/models/` and set `credential: team-data`. On the host, add
-`team-data: { modal-volume: training }` under `volume-credentials`. The mapped name must match
-exactly, including case. The mount uses the host's configured Modal environment; queries are rejected.
-Both new source schemes require `strategy: mount`; `copy` refuses them.
-
-Native mounts always use provider-enforced read-only access. Mount destinations cannot overlap
+Modal Volume and GCS sources require `strategy: mount`. Mount destinations cannot overlap
 the checkout, staged files, other mounts, or artifact storage. Use bucket prefixes ending in `/`;
 unsupported endpoint and path-style options produce an explicit refusal. See
 [Native source settings](../reference/resource-model.md#native-source-settings) for the full contract.
