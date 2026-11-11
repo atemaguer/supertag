@@ -13,6 +13,8 @@ elsewhere; its **Worklet** connects outbound to the Control Plane over HTTPS/Web
 
 - The installed `supertag` CLI, matching the release you deploy (`supertag --version`).
 - The [Fly CLI](https://fly.io/docs/flyctl/install/), installed and authenticated.
+- A Fly organization with billing enabled for an always-on deployment. [Trial Machines stop
+  after five minutes](https://fly.io/docs/about/free-trial/).
 - A checkout of the repository; run the commands below from its root.
 - A private environment file prepared with `supertag setup deployment --platform fly`, as
   described in [Configure a hosted Control Plane](deployment-setup.md). Use
@@ -28,8 +30,9 @@ fly apps create YOUR-APP
 fly volumes create supertag_state --app YOUR-APP --region iad --size 1
 ```
 
-The volume stores credentials for each **collaboration surface**, an external work tool such as
-Slack where SuperTag meets people, and artifacts, the output files that work captures.
+The volume stores Control Plane credentials, including those for each **collaboration surface**,
+an external work tool such as Slack where SuperTag meets people. Worker Hosts retain the output
+files they capture.
 
 ## 2. Provision PostgreSQL
 
@@ -84,9 +87,10 @@ Repeat verification with readiness required:
 supertag verify deployment https://YOUR-APP.fly.dev --env-file .env.deployment --require-ready
 ```
 
-After setting up a collaboration surface and Tag with the [collaboration surface guides](../surfaces/README.md), mention
-the Tag in a connected Slack channel and confirm that a Worker replies. Check that the
-Worklet reconnects and existing artifacts remain available after restarting the Machine.
+A **Task** is one turn of a Tag's work. After connecting your CLI, run `supertag` to open the
+terminal UI. Send the Tag a request that requires the Worker to run a command, and check its
+reply. Restart the Machine and verify that the Worklet reconnects, prior Tasks are still visible,
+and the Tag can complete a new Task.
 
 ## Optional: add a supertag.yaml
 

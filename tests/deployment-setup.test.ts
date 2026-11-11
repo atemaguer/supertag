@@ -78,6 +78,18 @@ describe("shared deployment configuration", () => {
     expect(manifest).not.toContain('handlers = ["tls"]');
   });
 
+  it.each(["fly.toml", "fly.grpc.toml"])(
+    "resolves the Dockerfile relative to the Fly config in %s",
+    async (name) => {
+      const config = new URL(`../deploy/fly/${name}`, import.meta.url);
+      const manifest = await readFile(config, "utf8");
+      const path = manifest.match(/^\s*dockerfile = "([^"]+)"$/m)?.[1];
+      const dockerfile = new URL(path ?? "", config);
+      expect(dockerfile.href).toBe(new URL("../deploy/docker/Dockerfile", import.meta.url).href);
+      expect((await stat(dockerfile)).isFile()).toBe(true);
+    },
+  );
+
   it.each(DEPLOYMENT_PLATFORMS)("validates %s against the same runtime contract", (platform) => {
     const env = resolveDeploymentEnvironment(platform, {
       ...common,

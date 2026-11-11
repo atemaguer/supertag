@@ -92,7 +92,7 @@ kill_signal = "SIGTERM"
 kill_timeout = "30s"
 
 [build]
-  dockerfile = "deploy/docker/Dockerfile"
+  dockerfile = "../docker/Dockerfile"
 
 [deploy]
   release_command = ${JSON.stringify(runtime.migrationCommand)}
