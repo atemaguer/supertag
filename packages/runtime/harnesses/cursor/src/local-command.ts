@@ -1,5 +1,9 @@
 import { delimiter, dirname, join } from "node:path";
-import type { HarnessRuntime, ProcessHandle } from "@supertag/worker-sdk";
+import {
+  ExecutionCleanupError,
+  type HarnessRuntime,
+  type ProcessResult,
+} from "@supertag/worker-sdk";
 import type { CursorSplitExecutor } from "./index.js";
 import type { CursorSplitToolDefinition } from "./mcp-custom-tools.js";
 
@@ -22,15 +26,14 @@ export function localCursorCommand(
   timeoutMs: number,
 ): CursorSplitExecutor {
   const lifetime = new AbortController();
-  const active = new Set<Promise<ProcessHandle>>();
+  const active = new Set<Promise<ProcessResult>>();
   const cancelAll = async () => {
     lifetime.abort();
-    const started = await Promise.allSettled(active);
-    await Promise.all(
-      started.flatMap((item) =>
-        item.status === "fulfilled" ? [item.value.wait().then(() => undefined)] : [],
-      ),
-    );
+    for (const result of await Promise.allSettled(active)) {
+      // The local supervisor rejects on cancellation even after it confirms the process exited.
+      if (result.status === "rejected" && result.reason instanceof ExecutionCleanupError)
+        throw result.reason;
+    }
   };
   return {
     tools: [COMMAND],
@@ -47,29 +50,33 @@ export function localCursorCommand(
         throw new Error("Command timeout must be a positive integer in milliseconds");
       const stop = signal ? AbortSignal.any([signal, lifetime.signal]) : lifetime.signal;
       stop.throwIfAborted();
-      const started = runtime.spawn(
-        {
-          // A login shell can replace PATH with a system Node or load operator startup files.
-          command: "/bin/sh",
-          args: ["-c", command],
-          cwd: workspace,
-          environment: {
-            PATH: [dirname(process.execPath), process.env["PATH"]].filter(Boolean).join(delimiter),
-            HOME: home,
-            XDG_CACHE_HOME: join(home, "cache"),
-            XDG_CONFIG_HOME: join(home, "config"),
-            XDG_DATA_HOME: join(home, "data"),
-            COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
-            CI: "true",
+      const running = runtime
+        .spawn(
+          {
+            // A login shell can replace PATH with a system Node or load operator startup files.
+            command: "/bin/sh",
+            args: ["-c", command],
+            cwd: workspace,
+            environment: {
+              PATH: [dirname(process.execPath), process.env["PATH"]]
+                .filter(Boolean)
+                .join(delimiter),
+              HOME: home,
+              XDG_CACHE_HOME: join(home, "cache"),
+              XDG_CONFIG_HOME: join(home, "config"),
+              XDG_DATA_HOME: join(home, "data"),
+              COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
+              CI: "true",
+            },
+            replaceEnvironment: true,
+            timeoutMs: Math.min(typeof timeout === "number" ? timeout : timeoutMs, timeoutMs),
           },
-          replaceEnvironment: true,
-          timeoutMs: Math.min(typeof timeout === "number" ? timeout : timeoutMs, timeoutMs),
-        },
-        stop,
-      );
-      active.add(started);
+          stop,
+        )
+        .then((handle) => handle.wait());
+      active.add(running);
       try {
-        const result = await (await started).wait();
+        const result = await running;
         const isError = result.exitCode !== 0;
         const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
         return {
@@ -77,7 +84,7 @@ export function localCursorCommand(
           isError,
         };
       } finally {
-        active.delete(started);
+        active.delete(running);
       }
     },
     cancelAll,

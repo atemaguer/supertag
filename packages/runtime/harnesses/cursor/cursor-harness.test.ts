@@ -358,6 +358,43 @@ it("runs a local builder command in the checkout with Worker Node and no provide
   }
 });
 
+it("stops an active local Cursor command without reporting a cleanup failure", async () => {
+  const { dir, context } = await fixture();
+  const worker = createCursorWorker({
+    workspace: dir,
+    profileId: context.profile.ref.id,
+    allowUnsandboxedCommands: true,
+    runner: async function* (request, _runtime, _signal, executor) {
+      if (!executor) throw new Error("Cursor command executor is missing");
+      const running = executor.call("command", {
+        command: 'printf "%s" "$$" > command.pid; exec sleep 60',
+      });
+      // Observe the running process before cancelling; do not wait for an arbitrary delay.
+      const failure = running.catch((error: unknown) => error);
+      try {
+        const pid = await vi.waitFor(
+          async () => {
+            const value = Number(await readFile(join(request.workspace, "command.pid"), "utf8"));
+            expect(value).toBeGreaterThan(0);
+            return value;
+          },
+          { timeout: 5_000 },
+        );
+        await executor.cancelAll();
+        expect(await failure).toMatchObject({ name: "AbortError" });
+        expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+      } finally {
+        await executor.cancelAll();
+      }
+      yield { type: "output.message", text: "Done", final: true };
+    },
+  });
+  const events = await collectTaskAttemptEvents(worker.execute(context.attempt));
+  expect(events.at(-1), JSON.stringify(events.at(-1))).toMatchObject({
+    type: "execution.completed",
+  });
+});
+
 it("passes only admitted MCP servers inline and leaves the repository untouched", async () => {
   const { dir, context, runtime } = await fixture();
   const tool: ToolInput = {
