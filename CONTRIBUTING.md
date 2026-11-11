@@ -77,8 +77,9 @@ CLI refuses a binary whose `--version` differs from its own and says how to rebu
 `SUPERTAG_TUI_BINARY` points the CLI at another binary. `go test ./...` in `apps/tui` runs its
 tests; `SUPERTAG_TUI_E2E=1` adds an end-to-end run under tmux against a fake Control Plane.
 
-The npm publish workflow builds the four binaries at the release tag and stages them under
-`tui/` with their `SHA256SUMS`, along with the installer script. To exercise that layout
+The release workflow builds the four binaries at the release tag and computes their
+`SHA256SUMS` after macOS signing. The npm package and GitHub Release use the same files.
+To exercise the package layout
 before a release, run `apps/tui/build.sh` and `sh scripts/stage-cli-release.sh`, then pack
 `packages/supertag-ai` with `npm pack`. Point `SUPERTAG_PACKAGE_SOURCE` at that tarball and
 run `sh install.sh` from the checkout. `tests/install-script.test.ts` tests the same layout
@@ -418,6 +419,37 @@ gh workflow run verify-installer.yml -f release_tag=v0.2.0-alpha.8
 Select `check_latest` to check the README's installer URL for the current release. When the
 installer check is the only failed job in a release run, **Re-run failed jobs** retries it
 on its own.
+
+### Sign and notarize the macOS terminal UI
+
+The release workflow signs the arm64 and amd64 binaries with a Developer ID Application
+certificate and the hardened runtime. It submits both to Apple in a single ZIP and checks
+that Apple issued a ticket for each binary. Gatekeeper looks up tickets for standalone
+executables online. See [Apple's notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow).
+
+Set these GitHub Actions secrets on the release repository:
+
+| Secret | Value |
+| --- | --- |
+| `APPLE_DEVELOPER_ID_P12` | Base64-encoded PKCS#12 export of the Developer ID Application certificate and its private key |
+| `APPLE_DEVELOPER_ID_P12_PASSWORD` | Password for that PKCS#12 export |
+| `APPLE_NOTARY_KEY` | Contents of the App Store Connect Team API key's `.p8` file |
+| `APPLE_NOTARY_KEY_ID` | Key ID shown in App Store Connect |
+| `APPLE_NOTARY_ISSUER_ID` | Issuer ID shown on the App Store Connect Team Keys page |
+
+Create the certificate and Team key under the same Apple Developer team. When all five
+secrets are absent, the workflow warns and produces unsigned builds. An incomplete
+configuration or failed notarization stops publication.
+
+To test the current branch's binaries and credentials without publishing, dispatch
+**Release SuperTag CLI installer** with its default inputs:
+
+```sh
+gh workflow run release-cli.yml
+```
+
+The run uploads a workflow artifact for inspection. To replace assets on an existing GitHub
+Release, set `release_tag` to its tag and `upload_assets` to true.
 
 ## Live Modal native mounts
 
