@@ -62,7 +62,7 @@ async function runLive(input: {
     directory: input.directory,
     ...(input.store ? { store: input.store } : {}),
     ...(input.tool ? { tool: input.tool } : {}),
-    runner: async function* (request, runtime, signal) {
+    runner: async function* (request, runtime, signal, executor) {
       observed.path = request.workspace;
       input.onStart?.(request);
       const wrapped = Object.assign(Object.create(runtime) as HarnessRuntime, {
@@ -72,7 +72,7 @@ async function runLive(input: {
           return handle;
         },
       });
-      for await (const event of runCursor(request, wrapped, signal)) {
+      for await (const event of runCursor(request, wrapped, signal, executor)) {
         input.onEvent?.(event);
         yield event;
       }

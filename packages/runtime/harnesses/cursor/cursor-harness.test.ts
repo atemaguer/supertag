@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { repositoryAttempt } from "../../../../tests/support/repository-execution.js";
 import {
   ArtifactContextResolver,
@@ -71,7 +71,7 @@ async function fixture() {
 it("maps Permission Sets to an explicit allowlist and no native subagents", () => {
   expect(cursorToolsForActions([])).toEqual({
     tools: ["read", "grep", "glob", "ls", "mcp"],
-    disallowedTools: ["task", "webSearch"],
+    disallowedTools: ["shell", "task", "webSearch"],
   });
   expect(cursorToolsForActions(["files:write", "commands:execute"]).tools).toEqual([
     "read",
@@ -80,18 +80,17 @@ it("maps Permission Sets to an explicit allowlist and no native subagents", () =
     "ls",
     "mcp",
     "edit",
-    "shell",
   ]);
   expect(cursorToolsForActions(["web:search"]).tools).toContain("webSearch");
 });
 
 it("refuses shell-only permission and maps every supported file and command combination", async () => {
   const { dir, context, runtime } = await fixture();
-  const seen: string[][] = [];
+  const seen: Parameters<CursorRunner>[0][] = [];
   const harness = new CursorHarness({
     workspace: dir,
     runner: async function* (request) {
-      seen.push([...request.tools]);
+      seen.push(request);
       yield { type: "output.message", text: "Done", final: true };
     },
   });
@@ -115,8 +114,9 @@ it("refuses shell-only permission and maps every supported file and command comb
     );
     await Array.fromAsync(execution.run());
     await execution.close();
-    expect(seen.at(-1)?.includes("edit")).toBe(edit);
-    expect(seen.at(-1)?.includes("shell")).toBe(shell);
+    expect(seen.at(-1)?.tools.includes("edit")).toBe(edit);
+    expect(seen.at(-1)?.tools).not.toContain("shell");
+    expect(seen.at(-1)?.localCommandTool?.name).toBe(shell ? "command" : undefined);
   }
   const shellOnly = {
     ...context,
@@ -313,10 +313,86 @@ it("passes sandbox, inline MCP policy and a private store to the injected runner
   expect(events).toEqual([{ type: "output.message", text: "Done", final: true }]);
   expect(seen?.home).toContain(context.attempt.attemptId);
   expect(seen?.storeDirectory).toContain("store");
-  expect(seen?.tools).toContain("shell");
+  expect(seen?.localCommandTool?.name).toBe("command");
+  expect(seen?.disallowedTools).toContain("shell");
   expect(seen?.disallowedTools).toContain("task");
   expect(seen?.mcpServers).toEqual({});
   await execution.close();
+});
+
+it("runs a local builder command in the checkout with Worker Node and no provider key", async () => {
+  const { dir } = await fixture();
+  await writeFile(join(dir, "package.json"), JSON.stringify({ packageManager: "pnpm@10.15.1" }));
+  const spec = repositoryAttempt("cursor-local-command");
+  vi.stubEnv("CURSOR_API_KEY", "fixture-key-must-not-reach-commands");
+  try {
+    const worker = createCursorWorker({
+      workspace: dir,
+      profileId: spec.workerProfile.id,
+      allowUnsandboxedCommands: true,
+      runner: async function* (request, _runtime, _signal, executor) {
+        expect(request.disallowedTools).toContain("shell");
+        expect(request.localCommandTool?.name).toBe("command");
+        const result = await executor?.call("command", {
+          command: `node -p 'JSON.stringify([process.version, require("./package.json").packageManager, process.env.CURSOR_API_KEY ?? null])'`,
+        });
+        expect(result?.isError).toBe(false);
+        expect(JSON.parse(result?.text ?? "null")).toEqual([process.version, "pnpm@10.15.1", null]);
+        yield { type: "output.message", text: "Done", final: true };
+      },
+    });
+    const events = await collectTaskAttemptEvents(
+      worker.execute({
+        ...spec,
+        input: {
+          ...spec.input,
+          messages: [{ id: "request", role: "requester", text: "Run the package check" }],
+        },
+      }),
+    );
+    expect(events.at(-1), JSON.stringify(events.at(-1))).toMatchObject({
+      type: "execution.completed",
+    });
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
+it("stops an active local Cursor command without reporting a cleanup failure", async () => {
+  const { dir, context } = await fixture();
+  const worker = createCursorWorker({
+    workspace: dir,
+    profileId: context.profile.ref.id,
+    allowUnsandboxedCommands: true,
+    runner: async function* (request, _runtime, _signal, executor) {
+      if (!executor) throw new Error("Cursor command executor is missing");
+      const running = executor.call("command", {
+        command: 'printf "%s" "$$" > command.pid; exec sleep 60',
+      });
+      // Observe the running process before cancelling; do not wait for an arbitrary delay.
+      const failure = running.catch((error: unknown) => error);
+      try {
+        const pid = await vi.waitFor(
+          async () => {
+            const value = Number(await readFile(join(request.workspace, "command.pid"), "utf8"));
+            expect(value).toBeGreaterThan(0);
+            return value;
+          },
+          { timeout: 5_000 },
+        );
+        await executor.cancelAll();
+        expect(await failure).toMatchObject({ name: "AbortError" });
+        expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+      } finally {
+        await executor.cancelAll();
+      }
+      yield { type: "output.message", text: "Done", final: true };
+    },
+  });
+  const events = await collectTaskAttemptEvents(worker.execute(context.attempt));
+  expect(events.at(-1), JSON.stringify(events.at(-1))).toMatchObject({
+    type: "execution.completed",
+  });
 });
 
 it("passes only admitted MCP servers inline and leaves the repository untouched", async () => {

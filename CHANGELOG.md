@@ -9,6 +9,11 @@ within the pre-1.0 compatibility policy described in
 
 ## [Unreleased]
 
+### Fixed
+
+- Cursor Tags with local command access use the Worker Host's Node and the project's pinned
+  package manager to run checks.
+
 ## [0.2.0-alpha.9] - 2026-11-10
 
 ### Added

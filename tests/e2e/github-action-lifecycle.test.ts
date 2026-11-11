@@ -34,6 +34,8 @@ import { migrateSqlite } from "../support/database.ts";
 
 const directories: string[] = [];
 const servers: HttpServer[] = [];
+// The final reply follows a Worker turn and HTTP round trips through the MCP policy proxy.
+const replyWait = { timeout: 5_000 };
 
 afterEach(async () => {
   await Promise.all(
@@ -66,7 +68,7 @@ describe("Slack to GitHub action lifecycle", () => {
       await expect(
         fixture.controlPlane.ingestSurfaceEvent({ ...event, eventId: "slack-delivery-twin" }),
       ).resolves.toMatchObject({ status: "duplicate" });
-      await vi.waitFor(() => expect(fixture.slackRequest).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(fixture.slackRequest).toHaveBeenCalledTimes(2), replyWait);
 
       expect(hosted.calls).toHaveBeenCalledOnce();
       expect(hosted.calls).toHaveBeenCalledWith({
@@ -121,7 +123,7 @@ describe("Slack to GitHub action lifecycle", () => {
     try {
       await fixture.controlPlane.start();
       await fixture.controlPlane.ingestSurfaceEvent(slackCommentRequest("slack-denied"));
-      await vi.waitFor(() => expect(fixture.slackRequest).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(fixture.slackRequest).toHaveBeenCalledTimes(2), replyWait);
 
       expect(hosted.calls).not.toHaveBeenCalled();
       expect(fixture.credentials).not.toHaveBeenCalled();
@@ -144,7 +146,7 @@ describe("Slack to GitHub action lifecycle", () => {
     try {
       await fixture.controlPlane.start();
       await fixture.controlPlane.ingestSurfaceEvent(slackCommentRequest("slack-resource-denied"));
-      await vi.waitFor(() => expect(fixture.slackRequest).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(fixture.slackRequest).toHaveBeenCalledTimes(2), replyWait);
 
       expect(fixture.runner).toHaveBeenCalledOnce();
       expect(hosted.calls).not.toHaveBeenCalled();

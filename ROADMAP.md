@@ -16,11 +16,11 @@ today is in the [documentation](docs/README.md).
   container. On both, `supertag init` set up local scheduling and execution, and a `/goal` in the
   terminal UI delivered a Git commit for review. The macOS binaries are signed and notarized.
 
-## Now
+## Unreleased
 
-- **Cursor as a full builder.** Cursor Tasks run, edit, and use SuperTag's tools today. Its
-  sandbox still finds an older Node.js and can't download a project's pinned package manager, so a
-  Cursor builder can't yet run a Node project's whole check on its own.
+- **Cursor builder support.** A Cursor Tag with [local command access](docs/operations/requirements.md#cursor-tools-models-and-sandbox)
+  can use the Worker's Node.js and a project's pinned package manager. We verified a frozen
+  install, typecheck, tests, build, and delivery of a Git commit.
 
 ## Next
 
