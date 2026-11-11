@@ -19,6 +19,8 @@ within the pre-1.0 compatibility policy described in
 ### Fixed
 
 - Control Plane shutdown waits for startup Session recovery before disconnecting storage.
+- Both Fly.io deployment profiles locate the shared Control Plane Dockerfile when building from
+  the repository root.
 
 ## [0.2.0-alpha.8] - 2026-11-10
 
