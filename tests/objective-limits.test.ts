@@ -389,9 +389,10 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
             timeout: 10_000,
           })
           .toBe("cancelled");
-        await expect
-          .poll(async () => (await f.reload()).status, { timeout: 10_000 })
-          .toBe("limited");
+        // Cancellation can settle after the first sweep checks for running Tasks.
+        // Reconcile after the Task drains instead of racing the scheduled sweep interval.
+        await f.sweep();
+        expect((await f.reload()).status).toBe("limited");
         expect(f.script.seen.aborted).toBe(1);
         f.script.release();
       });
