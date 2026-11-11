@@ -28,7 +28,12 @@ fi
 umask 077
 work=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/supertag-notary.XXXXXXXX")
 keychain="$work/signing.keychain-db"
+keychain_search_list_changed=false
 cleanup() {
+  if "$keychain_search_list_changed"; then
+    security list-keychains -d user -s ${original_keychains[@]+"${original_keychains[@]}"} ||
+      echo "Could not restore the user keychain search list." >&2
+  fi
   security delete-keychain "$keychain" >/dev/null 2>&1 || true
   rm -rf -- "$work"
 }
@@ -45,6 +50,18 @@ security import "$work/signing.p12" -k "$keychain" -f pkcs12 \
   -P "$APPLE_DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" \
   "$keychain" >/dev/null
+# codesign also needs to find the imported certificate chain through the search list.
+search_list=$(security list-keychains -d user)
+original_keychains=()
+while IFS= read -r line; do
+  path=${line#*\"}
+  path=${path%\"}
+  if [[ -n $path ]]; then
+    original_keychains+=("$path")
+  fi
+done <<< "$search_list"
+security list-keychains -d user -s "$keychain" ${original_keychains[@]+"${original_keychains[@]}"}
+keychain_search_list_changed=true
 identity=$(security find-identity -v -p codesigning "$keychain" |
   awk '/"Developer ID Application: / { print $2 }')
 if [[ ! $identity =~ ^[[:xdigit:]]{40}$ ]]; then
