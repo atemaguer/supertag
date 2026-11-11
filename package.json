@@ -58,6 +58,7 @@
     "deploy:generate": "tsx deploy/generate.ts && biome format --write deploy/railway/railway.json deploy/cloudflare/wrangler.json deploy/modal/runtime.json",
     "deploy:check": "node --import tsx deploy/generate.ts --check",
     "test:worklet:grpc:soak": "tsx --conditions=development scripts/worklet-grpc-docker-soak.ts",
+    "test:volumes:modal:live": "SUPERTAG_LIVE_MODAL=1 vitest run packages/runtime/environments/modal/modal-volumes-live.test.ts",
     "test:workspace:modal:live": "SUPERTAG_LIVE_MODAL=1 node --import tsx --conditions=development packages/runtime/environments/modal/modal-workspace-conformance-live.ts"
   },
   "devDependencies": {

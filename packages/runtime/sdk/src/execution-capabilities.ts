@@ -84,6 +84,12 @@ export const WORKSPACE_COPY_MOUNT_CAPABILITY: CapabilityIdentifier = {
   version: 1,
 };
 
+/** A profile can save copied Volume changes back to their source. */
+export const WORKSPACE_COPY_MOUNT_WRITE_CAPABILITY: CapabilityIdentifier = {
+  id: "supertag.workspace.mount.copy.write",
+  version: 1,
+};
+
 /**
  * The profile may run Tasks granted `commands:execute`. A profile whose harness runs commands
  * in the local process environment without its own OS sandbox reports it only when its Worker
@@ -195,5 +201,11 @@ export const TASK_OUTPUT_POLICY_CAPABILITY: CapabilityIdentifier = {
 /** A profile's Workspace environment supports native read-only mounts at Task start. */
 export const WORKSPACE_NATIVE_MOUNT_CAPABILITY: CapabilityIdentifier = {
   id: "supertag.workspace.mount.native",
+  version: 1,
+};
+
+/** A profile can attach a provider-native writable Volume. */
+export const WORKSPACE_NATIVE_MOUNT_WRITE_CAPABILITY: CapabilityIdentifier = {
+  id: "supertag.workspace.mount.native.write",
   version: 1,
 };

@@ -207,6 +207,8 @@ export interface WorkspaceFinalizeDetails {
   readonly summary?: string;
   readonly evidence?: readonly string[];
   readonly signal?: AbortSignal;
+  /** The Worker will dispose the sandbox after collecting Task outputs. */
+  readonly keepSandboxOpen?: boolean;
 }
 
 /** Asks a harness for the one-line change summary that {@link commitSubject} prefers. */
@@ -418,6 +420,16 @@ export class WorkspaceEnvironmentResolver implements WorkspaceResolver {
   supportsNativeMounts(providerId: string): boolean {
     const mounts = this.#environments.get(providerId)?.capabilities.mounts;
     return mounts?.strategies.includes("mount") === true && mounts.access.includes("read-only");
+  }
+
+  supportsCopyMountWrites(providerId: string): boolean {
+    const mounts = this.#environments.get(providerId)?.capabilities.mounts;
+    return mounts?.strategies.includes("copy") === true && mounts.access.includes("read-write");
+  }
+
+  supportsNativeMountWrites(providerId: string): boolean {
+    const mounts = this.#environments.get(providerId)?.capabilities.mounts;
+    return mounts?.strategies.includes("mount") === true && mounts.access.includes("read-write");
   }
 
   /** Why placement refuses a Workspace Task on this profile and provider. */
@@ -1089,8 +1101,9 @@ export class WorkspaceEnvironmentResolver implements WorkspaceResolver {
 
   /**
    * Commits a remote Attempt's work inside its sandbox, imports the returned commits into the
-   * host-managed clone through {@link deliverWorkspace}, then disposes the sandbox. An Attempt
-   * whose sandbox never started has nothing to deliver.
+   * host-managed clone through {@link deliverWorkspace}, then disposes the sandbox unless the
+   * Worker retains it for output collection. An Attempt whose sandbox never started has nothing
+   * to deliver.
    */
   async #finalizeRemote(
     task: WorkspaceTask,
@@ -1135,7 +1148,7 @@ export class WorkspaceEnvironmentResolver implements WorkspaceResolver {
       // A remote Attempt has no host worktree; its branch lives in the host-managed clone.
       return { ...delivery, worktreeRemoved: false, branchRemoved: false };
     } finally {
-      await sandbox.dispose(outcome).catch(() => undefined);
+      if (!details.keepSandboxOpen) await sandbox.dispose(outcome).catch(() => undefined);
     }
   }
 

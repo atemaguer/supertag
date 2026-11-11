@@ -1,6 +1,7 @@
 # Deployment files
 
-This directory owns the configuration and build files for hosting SuperTag's Control Plane.
+This directory owns the configuration and build files for hosting SuperTag's Control Plane and
+the base image for Workspace sandboxes.
 Follow the [deployment setup guide](../docs/guides/deployment-setup.md) for the shared CLI workflow.
 
 ```text
@@ -11,6 +12,7 @@ deploy/
     Dockerfile            Shared Control Plane image; build context is the repository root
     Dockerfile.dockerignore
     entrypoint.sh
+    worker/Dockerfile     Base image for Workspace sandboxes
   compose.yaml            Local self-hosting with PostgreSQL and persistent volumes
   .env.example            Environment template for self-hosting
   railway/railway.json    Railway service configuration
@@ -36,6 +38,18 @@ outputs out of the repository-root build context. A root `.dockerignore` symlink
 same rules because Wrangler's image build does not discover the Dockerfile-specific ignore file.
 Do not change the build context to `deploy/`:
 the image needs the application and workspace packages.
+
+The Workspace base image builds with `docker build -t supertag-worker-base:local deploy/docker/worker`.
+Its build context contains only the image recipe. The
+[Worker image workflow](../.github/workflows/publish-worker-base.yml) rebuilds it when the recipe
+changes on `main` and publishes Linux AMD64 and ARM64 images to GitHub Container Registry. It
+tags the image `latest` and `sha-<full commit SHA>`. Run the workflow manually on `main` to
+rebuild after an upstream base image update.
+
+GitHub creates the package as private on first publication. When the image is ready for
+anonymous use, set the package visibility to Public in GitHub Packages and verify a pull from
+a machine without registry credentials. See the user guide for extending the image and
+configuring it on a Worker Host. [Build a Workspace image](../docs/guides/modal-workers.md#build-a-workspace-image)
 
 Set Railway's Config File to `/deploy/railway/railway.json`, leaving the service root at the
 repository root. Set Render's Blueprint Path to `deploy/render/render.yaml`. Existing services

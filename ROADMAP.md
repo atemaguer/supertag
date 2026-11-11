@@ -6,6 +6,9 @@ today is in the [documentation](docs/README.md).
 
 ## Now
 
+- **Modal hosting.** Make Modal the first hosted deployment path we verify end to end, from the
+  [always-on Control Plane](docs/guides/deploy-modal.md) to
+  [Worker Hosts, repository Workspaces, and persistent Volume mounts](docs/guides/modal-workers.md).
 - **Cursor as a full builder.** Cursor Tasks run, edit, and use SuperTag's tools today. Its
   sandbox still finds an older Node.js and can't download a project's pinned package manager, so a
   Cursor builder can't yet run a Node project's whole check on its own.

@@ -29,9 +29,11 @@ import {
 } from "@supertag/core";
 import {
   WORKSPACE_COPY_MOUNT_CAPABILITY,
+  WORKSPACE_COPY_MOUNT_WRITE_CAPABILITY,
   WORKSPACE_ENVIRONMENT_CAPABILITY,
   WORKSPACE_IN_PLACE_CAPABILITY,
   WORKSPACE_NATIVE_MOUNT_CAPABILITY,
+  WORKSPACE_NATIVE_MOUNT_WRITE_CAPABILITY,
 } from "@supertag/worker-sdk";
 
 export type LabelPlacement =
@@ -408,20 +410,21 @@ export async function volumeMountRequirements(
           volume: name,
           refused: `Workspace mount ${name}: unsupported strategy ${String(strategy)}`,
         };
-      if (access !== "read-only")
+      if (access !== "read-only" && access !== "read-write")
         return {
           volume: name,
           refused: `Workspace mount ${name}: ${strategy} does not support ${String(access)}`,
         };
-      const native = strategy === "mount" ? ({ strategy, access } as const) : {};
+      const placement =
+        strategy === "mount" || access === "read-write" ? ({ strategy, access } as const) : {};
       const volume = hasVolumeLookup(store) ? await store.findVolumeByName(name) : undefined;
       const refused = volume === undefined ? undefined : holdsArtifacts(name, volume.source);
       if (refused !== undefined) return { volume: name, refused };
       return volume === undefined
         ? { volume: name, missing: true }
         : volume.credential
-          ? { volume: name, credential: volume.credential, ...native }
-          : { volume: name, ...native };
+          ? { volume: name, credential: volume.credential, ...placement }
+          : { volume: name, ...placement };
     }),
   );
 }
@@ -490,10 +493,18 @@ export function placeWorkspaceMounts(
   }[],
 ): TaskPlacement {
   if (mounts.length === 0) return { status: "eligible", tiers };
-  const mountCapabilities = [...new Set(mounts.map((mount) => mount.strategy ?? "copy"))].map(
-    (strategy) =>
-      strategy === "mount" ? WORKSPACE_NATIVE_MOUNT_CAPABILITY : WORKSPACE_COPY_MOUNT_CAPABILITY,
-  );
+  const mountCapabilities = [
+    ...new Set(
+      mounts.flatMap((mount) => {
+        const native = mount.strategy === "mount";
+        const read = native ? WORKSPACE_NATIVE_MOUNT_CAPABILITY : WORKSPACE_COPY_MOUNT_CAPABILITY;
+        const write = native
+          ? WORKSPACE_NATIVE_MOUNT_WRITE_CAPABILITY
+          : WORKSPACE_COPY_MOUNT_WRITE_CAPABILITY;
+        return mount.access === "read-write" ? [read, write] : [read];
+      }),
+    ),
+  ];
   const active = new Map(hosts.map((host) => [host.id, host]));
   const refusals: string[] = [];
   const eligible = tiers.flatMap((tier) => {
@@ -505,7 +516,11 @@ export function placeWorkspaceMounts(
           if (mount.refused !== undefined) return mount.refused;
           if (mount.missing) return `Volume ${mount.volume} is unavailable`;
           const strategy = mount.strategy ?? "copy";
-          if (mount.access !== undefined && mount.access !== "read-only")
+          if (
+            mount.access !== undefined &&
+            mount.access !== "read-only" &&
+            mount.access !== "read-write"
+          )
             return `Workspace mount ${mount.volume}: ${strategy} does not support ${mount.access}`;
           if (
             strategy === "mount" &&
@@ -524,6 +539,12 @@ export function placeWorkspaceMounts(
             !hasMountCapabilities(host.workerSnapshot, [WORKSPACE_COPY_MOUNT_CAPABILITY])
           )
             return `Volume ${mount.volume} needs a Workspace environment that supports copy on Worker Host ${id}`;
+          const write =
+            strategy === "mount"
+              ? WORKSPACE_NATIVE_MOUNT_WRITE_CAPABILITY
+              : WORKSPACE_COPY_MOUNT_WRITE_CAPABILITY;
+          if (mount.access === "read-write" && !hasMountCapabilities(host.workerSnapshot, [write]))
+            return `Workspace mount ${mount.volume}: no profile on Worker Host ${id} supports read-write ${strategy} mounts`;
           return undefined;
         })
         .find((value) => value !== undefined);

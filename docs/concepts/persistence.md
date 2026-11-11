@@ -52,18 +52,18 @@ The mount strategy determines whether a Task reads a separate copy or the live s
 | Copy | Files copied into its environment before the harness starts, with a recorded manifest | A bounded dataset that fits in the Task environment |
 | Native mount | Live data from the source, without a copy manifest | A large dataset or data that must remain live |
 
-Native mounts are read-only. They attach at Task start, after setup; setup cannot use their data.
+Native mounts attach at Task start, after setup. They can be read-only or read-write.
 Mounted content never becomes part of prepared images or setup snapshots. A live source can change
 between reads or Task runs, so a mount does not pin a dataset version. Object stores do not offer
 all local filesystem operations; keep tools that require rename, append, or locks in the checkout.
 
-The provider must enforce read-only access and hold storage credentials outside the Task's
-environment and harness. Native mounts cannot use credentials injected into the sandbox.
+The provider enforces the declared access and holds storage credentials outside the Task's
+environment and harness.
 Local and e2b providers refuse native mounts. SuperTag refuses unsupported strategies before
 calling a provider and never silently substitutes a copy.
 
-Modal attaches S3, R2, GCS, and Modal Volume sources read-only. See the
-[Modal guide](../guides/modal-workers.md#attach-a-read-only-dataset) for an example.
+Modal attaches S3, R2, GCS, and Modal Volume sources with their declared access.
+[Attach persistent storage to a Workspace](../guides/modal-workers.md#attach-persistent-storage-to-a-workspace)
 
 Both strategies leave the source outside the sandbox's lifecycle. A copied dataset inside a
 sandbox disappears with that sandbox; the source remains subject to its own storage durability.

@@ -79,6 +79,49 @@ it("starts remote exec-server without provider keys or Codex auth home", async (
   }
 });
 
+it("lets the executor exit on EOF without killing the sandbox used for delivery", async () => {
+  const fixture = environmentFixture();
+  const bridge = await startCodexExecServerBridge({
+    environment: fixture.environment,
+    command: "codex",
+    expectedVersion: "0.146.0",
+    timeoutMs: 5_000,
+  });
+  await bridge.close();
+  expect(fixture.endInput).toHaveBeenCalledOnce();
+  expect(fixture.execKilled).not.toHaveBeenCalled();
+});
+
+it("terminates the executor if it does not exit on EOF", async () => {
+  const fixture = environmentFixture();
+  fixture.endInput.mockImplementation(async () => undefined);
+  const bridge = await startCodexExecServerBridge({
+    environment: fixture.environment,
+    command: "codex",
+    expectedVersion: "0.146.0",
+    timeoutMs: 50,
+  });
+  await bridge.close();
+  expect(fixture.endInput).toHaveBeenCalledBefore(fixture.execKilled);
+  expect(fixture.execKilled).toHaveBeenCalledOnce();
+});
+
+it("reports uncertain cleanup when the environment loses the process exit status", async () => {
+  const fixture = environmentFixture();
+  fixture.endInput.mockImplementation(async () => {
+    fixture.output.end();
+    fixture.exit.reject(new Error("execution transport disconnected"));
+  });
+  const bridge = await startCodexExecServerBridge({
+    environment: fixture.environment,
+    command: "codex",
+    expectedVersion: "0.146.0",
+    timeoutMs: 5_000,
+  });
+  await expect(bridge.close()).rejects.toThrow("Codex exec-server exit could not be confirmed");
+  expect(fixture.execKilled).toHaveBeenCalledOnce();
+});
+
 it("fails before starting exec-server when its version differs from app-server", async () => {
   const fixture = environmentFixture("0.145.0");
   await expect(
@@ -189,6 +232,10 @@ function environmentFixture(version = "0.146.0", duplex = true) {
     output.end();
     exit.resolve({ exitCode: null, signal: "SIGTERM", stdout: "", stderr: "" });
   });
+  const endInput = vi.fn(async () => {
+    output.end();
+    exit.resolve({ exitCode: 0, stdout: "", stderr: "" });
+  });
   const versionHandle: ProcessHandle = {
     wait: async () => ({
       exitCode: 0,
@@ -204,7 +251,7 @@ function environmentFixture(version = "0.146.0", duplex = true) {
           write: async (bytes: Uint8Array) => {
             writes.push(bytes.slice());
           },
-          endInput: async () => undefined,
+          endInput,
         }
       : {}),
     wait: () => exit.promise,
@@ -223,7 +270,7 @@ function environmentFixture(version = "0.146.0", duplex = true) {
     }),
     dispose: async () => undefined,
   } satisfies ExecutionEnvironment;
-  return { environment, spawns, writes, output, exit, execKilled };
+  return { environment, spawns, writes, output, exit, execKilled, endInput };
 }
 
 function connect(url: string): Promise<WebSocket> {

@@ -77,9 +77,11 @@ import {
   UNSANDBOXED_COMMANDS_CAPABILITY,
   WORKSPACE_CLONE_CAPABILITY,
   WORKSPACE_COPY_MOUNT_CAPABILITY,
+  WORKSPACE_COPY_MOUNT_WRITE_CAPABILITY,
   WORKSPACE_ENVIRONMENT_CAPABILITY,
   WORKSPACE_IN_PLACE_CAPABILITY,
   WORKSPACE_NATIVE_MOUNT_CAPABILITY,
+  WORKSPACE_NATIVE_MOUNT_WRITE_CAPABILITY,
   type WorkerDescriptor,
   type WorkerHostStatus,
   type WorkerProfileCapabilities,
@@ -135,9 +137,11 @@ export {
   UNSANDBOXED_COMMANDS_CAPABILITY,
   WORKSPACE_CLONE_CAPABILITY,
   WORKSPACE_COPY_MOUNT_CAPABILITY,
+  WORKSPACE_COPY_MOUNT_WRITE_CAPABILITY,
   WORKSPACE_ENVIRONMENT_CAPABILITY,
   WORKSPACE_IN_PLACE_CAPABILITY,
   WORKSPACE_NATIVE_MOUNT_CAPABILITY,
+  WORKSPACE_NATIVE_MOUNT_WRITE_CAPABILITY,
   type WorkerDescriptor,
   type WorkerHostCondition,
   type WorkerHostConditionType,
@@ -1510,6 +1514,10 @@ export interface WorkspaceResolver {
   supportsCopyMounts?(providerId: string): boolean;
   /** Whether this profile supports provider-native read-only mounts at Task start. */
   supportsNativeMounts?(providerId: string): boolean;
+  /** Whether copied Volume changes can be saved back to the source. */
+  supportsCopyMountWrites?(providerId: string): boolean;
+  /** Whether this profile can attach provider-native writable Volumes. */
+  supportsNativeMountWrites?(providerId: string): boolean;
   /** Refuse a profile before any Workspace source is opened or prepared. */
   refuseProfile?(
     profile: WorkerProfile,
@@ -1557,7 +1565,8 @@ export interface WorkspaceResolver {
   startsWorkspaceSandbox?(attemptId: string): boolean;
   /**
    * Starts the Attempt's Workspace sandbox with the network policy the Worker planned before tool
-   * resolution. The resolver owns the sandbox: its `finalize` commits the work and disposes it.
+   * resolution. The resolver owns the sandbox until finalization, which can leave it open
+   * for the Worker to collect outputs and dispose it.
    */
   startWorkspaceSandbox?(
     attemptId: string,
@@ -1651,6 +1660,18 @@ export class WorkspaceResolverRegistry implements RuntimeInputProvider {
 
   supportsCopyMounts(providerId: string): boolean {
     return this.#resolvers.some((resolver) => resolver.supportsCopyMounts?.(providerId) === true);
+  }
+
+  supportsCopyMountWrites(providerId: string): boolean {
+    return this.#resolvers.some(
+      (resolver) => resolver.supportsCopyMountWrites?.(providerId) === true,
+    );
+  }
+
+  supportsNativeMountWrites(providerId: string): boolean {
+    return this.#resolvers.some(
+      (resolver) => resolver.supportsNativeMountWrites?.(providerId) === true,
+    );
   }
 
   refuseProfile(
@@ -4823,7 +4844,9 @@ class ConfiguredWorker implements Worker {
           WORKSPACE_CLONE_CAPABILITY.id,
           WORKSPACE_ENVIRONMENT_CAPABILITY.id,
           WORKSPACE_COPY_MOUNT_CAPABILITY.id,
+          WORKSPACE_COPY_MOUNT_WRITE_CAPABILITY.id,
           WORKSPACE_NATIVE_MOUNT_CAPABILITY.id,
+          WORKSPACE_NATIVE_MOUNT_WRITE_CAPABILITY.id,
           COMMANDS_EXECUTE_CAPABILITY.id,
           UNSANDBOXED_COMMANDS_CAPABILITY.id,
         ]);
@@ -4890,6 +4913,16 @@ class ConfiguredWorker implements Worker {
           this.#options.workspaceResolvers?.supportsNativeMounts(execution.id)
         )
           capabilities.push(WORKSPACE_NATIVE_MOUNT_CAPABILITY);
+        if (
+          workspaceRefusal === undefined &&
+          this.#options.workspaceResolvers?.supportsCopyMountWrites(execution.id)
+        )
+          capabilities.push(WORKSPACE_COPY_MOUNT_WRITE_CAPABILITY);
+        if (
+          workspaceRefusal === undefined &&
+          this.#options.workspaceResolvers?.supportsNativeMountWrites(execution.id)
+        )
+          capabilities.push(WORKSPACE_NATIVE_MOUNT_WRITE_CAPABILITY);
         return {
           profile: profile.ref,
           harness: harness.id,
@@ -5111,8 +5144,10 @@ class ConfiguredWorker implements Worker {
     redaction.values = sensitiveValues;
     let reason: "completed" | "failed" | "cancelled" = "failed";
     let workspacePrepared = false;
-    // A remote Workspace sandbox belongs to its resolver, whose finalize commits and disposes it.
+    // The resolver owns the remote sandbox until successful-path finalization hands cleanup
+    // back to the Worker. Declared outputs still live in it after Git delivery.
     let workspaceSandbox: ExecutionEnvironment | undefined;
+    let disposeWorkspaceSandbox = false;
     const boundedCleanup = async (operation: () => Promise<void>) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -5177,7 +5212,10 @@ class ConfiguredWorker implements Worker {
       }
       await closeHarness(currentExecution, errors);
       try {
-        if (currentExecutionEnvironment && currentExecutionEnvironment !== workspaceSandbox)
+        if (
+          currentExecutionEnvironment &&
+          (currentExecutionEnvironment !== workspaceSandbox || disposeWorkspaceSandbox)
+        )
           await boundedCleanup(() => currentExecutionEnvironment.dispose(reason));
       } catch (error) {
         errors.push(new Error("Execution environment cleanup failed", { cause: error }));
@@ -5789,8 +5827,8 @@ class ConfiguredWorker implements Worker {
       if (!finalResponse) throwIfAborted(signal);
       const finishSignal = finalResponse ? undefined : signal;
       if (workspacePrepared && workspaceSandbox !== undefined) {
-        // Finalize commits in the sandbox and then disposes it, so the Harness and its sandbox MCP
-        // bridges close first, while the sandbox still runs. A failed close fails the Attempt.
+        // Stop the Harness and its sandbox MCP bridges before finalizing Git in the sandbox.
+        // A failed close fails the Attempt; a live process could still change the checkout.
         const errors: unknown[] = [];
         await closeHarness(execution, errors);
         if (errors.length)
@@ -5800,6 +5838,7 @@ class ConfiguredWorker implements Worker {
       }
       if (workspacePrepared) {
         workspacePrepared = false;
+        disposeWorkspaceSandbox = workspaceSandbox !== undefined;
         const summary = pendingResult?.summary ?? finalOutput;
         for (const delivery of (await this.#options.workspaceResolvers?.finalize(
           spec,
@@ -5811,6 +5850,7 @@ class ConfiguredWorker implements Worker {
               ...(pendingResult?.decisions ?? []).map((decision) => decision.text),
             ].slice(0, 20),
             ...(finishSignal === undefined ? {} : { signal: finishSignal }),
+            ...(disposeWorkspaceSandbox ? { keepSandboxOpen: true } : {}),
           },
         )) ?? []) {
           yield workspaceDeliveryProgress(identity, at(), delivery);

@@ -343,7 +343,7 @@ environment: { modal: { app: supertag-workers, image: node:22-bookworm } }
 | --- | --- | --- |
 | `e2b` | `image` | The E2B template sandboxes start from. Default: E2B's `base` template. |
 | `modal` | `app` | Required. The Modal app that owns the sandboxes and images. SuperTag creates it when missing. |
-| `modal` | `image` | The registry image sandboxes start from. Default: `python:3.13-slim`. |
+| `modal` | `image` | The registry image or Modal image ID sandboxes start from. Default: `python:3.13-slim`. |
 
 - `image` applies when a repository has no devcontainer. For Claude Code and Cursor, it must
   contain `python3`, a POSIX shell, and POSIX shell tools, plus any tools your commands need.

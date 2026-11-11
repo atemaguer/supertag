@@ -28,6 +28,12 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
+function modalImage(client: ModalClient, image: string) {
+  return /^im-(?:[A-Za-z0-9]{22}|[A-Za-z0-9]{26})$/u.test(image)
+    ? client.images.fromId(image)
+    : client.images.fromRegistry(image);
+}
+
 export const MODAL_REMOTE_SANDBOX_CAPABILITY: CapabilityIdentifier = {
   id: "supertag.execution.remote-sandbox.modal",
   version: 1,
@@ -42,6 +48,7 @@ export interface ModalProcessClient {
 }
 export interface ModalSandboxClient {
   readonly sandboxId: string;
+  readonly nativeMountSymlinkTargets?: Readonly<Record<string, string>>;
   exec(
     command: string[],
     options: SandboxExecParams & { mode: "binary" },
@@ -126,8 +133,16 @@ async function nativeAttachments(
 ): Promise<Pick<SandboxCreateParams, "volumes" | "cloudBucketMounts">> {
   const volumes: NonNullable<SandboxCreateParams["volumes"]> = {};
   const cloudBucketMounts: NonNullable<SandboxCreateParams["cloudBucketMounts"]> = {};
+  const mountedVolumes = new Set<string>();
   for (const mount of mounts) {
     const location = nativeLocation(mount);
+    if (location.scheme === "modal-volume") {
+      if (mountedVolumes.has(location.name))
+        throw new Error(
+          `Workspace mount ${mount.volume}: Modal Volume ${location.name} is already mounted; use separate Volumes for separate mount paths`,
+        );
+      mountedVolumes.add(location.name);
+    }
     try {
       if (location.scheme === "modal-volume") {
         volumes[mount.path] = (
@@ -201,7 +216,7 @@ export const nativeModalSandboxFactory: ModalSandboxFactory = {
       });
       const image = input.imageId
         ? await client.images.fromId(input.imageId)
-        : client.images.fromRegistry(input.image);
+        : await modalImage(client, input.image);
       const attachments = await nativeAttachments(client, input.nativeMounts ?? []);
       const sandbox = await client.sandboxes.create(app, image, {
         ...input.params,
@@ -209,6 +224,13 @@ export const nativeModalSandboxFactory: ModalSandboxFactory = {
       });
       return {
         sandboxId: sandbox.sandboxId,
+        // Modal implements a Volume attachment as a link to its provider-managed mount point.
+        nativeMountSymlinkTargets: Object.fromEntries(
+          Object.entries(attachments.volumes ?? {}).map(([path, volume]) => [
+            path,
+            `/__modal/volumes/${volume.volumeId}`,
+          ]),
+        ),
         exec: (command, options) => sandbox.exec(command, options),
         async terminate(options) {
           // Closing the client before confirmed termination would discard recovery evidence.
@@ -414,10 +436,8 @@ export const nativeModalWorkspaceClient: ModalWorkspaceClient = {
       const app = await client.apps.fromName(input.appName, {
         createIfMissing: input.createAppIfMissing,
       });
-      const image = await client.images
-        .fromRegistry(input.image)
-        .dockerfileCommands([...input.commands])
-        .build(app);
+      const base = await modalImage(client, input.image);
+      const image = await base.dockerfileCommands([...input.commands]).build(app);
       return image.imageId;
     }),
   async createSetupSandbox(input) {
@@ -723,6 +743,9 @@ function adapt(sandbox: ModalSandboxClient): SandboxInstance {
   }
   const instance: SandboxInstance = {
     id: sandbox.sandboxId,
+    ...(sandbox.nativeMountSymlinkTargets === undefined
+      ? {}
+      : { nativeMountSymlinkTargets: sandbox.nativeMountSymlinkTargets }),
     prepareOutputDirectory: (root, path) => prepareSandboxOutputDirectory(instance, root, path),
     listOutputFiles: (root, query) => listSandboxOutputFiles(instance, root, query),
     materializeArtifactFiles: (input) => materializeSandboxArtifactFiles(instance, input),

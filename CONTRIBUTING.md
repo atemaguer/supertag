@@ -421,6 +421,11 @@ on its own.
 
 ## Live Modal native mounts
 
+Run the Modal Volume test on its own with `pnpm test:volumes:modal:live`. It prepares a Workspace
+with two disposable Volumes, verifies read-only input and git delivery, then reads persisted output
+in a replacement sandbox. It removes the sandboxes, Volumes, and prepared image when it finishes.
+Use your normal Modal credentials and optionally set `SUPERTAG_LIVE_MODAL_APP` for a dedicated app.
+
 The opt-in suite reads `fixture.txt` from a small bucket prefix and an existing Modal Volume
 subdirectory. Put a nonempty `fixture.txt` in each before running it. The suite creates an app
 named `supertag-mounts-live` if needed, creates one sandbox, verifies both writes fail even as root,
