@@ -818,6 +818,13 @@ async fn run_assignment(
             adapter::failed("Execution authority expired before launch"),
         );
     }
+    if supertag_protocol::mcp::grants(&task).next().is_some() {
+        return save_finish(
+            journal,
+            attempt,
+            adapter::failed("Worker Host cannot enforce accepted MCP grants"),
+        );
+    }
     let checkpoint = match time::timeout_at(valid_until, transfers.download(&attempt, token)).await
     {
         Ok(Ok(checkpoint)) => checkpoint,

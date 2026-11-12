@@ -107,6 +107,9 @@ pub(super) fn resolve_attempt(
     harness: HarnessKind,
     profile: &HarnessExecutionProfile,
 ) -> Option<AttemptExecutionSelection> {
+    if supertag_protocol::mcp::grants(task).next().is_some() {
+        return None;
+    }
     if profile.remote_file_workspace && (harness != HarnessKind::Cursor || task.workspace.is_none())
     {
         return None;
