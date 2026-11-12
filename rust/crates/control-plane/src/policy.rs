@@ -18,6 +18,20 @@ use crate::{
 const RESOURCE_BYTES: usize = 192 * 1024;
 const SNAPSHOT_BYTES: usize = 384 * 1024;
 pub(crate) const PAGE_BYTES: usize = 768 * 1024;
+const BUILTIN_HARNESSES: [(HarnessKind, &str); 5] = [
+    (HarnessKind::Codex, "codex"),
+    (HarnessKind::ClaudeCode, "claude-code"),
+    (HarnessKind::OpenaiAgents, "openai-agents"),
+    (HarnessKind::Opencode, "opencode"),
+    (HarnessKind::Cursor, "cursor"),
+];
+
+fn harness_for_name(name: &str) -> Option<HarnessKind> {
+    BUILTIN_HARNESSES
+        .iter()
+        .find(|(_, candidate)| *candidate == name)
+        .map(|(kind, _)| *kind)
+}
 
 pub(crate) fn operator(principal: &str) -> Result<()> {
     if principal
@@ -485,6 +499,25 @@ fn normalize_execution(
     } else {
         Ok(Some(execution))
     }
+}
+
+pub(crate) fn normalize_tag_execution(
+    harness: HarnessKind,
+    input: Option<PolicyExecutionSettings>,
+) -> Result<(HarnessKind, Option<PolicyExecutionSettings>)> {
+    let execution = normalize_execution(input)?;
+    let Some(name) = execution
+        .as_ref()
+        .and_then(|settings| settings.harness.as_deref())
+    else {
+        return Ok((harness, execution));
+    };
+    let selected =
+        harness_for_name(name).ok_or_else(|| invalid("unsupported Tag execution harness"))?;
+    if harness != HarnessKind::Unspecified && harness != selected {
+        return Err(invalid("Tag harness and execution settings disagree"));
+    }
+    Ok((selected, execution))
 }
 
 async fn optional_resource<M: Resource>(
@@ -1075,6 +1108,7 @@ pub(crate) struct AdmissionBase<'a> {
     pub instructions: &'a str,
     pub allowed_actions: &'a [String],
     pub harness_kind: i32,
+    pub execution: Option<&'a PolicyExecutionSettings>,
     pub approval_rules: &'a [ApprovalRule],
 }
 pub(crate) struct AdmissionPolicy {
@@ -1184,33 +1218,31 @@ pub(crate) async fn admission_in(
         .filter_map(|r| r.role.as_ref())
         .collect();
     execution_roles.sort_by(|a, b| a.name.cmp(&b.name).then(a.role_id.cmp(&b.role_id)));
-    let base_harness = match HarnessKind::try_from(base.harness_kind) {
-        Ok(HarnessKind::Codex) => Some("codex"),
-        Ok(HarnessKind::ClaudeCode) => Some("claude-code"),
-        Ok(HarnessKind::OpenaiAgents) => Some("openai-agents"),
-        Ok(HarnessKind::Opencode) => Some("opencode"),
-        Ok(HarnessKind::Cursor) => Some("cursor"),
-        _ => None,
-    };
-    let harness = base_harness.map(str::to_owned).or_else(|| {
+    let base_harness = BUILTIN_HARNESSES
+        .iter()
+        .find(|(kind, _)| *kind as i32 == base.harness_kind)
+        .map(|(_, name)| *name);
+    let sources = base.execution.into_iter().chain(
         execution_roles
             .iter()
-            .find_map(|r| r.execution.as_ref().and_then(|e| e.harness.clone()))
+            .filter_map(|role| role.execution.as_ref()),
+    );
+    let harness = base_harness.map(str::to_owned).or_else(|| {
+        sources
+            .clone()
+            .find_map(|settings| settings.harness.clone())
     });
-    let models = execution_roles
-        .iter()
-        .filter_map(|r| r.execution.as_ref())
+    let models = sources
+        .clone()
         .find(|e| !e.models.is_empty() && (e.harness.is_none() || e.harness == harness))
         .map(|e| e.models.clone())
         .unwrap_or_default();
-    let efforts = execution_roles
-        .iter()
-        .filter_map(|r| r.execution.as_ref())
+    let efforts = sources
+        .clone()
         .find(|e| !e.efforts.is_empty())
         .map(|e| e.efforts.clone())
         .unwrap_or_else(|| vec!["low".into(), "medium".into(), "high".into()]);
-    let has_execution = execution_roles.iter().any(|r| r.execution.is_some());
-    if has_execution {
+    if sources.clone().next().is_some() {
         snapshot.execution = Some(PolicyExecutionSettings {
             harness: harness.clone(),
             models,
@@ -1219,16 +1251,11 @@ pub(crate) async fn admission_in(
     }
     let harness_kind = match harness.as_deref() {
         None => base.harness_kind,
-        Some("codex") => HarnessKind::Codex as i32,
-        Some("claude-code") => HarnessKind::ClaudeCode as i32,
-        Some("openai-agents") => HarnessKind::OpenaiAgents as i32,
-        Some("opencode") => HarnessKind::Opencode as i32,
-        Some("cursor") => HarnessKind::Cursor as i32,
-        Some(_) => {
-            return Err(StoreError::FailedPrecondition(
+        Some(name) => harness_for_name(name).ok_or_else(|| {
+            StoreError::FailedPrecondition(
                 "Role requires a harness this runtime does not support".into(),
-            ));
-        }
+            )
+        })? as i32,
     };
     let mut policy = AdmissionPolicy {
         instructions,

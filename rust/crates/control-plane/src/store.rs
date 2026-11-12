@@ -33,8 +33,9 @@ use supertag_protocol::{
     v2::{
         AcceptEventRequest, AppendEventRequest, ApprovalRule, Assignment, ClaimReplyResponse,
         ContextContract, ExecutionLimits, FinishTaskRequest, HarnessExecutionProfile, HarnessKind,
-        PutTagRequest, Reply, ReplyDestination, ReplyState, SettleReplyRequest, StartTaskRequest,
-        SubmitTaskRequest, Tag, Task, TaskEvent, TaskState, WorkspaceSpec,
+        PolicyExecutionSettings, PutTagRequest, Reply, ReplyDestination, ReplyState,
+        SettleReplyRequest, StartTaskRequest, SubmitTaskRequest, Tag, Task, TaskEvent, TaskState,
+        WorkspaceSpec,
     },
     valid_git_commit, valid_workspace_id,
 };
@@ -69,7 +70,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 35;
+        const SCHEMA_VERSION: i64 = 36;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -155,6 +156,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0033_opencode_harness.sql"),
                 include_str!("../migrations/sqlite/0034_cursor_harness.sql"),
                 include_str!("../migrations/sqlite/0035_execution_selection.sql"),
+                include_str!("../migrations/sqlite/0036_tag_execution.sql"),
             ]
         } else {
             [
@@ -193,6 +195,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0033_opencode_harness.sql"),
                 include_str!("../migrations/postgresql/0034_cursor_harness.sql"),
                 include_str!("../migrations/postgresql/0035_execution_selection.sql"),
+                include_str!("../migrations/postgresql/0036_tag_execution.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -274,6 +277,7 @@ impl Store {
             workspace,
             harness_kind: harness as i32,
             approval_rules: vec![],
+            execution: None,
         })
         .await
     }
@@ -286,11 +290,13 @@ impl Store {
             workspace,
             harness_kind,
             approval_rules,
+            execution,
         } = input;
         let tag_id = tag_id.as_str();
         let instructions = instructions.as_str();
         let harness =
             HarnessKind::try_from(harness_kind).map_err(|_| invalid("unknown harness kind"))?;
+        let (harness, execution) = crate::policy::normalize_tag_execution(harness, execution)?;
         name("Tag ID", tag_id)?;
         if let Some(spec) = &workspace
             && (!valid_workspace_id(&spec.workspace_id) || !valid_git_commit(&spec.base_commit))
@@ -310,12 +316,13 @@ impl Store {
         let approval_rules = normalize_approval_rules(approval_rules, &allowed_actions)?;
         let stored_rules = stored_approval_rules(&approval_rules)?;
         let (mut transaction, _) = self.write().await?;
-        let revision: i64 = sqlx::query_scalar("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules) VALUES ($1,$2,$3,1,$4,$5,$6,$7) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules RETURNING revision")
+        let revision: i64 = sqlx::query_scalar("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules, execution = excluded.execution RETURNING revision")
             .bind(tag_id).bind(instructions).bind(actions)
             .bind(workspace.as_ref().map(|spec| &spec.workspace_id))
             .bind(workspace.as_ref().map(|spec| &spec.base_commit))
             .bind(harness as i64)
             .bind(stored_rules)
+            .bind(execution.as_ref().map(Message::encode_to_vec))
             .fetch_one(&mut *transaction).await?;
         transaction.commit().await?;
         Ok(Tag {
@@ -326,6 +333,7 @@ impl Store {
             workspace,
             harness_kind: harness as i32,
             approval_rules,
+            execution,
         })
     }
 
@@ -1192,7 +1200,7 @@ async fn tag_policy_in(
     surface: Option<&crate::surface_policy::AdmissionSurface>,
 ) -> Result<AcceptedTag> {
     let tag = sqlx::query(
-        "SELECT instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules FROM supertag_v2_tags WHERE tag_id = $1",
+        "SELECT instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution FROM supertag_v2_tags WHERE tag_id = $1",
     )
     .bind(tag_id)
     .fetch_optional(&mut **transaction)
@@ -1203,6 +1211,7 @@ async fn tag_policy_in(
     let allowed_actions: Vec<String> =
         serde_json::from_str(&tag.try_get::<String, _>("allowed_actions")?)?;
     let approval_rules = approval_rules_from_row(&tag)?;
+    let execution = tag_execution_from_row(&tag)?;
     let base_harness: i64 = tag.try_get("harness_kind")?;
     let policy = crate::policy::admission_in(
         transaction,
@@ -1211,6 +1220,7 @@ async fn tag_policy_in(
             instructions: &instructions,
             allowed_actions: &allowed_actions,
             harness_kind: base_harness as i32,
+            execution: execution.as_ref(),
             approval_rules: &approval_rules,
         },
         surface,
@@ -1221,6 +1231,13 @@ async fn tag_policy_in(
         workspace,
         policy,
     })
+}
+
+pub(crate) fn tag_execution_from_row(row: &AnyRow) -> Result<Option<PolicyExecutionSettings>> {
+    row.try_get::<Option<Vec<u8>>, _>("execution")?
+        .as_deref()
+        .map(crate::policy::decode)
+        .transpose()
 }
 
 pub(crate) async fn owner_runtime_actions_in(

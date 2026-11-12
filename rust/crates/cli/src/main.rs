@@ -35,9 +35,9 @@ use supertag_protocol::{
     v2::{
         ApprovalRule, AttemptDecision, CancelTaskRequest, CreateAuthKeyRequest, ExecutionLimits,
         GetTaskRequest, HarnessKind, LarkDomain, ListEventsRequest, ListNativeUsageRequest,
-        PutTagRequest, ReportedCostLimit, ResolveAttemptRequest, RevokeHostRequest,
-        SubmitTaskRequest, Task, WorkspaceSpec, attempt_inputs_server::AttemptInputsServer,
-        attempt_mailbox_server::AttemptMailboxServer,
+        PolicyExecutionSettings, PutTagRequest, ReportedCostLimit, ResolveAttemptRequest,
+        RevokeHostRequest, SubmitTaskRequest, Task, WorkspaceSpec,
+        attempt_inputs_server::AttemptInputsServer, attempt_mailbox_server::AttemptMailboxServer,
         attempt_work_sessions_server::AttemptWorkSessionsServer,
         attempt_workstreams_server::AttemptWorkstreamsServer,
         checkpoint_directory_server::CheckpointDirectoryServer, connector_server::ConnectorServer,
@@ -289,6 +289,12 @@ enum Command {
         /// Required harness for Tasks accepted from this Tag.
         #[arg(long)]
         harness: Option<Harness>,
+        /// Allowed model IDs, with the default first. May be repeated.
+        #[arg(long = "model", value_delimiter = ',')]
+        models: Vec<String>,
+        /// Allowed reasoning efforts, with the default first. May be repeated.
+        #[arg(long = "effort", value_delimiter = ',')]
+        efforts: Vec<String>,
     },
     /// Accept one turn of work in a Tag's Session.
     Submit {
@@ -688,6 +694,8 @@ async fn run(command: Command) -> Result<()> {
             workspace_id,
             workspace_base,
             harness,
+            models,
+            efforts,
         } => {
             let workspace = workspace_id
                 .zip(workspace_base)
@@ -725,6 +733,13 @@ async fn run(command: Command) -> Result<()> {
                         harness_kind: harness.map_or(HarnessKind::Unspecified, Harness::kind)
                             as i32,
                         approval_rules,
+                        execution: (!models.is_empty() || !efforts.is_empty()).then_some(
+                            PolicyExecutionSettings {
+                                models,
+                                efforts,
+                                harness: None,
+                            },
+                        ),
                     },
                     &token,
                 )?)

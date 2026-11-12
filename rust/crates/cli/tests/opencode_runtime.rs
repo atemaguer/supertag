@@ -17,7 +17,7 @@ use supertag_protocol::{
     authenticated_request,
     v2::{
         AssignRoleRequest, CancelTaskRequest, ClaimTaskRequest, ExecutionLimits, GetTaskRequest,
-        HarnessExecutionProfile, HarnessKind, ListEventsRequest, ModelSource,
+        HarnessExecutionProfile, HarnessKind, ListEventsRequest, ListTagsRequest, ModelSource,
         PolicyExecutionSettings, PutRoleRequest, PutTagRequest, Role, SubmitTaskRequest, Task,
         TaskState, operator_client::OperatorClient, policy_catalog_client::PolicyCatalogClient,
     },
@@ -849,6 +849,76 @@ async fn opencode_claims_and_runs_the_accepted_role_model() -> Result<()> {
     assert_eq!(calls[0]["args"][3], "--model");
     assert_eq!(calls[0]["args"][4], FIXTURE_MODEL);
     gone(calls[0]["pid"].as_i64().context("native PID missing")? as i32).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn put_tag_cli_preserves_model_and_effort_order_at_admission() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let mut runtime = Runtime::start(directory.path()).await?;
+    let put_tag = |runtime: &Runtime, flags: &[&str]| {
+        let mut command = runtime.credentials.command();
+        command
+            .args([
+                "put-tag",
+                "reviewer",
+                "--gateway",
+                &runtime.endpoint,
+                "--instructions",
+                "Review the fixture change",
+                "--harness",
+                "opencode",
+            ])
+            .args(flags);
+        Process::spawn(command, directory.path(), "put-tag", false)
+    };
+    let alternate = "openai/alternate";
+    put_tag(
+        &runtime,
+        &[
+            "--model",
+            FIXTURE_MODEL,
+            "--model",
+            alternate,
+            "--effort",
+            "high",
+            "--effort",
+            "low",
+        ],
+    )?
+    .success()
+    .await?;
+    let tag = runtime
+        .operator
+        .list_tags(runtime.credentials.request(ListTagsRequest::default())?)
+        .await?
+        .into_inner()
+        .tags
+        .pop()
+        .context("put-tag did not create the reviewer")?;
+    assert_eq!(tag.tag_id, "reviewer");
+    assert_eq!(tag.harness_kind(), HarnessKind::Opencode);
+    let range = tag.execution.context("Tag execution range missing")?;
+    assert_eq!(range.models, [FIXTURE_MODEL, alternate]);
+    assert_eq!(range.efforts, ["high", "low"]);
+    let first = runtime
+        .submit("reviewer", "configured", "fresh", None)
+        .await?;
+    let selection = first
+        .execution_selection
+        .as_ref()
+        .context("Task selection missing")?;
+    assert_eq!(selection.model.as_deref(), Some(FIXTURE_MODEL));
+    assert_eq!(selection.effort.as_deref(), Some("high"));
+
+    put_tag(&runtime, &[])?.success().await?;
+    let next = runtime
+        .submit("reviewer", "defaults", "fresh", None)
+        .await?;
+    let selection = next.execution_selection.context("Task default missing")?;
+    assert!(selection.model.is_none());
+    assert_eq!(selection.effort.as_deref(), Some("low"));
+    assert_eq!(runtime.task(&first.task_id).await?, first);
     Ok(())
 }
 

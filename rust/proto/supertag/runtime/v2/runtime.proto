@@ -902,6 +902,7 @@ message PutTagRequest {
   WorkspaceSpec workspace = 4;
   HarnessKind harness_kind = 5;
   repeated ApprovalRule approval_rules = 6;
+  PolicyExecutionSettings execution = 7;
 }
 
 message Tag {
@@ -912,6 +913,7 @@ message Tag {
   WorkspaceSpec workspace = 5;
   HarnessKind harness_kind = 6;
   repeated ApprovalRule approval_rules = 7;
+  PolicyExecutionSettings execution = 8;
 }
 
 message ListTagsRequest {

@@ -677,6 +677,7 @@ mod tests {
             .await
             .unwrap();
         let tag = PutTagRequest {
+            execution: None,
             approval_rules: vec![],
             harness_kind: 0,
             workspace: None,

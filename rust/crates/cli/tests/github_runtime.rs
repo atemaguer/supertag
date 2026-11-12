@@ -442,6 +442,7 @@ async fn put_tag(public: &str, credentials: &Credentials) -> Result<()> {
     OperatorClient::connect(public.to_owned())
         .await?
         .put_tag(credentials.operator(PutTagRequest {
+            execution: None,
             approval_rules: vec![],
             tag_id: "builder".into(),
             instructions: "GitHub fixture".into(),

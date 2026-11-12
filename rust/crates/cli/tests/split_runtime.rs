@@ -411,6 +411,7 @@ async fn exercise_split_runtime(database: &str, directory: &Path) -> Result<()> 
             workspace: None,
             tag_id: "engineer".into(),
             instructions: "New responsibility".into(),
+            execution: None,
             allowed_actions: vec!["files:write".into()],
         })?)
         .await?
@@ -764,6 +765,7 @@ async fn killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerun
             workspace: None,
             tag_id: "engineer".into(),
             instructions: "Require explicit recovery".into(),
+            execution: None,
             allowed_actions: vec!["files:read".into()],
         })?)
         .await?;
@@ -948,6 +950,7 @@ async fn killed_local_supervisor_stops_services_and_refuses_stale_endpoint() -> 
             workspace: None,
             tag_id: "after-supervisor-death".into(),
             instructions: "Local startup is live".into(),
+            execution: None,
             allowed_actions: vec!["files:read".into()],
         })?)
         .await?;
@@ -980,6 +983,7 @@ async fn local_shutdown_replays_finish_before_next_session_task_without_rerunnin
             workspace: None,
             tag_id: "engineer".into(),
             instructions: "Resume safely".into(),
+            execution: None,
             allowed_actions: vec!["files:read".into()],
         })?)
         .await?;
@@ -1472,6 +1476,7 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
             workspace: None,
             tag_id: "slack-engineer".into(),
             instructions: "Respond carefully".into(),
+            execution: None,
             allowed_actions: vec!["files:read".into()],
         })?)
         .await?;
@@ -2028,6 +2033,7 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
             workspace: None,
             tag_id: "engineer".into(),
             instructions: "Retry only with evidence".into(),
+            execution: None,
             allowed_actions: vec!["files:read".into()],
         })?)
         .await?;

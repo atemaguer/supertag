@@ -60,7 +60,7 @@ async fn contract(url: &str) {
         .fetch_one(&mut connection)
         .await
         .unwrap();
-    assert_eq!(version, 35);
+    assert_eq!(version, 36);
     let head: i64 = sqlx::query_scalar("SELECT head FROM supertag_v2_watch_state")
         .fetch_one(&mut connection)
         .await

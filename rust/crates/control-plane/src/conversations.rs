@@ -48,6 +48,7 @@ impl Store {
                 workspace: crate::workspaces::workspace_from_row(&row)?,
                 harness_kind: row.try_get::<i64, _>("harness_kind")? as i32,
                 approval_rules: crate::store::approval_rules_from_row(&row)?,
+                execution: crate::store::tag_execution_from_row(&row)?,
             };
             let cursor = tag.tag_id.clone();
             if !page.push(tag, cursor)? {
