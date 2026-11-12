@@ -143,6 +143,14 @@ impl Transport {
                     .recv()
                     .await
                     .context("Codex process ended before acknowledging its request")??;
+                if value["method"] == "item/tool/call" {
+                    ensure!(
+                        buffered.len() < 128,
+                        "Codex emitted too many startup requests"
+                    );
+                    buffered.push(value);
+                    continue;
+                }
                 if self.deny_request(&value).await? {
                     continue;
                 }
@@ -186,6 +194,7 @@ struct Stream {
     sequence: u64,
     turn_requested: bool,
     resumed: bool,
+    may_ask: bool,
 }
 
 impl Stream {
@@ -194,6 +203,7 @@ impl Stream {
         thread: String,
         expected_thread: Option<String>,
         baseline: Option<[u64; 3]>,
+        may_ask: bool,
     ) -> Result<Self> {
         let resumed = expected_thread.is_some();
         let mut native = events::Stream::new(policy, expected_thread);
@@ -212,6 +222,7 @@ impl Stream {
             sequence: 0,
             turn_requested: false,
             resumed,
+            may_ask,
         })
     }
 
@@ -308,6 +319,16 @@ impl Stream {
                     "Codex reported a failed turn"
                 );
                 self.completed = true;
+            }
+            // The pinned server may publish this informational field before
+            // any content. Its owned thread and turn were validated above.
+            "turn/moderationMetadata" => {
+                ensure!(
+                    self.turn_requested
+                        && !self.completed
+                        && params["turnId"].as_str() == self.turn.as_deref(),
+                    "Codex moderation metadata belongs to an inactive turn"
+                );
             }
             "thread/tokenUsage/updated" => {
                 let usage = &params["tokenUsage"]["total"];
@@ -424,6 +445,14 @@ impl Stream {
                             item["status"] = json!("completed");
                         }
                     }
+                    Some("dynamicToolCall") => {
+                        ensure!(
+                            self.may_ask,
+                            "Codex emitted an unregistered coordination tool item"
+                        );
+                        crate::questions::validate_tool(&item)?;
+                        return Ok(());
+                    }
                     Some("webSearch") => item["type"] = json!("web_search"),
                     _ => bail!("Codex emitted an unsupported tool or item"),
                 }
@@ -521,6 +550,38 @@ async fn settle(
     unreachable!()
 }
 
+async fn respond_tool(
+    transport: &mut Transport,
+    stream: &Stream,
+    questions: &mut crate::questions::Bridge,
+    value: &Value,
+) -> Result<bool> {
+    if value["method"] != "item/tool/call" {
+        return Ok(false);
+    }
+    ensure!(
+        stream.turn_requested && !stream.completed && stream.turn.is_some(),
+        "Codex requested a coordination tool outside its active turn"
+    );
+    let params = &value["params"];
+    ensure!(
+        params["threadId"].as_str() == Some(stream.thread.as_str())
+            && params["turnId"].as_str() == stream.turn.as_deref(),
+        "Codex coordination call belongs to an unowned thread or turn"
+    );
+    let id = value
+        .get("id")
+        .filter(|id| {
+            id.as_str().is_some_and(|s| !s.is_empty() && s.len() <= 256)
+                || id.as_i64().is_some()
+                || id.as_u64().is_some()
+        })
+        .context("Codex request identity is invalid")?;
+    let result = questions.call(params).await?;
+    transport.write(json!({"id": id,"result":result})).await?;
+    Ok(true)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute(
     input: ChildStdin,
@@ -532,12 +593,13 @@ pub(crate) async fn execute(
     expected_thread: Option<String>,
     baseline: Option<[u64; 3]>,
     harness: &mut HarnessClient<Channel>,
+    questions: &mut crate::questions::Bridge,
     token: &str,
     secrets: &[String],
 ) -> Result<(String, String)> {
     let mut transport = Transport::new(input, output);
     let mut buffered = Vec::new();
-    transport.call("initialize",json!({"clientInfo":{"name":"supertag","version":"0.1.0"},"capabilities":{"experimentalApi":false}}),&mut buffered).await?;
+    transport.call("initialize",json!({"clientInfo":{"name":"supertag","version":"0.1.0"},"capabilities":{"experimentalApi":questions.enabled()}}),&mut buffered).await?;
     transport
         .write(json!({"method":"initialized","params":{}}))
         .await?;
@@ -573,6 +635,9 @@ pub(crate) async fn execute(
         "thread/resume"
     } else {
         params["ephemeral"] = json!(false);
+        if questions.enabled() {
+            params["dynamicTools"] = questions.tools();
+        }
         "thread/start"
     };
     let response = transport.call(method, params, &mut buffered).await?;
@@ -581,9 +646,18 @@ pub(crate) async fn execute(
         .filter(|id| crate::checkpoint::thread_identity(id))
         .context("Codex thread identity is invalid")?
         .to_owned();
-    let mut stream = Stream::new(policy, thread, expected_thread, baseline)?;
+    let mut stream = Stream::new(
+        policy,
+        thread,
+        expected_thread,
+        baseline,
+        questions.enabled(),
+    )?;
     stream.model(&response)?;
     for notification in buffered.drain(..) {
+        if respond_tool(&mut transport, &stream, questions, &notification).await? {
+            continue;
+        }
         stream
             .notification(notification, harness, token, secrets)
             .await?;
@@ -611,6 +685,9 @@ pub(crate) async fn execute(
             .context("Codex turn identity is invalid")?,
     )?;
     for notification in buffered.drain(..) {
+        if respond_tool(&mut transport, &stream, questions, &notification).await? {
+            continue;
+        }
         stream
             .notification(notification, harness, token, secrets)
             .await?;
@@ -631,6 +708,7 @@ pub(crate) async fn execute(
                 value=transport.output.recv()=>{
                     let Some(value)=value else {ensure!(stream.completed,"Codex process ended without a completed turn");break;};
                     let value=value?;
+                    if respond_tool(&mut transport, &stream, questions, &value).await? {continue;}
                     if transport.deny_request(&value).await? {continue;}
                     if value.get("method").is_some() {
                         stream.notification(value,harness,token,secrets).await?;
@@ -749,7 +827,7 @@ mod tests {
         transport
             .call(
                 "initialize",
-                json!({"clientInfo":{"name":"supertag-protocol-test","version":"0.1.0"}}),
+                json!({"clientInfo":{"name":"supertag-protocol-test","version":"0.1.0"},"capabilities":{"experimentalApi":true}}),
                 &mut buffered,
             )
             .await?;
@@ -765,10 +843,30 @@ mod tests {
             .await?;
         let configuration = &response["config"];
         assert_eq!(configuration["features"]["code_mode_host"], false);
+        assert_eq!(configuration["features"]["code_mode"]["enabled"], false);
+        assert_eq!(
+            configuration["features"]["code_mode"]["direct_only_tool_namespaces"],
+            json!(["supertag"])
+        );
         assert_eq!(configuration["features"]["shell_tool"], false);
         assert_eq!(configuration["features"]["hooks"], false);
         assert_eq!(configuration["approval_policy"], "never");
         assert_eq!(configuration["sandbox_mode"], "read-only");
+        // Registration is a local App Server operation; this probe never
+        // starts a turn, reads native credentials, or calls a model provider.
+        let mut params = crate::config::thread_parameters(
+            &workspace,
+            &crate::config::arguments(&workspace, None, &policy)?,
+        )?;
+        params["dynamicTools"] = crate::questions::tool_specs();
+        params["ephemeral"] = json!(false);
+        let thread = transport
+            .call("thread/start", params, &mut buffered)
+            .await?;
+        ensure!(
+            thread["thread"]["id"].as_str().is_some(),
+            "native dynamic tool registration failed"
+        );
         let denied=transport.call("turn/steer",json!({"threadId":"00000000-0000-0000-0000-000000000000","expectedTurnId":"00000000-0000-0000-0000-000000000001","input":[{"type":"text","text":"must not start a turn"}]}),&mut buffered).await;
         assert!(denied.is_err());
         drop(transport);

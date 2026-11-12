@@ -99,11 +99,18 @@ pub(crate) async fn deliver_workstream_in(
     if recipients.is_empty() {
         return Ok(());
     }
-    let prior_hops: Option<i64> =
-        sqlx::query_scalar("SELECT MAX(hops) FROM supertag_v2_mailbox_messages WHERE task_id=$1")
-            .bind(&post.source_task_id)
-            .fetch_one(&mut **tx)
-            .await?;
+    // The approval continuation has no fresh batch of its own. Inherit the
+    // original Mailbox hop limit through any decisions in the same Session.
+    let prior_hops: Option<i64> = sqlx::query_scalar(
+        "WITH RECURSIVE source_tasks(task_id) AS (
+            SELECT CAST($1 AS TEXT)
+            UNION
+            SELECT w.task_id FROM supertag_v2_approval_waits w JOIN source_tasks s ON w.continuation_task_id=s.task_id
+        ) SELECT MAX(m.hops) FROM supertag_v2_mailbox_messages m JOIN source_tasks s ON m.task_id=s.task_id",
+    )
+    .bind(&post.source_task_id)
+    .fetch_one(&mut **tx)
+    .await?;
     let hops = prior_hops.map_or(0, |hops| hops + 1);
     if hops > MAX_HOPS {
         return Err(StoreError::FailedPrecondition(

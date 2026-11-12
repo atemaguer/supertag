@@ -19,7 +19,8 @@ use supertag_protocol::{
     v2::{
         Assignment, ClaimTaskRequest, FinishTaskRequest, HarnessCompleteRequest, HarnessKind,
         InspectAttemptRequest, RegisterHostRequest, StartTaskRequest, Task, TaskState,
-        attempt_inputs_client::AttemptInputsClient, worker_host_client::WorkerHostClient,
+        attempt_inputs_client::AttemptInputsClient,
+        attempt_workstreams_client::AttemptWorkstreamsClient, worker_host_client::WorkerHostClient,
     },
 };
 use tokio::time::{self, Instant};
@@ -76,6 +77,8 @@ impl Interceptor for HostHeaders {
 
 pub(crate) type RegisteredHost = WorkerHostClient<InterceptedService<Channel, HostHeaders>>;
 pub(crate) type RegisteredInputs = AttemptInputsClient<InterceptedService<Channel, HostHeaders>>;
+pub(crate) type RegisteredWorkstreams =
+    AttemptWorkstreamsClient<InterceptedService<Channel, HostHeaders>>;
 
 impl Attempt {
     fn from_assignment(assignment: Assignment) -> Result<Self> {
@@ -164,6 +167,10 @@ pub async fn run(
     )
     .max_decoding_message_size(MAX_MESSAGE_BYTES)
     .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let workstream_client =
+        AttemptWorkstreamsClient::with_interceptor(channel.clone(), headers.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES);
     let transfers = checkpoints::Transfers::new(channel.clone(), headers.clone());
     let mut host = WorkerHostClient::with_interceptor(channel, headers)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -234,7 +241,7 @@ pub async fn run(
                     &options,
                     &journal,
                     &workspaces,
-                    (&mut host, &inputs, &transfers, &token),
+                    (&mut host, &inputs, &workstream_client, &transfers, &token),
                     attempt,
                     &shutdown,
                     || {
@@ -272,6 +279,7 @@ pub async fn run(
                 result,
                 succeeded,
                 objective_signal,
+                waiting_approval_ids,
                 checkpoint,
                 workspace,
             } => {
@@ -302,6 +310,7 @@ pub async fn run(
                         result,
                         succeeded,
                         objective_signal,
+                        waiting_approval_ids,
                         checkpoint,
                         workspace: Some(Box::new(pending)),
                         prepared: Some(workspace),
@@ -320,6 +329,7 @@ pub async fn run(
                 result,
                 succeeded,
                 objective_signal,
+                waiting_approval_ids,
                 checkpoint,
                 workspace,
                 prepared,
@@ -366,6 +376,7 @@ pub async fn run(
                                 result,
                                 succeeded,
                                 objective_signal,
+                                waiting_approval_ids,
                                 checkpoint,
                                 workspace: Some(pending),
                                 prepared,
@@ -411,6 +422,7 @@ pub async fn run(
                                 result,
                                 succeeded,
                                 objective_signal,
+                                waiting_approval_ids,
                                 checkpoint: Some(pending),
                                 workspace,
                                 prepared,
@@ -446,6 +458,7 @@ pub async fn run(
                             result,
                             succeeded,
                             objective_signal,
+                            waiting_approval_ids: waiting_approval_ids.clone(),
                             checkpoint_sha256: checkpoint.map(|pending| pending.sha256),
                             workspace_delivery: workspace
                                 .as_ref()
@@ -485,15 +498,17 @@ pub async fn run(
                         continue;
                     }
                     Err(error)
-                        if error.code() == Code::InvalidArgument && objective_signal != 0 =>
+                        if error.code() == Code::InvalidArgument
+                            && (objective_signal != 0 || !waiting_approval_ids.is_empty()) =>
                     {
                         // An invalid owner signal is rejected before the Finish transaction
                         // commits. Settle the cleaned-up Attempt as a controlled failure.
                         journal.save(&Entry::Finish {
                             attempt,
-                            result: "Harness proposed an invalid Objective update".into(),
+                            result: "Harness proposed an invalid Objective or approval update".into(),
                             succeeded: false,
                             objective_signal: 0,
+                            waiting_approval_ids: vec![],
                             checkpoint: None,
                             workspace,
                             prepared,
@@ -575,6 +590,7 @@ async fn run_assignment(
     connection: (
         &mut RegisteredHost,
         &RegisteredInputs,
+        &RegisteredWorkstreams,
         &checkpoints::Transfers,
         &str,
     ),
@@ -582,7 +598,7 @@ async fn run_assignment(
     shutdown: &CancellationToken,
     ready: impl FnOnce(),
 ) -> Result<()> {
-    let (host, inputs, transfers, token) = connection;
+    let (host, inputs, workstream_client, transfers, token) = connection;
     // Starting is durable before requesting authority and never records a launch.
     // A lost start response can therefore be retried using this exact Attempt.
     let start = host
@@ -733,7 +749,7 @@ async fn run_assignment(
                 .as_ref()
                 .map(|prepared| prepared.checkout.path.as_path()),
         ),
-        (host.clone(), inputs.clone()),
+        (host.clone(), inputs.clone(), workstream_client.clone()),
         token,
         valid_until,
         shutdown,
@@ -756,6 +772,7 @@ async fn run_assignment(
                 result: outcome.result,
                 succeeded: outcome.succeeded,
                 objective_signal: outcome.objective_signal,
+                waiting_approval_ids: outcome.waiting_approval_ids,
                 checkpoint,
                 workspace: Box::new(workspace),
             })
@@ -788,6 +805,7 @@ fn save_finish(journal: &Journal, attempt: Attempt, outcome: HarnessCompleteRequ
         result: outcome.result,
         succeeded: outcome.succeeded,
         objective_signal: outcome.objective_signal,
+        waiting_approval_ids: outcome.waiting_approval_ids,
         checkpoint,
         workspace: None,
         prepared,

@@ -440,6 +440,7 @@ mod tests {
             result: "Change: Capture a checked result".into(),
             succeeded: true,
             objective_signal: 0,
+            waiting_approval_ids: vec!["test-approval".into()],
             checkpoint: None,
             workspace: Box::new(PreparedWorkspace {
                 workspace_id: "project".into(),
@@ -455,6 +456,7 @@ mod tests {
             result,
             succeeded,
             objective_signal,
+            waiting_approval_ids,
             checkpoint,
             workspace,
         }) = journal.load()?
@@ -476,6 +478,7 @@ mod tests {
             result,
             succeeded,
             objective_signal,
+            waiting_approval_ids,
             checkpoint,
             workspace: Some(Box::new(first)),
             prepared: Some(workspace),
@@ -485,12 +488,14 @@ mod tests {
         let Some(Entry::Finish {
             attempt,
             workspace: Some(pending),
+            waiting_approval_ids,
             ..
         }) = journal.load()?
         else {
             anyhow::bail!("missing delivery intent")
         };
         assert!(!pending.uploaded);
+        assert_eq!(waiting_approval_ids, ["test-approval"]);
         assert_eq!(workspaces.verify(&pending)?, receipt);
         crate::save_finish(
             &journal,

@@ -1,7 +1,9 @@
 mod inputs;
 mod questions;
+mod workstreams;
 
 use std::{
+    collections::HashSet,
     ffi::OsStr,
     io,
     path::Path,
@@ -40,7 +42,7 @@ use tonic::{Request, Response, Status, transport::Server};
 use uuid::Uuid;
 
 use crate::{
-    HostOptions, RegisteredHost, RegisteredInputs,
+    HostOptions, RegisteredHost, RegisteredInputs, RegisteredWorkstreams,
     guardian::{MAX_BOOTSTRAP_BYTES, monotonic_now_ns},
 };
 
@@ -51,6 +53,7 @@ struct Bridge {
     checkpoint: Option<SessionCheckpoint>,
     host_token: String,
     host: RegisteredHost,
+    workstreams: RegisteredWorkstreams,
     state: Arc<Mutex<RunState>>,
     attached: Arc<AtomicBool>,
     inputs: inputs::InputLane,
@@ -59,6 +62,7 @@ struct Bridge {
 #[derive(Default)]
 struct RunState {
     outcome: Option<HarnessCompleteRequest>,
+    observed_approvals: HashSet<String>,
 }
 
 impl Bridge {
@@ -101,11 +105,20 @@ impl Harness for Bridge {
         request: Request<HarnessAttachRequest>,
     ) -> Result<Response<HarnessRun>, Status> {
         self.authenticate(&request)?;
+        let mut upstream = authenticated_request(self.attempt(), &self.host_token, None)?;
+        upstream.set_timeout(Duration::from_secs(5));
+        let capabilities = self
+            .host
+            .clone()
+            .get_attempt_capabilities(upstream)
+            .await?
+            .into_inner();
         self.attached.store(true, Ordering::Release);
         Ok(Response::new(HarnessRun {
             task: self.assignment.task.clone(),
             attempt_id: self.assignment.attempt_id.clone(),
             checkpoint: self.checkpoint.clone(),
+            may_ask_objective_question: capabilities.may_ask_objective_question,
         }))
     }
 
@@ -187,6 +200,14 @@ impl Harness for Bridge {
             || outcome.result.contains('\0')
             || ObjectiveSignal::try_from(outcome.objective_signal).is_err()
             || (!outcome.succeeded && outcome.objective_signal != ObjectiveSignal::Progress as i32)
+            || (!outcome.waiting_approval_ids.is_empty()
+                && (!outcome.succeeded
+                    || outcome.objective_signal != ObjectiveSignal::Progress as i32
+                    || outcome.waiting_approval_ids.len() > 32
+                    || outcome
+                        .waiting_approval_ids
+                        .iter()
+                        .any(|id| !state.observed_approvals.contains(id))))
         {
             return Err(Status::invalid_argument("invalid harness outcome"));
         }
@@ -236,7 +257,7 @@ pub(crate) async fn execute(
     options: &HostOptions,
     assignment: Assignment,
     (checkpoint, workspace): (Option<SessionCheckpoint>, Option<&Path>),
-    (host, inputs): (RegisteredHost, RegisteredInputs),
+    (host, inputs, workstreams): (RegisteredHost, RegisteredInputs, RegisteredWorkstreams),
     host_token: &str,
     valid_until: Instant,
     shutdown: &CancellationToken,
@@ -253,6 +274,7 @@ pub(crate) async fn execute(
         checkpoint,
         host_token: host_token.to_owned(),
         host,
+        workstreams,
         state: Arc::default(),
         attached: Arc::default(),
         inputs: inputs::InputLane::new(inputs, valid_until, shutdown),
@@ -266,6 +288,7 @@ pub(crate) async fn execute(
                     .max_encoding_message_size(MAX_CHECKPOINT_BYTES + MAX_MESSAGE_BYTES),
             )
             .add_service(bridge.questions_service())
+            .add_service(bridge.workstreams_service())
             .serve_with_incoming_shutdown(
                 TcpListenerStream::new(listener),
                 stop_server.clone().cancelled_owned(),
@@ -427,6 +450,7 @@ pub(crate) fn failed(message: &str) -> HarnessCompleteRequest {
         succeeded: false,
         objective_signal: 0,
         checkpoint: None,
+        waiting_approval_ids: vec![],
     }
 }
 

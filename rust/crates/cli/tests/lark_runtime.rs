@@ -238,6 +238,7 @@ async fn put_tag(public: &str, credentials: &Credentials) -> Result<()> {
     OperatorClient::connect(public.to_owned())
         .await?
         .put_tag(credentials.operator(PutTagRequest {
+            approval_rules: vec![],
             tag_id: "builder".into(),
             instructions: "Lark fixture <at id=all>everyone</at>".into(),
             allowed_actions: vec!["files:read".into()],

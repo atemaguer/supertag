@@ -579,6 +579,21 @@ async fn bounded_batches_and_hops(url: &str) {
     start(&store, &host, &source).await;
     let mut to = "batch-recipient";
     for hop in 0..=4 {
+        if hop == 4 {
+            store
+                .put_tag_spec(PutTagRequest {
+                    tag_id: to.into(),
+                    instructions: "Handle incoming mail".into(),
+                    allowed_actions: vec!["workstream:post".into()],
+                    approval_rules: vec![ApprovalRule {
+                        action: "workstream:post".into(),
+                        operator_ids: vec![],
+                    }],
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+        }
         let text = format!("Relay hop {hop}");
         post(
             &store,
@@ -604,16 +619,64 @@ async fn bounded_batches_and_hops(url: &str) {
             "batch-recipient"
         };
     }
+    let body = "Hop five must roll back";
+    let approval = post(&store, &host, &source, "relay-needs-approval", body, &[to])
+        .await
+        .approval
+        .expect("pending Workstream approval");
+    let session = store.get_task(&source.task_id).await.unwrap().session_id;
+    store
+        .finish_task(
+            &host,
+            &FinishTaskRequest {
+                task_id: source.task_id,
+                attempt_id: source.attempt_id,
+                lease_token: source.lease_token,
+                succeeded: true,
+                result: "Waiting for the operator".into(),
+                waiting_approval_ids: vec![approval.approval_id.clone()],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let decision = store
+        .decide_approval(
+            OPERATOR,
+            &DecideApprovalRequest {
+                approval_id: approval.approval_id.clone(),
+                operation_id: "approve-mailbox-post".into(),
+                approve: true,
+                scope: ApprovalScope::Once.into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let source = claim(&store, &host).await;
+    assert_eq!(
+        decision.continuation_task_id.as_deref(),
+        Some(source.task_id.as_str())
+    );
+    assert_eq!(start(&store, &host, &source).await.session_id, session);
     let denied = PostAttemptWorkstreamRequest {
         attempt: Some(source.clone()),
         operation_id: "relay-denied".into(),
-        body: "Hop five must roll back".into(),
+        body: body.into(),
         to_tag_ids: vec![to.into()],
     };
     assert!(matches!(
         store.post_attempt_workstream(&host, &denied).await,
         Err(StoreError::FailedPrecondition(_))
     ));
+    assert!(
+        store
+            .get_approval(OPERATOR, &approval.approval_id)
+            .await
+            .unwrap()
+            .consumed_at_ms
+            .is_none()
+    );
     let posts = store
         .list_workstream_posts(
             OPERATOR,

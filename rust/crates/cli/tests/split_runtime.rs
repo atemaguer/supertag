@@ -406,6 +406,7 @@ async fn exercise_split_runtime(database: &str, directory: &Path) -> Result<()> 
 
     let edited = client
         .put_tag(credentials.request(PutTagRequest {
+            approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
             tag_id: "engineer".into(),
@@ -756,6 +757,7 @@ async fn killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerun
     let mut client = services.client().await?;
     client
         .put_tag(credentials.request(PutTagRequest {
+            approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
             tag_id: "engineer".into(),
@@ -937,6 +939,7 @@ async fn killed_local_supervisor_stops_services_and_refuses_stale_endpoint() -> 
     let credentials = local_credentials(&state)?;
     client
         .put_tag(credentials.request(PutTagRequest {
+            approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
             tag_id: "after-supervisor-death".into(),
@@ -968,6 +971,7 @@ async fn local_shutdown_replays_finish_before_next_session_task_without_rerunnin
     let credentials = local_credentials(&state)?;
     client
         .put_tag(credentials.request(PutTagRequest {
+            approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
             tag_id: "engineer".into(),
@@ -1451,6 +1455,7 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
     let mut operator = services.client().await?;
     operator
         .put_tag(credentials.request(PutTagRequest {
+            approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
             tag_id: "slack-engineer".into(),
@@ -1942,6 +1947,7 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
     let mut operator = services.client().await?;
     operator
         .put_tag(credentials.request(PutTagRequest {
+            approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
             tag_id: "engineer".into(),

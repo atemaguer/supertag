@@ -7,12 +7,30 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/atemaguer/supertag/apps/tui/client"
 	"github.com/atemaguer/supertag/packages/operator-api/go/operatorv1"
 )
 
 type inboxQuestionMsg struct {
 	occurrence string
 	text       string
+}
+
+type inboxApprovalMsg struct {
+	occurrence string
+	details    client.ApprovalDetails
+	err        error
+}
+
+func (m model) readInboxApproval() tea.Cmd {
+	id, occurrence := m.item.GetApproval().GetRequestId(), m.item.GetOccurrence()
+	if !m.client.RuntimeV2() || id == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		details, err := m.client.ReadApproval(m.ctx, id)
+		return inboxApprovalMsg{occurrence: occurrence, details: details, err: err}
+	}
 }
 
 func (m model) readInboxQuestion() tea.Cmd {
@@ -180,7 +198,26 @@ func (m model) renderItem() string {
 		if approval.GetTaskId() != "" {
 			add("Task: " + approval.GetTaskId())
 		}
-		if approval.GetBlocking() {
+		if m.client.RuntimeV2() {
+			switch {
+			case m.approvalDetails.err != nil:
+				add("", "Could not load approval details: "+m.approvalDetails.err.Error())
+			case m.approvalDetails.occurrence == "":
+				add("", "Loading approval details…")
+			case !m.approvalDetails.details.Pending:
+				add("", "This approval no longer waits for a decision.")
+			default:
+				details := m.approvalDetails.details
+				add("", "Action: "+details.Action)
+				if details.Resource != "" {
+					add("Resource: " + details.Resource)
+				}
+				add("Arguments:")
+				for _, line := range strings.Split(details.Arguments, "\n") {
+					add("  " + line)
+				}
+			}
+		} else if approval.GetBlocking() {
 			add("A running Task Attempt waits on the decision.")
 		} else {
 			add("No running Task Attempt waits on the decision.")

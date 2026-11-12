@@ -75,6 +75,7 @@ async fn claim_start(
 
 fn finish(identity: &InspectAttemptRequest, signal: ObjectiveSignal) -> FinishTaskRequest {
     FinishTaskRequest {
+        waiting_approval_ids: vec![],
         workspace_delivery: None,
         task_id: identity.task_id.clone(),
         attempt_id: identity.attempt_id.clone(),

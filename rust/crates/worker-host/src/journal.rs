@@ -48,6 +48,8 @@ pub(crate) enum Entry {
         result: String,
         succeeded: bool,
         objective_signal: i32,
+        #[serde(default)]
+        waiting_approval_ids: Vec<String>,
         checkpoint: Option<PendingCheckpoint>,
         workspace: Box<PreparedWorkspace>,
     },
@@ -58,6 +60,8 @@ pub(crate) enum Entry {
         succeeded: bool,
         #[serde(default)]
         objective_signal: i32,
+        #[serde(default)]
+        waiting_approval_ids: Vec<String>,
         #[serde(default)]
         checkpoint: Option<PendingCheckpoint>,
         #[serde(default)]

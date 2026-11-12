@@ -19,34 +19,36 @@ const config = process.env.CLAUDE_CONFIG_DIR;
 const cwd = process.cwd();
 const responses = new Map();
 let hooks = [];
+let sdkServers = [];
 let started = false;
 let waiting = false;
 let waitingForInput = false;
 let nativeChild;
 const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
-async function hook(tool, input) {
+function requestControl(request) {
+  const requestId = randomUUID();
+  const promise = new Promise((resolve) => responses.set(requestId, resolve));
+  send({ type: "control_request", request_id: requestId, request });
+  return promise;
+}
+async function hook(tool, input, metadata = {}) {
   let denied = false;
   for (const callbackId of hooks) {
-    const requestId = randomUUID();
-    const promise = new Promise((resolve) => responses.set(requestId, resolve));
-    send({
-      type: "control_request",
-      request_id: requestId,
-      request: {
-        subtype: "hook_callback",
-        callback_id: callbackId,
-        tool_use_id: requestId,
-        input: {
-          hook_event_name: "PreToolUse",
-          session_id: sessionId,
-          cwd,
-          tool_name: tool,
-          tool_input: input,
-          tool_use_id: requestId,
-        },
+    const toolUseId = randomUUID();
+    const response = await requestControl({
+      subtype: "hook_callback",
+      callback_id: callbackId,
+      tool_use_id: toolUseId,
+      input: {
+        hook_event_name: "PreToolUse",
+        session_id: sessionId,
+        cwd,
+        tool_name: tool,
+        tool_input: input,
+        tool_use_id: toolUseId,
+        ...metadata,
       },
     });
-    const response = await promise;
     if (
       response.subtype !== "success" ||
       response.response?.hookSpecificOutput?.permissionDecision === "deny"
@@ -54,6 +56,69 @@ async function hook(tool, input) {
       denied = true;
   }
   return !denied;
+}
+
+async function sdkMcp(method, params) {
+  const response = await requestControl({
+    subtype: "mcp_message",
+    server_name: "supertag",
+    message: { jsonrpc: "2.0", id: randomUUID(), method, params },
+  });
+  if (response.subtype !== "success" || !response.response?.mcp_response)
+    throw new Error("SDK MCP server did not answer");
+  return response.response.mcp_response;
+}
+
+async function objectiveQuestion(allowed) {
+  const name = "mcp__supertag__ask";
+  const metadata = { mcp_server: { name: "supertag", source: "sdk" } };
+  const valid = { text: `  Confirm the target branch. ${process.env.ANTHROPIC_API_KEY}  ` };
+  if (!allowed) {
+    if (sdkServers.length || (await hook(name, valid, metadata)))
+      throw new Error("Unadmitted Objective question was enabled");
+    return "Objective question unavailable";
+  }
+  if (sdkServers.join() !== "supertag") throw new Error("Objective question server missing");
+  const list = await sdkMcp("tools/list", {});
+  if (
+    list.result?.tools?.map(({ name }) => name).join() !== "ask" ||
+    list.result.tools[0].inputSchema.additionalProperties !== false
+  )
+    throw new Error("SDK exposed an unexpected Objective tool or argument schema");
+
+  for (const [tool, args, origin] of [
+    [name, { text: "   " }, metadata],
+    [name, { ...valid, objective_id: "other" }, metadata],
+    [name, valid, { ...metadata, agent_id: "child" }],
+    [name, valid, { mcp_server: { name: "supertag", source: "user" } }],
+    [name, valid, {}],
+    ["mcp__supertag__other", valid, metadata],
+  ]) {
+    if (await hook(tool, args, origin)) throw new Error("Unsupported Objective tool was allowed");
+  }
+  const malformed = await sdkMcp("tools/call", {
+    name: "ask",
+    arguments: { ...valid, task_id: "other" },
+  });
+  if (!malformed.error && !malformed.result?.isError)
+    throw new Error("SDK accepted unexpected arguments");
+
+  async function ask(input) {
+    if (!(await hook(name, input, metadata))) throw new Error("Admitted Objective question denied");
+    return sdkMcp("tools/call", { name: "ask", arguments: input });
+  }
+  const first = (await ask(valid)).result;
+  const second = (await ask(valid)).result;
+  if (
+    first?.isError ||
+    first?.content?.[0]?.text !== "Objective question recorded." ||
+    JSON.stringify(first) !== JSON.stringify(second)
+  )
+    throw new Error("An exact Objective question replay did not return the same acknowledgment");
+  const conflict = (await ask({ text: "A different question" })).result;
+  if (!conflict?.isError || JSON.stringify(conflict).includes("private refusal details"))
+    throw new Error("Objective question conflict was not returned safely");
+  return first.content[0].text;
 }
 async function histories(path) {
   const files = [];
@@ -130,6 +195,8 @@ async function turn(message) {
     return;
   }
   let result = resumed ? "fixture resumed turn" : "fixture first turn";
+  if (prompt.startsWith("objective-question"))
+    result = await objectiveQuestion(prompt === "objective-question");
   if (message.uuid) result += `; input: ${prompt}`;
   if (prompt.includes("write")) {
     if (!(await hook("Write", { file_path: join(cwd, "answer.txt"), content: result })))
@@ -206,10 +273,12 @@ lines.on("line", (line) => {
     responses.delete(message.response.request_id);
     callback?.(message.response);
   } else if (message.type === "control_request") {
-    if (message.request.subtype === "initialize")
+    if (message.request.subtype === "initialize") {
       hooks = (message.request.hooks?.PreToolUse ?? []).flatMap(
         (matcher) => matcher.hookCallbackIds,
       );
+      sdkServers = message.request.sdkMcpServers ?? [];
+    }
     send({
       type: "control_response",
       response: {

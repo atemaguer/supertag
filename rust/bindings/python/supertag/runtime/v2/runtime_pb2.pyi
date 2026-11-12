@@ -31,6 +31,21 @@ class InboxItemKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     INBOX_ITEM_KIND_OBJECTIVE_BUDGET: _ClassVar[InboxItemKind]
     INBOX_ITEM_KIND_OBJECTIVE_LIMIT: _ClassVar[InboxItemKind]
     INBOX_ITEM_KIND_TASK_ATTENTION: _ClassVar[InboxItemKind]
+    INBOX_ITEM_KIND_APPROVAL: _ClassVar[InboxItemKind]
+
+class ApprovalState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    APPROVAL_STATE_UNSPECIFIED: _ClassVar[ApprovalState]
+    APPROVAL_STATE_PENDING: _ClassVar[ApprovalState]
+    APPROVAL_STATE_APPROVED: _ClassVar[ApprovalState]
+    APPROVAL_STATE_DENIED: _ClassVar[ApprovalState]
+    APPROVAL_STATE_EXPIRED: _ClassVar[ApprovalState]
+
+class ApprovalScope(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    APPROVAL_SCOPE_UNSPECIFIED: _ClassVar[ApprovalScope]
+    APPROVAL_SCOPE_ONCE: _ClassVar[ApprovalScope]
+    APPROVAL_SCOPE_OBJECTIVE: _ClassVar[ApprovalScope]
 
 class TagMessageState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -193,6 +208,15 @@ INBOX_ITEM_KIND_QUESTION: InboxItemKind
 INBOX_ITEM_KIND_OBJECTIVE_BUDGET: InboxItemKind
 INBOX_ITEM_KIND_OBJECTIVE_LIMIT: InboxItemKind
 INBOX_ITEM_KIND_TASK_ATTENTION: InboxItemKind
+INBOX_ITEM_KIND_APPROVAL: InboxItemKind
+APPROVAL_STATE_UNSPECIFIED: ApprovalState
+APPROVAL_STATE_PENDING: ApprovalState
+APPROVAL_STATE_APPROVED: ApprovalState
+APPROVAL_STATE_DENIED: ApprovalState
+APPROVAL_STATE_EXPIRED: ApprovalState
+APPROVAL_SCOPE_UNSPECIFIED: ApprovalScope
+APPROVAL_SCOPE_ONCE: ApprovalScope
+APPROVAL_SCOPE_OBJECTIVE: ApprovalScope
 TAG_MESSAGE_STATE_UNSPECIFIED: TagMessageState
 TAG_MESSAGE_STATE_PENDING: TagMessageState
 TAG_MESSAGE_STATE_HANDLED: TagMessageState
@@ -358,7 +382,7 @@ class ListInboxItemsResponse(_message.Message):
     def __init__(self, as_of_ms: _Optional[int] = ..., items: _Optional[_Iterable[_Union[InboxItem, _Mapping]]] = ..., next_cursor: _Optional[str] = ..., truncated_kinds: _Optional[_Iterable[_Union[InboxItemKind, str]]] = ...) -> None: ...
 
 class InboxItem(_message.Message):
-    __slots__ = ("key", "occurrence", "kind", "objective_id", "task_id", "attempt_id", "operator_eligible", "actionable_since_ms", "reason", "question")
+    __slots__ = ("key", "occurrence", "kind", "objective_id", "task_id", "attempt_id", "operator_eligible", "actionable_since_ms", "reason", "question", "approval")
     KEY_FIELD_NUMBER: _ClassVar[int]
     OCCURRENCE_FIELD_NUMBER: _ClassVar[int]
     KIND_FIELD_NUMBER: _ClassVar[int]
@@ -369,6 +393,7 @@ class InboxItem(_message.Message):
     ACTIONABLE_SINCE_MS_FIELD_NUMBER: _ClassVar[int]
     REASON_FIELD_NUMBER: _ClassVar[int]
     QUESTION_FIELD_NUMBER: _ClassVar[int]
+    APPROVAL_FIELD_NUMBER: _ClassVar[int]
     key: str
     occurrence: str
     kind: InboxItemKind
@@ -379,7 +404,144 @@ class InboxItem(_message.Message):
     actionable_since_ms: int
     reason: str
     question: InboxQuestion
-    def __init__(self, key: _Optional[str] = ..., occurrence: _Optional[str] = ..., kind: _Optional[_Union[InboxItemKind, str]] = ..., objective_id: _Optional[str] = ..., task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., operator_eligible: _Optional[bool] = ..., actionable_since_ms: _Optional[int] = ..., reason: _Optional[str] = ..., question: _Optional[_Union[InboxQuestion, _Mapping]] = ...) -> None: ...
+    approval: InboxApproval
+    def __init__(self, key: _Optional[str] = ..., occurrence: _Optional[str] = ..., kind: _Optional[_Union[InboxItemKind, str]] = ..., objective_id: _Optional[str] = ..., task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., operator_eligible: _Optional[bool] = ..., actionable_since_ms: _Optional[int] = ..., reason: _Optional[str] = ..., question: _Optional[_Union[InboxQuestion, _Mapping]] = ..., approval: _Optional[_Union[InboxApproval, _Mapping]] = ...) -> None: ...
+
+class InboxApproval(_message.Message):
+    __slots__ = ("approval_id", "tag_id", "action", "resource", "summary")
+    APPROVAL_ID_FIELD_NUMBER: _ClassVar[int]
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    ACTION_FIELD_NUMBER: _ClassVar[int]
+    RESOURCE_FIELD_NUMBER: _ClassVar[int]
+    SUMMARY_FIELD_NUMBER: _ClassVar[int]
+    approval_id: str
+    tag_id: str
+    action: str
+    resource: str
+    summary: str
+    def __init__(self, approval_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., action: _Optional[str] = ..., resource: _Optional[str] = ..., summary: _Optional[str] = ...) -> None: ...
+
+class ApprovalRule(_message.Message):
+    __slots__ = ("action", "operator_ids")
+    ACTION_FIELD_NUMBER: _ClassVar[int]
+    OPERATOR_IDS_FIELD_NUMBER: _ClassVar[int]
+    action: str
+    operator_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, action: _Optional[str] = ..., operator_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class Approval(_message.Message):
+    __slots__ = ("approval_id", "task_id", "attempt_id", "tag_id", "session_id", "objective_id", "action", "arguments_digest", "summary", "operator_ids", "state", "scope", "requested_at_ms", "decided_at_ms", "decided_by", "reason", "valid_until_ms", "consumed_at_ms", "continuation_task_id", "resource", "canonical_arguments_json")
+    APPROVAL_ID_FIELD_NUMBER: _ClassVar[int]
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    ACTION_FIELD_NUMBER: _ClassVar[int]
+    ARGUMENTS_DIGEST_FIELD_NUMBER: _ClassVar[int]
+    SUMMARY_FIELD_NUMBER: _ClassVar[int]
+    OPERATOR_IDS_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    SCOPE_FIELD_NUMBER: _ClassVar[int]
+    REQUESTED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    DECIDED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    DECIDED_BY_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    VALID_UNTIL_MS_FIELD_NUMBER: _ClassVar[int]
+    CONSUMED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    CONTINUATION_TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    RESOURCE_FIELD_NUMBER: _ClassVar[int]
+    CANONICAL_ARGUMENTS_JSON_FIELD_NUMBER: _ClassVar[int]
+    approval_id: str
+    task_id: str
+    attempt_id: str
+    tag_id: str
+    session_id: str
+    objective_id: str
+    action: str
+    arguments_digest: str
+    summary: str
+    operator_ids: _containers.RepeatedScalarFieldContainer[str]
+    state: ApprovalState
+    scope: ApprovalScope
+    requested_at_ms: int
+    decided_at_ms: int
+    decided_by: str
+    reason: str
+    valid_until_ms: int
+    consumed_at_ms: int
+    continuation_task_id: str
+    resource: str
+    canonical_arguments_json: str
+    def __init__(self, approval_id: _Optional[str] = ..., task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., action: _Optional[str] = ..., arguments_digest: _Optional[str] = ..., summary: _Optional[str] = ..., operator_ids: _Optional[_Iterable[str]] = ..., state: _Optional[_Union[ApprovalState, str]] = ..., scope: _Optional[_Union[ApprovalScope, str]] = ..., requested_at_ms: _Optional[int] = ..., decided_at_ms: _Optional[int] = ..., decided_by: _Optional[str] = ..., reason: _Optional[str] = ..., valid_until_ms: _Optional[int] = ..., consumed_at_ms: _Optional[int] = ..., continuation_task_id: _Optional[str] = ..., resource: _Optional[str] = ..., canonical_arguments_json: _Optional[str] = ...) -> None: ...
+
+class GetApprovalRequest(_message.Message):
+    __slots__ = ("approval_id",)
+    APPROVAL_ID_FIELD_NUMBER: _ClassVar[int]
+    approval_id: str
+    def __init__(self, approval_id: _Optional[str] = ...) -> None: ...
+
+class ListApprovalsRequest(_message.Message):
+    __slots__ = ("objective_id", "task_id", "state", "limit", "cursor")
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    CURSOR_FIELD_NUMBER: _ClassVar[int]
+    objective_id: str
+    task_id: str
+    state: ApprovalState
+    limit: int
+    cursor: str
+    def __init__(self, objective_id: _Optional[str] = ..., task_id: _Optional[str] = ..., state: _Optional[_Union[ApprovalState, str]] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+
+class ListApprovalsResponse(_message.Message):
+    __slots__ = ("approvals", "next_cursor")
+    APPROVALS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    approvals: _containers.RepeatedCompositeFieldContainer[Approval]
+    next_cursor: str
+    def __init__(self, approvals: _Optional[_Iterable[_Union[Approval, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
+
+class DecideApprovalRequest(_message.Message):
+    __slots__ = ("approval_id", "operation_id", "approve", "scope", "valid_until_ms", "reason")
+    APPROVAL_ID_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    APPROVE_FIELD_NUMBER: _ClassVar[int]
+    SCOPE_FIELD_NUMBER: _ClassVar[int]
+    VALID_UNTIL_MS_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    approval_id: str
+    operation_id: str
+    approve: bool
+    scope: ApprovalScope
+    valid_until_ms: int
+    reason: str
+    def __init__(self, approval_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., approve: _Optional[bool] = ..., scope: _Optional[_Union[ApprovalScope, str]] = ..., valid_until_ms: _Optional[int] = ..., reason: _Optional[str] = ...) -> None: ...
+
+class RequestApprovalRequest(_message.Message):
+    __slots__ = ("attempt", "operation_id", "action", "arguments_json", "summary", "resource")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    ACTION_FIELD_NUMBER: _ClassVar[int]
+    ARGUMENTS_JSON_FIELD_NUMBER: _ClassVar[int]
+    SUMMARY_FIELD_NUMBER: _ClassVar[int]
+    RESOURCE_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    operation_id: str
+    action: str
+    arguments_json: str
+    summary: str
+    resource: str
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., action: _Optional[str] = ..., arguments_json: _Optional[str] = ..., summary: _Optional[str] = ..., resource: _Optional[str] = ...) -> None: ...
+
+class RequestApprovalResponse(_message.Message):
+    __slots__ = ("approval", "granted")
+    APPROVAL_FIELD_NUMBER: _ClassVar[int]
+    GRANTED_FIELD_NUMBER: _ClassVar[int]
+    approval: Approval
+    granted: bool
+    def __init__(self, approval: _Optional[_Union[Approval, _Mapping]] = ..., granted: _Optional[bool] = ...) -> None: ...
 
 class InboxQuestion(_message.Message):
     __slots__ = ("text", "asked_at_ms", "truncated")
@@ -434,6 +596,12 @@ class AskQuestionRequest(_message.Message):
     operation_id: str
     text: str
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
+
+class AttemptCapabilities(_message.Message):
+    __slots__ = ("may_ask_objective_question",)
+    MAY_ASK_OBJECTIVE_QUESTION_FIELD_NUMBER: _ClassVar[int]
+    may_ask_objective_question: bool
+    def __init__(self, may_ask_objective_question: _Optional[bool] = ...) -> None: ...
 
 class TagMessage(_message.Message):
     __slots__ = ("message_id", "sender_tag_id", "recipient_tag_id", "source_task_id", "workstream_post_id", "objective_id", "text", "hops", "task_id", "state", "created_at_ms")
@@ -576,6 +744,16 @@ class HarnessAskQuestionRequest(_message.Message):
     operation_id: str
     text: str
     def __init__(self, operation_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
+
+class HarnessPostWorkstreamRequest(_message.Message):
+    __slots__ = ("operation_id", "body", "to_tag_ids")
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    BODY_FIELD_NUMBER: _ClassVar[int]
+    TO_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
+    operation_id: str
+    body: str
+    to_tag_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, operation_id: _Optional[str] = ..., body: _Optional[str] = ..., to_tag_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class QueueInputRequest(_message.Message):
     __slots__ = ("task_id", "operation_id", "text")
@@ -734,34 +912,38 @@ class AuthenticateHostRequest(_message.Message):
     def __init__(self, token_digest: _Optional[bytes] = ...) -> None: ...
 
 class PutTagRequest(_message.Message):
-    __slots__ = ("tag_id", "instructions", "allowed_actions", "workspace", "harness_kind")
+    __slots__ = ("tag_id", "instructions", "allowed_actions", "workspace", "harness_kind", "approval_rules")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
+    APPROVAL_RULES_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     instructions: str
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
     workspace: WorkspaceSpec
     harness_kind: HarnessKind
-    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ...) -> None: ...
+    approval_rules: _containers.RepeatedCompositeFieldContainer[ApprovalRule]
+    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ...) -> None: ...
 
 class Tag(_message.Message):
-    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace", "harness_kind")
+    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace", "harness_kind", "approval_rules")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
     REVISION_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
+    APPROVAL_RULES_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     instructions: str
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
     revision: int
     workspace: WorkspaceSpec
     harness_kind: HarnessKind
-    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ...) -> None: ...
+    approval_rules: _containers.RepeatedCompositeFieldContainer[ApprovalRule]
+    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ...) -> None: ...
 
 class ListTagsRequest(_message.Message):
     __slots__ = ("limit", "cursor")
@@ -884,7 +1066,7 @@ class SubmitTaskRequest(_message.Message):
     def __init__(self, tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., prompt: _Optional[str] = ...) -> None: ...
 
 class Task(_message.Message):
-    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind")
+    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -898,6 +1080,7 @@ class Task(_message.Message):
     WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_DELIVERY_FIELD_NUMBER: _ClassVar[int]
     HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
+    APPROVAL_RULES_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     tag_id: str
     session_id: str
@@ -911,7 +1094,8 @@ class Task(_message.Message):
     workspace: WorkspaceSpec
     workspace_delivery: WorkspaceDeliveryReference
     harness_kind: HarnessKind
-    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ...) -> None: ...
+    approval_rules: _containers.RepeatedCompositeFieldContainer[ApprovalRule]
+    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ...) -> None: ...
 
 class GetTaskRequest(_message.Message):
     __slots__ = ("task_id",)
@@ -1114,7 +1298,7 @@ class TaskEvent(_message.Message):
     def __init__(self, sequence: _Optional[int] = ..., text: _Optional[str] = ...) -> None: ...
 
 class FinishTaskRequest(_message.Message):
-    __slots__ = ("task_id", "attempt_id", "lease_token", "result", "succeeded", "objective_signal", "checkpoint_sha256", "workspace_delivery")
+    __slots__ = ("task_id", "attempt_id", "lease_token", "result", "succeeded", "objective_signal", "checkpoint_sha256", "workspace_delivery", "waiting_approval_ids")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
@@ -1123,6 +1307,7 @@ class FinishTaskRequest(_message.Message):
     OBJECTIVE_SIGNAL_FIELD_NUMBER: _ClassVar[int]
     CHECKPOINT_SHA256_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_DELIVERY_FIELD_NUMBER: _ClassVar[int]
+    WAITING_APPROVAL_IDS_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     attempt_id: str
     lease_token: str
@@ -1131,7 +1316,8 @@ class FinishTaskRequest(_message.Message):
     objective_signal: ObjectiveSignal
     checkpoint_sha256: str
     workspace_delivery: WorkspaceDeliveryReference
-    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., result: _Optional[str] = ..., succeeded: _Optional[bool] = ..., objective_signal: _Optional[_Union[ObjectiveSignal, str]] = ..., checkpoint_sha256: _Optional[str] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ...) -> None: ...
+    waiting_approval_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., result: _Optional[str] = ..., succeeded: _Optional[bool] = ..., objective_signal: _Optional[_Union[ObjectiveSignal, str]] = ..., checkpoint_sha256: _Optional[str] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., waiting_approval_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class HarnessAttachRequest(_message.Message):
     __slots__ = ()
@@ -1146,14 +1332,16 @@ class AdapterBootstrap(_message.Message):
     def __init__(self, endpoint: _Optional[str] = ..., token: _Optional[str] = ...) -> None: ...
 
 class HarnessRun(_message.Message):
-    __slots__ = ("task", "attempt_id", "checkpoint")
+    __slots__ = ("task", "attempt_id", "checkpoint", "may_ask_objective_question")
     TASK_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     CHECKPOINT_FIELD_NUMBER: _ClassVar[int]
+    MAY_ASK_OBJECTIVE_QUESTION_FIELD_NUMBER: _ClassVar[int]
     task: Task
     attempt_id: str
     checkpoint: SessionCheckpoint
-    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., checkpoint: _Optional[_Union[SessionCheckpoint, _Mapping]] = ...) -> None: ...
+    may_ask_objective_question: bool
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., checkpoint: _Optional[_Union[SessionCheckpoint, _Mapping]] = ..., may_ask_objective_question: _Optional[bool] = ...) -> None: ...
 
 class SessionCheckpoint(_message.Message):
     __slots__ = ("harness", "format", "payload", "sha256")
@@ -1296,16 +1484,18 @@ class HarnessPublishRequest(_message.Message):
     def __init__(self, sequence: _Optional[int] = ..., text: _Optional[str] = ...) -> None: ...
 
 class HarnessCompleteRequest(_message.Message):
-    __slots__ = ("result", "succeeded", "objective_signal", "checkpoint")
+    __slots__ = ("result", "succeeded", "objective_signal", "checkpoint", "waiting_approval_ids")
     RESULT_FIELD_NUMBER: _ClassVar[int]
     SUCCEEDED_FIELD_NUMBER: _ClassVar[int]
     OBJECTIVE_SIGNAL_FIELD_NUMBER: _ClassVar[int]
     CHECKPOINT_FIELD_NUMBER: _ClassVar[int]
+    WAITING_APPROVAL_IDS_FIELD_NUMBER: _ClassVar[int]
     result: str
     succeeded: bool
     objective_signal: ObjectiveSignal
     checkpoint: SessionCheckpoint
-    def __init__(self, result: _Optional[str] = ..., succeeded: _Optional[bool] = ..., objective_signal: _Optional[_Union[ObjectiveSignal, str]] = ..., checkpoint: _Optional[_Union[SessionCheckpoint, _Mapping]] = ...) -> None: ...
+    waiting_approval_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, result: _Optional[str] = ..., succeeded: _Optional[bool] = ..., objective_signal: _Optional[_Union[ObjectiveSignal, str]] = ..., checkpoint: _Optional[_Union[SessionCheckpoint, _Mapping]] = ..., waiting_approval_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class HarnessCompleteResponse(_message.Message):
     __slots__ = ()
@@ -1524,12 +1714,14 @@ class PostAttemptWorkstreamRequest(_message.Message):
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., body: _Optional[str] = ..., to_tag_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class PostAttemptWorkstreamResponse(_message.Message):
-    __slots__ = ("post", "duplicate")
+    __slots__ = ("post", "duplicate", "approval")
     POST_FIELD_NUMBER: _ClassVar[int]
     DUPLICATE_FIELD_NUMBER: _ClassVar[int]
+    APPROVAL_FIELD_NUMBER: _ClassVar[int]
     post: WorkstreamPost
     duplicate: bool
-    def __init__(self, post: _Optional[_Union[WorkstreamPost, _Mapping]] = ..., duplicate: _Optional[bool] = ...) -> None: ...
+    approval: Approval
+    def __init__(self, post: _Optional[_Union[WorkstreamPost, _Mapping]] = ..., duplicate: _Optional[bool] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ...) -> None: ...
 
 class GetObjectiveRequest(_message.Message):
     __slots__ = ("objective_id",)

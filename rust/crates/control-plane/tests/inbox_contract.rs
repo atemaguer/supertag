@@ -134,10 +134,25 @@ async fn contract(url: &str) {
     let text = format!("Which option? {}", "x".repeat(600));
     let input = ask(&attempt, &format!("  {text}  "));
     assert!(matches!(
+        store.attempt_capabilities(&host, &attempt).await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+    assert!(matches!(
         store.ask_question(&host, &input).await,
         Err(StoreError::FailedPrecondition(_))
     ));
     start(&store, &host, &attempt).await;
+    assert!(
+        store
+            .attempt_capabilities(&host, &attempt)
+            .await
+            .unwrap()
+            .may_ask_objective_question
+    );
+    assert!(matches!(
+        store.attempt_capabilities(&other, &attempt).await,
+        Err(StoreError::PermissionDenied)
+    ));
     assert!(matches!(
         store.ask_question(&other, &input).await,
         Err(StoreError::PermissionDenied)

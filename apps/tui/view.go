@@ -338,7 +338,8 @@ func (m model) paneTitle() string {
 		return "Objective · " + terminalText(name)
 	case paneInbox:
 		title := "Waiting on you · " + itemKindName(m.item.GetKind())
-		if state := inboxWaitState(m.item); state != "" {
+		if state := inboxWaitState(m.item); state != "" &&
+			(!m.client.RuntimeV2() || m.item.GetApproval() == nil) {
 			title += " · " + state
 		}
 		return title
@@ -393,6 +394,11 @@ func (m model) paneHint() string {
 			return "This item is settled."
 		case m.approvalShown():
 			return "a approve · d deny"
+		case m.client.RuntimeV2() && m.item.GetApproval() != nil:
+			if m.approvalDetails.err != nil {
+				return "r reload approval details"
+			}
+			return ""
 		}
 		return "Run the command above to act on it."
 	case paneDiff:

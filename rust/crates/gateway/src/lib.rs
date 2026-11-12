@@ -675,6 +675,18 @@ impl WorkerHost for Gateway {
         .await
     }
 
+    async fn get_attempt_capabilities(
+        &self,
+        request: Request<InspectAttemptRequest>,
+    ) -> Result<Response<AttemptCapabilities>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel)
+                .get_attempt_capabilities(request)
+                .await
+        })
+        .await
+    }
+
     async fn register_host(
         &self,
         request: Request<RegisterHostRequest>,

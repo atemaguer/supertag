@@ -292,10 +292,11 @@ type model struct {
 	objectiveMessages map[string]*objectiveMessage
 	// item is the inbox item the inbox pane shows, kept after it leaves the inbox; itemNote is
 	// what came of acting on it.
-	item         *operatorv1.InboxItem
-	itemNote     note
-	fullQuestion string
-	decision     decision
+	item            *operatorv1.InboxItem
+	itemNote        note
+	fullQuestion    string
+	approvalDetails inboxApprovalMsg
+	decision        decision
 	// drafts keeps unsent input per pane.
 	drafts map[string]string
 
@@ -621,6 +622,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case inboxApprovalMsg:
+		if m.pane == paneInbox && m.item.GetOccurrence() == msg.occurrence {
+			m.approvalDetails = msg
+			m.refresh()
+		}
+		return m, nil
+
 	case overviewMsg:
 		var again tea.Cmd
 		if m.overviewReload.done() && m.pane == paneObjective {
@@ -938,6 +946,12 @@ func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "m" && m.pane == paneObjective && !m.objectiveCompose {
 		return m, m.composeObjectiveMessage()
 	}
+	if msg.String() == "r" && m.pane == paneInbox && m.approvalDetails.err != nil &&
+		m.inboxItem(m.item.GetOccurrence()) != nil {
+		m.approvalDetails = inboxApprovalMsg{}
+		m.refresh()
+		return m, m.readInboxApproval()
+	}
 	if m.decision == decisionConfirm {
 		if msg.String() == "enter" {
 			return m, m.approve()
@@ -1091,6 +1105,9 @@ func (m model) decide(key string) (tea.Model, tea.Cmd) {
 
 // approve approves the shown approval request once.
 func (m *model) approve() tea.Cmd {
+	if !m.approvalShown() {
+		return nil
+	}
 	item := m.item
 	m.decision = decisionSending
 	m.itemNote = note{text: "Approving…"}
@@ -1116,9 +1133,17 @@ func (m *model) decided(msg decidedMsg) tea.Cmd {
 			m.input.SetValue(msg.reason)
 		}
 	case msg.approved:
-		m.itemNote = note{text: "Approved once. The waiting Session continues."}
+		if m.client.RuntimeV2() {
+			m.itemNote = note{text: "Approved once."}
+		} else {
+			m.itemNote = note{text: "Approved once. The waiting Session continues."}
+		}
 	default:
-		m.itemNote = note{text: "Denied. The Session that asked continues with your reason."}
+		if m.client.RuntimeV2() {
+			m.itemNote = note{text: "Denied. Your reason was recorded."}
+		} else {
+			m.itemNote = note{text: "Denied. The Session that asked continues with your reason."}
+		}
 	}
 	cmd := m.syncInput()
 	m.refresh()
@@ -1200,7 +1225,9 @@ func (m model) inputShown() bool {
 // approvalShown says whether the pane shows an approval request that still waits.
 func (m model) approvalShown() bool {
 	return m.pane == paneInbox && m.item.GetKind() == operatorv1.InboxItemKind_INBOX_ITEM_KIND_APPROVAL &&
-		m.item.GetApproval().GetRequestId() != "" && m.inboxItem(m.item.GetOccurrence()) != nil
+		m.item.GetOperatorEligible() && m.item.GetApproval().GetRequestId() != "" &&
+		m.inboxItem(m.item.GetOccurrence()) != nil &&
+		(!m.client.RuntimeV2() || (m.approvalDetails.occurrence == m.item.GetOccurrence() && m.approvalDetails.details.Pending))
 }
 
 // inboxItem is the waiting item with this occurrence, or nil once it left the inbox.
@@ -1388,8 +1415,9 @@ func (m *model) choose() tea.Cmd {
 	case rowInbox:
 		m.pane, m.item = paneInbox, m.inbox.Items[r.index]
 		m.fullQuestion = ""
+		m.approvalDetails = inboxApprovalMsg{}
 		m.input.Placeholder = "Type your answer"
-		cmd = m.readInboxQuestion()
+		cmd = tea.Batch(m.readInboxQuestion(), m.readInboxApproval())
 	case rowTeam:
 		m.pane, m.teamID = paneTeam, m.teams[r.index].GetId()
 		cmd = m.reloadTeam()

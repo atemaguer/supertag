@@ -67,6 +67,10 @@ pub(crate) fn arguments(
         "mcp_servers={}".into(),
         "project_doc_max_bytes=0".into(),
         "analytics.enabled=false".into(),
+        // A model may select code-mode-only even when the feature is disabled.
+        // Keep the admitted SuperTag namespace directly callable in that mode.
+        "features.code_mode.enabled=false".into(),
+        "features.code_mode.direct_only_tool_namespaces=[\"supertag\"]".into(),
     ];
     for feature in [
         "multi_agent",
@@ -83,7 +87,8 @@ pub(crate) fn arguments(
         "computer_use",
         "in_app_browser",
         "hooks",
-        "code_mode",
+        "code_mode_only",
+        "code_mode_only_strict_3p_tools",
         // Native code-mode commands reached a non-loopback endpoint under the
         // limited network profile in the Codex 0.163.0 macOS integration probe.
         "code_mode_host",

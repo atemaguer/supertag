@@ -375,6 +375,39 @@ func TestApprovingAndDenyingInPlace(t *testing.T) {
 	}
 }
 
+func TestRuntimeApprovalRequiresDetailsBeforeConfirmation(t *testing.T) {
+	m := runtimeModel(t)
+	item := approvalItem("release", "apr-1", "Publish a branch")
+	m.pane, m.item = paneInbox, item
+	m.inbox.Items = []*operatorv1.InboxItem{item}
+	m.refresh()
+	m = press(t, m, letter('a'))
+	if m.decision != decisionNone || !strings.Contains(m.renderItem(), "Loading approval details") {
+		t.Fatal("a decision was offered before the actual effect was available")
+	}
+	m = update(t, m, inboxApprovalMsg{occurrence: item.GetOccurrence(), err: errors.New("Unavailable")})
+	if m.approvalShown() || m.paneHint() != "r reload approval details" {
+		t.Fatal("a failed read should allow reloading details, with the decision disabled")
+	}
+	details := client.ApprovalDetails{Action: "git:push", Resource: "refs/heads/main",
+		Arguments: "{\n  \"force\": false\n}", Pending: true}
+	m = update(t, m, inboxApprovalMsg{occurrence: "another-approval", details: details})
+	if m.approvalShown() || strings.Contains(m.renderItem(), "refs/heads/main") {
+		t.Fatal("approval details crossed into a different Inbox item")
+	}
+	m = update(t, m, inboxApprovalMsg{occurrence: item.GetOccurrence(), details: details})
+	got := ansi.Strip(m.renderItem())
+	for _, want := range []string{"Action: git:push", "Resource: refs/heads/main", `"force": false`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in approval:\n%s", want, got)
+		}
+	}
+	m = press(t, m, letter('a'))
+	if m.decision != decisionConfirm || m.paneHint() != "enter approves this request once · esc cancels" {
+		t.Fatal("loaded approval should require a once-scope confirmation")
+	}
+}
+
 func TestDenyingTakesAReasonAndKeepsItOnFailure(t *testing.T) {
 	fake := coordinationFake()
 	fails, deny := true, fake.deny

@@ -1,7 +1,11 @@
 import { fromBinary } from "@bufbuild/protobuf";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { createGrpcTransport } from "@connectrpc/connect-node";
-import { AdapterBootstrapSchema, Harness } from "./gen/supertag/runtime/v2/runtime_pb.js";
+import {
+  AdapterBootstrapSchema,
+  Harness,
+  HarnessQuestions,
+} from "./gen/supertag/runtime/v2/runtime_pb.js";
 
 /** This is a Worker-owned, execution-scoped transport, never a public control-plane client. */
 export async function readBootstrap(input: AsyncIterable<Uint8Array>) {
@@ -30,17 +34,16 @@ export async function readBootstrap(input: AsyncIterable<Uint8Array>) {
 }
 
 export function harnessClient(endpoint: string, token: string) {
-  const client = createClient(
-    Harness,
-    createGrpcTransport({
-      baseUrl: endpoint,
-      readMaxBytes: 17 * 1024 * 1024,
-      writeMaxBytes: 17 * 1024 * 1024,
-      idleConnectionTimeoutMs: 100,
-    }),
-  );
+  const transport = createGrpcTransport({
+    baseUrl: endpoint,
+    readMaxBytes: 17 * 1024 * 1024,
+    writeMaxBytes: 17 * 1024 * 1024,
+    idleConnectionTimeoutMs: 100,
+  });
+  const client = createClient(Harness, transport);
+  const questions = createClient(HarnessQuestions, transport);
   const options = () => ({ headers: { authorization: `Bearer ${token}` }, timeoutMs: 5000 });
-  return { client, options };
+  return { client, options, questions };
 }
 
 /** Retry the identical receipt only; callers allocate a sequence before entering this function. */

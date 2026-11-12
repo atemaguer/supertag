@@ -12,6 +12,8 @@ use tonic::{Code, Request, transport::Channel};
 use uuid::Uuid;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
+#[cfg(feature = "test-fixtures")]
+const ADAPTER: &str = env!("CARGO_BIN_EXE_supertag-fixture-adapter");
 const WAIT: Duration = Duration::from_secs(15);
 
 fn command(args: &[&str]) -> Command {
@@ -57,6 +59,289 @@ fn host_request<T>(input: T, token: &str, generation: u64) -> Result<Request<T>>
         .metadata_mut()
         .insert(HOST_GENERATION_HEADER, generation.into());
     Ok(request)
+}
+
+#[cfg(feature = "test-fixtures")]
+#[tokio::test]
+async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_write() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let gateway_token = Uuid::new_v4().to_string();
+    let operator_token = Uuid::new_v4().to_string();
+    let host_token = Uuid::new_v4().to_string();
+    let mut plane = command(&["control-plane"]);
+    plane
+        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+        .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
+        .env(
+            "SUPERTAG_DATABASE_URL",
+            format!(
+                "sqlite://{}?mode=rwc",
+                directory.path().join("control.db").display()
+            ),
+        );
+    let (_plane, private) = service(plane).await?;
+    let mut gateway = command(&["gateway", "--control-plane", &private]);
+    gateway
+        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+        .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
+    let (_gateway, public) = service(gateway).await?;
+    cli(
+        &[
+            "put-tag",
+            "--gateway",
+            &public,
+            "owner",
+            "--instructions",
+            "Verify rollout",
+            "--require-workstream-approval",
+            "--workstream-approver",
+            "local",
+        ],
+        &operator_token,
+    )
+    .await?;
+    cli(
+        &[
+            "team",
+            "--gateway",
+            &public,
+            "create",
+            "release",
+            "--name",
+            "Release",
+            "--member",
+            "owner",
+        ],
+        &operator_token,
+    )
+    .await?;
+    let objective = cli(
+        &[
+            "objective",
+            "--gateway",
+            &public,
+            "create",
+            "rollout",
+            "--owner",
+            "owner",
+            "--team",
+            "release",
+            "Verify the rollout",
+        ],
+        &operator_token,
+    )
+    .await?;
+
+    let output = timeout(
+        WAIT,
+        command(&[
+            "worker-host",
+            "--gateway",
+            &public,
+            "--adapter",
+            ADAPTER,
+            "--adapter-arg=--workstream-approval",
+            "--once",
+            "--state-directory",
+            directory
+                .path()
+                .join("host")
+                .to_str()
+                .context("fixture path")?,
+        ])
+        .env("SUPERTAG_HOST_TOKEN", &host_token)
+        .output(),
+    )
+    .await??;
+    ensure!(
+        output.status.success(),
+        "Worker Host failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let page = cli(
+        &["inbox", "--gateway", &public, "list", "--kind", "approval"],
+        &operator_token,
+    )
+    .await?;
+    let source_id = objective["starting_task_id"]
+        .as_str()
+        .context("Objective Task ID")?;
+    let task = cli(
+        &["get-task", "--gateway", &public, source_id],
+        &operator_token,
+    )
+    .await?;
+    ensure!(
+        task["state"] == "TASK_STATE_SUCCEEDED",
+        "fixture Task did not finish: {task}"
+    );
+    let item = &page["items"][0];
+    let approval_id = match item["approval"]["approval_id"].as_str() {
+        Some(id) => id,
+        None => {
+            let history = cli(
+                &["inbox", "--gateway", &public, "approvals"],
+                &operator_token,
+            )
+            .await?;
+            anyhow::bail!(
+                "missing approval for fixture Task {task}; Inbox {page}; approval history {history}"
+            );
+        }
+    };
+    assert_eq!(item["task_id"], objective["starting_task_id"]);
+    assert_eq!(item["operator_eligible"], true);
+    assert_eq!(item["approval"]["resource"], "release");
+    let detail = cli(
+        &["inbox", "--gateway", &public, "approval", approval_id],
+        &operator_token,
+    )
+    .await?;
+    let message = "The rollout is ready.";
+    assert_eq!(detail["arguments"]["body"], message);
+    assert_eq!(detail["action"], "workstream:post");
+    assert_eq!(detail["state"], "pending");
+
+    let channel = Channel::from_shared(public.clone())?
+        .timeout(WAIT)
+        .connect()
+        .await?;
+    let mut worker = worker_host_client::WorkerHostClient::new(channel.clone());
+    let mut workstreams =
+        attempt_workstreams_client::AttemptWorkstreamsClient::new(channel.clone());
+    let mut inbox = inbox_client::InboxClient::new(channel);
+    let host = worker
+        .register_host(authenticated_request(
+            RegisterHostRequest {
+                incarnation_id: "approval-host".into(),
+            },
+            &host_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    let claim_request = |operation_id: &str| {
+        host_request(
+            ClaimTaskRequest {
+                operation_id: operation_id.into(),
+                ..Default::default()
+            },
+            &host_token,
+            host.generation,
+        )
+    };
+    let start_request = |attempt: &InspectAttemptRequest| {
+        host_request(
+            StartTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+            },
+            &host_token,
+            host.generation,
+        )
+    };
+    let send = |attempt: &InspectAttemptRequest, operation_id: &str, body: &str| {
+        host_request(
+            PostAttemptWorkstreamRequest {
+                attempt: Some(attempt.clone()),
+                operation_id: operation_id.into(),
+                body: body.into(),
+                to_tag_ids: vec![],
+            },
+            &host_token,
+            host.generation,
+        )
+    };
+    assert_eq!(
+        inbox
+            .get_approval(authenticated_request(
+                GetApprovalRequest {
+                    approval_id: approval_id.into(),
+                },
+                &host_token,
+                Some("operator:local")
+            )?)
+            .await
+            .unwrap_err()
+            .code(),
+        Code::Unauthenticated
+    );
+    let decision_args = [
+        "inbox",
+        "--gateway",
+        &public,
+        "approve",
+        approval_id,
+        "--operation-id",
+        "decide-post",
+    ];
+    let decision = cli(&decision_args, &operator_token).await?;
+    let replay = cli(&decision_args, &operator_token).await?;
+    assert_eq!(decision, replay);
+    assert_eq!(decision["scope"], "once");
+    let assignment = worker
+        .claim_task(claim_request("continuation")?)
+        .await?
+        .into_inner()
+        .assignment
+        .context("approval continuation")?;
+    let next = assignment.task.context("continued Task")?;
+    assert_eq!(next.session_id, objective["session_id"]);
+    assert_eq!(next.task_id, decision["continuation_task_id"]);
+    let next = InspectAttemptRequest {
+        task_id: next.task_id,
+        attempt_id: assignment.attempt_id,
+        lease_token: assignment.lease_token,
+    };
+    worker.start_task(start_request(&next)?).await?;
+    let posted = workstreams
+        .post_attempt_workstream(send(&next, "post-after-approval", message)?)
+        .await?
+        .into_inner();
+    assert_eq!(
+        posted.post.context("approved Workstream effect")?.body,
+        message
+    );
+    let duplicate = workstreams
+        .post_attempt_workstream(send(&next, "post-after-approval", message)?)
+        .await?
+        .into_inner();
+    assert!(duplicate.duplicate);
+    let different = workstreams
+        .post_attempt_workstream(send(&next, "changed", "Different message")?)
+        .await?
+        .into_inner();
+    assert!(different.post.is_none());
+    assert_eq!(
+        different.approval.context("new request")?.state(),
+        ApprovalState::Pending
+    );
+    assert_eq!(
+        workstreams
+            .post_attempt_workstream(send(&next, "changed", message)?)
+            .await
+            .unwrap_err()
+            .code(),
+        Code::AlreadyExists
+    );
+    let used = cli(
+        &["inbox", "--gateway", &public, "approval", approval_id],
+        &operator_token,
+    )
+    .await?;
+    assert!(used["consumed_at_ms"].is_i64());
+    let page = cli(
+        &["team", "--gateway", &public, "posts", "release"],
+        &operator_token,
+    )
+    .await?;
+    assert_eq!(
+        page["posts"].as_array().context("Workstream posts")?.len(),
+        1
+    );
+    Ok(())
 }
 
 #[tokio::test]

@@ -13,7 +13,9 @@ import { permissionHook } from "./src/rust-adapter/adapter.js";
 import {
   AdapterBootstrapSchema,
   Harness,
+  type HarnessAskQuestionRequest,
   type HarnessCompleteRequest,
+  HarnessQuestions,
   type HarnessUsageRequest,
   LiveInputReceipt,
   type SessionCheckpoint,
@@ -38,6 +40,8 @@ async function invoke({
   lostComplete = false,
   cancel = false,
   liveInput,
+  mayAskObjectiveQuestion = false,
+  lostQuestion = false,
 }: {
   prompt?: string;
   checkpoint?: SessionCheckpoint;
@@ -45,6 +49,8 @@ async function invoke({
   lostComplete?: boolean;
   cancel?: boolean;
   liveInput?: string;
+  mayAskObjectiveQuestion?: boolean;
+  lostQuestion?: boolean;
 } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "supertag-rust-claude-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
@@ -57,6 +63,8 @@ async function invoke({
   const events: string[] = [];
   const usage: HarnessUsageRequest[] = [];
   const settlements: LiveInputReceipt[] = [];
+  const questions: HarnessAskQuestionRequest[] = [];
+  let question: HarnessAskQuestionRequest | undefined;
   let taken = false;
   const sessions = new Set<ServerHttp2Session>();
   const task = create(TaskSchema, {
@@ -76,7 +84,12 @@ async function invoke({
         router.service(Harness, {
           attach(_request, context) {
             expect(context.requestHeader.get("authorization")).toBe(`Bearer ${token}`);
-            return { task, attemptId: "attempt", ...(checkpoint ? { checkpoint } : {}) };
+            return {
+              task,
+              attemptId: "attempt",
+              mayAskObjectiveQuestion,
+              ...(checkpoint ? { checkpoint } : {}),
+            };
           },
           takeLiveInput() {
             if (liveInput && !taken) {
@@ -103,6 +116,27 @@ async function invoke({
             if (lostComplete && completions.length === 1)
               throw new ConnectError("reply lost", Code.Unavailable);
             return {};
+          },
+        });
+        router.service(HarnessQuestions, {
+          askQuestion(request, context) {
+            expect(context.requestHeader.get("authorization")).toBe(`Bearer ${token}`);
+            questions.push(request);
+            if (
+              question &&
+              (question.operationId !== request.operationId || question.text !== request.text)
+            )
+              throw new ConnectError("private refusal details", Code.AlreadyExists);
+            question = request;
+            if (lostQuestion && questions.length === 1)
+              throw new ConnectError("reply lost", Code.Unavailable);
+            return {
+              taskId: "task",
+              attemptId: "attempt",
+              objectiveId: "objective",
+              text: question.text,
+              askedAtMs: 1n,
+            };
           },
         });
       },
@@ -162,7 +196,7 @@ async function invoke({
     stderr: "",
     stdout: "",
   });
-  return { directory, workspace, state, completions, events, usage, settlements };
+  return { directory, workspace, state, completions, events, usage, settlements, questions };
 }
 
 it("runs the real Node SDK, denies unadmitted tools, mirrors a bounded checkpoint, and retries the same receipt", async () => {
@@ -269,4 +303,35 @@ it("settles live input only after the real SDK writes it to the native prompt st
   expect(run.completions[0]?.succeeded).toBe(true);
   expect(run.completions[0]?.result).toContain("delivered followup");
   expect(run.settlements).toEqual([LiveInputReceipt.ACCEPTED]);
+}, 30000);
+
+it("registers only the admitted Objective question in the real SDK and retries its exact receipt", async () => {
+  const run = await invoke({
+    prompt: "objective-question",
+    mayAskObjectiveQuestion: true,
+    lostQuestion: true,
+    actions: [],
+  });
+  expect(
+    run.completions[0]?.succeeded,
+    await readFile(join(run.workspace, "fixture-error.txt"), "utf8").catch(
+      () => run.completions[0]?.result,
+    ),
+  ).toBe(true);
+  expect(run.completions[0]?.result).toContain("Objective question recorded");
+  expect(run.questions.map(({ text }) => text)).toEqual([
+    "Confirm the target branch. [REDACTED]",
+    "Confirm the target branch. [REDACTED]",
+    "Confirm the target branch. [REDACTED]",
+    "A different question",
+  ]);
+  expect(new Set(run.questions.map(({ operationId }) => operationId)).size).toBe(1);
+  expect(run.questions[0]?.operationId).toBeTruthy();
+}, 30000);
+
+it("does not register or admit the Objective question without the attached capability", async () => {
+  const run = await invoke({ prompt: "objective-question-denied" });
+  expect(run.completions[0]?.result).toContain("Objective question unavailable");
+  expect(run.completions[0]?.succeeded).toBe(true);
+  expect(run.questions).toEqual([]);
 }, 30000);

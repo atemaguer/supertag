@@ -29,8 +29,8 @@ use supertag_gateway::{
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
-        AttemptDecision, CancelTaskRequest, CreateAuthKeyRequest, GetTaskRequest, HarnessKind,
-        LarkDomain, ListEventsRequest, ListNativeUsageRequest, PutTagRequest,
+        ApprovalRule, AttemptDecision, CancelTaskRequest, CreateAuthKeyRequest, GetTaskRequest,
+        HarnessKind, LarkDomain, ListEventsRequest, ListNativeUsageRequest, PutTagRequest,
         ResolveAttemptRequest, RevokeHostRequest, SubmitTaskRequest, Task, WorkspaceSpec,
         attempt_inputs_server::AttemptInputsServer, attempt_mailbox_server::AttemptMailboxServer,
         attempt_workstreams_server::AttemptWorkstreamsServer,
@@ -226,6 +226,12 @@ enum Command {
         instructions: String,
         #[arg(long)]
         allow: Vec<String>,
+        /// Require approval before this Tag posts to a Team Workstream.
+        #[arg(long)]
+        require_workstream_approval: bool,
+        /// Bare operator ID eligible to approve. Omit to allow any eligible operator.
+        #[arg(long, requires = "require_workstream_approval")]
+        workstream_approver: Vec<String>,
         /// Host-local logical repository binding.
         #[arg(long, requires = "workspace_base")]
         workspace_id: Option<String>,
@@ -575,7 +581,9 @@ async fn run(command: Command) -> Result<()> {
             connection,
             tag_id,
             instructions,
-            allow,
+            mut allow,
+            require_workstream_approval,
+            workstream_approver,
             workspace_id,
             workspace_base,
             harness,
@@ -586,6 +594,15 @@ async fn run(command: Command) -> Result<()> {
                     workspace_id,
                     base_commit,
                 });
+            let mut approval_rules = Vec::new();
+            if require_workstream_approval {
+                let action = "workstream:post".to_string();
+                allow.push(action.clone());
+                approval_rules.push(ApprovalRule {
+                    action,
+                    operator_ids: workstream_approver,
+                });
+            }
             let (mut operator, token) = operator(connection).await?;
             let tag = operator
                 .put_tag(request(
@@ -596,6 +613,7 @@ async fn run(command: Command) -> Result<()> {
                         workspace,
                         harness_kind: harness.map_or(HarnessKind::Unspecified, Harness::kind)
                             as i32,
+                        approval_rules,
                     },
                     &token,
                 )?)

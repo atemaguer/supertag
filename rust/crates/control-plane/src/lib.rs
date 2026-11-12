@@ -1,3 +1,4 @@
+mod approvals;
 mod checkpoints;
 mod conversations;
 mod inbox;
@@ -52,6 +53,7 @@ impl ControlPlane {
         self.store.sweep_expired_attempts().await?;
         self.store.sweep_inputs().await?;
         self.store.sweep_mailbox().await?;
+        self.store.sweep_approvals().await?;
         self.store.prune_watch().await?;
         Ok(())
     }
@@ -148,19 +150,8 @@ impl operator_server::Operator for ControlPlane {
 
     async fn put_tag(&self, request: Request<PutTagRequest>) -> Result<Response<Tag>, Status> {
         self.principal(&request, "operator:")?;
-        let input = request.into_inner();
-        let harness = HarnessKind::try_from(input.harness_kind)
-            .map_err(|_| Status::invalid_argument("unknown harness kind"))?;
         Ok(Response::new(
-            self.store
-                .put_tag_configured(
-                    &input.tag_id,
-                    &input.instructions,
-                    input.allowed_actions,
-                    input.workspace,
-                    harness,
-                )
-                .await?,
+            self.store.put_tag_spec(request.into_inner()).await?,
         ))
     }
 
@@ -269,6 +260,18 @@ impl worker_host_server::WorkerHost for ControlPlane {
         Ok(Response::new(
             self.store
                 .ask_question(&authority, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn get_attempt_capabilities(
+        &self,
+        request: Request<InspectAttemptRequest>,
+    ) -> Result<Response<AttemptCapabilities>, Status> {
+        let authority = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .attempt_capabilities(&authority, &request.into_inner())
                 .await?,
         ))
     }
@@ -627,6 +630,7 @@ mod tests {
             .await
             .unwrap();
         let tag = PutTagRequest {
+            approval_rules: vec![],
             harness_kind: 0,
             workspace: None,
             tag_id: "tag".into(),

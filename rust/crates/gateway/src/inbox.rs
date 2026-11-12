@@ -48,4 +48,37 @@ impl inbox_server::Inbox for Gateway {
         )
         .await
     }
+    async fn get_approval(
+        &self,
+        request: Request<GetApprovalRequest>,
+    ) -> Result<Response<Approval>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { client(channel).get_approval(request).await },
+        )
+        .await
+    }
+    async fn list_approvals(
+        &self,
+        request: Request<ListApprovalsRequest>,
+    ) -> Result<Response<ListApprovalsResponse>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { client(channel).list_approvals(request).await },
+        )
+        .await
+    }
+    async fn decide_approval(
+        &self,
+        request: Request<DecideApprovalRequest>,
+    ) -> Result<Response<Approval>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { client(channel).decide_approval(request).await },
+        )
+        .await
+    }
 }

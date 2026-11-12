@@ -16,11 +16,12 @@ use supertag_codex_adapter::{CodexOptions, run};
 use supertag_protocol::{
     MAX_CHECKPOINT_BYTES, MAX_MESSAGE_BYTES, matches_bearer,
     v2::{
-        AdapterBootstrap, HarnessAttachRequest, HarnessCompleteRequest, HarnessCompleteResponse,
-        HarnessPublishRequest, HarnessRun, HarnessSettleLiveInputRequest,
+        AdapterBootstrap, HarnessAskQuestionRequest, HarnessAttachRequest, HarnessCompleteRequest,
+        HarnessCompleteResponse, HarnessPublishRequest, HarnessRun, HarnessSettleLiveInputRequest,
         HarnessTakeLiveInputRequest, HarnessUsageRequest, LiveInput, LiveInputReceipt,
-        LiveInputState, ReportAttemptUsageResponse, SessionCheckpoint, TakeInputResponse, Task,
-        TaskEvent,
+        LiveInputState, ObjectiveQuestion, ReportAttemptUsageResponse, SessionCheckpoint,
+        TakeInputResponse, Task, TaskEvent,
+        harness_questions_server::{HarnessQuestions, HarnessQuestionsServer},
         harness_server::{Harness, HarnessServer},
     },
 };
@@ -43,6 +44,12 @@ struct Observed {
     valid_for_ms: u64,
     lose_settlement_response: bool,
     lose_take_response: bool,
+    questions: Vec<HarnessAskQuestionRequest>,
+    lose_question_response: bool,
+    deny_question: bool,
+    unknown_question: bool,
+    bad_question_receipt: bool,
+    slow_question: bool,
 }
 
 #[derive(Clone)]
@@ -50,6 +57,7 @@ struct HarnessFixture {
     task: Task,
     observed: Arc<Mutex<Observed>>,
     checkpoint: Option<SessionCheckpoint>,
+    may_ask: bool,
 }
 
 impl HarnessFixture {
@@ -72,6 +80,7 @@ impl Harness for HarnessFixture {
             task: Some(self.task.clone()),
             attempt_id: "native-attempt".into(),
             checkpoint: self.checkpoint.clone(),
+            may_ask_objective_question: self.may_ask,
         }))
     }
     async fn take_live_input(
@@ -166,6 +175,51 @@ impl Harness for HarnessFixture {
     }
 }
 
+#[tonic::async_trait]
+impl HarnessQuestions for HarnessFixture {
+    async fn ask_question(
+        &self,
+        request: Request<HarnessAskQuestionRequest>,
+    ) -> Result<Response<ObjectiveQuestion>, Status> {
+        self.authenticate(&request)?;
+        let mut observed = self.observed.lock().await;
+        let request = request.into_inner();
+        if let Some(prior) = observed.questions.first() {
+            assert_eq!(prior, &request);
+        }
+        observed.questions.push(request.clone());
+        if observed.unknown_question {
+            return Err(Status::unavailable("synthetic-private-error"));
+        }
+        if observed.slow_question {
+            // Release the observation lock so completion can prove that the
+            // native child was stopped even while this RPC outcome is unknown.
+            drop(observed);
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            return Err(Status::unavailable("synthetic-private-error"));
+        }
+        if observed.deny_question {
+            return Err(Status::permission_denied("synthetic-private-error"));
+        }
+        if observed.lose_question_response {
+            observed.lose_question_response = false;
+            return Err(Status::unavailable("lost durable Ask response"));
+        }
+        Ok(Response::new(ObjectiveQuestion {
+            task_id: if observed.bad_question_receipt {
+                "foreign-task".into()
+            } else {
+                self.task.task_id.clone()
+            },
+            attempt_id: "native-attempt".into(),
+            objective_id: "native-objective".into(),
+            text: request.text,
+            asked_at_ms: 1,
+            ..Default::default()
+        }))
+    }
+}
+
 struct HarnessProcess {
     bootstrap: AdapterBootstrap,
     observed: Arc<Mutex<Observed>>,
@@ -189,6 +243,15 @@ impl HarnessProcess {
         checkpoint: Option<SessionCheckpoint>,
         prompt: &str,
     ) -> Result<Self> {
+        Self::configured(actions, checkpoint, prompt, false).await
+    }
+
+    async fn configured(
+        actions: &[&str],
+        checkpoint: Option<SessionCheckpoint>,
+        prompt: &str,
+        may_ask: bool,
+    ) -> Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let bootstrap = AdapterBootstrap {
             endpoint: format!("http://{}", listener.local_addr()?),
@@ -210,14 +273,16 @@ impl HarnessProcess {
             },
             observed: observed.clone(),
             checkpoint,
+            may_ask,
         };
         let server = tokio::spawn(
             Server::builder()
                 .add_service(
-                    HarnessServer::new(fixture)
+                    HarnessServer::new(fixture.clone())
                         .max_decoding_message_size(MAX_CHECKPOINT_BYTES + MAX_MESSAGE_BYTES)
                         .max_encoding_message_size(MAX_CHECKPOINT_BYTES + MAX_MESSAGE_BYTES),
                 )
+                .add_service(HarnessQuestionsServer::new(fixture))
                 .serve_with_incoming(TcpListenerStream::new(listener)),
         );
         Ok(Self {
@@ -603,6 +668,8 @@ async fn native_app_server_uses_exact_model_read_only_sandbox_scoped_env_and_red
         "features.unified_exec=false",
         "features.hooks=false",
         "features.code_mode_host=false",
+        "features.code_mode.enabled=false",
+        "features.code_mode.direct_only_tool_namespaces=[\"supertag\"]",
         "mcp_servers={}",
         "web_search=\"disabled\"",
         "project_doc_max_bytes=0",
@@ -1022,7 +1089,7 @@ async fn continuation_restores_native_history_in_a_new_home_and_reapplies_curren
         .clone()
         .context("missing first checkpoint")?;
     assert_eq!(checkpoint.harness, "codex");
-    assert_eq!(checkpoint.format, "codex-session-v1");
+    assert_eq!(checkpoint.format, "codex-session-v2");
     assert_eq!(
         checkpoint.sha256,
         format!("{:x}", Sha256::digest(&checkpoint.payload))
@@ -1185,5 +1252,355 @@ async fn checkpoint_larger_than_ordinary_message_limit_crosses_attach_and_comple
     assert!(outcome.succeeded, "{}", outcome.result);
     assert!(outcome.checkpoint.as_ref().unwrap().payload.len() > MAX_MESSAGE_BYTES);
     assert!(second.read("restored.jsonl")?.len() > MAX_MESSAGE_BYTES);
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_objective_question_is_scoped_idempotent_and_pins_its_manifest() -> Result<()> {
+    let fixture = NativeFixture::new(&successful("Waiting for your decision"), "exit 0")?;
+    std::fs::write(fixture.directory.path().join("question-mode"), "duplicate")?;
+    let server =
+        HarnessProcess::configured(&["files:read"], None, "Ask the operator", true).await?;
+    server.observed.lock().await.lose_question_response = true;
+    run(fixture.options(), server.bootstrap.clone()).await?;
+    let observed = server.observed.lock().await;
+    let outcome = observed.outcome.as_ref().unwrap();
+    assert!(outcome.succeeded, "{}", outcome.result);
+    assert_eq!(
+        observed.questions.len(),
+        2,
+        "only identical durable gRPC receipt retried, duplicate native call uses cached result"
+    );
+    assert_eq!(observed.questions[0].text, "May I use staging?");
+    let checkpoint = outcome.checkpoint.clone().unwrap();
+    drop(observed);
+    let requests: Vec<Value> = fixture
+        .read("requests.jsonl")?
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<std::result::Result<_, _>>()?;
+    let start = requests
+        .iter()
+        .find(|r| r["method"] == "thread/start")
+        .unwrap();
+    assert_eq!(start["params"]["dynamicTools"][0]["name"], "supertag");
+    assert_eq!(
+        start["params"]["dynamicTools"][0]["tools"][0]["name"],
+        "ask"
+    );
+    assert!(!fixture.read("env")?.contains(TOKEN));
+    assert!(
+        fixture
+            .read("args")?
+            .contains("features.code_mode_host=false")
+    );
+    let resumed = NativeFixture::new(&successful("Resumed with the answer"), "exit 0")?;
+    let server = HarnessProcess::configured(
+        &["files:read"],
+        Some(checkpoint.clone()),
+        "Use staging",
+        true,
+    )
+    .await?;
+    run(resumed.options(), server.bootstrap.clone()).await?;
+    assert!(
+        server
+            .observed
+            .lock()
+            .await
+            .outcome
+            .as_ref()
+            .unwrap()
+            .succeeded
+    );
+    let rejected = NativeFixture::new(&successful("Must not launch"), "exit 0")?;
+    let server = HarnessProcess::configured(
+        &["files:read"],
+        Some(checkpoint),
+        "No question authority",
+        false,
+    )
+    .await?;
+    run(rejected.options(), server.bootstrap.clone()).await?;
+    assert!(
+        !server
+            .observed
+            .lock()
+            .await
+            .outcome
+            .as_ref()
+            .unwrap()
+            .succeeded
+    );
+    assert!(!rejected.directory.path().join("args").exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_questions_reject_wrong_scope_schema_late_calls_and_missing_capability() -> Result<()>
+{
+    for mode in [
+        "wrong-thread",
+        "wrong-turn",
+        "wrong-namespace",
+        "extra",
+        "late",
+        "no-capability",
+        "before-turn",
+    ] {
+        let fixture = NativeFixture::new(&successful("must not accept"), "exit 0")?;
+        std::fs::write(fixture.directory.path().join("question-mode"), mode)?;
+        let server =
+            HarnessProcess::configured(&["files:read"], None, "Ask", mode != "no-capability")
+                .await?;
+        run(fixture.options(), server.bootstrap.clone()).await?;
+        let observed = server.observed.lock().await;
+        assert!(!observed.outcome.as_ref().unwrap().succeeded, "{mode}");
+        assert!(observed.questions.is_empty(), "{mode}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_question_before_turn_ack_and_authoritative_refusal_are_handled() -> Result<()> {
+    for (mode, deny) in [("early", false), ("valid", true), ("moderation", false)] {
+        let fixture = NativeFixture::new(&successful("Question handled"), "exit 0")?;
+        std::fs::write(fixture.directory.path().join("question-mode"), mode)?;
+        let server = HarnessProcess::configured(&["files:read"], None, "Ask", true).await?;
+        server.observed.lock().await.deny_question = deny;
+        run(fixture.options(), server.bootstrap.clone()).await?;
+        let observed = server.observed.lock().await;
+        assert!(
+            observed.outcome.as_ref().unwrap().succeeded,
+            "{}",
+            observed.outcome.as_ref().unwrap().result
+        );
+        assert_eq!(observed.questions.len(), 1);
+        let replies: Vec<Value> = fixture
+            .read("requests.jsonl")?
+            .lines()
+            .map(serde_json::from_str)
+            .collect::<std::result::Result<_, _>>()?;
+        let reply = replies.iter().find(|r| r["id"] == "question-rpc").unwrap();
+        assert_eq!(reply["result"]["success"], !deny);
+        assert!(!serde_json::to_string(&replies)?.contains("synthetic-private-error"));
+    }
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "uses approved native Codex sign-in and model calls; set SUPERTAG_TEST_CODEX_BINARY"]
+async fn installed_native_objective_question_and_pinned_tool_resume() -> Result<()> {
+    let binary =
+        std::env::var_os("SUPERTAG_TEST_CODEX_BINARY").context("set SUPERTAG_TEST_CODEX_BINARY")?;
+    let fixture = NativeFixture::new(&successful("unused"), "exit 0")?;
+    let mut options = fixture.options();
+    options.executable = binary.clone().into();
+    options.model = Some("gpt-6.1-sol".into());
+    options.timeout = Duration::from_secs(90);
+    options.environment = ["PATH", "HOME", "CODEX_HOME", "LANG", "TMPDIR"]
+        .into_iter()
+        .filter_map(|name| std::env::var_os(name).map(|value| (OsString::from(name), value)))
+        .collect();
+    let server = HarnessProcess::configured(&["files:read"], None,
+        "This is an isolated test Objective. Use the supertag.ask tool exactly once with text 'May I use the staging fixture?' Then end your turn with a short reply. Do not use other tools, read files, or execute commands.", true).await?;
+    run(options, server.bootstrap.clone()).await?;
+    let checkpoint = {
+        let observed = server.observed.lock().await;
+        let outcome = observed
+            .outcome
+            .as_ref()
+            .context("native outcome missing")?;
+        ensure!(
+            outcome.succeeded,
+            "native Objective question failed: {}",
+            outcome.result
+        );
+        ensure!(
+            observed.questions.len() == 1,
+            "native invoked its Objective question tool {} times; final response: {}",
+            observed.questions.len(),
+            outcome.result
+        );
+        ensure!(
+            observed.questions[0].text == "May I use the staging fixture?",
+            "native question text differs"
+        );
+        ensure!(!observed.usage.is_empty(), "native usage missing");
+        outcome
+            .checkpoint
+            .clone()
+            .context("native checkpoint missing")?
+    };
+    let second = NativeFixture::new(&successful("unused"), "exit 0")?;
+    let mut options = second.options();
+    options.executable = binary.into();
+    options.model = Some("gpt-6.1-sol".into());
+    options.timeout = Duration::from_secs(90);
+    options.environment = ["PATH", "HOME", "CODEX_HOME", "LANG", "TMPDIR"]
+        .into_iter()
+        .filter_map(|name| std::env::var_os(name).map(|value| (OsString::from(name), value)))
+        .collect();
+    let server = HarnessProcess::configured(&["files:read"], Some(checkpoint),
+        "The operator answered: Yes, use staging. Reply exactly NATIVE_QUESTION_RESUME_OK. Do not call tools, read files, or execute commands.", true).await?;
+    run(options, server.bootstrap.clone()).await?;
+    let observed = server.observed.lock().await;
+    let outcome = observed
+        .outcome
+        .as_ref()
+        .context("native resumed outcome missing")?;
+    ensure!(
+        outcome.succeeded,
+        "native question resume failed: {}",
+        outcome.result
+    );
+    ensure!(
+        outcome.result.contains("NATIVE_QUESTION_RESUME_OK"),
+        "native resumed answer missing"
+    );
+    ensure!(
+        observed.questions.is_empty(),
+        "native asked a second question unnecessarily"
+    );
+    ensure!(
+        outcome.checkpoint.is_some(),
+        "native resumed checkpoint missing"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn ambiguous_question_and_invalid_receipts_fail_without_checkpoint_and_stop_native()
+-> Result<()> {
+    for mode in ["unknown", "bad-receipt", "slow", "changed-replay"] {
+        let fixture = NativeFixture::new(&successful("must not complete"), "exit 0")?;
+        std::fs::write(
+            fixture.directory.path().join("question-mode"),
+            if mode == "changed-replay" {
+                mode
+            } else {
+                "valid"
+            },
+        )?;
+        let server = HarnessProcess::configured(&["files:read"], None, "Ask", true).await?;
+        {
+            let mut observed = server.observed.lock().await;
+            observed.unknown_question = mode == "unknown";
+            observed.bad_question_receipt = mode == "bad-receipt";
+            observed.slow_question = mode == "slow";
+        }
+        let mut options = fixture.options();
+        if mode == "slow" {
+            options.timeout = Duration::from_millis(700);
+        }
+        run(options, server.bootstrap.clone()).await?;
+        let observed = server.observed.lock().await;
+        let outcome = observed.outcome.as_ref().unwrap();
+        assert!(!outcome.succeeded, "{mode}");
+        assert!(outcome.checkpoint.is_none(), "{mode}");
+        assert!(!outcome.result.contains("synthetic-private-error"));
+        assert_eq!(
+            observed.questions.len(),
+            if mode == "unknown" { 3 } else { 1 },
+            "{mode}"
+        );
+        let pid: i32 = fixture.read("pid")?.parse()?;
+        assert_eq!(
+            unsafe { libc::kill(pid, 0) },
+            -1,
+            "{mode}: native child survived"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn legacy_no_tool_checkpoint_resumes_without_gaining_question_authority() -> Result<()> {
+    let first = NativeFixture::new(&successful("legacy history"), "exit 0")?;
+    let server = HarnessProcess::start(&["files:read"]).await?;
+    run(first.options(), server.bootstrap.clone()).await?;
+    let mut checkpoint = server
+        .observed
+        .lock()
+        .await
+        .outcome
+        .as_ref()
+        .unwrap()
+        .checkpoint
+        .clone()
+        .unwrap();
+    let mut payload: Value = serde_json::from_slice(&checkpoint.payload)?;
+    payload["version"] = json!(1);
+    payload.as_object_mut().unwrap().remove("tool_manifest");
+    checkpoint.payload = serde_json::to_vec(&payload)?;
+    checkpoint.sha256 = format!("{:x}", Sha256::digest(&checkpoint.payload));
+    checkpoint.format = "codex-session-v1".into();
+    let legacy = checkpoint.clone();
+    let second = NativeFixture::new(&successful("legacy resumed"), "exit 0")?;
+    let server = HarnessProcess::with_checkpoint(&["files:read"], Some(legacy.clone())).await?;
+    run(second.options(), server.bootstrap.clone()).await?;
+    let observed = server.observed.lock().await;
+    let outcome = observed.outcome.as_ref().unwrap();
+    assert!(outcome.succeeded, "{}", outcome.result);
+    assert_eq!(
+        outcome.checkpoint.as_ref().unwrap().format,
+        "codex-session-v2"
+    );
+    drop(observed);
+    for mode in ["gain-authority", "untrusted-manifest"] {
+        let mut checkpoint = legacy.clone();
+        if mode == "untrusted-manifest" {
+            let mut archive: Value = serde_json::from_slice(&checkpoint.payload)?;
+            let text = archive["transcripts"][0]["text"].as_str().unwrap();
+            let mut records: Vec<Value> = text
+                .lines()
+                .map(serde_json::from_str)
+                .collect::<std::result::Result<_, _>>()?;
+            records[0]["payload"]["dynamic_tools"] = json!([{"name":"unexpected"}]);
+            archive["transcripts"][0]["text"] = json!(event_lines(&records));
+            checkpoint.payload = serde_json::to_vec(&archive)?;
+            checkpoint.sha256 = format!("{:x}", Sha256::digest(&checkpoint.payload));
+        }
+        let fixture = NativeFixture::new(&successful("must not launch"), "exit 0")?;
+        let server = HarnessProcess::configured(
+            &["files:read"],
+            Some(checkpoint),
+            "resume",
+            mode == "gain-authority",
+        )
+        .await?;
+        run(fixture.options(), server.bootstrap.clone()).await?;
+        assert!(
+            !server
+                .observed
+                .lock()
+                .await
+                .outcome
+                .as_ref()
+                .unwrap()
+                .succeeded,
+            "{mode}"
+        );
+        assert!(!fixture.directory.path().join("args").exists(), "{mode}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn informational_moderation_metadata_does_not_accept_a_failed_turn() -> Result<()> {
+    let fixture = NativeFixture::new(
+        &event_lines(&[
+            json!({"type":"thread.started","thread_id":"native-thread"}),
+            json!({"type":"turn.failed"}),
+        ]),
+        "exit 0",
+    )?;
+    std::fs::write(fixture.directory.path().join("question-mode"), "moderation")?;
+    let server = HarnessProcess::configured(&["files:read"], None, "Ask", true).await?;
+    run(fixture.options(), server.bootstrap.clone()).await?;
+    let observed = server.observed.lock().await;
+    assert_eq!(observed.questions.len(), 1);
+    assert!(!observed.outcome.as_ref().unwrap().succeeded);
+    assert!(observed.outcome.as_ref().unwrap().checkpoint.is_none());
     Ok(())
 }

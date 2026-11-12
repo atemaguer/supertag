@@ -43,11 +43,37 @@ fn nonempty_text(value: &str, maximum: usize) -> Result<&str> {
     }
     Ok(value)
 }
-fn closed(status: i64) -> bool {
-    status == ObjectiveStatus::Completed as i64 || status == ObjectiveStatus::Cancelled as i64
-}
-
 impl Store {
+    pub async fn attempt_capabilities(
+        &self,
+        host: &HostAuthority,
+        attempt: &InspectAttemptRequest,
+    ) -> Result<AttemptCapabilities> {
+        let mut tx = self.pool.begin().await?;
+        let row = owned(
+            &mut tx,
+            host,
+            &attempt.task_id,
+            &attempt.attempt_id,
+            &attempt.lease_token,
+        )
+        .await?;
+        if row.try_get::<i64, _>("state")? != TaskState::Running as i64
+            || !lease_is_live(&row, self.execution_now_ms())?
+        {
+            return Err(StoreError::FailedPrecondition(
+                "capabilities require a live running Attempt".into(),
+            ));
+        }
+        let may_ask_objective_question = question_objective_in(&mut tx, &row, &attempt.task_id)
+            .await?
+            .is_some();
+        tx.commit().await?;
+        Ok(AttemptCapabilities {
+            may_ask_objective_question,
+        })
+    }
+
     pub async fn ask_question(
         &self,
         host: &HostAuthority,
@@ -94,19 +120,15 @@ impl Store {
                 "asking requires a live running Attempt".into(),
             ));
         }
-        let objective = sqlx::query("SELECT o.* FROM supertag_v2_objectives o JOIN supertag_v2_objective_tasks link ON link.objective_id=o.objective_id WHERE link.task_id=$1")
-            .bind(&attempt.task_id).fetch_optional(&mut *tx).await?.ok_or_else(|| StoreError::FailedPrecondition("only an Objective owner Task can ask an operator question".into()))?;
-        if closed(objective.try_get("status")?) {
-            return Err(StoreError::FailedPrecondition("Objective is closed".into()));
-        }
-        if objective.try_get::<String, _>("owner_tag_id")? != row.try_get::<String, _>("tag_id")?
-            || objective.try_get::<String, _>("session_id")?
-                != row.try_get::<String, _>("session_id")?
-        {
-            return Err(StoreError::PermissionDenied);
-        }
+        let objective_id = question_objective_in(&mut tx, &row, &attempt.task_id)
+            .await?
+            .ok_or_else(|| {
+                StoreError::FailedPrecondition(
+                    "asking requires work by the owner of an open Objective".into(),
+                )
+            })?;
         sqlx::query("INSERT INTO supertag_v2_objective_questions (attempt_id,task_id,objective_id,operation_id,text,asked_at_ms) VALUES ($1,$2,$3,$4,$5,$6)")
-            .bind(&attempt.attempt_id).bind(&attempt.task_id).bind(objective.try_get::<String,_>("objective_id")?).bind(&input.operation_id).bind(text).bind(now).execute(&mut *tx).await?;
+            .bind(&attempt.attempt_id).bind(&attempt.task_id).bind(objective_id).bind(&input.operation_id).bind(text).bind(now).execute(&mut *tx).await?;
         let question = question_in(&mut tx, &attempt.task_id, false).await?;
         tx.commit().await?;
         Ok(question)
@@ -244,6 +266,7 @@ impl Store {
                         text: preview,
                         asked_at_ms: question.asked_at_ms,
                     }),
+                    approval: None,
                 });
             }
         }
@@ -303,6 +326,7 @@ impl Store {
                         actionable_since_ms: event.at.as_millis(),
                         reason,
                         question: None,
+                        approval: None,
                     });
                 }
             }
@@ -319,8 +343,23 @@ impl Store {
                 let task_id: String = row.try_get("task_id")?;
                 let attempt_id: Option<String> = row.try_get("attempt_id")?;
                 let key = format!("task_attention:{task_id}");
-                items.push(InboxItem { key: key.clone(), occurrence: format!("{key}:{}", attempt_id.as_deref().unwrap_or("")), kind: InboxItemKind::TaskAttention as i32, objective_id: row.try_get("objective_id")?, task_id, attempt_id, operator_eligible: true, actionable_since_ms: row.try_get("lease_expires_at_ms")?, reason: "Execution is uncertain. Confirm cleanup on the Worker Host before resolving this Attempt.".into(), question: None });
+                items.push(InboxItem { key: key.clone(), occurrence: format!("{key}:{}", attempt_id.as_deref().unwrap_or("")), kind: InboxItemKind::TaskAttention as i32, objective_id: row.try_get("objective_id")?, task_id, attempt_id, operator_eligible: true, actionable_since_ms: row.try_get("lease_expires_at_ms")?, reason: "Execution is uncertain. Confirm cleanup on the Worker Host before resolving this Attempt.".into(), question: None, approval: None });
             }
+        }
+        if wants(&cursor, InboxItemKind::Approval) {
+            let pending = crate::approvals::pending_in(
+                &mut tx,
+                principal,
+                &cursor.objective_id,
+                cursor.as_of_ms,
+                cursor.upper_order,
+                SCAN + 1,
+            )
+            .await?;
+            if pending.len() > SCAN {
+                truncated.push(InboxItemKind::Approval as i32);
+            }
+            items.extend(pending.into_iter().take(SCAN));
         }
         items.sort_by(|a, b| (a.actionable_since_ms, &a.key).cmp(&(b.actionable_since_ms, &b.key)));
         items.retain(|item| {
@@ -351,6 +390,21 @@ impl Store {
             truncated_kinds: truncated,
         })
     }
+}
+
+async fn question_objective_in(
+    tx: &mut Transaction<'_, Any>,
+    task: &AnyRow,
+    task_id: &str,
+) -> Result<Option<String>> {
+    Ok(sqlx::query_scalar("SELECT o.objective_id FROM supertag_v2_objectives o JOIN supertag_v2_objective_tasks link ON link.objective_id=o.objective_id WHERE link.task_id=$1 AND link.kind<>'notice' AND o.owner_tag_id=$2 AND o.session_id=$3 AND o.status NOT IN ($4,$5)")
+        .bind(task_id)
+        .bind(task.try_get::<String, _>("tag_id")?)
+        .bind(task.try_get::<String, _>("session_id")?)
+        .bind(ObjectiveStatus::Completed as i64)
+        .bind(ObjectiveStatus::Cancelled as i64)
+        .fetch_optional(&mut **tx)
+        .await?)
 }
 
 fn wants(cursor: &Cursor, kind: InboxItemKind) -> bool {
@@ -463,6 +517,39 @@ impl inbox_server::Inbox for ControlPlane {
         Ok(Response::new(
             self.store
                 .answer_question(&principal, request.get_ref())
+                .await?,
+        ))
+    }
+    async fn get_approval(
+        &self,
+        request: Request<GetApprovalRequest>,
+    ) -> std::result::Result<Response<Approval>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .get_approval(&principal, &request.get_ref().approval_id)
+                .await?,
+        ))
+    }
+    async fn list_approvals(
+        &self,
+        request: Request<ListApprovalsRequest>,
+    ) -> std::result::Result<Response<ListApprovalsResponse>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .list_approvals(&principal, request.get_ref())
+                .await?,
+        ))
+    }
+    async fn decide_approval(
+        &self,
+        request: Request<DecideApprovalRequest>,
+    ) -> std::result::Result<Response<Approval>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .decide_approval(&principal, request.get_ref())
                 .await?,
         ))
     }

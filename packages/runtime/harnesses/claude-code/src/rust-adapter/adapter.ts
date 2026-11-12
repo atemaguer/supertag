@@ -22,6 +22,7 @@ import {
   LiveInputReceipt,
   TaskState,
 } from "./gen/supertag/runtime/v2/runtime_pb.js";
+import { QUESTION_SERVER, QUESTION_TOOL, questionArguments, questionServer } from "./question.js";
 
 const ACTIONS: Readonly<Record<string, readonly string[]>> = {
   "files:read": ["Read", "Glob", "Grep"],
@@ -80,6 +81,12 @@ export function permissionHook(
   return async (hook) => {
     if (hook.hook_event_name !== "PreToolUse") return {};
     let allowed = !signal.aborted && tools.includes(hook.tool_name) && !hook.agent_id;
+    if (allowed && hook.tool_name === QUESTION_TOOL) {
+      allowed =
+        hook.mcp_server?.source === "sdk" &&
+        hook.mcp_server.name === QUESTION_SERVER &&
+        questionArguments.safeParse(hook.tool_input).success;
+    }
     if (allowed && ["Read", "Write", "Edit", "Glob", "Grep"].includes(hook.tool_name)) {
       const input = hook.tool_input as Record<string, unknown>;
       const path = ["Read", "Write", "Edit"].includes(hook.tool_name)
@@ -120,7 +127,8 @@ export async function runAdapter(
   signal: AbortSignal,
   configuration: AdapterOptions = {},
 ) {
-  const { client, options } = harnessClient(bootstrap.endpoint, bootstrap.token);
+  const harness = harnessClient(bootstrap.endpoint, bootstrap.token);
+  const { client, options } = harness;
   const run = await receipt(() => client.attach({}, options()));
   const task = run.task;
   if (
@@ -157,6 +165,7 @@ export async function runAdapter(
   const pendingSettlements: Promise<unknown>[] = [];
   try {
     const tools = admittedTools(task.allowedActions);
+    const allowedTools = run.mayAskObjectiveQuestion ? [...tools, QUESTION_TOOL] : tools;
     const { env, cwd } = await nativeEnvironment(environment);
     phase = "checkpoint validation";
     const restored = restoreCheckpoint(run.checkpoint, task, cwd);
@@ -175,14 +184,24 @@ export async function runAdapter(
     const sdkOptions: Options = {
       cwd,
       tools,
-      allowedTools: tools,
+      allowedTools,
       disallowedTools: ["Agent", "Task", "Skill", "TaskOutput", "TaskStop"],
       permissionMode: "dontAsk",
       settingSources: [],
       skills: [],
       plugins: [],
       strictMcpConfig: true,
-      mcpServers: {},
+      mcpServers: run.mayAskObjectiveQuestion
+        ? {
+            [QUESTION_SERVER]: questionServer(harness, {
+              taskId: task.taskId,
+              attemptId: run.attemptId,
+              secrets,
+              signal: controller.signal,
+              active: () => !finalSeen,
+            }),
+          }
+        : {},
       settings: { syncClaudeAiSkills: false, syncClaudeAiPlugins: false },
       systemPrompt: task.instructions,
       env,
@@ -190,7 +209,7 @@ export async function runAdapter(
       includePartialMessages: true,
       sessionStore: store,
       sessionStoreFlush: "eager",
-      hooks: { PreToolUse: [{ hooks: [permissionHook(tools, cwd, controller.signal)] }] },
+      hooks: { PreToolUse: [{ hooks: [permissionHook(allowedTools, cwd, controller.signal)] }] },
       ...(restored ? { resume: restored.nativeSessionId } : {}),
       ...(configuration.executable ? { pathToClaudeCodeExecutable: configuration.executable } : {}),
       ...(configuration.model ? { model: configuration.model } : {}),

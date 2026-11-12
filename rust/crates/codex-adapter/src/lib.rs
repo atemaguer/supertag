@@ -4,6 +4,7 @@ mod auth;
 mod checkpoint;
 mod config;
 mod events;
+mod questions;
 
 use std::{collections::BTreeMap, ffi::OsString, path::PathBuf, process::Stdio, time::Duration};
 
@@ -66,7 +67,7 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         .connect()
         .await
         .context("connect to supervising Worker Host")?;
-    let mut harness = HarnessClient::new(channel)
+    let mut harness = HarnessClient::new(channel.clone())
         .max_decoding_message_size(MAX_CHECKPOINT_BYTES + MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_CHECKPOINT_BYTES + MAX_MESSAGE_BYTES);
     let attached = harness
@@ -75,12 +76,20 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         .context("attach Codex adapter")?
         .into_inner();
     let task = attached.task.context("Worker Host returned no Task")?;
+    let mut questions = questions::Bridge::new(
+        channel,
+        &bootstrap.token,
+        &task.task_id,
+        &attached.attempt_id,
+        attached.may_ask_objective_question,
+    );
     let outcome = execute(
         &options,
         &task,
         attached.checkpoint.as_ref(),
         &attached.attempt_id,
         &mut harness,
+        &mut questions,
         &bootstrap.token,
     )
     .await;
@@ -95,6 +104,7 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
                 succeeded,
                 objective_signal: 0,
                 checkpoint,
+                waiting_approval_ids: vec![],
             },
             &bootstrap.token,
         )?)
@@ -115,6 +125,7 @@ async fn execute(
     previous_checkpoint: Option<&SessionCheckpoint>,
     attempt_id: &str,
     harness: &mut HarnessClient<Channel>,
+    questions: &mut questions::Bridge,
     token: &str,
 ) -> Result<(String, SessionCheckpoint)> {
     ensure!(
@@ -141,6 +152,7 @@ async fn execute(
             checkpoint::restore(
                 checkpoint,
                 task,
+                questions.manifest(),
                 authentication.home(),
                 &workspace,
                 &secrets,
@@ -187,6 +199,7 @@ async fn execute(
             expected_thread,
             baseline,
             harness,
+            questions,
             token,
             &secrets,
         )
@@ -198,9 +211,15 @@ async fn execute(
             result.len() <= MAX_RESULT,
             "Codex final response exceeds its limit"
         );
-        let checkpoint =
-            checkpoint::capture(task, authentication.home(), &workspace, thread, &secrets)
-                .context("could not preserve Codex Session continuity")?;
+        let checkpoint = checkpoint::capture(
+            task,
+            questions.manifest(),
+            authentication.home(),
+            &workspace,
+            thread,
+            &secrets,
+        )
+        .context("could not preserve Codex Session continuity")?;
         Ok::<_, anyhow::Error>((result, checkpoint))
     })
     .await;

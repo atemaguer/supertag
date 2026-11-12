@@ -27,7 +27,7 @@ use supertag_protocol::{
     validate_checkpoint_reference,
 };
 
-const FORMAT: &str = "codex-session-v1";
+const FORMAT: &str = "codex-session-v2";
 const MAX_FILES: usize = 16;
 const MAX_FILE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_RAW_BYTES: usize = 12 * 1024 * 1024;
@@ -74,6 +74,8 @@ pub(crate) fn usage_baseline(checkpoint: &SessionCheckpoint) -> Result<Option<[u
 #[serde(deny_unknown_fields)]
 struct Archive {
     version: u32,
+    #[serde(default)]
+    tool_manifest: String,
     tag_id: String,
     session_id: String,
     thread_id: String,
@@ -268,6 +270,7 @@ fn transform(
 pub(crate) fn restore(
     checkpoint: &SessionCheckpoint,
     task: &Task,
+    tool_manifest: &str,
     home: &Path,
     workspace: &Path,
     secrets: &[String],
@@ -275,7 +278,8 @@ pub(crate) fn restore(
     validate_checkpoint_reference(&checkpoint.reference())
         .context("invalid Codex checkpoint envelope")?;
     ensure!(
-        checkpoint.harness == "codex" && checkpoint.format == FORMAT,
+        checkpoint.harness == "codex"
+            && matches!(checkpoint.format.as_str(), FORMAT | "codex-session-v1"),
         "incompatible Codex Session checkpoint"
     );
     ensure!(
@@ -286,13 +290,42 @@ pub(crate) fn restore(
     let archive: Archive =
         serde_json::from_slice(&checkpoint.payload).context("invalid Codex checkpoint archive")?;
     ensure!(
-        archive.version == 1
-            && archive.tag_id == task.tag_id
+        archive.tag_id == task.tag_id
             && archive.session_id == task.session_id
             && identity(&archive.tag_id)
             && identity(&archive.session_id),
         "Codex checkpoint belongs to a different Tag or Session"
     );
+    if checkpoint.format == "codex-session-v1" {
+        // The v1 adapter never registered dynamic tools. Preserve that exact
+        // no-tool contract; a pre-existing native thread cannot gain a new tool.
+        ensure!(
+            archive.version == 1
+                && archive.tool_manifest.is_empty()
+                && tool_manifest == crate::questions::NONE,
+            "Codex checkpoint cannot resume with a changed tool manifest"
+        );
+        for transcript in &archive.transcripts {
+            for record in records(&transcript.text)? {
+                if record["type"] == "session_meta" {
+                    for name in ["dynamic_tools", "dynamicTools"] {
+                        ensure!(
+                            record["payload"]
+                                .get(name)
+                                .is_none_or(|tools| tools.is_null()
+                                    || tools.as_array().is_some_and(Vec::is_empty)),
+                            "Legacy Codex checkpoint contains unpinned tools"
+                        );
+                    }
+                }
+            }
+        }
+    } else {
+        ensure!(
+            archive.version == 2 && archive.tool_manifest == tool_manifest,
+            "Codex checkpoint cannot resume with a changed tool manifest"
+        );
+    }
     ensure!(
         Path::new(&archive.workspace).is_absolute() && archive.workspace.len() <= 4096,
         "invalid Codex checkpoint workspace"
@@ -407,6 +440,7 @@ fn scan(
 
 pub(crate) fn capture(
     task: &Task,
+    tool_manifest: &str,
     home: &Path,
     workspace: &Path,
     thread_id: String,
@@ -427,7 +461,8 @@ pub(crate) fn capture(
         .context("Codex workspace must be UTF-8")?
         .to_owned();
     let mut archive = Archive {
-        version: 1,
+        version: 2,
+        tool_manifest: tool_manifest.into(),
         tag_id: task.tag_id.clone(),
         session_id: task.session_id.clone(),
         thread_id,
@@ -524,6 +559,7 @@ mod tests {
         std::fs::write(home.path().join("config.toml"), "must never archive config")?;
         let checkpoint = capture(
             &task(),
+            crate::questions::NONE,
             home.path(),
             Path::new("/old/checkout"),
             "root".into(),
@@ -548,6 +584,7 @@ mod tests {
             restore(
                 &checkpoint,
                 &task(),
+                crate::questions::NONE,
                 restored_home.path(),
                 Path::new("/new/checkout"),
                 &[]
@@ -604,6 +641,7 @@ mod tests {
             assert!(
                 capture(
                     &task(),
+                    crate::questions::NONE,
                     home.path(),
                     Path::new("/old/checkout"),
                     "root".into(),
@@ -620,7 +658,8 @@ mod tests {
     #[test]
     fn rejects_unrelated_duplicate_and_unbounded_checkpoint_archives() -> Result<()> {
         let make_archive = || Archive {
-            version: 1,
+            version: 2,
+            tool_manifest: crate::questions::NONE.into(),
             tag_id: "tag".into(),
             session_id: "session".into(),
             thread_id: "root".into(),
@@ -678,6 +717,7 @@ mod tests {
                 restore(
                     &checkpoint,
                     &task(),
+                    crate::questions::NONE,
                     home.path(),
                     Path::new("/new/checkout"),
                     &[]
@@ -701,6 +741,7 @@ mod tests {
             restore(
                 &checkpoint,
                 &task(),
+                crate::questions::NONE,
                 home.path(),
                 Path::new("/new/checkout"),
                 &[]

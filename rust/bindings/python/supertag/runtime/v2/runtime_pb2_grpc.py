@@ -1338,6 +1338,21 @@ class InboxStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AnswerQuestionRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
                 _registered_method=True)
+        self.GetApproval = channel.unary_unary(
+                '/supertag.runtime.v2.Inbox/GetApproval',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetApprovalRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Approval.FromString,
+                _registered_method=True)
+        self.ListApprovals = channel.unary_unary(
+                '/supertag.runtime.v2.Inbox/ListApprovals',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListApprovalsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListApprovalsResponse.FromString,
+                _registered_method=True)
+        self.DecideApproval = channel.unary_unary(
+                '/supertag.runtime.v2.Inbox/DecideApproval',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.DecideApprovalRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Approval.FromString,
+                _registered_method=True)
 
 
 class InboxServicer:
@@ -1361,6 +1376,24 @@ class InboxServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetApproval(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListApprovals(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DecideApproval(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_InboxServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -1378,6 +1411,21 @@ def add_InboxServicer_to_server(servicer, server):
                     servicer.AnswerQuestion,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AnswerQuestionRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.SerializeToString,
+            ),
+            'GetApproval': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetApproval,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetApprovalRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Approval.SerializeToString,
+            ),
+            'ListApprovals': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListApprovals,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListApprovalsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListApprovalsResponse.SerializeToString,
+            ),
+            'DecideApproval': grpc.unary_unary_rpc_method_handler(
+                    servicer.DecideApproval,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.DecideApprovalRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Approval.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -1461,6 +1509,87 @@ class Inbox:
             '/supertag.runtime.v2.Inbox/AnswerQuestion',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AnswerQuestionRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetApproval(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Inbox/GetApproval',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetApprovalRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Approval.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListApprovals(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Inbox/ListApprovals',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListApprovalsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListApprovalsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DecideApproval(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Inbox/DecideApproval',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.DecideApprovalRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Approval.FromString,
             options,
             channel_credentials,
             insecure,
@@ -2052,6 +2181,11 @@ class WorkerHostStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
                 _registered_method=True)
+        self.GetAttemptCapabilities = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/GetAttemptCapabilities',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptCapabilities.FromString,
+                _registered_method=True)
         self.RenewAttempt = channel.unary_unary(
                 '/supertag.runtime.v2.WorkerHost/RenewAttempt',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
@@ -2112,6 +2246,12 @@ class WorkerHostServicer:
         raise NotImplementedError('Method not implemented!')
 
     def InspectAttempt(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetAttemptCapabilities(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -2180,6 +2320,11 @@ def add_WorkerHostServicer_to_server(servicer, server):
                     servicer.InspectAttempt,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.SerializeToString,
+            ),
+            'GetAttemptCapabilities': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAttemptCapabilities,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptCapabilities.SerializeToString,
             ),
             'RenewAttempt': grpc.unary_unary_rpc_method_handler(
                     servicer.RenewAttempt,
@@ -2347,6 +2492,33 @@ class WorkerHost:
             '/supertag.runtime.v2.WorkerHost/InspectAttempt',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetAttemptCapabilities(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/GetAttemptCapabilities',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptCapabilities.FromString,
             options,
             channel_credentials,
             insecure,
@@ -4383,6 +4555,81 @@ class HarnessQuestions:
             '/supertag.runtime.v2.HarnessQuestions/AskQuestion',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAskQuestionRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveQuestion.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class HarnessWorkstreamsStub:
+    """The supervising Worker Host supplies the Attempt identity for each post.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Post = channel.unary_unary(
+                '/supertag.runtime.v2.HarnessWorkstreams/Post',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessPostWorkstreamRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.PostAttemptWorkstreamResponse.FromString,
+                _registered_method=True)
+
+
+class HarnessWorkstreamsServicer:
+    """The supervising Worker Host supplies the Attempt identity for each post.
+    """
+
+    def Post(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_HarnessWorkstreamsServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Post': grpc.unary_unary_rpc_method_handler(
+                    servicer.Post,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessPostWorkstreamRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.PostAttemptWorkstreamResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.HarnessWorkstreams', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.HarnessWorkstreams', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class HarnessWorkstreams:
+    """The supervising Worker Host supplies the Attempt identity for each post.
+    """
+
+    @staticmethod
+    def Post(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HarnessWorkstreams/Post',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessPostWorkstreamRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.PostAttemptWorkstreamResponse.FromString,
             options,
             channel_credentials,
             insecure,

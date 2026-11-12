@@ -172,11 +172,10 @@ func (c *Client) ListInbox(ctx context.Context) (Inbox, error) {
 	return inbox, nil
 }
 
-// Approve approves a pending approval request once. It is not retried: a repeat of a call that
-// reached the Control Plane fails because the request is no longer pending.
+// Approve approves a pending approval request once. Runtime v2 retries the same operation.
 func (c *Client) Approve(ctx context.Context, id string) (*operatorv1.Approval, error) {
 	if c.RuntimeV2() {
-		return nil, unavailable("Approval decisions")
+		return c.runtime.decideApproval(ctx, id, "", true)
 	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
@@ -187,11 +186,10 @@ func (c *Client) Approve(ctx context.Context, id string) (*operatorv1.Approval, 
 	return res.Msg, nil
 }
 
-// Deny denies a pending approval request with a reason the Session that asked reads. It is not
-// retried, as Approve is not.
+// Deny denies a pending approval request with the operator's reason.
 func (c *Client) Deny(ctx context.Context, id, reason string) (*operatorv1.Approval, error) {
 	if c.RuntimeV2() {
-		return nil, unavailable("Approval decisions")
+		return c.runtime.decideApproval(ctx, id, reason, false)
 	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()

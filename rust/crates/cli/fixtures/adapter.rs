@@ -6,9 +6,10 @@ use supertag_protocol::{
     authenticated_request,
     v2::{
         AdapterBootstrap, HarnessAskQuestionRequest, HarnessAttachRequest, HarnessCompleteRequest,
-        HarnessPublishRequest, HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest,
-        LiveInput, LiveInputReceipt, LiveInputState, harness_client::HarnessClient,
-        harness_questions_client::HarnessQuestionsClient,
+        HarnessPostWorkstreamRequest, HarnessPublishRequest, HarnessSettleLiveInputRequest,
+        HarnessTakeLiveInputRequest, LiveInput, LiveInputReceipt, LiveInputState,
+        harness_client::HarnessClient, harness_questions_client::HarnessQuestionsClient,
+        harness_workstreams_client::HarnessWorkstreamsClient,
     },
 };
 use tokio::time::{Instant, sleep, timeout};
@@ -60,7 +61,7 @@ async fn main() -> Result<()> {
     if std::env::args().any(|arg| arg == "--objective-question")
         && task.prompt.contains("Ask which branch to release")
     {
-        let mut questions = HarnessQuestionsClient::connect(bootstrap.endpoint).await?;
+        let mut questions = HarnessQuestionsClient::connect(bootstrap.endpoint.clone()).await?;
         let input = HarnessAskQuestionRequest {
             operation_id: "fixture-question".into(),
             text: "Which branch should I release?".into(),
@@ -90,6 +91,37 @@ async fn main() -> Result<()> {
             .await?
             .into_inner();
         ensure!(replay == staged, "question replay changed its receipt");
+    }
+    let mut waiting_approval_ids = Vec::new();
+    if std::env::args().any(|arg| arg == "--workstream-approval") {
+        let mut workstreams = HarnessWorkstreamsClient::connect(bootstrap.endpoint.clone()).await?;
+        let input = HarnessPostWorkstreamRequest {
+            operation_id: "fixture-release-post".into(),
+            body: "The rollout is ready.".into(),
+            to_tag_ids: vec![],
+        };
+        let unauthorized = workstreams
+            .post(Request::new(input.clone()))
+            .await
+            .expect_err("post without an execution credential");
+        ensure!(unauthorized.code() == Code::Unauthenticated);
+        let pending = workstreams
+            .post(authenticated_request(
+                input.clone(),
+                &bootstrap.token,
+                None,
+            )?)
+            .await?
+            .into_inner();
+        ensure!(pending.post.is_none(), "the approval request wrote a post");
+        let approval = pending.approval.context("pending post had no approval")?;
+        ensure!(approval.task_id == task.task_id && approval.attempt_id == run.attempt_id);
+        let replay = workstreams
+            .post(authenticated_request(input, &bootstrap.token, None)?)
+            .await?
+            .into_inner();
+        ensure!(replay.approval.as_ref() == Some(&approval));
+        waiting_approval_ids.push(approval.approval_id);
     }
     harness
         .publish(authenticated_request(
@@ -188,6 +220,7 @@ async fn main() -> Result<()> {
                 succeeded: true,
                 objective_signal: 0,
                 checkpoint: None,
+                waiting_approval_ids,
             },
             &bootstrap.token,
             None,

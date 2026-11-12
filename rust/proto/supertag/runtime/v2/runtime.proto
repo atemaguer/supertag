@@ -95,6 +95,9 @@ service Inbox {
   rpc ListItems(ListInboxItemsRequest) returns (ListInboxItemsResponse);
   rpc GetQuestion(GetQuestionRequest) returns (ObjectiveQuestion);
   rpc AnswerQuestion(AnswerQuestionRequest) returns (Task);
+  rpc GetApproval(GetApprovalRequest) returns (Approval);
+  rpc ListApprovals(ListApprovalsRequest) returns (ListApprovalsResponse);
+  rpc DecideApproval(DecideApprovalRequest) returns (Approval);
 }
 
 enum InboxItemKind {
@@ -103,6 +106,7 @@ enum InboxItemKind {
   INBOX_ITEM_KIND_OBJECTIVE_BUDGET = 2;
   INBOX_ITEM_KIND_OBJECTIVE_LIMIT = 3;
   INBOX_ITEM_KIND_TASK_ATTENTION = 4;
+  INBOX_ITEM_KIND_APPROVAL = 5;
 }
 
 message ListInboxItemsRequest {
@@ -130,6 +134,96 @@ message InboxItem {
   int64 actionable_since_ms = 8;
   string reason = 9;
   InboxQuestion question = 10;
+  InboxApproval approval = 11;
+}
+
+message InboxApproval {
+  string approval_id = 1;
+  string tag_id = 2;
+  string action = 3;
+  string resource = 4;
+  string summary = 5;
+}
+
+message ApprovalRule {
+  string action = 1;
+  repeated string operator_ids = 2;
+}
+
+enum ApprovalState {
+  APPROVAL_STATE_UNSPECIFIED = 0;
+  APPROVAL_STATE_PENDING = 1;
+  APPROVAL_STATE_APPROVED = 2;
+  APPROVAL_STATE_DENIED = 3;
+  APPROVAL_STATE_EXPIRED = 4;
+}
+
+enum ApprovalScope {
+  APPROVAL_SCOPE_UNSPECIFIED = 0;
+  APPROVAL_SCOPE_ONCE = 1;
+  APPROVAL_SCOPE_OBJECTIVE = 2;
+}
+
+message Approval {
+  string approval_id = 1;
+  string task_id = 2;
+  string attempt_id = 3;
+  string tag_id = 4;
+  string session_id = 5;
+  optional string objective_id = 6;
+  string action = 7;
+  string arguments_digest = 8;
+  string summary = 9;
+  repeated string operator_ids = 10;
+  ApprovalState state = 11;
+  ApprovalScope scope = 12;
+  int64 requested_at_ms = 13;
+  optional int64 decided_at_ms = 14;
+  optional string decided_by = 15;
+  optional string reason = 16;
+  optional int64 valid_until_ms = 17;
+  optional int64 consumed_at_ms = 18;
+  optional string continuation_task_id = 19;
+  string resource = 20;
+  string canonical_arguments_json = 21;
+}
+
+message GetApprovalRequest { string approval_id = 1; }
+
+message ListApprovalsRequest {
+  string objective_id = 1;
+  string task_id = 2;
+  ApprovalState state = 3;
+  uint32 limit = 4;
+  string cursor = 5;
+}
+
+message ListApprovalsResponse {
+  repeated Approval approvals = 1;
+  string next_cursor = 2;
+}
+
+message DecideApprovalRequest {
+  string approval_id = 1;
+  string operation_id = 2;
+  bool approve = 3;
+  ApprovalScope scope = 4;
+  optional int64 valid_until_ms = 5;
+  string reason = 6;
+}
+
+message RequestApprovalRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string action = 3;
+  string arguments_json = 4;
+  string summary = 5;
+  string resource = 6;
+}
+
+message RequestApprovalResponse {
+  Approval approval = 1;
+  bool granted = 2;
 }
 
 message InboxQuestion {
@@ -160,6 +254,10 @@ message AskQuestionRequest {
   InspectAttemptRequest attempt = 1;
   string operation_id = 2;
   string text = 3;
+}
+
+message AttemptCapabilities {
+  bool may_ask_objective_question = 1;
 }
 
 service Teams {
@@ -228,6 +326,7 @@ service WorkerHost {
   rpc ClaimTask(ClaimTaskRequest) returns (ClaimTaskResponse);
   rpc StartTask(StartTaskRequest) returns (Task);
   rpc InspectAttempt(InspectAttemptRequest) returns (Task);
+  rpc GetAttemptCapabilities(InspectAttemptRequest) returns (AttemptCapabilities);
   rpc RenewAttempt(InspectAttemptRequest) returns (AttemptAuthority);
   rpc GetAttemptResolution(InspectAttemptRequest) returns (GetAttemptResolutionResponse);
   rpc ReportAttemptUsage(ReportAttemptUsageRequest) returns (ReportAttemptUsageResponse);
@@ -388,6 +487,17 @@ message HarnessAskQuestionRequest {
   string text = 2;
 }
 
+// The supervising Worker Host supplies the Attempt identity for each post.
+service HarnessWorkstreams {
+  rpc Post(HarnessPostWorkstreamRequest) returns (PostAttemptWorkstreamResponse);
+}
+
+message HarnessPostWorkstreamRequest {
+  string operation_id = 1;
+  string body = 2;
+  repeated string to_tag_ids = 3;
+}
+
 enum LiveInputState {
   LIVE_INPUT_STATE_UNSPECIFIED = 0;
   LIVE_INPUT_STATE_PENDING = 1;
@@ -532,6 +642,7 @@ message PutTagRequest {
   repeated string allowed_actions = 3;
   WorkspaceSpec workspace = 4;
   HarnessKind harness_kind = 5;
+  repeated ApprovalRule approval_rules = 6;
 }
 
 message Tag {
@@ -541,6 +652,7 @@ message Tag {
   uint64 revision = 4;
   WorkspaceSpec workspace = 5;
   HarnessKind harness_kind = 6;
+  repeated ApprovalRule approval_rules = 7;
 }
 
 message ListTagsRequest {
@@ -629,6 +741,7 @@ message Task {
   WorkspaceSpec workspace = 11;
   WorkspaceDeliveryReference workspace_delivery = 12;
   HarnessKind harness_kind = 13;
+  repeated ApprovalRule approval_rules = 14;
 }
 
 message GetTaskRequest {
@@ -766,6 +879,7 @@ message FinishTaskRequest {
   ObjectiveSignal objective_signal = 6;
   optional string checkpoint_sha256 = 7;
   WorkspaceDeliveryReference workspace_delivery = 8;
+  repeated string waiting_approval_ids = 9;
 }
 
 message HarnessAttachRequest {}
@@ -779,6 +893,7 @@ message HarnessRun {
   Task task = 1;
   string attempt_id = 2;
   SessionCheckpoint checkpoint = 3;
+  bool may_ask_objective_question = 4;
 }
 
 message SessionCheckpoint {
@@ -885,6 +1000,7 @@ message HarnessCompleteRequest {
   bool succeeded = 2;
   ObjectiveSignal objective_signal = 3;
   SessionCheckpoint checkpoint = 4;
+  repeated string waiting_approval_ids = 5;
 }
 
 message HarnessCompleteResponse {}
@@ -1031,6 +1147,8 @@ message PostAttemptWorkstreamRequest {
 message PostAttemptWorkstreamResponse {
   WorkstreamPost post = 1;
   bool duplicate = 2;
+  // A pending or denied approval is returned instead of writing a post.
+  Approval approval = 3;
 }
 
 message GetObjectiveRequest {

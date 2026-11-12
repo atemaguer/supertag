@@ -238,6 +238,7 @@ async fn internal_turn_in(
     .await?;
     // Limit notices communicate exhausted authority; they never grant a fresh work budget.
     if kind == "notice" && limits::admission_blocker(&record.limits, timestamp(now_ms)?).is_some() {
+        // Keep frozen approval restrictions even when the notice loses its actions.
         sqlx::query("UPDATE supertag_v2_tasks SET allowed_actions='[]' WHERE task_id=$1")
             .bind(&task.task_id)
             .execute(&mut **tx)
@@ -834,7 +835,9 @@ pub(crate) async fn objective_finish_in(
         return Err(StoreError::PermissionDenied);
     }
     if signal == ObjectiveSignal::Progress {
-        if crate::inbox::task_waits_in(tx, &task.task_id).await? {
+        if crate::inbox::task_waits_in(tx, &task.task_id).await?
+            || crate::approvals::task_waits_in(tx, &task.task_id).await?
+        {
             return Ok(());
         }
         if !record.value.ongoing
