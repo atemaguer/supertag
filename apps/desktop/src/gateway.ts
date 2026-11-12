@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 export interface Tag {
   tagId: string;
@@ -41,8 +41,6 @@ export interface TaskEvent {
 }
 
 export interface Gateway {
-  connect(gateway: string, token: string): Promise<void>;
-  disconnect(): Promise<void>;
   tags(): Promise<Tag[]>;
   conversations(tagId: string): Promise<Conversation[]>;
   messages(tagId: string, conversation: string, cursor?: string): Promise<MessagePage>;
@@ -50,7 +48,21 @@ export interface Gateway {
   events(tagId: string, taskId: string, afterSequence: number): Promise<TaskEvent[]>;
 }
 
-export const nativeGateway: Gateway = {
+export type WatchUpdate =
+  | { kind: "ready" | "resync" | "lost" | "tag" }
+  | { kind: "conversation"; tagId: string; conversation: string };
+
+interface NativeGateway extends Gateway {
+  connect(gateway: string, token: string): Promise<string>;
+  disconnect(): Promise<void>;
+  watch(
+    connectionId: string,
+    watchEpoch: number,
+    onUpdate: (update: WatchUpdate) => void,
+  ): Promise<() => Promise<void>>;
+}
+
+export const nativeGateway: NativeGateway = {
   connect: (gateway, token) => invoke("connect_gateway", { gateway, token }),
   disconnect: () => invoke("disconnect_gateway"),
   tags: () => invoke("list_tags"),
@@ -61,4 +73,13 @@ export const nativeGateway: Gateway = {
     invoke("send_message", { tagId, conversation, text, operationId }),
   events: (tagId, taskId, afterSequence) =>
     invoke("list_message_events", { tagId, taskId, afterSequence }),
+  async watch(connectionId, watchEpoch, receive) {
+    const onUpdate = new Channel<WatchUpdate>(receive);
+    const watchId = await invoke<string>("start_gateway_watch", {
+      connectionId,
+      watchEpoch,
+      onUpdate,
+    });
+    return () => invoke("stop_gateway_watch", { watchId });
+  },
 };

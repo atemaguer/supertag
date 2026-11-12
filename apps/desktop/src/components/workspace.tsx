@@ -12,8 +12,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import mascot from "../../../../assets/images/supertag-mascot-round.png";
-import type { Gateway, Tag } from "../gateway";
-import { describe, usePolling } from "../lib/polling";
+import type { Gateway, Tag, WatchUpdate } from "../gateway";
+import { describe } from "../lib/polling";
+import { useGatewayWatch, useWatchRefresh, type WatchFeed } from "../lib/watch";
 import { ConversationPane, type Draft } from "./conversation";
 import { TagAvatar } from "./tag-avatar";
 
@@ -274,6 +275,7 @@ export function EmptyWorkspace({
 }
 
 interface WorkspaceProps {
+  connectionId?: string;
   gateway: Gateway;
   initialTags: Tag[];
   preview: boolean;
@@ -283,6 +285,7 @@ interface WorkspaceProps {
 }
 
 export function Workspace({
+  connectionId,
   gateway,
   initialTags,
   preview,
@@ -294,6 +297,7 @@ export function Workspace({
   const [selectedTag, setSelectedTag] = useState(initialTags[0]?.tagId);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [error, setError] = useState("");
+  const watch = useGatewayWatch(connectionId);
   const tag = tags.find((entry) => entry.tagId === selectedTag) ?? tags[0];
 
   const refreshTags = useCallback(
@@ -306,11 +310,12 @@ export function Workspace({
         }
       } catch (error) {
         if (!signal.aborted) setError(describe(error));
+        return false;
       }
     },
     [gateway],
   );
-  usePolling(refreshTags, rosterInterval);
+  useWatchRefresh(refreshTags, rosterInterval, watch, rosterChanged);
 
   const shell = {
     tags,
@@ -325,6 +330,7 @@ export function Workspace({
     <TagWorkspace
       key={tag.tagId}
       gateway={gateway}
+      watch={watch}
       tag={tag}
       shell={shell}
       drafts={drafts}
@@ -338,8 +344,11 @@ export function Workspace({
   );
 }
 
+const rosterChanged = (update: WatchUpdate) => update.kind === "tag";
+
 function TagWorkspace({
   gateway,
+  watch,
   tag,
   shell,
   drafts,
@@ -347,6 +356,7 @@ function TagWorkspace({
   onWriteChange,
 }: {
   gateway: Gateway;
+  watch?: WatchFeed;
   tag: Tag;
   shell: Omit<ShellProps, "children">;
   drafts: Record<string, Draft>;
@@ -368,11 +378,16 @@ function TagWorkspace({
         }
       } catch (error) {
         if (!signal.aborted) setError(describe(error));
+        return false;
       }
     },
     [gateway, tagId],
   );
-  usePolling(refreshThreads, conversationInterval);
+  const threadsChanged = useCallback(
+    (update: WatchUpdate) => update.kind === "conversation" && update.tagId === tagId,
+    [tagId],
+  );
+  useWatchRefresh(refreshThreads, conversationInterval, watch, threadsChanged);
 
   const key = JSON.stringify([tagId, conversation]);
   return (
@@ -388,6 +403,7 @@ function TagWorkspace({
         <ConversationPane
           key={key}
           gateway={gateway}
+          watch={watch}
           tag={tag}
           name={conversation}
           draft={drafts[key] ?? { text: "" }}

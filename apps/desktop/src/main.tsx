@@ -11,6 +11,7 @@ interface Connection {
   gateway: Gateway;
   tags: Tag[];
   preview: boolean;
+  id?: string;
 }
 
 function App({ initialConnection }: { initialConnection?: Connection }) {
@@ -37,6 +38,8 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
     <>
       {connection ? (
         <Workspace
+          key={connection.id ?? "preview"}
+          connectionId={connection.id}
           gateway={connection.gateway}
           initialTags={connection.tags}
           preview={connection.preview}
@@ -56,9 +59,9 @@ function App({ initialConnection }: { initialConnection?: Connection }) {
         opener={opener}
         onClose={() => setSettings(false)}
         onReset={() => setConnection(undefined)}
-        onConnect={(nextAddress, tags) => {
+        onConnect={(nextAddress, tags, id) => {
           setAddress(nextAddress);
-          setConnection({ gateway: nativeGateway, tags, preview: false });
+          setConnection({ gateway: nativeGateway, tags, preview: false, id });
           setSettings(false);
         }}
       />

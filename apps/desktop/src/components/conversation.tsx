@@ -2,8 +2,17 @@ import { ArrowUp, X } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import type { Gateway, Message, Tag, TaskEvent } from "../gateway";
+import type { Gateway, Tag, TaskEvent, WatchUpdate } from "../gateway";
+import {
+  earlierHistory,
+  emptyHistory,
+  type History,
+  latestHistory,
+  readHistory,
+  receivedMessage,
+} from "../lib/history";
 import { describe, usePolling } from "../lib/polling";
+import { useWatchRefresh, type WatchFeed } from "../lib/watch";
 import { TagAvatar } from "./tag-avatar";
 
 const interval = 2_500;
@@ -15,16 +24,9 @@ export interface Draft {
   error?: string;
 }
 
-interface History {
-  recent: Message[];
-  earlier: Message[];
-  cursor?: string;
-  paging: boolean;
-  loading: boolean;
-}
-
 interface ConversationProps {
   gateway: Gateway;
+  watch?: WatchFeed;
   tag: Tag;
   name: string;
   draft: Draft;
@@ -61,18 +63,15 @@ function statusText(taskState: string, inputState?: string) {
 
 export function ConversationPane({
   gateway,
+  watch,
   tag,
   name,
   draft,
   setDraft,
   onWriteChange,
 }: ConversationProps) {
-  const [history, setHistory] = useState<History>({
-    recent: [],
-    earlier: [],
-    paging: false,
-    loading: true,
-  });
+  const [history, renderHistory] = useState<History>(emptyHistory);
+  const currentHistory = useRef(history);
   const [error, setError] = useState("");
   const [paging, setPaging] = useState(false);
   const [activeTask, setActiveTask] = useState<string>();
@@ -85,6 +84,10 @@ export function ConversationPane({
   const viewport = useRef<HTMLElement>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
   const activityTrigger = useRef<HTMLButtonElement>(null);
+  const setHistory = useCallback((next: History) => {
+    currentHistory.current = next;
+    renderHistory(next);
+  }, []);
 
   useEffect(() => {
     active.current = true;
@@ -97,35 +100,33 @@ export function ConversationPane({
     async (signal: AbortSignal) => {
       const started = revision.current;
       try {
-        const page = await gateway.messages(tagId, name);
+        const page = await readHistory(
+          (cursor) => gateway.messages(tagId, name, cursor),
+          currentHistory.current,
+          signal,
+        );
         if (signal.aborted || revision.current !== started) return;
-        const recent = [...page.messages].reverse();
-        const recentIds = new Set(recent.map(({ task }) => task.taskId));
-        setHistory((previous) => {
-          const earlier = previous.paging
-            ? previous.earlier.concat(
-                previous.recent.filter(({ task }) => !recentIds.has(task.taskId)),
-              )
-            : previous.earlier;
-          return {
-            ...previous,
-            earlier,
-            recent,
-            cursor: previous.paging ? previous.cursor : page.nextCursor || undefined,
-            loading: false,
-          };
-        });
+        const previous = currentHistory.current;
+        const next = latestHistory(previous, page);
+        if (previous.sessionId && previous.sessionId !== next.sessionId) setActiveTask(undefined);
+        setHistory(next);
         setError("");
       } catch (error) {
         if (!signal.aborted && revision.current === started) {
-          setHistory((previous) => ({ ...previous, loading: false }));
+          setHistory({ ...currentHistory.current, loading: false });
           setError(describe(error));
+          return false;
         }
       }
     },
-    [gateway, tagId, name],
+    [gateway, tagId, name, setHistory],
   );
-  usePolling(refresh, interval);
+  const historyChanged = useCallback(
+    (update: WatchUpdate) =>
+      update.kind === "conversation" && update.tagId === tagId && update.conversation === name,
+    [tagId, name],
+  );
+  const requestHistory = useWatchRefresh(refresh, interval, watch, historyChanged);
 
   useLayoutEffect(() => {
     const region = viewport.current;
@@ -140,19 +141,18 @@ export function ConversationPane({
   }, [history]);
 
   async function loadEarlier() {
-    if (!history.cursor || paging) return;
+    const expected = currentHistory.current;
+    if (!expected.cursor || paging) return;
     setPaging(true);
-    setHistory((previous) => ({ ...previous, paging: true }));
     try {
-      const page = await gateway.messages(tagId, name, history.cursor);
+      const page = await gateway.messages(tagId, name, expected.cursor);
       if (!active.current) return;
+      const previous = currentHistory.current;
+      const next = earlierHistory(previous, expected, page);
+      if (next === previous) return;
       const region = viewport.current;
       if (region) scrollOffset.current = { height: region.scrollHeight, top: region.scrollTop };
-      setHistory((previous) => ({
-        ...previous,
-        earlier: [...page.messages].reverse().concat(previous.earlier),
-        cursor: page.nextCursor || undefined,
-      }));
+      setHistory(next);
     } catch (error) {
       if (active.current) setError(describe(error));
     } finally {
@@ -174,13 +174,8 @@ export function ConversationPane({
       if (active.current) {
         revision.current++;
         following.current = true;
-        setHistory((previous) => ({
-          ...previous,
-          loading: false,
-          recent: previous.recent.some(({ task }) => task.taskId === message.task.taskId)
-            ? previous.recent
-            : previous.recent.concat(message),
-        }));
+        setHistory(receivedMessage(currentHistory.current, message));
+        requestHistory();
       }
     } catch (error) {
       setDraft({ text: draft.text, operationId, error: describe(error) });
@@ -191,11 +186,7 @@ export function ConversationPane({
     }
   }
 
-  const messages = [
-    ...new Map(
-      [...history.earlier, ...history.recent].map((message) => [message.task.taskId, message]),
-    ).values(),
-  ];
+  const messages = history.messages;
   return (
     <>
       {error && (

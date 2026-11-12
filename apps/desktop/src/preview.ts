@@ -77,8 +77,6 @@ function conversationsFor(tagId: string): Map<string, Message[]> {
 }
 
 export const previewGateway: Gateway = {
-  async connect() {},
-  async disconnect() {},
   async tags() {
     return tags;
   },

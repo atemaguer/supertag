@@ -19,7 +19,7 @@ tauri-build = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 supertag-protocol = { path = "../../../rust/crates/protocol" }
 tauri = { version = "2", features = [] }
-tokio = { version = "1", features = ["sync", "time"] }
+tokio = { version = "1", features = ["macros", "sync", "time"] }
 tonic = { version = "0.14", features = ["tls-ring", "tls-native-roots"] }
 
 [dev-dependencies]

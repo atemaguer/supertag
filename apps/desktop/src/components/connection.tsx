@@ -20,7 +20,7 @@ interface ConnectionDialogProps {
   opener: RefObject<HTMLButtonElement | null>;
   onClose(): void;
   onReset(): void;
-  onConnect(address: string, tags: Tag[]): void;
+  onConnect(address: string, tags: Tag[], connectionId: string): void;
 }
 
 export function ConnectionDialog({
@@ -60,9 +60,9 @@ export function ConnectionDialog({
     try {
       const connecting = nativeGateway.connect(destination, field.value.trim());
       field.value = "";
-      await connecting;
+      const connectionId = await connecting;
       try {
-        onConnect(destination, await nativeGateway.tags());
+        onConnect(destination, await nativeGateway.tags(), connectionId);
       } catch (error) {
         await nativeGateway.disconnect();
         throw error;

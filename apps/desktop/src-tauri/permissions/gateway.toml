@@ -4,6 +4,8 @@ description = "Connect to a Gateway and read or send personal conversation messa
 commands.allow = [
   "connect_gateway",
   "disconnect_gateway",
+  "start_gateway_watch",
+  "stop_gateway_watch",
   "list_tags",
   "list_conversations",
   "list_messages",

@@ -12,6 +12,9 @@ use tonic::{
     transport::{Channel, ClientTlsConfig, Endpoint},
 };
 
+mod watch;
+pub use watch::WatchUpdate;
+
 type Result<T> = std::result::Result<T, String>;
 const TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_PAGES: usize = 100;
@@ -23,6 +26,18 @@ pub struct GatewayState(RwLock<Connection>);
 struct Connection {
     generation: u64,
     session: Option<Arc<Session>>,
+    watch: Option<watch::Registration>,
+    watch_epoch: u64,
+}
+
+impl Connection {
+    fn replace(&mut self) -> u64 {
+        self.generation = self.generation.wrapping_add(1);
+        self.session = None;
+        self.watch = None;
+        self.watch_epoch = 0;
+        self.generation
+    }
 }
 
 // This type deliberately has no Debug/Serialize implementation. The credential
@@ -33,11 +48,16 @@ struct Session {
 }
 
 impl Session {
-    fn request<T>(&self, value: T) -> Request<T> {
+    fn authenticated<T>(&self, value: T) -> Request<T> {
         let mut request = Request::new(value);
         request
             .metadata_mut()
             .insert("authorization", self.authorization.clone());
+        request
+    }
+
+    fn request<T>(&self, value: T) -> Request<T> {
+        let mut request = self.authenticated(value);
         request.set_timeout(TIMEOUT);
         request
     }
@@ -56,14 +76,9 @@ impl Session {
 }
 
 impl GatewayState {
-    pub async fn connect(&self, gateway: String, token: String) -> Result<()> {
+    pub async fn connect(&self, gateway: String, token: String) -> Result<String> {
         // Replacing or disconnecting a connection invalidates pending connects.
-        let generation = {
-            let mut state = self.0.write().await;
-            state.generation = state.generation.wrapping_add(1);
-            state.session = None;
-            state.generation
-        };
+        let generation = self.0.write().await.replace();
         let endpoint = endpoint(&gateway)?;
         let authorization = bearer(&token)?;
         let channel = endpoint.connect().await.map_err(|_| {
@@ -86,13 +101,11 @@ impl GatewayState {
             return Err("The connection changed. Connect again.".into());
         }
         state.session = Some(session);
-        Ok(())
+        Ok(generation.to_string())
     }
 
     pub async fn disconnect(&self) {
-        let mut state = self.0.write().await;
-        state.generation = state.generation.wrapping_add(1);
-        state.session = None;
+        self.0.write().await.replace();
     }
 
     async fn session(&self) -> Result<Arc<Session>> {
