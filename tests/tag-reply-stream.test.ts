@@ -162,18 +162,21 @@ describe("ReplyStreams", () => {
 
 /**
  * How `streamingWorklet` treats a message delivered into its running turn: with `withdraw`, the
- * turn reports it unread, and the message's own turn waits at `later` before answering.
+ * turn reports it unread. The follower opens and finishes the message's own reply.
  */
 interface Delivery {
   withdraw: boolean;
-  later: Promise<void>;
+  ownReply?: {
+    begin: PromiseWithResolvers<void>;
+    finish: PromiseWithResolvers<void>;
+  };
 }
 
 /** A Worklet whose one Worker writes its reply in deltas, waiting at `gate` before finishing. */
 function streamingWorklet(
   gate: { promise: Promise<void> },
   received: string[] = [],
-  delivery: Delivery = { withdraw: false, later: Promise.resolve() },
+  delivery: Delivery = { withdraw: false },
 ): Worklet {
   const commands: string[] = [];
   let executions = 0;
@@ -216,7 +219,7 @@ function streamingWorklet(
       executions += 1;
       const own = delivery.withdraw && executions > 1;
       yield { ...id, at: at(), type: "execution.started", workerId: "stream-worker" };
-      if (own) await delivery.later;
+      if (own) await delivery.ownReply?.begin.promise;
       yield { ...id, at: at(), type: "output.delta", text: "Checking " };
       yield {
         ...id,
@@ -231,6 +234,7 @@ function streamingWorklet(
         command: { id: "c1", command: "pnpm lint", status: "completed" },
       };
       await gate.promise;
+      if (own) await delivery.ownReply?.finish.promise;
       if (delivery.withdraw && !own)
         for (const commandId of commands)
           yield { ...id, at: at(), type: "input.withdrawn", commandId };
@@ -290,7 +294,7 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
       vi.stubEnv("SUPERTAG_STATE_DIR", join(directory, "server"));
       gate = { promise: new Promise<void>((resolve) => (release = resolve)) };
       received = [];
-      delivery = { withdraw: false, later: Promise.resolve() };
+      delivery = { withdraw: false };
       runtime = await startControlPlaneRuntime({
         host: "127.0.0.1",
         port: 0,
@@ -306,6 +310,8 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
 
     afterEach(async () => {
       release();
+      delivery.ownReply?.begin.resolve();
+      delivery.ownReply?.finish.resolve();
       await store.disconnect();
       await runtime.close();
       await cleanup?.();
@@ -428,23 +434,29 @@ for (const dialect of ["sqlite", "postgresql"] as const) {
 
     it("follows a message's own turn once its delivery into a running turn is withdrawn", async () => {
       delivery.withdraw = true;
-      let answer = () => {};
-      delivery.later = new Promise<void>((resolve) => (answer = resolve));
+      const ownReply = {
+        begin: Promise.withResolvers<void>(),
+        finish: Promise.withResolvers<void>(),
+      };
+      delivery.ownReply = ownReply;
       const first = await send("Check the repository");
       await follow(first.taskId, linting);
       const second = await send("Also check the tests");
       expect(second.joinedTaskId).toBe(first.taskId);
       await vi.waitFor(() => expect(received).toHaveLength(1));
-      const following = follow(second.taskId, ended);
-      await new Promise((resolve) => setTimeout(resolve, 600));
-      release();
-      await vi.waitFor(async () =>
-        expect((await store.findTaskById(first.taskId))?.status).toBe("completed"),
-      );
-      // Long enough for a follower still watching the ended turn to give up on it.
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      answer();
-      const events = await following;
+      let withdrew = false;
+      const events = await follow(second.taskId, (event) => {
+        if (event.part.case === "joined" && event.part.value.taskId === first.taskId) release();
+        if (event.part.case === "joined" && event.part.value.taskId === "") {
+          withdrew = true;
+          ownReply.begin.resolve();
+        }
+        // The first turn's gate is already open. Keep the second turn live until
+        // the follower receives its prefix instead of racing its stored result.
+        if (withdrew && event.part.case === "textDelta" && event.part.value.text === "Checking ")
+          ownReply.finish.resolve();
+        return ended(event);
+      });
       expect(events.some((event) => event.part.case === "error")).toBe(false);
       const joins = events.flatMap((event) =>
         event.part.case === "joined" ? [event.part.value.taskId] : [],
