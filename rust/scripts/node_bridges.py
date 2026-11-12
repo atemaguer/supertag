@@ -27,13 +27,27 @@ PACKAGES = {
     "claude-code": "@supertag/worker-claude-code",
     "cursor": "@supertag/worker-cursor",
     "opencode": "@supertag/worker-opencode",
+    "e2b": "@supertag/worker-environment-e2b",
+    "modal": "@supertag/worker-environment-modal",
 }
+HARNESS_BRIDGES = {"claude-code", "cursor", "opencode"}
 STARTUP_ERRORS = {
     "claude-code": "Claude adapter could not complete its execution safely.",
     "cursor": "Cursor adapter could not complete its execution safely.",
     "opencode": "OpenCode adapter could not complete its execution safely.",
+    "e2b": "SuperTag E2B Workspace provider stopped after an error.",
+    "modal": "SuperTag Modal Workspace provider stopped after an error.",
 }
 ENTRY = Path("dist/rust-adapter/entry.js")
+
+
+def entry_for(kind):
+    return ENTRY if kind in HARNESS_BRIDGES else Path("dist/rust-provider/main.js")
+
+
+def source_for(repo, kind):
+    category = "harnesses" if kind in HARNESS_BRIDGES else "environments"
+    return repo / "packages/runtime" / category / kind
 
 
 def lockfile(path):
@@ -111,7 +125,7 @@ def verify_node(node):
 
 
 def smoke_entry(node, kind, package):
-    entry = package / ENTRY
+    entry = package / entry_for(kind)
     require(entry.is_file(), f"compiled {kind} entry is unavailable")
     with tempfile.TemporaryDirectory(prefix="supertag-bridge-home-") as home:
         # EOF reaches the adapter's bootstrap check without sending a provider request.
@@ -142,21 +156,22 @@ def stage(output, kinds, repo=REPO):
     # generated files, and the legacy deploy lock inside a disposable source tree.
     with tempfile.TemporaryDirectory(prefix="supertag-bridge-source-") as temporary:
         source = prepare_workspace(repo, Path(temporary))
-        return stage_workspace(output, kinds, source)
+        staged, _node = stage_workspace(output, kinds, source)
+        return staged
 
 
-def stage_workspace(output, kinds, repo):
+def stage_workspace(output, kinds, repo, env=None):
     output = Path(output).resolve()
     require(not output.exists(), "Node bridge output already exists")
     output.parent.mkdir(parents=True, exist_ok=True)
     root_package = json.loads((repo / "package.json").read_text())
-    manager = subprocess.check_output(["pnpm", "--version"], cwd=repo, text=True).strip()
+    manager = subprocess.check_output(["pnpm", "--version"], cwd=repo, env=env, text=True).strip()
     require(root_package["packageManager"] == f"pnpm@{manager}", "workspace pnpm version differs from its pin")
     source_lock = lockfile(repo / "pnpm-lock.yaml")
     subprocess.run(["pnpm", "install", "--frozen-lockfile", "--prefer-offline", "--prod=false"],
-                   cwd=repo, env={**os.environ, "CI": "true"}, check=True)
+                   cwd=repo, env={**(os.environ if env is None else env), "CI": "true"}, check=True)
     probe = subprocess.check_output(
-        ["pnpm", "--silent", "exec", "node", "-p", "process.execPath"], cwd=repo, text=True,
+        ["pnpm", "--silent", "exec", "node", "-p", "process.execPath"], cwd=repo, env=env, text=True,
     ).splitlines()
     require(bool(probe), "workspace Node interpreter is unavailable")
     node = Path(probe[-1].strip())
@@ -166,18 +181,21 @@ def stage_workspace(output, kinds, repo):
     command = ["pnpm"]
     for kind in selected:
         command.extend(["--filter", PACKAGES[kind]])
-    subprocess.run([*command, "build"], cwd=repo, check=True)
+    subprocess.run([*command, "build"], cwd=repo, env=env, check=True)
     platform = native_platform()
     with tempfile.TemporaryDirectory(prefix=".supertag-node-bridges-", dir=output.parent) as temporary:
         staging = Path(temporary) / "node-bridges"
         staging.mkdir()
         for kind in selected:
             package = PACKAGES[kind]
-            source_package = (repo / "packages/runtime/harnesses" / kind).resolve()
+            source_package = source_for(repo, kind).resolve()
+            metadata = json.loads((source_package / "package.json").read_text())
+            require(metadata.get("private") is True and metadata.get("name") == package,
+                    f"runtime helper must remain a private workspace package: {kind}")
             target = staging / "node_modules" / package
             target.parent.mkdir(parents=True, exist_ok=True)
             subprocess.run(["pnpm", "--filter", package, "--prod", "deploy", "--legacy",
-                            "--prefer-offline", "--ignore-scripts", target], cwd=repo, check=True)
+                            "--prefer-offline", "--ignore-scripts", target], cwd=repo, env=env, check=True)
             verify_deploy_lock(source_lock, lockfile(target / "node_modules/.pnpm/lock.yaml"), repo)
             relocate_self_alias(target, package, source_package)
             verify_relocatable_tree(target)
@@ -187,11 +205,14 @@ def stage_workspace(output, kinds, repo):
                 verify_claude_asset(target, platform)
             smoke_entry(node, kind, target)
         manifest = {"format": FORMAT, "version": version_from_repo(repo), "protocol": PROTOCOL,
-                    "platform": platform, "node_major": NODE_MAJOR, "bridges": selected}
+                    "platform": platform, "node_major": NODE_MAJOR,
+                    "bridges": [kind for kind in selected if kind in HARNESS_BRIDGES]}
         (staging / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         require(not output.exists(), "Node bridge output already exists")
         staging.rename(output)
-    return output
+    # Legacy deploy rewrites this disposable workspace's dependency state. Keep
+    # the verified interpreter instead of probing pnpm again after deployment.
+    return output, node
 
 
 def main():

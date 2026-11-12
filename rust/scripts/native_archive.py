@@ -327,23 +327,23 @@ def extract_archive(path, destination, checksum=None):
     return root
 
 
-def build_binaries(stage, profile, features):
-    command = ["cargo", "build", "--locked", "--manifest-path", str(REPO / "rust/Cargo.toml"),
+def build_binaries(stage, profile, features, repo=REPO, env=None):
+    command = ["cargo", "build", "--locked", "--manifest-path", str(repo / "rust/Cargo.toml"),
                "-p", "supertag-cli", "--bin", "supertag"]
     if profile == "release":
         command.append("--release")
     if features:
         command += ["--features", ",".join(features)]
-    subprocess.run(command, cwd=REPO, check=True)
+    subprocess.run(command, cwd=repo, env=env, check=True)
     metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1",
-        "--manifest-path", str(REPO / "rust/Cargo.toml")], cwd=REPO))
+        "--manifest-path", str(repo / "rust/Cargo.toml")], cwd=repo, env=env))
     cli = Path(metadata["target_directory"]) / ("release" if profile == "release" else "debug") / "supertag"
-    version = version_from_repo()
+    version = version_from_repo(repo)
     system, arch = native_platform().split("-")
-    env = dict(os.environ, CGO_ENABLED="0", GOOS=system, GOARCH=arch, GOWORK="off")
+    env = dict(os.environ if env is None else env, CGO_ENABLED="0", GOOS=system, GOARCH=arch, GOWORK="off")
     tui = stage / "supertag-tui"
     subprocess.run(["go", "build", "-mod=readonly", "-trimpath", "-ldflags", f"-s -w -X main.version={version}",
-                    "-o", str(tui), "."], cwd=REPO / "apps/tui", env=env, check=True)
+                    "-o", str(tui), "."], cwd=repo / "apps/tui", env=env, check=True)
     return cli, tui
 
 

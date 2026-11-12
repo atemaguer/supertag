@@ -41,16 +41,16 @@ def wait_until(check, description):
     raise ArchiveError("timed out waiting for " + description)
 
 
-def smoke(path, fixture, checksum=None):
+def smoke(path, fixture, checksum=None, *, validator=validate_archive, extractor=extract_archive):
     path, fixture = Path(path).resolve(), Path(fixture).resolve()
-    manifest = validate_archive(path, checksum)
+    manifest = validator(path, checksum)
     require(manifest["platform"] == native_platform(), "smoke test requires the archive's native platform")
     require(fixture.is_file() and os.access(fixture, os.X_OK), "fixture adapter must be executable")
     tmux = shutil.which("tmux")
     require(tmux is not None, "tmux is required for the packaged terminal UI smoke")
     with tempfile.TemporaryDirectory(prefix="supertag-archive-smoke-", dir="/tmp") as temporary:
         root = Path(temporary)
-        package = extract_archive(path, root / "unpacked", checksum)
+        package = extractor(path, root / "unpacked", checksum)
         cli, tui = package / "supertag", package / "supertag-tui"
         check_versions(cli, tui, manifest["version"])
         home, state = root / "home", root / "state"
@@ -101,7 +101,7 @@ def smoke(path, fixture, checksum=None):
                         os.killpg(service.pid, signal.SIGKILL)
                         service.wait(timeout=5)
     return {"archive_sha256": digest(path), "version": manifest["version"], "platform": manifest["platform"],
-            "profile": manifest["profile"], "features": manifest["features"], "source": manifest["source"],
+            "profile": manifest["profile"], "features": manifest.get("features", []), "source": manifest["source"],
             "fixture_adapter_sha256": digest(fixture), "isolated_home_and_state": True,
             "default_sibling_tui": True, "real_ui_task_round_trip": True, "clean_service_shutdown": True}
 
