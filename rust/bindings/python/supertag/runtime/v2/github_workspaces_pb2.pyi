@@ -19,14 +19,22 @@ class GithubWorkspaceSource(_message.Message):
     def __init__(self, account_id: _Optional[str] = ..., repository_id: _Optional[int] = ..., repository: _Optional[str] = ..., commit_sha: _Optional[str] = ...) -> None: ...
 
 class GithubWorkspace(_message.Message):
-    __slots__ = ("workspace_id", "source", "revision")
+    __slots__ = ("workspace_id", "source", "revision", "pull_request")
     WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
     SOURCE_FIELD_NUMBER: _ClassVar[int]
     REVISION_FIELD_NUMBER: _ClassVar[int]
+    PULL_REQUEST_FIELD_NUMBER: _ClassVar[int]
     workspace_id: str
     source: GithubWorkspaceSource
     revision: int
-    def __init__(self, workspace_id: _Optional[str] = ..., source: _Optional[_Union[GithubWorkspaceSource, _Mapping]] = ..., revision: _Optional[int] = ...) -> None: ...
+    pull_request: GithubPullRequestDelivery
+    def __init__(self, workspace_id: _Optional[str] = ..., source: _Optional[_Union[GithubWorkspaceSource, _Mapping]] = ..., revision: _Optional[int] = ..., pull_request: _Optional[_Union[GithubPullRequestDelivery, _Mapping]] = ...) -> None: ...
+
+class GithubPullRequestDelivery(_message.Message):
+    __slots__ = ("base_branch",)
+    BASE_BRANCH_FIELD_NUMBER: _ClassVar[int]
+    base_branch: str
+    def __init__(self, base_branch: _Optional[str] = ...) -> None: ...
 
 class PutGithubWorkspaceRequest(_message.Message):
     __slots__ = ("operation_id", "workspace", "expected_revision")

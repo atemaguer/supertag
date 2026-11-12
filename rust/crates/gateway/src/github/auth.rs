@@ -48,12 +48,14 @@ pub(super) struct Authentication {
 enum TokenScope {
     Comments,
     SourceRead,
+    Publication,
 }
 impl TokenScope {
-    fn permission(self) -> (&'static str, &'static str) {
+    fn permissions(self) -> &'static [(&'static str, &'static str)] {
         match self {
-            Self::Comments => ("issues", "write"),
-            Self::SourceRead => ("contents", "read"),
+            Self::Comments => &[("issues", "write")],
+            Self::SourceRead => &[("contents", "read")],
+            Self::Publication => &[("contents", "write"), ("pull_requests", "write")],
         }
     }
 }
@@ -137,6 +139,16 @@ impl Authentication {
         Ok(value)
     }
 
+    pub(super) fn publisher(
+        configuration: &GithubAuthentication,
+        repository_id: u64,
+        repository: &str,
+    ) -> Result<Self> {
+        let mut value = Self::new(configuration, repository_id, repository)?;
+        value.scope = TokenScope::Publication;
+        Ok(value)
+    }
+
     pub(super) async fn access_token(&self, client: &Client, api: &Url) -> Result<AccessToken> {
         self.access_token_at(client, api, now()?).await
     }
@@ -189,12 +201,17 @@ impl Authentication {
         let target = api.join(&format!(
             "app/installations/{installation_id}/access_tokens"
         ))?;
-        let (permission, access) = self.scope.permission();
+        let permissions: serde_json::Map<String, Value> = self
+            .scope
+            .permissions()
+            .iter()
+            .map(|(key, value)| (key.to_string(), Value::String(value.to_string())))
+            .collect();
         let response = client
             .post(target)
             .bearer_auth(&jwt)
             .headers(headers())
-            .json(&json!({"repository_ids":[self.repository_id],"permissions":{permission:access}}))
+            .json(&json!({"repository_ids":[self.repository_id],"permissions":permissions}))
             .send()
             .await
             .map_err(|_| anyhow!("GitHub installation token acquisition unavailable"))?;
@@ -281,11 +298,14 @@ fn validate_scoped_token_response<'a>(
         .get("permissions")
         .and_then(Value::as_object)
         .ok_or_else(|| anyhow!("GitHub installation token has no permission scope"))?;
-    let (permission, access) = scope.permission();
+    let required = scope.permissions();
     ensure!(
-        permissions.get(permission).and_then(Value::as_str) == Some(access)
-            && permissions.iter().all(|(key, value)| (key == permission
-                && value.as_str() == Some(access))
+        required
+            .iter()
+            .all(|(key, access)| permissions.get(*key).and_then(Value::as_str) == Some(*access))
+            && permissions.iter().all(|(key, value)| required
+                .iter()
+                .any(|(required, access)| key == required && value.as_str() == Some(*access))
                 || (key == "metadata" && value.as_str() == Some("read"))),
         "GitHub installation token permissions exceed the requested scope"
     );

@@ -1,0 +1,120 @@
+syntax = "proto3";
+package supertag.runtime.v2;
+import "supertag/runtime/v2/runtime.proto";
+
+// Operators inspect external delivery separately from a Task's local result.
+service GithubPublications {
+  rpc Get(GetGithubPublicationRequest) returns (GithubPublication);
+  rpc List(ListGithubPublicationsRequest) returns (ListGithubPublicationsResponse);
+  rpc Cancel(CancelGithubPublicationRequest) returns (GithubPublication);
+}
+
+// Private Gateway-to-Control-Plane service. The authenticated publisher is
+// bound to a configured GitHub account. A claim is never permission to write.
+service GithubPublisher {
+  rpc Claim(ClaimGithubPublicationRequest) returns (ClaimGithubPublicationResponse);
+  rpc Renew(GithubPublicationLease) returns (ClaimGithubPublicationResponse);
+  rpc Plan(PlanGithubPublicationRequest) returns (GithubPublication);
+  rpc BeginEffect(BeginGithubPublicationEffectRequest) returns (GithubPublication);
+  rpc RecordEffect(RecordGithubPublicationEffectRequest) returns (GithubPublication);
+}
+
+enum GithubPublicationState {
+  GITHUB_PUBLICATION_STATE_UNSPECIFIED = 0;
+  GITHUB_PUBLICATION_STATE_QUEUED = 1;
+  GITHUB_PUBLICATION_STATE_WAITING_APPROVAL = 2;
+  GITHUB_PUBLICATION_STATE_CLAIMED = 3;
+  GITHUB_PUBLICATION_STATE_SENDING = 4;
+  GITHUB_PUBLICATION_STATE_UNCERTAIN = 5;
+  GITHUB_PUBLICATION_STATE_PUBLISHED = 6;
+  GITHUB_PUBLICATION_STATE_HELD = 7;
+  GITHUB_PUBLICATION_STATE_CANCELLED = 8;
+}
+enum GithubPublicationPhase {
+  GITHUB_PUBLICATION_PHASE_INSPECT = 0;
+  GITHUB_PUBLICATION_PHASE_PUSH = 1;
+  GITHUB_PUBLICATION_PHASE_CREATE = 2;
+  GITHUB_PUBLICATION_PHASE_UPDATE = 3;
+}
+message GithubPullRequestReceipt {
+  uint64 number = 1;
+  string url = 2;
+  uint64 repository_id = 3;
+  string repository = 4;
+  string head_branch = 5;
+  string base_branch = 6;
+  string head_commit = 7;
+  bool open = 8;
+  bool merged = 9;
+  bool draft = 10;
+  string title = 11;
+  string body = 12;
+}
+message GithubPublication {
+  string publication_id = 1;
+  string task_id = 2;
+  string tag_id = 3;
+  string session_id = 4;
+  string account_id = 5;
+  uint64 repository_id = 6;
+  string repository = 7;
+  WorkspaceDeliveryReference delivery = 8;
+  string head_branch = 9;
+  string base_branch = 10;
+  string title = 11;
+  string body = 12;
+  GithubPublicationState state = 13;
+  GithubPublicationPhase phase = 14;
+  optional string approval_id = 15;
+  GithubPullRequestReceipt pull_request = 16;
+  string reason = 17;
+  int64 created_order = 18;
+  bool cancel_requested = 19;
+}
+message GetGithubPublicationRequest { string publication_id = 1; }
+message ListGithubPublicationsRequest {
+  string task_id = 1;
+  uint32 limit = 2;
+  int64 before_order = 3;
+}
+message ListGithubPublicationsResponse {
+  repeated GithubPublication publications = 1;
+  int64 next_before_order = 2;
+}
+message CancelGithubPublicationRequest {
+  string publication_id = 1;
+  string operation_id = 2;
+  string reason = 3;
+}
+message ClaimGithubPublicationRequest { string operation_id = 1; }
+message GithubPublicationLease { string publication_id = 1; string lease_token = 2; }
+message ClaimGithubPublicationResponse {
+  GithubPublication publication = 1;
+  string lease_token = 2;
+  uint64 valid_for_ms = 3;
+  // Recovery claims may observe and settle proven results, but cannot write.
+  bool read_only = 4;
+}
+message PlanGithubPublicationRequest {
+  GithubPublicationLease lease = 1;
+  string operation_id = 2;
+  // Absence means complete discovery proved no matching PR or branch.
+  GithubPullRequestReceipt existing = 3;
+  // Required when resuming after a durably acknowledged push, before Create/Update.
+  optional string pushed_commit = 4;
+}
+message BeginGithubPublicationEffectRequest {
+  GithubPublicationLease lease = 1;
+  string operation_id = 2;
+  GithubPublicationPhase phase = 3;
+}
+message RecordGithubPublicationEffectRequest {
+  GithubPublicationLease lease = 1;
+  string operation_id = 2;
+  GithubPublicationPhase phase = 3;
+  GithubPublicationState state = 4;
+  GithubPullRequestReceipt pull_request = 5;
+  // A push receipt must be a read-back of the exact remote commit.
+  optional string pushed_commit = 6;
+  string reason = 7;
+}

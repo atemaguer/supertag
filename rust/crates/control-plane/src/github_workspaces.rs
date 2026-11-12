@@ -49,6 +49,9 @@ fn validate(value: &mut GithubWorkspace) -> Result<()> {
     {
         return Err(invalid("GitHub repository must be owner/name"));
     }
+    if let Some(delivery) = &value.pull_request {
+        validate_base_branch(&delivery.base_branch)?;
+    }
     source.repository.make_ascii_lowercase();
     if source.commit_sha.len() != 40
         || !source
@@ -58,6 +61,30 @@ fn validate(value: &mut GithubWorkspace) -> Result<()> {
     {
         return Err(invalid(
             "GitHub source requires a full lowercase commit SHA",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_base_branch(branch: &str) -> Result<()> {
+    if branch.is_empty()
+        || branch.len() > 200
+        || branch.starts_with('-')
+        || branch.starts_with('/')
+        || branch.ends_with('/')
+        || branch.ends_with('.')
+        || branch.contains("..")
+        || branch.contains("@{")
+        || branch.contains("//")
+        || branch
+            .split('/')
+            .any(|part| part.starts_with('.') || part.ends_with(".lock"))
+        || !branch
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"/-_.".contains(&byte))
+    {
+        return Err(invalid(
+            "pull request base must be an explicit Git branch name",
         ));
     }
     Ok(())
@@ -144,6 +171,14 @@ pub(crate) async fn admission_in(
     }
     require_account_in(tx, source).await?;
     require_read(policy, source)?;
+    if value.pull_request.is_some() {
+        crate::external_effects::surface(
+            policy,
+            &source.account_id,
+            &format!("repository:{}", source.repository_id),
+            "pull-requests:create",
+        )?;
+    }
     spec.github_source = Some(value);
     Ok(())
 }
@@ -175,7 +210,9 @@ impl Store {
             ));
         }
         require_account_in(&mut tx, value.source.as_ref().unwrap()).await?;
-        if let Some(prior) = prior.filter(|prior| prior.source == value.source) {
+        if let Some(prior) = prior.filter(|prior| {
+            prior.source == value.source && prior.pull_request == value.pull_request
+        }) {
             value = prior;
         } else {
             value.revision =

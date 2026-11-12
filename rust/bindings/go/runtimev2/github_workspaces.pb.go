@@ -91,10 +91,12 @@ func (x *GithubWorkspaceSource) GetCommitSha() string {
 }
 
 type GithubWorkspace struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	Source        *GithubWorkspaceSource `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
-	Revision      uint64                 `protobuf:"varint,3,opt,name=revision,proto3" json:"revision,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Source      *GithubWorkspaceSource `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
+	Revision    uint64                 `protobuf:"varint,3,opt,name=revision,proto3" json:"revision,omitempty"`
+	// Omit to retain local commit/patch delivery only.
+	PullRequest   *GithubPullRequestDelivery `protobuf:"bytes,4,opt,name=pull_request,json=pullRequest,proto3" json:"pull_request,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -150,6 +152,57 @@ func (x *GithubWorkspace) GetRevision() uint64 {
 	return 0
 }
 
+func (x *GithubWorkspace) GetPullRequest() *GithubPullRequestDelivery {
+	if x != nil {
+		return x.PullRequest
+	}
+	return nil
+}
+
+type GithubPullRequestDelivery struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BaseBranch    string                 `protobuf:"bytes,1,opt,name=base_branch,json=baseBranch,proto3" json:"base_branch,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GithubPullRequestDelivery) Reset() {
+	*x = GithubPullRequestDelivery{}
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GithubPullRequestDelivery) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GithubPullRequestDelivery) ProtoMessage() {}
+
+func (x *GithubPullRequestDelivery) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GithubPullRequestDelivery.ProtoReflect.Descriptor instead.
+func (*GithubPullRequestDelivery) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *GithubPullRequestDelivery) GetBaseBranch() string {
+	if x != nil {
+		return x.BaseBranch
+	}
+	return ""
+}
+
 type PutGithubWorkspaceRequest struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	OperationId      string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
@@ -161,7 +214,7 @@ type PutGithubWorkspaceRequest struct {
 
 func (x *PutGithubWorkspaceRequest) Reset() {
 	*x = PutGithubWorkspaceRequest{}
-	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[2]
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -173,7 +226,7 @@ func (x *PutGithubWorkspaceRequest) String() string {
 func (*PutGithubWorkspaceRequest) ProtoMessage() {}
 
 func (x *PutGithubWorkspaceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[2]
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -186,7 +239,7 @@ func (x *PutGithubWorkspaceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutGithubWorkspaceRequest.ProtoReflect.Descriptor instead.
 func (*PutGithubWorkspaceRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP(), []int{2}
+	return file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *PutGithubWorkspaceRequest) GetOperationId() string {
@@ -219,7 +272,7 @@ type GetGithubWorkspaceRequest struct {
 
 func (x *GetGithubWorkspaceRequest) Reset() {
 	*x = GetGithubWorkspaceRequest{}
-	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[3]
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -231,7 +284,7 @@ func (x *GetGithubWorkspaceRequest) String() string {
 func (*GetGithubWorkspaceRequest) ProtoMessage() {}
 
 func (x *GetGithubWorkspaceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[3]
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -244,7 +297,7 @@ func (x *GetGithubWorkspaceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetGithubWorkspaceRequest.ProtoReflect.Descriptor instead.
 func (*GetGithubWorkspaceRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP(), []int{3}
+	return file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *GetGithubWorkspaceRequest) GetWorkspaceId() string {
@@ -264,7 +317,7 @@ type ListGithubWorkspacesRequest struct {
 
 func (x *ListGithubWorkspacesRequest) Reset() {
 	*x = ListGithubWorkspacesRequest{}
-	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[4]
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -276,7 +329,7 @@ func (x *ListGithubWorkspacesRequest) String() string {
 func (*ListGithubWorkspacesRequest) ProtoMessage() {}
 
 func (x *ListGithubWorkspacesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[4]
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -289,7 +342,7 @@ func (x *ListGithubWorkspacesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListGithubWorkspacesRequest.ProtoReflect.Descriptor instead.
 func (*ListGithubWorkspacesRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP(), []int{4}
+	return file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ListGithubWorkspacesRequest) GetAfterId() string {
@@ -316,7 +369,7 @@ type ListGithubWorkspacesResponse struct {
 
 func (x *ListGithubWorkspacesResponse) Reset() {
 	*x = ListGithubWorkspacesResponse{}
-	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[5]
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -328,7 +381,7 @@ func (x *ListGithubWorkspacesResponse) String() string {
 func (*ListGithubWorkspacesResponse) ProtoMessage() {}
 
 func (x *ListGithubWorkspacesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[5]
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -341,7 +394,7 @@ func (x *ListGithubWorkspacesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListGithubWorkspacesResponse.ProtoReflect.Descriptor instead.
 func (*ListGithubWorkspacesResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP(), []int{5}
+	return file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ListGithubWorkspacesResponse) GetWorkspaces() []*GithubWorkspace {
@@ -369,7 +422,7 @@ type DeleteGithubWorkspaceRequest struct {
 
 func (x *DeleteGithubWorkspaceRequest) Reset() {
 	*x = DeleteGithubWorkspaceRequest{}
-	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[6]
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -381,7 +434,7 @@ func (x *DeleteGithubWorkspaceRequest) String() string {
 func (*DeleteGithubWorkspaceRequest) ProtoMessage() {}
 
 func (x *DeleteGithubWorkspaceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[6]
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -394,7 +447,7 @@ func (x *DeleteGithubWorkspaceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteGithubWorkspaceRequest.ProtoReflect.Descriptor instead.
 func (*DeleteGithubWorkspaceRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP(), []int{6}
+	return file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *DeleteGithubWorkspaceRequest) GetOperationId() string {
@@ -426,7 +479,7 @@ type DeleteGithubWorkspaceResponse struct {
 
 func (x *DeleteGithubWorkspaceResponse) Reset() {
 	*x = DeleteGithubWorkspaceResponse{}
-	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[7]
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -438,7 +491,7 @@ func (x *DeleteGithubWorkspaceResponse) String() string {
 func (*DeleteGithubWorkspaceResponse) ProtoMessage() {}
 
 func (x *DeleteGithubWorkspaceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[7]
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -451,7 +504,7 @@ func (x *DeleteGithubWorkspaceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteGithubWorkspaceResponse.ProtoReflect.Descriptor instead.
 func (*DeleteGithubWorkspaceResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP(), []int{7}
+	return file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP(), []int{8}
 }
 
 var File_supertag_runtime_v2_github_workspaces_proto protoreflect.FileDescriptor
@@ -467,11 +520,15 @@ const file_supertag_runtime_v2_github_workspaces_proto_rawDesc = "" +
 	"repository\x18\x03 \x01(\tR\n" +
 	"repository\x12\x1d\n" +
 	"\n" +
-	"commit_sha\x18\x04 \x01(\tR\tcommitSha\"\x94\x01\n" +
+	"commit_sha\x18\x04 \x01(\tR\tcommitSha\"\xe7\x01\n" +
 	"\x0fGithubWorkspace\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12B\n" +
 	"\x06source\x18\x02 \x01(\v2*.supertag.runtime.v2.GithubWorkspaceSourceR\x06source\x12\x1a\n" +
-	"\brevision\x18\x03 \x01(\x04R\brevision\"\xca\x01\n" +
+	"\brevision\x18\x03 \x01(\x04R\brevision\x12Q\n" +
+	"\fpull_request\x18\x04 \x01(\v2..supertag.runtime.v2.GithubPullRequestDeliveryR\vpullRequest\"<\n" +
+	"\x19GithubPullRequestDelivery\x12\x1f\n" +
+	"\vbase_branch\x18\x01 \x01(\tR\n" +
+	"baseBranch\"\xca\x01\n" +
 	"\x19PutGithubWorkspaceRequest\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12B\n" +
 	"\tworkspace\x18\x02 \x01(\v2$.supertag.runtime.v2.GithubWorkspaceR\tworkspace\x120\n" +
@@ -511,34 +568,36 @@ func file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP() []byte {
 	return file_supertag_runtime_v2_github_workspaces_proto_rawDescData
 }
 
-var file_supertag_runtime_v2_github_workspaces_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_supertag_runtime_v2_github_workspaces_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_supertag_runtime_v2_github_workspaces_proto_goTypes = []any{
 	(*GithubWorkspaceSource)(nil),         // 0: supertag.runtime.v2.GithubWorkspaceSource
 	(*GithubWorkspace)(nil),               // 1: supertag.runtime.v2.GithubWorkspace
-	(*PutGithubWorkspaceRequest)(nil),     // 2: supertag.runtime.v2.PutGithubWorkspaceRequest
-	(*GetGithubWorkspaceRequest)(nil),     // 3: supertag.runtime.v2.GetGithubWorkspaceRequest
-	(*ListGithubWorkspacesRequest)(nil),   // 4: supertag.runtime.v2.ListGithubWorkspacesRequest
-	(*ListGithubWorkspacesResponse)(nil),  // 5: supertag.runtime.v2.ListGithubWorkspacesResponse
-	(*DeleteGithubWorkspaceRequest)(nil),  // 6: supertag.runtime.v2.DeleteGithubWorkspaceRequest
-	(*DeleteGithubWorkspaceResponse)(nil), // 7: supertag.runtime.v2.DeleteGithubWorkspaceResponse
+	(*GithubPullRequestDelivery)(nil),     // 2: supertag.runtime.v2.GithubPullRequestDelivery
+	(*PutGithubWorkspaceRequest)(nil),     // 3: supertag.runtime.v2.PutGithubWorkspaceRequest
+	(*GetGithubWorkspaceRequest)(nil),     // 4: supertag.runtime.v2.GetGithubWorkspaceRequest
+	(*ListGithubWorkspacesRequest)(nil),   // 5: supertag.runtime.v2.ListGithubWorkspacesRequest
+	(*ListGithubWorkspacesResponse)(nil),  // 6: supertag.runtime.v2.ListGithubWorkspacesResponse
+	(*DeleteGithubWorkspaceRequest)(nil),  // 7: supertag.runtime.v2.DeleteGithubWorkspaceRequest
+	(*DeleteGithubWorkspaceResponse)(nil), // 8: supertag.runtime.v2.DeleteGithubWorkspaceResponse
 }
 var file_supertag_runtime_v2_github_workspaces_proto_depIdxs = []int32{
 	0, // 0: supertag.runtime.v2.GithubWorkspace.source:type_name -> supertag.runtime.v2.GithubWorkspaceSource
-	1, // 1: supertag.runtime.v2.PutGithubWorkspaceRequest.workspace:type_name -> supertag.runtime.v2.GithubWorkspace
-	1, // 2: supertag.runtime.v2.ListGithubWorkspacesResponse.workspaces:type_name -> supertag.runtime.v2.GithubWorkspace
-	2, // 3: supertag.runtime.v2.GithubWorkspaces.Put:input_type -> supertag.runtime.v2.PutGithubWorkspaceRequest
-	3, // 4: supertag.runtime.v2.GithubWorkspaces.Get:input_type -> supertag.runtime.v2.GetGithubWorkspaceRequest
-	4, // 5: supertag.runtime.v2.GithubWorkspaces.List:input_type -> supertag.runtime.v2.ListGithubWorkspacesRequest
-	6, // 6: supertag.runtime.v2.GithubWorkspaces.Delete:input_type -> supertag.runtime.v2.DeleteGithubWorkspaceRequest
-	1, // 7: supertag.runtime.v2.GithubWorkspaces.Put:output_type -> supertag.runtime.v2.GithubWorkspace
-	1, // 8: supertag.runtime.v2.GithubWorkspaces.Get:output_type -> supertag.runtime.v2.GithubWorkspace
-	5, // 9: supertag.runtime.v2.GithubWorkspaces.List:output_type -> supertag.runtime.v2.ListGithubWorkspacesResponse
-	7, // 10: supertag.runtime.v2.GithubWorkspaces.Delete:output_type -> supertag.runtime.v2.DeleteGithubWorkspaceResponse
-	7, // [7:11] is the sub-list for method output_type
-	3, // [3:7] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	2, // 1: supertag.runtime.v2.GithubWorkspace.pull_request:type_name -> supertag.runtime.v2.GithubPullRequestDelivery
+	1, // 2: supertag.runtime.v2.PutGithubWorkspaceRequest.workspace:type_name -> supertag.runtime.v2.GithubWorkspace
+	1, // 3: supertag.runtime.v2.ListGithubWorkspacesResponse.workspaces:type_name -> supertag.runtime.v2.GithubWorkspace
+	3, // 4: supertag.runtime.v2.GithubWorkspaces.Put:input_type -> supertag.runtime.v2.PutGithubWorkspaceRequest
+	4, // 5: supertag.runtime.v2.GithubWorkspaces.Get:input_type -> supertag.runtime.v2.GetGithubWorkspaceRequest
+	5, // 6: supertag.runtime.v2.GithubWorkspaces.List:input_type -> supertag.runtime.v2.ListGithubWorkspacesRequest
+	7, // 7: supertag.runtime.v2.GithubWorkspaces.Delete:input_type -> supertag.runtime.v2.DeleteGithubWorkspaceRequest
+	1, // 8: supertag.runtime.v2.GithubWorkspaces.Put:output_type -> supertag.runtime.v2.GithubWorkspace
+	1, // 9: supertag.runtime.v2.GithubWorkspaces.Get:output_type -> supertag.runtime.v2.GithubWorkspace
+	6, // 10: supertag.runtime.v2.GithubWorkspaces.List:output_type -> supertag.runtime.v2.ListGithubWorkspacesResponse
+	8, // 11: supertag.runtime.v2.GithubWorkspaces.Delete:output_type -> supertag.runtime.v2.DeleteGithubWorkspaceResponse
+	8, // [8:12] is the sub-list for method output_type
+	4, // [4:8] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_github_workspaces_proto_init() }
@@ -546,14 +605,14 @@ func file_supertag_runtime_v2_github_workspaces_proto_init() {
 	if File_supertag_runtime_v2_github_workspaces_proto != nil {
 		return
 	}
-	file_supertag_runtime_v2_github_workspaces_proto_msgTypes[2].OneofWrappers = []any{}
+	file_supertag_runtime_v2_github_workspaces_proto_msgTypes[3].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_github_workspaces_proto_rawDesc), len(file_supertag_runtime_v2_github_workspaces_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

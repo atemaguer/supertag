@@ -1,6 +1,7 @@
 //! Signed GitHub events and journaled issue/PR comments. No credentials reach Tasks.
 mod auth;
 mod delivery;
+pub mod publication;
 #[cfg(test)]
 mod tests;
 pub mod workspaces;

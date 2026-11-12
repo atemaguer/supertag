@@ -18,6 +18,9 @@ pub enum GithubWorkspaceCommand {
         repository: String,
         #[arg(long)]
         commit: String,
+        /// Publish verified results as a draft pull request into this branch.
+        #[arg(long)]
+        pull_request_base: Option<String>,
         #[arg(long)]
         expected_revision: Option<u64>,
         #[arg(long)]
@@ -53,6 +56,7 @@ pub async fn run(connection: Connection, command: GithubWorkspaceCommand) -> Res
             repository_id,
             repository,
             commit,
+            pull_request_base,
             expected_revision,
             operation_id,
         } => {
@@ -63,6 +67,8 @@ pub async fn run(connection: Connection, command: GithubWorkspaceCommand) -> Res
                         operation_id: operation_id.clone(),
                         expected_revision,
                         workspace: Some(GithubWorkspace {
+                            pull_request: pull_request_base
+                                .map(|base_branch| GithubPullRequestDelivery { base_branch }),
                             workspace_id,
                             revision: 0,
                             source: Some(GithubWorkspaceSource {
@@ -121,6 +127,6 @@ pub async fn run(connection: Connection, command: GithubWorkspaceCommand) -> Res
 }
 
 fn describe(value: GithubWorkspace) -> Value {
-    json!({"workspace_id": value.workspace_id, "revision": value.revision, "source": value.source.map(|source|
+    json!({"workspace_id": value.workspace_id, "revision": value.revision, "pull_request": value.pull_request.map(|delivery| json!({"base_branch":delivery.base_branch})), "source": value.source.map(|source|
         json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha}))})
 }

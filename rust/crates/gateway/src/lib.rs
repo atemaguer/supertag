@@ -3,6 +3,7 @@
 mod conversations;
 mod delivery_journal;
 pub mod github;
+mod github_publications;
 mod github_workspaces;
 mod inbox;
 mod inputs;

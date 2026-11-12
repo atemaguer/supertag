@@ -250,7 +250,7 @@ impl GithubWorkspaceSources {
     }
 }
 
-fn git_command(directory: &Path) -> Command {
+pub(super) fn git_command(directory: &Path) -> Command {
     let mut command = Command::new("/usr/bin/git");
     command
         .current_dir(directory)
@@ -290,7 +290,11 @@ impl Drop for ProcessGroup {
     }
 }
 
-async fn run_git(mut command: Command, directory: &Path, cancel: &CancellationToken) -> Result<()> {
+pub(super) async fn run_git(
+    mut command: Command,
+    directory: &Path,
+    cancel: &CancellationToken,
+) -> Result<()> {
     use std::os::unix::process::CommandExt as _;
     command
         .stdin(Stdio::null())

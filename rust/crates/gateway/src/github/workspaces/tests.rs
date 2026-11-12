@@ -212,6 +212,7 @@ async fn loopback_source_fetch_keeps_credentials_at_gateway_and_imports_exact_co
         format!("http://{address}/git/").parse()?,
     )?;
     let request = GithubWorkspace {
+        pull_request: None,
         workspace_id: "project".into(),
         revision: 1,
         source: Some(GithubWorkspaceSource {
@@ -324,6 +325,7 @@ async fn source_metadata_redirect_and_mismatch_fail_before_git() -> Result<()> {
     )?
     .with_test_endpoints(base.parse()?, format!("{base}git/").parse()?)?;
     let workspace = GithubWorkspace {
+        pull_request: None,
         workspace_id: "project".into(),
         revision: 1,
         source: Some(GithubWorkspaceSource {

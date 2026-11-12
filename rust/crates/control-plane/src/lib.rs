@@ -5,6 +5,8 @@ mod checkpoints;
 mod commit_reviews;
 mod context;
 mod conversations;
+mod external_effects;
+mod github_publications;
 mod github_workspaces;
 mod history;
 mod inbox;
@@ -69,6 +71,7 @@ impl ControlPlane {
         self.store.sweep_work_sessions().await?;
         self.store.sweep_commit_reviews().await?;
         self.store.sweep_replies().await?;
+        self.store.sweep_github_publications().await?;
         self.store.prune_watch().await?;
         Ok(())
     }

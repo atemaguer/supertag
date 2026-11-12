@@ -20,7 +20,10 @@ message GithubWorkspace {
   string workspace_id = 1;
   GithubWorkspaceSource source = 2;
   uint64 revision = 3;
+  // Omit to retain local commit/patch delivery only.
+  GithubPullRequestDelivery pull_request = 4;
 }
+message GithubPullRequestDelivery { string base_branch = 1; }
 message PutGithubWorkspaceRequest {
   string operation_id = 1;
   GithubWorkspace workspace = 2;

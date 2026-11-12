@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/github_workspaces.proto.
  */
 export const file_supertag_runtime_v2_github_workspaces: GenFile = /*@__PURE__*/
-  fileDesc("CitzdXBlcnRhZy9ydW50aW1lL3YyL2dpdGh1Yl93b3Jrc3BhY2VzLnByb3RvEhNzdXBlcnRhZy5ydW50aW1lLnYyImoKFUdpdGh1YldvcmtzcGFjZVNvdXJjZRISCgphY2NvdW50X2lkGAEgASgJEhUKDXJlcG9zaXRvcnlfaWQYAiABKAQSEgoKcmVwb3NpdG9yeRgDIAEoCRISCgpjb21taXRfc2hhGAQgASgJInUKD0dpdGh1YldvcmtzcGFjZRIUCgx3b3Jrc3BhY2VfaWQYASABKAkSOgoGc291cmNlGAIgASgLMiouc3VwZXJ0YWcucnVudGltZS52Mi5HaXRodWJXb3Jrc3BhY2VTb3VyY2USEAoIcmV2aXNpb24YAyABKAQioAEKGVB1dEdpdGh1YldvcmtzcGFjZVJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAEgASgJEjcKCXdvcmtzcGFjZRgCIAEoCzIkLnN1cGVydGFnLnJ1bnRpbWUudjIuR2l0aHViV29ya3NwYWNlEh4KEWV4cGVjdGVkX3JldmlzaW9uGAMgASgESACIAQFCFAoSX2V4cGVjdGVkX3JldmlzaW9uIjEKGUdldEdpdGh1YldvcmtzcGFjZVJlcXVlc3QSFAoMd29ya3NwYWNlX2lkGAEgASgJIj4KG0xpc3RHaXRodWJXb3Jrc3BhY2VzUmVxdWVzdBIQCghhZnRlcl9pZBgBIAEoCRINCgVsaW1pdBgCIAEoDSJtChxMaXN0R2l0aHViV29ya3NwYWNlc1Jlc3BvbnNlEjgKCndvcmtzcGFjZXMYASADKAsyJC5zdXBlcnRhZy5ydW50aW1lLnYyLkdpdGh1YldvcmtzcGFjZRITCgtuZXh0X2N1cnNvchgCIAEoCSJlChxEZWxldGVHaXRodWJXb3Jrc3BhY2VSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRIUCgx3b3Jrc3BhY2VfaWQYAiABKAkSGQoRZXhwZWN0ZWRfcmV2aXNpb24YAyABKAQiHwodRGVsZXRlR2l0aHViV29ya3NwYWNlUmVzcG9uc2UyqgMKEEdpdGh1YldvcmtzcGFjZXMSWwoDUHV0Ei4uc3VwZXJ0YWcucnVudGltZS52Mi5QdXRHaXRodWJXb3Jrc3BhY2VSZXF1ZXN0GiQuc3VwZXJ0YWcucnVudGltZS52Mi5HaXRodWJXb3Jrc3BhY2USWwoDR2V0Ei4uc3VwZXJ0YWcucnVudGltZS52Mi5HZXRHaXRodWJXb3Jrc3BhY2VSZXF1ZXN0GiQuc3VwZXJ0YWcucnVudGltZS52Mi5HaXRodWJXb3Jrc3BhY2USawoETGlzdBIwLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdEdpdGh1YldvcmtzcGFjZXNSZXF1ZXN0GjEuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0R2l0aHViV29ya3NwYWNlc1Jlc3BvbnNlEm8KBkRlbGV0ZRIxLnN1cGVydGFnLnJ1bnRpbWUudjIuRGVsZXRlR2l0aHViV29ya3NwYWNlUmVxdWVzdBoyLnN1cGVydGFnLnJ1bnRpbWUudjIuRGVsZXRlR2l0aHViV29ya3NwYWNlUmVzcG9uc2ViBnByb3RvMw");
+  fileDesc("CitzdXBlcnRhZy9ydW50aW1lL3YyL2dpdGh1Yl93b3Jrc3BhY2VzLnByb3RvEhNzdXBlcnRhZy5ydW50aW1lLnYyImoKFUdpdGh1YldvcmtzcGFjZVNvdXJjZRISCgphY2NvdW50X2lkGAEgASgJEhUKDXJlcG9zaXRvcnlfaWQYAiABKAQSEgoKcmVwb3NpdG9yeRgDIAEoCRISCgpjb21taXRfc2hhGAQgASgJIrsBCg9HaXRodWJXb3Jrc3BhY2USFAoMd29ya3NwYWNlX2lkGAEgASgJEjoKBnNvdXJjZRgCIAEoCzIqLnN1cGVydGFnLnJ1bnRpbWUudjIuR2l0aHViV29ya3NwYWNlU291cmNlEhAKCHJldmlzaW9uGAMgASgEEkQKDHB1bGxfcmVxdWVzdBgEIAEoCzIuLnN1cGVydGFnLnJ1bnRpbWUudjIuR2l0aHViUHVsbFJlcXVlc3REZWxpdmVyeSIwChlHaXRodWJQdWxsUmVxdWVzdERlbGl2ZXJ5EhMKC2Jhc2VfYnJhbmNoGAEgASgJIqABChlQdXRHaXRodWJXb3Jrc3BhY2VSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRI3Cgl3b3Jrc3BhY2UYAiABKAsyJC5zdXBlcnRhZy5ydW50aW1lLnYyLkdpdGh1YldvcmtzcGFjZRIeChFleHBlY3RlZF9yZXZpc2lvbhgDIAEoBEgAiAEBQhQKEl9leHBlY3RlZF9yZXZpc2lvbiIxChlHZXRHaXRodWJXb3Jrc3BhY2VSZXF1ZXN0EhQKDHdvcmtzcGFjZV9pZBgBIAEoCSI+ChtMaXN0R2l0aHViV29ya3NwYWNlc1JlcXVlc3QSEAoIYWZ0ZXJfaWQYASABKAkSDQoFbGltaXQYAiABKA0ibQocTGlzdEdpdGh1YldvcmtzcGFjZXNSZXNwb25zZRI4Cgp3b3Jrc3BhY2VzGAEgAygLMiQuc3VwZXJ0YWcucnVudGltZS52Mi5HaXRodWJXb3Jrc3BhY2USEwoLbmV4dF9jdXJzb3IYAiABKAkiZQocRGVsZXRlR2l0aHViV29ya3NwYWNlUmVxdWVzdBIUCgxvcGVyYXRpb25faWQYASABKAkSFAoMd29ya3NwYWNlX2lkGAIgASgJEhkKEWV4cGVjdGVkX3JldmlzaW9uGAMgASgEIh8KHURlbGV0ZUdpdGh1YldvcmtzcGFjZVJlc3BvbnNlMqoDChBHaXRodWJXb3Jrc3BhY2VzElsKA1B1dBIuLnN1cGVydGFnLnJ1bnRpbWUudjIuUHV0R2l0aHViV29ya3NwYWNlUmVxdWVzdBokLnN1cGVydGFnLnJ1bnRpbWUudjIuR2l0aHViV29ya3NwYWNlElsKA0dldBIuLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0R2l0aHViV29ya3NwYWNlUmVxdWVzdBokLnN1cGVydGFnLnJ1bnRpbWUudjIuR2l0aHViV29ya3NwYWNlEmsKBExpc3QSMC5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RHaXRodWJXb3Jrc3BhY2VzUmVxdWVzdBoxLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdEdpdGh1YldvcmtzcGFjZXNSZXNwb25zZRJvCgZEZWxldGUSMS5zdXBlcnRhZy5ydW50aW1lLnYyLkRlbGV0ZUdpdGh1YldvcmtzcGFjZVJlcXVlc3QaMi5zdXBlcnRhZy5ydW50aW1lLnYyLkRlbGV0ZUdpdGh1YldvcmtzcGFjZVJlc3BvbnNlYgZwcm90bzM");
 
 /**
  * @generated from message supertag.runtime.v2.GithubWorkspaceSource
@@ -64,6 +64,13 @@ export type GithubWorkspace = Message<"supertag.runtime.v2.GithubWorkspace"> & {
    * @generated from field: uint64 revision = 3;
    */
   revision: bigint;
+
+  /**
+   * Omit to retain local commit/patch delivery only.
+   *
+   * @generated from field: supertag.runtime.v2.GithubPullRequestDelivery pull_request = 4;
+   */
+  pullRequest?: GithubPullRequestDelivery | undefined;
 };
 
 /**
@@ -72,6 +79,23 @@ export type GithubWorkspace = Message<"supertag.runtime.v2.GithubWorkspace"> & {
  */
 export const GithubWorkspaceSchema: GenMessage<GithubWorkspace> = /*@__PURE__*/
   messageDesc(file_supertag_runtime_v2_github_workspaces, 1);
+
+/**
+ * @generated from message supertag.runtime.v2.GithubPullRequestDelivery
+ */
+export type GithubPullRequestDelivery = Message<"supertag.runtime.v2.GithubPullRequestDelivery"> & {
+  /**
+   * @generated from field: string base_branch = 1;
+   */
+  baseBranch: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.GithubPullRequestDelivery.
+ * Use `create(GithubPullRequestDeliverySchema)` to create a new message.
+ */
+export const GithubPullRequestDeliverySchema: GenMessage<GithubPullRequestDelivery> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_github_workspaces, 2);
 
 /**
  * @generated from message supertag.runtime.v2.PutGithubWorkspaceRequest
@@ -98,7 +122,7 @@ export type PutGithubWorkspaceRequest = Message<"supertag.runtime.v2.PutGithubWo
  * Use `create(PutGithubWorkspaceRequestSchema)` to create a new message.
  */
 export const PutGithubWorkspaceRequestSchema: GenMessage<PutGithubWorkspaceRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_github_workspaces, 2);
+  messageDesc(file_supertag_runtime_v2_github_workspaces, 3);
 
 /**
  * @generated from message supertag.runtime.v2.GetGithubWorkspaceRequest
@@ -115,7 +139,7 @@ export type GetGithubWorkspaceRequest = Message<"supertag.runtime.v2.GetGithubWo
  * Use `create(GetGithubWorkspaceRequestSchema)` to create a new message.
  */
 export const GetGithubWorkspaceRequestSchema: GenMessage<GetGithubWorkspaceRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_github_workspaces, 3);
+  messageDesc(file_supertag_runtime_v2_github_workspaces, 4);
 
 /**
  * @generated from message supertag.runtime.v2.ListGithubWorkspacesRequest
@@ -137,7 +161,7 @@ export type ListGithubWorkspacesRequest = Message<"supertag.runtime.v2.ListGithu
  * Use `create(ListGithubWorkspacesRequestSchema)` to create a new message.
  */
 export const ListGithubWorkspacesRequestSchema: GenMessage<ListGithubWorkspacesRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_github_workspaces, 4);
+  messageDesc(file_supertag_runtime_v2_github_workspaces, 5);
 
 /**
  * @generated from message supertag.runtime.v2.ListGithubWorkspacesResponse
@@ -159,7 +183,7 @@ export type ListGithubWorkspacesResponse = Message<"supertag.runtime.v2.ListGith
  * Use `create(ListGithubWorkspacesResponseSchema)` to create a new message.
  */
 export const ListGithubWorkspacesResponseSchema: GenMessage<ListGithubWorkspacesResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_github_workspaces, 5);
+  messageDesc(file_supertag_runtime_v2_github_workspaces, 6);
 
 /**
  * @generated from message supertag.runtime.v2.DeleteGithubWorkspaceRequest
@@ -186,7 +210,7 @@ export type DeleteGithubWorkspaceRequest = Message<"supertag.runtime.v2.DeleteGi
  * Use `create(DeleteGithubWorkspaceRequestSchema)` to create a new message.
  */
 export const DeleteGithubWorkspaceRequestSchema: GenMessage<DeleteGithubWorkspaceRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_github_workspaces, 6);
+  messageDesc(file_supertag_runtime_v2_github_workspaces, 7);
 
 /**
  * @generated from message supertag.runtime.v2.DeleteGithubWorkspaceResponse
@@ -199,7 +223,7 @@ export type DeleteGithubWorkspaceResponse = Message<"supertag.runtime.v2.DeleteG
  * Use `create(DeleteGithubWorkspaceResponseSchema)` to create a new message.
  */
 export const DeleteGithubWorkspaceResponseSchema: GenMessage<DeleteGithubWorkspaceResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_github_workspaces, 7);
+  messageDesc(file_supertag_runtime_v2_github_workspaces, 8);
 
 /**
  * Credential-free repository configuration. A Task receives an immutable copy.

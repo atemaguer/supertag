@@ -370,6 +370,15 @@ impl Store {
                 "approval request already has a decision".into(),
             ));
         }
+        if scope == ApprovalScope::Objective
+            && crate::github_publications::approval_eligibility_in(&mut tx, &value)
+                .await?
+                .is_some()
+        {
+            return Err(invalid(
+                "publication approval is bound to one exact destination and commit",
+            ));
+        }
         if scope == ApprovalScope::Objective && value.objective_id.is_none() {
             return Err(invalid("Objective scope requires an Objective"));
         }
@@ -768,8 +777,13 @@ pub(crate) async fn pending_in(
     limit: usize,
 ) -> Result<Vec<InboxItem>> {
     let operator_id = operator(principal)?;
-    let rows=sqlx::query(&format!("{VIEW} WHERE a.state=1 AND c.approval_id IS NULL AND a.requested_at_ms<=$1 AND a.requested_order<=$2 AND ($3='' OR a.objective_id=$3) AND EXISTS (SELECT 1 FROM supertag_v2_task_audience audience WHERE audience.task_id=a.task_id AND audience.owner IN ('',$4)) AND NOT EXISTS (SELECT 1 FROM supertag_v2_objectives o WHERE o.objective_id=a.objective_id AND o.status IN (5,6)) AND EXISTS (SELECT 1 FROM supertag_v2_tasks t WHERE t.task_id=a.task_id AND t.attempt_id=a.attempt_id AND ((t.state=2 AND t.lease_expires_at_ms>$1) OR (t.state=3 AND EXISTS (SELECT 1 FROM supertag_v2_approval_waits w JOIN supertag_v2_approval_wait_requests r ON r.task_id=w.task_id WHERE r.approval_id=a.approval_id AND w.continuation_task_id IS NULL) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice'))))) ORDER BY a.requested_order LIMIT $5"))
+    let mut rows=sqlx::query(&format!("{VIEW} WHERE a.state=1 AND c.approval_id IS NULL AND a.requested_at_ms<=$1 AND a.requested_order<=$2 AND ($3='' OR a.objective_id=$3) AND EXISTS (SELECT 1 FROM supertag_v2_task_audience audience WHERE audience.task_id=a.task_id AND audience.owner IN ('',$4)) AND NOT EXISTS (SELECT 1 FROM supertag_v2_objectives o WHERE o.objective_id=a.objective_id AND o.status IN (5,6)) AND EXISTS (SELECT 1 FROM supertag_v2_tasks t WHERE t.task_id=a.task_id AND t.attempt_id=a.attempt_id AND ((t.state=2 AND t.lease_expires_at_ms>$1) OR (t.state=3 AND EXISTS (SELECT 1 FROM supertag_v2_approval_waits w JOIN supertag_v2_approval_wait_requests r ON r.task_id=w.task_id WHERE r.approval_id=a.approval_id AND w.continuation_task_id IS NULL) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice'))))) ORDER BY a.requested_order LIMIT $5"))
         .bind(as_of_ms).bind(upper_order).bind(objective_id).bind(principal).bind(limit.min(1001) as i64).fetch_all(&mut **tx).await?;
+    rows.extend(sqlx::query(&format!("{VIEW} JOIN supertag_v2_github_publications publication ON publication.approval_id=a.approval_id WHERE a.state=1 AND a.requested_at_ms<=$1 AND a.requested_order<=$2 AND ($3='' OR a.objective_id=$3) AND EXISTS(SELECT 1 FROM supertag_v2_task_audience audience WHERE audience.task_id=a.task_id AND audience.owner IN ('',$4)) ORDER BY a.requested_order LIMIT $5"))
+        .bind(as_of_ms).bind(upper_order).bind(objective_id).bind(principal).bind(limit.min(1001) as i64).fetch_all(&mut **tx).await?);
+    rows.sort_by_key(|row| row.get::<i64, _>("requested_order"));
+    rows.dedup_by(|a, b| a.get::<String, _>("approval_id") == b.get::<String, _>("approval_id"));
+    rows.truncate(limit.min(1001));
     let mut items = vec![];
     for row in rows {
         let value = approval_row(&row)?;
@@ -864,6 +878,13 @@ async fn effective_state(
     }
     if value.valid_until_ms.is_some_and(|until| until <= now) {
         return Ok(ApprovalState::Expired);
+    }
+    if let Some(eligible) = crate::github_publications::approval_eligibility_in(tx, value).await? {
+        return Ok(if eligible {
+            state
+        } else {
+            ApprovalState::Expired
+        });
     }
     if let Some(objective) = &value.objective_id {
         let status: i64 =
@@ -986,7 +1007,7 @@ impl<'de> Deserialize<'de> for Canonical {
         deserializer.deserialize_any(V)
     }
 }
-fn canonical_arguments(input: &str) -> Result<String> {
+pub(crate) fn canonical_arguments(input: &str) -> Result<String> {
     if input.len() > ARGUMENT_LIMIT {
         return Err(invalid("approval arguments exceed 128 KiB"));
     }

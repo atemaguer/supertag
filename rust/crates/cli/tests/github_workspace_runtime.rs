@@ -17,7 +17,7 @@ use std::{
     path::{Path, PathBuf},
     process::Stdio,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
@@ -36,6 +36,10 @@ struct Fixture {
     root: PathBuf,
     commit: String,
     calls: Arc<AtomicUsize>,
+    publication: Option<Arc<Mutex<Option<Value>>>>,
+    creates: Arc<AtomicUsize>,
+    updates: Arc<AtomicUsize>,
+    pushes: Arc<AtomicUsize>,
 }
 struct Server(tokio::task::JoinHandle<()>);
 impl Drop for Server {
@@ -78,6 +82,12 @@ async fn api_handler(State(fixture): State<Fixture>, request: Request<Body>) -> 
         request.headers().get("authorization").unwrap(),
         "Bearer fixture-source-token"
     );
+    if fixture.publication.is_some()
+        && request.uri().path().starts_with("/repos/acme/project/")
+        && !request.uri().path().contains("/commits/")
+    {
+        return publication_api(fixture, request).await;
+    }
     let value = if request.uri().path() == "/repositories/123" {
         serde_json::json!({"id":123,"full_name":"acme/project"})
     } else if request.uri().path() == format!("/repos/acme/project/commits/{}", fixture.commit) {
@@ -101,6 +111,9 @@ async fn git_http(State(fixture): State<Fixture>, request: Request<Body>) -> Res
         request.headers().get("authorization").unwrap(),
         expected.as_str()
     );
+    if request.uri().path().ends_with("git-receive-pack") && request.method() == "POST" {
+        fixture.pushes.fetch_add(1, Ordering::SeqCst);
+    }
     let (parts, body) = request.into_parts();
     let bytes = to_bytes(body, 1_048_576).await.unwrap();
     tokio::task::spawn_blocking(move || {
@@ -209,6 +222,14 @@ fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn source_and_continuation_cross_hosts_without_provider_credentials() -> Result<()> {
+    scenario(false).await
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn publication_approval_then_replacement_proves_lost_create_without_reposting() -> Result<()>
+{
+    scenario(true).await
+}
+async fn scenario(publication: bool) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
     let repository = root.join("input");
@@ -230,16 +251,27 @@ async fn source_and_continuation_cross_hosts_without_provider_credentials() -> R
             exported.join("acme/project.git").to_str().unwrap(),
         ],
     );
+    git(
+        &exported.join("acme/project.git"),
+        &["config", "http.receivepack", "true"],
+    );
     fs::write(
         repository.join("workspace.txt"),
         "uncommitted operator work\n",
     )?;
     fs::write(repository.join("operator-only.txt"), "not accepted\n")?;
     let calls = Arc::new(AtomicUsize::new(0));
+    let creates = Arc::new(AtomicUsize::new(0));
+    let updates = Arc::new(AtomicUsize::new(0));
+    let pushes = Arc::new(AtomicUsize::new(0));
     let fixture = Fixture {
         root: exported,
         commit: commit.clone(),
         calls: calls.clone(),
+        publication: publication.then(|| Arc::new(Mutex::new(None))),
+        creates: creates.clone(),
+        updates: updates.clone(),
+        pushes: pushes.clone(),
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let api = format!("http://{}/", listener.local_addr()?);
@@ -303,7 +335,7 @@ async fn source_and_continuation_cross_hosts_without_provider_credentials() -> R
         json!({"account_id":"github-source","identity":{"provider":"github","external_account_id":"installation:42"},"enabled":true}),
     )?;
     json(cli(&["surface-policy", "put", "account", &account])).await?;
-    let source = json(cli(&[
+    let mut create_source = cli(&[
         "github-workspace",
         "put",
         "project",
@@ -317,8 +349,11 @@ async fn source_and_continuation_cross_hosts_without_provider_credentials() -> R
         &commit,
         "--operation-id",
         "source",
-    ]))
-    .await?;
+    ]);
+    if publication {
+        create_source.args(["--pull-request-base", "main"]);
+    }
+    let source = json(create_source).await?;
     assert_eq!(source["source"]["commit_sha"], commit);
     assert_eq!(
         json(cli(&["github-workspace", "list"])).await?["workspaces"]
@@ -356,9 +391,15 @@ async fn source_and_continuation_cross_hosts_without_provider_credentials() -> R
         .success()
     );
     assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let mut permissions = vec![
+        json!({"target":"surface","surface_account_id":"github-source","scope":"repository:123","action":"contents:read"}),
+    ];
+    if publication {
+        permissions.push(json!({"target":"surface","surface_account_id":"github-source","scope":"repository:123","action":"pull-requests:create","approval_required":true}));
+    }
     let grant = spec(
         "grant.json",
-        json!({"set_id":"read-source","name":"read-source","permissions":[{"target":"surface","surface_account_id":"github-source","scope":"repository:123","action":"contents:read"}]}),
+        json!({"set_id":"read-source","name":"read-source","permissions":permissions}),
     )?;
     json(cli(&["policy", "put", "permission-set", &grant])).await?;
     let role = spec(
@@ -411,11 +452,63 @@ async fn source_and_continuation_cross_hosts_without_provider_credentials() -> R
     assert_eq!(first["state"], "TASK_STATE_SUCCEEDED", "{first}");
     assert_eq!(first["result"], "Change: first\nWorkspace before:\nbase\n");
     let first_head = field(&first["workspace_delivery"], "head_commit")?.to_owned();
+    let first_publication = if publication {
+        let value =
+            wait_publication(&cli, first_id, "GITHUB_PUBLICATION_STATE_WAITING_APPROVAL").await?;
+        assert_eq!(
+            pushes.load(Ordering::SeqCst),
+            0,
+            "approval must precede Git push"
+        );
+        assert_eq!(creates.load(Ordering::SeqCst), 0);
+        let approval = field(&value, "approval_id")?;
+        let inbox = json(cli(&["inbox", "list", "--kind", "approval"])).await?;
+        assert!(
+            inbox["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["task_id"] == first_id)
+        );
+        json(cli(&[
+            "inbox",
+            "approve",
+            approval,
+            "--operation-id",
+            "approve-first-publication",
+        ]))
+        .await?;
+        timeout(WAIT, async {
+            while creates.load(Ordering::SeqCst) == 0 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await?;
+        Some(value)
+    } else {
+        None
+    };
     gateway.kill().await?;
     gateway.wait().await?;
     gateway = service(gateway_command(public.strip_prefix("http://").unwrap()))
         .await?
         .0;
+    if let Some(waiting) = first_publication {
+        let delivered =
+            wait_publication(&cli, first_id, "GITHUB_PUBLICATION_STATE_PUBLISHED").await?;
+        assert_eq!(delivered["publication_id"], waiting["publication_id"]);
+        assert_eq!(delivered["pull_request"]["number"], 7);
+        assert_eq!(
+            creates.load(Ordering::SeqCst),
+            1,
+            "replacement must not repeat ambiguous creation"
+        );
+        assert_eq!(
+            pushes.load(Ordering::SeqCst),
+            1,
+            "replacement must not repeat ambiguous push"
+        );
+    }
     let second = json(cli(&[
         "submit",
         "--tag",
@@ -430,6 +523,19 @@ async fn source_and_continuation_cross_hosts_without_provider_credentials() -> R
     let second = json(cli(&["get-task", second_id])).await?;
     assert_eq!(second["state"], "TASK_STATE_SUCCEEDED", "{second}");
     assert_eq!(second["workspace_delivery"]["start_commit"], first_head);
+    if publication {
+        let delivered =
+            wait_publication(&cli, second_id, "GITHUB_PUBLICATION_STATE_PUBLISHED").await?;
+        assert!(
+            delivered["approval_id"].is_null(),
+            "existing Session PR should not repeat first-publication approval"
+        );
+        assert_eq!(delivered["pull_request"]["number"], 7);
+        assert_eq!(creates.load(Ordering::SeqCst), 1);
+        assert_eq!(updates.load(Ordering::SeqCst), 1);
+        assert_eq!(pushes.load(Ordering::SeqCst), 2);
+    }
+
     assert_eq!(
         second["result"],
         "Change: second\nWorkspace before:\nbase\nfirst\n"
@@ -552,4 +658,98 @@ async fn source_and_continuation_cross_hosts_without_provider_credentials() -> R
         "local services did not stop cleanly"
     );
     Ok(())
+}
+
+async fn wait_publication<F>(cli: &F, task: &str, state: &str) -> Result<Value>
+where
+    F: Fn(&[&str]) -> Command,
+{
+    timeout(WAIT, async {
+        loop {
+            let page = json(cli(&["github-publication", "list", "--task-id", task])).await?;
+            if let Some(job) = page["publications"]
+                .as_array()
+                .and_then(|jobs| jobs.first())
+            {
+                if job["state"] == state {
+                    return Ok(job.clone());
+                }
+                ensure!(
+                    job["state"] != "GITHUB_PUBLICATION_STATE_HELD"
+                        && job["state"] != "GITHUB_PUBLICATION_STATE_CANCELLED",
+                    "publication stopped: {job}"
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .context("publication status timed out")?
+}
+fn remote_head(fixture: &Fixture, branch: &str) -> Option<String> {
+    let output = std::process::Command::new("/usr/bin/git")
+        .current_dir(fixture.root.join("acme/project.git"))
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .args(["rev-parse", "--verify", &format!("refs/heads/{branch}")])
+        .output()
+        .unwrap();
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8(output.stdout).unwrap().trim().into())
+}
+async fn publication_api(fixture: Fixture, request: Request<Body>) -> Response<Body> {
+    let path = request.uri().path().to_owned();
+    let method = request.method().clone();
+    let state = fixture.publication.as_ref().unwrap();
+    if let Some(branch) = path.strip_prefix("/repos/acme/project/git/ref/heads/") {
+        return match remote_head(&fixture, branch) {
+            Some(head) => Response::new(Body::from(
+                json!({"ref":format!("refs/heads/{branch}"),"object":{"type":"commit","sha":head}})
+                    .to_string(),
+            )),
+            None => Response::builder().status(404).body(Body::empty()).unwrap(),
+        };
+    }
+    if path == "/repos/acme/project/pulls" && method == "POST" {
+        let body = to_bytes(request.into_body(), 65536).await.unwrap();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["draft"], true);
+        assert_eq!(body["base"], "main");
+        let branch = body["head"].as_str().unwrap();
+        let head = remote_head(&fixture, branch).unwrap();
+        let value = json!({"number":7,"html_url":"https://github.com/acme/project/pull/7","state":"open","merged":false,"draft":true,"title":body["title"],"body":body["body"],"head":{"ref":branch,"sha":head,"repo":{"id":123,"full_name":"acme/project"}},"base":{"ref":"main","repo":{"id":123,"full_name":"acme/project"}}});
+        *state.lock().unwrap() = Some(value.clone());
+        fixture.creates.fetch_add(1, Ordering::SeqCst);
+        // Provider accepted the POST, but the original Gateway never sees its reply.
+        tokio::time::sleep(Duration::from_secs(90)).await;
+        return Response::builder()
+            .status(201)
+            .body(Body::from(value.to_string()))
+            .unwrap();
+    }
+    if path.starts_with("/repos/acme/project/pulls") {
+        let mut value = state.lock().unwrap().clone();
+        if let Some(value) = &mut value {
+            let branch = value["head"]["ref"].as_str().unwrap();
+            value["head"]["sha"] = remote_head(&fixture, branch).unwrap().into();
+        }
+        if method == "PATCH" {
+            let bytes = to_bytes(request.into_body(), 65536).await.unwrap();
+            let input: Value = serde_json::from_slice(&bytes).unwrap();
+            let updated = value.as_mut().unwrap();
+            updated["title"] = input["title"].clone();
+            updated["body"] = input["body"].clone();
+            fixture.updates.fetch_add(1, Ordering::SeqCst);
+            *state.lock().unwrap() = value.clone();
+        }
+        let value = if path == "/repos/acme/project/pulls" {
+            json!(value.into_iter().collect::<Vec<_>>())
+        } else {
+            value.unwrap()
+        };
+        return Response::new(Body::from(value.to_string()));
+    }
+    Response::builder().status(404).body(Body::empty()).unwrap()
 }

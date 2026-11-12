@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n+supertag/runtime/v2/github_workspaces.proto\x12\x13supertag.runtime.v2\"j\n\x15GithubWorkspaceSource\x12\x12\n\naccount_id\x18\x01 \x01(\t\x12\x15\n\rrepository_id\x18\x02 \x01(\x04\x12\x12\n\nrepository\x18\x03 \x01(\t\x12\x12\n\ncommit_sha\x18\x04 \x01(\t\"u\n\x0fGithubWorkspace\x12\x14\n\x0cworkspace_id\x18\x01 \x01(\t\x12:\n\x06source\x18\x02 \x01(\x0b\x32*.supertag.runtime.v2.GithubWorkspaceSource\x12\x10\n\x08revision\x18\x03 \x01(\x04\"\xa0\x01\n\x19PutGithubWorkspaceRequest\x12\x14\n\x0coperation_id\x18\x01 \x01(\t\x12\x37\n\tworkspace\x18\x02 \x01(\x0b\x32$.supertag.runtime.v2.GithubWorkspace\x12\x1e\n\x11\x65xpected_revision\x18\x03 \x01(\x04H\x00\x88\x01\x01\x42\x14\n\x12_expected_revision\"1\n\x19GetGithubWorkspaceRequest\x12\x14\n\x0cworkspace_id\x18\x01 \x01(\t\">\n\x1bListGithubWorkspacesRequest\x12\x10\n\x08\x61\x66ter_id\x18\x01 \x01(\t\x12\r\n\x05limit\x18\x02 \x01(\r\"m\n\x1cListGithubWorkspacesResponse\x12\x38\n\nworkspaces\x18\x01 \x03(\x0b\x32$.supertag.runtime.v2.GithubWorkspace\x12\x13\n\x0bnext_cursor\x18\x02 \x01(\t\"e\n\x1c\x44\x65leteGithubWorkspaceRequest\x12\x14\n\x0coperation_id\x18\x01 \x01(\t\x12\x14\n\x0cworkspace_id\x18\x02 \x01(\t\x12\x19\n\x11\x65xpected_revision\x18\x03 \x01(\x04\"\x1f\n\x1d\x44\x65leteGithubWorkspaceResponse2\xaa\x03\n\x10GithubWorkspaces\x12[\n\x03Put\x12..supertag.runtime.v2.PutGithubWorkspaceRequest\x1a$.supertag.runtime.v2.GithubWorkspace\x12[\n\x03Get\x12..supertag.runtime.v2.GetGithubWorkspaceRequest\x1a$.supertag.runtime.v2.GithubWorkspace\x12k\n\x04List\x12\x30.supertag.runtime.v2.ListGithubWorkspacesRequest\x1a\x31.supertag.runtime.v2.ListGithubWorkspacesResponse\x12o\n\x06\x44\x65lete\x12\x31.supertag.runtime.v2.DeleteGithubWorkspaceRequest\x1a\x32.supertag.runtime.v2.DeleteGithubWorkspaceResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n+supertag/runtime/v2/github_workspaces.proto\x12\x13supertag.runtime.v2\"j\n\x15GithubWorkspaceSource\x12\x12\n\naccount_id\x18\x01 \x01(\t\x12\x15\n\rrepository_id\x18\x02 \x01(\x04\x12\x12\n\nrepository\x18\x03 \x01(\t\x12\x12\n\ncommit_sha\x18\x04 \x01(\t\"\xbb\x01\n\x0fGithubWorkspace\x12\x14\n\x0cworkspace_id\x18\x01 \x01(\t\x12:\n\x06source\x18\x02 \x01(\x0b\x32*.supertag.runtime.v2.GithubWorkspaceSource\x12\x10\n\x08revision\x18\x03 \x01(\x04\x12\x44\n\x0cpull_request\x18\x04 \x01(\x0b\x32..supertag.runtime.v2.GithubPullRequestDelivery\"0\n\x19GithubPullRequestDelivery\x12\x13\n\x0b\x62\x61se_branch\x18\x01 \x01(\t\"\xa0\x01\n\x19PutGithubWorkspaceRequest\x12\x14\n\x0coperation_id\x18\x01 \x01(\t\x12\x37\n\tworkspace\x18\x02 \x01(\x0b\x32$.supertag.runtime.v2.GithubWorkspace\x12\x1e\n\x11\x65xpected_revision\x18\x03 \x01(\x04H\x00\x88\x01\x01\x42\x14\n\x12_expected_revision\"1\n\x19GetGithubWorkspaceRequest\x12\x14\n\x0cworkspace_id\x18\x01 \x01(\t\">\n\x1bListGithubWorkspacesRequest\x12\x10\n\x08\x61\x66ter_id\x18\x01 \x01(\t\x12\r\n\x05limit\x18\x02 \x01(\r\"m\n\x1cListGithubWorkspacesResponse\x12\x38\n\nworkspaces\x18\x01 \x03(\x0b\x32$.supertag.runtime.v2.GithubWorkspace\x12\x13\n\x0bnext_cursor\x18\x02 \x01(\t\"e\n\x1c\x44\x65leteGithubWorkspaceRequest\x12\x14\n\x0coperation_id\x18\x01 \x01(\t\x12\x14\n\x0cworkspace_id\x18\x02 \x01(\t\x12\x19\n\x11\x65xpected_revision\x18\x03 \x01(\x04\"\x1f\n\x1d\x44\x65leteGithubWorkspaceResponse2\xaa\x03\n\x10GithubWorkspaces\x12[\n\x03Put\x12..supertag.runtime.v2.PutGithubWorkspaceRequest\x1a$.supertag.runtime.v2.GithubWorkspace\x12[\n\x03Get\x12..supertag.runtime.v2.GetGithubWorkspaceRequest\x1a$.supertag.runtime.v2.GithubWorkspace\x12k\n\x04List\x12\x30.supertag.runtime.v2.ListGithubWorkspacesRequest\x1a\x31.supertag.runtime.v2.ListGithubWorkspacesResponse\x12o\n\x06\x44\x65lete\x12\x31.supertag.runtime.v2.DeleteGithubWorkspaceRequest\x1a\x32.supertag.runtime.v2.DeleteGithubWorkspaceResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -33,20 +33,22 @@ if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_GITHUBWORKSPACESOURCE']._serialized_start=68
   _globals['_GITHUBWORKSPACESOURCE']._serialized_end=174
-  _globals['_GITHUBWORKSPACE']._serialized_start=176
-  _globals['_GITHUBWORKSPACE']._serialized_end=293
-  _globals['_PUTGITHUBWORKSPACEREQUEST']._serialized_start=296
-  _globals['_PUTGITHUBWORKSPACEREQUEST']._serialized_end=456
-  _globals['_GETGITHUBWORKSPACEREQUEST']._serialized_start=458
-  _globals['_GETGITHUBWORKSPACEREQUEST']._serialized_end=507
-  _globals['_LISTGITHUBWORKSPACESREQUEST']._serialized_start=509
-  _globals['_LISTGITHUBWORKSPACESREQUEST']._serialized_end=571
-  _globals['_LISTGITHUBWORKSPACESRESPONSE']._serialized_start=573
-  _globals['_LISTGITHUBWORKSPACESRESPONSE']._serialized_end=682
-  _globals['_DELETEGITHUBWORKSPACEREQUEST']._serialized_start=684
-  _globals['_DELETEGITHUBWORKSPACEREQUEST']._serialized_end=785
-  _globals['_DELETEGITHUBWORKSPACERESPONSE']._serialized_start=787
-  _globals['_DELETEGITHUBWORKSPACERESPONSE']._serialized_end=818
-  _globals['_GITHUBWORKSPACES']._serialized_start=821
-  _globals['_GITHUBWORKSPACES']._serialized_end=1247
+  _globals['_GITHUBWORKSPACE']._serialized_start=177
+  _globals['_GITHUBWORKSPACE']._serialized_end=364
+  _globals['_GITHUBPULLREQUESTDELIVERY']._serialized_start=366
+  _globals['_GITHUBPULLREQUESTDELIVERY']._serialized_end=414
+  _globals['_PUTGITHUBWORKSPACEREQUEST']._serialized_start=417
+  _globals['_PUTGITHUBWORKSPACEREQUEST']._serialized_end=577
+  _globals['_GETGITHUBWORKSPACEREQUEST']._serialized_start=579
+  _globals['_GETGITHUBWORKSPACEREQUEST']._serialized_end=628
+  _globals['_LISTGITHUBWORKSPACESREQUEST']._serialized_start=630
+  _globals['_LISTGITHUBWORKSPACESREQUEST']._serialized_end=692
+  _globals['_LISTGITHUBWORKSPACESRESPONSE']._serialized_start=694
+  _globals['_LISTGITHUBWORKSPACESRESPONSE']._serialized_end=803
+  _globals['_DELETEGITHUBWORKSPACEREQUEST']._serialized_start=805
+  _globals['_DELETEGITHUBWORKSPACEREQUEST']._serialized_end=906
+  _globals['_DELETEGITHUBWORKSPACERESPONSE']._serialized_start=908
+  _globals['_DELETEGITHUBWORKSPACERESPONSE']._serialized_end=939
+  _globals['_GITHUBWORKSPACES']._serialized_start=942
+  _globals['_GITHUBWORKSPACES']._serialized_end=1368
 # @@protoc_insertion_point(module_scope)

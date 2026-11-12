@@ -1,4 +1,5 @@
 mod artifacts;
+mod github_publications;
 mod github_workspaces;
 mod harness;
 mod host_status;
@@ -95,6 +96,12 @@ enum RecoveryDecision {
 #[derive(Subcommand)]
 enum Command {
     /// Manage GitHub Workspace sources pinned to one repository and commit.
+    GithubPublication {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: github_publications::PublicationCommand,
+    },
     GithubWorkspace {
         #[command(flatten)]
         connection: Connection,
@@ -585,6 +592,10 @@ async fn run(command: Command) -> Result<()> {
                 json!({ "messages": messages, "next_cursor": page.next_cursor })
             );
         }
+        Command::GithubPublication {
+            connection,
+            command,
+        } => github_publications::run(connection, command).await?,
         Command::GithubWorkspace {
             connection,
             command,
@@ -1284,6 +1295,8 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .add_service(plane.mailbox_service())
         .add_service(plane.inbox_service())
         .add_service(plane.github_workspaces_service())
+        .add_service(plane.github_publications_service())
+        .add_service(plane.github_publisher_service())
         .add_service(plane.policy_service())
         .add_service(plane.surface_policy_service())
         .add_service(plane.work_sessions_service())
@@ -1388,6 +1401,8 @@ async fn gateway(
         .lark
         .map(|directory| lark_connector(channel.clone(), gateway_token.clone(), directory))
         .transpose()?;
+    let publication_channel = channel.clone();
+    let publication_token = gateway_token.clone();
     let gateway = Gateway::new(
         channel,
         gateway_token,
@@ -1402,10 +1417,21 @@ async fn gateway(
     health
         .set_serving::<TransfersServer<GatewayTransfers>>()
         .await;
-    let mut transfers = GatewayTransfers::new(gateway.clone(), checkpoint_directory)?;
-    if let Some(directory) = connectors.github_workspace {
-        transfers = transfers.with_github_sources(github_workspace_sources(directory)?);
-    }
+    let mut transfers = GatewayTransfers::new(gateway.clone(), checkpoint_directory.clone())?;
+    let publication = if let Some(directory) = connectors.github_workspace {
+        transfers = transfers.with_github_sources(github_workspace_sources(directory.clone())?);
+        let blobs = checkpoint_directory
+            .as_ref()
+            .context("GitHub Workspace publication requires Gateway artifact storage")?;
+        Some(github_workspace_publisher(
+            directory,
+            blobs,
+            publication_channel,
+            publication_token,
+        )?)
+    } else {
+        None
+    };
     health.set_serving::<ObjectivesServer<Gateway>>().await;
     health.set_serving::<LiveInputsServer<Gateway>>().await;
     health.set_serving::<AttemptInputsServer<Gateway>>().await;
@@ -1459,6 +1485,7 @@ async fn gateway(
         .add_service(gateway.mailbox_service())
         .add_service(gateway.inbox_service())
         .add_service(gateway.github_workspaces_service())
+        .add_service(gateway.github_publications_service())
         .add_service(gateway.policy_service())
         .add_service(gateway.surface_policy_service())
         .add_service(gateway.work_sessions_service())
@@ -1525,21 +1552,33 @@ async fn gateway(
             Ok(())
         }
     };
+    let publication_loop = async {
+        if let Some(publication) = publication {
+            let result = publication.run(shutdown.clone()).await;
+            shutdown.cancel();
+            result
+        } else {
+            shutdown.cancelled().await;
+            Ok(())
+        }
+    };
     let services = async {
-        let (grpc, slack, github, linear, lark, teams) = tokio::join!(
+        let (grpc, slack, github, linear, lark, teams, publication) = tokio::join!(
             grpc,
             webhook,
             github_webhook,
             linear_webhook,
             lark_connection,
-            microsoft_teams_webhook
+            microsoft_teams_webhook,
+            publication_loop
         );
         grpc?;
         slack?;
         github?;
         linear?;
         lark?;
-        teams
+        teams?;
+        publication
     };
     tokio::pin!(services);
     tokio::select! {
@@ -1581,6 +1620,38 @@ fn slack_connector(
     Ok(connector)
 }
 
+fn github_workspace_account() -> Result<GithubWorkspaceAccount> {
+    Ok(GithubWorkspaceAccount {
+        account_id: required_env("SUPERTAG_GITHUB_ACCOUNT_ID")?,
+        repository_id: required_env("SUPERTAG_GITHUB_REPOSITORY_ID")?
+            .parse()
+            .context("invalid GitHub repository ID")?,
+        repository: required_env("SUPERTAG_GITHUB_REPOSITORY")?,
+        authentication: github_authentication()?,
+    })
+}
+fn github_workspace_publisher(
+    directory: PathBuf,
+    blobs: &std::path::Path,
+    channel: Channel,
+    token: String,
+) -> Result<supertag_gateway::github::publication::GithubPublisher> {
+    let publisher = supertag_gateway::github::publication::GithubPublisher::new(
+        github_workspace_account()?,
+        &directory,
+        blobs,
+        channel,
+        token,
+    )?;
+    #[cfg(feature = "test-fixtures")]
+    if let Ok(api) = std::env::var("SUPERTAG_TEST_GITHUB_API_URL") {
+        return publisher.with_test_endpoints(
+            api.parse()?,
+            required_env("SUPERTAG_TEST_GITHUB_GIT_URL")?.parse()?,
+        );
+    }
+    Ok(publisher)
+}
 fn github_workspace_sources(directory: PathBuf) -> Result<GithubWorkspaceSources> {
     use std::os::unix::fs::DirBuilderExt as _;
     if !directory.exists() {
@@ -1589,17 +1660,7 @@ fn github_workspace_sources(directory: PathBuf) -> Result<GithubWorkspaceSources
             .create(&directory)
             .context("create private GitHub Workspace directory")?;
     }
-    let sources = GithubWorkspaceSources::new(
-        GithubWorkspaceAccount {
-            account_id: required_env("SUPERTAG_GITHUB_ACCOUNT_ID")?,
-            repository_id: required_env("SUPERTAG_GITHUB_REPOSITORY_ID")?
-                .parse()
-                .context("invalid GitHub repository ID")?,
-            repository: required_env("SUPERTAG_GITHUB_REPOSITORY")?,
-            authentication: github_authentication()?,
-        },
-        &directory,
-    )?;
+    let sources = GithubWorkspaceSources::new(github_workspace_account()?, &directory)?;
     #[cfg(feature = "test-fixtures")]
     if let Ok(api) = std::env::var("SUPERTAG_TEST_GITHUB_API_URL") {
         return sources.with_test_endpoints(

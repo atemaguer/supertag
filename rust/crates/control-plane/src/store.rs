@@ -69,7 +69,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 41;
+        const SCHEMA_VERSION: i64 = 42;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -161,6 +161,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0039_tag_retirement.sql"),
                 include_str!("../migrations/sqlite/0040_github_workspaces.sql"),
                 include_str!("../migrations/sqlite/0041_artifact_captures.sql"),
+                include_str!("../migrations/sqlite/0042_github_publications.sql"),
             ]
         } else {
             [
@@ -205,6 +206,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0039_tag_retirement.sql"),
                 include_str!("../migrations/postgresql/0040_github_workspaces.sql"),
                 include_str!("../migrations/postgresql/0041_artifact_captures.sql"),
+                include_str!("../migrations/postgresql/0042_github_publications.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -913,6 +915,7 @@ impl Store {
         }
         if task.state == TaskState::Succeeded as i32 {
             enqueue_reply(&mut transaction, &task, order).await?;
+            crate::github_publications::finish_in(&mut transaction, &task).await?;
         }
         crate::objectives::objective_sweep_in(&mut transaction, now).await?;
         transaction.commit().await?;

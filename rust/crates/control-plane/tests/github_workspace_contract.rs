@@ -12,6 +12,7 @@ fn catalog() -> PutGithubWorkspaceRequest {
     PutGithubWorkspaceRequest {
         operation_id: "create-source".into(),
         workspace: Some(GithubWorkspace {
+            pull_request: None,
             workspace_id: "project".into(),
             source: Some(GithubWorkspaceSource {
                 account_id: "github-account".into(),
