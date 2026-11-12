@@ -35,7 +35,7 @@ func dialRuntimeV2(version string) connector {
 		if err != nil {
 			return model{}, err
 		}
-		return newModel(ctx, c, client.NewFollower(c), nil), nil
+		return newModel(ctx, c, client.NewFollower(c), client.NewWatcher(c, watchKinds...)), nil
 	}
 }
 

@@ -92,6 +92,11 @@ path = "tests/lark_runtime.rs"
 required-features = ["test-fixtures"]
 
 [[test]]
+name = "microsoft_teams_runtime"
+path = "tests/microsoft_teams_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
 name = "operator_runtime"
 path = "tests/operator_runtime.rs"
 required-features = ["test-fixtures"]

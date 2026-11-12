@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 anyhow.workspace = true
+async-stream = "0.3"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 prost.workspace = true
 serde.workspace = true
@@ -15,9 +16,11 @@ sqlx.workspace = true
 supertag-protocol = { path = "../protocol" }
 thiserror.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
 tonic.workspace = true
+url = "2.5.7"
 uuid.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-url = "2.5.7"

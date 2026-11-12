@@ -1,14 +1,17 @@
 mod checkpoints;
 mod conversations;
 mod inputs;
+mod mailbox;
 pub mod objective_limits;
 mod objectives;
 mod store;
 mod teams;
 mod usage;
+mod watch;
 mod workspaces;
 
 pub use store::{HostAuthority, Store, StoreError};
+pub use watch::OperatorWatch;
 
 use std::sync::Arc;
 
@@ -47,6 +50,8 @@ impl ControlPlane {
         self.store.sweep_objectives().await?;
         self.store.sweep_expired_attempts().await?;
         self.store.sweep_inputs().await?;
+        self.store.sweep_mailbox().await?;
+        self.store.prune_watch().await?;
         Ok(())
     }
 
@@ -427,6 +432,30 @@ impl connector_server::Connector for ControlPlane {
         Ok(Response::new(
             self.store
                 .accept_lark_event(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn accept_microsoft_teams_activity(
+        &self,
+        request: Request<AcceptMicrosoftTeamsActivityRequest>,
+    ) -> Result<Response<AcceptMicrosoftTeamsActivityResponse>, Status> {
+        let principal = self.principal(&request, "connector:")?;
+        Ok(Response::new(
+            self.store
+                .accept_microsoft_teams_activity(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn get_microsoft_teams_reply_route(
+        &self,
+        request: Request<GetMicrosoftTeamsReplyRouteRequest>,
+    ) -> Result<Response<MicrosoftTeamsReplyRoute>, Status> {
+        let principal = self.principal(&request, "connector:")?;
+        Ok(Response::new(
+            self.store
+                .get_microsoft_teams_reply_route(&principal, &request.into_inner())
                 .await?,
         ))
     }

@@ -62,7 +62,7 @@ impl Store {
         name("Tag ID", &input.tag_id)?;
         conversation_name(&input.conversation)?;
         name("operation ID", &input.operation_id)?;
-        text("message", &input.text, 262_144)?;
+        text("message", &input.text, crate::store::MAX_TASK_PROMPT_BYTES)?;
         if input.text.trim().is_empty() {
             return Err(invalid("message text is required"));
         }

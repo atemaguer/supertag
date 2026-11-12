@@ -1,6 +1,6 @@
 //! Outbound Lark/Feishu connection with durable admission before acknowledgement.
 mod delivery;
-mod render;
+pub(crate) mod render;
 #[cfg(test)]
 mod tests;
 mod transport;

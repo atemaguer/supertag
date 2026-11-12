@@ -156,7 +156,9 @@ async fn operator_teams_and_attempt_workstreams_run_across_the_gateway() -> Resu
         .await?;
     let mut worker = worker_host_client::WorkerHostClient::new(channel.clone());
     let mut attempts = attempt_workstreams_client::AttemptWorkstreamsClient::new(channel.clone());
-    let mut teams = teams_client::TeamsClient::new(channel);
+    let mut teams = teams_client::TeamsClient::new(channel.clone());
+    let mut mailbox = mailbox_client::MailboxClient::new(channel.clone());
+    let mut attempt_mailbox = attempt_mailbox_client::AttemptMailboxClient::new(channel);
     assert_eq!(
         teams
             .list_teams(authenticated_request(
@@ -228,9 +230,9 @@ async fn operator_teams_and_attempt_workstreams_run_across_the_gateway() -> Resu
     worker
         .start_task(host_request(
             StartTaskRequest {
-                task_id: attempt.task_id,
-                attempt_id: attempt.attempt_id,
-                lease_token: attempt.lease_token,
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
             },
             &host_token,
             host.generation,
@@ -255,6 +257,164 @@ async fn operator_teams_and_attempt_workstreams_run_across_the_gateway() -> Resu
     assert_eq!(page["posts"][0]["author_tag_id"], "engineer");
     assert_eq!(page["posts"][0]["sequence"], 1);
     assert_eq!(page["posts"].as_array().context("missing posts")?.len(), 1);
+
+    let addressed_request = PostAttemptWorkstreamRequest {
+        attempt: Some(attempt.clone()),
+        operation_id: "address-reviewer".into(),
+        body: "Please independently verify the rollback steps.".into(),
+        to_tag_ids: vec!["reviewer".into()],
+    };
+    let addressed = attempts
+        .post_attempt_workstream(host_request(
+            addressed_request.clone(),
+            &host_token,
+            host.generation,
+        )?)
+        .await?
+        .into_inner();
+    assert!(!addressed.duplicate);
+    let duplicate = attempts
+        .post_attempt_workstream(host_request(
+            addressed_request,
+            &host_token,
+            host.generation,
+        )?)
+        .await?
+        .into_inner();
+    assert!(duplicate.duplicate);
+    assert_eq!(duplicate.post, addressed.post);
+    let list = ListMailboxMessagesRequest {
+        tag_id: "reviewer".into(),
+        ..Default::default()
+    };
+    // The public Gateway rejects a host credential even with a forged operator
+    // principal. The native Attempt API infers its Tag from owned authority.
+    assert_eq!(
+        mailbox
+            .list_messages(authenticated_request(
+                list.clone(),
+                &host_token,
+                Some("operator:local")
+            )?)
+            .await
+            .unwrap_err()
+            .code(),
+        Code::Unauthenticated
+    );
+    let pending = mailbox
+        .list_messages(authenticated_request(list.clone(), &operator_token, None)?)
+        .await?
+        .into_inner();
+    assert_eq!(pending.messages.len(), 1);
+    let message = pending.messages[0].clone();
+    assert_eq!(message.state(), TagMessageState::Pending);
+    assert_eq!(message.task_id, None);
+    assert_eq!(message.source_task_id, attempt.task_id);
+    assert_eq!(
+        message.workstream_post_id,
+        addressed.post.context("addressed post")?.post_id
+    );
+    assert_eq!(message.objective_id.as_deref(), Some("rollout"));
+    let inbox = worker
+        .claim_task(host_request(
+            ClaimTaskRequest {
+                operation_id: "claim-inbox".into(),
+                ..Default::default()
+            },
+            &host_token,
+            host.generation,
+        )?)
+        .await?
+        .into_inner()
+        .assignment
+        .context("addressed post must wake reviewer")?;
+    let claimed = inbox.task.context("inbox Task")?;
+    assert_eq!(claimed.tag_id, "reviewer");
+    assert_eq!(claimed.session_id, "inbox:reviewer");
+    let inbox_attempt = InspectAttemptRequest {
+        task_id: claimed.task_id,
+        attempt_id: inbox.attempt_id,
+        lease_token: inbox.lease_token,
+    };
+    let read = ReadMailboxRequest {
+        attempt: Some(inbox_attempt.clone()),
+        ..Default::default()
+    };
+    assert_eq!(
+        attempt_mailbox
+            .read_mailbox(host_request(read.clone(), &host_token, host.generation)?)
+            .await
+            .unwrap_err()
+            .code(),
+        Code::FailedPrecondition
+    );
+    let running = worker
+        .start_task(host_request(
+            StartTaskRequest {
+                task_id: inbox_attempt.task_id.clone(),
+                attempt_id: inbox_attempt.attempt_id.clone(),
+                lease_token: inbox_attempt.lease_token.clone(),
+            },
+            &host_token,
+            host.generation,
+        )?)
+        .await?
+        .into_inner();
+    assert_eq!(running.instructions, "Verify changes");
+    assert!(
+        running
+            .prompt
+            .contains("Please independently verify the rollback steps.")
+    );
+    assert!(running.prompt.contains("via=\"workstream post\""));
+    assert!(running.prompt.contains(&message.message_id));
+    let read_result = attempt_mailbox
+        .read_mailbox(host_request(read, &host_token, host.generation)?)
+        .await?
+        .into_inner();
+    assert_eq!(read_result.messages.len(), 1);
+    assert_eq!(
+        read_result.messages[0].task_id.as_deref(),
+        Some(inbox_attempt.task_id.as_str())
+    );
+    let settled = worker
+        .finish_task(host_request(
+            FinishTaskRequest {
+                task_id: inbox_attempt.task_id.clone(),
+                attempt_id: inbox_attempt.attempt_id.clone(),
+                lease_token: inbox_attempt.lease_token.clone(),
+                succeeded: true,
+                result: "Rollback steps independently verified".into(),
+                ..Default::default()
+            },
+            &host_token,
+            host.generation,
+        )?)
+        .await?
+        .into_inner();
+    assert_eq!(settled.state(), TaskState::Succeeded);
+    let handled = mailbox
+        .list_messages(authenticated_request(list, &operator_token, None)?)
+        .await?
+        .into_inner();
+    assert_eq!(handled.messages.len(), 1);
+    assert_eq!(handled.messages[0].message_id, message.message_id);
+    assert_eq!(handled.messages[0].state(), TagMessageState::Handled);
+    assert!(
+        worker
+            .claim_task(host_request(
+                ClaimTaskRequest {
+                    operation_id: "no-duplicate-inbox".into(),
+                    ..Default::default()
+                },
+                &host_token,
+                host.generation
+            )?)
+            .await?
+            .into_inner()
+            .assignment
+            .is_none()
+    );
 
     gateway.kill().await?;
     plane.kill().await?;

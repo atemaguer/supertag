@@ -304,6 +304,25 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
         .unwrap();
     assert_eq!(second_post.sequence, 2);
     assert_eq!(second_post.to_tag_ids, ["reviewer"]);
+    // Addressed posts now enqueue a durable inbox turn. This turn is outside
+    // the sender's Objective and does not consume its Team's Objective slots.
+    let inbox = store
+        .claim_task(&other_host, "addressed-post-inbox")
+        .await
+        .unwrap()
+        .unwrap();
+    let inbox_task = inbox.task.unwrap();
+    assert_eq!(inbox_task.session_id, "inbox:reviewer");
+    let inbox_attempt = InspectAttemptRequest {
+        task_id: inbox_task.task_id,
+        attempt_id: inbox.attempt_id,
+        lease_token: inbox.lease_token,
+    };
+    store
+        .start_task(&other_host, &start(&inbox_attempt))
+        .await
+        .unwrap();
+    finish(store, &other_host, &inbox_attempt).await;
     let read = store
         .read_attempt_workstream(
             &host,

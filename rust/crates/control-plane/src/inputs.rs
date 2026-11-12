@@ -52,6 +52,11 @@ impl Store {
         let attempt_id: String = task.try_get("attempt_id")?;
         let tag_id: String = task.try_get("tag_id")?;
         let session_id: String = task.try_get("session_id")?;
+        if crate::mailbox::private_session(&session_id) {
+            return Err(StoreError::FailedPrecondition(
+                "Mailbox Tasks receive input through delivery".into(),
+            ));
+        }
         if crate::conversations::private_session(&session_id) {
             return Err(StoreError::FailedPrecondition(
                 "send messages through the conversation".into(),

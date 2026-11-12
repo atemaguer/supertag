@@ -26,6 +26,7 @@ type runtimeClient struct {
 	conversations runtimev2connect.ConversationsClient
 	objectives    runtimev2connect.ObjectivesClient
 	teams         runtimev2connect.TeamsClient
+	events        runtimev2connect.OperatorEventsClient
 }
 
 // NewRuntimeV2 connects to the public Gateway over binary gRPC and HTTP/2.
@@ -81,6 +82,7 @@ func NewRuntimeV2(target Target, version string) (*Client, error) {
 		conversations: runtimev2connect.NewConversationsClient(httpClient, origin, options...),
 		objectives:    runtimev2connect.NewObjectivesClient(httpClient, origin, options...),
 		teams:         runtimev2connect.NewTeamsClient(httpClient, origin, options...),
+		events:        runtimev2connect.NewOperatorEventsClient(httpClient, origin, options...),
 	}
 	return c, nil
 }
@@ -181,6 +183,9 @@ func (c *runtimeClient) listMessages(ctx context.Context, tag, conversation stri
 	}
 	items := make([]*operatorv1.Message, 0, len(res.Msg.GetMessages()))
 	for _, message := range res.Msg.GetMessages() {
+		if message.GetTask().GetTagId() != tag || message.GetTask().GetTaskId() == "" || message.GetConversation() != conversation {
+			return nil, "", &APIError{Code: connect.CodeDataLoss, Message: "Gateway returned a different conversation message."}
+		}
 		items = append(items, runtimeMessage(message))
 	}
 	return items, res.Msg.GetNextCursor(), nil

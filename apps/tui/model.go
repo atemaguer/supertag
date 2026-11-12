@@ -105,20 +105,23 @@ type entry struct {
 	session string
 }
 
-// conversation is what the TUI shows of one of the caller's conversations with a Tag: its newest
-// page of history, then what happened since the TUI started.
-type conversation struct {
+type transcript struct {
 	entries []entry
 	// draft is the reply text streaming in; the final reply replaces it.
 	draft string
-	// loading and loaded track the history, which loads when the conversation is first shown.
-	// Sending waits for it, so a message is not shown both live and from history.
-	loading, loaded bool
 	// cache holds each entry rendered at cacheWidth, "" for an entry that renders anew each time.
 	// Other entries never change once added, so each is rendered once per width, not on every
 	// streamed token.
 	cache      []string
 	cacheWidth int
+}
+
+// conversation holds the shown history and its in-flight read.
+type conversation struct {
+	transcript
+	historyReload reload
+	loaded        bool
+	runtime       runtimeHistory
 	// selected is the work Session or branch line chosen with up and down; nil while the input
 	// has the keys.
 	selected *target
@@ -127,12 +130,12 @@ type conversation struct {
 }
 
 // add appends an entry, filtering its text for the terminal.
-func (c *conversation) add(kind entryKind, text string) {
+func (c *transcript) add(kind entryKind, text string) {
 	c.entries = append(c.entries, entry{kind: kind, text: terminalLines(text)})
 }
 
 // addFor appends an entry of a work Session.
-func (c *conversation) addFor(kind entryKind, session, text string) {
+func (c *transcript) addFor(kind entryKind, session, text string) {
 	c.entries = append(c.entries, entry{kind: kind, text: terminalLines(text), session: session})
 }
 
@@ -153,6 +156,7 @@ type (
 		tag, conversation string
 		items             []client.HistoryItem
 		err               error
+		revision          uint64
 	}
 	sentMsg struct {
 		tag, conversation string
@@ -160,11 +164,11 @@ type (
 		err               error
 	}
 	followMsg struct {
-		tag, conversation string
-		event             client.FollowEvent
-		events            <-chan client.FollowEvent
+		tag, conversation, taskID string
+		event                     client.FollowEvent
+		events                    <-chan client.FollowEvent
 	}
-	followDoneMsg struct{}
+	followDoneMsg struct{ tag, conversation, taskID string }
 	watchMsg      struct {
 		update  client.WatchUpdate
 		updates <-chan client.WatchUpdate
@@ -412,10 +416,13 @@ func (m model) reloadOverview() tea.Cmd {
 // reloadAll rereads everything the TUI shows.
 func (m model) reloadAll() tea.Cmd {
 	return tea.Batch(m.reloadTags(), m.reloadConversations(), m.reloadObjectives(), m.reloadInbox(), m.reloadOverview(),
-		m.reloadTeams(), m.reloadTeam(), m.reloadPicker(), m.reloadHosts())
+		m.reloadTeams(), m.reloadTeam(), m.reloadPicker(), m.reloadHosts(), m.reloadShownHistory())
 }
 
 func (m model) loadHistory(tag, name string) tea.Cmd {
+	if m.client.RuntimeV2() {
+		return m.loadRuntimeHistory(tag, name)
+	}
 	return func() tea.Msg {
 		page, _, err := m.client.ListMessages(m.ctx, tag, name, historyPage, "")
 		return historyMsg{tag: tag, conversation: name, items: client.History(tag, page), err: err}
@@ -430,12 +437,16 @@ func (m model) send(tag, name, text string) tea.Cmd {
 }
 
 func waitFor(tag, name string, events <-chan client.FollowEvent) tea.Cmd {
+	return waitForTask(tag, name, "", events)
+}
+
+func waitForTask(tag, name, taskID string, events <-chan client.FollowEvent) tea.Cmd {
 	return func() tea.Msg {
 		event, ok := <-events
 		if !ok {
-			return followDoneMsg{}
+			return followDoneMsg{tag: tag, conversation: name, taskID: taskID}
 		}
-		return followMsg{tag: tag, conversation: name, event: event, events: events}
+		return followMsg{tag: tag, conversation: name, taskID: taskID, event: event, events: events}
 	}
 }
 
@@ -493,11 +504,14 @@ func (m *model) selectTag() tea.Cmd {
 		return nil
 	}
 	name := m.currentConversation(tag)
+	if m.client.RuntimeV2() {
+		return m.reloadHistory(tag, name)
+	}
 	c := m.conversation(tag, name)
-	if c.loaded || c.loading {
+	if c.loaded || c.historyReload.running {
 		return nil
 	}
-	c.loading = true
+	c.historyReload.start()
 	return m.loadHistory(tag, name)
 }
 
@@ -642,6 +656,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case pollMsg:
 		if m.live {
+			if m.client.RuntimeV2() {
+				// The selected Objective also shows spend, which can advance
+				// between Task status notices.
+				return m, tea.Batch(m.reloadOverview(), m.retryRuntimeHistory(), m.pollAfter())
+			}
 			m.polling = false
 			return m, nil
 		}
@@ -661,6 +680,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.polling = true
 				return m, tea.Batch(next, m.reloadAll(), m.pollAfter())
 			}
+			if m.client.RuntimeV2() {
+				return m, tea.Batch(next, m.reloadAll())
+			}
 		}
 		return m, next
 
@@ -668,6 +690,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.showHistory(msg)
 
 	case sentMsg:
+		if m.client.RuntimeV2() {
+			return m, m.runtimeSent(msg)
+		}
 		if msg.err != nil {
 			m.fail(msg.err)
 			m.addEntry(msg.tag, msg.conversation, entryError, msg.err.Error())
@@ -677,10 +702,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitFor(msg.tag, msg.conversation, m.follower.Follow(m.ctx, msg.tag, msg.message, nil))
 
 	case followMsg:
+		if msg.taskID != "" {
+			cmd := m.runtimeFollow(msg)
+			return m, tea.Batch(cmd, waitForTask(msg.tag, msg.conversation, msg.taskID, msg.events))
+		}
 		cmd := m.apply(msg.tag, msg.conversation, msg.event)
 		return m, tea.Batch(cmd, waitFor(msg.tag, msg.conversation, msg.events))
 
 	case followDoneMsg:
+		if msg.taskID != "" {
+			return m, m.runtimeFollowDone(msg)
+		}
 		return m, nil
 
 	case workMsg:
@@ -748,7 +780,11 @@ func (m model) changed(change *operatorv1.WatchChange) tea.Cmd {
 		if m.pane == paneConversations && m.picker != nil && m.picker.tag == change.GetTag() {
 			picker = m.reloadPicker()
 		}
-		return tea.Batch(m.reloadConversations(), picker)
+		var history tea.Cmd
+		if m.client.RuntimeV2() && m.showsConversation(change.GetTag(), change.GetConversation()) {
+			history = m.reloadShownHistory()
+		}
+		return tea.Batch(m.reloadConversations(), picker, history)
 	case operatorv1.WatchKind_WATCH_KIND_OBJECTIVE:
 		return tea.Batch(m.reloadObjectives(), shown(change.GetId()))
 	case operatorv1.WatchKind_WATCH_KIND_SESSION:
@@ -831,8 +867,12 @@ func (m model) overviewCmd(id string) tea.Cmd {
 // showHistory adds a conversation's past messages, oldest first, and follows those that still
 // have a reply or work to show.
 func (m *model) showHistory(msg historyMsg) tea.Cmd {
+	if m.client.RuntimeV2() {
+		return m.showRuntimeHistory(msg)
+	}
 	c := m.conversation(msg.tag, msg.conversation)
-	c.loading, c.loaded = false, true
+	c.historyReload.done()
+	c.loaded = true
 	if msg.err != nil {
 		m.addEntry(msg.tag, msg.conversation, entryError, "Could not load the conversation history: "+msg.err.Error())
 		return nil
@@ -981,7 +1021,12 @@ func (m *model) submit() tea.Cmd {
 			return nil
 		}
 		m.input.Reset()
-		m.addEntry(tag, name, entryYou, text)
+		if m.client.RuntimeV2() {
+			m.conversation(tag, name).runtime.sending++
+			m.refresh()
+		} else {
+			m.addEntry(tag, name, entryYou, text)
+		}
 		return m.send(tag, name, text)
 	case paneObjective:
 		return m.sendObjectiveMessage(text)
@@ -1353,7 +1398,14 @@ func (m *model) choose() tea.Cmd {
 // rereads a work Session that reported or whose shown activity grew. Every field from the server
 // or an agent is filtered for the terminal, as the CLI does.
 func (m *model) apply(tag, name string, event client.FollowEvent) tea.Cmd {
-	c := m.conversation(tag, name)
+	cmd := m.applyTranscript(&m.conversation(tag, name).transcript, event)
+	if m.showsConversation(tag, name) {
+		m.refresh()
+	}
+	return cmd
+}
+
+func (m *model) applyTranscript(c *transcript, event client.FollowEvent) tea.Cmd {
 	dim := func(text string) { c.add(entryDim, text) }
 	var cmd tea.Cmd
 	title := terminalText(event.Title)
@@ -1406,9 +1458,6 @@ func (m *model) apply(tag, name string, event client.FollowEvent) tea.Cmd {
 		c.draft = ""
 		c.add(entryError, event.Text)
 		m.connected, m.status = false, event.Text
-	}
-	if m.showsConversation(tag, name) {
-		m.refresh()
 	}
 	return cmd
 }

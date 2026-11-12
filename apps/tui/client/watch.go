@@ -98,31 +98,51 @@ func (w *Watcher) Run(ctx context.Context) <-chan WatchUpdate {
 // watch reads one stream from token, keeping token current. live says the stream delivered an
 // event; err says why it ended.
 func (w *Watcher) watch(ctx context.Context, token *string, send func(WatchUpdate) bool) (live bool, err error) {
+	if w.Client.RuntimeV2() {
+		return w.watchRuntime(ctx, token, send)
+	}
+	return watchStream(ctx, w.IdleTimeout, token, send, func(ctx context.Context) (*connect.ServerStreamForClient[operatorv1.WatchEvent], error) {
+		return w.Client.events.Watch(ctx, connect.NewRequest(&operatorv1.WatchRequest{ResumeToken: *token, Kinds: w.Kinds}))
+	}, legacyWatchFrame)
+}
+
+func legacyWatchFrame(event *operatorv1.WatchEvent) (string, WatchUpdate, bool) {
+	var update WatchUpdate
+	switch part := event.GetEvent().(type) {
+	case *operatorv1.WatchEvent_Resync:
+		update = WatchUpdate{Kind: WatchResync}
+	case *operatorv1.WatchEvent_Change:
+		update = WatchUpdate{Kind: WatchChanged, Change: part.Change}
+	}
+	return event.GetResumeToken(), update, true
+}
+
+func watchStream[T any](
+	ctx context.Context, idleTimeout time.Duration, token *string, send func(WatchUpdate) bool,
+	open func(context.Context) (*connect.ServerStreamForClient[T], error),
+	frame func(*T) (string, WatchUpdate, bool),
+) (live bool, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var idle atomic.Bool
-	timer := time.AfterFunc(w.IdleTimeout, func() {
+	timer := time.AfterFunc(idleTimeout, func() {
 		idle.Store(true)
 		cancel()
 	})
 	defer timer.Stop()
-	stream, err := w.Client.events.Watch(ctx, connect.NewRequest(&operatorv1.WatchRequest{ResumeToken: *token, Kinds: w.Kinds}))
+	stream, err := open(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer stream.Close()
 	for stream.Receive() {
-		timer.Reset(w.IdleTimeout)
-		event := stream.Msg()
-		if next := event.GetResumeToken(); next != "" {
-			*token = next
+		next, update, valid := frame(stream.Msg())
+		if !valid {
+			continue
 		}
-		var update WatchUpdate
-		switch part := event.GetEvent().(type) {
-		case *operatorv1.WatchEvent_Resync:
-			update = WatchUpdate{Kind: WatchResync}
-		case *operatorv1.WatchEvent_Change:
-			update = WatchUpdate{Kind: WatchChanged, Change: part.Change}
+		timer.Reset(idleTimeout)
+		if next != "" {
+			*token = next
 		}
 		if !live {
 			live = true

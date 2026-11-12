@@ -138,6 +138,9 @@ impl Store {
                 created_at_ms: now,
             }
         };
+        if !duplicate {
+            crate::mailbox::deliver_workstream_in(&mut tx, &post, now).await?;
+        }
         sqlx::query("INSERT INTO supertag_v2_workstream_operations (source_task_id,operation_id,request_digest,post_id) VALUES ($1,$2,$3,$4)")
             .bind(&attempt.task_id).bind(&input.operation_id).bind(&digest).bind(&post.post_id)
             .execute(&mut *tx).await?;

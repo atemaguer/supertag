@@ -121,6 +121,11 @@ func (m model) renderConversation() string {
 	width := m.paneWidth()
 	conversation := m.currentConversation(tag)
 	c := m.conversations[convKey(tag, conversation)]
+	if c != nil && m.client.RuntimeV2() {
+		if text := m.renderRuntimeHistory(c, name, width); text != "" {
+			return text
+		}
+	}
 	if c == nil || (len(c.entries) == 0 && c.draft == "") {
 		if conversation == defaultConversation {
 			return faint.Render(wrap.Render("Say something to " + name + ". This is your default conversation with it."))

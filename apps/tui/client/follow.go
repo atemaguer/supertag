@@ -235,10 +235,13 @@ type HistoryItem struct {
 }
 
 // History turns a page of messages, newest first as ListMessages returns them, into what the
-// conversation shows, oldest first. A message delivered into another message's turn on the page
-// shows only that it joined; that turn shows the reply and the work.
-func History(tag string, page []*operatorv1.Message) []HistoryItem {
+// conversation shows, oldest first. A message delivered into a turn on the
+// page or already displayed shows only that it joined.
+func History(tag string, page []*operatorv1.Message, displayedTaskIDs ...string) []HistoryItem {
 	onPage := map[string]bool{}
+	for _, id := range displayedTaskIDs {
+		onPage[id] = true
+	}
 	for _, message := range page {
 		onPage[message.GetTaskId()] = true
 	}

@@ -418,6 +418,41 @@ async fn rust_launcher_and_go_tui_send_a_real_conversation() -> Result<()> {
     tmux.run(&["send-keys", "-t", "runtime", "Enter"]).await?;
     tmux.wait_for("Process requests: Rust UI round trip")
         .await?;
+    let credentials: Value =
+        serde_json::from_slice(&std::fs::read(state.join("credentials.json"))?)?;
+    let token = credentials["operator_token"]
+        .as_str()
+        .context("test operator credential missing")?;
+    let mut messages = conversations_client::ConversationsClient::new(channel(&endpoint).await?);
+    let page = messages
+        .list_conversations(authenticated_request(
+            ListConversationsRequest {
+                tag_id: "engineer".into(),
+                ..Default::default()
+            },
+            token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    let thread = page
+        .conversations
+        .first()
+        .context("Go TUI conversation missing")?;
+    messages
+        .send_message(authenticated_request(
+            SendMessageRequest {
+                tag_id: "engineer".into(),
+                conversation: thread.name.clone(),
+                operation_id: "external-client".into(),
+                text: "Reply from another client".into(),
+            },
+            token,
+            None,
+        )?)
+        .await?;
+    tmux.wait_for("Process requests: Reply from another client")
+        .await?;
     tmux.wait_for("maintainers").await?;
     tmux.run(&["send-keys", "-t", "runtime", "Tab", "Down"])
         .await?;
@@ -429,5 +464,181 @@ async fn rust_launcher_and_go_tui_send_a_real_conversation() -> Result<()> {
         unsafe { libc::kill(pid as i32, libc::SIGTERM) };
     }
     assert!(timeout(WAIT, runtime.wait()).await??.success());
+    Ok(())
+}
+
+#[tokio::test]
+async fn watch_replays_private_conversations_after_services_restart() -> Result<()> {
+    use operator_events_client::OperatorEventsClient;
+    use watch_event::Update;
+
+    async fn open(
+        address: &str,
+        token: &str,
+        resume_token: String,
+    ) -> Result<tonic::Streaming<WatchEvent>, tonic::Status> {
+        let endpoint = channel(address)
+            .await
+            .map_err(|error| tonic::Status::unavailable(error.to_string()))?;
+        let mut client = OperatorEventsClient::new(endpoint);
+        Ok(client
+            .watch(authenticated_request(
+                WatchRequest {
+                    resume_token,
+                    ..Default::default()
+                },
+                token,
+                Some("operator:alice"),
+            )?)
+            .await?
+            .into_inner())
+    }
+
+    async fn until_tag(stream: &mut tonic::Streaming<WatchEvent>) -> Result<Vec<WatchChange>> {
+        timeout(WAIT, async {
+            let mut changes = Vec::new();
+            while let Some(event) = stream.message().await? {
+                if let Some(Update::Change(change)) = event.update {
+                    let done = change.kind() == WatchKind::Tag && change.id == "finished";
+                    changes.push(change);
+                    if done {
+                        return Ok(changes);
+                    }
+                }
+            }
+            anyhow::bail!("watch ended before the final Tag change")
+        })
+        .await?
+    }
+
+    async fn stop(process: &mut Child) -> Result<()> {
+        if let Some(pid) = process.id() {
+            // SAFETY: this is a live child PID held by the test.
+            unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+        }
+        assert!(
+            timeout(Duration::from_secs(5), process.wait())
+                .await??
+                .success()
+        );
+        Ok(())
+    }
+
+    let directory = tempfile::tempdir()?;
+    let secret = Uuid::new_v4().to_string();
+    let alice_token = Uuid::new_v4().to_string();
+    let bob_token = Uuid::new_v4().to_string();
+    let control_command = || {
+        let mut control = command(&["control-plane"]);
+        control.env("SUPERTAG_GATEWAY_TOKEN", &secret).env(
+            "SUPERTAG_DATABASE_URL",
+            format!(
+                "sqlite://{}?mode=rwc",
+                directory.path().join("watch.db").display()
+            ),
+        );
+        control
+    };
+    let (mut plane, private) = service(control_command()).await?;
+    let (mut alice_gateway, alice_url) =
+        service(gateway(&private, &secret, &alice_token, "operator:alice")).await?;
+    let (mut bob_gateway, bob_url) =
+        service(gateway(&private, &secret, &bob_token, "operator:bob")).await?;
+    assert_eq!(
+        open(&bob_url, &bob_token, "broken-cursor".into())
+            .await
+            .unwrap_err()
+            .code(),
+        Code::InvalidArgument
+    );
+
+    let mut alice_watch = open(&alice_url, &alice_token, String::new()).await?;
+    let mut bob_watch = open(&bob_url, &bob_token, String::new()).await?;
+    let alice_start = timeout(WAIT, alice_watch.message())
+        .await??
+        .context("Alice watch handshake")?;
+    let bob_start = timeout(WAIT, bob_watch.message())
+        .await??
+        .context("Bob watch handshake")?;
+    assert!(matches!(alice_start.update, Some(Update::Heartbeat(_))));
+    assert!(matches!(bob_start.update, Some(Update::Heartbeat(_))));
+
+    // Leave the streams idle beyond the Gateway's unary forwarding deadline.
+    tokio::time::sleep(Duration::from_secs(11)).await;
+
+    let alice = channel(&alice_url).await?;
+    let mut tags = operator_client::OperatorClient::new(alice.clone());
+    let put = |name: &str| PutTagRequest {
+        tag_id: name.to_owned(),
+        instructions: "Test Watch".into(),
+        ..Default::default()
+    };
+    tags.put_tag(authenticated_request(put("engineer"), &alice_token, None)?)
+        .await?;
+    let send = |text: &str| SendMessageRequest {
+        tag_id: "engineer".into(),
+        conversation: "private".into(),
+        operation_id: "send-once".into(),
+        text: text.to_owned(),
+    };
+    let mut a = conversations_client::ConversationsClient::new(alice);
+    let mut b = conversations_client::ConversationsClient::new(channel(&bob_url).await?);
+    let private_a = a
+        .send_message(authenticated_request(send("Alice"), &alice_token, None)?)
+        .await?
+        .into_inner()
+        .task
+        .context("Alice Task")?;
+    let private_b = b
+        .send_message(authenticated_request(send("Bob"), &bob_token, None)?)
+        .await?
+        .into_inner()
+        .task
+        .context("Bob Task")?;
+    a.send_message(authenticated_request(send("Alice"), &alice_token, None)?)
+        .await?;
+    tags.put_tag(authenticated_request(put("finished"), &alice_token, None)?)
+        .await?;
+
+    let check = |changes: Vec<WatchChange>, own: &Task, other: &Task| {
+        assert!(
+            changes
+                .iter()
+                .all(|change| change.id != other.task_id && change.session_id != other.session_id)
+        );
+        assert_eq!(
+            changes
+                .iter()
+                .filter(|change| change.id == own.task_id
+                    && change.kind() == WatchKind::ConversationMessage)
+                .count(),
+            1
+        );
+        assert!(changes.iter().any(|change| change.kind() == WatchKind::Task
+            && change.id == own.task_id
+            && change.session_id == own.session_id));
+    };
+    check(until_tag(&mut alice_watch).await?, &private_a, &private_b);
+    check(until_tag(&mut bob_watch).await?, &private_b, &private_a);
+
+    // Open streams must release both services during graceful shutdown.
+    stop(&mut alice_gateway).await?;
+    assert_eq!(
+        timeout(WAIT, alice_watch.message())
+            .await?
+            .unwrap_err()
+            .code(),
+        Code::Unavailable
+    );
+    stop(&mut plane).await?;
+    stop(&mut bob_gateway).await?;
+
+    let (mut plane, private) = service(control_command()).await?;
+    let (mut gateway, address) =
+        service(gateway(&private, &secret, &bob_token, "operator:bob")).await?;
+    let mut resumed = open(&address, &bob_token, bob_start.resume_token).await?;
+    check(until_tag(&mut resumed).await?, &private_b, &private_a);
+    stop(&mut plane).await?;
+    stop(&mut gateway).await?;
     Ok(())
 }

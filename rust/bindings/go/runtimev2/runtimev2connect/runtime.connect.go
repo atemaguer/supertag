@@ -25,12 +25,18 @@ const (
 	OperatorName = "supertag.runtime.v2.Operator"
 	// ConversationsName is the fully-qualified name of the Conversations service.
 	ConversationsName = "supertag.runtime.v2.Conversations"
+	// OperatorEventsName is the fully-qualified name of the OperatorEvents service.
+	OperatorEventsName = "supertag.runtime.v2.OperatorEvents"
 	// ObjectivesName is the fully-qualified name of the Objectives service.
 	ObjectivesName = "supertag.runtime.v2.Objectives"
 	// TeamsName is the fully-qualified name of the Teams service.
 	TeamsName = "supertag.runtime.v2.Teams"
 	// AttemptWorkstreamsName is the fully-qualified name of the AttemptWorkstreams service.
 	AttemptWorkstreamsName = "supertag.runtime.v2.AttemptWorkstreams"
+	// MailboxName is the fully-qualified name of the Mailbox service.
+	MailboxName = "supertag.runtime.v2.Mailbox"
+	// AttemptMailboxName is the fully-qualified name of the AttemptMailbox service.
+	AttemptMailboxName = "supertag.runtime.v2.AttemptMailbox"
 	// WorkerHostName is the fully-qualified name of the WorkerHost service.
 	WorkerHostName = "supertag.runtime.v2.WorkerHost"
 	// LiveInputsName is the fully-qualified name of the LiveInputs service.
@@ -97,6 +103,8 @@ const (
 	// ConversationsListMessageEventsProcedure is the fully-qualified name of the Conversations's
 	// ListMessageEvents RPC.
 	ConversationsListMessageEventsProcedure = "/supertag.runtime.v2.Conversations/ListMessageEvents"
+	// OperatorEventsWatchProcedure is the fully-qualified name of the OperatorEvents's Watch RPC.
+	OperatorEventsWatchProcedure = "/supertag.runtime.v2.OperatorEvents/Watch"
 	// ObjectivesCreateObjectiveProcedure is the fully-qualified name of the Objectives's
 	// CreateObjective RPC.
 	ObjectivesCreateObjectiveProcedure = "/supertag.runtime.v2.Objectives/CreateObjective"
@@ -138,6 +146,11 @@ const (
 	// AttemptWorkstreamsPostAttemptWorkstreamProcedure is the fully-qualified name of the
 	// AttemptWorkstreams's PostAttemptWorkstream RPC.
 	AttemptWorkstreamsPostAttemptWorkstreamProcedure = "/supertag.runtime.v2.AttemptWorkstreams/PostAttemptWorkstream"
+	// MailboxListMessagesProcedure is the fully-qualified name of the Mailbox's ListMessages RPC.
+	MailboxListMessagesProcedure = "/supertag.runtime.v2.Mailbox/ListMessages"
+	// AttemptMailboxReadMailboxProcedure is the fully-qualified name of the AttemptMailbox's
+	// ReadMailbox RPC.
+	AttemptMailboxReadMailboxProcedure = "/supertag.runtime.v2.AttemptMailbox/ReadMailbox"
 	// WorkerHostRegisterHostProcedure is the fully-qualified name of the WorkerHost's RegisterHost RPC.
 	WorkerHostRegisterHostProcedure = "/supertag.runtime.v2.WorkerHost/RegisterHost"
 	// WorkerHostClaimTaskProcedure is the fully-qualified name of the WorkerHost's ClaimTask RPC.
@@ -192,6 +205,12 @@ const (
 	// ConnectorAcceptLarkEventProcedure is the fully-qualified name of the Connector's AcceptLarkEvent
 	// RPC.
 	ConnectorAcceptLarkEventProcedure = "/supertag.runtime.v2.Connector/AcceptLarkEvent"
+	// ConnectorAcceptMicrosoftTeamsActivityProcedure is the fully-qualified name of the Connector's
+	// AcceptMicrosoftTeamsActivity RPC.
+	ConnectorAcceptMicrosoftTeamsActivityProcedure = "/supertag.runtime.v2.Connector/AcceptMicrosoftTeamsActivity"
+	// ConnectorGetMicrosoftTeamsReplyRouteProcedure is the fully-qualified name of the Connector's
+	// GetMicrosoftTeamsReplyRoute RPC.
+	ConnectorGetMicrosoftTeamsReplyRouteProcedure = "/supertag.runtime.v2.Connector/GetMicrosoftTeamsReplyRoute"
 	// ConnectorClaimReplyProcedure is the fully-qualified name of the Connector's ClaimReply RPC.
 	ConnectorClaimReplyProcedure = "/supertag.runtime.v2.Connector/ClaimReply"
 	// ConnectorSettleReplyProcedure is the fully-qualified name of the Connector's SettleReply RPC.
@@ -722,6 +741,76 @@ func (UnimplementedConversationsHandler) GetMessage(context.Context, *connect.Re
 
 func (UnimplementedConversationsHandler) ListMessageEvents(context.Context, *connect.Request[runtimev2.ListMessageEventsRequest]) (*connect.Response[runtimev2.ListEventsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Conversations.ListMessageEvents is not implemented"))
+}
+
+// OperatorEventsClient is a client for the supertag.runtime.v2.OperatorEvents service.
+type OperatorEventsClient interface {
+	Watch(context.Context, *connect.Request[runtimev2.WatchRequest]) (*connect.ServerStreamForClient[runtimev2.WatchEvent], error)
+}
+
+// NewOperatorEventsClient constructs a client for the supertag.runtime.v2.OperatorEvents service.
+// By default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped
+// responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewOperatorEventsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) OperatorEventsClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	operatorEventsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("OperatorEvents").Methods()
+	return &operatorEventsClient{
+		watch: connect.NewClient[runtimev2.WatchRequest, runtimev2.WatchEvent](
+			httpClient,
+			baseURL+OperatorEventsWatchProcedure,
+			connect.WithSchema(operatorEventsMethods.ByName("Watch")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// operatorEventsClient implements OperatorEventsClient.
+type operatorEventsClient struct {
+	watch *connect.Client[runtimev2.WatchRequest, runtimev2.WatchEvent]
+}
+
+// Watch calls supertag.runtime.v2.OperatorEvents.Watch.
+func (c *operatorEventsClient) Watch(ctx context.Context, req *connect.Request[runtimev2.WatchRequest]) (*connect.ServerStreamForClient[runtimev2.WatchEvent], error) {
+	return c.watch.CallServerStream(ctx, req)
+}
+
+// OperatorEventsHandler is an implementation of the supertag.runtime.v2.OperatorEvents service.
+type OperatorEventsHandler interface {
+	Watch(context.Context, *connect.Request[runtimev2.WatchRequest], *connect.ServerStream[runtimev2.WatchEvent]) error
+}
+
+// NewOperatorEventsHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewOperatorEventsHandler(svc OperatorEventsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	operatorEventsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("OperatorEvents").Methods()
+	operatorEventsWatchHandler := connect.NewServerStreamHandler(
+		OperatorEventsWatchProcedure,
+		svc.Watch,
+		connect.WithSchema(operatorEventsMethods.ByName("Watch")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.OperatorEvents/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case OperatorEventsWatchProcedure:
+			operatorEventsWatchHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedOperatorEventsHandler returns CodeUnimplemented from all methods.
+type UnimplementedOperatorEventsHandler struct{}
+
+func (UnimplementedOperatorEventsHandler) Watch(context.Context, *connect.Request[runtimev2.WatchRequest], *connect.ServerStream[runtimev2.WatchEvent]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.OperatorEvents.Watch is not implemented"))
 }
 
 // ObjectivesClient is a client for the supertag.runtime.v2.Objectives service.
@@ -1271,6 +1360,146 @@ func (UnimplementedAttemptWorkstreamsHandler) ReadAttemptWorkstream(context.Cont
 
 func (UnimplementedAttemptWorkstreamsHandler) PostAttemptWorkstream(context.Context, *connect.Request[runtimev2.PostAttemptWorkstreamRequest]) (*connect.Response[runtimev2.PostAttemptWorkstreamResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptWorkstreams.PostAttemptWorkstream is not implemented"))
+}
+
+// MailboxClient is a client for the supertag.runtime.v2.Mailbox service.
+type MailboxClient interface {
+	ListMessages(context.Context, *connect.Request[runtimev2.ListMailboxMessagesRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error)
+}
+
+// NewMailboxClient constructs a client for the supertag.runtime.v2.Mailbox service. By default, it
+// uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses, and sends
+// uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or
+// connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewMailboxClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) MailboxClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	mailboxMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("Mailbox").Methods()
+	return &mailboxClient{
+		listMessages: connect.NewClient[runtimev2.ListMailboxMessagesRequest, runtimev2.ListMailboxMessagesResponse](
+			httpClient,
+			baseURL+MailboxListMessagesProcedure,
+			connect.WithSchema(mailboxMethods.ByName("ListMessages")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// mailboxClient implements MailboxClient.
+type mailboxClient struct {
+	listMessages *connect.Client[runtimev2.ListMailboxMessagesRequest, runtimev2.ListMailboxMessagesResponse]
+}
+
+// ListMessages calls supertag.runtime.v2.Mailbox.ListMessages.
+func (c *mailboxClient) ListMessages(ctx context.Context, req *connect.Request[runtimev2.ListMailboxMessagesRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error) {
+	return c.listMessages.CallUnary(ctx, req)
+}
+
+// MailboxHandler is an implementation of the supertag.runtime.v2.Mailbox service.
+type MailboxHandler interface {
+	ListMessages(context.Context, *connect.Request[runtimev2.ListMailboxMessagesRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error)
+}
+
+// NewMailboxHandler builds an HTTP handler from the service implementation. It returns the path on
+// which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewMailboxHandler(svc MailboxHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	mailboxMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("Mailbox").Methods()
+	mailboxListMessagesHandler := connect.NewUnaryHandler(
+		MailboxListMessagesProcedure,
+		svc.ListMessages,
+		connect.WithSchema(mailboxMethods.ByName("ListMessages")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.Mailbox/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case MailboxListMessagesProcedure:
+			mailboxListMessagesHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedMailboxHandler returns CodeUnimplemented from all methods.
+type UnimplementedMailboxHandler struct{}
+
+func (UnimplementedMailboxHandler) ListMessages(context.Context, *connect.Request[runtimev2.ListMailboxMessagesRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Mailbox.ListMessages is not implemented"))
+}
+
+// AttemptMailboxClient is a client for the supertag.runtime.v2.AttemptMailbox service.
+type AttemptMailboxClient interface {
+	ReadMailbox(context.Context, *connect.Request[runtimev2.ReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error)
+}
+
+// NewAttemptMailboxClient constructs a client for the supertag.runtime.v2.AttemptMailbox service.
+// By default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped
+// responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewAttemptMailboxClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) AttemptMailboxClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	attemptMailboxMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("AttemptMailbox").Methods()
+	return &attemptMailboxClient{
+		readMailbox: connect.NewClient[runtimev2.ReadMailboxRequest, runtimev2.ListMailboxMessagesResponse](
+			httpClient,
+			baseURL+AttemptMailboxReadMailboxProcedure,
+			connect.WithSchema(attemptMailboxMethods.ByName("ReadMailbox")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// attemptMailboxClient implements AttemptMailboxClient.
+type attemptMailboxClient struct {
+	readMailbox *connect.Client[runtimev2.ReadMailboxRequest, runtimev2.ListMailboxMessagesResponse]
+}
+
+// ReadMailbox calls supertag.runtime.v2.AttemptMailbox.ReadMailbox.
+func (c *attemptMailboxClient) ReadMailbox(ctx context.Context, req *connect.Request[runtimev2.ReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error) {
+	return c.readMailbox.CallUnary(ctx, req)
+}
+
+// AttemptMailboxHandler is an implementation of the supertag.runtime.v2.AttemptMailbox service.
+type AttemptMailboxHandler interface {
+	ReadMailbox(context.Context, *connect.Request[runtimev2.ReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error)
+}
+
+// NewAttemptMailboxHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewAttemptMailboxHandler(svc AttemptMailboxHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	attemptMailboxMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("AttemptMailbox").Methods()
+	attemptMailboxReadMailboxHandler := connect.NewUnaryHandler(
+		AttemptMailboxReadMailboxProcedure,
+		svc.ReadMailbox,
+		connect.WithSchema(attemptMailboxMethods.ByName("ReadMailbox")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.AttemptMailbox/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case AttemptMailboxReadMailboxProcedure:
+			attemptMailboxReadMailboxHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedAttemptMailboxHandler returns CodeUnimplemented from all methods.
+type UnimplementedAttemptMailboxHandler struct{}
+
+func (UnimplementedAttemptMailboxHandler) ReadMailbox(context.Context, *connect.Request[runtimev2.ReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptMailbox.ReadMailbox is not implemented"))
 }
 
 // WorkerHostClient is a client for the supertag.runtime.v2.WorkerHost service.
@@ -1942,6 +2171,8 @@ type ConnectorClient interface {
 	AcceptGithubEvent(context.Context, *connect.Request[runtimev2.AcceptGithubEventRequest]) (*connect.Response[runtimev2.AcceptGithubEventResponse], error)
 	AcceptLinearEvent(context.Context, *connect.Request[runtimev2.AcceptLinearEventRequest]) (*connect.Response[runtimev2.AcceptLinearEventResponse], error)
 	AcceptLarkEvent(context.Context, *connect.Request[runtimev2.AcceptLarkEventRequest]) (*connect.Response[runtimev2.AcceptLarkEventResponse], error)
+	AcceptMicrosoftTeamsActivity(context.Context, *connect.Request[runtimev2.AcceptMicrosoftTeamsActivityRequest]) (*connect.Response[runtimev2.AcceptMicrosoftTeamsActivityResponse], error)
+	GetMicrosoftTeamsReplyRoute(context.Context, *connect.Request[runtimev2.GetMicrosoftTeamsReplyRouteRequest]) (*connect.Response[runtimev2.MicrosoftTeamsReplyRoute], error)
 	ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error)
 	SettleReply(context.Context, *connect.Request[runtimev2.SettleReplyRequest]) (*connect.Response[runtimev2.Reply], error)
 }
@@ -1987,6 +2218,18 @@ func NewConnectorClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(connectorMethods.ByName("AcceptLarkEvent")),
 			connect.WithClientOptions(opts...),
 		),
+		acceptMicrosoftTeamsActivity: connect.NewClient[runtimev2.AcceptMicrosoftTeamsActivityRequest, runtimev2.AcceptMicrosoftTeamsActivityResponse](
+			httpClient,
+			baseURL+ConnectorAcceptMicrosoftTeamsActivityProcedure,
+			connect.WithSchema(connectorMethods.ByName("AcceptMicrosoftTeamsActivity")),
+			connect.WithClientOptions(opts...),
+		),
+		getMicrosoftTeamsReplyRoute: connect.NewClient[runtimev2.GetMicrosoftTeamsReplyRouteRequest, runtimev2.MicrosoftTeamsReplyRoute](
+			httpClient,
+			baseURL+ConnectorGetMicrosoftTeamsReplyRouteProcedure,
+			connect.WithSchema(connectorMethods.ByName("GetMicrosoftTeamsReplyRoute")),
+			connect.WithClientOptions(opts...),
+		),
 		claimReply: connect.NewClient[runtimev2.ClaimReplyRequest, runtimev2.ClaimReplyResponse](
 			httpClient,
 			baseURL+ConnectorClaimReplyProcedure,
@@ -2004,13 +2247,15 @@ func NewConnectorClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 
 // connectorClient implements ConnectorClient.
 type connectorClient struct {
-	acceptEvent       *connect.Client[runtimev2.AcceptEventRequest, runtimev2.Task]
-	acceptSlackEvent  *connect.Client[runtimev2.AcceptSlackEventRequest, runtimev2.AcceptSlackEventResponse]
-	acceptGithubEvent *connect.Client[runtimev2.AcceptGithubEventRequest, runtimev2.AcceptGithubEventResponse]
-	acceptLinearEvent *connect.Client[runtimev2.AcceptLinearEventRequest, runtimev2.AcceptLinearEventResponse]
-	acceptLarkEvent   *connect.Client[runtimev2.AcceptLarkEventRequest, runtimev2.AcceptLarkEventResponse]
-	claimReply        *connect.Client[runtimev2.ClaimReplyRequest, runtimev2.ClaimReplyResponse]
-	settleReply       *connect.Client[runtimev2.SettleReplyRequest, runtimev2.Reply]
+	acceptEvent                  *connect.Client[runtimev2.AcceptEventRequest, runtimev2.Task]
+	acceptSlackEvent             *connect.Client[runtimev2.AcceptSlackEventRequest, runtimev2.AcceptSlackEventResponse]
+	acceptGithubEvent            *connect.Client[runtimev2.AcceptGithubEventRequest, runtimev2.AcceptGithubEventResponse]
+	acceptLinearEvent            *connect.Client[runtimev2.AcceptLinearEventRequest, runtimev2.AcceptLinearEventResponse]
+	acceptLarkEvent              *connect.Client[runtimev2.AcceptLarkEventRequest, runtimev2.AcceptLarkEventResponse]
+	acceptMicrosoftTeamsActivity *connect.Client[runtimev2.AcceptMicrosoftTeamsActivityRequest, runtimev2.AcceptMicrosoftTeamsActivityResponse]
+	getMicrosoftTeamsReplyRoute  *connect.Client[runtimev2.GetMicrosoftTeamsReplyRouteRequest, runtimev2.MicrosoftTeamsReplyRoute]
+	claimReply                   *connect.Client[runtimev2.ClaimReplyRequest, runtimev2.ClaimReplyResponse]
+	settleReply                  *connect.Client[runtimev2.SettleReplyRequest, runtimev2.Reply]
 }
 
 // AcceptEvent calls supertag.runtime.v2.Connector.AcceptEvent.
@@ -2038,6 +2283,16 @@ func (c *connectorClient) AcceptLarkEvent(ctx context.Context, req *connect.Requ
 	return c.acceptLarkEvent.CallUnary(ctx, req)
 }
 
+// AcceptMicrosoftTeamsActivity calls supertag.runtime.v2.Connector.AcceptMicrosoftTeamsActivity.
+func (c *connectorClient) AcceptMicrosoftTeamsActivity(ctx context.Context, req *connect.Request[runtimev2.AcceptMicrosoftTeamsActivityRequest]) (*connect.Response[runtimev2.AcceptMicrosoftTeamsActivityResponse], error) {
+	return c.acceptMicrosoftTeamsActivity.CallUnary(ctx, req)
+}
+
+// GetMicrosoftTeamsReplyRoute calls supertag.runtime.v2.Connector.GetMicrosoftTeamsReplyRoute.
+func (c *connectorClient) GetMicrosoftTeamsReplyRoute(ctx context.Context, req *connect.Request[runtimev2.GetMicrosoftTeamsReplyRouteRequest]) (*connect.Response[runtimev2.MicrosoftTeamsReplyRoute], error) {
+	return c.getMicrosoftTeamsReplyRoute.CallUnary(ctx, req)
+}
+
 // ClaimReply calls supertag.runtime.v2.Connector.ClaimReply.
 func (c *connectorClient) ClaimReply(ctx context.Context, req *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error) {
 	return c.claimReply.CallUnary(ctx, req)
@@ -2055,6 +2310,8 @@ type ConnectorHandler interface {
 	AcceptGithubEvent(context.Context, *connect.Request[runtimev2.AcceptGithubEventRequest]) (*connect.Response[runtimev2.AcceptGithubEventResponse], error)
 	AcceptLinearEvent(context.Context, *connect.Request[runtimev2.AcceptLinearEventRequest]) (*connect.Response[runtimev2.AcceptLinearEventResponse], error)
 	AcceptLarkEvent(context.Context, *connect.Request[runtimev2.AcceptLarkEventRequest]) (*connect.Response[runtimev2.AcceptLarkEventResponse], error)
+	AcceptMicrosoftTeamsActivity(context.Context, *connect.Request[runtimev2.AcceptMicrosoftTeamsActivityRequest]) (*connect.Response[runtimev2.AcceptMicrosoftTeamsActivityResponse], error)
+	GetMicrosoftTeamsReplyRoute(context.Context, *connect.Request[runtimev2.GetMicrosoftTeamsReplyRouteRequest]) (*connect.Response[runtimev2.MicrosoftTeamsReplyRoute], error)
 	ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error)
 	SettleReply(context.Context, *connect.Request[runtimev2.SettleReplyRequest]) (*connect.Response[runtimev2.Reply], error)
 }
@@ -2096,6 +2353,18 @@ func NewConnectorHandler(svc ConnectorHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(connectorMethods.ByName("AcceptLarkEvent")),
 		connect.WithHandlerOptions(opts...),
 	)
+	connectorAcceptMicrosoftTeamsActivityHandler := connect.NewUnaryHandler(
+		ConnectorAcceptMicrosoftTeamsActivityProcedure,
+		svc.AcceptMicrosoftTeamsActivity,
+		connect.WithSchema(connectorMethods.ByName("AcceptMicrosoftTeamsActivity")),
+		connect.WithHandlerOptions(opts...),
+	)
+	connectorGetMicrosoftTeamsReplyRouteHandler := connect.NewUnaryHandler(
+		ConnectorGetMicrosoftTeamsReplyRouteProcedure,
+		svc.GetMicrosoftTeamsReplyRoute,
+		connect.WithSchema(connectorMethods.ByName("GetMicrosoftTeamsReplyRoute")),
+		connect.WithHandlerOptions(opts...),
+	)
 	connectorClaimReplyHandler := connect.NewUnaryHandler(
 		ConnectorClaimReplyProcedure,
 		svc.ClaimReply,
@@ -2120,6 +2389,10 @@ func NewConnectorHandler(svc ConnectorHandler, opts ...connect.HandlerOption) (s
 			connectorAcceptLinearEventHandler.ServeHTTP(w, r)
 		case ConnectorAcceptLarkEventProcedure:
 			connectorAcceptLarkEventHandler.ServeHTTP(w, r)
+		case ConnectorAcceptMicrosoftTeamsActivityProcedure:
+			connectorAcceptMicrosoftTeamsActivityHandler.ServeHTTP(w, r)
+		case ConnectorGetMicrosoftTeamsReplyRouteProcedure:
+			connectorGetMicrosoftTeamsReplyRouteHandler.ServeHTTP(w, r)
 		case ConnectorClaimReplyProcedure:
 			connectorClaimReplyHandler.ServeHTTP(w, r)
 		case ConnectorSettleReplyProcedure:
@@ -2151,6 +2424,14 @@ func (UnimplementedConnectorHandler) AcceptLinearEvent(context.Context, *connect
 
 func (UnimplementedConnectorHandler) AcceptLarkEvent(context.Context, *connect.Request[runtimev2.AcceptLarkEventRequest]) (*connect.Response[runtimev2.AcceptLarkEventResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.AcceptLarkEvent is not implemented"))
+}
+
+func (UnimplementedConnectorHandler) AcceptMicrosoftTeamsActivity(context.Context, *connect.Request[runtimev2.AcceptMicrosoftTeamsActivityRequest]) (*connect.Response[runtimev2.AcceptMicrosoftTeamsActivityResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.AcceptMicrosoftTeamsActivity is not implemented"))
+}
+
+func (UnimplementedConnectorHandler) GetMicrosoftTeamsReplyRoute(context.Context, *connect.Request[runtimev2.GetMicrosoftTeamsReplyRouteRequest]) (*connect.Response[runtimev2.MicrosoftTeamsReplyRoute], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.GetMicrosoftTeamsReplyRoute is not implemented"))
 }
 
 func (UnimplementedConnectorHandler) ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error) {

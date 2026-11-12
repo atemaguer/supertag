@@ -14,12 +14,13 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use harness::{AdapterOptions, CodexAdapterArgs, Harness};
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use supertag_control_plane::ControlPlane;
+use supertag_control_plane::{ControlPlane, OperatorWatch};
 use supertag_gateway::{
-    Gateway,
+    Gateway, GatewayWatch,
     github::{Github, GithubAppConfig, GithubAuthentication, GithubConfig},
     lark::{Lark, LarkConfig},
     linear::{Linear, LinearConfig},
+    microsoft_teams::{MicrosoftTeams, MicrosoftTeamsConfig},
     slack::{Slack, SlackConfig},
     transfers::GatewayTransfers,
 };
@@ -29,12 +30,13 @@ use supertag_protocol::{
         AttemptDecision, CancelTaskRequest, CreateAuthKeyRequest, GetTaskRequest, HarnessKind,
         LarkDomain, ListEventsRequest, ListNativeUsageRequest, PutTagRequest,
         ResolveAttemptRequest, RevokeHostRequest, SubmitTaskRequest, Task, WorkspaceSpec,
-        attempt_inputs_server::AttemptInputsServer,
+        attempt_inputs_server::AttemptInputsServer, attempt_mailbox_server::AttemptMailboxServer,
         attempt_workstreams_server::AttemptWorkstreamsServer,
         checkpoint_directory_server::CheckpointDirectoryServer, connector_server::ConnectorServer,
         conversations_server::ConversationsServer, host_directory_server::HostDirectoryServer,
         host_enrollment_server::HostEnrollmentServer, live_inputs_server::LiveInputsServer,
-        objectives_server::ObjectivesServer, operator_client::OperatorClient,
+        mailbox_server::MailboxServer, objectives_server::ObjectivesServer,
+        operator_client::OperatorClient, operator_events_server::OperatorEventsServer,
         operator_server::OperatorServer, teams_server::TeamsServer,
         transfers_server::TransfersServer, worker_host_server::WorkerHostServer,
         workspace_directory_server::WorkspaceDirectoryServer,
@@ -74,6 +76,16 @@ enum RecoveryDecision {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Read the messages sent to or from a Tag.
+    Mailbox {
+        #[command(flatten)]
+        connection: Connection,
+        tag_id: String,
+        #[arg(long, default_value_t = 32)]
+        limit: u32,
+        #[arg(long, default_value = "")]
+        cursor: String,
+    },
     /// Manage Teams and read their Workstream posts.
     Team {
         #[command(flatten)]
@@ -118,6 +130,10 @@ enum Command {
         /// Enable the outbound Lark or Feishu connection and store reply receipts here.
         #[arg(long)]
         lark_state_directory: Option<PathBuf>,
+        #[arg(long, requires = "microsoft_teams_state_directory")]
+        microsoft_teams_listen: Option<SocketAddr>,
+        #[arg(long, requires = "microsoft_teams_listen")]
+        microsoft_teams_state_directory: Option<PathBuf>,
     },
     /// Open the Go terminal UI for a running Gateway.
     Tui {
@@ -313,6 +329,53 @@ fn main() -> Result<()> {
 
 async fn run(command: Command) -> Result<()> {
     match command {
+        Command::Mailbox {
+            connection,
+            tag_id,
+            limit,
+            cursor,
+        } => {
+            use supertag_protocol::v2::{
+                ListMailboxMessagesRequest, mailbox_client::MailboxClient,
+            };
+            let (channel, token) = connect_operator(connection).await?;
+            let page = MailboxClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                .list_messages(request(
+                    ListMailboxMessagesRequest {
+                        tag_id,
+                        limit,
+                        cursor,
+                    },
+                    &token,
+                )?)
+                .await?
+                .into_inner();
+            let messages = page
+                .messages
+                .into_iter()
+                .map(|message| {
+                    json!({
+                        "message_id": message.message_id,
+                        "sender_tag_id": message.sender_tag_id,
+                        "recipient_tag_id": message.recipient_tag_id,
+                        "source_task_id": message.source_task_id,
+                        "workstream_post_id": message.workstream_post_id,
+                        "objective_id": message.objective_id,
+                        "text": message.text,
+                        "hops": message.hops,
+                        "task_id": message.task_id,
+                        "state": message.state().as_str_name(),
+                        "created_at_ms": message.created_at_ms,
+                    })
+                })
+                .collect::<Vec<_>>();
+            println!(
+                "{}",
+                json!({ "messages": messages, "next_cursor": page.next_cursor })
+            );
+        }
         Command::Team {
             connection,
             command,
@@ -344,15 +407,20 @@ async fn run(command: Command) -> Result<()> {
             linear_listen,
             linear_state_directory,
             lark_state_directory,
+            microsoft_teams_listen,
+            microsoft_teams_state_directory,
         } => {
             gateway(
                 listen,
                 control_plane,
                 checkpoint_directory,
-                slack_listen.zip(slack_state_directory),
-                github_listen.zip(github_state_directory),
-                linear_listen.zip(linear_state_directory),
-                lark_state_directory,
+                GatewayConnectors {
+                    slack: slack_listen.zip(slack_state_directory),
+                    github: github_listen.zip(github_state_directory),
+                    linear: linear_listen.zip(linear_state_directory),
+                    lark: lark_state_directory,
+                    microsoft_teams: microsoft_teams_listen.zip(microsoft_teams_state_directory),
+                },
             )
             .await?
         }
@@ -714,6 +782,13 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
     health
         .set_serving::<AttemptWorkstreamsServer<ControlPlane>>()
         .await;
+    health.set_serving::<MailboxServer<ControlPlane>>().await;
+    health
+        .set_serving::<AttemptMailboxServer<ControlPlane>>()
+        .await;
+    health
+        .set_serving::<OperatorEventsServer<OperatorWatch>>()
+        .await;
     let listener = TcpListener::bind(listen).await?;
     println!("{}", listener.local_addr()?);
     let maintenance = plane.clone();
@@ -727,6 +802,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
             }
         }
     });
+    let watch_shutdown = CancellationToken::new();
     let served = builder
         .add_service(health_service)
         .add_service(
@@ -776,27 +852,47 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         )
         .add_service(plane.teams_service())
         .add_service(plane.attempt_workstreams_service())
+        .add_service(plane.mailbox_service())
+        .add_service(plane.attempt_mailbox_service())
+        .add_service(plane.operator_events_service(watch_shutdown.clone()))
         .add_service(
             ObjectivesServer::new(plane)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )
-        .serve_with_incoming_shutdown(TcpListenerStream::new(listener), termination_signal())
-        .await;
+        .serve_with_incoming_shutdown(
+            TcpListenerStream::new(listener),
+            watch_shutdown.clone().cancelled_owned(),
+        );
+    tokio::pin!(served);
+    let result = tokio::select! {
+        result = &mut served => result.map_err(anyhow::Error::from),
+        _ = termination_signal() => {
+            watch_shutdown.cancel();
+            tokio::time::timeout(Duration::from_secs(15), served)
+                .await
+                .context("Control Plane shutdown timed out")
+                .and_then(|result| result.map_err(anyhow::Error::from))
+        }
+    };
     sweep.abort();
     let _ = sweep.await;
-    served?;
-    Ok(())
+    result
+}
+
+struct GatewayConnectors {
+    slack: Option<(SocketAddr, PathBuf)>,
+    github: Option<(SocketAddr, PathBuf)>,
+    linear: Option<(SocketAddr, PathBuf)>,
+    lark: Option<PathBuf>,
+    microsoft_teams: Option<(SocketAddr, PathBuf)>,
 }
 
 async fn gateway(
     listen: SocketAddr,
     control_plane: String,
     checkpoint_directory: Option<PathBuf>,
-    slack_options: Option<(SocketAddr, PathBuf)>,
-    github_options: Option<(SocketAddr, PathBuf)>,
-    linear_options: Option<(SocketAddr, PathBuf)>,
-    lark_state_directory: Option<PathBuf>,
+    connectors: GatewayConnectors,
 ) -> Result<()> {
     let mut builder = network::server(listen, false).await?;
     let channel = network::endpoint(control_plane, true)
@@ -804,7 +900,7 @@ async fn gateway(
         .connect()
         .await?;
     let gateway_token = required_env("SUPERTAG_GATEWAY_TOKEN")?;
-    let slack = match slack_options {
+    let slack = match connectors.slack {
         Some((address, state_directory)) => {
             ensure!(
                 address.ip().is_loopback(),
@@ -816,7 +912,7 @@ async fn gateway(
         }
         None => None,
     };
-    let github = match github_options {
+    let github = match connectors.github {
         Some((address, state_directory)) => {
             ensure!(
                 address.ip().is_loopback(),
@@ -828,7 +924,7 @@ async fn gateway(
         }
         None => None,
     };
-    let linear = match linear_options {
+    let linear = match connectors.linear {
         Some((address, state_directory)) => {
             ensure!(
                 address.ip().is_loopback(),
@@ -840,7 +936,20 @@ async fn gateway(
         }
         None => None,
     };
-    let lark = lark_state_directory
+    let microsoft_teams = match connectors.microsoft_teams {
+        Some((address, state_directory)) => {
+            ensure!(
+                address.ip().is_loopback(),
+                "Microsoft Teams webhook listener must use loopback"
+            );
+            let connector =
+                microsoft_teams_connector(channel.clone(), gateway_token.clone(), state_directory)?;
+            Some((connector, TcpListener::bind(address).await?))
+        }
+        None => None,
+    };
+    let lark = connectors
+        .lark
         .map(|directory| lark_connector(channel.clone(), gateway_token.clone(), directory))
         .transpose()?;
     let gateway = Gateway::new(
@@ -865,6 +974,11 @@ async fn gateway(
     health
         .set_serving::<AttemptWorkstreamsServer<Gateway>>()
         .await;
+    health.set_serving::<MailboxServer<Gateway>>().await;
+    health.set_serving::<AttemptMailboxServer<Gateway>>().await;
+    health
+        .set_serving::<OperatorEventsServer<GatewayWatch>>()
+        .await;
     let listener = TcpListener::bind(listen).await?;
     println!("{}", listener.local_addr()?);
     if let Some((_, listener)) = &slack {
@@ -874,6 +988,9 @@ async fn gateway(
         println!("{}", listener.local_addr()?);
     }
     if let Some((_, listener)) = &linear {
+        println!("{}", listener.local_addr()?);
+    }
+    if let Some((_, listener)) = &microsoft_teams {
         println!("{}", listener.local_addr()?);
     }
     let shutdown = CancellationToken::new();
@@ -888,7 +1005,10 @@ async fn gateway(
         .add_service(gateway.live_inputs_service())
         .add_service(gateway.attempt_inputs_service())
         .add_service(gateway.teams_service())
-        .add_service(gateway.attempt_workstreams_service());
+        .add_service(gateway.attempt_workstreams_service())
+        .add_service(gateway.mailbox_service())
+        .add_service(gateway.attempt_mailbox_service())
+        .add_service(gateway.operator_events_service(shutdown.clone()));
     let grpc = async {
         let result = router
             .serve_with_incoming_shutdown(
@@ -939,19 +1059,31 @@ async fn gateway(
             Ok(())
         }
     };
+    let microsoft_teams_webhook = async {
+        if let Some((teams, listener)) = microsoft_teams {
+            let result = teams.serve(listener, shutdown.clone()).await;
+            shutdown.cancel();
+            result
+        } else {
+            shutdown.cancelled().await;
+            Ok(())
+        }
+    };
     let services = async {
-        let (grpc, slack, github, linear, lark) = tokio::join!(
+        let (grpc, slack, github, linear, lark, teams) = tokio::join!(
             grpc,
             webhook,
             github_webhook,
             linear_webhook,
-            lark_connection
+            lark_connection,
+            microsoft_teams_webhook
         );
         grpc?;
         slack?;
         github?;
         linear?;
-        lark
+        lark?;
+        teams
     };
     tokio::pin!(services);
     tokio::select! {
@@ -1142,6 +1274,36 @@ fn lark_connector(
     )?;
     #[cfg(feature = "test-fixtures")]
     if let Ok(url) = std::env::var("SUPERTAG_TEST_LARK_ORIGIN") {
+        return connector.with_test_origin(&url);
+    }
+    Ok(connector)
+}
+
+fn microsoft_teams_connector(
+    channel: Channel,
+    gateway_token: String,
+    state_directory: PathBuf,
+) -> Result<MicrosoftTeams> {
+    let connector = MicrosoftTeams::new(
+        MicrosoftTeamsConfig {
+            account_id: required_env("SUPERTAG_MICROSOFT_TEAMS_ACCOUNT_ID")?,
+            app_id: required_env("SUPERTAG_MICROSOFT_TEAMS_APP_ID")?,
+            app_secret: required_env("SUPERTAG_MICROSOFT_TEAMS_APP_SECRET")?,
+            tenant_id: required_env("SUPERTAG_MICROSOFT_TEAMS_TENANT_ID")?,
+            team_id: required_env("SUPERTAG_MICROSOFT_TEAMS_TEAM_ID")?,
+            channel_id: required_env("SUPERTAG_MICROSOFT_TEAMS_CHANNEL_ID")?,
+            tag_id: required_env("SUPERTAG_MICROSOFT_TEAMS_TAG_ID")?,
+            allowed_users: required_env("SUPERTAG_MICROSOFT_TEAMS_ALLOWED_USERS")?
+                .split(',')
+                .map(|value| value.trim().to_owned())
+                .collect(),
+            state_directory,
+        },
+        channel,
+        gateway_token,
+    )?;
+    #[cfg(feature = "test-fixtures")]
+    if let Ok(url) = std::env::var("SUPERTAG_TEST_MICROSOFT_TEAMS_ORIGIN") {
         return connector.with_test_origin(&url);
     }
     Ok(connector)

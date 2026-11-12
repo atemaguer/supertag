@@ -7,6 +7,30 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class WatchKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    WATCH_KIND_UNSPECIFIED: _ClassVar[WatchKind]
+    WATCH_KIND_TAG: _ClassVar[WatchKind]
+    WATCH_KIND_TASK: _ClassVar[WatchKind]
+    WATCH_KIND_CONVERSATION_MESSAGE: _ClassVar[WatchKind]
+    WATCH_KIND_OBJECTIVE: _ClassVar[WatchKind]
+    WATCH_KIND_TEAM: _ClassVar[WatchKind]
+    WATCH_KIND_WORKSTREAM_POST: _ClassVar[WatchKind]
+
+class WatchReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    WATCH_REASON_UNSPECIFIED: _ClassVar[WatchReason]
+    WATCH_REASON_CREATED: _ClassVar[WatchReason]
+    WATCH_REASON_CHANGED: _ClassVar[WatchReason]
+    WATCH_REASON_DELETED: _ClassVar[WatchReason]
+
+class TagMessageState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    TAG_MESSAGE_STATE_UNSPECIFIED: _ClassVar[TagMessageState]
+    TAG_MESSAGE_STATE_PENDING: _ClassVar[TagMessageState]
+    TAG_MESSAGE_STATE_HANDLED: _ClassVar[TagMessageState]
+    TAG_MESSAGE_STATE_FAILED: _ClassVar[TagMessageState]
+
 class LiveInputState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     LIVE_INPUT_STATE_UNSPECIFIED: _ClassVar[LiveInputState]
@@ -120,6 +144,21 @@ class ReplyState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     REPLY_STATE_DELIVERED: _ClassVar[ReplyState]
     REPLY_STATE_FAILED: _ClassVar[ReplyState]
     REPLY_STATE_UNCERTAIN: _ClassVar[ReplyState]
+WATCH_KIND_UNSPECIFIED: WatchKind
+WATCH_KIND_TAG: WatchKind
+WATCH_KIND_TASK: WatchKind
+WATCH_KIND_CONVERSATION_MESSAGE: WatchKind
+WATCH_KIND_OBJECTIVE: WatchKind
+WATCH_KIND_TEAM: WatchKind
+WATCH_KIND_WORKSTREAM_POST: WatchKind
+WATCH_REASON_UNSPECIFIED: WatchReason
+WATCH_REASON_CREATED: WatchReason
+WATCH_REASON_CHANGED: WatchReason
+WATCH_REASON_DELETED: WatchReason
+TAG_MESSAGE_STATE_UNSPECIFIED: TagMessageState
+TAG_MESSAGE_STATE_PENDING: TagMessageState
+TAG_MESSAGE_STATE_HANDLED: TagMessageState
+TAG_MESSAGE_STATE_FAILED: TagMessageState
 LIVE_INPUT_STATE_UNSPECIFIED: LiveInputState
 LIVE_INPUT_STATE_PENDING: LiveInputState
 LIVE_INPUT_STATE_DISPATCHING: LiveInputState
@@ -189,6 +228,110 @@ REPLY_STATE_CLAIMED: ReplyState
 REPLY_STATE_DELIVERED: ReplyState
 REPLY_STATE_FAILED: ReplyState
 REPLY_STATE_UNCERTAIN: ReplyState
+
+class WatchRequest(_message.Message):
+    __slots__ = ("resume_token", "kinds")
+    RESUME_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    KINDS_FIELD_NUMBER: _ClassVar[int]
+    resume_token: str
+    kinds: _containers.RepeatedScalarFieldContainer[WatchKind]
+    def __init__(self, resume_token: _Optional[str] = ..., kinds: _Optional[_Iterable[_Union[WatchKind, str]]] = ...) -> None: ...
+
+class WatchEvent(_message.Message):
+    __slots__ = ("resume_token", "heartbeat", "resync", "change")
+    RESUME_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    HEARTBEAT_FIELD_NUMBER: _ClassVar[int]
+    RESYNC_FIELD_NUMBER: _ClassVar[int]
+    CHANGE_FIELD_NUMBER: _ClassVar[int]
+    resume_token: str
+    heartbeat: WatchHeartbeat
+    resync: WatchResync
+    change: WatchChange
+    def __init__(self, resume_token: _Optional[str] = ..., heartbeat: _Optional[_Union[WatchHeartbeat, _Mapping]] = ..., resync: _Optional[_Union[WatchResync, _Mapping]] = ..., change: _Optional[_Union[WatchChange, _Mapping]] = ...) -> None: ...
+
+class WatchHeartbeat(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class WatchResync(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class WatchChange(_message.Message):
+    __slots__ = ("kind", "id", "tag_id", "session_id", "objective_id", "team_id", "conversation", "changed_at_ms", "reason")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    ID_FIELD_NUMBER: _ClassVar[int]
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    TEAM_ID_FIELD_NUMBER: _ClassVar[int]
+    CONVERSATION_FIELD_NUMBER: _ClassVar[int]
+    CHANGED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    kind: WatchKind
+    id: str
+    tag_id: str
+    session_id: str
+    objective_id: str
+    team_id: str
+    conversation: str
+    changed_at_ms: int
+    reason: WatchReason
+    def __init__(self, kind: _Optional[_Union[WatchKind, str]] = ..., id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., team_id: _Optional[str] = ..., conversation: _Optional[str] = ..., changed_at_ms: _Optional[int] = ..., reason: _Optional[_Union[WatchReason, str]] = ...) -> None: ...
+
+class TagMessage(_message.Message):
+    __slots__ = ("message_id", "sender_tag_id", "recipient_tag_id", "source_task_id", "workstream_post_id", "objective_id", "text", "hops", "task_id", "state", "created_at_ms")
+    MESSAGE_ID_FIELD_NUMBER: _ClassVar[int]
+    SENDER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    RECIPIENT_TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    WORKSTREAM_POST_ID_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    HOPS_FIELD_NUMBER: _ClassVar[int]
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    message_id: str
+    sender_tag_id: str
+    recipient_tag_id: str
+    source_task_id: str
+    workstream_post_id: str
+    objective_id: str
+    text: str
+    hops: int
+    task_id: str
+    state: TagMessageState
+    created_at_ms: int
+    def __init__(self, message_id: _Optional[str] = ..., sender_tag_id: _Optional[str] = ..., recipient_tag_id: _Optional[str] = ..., source_task_id: _Optional[str] = ..., workstream_post_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., text: _Optional[str] = ..., hops: _Optional[int] = ..., task_id: _Optional[str] = ..., state: _Optional[_Union[TagMessageState, str]] = ..., created_at_ms: _Optional[int] = ...) -> None: ...
+
+class ListMailboxMessagesRequest(_message.Message):
+    __slots__ = ("tag_id", "limit", "cursor")
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    CURSOR_FIELD_NUMBER: _ClassVar[int]
+    tag_id: str
+    limit: int
+    cursor: str
+    def __init__(self, tag_id: _Optional[str] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+
+class ListMailboxMessagesResponse(_message.Message):
+    __slots__ = ("messages", "next_cursor")
+    MESSAGES_FIELD_NUMBER: _ClassVar[int]
+    NEXT_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    messages: _containers.RepeatedCompositeFieldContainer[TagMessage]
+    next_cursor: str
+    def __init__(self, messages: _Optional[_Iterable[_Union[TagMessage, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
+
+class ReadMailboxRequest(_message.Message):
+    __slots__ = ("attempt", "limit", "cursor")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    CURSOR_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    limit: int
+    cursor: str
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
 
 class QueueInputRequest(_message.Message):
     __slots__ = ("task_id", "operation_id", "text")
@@ -1351,6 +1494,66 @@ class AcceptLarkEventResponse(_message.Message):
     TASK_FIELD_NUMBER: _ClassVar[int]
     task: Task
     def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ...) -> None: ...
+
+class AcceptMicrosoftTeamsActivityRequest(_message.Message):
+    __slots__ = ("account_id", "app_id", "tenant_id", "team_id", "channel_id", "conversation_id", "activity_id", "root_activity_id", "actor_id", "service_url", "prompt", "tag_id")
+    ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
+    APP_ID_FIELD_NUMBER: _ClassVar[int]
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    TEAM_ID_FIELD_NUMBER: _ClassVar[int]
+    CHANNEL_ID_FIELD_NUMBER: _ClassVar[int]
+    CONVERSATION_ID_FIELD_NUMBER: _ClassVar[int]
+    ACTIVITY_ID_FIELD_NUMBER: _ClassVar[int]
+    ROOT_ACTIVITY_ID_FIELD_NUMBER: _ClassVar[int]
+    ACTOR_ID_FIELD_NUMBER: _ClassVar[int]
+    SERVICE_URL_FIELD_NUMBER: _ClassVar[int]
+    PROMPT_FIELD_NUMBER: _ClassVar[int]
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    account_id: str
+    app_id: str
+    tenant_id: str
+    team_id: str
+    channel_id: str
+    conversation_id: str
+    activity_id: str
+    root_activity_id: str
+    actor_id: str
+    service_url: str
+    prompt: str
+    tag_id: str
+    def __init__(self, account_id: _Optional[str] = ..., app_id: _Optional[str] = ..., tenant_id: _Optional[str] = ..., team_id: _Optional[str] = ..., channel_id: _Optional[str] = ..., conversation_id: _Optional[str] = ..., activity_id: _Optional[str] = ..., root_activity_id: _Optional[str] = ..., actor_id: _Optional[str] = ..., service_url: _Optional[str] = ..., prompt: _Optional[str] = ..., tag_id: _Optional[str] = ...) -> None: ...
+
+class AcceptMicrosoftTeamsActivityResponse(_message.Message):
+    __slots__ = ("task",)
+    TASK_FIELD_NUMBER: _ClassVar[int]
+    task: Task
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ...) -> None: ...
+
+class GetMicrosoftTeamsReplyRouteRequest(_message.Message):
+    __slots__ = ("reply_id", "lease_token")
+    REPLY_ID_FIELD_NUMBER: _ClassVar[int]
+    LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    reply_id: str
+    lease_token: str
+    def __init__(self, reply_id: _Optional[str] = ..., lease_token: _Optional[str] = ...) -> None: ...
+
+class MicrosoftTeamsReplyRoute(_message.Message):
+    __slots__ = ("service_url", "conversation_id", "root_activity_id", "app_id", "tenant_id", "team_id", "channel_id")
+    SERVICE_URL_FIELD_NUMBER: _ClassVar[int]
+    CONVERSATION_ID_FIELD_NUMBER: _ClassVar[int]
+    ROOT_ACTIVITY_ID_FIELD_NUMBER: _ClassVar[int]
+    APP_ID_FIELD_NUMBER: _ClassVar[int]
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    TEAM_ID_FIELD_NUMBER: _ClassVar[int]
+    CHANNEL_ID_FIELD_NUMBER: _ClassVar[int]
+    service_url: str
+    conversation_id: str
+    root_activity_id: str
+    app_id: str
+    tenant_id: str
+    team_id: str
+    channel_id: str
+    def __init__(self, service_url: _Optional[str] = ..., conversation_id: _Optional[str] = ..., root_activity_id: _Optional[str] = ..., app_id: _Optional[str] = ..., tenant_id: _Optional[str] = ..., team_id: _Optional[str] = ..., channel_id: _Optional[str] = ...) -> None: ...
 
 class Reply(_message.Message):
     __slots__ = ("reply_id", "task_id", "account_id", "destination", "text", "state", "provider_receipt")

@@ -12,6 +12,8 @@ mod hosts;
 mod lark_events;
 #[path = "linear_events.rs"]
 mod linear_events;
+#[path = "microsoft_teams.rs"]
+mod microsoft_teams;
 #[path = "slack_threads.rs"]
 mod slack_threads;
 pub(crate) use authority::lease_is_live;
@@ -53,6 +55,7 @@ pub enum StoreError {
 }
 
 pub(crate) type Result<T> = std::result::Result<T, StoreError>;
+pub(crate) const MAX_TASK_PROMPT_BYTES: usize = 262_144;
 
 #[derive(Clone)]
 pub struct Store {
@@ -62,7 +65,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 15;
+        const SCHEMA_VERSION: i64 = 18;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -128,6 +131,9 @@ impl Store {
                 include_str!("../migrations/sqlite/0013_conversations.sql"),
                 include_str!("../migrations/sqlite/0014_lark.sql"),
                 include_str!("../migrations/sqlite/0015_team_workstreams.sql"),
+                include_str!("../migrations/sqlite/0016_operator_watch.sql"),
+                include_str!("../migrations/sqlite/0017_microsoft_teams.sql"),
+                include_str!("../migrations/sqlite/0018_mailbox.sql"),
             ]
         } else {
             [
@@ -146,12 +152,21 @@ impl Store {
                 include_str!("../migrations/postgresql/0013_conversations.sql"),
                 include_str!("../migrations/postgresql/0014_lark.sql"),
                 include_str!("../migrations/postgresql/0015_team_workstreams.sql"),
+                include_str!("../migrations/postgresql/0016_operator_watch.sql"),
+                include_str!("../migrations/postgresql/0017_microsoft_teams.sql"),
+                include_str!("../migrations/postgresql/0018_mailbox.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
             let mut transaction = pool.begin().await?;
             for migration in &migrations[version as usize..] {
                 sqlx::raw_sql(migration).execute(&mut *transaction).await?;
+            }
+            if version < 16 {
+                sqlx::query("UPDATE supertag_v2_watch_state SET feed_id=$1 WHERE singleton=1")
+                    .bind(Uuid::new_v4().simple().to_string())
+                    .execute(&mut *transaction)
+                    .await?;
             }
             transaction.commit().await?;
         }
@@ -259,7 +274,10 @@ impl Store {
                 "send messages through the conversation".into(),
             ));
         }
-        text("prompt", &input.prompt, 262_144)?;
+        if crate::mailbox::private_session(&input.session_id) {
+            return Err(invalid("Mailbox Sessions are reserved for delivery"));
+        }
+        text("prompt", &input.prompt, MAX_TASK_PROMPT_BYTES)?;
         let digest = format!(
             "{:x}",
             Sha256::digest(serde_json::to_vec(&(
@@ -376,6 +394,7 @@ impl Store {
         crate::objectives::objective_sweep_in(&mut transaction, now).await?;
         authority::expire_due_attempts(&mut transaction, now).await?;
         crate::inputs::sweep_in(&mut transaction, now).await?;
+        crate::mailbox::sweep_in(&mut transaction).await?;
         let prior = sqlx::query("SELECT task_id, attempt_id, lease_token, workspace_scope, harness_kind FROM supertag_v2_claims WHERE principal = $1 AND operation_id = $2")
             .bind(&host.principal).bind(operation_id).fetch_optional(&mut *transaction).await?;
         if let Some(prior) = prior {
@@ -506,6 +525,7 @@ impl Store {
             sqlx::query("UPDATE supertag_v2_tasks SET state = $1, cleanup_pending = 1, cleanup_observed = 0, lease_expires_at_ms = $2 WHERE task_id = $3")
                 .bind(TaskState::Running as i64).bind(deadline).bind(&input.task_id)
                 .execute(&mut *transaction).await?;
+            crate::mailbox::started_in(&mut transaction, &input.task_id).await?;
         }
         let task = task_in(&mut transaction, &input.task_id).await?;
         if state == TaskState::Claimed as i64 {
@@ -689,12 +709,15 @@ impl Store {
         name("event ID", &input.event_id)?;
         name("Tag ID", &input.tag_id)?;
         name("Session ID", &input.session_id)?;
+        if crate::mailbox::private_session(&input.session_id) {
+            return Err(invalid("Mailbox Sessions are reserved for delivery"));
+        }
         if crate::conversations::private_session(&input.session_id) {
             return Err(StoreError::FailedPrecondition(
                 "send messages through the conversation".into(),
             ));
         }
-        text("prompt", &input.prompt, 262_144)?;
+        text("prompt", &input.prompt, MAX_TASK_PROMPT_BYTES)?;
         let destination = input
             .destination
             .as_ref()

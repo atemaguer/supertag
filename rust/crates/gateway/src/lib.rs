@@ -6,9 +6,14 @@ pub mod github;
 mod inputs;
 pub mod lark;
 pub mod linear;
+mod mailbox;
+pub mod microsoft_teams;
 pub mod slack;
 mod teams;
 pub mod transfers;
+mod watch;
+
+pub use watch::GatewayWatch;
 
 use std::{future::Future, sync::Arc, time::Duration};
 
@@ -187,19 +192,7 @@ impl Credentials {
         request: Request<T>,
         principal: &Principal,
     ) -> Result<(Request<T>, Duration), Status> {
-        let values = request.metadata().get_all(AUTHORIZATION);
-        let mut authorizations = values.iter();
-        let valid = authorizations.next().is_some_and(|value| {
-            bool::from(
-                value
-                    .as_encoded_bytes()
-                    .ct_eq(principal.authorization.as_encoded_bytes()),
-            )
-        });
-        if !valid || authorizations.next().is_some() {
-            return Err(Status::unauthenticated("valid bearer credential required"));
-        }
-
+        principal.authorize(&request)?;
         let timeout = request_budget(&request)?;
         Ok((
             self.upstream(request.into_inner(), principal.identity.clone(), timeout),
@@ -213,14 +206,18 @@ impl Credentials {
         identity: MetadataValue<Ascii>,
         timeout: Duration,
     ) -> Request<T> {
-        // Rebuild metadata and extensions. The public caller controls neither the
-        // private service credential nor the principal used by the Control Plane.
+        let mut upstream = self.authenticated(message, identity);
+        upstream.set_timeout(timeout);
+        upstream
+    }
+
+    fn authenticated<T>(&self, message: T, identity: MetadataValue<Ascii>) -> Request<T> {
+        // Rebuild metadata and extensions so caller claims are never forwarded.
         let mut upstream = Request::new(message);
         upstream
             .metadata_mut()
             .insert(AUTHORIZATION, self.service.clone());
         upstream.metadata_mut().insert(PRINCIPAL, identity);
-        upstream.set_timeout(timeout);
         upstream
     }
 
@@ -249,6 +246,24 @@ impl Credentials {
             .filter(|token| valid_bearer_token(token))
             .ok_or_else(invalid)?;
         Ok(Sha256::digest(token.as_bytes()).to_vec())
+    }
+}
+
+impl Principal {
+    fn authorize<T>(&self, request: &Request<T>) -> Result<(), Status> {
+        let values = request.metadata().get_all(AUTHORIZATION);
+        let mut entries = values.iter();
+        let valid = entries.next().is_some_and(|value| {
+            bool::from(
+                value
+                    .as_encoded_bytes()
+                    .ct_eq(self.authorization.as_encoded_bytes()),
+            )
+        });
+        if !valid || entries.next().is_some() {
+            return Err(Status::unauthenticated("valid bearer credential required"));
+        }
+        Ok(())
     }
 }
 

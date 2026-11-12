@@ -11,7 +11,9 @@ server certificate authority and client certificate and key paths. The TUI uses 
 runtime v2 Go bindings over gRPC and HTTP/2. Cleartext connections require a loopback IP address.
 
 The TUI lists Tags and named conversations, loads conversation history, sends messages, and
-follows replies. It resumes event polling from the last sequence shown after an interruption.
+follows replies. Watch keeps the rail and open conversation current across clients. The TUI
+resumes Watch after an interruption and polls while reconnecting. Each reply follows its own
+Task event sequence.
 Open Objectives show their status, owner, deadline, and available spend information. Use
 `/goal` from a Tag's conversation to create an Objective or press `m` in an Objective to
 message its owner. You can select a Team in the Objective form and read its members, concurrency

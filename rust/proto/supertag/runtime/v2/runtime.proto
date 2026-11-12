@@ -26,6 +26,57 @@ service Conversations {
   rpc ListMessageEvents(ListMessageEventsRequest) returns (ListEventsResponse);
 }
 
+// Operator-visible invalidation notices. Task event replay has its own cursor.
+service OperatorEvents {
+  rpc Watch(WatchRequest) returns (stream WatchEvent);
+}
+
+enum WatchKind {
+  WATCH_KIND_UNSPECIFIED = 0;
+  WATCH_KIND_TAG = 1;
+  WATCH_KIND_TASK = 2;
+  WATCH_KIND_CONVERSATION_MESSAGE = 3;
+  WATCH_KIND_OBJECTIVE = 4;
+  WATCH_KIND_TEAM = 5;
+  WATCH_KIND_WORKSTREAM_POST = 6;
+}
+
+enum WatchReason {
+  WATCH_REASON_UNSPECIFIED = 0;
+  WATCH_REASON_CREATED = 1;
+  WATCH_REASON_CHANGED = 2;
+  WATCH_REASON_DELETED = 3;
+}
+
+message WatchRequest {
+  string resume_token = 1;
+  repeated WatchKind kinds = 2;
+}
+
+message WatchEvent {
+  string resume_token = 1;
+  oneof update {
+    WatchHeartbeat heartbeat = 2;
+    WatchResync resync = 3;
+    WatchChange change = 4;
+  }
+}
+
+message WatchHeartbeat {}
+message WatchResync {}
+
+message WatchChange {
+  WatchKind kind = 1;
+  string id = 2;
+  string tag_id = 3;
+  string session_id = 4;
+  string objective_id = 5;
+  string team_id = 6;
+  string conversation = 7;
+  int64 changed_at_ms = 8;
+  WatchReason reason = 9;
+}
+
 service Objectives {
   rpc CreateObjective(CreateObjectiveRequest) returns (Objective);
   rpc GetObjective(GetObjectiveRequest) returns (Objective);
@@ -49,6 +100,52 @@ service Teams {
 service AttemptWorkstreams {
   rpc ReadAttemptWorkstream(ReadAttemptWorkstreamRequest) returns (ReadAttemptWorkstreamResponse);
   rpc PostAttemptWorkstream(PostAttemptWorkstreamRequest) returns (PostAttemptWorkstreamResponse);
+}
+
+service Mailbox {
+  rpc ListMessages(ListMailboxMessagesRequest) returns (ListMailboxMessagesResponse);
+}
+
+service AttemptMailbox {
+  rpc ReadMailbox(ReadMailboxRequest) returns (ListMailboxMessagesResponse);
+}
+
+enum TagMessageState {
+  TAG_MESSAGE_STATE_UNSPECIFIED = 0;
+  TAG_MESSAGE_STATE_PENDING = 1;
+  TAG_MESSAGE_STATE_HANDLED = 2;
+  TAG_MESSAGE_STATE_FAILED = 3;
+}
+
+message TagMessage {
+  string message_id = 1;
+  string sender_tag_id = 2;
+  string recipient_tag_id = 3;
+  string source_task_id = 4;
+  string workstream_post_id = 5;
+  optional string objective_id = 6;
+  string text = 7;
+  uint32 hops = 8;
+  optional string task_id = 9;
+  TagMessageState state = 10;
+  int64 created_at_ms = 11;
+}
+
+message ListMailboxMessagesRequest {
+  string tag_id = 1;
+  uint32 limit = 2;
+  string cursor = 3;
+}
+
+message ListMailboxMessagesResponse {
+  repeated TagMessage messages = 1;
+  string next_cursor = 2;
+}
+
+message ReadMailboxRequest {
+  InspectAttemptRequest attempt = 1;
+  uint32 limit = 2;
+  string cursor = 3;
 }
 
 service WorkerHost {
@@ -95,6 +192,8 @@ service Connector {
   rpc AcceptGithubEvent(AcceptGithubEventRequest) returns (AcceptGithubEventResponse);
   rpc AcceptLinearEvent(AcceptLinearEventRequest) returns (AcceptLinearEventResponse);
   rpc AcceptLarkEvent(AcceptLarkEventRequest) returns (AcceptLarkEventResponse);
+  rpc AcceptMicrosoftTeamsActivity(AcceptMicrosoftTeamsActivityRequest) returns (AcceptMicrosoftTeamsActivityResponse);
+  rpc GetMicrosoftTeamsReplyRoute(GetMicrosoftTeamsReplyRouteRequest) returns (MicrosoftTeamsReplyRoute);
   rpc ClaimReply(ClaimReplyRequest) returns (ClaimReplyResponse);
   rpc SettleReply(SettleReplyRequest) returns (Reply);
 }
@@ -929,6 +1028,40 @@ message AcceptLarkEventRequest {
 
 message AcceptLarkEventResponse {
   Task task = 1;
+}
+
+message AcceptMicrosoftTeamsActivityRequest {
+  string account_id = 1;
+  string app_id = 2;
+  string tenant_id = 3;
+  string team_id = 4;
+  string channel_id = 5;
+  string conversation_id = 6;
+  string activity_id = 7;
+  string root_activity_id = 8;
+  string actor_id = 9;
+  string service_url = 10;
+  string prompt = 11;
+  string tag_id = 12;
+}
+
+message AcceptMicrosoftTeamsActivityResponse {
+  Task task = 1;
+}
+
+message GetMicrosoftTeamsReplyRouteRequest {
+  string reply_id = 1;
+  string lease_token = 2;
+}
+
+message MicrosoftTeamsReplyRoute {
+  string service_url = 1;
+  string conversation_id = 2;
+  string root_activity_id = 3;
+  string app_id = 4;
+  string tenant_id = 5;
+  string team_id = 6;
+  string channel_id = 7;
 }
 
 enum ReplyState {

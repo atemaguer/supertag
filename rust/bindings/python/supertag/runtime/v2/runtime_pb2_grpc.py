@@ -737,6 +737,81 @@ class Conversations:
             _registered_method=True)
 
 
+class OperatorEventsStub:
+    """Operator-visible invalidation notices. Task event replay has its own cursor.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Watch = channel.unary_stream(
+                '/supertag.runtime.v2.OperatorEvents/Watch',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WatchRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WatchEvent.FromString,
+                _registered_method=True)
+
+
+class OperatorEventsServicer:
+    """Operator-visible invalidation notices. Task event replay has its own cursor.
+    """
+
+    def Watch(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_OperatorEventsServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Watch': grpc.unary_stream_rpc_method_handler(
+                    servicer.Watch,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WatchRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WatchEvent.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.OperatorEvents', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.OperatorEvents', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class OperatorEvents:
+    """Operator-visible invalidation notices. Task event replay has its own cursor.
+    """
+
+    @staticmethod
+    def Watch(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/supertag.runtime.v2.OperatorEvents/Watch',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WatchRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WatchEvent.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
 class ObjectivesStub:
     """Missing associated documentation comment in .proto file."""
 
@@ -1501,6 +1576,150 @@ class AttemptWorkstreams:
             '/supertag.runtime.v2.AttemptWorkstreams/PostAttemptWorkstream',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.PostAttemptWorkstreamRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.PostAttemptWorkstreamResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class MailboxStub:
+    """Missing associated documentation comment in .proto file."""
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.ListMessages = channel.unary_unary(
+                '/supertag.runtime.v2.Mailbox/ListMessages',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesResponse.FromString,
+                _registered_method=True)
+
+
+class MailboxServicer:
+    """Missing associated documentation comment in .proto file."""
+
+    def ListMessages(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_MailboxServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'ListMessages': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListMessages,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.Mailbox', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.Mailbox', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class Mailbox:
+    """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def ListMessages(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Mailbox/ListMessages',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class AttemptMailboxStub:
+    """Missing associated documentation comment in .proto file."""
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.ReadMailbox = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptMailbox/ReadMailbox',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReadMailboxRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesResponse.FromString,
+                _registered_method=True)
+
+
+class AttemptMailboxServicer:
+    """Missing associated documentation comment in .proto file."""
+
+    def ReadMailbox(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_AttemptMailboxServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'ReadMailbox': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReadMailbox,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReadMailboxRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.AttemptMailbox', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.AttemptMailbox', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class AttemptMailbox:
+    """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def ReadMailbox(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptMailbox/ReadMailbox',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReadMailboxRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -2436,6 +2655,16 @@ class ConnectorStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptLarkEventRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptLarkEventResponse.FromString,
                 _registered_method=True)
+        self.AcceptMicrosoftTeamsActivity = channel.unary_unary(
+                '/supertag.runtime.v2.Connector/AcceptMicrosoftTeamsActivity',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptMicrosoftTeamsActivityRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptMicrosoftTeamsActivityResponse.FromString,
+                _registered_method=True)
+        self.GetMicrosoftTeamsReplyRoute = channel.unary_unary(
+                '/supertag.runtime.v2.Connector/GetMicrosoftTeamsReplyRoute',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetMicrosoftTeamsReplyRouteRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.MicrosoftTeamsReplyRoute.FromString,
+                _registered_method=True)
         self.ClaimReply = channel.unary_unary(
                 '/supertag.runtime.v2.Connector/ClaimReply',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ClaimReplyRequest.SerializeToString,
@@ -2483,6 +2712,18 @@ class ConnectorServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def AcceptMicrosoftTeamsActivity(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetMicrosoftTeamsReplyRoute(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ClaimReply(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -2522,6 +2763,16 @@ def add_ConnectorServicer_to_server(servicer, server):
                     servicer.AcceptLarkEvent,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptLarkEventRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptLarkEventResponse.SerializeToString,
+            ),
+            'AcceptMicrosoftTeamsActivity': grpc.unary_unary_rpc_method_handler(
+                    servicer.AcceptMicrosoftTeamsActivity,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptMicrosoftTeamsActivityRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptMicrosoftTeamsActivityResponse.SerializeToString,
+            ),
+            'GetMicrosoftTeamsReplyRoute': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetMicrosoftTeamsReplyRoute,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetMicrosoftTeamsReplyRouteRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.MicrosoftTeamsReplyRoute.SerializeToString,
             ),
             'ClaimReply': grpc.unary_unary_rpc_method_handler(
                     servicer.ClaimReply,
@@ -2671,6 +2922,60 @@ class Connector:
             '/supertag.runtime.v2.Connector/AcceptLarkEvent',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptLarkEventRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptLarkEventResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AcceptMicrosoftTeamsActivity(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Connector/AcceptMicrosoftTeamsActivity',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptMicrosoftTeamsActivityRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptMicrosoftTeamsActivityResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetMicrosoftTeamsReplyRoute(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Connector/GetMicrosoftTeamsReplyRoute',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetMicrosoftTeamsReplyRouteRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.MicrosoftTeamsReplyRoute.FromString,
             options,
             channel_credentials,
             insecure,

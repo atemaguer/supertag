@@ -7,7 +7,7 @@ const ELEMENT_CHARACTERS: usize = 4_000;
 
 /// Preserve Markdown while adapting constructs unsupported by Lark cards. Native
 /// mention tags in model output are always displayed as text, never executed.
-pub(super) fn card(markdown: &str) -> Result<Value> {
+pub(crate) fn card(markdown: &str) -> Result<Value> {
     let mut events = Vec::new();
     let mut parser = Parser::new_ext(markdown, Options::ENABLE_TABLES).peekable();
     while let Some(event) = parser.next() {
