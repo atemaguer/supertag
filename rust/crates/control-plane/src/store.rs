@@ -316,6 +316,15 @@ impl Store {
         let harness =
             HarnessKind::try_from(harness_kind).map_err(|_| invalid("unknown harness kind"))?;
         let (harness, execution) = crate::policy::normalize_tag_execution(harness, execution)?;
+        if workspace.is_some()
+            && execution
+                .as_ref()
+                .is_some_and(|settings| settings.shared_execution_environment_id.is_some())
+        {
+            return Err(invalid(
+                "shared execution cannot use a pinned Git Workspace",
+            ));
+        }
         name("Tag ID", tag_id)?;
         if let Some(display_name) = &display_name {
             crate::tags::validate_display_name(display_name)?;
@@ -1162,11 +1171,17 @@ async fn insert_task_options(
     )
     .await?;
     let harness = i64::from(accepted.policy.harness_kind);
-    if let Some(previous) = sqlx::query("SELECT workspace_id,workspace_base_commit,workspace_github_source,harness_kind FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 ORDER BY accepted_order LIMIT 1")
-        .bind(tag_id).bind(session_id).fetch_optional(&mut **transaction).await?
-        && (crate::workspaces::workspace_from_row(&previous)? != accepted.workspace || previous.try_get::<i64,_>("harness_kind")? != harness)
-    {
-        return Err(StoreError::FailedPrecondition("workspace or harness changed; start a new Session".into()));
+    if let Some(previous) = sqlx::query("SELECT workspace_id,workspace_base_commit,workspace_github_source,harness_kind,policy_snapshot FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 ORDER BY accepted_order LIMIT 1")
+        .bind(tag_id).bind(session_id).fetch_optional(&mut **transaction).await? {
+        let prior_policy = previous.try_get::<Option<Vec<u8>>,_>("policy_snapshot")?.as_deref()
+            .map(crate::policy::decode::<supertag_protocol::v2::TaskPolicySnapshot>).transpose()?;
+        let prior_shared = supertag_protocol::shared_execution::environment(prior_policy.as_ref());
+        let next_shared = supertag_protocol::shared_execution::environment(Some(&accepted.policy.snapshot));
+        if crate::workspaces::workspace_from_row(&previous)? != accepted.workspace
+            || previous.try_get::<i64,_>("harness_kind")? != harness || prior_shared != next_shared
+        {
+            return Err(StoreError::FailedPrecondition("workspace or harness changed; start a new Session".into()));
+        }
     }
     let limits = crate::budget_pool::root_in(
         transaction,
@@ -1194,6 +1209,30 @@ struct AcceptedTag {
     revision: i64,
     workspace: Option<WorkspaceSpec>,
     policy: crate::policy::AdmissionPolicy,
+}
+
+impl AcceptedTag {
+    fn validate_shared_execution(&self) -> Result<()> {
+        if supertag_protocol::shared_execution::environment(Some(&self.policy.snapshot)).is_none() {
+            return Ok(());
+        }
+        if self.workspace.is_some() {
+            return Err(StoreError::FailedPrecondition(
+                "shared execution cannot use a pinned Git Workspace".into(),
+            ));
+        }
+        if self
+            .policy
+            .allowed_actions
+            .iter()
+            .any(|action| action == "commands:execute")
+        {
+            return Err(StoreError::FailedPrecondition(
+                "shared execution currently supports admitted file tools only".into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 async fn tag_policy_in(
@@ -1228,11 +1267,13 @@ async fn tag_policy_in(
     )
     .await?;
     crate::github_workspaces::admission_in(transaction, &mut workspace, &policy.snapshot).await?;
-    Ok(AcceptedTag {
+    let accepted = AcceptedTag {
         revision: tag.try_get("revision")?,
         workspace,
         policy,
-    })
+    };
+    accepted.validate_shared_execution()?;
+    Ok(accepted)
 }
 
 pub(crate) fn tag_execution_from_row(row: &AnyRow) -> Result<Option<PolicyExecutionSettings>> {
@@ -1341,6 +1382,7 @@ pub(crate) async fn current_work_policy_in(
         }
     }
     crate::github_workspaces::refs::inherit(&mut accepted.workspace, &source.workspace);
+    accepted.validate_shared_execution()?;
     let mut result = source.clone();
     result.instructions = accepted.policy.instructions;
     result.allowed_actions = accepted.policy.allowed_actions;
@@ -1400,6 +1442,7 @@ async fn insert_accepted_task(
     requested_execution: Option<&ExecutionSelection>,
 ) -> Result<Task> {
     text("Task prompt", prompt, MAX_TASK_PROMPT_BYTES)?;
+    accepted.validate_shared_execution()?;
     let AcceptedTag {
         revision,
         workspace,

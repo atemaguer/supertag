@@ -78,6 +78,8 @@ pub(super) fn require_unchanged_authority(
     if !same_permissions(previous, next)
         || previous.harness_kind != next.harness_kind
         || previous.workspace != next.workspace
+        || supertag_protocol::shared_execution::environment(previous.policy_snapshot.as_ref())
+            != supertag_protocol::shared_execution::environment(next.policy_snapshot.as_ref())
         || (delegated && (!has_typed_runtime(previous) || !has_typed_runtime(next)))
         || runtime_grants(previous) != runtime_grants(next)
     {

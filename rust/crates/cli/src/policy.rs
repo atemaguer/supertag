@@ -217,6 +217,7 @@ struct RoleSpec {
 #[serde(deny_unknown_fields)]
 struct ExecutionSpec {
     harness: Option<String>,
+    shared_execution_environment_id: Option<String>,
     #[serde(default)]
     models: Vec<String>,
     #[serde(default)]
@@ -241,6 +242,7 @@ impl From<RoleSpec> for Role {
                 harness: execution.harness,
                 models: execution.models,
                 efforts: execution.efforts,
+                shared_execution_environment_id: execution.shared_execution_environment_id,
             }),
             ..Default::default()
         }
@@ -462,7 +464,7 @@ fn role_json(role: Role) -> Value {
         "role_id":role.role_id, "name":role.name, "purpose":role.purpose, "instructions":role.instructions,
         "permission_set_ids":role.permission_set_ids, "context_set_ids":role.context_set_ids,
         "status":role.status().as_str_name().trim_start_matches("ROLE_STATUS_").to_ascii_lowercase(), "revision":role.revision,
-        "execution":role.execution.map(|execution| json!({ "harness":execution.harness, "models":execution.models, "efforts":execution.efforts })),
+        "execution":role.execution.map(|execution| json!({ "harness":execution.harness, "models":execution.models, "efforts":execution.efforts, "shared_execution_environment_id":execution.shared_execution_environment_id })),
     })
 }
 

@@ -321,14 +321,16 @@ class ContextSet(_message.Message):
     def __init__(self, set_id: _Optional[str] = ..., name: _Optional[str] = ..., revision: _Optional[int] = ..., items: _Optional[_Iterable[_Union[PolicyContextItem, _Mapping]]] = ...) -> None: ...
 
 class PolicyExecutionSettings(_message.Message):
-    __slots__ = ("harness", "models", "efforts")
+    __slots__ = ("harness", "models", "efforts", "shared_execution_environment_id")
     HARNESS_FIELD_NUMBER: _ClassVar[int]
     MODELS_FIELD_NUMBER: _ClassVar[int]
     EFFORTS_FIELD_NUMBER: _ClassVar[int]
+    SHARED_EXECUTION_ENVIRONMENT_ID_FIELD_NUMBER: _ClassVar[int]
     harness: str
     models: _containers.RepeatedScalarFieldContainer[str]
     efforts: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, harness: _Optional[str] = ..., models: _Optional[_Iterable[str]] = ..., efforts: _Optional[_Iterable[str]] = ...) -> None: ...
+    shared_execution_environment_id: str
+    def __init__(self, harness: _Optional[str] = ..., models: _Optional[_Iterable[str]] = ..., efforts: _Optional[_Iterable[str]] = ..., shared_execution_environment_id: _Optional[str] = ...) -> None: ...
 
 class Role(_message.Message):
     __slots__ = ("role_id", "name", "purpose", "instructions", "permission_set_ids", "context_set_ids", "status", "revision", "execution")

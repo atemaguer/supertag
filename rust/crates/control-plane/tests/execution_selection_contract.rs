@@ -19,6 +19,7 @@ fn profile(models: &[&str], default: Option<&str>, commands: bool) -> HarnessExe
         allow_unsandboxed_commands: commands,
         remote_file_workspace: false,
         mcp_servers: vec![],
+        shared_execution: None,
     }
 }
 
@@ -40,6 +41,7 @@ fn role(
                 harness: Some(name.into()),
                 models: models.map(str::to_owned).into(),
                 efforts: efforts.map(str::to_owned).into(),
+                shared_execution_environment_id: None,
             }),
             ..Default::default()
         }),

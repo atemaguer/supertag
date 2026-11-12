@@ -13,6 +13,14 @@ pub(super) fn normalize_profile(
     if !supertag_protocol::mcp::normalize_capabilities(&mut profile.mcp_servers) {
         return Err(invalid("invalid Worker Host MCP server capabilities"));
     }
+    if let Some(shared) = profile.shared_execution.as_mut()
+        && (!supertag_protocol::shared_execution::normalize(shared)
+            || profile.remote_file_workspace
+            || profile.allow_unsandboxed_commands
+            || !profile.mcp_servers.is_empty())
+    {
+        return Err(invalid("invalid shared execution Worker Host capabilities"));
+    }
     if profile.remote_file_workspace && profile.allow_unsandboxed_commands {
         return Err(invalid(
             "remote file workspace cannot run unsandboxed commands",
@@ -69,6 +77,7 @@ pub(super) fn normalize_request(
             models: selection.model.iter().cloned().collect(),
             efforts: selection.effort.iter().cloned().collect(),
             harness: None,
+            shared_execution_environment_id: None,
         }))?
         .map(|range| ExecutionSelection {
             model: range.models.into_iter().next(),
@@ -113,6 +122,13 @@ pub(super) fn resolve_attempt(
     if !supertag_protocol::mcp::supports(task, harness, profile) {
         return None;
     }
+    if !supertag_protocol::shared_execution::supports(
+        task,
+        harness,
+        profile.shared_execution.as_ref(),
+    ) {
+        return None;
+    }
     if profile.remote_file_workspace && (harness != HarnessKind::Cursor || task.workspace.is_none())
     {
         return None;
@@ -147,6 +163,7 @@ pub(super) fn resolve_attempt(
         harness_kind: harness as i32,
         effort_applied,
         remote_file_workspace: profile.remote_file_workspace,
+        shared_execution: profile.shared_execution.clone(),
     })
 }
 

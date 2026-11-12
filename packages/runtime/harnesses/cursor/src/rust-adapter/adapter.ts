@@ -9,6 +9,7 @@ import {
   harnessClient,
   receipt,
   redact,
+  SharedExecutionTool,
   startCoordinationHttp,
   TaskState,
 } from "@supertag/worker-sdk/internal/rust-harness";
@@ -129,8 +130,32 @@ export async function runAdapter(
   let outcome: CursorOutcome;
   try {
     cancellation.throwIfAborted();
-    if ((task.attemptExecution?.remoteFileWorkspace ?? false) !== run.remoteWorkspace)
+    const shared = task.attemptExecution?.sharedExecution;
+    const sharedSummary = run.sharedExecution;
+    if (
+      ((task.attemptExecution?.remoteFileWorkspace ?? false) || shared !== undefined) !==
+        run.remoteWorkspace ||
+      shared?.environmentId !== sharedSummary?.environmentId ||
+      shared?.incarnationId !== sharedSummary?.incarnationId ||
+      shared?.environmentId !== task.policySnapshot?.execution?.sharedExecutionEnvironmentId
+    )
       throw new Error("Cursor Workspace placement differs from the accepted Attempt");
+    const sharedTools = new Set<string>();
+    if (shared) {
+      if (
+        task.workspace ||
+        task.allowedActions.includes("commands:execute") ||
+        !shared.tools.length ||
+        !sharedSummary ||
+        !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(sharedSummary.incarnationId)
+      )
+        throw new Error("Invalid Cursor shared execution placement");
+      for (const tool of shared.tools) {
+        if (tool === SharedExecutionTool.READ) sharedTools.add("read");
+        else if (tool === SharedExecutionTool.WRITE) sharedTools.add("write");
+        else throw new Error("Unknown Cursor shared execution file tool");
+      }
+    }
     validateActions(
       task.allowedActions,
       run.remoteWorkspace || (configuration.allowUnsandboxedCommands ?? false),
@@ -161,13 +186,19 @@ export async function runAdapter(
       task.allowedActions,
       configuration.timeoutMs,
       configuration.runnerEntrypoint,
-      run.remoteWorkspace ? createRemoteWorkspaceExecutor(task.allowedActions, bridge) : undefined,
+      run.remoteWorkspace
+        ? createRemoteWorkspaceExecutor(
+            task.allowedActions,
+            bridge,
+            shared ? sharedTools : undefined,
+          )
+        : undefined,
     );
     const { executor, home, nativeWorkspace, runtime, storeDirectory, workspace } = context;
     const workspaceMode = run.remoteWorkspace ? "remote" : "local";
     try {
       phase = "checkpoint restoration";
-      const restored = restoreCheckpoint(run.checkpoint, task, workspaceMode);
+      const restored = restoreCheckpoint(run.checkpoint, task, workspaceMode, sharedSummary);
       if (restored)
         await restorePortableCursorSessionState(restored, storeDirectory, nativeWorkspace);
       else await mkdir(storeDirectory, { mode: 0o700 });
@@ -191,9 +222,11 @@ export async function runAdapter(
         const prompt = [
           CURSOR_WORKER_POLICY,
           safeText(task.instructions, secrets),
-          run.remoteWorkspace
-            ? "Use paths relative to the Task workspace in the admitted file and command tools."
-            : `The Task workspace is ${workspace}. Use the admitted workspace tools for files and commands.`,
+          shared
+            ? "Use paths relative to the fixed shared root in the admitted file tools."
+            : run.remoteWorkspace
+              ? "Use paths relative to the Task workspace in the admitted file and command tools."
+              : `The Task workspace is ${workspace}. Use the admitted workspace tools for files and commands.`,
           ...(task.workspace
             ? ["SuperTag records changes after the Attempt. Do not push or change other branches."]
             : []),
@@ -276,7 +309,7 @@ export async function runAdapter(
             agentId,
             sensitive,
           );
-          checkpoint = createCheckpoint(task, portable, workspaceMode);
+          checkpoint = createCheckpoint(task, portable, workspaceMode, sharedSummary);
         } catch {
           await publish(
             "Cursor Session archive unavailable. The next Attempt can replay recorded history.",

@@ -162,6 +162,10 @@ impl Harness for Bridge {
             history,
             remote_workspace: self.workspace.is_some(),
             may_capture_artifacts: self.artifact_checkout.is_some(),
+            shared_execution: self
+                .workspace
+                .as_ref()
+                .and_then(workspace::RemoteWorkspace::shared_summary),
         }))
     }
 

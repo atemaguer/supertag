@@ -4,12 +4,21 @@ package supertag.environment.v2;
 
 // A standalone owner of one shared root. Accepted operations outlive the RPC that submits them.
 service SharedExecution {
+  rpc Describe(DescribeEnvironmentRequest) returns (EnvironmentInfo);
   rpc IssueAccess(IssueAccessRequest) returns (AccessReceipt);
   rpc ReleaseAccess(EndAccessRequest) returns (AccessReceipt);
   rpc RevokeAccess(EndAccessRequest) returns (AccessReceipt);
   rpc Execute(ExecuteRequest) returns (OperationReceipt);
   rpc InspectOperation(InspectOperationRequest) returns (OperationReceipt);
   rpc WatchProcess(WatchProcessRequest) returns (stream ProcessSnapshot);
+}
+
+message DescribeEnvironmentRequest {}
+message EnvironmentInfo {
+  string environment_id = 1;
+  string incarnation_id = 2;
+  bool file_read = 3;
+  bool file_write = 4;
 }
 
 // An admin bearer authorizes issuance. x-supertag-grant-token carries the client-selected access
@@ -21,6 +30,7 @@ message IssueAccessRequest {
   string attempt_id = 4;
   string tag_id = 5;
   uint64 ttl_ms = 6;
+  optional string expected_incarnation_id = 7;
 }
 
 enum AccessState {

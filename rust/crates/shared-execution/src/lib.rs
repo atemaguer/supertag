@@ -150,7 +150,12 @@ impl Provider {
         let _lock = self.0.admission.lock().await;
         self.accepting()?;
         let journal = &self.0.journal;
-        if input.environment_id != journal.environment_id {
+        if input.environment_id != journal.environment_id
+            || input
+                .expected_incarnation_id
+                .as_ref()
+                .is_some_and(|id| id != &journal.incarnation_id)
+        {
             return Err(Status::failed_precondition(
                 "shared execution environment identity does not match",
             ));
@@ -468,6 +473,20 @@ impl Provider {
 
 #[tonic::async_trait]
 impl SharedExecution for Provider {
+    async fn describe(
+        &self,
+        request: Request<DescribeEnvironmentRequest>,
+    ) -> Result<Response<EnvironmentInfo>, Status> {
+        self.require_admin(&request)?;
+        self.accepting()?;
+        Ok(Response::new(EnvironmentInfo {
+            environment_id: self.0.journal.environment_id.clone(),
+            incarnation_id: self.0.journal.incarnation_id.clone(),
+            file_read: true,
+            file_write: true,
+        }))
+    }
+
     async fn issue_access(
         &self,
         request: Request<IssueAccessRequest>,

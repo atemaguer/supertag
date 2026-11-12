@@ -30,6 +30,7 @@ for (const name of [
   "SUPERTAG_HOST_TOKEN",
   "SUPERTAG_BOOTSTRAP_HOST_TOKEN",
   "SUPERTAG_PRIVATE_HARNESS_TOKEN",
+  "SUPERTAG_EXECUTION_ADMIN_TOKEN",
   "SUPERTAG_WORKSPACE_DIRECTORY",
   "NODE_OPTIONS",
   "PYTHONPATH",
@@ -96,22 +97,26 @@ async function runFixture() {
         "resume",
         "remote-first",
         "remote-resume",
+        "shared-first",
+        "shared-resume",
         "baseline",
         "cancel",
         "after-cancel",
       ].includes(mode),
     );
-    const writes = mode === "first" || mode === "remote-first";
-    const resumes = mode === "resume" || mode === "remote-resume";
+    const shared = mode.startsWith("shared-");
+    const writes = mode === "first" || mode === "remote-first" || mode === "shared-first";
+    const resumes = mode === "resume" || mode === "remote-resume" || mode === "shared-resume";
     assert.deepEqual(request.tools, ["mcp"]);
     for (const name of ["read", "edit", "shell", "grep", "glob", "ls", "task"])
       assert.ok(request.disallowedTools.includes(name), `native SDK tool ${name} is not denied`);
     assert.equal(request.localCommandTool, undefined);
     const toolNames = request.splitTools.map(({ name }) => name);
     assert.ok(toolNames.includes("read"));
-    assert.equal(toolNames.includes("write"), writes);
-    assert.equal(toolNames.includes("edit"), writes);
+    assert.equal(toolNames.includes("write"), writes || shared);
+    assert.equal(toolNames.includes("edit"), writes && !shared);
     assert.equal(toolNames.includes("command"), mode === "first");
+    if (shared) assert.deepEqual(toolNames.sort(), ["read", "write"]);
 
     const cwd = await realpath(request.workspace);
     assert.notEqual(cwd, await realpath(process.cwd()));
@@ -124,7 +129,7 @@ async function runFixture() {
     assert.match(agentId, /^agent-[\w-]+$/u);
     const agentsFile = join(request.storeDirectory, "agents.ndjson");
     let restoredFrom;
-    if (["resume", "remote-resume", "cancel", "after-cancel"].includes(mode)) {
+    if (resumes || ["cancel", "after-cancel"].includes(mode)) {
       assert.ok(request.resumeAgentId, "expected native Session restore");
       const agents = (await readFile(agentsFile, "utf8")).trim().split("\n").map(JSON.parse);
       const agent = agents.find((entry) => entry.agentId === agentId);
@@ -132,7 +137,7 @@ async function runFixture() {
       restoredFrom = agent?.fixtureTurn;
       assert.equal(
         restoredFrom,
-        resumes ? (mode === "remote-resume" ? "remote-first" : "first") : "baseline",
+        resumes ? mode.replace("resume", "first") : "baseline",
       );
     } else {
       assert.equal(request.resumeAgentId, undefined);
@@ -174,7 +179,7 @@ async function runFixture() {
       file_path: "workspace.txt",
       content: "first-turn-content\n",
     });
-    assert.equal(write.isError, !writes);
+    assert.equal(write.isError, !(writes || shared));
 
     for (const name of ["agents.ndjson", "runs.ndjson", "run_events.ndjson", "checkpoints.ndjson"])
       await writeFile(
@@ -188,7 +193,7 @@ async function runFixture() {
       );
     text(`cursor-stream:${mode} ${key.slice(0, 13)}`);
     text(key.slice(13));
-    if (writes) await waitFor(join(fixture, `release-${process.pid}`));
+    if (writes && !shared) await waitFor(join(fixture, `release-${process.pid}`));
     if (mode === "cancel") return;
 
     const usage = {

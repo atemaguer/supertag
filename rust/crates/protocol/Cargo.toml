@@ -12,6 +12,7 @@ sha2.workspace = true
 subtle.workspace = true
 tonic.workspace = true
 tonic-prost.workspace = true
+uuid.workspace = true
 
 [build-dependencies]
 protoc-bin-vendored.workspace = true

@@ -10,6 +10,7 @@ mod mcp;
 mod readiness;
 mod remote;
 mod remote_provider;
+mod shared_execution;
 mod task_outputs;
 mod workspaces;
 
@@ -18,6 +19,7 @@ pub use enrollment::enroll;
 pub use guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
 pub use mcp::McpCatalog;
 pub use remote_provider::{ProviderAuthority, ProviderConfig};
+pub use shared_execution::SharedExecutionConfig;
 pub use workspaces::{WORKSPACE_DIRECTORY, WorkspaceMapping, WorkspaceSource};
 
 use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
@@ -62,6 +64,7 @@ pub struct HostOptions {
     pub once: bool,
     pub workspace: Option<WorkspaceMapping>,
     pub remote_provider: Option<ProviderConfig>,
+    pub shared_execution: Option<SharedExecutionConfig>,
     pub context_catalog: context::ContextCatalog,
     pub mcp_catalog: McpCatalog,
 }
@@ -129,6 +132,7 @@ impl Attempt {
             .and_then(|selection| selection.model.as_ref());
         Ok(execution.harness_kind == options.harness as i32
             && execution.remote_file_workspace == options.execution_profile.remote_file_workspace
+            && execution.shared_execution == options.execution_profile.shared_execution
             && model.is_none_or(|model| options.execution_profile.model_ids.contains(model))
             && (!self.requires_unsandboxed_commands
                 || options.execution_profile.allow_unsandboxed_commands))
@@ -182,6 +186,20 @@ pub async fn run(
                     && options.workspace.is_some()
                     && !options.execution_profile.allow_unsandboxed_commands)),
         "invalid Worker Host remote Workspace profile"
+    );
+    ensure!(
+        options.execution_profile.shared_execution.as_ref()
+            == options
+                .shared_execution
+                .as_ref()
+                .map(SharedExecutionConfig::capability)
+            && (options.shared_execution.is_none()
+                || (options.harness == HarnessKind::Cursor
+                    && options.workspace.is_none()
+                    && options.remote_provider.is_none()
+                    && options.execution_profile.mcp_servers.is_empty()
+                    && !options.execution_profile.allow_unsandboxed_commands)),
+        "shared execution requires a Cursor Worker Host with the exact file-only provider profile"
     );
     ensure!(
         !matches!(
@@ -368,7 +386,7 @@ pub async fn run(
                 .await?;
             }
             Entry::Executing { attempt, prepared } => {
-                remote::ensure_stopped(&options, &journal, &attempt, &registration).await?;
+                ensure_providers_stopped(&options, &journal, &attempt, &registration).await?;
                 match resolved(&mut host, &attempt, &token).await {
                     Ok(true) => journal.save(&Entry::Terminal { attempt, prepared })?,
                     Ok(false) if options.wait_for_recovery => {
@@ -405,7 +423,7 @@ pub async fn run(
                 // Exact finalization can safely resume after a Host restart.
                 with_cleanup_authority(
                     &mut host, &attempt, &token, &shutdown,
-                    remote::ensure_stopped(&options, &journal, &attempt, &registration),
+                    ensure_providers_stopped(&options, &journal, &attempt, &registration),
                 ).await?;
                 if let Some(mut pending) = outputs.as_ref().filter(|output| succeeded && !output.frozen).cloned() {
                     let checkout = workspace.checkout.path.clone();
@@ -506,7 +524,7 @@ pub async fn run(
             } => {
                 with_cleanup_authority(
                     &mut host, &attempt, &token, &shutdown,
-                    remote::ensure_stopped(&options, &journal, &attempt, &registration),
+                    ensure_providers_stopped(&options, &journal, &attempt, &registration),
                 ).await?;
                 let prepared = prepared.or_else(|| {
                     workspace.as_ref().map(|pending| {
@@ -924,6 +942,17 @@ async fn run_assignment(
             adapter::failed("Worker Host cannot enforce accepted MCP grants"),
         );
     }
+    if !supertag_protocol::shared_execution::supports(
+        &task,
+        options.harness,
+        options.execution_profile.shared_execution.as_ref(),
+    ) {
+        return save_finish(
+            journal,
+            attempt,
+            adapter::failed("Worker Host cannot enforce accepted shared execution placement"),
+        );
+    }
     let checkpoint = match time::timeout_at(valid_until, transfers.download(&attempt, token)).await
     {
         Ok(Ok(checkpoint)) => checkpoint,
@@ -1082,10 +1111,56 @@ async fn run_assignment(
     } else {
         None
     };
-    let remote_workspace = provider.as_ref().map(|provider| {
-        let (channel, token) = provider.workspace_connection();
-        adapter::RemoteWorkspace::new(channel, token)
-    });
+    let shared_access = if let Some(config) = options.shared_execution.as_ref() {
+        let cancel = shutdown.child_token();
+        match with_authority(host, &attempt, token, shutdown, &cancel, async {
+            shared_execution::prepare(
+                config,
+                journal,
+                &attempt,
+                &task,
+                registration,
+                options.attempt_timeout,
+            )
+            .await
+            .map_err(|_| {
+                Status::failed_precondition("shared execution access could not be prepared")
+            })
+        })
+        .await
+        {
+            Ok((access, expires)) => {
+                valid_until = expires;
+                Some(access)
+            }
+            Err(_) => {
+                save_finish(
+                    journal,
+                    attempt.clone(),
+                    adapter::failed("Shared execution access could not be prepared safely"),
+                )?;
+                with_cleanup_authority(
+                    host,
+                    &attempt,
+                    token,
+                    shutdown,
+                    shared_execution::ensure_released(options, journal, &attempt, registration),
+                )
+                .await?;
+                return Ok(());
+            }
+        }
+    } else {
+        None
+    };
+    let uses_shared_access = shared_access.is_some();
+    let remote_workspace = provider
+        .as_ref()
+        .map(|provider| {
+            let (channel, token) = provider.workspace_connection();
+            adapter::RemoteWorkspace::new(channel, token)
+        })
+        .or_else(|| shared_access.map(adapter::RemoteWorkspace::shared));
     let adapter_workspace = workspace
         .as_ref()
         .filter(|_| remote_workspace.is_none())
@@ -1196,6 +1271,16 @@ async fn run_assignment(
         }
     }
     .await;
+    if uses_shared_access {
+        with_cleanup_authority(
+            host,
+            &attempt,
+            token,
+            shutdown,
+            shared_execution::ensure_released(options, journal, &attempt, registration),
+        )
+        .await?;
+    }
     if let Some(provider) = provider.as_mut() {
         with_cleanup_authority(host, &attempt, token, shutdown, async {
             let closed = provider.shutdown().await;
@@ -1322,6 +1407,16 @@ async fn renew_running_attempt(
         return Err(Status::failed_precondition("execution authority expired"));
     }
     Ok(until)
+}
+
+async fn ensure_providers_stopped(
+    options: &HostOptions,
+    journal: &Journal,
+    attempt: &Attempt,
+    registration: &HostRecord,
+) -> Result<()> {
+    remote::ensure_stopped(options, journal, attempt, registration).await?;
+    shared_execution::ensure_released(options, journal, attempt, registration).await
 }
 
 /// Cleanup continues after authority ends. Only renewal stops on cancellation.

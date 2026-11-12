@@ -13,8 +13,8 @@ use supertag_protocol::{
     authenticated_request,
     v2::{
         CancelTaskRequest, GetTaskRequest, HarnessKind, ListEventsRequest, ListNativeUsageRequest,
-        PutTagRequest, SubmitTaskRequest, Task, TaskEvent, TaskState, WorkspaceSpec,
-        operator_client::OperatorClient,
+        PolicyExecutionSettings, PutTagRequest, SubmitTaskRequest, Task, TaskEvent, TaskState,
+        WorkspaceSpec, operator_client::OperatorClient,
     },
     valid_sha256,
 };
@@ -23,7 +23,11 @@ use tokio::{
     process::{Child, Command},
     time::{Instant, sleep, timeout},
 };
-use tonic::{Request, transport::Channel};
+use tokio_stream::wrappers::TcpListenerStream;
+use tonic::{
+    Request,
+    transport::{Channel, Server},
+};
 use uuid::Uuid;
 
 const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
@@ -317,46 +321,12 @@ impl<'a> Runtime<'a> {
         allow_commands: bool,
         remote: Option<RemoteWorkspace>,
     ) -> Result<Child> {
-        let mut command = self.credentials.command(&[
-            "worker-host",
-            "--gateway",
-            &self.endpoint,
-            "--once",
-            "--harness",
-            "cursor",
-            "--harness-model",
-            "fixture-model",
-            "--workspace-id",
-            WORKSPACE,
-        ]);
+        let mut command = self.worker_command(fixture, label);
         command
-            .arg("--cursor-node")
-            .arg(&fixture.node)
-            .arg("--cursor-adapter")
-            .arg(&fixture.adapter)
-            .arg("--state-directory")
-            .arg(fixture.root.join(format!("host-{label}")))
+            .arg("--workspace-id")
+            .arg(WORKSPACE)
             .arg("--workspace-source")
-            .arg(&fixture.source)
-            .env("HOME", fixture.root.join("operator-home"))
-            .env("CURSOR_API_KEY", PROVIDER_KEY)
-            .env("OPENAI_API_KEY", "unrelated-provider-key")
-            .env("ANTHROPIC_API_KEY", "unrelated-anthropic-key")
-            .env("MODAL_TOKEN_ID", "synthetic-modal-token-id")
-            .env("MODAL_TOKEN_SECRET", "synthetic-modal-token-secret")
-            .env("MODAL_SERVER_URL", "https://fixture.modal.invalid:443")
-            .env("MODAL_CONFIG_PATH", "/fixture/untrusted-modal-profile")
-            .env("MODAL_ENVIRONMENT", "unrelated-modal-profile")
-            .env("SUPERTAG_MODAL_WORKSPACE_APP", "fixture-modal-app")
-            .env(
-                "SUPERTAG_MODAL_WORKSPACE_ENVIRONMENT",
-                "fixture-modal-environment",
-            )
-            .env("SUPERTAG_MODAL_WORKSPACE_IMAGE", "fixture-modal-image")
-            .env("NODE_OPTIONS", "--invalid-fixture-option")
-            .env("PYTHONPATH", "unrelated-python-path")
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped());
+            .arg(&fixture.source);
         if allow_commands {
             command.arg("--allow-unsandboxed-commands");
         }
@@ -380,6 +350,46 @@ impl<'a> Runtime<'a> {
                 .env("SUPERTAG_E2B_TEMPLATE", "fixture-template");
         }
         Ok(command.spawn()?)
+    }
+
+    fn worker_command(&self, fixture: &Fixture, label: &str) -> Command {
+        let mut command = self.credentials.command(&[
+            "worker-host",
+            "--gateway",
+            &self.endpoint,
+            "--once",
+            "--harness",
+            "cursor",
+            "--harness-model",
+            "fixture-model",
+        ]);
+        command
+            .arg("--cursor-node")
+            .arg(&fixture.node)
+            .arg("--cursor-adapter")
+            .arg(&fixture.adapter)
+            .arg("--state-directory")
+            .arg(fixture.root.join(format!("host-{label}")))
+            .env("HOME", fixture.root.join("operator-home"))
+            .env("CURSOR_API_KEY", PROVIDER_KEY)
+            .env("OPENAI_API_KEY", "unrelated-provider-key")
+            .env("ANTHROPIC_API_KEY", "unrelated-anthropic-key")
+            .env("MODAL_TOKEN_ID", "synthetic-modal-token-id")
+            .env("MODAL_TOKEN_SECRET", "synthetic-modal-token-secret")
+            .env("MODAL_SERVER_URL", "https://fixture.modal.invalid:443")
+            .env("MODAL_CONFIG_PATH", "/fixture/untrusted-modal-profile")
+            .env("MODAL_ENVIRONMENT", "unrelated-modal-profile")
+            .env("SUPERTAG_MODAL_WORKSPACE_APP", "fixture-modal-app")
+            .env(
+                "SUPERTAG_MODAL_WORKSPACE_ENVIRONMENT",
+                "fixture-modal-environment",
+            )
+            .env("SUPERTAG_MODAL_WORKSPACE_IMAGE", "fixture-modal-image")
+            .env("NODE_OPTIONS", "--invalid-fixture-option")
+            .env("PYTHONPATH", "unrelated-python-path")
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+        command
     }
 
     async fn task(&mut self, id: &str) -> Result<Task> {
@@ -506,6 +516,146 @@ impl<'a> Runtime<'a> {
         assert!(!latest.estimated);
         Ok(())
     }
+}
+
+#[tokio::test]
+async fn cursor_shared_execution_reopens_the_fixed_root_and_revokes_each_access() -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    use supertag_shared_execution::{Config, Provider, v2::AccessState};
+
+    const ENVIRONMENT: &str = "fixture-fixed-root";
+    let directory = tempfile::tempdir()?;
+    let fixture = Fixture::prepare(directory.path()).await?;
+    let root = fixture.root.join("shared-root");
+    let state = fixture.root.join("shared-provider");
+    std::fs::create_dir(&root)?;
+    std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700))?;
+    std::fs::write(root.join("workspace.txt"), "initial-content\n")?;
+    let admin = Uuid::new_v4().to_string();
+    let provider = Provider::open(Config {
+        environment_id: ENVIRONMENT.into(),
+        root: root.clone(),
+        state_directory: state.clone(),
+        admin_token: admin.clone(),
+        process_identity: None,
+    })
+    .await?;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let endpoint = format!("http://{}", listener.local_addr()?);
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let provider_task = tokio::spawn(async move {
+        Server::builder()
+            .add_service(provider.service())
+            .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async {
+                let _ = stopped.await;
+            })
+            .await
+    });
+    let credentials = Credentials::new();
+    let mut runtime = Runtime::start(&fixture.root, &credentials).await?;
+    runtime
+        .operator
+        .put_tag(runtime.credentials.request(PutTagRequest {
+            tag_id: TAG.into(),
+            instructions: "Follow the fixed root fixture.".into(),
+            allowed_actions: vec!["files:read".into(), "files:write".into()],
+            harness_kind: HarnessKind::Cursor as i32,
+            execution: Some(PolicyExecutionSettings {
+                shared_execution_environment_id: Some(ENVIRONMENT.into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })?)
+        .await?;
+    let mut database = sqlx::SqliteConnection::connect(&format!(
+        "sqlite://{}",
+        state.join("state.sqlite").display()
+    ))
+    .await?;
+    let start_host = |runtime: &Runtime<'_>| {
+        runtime
+            .worker_command(&fixture, "shared")
+            .arg("--shared-execution-endpoint")
+            .arg(&endpoint)
+            .arg("--shared-execution-environment")
+            .arg(ENVIRONMENT)
+            .env("SUPERTAG_EXECUTION_ADMIN_TOKEN", &admin)
+            .spawn()
+    };
+    // A real provider storage failure during revocation must fence completion until
+    // the same Host can replay and verify cleanup. No model call should run twice.
+    sqlx::query(
+        "CREATE TRIGGER hold_revoke BEFORE UPDATE OF state ON accesses
+         BEGIN SELECT RAISE(ABORT, 'fixture holds access cleanup'); END",
+    )
+    .execute(&mut database)
+    .await?;
+    for (index, mode) in ["shared-first", "shared-resume"].into_iter().enumerate() {
+        let queued = runtime.submit(TAG, mode).await?;
+        if index == 0 {
+            let output = timeout(WAIT, start_host(&runtime)?.wait_with_output()).await??;
+            assert!(!output.status.success());
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("cleanup receipt is unavailable")
+            );
+            let unsettled = runtime.task(&queued.task_id).await?;
+            assert_eq!(unsettled.state(), TaskState::Running);
+            assert!(unsettled.result.is_none());
+            fixture.started(mode)?;
+            sqlx::query("DROP TRIGGER hold_revoke")
+                .execute(&mut database)
+                .await?;
+        }
+        let worker = start_host(&runtime)?;
+        let output = timeout(WAIT, worker.wait_with_output()).await??;
+        ensure!(
+            output.status.success(),
+            "shared Worker Host failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result = runtime
+            .assert_success(&queued.task_id, mode)
+            .await
+            .with_context(|| format!("Cursor runner trace: {:?}", fixture.trace()))?;
+        assert!(result.workspace.is_none() && result.workspace_delivery.is_none());
+        assert_eq!(
+            result
+                .attempt_execution
+                .and_then(|execution| execution.shared_execution)
+                .map(|shared| shared.environment_id)
+                .as_deref(),
+            Some(ENVIRONMENT),
+        );
+        let revoked: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM accesses WHERE state=$1")
+            .bind(AccessState::Revoked as i64)
+            .fetch_one(&mut database)
+            .await?;
+        assert_eq!(revoked, (index + 1) as i64);
+        assert_eq!(
+            std::fs::read_to_string(root.join("workspace.txt"))?,
+            "first-turn-content\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(fixture.source.join("workspace.txt"))?,
+            "initial-content\n"
+        );
+        assert_eq!(
+            fixture
+                .trace()?
+                .iter()
+                .filter(|entry| entry["type"] == "started" && entry["mode"] == mode)
+                .count(),
+            1,
+        );
+    }
+    assert_eq!(
+        fixture.started("shared-resume")?["restoredFrom"],
+        "shared-first"
+    );
+    runtime.stop().await?;
+    let _ = stop.send(());
+    timeout(WAIT, provider_task).await???;
+    Ok(())
 }
 
 #[tokio::test]

@@ -147,6 +147,12 @@ class HarnessKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     HARNESS_KIND_OPENCODE: _ClassVar[HarnessKind]
     HARNESS_KIND_CURSOR: _ClassVar[HarnessKind]
 
+class SharedExecutionTool(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    SHARED_EXECUTION_TOOL_UNSPECIFIED: _ClassVar[SharedExecutionTool]
+    SHARED_EXECUTION_TOOL_READ: _ClassVar[SharedExecutionTool]
+    SHARED_EXECUTION_TOOL_WRITE: _ClassVar[SharedExecutionTool]
+
 class ModelSource(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     MODEL_SOURCE_UNSPECIFIED: _ClassVar[ModelSource]
@@ -316,6 +322,9 @@ HARNESS_KIND_CLAUDE_CODE: HarnessKind
 HARNESS_KIND_OPENAI_AGENTS: HarnessKind
 HARNESS_KIND_OPENCODE: HarnessKind
 HARNESS_KIND_CURSOR: HarnessKind
+SHARED_EXECUTION_TOOL_UNSPECIFIED: SharedExecutionTool
+SHARED_EXECUTION_TOOL_READ: SharedExecutionTool
+SHARED_EXECUTION_TOOL_WRITE: SharedExecutionTool
 MODEL_SOURCE_UNSPECIFIED: ModelSource
 MODEL_SOURCE_TASK: ModelSource
 MODEL_SOURCE_HOST_DEFAULT: ModelSource
@@ -1776,32 +1785,54 @@ class ExecutionSelection(_message.Message):
     def __init__(self, model: _Optional[str] = ..., effort: _Optional[str] = ...) -> None: ...
 
 class HarnessExecutionProfile(_message.Message):
-    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace", "mcp_servers")
+    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace", "mcp_servers", "shared_execution")
     MODEL_IDS_FIELD_NUMBER: _ClassVar[int]
     DEFAULT_MODEL_FIELD_NUMBER: _ClassVar[int]
     ALLOW_UNSANDBOXED_COMMANDS_FIELD_NUMBER: _ClassVar[int]
     REMOTE_FILE_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     MCP_SERVERS_FIELD_NUMBER: _ClassVar[int]
+    SHARED_EXECUTION_FIELD_NUMBER: _ClassVar[int]
     model_ids: _containers.RepeatedScalarFieldContainer[str]
     default_model: str
     allow_unsandboxed_commands: bool
     remote_file_workspace: bool
     mcp_servers: _containers.RepeatedCompositeFieldContainer[_mcp_pb2.McpServerCapability]
-    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ...) -> None: ...
+    shared_execution: SharedExecutionCapability
+    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ...) -> None: ...
+
+class SharedExecutionCapability(_message.Message):
+    __slots__ = ("environment_id", "tools", "incarnation_id")
+    ENVIRONMENT_ID_FIELD_NUMBER: _ClassVar[int]
+    TOOLS_FIELD_NUMBER: _ClassVar[int]
+    INCARNATION_ID_FIELD_NUMBER: _ClassVar[int]
+    environment_id: str
+    tools: _containers.RepeatedScalarFieldContainer[SharedExecutionTool]
+    incarnation_id: str
+    def __init__(self, environment_id: _Optional[str] = ..., tools: _Optional[_Iterable[_Union[SharedExecutionTool, str]]] = ..., incarnation_id: _Optional[str] = ...) -> None: ...
+
+class SharedExecutionAccessSummary(_message.Message):
+    __slots__ = ("environment_id", "incarnation_id")
+    ENVIRONMENT_ID_FIELD_NUMBER: _ClassVar[int]
+    INCARNATION_ID_FIELD_NUMBER: _ClassVar[int]
+    environment_id: str
+    incarnation_id: str
+    def __init__(self, environment_id: _Optional[str] = ..., incarnation_id: _Optional[str] = ...) -> None: ...
 
 class AttemptExecutionSelection(_message.Message):
-    __slots__ = ("selection", "model_source", "harness_kind", "effort_applied", "remote_file_workspace")
+    __slots__ = ("selection", "model_source", "harness_kind", "effort_applied", "remote_file_workspace", "shared_execution")
     SELECTION_FIELD_NUMBER: _ClassVar[int]
     MODEL_SOURCE_FIELD_NUMBER: _ClassVar[int]
     HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
     EFFORT_APPLIED_FIELD_NUMBER: _ClassVar[int]
     REMOTE_FILE_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
+    SHARED_EXECUTION_FIELD_NUMBER: _ClassVar[int]
     selection: ExecutionSelection
     model_source: ModelSource
     harness_kind: HarnessKind
     effort_applied: bool
     remote_file_workspace: bool
-    def __init__(self, selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., model_source: _Optional[_Union[ModelSource, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., effort_applied: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ...) -> None: ...
+    shared_execution: SharedExecutionCapability
+    def __init__(self, selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., model_source: _Optional[_Union[ModelSource, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., effort_applied: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ...) -> None: ...
 
 class GetTaskRequest(_message.Message):
     __slots__ = ("task_id",)
@@ -2086,7 +2117,7 @@ class AttemptHistory(_message.Message):
     def __init__(self, entries: _Optional[_Iterable[_Union[AttemptHistoryEntry, _Mapping]]] = ...) -> None: ...
 
 class HarnessRun(_message.Message):
-    __slots__ = ("task", "attempt_id", "checkpoint", "may_ask_objective_question", "coordination", "resolved_skills", "history", "remote_workspace", "may_capture_artifacts")
+    __slots__ = ("task", "attempt_id", "checkpoint", "may_ask_objective_question", "coordination", "resolved_skills", "history", "remote_workspace", "may_capture_artifacts", "shared_execution")
     TASK_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     CHECKPOINT_FIELD_NUMBER: _ClassVar[int]
@@ -2096,6 +2127,7 @@ class HarnessRun(_message.Message):
     HISTORY_FIELD_NUMBER: _ClassVar[int]
     REMOTE_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     MAY_CAPTURE_ARTIFACTS_FIELD_NUMBER: _ClassVar[int]
+    SHARED_EXECUTION_FIELD_NUMBER: _ClassVar[int]
     task: Task
     attempt_id: str
     checkpoint: SessionCheckpoint
@@ -2105,7 +2137,8 @@ class HarnessRun(_message.Message):
     history: _containers.RepeatedCompositeFieldContainer[AttemptHistoryEntry]
     remote_workspace: bool
     may_capture_artifacts: bool
-    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., checkpoint: _Optional[_Union[SessionCheckpoint, _Mapping]] = ..., may_ask_objective_question: _Optional[bool] = ..., coordination: _Optional[_Union[AttemptCapabilities, _Mapping]] = ..., resolved_skills: _Optional[_Iterable[_Union[ResolvedSkill, _Mapping]]] = ..., history: _Optional[_Iterable[_Union[AttemptHistoryEntry, _Mapping]]] = ..., remote_workspace: _Optional[bool] = ..., may_capture_artifacts: _Optional[bool] = ...) -> None: ...
+    shared_execution: SharedExecutionAccessSummary
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., checkpoint: _Optional[_Union[SessionCheckpoint, _Mapping]] = ..., may_ask_objective_question: _Optional[bool] = ..., coordination: _Optional[_Union[AttemptCapabilities, _Mapping]] = ..., resolved_skills: _Optional[_Iterable[_Union[ResolvedSkill, _Mapping]]] = ..., history: _Optional[_Iterable[_Union[AttemptHistoryEntry, _Mapping]]] = ..., remote_workspace: _Optional[bool] = ..., may_capture_artifacts: _Optional[bool] = ..., shared_execution: _Optional[_Union[SharedExecutionAccessSummary, _Mapping]] = ...) -> None: ...
 
 class ContextContract(_message.Message):
     __slots__ = ("type", "version")

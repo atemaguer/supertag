@@ -392,6 +392,7 @@ async fn composition(store: &Store) {
         harness: Some("claude-code".into()),
         models: vec!["claude-model".into()],
         efforts: vec!["high".into()],
+        shared_execution_environment_id: None,
     });
     let mut zulu = role("a-zulu", &["gated", "ungated"], &[]);
     let z = zulu.role.as_mut().unwrap();
@@ -400,6 +401,7 @@ async fn composition(store: &Store) {
         harness: Some("codex".into()),
         models: vec!["codex-model".into()],
         efforts: vec!["low".into()],
+        shared_execution_environment_id: None,
     });
     for r in [&alpha, &zulu] {
         store.put_role(OP, r).await.unwrap();

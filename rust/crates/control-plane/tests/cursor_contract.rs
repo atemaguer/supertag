@@ -359,6 +359,7 @@ async fn contract(url: &str) {
         allow_unsandboxed_commands: true,
         remote_file_workspace: false,
         mcp_servers: vec![],
+        shared_execution: None,
     };
     let claim = store
         .claim_task_with_profile(

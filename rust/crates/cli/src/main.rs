@@ -266,6 +266,14 @@ Use {"version":1,"servers":[{"name":"catalog","url":"https://example.com/mcp","h
 Catalog entries expose tools only when the Task's accepted Permission Sets grant them. Calls requiring approval are refused. Endpoints must use HTTPS or literal loopback HTTP."#
         )]
         mcp_catalog: Option<PathBuf>,
+        /// gRPC origin of a standalone shared execution provider for Cursor file tools.
+        #[arg(long, requires = "shared_execution_environment", conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider", "mcp_catalog", "workspace_id", "allow_unsandboxed_commands"])]
+        shared_execution_endpoint: Option<String>,
+        /// Environment ID expected from the provider. Set SUPERTAG_EXECUTION_ADMIN_TOKEN separately.
+        #[arg(long, requires = "shared_execution_endpoint")]
+        shared_execution_environment: Option<String>,
+        #[arg(long, requires = "shared_execution_endpoint")]
+        shared_execution_ca_file: Option<PathBuf>,
         /// Private host allowlist of Skill packages.
         #[arg(long)]
         skill_catalog: Option<PathBuf>,
@@ -357,6 +365,9 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         /// Allowed reasoning efforts, with the default first. May be repeated.
         #[arg(long = "effort", value_delimiter = ',')]
         efforts: Vec<String>,
+        /// Require this fixed execution environment for new Cursor Sessions.
+        #[arg(long, conflicts_with = "workspace_id")]
+        shared_execution_environment: Option<String>,
     },
     /// Inspect a Tag by its permanent ID, including after retirement.
     GetTag {
@@ -668,6 +679,9 @@ async fn run(command: Command) -> Result<()> {
             modal_workspace_provider,
             modal_workspace_provider_arg,
             mcp_catalog,
+            shared_execution_endpoint,
+            shared_execution_environment,
+            shared_execution_ca_file,
             skill_catalog,
             attempt_timeout_seconds,
             once,
@@ -735,6 +749,32 @@ async fn run(command: Command) -> Result<()> {
             let (adapter, adapter_args) = adapter.launch(attempt_timeout_seconds)?;
             let mcp_catalog = supertag_worker_host::McpCatalog::load(mcp_catalog.as_deref())?;
             execution_profile.mcp_servers = mcp_catalog.capabilities();
+            let shared_execution = if let Some((endpoint, environment)) =
+                shared_execution_endpoint.zip(shared_execution_environment)
+            {
+                ensure!(
+                    harness == HarnessKind::Cursor,
+                    "shared execution currently requires --harness cursor"
+                );
+                let admin = std::env::var("SUPERTAG_EXECUTION_ADMIN_TOKEN")
+                    .context("set SUPERTAG_EXECUTION_ADMIN_TOKEN for shared execution")?;
+                let ca = if let Some(path) = shared_execution_ca_file {
+                    Some(tokio::fs::read(path).await?)
+                } else {
+                    None
+                };
+                let config = supertag_worker_host::SharedExecutionConfig::connect(
+                    endpoint,
+                    environment,
+                    admin,
+                    ca,
+                )
+                .await?;
+                execution_profile.shared_execution = Some(config.capability().clone());
+                Some(config)
+            } else {
+                None
+            };
             let options = HostOptions {
                 gateway: network::endpoint(gateway, false).await?,
                 token: std::env::var("SUPERTAG_HOST_TOKEN").ok(),
@@ -750,6 +790,7 @@ async fn run(command: Command) -> Result<()> {
                 once,
                 workspace,
                 remote_provider,
+                shared_execution,
                 context_catalog: supertag_worker_host::context::ContextCatalog::load(
                     skill_catalog.as_deref(),
                 )?,
@@ -862,6 +903,7 @@ async fn run(command: Command) -> Result<()> {
             harness,
             models,
             efforts,
+            shared_execution_environment,
         } => {
             let workspace = workspace_id.map(|workspace_id| WorkspaceSpec {
                 workspace_id,
@@ -899,13 +941,15 @@ async fn run(command: Command) -> Result<()> {
                         harness_kind: harness.map_or(HarnessKind::Unspecified, Harness::kind)
                             as i32,
                         approval_rules,
-                        execution: (!models.is_empty() || !efforts.is_empty()).then_some(
-                            PolicyExecutionSettings {
-                                models,
-                                efforts,
-                                harness: None,
-                            },
-                        ),
+                        execution: (!models.is_empty()
+                            || !efforts.is_empty()
+                            || shared_execution_environment.is_some())
+                        .then_some(PolicyExecutionSettings {
+                            models,
+                            efforts,
+                            harness: None,
+                            shared_execution_environment_id: shared_execution_environment,
+                        }),
                     },
                     &token,
                 )?)
@@ -1950,6 +1994,7 @@ fn tag_json(tag: &Tag) -> serde_json::Value {
         "instructions": tag.instructions,
         "allowed_actions": tag.allowed_actions,
         "harness": tag.harness_kind().as_str_name(),
+        "shared_execution_environment_id": tag.execution.as_ref().and_then(|settings| settings.shared_execution_environment_id.as_deref()),
         "retired_at_ms": tag.retired_at_ms,
     })
 }
@@ -1961,6 +2006,7 @@ fn print_task(task: &Task) {
             "task_id": task.task_id, "tag_id": task.tag_id, "session_id": task.session_id,
             "state": task.state().as_str_name(), "result": task.result, "attempt_id": task.attempt_id,
             "harness": task.harness_kind().as_str_name(),
+            "shared_execution_environment_id": supertag_protocol::shared_execution::environment(task.policy_snapshot.as_ref()),
             "workspace": task.workspace.as_ref().map(|spec| json!({
                 "workspace_id": spec.workspace_id, "base_commit": spec.base_commit,
                 "github_source": spec.github_source.as_ref().map(|value| json!({"workspace_id":value.workspace_id,"revision":value.revision,"source":value.source.as_ref().map(|source|json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha,"revision":source.revision,"resolved_revision":source.resolved_revision}))})),

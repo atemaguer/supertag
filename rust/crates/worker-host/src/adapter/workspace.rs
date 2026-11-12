@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, MAX_WORKSPACE_TOOL_OUTPUT_BYTES, authenticated_request,
     v2::{
-        HarnessWorkspaceRequest, HarnessWorkspaceResult, TaskState,
+        HarnessWorkspaceRequest, HarnessWorkspaceResult, SharedExecutionAccessSummary, TaskState,
         harness_workspace_client::HarnessWorkspaceClient,
         harness_workspace_server::{HarnessWorkspace, HarnessWorkspaceServer},
     },
@@ -23,19 +23,58 @@ const TOOL_TIMEOUT: Duration = Duration::from_secs(130);
 /// A provider connection scoped to one sandbox, with its own private token.
 #[derive(Clone)]
 pub(crate) struct RemoteWorkspace {
-    pub(crate) client: HarnessWorkspaceClient<Channel>,
-    pub(crate) token: String,
-    pub(crate) operation: Arc<Mutex<()>>,
+    provider: Provider,
+    operation: Arc<Mutex<()>>,
+}
+
+#[derive(Clone)]
+enum Provider {
+    Sandbox {
+        client: HarnessWorkspaceClient<Channel>,
+        token: String,
+    },
+    Shared(crate::shared_execution::Access),
 }
 
 impl RemoteWorkspace {
     pub(crate) fn new(channel: Channel, token: String) -> Self {
         Self {
-            client: HarnessWorkspaceClient::new(channel)
-                .max_decoding_message_size(MAX_WORKSPACE_TOOL_OUTPUT_BYTES + 16)
-                .max_encoding_message_size(MAX_MESSAGE_BYTES),
-            token,
+            provider: Provider::Sandbox {
+                client: HarnessWorkspaceClient::new(channel)
+                    .max_decoding_message_size(MAX_WORKSPACE_TOOL_OUTPUT_BYTES + 16)
+                    .max_encoding_message_size(MAX_MESSAGE_BYTES),
+                token,
+            },
             operation: Arc::default(),
+        }
+    }
+
+    pub(crate) fn shared(access: crate::shared_execution::Access) -> Self {
+        Self {
+            provider: Provider::Shared(access),
+            operation: Arc::default(),
+        }
+    }
+
+    pub(super) fn shared_summary(&self) -> Option<SharedExecutionAccessSummary> {
+        match &self.provider {
+            Provider::Sandbox { .. } => None,
+            Provider::Shared(access) => Some(access.summary.clone()),
+        }
+    }
+
+    async fn execute(
+        &self,
+        input: HarnessWorkspaceRequest,
+        deadline: Instant,
+    ) -> Result<HarnessWorkspaceResult, Status> {
+        match &self.provider {
+            Provider::Shared(access) => access.execute(input).await,
+            Provider::Sandbox { client, token } => {
+                let mut downstream = authenticated_request(input, token, None)?;
+                downstream.set_timeout(deadline.saturating_duration_since(Instant::now()));
+                Ok(client.clone().execute(downstream).await?.into_inner())
+            }
         }
     }
 }
@@ -84,14 +123,7 @@ impl HarnessWorkspace for Bridge {
                     "workspace execution authority expired",
                 ));
             }
-            let mut downstream = authenticated_request(input, &workspace.token, None)?;
-            downstream.set_timeout(tool_deadline.saturating_duration_since(Instant::now()));
-            let result = workspace
-                .client
-                .clone()
-                .execute(downstream)
-                .await?
-                .into_inner();
+            let result = workspace.execute(input, tool_deadline).await?;
             if result.text.len() > MAX_WORKSPACE_TOOL_OUTPUT_BYTES {
                 return Err(Status::data_loss(
                     "workspace provider returned oversized output",

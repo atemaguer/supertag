@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+hmac.workspace = true
 libc.workspace = true
 prost.workspace = true
 reqwest.workspace = true
@@ -15,6 +16,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 supertag-protocol.workspace = true
+supertag-shared-execution = { path = "../shared-execution" }
 supertag-workspaces = { path = "../workspaces" }
 tempfile.workspace = true
 tokio.workspace = true

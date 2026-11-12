@@ -159,6 +159,7 @@ impl Harness for HarnessFixture {
             history: vec![],
             remote_workspace: false,
             may_capture_artifacts: observed.may_capture_artifacts,
+            shared_execution: None,
         }))
     }
     async fn confirm_execution_limits(

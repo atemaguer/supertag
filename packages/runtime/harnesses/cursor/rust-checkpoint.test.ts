@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { create } from "@bufbuild/protobuf";
 import {
   SessionCheckpointSchema,
+  SharedExecutionAccessSummarySchema,
   TaskSchema,
   WorkspaceSpecSchema,
 } from "@supertag/worker-sdk/internal/rust-harness";
@@ -30,6 +31,26 @@ const portable: PortableCursorSessionState = {
 const checkpoint = create(SessionCheckpointSchema, createCheckpoint(task, portable));
 
 describe("Cursor checkpoints in the Rust runtime", () => {
+  it("resumes fixed-root state only for the same provider incarnation", () => {
+    const sharedTask = { ...task, workspace: undefined };
+    const shared = create(SharedExecutionAccessSummarySchema, {
+      environmentId: "shared",
+      incarnationId: "00000000-0000-4000-8000-000000000001",
+    });
+    const saved = create(
+      SessionCheckpointSchema,
+      createCheckpoint(sharedTask, portable, "remote", shared),
+    );
+    expect(restoreCheckpoint(saved, sharedTask, "remote", shared)).toEqual(portable);
+    expect(
+      restoreCheckpoint(saved, sharedTask, "remote", {
+        ...shared,
+        incarnationId: "00000000-0000-4000-8000-000000000002",
+      }),
+    ).toBeUndefined();
+    expect(restoreCheckpoint(saved, sharedTask, "remote")).toBeUndefined();
+  });
+
   it("resumes the authorized Workspace across checkouts and uses replay when the Workspace changes", () => {
     expect(
       restoreCheckpoint(checkpoint, {

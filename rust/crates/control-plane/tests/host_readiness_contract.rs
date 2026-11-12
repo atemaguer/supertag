@@ -36,6 +36,7 @@ fn report(sequence: u64) -> ReportHostRequest {
             allow_unsandboxed_commands: false,
             remote_file_workspace: false,
             mcp_servers: vec![],
+            shared_execution: None,
         }),
     }
 }

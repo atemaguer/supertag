@@ -277,6 +277,63 @@ impl Journal {
         self.directory.join("remote-sandbox.json")
     }
 
+    fn shared_access_path(&self) -> PathBuf {
+        self.directory.join("shared-execution-access.json")
+    }
+
+    pub(crate) fn shared_access(&self) -> Result<Option<crate::shared_execution::AccessRecord>> {
+        let file = match OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(self.shared_access_path())
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let metadata = file.metadata()?;
+        ensure!(
+            metadata.is_file()
+                && metadata.nlink() == 1
+                && metadata.mode() & 0o077 == 0
+                && metadata.uid() == unsafe { libc::geteuid() },
+            "shared execution access journal must be private"
+        );
+        let mut bytes = Vec::new();
+        file.take(4097).read_to_end(&mut bytes)?;
+        ensure!(
+            bytes.len() <= 4096,
+            "shared execution access journal exceeds its limit"
+        );
+        let record: crate::shared_execution::AccessRecord =
+            serde_json::from_slice(&bytes).context("read shared execution access journal")?;
+        ensure!(
+            valid_sha256(&record.scope)
+                && record.host_generation > 0
+                && !record.host_id.is_empty()
+                && !record.task_id.is_empty()
+                && !record.attempt_id.is_empty()
+                && !record.tag_id.is_empty()
+                && supertag_protocol::shared_execution::valid_environment_id(
+                    &record.environment_id
+                )
+                && uuid::Uuid::parse_str(&record.incarnation_id).is_ok()
+                && uuid::Uuid::parse_str(&record.access_id).is_ok()
+                && (1_000..=86_400_000).contains(&record.ttl_ms),
+            "invalid shared execution access journal"
+        );
+        Ok(Some(record))
+    }
+
+    pub(crate) fn save_shared_access(
+        &self,
+        record: &crate::shared_execution::AccessRecord,
+    ) -> Result<()> {
+        self.write(&self.shared_access_path(), |file| {
+            Ok(serde_json::to_writer(file, record)?)
+        })
+    }
+
     pub(crate) fn remote_scratch(&self) -> Result<PathBuf> {
         let directory = self.directory.join("remote-workspace");
         match DirBuilder::new().mode(0o700).create(&directory) {
@@ -460,6 +517,11 @@ impl Journal {
 
     pub(crate) fn clear(&self) -> Result<()> {
         let remote = self.remote_sandbox()?;
+        let shared = self.shared_access()?;
+        ensure!(
+            shared.as_ref().is_none_or(|access| access.ended),
+            "shared execution cleanup must be confirmed before clearing the Attempt"
+        );
         ensure!(
             remote
                 .as_ref()
@@ -474,6 +536,10 @@ impl Journal {
         }
         if remote.is_some() {
             fs::remove_file(self.remote_sandbox_path())?;
+            self.sync_directory()?;
+        }
+        if shared.is_some() {
+            fs::remove_file(self.shared_access_path())?;
             self.sync_directory()?;
         }
         fs::remove_file(self.entry_path())?;
@@ -589,6 +655,7 @@ mod tests {
                 allow_unsandboxed_commands: false,
                 remote_file_workspace: false,
                 mcp_servers: vec![],
+                shared_execution: None,
             }),
             ..Default::default()
         };
@@ -615,6 +682,7 @@ mod tests {
                 harness_kind: HarnessKind::Codex as i32,
                 effort_applied: Some(true),
                 remote_file_workspace: false,
+                shared_execution: None,
             }
             .encode_to_vec(),
         );

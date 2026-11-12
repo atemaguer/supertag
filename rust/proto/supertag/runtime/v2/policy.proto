@@ -178,6 +178,8 @@ message PolicyExecutionSettings {
   // Order matters: the first entry is the default. Empty means unset.
   repeated string models = 2;
   repeated string efforts = 3;
+  // A mutable fixed execution root, distinct from a pinned Git Workspace.
+  optional string shared_execution_environment_id = 4;
 }
 enum RoleStatus {
   ROLE_STATUS_UNSPECIFIED = 0;

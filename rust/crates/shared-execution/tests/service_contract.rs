@@ -2,9 +2,10 @@ use std::{net::SocketAddr, path::PathBuf, process::Stdio, time::Duration};
 
 use anyhow::{Context, Result, ensure};
 use supertag_shared_execution::v2::{
-    AccessReceipt, AccessState, EndAccessRequest, ExecuteRequest, InspectOperationRequest,
-    IssueAccessRequest, OperationState, ReadFile, WriteFile, execute_request::Operation,
-    operation_receipt::Result as Effect, shared_execution_client::SharedExecutionClient,
+    AccessReceipt, AccessState, DescribeEnvironmentRequest, EndAccessRequest, ExecuteRequest,
+    InspectOperationRequest, IssueAccessRequest, OperationState, ReadFile, WriteFile,
+    execute_request::Operation, operation_receipt::Result as Effect,
+    shared_execution_client::SharedExecutionClient,
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -97,6 +98,7 @@ fn issue(id: &str, token: &str, attempt: &str) -> Request<IssueAccessRequest> {
             attempt_id: attempt.into(),
             tag_id: "fixture-tag".into(),
             ttl_ms: 60_000,
+            expected_incarnation_id: None,
         },
         ADMIN,
     );
@@ -162,7 +164,41 @@ async fn fixed_root_access_preserves_exact_receipts_and_refuses_cross_access_or_
         fixture.start(false).await.is_err(),
         "a second owner acquired the root"
     );
+    let mut describe = running.client.clone();
+    assert_eq!(
+        describe
+            .describe(request(
+                DescribeEnvironmentRequest {},
+                "invalid-grant-credential"
+            ))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::Unauthenticated
+    );
+    let description = describe
+        .describe(request(DescribeEnvironmentRequest {}, ADMIN))
+        .await?
+        .into_inner();
+    assert_eq!(description.environment_id, ENVIRONMENT);
+    assert!(description.file_read && description.file_write);
+    let mut replaced = issue(
+        "first",
+        "would-have-minted-a-stale-access-token",
+        "attempt-first",
+    );
+    replaced.get_mut().expected_incarnation_id = Some(uuid::Uuid::new_v4().to_string());
+    assert_eq!(
+        running
+            .client
+            .issue_access(replaced)
+            .await
+            .unwrap_err()
+            .code(),
+        Code::FailedPrecondition
+    );
     let (token, first) = grant(&mut running.client, "first").await?;
+    assert_eq!(first.incarnation_id, description.incarnation_id);
     let (other, _) = grant(&mut running.client, "other").await?;
     assert_eq!(
         running

@@ -106,10 +106,12 @@ function workspaceRequest(name: string, input: unknown): WorkspaceRequest {
 export function createRemoteWorkspaceExecutor(
   actions: readonly string[],
   bridge: Pick<ReturnType<typeof harnessClient>, "workspace" | "options">,
+  supportedTools?: ReadonlySet<string>,
 ): CursorSplitExecutor {
   const filesWrite = actions.includes("files:write");
   const filesRead = actions.includes("files:read");
   const tools = workspaceToolDefinitions.filter(({ name }) => {
+    if (supportedTools && !supportedTools.has(name)) return false;
     if (name === "command") return filesWrite && actions.includes("commands:execute");
     return name === "write" || name === "edit" ? filesWrite : filesRead;
   });

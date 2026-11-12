@@ -433,6 +433,13 @@ pub(crate) fn normalize_execution(
     let Some(mut execution) = input else {
         return Ok(None);
     };
+    if execution
+        .shared_execution_environment_id
+        .as_deref()
+        .is_some_and(|id| !supertag_protocol::shared_execution::valid_environment_id(id))
+    {
+        return Err(invalid("invalid shared execution environment identity"));
+    }
     if let Some(harness) = execution.harness.as_mut() {
         *harness = harness.trim().to_lowercase();
         if harness.is_empty()
@@ -479,7 +486,19 @@ pub(crate) fn normalize_execution(
         efforts.push(effort);
     }
     execution.efforts = efforts;
-    if execution.harness.is_none() && execution.models.is_empty() && execution.efforts.is_empty() {
+    if execution.shared_execution_environment_id.is_some()
+        && execution
+            .harness
+            .as_deref()
+            .is_some_and(|name| name != "cursor")
+    {
+        return Err(invalid("shared execution currently requires Cursor"));
+    }
+    if execution.harness.is_none()
+        && execution.models.is_empty()
+        && execution.efforts.is_empty()
+        && execution.shared_execution_environment_id.is_none()
+    {
         Ok(None)
     } else {
         Ok(Some(execution))
@@ -491,6 +510,13 @@ pub(crate) fn normalize_tag_execution(
     input: Option<PolicyExecutionSettings>,
 ) -> Result<(HarnessKind, Option<PolicyExecutionSettings>)> {
     let execution = normalize_execution(input)?;
+    if execution
+        .as_ref()
+        .is_some_and(|settings| settings.shared_execution_environment_id.is_some())
+        && !matches!(harness, HarnessKind::Unspecified | HarnessKind::Cursor)
+    {
+        return Err(invalid("shared execution currently requires Cursor"));
+    }
     let Some(name) = execution
         .as_ref()
         .and_then(|settings| settings.harness.as_deref())
@@ -1216,11 +1242,22 @@ pub(crate) async fn admission_in(
             .iter()
             .filter_map(|role| role.execution.as_ref()),
     );
-    let harness = base_harness.map(str::to_owned).or_else(|| {
+    let mut harness = base_harness.map(str::to_owned).or_else(|| {
         sources
             .clone()
             .find_map(|settings| settings.harness.clone())
     });
+    let shared_execution_environment_id = sources
+        .clone()
+        .find_map(|settings| settings.shared_execution_environment_id.clone());
+    if shared_execution_environment_id.is_some() {
+        if harness.as_deref().is_some_and(|name| name != "cursor") {
+            return Err(StoreError::FailedPrecondition(
+                "shared execution currently requires Cursor".into(),
+            ));
+        }
+        harness = Some("cursor".into());
+    }
     let models = sources
         .clone()
         .find(|e| !e.models.is_empty() && (e.harness.is_none() || e.harness == harness))
@@ -1236,6 +1273,7 @@ pub(crate) async fn admission_in(
             harness: harness.clone(),
             models,
             efforts,
+            shared_execution_environment_id,
         });
     }
     let harness_kind = match harness.as_deref() {
@@ -1522,6 +1560,7 @@ fn effective_digest(snapshot: &TaskPolicySnapshot) -> Result<String> {
             Some((&e.models, efforts))
         }
     });
+    let shared_environment = supertag_protocol::shared_execution::environment(Some(snapshot));
     let runtime = snapshot.runtime_authority.as_ref().and_then(|authority| {
         // Executable actions are already compared on the Task. The marker and
         // typed gates are additional authority a live-input join must match.
@@ -1544,10 +1583,14 @@ fn effective_digest(snapshot: &TaskPolicySnapshot) -> Result<String> {
         && execution.is_none()
         && snapshot.origin.is_none()
         && runtime.is_none()
+        && shared_environment.is_none()
     {
         return Ok(String::new());
     }
     let mut encoded = serde_json::to_vec(&(permissions, contexts, execution))?;
+    if let Some(environment) = shared_environment {
+        encoded.extend(serde_json::to_vec(&("shared_execution", environment))?);
+    }
     if let Some(runtime) = runtime {
         encoded.extend(serde_json::to_vec(&runtime)?);
     }
@@ -1790,6 +1833,7 @@ mod tests {
                 harness: Some("codex".into()),
                 models: vec![],
                 efforts: vec!["low".into(), "medium".into(), "high".into()],
+                shared_execution_environment_id: None,
             }),
             ..Default::default()
         };

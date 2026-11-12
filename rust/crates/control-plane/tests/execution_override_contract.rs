@@ -24,6 +24,7 @@ async fn put_tag(store: &Store, models: &[&str], efforts: &[&str]) -> PolicyExec
         harness: Some("codex".into()),
         models: models.iter().map(|model| (*model).into()).collect(),
         efforts: efforts.iter().map(|effort| (*effort).into()).collect(),
+        shared_execution_environment_id: None,
     };
     store
         .put_tag_spec(PutTagRequest {

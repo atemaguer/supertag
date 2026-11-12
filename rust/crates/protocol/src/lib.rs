@@ -5,6 +5,7 @@ pub mod artifacts;
 mod workspace_tools;
 pub use workspace_tools::{MAX_WORKSPACE_TOOL_OUTPUT_BYTES, validate_workspace_operation};
 pub mod mcp;
+pub mod shared_execution;
 
 pub mod v2 {
     tonic::include_proto!("supertag.runtime.v2");

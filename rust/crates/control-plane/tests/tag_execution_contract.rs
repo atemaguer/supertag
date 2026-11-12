@@ -18,6 +18,7 @@ fn settings(harness: Option<&str>, models: &[&str], efforts: &[&str]) -> PolicyE
         harness: harness.map(str::to_owned),
         models: models.iter().map(|model| (*model).into()).collect(),
         efforts: efforts.iter().map(|effort| (*effort).into()).collect(),
+        shared_execution_environment_id: None,
     }
 }
 

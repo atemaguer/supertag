@@ -1212,6 +1212,24 @@ message HarnessExecutionProfile {
   bool allow_unsandboxed_commands = 3;
   bool remote_file_workspace = 4;
   repeated McpServerCapability mcp_servers = 5;
+  SharedExecutionCapability shared_execution = 6;
+}
+
+enum SharedExecutionTool {
+  SHARED_EXECUTION_TOOL_UNSPECIFIED = 0;
+  SHARED_EXECUTION_TOOL_READ = 1;
+  SHARED_EXECUTION_TOOL_WRITE = 2;
+}
+
+message SharedExecutionCapability {
+  string environment_id = 1;
+  repeated SharedExecutionTool tools = 2;
+  string incarnation_id = 3;
+}
+
+message SharedExecutionAccessSummary {
+  string environment_id = 1;
+  string incarnation_id = 2;
 }
 
 enum ModelSource {
@@ -1227,6 +1245,7 @@ message AttemptExecutionSelection {
   HarnessKind harness_kind = 3;
   optional bool effort_applied = 4;
   bool remote_file_workspace = 5;
+  SharedExecutionCapability shared_execution = 6;
 }
 
 message GetTaskRequest {
@@ -1420,6 +1439,7 @@ message HarnessRun {
   bool remote_workspace = 8;
   // The supervising Worker Host can capture selected files from this checkout.
   bool may_capture_artifacts = 9;
+  SharedExecutionAccessSummary shared_execution = 10;
 }
 
 message ContextContract {

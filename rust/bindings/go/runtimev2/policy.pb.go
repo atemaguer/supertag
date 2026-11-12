@@ -1984,10 +1984,12 @@ type PolicyExecutionSettings struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Harness *string                `protobuf:"bytes,1,opt,name=harness,proto3,oneof" json:"harness,omitempty"`
 	// Order matters: the first entry is the default. Empty means unset.
-	Models        []string `protobuf:"bytes,2,rep,name=models,proto3" json:"models,omitempty"`
-	Efforts       []string `protobuf:"bytes,3,rep,name=efforts,proto3" json:"efforts,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Models  []string `protobuf:"bytes,2,rep,name=models,proto3" json:"models,omitempty"`
+	Efforts []string `protobuf:"bytes,3,rep,name=efforts,proto3" json:"efforts,omitempty"`
+	// A mutable fixed execution root, distinct from a pinned Git Workspace.
+	SharedExecutionEnvironmentId *string `protobuf:"bytes,4,opt,name=shared_execution_environment_id,json=sharedExecutionEnvironmentId,proto3,oneof" json:"shared_execution_environment_id,omitempty"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
 }
 
 func (x *PolicyExecutionSettings) Reset() {
@@ -2039,6 +2041,13 @@ func (x *PolicyExecutionSettings) GetEfforts() []string {
 		return x.Efforts
 	}
 	return nil
+}
+
+func (x *PolicyExecutionSettings) GetSharedExecutionEnvironmentId() string {
+	if x != nil && x.SharedExecutionEnvironmentId != nil {
+		return *x.SharedExecutionEnvironmentId
+	}
+	return ""
 }
 
 type Role struct {
@@ -3431,13 +3440,15 @@ const file_supertag_runtime_v2_policy_proto_rawDesc = "" +
 	"\x06set_id\x18\x01 \x01(\tR\x05setId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
 	"\brevision\x18\x03 \x01(\x04R\brevision\x12<\n" +
-	"\x05items\x18\x04 \x03(\v2&.supertag.runtime.v2.PolicyContextItemR\x05items\"v\n" +
+	"\x05items\x18\x04 \x03(\v2&.supertag.runtime.v2.PolicyContextItemR\x05items\"\xe6\x01\n" +
 	"\x17PolicyExecutionSettings\x12\x1d\n" +
 	"\aharness\x18\x01 \x01(\tH\x00R\aharness\x88\x01\x01\x12\x16\n" +
 	"\x06models\x18\x02 \x03(\tR\x06models\x12\x18\n" +
-	"\aefforts\x18\x03 \x03(\tR\aeffortsB\n" +
+	"\aefforts\x18\x03 \x03(\tR\aefforts\x12J\n" +
+	"\x1fshared_execution_environment_id\x18\x04 \x01(\tH\x01R\x1csharedExecutionEnvironmentId\x88\x01\x01B\n" +
 	"\n" +
-	"\b_harness\"\xe8\x02\n" +
+	"\b_harnessB\"\n" +
+	" _shared_execution_environment_id\"\xe8\x02\n" +
 	"\x04Role\x12\x17\n" +
 	"\arole_id\x18\x01 \x01(\tR\x06roleId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +

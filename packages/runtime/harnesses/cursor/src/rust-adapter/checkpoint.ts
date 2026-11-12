@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import type { SessionCheckpoint, Task } from "@supertag/worker-sdk/internal/rust-harness";
+import type {
+  SessionCheckpoint,
+  SharedExecutionAccessSummary,
+  Task,
+} from "@supertag/worker-sdk/internal/rust-harness";
 import {
   type PortableCursorSessionState,
   validatePortableCursorSessionState,
@@ -10,12 +14,14 @@ const MAX_BYTES = 15 * 1024 * 1024;
 
 type WorkspaceMode = "local" | "remote";
 
-function binding(task: Task, mode: WorkspaceMode) {
+function binding(task: Task, mode: WorkspaceMode, shared?: SharedExecutionAccessSummary) {
   return {
     tagId: task.tagId,
     sessionId: task.sessionId,
     workspaceId: task.workspace?.workspaceId ?? null,
     mode,
+    sharedEnvironmentId: shared?.environmentId,
+    sharedIncarnationId: shared?.incarnationId,
   };
 }
 
@@ -27,6 +33,7 @@ export function restoreCheckpoint(
   checkpoint: SessionCheckpoint | undefined,
   task: Task,
   mode: WorkspaceMode = "local",
+  shared?: SharedExecutionAccessSummary,
 ) {
   // A Session can move between harnesses. Only Cursor's own archive can be resumed.
   if (checkpoint?.harness !== "cursor") return undefined;
@@ -37,7 +44,7 @@ export function restoreCheckpoint(
   )
     throw new Error("Incompatible or damaged Cursor checkpoint");
   const saved = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(checkpoint.payload));
-  const expected = binding(task, mode);
+  const expected = binding(task, mode, shared);
   if (
     saved?.tagId !== expected.tagId ||
     saved?.sessionId !== expected.sessionId ||
@@ -46,15 +53,21 @@ export function restoreCheckpoint(
   )
     throw new Error("Cursor checkpoint belongs to another Tag, Session, or execution mode");
   const portable = validatePortableCursorSessionState(saved.portable);
-  return saved.workspaceId === expected.workspaceId && saved.mode === mode ? portable : undefined;
+  return saved.workspaceId === expected.workspaceId &&
+    saved.mode === mode &&
+    saved.sharedEnvironmentId === expected.sharedEnvironmentId &&
+    saved.sharedIncarnationId === expected.sharedIncarnationId
+    ? portable
+    : undefined;
 }
 
 export function createCheckpoint(
   task: Task,
   portable: PortableCursorSessionState,
   mode: WorkspaceMode = "local",
+  shared?: SharedExecutionAccessSummary,
 ) {
-  const payload = Buffer.from(JSON.stringify({ ...binding(task, mode), portable }));
+  const payload = Buffer.from(JSON.stringify({ ...binding(task, mode, shared), portable }));
   if (payload.byteLength > MAX_BYTES) throw new Error("Cursor checkpoint exceeds its limit");
   return { harness: "cursor", format: FORMAT, payload, sha256: digest(payload) };
 }

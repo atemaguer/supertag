@@ -2314,6 +2314,7 @@ dependencies = [
  "supertag-control-plane",
  "supertag-gateway",
  "supertag-protocol",
+ "supertag-shared-execution",
  "supertag-worker-host",
  "tempfile",
  "tokio",
@@ -2412,6 +2413,7 @@ dependencies = [
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+ "uuid",
 ]
 
 [[package]]
@@ -2443,6 +2445,7 @@ name = "supertag-worker-host"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "hmac",
  "libc",
  "prost",
  "reqwest",
@@ -2450,6 +2453,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "supertag-protocol",
+ "supertag-shared-execution",
  "supertag-workspaces",
  "tempfile",
  "tokio",
