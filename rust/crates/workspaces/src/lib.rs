@@ -100,7 +100,19 @@ pub async fn git_output_files(
     maximum: usize,
     cancel: &CancellationToken,
 ) -> Result<GitOutputFiles> {
-    git::Repository::output_files(checkout, selected, permits, maximum, cancel).await
+    git::Repository::output_files(checkout, selected, permits, maximum, false, cancel).await
+}
+
+/// Remote providers return files only. Their starting commit is the only
+/// verifiable Git HEAD, and their output bytes come from the returned tree.
+pub async fn prepared_git_output_files(
+    checkout: &Checkout,
+    selected: &[String],
+    permits: impl Fn(&str) -> bool,
+    maximum: usize,
+    cancel: &CancellationToken,
+) -> Result<GitOutputFiles> {
+    git::Repository::output_files(checkout, selected, permits, maximum, true, cancel).await
 }
 
 pub async fn advertised_output_remote(

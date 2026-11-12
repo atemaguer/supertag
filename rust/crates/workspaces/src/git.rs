@@ -466,19 +466,27 @@ impl Repository {
         selected: &[String],
         permits: impl Fn(&str) -> bool,
         maximum: usize,
+        prepared_head: bool,
         cancel: &CancellationToken,
     ) -> Result<GitOutputFiles> {
         let repository = Self::output_repository(&checkout.path, checkout.start_commit.len())?;
-        let head_commit = output_oid(
-            repository
-                .command(
-                    &["rev-parse", "--verify", "HEAD^{commit}"],
-                    &[],
-                    &[],
-                    cancel,
-                )
-                .await?,
-        )?;
+        let (head_commit, mut tracked) = if prepared_head {
+            (checkout.start_commit.clone(), BTreeSet::new())
+        } else {
+            (
+                output_oid(
+                    repository
+                        .command(
+                            &["rev-parse", "--verify", "HEAD^{commit}"],
+                            &[],
+                            &[],
+                            cancel,
+                        )
+                        .await?,
+                )?,
+                repository.selected_tracked(selected, cancel).await?,
+            )
+        };
         let head = repository.tree(&head_commit, cancel).await?;
         let base = if checkout.start_commit == head_commit {
             None
@@ -486,7 +494,6 @@ impl Repository {
             Some(repository.tree(&checkout.start_commit, cancel).await?)
         };
         let base = base.as_ref().unwrap_or(&head);
-        let mut tracked = repository.selected_tracked(selected, cancel).await?;
         let selected: BTreeSet<&str> = selected.iter().map(String::as_str).collect();
         let deleted: Vec<_> = base
             .values()

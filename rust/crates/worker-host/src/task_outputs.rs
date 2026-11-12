@@ -185,19 +185,15 @@ impl PendingOutputs {
                 let checkout = workspace.checkout.clone();
                 let maximum = policy.max_bytes.unwrap_or(MAX_ARTIFACT_BYTES);
                 return tokio::task::spawn_blocking(move || {
-                    let files = collect_git_outputs(&checkout, paths, git, remote, maximum)?;
-                    ensure!(
-                        files.len() <= limit,
-                        "Task output including Git manifest exceeds its file limit"
-                    );
-                    output.paths = files.keys().cloned().collect();
-                    Snapshots::open(&state, &attempt.attempt_id)?.freeze_collected_outputs(
-                        files,
-                        attempt.inspect(),
-                        output.request(),
+                    let files = collect_git_outputs(
+                        &checkout.path,
+                        &checkout.start_commit,
+                        paths,
+                        git,
+                        remote,
                         maximum,
                     )?;
-                    output.frozen = true;
+                    output.freeze_git_files(&state, &attempt, files, limit, maximum)?;
                     Ok(output)
                 })
                 .await?;
@@ -222,6 +218,29 @@ impl PendingOutputs {
             Ok(output)
         })
         .await?
+    }
+
+    fn freeze_git_files(
+        &mut self,
+        state: &Path,
+        attempt: &Attempt,
+        files: BTreeMap<String, CollectedOutput>,
+        limit: usize,
+        maximum: u64,
+    ) -> Result<()> {
+        ensure!(
+            files.len() <= limit,
+            "Task output including Git manifest exceeds its file limit"
+        );
+        self.paths = files.keys().cloned().collect();
+        Snapshots::open(state, &attempt.attempt_id)?.freeze_collected_outputs(
+            files,
+            attempt.inspect(),
+            self.request(),
+            maximum,
+        )?;
+        self.frozen = true;
+        Ok(())
     }
 
     fn freeze_files(
@@ -355,7 +374,8 @@ impl PendingOutputs {
 }
 
 fn collect_git_outputs(
-    checkout: &supertag_workspaces::Checkout,
+    checkout: &Path,
+    start_commit: &str,
     paths: Vec<String>,
     git: supertag_workspaces::GitOutputFiles,
     remote: Option<String>,
@@ -370,7 +390,7 @@ fn collect_git_outputs(
     let mut remaining = maximum;
     for path in paths {
         let bytes = supertag_workspaces::capture_artifact_file(
-            &checkout.path,
+            checkout,
             &path,
             remaining.min(MAX_ARTIFACT_FILE_BYTES) as usize,
         )?;
@@ -389,7 +409,7 @@ fn collect_git_outputs(
     }
     referenced_paths.sort_unstable();
     let snapshot = GitOutputSnapshot {
-        start_commit: checkout.start_commit.clone(),
+        start_commit: start_commit.to_owned(),
         head_commit: git.head_commit,
         remote,
         tracked_paths: git.tracked,

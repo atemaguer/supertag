@@ -1306,7 +1306,7 @@ async fn run_assignment(
                 remote::capture(
                     provider,
                     journal,
-                    (&attempt, workspace),
+                    (&attempt, workspace, workspaces),
                     outputs.take(),
                     &options.state_directory,
                     &cancel,

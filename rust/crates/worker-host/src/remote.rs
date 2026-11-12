@@ -71,7 +71,7 @@ pub(crate) async fn prepare(
 pub(crate) async fn capture(
     provider: &RemoteProvider,
     journal: &Journal,
-    (attempt, workspace): (&Attempt, &PreparedWorkspace),
+    (attempt, workspace, workspaces): (&Attempt, &PreparedWorkspace, &Workspaces),
     outputs: Option<Box<PendingOutputs>>,
     state: &std::path::Path,
     cancel: &CancellationToken,
@@ -86,7 +86,13 @@ pub(crate) async fn capture(
     let outputs = if let Some(outputs) = outputs {
         Some(Box::new(
             outputs
-                .freeze_remote(workspace, tree.clone(), state, attempt, cancel)
+                .freeze_remote(
+                    (workspace, workspaces),
+                    tree.clone(),
+                    state,
+                    attempt,
+                    cancel,
+                )
                 .await
                 .map_err(|error| {
                     let message = if error

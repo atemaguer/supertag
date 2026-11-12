@@ -104,6 +104,8 @@ async function runFixture() {
         "remote-output-readonly",
         "remote-output-cap",
         "remote-output-tracked",
+        "remote-output-git-capture",
+        "remote-output-git-reference",
         "shared-first",
         "shared-resume",
         "shared-command",
@@ -212,6 +214,9 @@ async function runFixture() {
         await writeOutput("reports/report.txt", "declared outside the default directory\n");
         await writeOutput(`${directory}/included.txt`, "declared inside\n");
         await writeOutput(`${directory}/private/skip.txt`, "excluded\n");
+      } else if (mode.startsWith("remote-output-git-")) {
+        await writeOutput("workspace.txt", "dirty remote output\n");
+        await writeOutput(`${directory}/new.txt`, "new remote output\n");
       } else if (mode === "remote-output-readonly") {
         await writeOutput(`${directory}/not-permitted.txt`, "denied\n");
       } else if (mode === "remote-output-cap") {

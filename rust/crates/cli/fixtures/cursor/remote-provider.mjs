@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { access, appendFile, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import {
+  access,
+  appendFile,
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -156,6 +165,14 @@ const implementation = {
     async *capture() {
       assert.ok(staged && !allocation.stopped);
       const checkout = join(directory, "checkout");
+      if (
+        await access(join(root, "omit-tracked-output")).then(
+          () => true,
+          () => false,
+        )
+      ) {
+        await rm(join(checkout, "gone.txt"));
+      }
       const content = await readFile(join(checkout, "workspace.txt"));
       const entries = [];
       async function files(folder, prefix = "") {

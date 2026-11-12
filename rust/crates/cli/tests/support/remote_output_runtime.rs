@@ -1,6 +1,7 @@
 use super::*;
 use supertag_protocol::{
     artifacts::managed_output_directory,
+    git_outputs::MANIFEST_PATH,
     v2::{OutputGitMode, OutputPathPatterns, TaskOutputPolicy},
 };
 
@@ -263,13 +264,13 @@ async fn policies(
     let task = submit(
         runtime,
         mode,
-        Some(declared(&["workspace.txt"], OutputGitMode::Capture, 64)),
+        Some(declared(&["workspace.txt"], OutputGitMode::Capture, 2048)),
     )
     .await?;
     worker_exit(runtime.worker_with_remote(fixture, mode, false, Some(provider))?).await?;
     let result = runtime.assert_success(&task.task_id, mode).await?;
     assert_eq!(result.artifacts.len(), 1);
-    assert_eq!(result.artifacts[0].paths, ["workspace.txt"]);
+    assert_eq!(result.artifacts[0].paths, [MANIFEST_PATH, "workspace.txt"]);
     assert_eq!(
         download(
             runtime,
@@ -283,9 +284,112 @@ async fn policies(
     Ok(())
 }
 
+async fn git_policies(
+    runtime: &mut Runtime<'_>,
+    fixture: &Fixture,
+    provider: RemoteWorkspace,
+) -> Result<()> {
+    let omitted = fixture.root.join("omit-tracked-output");
+    std::fs::write(&omitted, b"held")?;
+    for (mode, git_mode) in [
+        ("remote-output-git-capture", OutputGitMode::Capture),
+        ("remote-output-git-reference", OutputGitMode::Reference),
+    ] {
+        let mut policy = declared(&["workspace.txt", "stable.txt"], git_mode, 4096);
+        policy
+            .include
+            .as_mut()
+            .unwrap()
+            .patterns
+            .push("gone.txt".into());
+        let task = submit(runtime, mode, Some(policy)).await?;
+        worker_exit(runtime.worker_with_remote(fixture, mode, false, Some(provider))?).await?;
+        let result = runtime.assert_success(&task.task_id, mode).await?;
+        assert_eq!(result.artifacts.len(), 1);
+        let artifact = &result.artifacts[0];
+        let reference = git_mode == OutputGitMode::Reference;
+        let mut paths = vec!["deliverables/new.txt"];
+        if !reference {
+            paths.push("stable.txt");
+        }
+        paths.extend([MANIFEST_PATH, "workspace.txt"]);
+        assert_eq!(artifact.paths, paths);
+        let manifest: Value = serde_json::from_slice(
+            &download(runtime, fixture, &artifact.artifact_id, MANIFEST_PATH).await?,
+        )?;
+        assert_eq!(manifest["head"], fixture.base);
+        assert_eq!(manifest["baseCommit"], fixture.base);
+        assert_eq!(manifest["paths"], json!(["stable.txt", "workspace.txt"]));
+        assert_eq!(manifest["deleted"], json!(["gone.txt"]));
+        if reference {
+            assert_eq!(manifest["referencedPaths"], json!(["stable.txt"]));
+            assert_eq!(
+                supertag_protocol::git_outputs::remote_url(
+                    manifest["remote"].as_str().context("advertised source")?
+                )
+                .context("safe advertised source")?
+                .to_file_path()
+                .map_err(|_| anyhow::anyhow!("expected file URL"))?,
+                fixture.source
+            );
+        } else {
+            assert_eq!(manifest["referencedPaths"], json!([]));
+            assert_eq!(manifest["remote"], Value::Null);
+        }
+        assert_eq!(
+            download(runtime, fixture, &artifact.artifact_id, "workspace.txt").await?,
+            b"dirty remote output\n"
+        );
+        assert_eq!(
+            download(
+                runtime,
+                fixture,
+                &artifact.artifact_id,
+                "deliverables/new.txt"
+            )
+            .await?,
+            b"new remote output\n"
+        );
+        assert_eq!(
+            result
+                .workspace_delivery
+                .context("verified Workspace delivery")?
+                .changed_files,
+            2
+        );
+    }
+    std::fs::remove_file(omitted)?;
+    Ok(())
+}
+
 async fn contract(provider: RemoteWorkspace, name: &str) -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let fixture = Fixture::prepare(directory.path()).await?;
+    let mut fixture = Fixture::prepare(directory.path()).await?;
+    std::fs::write(
+        fixture.source.join("stable.txt"),
+        b"unchanged tracked bytes\n",
+    )?;
+    std::fs::write(
+        fixture.source.join("gone.txt"),
+        b"selected tracked deletion\n",
+    )?;
+    git(&fixture.source, &["add", "stable.txt", "gone.txt"]).await?;
+    git(
+        &fixture.source,
+        &["commit", "--quiet", "-m", "Fixture outputs"],
+    )
+    .await?;
+    fixture.base = git(&fixture.source, &["rev-parse", "HEAD"]).await?;
+    git(
+        &fixture.source,
+        &[
+            "remote",
+            "add",
+            "origin",
+            fixture.source.to_str().context("fixture source")?,
+        ],
+    )
+    .await?;
     std::fs::write(fixture.root.join("provider-kind"), name)?;
     let credentials = Credentials::new();
     let mut runtime = Runtime::start(&fixture.root, &credentials).await?;
@@ -303,6 +407,7 @@ async fn contract(provider: RemoteWorkspace, name: &str) -> Result<()> {
         provider,
     ))
     .await?;
+    Box::pin(git_policies(&mut runtime, &fixture, provider)).await?;
     Box::pin(policies(&mut runtime, &fixture, provider)).await?;
     runtime.stop().await
 }
