@@ -360,6 +360,7 @@ async fn contract(url: &str) {
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
                 session_id: stale.session_id,

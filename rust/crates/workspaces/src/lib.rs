@@ -37,11 +37,41 @@ pub fn create_output_directory(root: &Path, path: &str) -> Result<()> {
 }
 
 pub fn list_output_files(root: &Path, path: &str, max_files: usize) -> Result<Vec<String>> {
-    paths::list_output_files(root, path, max_files)
+    paths::list_selected_output_files(root, &[path.to_owned()], max_files, &|_| true)
+}
+
+pub fn prepare_declared_output_directory(root: &Path, path: &str) -> Result<()> {
+    paths::prepare_declared_output_directory(root, path)
+}
+
+pub fn list_selected_output_files(
+    root: &Path,
+    roots: &[String],
+    max_files: usize,
+    include: &impl Fn(&str) -> bool,
+) -> Result<Vec<String>> {
+    paths::list_selected_output_files(root, roots, max_files, include)
 }
 
 pub fn remove_output_directory(root: &Path, path: &str) -> Result<()> {
     paths::remove_output_directory(root, path)
+}
+
+pub async fn tracked_output_paths(
+    checkout: &Checkout,
+    selected: &[String],
+    cancel: &CancellationToken,
+) -> Result<BTreeSet<String>> {
+    if selected.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    git::Repository::tracked_outputs(
+        &checkout.path,
+        checkout.start_commit.len(),
+        selected,
+        cancel,
+    )
+    .await
 }
 
 #[derive(Clone, Debug)]
@@ -83,6 +113,8 @@ pub enum Outcome {
 pub struct FinalizeRequest {
     pub summary: String,
     pub outcome: Outcome,
+    #[serde(default)]
+    pub output_directory: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -331,6 +363,10 @@ impl Workspace {
         let repository = self.repository(cancel).await?;
         let base_tree = repository.tree(&checkout.start_commit, cancel).await?;
         let all_files = paths::scan(&checkout.path, cancel)?;
+        let output_prefix = request
+            .output_directory
+            .as_ref()
+            .map(|directory| format!("{directory}/"));
         let untracked: Vec<_> = all_files
             .keys()
             .filter(|name| !base_tree.contains_key(*name))
@@ -343,7 +379,12 @@ impl Workspace {
         let mut captured_bytes = 0_usize;
         for path in all_files.keys() {
             check_cancelled(cancel)?;
-            if ignored.contains(path) {
+            if ignored.contains(path)
+                || (output_prefix
+                    .as_ref()
+                    .is_some_and(|prefix| path.starts_with(prefix))
+                    && !base_tree.contains_key(path))
+            {
                 continue;
             }
             let file = paths::read_checkout_file(&checkout.path, path)?;

@@ -96,6 +96,7 @@ async fn conversation(store: &Store, name: &str) -> Task {
         .send_message(
             OPERATOR,
             &SendMessageRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
                 conversation: name.into(),

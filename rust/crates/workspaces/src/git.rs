@@ -390,6 +390,44 @@ impl Repository {
         Ok(ignored)
     }
 
+    pub(crate) async fn tracked_outputs(
+        checkout: &Path,
+        oid_length: usize,
+        selected: &[String],
+        cancel: &CancellationToken,
+    ) -> Result<BTreeSet<String>> {
+        let repository = Self {
+            root: checkout.to_owned(),
+            git_dir: checkout.join(".git"),
+            oid_length,
+            bare: false,
+        };
+        paths::read_regular(&repository.git_dir.join("HEAD"), 1024)?;
+        paths::read_regular(&repository.git_dir.join("index"), 32 * 1024 * 1024)?;
+        let mut index = vec!["--literal-pathspecs", "ls-files", "-z", "--cached", "--"];
+        let mut tree = vec![
+            "--literal-pathspecs",
+            "ls-tree",
+            "-rz",
+            "--name-only",
+            "HEAD",
+            "--",
+        ];
+        index.extend(selected.iter().map(String::as_str));
+        tree.extend(selected.iter().map(String::as_str));
+        let mut tracked = BTreeSet::new();
+        for arguments in [index, tree] {
+            let bytes = repository.command(&arguments, &[], &[], cancel).await?;
+            for path in bytes
+                .split(|byte| *byte == 0)
+                .filter(|path| !path.is_empty())
+            {
+                tracked.insert(std::str::from_utf8(path)?.to_owned());
+            }
+        }
+        Ok(tracked)
+    }
+
     pub(crate) async fn write_blob(
         &self,
         bytes: &[u8],

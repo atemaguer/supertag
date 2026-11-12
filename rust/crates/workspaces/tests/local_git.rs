@@ -85,6 +85,7 @@ fn request(task: &str, attempt: &str, head: Option<String>) -> PrepareRequest {
 }
 fn complete() -> FinalizeRequest {
     FinalizeRequest {
+        output_directory: None,
         summary: "Review complete\nChange: Add the requested behavior".into(),
         outcome: Outcome::Completed,
     }
@@ -179,6 +180,7 @@ async fn isolated_capture_is_durable_exact_and_continues_only_an_explicit_pin() 
             .finalize(
                 &checkout,
                 FinalizeRequest {
+                    output_directory: None,
                     summary: "Different result".into(),
                     outcome: Outcome::Completed
                 },
@@ -373,6 +375,7 @@ async fn changed_requests_cancellation_and_failed_outputs_never_select_a_session
         .finalize(
             &checkout,
             FinalizeRequest {
+                output_directory: None,
                 summary: "Capture failed work".into(),
                 outcome: Outcome::Failed,
             },

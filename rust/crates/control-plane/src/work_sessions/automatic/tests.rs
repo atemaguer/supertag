@@ -76,6 +76,7 @@ async fn contract(url: &str) {
             .submit_task(
                 OP,
                 &SubmitTaskRequest {
+                    output_policy: None,
                     tag_id: "lead".into(),
                     session_id: scenario.into(),
                     operation_id: scenario.into(),

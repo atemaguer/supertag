@@ -614,20 +614,23 @@ async fn claude_captures_selected_workspace_files_for_the_operator() -> Result<(
         ])
         .await?;
     let task_id = task["task_id"].as_str().context("Task ID missing")?;
-    let mut host = services.worker(
-        "claude-code",
-        &directory.path().join("host"),
-        Path::new(&interpreter),
-        &entry,
-    );
-    host.arg("--claude-path")
-        .arg(&native)
-        .arg("--workspace-id")
-        .arg("evidence")
-        .arg("--workspace-source")
-        .arg(&source)
-        .env("ANTHROPIC_API_KEY", "fixture-artifact-provider-key");
-    success(host).await?;
+    let worker = || {
+        let mut host = services.worker(
+            "claude-code",
+            &directory.path().join("host"),
+            Path::new(&interpreter),
+            &entry,
+        );
+        host.arg("--claude-path")
+            .arg(&native)
+            .arg("--workspace-id")
+            .arg("evidence")
+            .arg("--workspace-source")
+            .arg(&source)
+            .env("ANTHROPIC_API_KEY", "fixture-artifact-provider-key");
+        host
+    };
+    success(worker()).await?;
     let task = services.operator(&["get-task", task_id]).await?;
     assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
     let page = services
@@ -725,7 +728,89 @@ async fn claude_captures_selected_workspace_files_for_the_operator() -> Result<(
     assert_eq!(std::fs::read(&managed_download)?, b"managed Task output\n");
     assert_eq!(task["workspace_delivery"]["changed_files"], 0);
     assert!(success(git(&["status", "--porcelain"])).await?.is_empty());
+    declared_output_cases(&services, directory.path(), worker).await?;
     services.stop().await
+}
+
+async fn declared_output_cases(
+    services: &LanguageServices,
+    directory: &Path,
+    worker: impl Fn() -> Command,
+) -> Result<()> {
+    let policy_file = directory.join("output-policy.json");
+    let file = policy_file
+        .to_str()
+        .context("policy fixture path is not UTF-8")?;
+    for (session, required, git, expected) in [
+        (
+            "declared",
+            "deliverables/**/deliverable.txt",
+            "capture",
+            "TASK_STATE_SUCCEEDED",
+        ),
+        (
+            "missing",
+            "deliverables/never-created.txt",
+            "capture",
+            "TASK_STATE_FAILED",
+        ),
+        ("tracked", "report.txt", "ignore", "TASK_STATE_FAILED"),
+    ] {
+        std::fs::write(
+            &policy_file,
+            serde_json::to_vec(&serde_json::json!({
+                "directory": "deliverables",
+                "required": [required],
+                "include": [],
+                "git": git,
+                "maxBytes": 64,
+            }))?,
+        )?;
+        let accepted = services
+            .operator(&[
+                "submit",
+                "--tag",
+                "producer",
+                "--session",
+                session,
+                "--outputs",
+                file,
+                "capture-evidence",
+            ])
+            .await?;
+        let task_id = accepted["task_id"].as_str().context("Task ID missing")?;
+        success(worker()).await?;
+        let result = services.operator(&["get-task", task_id]).await?;
+        assert_eq!(result["state"], expected, "{result}");
+        if expected == "TASK_STATE_FAILED" {
+            assert_eq!(result["result"], "Required Task output is missing");
+            assert_eq!(result["artifacts"], serde_json::json!([]));
+        } else {
+            let selection = &result["artifacts"][0];
+            assert_eq!(result["workspace_delivery"]["changed_files"], 0);
+            assert_eq!(
+                selection["paths"],
+                serde_json::json!(["deliverables/deliverable.txt"])
+            );
+            let artifact_id = selection["artifact_id"]
+                .as_str()
+                .context("artifact ID missing")?;
+            let destination = directory.join("declared.txt");
+            services
+                .operator(&[
+                    "artifact",
+                    "download",
+                    artifact_id,
+                    "--path",
+                    "deliverables/deliverable.txt",
+                    "--output",
+                    destination.to_str().context("fixture path is not UTF-8")?,
+                ])
+                .await?;
+            assert_eq!(std::fs::read(destination)?, b"managed Task output\n");
+        }
+    }
+    Ok(())
 }
 
 #[tokio::test]

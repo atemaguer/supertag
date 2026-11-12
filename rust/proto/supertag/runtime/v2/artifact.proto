@@ -57,6 +57,7 @@ message ArtifactSummary {
   uint32 file_count = 4;
   uint64 byte_length = 5;
   int64 captured_at_ms = 6;
+  bool declared_task_output = 7;
 }
 
 message CapturedArtifact {
@@ -79,6 +80,8 @@ message CommitArtifactCaptureRequest {
   optional string native_session_id = 5;
   // Worker Host collection from the current Attempt's managed output directory.
   bool managed_task_output = 6;
+  // Collection under the immutable output policy accepted with the Task.
+  bool declared_task_output = 7;
 }
 
 message GetCapturedArtifactRequest {

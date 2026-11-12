@@ -29,6 +29,7 @@ fn catalog() -> PutGithubWorkspaceRequest {
 
 fn submit(operation: &str, session: &str) -> SubmitTaskRequest {
     SubmitTaskRequest {
+        output_policy: None,
         tag_id: "engineer".into(),
         session_id: session.into(),
         operation_id: operation.into(),

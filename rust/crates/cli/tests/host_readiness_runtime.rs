@@ -288,6 +288,7 @@ async fn executing_capacity_and_recovery_suppression_are_reported_by_the_actual_
         .await?;
     let task = operator
         .submit_task(credentials.request(SubmitTaskRequest {
+            output_policy: None,
             execution_limits: None,
             tag_id: "reviewer".into(),
             session_id: "review".into(),

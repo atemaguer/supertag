@@ -280,7 +280,7 @@ export async function runAdapter(
     });
     phase = "MCP tool preparation";
     const mcp = await taskMcpTools(harness, task, controller.signal, () => !finalSeen, secrets);
-    const { env, cwd } = await nativeEnvironment(environment);
+    const { env, cwd } = await nativeEnvironment(environment, task.outputPolicy?.directory);
     phase = "Skill preparation";
     const { plugins, names, roots } = await stageSkills(
       selected,

@@ -33,6 +33,7 @@ async fn submit(store: &Store, tag: &str, session: &str) -> Task {
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: tag.into(),
                 session_id: session.into(),
@@ -127,6 +128,7 @@ async fn contract(url: String) {
             .submit_task(
                 OPERATOR,
                 &SubmitTaskRequest {
+                    output_policy: None,
                     execution_limits: None,
                     tag_id: "owner".into(),
                     session_id: "work/forged".into(),

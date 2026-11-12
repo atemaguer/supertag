@@ -49,6 +49,7 @@ async fn exercise(url: &str) {
         .await
         .unwrap();
     let capture = CommitArtifactCaptureRequest {
+        declared_task_output: false,
         attempt: Some(attempt),
         operation_id: "capture".into(),
         description: Some(ArtifactDescription {

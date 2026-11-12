@@ -250,6 +250,7 @@ impl Runtime {
         Ok(self
             .operator
             .submit_task(self.credentials.request(SubmitTaskRequest {
+                output_policy: None,
                 tag_id: tag.into(),
                 session_id: session.into(),
                 operation_id: Uuid::new_v4().to_string(),
@@ -803,6 +804,7 @@ async fn opencode_claims_and_runs_the_accepted_role_model() -> Result<()> {
         operation_id: Uuid::new_v4().to_string(),
         harness_kind: HarnessKind::Opencode as i32,
         execution_profile: Some(HarnessExecutionProfile {
+            declared_task_outputs: false,
             model_ids: vec![FIXTURE_MODEL.into()],
             default_model: Some(FIXTURE_MODEL.into()),
             allow_unsandboxed_commands: false,

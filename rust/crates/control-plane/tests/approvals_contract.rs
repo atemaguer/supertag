@@ -134,6 +134,7 @@ async fn contract(url: &str) {
         .submit_task(
             ALICE,
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
                 session_id: "ordinary".into(),
@@ -269,6 +270,7 @@ async fn contract(url: &str) {
         .send_message(
             ALICE,
             &SendMessageRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
                 conversation: "private-approval".into(),
@@ -351,6 +353,7 @@ async fn contract(url: &str) {
         .send_message(
             ALICE,
             &SendMessageRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
                 conversation: "another-conversation".into(),
@@ -402,6 +405,7 @@ async fn contract(url: &str) {
         .send_message(
             ALICE,
             &SendMessageRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
                 conversation: "excluded-owner".into(),
@@ -625,6 +629,7 @@ async fn contract(url: &str) {
         .submit_task(
             ALICE,
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
                 session_id: "expired-grant".into(),
@@ -704,6 +709,7 @@ async fn contract(url: &str) {
         .submit_task(
             ALICE,
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
                 session_id: "sweep-tail".into(),

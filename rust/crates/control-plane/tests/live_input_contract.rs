@@ -26,6 +26,7 @@ async fn submit(store: &Store, tag: &str, session: &str, operation: &str) -> Tas
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: tag.into(),
                 session_id: session.into(),
@@ -599,6 +600,7 @@ async fn policy_fence(url: &str, store: &Store, host: &HostAuthority) {
 
     store.put_tag_spec(policy.clone()).await.unwrap();
     let mut send = SendMessageRequest {
+        output_policy: None,
         execution_limits: None,
         tag_id: "reviewer".into(),
         conversation: "policy-fence".into(),

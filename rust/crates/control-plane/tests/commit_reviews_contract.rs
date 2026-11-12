@@ -790,6 +790,7 @@ async fn contract(url: &str) {
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "reviewer".into(),
                 session_id: "unrelated".into(),
@@ -1137,6 +1138,7 @@ async fn gated_request_contract(url: &str) {
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "scoped-reviewer".into(),
                 session_id: "separate-review-session".into(),

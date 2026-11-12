@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 fn request(operation: &str) -> SubmitTaskRequest {
     SubmitTaskRequest {
+        output_policy: None,
         execution_limits: None,
         tag_id: "reviewer".into(),
         session_id: "review-session".into(),

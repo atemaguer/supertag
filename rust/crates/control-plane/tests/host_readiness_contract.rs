@@ -31,6 +31,7 @@ fn report(sequence: u64) -> ReportHostRequest {
         harness_kind: HarnessKind::Codex as i32,
         workspace_ids: vec!["project".into()],
         execution_profile: Some(HarnessExecutionProfile {
+            declared_task_outputs: false,
             model_ids: vec!["codex-alpha".into(), "codex-beta".into()],
             default_model: Some("codex-alpha".into()),
             allow_unsandboxed_commands: false,
@@ -116,6 +117,7 @@ async fn contract(url: &str) {
         .submit_task(
             "operator:alice",
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "engineering".into(),
                 session_id: "session".into(),

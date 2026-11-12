@@ -650,6 +650,7 @@ mod tests {
             harness_kind: HarnessKind::Codex as i32,
             workspace_ids: vec!["repository".into()],
             execution_profile: Some(HarnessExecutionProfile {
+                declared_task_outputs: false,
                 model_ids: vec!["primary".into(), "secondary".into()],
                 default_model: Some("primary".into()),
                 allow_unsandboxed_commands: false,

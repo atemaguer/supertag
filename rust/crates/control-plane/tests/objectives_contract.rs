@@ -195,6 +195,7 @@ async fn review_lifecycle(
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
                 session_id: "direct".into(),
@@ -272,6 +273,7 @@ async fn review_lifecycle(
             .submit_task(
                 OPERATOR,
                 &SubmitTaskRequest {
+                    output_policy: None,
                     execution_limits: None,
                     tag_id: "owner".into(),
                     session_id: objective.session_id,
@@ -412,6 +414,7 @@ async fn budget_and_deadline(
             .submit_task(
                 OPERATOR,
                 &SubmitTaskRequest {
+                    output_policy: None,
                     execution_limits: None,
                     tag_id: "owner".into(),
                     session_id: budget.session_id.clone(),
@@ -496,6 +499,7 @@ async fn budget_and_deadline(
             .submit_task(
                 OPERATOR,
                 &SubmitTaskRequest {
+                    output_policy: None,
                     execution_limits: None,
                     tag_id: "owner".into(),
                     session_id: deadline.session_id.clone(),
@@ -599,6 +603,7 @@ async fn idle_and_unstarted_claims(
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
                 session_id: idle.session_id,
@@ -721,6 +726,7 @@ async fn pause_and_recovery(url: &str, clock: &Arc<AtomicI64>, host: &HostAuthor
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
                 session_id: "pause-race-unrelated".into(),
@@ -795,6 +801,7 @@ async fn pause_and_recovery(url: &str, clock: &Arc<AtomicI64>, host: &HostAuthor
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
                 session_id: denied.session_id,
@@ -863,6 +870,7 @@ async fn pause_and_recovery(url: &str, clock: &Arc<AtomicI64>, host: &HostAuthor
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
                 session_id: recovery.session_id,

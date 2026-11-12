@@ -226,15 +226,16 @@ func (x *ArtifactProducer) GetNativeSessionId() string {
 }
 
 type ArtifactSummary struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ArtifactId    string                 `protobuf:"bytes,1,opt,name=artifact_id,json=artifactId,proto3" json:"artifact_id,omitempty"`
-	Description   *ArtifactDescription   `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
-	Producer      *ArtifactProducer      `protobuf:"bytes,3,opt,name=producer,proto3" json:"producer,omitempty"`
-	FileCount     uint32                 `protobuf:"varint,4,opt,name=file_count,json=fileCount,proto3" json:"file_count,omitempty"`
-	ByteLength    uint64                 `protobuf:"varint,5,opt,name=byte_length,json=byteLength,proto3" json:"byte_length,omitempty"`
-	CapturedAtMs  int64                  `protobuf:"varint,6,opt,name=captured_at_ms,json=capturedAtMs,proto3" json:"captured_at_ms,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	ArtifactId         string                 `protobuf:"bytes,1,opt,name=artifact_id,json=artifactId,proto3" json:"artifact_id,omitempty"`
+	Description        *ArtifactDescription   `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	Producer           *ArtifactProducer      `protobuf:"bytes,3,opt,name=producer,proto3" json:"producer,omitempty"`
+	FileCount          uint32                 `protobuf:"varint,4,opt,name=file_count,json=fileCount,proto3" json:"file_count,omitempty"`
+	ByteLength         uint64                 `protobuf:"varint,5,opt,name=byte_length,json=byteLength,proto3" json:"byte_length,omitempty"`
+	CapturedAtMs       int64                  `protobuf:"varint,6,opt,name=captured_at_ms,json=capturedAtMs,proto3" json:"captured_at_ms,omitempty"`
+	DeclaredTaskOutput bool                   `protobuf:"varint,7,opt,name=declared_task_output,json=declaredTaskOutput,proto3" json:"declared_task_output,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ArtifactSummary) Reset() {
@@ -307,6 +308,13 @@ func (x *ArtifactSummary) GetCapturedAtMs() int64 {
 		return x.CapturedAtMs
 	}
 	return 0
+}
+
+func (x *ArtifactSummary) GetDeclaredTaskOutput() bool {
+	if x != nil {
+		return x.DeclaredTaskOutput
+	}
+	return false
 }
 
 type CapturedArtifact struct {
@@ -438,8 +446,10 @@ type CommitArtifactCaptureRequest struct {
 	NativeSessionId *string                `protobuf:"bytes,5,opt,name=native_session_id,json=nativeSessionId,proto3,oneof" json:"native_session_id,omitempty"`
 	// Worker Host collection from the current Attempt's managed output directory.
 	ManagedTaskOutput bool `protobuf:"varint,6,opt,name=managed_task_output,json=managedTaskOutput,proto3" json:"managed_task_output,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Collection under the immutable output policy accepted with the Task.
+	DeclaredTaskOutput bool `protobuf:"varint,7,opt,name=declared_task_output,json=declaredTaskOutput,proto3" json:"declared_task_output,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *CommitArtifactCaptureRequest) Reset() {
@@ -510,6 +520,13 @@ func (x *CommitArtifactCaptureRequest) GetNativeSessionId() string {
 func (x *CommitArtifactCaptureRequest) GetManagedTaskOutput() bool {
 	if x != nil {
 		return x.ManagedTaskOutput
+	}
+	return false
+}
+
+func (x *CommitArtifactCaptureRequest) GetDeclaredTaskOutput() bool {
+	if x != nil {
+		return x.DeclaredTaskOutput
 	}
 	return false
 }
@@ -965,7 +982,7 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"\fharness_kind\x18\x06 \x01(\x0e2 .supertag.runtime.v2.HarnessKindR\vharnessKind\x12/\n" +
 	"\x11native_session_id\x18\a \x01(\tH\x01R\x0fnativeSessionId\x88\x01\x01B\x0f\n" +
 	"\r_objective_idB\x14\n" +
-	"\x12_native_session_id\"\xa7\x02\n" +
+	"\x12_native_session_id\"\xd9\x02\n" +
 	"\x0fArtifactSummary\x12\x1f\n" +
 	"\vartifact_id\x18\x01 \x01(\tR\n" +
 	"artifactId\x12J\n" +
@@ -975,7 +992,8 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"file_count\x18\x04 \x01(\rR\tfileCount\x12\x1f\n" +
 	"\vbyte_length\x18\x05 \x01(\x04R\n" +
 	"byteLength\x12$\n" +
-	"\x0ecaptured_at_ms\x18\x06 \x01(\x03R\fcapturedAtMs\"\x8b\x01\n" +
+	"\x0ecaptured_at_ms\x18\x06 \x01(\x03R\fcapturedAtMs\x120\n" +
+	"\x14declared_task_output\x18\a \x01(\bR\x12declaredTaskOutput\"\x8b\x01\n" +
 	"\x10CapturedArtifact\x12>\n" +
 	"\asummary\x18\x01 \x01(\v2$.supertag.runtime.v2.ArtifactSummaryR\asummary\x127\n" +
 	"\x05files\x18\x02 \x03(\v2!.supertag.runtime.v2.ArtifactFileR\x05files\"\xeb\x01\n" +
@@ -984,14 +1002,15 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"\vdescription\x18\x02 \x01(\v2(.supertag.runtime.v2.ArtifactDescriptionR\vdescription\x12\x14\n" +
 	"\x05paths\x18\x03 \x03(\tR\x05paths\x12/\n" +
 	"\x11native_session_id\x18\x04 \x01(\tH\x00R\x0fnativeSessionId\x88\x01\x01B\x14\n" +
-	"\x12_native_session_id\"\x83\x03\n" +
+	"\x12_native_session_id\"\xb5\x03\n" +
 	"\x1cCommitArtifactCaptureRequest\x12D\n" +
 	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12!\n" +
 	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12J\n" +
 	"\vdescription\x18\x03 \x01(\v2(.supertag.runtime.v2.ArtifactDescriptionR\vdescription\x127\n" +
 	"\x05files\x18\x04 \x03(\v2!.supertag.runtime.v2.ArtifactFileR\x05files\x12/\n" +
 	"\x11native_session_id\x18\x05 \x01(\tH\x00R\x0fnativeSessionId\x88\x01\x01\x12.\n" +
-	"\x13managed_task_output\x18\x06 \x01(\bR\x11managedTaskOutputB\x14\n" +
+	"\x13managed_task_output\x18\x06 \x01(\bR\x11managedTaskOutput\x120\n" +
+	"\x14declared_task_output\x18\a \x01(\bR\x12declaredTaskOutputB\x14\n" +
 	"\x12_native_session_id\"=\n" +
 	"\x1aGetCapturedArtifactRequest\x12\x1f\n" +
 	"\vartifact_id\x18\x01 \x01(\tR\n" +

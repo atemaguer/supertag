@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result, bail, ensure};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     ffi::{CStr, CString, OsStr},
     fs::{self, DirBuilder, File, OpenOptions},
     io::Read,
@@ -285,60 +285,107 @@ pub(crate) fn remove_output_directory(root: &Path, path: &str) -> Result<()> {
     }
 }
 
-pub(crate) fn list_output_files(root: &Path, path: &str, max_files: usize) -> Result<Vec<String>> {
-    fn visit(
-        directory: &File,
-        prefix: &str,
-        depth: usize,
-        remaining: &mut usize,
-        files: &mut Vec<String>,
-        max_files: usize,
-    ) -> Result<()> {
+pub(crate) fn prepare_declared_output_directory(root: &Path, path: &str) -> Result<()> {
+    validate_repo_path(path)?;
+    let mut directory = open_root(root)?;
+    for part in path.split('/') {
+        if let Err(error) = mkdir_at(&directory, part)
+            && error.kind() != std::io::ErrorKind::AlreadyExists
+        {
+            return Err(error.into());
+        }
+        directory = open_dir_at(&directory, part)?;
+    }
+    Ok(())
+}
+
+struct OutputWalk<'a, F> {
+    include: &'a F,
+    remaining: usize,
+    max_files: usize,
+    files: BTreeSet<String>,
+}
+
+impl<F: Fn(&str) -> bool> OutputWalk<'_, F> {
+    fn directory(&mut self, directory: &File, prefix: &str, depth: usize) -> Result<()> {
         ensure!(depth <= 128, "output directory nesting exceeds its limit");
-        for name in bounded_names(directory, *remaining)? {
-            *remaining = remaining
-                .checked_sub(1)
-                .context("output enumeration exceeds its limit")?;
-            if exclude_output_name(&name) {
-                continue;
-            }
-            let path = format!("{prefix}/{name}");
-            ensure!(
-                path.len() <= 1024,
-                "output file path exceeds its length limit"
-            );
-            let mode = metadata_at(directory, &name)?.st_mode & libc::S_IFMT;
-            match mode {
-                libc::S_IFDIR => visit(
-                    &open_dir_at(directory, &name)?,
-                    &path,
-                    depth + 1,
-                    remaining,
-                    files,
-                    max_files,
-                )?,
-                libc::S_IFREG => {
-                    ensure!(
-                        files.len() < max_files,
-                        "output file count exceeds its limit"
-                    );
-                    files.push(path);
-                }
-                _ => bail!("outputs must contain only directories and regular files"),
-            }
+        for name in bounded_names(directory, self.remaining)? {
+            let path = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{prefix}/{name}")
+            };
+            self.entry(directory, &name, path, depth)?;
         }
         Ok(())
     }
-    validate_repo_path(path)?;
-    let directory = match open_root(&root.join(path)) {
-        Ok(directory) => directory,
-        Err(error) if missing(&error) => return Ok(vec![]),
-        Err(error) => return Err(error),
+
+    fn entry(&mut self, directory: &File, name: &str, path: String, depth: usize) -> Result<()> {
+        self.remaining = self
+            .remaining
+            .checked_sub(1)
+            .context("output enumeration exceeds its limit")?;
+        if exclude_output_name(name) {
+            return Ok(());
+        }
+        ensure!(
+            path.len() <= 1024,
+            "output file path exceeds its length limit"
+        );
+        let mode = match metadata_at(directory, name) {
+            Ok(metadata) => metadata.st_mode & libc::S_IFMT,
+            Err(error) if missing(&error) => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        match mode {
+            libc::S_IFDIR => self.directory(&open_dir_at(directory, name)?, &path, depth + 1)?,
+            libc::S_IFREG if (self.include)(&path) => {
+                self.files.insert(path);
+                ensure!(
+                    self.files.len() <= self.max_files,
+                    "output file count exceeds its limit"
+                );
+            }
+            libc::S_IFREG => {}
+            _ => bail!("outputs must contain only directories and regular files"),
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn list_selected_output_files(
+    root: &Path,
+    roots: &[String],
+    max_files: usize,
+    include: &impl Fn(&str) -> bool,
+) -> Result<Vec<String>> {
+    let mut walk = OutputWalk {
+        include,
+        remaining: max_files.saturating_mul(4).saturating_add(1000),
+        max_files,
+        files: BTreeSet::new(),
     };
-    let mut files = vec![];
-    let mut remaining = max_files.saturating_mul(4).saturating_add(1000);
-    visit(&directory, path, 0, &mut remaining, &mut files, max_files)?;
-    Ok(files)
+    for path in roots {
+        if path.is_empty() {
+            walk.directory(&open_root(root)?, "", 0)?;
+            continue;
+        }
+        validate_repo_path(path)?;
+        if path.split('/').any(exclude_output_name) {
+            continue;
+        }
+        let parent = match checkout_parent(root, path) {
+            Ok(parent) => parent,
+            Err(error) if missing(&error) => continue,
+            Err(error) => return Err(error),
+        };
+        let name = path
+            .rsplit('/')
+            .next()
+            .context("output path needs a filename")?;
+        walk.entry(&parent, name, path.clone(), 0)?;
+    }
+    Ok(walk.files.into_iter().collect())
 }
 
 fn missing(error: &anyhow::Error) -> bool {

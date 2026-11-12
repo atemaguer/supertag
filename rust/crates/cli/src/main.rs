@@ -10,6 +10,7 @@ mod mailbox_grants;
 mod network;
 mod node_bridges;
 mod objectives;
+mod output_policy;
 mod policy;
 mod replies;
 mod surface_policy;
@@ -417,6 +418,9 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         /// Limit native agents and Work Sessions started by this turn.
         #[arg(long)]
         max_native_agents: Option<u64>,
+        /// Read declared output requirements from a JSON file.
+        #[arg(long)]
+        outputs: Option<PathBuf>,
         prompt: String,
     },
     /// Read a Task.
@@ -1026,6 +1030,7 @@ async fn run(command: Command) -> Result<()> {
             max_reported_cost_minor,
             reported_cost_currency,
             max_native_agents,
+            outputs,
             prompt,
         } => {
             let (mut operator, token) = operator(connection).await?;
@@ -1043,6 +1048,7 @@ async fn run(command: Command) -> Result<()> {
                 max_reported_cost,
                 max_native_agents,
             });
+            let output_policy = outputs.as_deref().map(output_policy::read).transpose()?;
             let task = operator
                 .submit_task(request(
                     SubmitTaskRequest {
@@ -1051,6 +1057,7 @@ async fn run(command: Command) -> Result<()> {
                         prompt,
                         operation_id: operation_id.unwrap_or_else(|| Uuid::new_v4().to_string()),
                         execution_limits,
+                        output_policy,
                     },
                     &token,
                 )?)

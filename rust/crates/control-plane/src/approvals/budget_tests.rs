@@ -42,6 +42,7 @@ async fn contract(url: &str) {
         .send_message(
             OPERATOR,
             &SendMessageRequest {
+                output_policy: None,
                 tag_id: "lead".into(),
                 conversation: "bounded-root".into(),
                 operation_id: "begin".into(),

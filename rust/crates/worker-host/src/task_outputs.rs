@@ -4,14 +4,18 @@ use std::{
 };
 
 use anyhow::Result;
+use prost::Message;
 use serde::{Deserialize, Serialize};
 use supertag_protocol::{
-    artifacts::{MAX_ARTIFACT_FILES, managed_output_directory},
+    artifacts::{MAX_ARTIFACT_BYTES, MAX_ARTIFACT_FILES, managed_output_directory},
     authenticated_request,
+    output_policy::OutputSelection,
     v2::{
-        ArtifactDescription, ArtifactSelection, HarnessCaptureArtifactRequest, HarnessKind, Task,
+        ArtifactDescription, ArtifactSelection, HarnessCaptureArtifactRequest, HarnessKind,
+        OutputGitMode, Task, TaskOutputPolicy,
     },
 };
+use tokio_util::sync::CancellationToken;
 use tonic::Status;
 use uuid::Uuid;
 
@@ -19,6 +23,7 @@ use crate::{
     Attempt, CoordinationClients,
     adapter::upload_records,
     artifact_snapshots::{Capture, Snapshots},
+    workspaces::PreparedWorkspace,
 };
 
 pub(crate) const OUTPUT_DIRECTORY: &str = "SUPERTAG_OUTPUT_DIR";
@@ -31,6 +36,8 @@ pub(crate) struct PendingOutputs {
     artifact_id: Option<String>,
     #[serde(default)]
     pub(crate) frozen: bool,
+    #[serde(default)]
+    declared_policy: Option<Vec<u8>>,
 }
 
 impl PendingOutputs {
@@ -42,21 +49,30 @@ impl PendingOutputs {
     ) -> Result<Option<Self>> {
         let Some(checkout) = checkout.filter(|_| {
             matches!(harness, HarnessKind::Codex | HarnessKind::ClaudeCode)
-                && task
-                    .allowed_actions
-                    .iter()
-                    .any(|action| action == "files:write")
+                && (task.output_policy.is_some()
+                    || task
+                        .allowed_actions
+                        .iter()
+                        .any(|action| action == "files:write"))
         }) else {
             return Ok(None);
         };
-        let directory = managed_output_directory(&attempt.attempt_id);
-        supertag_workspaces::create_output_directory(checkout, &directory)?;
+        let directory = if let Some(policy) = &task.output_policy {
+            let directory = policy.directory.as_deref().unwrap_or("outputs");
+            supertag_workspaces::prepare_declared_output_directory(checkout, directory)?;
+            directory.into()
+        } else {
+            let directory = managed_output_directory(&attempt.attempt_id);
+            supertag_workspaces::create_output_directory(checkout, &directory)?;
+            directory
+        };
         Ok(Some(Self {
             directory,
             operation_id: format!("task-outputs:{}", Uuid::new_v4()),
             paths: Vec::new(),
             artifact_id: None,
             frozen: false,
+            declared_policy: task.output_policy.as_ref().map(Message::encode_to_vec),
         }))
     }
 
@@ -64,19 +80,87 @@ impl PendingOutputs {
         checkout.join(&self.directory)
     }
 
-    pub(crate) fn freeze(
+    pub(crate) fn cleanup_directory(&self) -> Option<&str> {
+        self.declared_policy
+            .is_none()
+            .then_some(self.directory.as_str())
+    }
+
+    fn policy(&self) -> Result<Option<TaskOutputPolicy>> {
+        Ok(self
+            .declared_policy
+            .as_deref()
+            .map(TaskOutputPolicy::decode)
+            .transpose()?)
+    }
+
+    fn select(&self, checkout: &Path, policy: Option<&TaskOutputPolicy>) -> Result<Vec<String>> {
+        if let Some(policy) = policy {
+            let rules = OutputSelection::new(policy)?;
+            return supertag_workspaces::list_selected_output_files(
+                checkout,
+                &rules.roots(),
+                policy.max_files.unwrap_or(MAX_ARTIFACT_FILES as u32) as usize,
+                &|path| rules.permits(path),
+            );
+        }
+        supertag_workspaces::list_output_files(checkout, &self.directory, MAX_ARTIFACT_FILES)
+    }
+
+    pub(crate) async fn freeze(
+        self,
+        workspace: &PreparedWorkspace,
+        state: &Path,
+        attempt: &Attempt,
+        cancel: &CancellationToken,
+    ) -> Result<Self> {
+        let checkout = workspace.checkout.path.clone();
+        let (mut output, policy, mut paths) = tokio::task::spawn_blocking(move || {
+            let policy = self.policy()?;
+            let paths = self.select(&checkout, policy.as_ref())?;
+            Ok::<_, anyhow::Error>((self, policy, paths))
+        })
+        .await??;
+        if policy
+            .as_ref()
+            .is_some_and(|policy| policy.git() == OutputGitMode::Ignore)
+        {
+            let tracked =
+                supertag_workspaces::tracked_output_paths(&workspace.checkout, &paths, cancel)
+                    .await?;
+            paths.retain(|path| !tracked.contains(path));
+        }
+        let checkout = workspace.checkout.path.clone();
+        let state = state.to_owned();
+        let attempt = attempt.clone();
+        tokio::task::spawn_blocking(move || {
+            output.freeze_files(&checkout, &state, &attempt, policy.as_ref(), paths)?;
+            Ok(output)
+        })
+        .await?
+    }
+
+    fn freeze_files(
         &mut self,
         checkout: &Path,
         state: &Path,
         attempt: &Attempt,
+        policy: Option<&TaskOutputPolicy>,
+        paths: Vec<String>,
     ) -> Result<()> {
-        self.paths =
-            supertag_workspaces::list_output_files(checkout, &self.directory, MAX_ARTIFACT_FILES)?;
+        if let Some(policy) = policy {
+            OutputSelection::new(policy)?.validate(&paths)?;
+        }
+        self.paths = paths;
         if !self.paths.is_empty() {
-            Snapshots::open(state, &attempt.attempt_id)?.freeze_managed_outputs(
+            Snapshots::open(state, &attempt.attempt_id)?.freeze_outputs(
                 checkout,
                 attempt.inspect(),
                 self.request(),
+                policy.is_some(),
+                policy
+                    .and_then(|value| value.max_bytes)
+                    .unwrap_or(MAX_ARTIFACT_BYTES),
             )?;
         }
         self.frozen = true;
@@ -104,10 +188,20 @@ impl PendingOutputs {
         let state = state.to_owned();
         let identity = attempt.inspect();
         let input = self.request();
+        let policy = self
+            .policy()
+            .map_err(|_| Status::data_loss("accepted output policy could not be restored"))?;
         let (snapshots, capture) = tokio::task::spawn_blocking(move || {
             let snapshots = Snapshots::open(&state, &identity.attempt_id)
                 .map_err(|_| Status::data_loss("Task output snapshot is unavailable"))?;
-            let capture = snapshots.replay_managed_outputs(identity, input)?;
+            let capture = snapshots.replay_outputs(
+                identity,
+                input,
+                policy.is_some(),
+                policy
+                    .and_then(|value| value.max_bytes)
+                    .unwrap_or(MAX_ARTIFACT_BYTES),
+            )?;
             Ok::<_, Status>((snapshots, capture))
         })
         .await
@@ -130,6 +224,7 @@ impl PendingOutputs {
                 if receipt.files != manifest.files
                     || receipt.summary.as_ref().is_none_or(|summary| {
                         summary.description != manifest.description
+                            || summary.declared_task_output != manifest.declared_task_output
                             || summary.producer.as_ref().is_none_or(|producer| {
                                 producer.task_id != attempt.task_id
                                     || producer.attempt_id != attempt.attempt_id
@@ -205,9 +300,10 @@ mod tests {
         fs::write(output.join("report.txt"), b"durable output")?;
         fs::write(output.join(".env"), b"excluded")?;
         symlink(output.join("report.txt"), output.join("link.txt"))?;
-        assert!(pending.freeze(&checkout, state.path(), &attempt).is_err());
+        assert!(pending.select(&checkout, None).is_err());
         fs::remove_file(output.join("link.txt"))?;
-        pending.freeze(&checkout, state.path(), &attempt)?;
+        let selected = pending.select(&checkout, None)?;
+        pending.freeze_files(&checkout, state.path(), &attempt, None, selected)?;
         let saved = serde_json::to_vec(&pending)?;
         supertag_workspaces::remove_output_directory(&checkout, &pending.directory)?;
         supertag_workspaces::remove_output_directory(&checkout, &pending.directory)?;
@@ -215,8 +311,12 @@ mod tests {
 
         let recovered: PendingOutputs = serde_json::from_slice(&saved)?;
         let snapshots = Snapshots::open(state.path(), &attempt.attempt_id)?;
-        let Capture::Pending(manifest, bytes) =
-            snapshots.replay_managed_outputs(attempt.inspect(), recovered.request())?
+        let Capture::Pending(manifest, bytes) = snapshots.replay_outputs(
+            attempt.inspect(),
+            recovered.request(),
+            false,
+            MAX_ARTIFACT_BYTES,
+        )?
         else {
             anyhow::bail!("expected the unfinished transfer");
         };
@@ -231,7 +331,12 @@ mod tests {
         let snapshots = Snapshots::open(state.path(), &attempt.attempt_id)?;
         assert_eq!(
             snapshots
-                .replay_managed_outputs(attempt.inspect(), recovered.request())
+                .replay_outputs(
+                    attempt.inspect(),
+                    recovered.request(),
+                    false,
+                    MAX_ARTIFACT_BYTES
+                )
                 .err()
                 .expect("missing snapshot fails closed")
                 .code(),

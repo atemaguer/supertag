@@ -177,6 +177,7 @@ async fn private_harness_work_session_reports_once_after_service_restart() -> Re
     let source = conversations
         .send_message(authenticated_request(
             SendMessageRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
                 conversation: "private".into(),
@@ -543,6 +544,7 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports() -
     let first_parent = conversations
         .send_message(authenticated_request(
             SendMessageRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
                 conversation: "private".into(),
@@ -626,6 +628,7 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports() -
     let next_parent = conversations
         .send_message(authenticated_request(
             SendMessageRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "owner".into(),
                 conversation: "private".into(),

@@ -36,6 +36,11 @@ pub fn validate_capture_manifest(input: &CommitArtifactCaptureRequest) -> Result
         .as_ref()
         .ok_or_else(|| Status::invalid_argument("Attempt authority is required"))?;
     validate_paths(input.files.iter().map(|file| file.path.as_str()))?;
+    if input.managed_task_output && input.declared_task_output {
+        return Err(Status::invalid_argument(
+            "artifact output modes are mutually exclusive",
+        ));
+    }
     if input.managed_task_output {
         let prefix = format!("{}/", managed_output_directory(&attempt.attempt_id));
         if input
@@ -170,6 +175,7 @@ mod tests {
                 .collect(),
             native_session_id: Some("native-session".into()),
             managed_task_output: false,
+            declared_task_output: false,
         }
     }
 

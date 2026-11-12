@@ -111,6 +111,7 @@ impl Fixture {
 }
 fn completed() -> FinalizeRequest {
     FinalizeRequest {
+        output_directory: None,
         summary: "Capture remote work".into(),
         outcome: Outcome::Completed,
     }

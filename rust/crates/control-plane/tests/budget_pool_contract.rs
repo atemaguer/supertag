@@ -115,6 +115,7 @@ async fn ordinary(url: &str) {
             .submit_task(
                 OP,
                 &SubmitTaskRequest {
+                    output_policy: None,
                     tag_id: "lead".into(),
                     session_id: format!("agents-{maximum}"),
                     operation_id: format!("agents-{maximum}"),
@@ -155,6 +156,7 @@ async fn ordinary(url: &str) {
         }
     }
     let req = SubmitTaskRequest {
+        output_policy: None,
         tag_id: "lead".into(),
         session_id: "parent".into(),
         operation_id: "root".into(),

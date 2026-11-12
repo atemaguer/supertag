@@ -201,6 +201,7 @@ async fn contract(url: &str) {
                 .submit_task(
                     OP,
                     &SubmitTaskRequest {
+                        output_policy: None,
                         tag_id: "direct".into(),
                         session_id: name.into(),
                         operation_id: name.into(),
@@ -354,6 +355,7 @@ async fn contract(url: &str) {
         version: 1,
     }];
     let profile = HarnessExecutionProfile {
+        declared_task_outputs: false,
         model_ids: vec!["fixture-model".into()],
         default_model: Some("fixture-model".into()),
         allow_unsandboxed_commands: true,

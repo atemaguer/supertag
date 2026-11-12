@@ -96,6 +96,7 @@ async fn version_two_inflight_upgrade(url: &str, sqlite: bool) {
 
 fn turn(operation_id: &str, session_id: &str) -> SubmitTaskRequest {
     SubmitTaskRequest {
+        output_policy: None,
         execution_limits: None,
         tag_id: "reviewer".into(),
         session_id: session_id.into(),

@@ -243,6 +243,7 @@ async fn contract(url: &str) {
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "engineer".into(),
                 session_id: "ordinary".into(),

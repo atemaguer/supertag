@@ -23,7 +23,7 @@ async function ownedDirectory(path: string): Promise<string> {
 }
 
 /** Copy only provider credentials, never user settings, plugins, hooks, or service credentials. */
-export async function nativeEnvironment(environment: NodeJS.ProcessEnv) {
+export async function nativeEnvironment(environment: NodeJS.ProcessEnv, declaredOutput?: string) {
   const state = await ownedDirectory(environment["SUPERTAG_ADAPTER_STATE_DIRECTORY"] ?? "");
   const cwd = await realpath(environment["SUPERTAG_WORKSPACE_DIRECTORY"] ?? "");
   if (!(await lstat(cwd)).isDirectory()) throw new Error("Workspace directory is missing");
@@ -44,7 +44,12 @@ export async function nativeEnvironment(environment: NodeJS.ProcessEnv) {
   };
   if (environment["SUPERTAG_OUTPUT_DIR"]) {
     const directory = await ownedDirectory(environment["SUPERTAG_OUTPUT_DIR"]);
-    if (!/^outputs\/[a-f0-9]{64}$/u.test(relative(cwd, directory)))
+    const mapped = relative(cwd, directory);
+    if (
+      declaredOutput === undefined
+        ? !/^outputs\/[a-f0-9]{64}$/u.test(mapped)
+        : mapped !== declaredOutput
+    )
       throw new Error("Task output directory is outside the current workspace");
     env["SUPERTAG_OUTPUT_DIR"] = directory;
   }

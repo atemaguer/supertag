@@ -537,6 +537,7 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway()
         Code::Unauthenticated
     );
     let task = |operation: &str| SubmitTaskRequest {
+        output_policy: None,
         execution_limits: None,
         tag_id: "engineer".into(),
         session_id: "reviews".into(),

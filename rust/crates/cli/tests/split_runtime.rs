@@ -419,6 +419,7 @@ async fn exercise_split_runtime(database: &str, directory: &Path) -> Result<()> 
         .into_inner();
     assert_eq!(edited.revision, 2);
     let submit = SubmitTaskRequest {
+        output_policy: None,
         execution_limits: None,
         tag_id: "engineer".into(),
         session_id: "review".into(),
@@ -489,6 +490,7 @@ async fn exercise_split_runtime(database: &str, directory: &Path) -> Result<()> 
 
     let cancel = client
         .submit_task(credentials.request(SubmitTaskRequest {
+            output_policy: None,
             execution_limits: None,
             tag_id: "engineer".into(),
             session_id: "cancel".into(),
@@ -773,6 +775,7 @@ async fn killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerun
         .await?;
     let accepted = client
         .submit_task(credentials.request(SubmitTaskRequest {
+            output_policy: None,
             execution_limits: None,
             tag_id: "engineer".into(),
             session_id: "interrupted".into(),
@@ -853,6 +856,7 @@ async fn killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerun
 
     let queued = client
         .submit_task(credentials.request(SubmitTaskRequest {
+            output_policy: None,
             execution_limits: None,
             tag_id: "engineer".into(),
             session_id: "other-session".into(),
@@ -993,6 +997,7 @@ async fn local_shutdown_replays_finish_before_next_session_task_without_rerunnin
         .await?;
     let first = client
         .submit_task(credentials.request(SubmitTaskRequest {
+            output_policy: None,
             execution_limits: None,
             tag_id: "engineer".into(),
             session_id: "same-session".into(),
@@ -1025,6 +1030,7 @@ async fn local_shutdown_replays_finish_before_next_session_task_without_rerunnin
     let running = task(&mut client, &credentials, &first.task_id).await?;
     let next = client
         .submit_task(credentials.request(SubmitTaskRequest {
+            output_policy: None,
             execution_limits: None,
             tag_id: "engineer".into(),
             session_id: "same-session".into(),
@@ -1865,6 +1871,7 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
         .context("missing Session ID")?;
     let resume = |operation_id: &str| {
         credentials.request(SubmitTaskRequest {
+            output_policy: None,
             execution_limits: None,
             tag_id: "native-engineer".into(),
             session_id: session_id.into(),
@@ -1900,6 +1907,7 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
     assert_eq!(next.result.as_deref(), Some("Native adapter resumed"));
     let running = operator
         .submit_task(credentials.request(SubmitTaskRequest {
+            output_policy: None,
             execution_limits: None,
             tag_id: "native-engineer".into(),
             session_id: session_id.into(),
@@ -1946,6 +1954,7 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
     );
     let ambiguous = operator
         .submit_task(credentials.request(SubmitTaskRequest {
+            output_policy: None,
             execution_limits: None,
             tag_id: "native-engineer".into(),
             session_id: session_id.into(),
@@ -2045,6 +2054,7 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
         .await?;
     let accepted = operator
         .submit_task(credentials.request(SubmitTaskRequest {
+            output_policy: None,
             execution_limits: None,
             tag_id: "engineer".into(),
             session_id: "partitioned-session".into(),
@@ -2055,6 +2065,7 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
         .into_inner();
     let pending = operator
         .submit_task(credentials.request(SubmitTaskRequest {
+            output_policy: None,
             execution_limits: None,
             tag_id: "engineer".into(),
             session_id: "partitioned-session".into(),

@@ -119,7 +119,9 @@ pub(super) fn resolve_attempt(
     harness: HarnessKind,
     profile: &HarnessExecutionProfile,
 ) -> Option<AttemptExecutionSelection> {
-    if !supertag_protocol::mcp::supports(task, harness, profile) {
+    if !supertag_protocol::mcp::supports(task, harness, profile)
+        || !supertag_protocol::output_policy::supports(task, harness, profile)
+    {
         return None;
     }
     if !supertag_protocol::shared_execution::supports(

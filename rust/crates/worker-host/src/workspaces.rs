@@ -245,6 +245,7 @@ impl Workspaces {
         prepared: &PreparedWorkspace,
         summary: &str,
         succeeded: bool,
+        output_directory: Option<&str>,
         cancel: &CancellationToken,
     ) -> Result<PendingWorkspace> {
         let workspace = self.open(&prepared.workspace_id, &prepared.checkout.base_commit)?;
@@ -253,6 +254,7 @@ impl Workspaces {
                 &prepared.checkout,
                 FinalizeRequest {
                     summary: summary.to_owned(),
+                    output_directory: output_directory.map(str::to_owned),
                     outcome: if succeeded {
                         Outcome::Completed
                     } else {
@@ -618,10 +620,22 @@ mod tests {
             anyhow::bail!("missing finalization intent")
         };
         let first = workspaces
-            .finalize(&workspace, &result, succeeded, &CancellationToken::new())
+            .finalize(
+                &workspace,
+                &result,
+                succeeded,
+                None,
+                &CancellationToken::new(),
+            )
             .await?;
         let repeat = workspaces
-            .finalize(&workspace, &result, succeeded, &CancellationToken::new())
+            .finalize(
+                &workspace,
+                &result,
+                succeeded,
+                None,
+                &CancellationToken::new(),
+            )
             .await?;
         assert_eq!(first.delivery, repeat.delivery);
         let receipt = workspaces.verify(&first)?;

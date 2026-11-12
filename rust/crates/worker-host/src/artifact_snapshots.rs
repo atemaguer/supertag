@@ -32,11 +32,13 @@ pub(crate) enum Capture {
     Committed(CapturedArtifact),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
 enum SnapshotMode {
     Explicit,
-    Managed,
-    ReplayManaged,
+    Output {
+        declared: bool,
+        max_bytes: u64,
+        replay: bool,
+    },
 }
 
 impl Snapshots {
@@ -67,21 +69,43 @@ impl Snapshots {
         self.freeze_with_purpose(checkout, attempt, request, SnapshotMode::Explicit)
     }
 
-    pub(crate) fn freeze_managed_outputs(
+    pub(crate) fn freeze_outputs(
         &self,
         checkout: &Path,
         attempt: InspectAttemptRequest,
         request: HarnessCaptureArtifactRequest,
+        declared: bool,
+        max_bytes: u64,
     ) -> Result<Capture, Status> {
-        self.freeze_with_purpose(checkout, attempt, request, SnapshotMode::Managed)
+        self.freeze_with_purpose(
+            checkout,
+            attempt,
+            request,
+            SnapshotMode::Output {
+                declared,
+                max_bytes,
+                replay: false,
+            },
+        )
     }
 
-    pub(crate) fn replay_managed_outputs(
+    pub(crate) fn replay_outputs(
         &self,
         attempt: InspectAttemptRequest,
         request: HarnessCaptureArtifactRequest,
+        declared: bool,
+        max_bytes: u64,
     ) -> Result<Capture, Status> {
-        self.freeze_with_purpose(Path::new(""), attempt, request, SnapshotMode::ReplayManaged)
+        self.freeze_with_purpose(
+            Path::new(""),
+            attempt,
+            request,
+            SnapshotMode::Output {
+                declared,
+                max_bytes,
+                replay: true,
+            },
+        )
     }
 
     fn freeze_with_purpose(
@@ -91,7 +115,14 @@ impl Snapshots {
         mut request: HarnessCaptureArtifactRequest,
         mode: SnapshotMode,
     ) -> Result<Capture, Status> {
-        let managed_task_output = mode != SnapshotMode::Explicit;
+        let (managed_task_output, declared_task_output, max_bytes, replay) = match mode {
+            SnapshotMode::Explicit => (false, false, MAX_ARTIFACT_BYTES, false),
+            SnapshotMode::Output {
+                declared,
+                max_bytes,
+                replay,
+            } => (!declared, declared, max_bytes, replay),
+        };
         request.paths.sort_unstable();
         let receipt = self.path(&request.operation_id, "receipt");
         if let Some(mut file) = open_private(&receipt).map_err(journal_error)? {
@@ -101,6 +132,13 @@ impl Snapshots {
                 .summary
                 .as_ref()
                 .ok_or_else(|| Status::data_loss("stored artifact summary is missing"))?;
+            if summary.declared_task_output != declared_task_output
+                || summary.byte_length > max_bytes
+            {
+                return Err(Status::data_loss(
+                    "stored artifact differs from its accepted output policy",
+                ));
+            }
             let producer = summary
                 .producer
                 .as_ref()
@@ -128,6 +166,7 @@ impl Snapshots {
             if manifest.operation_id != request.operation_id
                 || manifest.attempt.is_some()
                 || manifest.managed_task_output != managed_task_output
+                || manifest.declared_task_output != declared_task_output
             {
                 return Err(Status::data_loss(
                     "stored artifact request has invalid authority",
@@ -140,7 +179,11 @@ impl Snapshots {
                 &manifest.files,
             )?;
             manifest.attempt = Some(attempt);
-            validate_capture_manifest(&manifest)?;
+            if validate_capture_manifest(&manifest)? > max_bytes {
+                return Err(Status::data_loss(
+                    "stored artifact exceeds its accepted byte limit",
+                ));
+            }
             let bytes = manifest
                 .files
                 .iter()
@@ -160,7 +203,7 @@ impl Snapshots {
             return Ok(Capture::Pending(manifest, bytes));
         }
 
-        if mode == SnapshotMode::ReplayManaged {
+        if replay {
             return Err(Status::data_loss("frozen Task output snapshot is missing"));
         }
         let mut manifest = CommitArtifactCaptureRequest {
@@ -170,11 +213,12 @@ impl Snapshots {
             files: Vec::with_capacity(request.paths.len()),
             native_session_id: request.native_session_id,
             managed_task_output,
+            declared_task_output,
         };
         let pending = self.pending_bytes().map_err(journal_error)?;
         let mut remaining = (MAX_PENDING_BYTES.saturating_sub(pending))
             .saturating_sub(MAX_MESSAGE_BYTES as u64 + 4)
-            .min(MAX_ARTIFACT_BYTES);
+            .min(max_bytes);
         if remaining == 0 {
             return Err(Status::resource_exhausted(
                 "retry a pending artifact capture before staging more bytes",

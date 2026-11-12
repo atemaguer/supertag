@@ -71,7 +71,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 44;
+        const SCHEMA_VERSION: i64 = 45;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -166,6 +166,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0042_github_publications.sql"),
                 include_str!("../migrations/sqlite/0043_task_result_artifacts.sql"),
                 include_str!("../migrations/sqlite/0044_github_source_pins.sql"),
+                include_str!("../migrations/sqlite/0045_task_output_policy.sql"),
             ]
         } else {
             [
@@ -213,6 +214,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0042_github_publications.sql"),
                 include_str!("../migrations/postgresql/0043_task_result_artifacts.sql"),
                 include_str!("../migrations/postgresql/0044_github_source_pins.sql"),
+                include_str!("../migrations/postgresql/0045_task_output_policy.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -378,6 +380,9 @@ impl Store {
 
     pub async fn submit_task(&self, principal: &str, input: &SubmitTaskRequest) -> Result<Task> {
         let execution_limits = crate::budget_pool::normalize(input.execution_limits.as_ref())?;
+        let output_policy =
+            supertag_protocol::output_policy::normalize(input.output_policy.as_ref())
+                .map_err(|error| invalid(error.message()))?;
         name("principal", principal)?;
         name("operation ID", &input.operation_id)?;
         name("Tag ID", &input.tag_id)?;
@@ -405,6 +410,7 @@ impl Store {
                 Sha256::digest(serde_json::to_vec(&(&digest, limits.encode_to_vec()))?)
             );
         }
+        let digest = output_policy_digest(digest, output_policy.as_ref())?;
         let (mut transaction, order) = self.write().await?;
         let prior = sqlx::query("SELECT request_digest, task_id FROM supertag_v2_admissions WHERE principal = $1 AND operation_id = $2")
             .bind(principal).bind(&input.operation_id).fetch_optional(&mut *transaction).await?;
@@ -425,13 +431,13 @@ impl Store {
             self.execution_now_ms(),
         )
         .await?;
-        let task = insert_task_with_limits(
+        let task = insert_task_with_requirements(
             &mut transaction,
             order,
             &input.tag_id,
             &input.session_id,
             &input.prompt,
-            execution_limits.as_ref(),
+            (execution_limits.as_ref(), output_policy.as_ref()),
         )
         .await?;
         crate::objectives::objective_link_task_in(&mut transaction, &task).await?;
@@ -907,8 +913,14 @@ impl Store {
             }
             if input.succeeded {
                 crate::workspaces::finish_in(&mut transaction, &row, input).await?;
-                if !input.artifacts.is_empty() {
-                    Box::pin(crate::artifact_captures::submit_in(&mut transaction, input)).await?;
+                let output_policy = output_policy_from_row(&row)?;
+                if !input.artifacts.is_empty() || output_policy.is_some() {
+                    Box::pin(crate::artifact_captures::submit_in(
+                        &mut transaction,
+                        input,
+                        output_policy.as_ref(),
+                    ))
+                    .await?;
                 }
             } else if !input.artifacts.is_empty() {
                 return Err(invalid("only a successful Task can submit artifacts"));
@@ -1075,13 +1087,16 @@ pub(crate) async fn insert_task_with_surface(
     .await
 }
 
-pub(crate) async fn insert_task_with_limits(
+pub(crate) async fn insert_task_with_requirements(
     transaction: &mut Transaction<'_, Any>,
     order: i64,
     tag_id: &str,
     session_id: &str,
     prompt: &str,
-    execution_limits: Option<&ExecutionLimits>,
+    (execution_limits, output_policy): (
+        Option<&ExecutionLimits>,
+        Option<&supertag_protocol::v2::TaskOutputPolicy>,
+    ),
 ) -> Result<Task> {
     Box::pin(insert_task_options(
         transaction,
@@ -1091,6 +1106,7 @@ pub(crate) async fn insert_task_with_limits(
         prompt,
         TaskAdmission {
             execution_limits,
+            output_policy,
             ..Default::default()
         },
     ))
@@ -1122,6 +1138,7 @@ pub(crate) async fn insert_owed_task(
 struct TaskAdmission<'a> {
     surface: Option<&'a crate::surface_policy::AdmissionSurface>,
     execution_limits: Option<&'a ExecutionLimits>,
+    output_policy: Option<&'a supertag_protocol::v2::TaskOutputPolicy>,
     requested_execution: Option<&'a ExecutionSelection>,
     owed: bool,
 }
@@ -1171,6 +1188,18 @@ async fn insert_task_options(
     )
     .await?;
     let harness = i64::from(accepted.policy.harness_kind);
+    if options.output_policy.is_some()
+        && (accepted.workspace.is_none()
+            || !accepted
+                .policy
+                .allowed_actions
+                .iter()
+                .any(|action| action == "files:read"))
+    {
+        return Err(StoreError::FailedPrecondition(
+            "declared Task outputs require a Workspace and accepted file read access".into(),
+        ));
+    }
     if let Some(previous) = sqlx::query("SELECT workspace_id,workspace_base_commit,workspace_github_source,harness_kind,policy_snapshot FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 ORDER BY accepted_order LIMIT 1")
         .bind(tag_id).bind(session_id).fetch_optional(&mut **transaction).await? {
         let prior_policy = previous.try_get::<Option<Vec<u8>>,_>("policy_snapshot")?.as_deref()
@@ -1202,6 +1231,17 @@ async fn insert_task_options(
     )
     .await?;
     crate::budget_pool::set_in(transaction, &mut task, limits).await?;
+    if let Some(policy) = options.output_policy {
+        sqlx::query("UPDATE supertag_v2_tasks SET output_policy=$1 WHERE task_id=$2")
+            .bind(policy.encode_to_vec())
+            .bind(&task.task_id)
+            .execute(&mut **transaction)
+            .await?;
+        task.output_policy = Some(policy.clone());
+        if task.encoded_len() > MAX_TASK_MESSAGE_BYTES {
+            return Err(invalid("accepted Task exceeds the transport limit"));
+        }
+    }
     Ok(task)
 }
 
@@ -1654,7 +1694,32 @@ pub(crate) fn task_row(row: &AnyRow) -> Result<Task> {
         execution_selection,
         attempt_execution,
         artifacts: crate::artifact_captures::submitted_from_row(row)?,
+        output_policy: output_policy_from_row(row)?,
     })
+}
+
+fn output_policy_from_row(row: &AnyRow) -> Result<Option<supertag_protocol::v2::TaskOutputPolicy>> {
+    row.try_get::<Option<Vec<u8>>, _>("output_policy")?
+        .as_deref()
+        .map(crate::policy::decode)
+        .transpose()
+}
+
+pub(crate) fn output_policy_digest(
+    digest: String,
+    policy: Option<&supertag_protocol::v2::TaskOutputPolicy>,
+) -> Result<String> {
+    let Some(policy) = policy else {
+        return Ok(digest);
+    };
+    Ok(format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&(
+            digest,
+            "task-output-policy",
+            policy.encode_to_vec(),
+        ))?)
+    ))
 }
 
 pub(crate) const WORKSTREAM_POST_ACTION: &str = "workstream:post";

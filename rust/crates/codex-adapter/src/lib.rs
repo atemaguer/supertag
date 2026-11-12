@@ -235,11 +235,15 @@ async fn execute(
             .strip_prefix(&workspace)?
             .to_str()
             .context("invalid Task output path")?;
-        let expected = supertag_protocol::artifacts::managed_output_directory(
-            task.attempt_id
-                .as_deref()
-                .context("Task output directory requires an Attempt")?,
-        );
+        let expected = if let Some(policy) = &task.output_policy {
+            policy.directory.as_deref().unwrap_or("outputs").to_owned()
+        } else {
+            supertag_protocol::artifacts::managed_output_directory(
+                task.attempt_id
+                    .as_deref()
+                    .context("Task output directory requires an Attempt")?,
+            )
+        };
         ensure!(
             relative == expected,
             "Task output directory is outside this Attempt"

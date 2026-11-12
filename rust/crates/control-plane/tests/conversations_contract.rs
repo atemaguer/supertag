@@ -10,6 +10,7 @@ const BOB: &str = "operator:bob";
 
 fn send(text: &str, operation: &str) -> SendMessageRequest {
     SendMessageRequest {
+        output_policy: None,
         execution_limits: None,
         tag_id: "engineer".into(),
         conversation: "project".into(),
@@ -175,6 +176,7 @@ async fn exercise(database: &str) {
             .submit_task(
                 ALICE,
                 &SubmitTaskRequest {
+                    output_policy: None,
                     execution_limits: None,
                     tag_id: alice.tag_id.clone(),
                     session_id: alice.session_id.clone(),

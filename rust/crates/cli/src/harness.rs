@@ -187,6 +187,10 @@ impl AdapterOptions {
             remote_file_workspace: false,
             mcp_servers: vec![],
             shared_execution: None,
+            declared_task_outputs: matches!(
+                self.harness_kind(),
+                HarnessKind::Codex | HarnessKind::ClaudeCode
+            ),
         })
     }
     pub fn provider_environment(&self) -> Result<&'static [&'static str]> {

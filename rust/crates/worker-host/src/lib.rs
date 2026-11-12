@@ -425,17 +425,19 @@ pub async fn run(
                     &mut host, &attempt, &token, &shutdown,
                     ensure_providers_stopped(&options, &journal, &attempt, &registration),
                 ).await?;
-                if let Some(mut pending) = outputs.as_ref().filter(|output| succeeded && !output.frozen).cloned() {
-                    let checkout = workspace.checkout.path.clone();
-                    let state = options.state_directory.clone();
-                    let identity = attempt.clone();
+                if let Some(pending) = outputs.as_ref().filter(|output| succeeded && !output.frozen).cloned() {
                     let cancellation = shutdown.child_token();
                     let frozen = with_authority(&mut host, &attempt, &token, &shutdown, &cancellation, async {
-                        tokio::task::spawn_blocking(move || {
-                            pending.freeze(&checkout, &state, &identity)
-                                .map_err(|_| Status::failed_precondition("Task output files could not be captured safely"))?;
-                            Ok(pending)
-                        }).await.map_err(|_| Status::internal("Task output snapshot failed"))?
+                        pending.freeze(&workspace, &options.state_directory, &attempt, &cancellation)
+                            .await.map(Box::new).map_err(|error| {
+                                let required = supertag_protocol::output_policy::REQUIRED_OUTPUT_MISSING;
+                                let message = if error.downcast_ref::<Status>().is_some_and(|status| status.message() == required) {
+                                    required
+                                } else {
+                                    "Task output files could not be captured safely"
+                                };
+                                Status::failed_precondition(message)
+                            })
                     }).await;
                     match frozen {
                         Ok((pending, _)) => journal.save(&Entry::Finalizing {
@@ -451,10 +453,16 @@ pub async fn run(
                         })?,
                         Err(_) if shutdown.is_cancelled() => return Ok(()),
                         Err(error) if retryable(&error) => wait_for_work(&shutdown).await,
-                        Err(_) => save_finish(
+                        Err(error) => save_finish(
                             &journal,
                             attempt,
-                            adapter::failed("Task output files could not be captured safely"),
+                            adapter::failed(
+                                if error.message() == supertag_protocol::output_policy::REQUIRED_OUTPUT_MISSING {
+                                    supertag_protocol::output_policy::REQUIRED_OUTPUT_MISSING
+                                } else {
+                                    "Task output files could not be captured safely"
+                                },
+                            ),
                         )?,
                     }
                     continue;
@@ -467,9 +475,9 @@ pub async fn run(
                     &shutdown,
                     &cancellation,
                     async {
-                        if let Some(outputs) = &outputs {
+                        if let Some(directory) = outputs.as_ref().and_then(|outputs| outputs.cleanup_directory()) {
                             let checkout = workspace.checkout.path.clone();
-                            let directory = outputs.directory.clone();
+                            let directory = directory.to_owned();
                             tokio::task::spawn_blocking(move || {
                                 supertag_workspaces::remove_output_directory(&checkout, &directory)
                                     .map_err(|_| Status::failed_precondition("Task output directory could not be removed safely"))
@@ -480,7 +488,7 @@ pub async fn run(
                                 .map_err(|_| Status::invalid_argument("Remote Workspace output could not be restored safely"))?;
                         }
                         workspaces
-                            .finalize(&workspace, &result, succeeded, &cancellation)
+                            .finalize(&workspace, &result, succeeded, outputs.as_ref().map(|output| output.directory.as_str()), &cancellation)
                             .await
                             .map_err(|_| {
                                 Status::invalid_argument(
@@ -953,6 +961,17 @@ async fn run_assignment(
             adapter::failed("Worker Host cannot enforce accepted shared execution placement"),
         );
     }
+    if !supertag_protocol::output_policy::supports(
+        &task,
+        options.harness,
+        &options.execution_profile,
+    ) {
+        return save_finish(
+            journal,
+            attempt,
+            adapter::failed("Worker Host cannot enforce accepted Task output requirements"),
+        );
+    }
     let checkpoint = match time::timeout_at(valid_until, transfers.download(&attempt, token)).await
     {
         Ok(Ok(checkpoint)) => checkpoint,
@@ -1184,7 +1203,12 @@ async fn run_assignment(
         .as_ref()
         .zip(adapter_workspace)
         .map(|(outputs, checkout)| outputs.absolute(checkout));
-    if let Some(directory) = &output_directory {
+    if let Some(directory) = &output_directory
+        && task
+            .allowed_actions
+            .iter()
+            .any(|action| action == "files:write")
+    {
         task.instructions.push_str(&format!(
             "\n\nSave deliverables in the Task output directory at {}. Use this directory for files you want to return with the Task result.",
             directory.display(),

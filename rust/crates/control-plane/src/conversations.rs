@@ -13,7 +13,9 @@ use crate::{
     ControlPlane, Store, StoreError,
     inputs::{input_for_follower_in, record_live_input_in},
     objectives::{objective_admission_in, objective_link_task_in},
-    store::{Result, insert_task_with_limits, invalid, name, task_in, text},
+    store::{
+        Result, insert_task_with_requirements, invalid, name, output_policy_digest, task_in, text,
+    },
 };
 
 const SESSION_PREFIX: &str = "conversation/";
@@ -56,6 +58,9 @@ impl Store {
         input: &SendMessageRequest,
     ) -> Result<ConversationMessage> {
         let execution_limits = crate::budget_pool::normalize(input.execution_limits.as_ref())?;
+        let output_policy =
+            supertag_protocol::output_policy::normalize(input.output_policy.as_ref())
+                .map_err(|error| invalid(error.message()))?;
         operator(principal)?;
         name("Tag ID", &input.tag_id)?;
         conversation_name(&input.conversation)?;
@@ -81,6 +86,7 @@ impl Store {
                 ))?)
             );
         }
+        let digest = output_policy_digest(digest, output_policy.as_ref())?;
         let (mut tx, order) = self.write().await?;
         let prior = sqlx::query("SELECT task_id,request_digest FROM supertag_v2_conversation_messages WHERE principal=$1 AND operation_id=$2")
             .bind(principal).bind(&input.operation_id).fetch_optional(&mut *tx).await?;
@@ -102,13 +108,13 @@ impl Store {
             .unwrap_or_else(|| format!("{SESSION_PREFIX}{}", Uuid::new_v4()));
         let now = self.execution_now_ms();
         objective_admission_in(&mut tx, &input.tag_id, &session, now).await?;
-        let task = insert_task_with_limits(
+        let task = insert_task_with_requirements(
             &mut tx,
             order,
             &input.tag_id,
             &session,
             &input.text,
-            execution_limits.as_ref(),
+            (execution_limits.as_ref(), output_policy.as_ref()),
         )
         .await?;
         objective_link_task_in(&mut tx, &task).await?;

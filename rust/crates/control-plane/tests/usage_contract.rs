@@ -11,6 +11,7 @@ async fn start(store: &Store, host: &HostAuthority) -> InspectAttemptRequest {
         .submit_task(
             "operator:test",
             &SubmitTaskRequest {
+                output_policy: None,
                 tag_id: "usage".into(),
                 session_id: Uuid::new_v4().to_string(),
                 operation_id: Uuid::new_v4().to_string(),

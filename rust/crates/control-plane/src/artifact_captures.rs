@@ -3,6 +3,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::{
     artifacts::{MAX_ARTIFACT_FILES, validate_artifact_path, validate_capture_manifest},
+    output_policy::OutputSelection,
     v2::*,
 };
 use tonic::{Request, Response, Status};
@@ -121,6 +122,29 @@ impl Store {
         if !permitted {
             return Err(StoreError::PermissionDenied);
         }
+        if canonical.declared_task_output {
+            let policy = task
+                .output_policy
+                .as_ref()
+                .ok_or(StoreError::PermissionDenied)?;
+            if task.workspace.is_none()
+                || task.attempt_execution.as_ref().is_none_or(|execution| {
+                    execution.remote_file_workspace
+                        || !matches!(
+                            execution.harness_kind(),
+                            HarnessKind::Codex | HarnessKind::ClaudeCode
+                        )
+                })
+            {
+                return Err(StoreError::PermissionDenied);
+            }
+            let paths = canonical
+                .files
+                .iter()
+                .map(|file| file.path.clone())
+                .collect::<Vec<_>>();
+            validate_declared_outputs(policy, &paths, byte_length)?;
+        }
         let objective_id = sqlx::query_scalar(
             "SELECT objective_id FROM supertag_v2_task_audience WHERE task_id=$1 AND objective_id<>''",
         )
@@ -146,6 +170,7 @@ impl Store {
                 file_count: canonical.files.len() as u32,
                 byte_length,
                 captured_at_ms: now,
+                declared_task_output: canonical.declared_task_output,
             }),
             files: canonical.files,
         };
@@ -293,8 +318,11 @@ pub(crate) fn normalize_submissions(input: &[ArtifactSelection]) -> Result<Vec<A
 pub(crate) async fn submit_in(
     tx: &mut Transaction<'_, Any>,
     input: &FinishTaskRequest,
+    output_policy: Option<&TaskOutputPolicy>,
 ) -> Result<()> {
     let selections = normalize_submissions(&input.artifacts)?;
+    let mut declared_paths = Vec::new();
+    let mut declared_bytes = 0_u64;
     for selection in &selections {
         let row = sqlx::query(
             "SELECT payload FROM supertag_v2_artifact_captures
@@ -307,13 +335,31 @@ pub(crate) async fn submit_in(
         .await?
         .ok_or_else(|| invalid("submitted artifact must be committed by this Task Attempt"))?;
         let artifact = capture_row(&row)?;
-        if selection
-            .paths
-            .iter()
-            .any(|path| !artifact.files.iter().any(|entry| &entry.path == path))
-        {
-            return Err(invalid("submitted artifact path does not exist"));
+        for path in &selection.paths {
+            let entry = artifact
+                .files
+                .iter()
+                .find(|entry| &entry.path == path)
+                .ok_or_else(|| invalid("submitted artifact path does not exist"))?;
+            if artifact
+                .summary
+                .as_ref()
+                .is_some_and(|summary| summary.declared_task_output)
+            {
+                declared_paths.push(path.clone());
+                declared_bytes += entry
+                    .blob
+                    .as_ref()
+                    .ok_or_else(|| invalid("submitted artifact path has no byte receipt"))?
+                    .byte_length;
+            }
         }
+    }
+    if let Some(policy) = output_policy {
+        validate_declared_outputs(policy, &declared_paths, declared_bytes)?;
+    }
+    if selections.is_empty() {
+        return Ok(());
     }
     sqlx::query("UPDATE supertag_v2_tasks SET result_artifacts=$1 WHERE task_id=$2")
         .bind(SubmittedArtifacts { selections }.encode_to_vec())
@@ -321,6 +367,24 @@ pub(crate) async fn submit_in(
         .execute(&mut **tx)
         .await?;
     Ok(())
+}
+
+fn validate_declared_outputs(
+    policy: &TaskOutputPolicy,
+    paths: &[String],
+    bytes: u64,
+) -> Result<()> {
+    if paths.len() > policy.max_files.unwrap_or(MAX_ARTIFACT_FILES as u32) as usize
+        || bytes
+            > policy
+                .max_bytes
+                .unwrap_or(supertag_protocol::artifacts::MAX_ARTIFACT_BYTES)
+    {
+        return Err(invalid("declared Task output exceeds its accepted limits"));
+    }
+    OutputSelection::new(policy)
+        .and_then(|rules| rules.validate(paths))
+        .map_err(|error| invalid(error.message()))
 }
 
 fn running(row: &AnyRow, now: i64) -> Result<()> {

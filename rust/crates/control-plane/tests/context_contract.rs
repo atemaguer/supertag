@@ -119,6 +119,7 @@ async fn contract(url: String) {
         .submit_task(
             "operator:alice",
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 operation_id: "required".into(),
                 tag_id: "required".into(),
@@ -132,6 +133,7 @@ async fn contract(url: String) {
         .submit_task(
             "operator:alice",
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 operation_id: "plain".into(),
                 tag_id: "plain".into(),

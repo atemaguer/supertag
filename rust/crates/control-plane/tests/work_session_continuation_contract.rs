@@ -14,6 +14,7 @@ async fn submit(store: &Store, session: &str) -> Task {
         .submit_task(
             OP,
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 tag_id: "lead".into(),
                 session_id: session.into(),

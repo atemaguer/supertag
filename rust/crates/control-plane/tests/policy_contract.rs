@@ -110,6 +110,7 @@ async fn contract(url: String) {
         .submit_task(
             OP,
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 operation_id: "task-one".into(),
                 tag_id: "lead".into(),
@@ -176,6 +177,7 @@ async fn contract(url: String) {
         .submit_task(
             OP,
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 operation_id: "task-two".into(),
                 tag_id: "lead".into(),
@@ -250,6 +252,7 @@ async fn contract(url: String) {
         .submit_task(
             OP,
             &SubmitTaskRequest {
+                output_policy: None,
                 execution_limits: None,
                 operation_id: "task-three".into(),
                 tag_id: "lead".into(),
@@ -418,6 +421,7 @@ async fn composition(store: &Store) {
             .unwrap();
     }
     let request = SubmitTaskRequest {
+        output_policy: None,
         execution_limits: None,
         operation_id: "composed-one".into(),
         tag_id: "composed".into(),
@@ -503,6 +507,7 @@ async fn composition(store: &Store) {
             .submit_task(
                 OP,
                 &SubmitTaskRequest {
+                    output_policy: None,
                     execution_limits: None,
                     operation_id: "internal-artifact".into(),
                     tag_id: "composed".into(),

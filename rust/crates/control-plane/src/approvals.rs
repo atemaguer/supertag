@@ -697,13 +697,13 @@ async fn continue_in(tx: &mut Transaction<'_, Any>, task_id: &str, now: i64) -> 
             ))
             .await?
         } else {
-            crate::store::insert_task_with_limits(
+            crate::store::insert_task_with_requirements(
                 tx,
                 order,
                 &source.tag_id,
                 &source.session_id,
                 &prompt,
-                allocation.as_ref(),
+                (allocation.as_ref(), None),
             )
             .await?
         };
