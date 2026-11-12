@@ -1,0 +1,121 @@
+syntax = "proto3";
+
+package supertag.runtime.v2;
+
+import "supertag/runtime/v2/runtime.proto";
+
+// Operator catalog reads are scoped to the producing Task's audience.
+service ArtifactCatalog {
+  rpc Get(GetCapturedArtifactRequest) returns (CapturedArtifact);
+  rpc List(ListCapturedArtifactsRequest) returns (ListCapturedArtifactsResponse);
+}
+
+// Only the Gateway serves bytes. The Control Plane verifies authority and
+// records provenance and metadata after the Gateway verifies durable storage.
+service ArtifactDirectory {
+  rpc ReserveCapture(CommitArtifactCaptureRequest) returns (CapturedArtifact);
+  rpc CommitCapture(CommitArtifactCaptureRequest) returns (CapturedArtifact);
+  rpc Get(GetCapturedArtifactRequest) returns (CapturedArtifact);
+  rpc List(ListCapturedArtifactsRequest) returns (ListCapturedArtifactsResponse);
+}
+
+service ArtifactTransfers {
+  rpc UploadCapture(stream ArtifactUpload) returns (CapturedArtifact);
+  rpc DownloadFile(DownloadArtifactFileRequest) returns (stream ArtifactDownload);
+}
+
+// The local Worker Host binds the request to its running Attempt and workspace.
+service HarnessArtifacts {
+  rpc Capture(HarnessCaptureArtifactRequest) returns (CapturedArtifact);
+}
+
+message ArtifactDescription {
+  string title = 1;
+  string kind = 2;
+  optional string summary = 3;
+}
+
+message ArtifactFile {
+  string path = 1;
+  BlobReference blob = 2;
+}
+
+message ArtifactProducer {
+  string task_id = 1;
+  string attempt_id = 2;
+  string tag_id = 3;
+  string session_id = 4;
+  optional string objective_id = 5;
+  HarnessKind harness_kind = 6;
+  optional string native_session_id = 7;
+}
+
+message ArtifactSummary {
+  string artifact_id = 1;
+  ArtifactDescription description = 2;
+  ArtifactProducer producer = 3;
+  uint32 file_count = 4;
+  uint64 byte_length = 5;
+  int64 captured_at_ms = 6;
+}
+
+message CapturedArtifact {
+  ArtifactSummary summary = 1;
+  repeated ArtifactFile files = 2;
+}
+
+message HarnessCaptureArtifactRequest {
+  string operation_id = 1;
+  ArtifactDescription description = 2;
+  repeated string paths = 3;
+  optional string native_session_id = 4;
+}
+
+message CommitArtifactCaptureRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  ArtifactDescription description = 3;
+  repeated ArtifactFile files = 4;
+  optional string native_session_id = 5;
+}
+
+message GetCapturedArtifactRequest {
+  string artifact_id = 1;
+}
+
+message ListCapturedArtifactsRequest {
+  string task_id = 1;
+  uint32 limit = 2;
+  uint64 before_order = 3;
+}
+
+message ListCapturedArtifactsResponse {
+  repeated ArtifactSummary artifacts = 1;
+  uint64 next_before_order = 2;
+}
+
+message ArtifactUpload {
+  oneof part {
+    CommitArtifactCaptureRequest begin = 1;
+    ArtifactChunk chunk = 2;
+  }
+}
+
+// Chunks for each file are consecutive, in the order of the opening manifest.
+// Empty files have no chunks. The reference defines the exact terminal length.
+message ArtifactChunk {
+  uint32 file_index = 1;
+  bytes data = 2;
+}
+
+message DownloadArtifactFileRequest {
+  string artifact_id = 1;
+  string path = 2;
+}
+
+message ArtifactDownload {
+  oneof part {
+    ArtifactFile file = 1;
+    bytes chunk = 2;
+  }
+}

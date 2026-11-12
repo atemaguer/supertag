@@ -30,6 +30,8 @@ use tonic::{Request, Response, Status, Streaming, transport::Channel};
 
 use crate::Gateway;
 
+mod artifacts;
+
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(25);
 const WORKSPACE_TRANSFER_TIMEOUT: Duration = Duration::from_secs(120);
 

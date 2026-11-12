@@ -43,8 +43,9 @@ use supertag_protocol::{
         GetTagRequest, GetTaskRequest, HarnessKind, LarkDomain, ListEventsRequest,
         ListNativeUsageRequest, ListTagsRequest, PolicyExecutionSettings, PutTagRequest,
         ReportedCostLimit, ResolveAttemptRequest, RetireTagRequest, RevokeHostRequest,
-        SubmitTaskRequest, Tag, Task, WorkspaceSpec, attempt_inputs_server::AttemptInputsServer,
-        attempt_mailbox_server::AttemptMailboxServer,
+        SubmitTaskRequest, Tag, Task, WorkspaceSpec,
+        artifact_directory_server::ArtifactDirectoryServer,
+        attempt_inputs_server::AttemptInputsServer, attempt_mailbox_server::AttemptMailboxServer,
         attempt_work_sessions_server::AttemptWorkSessionsServer,
         attempt_workstreams_server::AttemptWorkstreamsServer,
         checkpoint_directory_server::CheckpointDirectoryServer, connector_server::ConnectorServer,
@@ -1246,6 +1247,11 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )
         .add_service(
+            ArtifactDirectoryServer::new(plane.clone())
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        )
+        .add_service(
             LiveInputsServer::new(plane.clone())
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
@@ -1429,6 +1435,8 @@ async fn gateway(
         .add_service(gateway.conversations_service())
         .add_service(gateway.worker_host_service())
         .add_service(gateway.host_enrollment_service())
+        .add_service(transfers.artifact_catalog_service())
+        .add_service(transfers.artifact_transfer_service())
         .add_service(transfers.service())
         .add_service(gateway.objectives_service())
         .add_service(gateway.live_inputs_service())

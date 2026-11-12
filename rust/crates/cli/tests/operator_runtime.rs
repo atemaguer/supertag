@@ -4,7 +4,8 @@ use std::{
 
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
-use supertag_protocol::{authenticated_request, v2::*};
+use sha2::{Digest, Sha256};
+use supertag_protocol::{HOST_GENERATION_HEADER, authenticated_request, v2::*};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::{Child, Command},
@@ -126,6 +127,245 @@ async fn retirement_removes_tag_from_roster_and_preserves_identity() -> Result<(
     gateway.kill().await?;
     control.kill().await?;
     Ok(())
+}
+
+#[tokio::test]
+async fn captured_artifact_bytes_survive_gateway_restart_with_private_metadata() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let database = directory.path().join("control.db");
+    let blobs = directory.path().join("blobs");
+    let secret = Uuid::new_v4().to_string();
+    let token = Uuid::new_v4().to_string();
+    let bob_token = Uuid::new_v4().to_string();
+    let host_token = Uuid::new_v4().to_string();
+    let mut control = command(&["control-plane"]);
+    control
+        .env("SUPERTAG_GATEWAY_TOKEN", &secret)
+        .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
+        .env(
+            "SUPERTAG_DATABASE_URL",
+            format!("sqlite://{}?mode=rwc", database.display()),
+        );
+    let (mut control, private) = service(control).await?;
+    let create_gateway = |token: &str, principal: &str| {
+        let mut gateway = gateway(&private, &secret, token, principal);
+        gateway.arg("--checkpoint-directory").arg(&blobs);
+        gateway
+    };
+    let (mut public, endpoint) = service(create_gateway(&token, "operator:alice")).await?;
+    let alice = channel(&endpoint).await?;
+    operator_client::OperatorClient::new(alice.clone())
+        .put_tag(authenticated_request(
+            PutTagRequest {
+                tag_id: "producer".into(),
+                instructions: "Save evidence".into(),
+                allowed_actions: vec!["files:read".into()],
+                ..Default::default()
+            },
+            &token,
+            None,
+        )?)
+        .await?;
+    let task = conversations_client::ConversationsClient::new(alice.clone())
+        .send_message(authenticated_request(
+            SendMessageRequest {
+                tag_id: "producer".into(),
+                conversation: "private".into(),
+                operation_id: "request-evidence".into(),
+                text: "Capture two files".into(),
+                ..Default::default()
+            },
+            &token,
+            None,
+        )?)
+        .await?
+        .into_inner()
+        .task
+        .context("Task missing")?;
+    let mut host = worker_host_client::WorkerHostClient::new(alice.clone());
+    let generation = host
+        .register_host(authenticated_request(
+            RegisterHostRequest {
+                incarnation_id: "fixture".into(),
+            },
+            &host_token,
+            None,
+        )?)
+        .await?
+        .into_inner()
+        .generation;
+    let assignment = host
+        .claim_task(artifact_host_request(
+            ClaimTaskRequest {
+                operation_id: "claim".into(),
+                ..Default::default()
+            },
+            &host_token,
+            generation,
+        )?)
+        .await?
+        .into_inner()
+        .assignment
+        .context("Attempt missing")?;
+    let attempt = InspectAttemptRequest {
+        task_id: task.task_id.clone(),
+        attempt_id: assignment.attempt_id,
+        lease_token: assignment.lease_token,
+    };
+    host.start_task(artifact_host_request(
+        StartTaskRequest {
+            task_id: attempt.task_id.clone(),
+            attempt_id: attempt.attempt_id.clone(),
+            lease_token: attempt.lease_token.clone(),
+        },
+        &host_token,
+        generation,
+    )?)
+    .await?;
+
+    let bytes = b"artifact bytes kept by the Gateway, never the Control Plane";
+    let digest = format!("{:x}", Sha256::digest(bytes));
+    let capture = CommitArtifactCaptureRequest {
+        attempt: Some(attempt),
+        operation_id: "capture".into(),
+        description: Some(ArtifactDescription {
+            title: "Evidence".into(),
+            kind: "report".into(),
+            summary: None,
+        }),
+        files: vec![
+            ArtifactFile {
+                path: "report.txt".into(),
+                blob: Some(BlobReference {
+                    sha256: digest.clone(),
+                    byte_length: bytes.len() as u64,
+                }),
+            },
+            ArtifactFile {
+                path: "empty".into(),
+                blob: Some(BlobReference {
+                    sha256: format!("{:x}", Sha256::digest([])),
+                    byte_length: 0,
+                }),
+            },
+        ],
+        ..Default::default()
+    };
+    let stream = |data: Vec<u8>| {
+        tokio_stream::iter([
+            ArtifactUpload {
+                part: Some(artifact_upload::Part::Begin(capture.clone())),
+            },
+            ArtifactUpload {
+                part: Some(artifact_upload::Part::Chunk(ArtifactChunk {
+                    file_index: 0,
+                    data,
+                })),
+            },
+        ])
+    };
+    let mut transfers = artifact_transfers_client::ArtifactTransfersClient::new(alice.clone());
+    let mut catalog = artifact_catalog_client::ArtifactCatalogClient::new(alice);
+    let error = transfers
+        .upload_capture(artifact_host_request(
+            stream(vec![b'x'; bytes.len()]),
+            &host_token,
+            generation,
+        )?)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), Code::InvalidArgument);
+    let list = ListCapturedArtifactsRequest {
+        task_id: task.task_id,
+        ..Default::default()
+    };
+    assert!(
+        catalog
+            .list(authenticated_request(list, &token, None)?)
+            .await?
+            .into_inner()
+            .artifacts
+            .is_empty()
+    );
+    let captured = transfers
+        .upload_capture(artifact_host_request(
+            stream(bytes.to_vec()),
+            &host_token,
+            generation,
+        )?)
+        .await?
+        .into_inner();
+    assert_eq!(captured.files.len(), 2);
+    assert_eq!(std::fs::read(blobs.join(digest))?, bytes);
+    assert!(
+        !std::fs::read(&database)?
+            .windows(bytes.len())
+            .any(|window| window == bytes)
+    );
+
+    public.kill().await?;
+    let (mut public, endpoint) = service(create_gateway(&token, "operator:alice")).await?;
+    let (mut bob, bob_endpoint) = service(create_gateway(&bob_token, "operator:bob")).await?;
+    let mut alice_transfers =
+        artifact_transfers_client::ArtifactTransfersClient::new(channel(&endpoint).await?);
+    let mut bob_transfers =
+        artifact_transfers_client::ArtifactTransfersClient::new(channel(&bob_endpoint).await?);
+    let download = DownloadArtifactFileRequest {
+        artifact_id: captured
+            .summary
+            .as_ref()
+            .context("artifact summary missing")?
+            .artifact_id
+            .clone(),
+        path: "report.txt".into(),
+    };
+    assert_eq!(
+        bob_transfers
+            .download_file(authenticated_request(download.clone(), &bob_token, None)?)
+            .await
+            .unwrap_err()
+            .code(),
+        Code::NotFound
+    );
+    let mut returned = alice_transfers
+        .download_file(authenticated_request(download, &token, None)?)
+        .await?
+        .into_inner();
+    assert!(
+        matches!(returned.message().await?.and_then(|message| message.part),
+        Some(artifact_download::Part::File(file)) if file.path == "report.txt")
+    );
+    let mut result = Vec::new();
+    while let Some(message) = returned.message().await? {
+        let Some(artifact_download::Part::Chunk(chunk)) = message.part else {
+            anyhow::bail!("expected artifact data");
+        };
+        result.extend(chunk);
+    }
+    assert_eq!(result, bytes);
+    assert_eq!(
+        alice_transfers
+            .upload_capture(artifact_host_request(
+                stream(bytes.to_vec()),
+                &host_token,
+                generation
+            )?)
+            .await?
+            .into_inner(),
+        captured
+    );
+    bob.kill().await?;
+    public.kill().await?;
+    control.kill().await?;
+    Ok(())
+}
+
+fn artifact_host_request<T>(input: T, token: &str, generation: u64) -> Result<tonic::Request<T>> {
+    let mut request = authenticated_request(input, token, None)?;
+    request
+        .metadata_mut()
+        .insert(HOST_GENERATION_HEADER, generation.into());
+    Ok(request)
 }
 
 #[tokio::test]
