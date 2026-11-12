@@ -52,6 +52,7 @@ use uuid::Uuid;
 
 use crate::{
     CoordinationClients, HostOptions, RegisteredHost, RegisteredInputs,
+    artifact_snapshots::Snapshots,
     guardian::{MAX_BOOTSTRAP_BYTES, monotonic_now_ns},
 };
 
@@ -71,7 +72,7 @@ struct Bridge {
     workspace: Option<workspace::RemoteWorkspace>,
     mcp: Option<Arc<crate::mcp::AttemptMcp>>,
     mcp_lane: Arc<Mutex<()>>,
-    artifact_checkout: Option<PathBuf>,
+    artifact_checkout: Option<(PathBuf, Snapshots)>,
     artifact_capacity: Arc<Semaphore>,
 }
 
@@ -159,12 +160,7 @@ impl Harness for Bridge {
             resolved_skills: self.resolved_skills.clone(),
             history,
             remote_workspace: self.workspace.is_some(),
-            may_capture_artifacts: self.artifact_checkout.is_some()
-                && self.assignment.task.as_ref().is_some_and(|task| {
-                    task.allowed_actions
-                        .iter()
-                        .any(|action| action == "files:read")
-                }),
+            may_capture_artifacts: self.artifact_checkout.is_some(),
         }))
     }
 
@@ -397,6 +393,21 @@ pub(crate) async fn execute(
         endpoint: format!("http://{}", listener.local_addr()?),
         token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
     };
+    let artifact_checkout = workspace
+        .filter(|_| {
+            assignment.task.as_ref().is_some_and(|task| {
+                task.allowed_actions
+                    .iter()
+                    .any(|action| action == "files:read")
+            })
+        })
+        .map(|path| {
+            Ok::<_, anyhow::Error>((
+                path.to_owned(),
+                Snapshots::open(&options.state_directory, &assignment.attempt_id)?,
+            ))
+        })
+        .transpose()?;
     let bridge = Bridge {
         token: bootstrap.token.clone(),
         assignment,
@@ -412,7 +423,7 @@ pub(crate) async fn execute(
         workspace: remote_workspace,
         mcp,
         mcp_lane: Arc::default(),
-        artifact_checkout: workspace.map(Path::to_owned),
+        artifact_checkout,
         artifact_capacity: Arc::new(Semaphore::new(1)),
     };
     let stop_server = CancellationToken::new();

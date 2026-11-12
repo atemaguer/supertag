@@ -1,4 +1,5 @@
 mod adapter;
+mod artifact_snapshots;
 mod checkpoints;
 pub mod context;
 mod credentials;

@@ -133,6 +133,7 @@ async function captureArtifact() {
   const source = { mcp_server: { name: "supertag", source: "sdk" } };
   const paths = ["report.txt", "empty.txt"];
   const input = {
+    operationId: "release-evidence",
     title: `Release evidence ${process.env.ANTHROPIC_API_KEY}`,
     kind: "report",
     paths,
@@ -151,6 +152,12 @@ async function captureArtifact() {
   const receipt = JSON.parse(stored?.content?.[0]?.text ?? "{}");
   if (stored?.isError || receipt.fileCount !== 2 || !receipt.artifactId)
     throw new Error("Artifact capture did not return its receipt");
+  const replayed = await coordinationCall(tool, { ...input, paths: [...paths].reverse() });
+  const sameReceipt = JSON.parse(replayed?.content?.[0]?.text ?? "{}");
+  if (replayed?.isError || sameReceipt.artifactId !== receipt.artifactId)
+    throw new Error("Exact artifact retry did not return the original receipt");
+  const conflict = await coordinationCall(tool, { ...input, paths: [paths[0]] });
+  if (!conflict?.isError) throw new Error("Artifact capture accepted a conflicting retry");
   return `Captured artifact ${receipt.artifactId}`;
 }
 

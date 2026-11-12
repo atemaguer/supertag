@@ -462,6 +462,7 @@ impl Journal {
                 .is_none_or(|record| matches!(record.state, RemoteSandboxState::Stopped { .. })),
             "sandbox cleanup must be confirmed before clearing the Attempt"
         );
+        crate::artifact_snapshots::Snapshots::clear(&self.directory)?;
         match fs::remove_dir_all(self.directory.join("remote-workspace")) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}

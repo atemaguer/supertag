@@ -59,6 +59,7 @@ const afterSequence = z
   .optional();
 const schemas = {
   capture_artifact: z.strictObject({
+    operationId: tagId.optional(),
     title: nonblankText(200),
     kind: nonblankText(64),
     summary: z.string().max(4096).optional(),
@@ -196,18 +197,24 @@ export function registerCoordinationTools(
     server.registerTool(
       "capture_artifact",
       {
-        description: "Save selected workspace files as an immutable artifact for the operator.",
+        description:
+          "Save selected workspace files as an immutable artifact for the operator. Reuse operationId to retry the same capture.",
         inputSchema: schemas.capture_artifact,
         _meta: meta,
       },
       async (input, extra) =>
         write(async () => {
-          if (asked || input.paths.some((path) => safeText(path) !== path)) {
+          if (
+            asked ||
+            (input.operationId !== undefined &&
+              safeText(input.operationId) !== input.operationId) ||
+            input.paths.some((path) => safeText(path) !== path)
+          ) {
             return response("The selected artifact files are unavailable.", true);
           }
           const nativeSessionId = scope.nativeSessionId?.();
           const capture = {
-            operationId: randomUUID(),
+            operationId: input.operationId ?? randomUUID(),
             description: {
               title: safeText(input.title),
               kind: safeText(input.kind),

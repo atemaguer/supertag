@@ -16,6 +16,8 @@ use tonic::transport::Channel;
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Capture {
+    #[serde(rename = "operationId")]
+    operation_id: Option<String>,
     title: String,
     kind: String,
     summary: Option<String>,
@@ -29,7 +31,7 @@ impl Capture {
         native_session_id: Option<String>,
     ) -> HarnessCaptureArtifactRequest {
         HarnessCaptureArtifactRequest {
-            operation_id,
+            operation_id: self.operation_id.clone().unwrap_or(operation_id),
             description: Some(ArtifactDescription {
                 title: self.title.clone(),
                 kind: self.kind.clone(),
@@ -64,7 +66,9 @@ impl Capture {
         secrets: &[String],
     ) -> Result<Value> {
         let safe = |value: &str| crate::auth::redact(value.to_owned(), secrets);
-        if self.paths.iter().any(|path| safe(path) != *path) {
+        if self.operation_id.as_ref().is_some_and(|id| safe(id) != *id)
+            || self.paths.iter().any(|path| safe(path) != *path)
+        {
             return Ok(crate::coordination::refused());
         }
         let mut input = self.request(
@@ -109,10 +113,11 @@ pub(crate) fn spec() -> Value {
     json!({
         "type": "function",
         "name": "capture_artifact",
-        "description": "Save selected workspace files as an immutable artifact for the operator.",
+        "description": "Save selected workspace files as an immutable artifact for the operator. Reuse operationId to retry the same capture.",
         "inputSchema": {
             "type": "object",
             "properties": {
+                "operationId": {"type": "string", "minLength": 1, "maxLength": 256},
                 "title": {"type": "string", "minLength": 1, "maxLength": 200},
                 "kind": {"type": "string", "minLength": 1, "maxLength": 64},
                 "summary": {"type": "string", "maxLength": 4096},
