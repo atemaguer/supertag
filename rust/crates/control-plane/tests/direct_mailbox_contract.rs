@@ -157,15 +157,39 @@ async fn previous_mailbox_schema(url: &str) {
     pool.close().await;
 }
 
+async fn open_at(url: &str, clock: &Arc<AtomicI64>) -> Store {
+    let now = clock.clone();
+    Store::open(url)
+        .await
+        .unwrap()
+        .with_execution_clock(move || now.load(Ordering::SeqCst))
+}
+
 async fn direct_contract(url: &str) {
     previous_mailbox_schema(url).await;
     let clock = Arc::new(AtomicI64::new(NOW));
-    let now = clock.clone();
-    let mut store = Store::open(url)
-        .await
-        .unwrap()
-        .with_execution_clock(move || now.load(Ordering::SeqCst));
-    let upgraded = history(&store, "legacy-recipient").await;
+    let store = open_at(url, &clock).await;
+    let (sender, receiver, other) = initialize_mailbox(&store).await;
+    let delivery = submit_direct_messages(&store, &sender, &receiver, &other).await;
+
+    // Exact replay across restart while both sending and receiving Attempts are live.
+    store.close().await;
+    let store = open_at(url, &clock).await;
+    verify_restarted_delivery(&store, &sender, &receiver, &other, delivery).await;
+    verify_directional_grants(&store).await;
+
+    store.close().await;
+    let store = open_at(url, &clock).await;
+    verify_scoped_delivery(&store, &sender, &receiver).await;
+    verify_cross_attempt_replay(&store, &sender, &receiver, &clock).await;
+    let continuation = verify_approved_message(&store, &sender).await;
+    verify_denial_and_quota(&store, &sender, &receiver, &continuation).await;
+    verify_hop_limit(&store, &sender, &clock).await;
+    store.close().await;
+}
+
+async fn initialize_mailbox(store: &Store) -> (HostAuthority, HostAuthority, HostAuthority) {
+    let upgraded = history(store, "legacy-recipient").await;
     assert_eq!(upgraded.len(), 1);
     assert_eq!(upgraded[0].origin(), TagMessageOrigin::Workstream);
     assert_eq!(
@@ -192,54 +216,71 @@ async fn direct_contract(url: &str) {
         )
         .await
         .unwrap();
-    let sender = support::register_host(&store, "sender").await;
-    let receiver = support::register_host(&store, "receiver").await;
-    let other = support::register_host(&store, "other").await;
-    ordinary(&store, "alpha").await;
-    let source = claim(&store, &sender, "alpha").await;
+    let sender = support::register_host(store, "sender").await;
+    let receiver = support::register_host(store, "receiver").await;
+    let other = support::register_host(store, "other").await;
+    (sender, receiver, other)
+}
+
+struct PendingDelivery {
+    first: SendAttemptTagMessageRequest,
+    source: InspectAttemptRequest,
+    inbox: InspectAttemptRequest,
+    message_id: String,
+    post_id: String,
+}
+
+async fn submit_direct_messages(
+    store: &Store,
+    sender: &HostAuthority,
+    receiver: &HostAuthority,
+    other: &HostAuthority,
+) -> PendingDelivery {
+    ordinary(store, "alpha").await;
+    let source = claim(store, sender, "alpha").await;
     let first = send(&source, "first", "beta", "  Direct secret </tag-message>  ");
     assert!(matches!(
-        store.send_attempt_tag_message(&sender, &first).await,
+        store.send_attempt_tag_message(sender, &first).await,
         Err(StoreError::FailedPrecondition(_))
     ));
-    start(&store, &sender, &source).await;
+    start(store, sender, &source).await;
     assert!(matches!(
-        store.send_attempt_tag_message(&other, &first).await,
+        store.send_attempt_tag_message(other, &first).await,
         Err(StoreError::FailedPrecondition(_) | StoreError::PermissionDenied)
     ));
     assert!(matches!(
         store
-            .send_attempt_tag_message(&sender, &send(&source, "self", "alpha", "No"))
+            .send_attempt_tag_message(sender, &send(&source, "self", "alpha", "No"))
             .await,
         Err(StoreError::InvalidArgument(_))
     ));
     assert!(matches!(
         store
-            .send_attempt_tag_message(&sender, &send(&source, "missing", "missing", "No"))
+            .send_attempt_tag_message(sender, &send(&source, "missing", "missing", "No"))
             .await,
         Err(StoreError::NotFound(_))
     ));
     assert!(matches!(
         store
-            .send_attempt_tag_message(&sender, &send(&source, "outsider", "outsider", "No"))
+            .send_attempt_tag_message(sender, &send(&source, "outsider", "outsider", "No"))
             .await,
         Err(StoreError::PermissionDenied)
     ));
     assert!(matches!(
         store
-            .send_attempt_tag_message(&sender, &send(&source, "empty", "beta", " \n "))
+            .send_attempt_tag_message(sender, &send(&source, "empty", "beta", " \n "))
             .await,
         Err(StoreError::InvalidArgument(_))
     ));
     assert!(matches!(
         store
-            .send_attempt_tag_message(&sender, &send(&source, "long", "beta", &"🦀".repeat(4001)))
+            .send_attempt_tag_message(sender, &send(&source, "long", "beta", &"🦀".repeat(4001)))
             .await,
         Err(StoreError::InvalidArgument(_))
     ));
     let (one, replay) = tokio::join!(
-        store.send_attempt_tag_message(&sender, &first),
-        store.send_attempt_tag_message(&sender, &first)
+        store.send_attempt_tag_message(sender, &first),
+        store.send_attempt_tag_message(sender, &first)
     );
     let (one, replay) = (one.unwrap(), replay.unwrap());
     assert_ne!(one.duplicate, replay.duplicate);
@@ -255,23 +296,20 @@ async fn direct_contract(url: &str) {
     assert!(message.objective_id.is_none());
     assert!(matches!(
         store
-            .send_attempt_tag_message(&sender, &send(&source, "first", "beta", "changed"))
+            .send_attempt_tag_message(sender, &send(&source, "first", "beta", "changed"))
             .await,
         Err(StoreError::Conflict(_))
     ));
     store
-        .send_attempt_tag_message(
-            &sender,
-            &send(&source, "second", "beta", &"🦀".repeat(4000)),
-        )
+        .send_attempt_tag_message(sender, &send(&source, "second", "beta", &"🦀".repeat(4000)))
         .await
         .unwrap();
     store
         .put_tag("beta", "Changed after inbox acceptance", vec![])
         .await
         .unwrap();
-    let inbox = claim(&store, &receiver, "beta").await;
-    let bound = start(&store, &receiver, &inbox).await;
+    let inbox = claim(store, receiver, "beta").await;
+    let bound = start(store, receiver, &inbox).await;
     assert_eq!(bound.instructions, "Identity beta");
     assert_eq!(bound.prompt.matches("<tag-message ").count(), 2);
     assert!(bound.prompt.contains("via=\"direct message\""));
@@ -280,22 +318,22 @@ async fn direct_contract(url: &str) {
     let third = send(&source, "third", "beta", "Third direct");
     let fourth = send(&source, "fourth", "beta", "Fourth direct");
     let (third, fourth) = tokio::join!(
-        store.send_attempt_tag_message(&sender, &third),
-        store.send_attempt_tag_message(&sender, &fourth)
+        store.send_attempt_tag_message(sender, &third),
+        store.send_attempt_tag_message(sender, &fourth)
     );
     assert_eq!(usize::from(third.is_ok()) + usize::from(fourth.is_ok()), 1);
     let error = third.err().or_else(|| fourth.err()).unwrap();
     assert!(matches!(error, StoreError::FailedPrecondition(_)));
     assert!(
         store
-            .send_attempt_tag_message(&sender, &first)
+            .send_attempt_tag_message(sender, &first)
             .await
             .unwrap()
             .duplicate
     );
     let public = store
         .post_attempt_workstream(
-            &sender,
+            sender,
             &PostAttemptWorkstreamRequest {
                 attempt: Some(source.clone()),
                 operation_id: "public".into(),
@@ -311,21 +349,36 @@ async fn direct_contract(url: &str) {
         store.get_task(&inbox.task_id).await.unwrap().prompt,
         bound.prompt
     );
-    // Lost-response replay still returns the same committed message after a
-    // Control Plane restart while both sending and receiving Attempts are live.
-    store.close().await;
-    let now = clock.clone();
-    store = Store::open(url)
-        .await
-        .unwrap()
-        .with_execution_clock(move || now.load(Ordering::SeqCst));
+    PendingDelivery {
+        first,
+        source,
+        inbox,
+        message_id: message.message_id,
+        post_id: public.post_id,
+    }
+}
+
+async fn verify_restarted_delivery(
+    store: &Store,
+    sender: &HostAuthority,
+    receiver: &HostAuthority,
+    other: &HostAuthority,
+    delivery: PendingDelivery,
+) {
+    let PendingDelivery {
+        first,
+        source,
+        inbox,
+        message_id,
+        post_id,
+    } = delivery;
     let replay = store
-        .send_attempt_tag_message(&sender, &first)
+        .send_attempt_tag_message(sender, &first)
         .await
         .unwrap();
     assert!(replay.duplicate);
-    assert_eq!(replay.message.unwrap().message_id, message.message_id);
-    let all = history(&store, "beta").await;
+    assert_eq!(replay.message.unwrap().message_id, message_id);
+    let all = history(store, "beta").await;
     assert_eq!(
         all.iter()
             .filter(|m| m.origin() == TagMessageOrigin::Direct)
@@ -344,22 +397,22 @@ async fn direct_contract(url: &str) {
             .unwrap()
             .workstream_post_id
             .as_deref(),
-        Some(public.post_id.as_str())
+        Some(post_id.as_str())
     );
-    finish(&store, &receiver, &inbox, vec![]).await;
-    let successor = claim(&store, &receiver, "beta").await;
-    let next = start(&store, &receiver, &successor).await;
+    finish(store, receiver, &inbox, vec![]).await;
+    let successor = claim(store, receiver, "beta").await;
+    let next = start(store, receiver, &successor).await;
     assert_eq!(next.prompt.matches("<tag-message ").count(), 2);
     assert!(next.prompt.contains("via=\"direct message\""));
     assert!(next.prompt.contains("via=\"workstream post\""));
-    finish(&store, &receiver, &successor, vec![]).await;
-    ordinary(&store, "quiet").await;
-    let quiet = claim(&store, &other, "quiet").await;
-    start(&store, &other, &quiet).await;
+    finish(store, receiver, &successor, vec![]).await;
+    ordinary(store, "quiet").await;
+    let quiet = claim(store, other, "quiet").await;
+    start(store, other, &quiet).await;
     assert!(
         store
             .read_attempt_mailbox(
-                &other,
+                other,
                 &ReadMailboxRequest {
                     attempt: Some(quiet.clone()),
                     ..Default::default()
@@ -372,7 +425,7 @@ async fn direct_contract(url: &str) {
     );
     let shared = store
         .read_attempt_workstream(
-            &other,
+            other,
             &ReadAttemptWorkstreamRequest {
                 attempt: Some(quiet.clone()),
                 ..Default::default()
@@ -383,15 +436,17 @@ async fn direct_contract(url: &str) {
     let shared = shared.page.unwrap();
     assert_eq!(shared.posts.len(), 1);
     assert_eq!(shared.posts[0].body, "Public update");
-    finish(&store, &other, &quiet, vec![]).await;
-    finish(&store, &sender, &source, vec![]).await;
+    finish(store, other, &quiet, vec![]).await;
+    finish(store, sender, &source, vec![]).await;
     assert!(
         store
-            .send_attempt_tag_message(&sender, &first)
+            .send_attempt_tag_message(sender, &first)
             .await
             .is_err()
     );
+}
 
+async fn verify_directional_grants(store: &Store) {
     // Directional recipient grants and durable idempotency survive restart.
     let allow = grant("allow", "alpha", "outsider", true);
     assert!(matches!(
@@ -501,19 +556,16 @@ async fn direct_contract(url: &str) {
             .await
             .is_err()
     );
-    store.close().await;
-    let now = clock.clone();
-    store = Store::open(url)
-        .await
-        .unwrap()
-        .with_execution_clock(move || now.load(Ordering::SeqCst));
-    assert_eq!(history(&store, "beta").await.len(), 4);
-    ordinary(&store, "alpha").await;
-    let source = claim(&store, &sender, "alpha").await;
-    start(&store, &sender, &source).await;
+}
+
+async fn verify_scoped_delivery(store: &Store, sender: &HostAuthority, receiver: &HostAuthority) {
+    assert_eq!(history(store, "beta").await.len(), 4);
+    ordinary(store, "alpha").await;
+    let source = claim(store, sender, "alpha").await;
+    start(store, sender, &source).await;
     let request = send(&source, "direct-outsider", "outsider", "Scoped grant");
     store
-        .send_attempt_tag_message(&sender, &request)
+        .send_attempt_tag_message(sender, &request)
         .await
         .unwrap();
     store
@@ -522,32 +574,39 @@ async fn direct_contract(url: &str) {
         .unwrap();
     assert!(matches!(
         store
-            .send_attempt_tag_message(&sender, &send(&source, "revoked", "outsider", "No"))
+            .send_attempt_tag_message(sender, &send(&source, "revoked", "outsider", "No"))
             .await,
         Err(StoreError::PermissionDenied)
     ));
-    finish(&store, &sender, &source, vec![]).await;
-    let inbox = claim(&store, &receiver, "outsider").await;
-    start(&store, &receiver, &inbox).await;
+    finish(store, sender, &source, vec![]).await;
+    let inbox = claim(store, receiver, "outsider").await;
+    start(store, receiver, &inbox).await;
     assert!(matches!(
         store
             .send_attempt_tag_message(
-                &receiver,
+                receiver,
                 &send(&inbox, "no-reverse", "alpha", "No reverse grant")
             )
             .await,
         Err(StoreError::PermissionDenied)
     ));
-    finish(&store, &receiver, &inbox, vec![]).await;
+    finish(store, receiver, &inbox, vec![]).await;
+}
 
+async fn verify_cross_attempt_replay(
+    store: &Store,
+    sender: &HostAuthority,
+    receiver: &HostAuthority,
+    clock: &AtomicI64,
+) {
     // A confirmed retry gets a new Attempt, but replays the Task's exact send
     // receipt instead of duplicating a message accepted before execution stopped.
-    ordinary(&store, "alpha").await;
-    let before_retry = claim(&store, &sender, "alpha").await;
-    start(&store, &sender, &before_retry).await;
+    ordinary(store, "alpha").await;
+    let before_retry = claim(store, sender, "alpha").await;
+    start(store, sender, &before_retry).await;
     let before = store
         .send_attempt_tag_message(
-            &sender,
+            sender,
             &send(
                 &before_retry,
                 "cross-attempt",
@@ -579,13 +638,13 @@ async fn direct_contract(url: &str) {
         )
         .await
         .unwrap();
-    let after_retry = claim(&store, &sender, "alpha").await;
+    let after_retry = claim(store, sender, "alpha").await;
     assert_eq!(before_retry.task_id, after_retry.task_id);
     assert_ne!(before_retry.attempt_id, after_retry.attempt_id);
-    start(&store, &sender, &after_retry).await;
+    start(store, sender, &after_retry).await;
     let replay = store
         .send_attempt_tag_message(
-            &sender,
+            sender,
             &send(
                 &after_retry,
                 "cross-attempt",
@@ -599,15 +658,18 @@ async fn direct_contract(url: &str) {
     assert_eq!(replay.message.unwrap().message_id, before.message_id);
     assert!(
         store
-            .send_attempt_tag_message(&sender, &send(&before_retry, "stale-retry", "beta", "No"))
+            .send_attempt_tag_message(sender, &send(&before_retry, "stale-retry", "beta", "No"))
             .await
             .is_err()
     );
-    finish(&store, &sender, &after_retry, vec![]).await;
-    let inbox = claim(&store, &receiver, "beta").await;
-    start(&store, &receiver, &inbox).await;
-    finish(&store, &receiver, &inbox, vec![]).await;
-    let baseline_mailbox_count = history(&store, "beta").await.len();
+    finish(store, sender, &after_retry, vec![]).await;
+    let inbox = claim(store, receiver, "beta").await;
+    start(store, receiver, &inbox).await;
+    finish(store, receiver, &inbox, vec![]).await;
+}
+
+async fn verify_approved_message(store: &Store, sender: &HostAuthority) -> InspectAttemptRequest {
+    let baseline_mailbox_count = history(store, "beta").await.len();
 
     // Approval is consumed only in the same transaction as the direct message.
     store
@@ -623,9 +685,9 @@ async fn direct_contract(url: &str) {
         })
         .await
         .unwrap();
-    ordinary(&store, "alpha").await;
-    let source = claim(&store, &sender, "alpha").await;
-    start(&store, &sender, &source).await;
+    ordinary(store, "alpha").await;
+    let source = claim(store, sender, "alpha").await;
+    start(store, sender, &source).await;
     let request = send(
         &source,
         "approved-direct",
@@ -633,15 +695,15 @@ async fn direct_contract(url: &str) {
         "Private approved message",
     );
     let pending = store
-        .send_attempt_tag_message(&sender, &request)
+        .send_attempt_tag_message(sender, &request)
         .await
         .unwrap();
     assert!(pending.message.is_none());
     let approval = pending.approval.unwrap();
     assert_eq!(approval.action, "mailbox:send");
     assert_eq!(approval.resource, "beta");
-    assert_eq!(history(&store, "beta").await.len(), baseline_mailbox_count);
-    finish(&store, &sender, &source, vec![approval.approval_id.clone()]).await;
+    assert_eq!(history(store, "beta").await.len(), baseline_mailbox_count);
+    finish(store, sender, &source, vec![approval.approval_id.clone()]).await;
     let decided = store
         .decide_approval(
             OPERATOR,
@@ -656,12 +718,12 @@ async fn direct_contract(url: &str) {
         )
         .await
         .unwrap();
-    let continuation = claim(&store, &sender, "alpha").await;
+    let continuation = claim(store, sender, "alpha").await;
     assert_eq!(
         decided.continuation_task_id.as_deref(),
         Some(continuation.task_id.as_str())
     );
-    start(&store, &sender, &continuation).await;
+    start(store, sender, &continuation).await;
     let retry = send(
         &continuation,
         "retry-direct",
@@ -670,7 +732,7 @@ async fn direct_contract(url: &str) {
     );
     assert!(
         store
-            .send_attempt_tag_message(&sender, &retry)
+            .send_attempt_tag_message(sender, &retry)
             .await
             .unwrap()
             .message
@@ -678,7 +740,7 @@ async fn direct_contract(url: &str) {
     );
     assert!(
         store
-            .send_attempt_tag_message(&sender, &retry)
+            .send_attempt_tag_message(sender, &retry)
             .await
             .unwrap()
             .duplicate
@@ -691,11 +753,20 @@ async fn direct_contract(url: &str) {
             .consumed_at_ms
             .is_some()
     );
+    continuation
+}
+
+async fn verify_denial_and_quota(
+    store: &Store,
+    sender: &HostAuthority,
+    receiver: &HostAuthority,
+    continuation: &InspectAttemptRequest,
+) {
     // A denial delivers nothing. A later quota refusal must not consume a
     // separately approved Once grant: consumption belongs to the actual insert.
-    let denied_request = send(&continuation, "denied-direct", "beta", "Do not send");
+    let denied_request = send(continuation, "denied-direct", "beta", "Do not send");
     let denied = store
-        .send_attempt_tag_message(&sender, &denied_request)
+        .send_attempt_tag_message(sender, &denied_request)
         .await
         .unwrap()
         .approval
@@ -714,7 +785,7 @@ async fn direct_contract(url: &str) {
         .await
         .unwrap();
     let refused = store
-        .send_attempt_tag_message(&sender, &denied_request)
+        .send_attempt_tag_message(sender, &denied_request)
         .await
         .unwrap();
     assert!(refused.message.is_none());
@@ -722,13 +793,13 @@ async fn direct_contract(url: &str) {
     let mut held = vec![];
     for index in 0..3 {
         let request = send(
-            &continuation,
+            continuation,
             &format!("held-{index}"),
             "beta",
             &format!("Approved extra {index}"),
         );
         let approval = store
-            .send_attempt_tag_message(&sender, &request)
+            .send_attempt_tag_message(sender, &request)
             .await
             .unwrap()
             .approval
@@ -752,7 +823,7 @@ async fn direct_contract(url: &str) {
     for (request, _) in held.iter().take(2) {
         assert!(
             store
-                .send_attempt_tag_message(&sender, request)
+                .send_attempt_tag_message(sender, request)
                 .await
                 .unwrap()
                 .message
@@ -760,7 +831,7 @@ async fn direct_contract(url: &str) {
         );
     }
     assert!(matches!(
-        store.send_attempt_tag_message(&sender, &held[2].0).await,
+        store.send_attempt_tag_message(sender, &held[2].0).await,
         Err(StoreError::FailedPrecondition(_))
     ));
     assert!(
@@ -771,16 +842,18 @@ async fn direct_contract(url: &str) {
             .consumed_at_ms
             .is_none()
     );
-    finish(&store, &sender, &continuation, vec![]).await;
-    let inbox = claim(&store, &receiver, "beta").await;
-    start(&store, &receiver, &inbox).await;
-    finish(&store, &receiver, &inbox, vec![]).await;
+    finish(store, sender, continuation, vec![]).await;
+    let inbox = claim(store, receiver, "beta").await;
+    start(store, receiver, &inbox).await;
+    finish(store, receiver, &inbox, vec![]).await;
+}
 
+async fn verify_hop_limit(store: &Store, sender: &HostAuthority, clock: &AtomicI64) {
     // Each new inbox message inherits the bound chain, including approval turns.
     store.put_tag("alpha", "Sender", vec![]).await.unwrap();
-    ordinary(&store, "alpha").await;
-    let mut current = claim(&store, &sender, "alpha").await;
-    start(&store, &sender, &current).await;
+    ordinary(store, "alpha").await;
+    let mut current = claim(store, sender, "alpha").await;
+    start(store, sender, &current).await;
     for hop in 0..=4 {
         let to = if hop % 2 == 0 { "beta" } else { "alpha" };
         if hop == 3 {
@@ -800,12 +873,12 @@ async fn direct_contract(url: &str) {
         }
         if hop == 4 {
             let pending = store
-                .send_attempt_tag_message(&sender, &send(&current, "chain", to, "Forward chain"))
+                .send_attempt_tag_message(sender, &send(&current, "chain", to, "Forward chain"))
                 .await
                 .unwrap()
                 .approval
                 .unwrap();
-            finish(&store, &sender, &current, vec![pending.approval_id.clone()]).await;
+            finish(store, sender, &current, vec![pending.approval_id.clone()]).await;
             store
                 .decide_approval(
                     OPERATOR,
@@ -820,33 +893,32 @@ async fn direct_contract(url: &str) {
                 )
                 .await
                 .unwrap();
-            current = claim(&store, &sender, "alpha").await;
-            start(&store, &sender, &current).await;
+            current = claim(store, sender, "alpha").await;
+            start(store, sender, &current).await;
         }
         let sent = store
-            .send_attempt_tag_message(&sender, &send(&current, "chain", to, "Forward chain"))
+            .send_attempt_tag_message(sender, &send(&current, "chain", to, "Forward chain"))
             .await
             .unwrap()
             .message
             .unwrap();
         assert_eq!(sent.hops, hop);
-        finish(&store, &sender, &current, vec![]).await;
-        current = claim(&store, &sender, to).await;
-        start(&store, &sender, &current).await;
+        finish(store, sender, &current, vec![]).await;
+        current = claim(store, sender, to).await;
+        start(store, sender, &current).await;
     }
     let rejected = send(&current, "too-far", "alpha", "No sixth inbox");
     assert!(matches!(
-        store.send_attempt_tag_message(&sender, &rejected).await,
+        store.send_attempt_tag_message(sender, &rejected).await,
         Err(StoreError::FailedPrecondition(_))
     ));
     clock.store(NOW + 60_002, Ordering::SeqCst);
     assert!(
         store
-            .send_attempt_tag_message(&sender, &send(&current, "stale", "alpha", "No"))
+            .send_attempt_tag_message(sender, &send(&current, "stale", "alpha", "No"))
             .await
             .is_err()
     );
-    store.close().await;
 }
 
 #[tokio::test]
