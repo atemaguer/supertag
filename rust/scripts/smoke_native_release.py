@@ -17,17 +17,18 @@ from release_archive import extract_release, validate_release
 from smoke_native_archive import smoke, wait_until
 
 
-def installed_bridge(package, node, fixture_source, scratch):
+def installed_bridge(package, node, fixture_source, scratch, *, cli_override=None):
     """Real Host -> installed OpenCode bridge -> synthetic native subprocess."""
     home, tools, vendor = (scratch / name for name in ("home", "bin", "vendor"))
     for directory in (home, tools, vendor):
         directory.mkdir(mode=0o700)
     (tools / "node").symlink_to(node.resolve())
-    (tools / "supertag").symlink_to(package / "supertag")
+    if cli_override is None:
+        (tools / "supertag").symlink_to(package / "supertag")
     native = vendor / "opencode.mjs"
     native.write_text(f"#!{node.resolve()}\n" + fixture_source.read_text())
     native.chmod(0o700)
-    cli, state = tools / "supertag", scratch / "state"
+    cli, state = cli_override or tools / "supertag", scratch / "state"
     env = {"PATH": f"{tools}:{os.defpath}", "HOME": str(home), "LANG": "C.UTF-8"}
     with (scratch / "up.log").open("w+") as log:
         service = subprocess.Popen([cli, "up", "--state-directory", state, "--harness", "opencode",

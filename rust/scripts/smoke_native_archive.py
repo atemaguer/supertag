@@ -41,7 +41,7 @@ def wait_until(check, description):
     raise ArchiveError("timed out waiting for " + description)
 
 
-def smoke(path, fixture, checksum=None, *, validator=validate_archive, extractor=extract_archive):
+def smoke(path, fixture, checksum=None, *, validator=validate_archive, extractor=extract_archive, cli_override=None):
     path, fixture = Path(path).resolve(), Path(fixture).resolve()
     manifest = validator(path, checksum)
     require(manifest["platform"] == native_platform(), "smoke test requires the archive's native platform")
@@ -51,7 +51,7 @@ def smoke(path, fixture, checksum=None, *, validator=validate_archive, extractor
     with tempfile.TemporaryDirectory(prefix="supertag-archive-smoke-", dir="/tmp") as temporary:
         root = Path(temporary)
         package = extractor(path, root / "unpacked", checksum)
-        cli, tui = package / "supertag", package / "supertag-tui"
+        cli, tui = cli_override or package / "supertag", package / "supertag-tui"
         check_versions(cli, tui, manifest["version"])
         home, state = root / "home", root / "state"
         home.mkdir(mode=0o700)
