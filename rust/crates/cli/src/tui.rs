@@ -50,9 +50,14 @@ pub async fn launch(
             Ok(None)
         }
     };
-    let binary = binary
-        .or_else(|| std::env::var_os("SUPERTAG_TUI_BINARY").map(PathBuf::from))
-        .unwrap_or(std::env::current_exe()?.with_file_name("supertag-tui"));
+    let binary = match binary.or_else(|| std::env::var_os("SUPERTAG_TUI_BINARY").map(PathBuf::from))
+    {
+        Some(binary) => binary,
+        None => std::env::current_exe()?
+            .canonicalize()
+            .context("resolve installed SuperTag executable")?
+            .with_file_name("supertag-tui"),
+    };
     check_version(&binary).await?;
 
     let payload = serde_json::to_vec(&json!({
