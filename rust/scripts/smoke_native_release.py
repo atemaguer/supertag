@@ -74,7 +74,7 @@ def smoke_release(archive, fixture, node, opencode_fixture=None):
     opencode_fixture = opencode_fixture or REPO / "packages/runtime/harnesses/opencode/fixtures/native-opencode.mjs"
     verify_node(node)
     with tempfile.TemporaryDirectory(prefix="supertag-complete-smoke-") as temporary:
-        scratch = Path(temporary)
+        scratch = Path(temporary).resolve(strict=True)
         package = extract_release(archive, scratch / "extracted")
         manifest = json.loads((package / "manifest.json").read_text())
         require(manifest["platform"] == native_platform(), "smoke requires the native release platform")

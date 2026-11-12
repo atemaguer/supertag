@@ -74,6 +74,18 @@ class NativeInstallContracts(unittest.TestCase):
                                                   "SUPERTAG_INSTALL_ROOT": "/chosen", "SUPERTAG_BIN_DIR": "/commands"}),
                          (Path("/chosen"), Path("/commands")))
 
+    def test_internal_dependency_link_keeps_portable_mode_on_install_and_replay(self):
+        alias = self.stage / "node-bridges/node_modules/opencode-alias"
+        alias.symlink_to("@supertag/worker-opencode", target_is_directory=True)
+        archive = self.package("0.1.1")
+        installed = self.install(archive)
+        target = Path(installed["installation"])
+        link = target / alias.relative_to(self.stage)
+        self.assertEqual(link.lstat().st_mode & 0o777, 0o777)
+        self.assertEqual(link.resolve(strict=True), target / "node-bridges/node_modules/@supertag/worker-opencode")
+        self.assertEqual(link.stat().st_mode & 0o777, 0o755)
+        self.assertTrue(self.install(archive)["reused"])
+
     def test_upgrade_retains_old_release_and_failure_preserves_active_link(self):
         first = self.install()
         command = Path(first["command"])

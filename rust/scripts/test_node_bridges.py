@@ -59,6 +59,22 @@ class NodeBridgeContracts(unittest.TestCase):
         with self.assertRaisesRegex(ArchiveError, "unresolved staged link"):
             verify_relocatable_tree(stage)
 
+    def test_parent_alias_preserves_internal_link_boundary(self):
+        parent = self.root / "real-parent"
+        stage = parent / "stage"
+        stage.mkdir(parents=True)
+        (stage / "content").write_text("inside")
+        link = stage / "link"
+        link.symlink_to("content")
+        alias = self.root / "parent-alias"
+        alias.symlink_to(parent, target_is_directory=True)
+        verify_relocatable_tree(alias / "stage")
+        (parent / "outside").write_text("outside")
+        link.unlink()
+        link.symlink_to("../outside")
+        with self.assertRaisesRegex(ArchiveError, "leaves bundle"):
+            verify_relocatable_tree(alias / "stage")
+
     def test_staging_uses_committed_source_in_a_separate_workspace(self):
         repo = self.root / "checkout"
         repo.mkdir()

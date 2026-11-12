@@ -79,6 +79,9 @@ def relocate_self_alias(stage, package, source):
 
 
 def verify_relocatable_tree(root):
+    # macOS temporary directories may arrive through /var -> /private/var.
+    # Compare resolved link destinations with the same canonical boundary.
+    root = Path(root).resolve(strict=True)
     for entry in root.rglob("*"):
         mode = entry.lstat().st_mode
         if stat.S_ISLNK(mode):

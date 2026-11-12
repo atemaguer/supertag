@@ -287,5 +287,10 @@ def extract_release(path, destination, checksum=None):
                     (root / name).chmod(member.mode)
         for name, entry in manifest["entries"].items():
             if entry["type"] == "symlink":
-                (root / name).symlink_to(entry["target"])
+                link = root / name
+                link.symlink_to(entry["target"])
+                # Linux creates 0777 links; macOS applies the process umask.
+                # Restore the portable metadata without chmod-ing the target.
+                if stat.S_IMODE(link.lstat().st_mode) != entry["mode"]:
+                    link.chmod(entry["mode"], follow_symlinks=False)
     return root

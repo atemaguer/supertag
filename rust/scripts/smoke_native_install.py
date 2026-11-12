@@ -21,7 +21,7 @@ def smoke_install(archive, fixture, node, opencode_fixture=None):
     archive, fixture, node = (Path(value).resolve(strict=True) for value in (archive, fixture, node))
     opencode_fixture = opencode_fixture or REPO / "packages/runtime/harnesses/opencode/fixtures/native-opencode.mjs"
     with tempfile.TemporaryDirectory(prefix="supertag-native-installed-") as temporary:
-        root = Path(temporary)
+        root = Path(temporary).resolve(strict=True)
         home = root / "home"
         home.mkdir(mode=0o700)
         env = {"HOME": str(home), "PATH": os.defpath, "LANG": "C.UTF-8"}
