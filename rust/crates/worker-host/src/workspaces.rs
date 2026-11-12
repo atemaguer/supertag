@@ -598,6 +598,7 @@ mod tests {
                 checkout,
             }),
             remote_tree: None,
+            outputs: None,
         })?;
         drop(journal);
         drop(workspaces);
@@ -635,6 +636,7 @@ mod tests {
             checkpoint,
             workspace: Some(Box::new(first)),
             prepared: Some(workspace),
+            outputs: None,
         })?;
         drop(journal);
         let journal = Journal::open(&state)?;
