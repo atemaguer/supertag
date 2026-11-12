@@ -442,11 +442,14 @@ async fn tui_save_task_file(
     tmux.wait_for("Evidence is ready.").await?;
     tmux.wait_for("Save from Ctrl+k").await?;
     tmux.run(&["send-keys", "-t", "runtime", "C-k"]).await?;
+    tmux.wait_for("Commands").await?;
     tmux.run(&["send-keys", "-t", "runtime", "-l", "Task files"])
         .await?;
     tmux.run(&["send-keys", "-t", "runtime", "Enter"]).await?;
-    tmux.wait_for("report.txt").await?;
-    tmux.wait_for("Evidence").await?;
+    // The reply already mentions report.txt. Wait for the loaded file row
+    // before sending a key that the loading dialog intentionally ignores.
+    tmux.wait_for("bytes  ·  Evidence").await?;
+    tmux.wait_for("enter chooses").await?;
     tmux.run(&["send-keys", "-t", "runtime", "Enter"]).await?;
     tmux.wait_for("Save to a local path").await?;
     let output = directory.join("saved-report.txt");
