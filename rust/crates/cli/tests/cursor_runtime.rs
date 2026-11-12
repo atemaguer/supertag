@@ -33,6 +33,12 @@ const TAG: &str = "cursor-fixture";
 const SESSION: &str = "cursor-session";
 const WORKSPACE: &str = "cursor-project";
 
+#[derive(Clone, Copy)]
+enum RemoteWorkspace {
+    E2b,
+    Modal,
+}
+
 struct Fixture {
     root: PathBuf,
     node: PathBuf,
@@ -57,7 +63,7 @@ impl Fixture {
             repository.join("packages/runtime/harnesses/cursor/dist/rust-adapter/adapter.js");
         let bridge_module = repository.join("packages/runtime/sdk/dist/rust-harness/index.js");
         let provider_transport =
-            repository.join("packages/runtime/environments/e2b/dist/rust-provider/transport.js");
+            repository.join("packages/runtime/sdk/dist/rust-workspace-provider/transport.js");
         ensure!(
             adapter_module.is_file() && bridge_module.is_file(),
             "build Cursor first: pnpm --filter @supertag/worker-cursor build"
@@ -295,6 +301,21 @@ impl<'a> Runtime<'a> {
         allow_commands: bool,
         remote: bool,
     ) -> Result<Child> {
+        self.worker_with_remote(
+            fixture,
+            label,
+            allow_commands,
+            remote.then_some(RemoteWorkspace::E2b),
+        )
+    }
+
+    fn worker_with_remote(
+        &self,
+        fixture: &Fixture,
+        label: &str,
+        allow_commands: bool,
+        remote: Option<RemoteWorkspace>,
+    ) -> Result<Child> {
         let mut command = self.credentials.command(&[
             "worker-host",
             "--gateway",
@@ -320,6 +341,17 @@ impl<'a> Runtime<'a> {
             .env("CURSOR_API_KEY", PROVIDER_KEY)
             .env("OPENAI_API_KEY", "unrelated-provider-key")
             .env("ANTHROPIC_API_KEY", "unrelated-anthropic-key")
+            .env("MODAL_TOKEN_ID", "synthetic-modal-token-id")
+            .env("MODAL_TOKEN_SECRET", "synthetic-modal-token-secret")
+            .env("MODAL_SERVER_URL", "https://fixture.modal.invalid:443")
+            .env("MODAL_CONFIG_PATH", "/fixture/untrusted-modal-profile")
+            .env("MODAL_ENVIRONMENT", "unrelated-modal-profile")
+            .env("SUPERTAG_MODAL_WORKSPACE_APP", "fixture-modal-app")
+            .env(
+                "SUPERTAG_MODAL_WORKSPACE_ENVIRONMENT",
+                "fixture-modal-environment",
+            )
+            .env("SUPERTAG_MODAL_WORKSPACE_IMAGE", "fixture-modal-image")
             .env("NODE_OPTIONS", "--invalid-fixture-option")
             .env("PYTHONPATH", "unrelated-python-path")
             .stdout(Stdio::null())
@@ -327,11 +359,20 @@ impl<'a> Runtime<'a> {
         if allow_commands {
             command.arg("--allow-unsandboxed-commands");
         }
-        if remote {
+        if let Some(remote) = remote {
+            let (provider_flag, argument_flag) = match remote {
+                RemoteWorkspace::E2b => {
+                    ("--e2b-workspace-provider", "--e2b-workspace-provider-arg")
+                }
+                RemoteWorkspace::Modal => (
+                    "--modal-workspace-provider",
+                    "--modal-workspace-provider-arg",
+                ),
+            };
             command
-                .arg("--e2b-workspace-provider")
+                .arg(provider_flag)
                 .arg(&fixture.node)
-                .arg("--e2b-workspace-provider-arg")
+                .arg(argument_flag)
                 .arg(fixture.root.join("remote-provider.mjs"))
                 .env("E2B_API_KEY", "synthetic-e2b-provider-key")
                 .env("E2B_DOMAIN", "fixture.e2b.invalid")
@@ -468,8 +509,23 @@ impl<'a> Runtime<'a> {
 
 #[tokio::test]
 async fn cursor_remote_workspace_delivers_and_resumes_from_the_approved_head() -> Result<()> {
+    remote_workspace_round_trip(RemoteWorkspace::E2b).await
+}
+
+#[tokio::test]
+async fn cursor_modal_workspace_delivers_and_resumes_with_isolated_provider_credentials()
+-> Result<()> {
+    remote_workspace_round_trip(RemoteWorkspace::Modal).await
+}
+
+async fn remote_workspace_round_trip(provider: RemoteWorkspace) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let fixture = Fixture::prepare(directory.path()).await?;
+    let provider_name = match provider {
+        RemoteWorkspace::E2b => "e2b",
+        RemoteWorkspace::Modal => "modal",
+    };
+    std::fs::write(fixture.root.join("provider-kind"), provider_name)?;
     let credentials = Credentials::new();
     let mut runtime = Runtime::start(&fixture.root, &credentials).await?;
     runtime
@@ -482,7 +538,7 @@ async fn cursor_remote_workspace_delivers_and_resumes_from_the_approved_head() -
         .await?;
     let first = runtime.submit(TAG, "remote-first").await?;
     std::fs::write(fixture.root.join("hold-stop"), b"enabled")?;
-    let worker = runtime.worker_with_provider(&fixture, "remote-first", false, true)?;
+    let worker = runtime.worker_with_remote(&fixture, "remote-first", false, Some(provider))?;
     runtime
         .wait_stream(&fixture, &first.task_id, "remote-first")
         .await?;
@@ -552,7 +608,7 @@ async fn cursor_remote_workspace_delivers_and_resumes_from_the_approved_head() -
         .await?;
     let second = runtime.submit(TAG, "remote-resume").await?;
     worker_finished(
-        runtime.worker_with_provider(&fixture, "remote-resume", false, true)?,
+        runtime.worker_with_remote(&fixture, "remote-resume", false, Some(provider))?,
         &fixture,
     )
     .await?;
@@ -602,6 +658,7 @@ async fn cursor_remote_workspace_delivers_and_resumes_from_the_approved_head() -
     assert_eq!(stages[1]["startCommit"], first_delivery.head_commit);
     assert_eq!(stages[1]["before"], "first-turn-content\n");
     for (allocation, task) in allocations.iter().zip([&first, &second]) {
+        assert_eq!(allocation["provider"], provider_name);
         assert_eq!(allocation["owner"]["taskId"], task.task_id);
         assert_eq!(
             allocation["owner"]["attemptId"],

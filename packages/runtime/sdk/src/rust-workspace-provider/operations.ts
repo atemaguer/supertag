@@ -1,10 +1,6 @@
 import { posix } from "node:path";
-import type {
-  ExecutionEnvironment,
-  ProcessSpec,
-  SplitExecutionToolResult,
-} from "@supertag/worker-sdk";
-import { createWorkspaceToolBridge } from "@supertag/worker-sdk/internal/rust-harness";
+import type { ExecutionEnvironment, ProcessSpec, SplitExecutionToolResult } from "../index.js";
+import { createWorkspaceToolBridge } from "../split-execution-bridge.js";
 
 export type WorkspaceOperation =
   | {

@@ -11,14 +11,16 @@ import {
   RemoteWorkspaceProvider,
   RemoteWorkspaceStageChunkSchema,
 } from "@supertag/worker-sdk/internal/rust-harness";
+import {
+  createWorkspaceHandlers,
+  startRemoteWorkspaceTransport,
+} from "@supertag/worker-sdk/internal/rust-workspace-provider";
 import type { SandboxOpts } from "e2b";
 import { afterEach, expect, it, vi } from "vitest";
-import { createE2BWorkspaceHandlers } from "./src/rust-provider/main.ts";
 import {
   createE2BWorkspaceSession,
   type E2BWorkspaceSandbox,
 } from "./src/rust-provider/session.ts";
-import { startRemoteWorkspaceTransport } from "./src/rust-provider/transport.ts";
 
 const owner = {
   hostId: "host",
@@ -405,7 +407,7 @@ it("wires generated gRPC through production handlers, seals queued edits and pro
   const token = "workspace-provider-fixture-token";
   const auth = { headers: { authorization: `Bearer ${token}` } };
   const server = await startRemoteWorkspaceTransport({
-    ...createE2BWorkspaceHandlers(session),
+    ...createWorkspaceHandlers(session),
     token,
   });
   const sessionManager = new Http2SessionManager(server.endpoint);

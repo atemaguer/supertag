@@ -214,6 +214,16 @@ enum Command {
         /// Argument to the E2B provider, such as the compiled helper entrypoint.
         #[arg(long, requires = "e2b_workspace_provider", allow_hyphen_values = true)]
         e2b_workspace_provider_arg: Vec<std::ffi::OsString>,
+        /// Executable for a private Modal Workspace provider used by Cursor.
+        #[arg(long, conflicts_with = "e2b_workspace_provider")]
+        modal_workspace_provider: Option<PathBuf>,
+        /// Argument to the Modal provider, such as the compiled helper entrypoint.
+        #[arg(
+            long,
+            requires = "modal_workspace_provider",
+            allow_hyphen_values = true
+        )]
+        modal_workspace_provider_arg: Vec<std::ffi::OsString>,
         /// Private host allowlist of Skill packages.
         #[arg(long)]
         skill_catalog: Option<PathBuf>,
@@ -563,6 +573,8 @@ async fn run(command: Command) -> Result<()> {
             adapter,
             e2b_workspace_provider,
             e2b_workspace_provider_arg,
+            modal_workspace_provider,
+            modal_workspace_provider_arg,
             skill_catalog,
             attempt_timeout_seconds,
             once,
@@ -580,20 +592,50 @@ async fn run(command: Command) -> Result<()> {
             let provider_model = adapter.provider_model();
             let mut execution_profile = adapter.execution_profile()?;
             let workspace = adapter.workspace_mapping();
-            let remote_provider =
-                e2b_workspace_provider.map(|executable| supertag_worker_host::ProviderConfig {
+            use supertag_worker_host::{ProviderAuthority, ProviderConfig};
+            let remote_provider = if let Some(executable) = e2b_workspace_provider {
+                Some(ProviderConfig {
                     executable,
                     arguments: e2b_workspace_provider_arg,
-                    api_key: std::env::var("E2B_API_KEY").ok(),
-                    domain: std::env::var("E2B_DOMAIN").ok(),
-                    template: std::env::var("SUPERTAG_E2B_TEMPLATE").ok(),
-                });
+                    authority: ProviderAuthority::E2b {
+                        api_key: std::env::var("E2B_API_KEY").ok(),
+                        domain: std::env::var("E2B_DOMAIN").ok(),
+                        template: std::env::var("SUPERTAG_E2B_TEMPLATE").ok(),
+                    },
+                })
+            } else if let Some(executable) = modal_workspace_provider {
+                let required = |name| {
+                    let value = std::env::var(name)
+                        .with_context(|| format!("set {name} for the Modal Workspace provider"))?;
+                    ensure!(
+                        !value.trim().is_empty(),
+                        "set {name} for the Modal Workspace provider"
+                    );
+                    Ok::<_, anyhow::Error>(value)
+                };
+                Some(ProviderConfig {
+                    executable,
+                    arguments: modal_workspace_provider_arg,
+                    authority: ProviderAuthority::Modal {
+                        token_id: required("MODAL_TOKEN_ID")?,
+                        token_secret: required("MODAL_TOKEN_SECRET")?,
+                        app: required("SUPERTAG_MODAL_WORKSPACE_APP")?,
+                        endpoint: std::env::var("MODAL_SERVER_URL")
+                            .unwrap_or_else(|_| "https://api.modal.com:443".into()),
+                        environment: std::env::var("SUPERTAG_MODAL_WORKSPACE_ENVIRONMENT")
+                            .unwrap_or_else(|_| "main".into()),
+                        image: std::env::var("SUPERTAG_MODAL_WORKSPACE_IMAGE").ok(),
+                    },
+                })
+            } else {
+                None
+            };
             if remote_provider.is_some() {
                 ensure!(
                     harness == HarnessKind::Cursor
                         && workspace.is_some()
                         && !execution_profile.allow_unsandboxed_commands,
-                    "E2B workspace placement requires Cursor and a named Workspace without unsandboxed commands"
+                    "remote Workspace placement requires Cursor and a named Workspace without unsandboxed commands"
                 );
                 execution_profile.remote_file_workspace = true;
             }

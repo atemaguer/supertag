@@ -15,7 +15,7 @@ import {
   HarnessWorkspace,
   RemoteWorkspaceProvider,
   RemoteWorkspaceProviderBootstrapSchema,
-} from "@supertag/worker-sdk/internal/rust-harness";
+} from "../rust-harness/index.js";
 
 const HOST = "127.0.0.1";
 const MAX_BOOTSTRAP_BYTES = 4096;

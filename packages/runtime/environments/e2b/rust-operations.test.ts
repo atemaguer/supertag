@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
 import type { ExecutionEnvironment, ProcessSpec } from "@supertag/worker-sdk";
 import { spawnOwnedProcess } from "@supertag/worker-sdk/internal/rust-harness";
+import { createWorkspaceOperations } from "@supertag/worker-sdk/internal/rust-workspace-provider";
 import { afterEach, expect, it, vi } from "vitest";
-import { createWorkspaceOperations } from "./src/rust-provider/operations.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
 const allActions = ["files:read", "files:write", "commands:execute"];

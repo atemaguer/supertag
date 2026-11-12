@@ -22,13 +22,13 @@ pub(crate) async fn prepare(
     let config = options
         .remote_provider
         .as_ref()
-        .context("E2B provider is unavailable")?;
+        .context("remote Workspace provider is unavailable")?;
     ensure!(
         !task
             .allowed_actions
             .iter()
             .any(|action| action == "commands:execute"),
-        "E2B file workspace cannot run commands"
+        "remote file Workspace cannot run commands"
     );
     let allowed_actions = task
         .allowed_actions
@@ -83,10 +83,10 @@ pub(crate) async fn ensure_stopped(
     let config = options
         .remote_provider
         .as_ref()
-        .context("sandbox recovery requires its E2B provider")?;
+        .context("sandbox recovery requires its Workspace provider")?;
     ensure!(
         record.provider_scope == config.authority_fingerprint(),
-        "sandbox recovery requires the original E2B provider authority"
+        "sandbox recovery requires the original provider authority"
     );
     // Cleanup must still run after cancellation. The provider client bounds each call.
     let cleanup = CancellationToken::new();

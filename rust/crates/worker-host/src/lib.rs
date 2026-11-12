@@ -13,7 +13,7 @@ mod workspaces;
 pub use credentials::{provider_environment, provider_environment_for, validate_opencode_model};
 pub use enrollment::enroll;
 pub use guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
-pub use remote_provider::ProviderConfig;
+pub use remote_provider::{ProviderAuthority, ProviderConfig};
 pub use workspaces::{WORKSPACE_DIRECTORY, WorkspaceMapping};
 
 use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
@@ -905,7 +905,7 @@ async fn run_assignment(
     let mut provider = if options.remote_provider.is_some() {
         let workspace = workspace
             .as_ref()
-            .context("E2B Attempt has no prepared Workspace")?;
+            .context("remote Attempt has no prepared Workspace")?;
         let cancel = shutdown.child_token();
         let prepared = with_authority(host, &attempt, token, shutdown, &cancel, async {
             remote::prepare(

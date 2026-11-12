@@ -8,6 +8,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const root = dirname(fileURLToPath(import.meta.url));
+const provider = await readFile(join(root, "provider-kind"), "utf8").catch(() => "e2b");
+assert.ok(["e2b", "modal"].includes(provider));
+const redact = (message) =>
+  String(message)
+    .replaceAll("synthetic-e2b-provider-key", "[REDACTED]")
+    .replaceAll("synthetic-modal-token-id", "[REDACTED]")
+    .replaceAll("synthetic-modal-token-secret", "[REDACTED]");
 await appendFile(
   join(root, "provider-calls.jsonl"),
   `${JSON.stringify({ type: "boot", pid: process.pid, environment: Object.keys(process.env).sort() })}\n`,
@@ -16,27 +23,34 @@ await appendFile(
 process.on("uncaughtException", async (error) => {
   await appendFile(
     join(root, "provider-calls.jsonl"),
-    `${JSON.stringify({ type: "startup-error", message: String(error.message).replaceAll("synthetic-e2b-provider-key", "[REDACTED]").slice(0, 1200) })}\n`,
+    `${JSON.stringify({ type: "startup-error", message: redact(error.message).slice(0, 1200) })}\n`,
     { mode: 0o600 },
   );
   process.exit(1);
 });
 const { providerTransport } = JSON.parse(await readFile(join(root, "modules.json"), "utf8"));
 const { runRemoteWorkspaceTransport } = await import(pathToFileURL(providerTransport).href);
-assert.equal(process.env.E2B_API_KEY, "synthetic-e2b-provider-key");
-assert.equal(process.env.E2B_DOMAIN, "fixture.e2b.invalid");
-assert.equal(process.env.SUPERTAG_E2B_TEMPLATE, "fixture-template");
+const expected =
+  provider === "modal"
+    ? {
+        MODAL_TOKEN_ID: "synthetic-modal-token-id",
+        MODAL_TOKEN_SECRET: "synthetic-modal-token-secret",
+        MODAL_SERVER_URL: "https://fixture.modal.invalid:443",
+        MODAL_CONFIG_PATH: "/dev/null",
+        SUPERTAG_MODAL_WORKSPACE_APP: "fixture-modal-app",
+        SUPERTAG_MODAL_WORKSPACE_ENVIRONMENT: "fixture-modal-environment",
+        SUPERTAG_MODAL_WORKSPACE_IMAGE: "fixture-modal-image",
+      }
+    : {
+        E2B_API_KEY: "synthetic-e2b-provider-key",
+        E2B_DOMAIN: "fixture.e2b.invalid",
+        SUPERTAG_E2B_TEMPLATE: "fixture-template",
+      };
+for (const [key, value] of Object.entries(expected))
+  assert.equal(process.env[key], value, `provider is missing expected ${key}`);
 for (const key of Object.keys(process.env))
   assert.ok(
-    [
-      "PATH",
-      "LANG",
-      "TMPDIR",
-      "E2B_API_KEY",
-      "E2B_DOMAIN",
-      "SUPERTAG_E2B_TEMPLATE",
-      "__CF_USER_TEXT_ENCODING",
-    ].includes(key),
+    ["PATH", "LANG", "TMPDIR", ...Object.keys(expected), "__CF_USER_TEXT_ENCODING"].includes(key),
     `provider inherited ${key}`,
   );
 
@@ -91,6 +105,7 @@ const implementation = {
       await persist(allocation);
       await trace({
         type: "allocate",
+        provider,
         ...allocation,
         environment: Object.keys(process.env).sort(),
       });
@@ -220,9 +235,7 @@ for (const [service, names] of [
         await trace({
           type: "fixture-error",
           operation: name,
-          message: String(error.message)
-            .replaceAll("synthetic-e2b-provider-key", "[REDACTED]")
-            .slice(0, 1200),
+          message: redact(error.message).slice(0, 1200),
         });
         throw error;
       }

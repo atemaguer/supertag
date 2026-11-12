@@ -1,12 +1,10 @@
+import type {
+  SandboxOwner,
+  SandboxStopResult,
+} from "@supertag/worker-sdk/internal/rust-workspace-provider";
 import { Sandbox, type SandboxApiOpts, SandboxNotFoundError } from "e2b";
 
-export interface SandboxOwner {
-  readonly hostId: string;
-  readonly hostGeneration: bigint;
-  readonly taskId: string;
-  readonly attemptId: string;
-  readonly allocationId: string;
-}
+export type { SandboxOwner } from "@supertag/worker-sdk/internal/rust-workspace-provider";
 
 export interface SandboxIdentity {
   readonly sandboxId: string;
@@ -19,10 +17,6 @@ export interface SandboxInventory {
   get(sandboxId: string): Promise<SandboxIdentity | undefined>;
   kill(sandboxId: string): Promise<void>;
 }
-
-export type SandboxStopResult =
-  | { readonly state: "stopped"; readonly sandboxId: string }
-  | { readonly state: "uncertain" };
 
 export function sandboxOwnershipMetadata(owner: SandboxOwner): Readonly<Record<string, string>> {
   if (

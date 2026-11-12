@@ -24,6 +24,11 @@
       "development": "./src/rust-harness/index.ts",
       "default": "./dist/rust-harness/index.js"
     },
+    "./internal/rust-workspace-provider": {
+      "types": "./dist/rust-workspace-provider/index.d.ts",
+      "development": "./src/rust-workspace-provider/index.ts",
+      "default": "./dist/rust-workspace-provider/index.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "development": "./src/index.ts",

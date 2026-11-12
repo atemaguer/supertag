@@ -10,13 +10,13 @@ import {
   type RemoteWorkspaceStageChunk,
   RemoteWorkspaceStageChunkSchema,
 } from "@supertag/worker-sdk/internal/rust-harness";
-import { expect, it, vi } from "vitest";
 import {
   type RemoteWorkspaceHandlers,
   readRemoteWorkspaceBootstrap,
   runRemoteWorkspaceTransport,
   startRemoteWorkspaceTransport,
-} from "./src/rust-provider/transport.js";
+} from "@supertag/worker-sdk/internal/rust-workspace-provider";
+import { expect, it, vi } from "vitest";
 
 const token = "private-fixture-bearer-32-characters";
 const auth = { headers: { authorization: `Bearer ${token}` }, timeoutMs: 2000 };

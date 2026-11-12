@@ -49,9 +49,24 @@ const MAX_ENDPOINT_BYTES: usize = 512;
 pub struct ProviderConfig {
     pub executable: PathBuf,
     pub arguments: Vec<OsString>,
-    pub api_key: Option<String>,
-    pub domain: Option<String>,
-    pub template: Option<String>,
+    pub authority: ProviderAuthority,
+}
+
+#[derive(Clone)]
+pub enum ProviderAuthority {
+    E2b {
+        api_key: Option<String>,
+        domain: Option<String>,
+        template: Option<String>,
+    },
+    Modal {
+        token_id: String,
+        token_secret: String,
+        endpoint: String,
+        app: String,
+        environment: String,
+        image: Option<String>,
+    },
 }
 
 impl ProviderConfig {
@@ -59,23 +74,83 @@ impl ProviderConfig {
     /// Bind that authority without retaining the provider credential in state.
     pub(crate) fn authority_fingerprint(&self) -> String {
         let mut hash = Sha256::new();
-        hash.update(b"supertag-e2b-authority-v1\0");
+        hash.update(match &self.authority {
+            ProviderAuthority::E2b { .. } => b"supertag-e2b-authority-v1\0".as_slice(),
+            ProviderAuthority::Modal { .. } => b"supertag-modal-authority-v1\0".as_slice(),
+        });
         let mut add = |value: &[u8]| {
             hash.update((value.len() as u64).to_be_bytes());
             hash.update(value);
         };
-        add(self
-            .domain
-            .as_deref()
-            .filter(|value| !value.is_empty())
-            .unwrap_or("e2b.app")
-            .as_bytes());
-        add(self.api_key.as_deref().unwrap_or_default().as_bytes());
+        match &self.authority {
+            ProviderAuthority::E2b {
+                domain, api_key, ..
+            } => {
+                add(domain
+                    .as_deref()
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or("e2b.app")
+                    .as_bytes());
+                add(api_key.as_deref().unwrap_or_default().as_bytes());
+            }
+            ProviderAuthority::Modal {
+                token_id,
+                token_secret,
+                endpoint,
+                app,
+                environment,
+                ..
+            } => {
+                for value in [endpoint, token_id, token_secret, app, environment] {
+                    add(value.as_bytes());
+                }
+            }
+        }
         add(self.executable.as_os_str().as_bytes());
         for arg in &self.arguments {
             add(arg.as_os_str().as_bytes());
         }
         format!("{:x}", hash.finalize())
+    }
+
+    fn configure_environment(&self, command: &mut Command) {
+        match &self.authority {
+            ProviderAuthority::E2b {
+                api_key,
+                domain,
+                template,
+            } => {
+                for (name, value) in [
+                    ("E2B_API_KEY", api_key),
+                    ("E2B_DOMAIN", domain),
+                    ("SUPERTAG_E2B_TEMPLATE", template),
+                ] {
+                    if let Some(value) = value {
+                        command.env(name, value);
+                    }
+                }
+            }
+            ProviderAuthority::Modal {
+                token_id,
+                token_secret,
+                endpoint,
+                app,
+                environment,
+                image,
+            } => {
+                command.envs([
+                    ("MODAL_TOKEN_ID", token_id.as_str()),
+                    ("MODAL_TOKEN_SECRET", token_secret.as_str()),
+                    ("MODAL_SERVER_URL", endpoint.as_str()),
+                    ("SUPERTAG_MODAL_WORKSPACE_APP", app.as_str()),
+                    ("SUPERTAG_MODAL_WORKSPACE_ENVIRONMENT", environment.as_str()),
+                    ("MODAL_CONFIG_PATH", "/dev/null"),
+                ]);
+                if let Some(image) = image {
+                    command.env("SUPERTAG_MODAL_WORKSPACE_IMAGE", image);
+                }
+            }
+        }
     }
 }
 
@@ -130,15 +205,7 @@ impl RemoteProvider {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true);
-        for (name, value) in [
-            ("E2B_API_KEY", &config.api_key),
-            ("E2B_DOMAIN", &config.domain),
-            ("SUPERTAG_E2B_TEMPLATE", &config.template),
-        ] {
-            if let Some(value) = value {
-                command.env(name, value);
-            }
-        }
+        config.configure_environment(&mut command);
         let mut child = command
             .spawn()
             .context("provider process could not start")?;
@@ -587,23 +654,73 @@ mod tests {
         let original = ProviderConfig {
             executable: "/fixture/provider".into(),
             arguments: vec!["fixture".into()],
-            api_key: Some("first-test-key".into()),
-            domain: None,
-            template: None,
+            authority: ProviderAuthority::E2b {
+                api_key: Some("first-test-key".into()),
+                domain: None,
+                template: None,
+            },
         };
         let scope = original.authority_fingerprint();
         assert!(valid_sha256(&scope));
         let mut changed = original.clone();
-        changed.domain = Some("e2b.app".into());
+        if let ProviderAuthority::E2b { domain, .. } = &mut changed.authority {
+            *domain = Some("e2b.app".into());
+        }
         assert_eq!(changed.authority_fingerprint(), scope);
-        changed.domain = Some("fixture.e2b.invalid".into());
+        if let ProviderAuthority::E2b { domain, .. } = &mut changed.authority {
+            *domain = Some("fixture.e2b.invalid".into());
+        }
         assert_ne!(changed.authority_fingerprint(), scope);
         let mut changed = original.clone();
-        changed.api_key = Some("second-test-key".into());
+        if let ProviderAuthority::E2b { api_key, .. } = &mut changed.authority {
+            *api_key = Some("second-test-key".into());
+        }
         assert_ne!(changed.authority_fingerprint(), scope);
         let mut changed = original;
         changed.arguments.push("different-helper".into());
         assert_ne!(changed.authority_fingerprint(), scope);
+    }
+
+    #[test]
+    fn modal_provider_scope_and_environment_are_explicit() {
+        let config = ProviderConfig {
+            executable: "/fixture/provider".into(),
+            arguments: vec![],
+            authority: ProviderAuthority::Modal {
+                token_id: "fixture-token-id".into(),
+                token_secret: "fixture-secret".into(),
+                endpoint: "https://api.modal.com:443".into(),
+                app: "fixture-app".into(),
+                environment: "main".into(),
+                image: None,
+            },
+        };
+        let scope = config.authority_fingerprint();
+        let mut changed = config.clone();
+        if let ProviderAuthority::Modal { environment, .. } = &mut changed.authority {
+            *environment = "staging".into();
+        }
+        assert_ne!(changed.authority_fingerprint(), scope);
+        let mut changed = config.clone();
+        if let ProviderAuthority::Modal { image, .. } = &mut changed.authority {
+            *image = Some("changed-image".into());
+        }
+        assert_eq!(changed.authority_fingerprint(), scope);
+        let mut command = Command::new(&config.executable);
+        config.configure_environment(&mut command);
+        let environment = command
+            .as_std()
+            .get_envs()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(
+            environment.get(std::ffi::OsStr::new("MODAL_CONFIG_PATH")),
+            Some(&Some(std::ffi::OsStr::new("/dev/null")))
+        );
+        assert_eq!(
+            environment.get(std::ffi::OsStr::new("MODAL_TOKEN_SECRET")),
+            Some(&Some(std::ffi::OsStr::new("fixture-secret")))
+        );
+        assert!(!environment.contains_key(std::ffi::OsStr::new("E2B_API_KEY")));
     }
     use std::os::unix::fs::PermissionsExt;
     use std::sync::{
@@ -775,7 +892,11 @@ mod tests {
         ProviderConfig {
             executable: "/bin/sh".into(),
             arguments: vec!["-c".into(), "printf '%s' $$ > \"$2/pid\"; /usr/bin/env > \"$2/env\"; /bin/cat > \"$2/bootstrap\"; printf '%s\\n' \"$1\"; exec /bin/sleep 600".into(), "fixture".into(), endpoint.into(), directory.as_os_str().to_owned()],
-            api_key: Some("synthetic-e2b-key".into()), domain: Some("fixture.invalid".into()), template: Some("fixture-template".into()),
+            authority: ProviderAuthority::E2b {
+                api_key: Some("synthetic-e2b-key".into()),
+                domain: Some("fixture.invalid".into()),
+                template: Some("fixture-template".into()),
+            },
         }
     }
     async fn fixture() -> (tempfile::TempDir, RemoteProvider, Mock, CancellationToken) {

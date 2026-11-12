@@ -21,17 +21,20 @@ try:
     data = sys.stdin.buffer.read(65536)
     if not data: break
     target.write(data)
- elif operation == "read":
+ elif operation in ("read", "read-stream"):
   out = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
   try:
    if not stat.S_ISREG(os.fstat(out).st_mode): raise ValueError("not regular")
    data = bytearray()
-   while len(data) <= limit:
-    chunk = os.read(out, min(65536, limit + 1 - len(data)))
+   total = 0
+   while True:
+    chunk = os.read(out, min(65536, limit + 1 - total))
     if not chunk: break
-    data.extend(chunk)
-   if len(data) > limit: raise ValueError("too large")
-   sys.stdout.buffer.write(data)
+    total += len(chunk)
+    if total > limit: raise ValueError("too large")
+    if operation == "read-stream": sys.stdout.buffer.write(chunk)
+    else: data.extend(chunk)
+   if operation == "read": sys.stdout.buffer.write(data)
   finally: os.close(out)
  elif operation == "readonly":
   def protect(parent, name):
