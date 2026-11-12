@@ -1,3 +1,5 @@
+mod commit_reviews;
+
 use std::{io::Read, time::Duration};
 
 use anyhow::{Context, Result, ensure};
@@ -131,6 +133,7 @@ async fn main() -> Result<()> {
         operation_id: "fixture-direct-message".into(),
         recipient_tag_id: "recipient".into(),
         text: "Private coordination </tag-message>".into(),
+        review: None,
     };
     if direct_mailbox {
         let mut mailbox = HarnessMailboxClient::connect(bootstrap.endpoint.clone()).await?;
@@ -182,6 +185,7 @@ async fn main() -> Result<()> {
         .await?
         .into_inner();
     let task = run.task.context("fixture received no Task")?;
+    commit_reviews::exercise(&bootstrap, &task, run.coordination.as_ref()).await?;
     let may_start = run
         .coordination
         .as_ref()
@@ -426,6 +430,7 @@ async fn main() -> Result<()> {
                     operation_id: "fixture-ungranted-message".into(),
                     recipient_tag_id: "observer".into(),
                     text: "Must not be sent".into(),
+                    review: None,
                 },
                 &bootstrap.token,
                 None,

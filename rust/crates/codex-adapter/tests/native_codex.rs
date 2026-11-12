@@ -14,11 +14,14 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use supertag_codex_adapter::{CodexOptions, run};
 use supertag_protocol::v2::{
-    Approval, ApprovalState, AttemptCapabilities, HarnessPostWorkstreamRequest,
-    HarnessReadMailboxRequest, HarnessReadWorkstreamRequest, HarnessSendTagMessageRequest,
-    ListMailboxMessagesResponse, ListWorkstreamPostsResponse, PostAttemptWorkstreamResponse,
-    ReadAttemptWorkstreamResponse, SendTagMessageResponse, TagMessage, TagMessageOrigin, Team,
+    Approval, ApprovalState, AttemptCapabilities, BlobReference, CommitReview,
+    CommitReviewDecision, CommitReviewVerdict, HarnessPostWorkstreamRequest,
+    HarnessReadMailboxRequest, HarnessReadReviewPatchRequest, HarnessReadWorkstreamRequest,
+    HarnessReviewPatch, HarnessSendTagMessageRequest, ListMailboxMessagesResponse,
+    ListWorkstreamPostsResponse, PostAttemptWorkstreamResponse, ReadAttemptWorkstreamResponse,
+    SendTagMessageResponse, TagMessage, TagMessageOrigin, Team, WorkspaceDeliveryReference,
     WorkstreamPost,
+    commit_review_submission::Kind as ReviewKind,
     harness_mailbox_server::{HarnessMailbox, HarnessMailboxServer},
     harness_workstreams_server::{HarnessWorkstreams, HarnessWorkstreamsServer},
 };
@@ -70,6 +73,7 @@ struct Observed {
     workstream_reads: Vec<HarnessReadWorkstreamRequest>,
     mailbox_reads: Vec<HarnessReadMailboxRequest>,
     mailbox_sends: Vec<HarnessSendTagMessageRequest>,
+    review_patch_reads: Vec<HarnessReadReviewPatchRequest>,
     work_starts: Vec<HarnessStartWorkSessionRequest>,
     work_continuations: Vec<HarnessContinueWorkSessionRequest>,
     work_questions: Vec<HarnessAskWorkSessionQuestionRequest>,
@@ -338,25 +342,69 @@ impl HarnessMailbox for HarnessFixture {
         self.authenticate(&request)?;
         let mut observed = self.observed.lock().await;
         let request = request.into_inner();
-        if let Some(previous) = observed.mailbox_sends.first() {
+        let previous = observed
+            .mailbox_sends
+            .iter()
+            .find(|prior| prior.operation_id == request.operation_id);
+        let duplicate = previous.is_some();
+        if let Some(previous) = previous {
             assert_eq!(previous, &request);
         }
         observed.mailbox_sends.push(request.clone());
-        if observed.mailbox_sends.len() == 1 {
+        if !duplicate {
             return Err(Status::unavailable("synthetic response loss"));
         }
+        let mut review = CommitReview {
+            request_id: "review-request".into(),
+            objective_id: "objective".into(),
+            commit: "ab".repeat(20),
+            workspace_id: "repo".into(),
+            source_task_id: "child-task".into(),
+            requester_tag_id: "native-tag".into(),
+            reviewer_tag_id: request.recipient_tag_id.clone(),
+            requested_at_ms: 100,
+            verdict: None,
+        };
+        let requested = match request.review.and_then(|review| review.kind) {
+            Some(ReviewKind::Response(input)) => {
+                review.requester_tag_id = request.recipient_tag_id;
+                review.reviewer_tag_id = "native-tag".into();
+                review.verdict = Some(CommitReviewVerdict {
+                    decision: input.verdict,
+                    summary: request.text,
+                    task_id: "native-task".into(),
+                    recorded_at_ms: 101,
+                });
+                return Ok(Response::new(SendTagMessageResponse {
+                    review: Some(review),
+                    duplicate: true,
+                    ..Default::default()
+                }));
+            }
+            Some(ReviewKind::Commit(commit)) => {
+                assert_eq!(commit, review.commit);
+                Some(review)
+            }
+            None => None,
+        };
         Ok(Response::new(SendTagMessageResponse {
             message: Some(TagMessage {
-                message_id: "direct-receipt".into(),
+                message_id: requested
+                    .as_ref()
+                    .map_or("direct-receipt", |review| &review.request_id)
+                    .into(),
                 source_task_id: "native-task".into(),
                 sender_tag_id: "native-tag".into(),
                 recipient_tag_id: request.recipient_tag_id,
                 text: request.text,
                 origin: TagMessageOrigin::Direct as i32,
+                objective_id: requested.as_ref().map(|review| review.objective_id.clone()),
+                review: requested,
                 ..Default::default()
             }),
             approval: None,
             duplicate: true,
+            review: None,
         }))
     }
 
@@ -379,6 +427,57 @@ impl HarnessMailbox for HarnessFixture {
                 ..Default::default()
             }],
             next_cursor: "mailbox-next".into(),
+        }))
+    }
+
+    async fn read_review_patch(
+        &self,
+        request: Request<HarnessReadReviewPatchRequest>,
+    ) -> Result<Response<HarnessReviewPatch>, Status> {
+        self.authenticate(&request)?;
+        let request = request.into_inner();
+        self.observed
+            .lock()
+            .await
+            .review_patch_reads
+            .push(request.clone());
+        let empty = request.review_id == "empty-review";
+        Ok(Response::new(HarnessReviewPatch {
+            review_id: request.review_id,
+            offset: request.offset,
+            data: if empty {
+                vec![]
+            } else if request.offset == 0 {
+                b"patch\n".to_vec()
+            } else {
+                vec![255]
+            },
+            next_offset: (!empty && request.offset == 0).then_some(6),
+            delivery: Some(WorkspaceDeliveryReference {
+                workspace_id: "repo".into(),
+                delivery_id: "d".repeat(64),
+                base_commit: "a".repeat(40),
+                start_commit: if empty {
+                    "ab".repeat(20)
+                } else {
+                    "a".repeat(40)
+                },
+                head_commit: "ab".repeat(20),
+                committed: !empty,
+                changed_files: u64::from(!empty),
+                patch: Some(BlobReference {
+                    sha256: if empty {
+                        format!("{:x}", Sha256::digest([]))
+                    } else {
+                        "b".repeat(64)
+                    },
+                    byte_length: if empty { 0 } else { 7 },
+                }),
+                bundle: Some(BlobReference {
+                    sha256: "c".repeat(64),
+                    byte_length: 123,
+                }),
+            }),
         }))
     }
 }
@@ -724,6 +823,69 @@ async fn native_coordination_pins_tools_and_stages_only_verified_workstream_appr
             assert!(logs.contains("thread/resume") && !logs.contains("dynamicTools"));
         }
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_commit_review_tools_confirm_request_patch_and_verdict() -> Result<()> {
+    let native = NativeFixture::new(&successful("Reviewed the release"), "exit 0")?;
+    std::fs::write(native.directory.path().join("commit-review-mode"), "")?;
+    let server = HarnessProcess::configured_tools(
+        &["files:read"],
+        None,
+        "Inspect the review",
+        false,
+        Some(AttemptCapabilities {
+            may_read_mailbox: true,
+            may_send_tag_message: true,
+            ..Default::default()
+        }),
+    )
+    .await?;
+    run(native.options(), server.bootstrap.clone()).await?;
+    let observed = server.observed.lock().await;
+    let outcome = observed.outcome.as_ref().context("outcome")?;
+    ensure!(outcome.succeeded, "{}", outcome.result);
+    assert_eq!(observed.mailbox_sends.len(), 4);
+    assert_eq!(observed.mailbox_sends[0], observed.mailbox_sends[1]);
+    assert_eq!(observed.mailbox_sends[2], observed.mailbox_sends[3]);
+    assert_ne!(
+        observed.mailbox_sends[0].operation_id,
+        observed.mailbox_sends[2].operation_id
+    );
+    assert_eq!(
+        observed.mailbox_sends[0]
+            .review
+            .as_ref()
+            .and_then(|review| review.kind.clone()),
+        Some(ReviewKind::Commit("ab".repeat(20)))
+    );
+    assert!(
+        matches!(observed.mailbox_sends[2].review.as_ref().and_then(|review| review.kind.as_ref()),
+        Some(ReviewKind::Response(response)) if response.request_id == "review-request" && response.verdict() == CommitReviewDecision::ChangesRequested)
+    );
+    assert_eq!(
+        observed
+            .review_patch_reads
+            .iter()
+            .map(|page| (page.review_id.as_str(), page.offset))
+            .collect::<Vec<_>>(),
+        [
+            ("review-request", 0),
+            ("review-request", 6),
+            ("empty-review", 0)
+        ]
+    );
+    let log = native.read("requests.jsonl")?;
+    assert!(
+        log.contains("read_review_patch")
+            && log.contains("escaped-bytes")
+            && log.contains("Untrusted coordination history")
+            && log.contains("recorded")
+            && log.contains("This delivery made no changes")
+    );
+    let checkpoint = outcome.checkpoint.as_ref().context("review checkpoint")?;
+    assert!(String::from_utf8_lossy(&checkpoint.payload).contains("coordination-v2-review-v1"));
     Ok(())
 }
 

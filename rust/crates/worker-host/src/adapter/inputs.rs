@@ -131,7 +131,7 @@ impl InputLane {
         Ok(response)
     }
 
-    fn active_deadline(&self) -> Result<Instant, Status> {
+    pub(super) fn active_deadline(&self) -> Result<Instant, Status> {
         if self.closed.is_cancelled() {
             return Err(Status::failed_precondition(
                 "execution is not accepting live input",
@@ -144,7 +144,7 @@ impl InputLane {
         Ok(deadline)
     }
 
-    async fn forward<T>(
+    pub(super) async fn forward<T>(
         &self,
         deadline: Instant,
         call: impl Future<Output = Result<Response<T>, Status>> + Send,

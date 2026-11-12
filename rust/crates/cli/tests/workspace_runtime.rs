@@ -4,7 +4,10 @@ use std::{net::SocketAddr, path::Path, process::Stdio, str::FromStr, time::Durat
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use sqlx::{ConnectOptions, Connection, Executor, PgConnection, postgres::PgConnectOptions};
+use sqlx::{
+    ConnectOptions, Connection, Executor, PgConnection, SqliteConnection,
+    postgres::PgConnectOptions,
+};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::{Child, Command},
@@ -48,16 +51,27 @@ impl Credentials {
         command
     }
     fn worker(&self, public: &str, state: &Path, source: Option<&Path>) -> Command {
+        self.worker_with_mode(public, state, source, "--workspace-fixture")
+    }
+    fn worker_with_mode(
+        &self,
+        public: &str,
+        state: &Path,
+        source: Option<&Path>,
+        mode: &str,
+    ) -> Command {
         let mut command = self.command(&[
             "worker-host",
             "--gateway",
             public,
             "--adapter",
             ADAPTER,
-            "--adapter-arg=--workspace-fixture",
             "--once",
         ]);
-        command.arg("--state-directory").arg(state);
+        command
+            .arg(format!("--adapter-arg={mode}"))
+            .arg("--state-directory")
+            .arg(state);
         if let Some(source) = source {
             command
                 .args(["--workspace-id", "project", "--workspace-source"])
@@ -65,6 +79,186 @@ impl Credentials {
         }
         command
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn delivered_commit_review_survives_restart_and_notifies_owner_once() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let source = root.join("source");
+    std::fs::create_dir(&source)?;
+    git(&source, &["init", "--quiet"]).await?;
+    std::fs::write(source.join("workspace.txt"), "base\n")?;
+    git(&source, &["add", "workspace.txt"]).await?;
+    git(&source, &["commit", "--quiet", "-m", "Initial source"]).await?;
+    let base = git(&source, &["rev-parse", "HEAD"]).await?;
+    let credentials = Credentials::new();
+    let database = format!(
+        "sqlite://{}?mode=rwc",
+        root.join("control.sqlite").display()
+    );
+    let plane_command = |listen: &str| {
+        let mut plane = credentials.command(&["control-plane", "--listen", listen]);
+        plane.env("SUPERTAG_DATABASE_URL", &database);
+        plane
+    };
+    let (mut plane, private) = service(plane_command("127.0.0.1:0")).await?;
+    let gateway_command = |listen: &str| {
+        let mut gateway =
+            credentials.command(&["gateway", "--control-plane", &private, "--listen", listen]);
+        gateway
+            .arg("--checkpoint-directory")
+            .arg(root.join("gateway-artifacts"));
+        gateway
+    };
+    let (mut gateway, public) = service(gateway_command("127.0.0.1:0")).await?;
+    let cli = |args: &[&str]| {
+        let mut command = credentials.command(&[args[0], "--gateway", &public]);
+        command.args(&args[1..]);
+        command
+    };
+    json(cli(&[
+        "put-tag",
+        "owner",
+        "--instructions",
+        "Review the delivery",
+        "--allow",
+        "files:read",
+        "--allow",
+        "files:write",
+        "--workspace-id",
+        "project",
+        "--workspace-base",
+        &base,
+    ]))
+    .await?;
+    json(cli(&[
+        "put-tag",
+        "reviewer",
+        "--instructions",
+        "Inspect the exact patch",
+        "--allow",
+        "files:read",
+    ]))
+    .await?;
+    json(cli(&[
+        "team", "create", "release", "--name", "Release", "--member", "owner", "--member",
+        "reviewer",
+    ]))
+    .await?;
+    let objective = json(cli(&[
+        "objective",
+        "create",
+        "release",
+        "--owner",
+        "owner",
+        "--team",
+        "release",
+        "--ongoing",
+        "Review the work",
+    ]))
+    .await?;
+    let session = field(&objective, "session_id")?;
+    success(credentials.worker_with_mode(
+        &public,
+        &root.join("owner-start"),
+        Some(&source),
+        "--start-work-session",
+    ))
+    .await?;
+    let work = json(cli(&[
+        "work-sessions",
+        "list",
+        "--parent-tag",
+        "owner",
+        "--parent-session",
+        session,
+    ]))
+    .await?;
+    let child_id = field(&work["work_sessions"][0], "latest_task_id")?;
+    success(credentials.worker(&public, &root.join("child"), Some(&source))).await?;
+    let child = json(cli(&["get-task", child_id])).await?;
+    assert_eq!(child["state"], "TASK_STATE_SUCCEEDED");
+    let commit = field(&child["workspace_delivery"], "head_commit")?;
+    assert_ne!(commit, base);
+
+    let list = || cli(&["objective", "list-commit-reviews", "release"]);
+    success(credentials.worker_with_mode(
+        &public,
+        &root.join("owner-report"),
+        Some(&source),
+        &format!("--request-commit-review={commit}"),
+    ))
+    .await?;
+    let pending = json(list()).await?;
+    let pending = pending["reviews"]
+        .as_array()
+        .context("pending review list")?;
+    assert_eq!(pending.len(), 1);
+    let request_id = field(&pending[0], "request_id")?;
+    assert_eq!(pending[0]["source_task_id"], child_id);
+    assert_eq!(pending[0]["commit"], commit);
+    assert_eq!(pending[0]["reviewer_tag_id"], "reviewer");
+    assert!(pending[0]["verdict"].is_null());
+
+    gateway.kill().await?;
+    plane.kill().await?;
+    (plane, _) = service(plane_command(private.trim_start_matches("http://"))).await?;
+    (gateway, _) = service(gateway_command(public.trim_start_matches("http://"))).await?;
+    assert_eq!(json(list()).await?["reviews"][0], pending[0]);
+    success(credentials.worker_with_mode(
+        &public,
+        &root.join("reviewer"),
+        None,
+        &format!("--record-commit-review={request_id}"),
+    ))
+    .await?;
+    let recorded = json(list()).await?;
+    assert_eq!(
+        recorded["reviews"]
+            .as_array()
+            .context("recorded review list")?
+            .len(),
+        1
+    );
+    assert_eq!(recorded["reviews"][0]["request_id"], request_id);
+    assert_eq!(recorded["reviews"][0]["verdict"]["decision"], "approved");
+
+    // Observe the durable internal notice without treating Objective Sessions as
+    // direct operator conversations. Execute it on the owner through the Host.
+    let mut db = SqliteConnection::connect(&database).await?;
+    let notices: Vec<String> = timeout(WAIT, async {
+        loop {
+            let ids: Vec<String> = sqlx::query_scalar(
+                "SELECT task_id FROM supertag_v2_objective_notices WHERE objective_id='release' AND notice_key LIKE 'review:%'",
+            )
+            .fetch_all(&mut db)
+            .await?;
+            if !ids.is_empty() {
+                return Ok::<_, anyhow::Error>(ids);
+            }
+            sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .context("owner did not receive its review notice")??;
+    assert_eq!(notices.len(), 1);
+    success(credentials.worker_with_mode(
+        &public,
+        &root.join("owner-notice"),
+        Some(&source),
+        &format!("--observe-commit-review={request_id}"),
+    ))
+    .await?;
+    let notice = json(cli(&["get-task", &notices[0]])).await?;
+    assert_eq!(notice["state"], "TASK_STATE_SUCCEEDED");
+    assert_eq!(notice["tag_id"], "owner");
+    assert_eq!(notice["session_id"], session);
+    let objective = json(cli(&["objective", "get", "release"])).await?;
+    assert_eq!(objective["status"], "OBJECTIVE_STATUS_WORKING");
+    gateway.kill().await?;
+    plane.kill().await?;
+    Ok(())
 }
 
 async fn service(mut command: Command) -> Result<(Child, String)> {

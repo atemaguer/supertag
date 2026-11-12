@@ -92,15 +92,16 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
     } else if capabilities.may_ask_work_session_question && attached.checkpoint.is_none() {
         coordination::Inventory::ChildQuestions
     } else if capabilities.may_continue_work_session && attached.checkpoint.is_none() {
-        coordination::Inventory::WorkSessionLifecycle
+        coordination::Inventory::WorkSessionLifecycleReview
     } else if capabilities.may_start_work_session && attached.checkpoint.is_none() {
-        coordination::Inventory::WorkSessions
+        coordination::Inventory::WorkSessionsReview
     } else if attached.checkpoint.is_none()
         && (capabilities.may_use_workstream
             || capabilities.may_read_mailbox
-            || capabilities.may_send_tag_message)
+            || capabilities.may_send_tag_message
+            || capabilities.may_request_commit_review)
     {
-        coordination::Inventory::Direct
+        coordination::Inventory::DirectReview
     } else if capabilities.may_ask_objective_question {
         coordination::Inventory::Ask
     } else {

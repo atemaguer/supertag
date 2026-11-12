@@ -178,6 +178,7 @@ async fn contract(url: String) {
                 operation_id: "mail".into(),
                 recipient_tag_id: "recipient".into(),
                 text: "Read this fixture notice".into(),
+                review: None,
             },
         )
         .await

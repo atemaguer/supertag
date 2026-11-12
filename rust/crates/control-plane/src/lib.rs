@@ -1,5 +1,6 @@
 mod approvals;
 mod checkpoints;
+mod commit_reviews;
 mod context;
 mod conversations;
 mod inbox;
@@ -8,6 +9,7 @@ mod mailbox;
 pub mod objective_limits;
 mod objectives;
 mod policy;
+mod review_artifacts;
 mod store;
 mod surface_policy;
 mod teams;
@@ -59,6 +61,7 @@ impl ControlPlane {
         self.store.sweep_mailbox().await?;
         self.store.sweep_approvals().await?;
         self.store.sweep_work_sessions().await?;
+        self.store.sweep_commit_reviews().await?;
         self.store.prune_watch().await?;
         Ok(())
     }

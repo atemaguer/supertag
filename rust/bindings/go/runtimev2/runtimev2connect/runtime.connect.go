@@ -134,6 +134,9 @@ const (
 	// ObjectivesListObjectivesProcedure is the fully-qualified name of the Objectives's ListObjectives
 	// RPC.
 	ObjectivesListObjectivesProcedure = "/supertag.runtime.v2.Objectives/ListObjectives"
+	// ObjectivesListCommitReviewsProcedure is the fully-qualified name of the Objectives's
+	// ListCommitReviews RPC.
+	ObjectivesListCommitReviewsProcedure = "/supertag.runtime.v2.Objectives/ListCommitReviews"
 	// ObjectivesSetLimitsProcedure is the fully-qualified name of the Objectives's SetLimits RPC.
 	ObjectivesSetLimitsProcedure = "/supertag.runtime.v2.Objectives/SetLimits"
 	// ObjectivesSetRuntimeActionsProcedure is the fully-qualified name of the Objectives's
@@ -298,6 +301,9 @@ const (
 	// TransfersDownloadWorkspaceArtifactProcedure is the fully-qualified name of the Transfers's
 	// DownloadWorkspaceArtifact RPC.
 	TransfersDownloadWorkspaceArtifactProcedure = "/supertag.runtime.v2.Transfers/DownloadWorkspaceArtifact"
+	// TransfersDownloadReviewArtifactProcedure is the fully-qualified name of the Transfers's
+	// DownloadReviewArtifact RPC.
+	TransfersDownloadReviewArtifactProcedure = "/supertag.runtime.v2.Transfers/DownloadReviewArtifact"
 	// CheckpointDirectoryGetCheckpointProcedure is the fully-qualified name of the
 	// CheckpointDirectory's GetCheckpoint RPC.
 	CheckpointDirectoryGetCheckpointProcedure = "/supertag.runtime.v2.CheckpointDirectory/GetCheckpoint"
@@ -319,6 +325,9 @@ const (
 	// WorkspaceDirectoryGetArtifactProcedure is the fully-qualified name of the WorkspaceDirectory's
 	// GetArtifact RPC.
 	WorkspaceDirectoryGetArtifactProcedure = "/supertag.runtime.v2.WorkspaceDirectory/GetArtifact"
+	// WorkspaceDirectoryGetReviewArtifactProcedure is the fully-qualified name of the
+	// WorkspaceDirectory's GetReviewArtifact RPC.
+	WorkspaceDirectoryGetReviewArtifactProcedure = "/supertag.runtime.v2.WorkspaceDirectory/GetReviewArtifact"
 	// HarnessAttachProcedure is the fully-qualified name of the Harness's Attach RPC.
 	HarnessAttachProcedure = "/supertag.runtime.v2.Harness/Attach"
 	// HarnessTakeLiveInputProcedure is the fully-qualified name of the Harness's TakeLiveInput RPC.
@@ -343,6 +352,9 @@ const (
 	// HarnessMailboxSendMessageProcedure is the fully-qualified name of the HarnessMailbox's
 	// SendMessage RPC.
 	HarnessMailboxSendMessageProcedure = "/supertag.runtime.v2.HarnessMailbox/SendMessage"
+	// HarnessMailboxReadReviewPatchProcedure is the fully-qualified name of the HarnessMailbox's
+	// ReadReviewPatch RPC.
+	HarnessMailboxReadReviewPatchProcedure = "/supertag.runtime.v2.HarnessMailbox/ReadReviewPatch"
 	// HarnessWorkSessionsStartProcedure is the fully-qualified name of the HarnessWorkSessions's Start
 	// RPC.
 	HarnessWorkSessionsStartProcedure = "/supertag.runtime.v2.HarnessWorkSessions/Start"
@@ -984,6 +996,7 @@ type ObjectivesClient interface {
 	CreateObjective(context.Context, *connect.Request[runtimev2.CreateObjectiveRequest]) (*connect.Response[runtimev2.Objective], error)
 	GetObjective(context.Context, *connect.Request[runtimev2.GetObjectiveRequest]) (*connect.Response[runtimev2.Objective], error)
 	ListObjectives(context.Context, *connect.Request[runtimev2.ListObjectivesRequest]) (*connect.Response[runtimev2.ListObjectivesResponse], error)
+	ListCommitReviews(context.Context, *connect.Request[runtimev2.ListObjectiveCommitReviewsRequest]) (*connect.Response[runtimev2.ListObjectiveCommitReviewsResponse], error)
 	SetLimits(context.Context, *connect.Request[runtimev2.SetObjectiveLimitsRequest]) (*connect.Response[runtimev2.Objective], error)
 	SetRuntimeActions(context.Context, *connect.Request[runtimev2.SetObjectiveRuntimeActionsRequest]) (*connect.Response[runtimev2.Objective], error)
 	PauseObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error)
@@ -1019,6 +1032,12 @@ func NewObjectivesClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			httpClient,
 			baseURL+ObjectivesListObjectivesProcedure,
 			connect.WithSchema(objectivesMethods.ByName("ListObjectives")),
+			connect.WithClientOptions(opts...),
+		),
+		listCommitReviews: connect.NewClient[runtimev2.ListObjectiveCommitReviewsRequest, runtimev2.ListObjectiveCommitReviewsResponse](
+			httpClient,
+			baseURL+ObjectivesListCommitReviewsProcedure,
+			connect.WithSchema(objectivesMethods.ByName("ListCommitReviews")),
 			connect.WithClientOptions(opts...),
 		),
 		setLimits: connect.NewClient[runtimev2.SetObjectiveLimitsRequest, runtimev2.Objective](
@@ -1065,6 +1084,7 @@ type objectivesClient struct {
 	createObjective   *connect.Client[runtimev2.CreateObjectiveRequest, runtimev2.Objective]
 	getObjective      *connect.Client[runtimev2.GetObjectiveRequest, runtimev2.Objective]
 	listObjectives    *connect.Client[runtimev2.ListObjectivesRequest, runtimev2.ListObjectivesResponse]
+	listCommitReviews *connect.Client[runtimev2.ListObjectiveCommitReviewsRequest, runtimev2.ListObjectiveCommitReviewsResponse]
 	setLimits         *connect.Client[runtimev2.SetObjectiveLimitsRequest, runtimev2.Objective]
 	setRuntimeActions *connect.Client[runtimev2.SetObjectiveRuntimeActionsRequest, runtimev2.Objective]
 	pauseObjective    *connect.Client[runtimev2.ObjectiveActionRequest, runtimev2.Objective]
@@ -1086,6 +1106,11 @@ func (c *objectivesClient) GetObjective(ctx context.Context, req *connect.Reques
 // ListObjectives calls supertag.runtime.v2.Objectives.ListObjectives.
 func (c *objectivesClient) ListObjectives(ctx context.Context, req *connect.Request[runtimev2.ListObjectivesRequest]) (*connect.Response[runtimev2.ListObjectivesResponse], error) {
 	return c.listObjectives.CallUnary(ctx, req)
+}
+
+// ListCommitReviews calls supertag.runtime.v2.Objectives.ListCommitReviews.
+func (c *objectivesClient) ListCommitReviews(ctx context.Context, req *connect.Request[runtimev2.ListObjectiveCommitReviewsRequest]) (*connect.Response[runtimev2.ListObjectiveCommitReviewsResponse], error) {
+	return c.listCommitReviews.CallUnary(ctx, req)
 }
 
 // SetLimits calls supertag.runtime.v2.Objectives.SetLimits.
@@ -1123,6 +1148,7 @@ type ObjectivesHandler interface {
 	CreateObjective(context.Context, *connect.Request[runtimev2.CreateObjectiveRequest]) (*connect.Response[runtimev2.Objective], error)
 	GetObjective(context.Context, *connect.Request[runtimev2.GetObjectiveRequest]) (*connect.Response[runtimev2.Objective], error)
 	ListObjectives(context.Context, *connect.Request[runtimev2.ListObjectivesRequest]) (*connect.Response[runtimev2.ListObjectivesResponse], error)
+	ListCommitReviews(context.Context, *connect.Request[runtimev2.ListObjectiveCommitReviewsRequest]) (*connect.Response[runtimev2.ListObjectiveCommitReviewsResponse], error)
 	SetLimits(context.Context, *connect.Request[runtimev2.SetObjectiveLimitsRequest]) (*connect.Response[runtimev2.Objective], error)
 	SetRuntimeActions(context.Context, *connect.Request[runtimev2.SetObjectiveRuntimeActionsRequest]) (*connect.Response[runtimev2.Objective], error)
 	PauseObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error)
@@ -1154,6 +1180,12 @@ func NewObjectivesHandler(svc ObjectivesHandler, opts ...connect.HandlerOption) 
 		ObjectivesListObjectivesProcedure,
 		svc.ListObjectives,
 		connect.WithSchema(objectivesMethods.ByName("ListObjectives")),
+		connect.WithHandlerOptions(opts...),
+	)
+	objectivesListCommitReviewsHandler := connect.NewUnaryHandler(
+		ObjectivesListCommitReviewsProcedure,
+		svc.ListCommitReviews,
+		connect.WithSchema(objectivesMethods.ByName("ListCommitReviews")),
 		connect.WithHandlerOptions(opts...),
 	)
 	objectivesSetLimitsHandler := connect.NewUnaryHandler(
@@ -1200,6 +1232,8 @@ func NewObjectivesHandler(svc ObjectivesHandler, opts ...connect.HandlerOption) 
 			objectivesGetObjectiveHandler.ServeHTTP(w, r)
 		case ObjectivesListObjectivesProcedure:
 			objectivesListObjectivesHandler.ServeHTTP(w, r)
+		case ObjectivesListCommitReviewsProcedure:
+			objectivesListCommitReviewsHandler.ServeHTTP(w, r)
 		case ObjectivesSetLimitsProcedure:
 			objectivesSetLimitsHandler.ServeHTTP(w, r)
 		case ObjectivesSetRuntimeActionsProcedure:
@@ -1231,6 +1265,10 @@ func (UnimplementedObjectivesHandler) GetObjective(context.Context, *connect.Req
 
 func (UnimplementedObjectivesHandler) ListObjectives(context.Context, *connect.Request[runtimev2.ListObjectivesRequest]) (*connect.Response[runtimev2.ListObjectivesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Objectives.ListObjectives is not implemented"))
+}
+
+func (UnimplementedObjectivesHandler) ListCommitReviews(context.Context, *connect.Request[runtimev2.ListObjectiveCommitReviewsRequest]) (*connect.Response[runtimev2.ListObjectiveCommitReviewsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Objectives.ListCommitReviews is not implemented"))
 }
 
 func (UnimplementedObjectivesHandler) SetLimits(context.Context, *connect.Request[runtimev2.SetObjectiveLimitsRequest]) (*connect.Response[runtimev2.Objective], error) {
@@ -3268,6 +3306,7 @@ type TransfersClient interface {
 	UploadWorkspace(context.Context) *connect.ClientStreamForClient[runtimev2.WorkspaceUpload, runtimev2.WorkspaceDeliveryReference]
 	DownloadWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
 	DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
+	DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
 }
 
 // NewTransfersClient constructs a client for the supertag.runtime.v2.Transfers service. By default,
@@ -3311,6 +3350,12 @@ func NewTransfersClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(transfersMethods.ByName("DownloadWorkspaceArtifact")),
 			connect.WithClientOptions(opts...),
 		),
+		downloadReviewArtifact: connect.NewClient[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDownload](
+			httpClient,
+			baseURL+TransfersDownloadReviewArtifactProcedure,
+			connect.WithSchema(transfersMethods.ByName("DownloadReviewArtifact")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -3321,6 +3366,7 @@ type transfersClient struct {
 	uploadWorkspace           *connect.Client[runtimev2.WorkspaceUpload, runtimev2.WorkspaceDeliveryReference]
 	downloadWorkspace         *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload]
 	downloadWorkspaceArtifact *connect.Client[runtimev2.GetWorkspaceArtifactRequest, runtimev2.WorkspaceDownload]
+	downloadReviewArtifact    *connect.Client[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDownload]
 }
 
 // UploadCheckpoint calls supertag.runtime.v2.Transfers.UploadCheckpoint.
@@ -3348,6 +3394,11 @@ func (c *transfersClient) DownloadWorkspaceArtifact(ctx context.Context, req *co
 	return c.downloadWorkspaceArtifact.CallServerStream(ctx, req)
 }
 
+// DownloadReviewArtifact calls supertag.runtime.v2.Transfers.DownloadReviewArtifact.
+func (c *transfersClient) DownloadReviewArtifact(ctx context.Context, req *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error) {
+	return c.downloadReviewArtifact.CallServerStream(ctx, req)
+}
+
 // TransfersHandler is an implementation of the supertag.runtime.v2.Transfers service.
 type TransfersHandler interface {
 	UploadCheckpoint(context.Context, *connect.ClientStream[runtimev2.CheckpointUpload]) (*connect.Response[runtimev2.CheckpointReference], error)
@@ -3355,6 +3406,7 @@ type TransfersHandler interface {
 	UploadWorkspace(context.Context, *connect.ClientStream[runtimev2.WorkspaceUpload]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 	DownloadWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
 	DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
+	DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
 }
 
 // NewTransfersHandler builds an HTTP handler from the service implementation. It returns the path
@@ -3394,6 +3446,12 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(transfersMethods.ByName("DownloadWorkspaceArtifact")),
 		connect.WithHandlerOptions(opts...),
 	)
+	transfersDownloadReviewArtifactHandler := connect.NewServerStreamHandler(
+		TransfersDownloadReviewArtifactProcedure,
+		svc.DownloadReviewArtifact,
+		connect.WithSchema(transfersMethods.ByName("DownloadReviewArtifact")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.Transfers/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case TransfersUploadCheckpointProcedure:
@@ -3406,6 +3464,8 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 			transfersDownloadWorkspaceHandler.ServeHTTP(w, r)
 		case TransfersDownloadWorkspaceArtifactProcedure:
 			transfersDownloadWorkspaceArtifactHandler.ServeHTTP(w, r)
+		case TransfersDownloadReviewArtifactProcedure:
+			transfersDownloadReviewArtifactHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -3433,6 +3493,10 @@ func (UnimplementedTransfersHandler) DownloadWorkspace(context.Context, *connect
 
 func (UnimplementedTransfersHandler) DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadWorkspaceArtifact is not implemented"))
+}
+
+func (UnimplementedTransfersHandler) DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadReviewArtifact is not implemented"))
 }
 
 // CheckpointDirectoryClient is a client for the supertag.runtime.v2.CheckpointDirectory service.
@@ -3564,6 +3628,7 @@ type WorkspaceDirectoryClient interface {
 	ReserveDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 	CommitDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 	GetArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
+	GetReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 }
 
 // NewWorkspaceDirectoryClient constructs a client for the supertag.runtime.v2.WorkspaceDirectory
@@ -3601,15 +3666,22 @@ func NewWorkspaceDirectoryClient(httpClient connect.HTTPClient, baseURL string, 
 			connect.WithSchema(workspaceDirectoryMethods.ByName("GetArtifact")),
 			connect.WithClientOptions(opts...),
 		),
+		getReviewArtifact: connect.NewClient[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDeliveryReference](
+			httpClient,
+			baseURL+WorkspaceDirectoryGetReviewArtifactProcedure,
+			connect.WithSchema(workspaceDirectoryMethods.ByName("GetReviewArtifact")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // workspaceDirectoryClient implements WorkspaceDirectoryClient.
 type workspaceDirectoryClient struct {
-	getContinuation *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceContinuation]
-	reserveDelivery *connect.Client[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference]
-	commitDelivery  *connect.Client[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference]
-	getArtifact     *connect.Client[runtimev2.GetWorkspaceArtifactRequest, runtimev2.WorkspaceDeliveryReference]
+	getContinuation   *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceContinuation]
+	reserveDelivery   *connect.Client[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference]
+	commitDelivery    *connect.Client[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference]
+	getArtifact       *connect.Client[runtimev2.GetWorkspaceArtifactRequest, runtimev2.WorkspaceDeliveryReference]
+	getReviewArtifact *connect.Client[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDeliveryReference]
 }
 
 // GetContinuation calls supertag.runtime.v2.WorkspaceDirectory.GetContinuation.
@@ -3632,6 +3704,11 @@ func (c *workspaceDirectoryClient) GetArtifact(ctx context.Context, req *connect
 	return c.getArtifact.CallUnary(ctx, req)
 }
 
+// GetReviewArtifact calls supertag.runtime.v2.WorkspaceDirectory.GetReviewArtifact.
+func (c *workspaceDirectoryClient) GetReviewArtifact(ctx context.Context, req *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error) {
+	return c.getReviewArtifact.CallUnary(ctx, req)
+}
+
 // WorkspaceDirectoryHandler is an implementation of the supertag.runtime.v2.WorkspaceDirectory
 // service.
 type WorkspaceDirectoryHandler interface {
@@ -3639,6 +3716,7 @@ type WorkspaceDirectoryHandler interface {
 	ReserveDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 	CommitDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 	GetArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
+	GetReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 }
 
 // NewWorkspaceDirectoryHandler builds an HTTP handler from the service implementation. It returns
@@ -3672,6 +3750,12 @@ func NewWorkspaceDirectoryHandler(svc WorkspaceDirectoryHandler, opts ...connect
 		connect.WithSchema(workspaceDirectoryMethods.ByName("GetArtifact")),
 		connect.WithHandlerOptions(opts...),
 	)
+	workspaceDirectoryGetReviewArtifactHandler := connect.NewUnaryHandler(
+		WorkspaceDirectoryGetReviewArtifactProcedure,
+		svc.GetReviewArtifact,
+		connect.WithSchema(workspaceDirectoryMethods.ByName("GetReviewArtifact")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.WorkspaceDirectory/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case WorkspaceDirectoryGetContinuationProcedure:
@@ -3682,6 +3766,8 @@ func NewWorkspaceDirectoryHandler(svc WorkspaceDirectoryHandler, opts ...connect
 			workspaceDirectoryCommitDeliveryHandler.ServeHTTP(w, r)
 		case WorkspaceDirectoryGetArtifactProcedure:
 			workspaceDirectoryGetArtifactHandler.ServeHTTP(w, r)
+		case WorkspaceDirectoryGetReviewArtifactProcedure:
+			workspaceDirectoryGetReviewArtifactHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -3705,6 +3791,10 @@ func (UnimplementedWorkspaceDirectoryHandler) CommitDelivery(context.Context, *c
 
 func (UnimplementedWorkspaceDirectoryHandler) GetArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkspaceDirectory.GetArtifact is not implemented"))
+}
+
+func (UnimplementedWorkspaceDirectoryHandler) GetReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkspaceDirectory.GetReviewArtifact is not implemented"))
 }
 
 // HarnessClient is a client for the supertag.runtime.v2.Harness service.
@@ -4078,6 +4168,7 @@ func (UnimplementedHarnessWorkstreamsHandler) Post(context.Context, *connect.Req
 type HarnessMailboxClient interface {
 	Read(context.Context, *connect.Request[runtimev2.HarnessReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error)
 	SendMessage(context.Context, *connect.Request[runtimev2.HarnessSendTagMessageRequest]) (*connect.Response[runtimev2.SendTagMessageResponse], error)
+	ReadReviewPatch(context.Context, *connect.Request[runtimev2.HarnessReadReviewPatchRequest]) (*connect.Response[runtimev2.HarnessReviewPatch], error)
 }
 
 // NewHarnessMailboxClient constructs a client for the supertag.runtime.v2.HarnessMailbox service.
@@ -4103,13 +4194,20 @@ func NewHarnessMailboxClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(harnessMailboxMethods.ByName("SendMessage")),
 			connect.WithClientOptions(opts...),
 		),
+		readReviewPatch: connect.NewClient[runtimev2.HarnessReadReviewPatchRequest, runtimev2.HarnessReviewPatch](
+			httpClient,
+			baseURL+HarnessMailboxReadReviewPatchProcedure,
+			connect.WithSchema(harnessMailboxMethods.ByName("ReadReviewPatch")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // harnessMailboxClient implements HarnessMailboxClient.
 type harnessMailboxClient struct {
-	read        *connect.Client[runtimev2.HarnessReadMailboxRequest, runtimev2.ListMailboxMessagesResponse]
-	sendMessage *connect.Client[runtimev2.HarnessSendTagMessageRequest, runtimev2.SendTagMessageResponse]
+	read            *connect.Client[runtimev2.HarnessReadMailboxRequest, runtimev2.ListMailboxMessagesResponse]
+	sendMessage     *connect.Client[runtimev2.HarnessSendTagMessageRequest, runtimev2.SendTagMessageResponse]
+	readReviewPatch *connect.Client[runtimev2.HarnessReadReviewPatchRequest, runtimev2.HarnessReviewPatch]
 }
 
 // Read calls supertag.runtime.v2.HarnessMailbox.Read.
@@ -4122,10 +4220,16 @@ func (c *harnessMailboxClient) SendMessage(ctx context.Context, req *connect.Req
 	return c.sendMessage.CallUnary(ctx, req)
 }
 
+// ReadReviewPatch calls supertag.runtime.v2.HarnessMailbox.ReadReviewPatch.
+func (c *harnessMailboxClient) ReadReviewPatch(ctx context.Context, req *connect.Request[runtimev2.HarnessReadReviewPatchRequest]) (*connect.Response[runtimev2.HarnessReviewPatch], error) {
+	return c.readReviewPatch.CallUnary(ctx, req)
+}
+
 // HarnessMailboxHandler is an implementation of the supertag.runtime.v2.HarnessMailbox service.
 type HarnessMailboxHandler interface {
 	Read(context.Context, *connect.Request[runtimev2.HarnessReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error)
 	SendMessage(context.Context, *connect.Request[runtimev2.HarnessSendTagMessageRequest]) (*connect.Response[runtimev2.SendTagMessageResponse], error)
+	ReadReviewPatch(context.Context, *connect.Request[runtimev2.HarnessReadReviewPatchRequest]) (*connect.Response[runtimev2.HarnessReviewPatch], error)
 }
 
 // NewHarnessMailboxHandler builds an HTTP handler from the service implementation. It returns the
@@ -4147,12 +4251,20 @@ func NewHarnessMailboxHandler(svc HarnessMailboxHandler, opts ...connect.Handler
 		connect.WithSchema(harnessMailboxMethods.ByName("SendMessage")),
 		connect.WithHandlerOptions(opts...),
 	)
+	harnessMailboxReadReviewPatchHandler := connect.NewUnaryHandler(
+		HarnessMailboxReadReviewPatchProcedure,
+		svc.ReadReviewPatch,
+		connect.WithSchema(harnessMailboxMethods.ByName("ReadReviewPatch")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.HarnessMailbox/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case HarnessMailboxReadProcedure:
 			harnessMailboxReadHandler.ServeHTTP(w, r)
 		case HarnessMailboxSendMessageProcedure:
 			harnessMailboxSendMessageHandler.ServeHTTP(w, r)
+		case HarnessMailboxReadReviewPatchProcedure:
+			harnessMailboxReadReviewPatchHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -4168,6 +4280,10 @@ func (UnimplementedHarnessMailboxHandler) Read(context.Context, *connect.Request
 
 func (UnimplementedHarnessMailboxHandler) SendMessage(context.Context, *connect.Request[runtimev2.HarnessSendTagMessageRequest]) (*connect.Response[runtimev2.SendTagMessageResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessMailbox.SendMessage is not implemented"))
+}
+
+func (UnimplementedHarnessMailboxHandler) ReadReviewPatch(context.Context, *connect.Request[runtimev2.HarnessReadReviewPatchRequest]) (*connect.Response[runtimev2.HarnessReviewPatch], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessMailbox.ReadReviewPatch is not implemented"))
 }
 
 // HarnessWorkSessionsClient is a client for the supertag.runtime.v2.HarnessWorkSessions service.

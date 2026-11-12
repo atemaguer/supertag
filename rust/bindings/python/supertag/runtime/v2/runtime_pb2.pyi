@@ -61,6 +61,12 @@ class TagMessageState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     TAG_MESSAGE_STATE_HANDLED: _ClassVar[TagMessageState]
     TAG_MESSAGE_STATE_FAILED: _ClassVar[TagMessageState]
 
+class CommitReviewDecision(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    COMMIT_REVIEW_DECISION_UNSPECIFIED: _ClassVar[CommitReviewDecision]
+    COMMIT_REVIEW_DECISION_APPROVED: _ClassVar[CommitReviewDecision]
+    COMMIT_REVIEW_DECISION_CHANGES_REQUESTED: _ClassVar[CommitReviewDecision]
+
 class HostPhase(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     HOST_PHASE_UNSPECIFIED: _ClassVar[HostPhase]
@@ -231,6 +237,9 @@ TAG_MESSAGE_STATE_UNSPECIFIED: TagMessageState
 TAG_MESSAGE_STATE_PENDING: TagMessageState
 TAG_MESSAGE_STATE_HANDLED: TagMessageState
 TAG_MESSAGE_STATE_FAILED: TagMessageState
+COMMIT_REVIEW_DECISION_UNSPECIFIED: CommitReviewDecision
+COMMIT_REVIEW_DECISION_APPROVED: CommitReviewDecision
+COMMIT_REVIEW_DECISION_CHANGES_REQUESTED: CommitReviewDecision
 HOST_PHASE_UNSPECIFIED: HostPhase
 HOST_PHASE_PENDING: HostPhase
 HOST_PHASE_READY: HostPhase
@@ -612,7 +621,7 @@ class AskQuestionRequest(_message.Message):
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
 
 class AttemptCapabilities(_message.Message):
-    __slots__ = ("may_ask_objective_question", "may_use_workstream", "may_read_mailbox", "may_send_tag_message", "may_start_work_session", "may_continue_work_session", "may_ask_work_session_question")
+    __slots__ = ("may_ask_objective_question", "may_use_workstream", "may_read_mailbox", "may_send_tag_message", "may_start_work_session", "may_continue_work_session", "may_ask_work_session_question", "may_request_commit_review")
     MAY_ASK_OBJECTIVE_QUESTION_FIELD_NUMBER: _ClassVar[int]
     MAY_USE_WORKSTREAM_FIELD_NUMBER: _ClassVar[int]
     MAY_READ_MAILBOX_FIELD_NUMBER: _ClassVar[int]
@@ -620,6 +629,7 @@ class AttemptCapabilities(_message.Message):
     MAY_START_WORK_SESSION_FIELD_NUMBER: _ClassVar[int]
     MAY_CONTINUE_WORK_SESSION_FIELD_NUMBER: _ClassVar[int]
     MAY_ASK_WORK_SESSION_QUESTION_FIELD_NUMBER: _ClassVar[int]
+    MAY_REQUEST_COMMIT_REVIEW_FIELD_NUMBER: _ClassVar[int]
     may_ask_objective_question: bool
     may_use_workstream: bool
     may_read_mailbox: bool
@@ -627,7 +637,8 @@ class AttemptCapabilities(_message.Message):
     may_start_work_session: bool
     may_continue_work_session: bool
     may_ask_work_session_question: bool
-    def __init__(self, may_ask_objective_question: _Optional[bool] = ..., may_use_workstream: _Optional[bool] = ..., may_read_mailbox: _Optional[bool] = ..., may_send_tag_message: _Optional[bool] = ..., may_start_work_session: _Optional[bool] = ..., may_continue_work_session: _Optional[bool] = ..., may_ask_work_session_question: _Optional[bool] = ...) -> None: ...
+    may_request_commit_review: bool
+    def __init__(self, may_ask_objective_question: _Optional[bool] = ..., may_use_workstream: _Optional[bool] = ..., may_read_mailbox: _Optional[bool] = ..., may_send_tag_message: _Optional[bool] = ..., may_start_work_session: _Optional[bool] = ..., may_continue_work_session: _Optional[bool] = ..., may_ask_work_session_question: _Optional[bool] = ..., may_request_commit_review: _Optional[bool] = ...) -> None: ...
 
 class WorkSession(_message.Message):
     __slots__ = ("work_session_id", "title", "parent_tag_id", "parent_session_id", "starter_task_id", "tag_id", "latest_task_id", "latest_task_state", "report_task_id", "report_task_state", "objective_id", "workspace_delivery", "created_order", "question")
@@ -748,7 +759,7 @@ class ListWorkSessionsResponse(_message.Message):
     def __init__(self, work_sessions: _Optional[_Iterable[_Union[WorkSession, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
 
 class TagMessage(_message.Message):
-    __slots__ = ("message_id", "sender_tag_id", "recipient_tag_id", "source_task_id", "workstream_post_id", "objective_id", "text", "hops", "task_id", "state", "created_at_ms", "origin")
+    __slots__ = ("message_id", "sender_tag_id", "recipient_tag_id", "source_task_id", "workstream_post_id", "objective_id", "text", "hops", "task_id", "state", "created_at_ms", "origin", "review")
     MESSAGE_ID_FIELD_NUMBER: _ClassVar[int]
     SENDER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
     RECIPIENT_TAG_ID_FIELD_NUMBER: _ClassVar[int]
@@ -761,6 +772,7 @@ class TagMessage(_message.Message):
     STATE_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     ORIGIN_FIELD_NUMBER: _ClassVar[int]
+    REVIEW_FIELD_NUMBER: _ClassVar[int]
     message_id: str
     sender_tag_id: str
     recipient_tag_id: str
@@ -773,29 +785,84 @@ class TagMessage(_message.Message):
     state: TagMessageState
     created_at_ms: int
     origin: TagMessageOrigin
-    def __init__(self, message_id: _Optional[str] = ..., sender_tag_id: _Optional[str] = ..., recipient_tag_id: _Optional[str] = ..., source_task_id: _Optional[str] = ..., workstream_post_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., text: _Optional[str] = ..., hops: _Optional[int] = ..., task_id: _Optional[str] = ..., state: _Optional[_Union[TagMessageState, str]] = ..., created_at_ms: _Optional[int] = ..., origin: _Optional[_Union[TagMessageOrigin, str]] = ...) -> None: ...
+    review: CommitReview
+    def __init__(self, message_id: _Optional[str] = ..., sender_tag_id: _Optional[str] = ..., recipient_tag_id: _Optional[str] = ..., source_task_id: _Optional[str] = ..., workstream_post_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., text: _Optional[str] = ..., hops: _Optional[int] = ..., task_id: _Optional[str] = ..., state: _Optional[_Union[TagMessageState, str]] = ..., created_at_ms: _Optional[int] = ..., origin: _Optional[_Union[TagMessageOrigin, str]] = ..., review: _Optional[_Union[CommitReview, _Mapping]] = ...) -> None: ...
+
+class CommitReviewSubmission(_message.Message):
+    __slots__ = ("commit", "response")
+    COMMIT_FIELD_NUMBER: _ClassVar[int]
+    RESPONSE_FIELD_NUMBER: _ClassVar[int]
+    commit: str
+    response: CommitReviewResponse
+    def __init__(self, commit: _Optional[str] = ..., response: _Optional[_Union[CommitReviewResponse, _Mapping]] = ...) -> None: ...
+
+class CommitReviewResponse(_message.Message):
+    __slots__ = ("request_id", "verdict")
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    VERDICT_FIELD_NUMBER: _ClassVar[int]
+    request_id: str
+    verdict: CommitReviewDecision
+    def __init__(self, request_id: _Optional[str] = ..., verdict: _Optional[_Union[CommitReviewDecision, str]] = ...) -> None: ...
+
+class CommitReviewVerdict(_message.Message):
+    __slots__ = ("decision", "summary", "task_id", "recorded_at_ms")
+    DECISION_FIELD_NUMBER: _ClassVar[int]
+    SUMMARY_FIELD_NUMBER: _ClassVar[int]
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    RECORDED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    decision: CommitReviewDecision
+    summary: str
+    task_id: str
+    recorded_at_ms: int
+    def __init__(self, decision: _Optional[_Union[CommitReviewDecision, str]] = ..., summary: _Optional[str] = ..., task_id: _Optional[str] = ..., recorded_at_ms: _Optional[int] = ...) -> None: ...
+
+class CommitReview(_message.Message):
+    __slots__ = ("request_id", "objective_id", "commit", "workspace_id", "source_task_id", "requester_tag_id", "reviewer_tag_id", "requested_at_ms", "verdict")
+    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    COMMIT_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    REQUESTER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    REVIEWER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    REQUESTED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    VERDICT_FIELD_NUMBER: _ClassVar[int]
+    request_id: str
+    objective_id: str
+    commit: str
+    workspace_id: str
+    source_task_id: str
+    requester_tag_id: str
+    reviewer_tag_id: str
+    requested_at_ms: int
+    verdict: CommitReviewVerdict
+    def __init__(self, request_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., commit: _Optional[str] = ..., workspace_id: _Optional[str] = ..., source_task_id: _Optional[str] = ..., requester_tag_id: _Optional[str] = ..., reviewer_tag_id: _Optional[str] = ..., requested_at_ms: _Optional[int] = ..., verdict: _Optional[_Union[CommitReviewVerdict, _Mapping]] = ...) -> None: ...
 
 class SendAttemptTagMessageRequest(_message.Message):
-    __slots__ = ("attempt", "operation_id", "recipient_tag_id", "text")
+    __slots__ = ("attempt", "operation_id", "recipient_tag_id", "text", "review")
     ATTEMPT_FIELD_NUMBER: _ClassVar[int]
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     RECIPIENT_TAG_ID_FIELD_NUMBER: _ClassVar[int]
     TEXT_FIELD_NUMBER: _ClassVar[int]
+    REVIEW_FIELD_NUMBER: _ClassVar[int]
     attempt: InspectAttemptRequest
     operation_id: str
     recipient_tag_id: str
     text: str
-    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., recipient_tag_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
+    review: CommitReviewSubmission
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., recipient_tag_id: _Optional[str] = ..., text: _Optional[str] = ..., review: _Optional[_Union[CommitReviewSubmission, _Mapping]] = ...) -> None: ...
 
 class SendTagMessageResponse(_message.Message):
-    __slots__ = ("message", "duplicate", "approval")
+    __slots__ = ("message", "duplicate", "approval", "review")
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
     DUPLICATE_FIELD_NUMBER: _ClassVar[int]
     APPROVAL_FIELD_NUMBER: _ClassVar[int]
+    REVIEW_FIELD_NUMBER: _ClassVar[int]
     message: TagMessage
     duplicate: bool
     approval: Approval
-    def __init__(self, message: _Optional[_Union[TagMessage, _Mapping]] = ..., duplicate: _Optional[bool] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ...) -> None: ...
+    review: CommitReview
+    def __init__(self, message: _Optional[_Union[TagMessage, _Mapping]] = ..., duplicate: _Optional[bool] = ..., approval: _Optional[_Union[Approval, _Mapping]] = ..., review: _Optional[_Union[CommitReview, _Mapping]] = ...) -> None: ...
 
 class ChangeMailboxGrantRequest(_message.Message):
     __slots__ = ("operation_id", "sender_tag_id", "recipient_tag_id", "granted")
@@ -1014,14 +1081,16 @@ class HarnessStartWorkSessionRequest(_message.Message):
     def __init__(self, operation_id: _Optional[str] = ..., title: _Optional[str] = ..., instruction: _Optional[str] = ..., workspace_id: _Optional[str] = ..., target_tag_id: _Optional[str] = ...) -> None: ...
 
 class HarnessSendTagMessageRequest(_message.Message):
-    __slots__ = ("operation_id", "recipient_tag_id", "text")
+    __slots__ = ("operation_id", "recipient_tag_id", "text", "review")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     RECIPIENT_TAG_ID_FIELD_NUMBER: _ClassVar[int]
     TEXT_FIELD_NUMBER: _ClassVar[int]
+    REVIEW_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     recipient_tag_id: str
     text: str
-    def __init__(self, operation_id: _Optional[str] = ..., recipient_tag_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
+    review: CommitReviewSubmission
+    def __init__(self, operation_id: _Optional[str] = ..., recipient_tag_id: _Optional[str] = ..., text: _Optional[str] = ..., review: _Optional[_Union[CommitReviewSubmission, _Mapping]] = ...) -> None: ...
 
 class HarnessReadMailboxRequest(_message.Message):
     __slots__ = ("limit", "cursor")
@@ -1030,6 +1099,28 @@ class HarnessReadMailboxRequest(_message.Message):
     limit: int
     cursor: str
     def __init__(self, limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+
+class HarnessReadReviewPatchRequest(_message.Message):
+    __slots__ = ("review_id", "offset")
+    REVIEW_ID_FIELD_NUMBER: _ClassVar[int]
+    OFFSET_FIELD_NUMBER: _ClassVar[int]
+    review_id: str
+    offset: int
+    def __init__(self, review_id: _Optional[str] = ..., offset: _Optional[int] = ...) -> None: ...
+
+class HarnessReviewPatch(_message.Message):
+    __slots__ = ("review_id", "offset", "data", "next_offset", "delivery")
+    REVIEW_ID_FIELD_NUMBER: _ClassVar[int]
+    OFFSET_FIELD_NUMBER: _ClassVar[int]
+    DATA_FIELD_NUMBER: _ClassVar[int]
+    NEXT_OFFSET_FIELD_NUMBER: _ClassVar[int]
+    DELIVERY_FIELD_NUMBER: _ClassVar[int]
+    review_id: str
+    offset: int
+    data: bytes
+    next_offset: int
+    delivery: WorkspaceDeliveryReference
+    def __init__(self, review_id: _Optional[str] = ..., offset: _Optional[int] = ..., data: _Optional[bytes] = ..., next_offset: _Optional[int] = ..., delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ...) -> None: ...
 
 class QueueInputRequest(_message.Message):
     __slots__ = ("task_id", "operation_id", "text")
@@ -1825,6 +1916,14 @@ class GetWorkspaceArtifactRequest(_message.Message):
     kind: WorkspaceArtifactKind
     def __init__(self, task_id: _Optional[str] = ..., kind: _Optional[_Union[WorkspaceArtifactKind, str]] = ...) -> None: ...
 
+class GetReviewArtifactRequest(_message.Message):
+    __slots__ = ("attempt", "review_id")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    REVIEW_ID_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    review_id: str
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., review_id: _Optional[str] = ...) -> None: ...
+
 class HarnessPublishRequest(_message.Message):
     __slots__ = ("sequence", "text")
     SEQUENCE_FIELD_NUMBER: _ClassVar[int]
@@ -2102,6 +2201,24 @@ class ListObjectivesResponse(_message.Message):
     OBJECTIVES_FIELD_NUMBER: _ClassVar[int]
     objectives: _containers.RepeatedCompositeFieldContainer[Objective]
     def __init__(self, objectives: _Optional[_Iterable[_Union[Objective, _Mapping]]] = ...) -> None: ...
+
+class ListObjectiveCommitReviewsRequest(_message.Message):
+    __slots__ = ("objective_id", "limit", "before_order")
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    BEFORE_ORDER_FIELD_NUMBER: _ClassVar[int]
+    objective_id: str
+    limit: int
+    before_order: int
+    def __init__(self, objective_id: _Optional[str] = ..., limit: _Optional[int] = ..., before_order: _Optional[int] = ...) -> None: ...
+
+class ListObjectiveCommitReviewsResponse(_message.Message):
+    __slots__ = ("reviews", "next_before_order")
+    REVIEWS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_BEFORE_ORDER_FIELD_NUMBER: _ClassVar[int]
+    reviews: _containers.RepeatedCompositeFieldContainer[CommitReview]
+    next_before_order: int
+    def __init__(self, reviews: _Optional[_Iterable[_Union[CommitReview, _Mapping]]] = ..., next_before_order: _Optional[int] = ...) -> None: ...
 
 class SetObjectiveLimitsRequest(_message.Message):
     __slots__ = ("objective_id", "operation_id", "deadline_ms", "clear_deadline", "budget_limit_minor", "budget_currency", "clear_budget", "expected_revision")

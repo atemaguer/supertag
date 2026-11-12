@@ -965,6 +965,11 @@ class ObjectivesStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListObjectivesRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListObjectivesResponse.FromString,
                 _registered_method=True)
+        self.ListCommitReviews = channel.unary_unary(
+                '/supertag.runtime.v2.Objectives/ListCommitReviews',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListObjectiveCommitReviewsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListObjectiveCommitReviewsResponse.FromString,
+                _registered_method=True)
         self.SetLimits = channel.unary_unary(
                 '/supertag.runtime.v2.Objectives/SetLimits',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SetObjectiveLimitsRequest.SerializeToString,
@@ -1013,6 +1018,12 @@ class ObjectivesServicer:
         raise NotImplementedError('Method not implemented!')
 
     def ListObjectives(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListCommitReviews(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -1071,6 +1082,11 @@ def add_ObjectivesServicer_to_server(servicer, server):
                     servicer.ListObjectives,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListObjectivesRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListObjectivesResponse.SerializeToString,
+            ),
+            'ListCommitReviews': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListCommitReviews,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListObjectiveCommitReviewsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListObjectiveCommitReviewsResponse.SerializeToString,
             ),
             'SetLimits': grpc.unary_unary_rpc_method_handler(
                     servicer.SetLimits,
@@ -1184,6 +1200,33 @@ class Objectives:
             '/supertag.runtime.v2.Objectives/ListObjectives',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListObjectivesRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListObjectivesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListCommitReviews(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Objectives/ListCommitReviews',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListObjectiveCommitReviewsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListObjectiveCommitReviewsResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -4155,6 +4198,11 @@ class TransfersStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
                 _registered_method=True)
+        self.DownloadReviewArtifact = channel.unary_stream(
+                '/supertag.runtime.v2.Transfers/DownloadReviewArtifact',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReviewArtifactRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
+                _registered_method=True)
 
 
 class TransfersServicer:
@@ -4191,6 +4239,12 @@ class TransfersServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def DownloadReviewArtifact(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_TransfersServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -4217,6 +4271,11 @@ def add_TransfersServicer_to_server(servicer, server):
             'DownloadWorkspaceArtifact': grpc.unary_stream_rpc_method_handler(
                     servicer.DownloadWorkspaceArtifact,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.SerializeToString,
+            ),
+            'DownloadReviewArtifact': grpc.unary_stream_rpc_method_handler(
+                    servicer.DownloadReviewArtifact,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReviewArtifactRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.SerializeToString,
             ),
     }
@@ -4355,6 +4414,33 @@ class Transfers:
             target,
             '/supertag.runtime.v2.Transfers/DownloadWorkspaceArtifact',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DownloadReviewArtifact(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/supertag.runtime.v2.Transfers/DownloadReviewArtifact',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReviewArtifactRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
             options,
             channel_credentials,
@@ -4558,6 +4644,11 @@ class WorkspaceDirectoryStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
                 _registered_method=True)
+        self.GetReviewArtifact = channel.unary_unary(
+                '/supertag.runtime.v2.WorkspaceDirectory/GetReviewArtifact',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReviewArtifactRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
+                _registered_method=True)
 
 
 class WorkspaceDirectoryServicer:
@@ -4588,6 +4679,12 @@ class WorkspaceDirectoryServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetReviewArtifact(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_WorkspaceDirectoryServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -4609,6 +4706,11 @@ def add_WorkspaceDirectoryServicer_to_server(servicer, server):
             'GetArtifact': grpc.unary_unary_rpc_method_handler(
                     servicer.GetArtifact,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.SerializeToString,
+            ),
+            'GetReviewArtifact': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetReviewArtifact,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReviewArtifactRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.SerializeToString,
             ),
     }
@@ -4720,6 +4822,33 @@ class WorkspaceDirectory:
             target,
             '/supertag.runtime.v2.WorkspaceDirectory/GetArtifact',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetReviewArtifact(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkspaceDirectory/GetReviewArtifact',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReviewArtifactRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
             options,
             channel_credentials,
@@ -5237,6 +5366,11 @@ class HarnessMailboxStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessSendTagMessageRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendTagMessageResponse.FromString,
                 _registered_method=True)
+        self.ReadReviewPatch = channel.unary_unary(
+                '/supertag.runtime.v2.HarnessMailbox/ReadReviewPatch',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReadReviewPatchRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReviewPatch.FromString,
+                _registered_method=True)
 
 
 class HarnessMailboxServicer:
@@ -5254,6 +5388,12 @@ class HarnessMailboxServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReadReviewPatch(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_HarnessMailboxServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -5266,6 +5406,11 @@ def add_HarnessMailboxServicer_to_server(servicer, server):
                     servicer.SendMessage,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessSendTagMessageRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendTagMessageResponse.SerializeToString,
+            ),
+            'ReadReviewPatch': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReadReviewPatch,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReadReviewPatchRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReviewPatch.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -5322,6 +5467,33 @@ class HarnessMailbox:
             '/supertag.runtime.v2.HarnessMailbox/SendMessage',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessSendTagMessageRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendTagMessageResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReadReviewPatch(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HarnessMailbox/ReadReviewPatch',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReadReviewPatchRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReviewPatch.FromString,
             options,
             channel_credentials,
             insecure,

@@ -116,7 +116,7 @@ pub(crate) async fn settle_in(
             "Work Session has conflicting operator waits".into(),
         ));
     }
-    let prompt = prompt(
+    let mut prompt = prompt(
         &row.try_get::<String, _>("title")?,
         &session,
         task.state(),
@@ -125,6 +125,18 @@ pub(crate) async fn settle_in(
         question.as_deref(),
         objective.is_some(),
     );
+    if objective.is_some()
+        && task.state() == TaskState::Succeeded
+        && let Some(delivery) = task
+            .workspace_delivery
+            .as_ref()
+            .filter(|delivery| delivery.committed)
+    {
+        prompt.push_str(&format!(
+            "\n\nSuperTag verified this Work Session's Workspace commit {}. You can request review of this commit from a Tag by supplying it to send_message.",
+            delivery.head_commit,
+        ));
+    }
     let order = next_order(tx).await?;
     let report = insert_task_from_snapshot(tx, order, &starter, &parent, &prompt).await?;
     sqlx::query("INSERT INTO supertag_v2_work_session_tasks (task_id,work_session_id,kind) VALUES ($1,$2,2)")

@@ -234,6 +234,18 @@ fn require_running(row: &AnyRow, now: i64) -> Result<()> {
 
 #[tonic::async_trait]
 impl workspace_directory_server::WorkspaceDirectory for ControlPlane {
+    async fn get_review_artifact(
+        &self,
+        request: Request<GetReviewArtifactRequest>,
+    ) -> std::result::Result<Response<WorkspaceDeliveryReference>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .get_review_artifact(&host, &request.into_inner())
+                .await?,
+        ))
+    }
+
     async fn get_continuation(
         &self,
         request: Request<InspectAttemptRequest>,

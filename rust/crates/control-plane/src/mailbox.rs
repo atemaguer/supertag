@@ -223,10 +223,18 @@ pub(crate) async fn started_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> 
                 .replace('<', "&lt;")
                 .replace('>', "&gt;")
         );
-        if prompt.len() + entry.len() > MAX_TASK_PROMPT_BYTES {
+        let review = crate::commit_reviews::for_message_in(tx, &id).await?;
+        let review_prompt = review.map_or_else(String::new, |review| {
+            format!(
+                "Commit review request {id} is assigned to this Task for immutable commit {}. Use read_review_patch with requestId {id}, starting at offset zero and following nextOffset. Record the verdict using send_message to the requester's Tag with review.requestId {id} and review.verdict approved or changes_requested.\n",
+                review.commit
+            )
+        });
+        if prompt.len() + entry.len() + review_prompt.len() > MAX_TASK_PROMPT_BYTES {
             break;
         }
         prompt.push_str(&entry);
+        prompt.push_str(&review_prompt);
         sqlx::query("UPDATE supertag_v2_mailbox_messages SET task_id=$1 WHERE message_id=$2 AND task_id IS NULL").bind(task_id).bind(id).execute(&mut **tx).await?;
     }
     sqlx::query("UPDATE supertag_v2_tasks SET prompt=$1 WHERE task_id=$2")
@@ -281,7 +289,7 @@ async fn history_in(
     let mut next_cursor = String::new();
     let mut messages = Vec::with_capacity(limit);
     for row in rows.iter().take(limit) {
-        messages.push(message_row(row)?);
+        messages.push(message_row(tx, row).await?);
         if more {
             next_cursor = format!("m{}", row.try_get::<i64, _>("delivery_order")?);
         }
@@ -292,7 +300,7 @@ async fn history_in(
     })
 }
 
-fn message_row(row: &AnyRow) -> Result<TagMessage> {
+async fn message_row(tx: &mut Transaction<'_, Any>, row: &AnyRow) -> Result<TagMessage> {
     let state = match row
         .try_get::<Option<i64>, _>("task_state")?
         .and_then(|s| TaskState::try_from(s as i32).ok())
@@ -301,8 +309,10 @@ fn message_row(row: &AnyRow) -> Result<TagMessage> {
         Some(TaskState::Failed | TaskState::Cancelled) => TagMessageState::Failed,
         _ => TagMessageState::Pending,
     };
+    let message_id: String = row.try_get("message_id")?;
+    let review = crate::commit_reviews::for_message_in(tx, &message_id).await?;
     Ok(TagMessage {
-        message_id: row.try_get("message_id")?,
+        message_id,
         sender_tag_id: row.try_get("sender_tag_id")?,
         recipient_tag_id: row.try_get("recipient_tag_id")?,
         source_task_id: row.try_get("source_task_id")?,
@@ -314,6 +324,7 @@ fn message_row(row: &AnyRow) -> Result<TagMessage> {
         state: state as i32,
         created_at_ms: row.try_get("created_at_ms")?,
         origin: row.try_get::<i64, _>("origin")? as i32,
+        review,
     })
 }
 

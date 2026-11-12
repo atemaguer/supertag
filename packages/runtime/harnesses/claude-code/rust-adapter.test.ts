@@ -19,6 +19,7 @@ import {
   AdapterBootstrapSchema,
   ApprovalState,
   type AttemptCapabilities,
+  CommitReviewDecision,
   ContextPinSchema,
   Harness,
   type HarnessAskQuestionRequest,
@@ -29,6 +30,7 @@ import {
   type HarnessPostWorkstreamRequest,
   HarnessQuestions,
   type HarnessReadMailboxRequest,
+  type HarnessReadReviewPatchRequest,
   type HarnessReadWorkstreamRequest,
   type HarnessSendTagMessageRequest,
   type HarnessStartWorkSessionRequest,
@@ -49,6 +51,19 @@ const entry = join(here, "dist/rust-adapter/entry.js");
 const token = "execution-token-private-fixture-123";
 const providerSecret = "provider-secret-private-fixture-123";
 const childSession = "work/00000000-0000-4000-8000-000000000001";
+const reviewCommit = "ab".repeat(20);
+const reviewPatch = Buffer.from(`diff ${providerSecret}\n`);
+const reviewDelivery = {
+  workspaceId: "repo",
+  deliveryId: "d".repeat(64),
+  baseCommit: "a".repeat(40),
+  startCommit: "a".repeat(40),
+  headCommit: reviewCommit,
+  committed: true,
+  changedFiles: 1n,
+  patch: { sha256: "b".repeat(64), byteLength: BigInt(reviewPatch.length + 1) },
+  bundle: { sha256: "c".repeat(64), byteLength: 123n },
+};
 const cleanups: Array<() => Promise<unknown>> = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
@@ -107,6 +122,7 @@ async function invoke({
   const posts: HarnessPostWorkstreamRequest[] = [];
   const workstreamReads: HarnessReadWorkstreamRequest[] = [];
   const mailboxReads: HarnessReadMailboxRequest[] = [];
+  const reviewPatchReads: HarnessReadReviewPatchRequest[] = [];
   const mailboxSends: HarnessSendTagMessageRequest[] = [];
   const workSessionStarts: HarnessStartWorkSessionRequest[] = [];
   const workSessionContinuations: HarnessContinueWorkSessionRequest[] = [];
@@ -329,16 +345,69 @@ async function invoke({
             expect(context.requestHeader.get("authorization")).toBe(`Bearer ${token}`);
             mailboxSends.push(request);
             if (mailboxSends.length === 1) throw new ConnectError("reply lost", Code.Unavailable);
+            const kind = request.review?.kind;
+            const review = {
+              requestId: "review-request",
+              objectiveId: "objective",
+              commit: reviewCommit,
+              workspaceId: "repo",
+              sourceTaskId: "child-task",
+              requestedAtMs: 100n,
+              requesterTagId: kind?.case === "response" ? "lead" : "actor",
+              reviewerTagId: kind?.case === "response" ? "actor" : "lead",
+            };
+            if (kind?.case === "response") {
+              return {
+                duplicate: true,
+                review: {
+                  ...review,
+                  verdict: {
+                    decision: kind.value.verdict,
+                    summary: request.text,
+                    taskId: "task",
+                    recordedAtMs: 101n,
+                  },
+                },
+              };
+            }
             return {
               duplicate: true,
               message: {
-                messageId: "direct-receipt",
+                messageId: kind?.case === "commit" ? review.requestId : "direct-receipt",
                 sourceTaskId: "task",
                 senderTagId: "actor",
                 recipientTagId: request.recipientTagId,
                 text: request.text,
                 origin: TagMessageOrigin.DIRECT,
+                ...(kind?.case === "commit" ? { objectiveId: review.objectiveId, review } : {}),
               },
+            };
+          },
+          readReviewPatch(request, context) {
+            expect(context.requestHeader.get("authorization")).toBe(`Bearer ${token}`);
+            reviewPatchReads.push(request);
+            if (request.reviewId === "empty-review")
+              return {
+                reviewId: request.reviewId,
+                offset: 0n,
+                data: new Uint8Array(),
+                delivery: {
+                  ...reviewDelivery,
+                  startCommit: reviewCommit,
+                  committed: false,
+                  changedFiles: 0n,
+                  patch: {
+                    sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                    byteLength: 0n,
+                  },
+                },
+              };
+            return {
+              reviewId: request.reviewId,
+              offset: request.offset,
+              data: request.offset === 0n ? reviewPatch : Uint8Array.of(255),
+              nextOffset: request.offset === 0n ? BigInt(reviewPatch.length) : undefined,
+              delivery: reviewDelivery,
             };
           },
           read(request, context) {
@@ -433,6 +502,7 @@ async function invoke({
     posts,
     workstreamReads,
     mailboxReads,
+    reviewPatchReads,
     mailboxSends,
     workSessionStarts,
     workSessionContinuations,
@@ -639,6 +709,54 @@ it("sends direct Mailbox messages through the real Claude SDK with a stable retr
   });
   expect(run.posts).toEqual([]);
 }, 30000);
+
+it.each(["request", "verdict"] as const)(
+  "confirms a typed commit review %s through the real Claude SDK",
+  async (mode) => {
+    const run = await invoke({
+      prompt: `commit-review-${mode}`,
+      coordination: {
+        mayRequestCommitReview: mode === "request",
+        mayReadMailbox: mode === "verdict",
+        maySendTagMessage: mode === "verdict",
+      },
+    });
+    expect(
+      run.completions[0]?.succeeded,
+      await readFile(join(run.workspace, "fixture-error.txt"), "utf8").catch(
+        () => run.completions[0]?.result,
+      ),
+    ).toBe(true);
+    expect(run.mailboxSends).toHaveLength(2);
+    expect(run.mailboxSends[0]).toEqual(run.mailboxSends[1]);
+    expect(run.mailboxSends[0]).toMatchObject({
+      recipientTagId: "lead",
+      text: "Inspect [REDACTED]",
+      review: {
+        kind:
+          mode === "request"
+            ? { case: "commit", value: reviewCommit }
+            : {
+                case: "response",
+                value: {
+                  requestId: "review-request",
+                  verdict: CommitReviewDecision.CHANGES_REQUESTED,
+                },
+              },
+      },
+    });
+    expect(run.reviewPatchReads.map(({ reviewId, offset }) => [reviewId, offset])).toEqual(
+      mode === "request"
+        ? []
+        : [
+            ["review-request", 0n],
+            ["review-request", BigInt(reviewPatch.length)],
+            ["empty-review", 0n],
+          ],
+    );
+  },
+  30000,
+);
 
 it("starts a Work Session through the real Claude SDK with a scoped replay receipt", async () => {
   const run = await invoke({

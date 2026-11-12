@@ -119,6 +119,13 @@ impl HarnessWorkstreams for Bridge {
 
 #[tonic::async_trait]
 impl HarnessMailbox for Bridge {
+    async fn read_review_patch(
+        &self,
+        request: Request<supertag_protocol::v2::HarnessReadReviewPatchRequest>,
+    ) -> Result<Response<supertag_protocol::v2::HarnessReviewPatch>, Status> {
+        self.review_patch(request).await
+    }
+
     async fn send_message(
         &self,
         request: Request<HarnessSendTagMessageRequest>,
@@ -136,6 +143,7 @@ impl HarnessMailbox for Bridge {
                 operation_id: input.operation_id,
                 recipient_tag_id: input.recipient_tag_id,
                 text: input.text,
+                review: input.review,
             },
             &self.host_token,
             None,

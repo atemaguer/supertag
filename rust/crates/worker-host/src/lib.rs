@@ -83,6 +83,7 @@ pub(crate) type RegisteredHost = WorkerHostClient<InterceptedService<Channel, Ho
 pub(crate) type RegisteredInputs = AttemptInputsClient<InterceptedService<Channel, HostHeaders>>;
 #[derive(Clone)]
 pub(crate) struct CoordinationClients {
+    transfers: checkpoints::Transfers,
     workstreams: AttemptWorkstreamsClient<InterceptedService<Channel, HostHeaders>>,
     mailbox: AttemptMailboxClient<InterceptedService<Channel, HostHeaders>>,
     work_sessions: AttemptWorkSessionsClient<InterceptedService<Channel, HostHeaders>>,
@@ -182,6 +183,7 @@ pub async fn run(
     .max_decoding_message_size(MAX_MESSAGE_BYTES)
     .max_encoding_message_size(MAX_MESSAGE_BYTES);
     let coordination = CoordinationClients {
+        transfers: checkpoints::Transfers::new(channel.clone(), headers.clone()),
         workstreams: AttemptWorkstreamsClient::with_interceptor(channel.clone(), headers.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES),

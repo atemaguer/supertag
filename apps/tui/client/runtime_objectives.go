@@ -111,7 +111,52 @@ func (c *runtimeClient) describeObjective(ctx context.Context, id string) (*oper
 	if id := objective.GetSessionId(); id != "" {
 		view.Sessions = []*operatorv1.ObjectiveSession{{Id: id, TagId: owner, Tag: owner, Owner: true}}
 	}
+	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
+	defer cancel()
+	const reviewLimit = 50
+	var before uint64
+	for len(view.CommitReviews) < reviewLimit {
+		remaining := reviewLimit - len(view.CommitReviews)
+		reviews, err := c.objectives.ListCommitReviews(ctx, connect.NewRequest(&v2.ListObjectiveCommitReviewsRequest{
+			ObjectiveId: id, Limit: uint32(remaining), BeforeOrder: before,
+		}))
+		if err != nil {
+			return nil, apiError(err)
+		}
+		page := reviews.Msg.GetReviews()
+		next := reviews.Msg.GetNextBeforeOrder()
+		if len(page) > remaining || next != 0 && (len(page) == 0 || before != 0 && next >= before) {
+			return nil, &APIError{Code: connect.CodeDataLoss, Message: "Gateway returned an invalid commit review page."}
+		}
+		for _, review := range page {
+			if review.GetObjectiveId() != id {
+				return nil, &APIError{Code: connect.CodeDataLoss, Message: "Gateway returned a commit review for a different Objective."}
+			}
+			view.CommitReviews = append(view.CommitReviews, runtimeCommitReview(review))
+		}
+		if next == 0 {
+			break
+		}
+		before = next
+	}
 	return view, nil
+}
+
+func runtimeCommitReview(review *v2.CommitReview) *operatorv1.ObjectiveCommitReview {
+	out := &operatorv1.ObjectiveCommitReview{
+		RequestId: review.GetRequestId(), Commit: review.GetCommit(), ReviewerTagId: review.GetReviewerTagId(),
+	}
+	if verdict := review.GetVerdict(); verdict != nil {
+		switch verdict.GetDecision() {
+		case v2.CommitReviewDecision_COMMIT_REVIEW_DECISION_APPROVED:
+			out.Verdict = "approved"
+		case v2.CommitReviewDecision_COMMIT_REVIEW_DECISION_CHANGES_REQUESTED:
+			out.Verdict = "changes_requested"
+		}
+		out.Summary = verdict.GetSummary()
+		out.RecordedAt = timestamppb.New(time.UnixMilli(verdict.GetRecordedAtMs()))
+	}
+	return out
 }
 
 func (c *runtimeClient) messageObjective(ctx context.Context, id, text string) (*operatorv1.MessageObjectiveResponse, error) {

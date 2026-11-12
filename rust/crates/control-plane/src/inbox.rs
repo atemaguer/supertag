@@ -69,13 +69,15 @@ impl Store {
             .await?
             .is_some();
         let session: String = row.try_get("session_id")?;
-        let kind = crate::work_sessions::task_kind_in(&mut tx, &attempt.task_id).await?;
+        let scope = crate::work_sessions::task_scope_in(&mut tx, &attempt.task_id).await?;
+        let kind = scope.as_ref().map(|scope| scope.kind);
         let is_root = !crate::work_sessions::reserved_session(&session) && kind.is_none();
-        let may_continue_work_session = crate::work_sessions::continuation::may_continue_in(
-            &mut tx,
-            &crate::store::task_row(&row)?,
-        )
-        .await?;
+        let task = crate::store::task_row(&row)?;
+        let may_request_commit_review = kind == Some(crate::work_sessions::REPORT)
+            && crate::commit_reviews::may_request_in(&mut tx, &task).await?;
+        let may_continue_work_session =
+            crate::work_sessions::continuation::may_continue_in(&mut tx, &task, scope.as_ref())
+                .await?;
         let tag: String = row.try_get("tag_id")?;
         let may_use_workstream = match crate::teams::workstreams::workstream_for_task_in(
             &mut tx,
@@ -101,6 +103,7 @@ impl Store {
             may_start_work_session: is_root && !crate::mailbox::private_session(&session),
             may_continue_work_session,
             may_ask_work_session_question: kind == Some(crate::work_sessions::CHILD),
+            may_request_commit_review,
         })
     }
 

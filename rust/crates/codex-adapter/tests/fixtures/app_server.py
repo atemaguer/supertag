@@ -44,6 +44,14 @@ coordination_tools = [
 ] if root.joinpath("coordination-mode").exists() else []
 if root.joinpath("direct-mode").exists():
     coordination_tools.append(("send_message", {"to": "reviewer", "text": "Private rollout note."}))
+if root.joinpath("commit-review-mode").exists():
+    coordination_tools.extend([
+        ("send_message", {"to": "reviewer", "text": "Inspect this commit.", "review": {"commit": "AB" * 20}}),
+        ("read_review_patch", {"requestId": "review-request"}),
+        ("read_review_patch", {"requestId": "review-request", "offset": 6}),
+        ("read_review_patch", {"requestId": "empty-review"}),
+        ("send_message", {"to": "owner", "text": "Please amend the patch.", "review": {"requestId": "review-request", "verdict": "changes_requested"}}),
+    ])
 if root.joinpath("work-session-mode").exists():
     coordination_tools.append(("start_session", {"title": "  Review   release ", "instruction": "Inspect release logs synthetic-codex-provider-secret."}))
 if root.joinpath("continue-session-mode").exists():

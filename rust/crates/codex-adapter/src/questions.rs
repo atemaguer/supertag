@@ -21,6 +21,9 @@ pub(crate) const FULL_COORDINATION: &str = "coordination-v1";
 pub(crate) const DIRECT_COORDINATION: &str = "coordination-v2";
 pub(crate) const WORK_SESSIONS: &str = "coordination-v3";
 pub(crate) const WORK_SESSION_LIFECYCLE: &str = "coordination-v4";
+pub(crate) const DIRECT_REVIEW: &str = "coordination-v2-review-v1";
+pub(crate) const WORK_SESSIONS_REVIEW: &str = "coordination-v3-review-v1";
+pub(crate) const WORK_SESSION_LIFECYCLE_REVIEW: &str = "coordination-v4-review-v1";
 pub(crate) const CHILD_QUESTIONS: &str = "work-session-ask-v1";
 
 pub(crate) struct Bridge {
@@ -86,8 +89,11 @@ impl Bridge {
             Inventory::ChildQuestions => CHILD_QUESTIONS,
             Inventory::Workstream => FULL_COORDINATION,
             Inventory::Direct => DIRECT_COORDINATION,
+            Inventory::DirectReview => DIRECT_REVIEW,
             Inventory::WorkSessions => WORK_SESSIONS,
+            Inventory::WorkSessionsReview => WORK_SESSIONS_REVIEW,
             Inventory::WorkSessionLifecycle => WORK_SESSION_LIFECYCLE,
+            Inventory::WorkSessionLifecycleReview => WORK_SESSION_LIFECYCLE_REVIEW,
         }
     }
     pub(crate) fn tools(&self) -> Value {
@@ -176,7 +182,17 @@ impl Bridge {
                     .read_mailbox(page, &self.tag_id, &self.token, &self.secrets)
                     .await?
             }
-            Arguments::Send(message) if self.capabilities.may_send_tag_message && !self.asked => {
+            Arguments::ReadReviewPatch(page) if self.capabilities.may_read_mailbox => {
+                self.coordination
+                    .read_review_patch(page, &self.token, &self.secrets)
+                    .await?
+            }
+            Arguments::Send(message)
+                if !self.asked
+                    && (self.capabilities.may_send_tag_message
+                        || (self.capabilities.may_request_commit_review
+                            && message.requests_review())) =>
+            {
                 self.coordination
                     .send(
                         message,

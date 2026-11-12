@@ -86,20 +86,24 @@ fn require_unchanged_authority(previous: &Task, next: &Task, delegated: bool) ->
 
 /// Ordinary root turns can continue work. A report can do so only for its owner
 /// Objective, and only while it is the latest report for that child Session.
-pub(crate) async fn may_continue_in(tx: &mut Transaction<'_, Any>, parent: &Task) -> Result<bool> {
+pub(crate) async fn may_continue_in(
+    tx: &mut Transaction<'_, Any>,
+    parent: &Task,
+    scope: Option<&WorkSessionTaskScope>,
+) -> Result<bool> {
     if reserved_session(&parent.session_id) || crate::mailbox::private_session(&parent.session_id) {
         return Ok(false);
     }
-    match task_kind_in(tx, &parent.task_id).await? {
+    match scope {
         None => Ok(true),
-        Some(REPORT) => {
+        Some(scope) if scope.kind == REPORT => {
             let count: i64 = sqlx::query_scalar(
                 "SELECT COUNT(*) FROM supertag_v2_work_session_reports r
                  JOIN supertag_v2_work_sessions w ON w.latest_task_id=r.child_task_id
                  JOIN supertag_v2_objectives o ON o.objective_id=w.objective_id
                  WHERE r.report_task_id=$1 AND o.owner_tag_id=$2 AND o.session_id=$3",
             )
-            .bind(&parent.task_id)
+            .bind(&scope.task_id)
             .bind(&parent.tag_id)
             .bind(&parent.session_id)
             .fetch_one(&mut **tx)
@@ -197,7 +201,12 @@ impl Store {
                 "continuing work requires a live running Attempt".into(),
             ));
         }
-        if !may_continue_in(&mut tx, &parent).await? {
+        let scope = task_scope_in(&mut tx, &parent.task_id).await?;
+        if scope
+            .as_ref()
+            .is_some_and(|scope| scope.work_session_id != input.work_session_id)
+            || !may_continue_in(&mut tx, &parent, scope.as_ref()).await?
+        {
             return Err(StoreError::PermissionDenied);
         }
         let session = sqlx::query("SELECT w.*,k.starter_task_id AS latest_starter_task_id FROM supertag_v2_work_sessions w JOIN supertag_v2_work_session_tasks k ON k.task_id=w.latest_task_id AND k.kind=1 WHERE w.work_session_id=$1 AND w.parent_tag_id=$2 AND w.parent_session_id=$3")
@@ -238,7 +247,13 @@ impl Store {
         if objective_id != session.try_get::<Option<String>, _>("objective_id")? {
             return Err(StoreError::PermissionDenied);
         }
-        let objective_report = report_id == parent.task_id && objective_id.is_some();
+        let objective_report = objective_id.is_some()
+            && scope
+                .as_ref()
+                .is_some_and(|scope| scope.kind == REPORT && scope.task_id == report_id);
+        if scope.is_some() && !objective_report {
+            return Err(StoreError::PermissionDenied);
+        }
         let report_state =
             TaskState::try_from(report.try_get::<i64, _>("state")? as i32).unwrap_or_default();
         if !objective_report
@@ -250,9 +265,6 @@ impl Store {
             return Err(StoreError::FailedPrecondition(
                 "the Work Session report has not settled".into(),
             ));
-        }
-        if task_kind_in(&mut tx, &parent.task_id).await? == Some(REPORT) && !objective_report {
-            return Err(StoreError::PermissionDenied);
         }
         if target == parent.tag_id {
             require_unchanged_authority(&child, &parent, false)?;

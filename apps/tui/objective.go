@@ -118,6 +118,7 @@ func describeRuntimeObjective(view *operatorv1.ObjectiveOverview, teamName strin
 	if deadline := objective.GetDeadline(); deadline != nil {
 		lines = append(lines, "Deadline: "+timestamp(deadline))
 	}
+	lines = append(lines, commitReviewLines(view.GetCommitReviews(), func(id string) string { return id })...)
 	if objective.GetStatus() == operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_READY_FOR_REVIEW {
 		lines = append(lines, "Review with supertag objective review "+shellWord(objective.GetId())+" approve")
 	}
@@ -126,6 +127,25 @@ func describeRuntimeObjective(view *operatorv1.ObjectiveOverview, teamName strin
 		lines[i] = terminalLines(line)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func commitReviewLines(reviews []*operatorv1.ObjectiveCommitReview, tag func(string) string) []string {
+	if len(reviews) == 0 {
+		return nil
+	}
+	lines := []string{"Commit reviews:"}
+	for _, review := range reviews {
+		verdict := strings.ReplaceAll(review.GetVerdict(), "_", " ")
+		if verdict == "" {
+			verdict = "pending"
+		}
+		line := fmt.Sprintf("  %s · %s · %s", review.GetCommit(), tag(review.GetReviewerTagId()), verdict)
+		if summary := review.GetSummary(); summary != "" {
+			line += " · " + summary
+		}
+		lines = append(lines, line)
+	}
+	return lines
 }
 
 // describeObjective renders an Objective's overview as `supertag describe objective` does: what a
@@ -166,20 +186,7 @@ func describeObjective(view *operatorv1.ObjectiveOverview, inbox []*operatorv1.I
 			add(line)
 		}
 	}
-	if reviews := view.GetCommitReviews(); len(reviews) > 0 {
-		add("Commit reviews:")
-		for _, review := range reviews {
-			verdict := strings.ReplaceAll(review.GetVerdict(), "_", " ")
-			if verdict == "" {
-				verdict = "pending"
-			}
-			line := fmt.Sprintf("  %s · %s · %s", review.GetCommit(), tag(review.GetReviewerTagId()), verdict)
-			if summary := review.GetSummary(); summary != "" {
-				line += " · " + summary
-			}
-			add(line)
-		}
-	}
+	add(commitReviewLines(view.GetCommitReviews(), tag)...)
 	add("Owner: " + tag(objective.GetOwnerTagId()))
 	if team := view.GetTeam(); team != nil {
 		members := make([]string, 0, len(team.GetMemberTagIds()))

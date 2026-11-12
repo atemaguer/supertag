@@ -282,6 +282,12 @@ func TestRuntimeV2ObjectiveOverTLS(t *testing.T) {
 		}
 		return objective, nil
 	})
+	testRPC(mux, rpc.ObjectivesListCommitReviewsProcedure, func(_ context.Context, req *v2.ListObjectiveCommitReviewsRequest) (*v2.ListObjectiveCommitReviewsResponse, error) {
+		if req.GetObjectiveId() != "sso" {
+			t.Errorf("ListCommitReviews request = %v", req)
+		}
+		return &v2.ListObjectiveCommitReviewsResponse{}, nil
+	})
 	task := &v2.Task{TagId: "lead", TaskId: "follow-up", SessionId: "objective-session", State: v2.TaskState_TASK_STATE_SUCCEEDED, Result: proto.String("Verified")}
 	testRPC(mux, rpc.OperatorSubmitTaskProcedure, func(_ context.Context, req *v2.SubmitTaskRequest) (*v2.Task, error) {
 		if req.GetTagId() != "lead" || req.GetSessionId() != "objective-session" || req.GetOperationId() == "" || req.GetPrompt() != "Try again" {

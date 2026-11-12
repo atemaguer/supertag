@@ -23,6 +23,7 @@ fn send(
         operation_id: operation.into(),
         recipient_tag_id: recipient.into(),
         text: text.into(),
+        review: None,
     }
 }
 fn grant(

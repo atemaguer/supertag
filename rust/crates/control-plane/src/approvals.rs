@@ -15,7 +15,8 @@ use crate::{
     HostAuthority, Store, StoreError,
     objectives::{objective_admission_in, objective_link_task_in},
     store::{
-        Result, approval_rules_from_row, insert_task, invalid, lease_is_live, name, owned, task_in,
+        Result, approval_rules_from_row, insert_task, insert_task_from_snapshot, invalid,
+        lease_is_live, name, owned, task_in,
     },
 };
 
@@ -624,7 +625,28 @@ async fn continue_in(tx: &mut Transaction<'_, Any>, task_id: &str, now: i64) -> 
             .join("\n")
     );
     let order:i64=sqlx::query_scalar("UPDATE supertag_v2_write_order SET revision=revision+1 WHERE singleton=1 RETURNING revision").fetch_one(&mut **tx).await?;
-    let task = insert_task(tx, order, &source.tag_id, &source.session_id, &prompt).await?;
+    let scope = crate::work_sessions::task_scope_in(tx, task_id).await?;
+    let task = if let Some(scope) = scope.filter(|scope| scope.kind == crate::work_sessions::REPORT)
+    {
+        let report = if scope.task_id == source.task_id {
+            source.clone()
+        } else {
+            task_in(tx, &scope.task_id).await?
+        };
+        if report.tag_id != source.tag_id || report.session_id != source.session_id {
+            return Err(StoreError::PermissionDenied);
+        }
+        Box::pin(insert_task_from_snapshot(
+            tx,
+            order,
+            &report,
+            &source.session_id,
+            &prompt,
+        ))
+        .await?
+    } else {
+        insert_task(tx, order, &source.tag_id, &source.session_id, &prompt).await?
+    };
     objective_link_task_in(tx, &task).await?;
     // A continuation of a private Conversation remains private and visible in
     // that owner's conversation history, regardless of the decision transport.

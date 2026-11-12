@@ -30,16 +30,47 @@ pub(crate) fn reserved_session(session_id: &str) -> bool {
     session_id.starts_with(SESSION_PREFIX)
 }
 
+pub(crate) struct WorkSessionTaskScope {
+    pub(crate) kind: i64,
+    pub(crate) task_id: String,
+    pub(crate) work_session_id: String,
+}
+
+/// Approval decisions can schedule a new Task in the same Session. Its
+/// coordination authority still comes from the original Work Session Task.
+pub(crate) async fn task_scope_in(
+    tx: &mut Transaction<'_, Any>,
+    task_id: &str,
+) -> Result<Option<WorkSessionTaskScope>> {
+    let rows = sqlx::query(
+        "WITH RECURSIVE lineage(task_id) AS (
+             SELECT CAST($1 AS TEXT)
+             UNION
+             SELECT w.task_id FROM supertag_v2_approval_waits w
+             JOIN lineage l ON l.task_id=w.continuation_task_id
+         ) SELECT scoped.kind,scoped.task_id,scoped.work_session_id
+           FROM lineage l JOIN supertag_v2_work_session_tasks scoped ON scoped.task_id=l.task_id
+           LIMIT 2",
+    )
+    .bind(task_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    match rows.as_slice() {
+        [] => Ok(None),
+        [row] => Ok(Some(WorkSessionTaskScope {
+            kind: row.try_get("kind")?,
+            task_id: row.try_get("task_id")?,
+            work_session_id: row.try_get("work_session_id")?,
+        })),
+        _ => Err(StoreError::PermissionDenied),
+    }
+}
+
 pub(crate) async fn task_kind_in(
     tx: &mut Transaction<'_, Any>,
     task_id: &str,
 ) -> Result<Option<i64>> {
-    Ok(
-        sqlx::query_scalar("SELECT kind FROM supertag_v2_work_session_tasks WHERE task_id=$1")
-            .bind(task_id)
-            .fetch_optional(&mut **tx)
-            .await?,
-    )
+    Ok(task_scope_in(tx, task_id).await?.map(|scope| scope.kind))
 }
 
 /// Include leased claims and unsettled execution when reserving the parent Session's capacity.

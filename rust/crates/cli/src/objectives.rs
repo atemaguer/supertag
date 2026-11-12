@@ -5,7 +5,8 @@ use supertag_control_plane::objective_limits::Timestamp;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
-        CreateObjectiveRequest, GetObjectiveRequest, ListObjectivesRequest, Objective,
+        CommitReview, CommitReviewDecision, CreateObjectiveRequest, GetObjectiveRequest,
+        ListObjectiveCommitReviewsRequest, ListObjectivesRequest, Objective,
         ObjectiveActionRequest, ReviewObjectiveRequest, RuntimeActions, SetObjectiveLimitsRequest,
         SetObjectiveRuntimeActionsRequest, objectives_client::ObjectivesClient,
     },
@@ -50,6 +51,14 @@ pub enum ObjectiveCommand {
         limit: u32,
         #[arg(long, default_value = "")]
         after_id: String,
+    },
+    /// List commit review requests and recorded verdicts for an Objective.
+    ListCommitReviews {
+        objective_id: String,
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        before_order: u64,
     },
     /// Change the deadline or monetary limit.
     SetLimits {
@@ -141,6 +150,31 @@ pub async fn run(connection: Connection, command: ObjectiveCommand) -> Result<()
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
     let mut requested_actions = None;
     let response = match command {
+        ObjectiveCommand::ListCommitReviews {
+            objective_id,
+            limit,
+            before_order,
+        } => {
+            let page = client
+                .list_commit_reviews(request(
+                    ListObjectiveCommitReviewsRequest {
+                        objective_id,
+                        limit,
+                        before_order,
+                    },
+                    &token,
+                )?)
+                .await?
+                .into_inner();
+            println!(
+                "{}",
+                json!({
+                    "reviews": page.reviews.into_iter().map(commit_review_output).collect::<Vec<_>>(),
+                    "next_before_order": page.next_before_order,
+                })
+            );
+            return Ok(());
+        }
         ObjectiveCommand::Create {
             objective_id,
             owner,
@@ -311,6 +345,29 @@ pub async fn run(connection: Connection, command: ObjectiveCommand) -> Result<()
     }
     println!("{}", output(objective));
     Ok(())
+}
+
+fn commit_review_output(review: CommitReview) -> Value {
+    json!({
+        "request_id": review.request_id,
+        "objective_id": review.objective_id,
+        "commit": review.commit,
+        "workspace_id": review.workspace_id,
+        "source_task_id": review.source_task_id,
+        "requester_tag_id": review.requester_tag_id,
+        "reviewer_tag_id": review.reviewer_tag_id,
+        "requested_at_ms": review.requested_at_ms,
+        "verdict": review.verdict.map(|verdict| json!({
+            "decision": match verdict.decision() {
+                CommitReviewDecision::Approved => "approved",
+                CommitReviewDecision::ChangesRequested => "changes_requested",
+                CommitReviewDecision::Unspecified => "unspecified",
+            },
+            "summary": verdict.summary,
+            "task_id": verdict.task_id,
+            "recorded_at_ms": verdict.recorded_at_ms,
+        })),
+    })
 }
 
 fn output(objective: Objective) -> Value {

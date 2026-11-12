@@ -68,7 +68,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 29;
+        const SCHEMA_VERSION: i64 = 30;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -148,6 +148,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0027_work_sessions.sql"),
                 include_str!("../migrations/sqlite/0028_work_session_lifecycle.sql"),
                 include_str!("../migrations/sqlite/0029_objective_runtime_actions.sql"),
+                include_str!("../migrations/sqlite/0030_commit_reviews.sql"),
             ]
         } else {
             [
@@ -180,6 +181,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0027_work_sessions.sql"),
                 include_str!("../migrations/postgresql/0028_work_session_lifecycle.sql"),
                 include_str!("../migrations/postgresql/0029_objective_runtime_actions.sql"),
+                include_str!("../migrations/postgresql/0030_commit_reviews.sql"),
             ]
         };
         if version < SCHEMA_VERSION {

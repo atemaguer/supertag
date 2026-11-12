@@ -1001,6 +1001,7 @@ pub(crate) async fn objective_finish_in(
                 &task.session_id,
             )
             .await?
+            || crate::commit_reviews::pending_objective_in(tx, &id).await?
         {
             return Ok(());
         }
@@ -1055,6 +1056,34 @@ pub(crate) async fn objective_finish_in(
         cancel_open_in(tx, &id, Some(&task.task_id)).await?;
     }
     Ok(())
+}
+
+/// A recorded review schedules at most one owner turn. Pause and limits defer
+/// execution; closure preserves the review as audit history without reviving work.
+pub(crate) async fn commit_review_notice_in(
+    tx: &mut Transaction<'_, Any>,
+    objective_id: &str,
+    request_id: &str,
+    prompt: &str,
+    now_ms: i64,
+) -> Result<Option<String>> {
+    reconcile_in(tx, objective_id, now_ms).await?;
+    let record = get_in(tx, objective_id).await?;
+    if record.value.status != ObjectiveStatus::Working as i32
+        || record.value.paused_at_ms.is_some()
+        || limits::admission_blocker(&record.limits, timestamp(now_ms)?).is_some()
+    {
+        return Ok(None);
+    }
+    let key = format!("review:{request_id}");
+    internal_turn_in(tx, &record, &key, prompt, "notice", now_ms).await?;
+    Ok(sqlx::query_scalar(
+        "SELECT task_id FROM supertag_v2_objective_notices WHERE objective_id=$1 AND notice_key=$2",
+    )
+    .bind(objective_id)
+    .bind(key)
+    .fetch_optional(&mut **tx)
+    .await?)
 }
 
 async fn reported_in(
@@ -1282,6 +1311,17 @@ impl objectives_server::Objectives for ControlPlane {
         Ok(Response::new(ListObjectivesResponse {
             objectives: self.store.list_objectives(&request.into_inner()).await?,
         }))
+    }
+    async fn list_commit_reviews(
+        &self,
+        request: Request<ListObjectiveCommitReviewsRequest>,
+    ) -> std::result::Result<Response<ListObjectiveCommitReviewsResponse>, Status> {
+        self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .list_objective_commit_reviews(&request.into_inner())
+                .await?,
+        ))
     }
     async fn set_limits(
         &self,

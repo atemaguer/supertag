@@ -416,6 +416,22 @@ impl Objectives for Gateway {
         .await
     }
 
+    async fn list_commit_reviews(
+        &self,
+        request: Request<ListObjectiveCommitReviewsRequest>,
+    ) -> Result<Response<ListObjectiveCommitReviewsResponse>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async {
+                objectives_client(channel)
+                    .list_commit_reviews(request)
+                    .await
+            },
+        )
+        .await
+    }
+
     async fn set_limits(
         &self,
         request: Request<SetObjectiveLimitsRequest>,

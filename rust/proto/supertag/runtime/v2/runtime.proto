@@ -86,6 +86,7 @@ service Objectives {
   rpc CreateObjective(CreateObjectiveRequest) returns (Objective);
   rpc GetObjective(GetObjectiveRequest) returns (Objective);
   rpc ListObjectives(ListObjectivesRequest) returns (ListObjectivesResponse);
+  rpc ListCommitReviews(ListObjectiveCommitReviewsRequest) returns (ListObjectiveCommitReviewsResponse);
   rpc SetLimits(SetObjectiveLimitsRequest) returns (Objective);
   rpc SetRuntimeActions(SetObjectiveRuntimeActionsRequest) returns (Objective);
   rpc PauseObjective(ObjectiveActionRequest) returns (Objective);
@@ -269,6 +270,8 @@ message AttemptCapabilities {
   bool may_start_work_session = 5;
   bool may_continue_work_session = 6;
   bool may_ask_work_session_question = 7;
+  // An Objective owner report may request review of its own child delivery.
+  bool may_request_commit_review = 8;
 }
 
 // Operators see the work started in Sessions they can access.
@@ -402,6 +405,44 @@ message TagMessage {
   TagMessageState state = 10;
   int64 created_at_ms = 11;
   TagMessageOrigin origin = 12;
+  CommitReview review = 13;
+}
+
+enum CommitReviewDecision {
+  COMMIT_REVIEW_DECISION_UNSPECIFIED = 0;
+  COMMIT_REVIEW_DECISION_APPROVED = 1;
+  COMMIT_REVIEW_DECISION_CHANGES_REQUESTED = 2;
+}
+
+message CommitReviewSubmission {
+  oneof kind {
+    string commit = 1;
+    CommitReviewResponse response = 2;
+  }
+}
+
+message CommitReviewResponse {
+  string request_id = 1;
+  CommitReviewDecision verdict = 2;
+}
+
+message CommitReviewVerdict {
+  CommitReviewDecision decision = 1;
+  string summary = 2;
+  string task_id = 3;
+  int64 recorded_at_ms = 4;
+}
+
+message CommitReview {
+  string request_id = 1;
+  string objective_id = 2;
+  string commit = 3;
+  string workspace_id = 4;
+  string source_task_id = 5; // Successful child Task that published this commit.
+  string requester_tag_id = 6;
+  string reviewer_tag_id = 7;
+  int64 requested_at_ms = 8;
+  CommitReviewVerdict verdict = 9;
 }
 
 message SendAttemptTagMessageRequest {
@@ -409,12 +450,15 @@ message SendAttemptTagMessageRequest {
   string operation_id = 2;
   string recipient_tag_id = 3;
   string text = 4;
+  CommitReviewSubmission review = 5;
 }
 
 message SendTagMessageResponse {
   TagMessage message = 1;
   bool duplicate = 2;
   Approval approval = 3;
+  // A recorded verdict returns the original review without a new Mailbox message.
+  CommitReview review = 4;
 }
 
 message ChangeMailboxGrantRequest {
@@ -592,6 +636,7 @@ service Transfers {
   rpc UploadWorkspace(stream WorkspaceUpload) returns (WorkspaceDeliveryReference);
   rpc DownloadWorkspace(InspectAttemptRequest) returns (stream WorkspaceDownload);
   rpc DownloadWorkspaceArtifact(GetWorkspaceArtifactRequest) returns (stream WorkspaceDownload);
+  rpc DownloadReviewArtifact(GetReviewArtifactRequest) returns (stream WorkspaceDownload);
 }
 
 // Private authorization and commit for bytes stored by the Gateway.
@@ -607,6 +652,7 @@ service WorkspaceDirectory {
   rpc ReserveDelivery(WorkspaceDeliveryRequest) returns (WorkspaceDeliveryReference);
   rpc CommitDelivery(WorkspaceDeliveryRequest) returns (WorkspaceDeliveryReference);
   rpc GetArtifact(GetWorkspaceArtifactRequest) returns (WorkspaceDeliveryReference);
+  rpc GetReviewArtifact(GetReviewArtifactRequest) returns (WorkspaceDeliveryReference);
 }
 
 // An adapter connects only to its supervising Worker Host. The launch pipe
@@ -651,6 +697,7 @@ message HarnessPostWorkstreamRequest {
 service HarnessMailbox {
   rpc Read(HarnessReadMailboxRequest) returns (ListMailboxMessagesResponse);
   rpc SendMessage(HarnessSendTagMessageRequest) returns (SendTagMessageResponse);
+  rpc ReadReviewPatch(HarnessReadReviewPatchRequest) returns (HarnessReviewPatch);
 }
 
 // The supervising Worker Host supplies the Attempt identity.
@@ -683,11 +730,25 @@ message HarnessSendTagMessageRequest {
   string operation_id = 1;
   string recipient_tag_id = 2;
   string text = 3;
+  CommitReviewSubmission review = 4;
 }
 
 message HarnessReadMailboxRequest {
   uint32 limit = 1;
   string cursor = 2;
+}
+
+message HarnessReadReviewPatchRequest {
+  string review_id = 1;
+  uint64 offset = 2;
+}
+
+message HarnessReviewPatch {
+  string review_id = 1;
+  uint64 offset = 2;
+  bytes data = 3;
+  optional uint64 next_offset = 4;
+  WorkspaceDeliveryReference delivery = 5;
 }
 
 enum LiveInputState {
@@ -1226,6 +1287,11 @@ message GetWorkspaceArtifactRequest {
   WorkspaceArtifactKind kind = 2;
 }
 
+message GetReviewArtifactRequest {
+  InspectAttemptRequest attempt = 1;
+  string review_id = 2;
+}
+
 message HarnessPublishRequest {
   uint64 sequence = 1;
   string text = 2;
@@ -1405,6 +1471,17 @@ message ListObjectivesRequest {
 
 message ListObjectivesResponse {
   repeated Objective objectives = 1;
+}
+
+message ListObjectiveCommitReviewsRequest {
+  string objective_id = 1;
+  uint32 limit = 2;
+  uint64 before_order = 3;
+}
+
+message ListObjectiveCommitReviewsResponse {
+  repeated CommitReview reviews = 1;
+  uint64 next_before_order = 2;
 }
 
 message SetObjectiveLimitsRequest {

@@ -33,6 +33,10 @@ use crate::Gateway;
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(25);
 const WORKSPACE_TRANSFER_TIMEOUT: Duration = Duration::from_secs(120);
 
+#[cfg(test)]
+#[path = "transfers_review_tests.rs"]
+mod review_tests;
+
 #[derive(Clone)]
 pub struct GatewayTransfers {
     gateway: Gateway,
@@ -207,6 +211,18 @@ impl GatewayTransfers {
             })
             .await
             .map(|response| response.into_inner().delivery)
+    }
+
+    async fn get_review_reference(
+        &self,
+        request: Request<GetReviewArtifactRequest>,
+    ) -> Result<WorkspaceDeliveryReference, Status> {
+        self.gateway
+            .forward_host(request, true, |channel, request| async move {
+                workspace_client(channel).get_review_artifact(request).await
+            })
+            .await
+            .map(Response::into_inner)
     }
 
     async fn authorize_upload<T>(&self, request: &Request<T>) -> Result<(), Status> {
@@ -399,6 +415,36 @@ impl Transfers for GatewayTransfers {
 
     type DownloadWorkspaceArtifactStream = ReceiverStream<Result<WorkspaceDownload, Status>>;
 
+    type DownloadReviewArtifactStream = ReceiverStream<Result<WorkspaceDownload, Status>>;
+
+    async fn download_review_artifact(
+        &self,
+        request: Request<GetReviewArtifactRequest>,
+    ) -> Result<Response<Self::DownloadReviewArtifactStream>, Status> {
+        let input = request.get_ref().clone();
+        let metadata = request.metadata().clone();
+        let reference = self.get_review_reference(request).await?;
+        let expected = reference.clone();
+        let service = self.clone();
+        let authorize = move || {
+            let service = service.clone();
+            let expected = expected.clone();
+            let mut request = Request::new(input.clone());
+            *request.metadata_mut() = metadata.clone();
+            async move {
+                if service.get_review_reference(request).await? == expected {
+                    Ok(())
+                } else {
+                    Err(Status::permission_denied(
+                        "review patch is no longer authorized",
+                    ))
+                }
+            }
+        };
+        self.workspace_download(reference, WorkspaceArtifactKind::Patch, authorize)
+            .await
+    }
+
     async fn download_workspace_artifact(
         &self,
         request: Request<GetWorkspaceArtifactRequest>,
@@ -531,6 +577,7 @@ where
             {
                 return Err(Status::data_loss("blob digest does not match its receipt"));
             }
+            authorize().await?;
             Ok(())
         };
         match timeout(budget, stream).await {

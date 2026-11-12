@@ -90,6 +90,82 @@ async function directMailbox() {
   return "fixture sent a direct message";
 }
 
+async function commitReview(mode) {
+  const tools = (await sdkMcp("tools/list", {})).result?.tools;
+  const schema = tools?.find(({ name }) => name === "send_message")?.inputSchema;
+  if (
+    schema?.additionalProperties !== false ||
+    schema.properties?.review?.additionalProperties !== false ||
+    schema.properties?.review?.properties?.verdict?.enum?.join() !== "approved,changes_requested"
+  )
+    throw new Error("Unexpected commit review argument schema");
+  const metadata = { mcp_server: { name: "supertag", source: "sdk" } };
+  const send = "mcp__supertag__send_message";
+  const text = ` Inspect ${process.env.ANTHROPIC_API_KEY} `;
+  const commit = "AB".repeat(20);
+  const requestId = "review-request";
+  for (const review of [
+    null,
+    {},
+    { commit: "short" },
+    { requestId },
+    { commit, requestId, verdict: "approved" },
+  ]) {
+    if (await hook(send, { to: "lead", text, review }, metadata))
+      throw new Error("Malformed review arguments were admitted");
+  }
+  if (mode === "verdict") {
+    const patch = await coordinationCall("read_review_patch", { requestId });
+    const page = JSON.parse(patch.content[0].text);
+    if (
+      patch.isError ||
+      page.trust !== "untrusted" ||
+      !page.text.includes("[REDACTED]") ||
+      page.nextOffset !== Buffer.byteLength(`diff ${process.env.ANTHROPIC_API_KEY}\n`)
+    )
+      throw new Error("Untrusted review patch page missing");
+    const tail = await coordinationCall("read_review_patch", {
+      requestId,
+      offset: page.nextOffset,
+    });
+    const end = JSON.parse(tail.content[0].text);
+    if (
+      tail.isError ||
+      end.nextOffset !== null ||
+      end.encoding !== "escaped-bytes" ||
+      end.text !== "\\xff"
+    )
+      throw new Error("Escaped review patch tail missing");
+    const empty = await coordinationCall("read_review_patch", { requestId: "empty-review" });
+    const unchanged = JSON.parse(empty.content[0].text);
+    if (
+      empty.isError ||
+      unchanged.text !== "" ||
+      unchanged.nextOffset !== null ||
+      !unchanged.deliveryNotice.includes("made no changes")
+    )
+      throw new Error("Empty review delivery notice missing");
+  } else {
+    if (tools.some(({ name }) => name === "read_review_patch"))
+      throw new Error("Report acquired review reading access");
+    const plain = await coordinationCall("send_message", { to: "lead", text });
+    if (!plain.isError) throw new Error("Review-only report sent a plain message");
+  }
+  const result = await coordinationCall("send_message", {
+    to: "lead",
+    text,
+    review: mode === "verdict" ? { requestId, verdict: "changes_requested" } : { commit },
+  });
+  const receipt = JSON.parse(result.content[0].text);
+  if (
+    result.isError ||
+    receipt.status !== (mode === "verdict" ? "recorded" : "sent") ||
+    receipt.messageId !== requestId
+  )
+    throw new Error("Commit review receipt missing");
+  return `fixture handled review ${mode}`;
+}
+
 async function workSessionLifecycle(child) {
   const tool = child ? "ask" : "continue_session";
   const tools = (await sdkMcp("tools/list", {})).result?.tools;
@@ -194,7 +270,9 @@ async function objectiveQuestion(allowed) {
 async function coordinationTools(workstream) {
   const metadata = { mcp_server: { name: "supertag", source: "sdk" } };
   const list = (await sdkMcp("tools/list", {})).result?.tools;
-  const expected = workstream ? ["post", "read_mailbox", "read_workstream"] : ["read_mailbox"];
+  const expected = workstream
+    ? ["post", "read_mailbox", "read_review_patch", "read_workstream"]
+    : ["read_mailbox", "read_review_patch"];
   if (
     sdkServers.join() !== "supertag" ||
     list
@@ -485,6 +563,8 @@ async function turn(message) {
   if (prompt.startsWith("coordination-"))
     result = await coordinationTools(prompt === "coordination-tools");
   if (prompt === "direct-mailbox") result = await directMailbox();
+  if (prompt === "commit-review-request") result = await commitReview("request");
+  if (prompt === "commit-review-verdict") result = await commitReview("verdict");
   if (prompt === "start-work-session") result = await workSessionTools();
   if (prompt === "ask-work-session" || prompt === "continue-work-session")
     result = await workSessionLifecycle(prompt === "ask-work-session");
