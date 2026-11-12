@@ -1,0 +1,48 @@
+[package]
+name = "supertag-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[features]
+test-fixtures = ["supertag-gateway/test-fixtures"]
+
+[[bin]]
+name = "supertag"
+path = "src/main.rs"
+
+[[bin]]
+name = "supertag-fixture-adapter"
+path = "fixtures/adapter.rs"
+required-features = ["test-fixtures"]
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+libc.workspace = true
+prost.workspace = true
+serde_json.workspace = true
+supertag-control-plane.workspace = true
+supertag-gateway.workspace = true
+supertag-protocol.workspace = true
+supertag-worker-host.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
+tonic.workspace = true
+tonic-health.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+hmac.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+sqlx.workspace = true
+
+[[test]]
+name = "split_runtime"
+path = "tests/split_runtime.rs"
+required-features = ["test-fixtures"]

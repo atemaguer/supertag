@@ -1,0 +1,21 @@
+[package]
+name = "supertag-control-plane"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+supertag-protocol = { path = "../protocol" }
+thiserror.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+url = "2.5.7"

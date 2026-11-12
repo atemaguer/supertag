@@ -39,6 +39,7 @@
       "!packages/runtime/environments/shared-execution/src/gen",
       "!packages/runtime/transport/src/gen",
       "!packages/operator-api/src/gen",
+      "!rust/bindings/typescript/supertag/runtime/v2",
       "!spec/manifests"
     ]
   }

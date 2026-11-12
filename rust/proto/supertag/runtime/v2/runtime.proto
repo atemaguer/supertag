@@ -1,0 +1,218 @@
+syntax = "proto3";
+
+package supertag.runtime.v2;
+
+// The Gateway exposes these services to operators and enrolled hosts. The
+// Control Plane serves the same messages on a private authenticated listener.
+service Operator {
+  rpc PutTag(PutTagRequest) returns (Tag);
+  rpc SubmitTask(SubmitTaskRequest) returns (Task);
+  rpc GetTask(GetTaskRequest) returns (Task);
+  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
+  rpc CancelTask(CancelTaskRequest) returns (Task);
+}
+
+service WorkerHost {
+  rpc ClaimTask(ClaimTaskRequest) returns (ClaimTaskResponse);
+  rpc StartTask(StartTaskRequest) returns (Task);
+  rpc InspectAttempt(InspectAttemptRequest) returns (Task);
+  rpc AppendEvent(AppendEventRequest) returns (TaskEvent);
+  rpc FinishTask(FinishTaskRequest) returns (Task);
+}
+
+// Private Gateway-to-Control-Plane operations. The authenticated connector
+// principal identifies the account. Provider request bodies cannot select it.
+service Connector {
+  rpc AcceptEvent(AcceptEventRequest) returns (Task);
+  rpc ClaimReply(ClaimReplyRequest) returns (ClaimReplyResponse);
+  rpc SettleReply(SettleReplyRequest) returns (Reply);
+}
+
+// An adapter connects only to its supervising Worker Host. The launch pipe
+// provides its endpoint and an execution-scoped credential.
+service Harness {
+  rpc Attach(HarnessAttachRequest) returns (HarnessRun);
+  rpc Publish(HarnessPublishRequest) returns (TaskEvent);
+  rpc Complete(HarnessCompleteRequest) returns (HarnessCompleteResponse);
+}
+
+enum TaskState {
+  TASK_STATE_UNSPECIFIED = 0;
+  TASK_STATE_QUEUED = 1;
+  TASK_STATE_RUNNING = 2;
+  TASK_STATE_SUCCEEDED = 3;
+  TASK_STATE_FAILED = 4;
+  TASK_STATE_CANCELLED = 5;
+  TASK_STATE_CLAIMED = 6;
+}
+
+message PutTagRequest {
+  string tag_id = 1;
+  string instructions = 2;
+  repeated string allowed_actions = 3;
+}
+
+message Tag {
+  string tag_id = 1;
+  string instructions = 2;
+  repeated string allowed_actions = 3;
+  uint64 revision = 4;
+}
+
+message SubmitTaskRequest {
+  string tag_id = 1;
+  string session_id = 2;
+  string operation_id = 3;
+  string prompt = 4;
+}
+
+message Task {
+  string task_id = 1;
+  string tag_id = 2;
+  string session_id = 3;
+  string prompt = 4;
+  string instructions = 5;
+  repeated string allowed_actions = 6;
+  uint64 tag_revision = 7;
+  TaskState state = 8;
+  optional string result = 9;
+  optional string attempt_id = 10;
+}
+
+message GetTaskRequest {
+  string task_id = 1;
+}
+
+message ListEventsRequest {
+  string task_id = 1;
+  uint64 after_sequence = 2;
+  uint32 limit = 3;
+}
+
+message ListEventsResponse {
+  repeated TaskEvent events = 1;
+}
+
+message CancelTaskRequest {
+  string task_id = 1;
+}
+
+message ClaimTaskRequest {
+  string operation_id = 1;
+}
+
+message ClaimTaskResponse {
+  Assignment assignment = 1;
+}
+
+message Assignment {
+  Task task = 1;
+  string attempt_id = 2;
+  string lease_token = 3;
+}
+
+message StartTaskRequest {
+  string task_id = 1;
+  string attempt_id = 2;
+  string lease_token = 3;
+}
+
+message InspectAttemptRequest {
+  string task_id = 1;
+  string attempt_id = 2;
+  string lease_token = 3;
+}
+
+message AppendEventRequest {
+  string task_id = 1;
+  string attempt_id = 2;
+  string lease_token = 3;
+  uint64 sequence = 4;
+  string text = 5;
+}
+
+message TaskEvent {
+  uint64 sequence = 1;
+  string text = 2;
+}
+
+message FinishTaskRequest {
+  string task_id = 1;
+  string attempt_id = 2;
+  string lease_token = 3;
+  string result = 4;
+  bool succeeded = 5;
+}
+
+message HarnessAttachRequest {}
+
+message AdapterBootstrap {
+  string endpoint = 1;
+  string token = 2;
+}
+
+message HarnessRun {
+  Task task = 1;
+  string attempt_id = 2;
+}
+
+message HarnessPublishRequest {
+  uint64 sequence = 1;
+  string text = 2;
+}
+
+message HarnessCompleteRequest {
+  string result = 1;
+  bool succeeded = 2;
+}
+
+message HarnessCompleteResponse {}
+
+message ReplyDestination {
+  string conversation_id = 1;
+  optional string thread_id = 2;
+}
+
+message AcceptEventRequest {
+  string account_id = 1;
+  string event_id = 2;
+  string tag_id = 3;
+  string session_id = 4;
+  string prompt = 5;
+  ReplyDestination destination = 6;
+}
+
+enum ReplyState {
+  REPLY_STATE_UNSPECIFIED = 0;
+  REPLY_STATE_PENDING = 1;
+  REPLY_STATE_CLAIMED = 2;
+  REPLY_STATE_DELIVERED = 3;
+  REPLY_STATE_FAILED = 4;
+  REPLY_STATE_UNCERTAIN = 5;
+}
+
+message Reply {
+  string reply_id = 1;
+  string task_id = 2;
+  string account_id = 3;
+  ReplyDestination destination = 4;
+  string text = 5;
+  ReplyState state = 6;
+  optional string provider_receipt = 7;
+}
+
+message ClaimReplyRequest {
+  string operation_id = 1;
+}
+
+message ClaimReplyResponse {
+  Reply reply = 1;
+  string lease_token = 2;
+}
+
+message SettleReplyRequest {
+  string reply_id = 1;
+  string lease_token = 2;
+  ReplyState state = 3;
+  optional string provider_receipt = 4;
+}

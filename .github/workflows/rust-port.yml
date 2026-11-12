@@ -1,0 +1,73 @@
+name: Rust runtime
+
+on:
+  pull_request:
+    paths:
+      - 'rust/**'
+      - '.github/workflows/rust-port.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'rust/**'
+      - '.github/workflows/rust-port.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: supertag_test
+          POSTGRES_USER: supertag
+          POSTGRES_PASSWORD: rust-port-ci-database
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U supertag -d supertag_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    defaults:
+      run:
+        working-directory: rust
+    env:
+      SUPERTAG_RUST_TEST_DATABASE_URL: postgresql://supertag:rust-port-ci-database@localhost:5432/supertag_test
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - name: Test the Rust runtime with SQLite and PostgreSQL
+        run: |
+          umask 077
+          export SUPERTAG_RUST_TEST_POSTGRES_URL_FILE="$RUNNER_TEMP/supertag-rust-postgres-url"
+          printf '%s' "$SUPERTAG_RUST_TEST_DATABASE_URL" > "$SUPERTAG_RUST_TEST_POSTGRES_URL_FILE"
+          cargo test --locked --workspace --all-features -- --include-ignored
+
+  bindings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: rust/bindings/go/go.mod
+          cache-dependency-path: rust/bindings/go/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install uv==0.9.5
+      - run: pnpm install --frozen-lockfile
+      - run: uv run --python 3.13 --script rust/scripts/generate-bindings.py --check
+      - run: uv run --python 3.13 --script rust/bindings/wire-roundtrip.py
+      - run: go -C rust/bindings/go test ./...

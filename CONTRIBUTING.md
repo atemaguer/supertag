@@ -119,6 +119,26 @@ plain data and are idempotent. They never import the
 can later serve them with `OperatorControl` as a call to the Control Plane.
 `tests/operator-rpc-seams.test.ts` checks the classes and the imports.
 
+## Rust runtime development
+
+The workspace in `rust/` builds the Control Plane, Gateway, Worker Host, and native CLI.
+The `test-fixtures` Cargo feature builds a deterministic harness adapter for the process tests.
+Run the SQLite tests with the pinned Rust toolchain.
+
+```sh
+cargo test --manifest-path rust/Cargo.toml --locked --workspace --all-features
+```
+
+For PostgreSQL coverage, put the disposable test server URL in a private file and set
+`SUPERTAG_RUST_TEST_POSTGRES_URL_FILE` to its path. Run the same command with
+`-- --include-ignored` to require the PostgreSQL cases. Each case creates a separate database.
+The process tests also use temporary state directories and a local HTTP provider fixture.
+
+Regenerate the Go, TypeScript, and Python runtime bindings after changing the Rust protobuf
+contract. See [binding generation and conformance checks](rust/bindings/README.md).
+The [behavioral baseline](tests/rust-port-baseline/README.md) exercises selected scenarios
+against the TypeScript implementation during the port.
+
 ## Test your change
 
 Before opening a pull request, run:

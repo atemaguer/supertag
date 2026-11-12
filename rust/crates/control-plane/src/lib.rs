@@ -1,0 +1,337 @@
+pub mod objective_limits;
+mod store;
+
+pub use store::{Store, StoreError};
+
+use std::sync::Arc;
+
+use supertag_protocol::{incoming_principal, v2::*};
+use tonic::{Request, Response, Status};
+
+#[derive(Clone)]
+pub struct ControlPlane {
+    store: Store,
+    gateway_token: Arc<String>,
+}
+
+impl ControlPlane {
+    pub async fn open(database_url: &str, gateway_token: String) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            !gateway_token.is_empty(),
+            "a private Gateway credential is required"
+        );
+        Ok(Self {
+            store: Store::open(database_url).await?,
+            gateway_token: Arc::new(gateway_token),
+        })
+    }
+
+    fn principal<T>(&self, request: &Request<T>, class: &str) -> Result<String, Status> {
+        let principal = incoming_principal(request, &self.gateway_token)?;
+        let Some(identity) = principal.strip_prefix(class) else {
+            return Err(Status::permission_denied(
+                "caller is not allowed to use this service",
+            ));
+        };
+        if identity.is_empty() || principal.len() > 256 {
+            return Err(Status::permission_denied("invalid caller identity"));
+        }
+        Ok(principal.to_owned())
+    }
+}
+
+impl From<StoreError> for Status {
+    fn from(error: StoreError) -> Self {
+        match error {
+            StoreError::InvalidArgument(message) => Self::invalid_argument(message),
+            StoreError::NotFound(message) => Self::not_found(message),
+            StoreError::Conflict(message) => Self::already_exists(message),
+            StoreError::FailedPrecondition(message) => Self::failed_precondition(message),
+            StoreError::PermissionDenied => {
+                Self::permission_denied("execution ownership does not match")
+            }
+            StoreError::Storage(_) | StoreError::Data(_) => {
+                Self::internal("storage operation failed")
+            }
+        }
+    }
+}
+
+#[tonic::async_trait]
+impl operator_server::Operator for ControlPlane {
+    async fn put_tag(&self, request: Request<PutTagRequest>) -> Result<Response<Tag>, Status> {
+        self.principal(&request, "operator:")?;
+        let input = request.into_inner();
+        Ok(Response::new(
+            self.store
+                .put_tag(&input.tag_id, &input.instructions, input.allowed_actions)
+                .await?,
+        ))
+    }
+
+    async fn submit_task(
+        &self,
+        request: Request<SubmitTaskRequest>,
+    ) -> Result<Response<Task>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .submit_task(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn get_task(&self, request: Request<GetTaskRequest>) -> Result<Response<Task>, Status> {
+        self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store.get_task(&request.into_inner().task_id).await?,
+        ))
+    }
+
+    async fn list_events(
+        &self,
+        request: Request<ListEventsRequest>,
+    ) -> Result<Response<ListEventsResponse>, Status> {
+        self.principal(&request, "operator:")?;
+        let input = request.into_inner();
+        Ok(Response::new(ListEventsResponse {
+            events: self
+                .store
+                .list_events(&input.task_id, input.after_sequence, input.limit)
+                .await?,
+        }))
+    }
+
+    async fn cancel_task(
+        &self,
+        request: Request<CancelTaskRequest>,
+    ) -> Result<Response<Task>, Status> {
+        self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .cancel_task(&request.into_inner().task_id)
+                .await?,
+        ))
+    }
+}
+
+#[tonic::async_trait]
+impl worker_host_server::WorkerHost for ControlPlane {
+    async fn claim_task(
+        &self,
+        request: Request<ClaimTaskRequest>,
+    ) -> Result<Response<ClaimTaskResponse>, Status> {
+        let principal = self.principal(&request, "host:")?;
+        Ok(Response::new(ClaimTaskResponse {
+            assignment: self
+                .store
+                .claim_task(&principal, &request.into_inner().operation_id)
+                .await?,
+        }))
+    }
+
+    async fn start_task(
+        &self,
+        request: Request<StartTaskRequest>,
+    ) -> Result<Response<Task>, Status> {
+        let principal = self.principal(&request, "host:")?;
+        Ok(Response::new(
+            self.store
+                .start_task(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn inspect_attempt(
+        &self,
+        request: Request<InspectAttemptRequest>,
+    ) -> Result<Response<Task>, Status> {
+        let principal = self.principal(&request, "host:")?;
+        let input = request.into_inner();
+        Ok(Response::new(
+            self.store
+                .inspect_attempt(
+                    &principal,
+                    &input.task_id,
+                    &input.attempt_id,
+                    &input.lease_token,
+                )
+                .await?,
+        ))
+    }
+
+    async fn append_event(
+        &self,
+        request: Request<AppendEventRequest>,
+    ) -> Result<Response<TaskEvent>, Status> {
+        let principal = self.principal(&request, "host:")?;
+        Ok(Response::new(
+            self.store
+                .append_event(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn finish_task(
+        &self,
+        request: Request<FinishTaskRequest>,
+    ) -> Result<Response<Task>, Status> {
+        let principal = self.principal(&request, "host:")?;
+        Ok(Response::new(
+            self.store
+                .finish_task(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+}
+
+#[tonic::async_trait]
+impl connector_server::Connector for ControlPlane {
+    async fn accept_event(
+        &self,
+        request: Request<AcceptEventRequest>,
+    ) -> Result<Response<Task>, Status> {
+        let principal = self.principal(&request, "connector:")?;
+        Ok(Response::new(
+            self.store
+                .accept_event(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn claim_reply(
+        &self,
+        request: Request<ClaimReplyRequest>,
+    ) -> Result<Response<ClaimReplyResponse>, Status> {
+        let principal = self.principal(&request, "connector:")?;
+        Ok(Response::new(
+            self.store
+                .claim_reply(&principal, &request.into_inner().operation_id)
+                .await?,
+        ))
+    }
+
+    async fn settle_reply(
+        &self,
+        request: Request<SettleReplyRequest>,
+    ) -> Result<Response<Reply>, Status> {
+        let principal = self.principal(&request, "connector:")?;
+        Ok(Response::new(
+            self.store
+                .settle_reply(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use supertag_protocol::{
+        authenticated_request, v2::connector_server::Connector, v2::operator_server::Operator,
+        v2::worker_host_server::WorkerHost,
+    };
+
+    #[tokio::test]
+    async fn private_api_requires_gateway_and_preserves_principal_class() {
+        let cp = ControlPlane::open("sqlite::memory:", "private-key".into())
+            .await
+            .unwrap();
+        let tag = PutTagRequest {
+            tag_id: "tag".into(),
+            instructions: String::new(),
+            allowed_actions: vec![],
+        };
+        assert_eq!(
+            cp.put_tag(Request::new(tag.clone()))
+                .await
+                .unwrap_err()
+                .code(),
+            tonic::Code::Unauthenticated
+        );
+        assert_eq!(
+            cp.put_tag(
+                authenticated_request(tag.clone(), "wrong", Some("operator:alice")).unwrap()
+            )
+            .await
+            .unwrap_err()
+            .code(),
+            tonic::Code::Unauthenticated
+        );
+        assert_eq!(
+            cp.put_tag(
+                authenticated_request(tag.clone(), "private-key", Some("host:worker")).unwrap()
+            )
+            .await
+            .unwrap_err()
+            .code(),
+            tonic::Code::PermissionDenied
+        );
+        assert_eq!(
+            cp.put_tag(
+                authenticated_request(tag.clone(), "private-key", Some("operator:")).unwrap()
+            )
+            .await
+            .unwrap_err()
+            .code(),
+            tonic::Code::PermissionDenied
+        );
+        assert!(
+            cp.put_tag(authenticated_request(tag, "private-key", Some("operator:alice")).unwrap())
+                .await
+                .is_ok()
+        );
+        let claim = ClaimTaskRequest {
+            operation_id: "claim".into(),
+        };
+        assert_eq!(
+            cp.claim_task(
+                authenticated_request(claim, "private-key", Some("operator:alice")).unwrap()
+            )
+            .await
+            .unwrap_err()
+            .code(),
+            tonic::Code::PermissionDenied
+        );
+        assert_eq!(
+            cp.claim_reply(
+                authenticated_request(
+                    ClaimReplyRequest {
+                        operation_id: "delivery".into()
+                    },
+                    "private-key",
+                    Some("operator:alice")
+                )
+                .unwrap()
+            )
+            .await
+            .unwrap_err()
+            .code(),
+            tonic::Code::PermissionDenied
+        );
+        assert_eq!(
+            cp.accept_event(
+                authenticated_request(
+                    AcceptEventRequest {
+                        account_id: "account-a".into(),
+                        event_id: "event".into(),
+                        tag_id: "tag".into(),
+                        session_id: "session".into(),
+                        prompt: "hello".into(),
+                        destination: Some(ReplyDestination {
+                            conversation_id: "room".into(),
+                            thread_id: None
+                        })
+                    },
+                    "private-key",
+                    Some("connector:account-b")
+                )
+                .unwrap()
+            )
+            .await
+            .unwrap_err()
+            .code(),
+            tonic::Code::PermissionDenied
+        );
+    }
+}
