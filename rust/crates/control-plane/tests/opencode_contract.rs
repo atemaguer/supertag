@@ -203,6 +203,7 @@ async fn contract(url: &str) {
                         operation_id: name.into(),
                         prompt: "Keep unsupported limit queued".into(),
                         execution_limits: Some(limits),
+                        input_artifacts: vec![],
                     },
                 )
                 .await
@@ -328,6 +329,7 @@ async fn contract(url: &str) {
         remote_file_workspace: false,
         mcp_servers: vec![],
         shared_execution: None,
+        task_artifact_inputs: false,
     };
     let claim = store
         .claim_task_with_profile(

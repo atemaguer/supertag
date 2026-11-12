@@ -20,6 +20,7 @@ async fn submit(store: &Store, session: &str) -> Task {
                 session_id: session.into(),
                 operation_id: Uuid::new_v4().to_string(),
                 prompt: "Continue fixture work".into(),
+                input_artifacts: vec![],
             },
         )
         .await

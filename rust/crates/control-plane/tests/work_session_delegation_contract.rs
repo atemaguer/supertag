@@ -222,6 +222,7 @@ async fn assert_delegated_gates(store: &Store, objective: &Objective, host: &Hos
                 session_id: objective.session_id.clone(),
                 operation_id: "delegate-gated-write".into(),
                 prompt: "Review the approved write path".into(),
+                input_artifacts: vec![],
             },
         )
         .await
@@ -335,6 +336,7 @@ async fn contract(url: &str) {
                 session_id: "ordinary".into(),
                 operation_id: "ordinary-turn".into(),
                 prompt: "Review a regular request".into(),
+                input_artifacts: vec![],
             },
         )
         .await

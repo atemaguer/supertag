@@ -33,6 +33,7 @@ async fn turn(store: &Store, objective: &Objective, operation: &str) -> Task {
                 session_id: objective.session_id.clone(),
                 operation_id: operation.into(),
                 prompt: "Next fixture instruction".into(),
+                input_artifacts: vec![],
             },
         )
         .await
@@ -391,7 +392,8 @@ async fn contract(url: String) {
                     tag_id: "owner".into(),
                     session_id: paused.session_id,
                     operation_id: "paused-after-action-change".into(),
-                    prompt: "Still paused".into()
+                    prompt: "Still paused".into(),
+                    input_artifacts: vec![],
                 }
             )
             .await

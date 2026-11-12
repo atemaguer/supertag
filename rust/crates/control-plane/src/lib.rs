@@ -23,6 +23,7 @@ mod review_artifacts;
 mod store;
 mod surface_policy;
 mod tags;
+mod task_artifact_inputs;
 mod teams;
 mod usage;
 mod watch;

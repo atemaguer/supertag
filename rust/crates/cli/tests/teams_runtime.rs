@@ -543,6 +543,7 @@ async fn cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway()
         session_id: "reviews".into(),
         operation_id: operation.into(),
         prompt: "Review the diff".into(),
+        input_artifacts: vec![],
     };
     let before = operator
         .submit_task(authenticated_request(

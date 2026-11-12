@@ -294,6 +294,7 @@ async fn contract(url: String) {
                 session_id: "direct".into(),
                 operation_id: "direct".into(),
                 prompt: "direct".into(),
+                input_artifacts: vec![],
             },
         )
         .await

@@ -39,6 +39,7 @@ async fn submit(store: &Store, tag: &str, session: &str) -> Task {
                 session_id: session.into(),
                 operation_id: Uuid::new_v4().to_string(),
                 prompt: "Inspect fixture".into(),
+                input_artifacts: vec![],
             },
         )
         .await
@@ -133,7 +134,8 @@ async fn contract(url: String) {
                     tag_id: "owner".into(),
                     session_id: "work/forged".into(),
                     operation_id: "forged-child".into(),
-                    prompt: "Unauthorized child".into()
+                    prompt: "Unauthorized child".into(),
+                    input_artifacts: vec![],
                 }
             )
             .await,

@@ -116,6 +116,7 @@ async fn contract(url: String) {
                 tag_id: "lead".into(),
                 session_id: "one".into(),
                 prompt: "Review".into(),
+                input_artifacts: vec![],
             },
         )
         .await
@@ -183,6 +184,7 @@ async fn contract(url: String) {
                 tag_id: "lead".into(),
                 session_id: "two".into(),
                 prompt: "Review".into(),
+                input_artifacts: vec![],
             },
         )
         .await
@@ -258,6 +260,7 @@ async fn contract(url: String) {
                 tag_id: "lead".into(),
                 session_id: "three".into(),
                 prompt: "Review".into(),
+                input_artifacts: vec![],
             },
         )
         .await
@@ -427,6 +430,7 @@ async fn composition(store: &Store) {
         tag_id: "composed".into(),
         session_id: "composed-one".into(),
         prompt: "Coordinate".into(),
+        input_artifacts: vec![],
     };
     let task = store.submit_task(OP, &request).await.unwrap();
     assert_eq!(task.allowed_actions, ["workstream:post"]);
@@ -512,7 +516,8 @@ async fn composition(store: &Store) {
                     operation_id: "internal-artifact".into(),
                     tag_id: "composed".into(),
                     session_id: "artifact".into(),
-                    prompt: "Read history".into()
+                    prompt: "Read history".into(),
+                    input_artifacts: vec![],
                 }
             )
             .await,

@@ -120,6 +120,7 @@ async fn contract(url: String) {
                 session_id: "legacy-parent".into(),
                 operation_id: "later-parent".into(),
                 prompt: "Continue the migrated child".into(),
+                input_artifacts: vec![],
             },
         )
         .await

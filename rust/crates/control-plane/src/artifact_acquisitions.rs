@@ -38,7 +38,7 @@ fn receipt(row: &AnyRow) -> Result<ArtifactAcquisition> {
 fn missing() -> StoreError {
     StoreError::NotFound("artifact was not found".into())
 }
-async fn visible_in(
+pub(crate) async fn visible_in(
     tx: &mut Transaction<'_, Any>,
     consumer: &str,
     id: &str,
@@ -236,6 +236,16 @@ impl Store {
         let now = self.execution_now_ms();
         crate::artifact_captures::running(&row, now)?;
         let task = task_row(&row)?;
+        if input
+            .operation_id
+            .starts_with(supertag_protocol::task_artifact_inputs::OPERATION_PREFIX)
+            && !task
+                .attempt_execution
+                .as_ref()
+                .is_some_and(|attempt| attempt.task_artifact_inputs)
+        {
+            return Err(StoreError::PermissionDenied);
+        }
         if input.delivery() == ArtifactDelivery::Materialize
             && (task.workspace.is_none()
                 || task
@@ -261,6 +271,7 @@ impl Store {
                     .ok_or_else(missing)?,
             );
         }
+        crate::task_artifact_inputs::reserved_acquisition(&task, input, &artifact, &files)?;
         let acquisition = ArtifactAcquisition {
             acquisition_id: uuid::Uuid::new_v4().to_string(),
             operation_id: input.operation_id.clone(),

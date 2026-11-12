@@ -61,7 +61,7 @@ pub enum StoreError {
 pub(crate) type Result<T> = std::result::Result<T, StoreError>;
 pub(crate) const MAX_TASK_PROMPT_BYTES: usize = 262_144;
 // Reserve framing space for the enclosing conversation and execution messages.
-const MAX_TASK_MESSAGE_BYTES: usize = supertag_protocol::MAX_MESSAGE_BYTES - 4096;
+pub(crate) const MAX_TASK_MESSAGE_BYTES: usize = supertag_protocol::MAX_MESSAGE_BYTES - 4096;
 
 #[derive(Clone)]
 pub struct Store {
@@ -71,7 +71,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 48;
+        const SCHEMA_VERSION: i64 = 49;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -170,6 +170,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0046_artifact_acquisitions.sql"),
                 include_str!("../migrations/sqlite/0047_mcp_effects.sql"),
                 include_str!("../migrations/sqlite/0048_artifact_volumes.sql"),
+                include_str!("../migrations/sqlite/0049_task_artifact_inputs.sql"),
             ]
         } else {
             [
@@ -221,6 +222,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0046_artifact_acquisitions.sql"),
                 include_str!("../migrations/postgresql/0047_mcp_effects.sql"),
                 include_str!("../migrations/postgresql/0048_artifact_volumes.sql"),
+                include_str!("../migrations/postgresql/0049_task_artifact_inputs.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -389,6 +391,7 @@ impl Store {
         let output_policy =
             supertag_protocol::output_policy::normalize(input.output_policy.as_ref())
                 .map_err(|error| invalid(error.message()))?;
+        let artifact_inputs = crate::task_artifact_inputs::normalize(&input.input_artifacts)?;
         name("principal", principal)?;
         name("operation ID", &input.operation_id)?;
         name("Tag ID", &input.tag_id)?;
@@ -417,6 +420,7 @@ impl Store {
             );
         }
         let digest = output_policy_digest(digest, output_policy.as_ref())?;
+        let digest = crate::task_artifact_inputs::digest(digest, &artifact_inputs);
         let (mut transaction, order) = self.write().await?;
         let prior = sqlx::query("SELECT request_digest, task_id FROM supertag_v2_admissions WHERE principal = $1 AND operation_id = $2")
             .bind(principal).bind(&input.operation_id).fetch_optional(&mut *transaction).await?;
@@ -437,7 +441,7 @@ impl Store {
             self.execution_now_ms(),
         )
         .await?;
-        let task = insert_task_with_requirements(
+        let mut task = insert_task_with_requirements(
             &mut transaction,
             order,
             &input.tag_id,
@@ -447,6 +451,15 @@ impl Store {
         )
         .await?;
         crate::objectives::objective_link_task_in(&mut transaction, &task).await?;
+        if !artifact_inputs.is_empty() {
+            Box::pin(crate::task_artifact_inputs::accept_in(
+                &mut transaction,
+                principal,
+                &mut task,
+                &artifact_inputs,
+            ))
+            .await?;
+        }
         let id = &task.task_id;
         sqlx::query("INSERT INTO supertag_v2_admissions (principal, operation_id, request_digest, task_id) VALUES ($1,$2,$3,$4)")
             .bind(principal).bind(&input.operation_id).bind(digest).bind(id).execute(&mut *transaction).await?;
@@ -1706,6 +1719,7 @@ pub(crate) fn task_row(row: &AnyRow) -> Result<Task> {
         attempt_execution,
         artifacts: crate::artifact_captures::submitted_from_row(row)?,
         output_policy: output_policy_from_row(row)?,
+        input_artifacts: crate::task_artifact_inputs::from_row(row)?,
     })
 }
 

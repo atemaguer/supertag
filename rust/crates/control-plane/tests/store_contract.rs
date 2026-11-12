@@ -17,6 +17,7 @@ fn request(operation: &str) -> SubmitTaskRequest {
         session_id: "review-session".into(),
         operation_id: operation.into(),
         prompt: "Review the patch".into(),
+        input_artifacts: vec![],
     }
 }
 

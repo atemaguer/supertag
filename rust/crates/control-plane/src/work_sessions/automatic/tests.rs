@@ -82,6 +82,7 @@ async fn contract(url: &str) {
                     operation_id: scenario.into(),
                     prompt: "Coordinate".into(),
                     execution_limits: Some(limits(10_000, 500)),
+                    input_artifacts: vec![],
                 },
             )
             .await

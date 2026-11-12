@@ -12,6 +12,7 @@ mod readiness;
 mod remote;
 mod remote_provider;
 mod shared_execution;
+mod task_artifact_inputs;
 mod task_outputs;
 mod workspaces;
 
@@ -139,6 +140,7 @@ impl Attempt {
         Ok(execution.harness_kind == options.harness as i32
             && execution.remote_file_workspace == options.execution_profile.remote_file_workspace
             && execution.shared_execution == options.execution_profile.shared_execution
+            && (!execution.task_artifact_inputs || options.execution_profile.task_artifact_inputs)
             && execution
                 .mcp_servers
                 .iter()
@@ -385,7 +387,7 @@ pub async fn run(
                     wait_for_work(&shutdown).await;
                 }
             }
-            Entry::Starting { attempt } => {
+            Entry::Starting { attempt } | Entry::PreparingInputs { attempt, .. } => {
                 run_assignment(
                     &options,
                     &journal,
@@ -822,6 +824,26 @@ fn cleanup_terminal(
     journal.clear()
 }
 
+fn discard_prelaunch(
+    options: &HostOptions,
+    journal: &Journal,
+    workspaces: &workspaces::Workspaces,
+    attempt: &Attempt,
+) -> Result<()> {
+    let prepared = journal
+        .load()?
+        .map(|entry| entry.prepared(attempt))
+        .transpose()?
+        .flatten();
+    cleanup_terminal(
+        journal,
+        workspaces,
+        &options.state_directory,
+        attempt,
+        prepared.as_deref(),
+    )
+}
+
 async fn resolved(
     host: &mut RegisteredHost,
     attempt: &Attempt,
@@ -900,8 +922,7 @@ async fn run_assignment(
                 // No adapter was launched for Starting. The Control Plane can
                 // safely retire a reservation that expired before start.
                 Err(error) if lost_ownership(&error) => {
-                    context::discard_attempt(&options.state_directory, &attempt.attempt_id)?;
-                    return journal.clear();
+                    return discard_prelaunch(options, journal, workspaces, &attempt);
                 }
                 Err(error) => return Err(error.into()),
             }
@@ -951,8 +972,7 @@ async fn run_assignment(
             return Ok(());
         }
         Err(error) if lost_ownership(&error) => {
-            context::discard_attempt(&options.state_directory, &attempt.attempt_id)?;
-            return journal.clear();
+            return discard_prelaunch(options, journal, workspaces, &attempt);
         }
         Err(error) => return Err(error.into()),
     };
@@ -996,6 +1016,22 @@ async fn run_assignment(
             journal,
             attempt,
             adapter::failed("Worker Host cannot enforce accepted Task output requirements"),
+        );
+    }
+    if !supertag_protocol::task_artifact_inputs::supports(
+        &task,
+        options.harness,
+        &options.execution_profile,
+    ) || (!task.input_artifacts.is_empty()
+        && !task
+            .attempt_execution
+            .as_ref()
+            .is_some_and(|execution| execution.task_artifact_inputs))
+    {
+        return save_finish(
+            journal,
+            attempt,
+            adapter::failed("Worker Host cannot materialize accepted Task artifact inputs"),
         );
     }
     let checkpoint = match time::timeout_at(valid_until, transfers.download(&attempt, token)).await
@@ -1081,6 +1117,50 @@ async fn run_assignment(
             );
         }
     };
+    if !task.input_artifacts.is_empty() {
+        let prepared = workspace
+            .as_ref()
+            .context("Task artifact input Workspace is missing")?;
+        journal.save(&Entry::PreparingInputs {
+            attempt: attempt.clone(),
+            prepared: Box::new(prepared.clone()),
+        })?;
+        let cancel = shutdown.child_token();
+        let staged = Box::pin(with_authority(
+            host,
+            &attempt,
+            token,
+            shutdown,
+            &cancel,
+            task_artifact_inputs::prepare(
+                (&options.state_directory, &prepared.checkout.path),
+                &task,
+                &attempt,
+                coordination,
+                token,
+                &cancel,
+            ),
+        ))
+        .await;
+        match staged {
+            Ok((instructions, expires)) => {
+                task.instructions.push_str(&instructions);
+                valid_until = expires;
+            }
+            Err(_) if shutdown.is_cancelled() => return Ok(()),
+            Err(error) if retryable(&error) => {
+                wait_for_work(shutdown).await;
+                return Ok(());
+            }
+            Err(_) => {
+                return save_finish(
+                    journal,
+                    attempt,
+                    adapter::failed("Task artifact inputs could not be materialized safely"),
+                );
+            }
+        }
+    }
     journal.save(&Entry::Executing {
         attempt: attempt.clone(),
         prepared: workspace

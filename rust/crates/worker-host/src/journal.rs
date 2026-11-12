@@ -94,6 +94,11 @@ pub(crate) enum Entry {
         #[serde(flatten)]
         attempt: Attempt,
     },
+    PreparingInputs {
+        #[serde(flatten)]
+        attempt: Attempt,
+        prepared: Box<PreparedWorkspace>,
+    },
     Executing {
         #[serde(flatten)]
         attempt: Attempt,
@@ -145,6 +150,7 @@ impl Entry {
     pub(crate) fn prepared(&self, expected: &Attempt) -> Result<Option<Box<PreparedWorkspace>>> {
         let (attempt, prepared) = match self {
             Self::Starting { attempt } => (attempt, None),
+            Self::PreparingInputs { attempt, prepared } => (attempt, Some(prepared.clone())),
             Self::Executing { attempt, prepared } | Self::Terminal { attempt, prepared } => {
                 (attempt, prepared.clone())
             }
@@ -659,6 +665,7 @@ mod tests {
                 remote_file_workspace: false,
                 mcp_servers: vec![],
                 shared_execution: None,
+                task_artifact_inputs: false,
             }),
             ..Default::default()
         };
@@ -687,6 +694,7 @@ mod tests {
                 remote_file_workspace: false,
                 shared_execution: None,
                 mcp_servers: vec![],
+                task_artifact_inputs: false,
             }
             .encode_to_vec(),
         );

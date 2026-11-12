@@ -121,6 +121,7 @@ pub(super) fn resolve_attempt(
 ) -> Option<AttemptExecutionSelection> {
     if !supertag_protocol::mcp::supports(task, harness, profile)
         || !supertag_protocol::output_policy::supports(task, harness, profile)
+        || !supertag_protocol::task_artifact_inputs::supports(task, harness, profile)
     {
         return None;
     }
@@ -168,6 +169,7 @@ pub(super) fn resolve_attempt(
         remote_file_workspace: profile.remote_file_workspace,
         shared_execution: profile.shared_execution.clone(),
         mcp_servers: supertag_protocol::mcp::selected_servers(task, profile),
+        task_artifact_inputs: !task.input_artifacts.is_empty(),
     })
 }
 

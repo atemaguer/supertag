@@ -124,6 +124,7 @@ async fn ordinary(url: &str) {
                         max_native_agents: Some(maximum),
                         ..Default::default()
                     }),
+                    input_artifacts: vec![],
                 },
             )
             .await
@@ -162,6 +163,7 @@ async fn ordinary(url: &str) {
         operation_id: "root".into(),
         prompt: "Coordinate fixture".into(),
         execution_limits: Some(limits(10_000, 500)),
+        input_artifacts: vec![],
     };
     let p = s.submit_task(OP, &req).await.unwrap();
     let a = run(&s, &h, &p.task_id).await;

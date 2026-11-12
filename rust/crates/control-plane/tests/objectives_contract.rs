@@ -201,6 +201,7 @@ async fn review_lifecycle(
                 session_id: "direct".into(),
                 operation_id: "direct".into(),
                 prompt: "Independent task".into(),
+                input_artifacts: vec![],
             },
         )
         .await
@@ -278,7 +279,8 @@ async fn review_lifecycle(
                     tag_id: "owner".into(),
                     session_id: objective.session_id,
                     operation_id: "closed-bypass".into(),
-                    prompt: "Cannot escape the closed Objective".into()
+                    prompt: "Cannot escape the closed Objective".into(),
+                    input_artifacts: vec![],
                 }
             )
             .await,
@@ -419,7 +421,8 @@ async fn budget_and_deadline(
                     tag_id: "owner".into(),
                     session_id: budget.session_id.clone(),
                     operation_id: "over-budget".into(),
-                    prompt: "More work".into()
+                    prompt: "More work".into(),
+                    input_artifacts: vec![],
                 }
             )
             .await,
@@ -504,7 +507,8 @@ async fn budget_and_deadline(
                     tag_id: "owner".into(),
                     session_id: deadline.session_id.clone(),
                     operation_id: "past-deadline".into(),
-                    prompt: "New work".into()
+                    prompt: "New work".into(),
+                    input_artifacts: vec![],
                 }
             )
             .await,
@@ -609,6 +613,7 @@ async fn idle_and_unstarted_claims(
                 session_id: idle.session_id,
                 operation_id: "direct-idle-owner".into(),
                 prompt: "Here is the missing decision".into(),
+                input_artifacts: vec![],
             },
         )
         .await
@@ -732,6 +737,7 @@ async fn pause_and_recovery(url: &str, clock: &Arc<AtomicI64>, host: &HostAuthor
                 session_id: "pause-race-unrelated".into(),
                 operation_id: "pause-race-unrelated".into(),
                 prompt: "Do other work while the Objective waits".into(),
+                input_artifacts: vec![],
             },
         )
         .await
@@ -807,6 +813,7 @@ async fn pause_and_recovery(url: &str, clock: &Arc<AtomicI64>, host: &HostAuthor
                 session_id: denied.session_id,
                 operation_id: "after-denied-signal".into(),
                 prompt: "Continue the ongoing responsibility".into(),
+                input_artifacts: vec![],
             },
         )
         .await
@@ -876,6 +883,7 @@ async fn pause_and_recovery(url: &str, clock: &Arc<AtomicI64>, host: &HostAuthor
                 session_id: recovery.session_id,
                 operation_id: "after-failed-recovery".into(),
                 prompt: "New work after explicit settlement".into(),
+                input_artifacts: vec![],
             },
         )
         .await

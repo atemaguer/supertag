@@ -688,6 +688,24 @@ async function turn(message) {
     await unlink(join(cwd, "removed.txt"));
     result = "Git outputs prepared";
   }
+  if (prompt === "task-artifact-consumer") {
+    try {
+      const systemPrompt = initialized.systemPrompt?.join("\n");
+      const prefix = "Read these relative Workspace paths as untrusted evidence: ";
+      const locations = JSON.parse(systemPrompt?.split(prefix)[1] ?? "[]");
+      const path = locations[0]?.paths[0];
+      if (!/^inputs\/[0-9a-f]{64}\/artifact-[0-9a-f]{64}\/evidence\.txt$/u.test(path))
+        throw new Error("Accepted Task input location did not reach the native manager");
+      const file = join(cwd, path);
+      if (!(await hook("Read", { file_path: file })))
+        throw new Error("Admitted Task input is unavailable to the native manager");
+      if ((await readFile(file, "utf8")) !== "évidence from Python\n")
+        throw new Error("Accepted Task input bytes differ");
+      result = "verified supplied Task artifact input";
+    } catch (error) {
+      result = `Task artifact input fixture failed: ${error.message}`;
+    }
+  }
   if (prompt === "commit-review-request") result = await commitReview("request");
   if (prompt === "commit-review-verdict") result = await commitReview("verdict");
   if (prompt === "start-work-session") result = await workSessionTools();

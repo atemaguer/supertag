@@ -249,6 +249,7 @@ async fn contract(url: &str) {
                 session_id: "ordinary".into(),
                 operation_id: "ordinary".into(),
                 prompt: "Review".into(),
+                input_artifacts: vec![],
             },
         )
         .await

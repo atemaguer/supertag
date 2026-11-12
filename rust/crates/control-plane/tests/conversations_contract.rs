@@ -182,6 +182,7 @@ async fn exercise(database: &str) {
                     session_id: alice.session_id.clone(),
                     operation_id: "bypass".into(),
                     prompt: "Incorrect path".into(),
+                    input_artifacts: vec![],
                 }
             )
             .await,

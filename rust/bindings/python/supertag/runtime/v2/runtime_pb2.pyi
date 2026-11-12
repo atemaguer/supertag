@@ -1710,20 +1710,22 @@ class ListMessageEventsRequest(_message.Message):
     def __init__(self, tag_id: _Optional[str] = ..., task_id: _Optional[str] = ..., after_sequence: _Optional[int] = ..., limit: _Optional[int] = ...) -> None: ...
 
 class SubmitTaskRequest(_message.Message):
-    __slots__ = ("tag_id", "session_id", "operation_id", "prompt", "execution_limits", "output_policy")
+    __slots__ = ("tag_id", "session_id", "operation_id", "prompt", "execution_limits", "output_policy", "input_artifacts")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_LIMITS_FIELD_NUMBER: _ClassVar[int]
     OUTPUT_POLICY_FIELD_NUMBER: _ClassVar[int]
+    INPUT_ARTIFACTS_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     session_id: str
     operation_id: str
     prompt: str
     execution_limits: ExecutionLimits
     output_policy: TaskOutputPolicy
-    def __init__(self, tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., prompt: _Optional[str] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ...) -> None: ...
+    input_artifacts: _containers.RepeatedCompositeFieldContainer[TaskArtifactInputSelection]
+    def __init__(self, tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., prompt: _Optional[str] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ..., input_artifacts: _Optional[_Iterable[_Union[TaskArtifactInputSelection, _Mapping]]] = ...) -> None: ...
 
 class ReportedCostLimit(_message.Message):
     __slots__ = ("currency", "amount_minor")
@@ -1744,7 +1746,7 @@ class ExecutionLimits(_message.Message):
     def __init__(self, max_reported_tokens: _Optional[int] = ..., max_reported_cost: _Optional[_Union[ReportedCostLimit, _Mapping]] = ..., max_native_agents: _Optional[int] = ...) -> None: ...
 
 class Task(_message.Message):
-    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits", "execution_selection", "attempt_execution", "artifacts", "output_policy")
+    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits", "execution_selection", "attempt_execution", "artifacts", "output_policy", "input_artifacts")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -1765,6 +1767,7 @@ class Task(_message.Message):
     ATTEMPT_EXECUTION_FIELD_NUMBER: _ClassVar[int]
     ARTIFACTS_FIELD_NUMBER: _ClassVar[int]
     OUTPUT_POLICY_FIELD_NUMBER: _ClassVar[int]
+    INPUT_ARTIFACTS_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     tag_id: str
     session_id: str
@@ -1785,7 +1788,44 @@ class Task(_message.Message):
     attempt_execution: AttemptExecutionSelection
     artifacts: _containers.RepeatedCompositeFieldContainer[ArtifactSelection]
     output_policy: TaskOutputPolicy
-    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ...) -> None: ...
+    input_artifacts: _containers.RepeatedCompositeFieldContainer[AcceptedTaskArtifactInput]
+    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ..., input_artifacts: _Optional[_Iterable[_Union[AcceptedTaskArtifactInput, _Mapping]]] = ...) -> None: ...
+
+class TaskArtifactInputSelection(_message.Message):
+    __slots__ = ("artifact_id", "paths", "require_accepted")
+    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
+    PATHS_FIELD_NUMBER: _ClassVar[int]
+    REQUIRE_ACCEPTED_FIELD_NUMBER: _ClassVar[int]
+    artifact_id: str
+    paths: _containers.RepeatedScalarFieldContainer[str]
+    require_accepted: bool
+    def __init__(self, artifact_id: _Optional[str] = ..., paths: _Optional[_Iterable[str]] = ..., require_accepted: _Optional[bool] = ...) -> None: ...
+
+class AcceptedTaskArtifactInput(_message.Message):
+    __slots__ = ("artifact_id", "source_task_id", "source_attempt_id", "files")
+    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    FILES_FIELD_NUMBER: _ClassVar[int]
+    artifact_id: str
+    source_task_id: str
+    source_attempt_id: str
+    files: _containers.RepeatedCompositeFieldContainer[ArtifactInputFile]
+    def __init__(self, artifact_id: _Optional[str] = ..., source_task_id: _Optional[str] = ..., source_attempt_id: _Optional[str] = ..., files: _Optional[_Iterable[_Union[ArtifactInputFile, _Mapping]]] = ...) -> None: ...
+
+class ArtifactInputFile(_message.Message):
+    __slots__ = ("path", "blob")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    BLOB_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    blob: BlobReference
+    def __init__(self, path: _Optional[str] = ..., blob: _Optional[_Union[BlobReference, _Mapping]] = ...) -> None: ...
+
+class AcceptedTaskArtifactInputs(_message.Message):
+    __slots__ = ("inputs",)
+    INPUTS_FIELD_NUMBER: _ClassVar[int]
+    inputs: _containers.RepeatedCompositeFieldContainer[AcceptedTaskArtifactInput]
+    def __init__(self, inputs: _Optional[_Iterable[_Union[AcceptedTaskArtifactInput, _Mapping]]] = ...) -> None: ...
 
 class OutputPathPatterns(_message.Message):
     __slots__ = ("patterns",)
@@ -1828,7 +1868,7 @@ class ExecutionSelection(_message.Message):
     def __init__(self, model: _Optional[str] = ..., effort: _Optional[str] = ...) -> None: ...
 
 class HarnessExecutionProfile(_message.Message):
-    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace", "mcp_servers", "shared_execution", "declared_task_outputs")
+    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace", "mcp_servers", "shared_execution", "declared_task_outputs", "task_artifact_inputs")
     MODEL_IDS_FIELD_NUMBER: _ClassVar[int]
     DEFAULT_MODEL_FIELD_NUMBER: _ClassVar[int]
     ALLOW_UNSANDBOXED_COMMANDS_FIELD_NUMBER: _ClassVar[int]
@@ -1836,6 +1876,7 @@ class HarnessExecutionProfile(_message.Message):
     MCP_SERVERS_FIELD_NUMBER: _ClassVar[int]
     SHARED_EXECUTION_FIELD_NUMBER: _ClassVar[int]
     DECLARED_TASK_OUTPUTS_FIELD_NUMBER: _ClassVar[int]
+    TASK_ARTIFACT_INPUTS_FIELD_NUMBER: _ClassVar[int]
     model_ids: _containers.RepeatedScalarFieldContainer[str]
     default_model: str
     allow_unsandboxed_commands: bool
@@ -1843,7 +1884,8 @@ class HarnessExecutionProfile(_message.Message):
     mcp_servers: _containers.RepeatedCompositeFieldContainer[_mcp_pb2.McpServerCapability]
     shared_execution: SharedExecutionCapability
     declared_task_outputs: bool
-    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ..., declared_task_outputs: _Optional[bool] = ...) -> None: ...
+    task_artifact_inputs: bool
+    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ..., declared_task_outputs: _Optional[bool] = ..., task_artifact_inputs: _Optional[bool] = ...) -> None: ...
 
 class SharedExecutionCapability(_message.Message):
     __slots__ = ("environment_id", "tools", "incarnation_id")
@@ -1864,7 +1906,7 @@ class SharedExecutionAccessSummary(_message.Message):
     def __init__(self, environment_id: _Optional[str] = ..., incarnation_id: _Optional[str] = ...) -> None: ...
 
 class AttemptExecutionSelection(_message.Message):
-    __slots__ = ("selection", "model_source", "harness_kind", "effort_applied", "remote_file_workspace", "shared_execution", "mcp_servers")
+    __slots__ = ("selection", "model_source", "harness_kind", "effort_applied", "remote_file_workspace", "shared_execution", "mcp_servers", "task_artifact_inputs")
     SELECTION_FIELD_NUMBER: _ClassVar[int]
     MODEL_SOURCE_FIELD_NUMBER: _ClassVar[int]
     HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
@@ -1872,6 +1914,7 @@ class AttemptExecutionSelection(_message.Message):
     REMOTE_FILE_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     SHARED_EXECUTION_FIELD_NUMBER: _ClassVar[int]
     MCP_SERVERS_FIELD_NUMBER: _ClassVar[int]
+    TASK_ARTIFACT_INPUTS_FIELD_NUMBER: _ClassVar[int]
     selection: ExecutionSelection
     model_source: ModelSource
     harness_kind: HarnessKind
@@ -1879,7 +1922,8 @@ class AttemptExecutionSelection(_message.Message):
     remote_file_workspace: bool
     shared_execution: SharedExecutionCapability
     mcp_servers: _containers.RepeatedCompositeFieldContainer[_mcp_pb2.McpServerCapability]
-    def __init__(self, selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., model_source: _Optional[_Union[ModelSource, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., effort_applied: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ...) -> None: ...
+    task_artifact_inputs: bool
+    def __init__(self, selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., model_source: _Optional[_Union[ModelSource, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., effort_applied: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., shared_execution: _Optional[_Union[SharedExecutionCapability, _Mapping]] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ..., task_artifact_inputs: _Optional[bool] = ...) -> None: ...
 
 class ReserveMcpEffectRequest(_message.Message):
     __slots__ = ("attempt", "operation_id", "server", "tool", "arguments_json", "provider_binding", "tool_schema_sha256")

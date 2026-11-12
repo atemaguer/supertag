@@ -1,5 +1,7 @@
 #[path = "support/python_artifacts_runtime.rs"]
 mod python_artifacts_runtime;
+#[path = "support/task_artifact_inputs_runtime.rs"]
+mod task_artifact_inputs_runtime;
 
 use std::{
     net::SocketAddr, os::unix::fs::PermissionsExt, path::Path, process::Stdio, time::Duration,

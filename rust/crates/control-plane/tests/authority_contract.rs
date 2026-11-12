@@ -102,6 +102,7 @@ fn turn(operation_id: &str, session_id: &str) -> SubmitTaskRequest {
         session_id: session_id.into(),
         operation_id: operation_id.into(),
         prompt: "Review the patch".into(),
+        input_artifacts: vec![],
     }
 }
 

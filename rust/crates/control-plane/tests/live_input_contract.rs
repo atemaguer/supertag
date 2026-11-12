@@ -32,6 +32,7 @@ async fn submit(store: &Store, tag: &str, session: &str, operation: &str) -> Tas
                 session_id: session.into(),
                 operation_id: operation.into(),
                 prompt: operation.into(),
+                input_artifacts: vec![],
             },
         )
         .await

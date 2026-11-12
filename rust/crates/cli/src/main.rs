@@ -15,6 +15,7 @@ mod output_policy;
 mod policy;
 mod replies;
 mod surface_policy;
+mod task_artifact_inputs;
 mod teams;
 mod tui;
 mod volumes;
@@ -436,6 +437,9 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         /// Read declared output requirements from a JSON file.
         #[arg(long)]
         outputs: Option<PathBuf>,
+        /// Include one submitted artifact file from the same Objective. Repeat for more files.
+        #[arg(long = "artifact-input", value_name = "ARTIFACT_ID:PATH")]
+        artifact_inputs: Vec<String>,
         prompt: String,
     },
     /// Read a Task.
@@ -807,6 +811,10 @@ async fn run(command: Command) -> Result<()> {
             } else {
                 None
             };
+            execution_profile.task_artifact_inputs = workspace.is_some()
+                && remote_provider.is_none()
+                && shared_execution.is_none()
+                && supertag_protocol::task_artifact_inputs::supports_harness(harness);
             let options = HostOptions {
                 gateway: network::endpoint(gateway, false).await?,
                 token: std::env::var("SUPERTAG_HOST_TOKEN").ok(),
@@ -1059,6 +1067,7 @@ async fn run(command: Command) -> Result<()> {
             reported_cost_currency,
             max_native_agents,
             outputs,
+            artifact_inputs,
             prompt,
         } => {
             let (mut operator, token) = operator(connection).await?;
@@ -1077,6 +1086,7 @@ async fn run(command: Command) -> Result<()> {
                 max_native_agents,
             });
             let output_policy = outputs.as_deref().map(output_policy::read).transpose()?;
+            let input_artifacts = task_artifact_inputs::parse(artifact_inputs)?;
             let task = operator
                 .submit_task(request(
                     SubmitTaskRequest {
@@ -1086,6 +1096,7 @@ async fn run(command: Command) -> Result<()> {
                         operation_id: operation_id.unwrap_or_else(|| Uuid::new_v4().to_string()),
                         execution_limits,
                         output_policy,
+                        input_artifacts,
                     },
                     &token,
                 )?)
@@ -2065,6 +2076,18 @@ fn print_task(task: &Task) {
             "artifacts": task.artifacts.iter().map(|selection| json!({
                 "artifact_id": selection.artifact_id,
                 "paths": selection.paths,
+            })).collect::<Vec<_>>(),
+            "input_artifacts": task.input_artifacts.iter().map(|input| json!({
+                "artifact_id": input.artifact_id,
+                "source_task_id": input.source_task_id,
+                "source_attempt_id": input.source_attempt_id,
+                "files": input.files.iter().map(|file| json!({
+                    "path": file.path,
+                    "blob": file.blob.as_ref().map(|blob| json!({
+                        "sha256": blob.sha256,
+                        "byte_length": blob.byte_length,
+                    })),
+                })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
             "execution_limits": task.execution_limits.as_ref().map(|limits| json!({
                 "max_reported_tokens": limits.max_reported_tokens,

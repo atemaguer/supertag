@@ -125,6 +125,7 @@ async fn contract(url: String) {
                 tag_id: "required".into(),
                 session_id: "one".into(),
                 prompt: "Review".into(),
+                input_artifacts: vec![],
             },
         )
         .await
@@ -139,6 +140,7 @@ async fn contract(url: String) {
                 tag_id: "plain".into(),
                 session_id: "two".into(),
                 prompt: "Read".into(),
+                input_artifacts: vec![],
             },
         )
         .await

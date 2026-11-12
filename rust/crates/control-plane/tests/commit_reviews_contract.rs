@@ -891,6 +891,7 @@ async fn unrelated_reviewer_authority(
                 session_id: "unrelated".into(),
                 operation_id: "unrelated".into(),
                 prompt: "Other work".into(),
+                input_artifacts: vec![],
             },
         )
         .await
@@ -1267,6 +1268,7 @@ async fn record_separate_root_verdict(
                 session_id: "separate-review-session".into(),
                 operation_id: "separate-review-session".into(),
                 prompt: "Record the verdict from the review".into(),
+                input_artifacts: vec![],
             },
         )
         .await

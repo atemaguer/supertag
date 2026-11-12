@@ -35,6 +35,7 @@ fn submit(operation: &str, session: &str) -> SubmitTaskRequest {
         operation_id: operation.into(),
         prompt: "Read the pinned repository".into(),
         execution_limits: None,
+        input_artifacts: vec![],
     }
 }
 

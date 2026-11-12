@@ -256,6 +256,7 @@ impl Runtime {
                 operation_id: Uuid::new_v4().to_string(),
                 prompt: format!("fixture:{mode}"),
                 execution_limits: limits,
+                input_artifacts: vec![],
             })?)
             .await?
             .into_inner())
@@ -811,6 +812,7 @@ async fn opencode_claims_and_runs_the_accepted_role_model() -> Result<()> {
             remote_file_workspace: false,
             mcp_servers: vec![],
             shared_execution: None,
+            task_artifact_inputs: false,
         }),
         ..Default::default()
     };

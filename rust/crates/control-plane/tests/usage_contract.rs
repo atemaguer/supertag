@@ -17,6 +17,7 @@ async fn start(store: &Store, host: &HostAuthority) -> InspectAttemptRequest {
                 operation_id: Uuid::new_v4().to_string(),
                 prompt: "Measure actual usage".into(),
                 execution_limits: None,
+                input_artifacts: vec![],
             },
         )
         .await

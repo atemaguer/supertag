@@ -50,6 +50,7 @@ async fn ordinary(store: &Store, tag: &str) -> Task {
                 session_id: "ordinary".into(),
                 operation_id: Uuid::new_v4().to_string(),
                 prompt: "Coordinate".into(),
+                input_artifacts: vec![],
             },
         )
         .await

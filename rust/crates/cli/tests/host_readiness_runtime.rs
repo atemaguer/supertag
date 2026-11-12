@@ -294,6 +294,7 @@ async fn executing_capacity_and_recovery_suppression_are_reported_by_the_actual_
             session_id: "review".into(),
             operation_id: "review-turn".into(),
             prompt: "Wait for operator".into(),
+            input_artifacts: vec![],
         })?)
         .await?
         .into_inner();

@@ -366,6 +366,7 @@ async fn contract(url: &str) {
                 session_id: stale.session_id,
                 operation_id: "newer-turn".into(),
                 prompt: "I have new instructions".into(),
+                input_artifacts: vec![],
             },
         )
         .await

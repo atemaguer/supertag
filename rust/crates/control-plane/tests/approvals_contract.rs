@@ -140,6 +140,7 @@ async fn contract(url: &str) {
                 session_id: "ordinary".into(),
                 operation_id: "first".into(),
                 prompt: "Post the update".into(),
+                input_artifacts: vec![],
             },
         )
         .await
@@ -635,6 +636,7 @@ async fn contract(url: &str) {
                 session_id: "expired-grant".into(),
                 operation_id: "expired-grant".into(),
                 prompt: "Check short approval validity".into(),
+                input_artifacts: vec![],
             },
         )
         .await
@@ -715,6 +717,7 @@ async fn contract(url: &str) {
                 session_id: "sweep-tail".into(),
                 operation_id: "sweep-tail".into(),
                 prompt: "Abandoned request".into(),
+                input_artifacts: vec![],
             },
         )
         .await

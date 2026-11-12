@@ -65,6 +65,7 @@ async fn turn(
                 session_id: session.into(),
                 operation_id: Uuid::new_v4().to_string(),
                 prompt: "Continue the Session".into(),
+                input_artifacts: vec![],
             },
         )
         .await

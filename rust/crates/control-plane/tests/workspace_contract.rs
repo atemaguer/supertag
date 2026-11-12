@@ -22,6 +22,7 @@ async fn submit(store: &Store, session_id: &str) -> Result<Task, StoreError> {
                 session_id: session_id.into(),
                 operation_id: Uuid::new_v4().to_string(),
                 prompt: "Review the repository".into(),
+                input_artifacts: vec![],
             },
         )
         .await

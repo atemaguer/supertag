@@ -231,6 +231,7 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
                 tag_id: "outsider".into(),
                 session_id: "ordinary".into(),
                 prompt: "Unrelated work".into(),
+                input_artifacts: vec![],
             },
         )
         .await

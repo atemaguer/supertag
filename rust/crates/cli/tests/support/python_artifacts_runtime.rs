@@ -2,7 +2,7 @@ use super::*;
 
 const EVIDENCE: &str = "évidence from Python\n";
 
-async fn checkout(root: &Path) -> Result<String> {
+pub(super) async fn checkout(root: &Path) -> Result<String> {
     std::fs::create_dir(root)?;
     let git = |args: &[&str]| {
         let mut command = Command::new("/usr/bin/git");

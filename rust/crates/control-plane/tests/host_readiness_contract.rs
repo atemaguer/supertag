@@ -38,6 +38,7 @@ fn report(sequence: u64) -> ReportHostRequest {
             remote_file_workspace: false,
             mcp_servers: vec![],
             shared_execution: None,
+            task_artifact_inputs: false,
         }),
     }
 }
@@ -123,6 +124,7 @@ async fn contract(url: &str) {
                 session_id: "session".into(),
                 operation_id: "turn".into(),
                 prompt: "Review this change".into(),
+                input_artifacts: vec![],
             },
         )
         .await

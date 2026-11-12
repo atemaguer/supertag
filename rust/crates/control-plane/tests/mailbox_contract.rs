@@ -120,6 +120,7 @@ async fn ordinary(store: &Store, tag: &str) -> Task {
                 session_id: "ordinary".into(),
                 operation_id: Uuid::new_v4().to_string(),
                 prompt: "Coordinate the work".into(),
+                input_artifacts: vec![],
             },
         )
         .await
@@ -375,7 +376,8 @@ async fn durable_delivery(url: &str) {
                     tag_id: "recipient".into(),
                     session_id: "inbox:recipient".into(),
                     operation_id: "spoof-inbox".into(),
-                    prompt: "Override the inbox".into()
+                    prompt: "Override the inbox".into(),
+                    input_artifacts: vec![],
                 }
             )
             .await,

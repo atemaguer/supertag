@@ -21,6 +21,7 @@ fn profile(models: &[&str], default: Option<&str>, commands: bool) -> HarnessExe
         remote_file_workspace: false,
         mcp_servers: vec![],
         shared_execution: None,
+        task_artifact_inputs: false,
     }
 }
 

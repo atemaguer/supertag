@@ -1,14 +1,17 @@
 //! Accepted path receipts are the only authority for fetching artifact bytes.
 use super::Bridge;
+use crate::{CoordinationClients, artifact_inputs::Inputs};
 use sha2::{Digest, Sha256};
 use std::time::Duration;
 use supertag_protocol::{
     CHECKPOINT_CHUNK_BYTES,
     artifacts::{MAX_ARTIFACT_BYTES, MAX_ARTIFACT_FILE_BYTES, materialized_artifact_directory},
     authenticated_request,
+    task_artifact_inputs::OPERATION_PREFIX,
     v2::*,
 };
 use tokio_stream::{Stream, StreamExt};
+use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 
 impl Bridge {
@@ -72,7 +75,119 @@ impl Bridge {
             )
             .await
     }
-    async fn acquisition(
+    fn acquisition_client(&self) -> AcquisitionClient<'_> {
+        AcquisitionClient {
+            coordination: &self.coordination,
+            host_token: &self.host_token,
+            attempt: self.attempt(),
+        }
+    }
+
+    pub(super) async fn read_artifact(
+        &self,
+        request: Request<HarnessReadArtifactRequest>,
+    ) -> Result<Response<HarnessArtifactPage>, Status> {
+        self.authenticate(&request)?;
+        self.require_attached()?;
+        self.artifact_open().await?;
+        let input = request.into_inner();
+        reject_reserved(&input.operation_id)?;
+        let client = self.acquisition_client();
+        let deadline = self
+            .inputs
+            .active_deadline()?
+            .min(tokio::time::Instant::now() + Duration::from_secs(120));
+        let operation = async {
+            let acquisition = client
+                .acquire(AcquireArtifactRequest {
+                    attempt: Some(self.attempt()),
+                    operation_id: input.operation_id,
+                    artifact_id: input.artifact_id,
+                    paths: vec![input.path.clone()],
+                    delivery: ArtifactDelivery::Read as i32,
+                    destination: None,
+                })
+                .await?;
+            let bytes = client
+                .acquired_bytes(&acquisition, &acquisition.files[0])
+                .await?;
+            let (text, next) = text_page(&bytes, input.offset, input.limit)?;
+            let acquisition = client
+                .settle_acquisition(&acquisition, ArtifactAcquisitionState::Delivered)
+                .await?;
+            Ok(Response::new(HarnessArtifactPage {
+                acquisition: Some(acquisition),
+                path: input.path,
+                text,
+                offset: input.offset,
+                next_offset: next.unwrap_or(bytes.len() as u64),
+                truncated: next.is_some(),
+            }))
+        };
+        self.inputs.forward(deadline, operation).await
+    }
+    pub(super) async fn attach_artifact(
+        &self,
+        request: Request<HarnessAttachArtifactRequest>,
+    ) -> Result<Response<HarnessAttachedArtifact>, Status> {
+        self.authenticate(&request)?;
+        self.require_attached()?;
+        self.artifact_open().await?;
+        let input = request.into_inner();
+        reject_reserved(&input.operation_id)?;
+        let client = self.acquisition_client();
+        let inputs = self.artifact_inputs.clone().ok_or_else(|| {
+            Status::failed_precondition("artifact attachment requires a prepared local checkout")
+        })?;
+        let permit = self
+            .artifact_capacity
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| Status::resource_exhausted("another artifact operation is in progress"))?;
+        let deadline = self
+            .inputs
+            .active_deadline()?
+            .min(tokio::time::Instant::now() + Duration::from_secs(120));
+        let operation = async {
+            let destination =
+                materialized_artifact_directory(&self.assignment.attempt_id, &input.operation_id);
+            let acquisition = client
+                .acquire(AcquireArtifactRequest {
+                    attempt: Some(self.attempt()),
+                    operation_id: input.operation_id,
+                    artifact_id: input.artifact_id,
+                    paths: input.paths,
+                    delivery: ArtifactDelivery::Materialize as i32,
+                    destination: Some(destination.clone()),
+                })
+                .await?;
+            let acquisition = materialize(&client, inputs, acquisition, permit, None).await?;
+            Ok(Response::new(HarnessAttachedArtifact {
+                acquisition: Some(acquisition),
+                local_path: destination,
+            }))
+        };
+        self.inputs.forward(deadline, operation).await
+    }
+}
+
+fn reject_reserved(operation: &str) -> Result<(), Status> {
+    if operation.starts_with(OPERATION_PREFIX) {
+        return Err(Status::invalid_argument(
+            "artifact operation ID uses a reserved prefix",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) struct AcquisitionClient<'a> {
+    pub(crate) coordination: &'a CoordinationClients,
+    pub(crate) host_token: &'a str,
+    pub(crate) attempt: InspectAttemptRequest,
+}
+
+impl AcquisitionClient<'_> {
+    pub(crate) async fn acquire(
         &self,
         input: AcquireArtifactRequest,
     ) -> Result<ArtifactAcquisition, Status> {
@@ -81,13 +196,13 @@ impl Bridge {
             .coordination
             .acquisitions
             .clone()
-            .acquire(authenticated_request(input, &self.host_token, None)?)
+            .acquire(authenticated_request(input, self.host_token, None)?)
             .await?
             .into_inner();
         let mut paths = expected.paths;
         paths.sort();
-        if result.task_id != self.task_id()
-            || result.attempt_id != self.assignment.attempt_id
+        if result.task_id != self.attempt.task_id
+            || result.attempt_id != self.attempt.attempt_id
             || result.operation_id != expected.operation_id
             || result.artifact_id != expected.artifact_id
             || result.delivery != expected.delivery
@@ -115,20 +230,36 @@ impl Bridge {
         acquisition: &ArtifactAcquisition,
         state: ArtifactAcquisitionState,
     ) -> Result<ArtifactAcquisition, Status> {
-        self.coordination
+        let receipt = self
+            .coordination
             .acquisitions
             .clone()
             .settle(authenticated_request(
                 SettleArtifactAcquisitionRequest {
-                    attempt: Some(self.attempt()),
+                    attempt: Some(self.attempt.clone()),
                     acquisition_id: acquisition.acquisition_id.clone(),
                     state: state as i32,
                 },
-                &self.host_token,
+                self.host_token,
                 None,
             )?)
             .await
-            .map(Response::into_inner)
+            .map(Response::into_inner)?;
+        if receipt.state() != state
+            || receipt.acquisition_id != acquisition.acquisition_id
+            || receipt.task_id != acquisition.task_id
+            || receipt.attempt_id != acquisition.attempt_id
+            || receipt.operation_id != acquisition.operation_id
+            || receipt.artifact_id != acquisition.artifact_id
+            || receipt.files != acquisition.files
+            || receipt.delivery != acquisition.delivery
+            || receipt.destination != acquisition.destination
+        {
+            return Err(Status::data_loss(
+                "artifact settlement differs from the acquisition",
+            ));
+        }
+        Ok(receipt)
     }
     async fn acquired_bytes(
         &self,
@@ -141,142 +272,83 @@ impl Bridge {
             .clone()
             .download_acquired_file(authenticated_request(
                 GetAcquiredArtifactFileRequest {
-                    attempt: Some(self.attempt()),
+                    attempt: Some(self.attempt.clone()),
                     acquisition_id: acquisition.acquisition_id.clone(),
                     path: file.path.clone(),
                 },
-                &self.host_token,
+                self.host_token,
                 None,
             )?)
             .await?
             .into_inner();
         verified_file(file, stream).await
     }
-    pub(super) async fn read_artifact(
-        &self,
-        request: Request<HarnessReadArtifactRequest>,
-    ) -> Result<Response<HarnessArtifactPage>, Status> {
-        self.authenticate(&request)?;
-        self.require_attached()?;
-        self.artifact_open().await?;
-        let input = request.into_inner();
-        let deadline = self
-            .inputs
-            .active_deadline()?
-            .min(tokio::time::Instant::now() + Duration::from_secs(120));
-        let operation = async {
-            let acquisition = self
-                .acquisition(AcquireArtifactRequest {
-                    attempt: Some(self.attempt()),
-                    operation_id: input.operation_id,
-                    artifact_id: input.artifact_id,
-                    paths: vec![input.path.clone()],
-                    delivery: ArtifactDelivery::Read as i32,
-                    destination: None,
-                })
-                .await?;
-            let bytes = self
-                .acquired_bytes(&acquisition, &acquisition.files[0])
-                .await?;
-            let (text, next) = text_page(&bytes, input.offset, input.limit)?;
-            let acquisition = self
-                .settle_acquisition(&acquisition, ArtifactAcquisitionState::Delivered)
-                .await?;
-            Ok(Response::new(HarnessArtifactPage {
-                acquisition: Some(acquisition),
-                path: input.path,
-                text,
-                offset: input.offset,
-                next_offset: next.unwrap_or(bytes.len() as u64),
-                truncated: next.is_some(),
-            }))
-        };
-        self.inputs.forward(deadline, operation).await
-    }
-    pub(super) async fn attach_artifact(
-        &self,
-        request: Request<HarnessAttachArtifactRequest>,
-    ) -> Result<Response<HarnessAttachedArtifact>, Status> {
-        self.authenticate(&request)?;
-        self.require_attached()?;
-        self.artifact_open().await?;
-        let input = request.into_inner();
-        let inputs = self.artifact_inputs.clone().ok_or_else(|| {
-            Status::failed_precondition("artifact attachment requires a prepared local checkout")
-        })?;
-        let permit = self
-            .artifact_capacity
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| Status::resource_exhausted("another artifact operation is in progress"))?;
-        let deadline = self
-            .inputs
-            .active_deadline()?
-            .min(tokio::time::Instant::now() + Duration::from_secs(120));
-        let operation = async {
-            let destination =
-                materialized_artifact_directory(&self.assignment.attempt_id, &input.operation_id);
-            let acquisition = self
-                .acquisition(AcquireArtifactRequest {
-                    attempt: Some(self.attempt()),
-                    operation_id: input.operation_id,
-                    artifact_id: input.artifact_id,
-                    paths: input.paths,
-                    delivery: ArtifactDelivery::Materialize as i32,
-                    destination: Some(destination.clone()),
-                })
-                .await?;
-            let replay = inputs.clone();
-            let receipt = acquisition.clone();
-            let (permit, done) = tokio::task::spawn_blocking(move || {
-                let done = replay.replay(&receipt)?;
-                Ok::<_, Status>((permit, done))
-            })
-            .await
-            .map_err(|_| Status::internal("artifact input journal failed"))??;
-            if !done {
-                let mut files = Vec::new();
-                let mut total = 0u64;
-                for file in &acquisition.files {
-                    let length = file
-                        .blob
-                        .as_ref()
-                        .ok_or_else(|| Status::data_loss("artifact blob is missing"))?
-                        .byte_length;
-                    total = total.saturating_add(length);
-                    if total > MAX_ARTIFACT_BYTES {
-                        return Err(Status::resource_exhausted(
-                            "artifact attachment exceeds its byte limit",
-                        ));
-                    }
-                    files.push((
-                        file.path.clone(),
-                        self.acquired_bytes(&acquisition, file).await?,
-                    ));
-                }
-                let receipt = acquisition.clone();
-                let materialized = tokio::task::spawn_blocking(move || {
-                    let _permit = permit;
-                    inputs.materialize(&receipt, &files)
-                })
-                .await
-                .map_err(|_| Status::internal("artifact attachment failed"))?;
-                if let Err(error) = materialized {
-                    let _ = self
-                        .settle_acquisition(&acquisition, ArtifactAcquisitionState::Uncertain)
-                        .await;
-                    return Err(error);
-                }
+}
+
+pub(crate) async fn materialize(
+    client: &AcquisitionClient<'_>,
+    inputs: Inputs,
+    acquisition: ArtifactAcquisition,
+    permit: impl Send + 'static,
+    cancel: Option<&CancellationToken>,
+) -> Result<ArtifactAcquisition, Status> {
+    let replay = inputs.clone();
+    let receipt = acquisition.clone();
+    let (permit, done) = tokio::task::spawn_blocking(move || {
+        let done = replay.replay(&receipt)?;
+        Ok::<_, Status>((permit, done))
+    })
+    .await
+    .map_err(|_| Status::internal("artifact input journal failed"))??;
+    if !done {
+        let mut files = Vec::new();
+        let mut total = 0u64;
+        for file in &acquisition.files {
+            let length = file
+                .blob
+                .as_ref()
+                .ok_or_else(|| Status::data_loss("artifact blob is missing"))?
+                .byte_length;
+            total = total.saturating_add(length);
+            if total > MAX_ARTIFACT_BYTES {
+                return Err(Status::resource_exhausted(
+                    "artifact attachment exceeds its byte limit",
+                ));
             }
-            let acquisition = self
-                .settle_acquisition(&acquisition, ArtifactAcquisitionState::Delivered)
-                .await?;
-            Ok(Response::new(HarnessAttachedArtifact {
-                acquisition: Some(acquisition),
-                local_path: destination,
-            }))
-        };
-        self.inputs.forward(deadline, operation).await
+            let bytes = tokio::select! {
+                result = client.acquired_bytes(&acquisition, file) => result?,
+                _ = cancelled(cancel) => return Err(Status::cancelled("artifact transfer cancelled")),
+            };
+            files.push((file.path.clone(), bytes));
+        }
+        if cancel.is_some_and(CancellationToken::is_cancelled) {
+            return Err(Status::cancelled("artifact attachment cancelled"));
+        }
+        let receipt = acquisition.clone();
+        let materialized = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            inputs.materialize(&receipt, &files)
+        })
+        .await
+        .map_err(|_| Status::internal("artifact attachment failed"))?;
+        if let Err(error) = materialized {
+            tokio::select! {
+                _ = client.settle_acquisition(&acquisition, ArtifactAcquisitionState::Uncertain) => {},
+                _ = cancelled(cancel) => {},
+            }
+            return Err(error);
+        }
+    }
+    tokio::select! {
+        result = client.settle_acquisition(&acquisition, ArtifactAcquisitionState::Delivered) => result,
+        _ = cancelled(cancel) => Err(Status::cancelled("artifact delivery cancelled")),
+    }
+}
+
+async fn cancelled(cancel: Option<&CancellationToken>) {
+    match cancel {
+        Some(cancel) => cancel.cancelled().await,
+        None => std::future::pending().await,
     }
 }
 

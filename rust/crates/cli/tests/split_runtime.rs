@@ -426,6 +426,7 @@ async fn exercise_split_runtime(database: &str, directory: &Path) -> Result<()> 
         session_id: "review".into(),
         operation_id: "same-submit".into(),
         prompt: "inspect repository".into(),
+        input_artifacts: vec![],
     };
     let retried = client
         .submit_task(credentials.request(submit.clone())?)
@@ -497,6 +498,7 @@ async fn exercise_split_runtime(database: &str, directory: &Path) -> Result<()> 
             session_id: "cancel".into(),
             operation_id: "cancel-submit".into(),
             prompt: "wait for an operator".into(),
+            input_artifacts: vec![],
         })?)
         .await?
         .into_inner();
@@ -782,6 +784,7 @@ async fn killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerun
             session_id: "interrupted".into(),
             operation_id: "host-killed".into(),
             prompt: "wait for host death".into(),
+            input_artifacts: vec![],
         })?)
         .await?
         .into_inner();
@@ -863,6 +866,7 @@ async fn killed_worker_host_stops_adapter_and_restart_fails_closed_without_rerun
             session_id: "other-session".into(),
             operation_id: "work-after-host-death".into(),
             prompt: "do not claim before recovery".into(),
+            input_artifacts: vec![],
         })?)
         .await?
         .into_inner();
@@ -1004,6 +1008,7 @@ async fn local_shutdown_replays_finish_before_next_session_task_without_rerunnin
             session_id: "same-session".into(),
             operation_id: "interrupted".into(),
             prompt: "wait during shutdown".into(),
+            input_artifacts: vec![],
         })?)
         .await?
         .into_inner();
@@ -1037,6 +1042,7 @@ async fn local_shutdown_replays_finish_before_next_session_task_without_rerunnin
             session_id: "same-session".into(),
             operation_id: "next".into(),
             prompt: "continue after shutdown".into(),
+            input_artifacts: vec![],
         })?)
         .await?
         .into_inner();
@@ -1878,6 +1884,7 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
             session_id: session_id.into(),
             prompt: "Resume the native harness".into(),
             operation_id: operation_id.into(),
+            input_artifacts: vec![],
         })
     };
     // Same-size corruption must fail before another adapter receives the bytes.
@@ -1914,6 +1921,7 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
             session_id: session_id.into(),
             prompt: "Wait for live input".into(),
             operation_id: "native-live-steering".into(),
+            input_artifacts: vec![],
         })?)
         .await?
         .into_inner();
@@ -1961,6 +1969,7 @@ async fn native_codex_records_usage_and_restores_session_after_services_restart(
             session_id: session_id.into(),
             prompt: "Wait for live input".into(),
             operation_id: "native-ambiguous-steering".into(),
+            input_artifacts: vec![],
         })?)
         .await?
         .into_inner();
@@ -2064,6 +2073,7 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
             session_id: "partitioned-session".into(),
             operation_id: "partitioned-work".into(),
             prompt: "inspect after recovery".into(),
+            input_artifacts: vec![],
         })?)
         .await?
         .into_inner();
@@ -2075,6 +2085,7 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
             session_id: "partitioned-session".into(),
             operation_id: "later-session-work".into(),
             prompt: "continue the Session".into(),
+            input_artifacts: vec![],
         })?)
         .await?
         .into_inner();

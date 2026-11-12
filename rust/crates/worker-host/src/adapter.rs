@@ -1,4 +1,4 @@
-mod artifact_acquisition;
+pub(crate) mod artifact_acquisition;
 mod artifact_capture;
 mod inputs;
 mod limits;

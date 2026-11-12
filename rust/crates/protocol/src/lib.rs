@@ -5,6 +5,7 @@ use tonic::{Request, Status, metadata::MetadataValue};
 pub mod artifacts;
 pub mod git_outputs;
 pub mod output_policy;
+pub mod task_artifact_inputs;
 mod workspace_tools;
 pub use workspace_tools::{MAX_WORKSPACE_TOOL_OUTPUT_BYTES, validate_workspace_operation};
 pub mod mcp;

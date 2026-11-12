@@ -1161,6 +1161,7 @@ message SubmitTaskRequest {
   string prompt = 4;
   ExecutionLimits execution_limits = 5;
   TaskOutputPolicy output_policy = 6;
+  repeated TaskArtifactInputSelection input_artifacts = 7;
 }
 
 message ReportedCostLimit {
@@ -1197,6 +1198,30 @@ message Task {
   repeated ArtifactSelection artifacts = 19;
   // Optional output requirements frozen when the Task is accepted.
   TaskOutputPolicy output_policy = 20;
+  repeated AcceptedTaskArtifactInput input_artifacts = 21;
+}
+
+message TaskArtifactInputSelection {
+  string artifact_id = 1;
+  repeated string paths = 2;
+  bool require_accepted = 3;
+}
+
+message AcceptedTaskArtifactInput {
+  string artifact_id = 1;
+  string source_task_id = 2;
+  string source_attempt_id = 3;
+  repeated ArtifactInputFile files = 4;
+}
+
+// Immutable byte identity for a file selected at admission.
+message ArtifactInputFile {
+  string path = 1;
+  BlobReference blob = 2;
+}
+
+message AcceptedTaskArtifactInputs {
+  repeated AcceptedTaskArtifactInput inputs = 1;
 }
 
 message OutputPathPatterns {
@@ -1242,6 +1267,7 @@ message HarnessExecutionProfile {
   repeated McpServerCapability mcp_servers = 5;
   SharedExecutionCapability shared_execution = 6;
   bool declared_task_outputs = 7;
+  bool task_artifact_inputs = 8;
 }
 
 enum SharedExecutionTool {
@@ -1277,6 +1303,7 @@ message AttemptExecutionSelection {
   bool remote_file_workspace = 5;
   SharedExecutionCapability shared_execution = 6;
   repeated McpServerCapability mcp_servers = 7;
+  bool task_artifact_inputs = 8;
 }
 
 service AttemptMcpEffects {
