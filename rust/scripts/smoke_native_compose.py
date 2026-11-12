@@ -6,6 +6,7 @@ from pathlib import Path
 import secrets
 import shutil
 import subprocess
+import sys
 import tempfile
 import uuid
 
@@ -71,6 +72,9 @@ def smoke(control_image, gateway_image, fixture):
             return run([*prefix, *arguments], env, timeout=timeout)
         def operator(command, *arguments):
             return json.loads(compose("exec", "-T", "gateway", CLI, command, "--gateway", GATEWAY, *arguments))
+        def task_events(task_id):
+            output = compose("exec", "-T", "gateway", CLI, "task-events", "--gateway", GATEWAY, task_id)
+            return [json.loads(line) for line in output.splitlines()]
         def container(service):
             return compose("ps", "--all", "--quiet", service).strip()
         try:
@@ -102,8 +106,8 @@ def smoke(control_image, gateway_image, fixture):
             finished = operator("get-task", task["task_id"])
             require(finished["state"] == "TASK_STATE_SUCCEEDED" and "through native Compose" in finished["result"],
                     "Task did not complete through native Compose")
-            events = operator("task-events", task["task_id"])
-            require(events.get("events"), "Task event history is empty")
+            events = task_events(task["task_id"])
+            require(events, "Task event history is empty")
             # Stop each dependent cleanly, then restart the real database as well.
             for service in ("gateway", "control-plane", "postgres"):
                 compose("stop", service)
@@ -111,7 +115,7 @@ def smoke(control_image, gateway_image, fixture):
                         "service did not stop cleanly")
             compose("up", "--detach", "--wait", "--wait-timeout", "90", "gateway", timeout=120)
             require(operator("get-task", task["task_id"]) == finished, "Task changed across full service restart")
-            require(operator("task-events", task["task_id"]) == events, "Task event history changed after restart")
+            require(task_events(task["task_id"]) == events, "Task event history changed after restart")
             require(operator("submit", *submit)["task_id"] == task["task_id"], "request replay created another Task")
             return {"format": "supertag-native-compose-rehearsal-v1", "compose_project": identifier,
                     "images": {service: {"tag": image, "id": docker("image", "inspect", "--format", "{{.Id}}", image).strip()}
@@ -123,11 +127,19 @@ def smoke(control_image, gateway_image, fixture):
                     "task_id": task["task_id"]}
         finally:
             # Only this randomly named Compose project is owned by the rehearsal.
-            compose("down", "--volumes", "--remove-orphans", "--timeout", "15")
-            for kind in ("container", "network", "volume"):
-                remaining = docker(kind, "ls", *(["--all"] if kind == "container" else []), "--quiet",
-                                   "--filter", f"label=com.docker.compose.project={identifier}")
-                require(not remaining.strip(), "rehearsal left an owned " + kind)
+            failure = sys.exc_info()[1]
+            try:
+                # Include the opt-in worker profile: Compose otherwise omits its
+                # named volume when resolving the teardown resource set.
+                compose("--profile", "fixture", "down", "--volumes", "--remove-orphans", "--timeout", "15")
+                for kind in ("container", "network", "volume"):
+                    remaining = docker(kind, "ls", *(["--all"] if kind == "container" else []), "--quiet",
+                                       "--filter", f"label=com.docker.compose.project={identifier}")
+                    require(not remaining.strip(), "rehearsal left an owned " + kind)
+            except Exception as cleanup:
+                if failure:
+                    raise ArchiveError(f"rehearsal failed ({failure}); cleanup failed ({cleanup})") from cleanup
+                raise
 
 
 def main():
