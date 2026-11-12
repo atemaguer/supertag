@@ -27,6 +27,10 @@ const (
 	ObjectivesName = "supertag.runtime.v2.Objectives"
 	// WorkerHostName is the fully-qualified name of the WorkerHost service.
 	WorkerHostName = "supertag.runtime.v2.WorkerHost"
+	// LiveInputsName is the fully-qualified name of the LiveInputs service.
+	LiveInputsName = "supertag.runtime.v2.LiveInputs"
+	// AttemptInputsName is the fully-qualified name of the AttemptInputs service.
+	AttemptInputsName = "supertag.runtime.v2.AttemptInputs"
 	// HostEnrollmentName is the fully-qualified name of the HostEnrollment service.
 	HostEnrollmentName = "supertag.runtime.v2.HostEnrollment"
 	// HostDirectoryName is the fully-qualified name of the HostDirectory service.
@@ -37,6 +41,8 @@ const (
 	TransfersName = "supertag.runtime.v2.Transfers"
 	// CheckpointDirectoryName is the fully-qualified name of the CheckpointDirectory service.
 	CheckpointDirectoryName = "supertag.runtime.v2.CheckpointDirectory"
+	// WorkspaceDirectoryName is the fully-qualified name of the WorkspaceDirectory service.
+	WorkspaceDirectoryName = "supertag.runtime.v2.WorkspaceDirectory"
 	// HarnessName is the fully-qualified name of the Harness service.
 	HarnessName = "supertag.runtime.v2.Harness"
 )
@@ -111,6 +117,17 @@ const (
 	WorkerHostAppendEventProcedure = "/supertag.runtime.v2.WorkerHost/AppendEvent"
 	// WorkerHostFinishTaskProcedure is the fully-qualified name of the WorkerHost's FinishTask RPC.
 	WorkerHostFinishTaskProcedure = "/supertag.runtime.v2.WorkerHost/FinishTask"
+	// LiveInputsQueueInputProcedure is the fully-qualified name of the LiveInputs's QueueInput RPC.
+	LiveInputsQueueInputProcedure = "/supertag.runtime.v2.LiveInputs/QueueInput"
+	// LiveInputsGetInputProcedure is the fully-qualified name of the LiveInputs's GetInput RPC.
+	LiveInputsGetInputProcedure = "/supertag.runtime.v2.LiveInputs/GetInput"
+	// LiveInputsResolveInputProcedure is the fully-qualified name of the LiveInputs's ResolveInput RPC.
+	LiveInputsResolveInputProcedure = "/supertag.runtime.v2.LiveInputs/ResolveInput"
+	// AttemptInputsTakeInputProcedure is the fully-qualified name of the AttemptInputs's TakeInput RPC.
+	AttemptInputsTakeInputProcedure = "/supertag.runtime.v2.AttemptInputs/TakeInput"
+	// AttemptInputsSettleInputProcedure is the fully-qualified name of the AttemptInputs's SettleInput
+	// RPC.
+	AttemptInputsSettleInputProcedure = "/supertag.runtime.v2.AttemptInputs/SettleInput"
 	// HostEnrollmentEnrollHostProcedure is the fully-qualified name of the HostEnrollment's EnrollHost
 	// RPC.
 	HostEnrollmentEnrollHostProcedure = "/supertag.runtime.v2.HostEnrollment/EnrollHost"
@@ -121,6 +138,9 @@ const (
 	HostDirectoryAuthenticateProcedure = "/supertag.runtime.v2.HostDirectory/Authenticate"
 	// ConnectorAcceptEventProcedure is the fully-qualified name of the Connector's AcceptEvent RPC.
 	ConnectorAcceptEventProcedure = "/supertag.runtime.v2.Connector/AcceptEvent"
+	// ConnectorAcceptSlackEventProcedure is the fully-qualified name of the Connector's
+	// AcceptSlackEvent RPC.
+	ConnectorAcceptSlackEventProcedure = "/supertag.runtime.v2.Connector/AcceptSlackEvent"
 	// ConnectorClaimReplyProcedure is the fully-qualified name of the Connector's ClaimReply RPC.
 	ConnectorClaimReplyProcedure = "/supertag.runtime.v2.Connector/ClaimReply"
 	// ConnectorSettleReplyProcedure is the fully-qualified name of the Connector's SettleReply RPC.
@@ -131,6 +151,15 @@ const (
 	// TransfersDownloadCheckpointProcedure is the fully-qualified name of the Transfers's
 	// DownloadCheckpoint RPC.
 	TransfersDownloadCheckpointProcedure = "/supertag.runtime.v2.Transfers/DownloadCheckpoint"
+	// TransfersUploadWorkspaceProcedure is the fully-qualified name of the Transfers's UploadWorkspace
+	// RPC.
+	TransfersUploadWorkspaceProcedure = "/supertag.runtime.v2.Transfers/UploadWorkspace"
+	// TransfersDownloadWorkspaceProcedure is the fully-qualified name of the Transfers's
+	// DownloadWorkspace RPC.
+	TransfersDownloadWorkspaceProcedure = "/supertag.runtime.v2.Transfers/DownloadWorkspace"
+	// TransfersDownloadWorkspaceArtifactProcedure is the fully-qualified name of the Transfers's
+	// DownloadWorkspaceArtifact RPC.
+	TransfersDownloadWorkspaceArtifactProcedure = "/supertag.runtime.v2.Transfers/DownloadWorkspaceArtifact"
 	// CheckpointDirectoryGetCheckpointProcedure is the fully-qualified name of the
 	// CheckpointDirectory's GetCheckpoint RPC.
 	CheckpointDirectoryGetCheckpointProcedure = "/supertag.runtime.v2.CheckpointDirectory/GetCheckpoint"
@@ -140,8 +169,24 @@ const (
 	// CheckpointDirectoryCommitCheckpointProcedure is the fully-qualified name of the
 	// CheckpointDirectory's CommitCheckpoint RPC.
 	CheckpointDirectoryCommitCheckpointProcedure = "/supertag.runtime.v2.CheckpointDirectory/CommitCheckpoint"
+	// WorkspaceDirectoryGetContinuationProcedure is the fully-qualified name of the
+	// WorkspaceDirectory's GetContinuation RPC.
+	WorkspaceDirectoryGetContinuationProcedure = "/supertag.runtime.v2.WorkspaceDirectory/GetContinuation"
+	// WorkspaceDirectoryReserveDeliveryProcedure is the fully-qualified name of the
+	// WorkspaceDirectory's ReserveDelivery RPC.
+	WorkspaceDirectoryReserveDeliveryProcedure = "/supertag.runtime.v2.WorkspaceDirectory/ReserveDelivery"
+	// WorkspaceDirectoryCommitDeliveryProcedure is the fully-qualified name of the WorkspaceDirectory's
+	// CommitDelivery RPC.
+	WorkspaceDirectoryCommitDeliveryProcedure = "/supertag.runtime.v2.WorkspaceDirectory/CommitDelivery"
+	// WorkspaceDirectoryGetArtifactProcedure is the fully-qualified name of the WorkspaceDirectory's
+	// GetArtifact RPC.
+	WorkspaceDirectoryGetArtifactProcedure = "/supertag.runtime.v2.WorkspaceDirectory/GetArtifact"
 	// HarnessAttachProcedure is the fully-qualified name of the Harness's Attach RPC.
 	HarnessAttachProcedure = "/supertag.runtime.v2.Harness/Attach"
+	// HarnessTakeLiveInputProcedure is the fully-qualified name of the Harness's TakeLiveInput RPC.
+	HarnessTakeLiveInputProcedure = "/supertag.runtime.v2.Harness/TakeLiveInput"
+	// HarnessSettleLiveInputProcedure is the fully-qualified name of the Harness's SettleLiveInput RPC.
+	HarnessSettleLiveInputProcedure = "/supertag.runtime.v2.Harness/SettleLiveInput"
 	// HarnessPublishProcedure is the fully-qualified name of the Harness's Publish RPC.
 	HarnessPublishProcedure = "/supertag.runtime.v2.Harness/Publish"
 	// HarnessReportUsageProcedure is the fully-qualified name of the Harness's ReportUsage RPC.
@@ -958,6 +1003,224 @@ func (UnimplementedWorkerHostHandler) FinishTask(context.Context, *connect.Reque
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.FinishTask is not implemented"))
 }
 
+// LiveInputsClient is a client for the supertag.runtime.v2.LiveInputs service.
+type LiveInputsClient interface {
+	QueueInput(context.Context, *connect.Request[runtimev2.QueueInputRequest]) (*connect.Response[runtimev2.LiveInput], error)
+	GetInput(context.Context, *connect.Request[runtimev2.GetInputRequest]) (*connect.Response[runtimev2.LiveInput], error)
+	ResolveInput(context.Context, *connect.Request[runtimev2.ResolveInputRequest]) (*connect.Response[runtimev2.LiveInput], error)
+}
+
+// NewLiveInputsClient constructs a client for the supertag.runtime.v2.LiveInputs service. By
+// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
+// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewLiveInputsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) LiveInputsClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	liveInputsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("LiveInputs").Methods()
+	return &liveInputsClient{
+		queueInput: connect.NewClient[runtimev2.QueueInputRequest, runtimev2.LiveInput](
+			httpClient,
+			baseURL+LiveInputsQueueInputProcedure,
+			connect.WithSchema(liveInputsMethods.ByName("QueueInput")),
+			connect.WithClientOptions(opts...),
+		),
+		getInput: connect.NewClient[runtimev2.GetInputRequest, runtimev2.LiveInput](
+			httpClient,
+			baseURL+LiveInputsGetInputProcedure,
+			connect.WithSchema(liveInputsMethods.ByName("GetInput")),
+			connect.WithClientOptions(opts...),
+		),
+		resolveInput: connect.NewClient[runtimev2.ResolveInputRequest, runtimev2.LiveInput](
+			httpClient,
+			baseURL+LiveInputsResolveInputProcedure,
+			connect.WithSchema(liveInputsMethods.ByName("ResolveInput")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// liveInputsClient implements LiveInputsClient.
+type liveInputsClient struct {
+	queueInput   *connect.Client[runtimev2.QueueInputRequest, runtimev2.LiveInput]
+	getInput     *connect.Client[runtimev2.GetInputRequest, runtimev2.LiveInput]
+	resolveInput *connect.Client[runtimev2.ResolveInputRequest, runtimev2.LiveInput]
+}
+
+// QueueInput calls supertag.runtime.v2.LiveInputs.QueueInput.
+func (c *liveInputsClient) QueueInput(ctx context.Context, req *connect.Request[runtimev2.QueueInputRequest]) (*connect.Response[runtimev2.LiveInput], error) {
+	return c.queueInput.CallUnary(ctx, req)
+}
+
+// GetInput calls supertag.runtime.v2.LiveInputs.GetInput.
+func (c *liveInputsClient) GetInput(ctx context.Context, req *connect.Request[runtimev2.GetInputRequest]) (*connect.Response[runtimev2.LiveInput], error) {
+	return c.getInput.CallUnary(ctx, req)
+}
+
+// ResolveInput calls supertag.runtime.v2.LiveInputs.ResolveInput.
+func (c *liveInputsClient) ResolveInput(ctx context.Context, req *connect.Request[runtimev2.ResolveInputRequest]) (*connect.Response[runtimev2.LiveInput], error) {
+	return c.resolveInput.CallUnary(ctx, req)
+}
+
+// LiveInputsHandler is an implementation of the supertag.runtime.v2.LiveInputs service.
+type LiveInputsHandler interface {
+	QueueInput(context.Context, *connect.Request[runtimev2.QueueInputRequest]) (*connect.Response[runtimev2.LiveInput], error)
+	GetInput(context.Context, *connect.Request[runtimev2.GetInputRequest]) (*connect.Response[runtimev2.LiveInput], error)
+	ResolveInput(context.Context, *connect.Request[runtimev2.ResolveInputRequest]) (*connect.Response[runtimev2.LiveInput], error)
+}
+
+// NewLiveInputsHandler builds an HTTP handler from the service implementation. It returns the path
+// on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewLiveInputsHandler(svc LiveInputsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	liveInputsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("LiveInputs").Methods()
+	liveInputsQueueInputHandler := connect.NewUnaryHandler(
+		LiveInputsQueueInputProcedure,
+		svc.QueueInput,
+		connect.WithSchema(liveInputsMethods.ByName("QueueInput")),
+		connect.WithHandlerOptions(opts...),
+	)
+	liveInputsGetInputHandler := connect.NewUnaryHandler(
+		LiveInputsGetInputProcedure,
+		svc.GetInput,
+		connect.WithSchema(liveInputsMethods.ByName("GetInput")),
+		connect.WithHandlerOptions(opts...),
+	)
+	liveInputsResolveInputHandler := connect.NewUnaryHandler(
+		LiveInputsResolveInputProcedure,
+		svc.ResolveInput,
+		connect.WithSchema(liveInputsMethods.ByName("ResolveInput")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.LiveInputs/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case LiveInputsQueueInputProcedure:
+			liveInputsQueueInputHandler.ServeHTTP(w, r)
+		case LiveInputsGetInputProcedure:
+			liveInputsGetInputHandler.ServeHTTP(w, r)
+		case LiveInputsResolveInputProcedure:
+			liveInputsResolveInputHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedLiveInputsHandler returns CodeUnimplemented from all methods.
+type UnimplementedLiveInputsHandler struct{}
+
+func (UnimplementedLiveInputsHandler) QueueInput(context.Context, *connect.Request[runtimev2.QueueInputRequest]) (*connect.Response[runtimev2.LiveInput], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.LiveInputs.QueueInput is not implemented"))
+}
+
+func (UnimplementedLiveInputsHandler) GetInput(context.Context, *connect.Request[runtimev2.GetInputRequest]) (*connect.Response[runtimev2.LiveInput], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.LiveInputs.GetInput is not implemented"))
+}
+
+func (UnimplementedLiveInputsHandler) ResolveInput(context.Context, *connect.Request[runtimev2.ResolveInputRequest]) (*connect.Response[runtimev2.LiveInput], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.LiveInputs.ResolveInput is not implemented"))
+}
+
+// AttemptInputsClient is a client for the supertag.runtime.v2.AttemptInputs service.
+type AttemptInputsClient interface {
+	TakeInput(context.Context, *connect.Request[runtimev2.TakeInputRequest]) (*connect.Response[runtimev2.TakeInputResponse], error)
+	SettleInput(context.Context, *connect.Request[runtimev2.SettleInputRequest]) (*connect.Response[runtimev2.LiveInput], error)
+}
+
+// NewAttemptInputsClient constructs a client for the supertag.runtime.v2.AttemptInputs service. By
+// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
+// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewAttemptInputsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) AttemptInputsClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	attemptInputsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("AttemptInputs").Methods()
+	return &attemptInputsClient{
+		takeInput: connect.NewClient[runtimev2.TakeInputRequest, runtimev2.TakeInputResponse](
+			httpClient,
+			baseURL+AttemptInputsTakeInputProcedure,
+			connect.WithSchema(attemptInputsMethods.ByName("TakeInput")),
+			connect.WithClientOptions(opts...),
+		),
+		settleInput: connect.NewClient[runtimev2.SettleInputRequest, runtimev2.LiveInput](
+			httpClient,
+			baseURL+AttemptInputsSettleInputProcedure,
+			connect.WithSchema(attemptInputsMethods.ByName("SettleInput")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// attemptInputsClient implements AttemptInputsClient.
+type attemptInputsClient struct {
+	takeInput   *connect.Client[runtimev2.TakeInputRequest, runtimev2.TakeInputResponse]
+	settleInput *connect.Client[runtimev2.SettleInputRequest, runtimev2.LiveInput]
+}
+
+// TakeInput calls supertag.runtime.v2.AttemptInputs.TakeInput.
+func (c *attemptInputsClient) TakeInput(ctx context.Context, req *connect.Request[runtimev2.TakeInputRequest]) (*connect.Response[runtimev2.TakeInputResponse], error) {
+	return c.takeInput.CallUnary(ctx, req)
+}
+
+// SettleInput calls supertag.runtime.v2.AttemptInputs.SettleInput.
+func (c *attemptInputsClient) SettleInput(ctx context.Context, req *connect.Request[runtimev2.SettleInputRequest]) (*connect.Response[runtimev2.LiveInput], error) {
+	return c.settleInput.CallUnary(ctx, req)
+}
+
+// AttemptInputsHandler is an implementation of the supertag.runtime.v2.AttemptInputs service.
+type AttemptInputsHandler interface {
+	TakeInput(context.Context, *connect.Request[runtimev2.TakeInputRequest]) (*connect.Response[runtimev2.TakeInputResponse], error)
+	SettleInput(context.Context, *connect.Request[runtimev2.SettleInputRequest]) (*connect.Response[runtimev2.LiveInput], error)
+}
+
+// NewAttemptInputsHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewAttemptInputsHandler(svc AttemptInputsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	attemptInputsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("AttemptInputs").Methods()
+	attemptInputsTakeInputHandler := connect.NewUnaryHandler(
+		AttemptInputsTakeInputProcedure,
+		svc.TakeInput,
+		connect.WithSchema(attemptInputsMethods.ByName("TakeInput")),
+		connect.WithHandlerOptions(opts...),
+	)
+	attemptInputsSettleInputHandler := connect.NewUnaryHandler(
+		AttemptInputsSettleInputProcedure,
+		svc.SettleInput,
+		connect.WithSchema(attemptInputsMethods.ByName("SettleInput")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.AttemptInputs/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case AttemptInputsTakeInputProcedure:
+			attemptInputsTakeInputHandler.ServeHTTP(w, r)
+		case AttemptInputsSettleInputProcedure:
+			attemptInputsSettleInputHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedAttemptInputsHandler returns CodeUnimplemented from all methods.
+type UnimplementedAttemptInputsHandler struct{}
+
+func (UnimplementedAttemptInputsHandler) TakeInput(context.Context, *connect.Request[runtimev2.TakeInputRequest]) (*connect.Response[runtimev2.TakeInputResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptInputs.TakeInput is not implemented"))
+}
+
+func (UnimplementedAttemptInputsHandler) SettleInput(context.Context, *connect.Request[runtimev2.SettleInputRequest]) (*connect.Response[runtimev2.LiveInput], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptInputs.SettleInput is not implemented"))
+}
+
 // HostEnrollmentClient is a client for the supertag.runtime.v2.HostEnrollment service.
 type HostEnrollmentClient interface {
 	EnrollHost(context.Context, *connect.Request[runtimev2.EnrollHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
@@ -1127,6 +1390,7 @@ func (UnimplementedHostDirectoryHandler) Authenticate(context.Context, *connect.
 // ConnectorClient is a client for the supertag.runtime.v2.Connector service.
 type ConnectorClient interface {
 	AcceptEvent(context.Context, *connect.Request[runtimev2.AcceptEventRequest]) (*connect.Response[runtimev2.Task], error)
+	AcceptSlackEvent(context.Context, *connect.Request[runtimev2.AcceptSlackEventRequest]) (*connect.Response[runtimev2.AcceptSlackEventResponse], error)
 	ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error)
 	SettleReply(context.Context, *connect.Request[runtimev2.SettleReplyRequest]) (*connect.Response[runtimev2.Reply], error)
 }
@@ -1148,6 +1412,12 @@ func NewConnectorClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(connectorMethods.ByName("AcceptEvent")),
 			connect.WithClientOptions(opts...),
 		),
+		acceptSlackEvent: connect.NewClient[runtimev2.AcceptSlackEventRequest, runtimev2.AcceptSlackEventResponse](
+			httpClient,
+			baseURL+ConnectorAcceptSlackEventProcedure,
+			connect.WithSchema(connectorMethods.ByName("AcceptSlackEvent")),
+			connect.WithClientOptions(opts...),
+		),
 		claimReply: connect.NewClient[runtimev2.ClaimReplyRequest, runtimev2.ClaimReplyResponse](
 			httpClient,
 			baseURL+ConnectorClaimReplyProcedure,
@@ -1165,14 +1435,20 @@ func NewConnectorClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 
 // connectorClient implements ConnectorClient.
 type connectorClient struct {
-	acceptEvent *connect.Client[runtimev2.AcceptEventRequest, runtimev2.Task]
-	claimReply  *connect.Client[runtimev2.ClaimReplyRequest, runtimev2.ClaimReplyResponse]
-	settleReply *connect.Client[runtimev2.SettleReplyRequest, runtimev2.Reply]
+	acceptEvent      *connect.Client[runtimev2.AcceptEventRequest, runtimev2.Task]
+	acceptSlackEvent *connect.Client[runtimev2.AcceptSlackEventRequest, runtimev2.AcceptSlackEventResponse]
+	claimReply       *connect.Client[runtimev2.ClaimReplyRequest, runtimev2.ClaimReplyResponse]
+	settleReply      *connect.Client[runtimev2.SettleReplyRequest, runtimev2.Reply]
 }
 
 // AcceptEvent calls supertag.runtime.v2.Connector.AcceptEvent.
 func (c *connectorClient) AcceptEvent(ctx context.Context, req *connect.Request[runtimev2.AcceptEventRequest]) (*connect.Response[runtimev2.Task], error) {
 	return c.acceptEvent.CallUnary(ctx, req)
+}
+
+// AcceptSlackEvent calls supertag.runtime.v2.Connector.AcceptSlackEvent.
+func (c *connectorClient) AcceptSlackEvent(ctx context.Context, req *connect.Request[runtimev2.AcceptSlackEventRequest]) (*connect.Response[runtimev2.AcceptSlackEventResponse], error) {
+	return c.acceptSlackEvent.CallUnary(ctx, req)
 }
 
 // ClaimReply calls supertag.runtime.v2.Connector.ClaimReply.
@@ -1188,6 +1464,7 @@ func (c *connectorClient) SettleReply(ctx context.Context, req *connect.Request[
 // ConnectorHandler is an implementation of the supertag.runtime.v2.Connector service.
 type ConnectorHandler interface {
 	AcceptEvent(context.Context, *connect.Request[runtimev2.AcceptEventRequest]) (*connect.Response[runtimev2.Task], error)
+	AcceptSlackEvent(context.Context, *connect.Request[runtimev2.AcceptSlackEventRequest]) (*connect.Response[runtimev2.AcceptSlackEventResponse], error)
 	ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error)
 	SettleReply(context.Context, *connect.Request[runtimev2.SettleReplyRequest]) (*connect.Response[runtimev2.Reply], error)
 }
@@ -1203,6 +1480,12 @@ func NewConnectorHandler(svc ConnectorHandler, opts ...connect.HandlerOption) (s
 		ConnectorAcceptEventProcedure,
 		svc.AcceptEvent,
 		connect.WithSchema(connectorMethods.ByName("AcceptEvent")),
+		connect.WithHandlerOptions(opts...),
+	)
+	connectorAcceptSlackEventHandler := connect.NewUnaryHandler(
+		ConnectorAcceptSlackEventProcedure,
+		svc.AcceptSlackEvent,
+		connect.WithSchema(connectorMethods.ByName("AcceptSlackEvent")),
 		connect.WithHandlerOptions(opts...),
 	)
 	connectorClaimReplyHandler := connect.NewUnaryHandler(
@@ -1221,6 +1504,8 @@ func NewConnectorHandler(svc ConnectorHandler, opts ...connect.HandlerOption) (s
 		switch r.URL.Path {
 		case ConnectorAcceptEventProcedure:
 			connectorAcceptEventHandler.ServeHTTP(w, r)
+		case ConnectorAcceptSlackEventProcedure:
+			connectorAcceptSlackEventHandler.ServeHTTP(w, r)
 		case ConnectorClaimReplyProcedure:
 			connectorClaimReplyHandler.ServeHTTP(w, r)
 		case ConnectorSettleReplyProcedure:
@@ -1238,6 +1523,10 @@ func (UnimplementedConnectorHandler) AcceptEvent(context.Context, *connect.Reque
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.AcceptEvent is not implemented"))
 }
 
+func (UnimplementedConnectorHandler) AcceptSlackEvent(context.Context, *connect.Request[runtimev2.AcceptSlackEventRequest]) (*connect.Response[runtimev2.AcceptSlackEventResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.AcceptSlackEvent is not implemented"))
+}
+
 func (UnimplementedConnectorHandler) ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.ClaimReply is not implemented"))
 }
@@ -1250,6 +1539,9 @@ func (UnimplementedConnectorHandler) SettleReply(context.Context, *connect.Reque
 type TransfersClient interface {
 	UploadCheckpoint(context.Context) *connect.ClientStreamForClient[runtimev2.CheckpointUpload, runtimev2.CheckpointReference]
 	DownloadCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.CheckpointDownload], error)
+	UploadWorkspace(context.Context) *connect.ClientStreamForClient[runtimev2.WorkspaceUpload, runtimev2.WorkspaceDeliveryReference]
+	DownloadWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
+	DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
 }
 
 // NewTransfersClient constructs a client for the supertag.runtime.v2.Transfers service. By default,
@@ -1275,13 +1567,34 @@ func NewTransfersClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(transfersMethods.ByName("DownloadCheckpoint")),
 			connect.WithClientOptions(opts...),
 		),
+		uploadWorkspace: connect.NewClient[runtimev2.WorkspaceUpload, runtimev2.WorkspaceDeliveryReference](
+			httpClient,
+			baseURL+TransfersUploadWorkspaceProcedure,
+			connect.WithSchema(transfersMethods.ByName("UploadWorkspace")),
+			connect.WithClientOptions(opts...),
+		),
+		downloadWorkspace: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload](
+			httpClient,
+			baseURL+TransfersDownloadWorkspaceProcedure,
+			connect.WithSchema(transfersMethods.ByName("DownloadWorkspace")),
+			connect.WithClientOptions(opts...),
+		),
+		downloadWorkspaceArtifact: connect.NewClient[runtimev2.GetWorkspaceArtifactRequest, runtimev2.WorkspaceDownload](
+			httpClient,
+			baseURL+TransfersDownloadWorkspaceArtifactProcedure,
+			connect.WithSchema(transfersMethods.ByName("DownloadWorkspaceArtifact")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // transfersClient implements TransfersClient.
 type transfersClient struct {
-	uploadCheckpoint   *connect.Client[runtimev2.CheckpointUpload, runtimev2.CheckpointReference]
-	downloadCheckpoint *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.CheckpointDownload]
+	uploadCheckpoint          *connect.Client[runtimev2.CheckpointUpload, runtimev2.CheckpointReference]
+	downloadCheckpoint        *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.CheckpointDownload]
+	uploadWorkspace           *connect.Client[runtimev2.WorkspaceUpload, runtimev2.WorkspaceDeliveryReference]
+	downloadWorkspace         *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload]
+	downloadWorkspaceArtifact *connect.Client[runtimev2.GetWorkspaceArtifactRequest, runtimev2.WorkspaceDownload]
 }
 
 // UploadCheckpoint calls supertag.runtime.v2.Transfers.UploadCheckpoint.
@@ -1294,10 +1607,28 @@ func (c *transfersClient) DownloadCheckpoint(ctx context.Context, req *connect.R
 	return c.downloadCheckpoint.CallServerStream(ctx, req)
 }
 
+// UploadWorkspace calls supertag.runtime.v2.Transfers.UploadWorkspace.
+func (c *transfersClient) UploadWorkspace(ctx context.Context) *connect.ClientStreamForClient[runtimev2.WorkspaceUpload, runtimev2.WorkspaceDeliveryReference] {
+	return c.uploadWorkspace.CallClientStream(ctx)
+}
+
+// DownloadWorkspace calls supertag.runtime.v2.Transfers.DownloadWorkspace.
+func (c *transfersClient) DownloadWorkspace(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error) {
+	return c.downloadWorkspace.CallServerStream(ctx, req)
+}
+
+// DownloadWorkspaceArtifact calls supertag.runtime.v2.Transfers.DownloadWorkspaceArtifact.
+func (c *transfersClient) DownloadWorkspaceArtifact(ctx context.Context, req *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error) {
+	return c.downloadWorkspaceArtifact.CallServerStream(ctx, req)
+}
+
 // TransfersHandler is an implementation of the supertag.runtime.v2.Transfers service.
 type TransfersHandler interface {
 	UploadCheckpoint(context.Context, *connect.ClientStream[runtimev2.CheckpointUpload]) (*connect.Response[runtimev2.CheckpointReference], error)
 	DownloadCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.CheckpointDownload]) error
+	UploadWorkspace(context.Context, *connect.ClientStream[runtimev2.WorkspaceUpload]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
+	DownloadWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
+	DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
 }
 
 // NewTransfersHandler builds an HTTP handler from the service implementation. It returns the path
@@ -1319,12 +1650,36 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(transfersMethods.ByName("DownloadCheckpoint")),
 		connect.WithHandlerOptions(opts...),
 	)
+	transfersUploadWorkspaceHandler := connect.NewClientStreamHandler(
+		TransfersUploadWorkspaceProcedure,
+		svc.UploadWorkspace,
+		connect.WithSchema(transfersMethods.ByName("UploadWorkspace")),
+		connect.WithHandlerOptions(opts...),
+	)
+	transfersDownloadWorkspaceHandler := connect.NewServerStreamHandler(
+		TransfersDownloadWorkspaceProcedure,
+		svc.DownloadWorkspace,
+		connect.WithSchema(transfersMethods.ByName("DownloadWorkspace")),
+		connect.WithHandlerOptions(opts...),
+	)
+	transfersDownloadWorkspaceArtifactHandler := connect.NewServerStreamHandler(
+		TransfersDownloadWorkspaceArtifactProcedure,
+		svc.DownloadWorkspaceArtifact,
+		connect.WithSchema(transfersMethods.ByName("DownloadWorkspaceArtifact")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.Transfers/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case TransfersUploadCheckpointProcedure:
 			transfersUploadCheckpointHandler.ServeHTTP(w, r)
 		case TransfersDownloadCheckpointProcedure:
 			transfersDownloadCheckpointHandler.ServeHTTP(w, r)
+		case TransfersUploadWorkspaceProcedure:
+			transfersUploadWorkspaceHandler.ServeHTTP(w, r)
+		case TransfersDownloadWorkspaceProcedure:
+			transfersDownloadWorkspaceHandler.ServeHTTP(w, r)
+		case TransfersDownloadWorkspaceArtifactProcedure:
+			transfersDownloadWorkspaceArtifactHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1340,6 +1695,18 @@ func (UnimplementedTransfersHandler) UploadCheckpoint(context.Context, *connect.
 
 func (UnimplementedTransfersHandler) DownloadCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.CheckpointDownload]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadCheckpoint is not implemented"))
+}
+
+func (UnimplementedTransfersHandler) UploadWorkspace(context.Context, *connect.ClientStream[runtimev2.WorkspaceUpload]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.UploadWorkspace is not implemented"))
+}
+
+func (UnimplementedTransfersHandler) DownloadWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadWorkspace is not implemented"))
+}
+
+func (UnimplementedTransfersHandler) DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadWorkspaceArtifact is not implemented"))
 }
 
 // CheckpointDirectoryClient is a client for the supertag.runtime.v2.CheckpointDirectory service.
@@ -1465,9 +1832,160 @@ func (UnimplementedCheckpointDirectoryHandler) CommitCheckpoint(context.Context,
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.CheckpointDirectory.CommitCheckpoint is not implemented"))
 }
 
+// WorkspaceDirectoryClient is a client for the supertag.runtime.v2.WorkspaceDirectory service.
+type WorkspaceDirectoryClient interface {
+	GetContinuation(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceContinuation], error)
+	ReserveDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
+	CommitDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
+	GetArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
+}
+
+// NewWorkspaceDirectoryClient constructs a client for the supertag.runtime.v2.WorkspaceDirectory
+// service. By default, it uses the Connect protocol with the binary Protobuf Codec, asks for
+// gzipped responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply
+// the connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewWorkspaceDirectoryClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) WorkspaceDirectoryClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	workspaceDirectoryMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("WorkspaceDirectory").Methods()
+	return &workspaceDirectoryClient{
+		getContinuation: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceContinuation](
+			httpClient,
+			baseURL+WorkspaceDirectoryGetContinuationProcedure,
+			connect.WithSchema(workspaceDirectoryMethods.ByName("GetContinuation")),
+			connect.WithClientOptions(opts...),
+		),
+		reserveDelivery: connect.NewClient[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference](
+			httpClient,
+			baseURL+WorkspaceDirectoryReserveDeliveryProcedure,
+			connect.WithSchema(workspaceDirectoryMethods.ByName("ReserveDelivery")),
+			connect.WithClientOptions(opts...),
+		),
+		commitDelivery: connect.NewClient[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference](
+			httpClient,
+			baseURL+WorkspaceDirectoryCommitDeliveryProcedure,
+			connect.WithSchema(workspaceDirectoryMethods.ByName("CommitDelivery")),
+			connect.WithClientOptions(opts...),
+		),
+		getArtifact: connect.NewClient[runtimev2.GetWorkspaceArtifactRequest, runtimev2.WorkspaceDeliveryReference](
+			httpClient,
+			baseURL+WorkspaceDirectoryGetArtifactProcedure,
+			connect.WithSchema(workspaceDirectoryMethods.ByName("GetArtifact")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// workspaceDirectoryClient implements WorkspaceDirectoryClient.
+type workspaceDirectoryClient struct {
+	getContinuation *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceContinuation]
+	reserveDelivery *connect.Client[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference]
+	commitDelivery  *connect.Client[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference]
+	getArtifact     *connect.Client[runtimev2.GetWorkspaceArtifactRequest, runtimev2.WorkspaceDeliveryReference]
+}
+
+// GetContinuation calls supertag.runtime.v2.WorkspaceDirectory.GetContinuation.
+func (c *workspaceDirectoryClient) GetContinuation(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceContinuation], error) {
+	return c.getContinuation.CallUnary(ctx, req)
+}
+
+// ReserveDelivery calls supertag.runtime.v2.WorkspaceDirectory.ReserveDelivery.
+func (c *workspaceDirectoryClient) ReserveDelivery(ctx context.Context, req *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error) {
+	return c.reserveDelivery.CallUnary(ctx, req)
+}
+
+// CommitDelivery calls supertag.runtime.v2.WorkspaceDirectory.CommitDelivery.
+func (c *workspaceDirectoryClient) CommitDelivery(ctx context.Context, req *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error) {
+	return c.commitDelivery.CallUnary(ctx, req)
+}
+
+// GetArtifact calls supertag.runtime.v2.WorkspaceDirectory.GetArtifact.
+func (c *workspaceDirectoryClient) GetArtifact(ctx context.Context, req *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error) {
+	return c.getArtifact.CallUnary(ctx, req)
+}
+
+// WorkspaceDirectoryHandler is an implementation of the supertag.runtime.v2.WorkspaceDirectory
+// service.
+type WorkspaceDirectoryHandler interface {
+	GetContinuation(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceContinuation], error)
+	ReserveDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
+	CommitDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
+	GetArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
+}
+
+// NewWorkspaceDirectoryHandler builds an HTTP handler from the service implementation. It returns
+// the path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewWorkspaceDirectoryHandler(svc WorkspaceDirectoryHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	workspaceDirectoryMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("WorkspaceDirectory").Methods()
+	workspaceDirectoryGetContinuationHandler := connect.NewUnaryHandler(
+		WorkspaceDirectoryGetContinuationProcedure,
+		svc.GetContinuation,
+		connect.WithSchema(workspaceDirectoryMethods.ByName("GetContinuation")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workspaceDirectoryReserveDeliveryHandler := connect.NewUnaryHandler(
+		WorkspaceDirectoryReserveDeliveryProcedure,
+		svc.ReserveDelivery,
+		connect.WithSchema(workspaceDirectoryMethods.ByName("ReserveDelivery")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workspaceDirectoryCommitDeliveryHandler := connect.NewUnaryHandler(
+		WorkspaceDirectoryCommitDeliveryProcedure,
+		svc.CommitDelivery,
+		connect.WithSchema(workspaceDirectoryMethods.ByName("CommitDelivery")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workspaceDirectoryGetArtifactHandler := connect.NewUnaryHandler(
+		WorkspaceDirectoryGetArtifactProcedure,
+		svc.GetArtifact,
+		connect.WithSchema(workspaceDirectoryMethods.ByName("GetArtifact")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.WorkspaceDirectory/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case WorkspaceDirectoryGetContinuationProcedure:
+			workspaceDirectoryGetContinuationHandler.ServeHTTP(w, r)
+		case WorkspaceDirectoryReserveDeliveryProcedure:
+			workspaceDirectoryReserveDeliveryHandler.ServeHTTP(w, r)
+		case WorkspaceDirectoryCommitDeliveryProcedure:
+			workspaceDirectoryCommitDeliveryHandler.ServeHTTP(w, r)
+		case WorkspaceDirectoryGetArtifactProcedure:
+			workspaceDirectoryGetArtifactHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedWorkspaceDirectoryHandler returns CodeUnimplemented from all methods.
+type UnimplementedWorkspaceDirectoryHandler struct{}
+
+func (UnimplementedWorkspaceDirectoryHandler) GetContinuation(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceContinuation], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkspaceDirectory.GetContinuation is not implemented"))
+}
+
+func (UnimplementedWorkspaceDirectoryHandler) ReserveDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkspaceDirectory.ReserveDelivery is not implemented"))
+}
+
+func (UnimplementedWorkspaceDirectoryHandler) CommitDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkspaceDirectory.CommitDelivery is not implemented"))
+}
+
+func (UnimplementedWorkspaceDirectoryHandler) GetArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkspaceDirectory.GetArtifact is not implemented"))
+}
+
 // HarnessClient is a client for the supertag.runtime.v2.Harness service.
 type HarnessClient interface {
 	Attach(context.Context, *connect.Request[runtimev2.HarnessAttachRequest]) (*connect.Response[runtimev2.HarnessRun], error)
+	TakeLiveInput(context.Context, *connect.Request[runtimev2.HarnessTakeLiveInputRequest]) (*connect.Response[runtimev2.TakeInputResponse], error)
+	SettleLiveInput(context.Context, *connect.Request[runtimev2.HarnessSettleLiveInputRequest]) (*connect.Response[runtimev2.LiveInput], error)
 	Publish(context.Context, *connect.Request[runtimev2.HarnessPublishRequest]) (*connect.Response[runtimev2.TaskEvent], error)
 	ReportUsage(context.Context, *connect.Request[runtimev2.HarnessUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error)
 	Complete(context.Context, *connect.Request[runtimev2.HarnessCompleteRequest]) (*connect.Response[runtimev2.HarnessCompleteResponse], error)
@@ -1488,6 +2006,18 @@ func NewHarnessClient(httpClient connect.HTTPClient, baseURL string, opts ...con
 			httpClient,
 			baseURL+HarnessAttachProcedure,
 			connect.WithSchema(harnessMethods.ByName("Attach")),
+			connect.WithClientOptions(opts...),
+		),
+		takeLiveInput: connect.NewClient[runtimev2.HarnessTakeLiveInputRequest, runtimev2.TakeInputResponse](
+			httpClient,
+			baseURL+HarnessTakeLiveInputProcedure,
+			connect.WithSchema(harnessMethods.ByName("TakeLiveInput")),
+			connect.WithClientOptions(opts...),
+		),
+		settleLiveInput: connect.NewClient[runtimev2.HarnessSettleLiveInputRequest, runtimev2.LiveInput](
+			httpClient,
+			baseURL+HarnessSettleLiveInputProcedure,
+			connect.WithSchema(harnessMethods.ByName("SettleLiveInput")),
 			connect.WithClientOptions(opts...),
 		),
 		publish: connect.NewClient[runtimev2.HarnessPublishRequest, runtimev2.TaskEvent](
@@ -1513,15 +2043,27 @@ func NewHarnessClient(httpClient connect.HTTPClient, baseURL string, opts ...con
 
 // harnessClient implements HarnessClient.
 type harnessClient struct {
-	attach      *connect.Client[runtimev2.HarnessAttachRequest, runtimev2.HarnessRun]
-	publish     *connect.Client[runtimev2.HarnessPublishRequest, runtimev2.TaskEvent]
-	reportUsage *connect.Client[runtimev2.HarnessUsageRequest, runtimev2.ReportAttemptUsageResponse]
-	complete    *connect.Client[runtimev2.HarnessCompleteRequest, runtimev2.HarnessCompleteResponse]
+	attach          *connect.Client[runtimev2.HarnessAttachRequest, runtimev2.HarnessRun]
+	takeLiveInput   *connect.Client[runtimev2.HarnessTakeLiveInputRequest, runtimev2.TakeInputResponse]
+	settleLiveInput *connect.Client[runtimev2.HarnessSettleLiveInputRequest, runtimev2.LiveInput]
+	publish         *connect.Client[runtimev2.HarnessPublishRequest, runtimev2.TaskEvent]
+	reportUsage     *connect.Client[runtimev2.HarnessUsageRequest, runtimev2.ReportAttemptUsageResponse]
+	complete        *connect.Client[runtimev2.HarnessCompleteRequest, runtimev2.HarnessCompleteResponse]
 }
 
 // Attach calls supertag.runtime.v2.Harness.Attach.
 func (c *harnessClient) Attach(ctx context.Context, req *connect.Request[runtimev2.HarnessAttachRequest]) (*connect.Response[runtimev2.HarnessRun], error) {
 	return c.attach.CallUnary(ctx, req)
+}
+
+// TakeLiveInput calls supertag.runtime.v2.Harness.TakeLiveInput.
+func (c *harnessClient) TakeLiveInput(ctx context.Context, req *connect.Request[runtimev2.HarnessTakeLiveInputRequest]) (*connect.Response[runtimev2.TakeInputResponse], error) {
+	return c.takeLiveInput.CallUnary(ctx, req)
+}
+
+// SettleLiveInput calls supertag.runtime.v2.Harness.SettleLiveInput.
+func (c *harnessClient) SettleLiveInput(ctx context.Context, req *connect.Request[runtimev2.HarnessSettleLiveInputRequest]) (*connect.Response[runtimev2.LiveInput], error) {
+	return c.settleLiveInput.CallUnary(ctx, req)
 }
 
 // Publish calls supertag.runtime.v2.Harness.Publish.
@@ -1542,6 +2084,8 @@ func (c *harnessClient) Complete(ctx context.Context, req *connect.Request[runti
 // HarnessHandler is an implementation of the supertag.runtime.v2.Harness service.
 type HarnessHandler interface {
 	Attach(context.Context, *connect.Request[runtimev2.HarnessAttachRequest]) (*connect.Response[runtimev2.HarnessRun], error)
+	TakeLiveInput(context.Context, *connect.Request[runtimev2.HarnessTakeLiveInputRequest]) (*connect.Response[runtimev2.TakeInputResponse], error)
+	SettleLiveInput(context.Context, *connect.Request[runtimev2.HarnessSettleLiveInputRequest]) (*connect.Response[runtimev2.LiveInput], error)
 	Publish(context.Context, *connect.Request[runtimev2.HarnessPublishRequest]) (*connect.Response[runtimev2.TaskEvent], error)
 	ReportUsage(context.Context, *connect.Request[runtimev2.HarnessUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error)
 	Complete(context.Context, *connect.Request[runtimev2.HarnessCompleteRequest]) (*connect.Response[runtimev2.HarnessCompleteResponse], error)
@@ -1558,6 +2102,18 @@ func NewHarnessHandler(svc HarnessHandler, opts ...connect.HandlerOption) (strin
 		HarnessAttachProcedure,
 		svc.Attach,
 		connect.WithSchema(harnessMethods.ByName("Attach")),
+		connect.WithHandlerOptions(opts...),
+	)
+	harnessTakeLiveInputHandler := connect.NewUnaryHandler(
+		HarnessTakeLiveInputProcedure,
+		svc.TakeLiveInput,
+		connect.WithSchema(harnessMethods.ByName("TakeLiveInput")),
+		connect.WithHandlerOptions(opts...),
+	)
+	harnessSettleLiveInputHandler := connect.NewUnaryHandler(
+		HarnessSettleLiveInputProcedure,
+		svc.SettleLiveInput,
+		connect.WithSchema(harnessMethods.ByName("SettleLiveInput")),
 		connect.WithHandlerOptions(opts...),
 	)
 	harnessPublishHandler := connect.NewUnaryHandler(
@@ -1582,6 +2138,10 @@ func NewHarnessHandler(svc HarnessHandler, opts ...connect.HandlerOption) (strin
 		switch r.URL.Path {
 		case HarnessAttachProcedure:
 			harnessAttachHandler.ServeHTTP(w, r)
+		case HarnessTakeLiveInputProcedure:
+			harnessTakeLiveInputHandler.ServeHTTP(w, r)
+		case HarnessSettleLiveInputProcedure:
+			harnessSettleLiveInputHandler.ServeHTTP(w, r)
 		case HarnessPublishProcedure:
 			harnessPublishHandler.ServeHTTP(w, r)
 		case HarnessReportUsageProcedure:
@@ -1599,6 +2159,14 @@ type UnimplementedHarnessHandler struct{}
 
 func (UnimplementedHarnessHandler) Attach(context.Context, *connect.Request[runtimev2.HarnessAttachRequest]) (*connect.Response[runtimev2.HarnessRun], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Harness.Attach is not implemented"))
+}
+
+func (UnimplementedHarnessHandler) TakeLiveInput(context.Context, *connect.Request[runtimev2.HarnessTakeLiveInputRequest]) (*connect.Response[runtimev2.TakeInputResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Harness.TakeLiveInput is not implemented"))
+}
+
+func (UnimplementedHarnessHandler) SettleLiveInput(context.Context, *connect.Request[runtimev2.HarnessSettleLiveInputRequest]) (*connect.Response[runtimev2.LiveInput], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Harness.SettleLiveInput is not implemented"))
 }
 
 func (UnimplementedHarnessHandler) Publish(context.Context, *connect.Request[runtimev2.HarnessPublishRequest]) (*connect.Response[runtimev2.TaskEvent], error) {

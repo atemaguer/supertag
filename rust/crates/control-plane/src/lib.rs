@@ -1,8 +1,10 @@
 mod checkpoints;
+mod inputs;
 pub mod objective_limits;
 mod objectives;
 mod store;
 mod usage;
+mod workspaces;
 
 pub use store::{HostAuthority, Store, StoreError};
 
@@ -42,6 +44,7 @@ impl ControlPlane {
     pub async fn sweep(&self) -> anyhow::Result<()> {
         self.store.sweep_objectives().await?;
         self.store.sweep_expired_attempts().await?;
+        self.store.sweep_inputs().await?;
         Ok(())
     }
 
@@ -107,7 +110,12 @@ impl operator_server::Operator for ControlPlane {
         let input = request.into_inner();
         Ok(Response::new(
             self.store
-                .put_tag(&input.tag_id, &input.instructions, input.allowed_actions)
+                .put_tag_with_workspace(
+                    &input.tag_id,
+                    &input.instructions,
+                    input.allowed_actions,
+                    input.workspace,
+                )
                 .await?,
         ))
     }
@@ -203,10 +211,11 @@ impl worker_host_server::WorkerHost for ControlPlane {
         request: Request<ClaimTaskRequest>,
     ) -> Result<Response<ClaimTaskResponse>, Status> {
         let principal = self.host_authority(&request)?;
+        let input = request.into_inner();
         Ok(Response::new(ClaimTaskResponse {
             assignment: self
                 .store
-                .claim_task(&principal, &request.into_inner().operation_id)
+                .claim_task_with_workspaces(&principal, &input.operation_id, &input.workspace_ids)
                 .await?,
         }))
     }
@@ -347,6 +356,18 @@ impl connector_server::Connector for ControlPlane {
         ))
     }
 
+    async fn accept_slack_event(
+        &self,
+        request: Request<AcceptSlackEventRequest>,
+    ) -> Result<Response<AcceptSlackEventResponse>, Status> {
+        let principal = self.principal(&request, "connector:")?;
+        Ok(Response::new(
+            self.store
+                .accept_slack_event(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
     async fn claim_reply(
         &self,
         request: Request<ClaimReplyRequest>,
@@ -372,6 +393,70 @@ impl connector_server::Connector for ControlPlane {
     }
 }
 
+#[tonic::async_trait]
+impl live_inputs_server::LiveInputs for ControlPlane {
+    async fn queue_input(
+        &self,
+        request: Request<QueueInputRequest>,
+    ) -> Result<Response<LiveInput>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .queue_input(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn get_input(
+        &self,
+        request: Request<GetInputRequest>,
+    ) -> Result<Response<LiveInput>, Status> {
+        self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store.get_input(&request.into_inner().input_id).await?,
+        ))
+    }
+
+    async fn resolve_input(
+        &self,
+        request: Request<ResolveInputRequest>,
+    ) -> Result<Response<LiveInput>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .resolve_input(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+}
+
+#[tonic::async_trait]
+impl attempt_inputs_server::AttemptInputs for ControlPlane {
+    async fn take_input(
+        &self,
+        request: Request<TakeInputRequest>,
+    ) -> Result<Response<TakeInputResponse>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .take_input_for_host(&host, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn settle_input(
+        &self,
+        request: Request<SettleInputRequest>,
+    ) -> Result<Response<LiveInput>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .settle_input(&host, &request.into_inner())
+                .await?,
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,6 +471,7 @@ mod tests {
             .await
             .unwrap();
         let tag = PutTagRequest {
+            workspace: None,
             tag_id: "tag".into(),
             instructions: String::new(),
             allowed_actions: vec![],
@@ -430,6 +516,7 @@ mod tests {
                 .is_ok()
         );
         let claim = ClaimTaskRequest {
+            workspace_ids: vec![],
             operation_id: "claim".into(),
         };
         assert_eq!(

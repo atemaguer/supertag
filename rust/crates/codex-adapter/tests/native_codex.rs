@@ -17,8 +17,9 @@ use supertag_protocol::{
     MAX_CHECKPOINT_BYTES, MAX_MESSAGE_BYTES, matches_bearer,
     v2::{
         AdapterBootstrap, HarnessAttachRequest, HarnessCompleteRequest, HarnessCompleteResponse,
-        HarnessPublishRequest, HarnessRun, HarnessUsageRequest, ReportAttemptUsageResponse,
-        SessionCheckpoint, Task, TaskEvent,
+        HarnessPublishRequest, HarnessRun, HarnessSettleLiveInputRequest,
+        HarnessTakeLiveInputRequest, HarnessUsageRequest, LiveInput, ReportAttemptUsageResponse,
+        SessionCheckpoint, TakeInputResponse, Task, TaskEvent,
         harness_server::{Harness, HarnessServer},
     },
 };
@@ -66,6 +67,24 @@ impl Harness for HarnessFixture {
             checkpoint: self.checkpoint.clone(),
         }))
     }
+    async fn take_live_input(
+        &self,
+        _request: Request<HarnessTakeLiveInputRequest>,
+    ) -> Result<Response<TakeInputResponse>, Status> {
+        Err(Status::unimplemented(
+            "the Codex exec fixture does not steer live input",
+        ))
+    }
+
+    async fn settle_live_input(
+        &self,
+        _request: Request<HarnessSettleLiveInputRequest>,
+    ) -> Result<Response<LiveInput>, Status> {
+        Err(Status::unimplemented(
+            "the Codex exec fixture does not steer live input",
+        ))
+    }
+
     async fn publish(
         &self,
         request: Request<HarnessPublishRequest>,
@@ -132,6 +151,8 @@ impl HarnessProcess {
         let observed = Arc::new(Mutex::new(Observed::default()));
         let fixture = HarnessFixture {
             task: Task {
+                workspace: None,
+                workspace_delivery: None,
                 task_id: "native-task".into(),
                 tag_id: "native-tag".into(),
                 session_id: "native-session".into(),

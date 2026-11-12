@@ -252,6 +252,7 @@ pub(super) async fn claim_candidate(
     now: i64,
     host_id: &str,
     all_tags: i64,
+    workspace_ids: &[String],
 ) -> Result<Option<String>> {
     let mut after = 0_i64;
     loop {
@@ -263,7 +264,19 @@ pub(super) async fn claim_candidate(
         for candidate in candidates {
             let id: String = candidate.try_get("task_id")?;
             let task = task_in(transaction, &id).await?;
-            if crate::objectives::objective_task_can_start_in(transaction, &task, now).await? {
+            let has_workspace = task
+                .workspace
+                .as_ref()
+                .is_none_or(|spec| workspace_ids.binary_search(&spec.workspace_id).is_ok());
+            if has_workspace
+                && crate::inputs::can_claim_in(
+                    transaction,
+                    &task,
+                    candidate.try_get("accepted_order")?,
+                )
+                .await?
+                && crate::objectives::objective_task_can_start_in(transaction, &task, now).await?
+            {
                 return Ok(Some(id));
             }
             after = candidate.try_get("accepted_order")?;

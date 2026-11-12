@@ -12,8 +12,8 @@ use crate::{HostHeaders, journal::Attempt, request};
 
 #[derive(Clone)]
 pub(crate) struct Transfers {
-    channel: Channel,
-    headers: HostHeaders,
+    pub(crate) channel: Channel,
+    pub(crate) headers: HostHeaders,
 }
 
 impl Transfers {

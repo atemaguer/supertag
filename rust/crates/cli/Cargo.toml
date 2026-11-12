@@ -30,6 +30,7 @@ supertag-codex-adapter.workspace = true
 supertag-gateway.workspace = true
 supertag-protocol.workspace = true
 supertag-worker-host.workspace = true
+tempfile.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
@@ -38,7 +39,6 @@ tonic-health.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
 hmac.workspace = true
 reqwest.workspace = true
 sqlx.workspace = true
@@ -51,4 +51,19 @@ required-features = ["test-fixtures"]
 [[test]]
 name = "enrolled_runtime"
 path = "tests/enrolled_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "slack_threads"
+path = "tests/slack_threads.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "workspace_runtime"
+path = "tests/workspace_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "live_input_runtime"
+path = "tests/live_input_runtime.rs"
 required-features = ["test-fixtures"]

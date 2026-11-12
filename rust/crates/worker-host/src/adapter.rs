@@ -1,8 +1,14 @@
+mod inputs;
+
 use std::{
     ffi::OsStr,
     io,
+    path::Path,
     process::{ExitStatus, Stdio},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -13,8 +19,9 @@ use supertag_protocol::{
     v2::{
         AdapterBootstrap, AppendEventRequest, Assignment, HarnessAttachRequest,
         HarnessCompleteRequest, HarnessCompleteResponse, HarnessPublishRequest, HarnessRun,
-        HarnessUsageRequest, InspectAttemptRequest, ObjectiveSignal, ReportAttemptUsageRequest,
-        ReportAttemptUsageResponse, SessionCheckpoint, TaskEvent, TaskState,
+        HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest, HarnessUsageRequest,
+        InspectAttemptRequest, LiveInput, ObjectiveSignal, ReportAttemptUsageRequest,
+        ReportAttemptUsageResponse, SessionCheckpoint, TakeInputResponse, TaskEvent, TaskState,
         harness_server::{Harness, HarnessServer},
     },
     validate_checkpoint_reference,
@@ -32,7 +39,7 @@ use tonic::{Request, Response, Status, transport::Server};
 use uuid::Uuid;
 
 use crate::{
-    HostOptions, RegisteredHost,
+    HostOptions, RegisteredHost, RegisteredInputs,
     guardian::{MAX_BOOTSTRAP_BYTES, monotonic_now_ns},
 };
 
@@ -44,11 +51,12 @@ struct Bridge {
     host_token: String,
     host: RegisteredHost,
     state: Arc<Mutex<RunState>>,
+    attached: Arc<AtomicBool>,
+    inputs: inputs::InputLane,
 }
 
 #[derive(Default)]
 struct RunState {
-    attached: bool,
     outcome: Option<HarnessCompleteRequest>,
 }
 
@@ -68,6 +76,21 @@ impl Bridge {
             .expect("validated assignment")
             .task_id
     }
+
+    fn attempt(&self) -> InspectAttemptRequest {
+        InspectAttemptRequest {
+            task_id: self.task_id().into(),
+            attempt_id: self.assignment.attempt_id.clone(),
+            lease_token: self.assignment.lease_token.clone(),
+        }
+    }
+
+    fn require_attached(&self) -> Result<(), Status> {
+        if !self.attached.load(Ordering::Acquire) {
+            return Err(Status::failed_precondition("adapter must attach first"));
+        }
+        Ok(())
+    }
 }
 
 #[tonic::async_trait]
@@ -77,7 +100,7 @@ impl Harness for Bridge {
         request: Request<HarnessAttachRequest>,
     ) -> Result<Response<HarnessRun>, Status> {
         self.authenticate(&request)?;
-        self.state.lock().await.attached = true;
+        self.attached.store(true, Ordering::Release);
         Ok(Response::new(HarnessRun {
             task: self.assignment.task.clone(),
             attempt_id: self.assignment.attempt_id.clone(),
@@ -91,7 +114,7 @@ impl Harness for Bridge {
     ) -> Result<Response<TaskEvent>, Status> {
         self.authenticate(&request)?;
         let state = self.state.lock().await;
-        if !state.attached || state.outcome.is_some() {
+        if !self.attached.load(Ordering::Acquire) || state.outcome.is_some() {
             return Err(Status::failed_precondition(
                 "execution is not accepting events",
             ));
@@ -120,7 +143,7 @@ impl Harness for Bridge {
     ) -> Result<Response<ReportAttemptUsageResponse>, Status> {
         self.authenticate(&request)?;
         let state = self.state.lock().await;
-        if !state.attached || state.outcome.is_some() {
+        if !self.attached.load(Ordering::Acquire) || state.outcome.is_some() {
             return Err(Status::failed_precondition(
                 "execution is not accepting usage",
             ));
@@ -131,11 +154,7 @@ impl Harness for Bridge {
         }
         let mut upstream = authenticated_request(
             ReportAttemptUsageRequest {
-                attempt: Some(InspectAttemptRequest {
-                    task_id: self.task_id().into(),
-                    attempt_id: self.assignment.attempt_id.clone(),
-                    lease_token: self.assignment.lease_token.clone(),
-                }),
+                attempt: Some(self.attempt()),
                 sequence: usage.sequence,
                 amount_minor: None,
                 currency: None,
@@ -157,7 +176,7 @@ impl Harness for Bridge {
     ) -> Result<Response<HarnessCompleteResponse>, Status> {
         self.authenticate(&request)?;
         let mut state = self.state.lock().await;
-        if !state.attached {
+        if !self.attached.load(Ordering::Acquire) {
             return Err(Status::failed_precondition(
                 "adapter must attach before proposing a result",
             ));
@@ -186,16 +205,37 @@ impl Harness for Bridge {
             }
         } else {
             state.outcome = Some(outcome);
+            self.inputs.close();
         }
         Ok(Response::new(HarnessCompleteResponse {}))
+    }
+
+    async fn take_live_input(
+        &self,
+        request: Request<HarnessTakeLiveInputRequest>,
+    ) -> Result<Response<TakeInputResponse>, Status> {
+        self.authenticate(&request)?;
+        self.require_attached()?;
+        self.inputs.take(self.attempt(), &self.host_token).await
+    }
+
+    async fn settle_live_input(
+        &self,
+        request: Request<HarnessSettleLiveInputRequest>,
+    ) -> Result<Response<LiveInput>, Status> {
+        self.authenticate(&request)?;
+        self.require_attached()?;
+        self.inputs
+            .settle(self.attempt(), request.into_inner(), &self.host_token)
+            .await
     }
 }
 
 pub(crate) async fn execute(
     options: &HostOptions,
     assignment: Assignment,
-    checkpoint: Option<SessionCheckpoint>,
-    host: RegisteredHost,
+    (checkpoint, workspace): (Option<SessionCheckpoint>, Option<&Path>),
+    (host, inputs): (RegisteredHost, RegisteredInputs),
     host_token: &str,
     valid_until: Instant,
     shutdown: &CancellationToken,
@@ -213,6 +253,8 @@ pub(crate) async fn execute(
         host_token: host_token.to_owned(),
         host,
         state: Arc::default(),
+        attached: Arc::default(),
+        inputs: inputs::InputLane::new(inputs, valid_until, shutdown),
     };
     let stop_server = CancellationToken::new();
     let mut server = tokio::spawn(
@@ -227,7 +269,16 @@ pub(crate) async fn execute(
                 stop_server.clone().cancelled_owned(),
             ),
     );
-    let result = supervise(options, &bridge, bootstrap, valid_until, shutdown).await;
+    let result = supervise(
+        options,
+        &bridge,
+        bootstrap,
+        valid_until,
+        shutdown,
+        workspace,
+    )
+    .await;
+    bridge.inputs.close();
     stop_server.cancel();
     if time::timeout(Duration::from_secs(2), &mut server)
         .await
@@ -245,6 +296,7 @@ async fn supervise(
     bootstrap: AdapterBootstrap,
     valid_until: Instant,
     shutdown: &CancellationToken,
+    workspace: Option<&Path>,
 ) -> Result<HarnessCompleteRequest> {
     if shutdown.is_cancelled() {
         return Ok(failed("Worker Host is shutting down"));
@@ -280,6 +332,11 @@ async fn supervise(
         .stderr(Stdio::null())
         .process_group(0)
         .kill_on_drop(true);
+    if let Some(workspace) = workspace {
+        command
+            .current_dir(workspace)
+            .env(crate::WORKSPACE_DIRECTORY, workspace);
+    }
     if options.forward_codex_credentials {
         command.env(
             crate::guardian::CODEX_SCRATCH_PARENT,
@@ -324,6 +381,7 @@ async fn supervise(
         outcome
     })
     .await;
+    bridge.inputs.close();
     if child.try_wait()?.is_none() {
         // Give the guardian time to reap the adapter before forcing down the group.
         let _ = time::timeout(Duration::from_millis(500), child.wait()).await;
@@ -401,15 +459,7 @@ async fn monitor_authority(bridge: &Bridge, valid_until: &mut Instant) -> Result
         time::sleep_until(poll_at.min(renew_at).min(*valid_until)).await;
         let sent = Instant::now();
         ensure!(sent < *valid_until, "execution authority expired");
-        let mut request = authenticated_request(
-            InspectAttemptRequest {
-                task_id: bridge.task_id().into(),
-                attempt_id: bridge.assignment.attempt_id.clone(),
-                lease_token: bridge.assignment.lease_token.clone(),
-            },
-            &bridge.host_token,
-            None,
-        )?;
+        let mut request = authenticated_request(bridge.attempt(), &bridge.host_token, None)?;
         request.set_timeout(Duration::from_secs(2));
         let observed = if sent >= renew_at {
             let renewed = time::timeout_at(*valid_until, host.renew_attempt(request))
@@ -445,12 +495,16 @@ async fn monitor_authority(bridge: &Bridge, valid_until: &mut Instant) -> Result
                 .map(Response::into_inner)
         };
         match observed {
-            Ok(task) => ensure!(
-                task.task_id == bridge.task_id()
-                    && task.attempt_id.as_deref() == Some(bridge.assignment.attempt_id.as_str())
-                    && task.state() == TaskState::Running,
-                "Control Plane ended the Task Attempt"
-            ),
+            Ok(task) => {
+                ensure!(
+                    task.task_id == bridge.task_id()
+                        && task.attempt_id.as_deref()
+                            == Some(bridge.assignment.attempt_id.as_str())
+                        && task.state() == TaskState::Running,
+                    "Control Plane ended the Task Attempt"
+                );
+                bridge.inputs.set_deadline(*valid_until);
+            }
             Err(error) if crate::retryable(&error) => {}
             Err(error) => return Err(error.into()),
         }

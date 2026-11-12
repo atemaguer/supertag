@@ -124,6 +124,7 @@ async fn contract(store: &Store) {
     );
 
     let finish = FinishTaskRequest {
+        workspace_delivery: None,
         task_id: first.task_id.clone(),
         attempt_id: start.attempt_id.clone(),
         lease_token: start.lease_token.clone(),
@@ -200,6 +201,7 @@ async fn contract(store: &Store) {
             .is_none()
     );
     let finish = FinishTaskRequest {
+        workspace_delivery: None,
         task_id: running.task_id.clone(),
         attempt_id: start.attempt_id,
         lease_token: start.lease_token,
@@ -242,6 +244,7 @@ async fn contract(store: &Store) {
         };
         store.start_task(&racer_host, &start).await.unwrap();
         let finish = FinishTaskRequest {
+            workspace_delivery: None,
             task_id: task.task_id.clone(),
             attempt_id: start.attempt_id,
             lease_token: start.lease_token,

@@ -7,6 +7,32 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class LiveInputState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    LIVE_INPUT_STATE_UNSPECIFIED: _ClassVar[LiveInputState]
+    LIVE_INPUT_STATE_PENDING: _ClassVar[LiveInputState]
+    LIVE_INPUT_STATE_DISPATCHING: _ClassVar[LiveInputState]
+    LIVE_INPUT_STATE_ACCEPTED: _ClassVar[LiveInputState]
+    LIVE_INPUT_STATE_REJECTED: _ClassVar[LiveInputState]
+    LIVE_INPUT_STATE_UNKNOWN: _ClassVar[LiveInputState]
+    LIVE_INPUT_STATE_WITHDRAWN: _ClassVar[LiveInputState]
+    LIVE_INPUT_STATE_FAILED: _ClassVar[LiveInputState]
+    LIVE_INPUT_STATE_RETRIED: _ClassVar[LiveInputState]
+
+class LiveInputDecision(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    LIVE_INPUT_DECISION_UNSPECIFIED: _ClassVar[LiveInputDecision]
+    LIVE_INPUT_DECISION_FAIL: _ClassVar[LiveInputDecision]
+    LIVE_INPUT_DECISION_RETRY: _ClassVar[LiveInputDecision]
+
+class LiveInputReceipt(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    LIVE_INPUT_RECEIPT_UNSPECIFIED: _ClassVar[LiveInputReceipt]
+    LIVE_INPUT_RECEIPT_ACCEPTED: _ClassVar[LiveInputReceipt]
+    LIVE_INPUT_RECEIPT_REJECTED: _ClassVar[LiveInputReceipt]
+    LIVE_INPUT_RECEIPT_UNKNOWN: _ClassVar[LiveInputReceipt]
+    LIVE_INPUT_RECEIPT_WITHDRAWN: _ClassVar[LiveInputReceipt]
+
 class TaskState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     TASK_STATE_UNSPECIFIED: _ClassVar[TaskState]
@@ -23,6 +49,12 @@ class AttemptDecision(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     ATTEMPT_DECISION_UNSPECIFIED: _ClassVar[AttemptDecision]
     ATTEMPT_DECISION_FAILED: _ClassVar[AttemptDecision]
     ATTEMPT_DECISION_RETRY: _ClassVar[AttemptDecision]
+
+class WorkspaceArtifactKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    WORKSPACE_ARTIFACT_KIND_UNSPECIFIED: _ClassVar[WorkspaceArtifactKind]
+    WORKSPACE_ARTIFACT_KIND_PATCH: _ClassVar[WorkspaceArtifactKind]
+    WORKSPACE_ARTIFACT_KIND_BUNDLE: _ClassVar[WorkspaceArtifactKind]
 
 class ObjectiveStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
@@ -49,6 +81,23 @@ class ReplyState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     REPLY_STATE_DELIVERED: _ClassVar[ReplyState]
     REPLY_STATE_FAILED: _ClassVar[ReplyState]
     REPLY_STATE_UNCERTAIN: _ClassVar[ReplyState]
+LIVE_INPUT_STATE_UNSPECIFIED: LiveInputState
+LIVE_INPUT_STATE_PENDING: LiveInputState
+LIVE_INPUT_STATE_DISPATCHING: LiveInputState
+LIVE_INPUT_STATE_ACCEPTED: LiveInputState
+LIVE_INPUT_STATE_REJECTED: LiveInputState
+LIVE_INPUT_STATE_UNKNOWN: LiveInputState
+LIVE_INPUT_STATE_WITHDRAWN: LiveInputState
+LIVE_INPUT_STATE_FAILED: LiveInputState
+LIVE_INPUT_STATE_RETRIED: LiveInputState
+LIVE_INPUT_DECISION_UNSPECIFIED: LiveInputDecision
+LIVE_INPUT_DECISION_FAIL: LiveInputDecision
+LIVE_INPUT_DECISION_RETRY: LiveInputDecision
+LIVE_INPUT_RECEIPT_UNSPECIFIED: LiveInputReceipt
+LIVE_INPUT_RECEIPT_ACCEPTED: LiveInputReceipt
+LIVE_INPUT_RECEIPT_REJECTED: LiveInputReceipt
+LIVE_INPUT_RECEIPT_UNKNOWN: LiveInputReceipt
+LIVE_INPUT_RECEIPT_WITHDRAWN: LiveInputReceipt
 TASK_STATE_UNSPECIFIED: TaskState
 TASK_STATE_QUEUED: TaskState
 TASK_STATE_RUNNING: TaskState
@@ -60,6 +109,9 @@ TASK_STATE_UNCERTAIN: TaskState
 ATTEMPT_DECISION_UNSPECIFIED: AttemptDecision
 ATTEMPT_DECISION_FAILED: AttemptDecision
 ATTEMPT_DECISION_RETRY: AttemptDecision
+WORKSPACE_ARTIFACT_KIND_UNSPECIFIED: WorkspaceArtifactKind
+WORKSPACE_ARTIFACT_KIND_PATCH: WorkspaceArtifactKind
+WORKSPACE_ARTIFACT_KIND_BUNDLE: WorkspaceArtifactKind
 OBJECTIVE_STATUS_UNSPECIFIED: ObjectiveStatus
 OBJECTIVE_STATUS_WORKING: ObjectiveStatus
 OBJECTIVE_STATUS_BLOCKED: ObjectiveStatus
@@ -77,6 +129,88 @@ REPLY_STATE_CLAIMED: ReplyState
 REPLY_STATE_DELIVERED: ReplyState
 REPLY_STATE_FAILED: ReplyState
 REPLY_STATE_UNCERTAIN: ReplyState
+
+class QueueInputRequest(_message.Message):
+    __slots__ = ("task_id", "operation_id", "text")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    operation_id: str
+    text: str
+    def __init__(self, task_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
+
+class GetInputRequest(_message.Message):
+    __slots__ = ("input_id",)
+    INPUT_ID_FIELD_NUMBER: _ClassVar[int]
+    input_id: str
+    def __init__(self, input_id: _Optional[str] = ...) -> None: ...
+
+class ResolveInputRequest(_message.Message):
+    __slots__ = ("input_id", "operation_id", "decision", "evidence")
+    INPUT_ID_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    DECISION_FIELD_NUMBER: _ClassVar[int]
+    EVIDENCE_FIELD_NUMBER: _ClassVar[int]
+    input_id: str
+    operation_id: str
+    decision: LiveInputDecision
+    evidence: str
+    def __init__(self, input_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., decision: _Optional[_Union[LiveInputDecision, str]] = ..., evidence: _Optional[str] = ...) -> None: ...
+
+class LiveInput(_message.Message):
+    __slots__ = ("input_id", "task_id", "attempt_id", "follower_task_id", "text", "state", "order")
+    INPUT_ID_FIELD_NUMBER: _ClassVar[int]
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    FOLLOWER_TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    ORDER_FIELD_NUMBER: _ClassVar[int]
+    input_id: str
+    task_id: str
+    attempt_id: str
+    follower_task_id: str
+    text: str
+    state: LiveInputState
+    order: int
+    def __init__(self, input_id: _Optional[str] = ..., task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., follower_task_id: _Optional[str] = ..., text: _Optional[str] = ..., state: _Optional[_Union[LiveInputState, str]] = ..., order: _Optional[int] = ...) -> None: ...
+
+class TakeInputRequest(_message.Message):
+    __slots__ = ("attempt",)
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ...) -> None: ...
+
+class TakeInputResponse(_message.Message):
+    __slots__ = ("input", "valid_for_ms")
+    INPUT_FIELD_NUMBER: _ClassVar[int]
+    VALID_FOR_MS_FIELD_NUMBER: _ClassVar[int]
+    input: LiveInput
+    valid_for_ms: int
+    def __init__(self, input: _Optional[_Union[LiveInput, _Mapping]] = ..., valid_for_ms: _Optional[int] = ...) -> None: ...
+
+class HarnessTakeLiveInputRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class HarnessSettleLiveInputRequest(_message.Message):
+    __slots__ = ("input_id", "receipt")
+    INPUT_ID_FIELD_NUMBER: _ClassVar[int]
+    RECEIPT_FIELD_NUMBER: _ClassVar[int]
+    input_id: str
+    receipt: LiveInputReceipt
+    def __init__(self, input_id: _Optional[str] = ..., receipt: _Optional[_Union[LiveInputReceipt, str]] = ...) -> None: ...
+
+class SettleInputRequest(_message.Message):
+    __slots__ = ("attempt", "input_id", "receipt")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    INPUT_ID_FIELD_NUMBER: _ClassVar[int]
+    RECEIPT_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    input_id: str
+    receipt: LiveInputReceipt
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., input_id: _Optional[str] = ..., receipt: _Optional[_Union[LiveInputReceipt, str]] = ...) -> None: ...
 
 class CreateAuthKeyRequest(_message.Message):
     __slots__ = ("host_id", "operation_id", "key_digest", "expires_in_ms", "allowed_tag_ids", "all_tags")
@@ -153,26 +287,30 @@ class AuthenticateHostRequest(_message.Message):
     def __init__(self, token_digest: _Optional[bytes] = ...) -> None: ...
 
 class PutTagRequest(_message.Message):
-    __slots__ = ("tag_id", "instructions", "allowed_actions")
+    __slots__ = ("tag_id", "instructions", "allowed_actions", "workspace")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     instructions: str
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ...) -> None: ...
+    workspace: WorkspaceSpec
+    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ...) -> None: ...
 
 class Tag(_message.Message):
-    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision")
+    __slots__ = ("tag_id", "instructions", "allowed_actions", "revision", "workspace")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
     ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
     REVISION_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     instructions: str
     allowed_actions: _containers.RepeatedScalarFieldContainer[str]
     revision: int
-    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ...) -> None: ...
+    workspace: WorkspaceSpec
+    def __init__(self, tag_id: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., revision: _Optional[int] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ...) -> None: ...
 
 class SubmitTaskRequest(_message.Message):
     __slots__ = ("tag_id", "session_id", "operation_id", "prompt")
@@ -187,7 +325,7 @@ class SubmitTaskRequest(_message.Message):
     def __init__(self, tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., prompt: _Optional[str] = ...) -> None: ...
 
 class Task(_message.Message):
-    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id")
+    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -198,6 +336,8 @@ class Task(_message.Message):
     STATE_FIELD_NUMBER: _ClassVar[int]
     RESULT_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_DELIVERY_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     tag_id: str
     session_id: str
@@ -208,7 +348,9 @@ class Task(_message.Message):
     state: TaskState
     result: str
     attempt_id: str
-    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ...) -> None: ...
+    workspace: WorkspaceSpec
+    workspace_delivery: WorkspaceDeliveryReference
+    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ...) -> None: ...
 
 class GetTaskRequest(_message.Message):
     __slots__ = ("task_id",)
@@ -239,10 +381,12 @@ class CancelTaskRequest(_message.Message):
     def __init__(self, task_id: _Optional[str] = ...) -> None: ...
 
 class ClaimTaskRequest(_message.Message):
-    __slots__ = ("operation_id",)
+    __slots__ = ("operation_id", "workspace_ids")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_IDS_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
-    def __init__(self, operation_id: _Optional[str] = ...) -> None: ...
+    workspace_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, operation_id: _Optional[str] = ..., workspace_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ClaimTaskResponse(_message.Message):
     __slots__ = ("assignment",)
@@ -407,7 +551,7 @@ class TaskEvent(_message.Message):
     def __init__(self, sequence: _Optional[int] = ..., text: _Optional[str] = ...) -> None: ...
 
 class FinishTaskRequest(_message.Message):
-    __slots__ = ("task_id", "attempt_id", "lease_token", "result", "succeeded", "objective_signal", "checkpoint_sha256")
+    __slots__ = ("task_id", "attempt_id", "lease_token", "result", "succeeded", "objective_signal", "checkpoint_sha256", "workspace_delivery")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
@@ -415,6 +559,7 @@ class FinishTaskRequest(_message.Message):
     SUCCEEDED_FIELD_NUMBER: _ClassVar[int]
     OBJECTIVE_SIGNAL_FIELD_NUMBER: _ClassVar[int]
     CHECKPOINT_SHA256_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_DELIVERY_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     attempt_id: str
     lease_token: str
@@ -422,7 +567,8 @@ class FinishTaskRequest(_message.Message):
     succeeded: bool
     objective_signal: ObjectiveSignal
     checkpoint_sha256: str
-    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., result: _Optional[str] = ..., succeeded: _Optional[bool] = ..., objective_signal: _Optional[_Union[ObjectiveSignal, str]] = ..., checkpoint_sha256: _Optional[str] = ...) -> None: ...
+    workspace_delivery: WorkspaceDeliveryReference
+    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., result: _Optional[str] = ..., succeeded: _Optional[bool] = ..., objective_signal: _Optional[_Union[ObjectiveSignal, str]] = ..., checkpoint_sha256: _Optional[str] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ...) -> None: ...
 
 class HarnessAttachRequest(_message.Message):
     __slots__ = ()
@@ -499,6 +645,84 @@ class CheckpointDownload(_message.Message):
     reference: CheckpointReference
     chunk: bytes
     def __init__(self, reference: _Optional[_Union[CheckpointReference, _Mapping]] = ..., chunk: _Optional[bytes] = ...) -> None: ...
+
+class WorkspaceSpec(_message.Message):
+    __slots__ = ("workspace_id", "base_commit")
+    WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
+    BASE_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    workspace_id: str
+    base_commit: str
+    def __init__(self, workspace_id: _Optional[str] = ..., base_commit: _Optional[str] = ...) -> None: ...
+
+class BlobReference(_message.Message):
+    __slots__ = ("sha256", "byte_length")
+    SHA256_FIELD_NUMBER: _ClassVar[int]
+    BYTE_LENGTH_FIELD_NUMBER: _ClassVar[int]
+    sha256: str
+    byte_length: int
+    def __init__(self, sha256: _Optional[str] = ..., byte_length: _Optional[int] = ...) -> None: ...
+
+class WorkspaceDeliveryReference(_message.Message):
+    __slots__ = ("workspace_id", "delivery_id", "base_commit", "start_commit", "head_commit", "committed", "changed_files", "patch", "bundle")
+    WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
+    DELIVERY_ID_FIELD_NUMBER: _ClassVar[int]
+    BASE_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    START_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    HEAD_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    COMMITTED_FIELD_NUMBER: _ClassVar[int]
+    CHANGED_FILES_FIELD_NUMBER: _ClassVar[int]
+    PATCH_FIELD_NUMBER: _ClassVar[int]
+    BUNDLE_FIELD_NUMBER: _ClassVar[int]
+    workspace_id: str
+    delivery_id: str
+    base_commit: str
+    start_commit: str
+    head_commit: str
+    committed: bool
+    changed_files: int
+    patch: BlobReference
+    bundle: BlobReference
+    def __init__(self, workspace_id: _Optional[str] = ..., delivery_id: _Optional[str] = ..., base_commit: _Optional[str] = ..., start_commit: _Optional[str] = ..., head_commit: _Optional[str] = ..., committed: _Optional[bool] = ..., changed_files: _Optional[int] = ..., patch: _Optional[_Union[BlobReference, _Mapping]] = ..., bundle: _Optional[_Union[BlobReference, _Mapping]] = ...) -> None: ...
+
+class WorkspaceDeliveryRequest(_message.Message):
+    __slots__ = ("attempt", "delivery")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    DELIVERY_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    delivery: WorkspaceDeliveryReference
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ...) -> None: ...
+
+class WorkspaceContinuation(_message.Message):
+    __slots__ = ("delivery",)
+    DELIVERY_FIELD_NUMBER: _ClassVar[int]
+    delivery: WorkspaceDeliveryReference
+    def __init__(self, delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ...) -> None: ...
+
+class WorkspaceUpload(_message.Message):
+    __slots__ = ("begin", "patch_chunk", "bundle_chunk")
+    BEGIN_FIELD_NUMBER: _ClassVar[int]
+    PATCH_CHUNK_FIELD_NUMBER: _ClassVar[int]
+    BUNDLE_CHUNK_FIELD_NUMBER: _ClassVar[int]
+    begin: WorkspaceDeliveryRequest
+    patch_chunk: bytes
+    bundle_chunk: bytes
+    def __init__(self, begin: _Optional[_Union[WorkspaceDeliveryRequest, _Mapping]] = ..., patch_chunk: _Optional[bytes] = ..., bundle_chunk: _Optional[bytes] = ...) -> None: ...
+
+class WorkspaceDownload(_message.Message):
+    __slots__ = ("reference", "chunk")
+    REFERENCE_FIELD_NUMBER: _ClassVar[int]
+    CHUNK_FIELD_NUMBER: _ClassVar[int]
+    reference: WorkspaceDeliveryReference
+    chunk: bytes
+    def __init__(self, reference: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., chunk: _Optional[bytes] = ...) -> None: ...
+
+class GetWorkspaceArtifactRequest(_message.Message):
+    __slots__ = ("task_id", "kind")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    kind: WorkspaceArtifactKind
+    def __init__(self, task_id: _Optional[str] = ..., kind: _Optional[_Union[WorkspaceArtifactKind, str]] = ...) -> None: ...
 
 class HarnessPublishRequest(_message.Message):
     __slots__ = ("sequence", "text")
@@ -659,6 +883,32 @@ class AcceptEventRequest(_message.Message):
     prompt: str
     destination: ReplyDestination
     def __init__(self, account_id: _Optional[str] = ..., event_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., destination: _Optional[_Union[ReplyDestination, _Mapping]] = ...) -> None: ...
+
+class AcceptSlackEventRequest(_message.Message):
+    __slots__ = ("account_id", "event_id", "team_id", "channel_id", "message_ts", "thread_ts", "prompt", "mention_tag_id")
+    ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
+    EVENT_ID_FIELD_NUMBER: _ClassVar[int]
+    TEAM_ID_FIELD_NUMBER: _ClassVar[int]
+    CHANNEL_ID_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_TS_FIELD_NUMBER: _ClassVar[int]
+    THREAD_TS_FIELD_NUMBER: _ClassVar[int]
+    PROMPT_FIELD_NUMBER: _ClassVar[int]
+    MENTION_TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    account_id: str
+    event_id: str
+    team_id: str
+    channel_id: str
+    message_ts: str
+    thread_ts: str
+    prompt: str
+    mention_tag_id: str
+    def __init__(self, account_id: _Optional[str] = ..., event_id: _Optional[str] = ..., team_id: _Optional[str] = ..., channel_id: _Optional[str] = ..., message_ts: _Optional[str] = ..., thread_ts: _Optional[str] = ..., prompt: _Optional[str] = ..., mention_tag_id: _Optional[str] = ...) -> None: ...
+
+class AcceptSlackEventResponse(_message.Message):
+    __slots__ = ("task",)
+    TASK_FIELD_NUMBER: _ClassVar[int]
+    task: Task
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ...) -> None: ...
 
 class Reply(_message.Message):
     __slots__ = ("reply_id", "task_id", "account_id", "destination", "text", "state", "provider_receipt")

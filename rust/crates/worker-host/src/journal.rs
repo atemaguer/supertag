@@ -5,12 +5,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::workspaces::{PendingWorkspace, PreparedWorkspace};
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use supertag_protocol::{MAX_CHECKPOINT_BYTES, v2::SessionCheckpoint};
 use tempfile::NamedTempFile;
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct Attempt {
     pub task_id: String,
     pub attempt_id: String,
@@ -38,6 +39,17 @@ pub(crate) enum Entry {
     Executing {
         #[serde(flatten)]
         attempt: Attempt,
+        #[serde(default)]
+        prepared: Option<Box<PreparedWorkspace>>,
+    },
+    Finalizing {
+        #[serde(flatten)]
+        attempt: Attempt,
+        result: String,
+        succeeded: bool,
+        objective_signal: i32,
+        checkpoint: Option<PendingCheckpoint>,
+        workspace: Box<PreparedWorkspace>,
     },
     Finish {
         #[serde(flatten)]
@@ -48,7 +60,53 @@ pub(crate) enum Entry {
         objective_signal: i32,
         #[serde(default)]
         checkpoint: Option<PendingCheckpoint>,
+        #[serde(default)]
+        workspace: Option<Box<PendingWorkspace>>,
+        #[serde(default)]
+        prepared: Option<Box<PreparedWorkspace>>,
     },
+    Terminal {
+        #[serde(flatten)]
+        attempt: Attempt,
+        prepared: Option<Box<PreparedWorkspace>>,
+    },
+}
+
+impl Entry {
+    /// Keep checkout ownership when an outcome is downgraded after local cleanup.
+    pub(crate) fn prepared(&self, expected: &Attempt) -> Result<Option<Box<PreparedWorkspace>>> {
+        let (attempt, prepared) = match self {
+            Self::Starting { attempt } => (attempt, None),
+            Self::Executing { attempt, prepared } | Self::Terminal { attempt, prepared } => {
+                (attempt, prepared.clone())
+            }
+            Self::Finalizing {
+                attempt, workspace, ..
+            } => (attempt, Some(workspace.clone())),
+            Self::Finish {
+                attempt,
+                prepared,
+                workspace,
+                ..
+            } => (
+                attempt,
+                prepared.clone().or_else(|| {
+                    workspace.as_ref().map(|pending| {
+                        Box::new(PreparedWorkspace {
+                            workspace_id: pending.workspace_id.clone(),
+                            checkout: pending.checkout.clone(),
+                        })
+                    })
+                }),
+            ),
+            Self::Claim { .. } => anyhow::bail!("claim journal has no prepared Attempt"),
+        };
+        ensure!(
+            attempt == expected,
+            "workspace journal belongs to another Attempt"
+        );
+        Ok(prepared)
+    }
 }
 
 pub(crate) struct Journal {
@@ -209,12 +267,13 @@ mod tests {
                 attempt_id: "attempt".into(),
                 lease_token: "lease".into(),
             },
+            prepared: None,
         })?;
         drop(journal);
         let reopened = Journal::open(state.path())?;
         assert!(matches!(
             reopened.load()?,
-            Some(Entry::Executing { attempt })
+            Some(Entry::Executing { attempt, .. })
                 if attempt.task_id == "task" && attempt.attempt_id == "attempt"
         ));
         reopened.clear()?;

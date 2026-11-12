@@ -25,7 +25,7 @@ use serde_json::json;
 use sha2::Sha256;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
-    v2::{AcceptEventRequest, ReplyDestination, connector_client::ConnectorClient},
+    v2::{AcceptSlackEventRequest, connector_client::ConnectorClient},
 };
 use tokio::{net::TcpListener, time};
 use tokio_util::sync::CancellationToken;
@@ -214,7 +214,7 @@ async fn webhook(State(slack): State<Slack>, headers: HeaderMap, body: Bytes) ->
                 return StatusCode::SERVICE_UNAVAILABLE.into_response();
             };
             let mut control_plane = connector.control_plane.clone();
-            match time::timeout(ACCEPT_TIMEOUT, control_plane.accept_event(request)).await {
+            match time::timeout(ACCEPT_TIMEOUT, control_plane.accept_slack_event(request)).await {
                 Ok(Ok(_)) => StatusCode::OK.into_response(),
                 Ok(Err(error)) if error.code() == tonic::Code::AlreadyExists => {
                     StatusCode::CONFLICT.into_response()
@@ -264,7 +264,7 @@ fn verify_signature(headers: &HeaderMap, body: &[u8], secret: &str, now: u64) ->
 
 enum Ingress {
     Challenge(String),
-    Accept(AcceptEventRequest),
+    Accept(AcceptSlackEventRequest),
     Ignore,
 }
 
@@ -313,7 +313,9 @@ fn normalize(config: &SlackConfig, body: &[u8]) -> Result<Ingress, StatusCode> {
             if team_id != config.team_id {
                 return Err(StatusCode::FORBIDDEN);
             }
-            if event.kind != "app_mention"
+            let mention = event.kind == "app_mention";
+            let reply = event.kind == "message" && event.thread_ts.is_some();
+            if (!mention && !reply)
                 || event.bot_id.is_some()
                 || event.subtype.is_some()
                 || event.channel.as_deref() != Some(&config.channel_id)
@@ -327,7 +329,7 @@ fn normalize(config: &SlackConfig, body: &[u8]) -> Result<Ingress, StatusCode> {
                 .ts
                 .filter(|ts| slack_ts(ts))
                 .ok_or(StatusCode::BAD_REQUEST)?;
-            let thread = event.thread_ts.unwrap_or(ts);
+            let thread = event.thread_ts.unwrap_or_else(|| ts.clone());
             if !slack_ts(&thread)
                 || !event_id.starts_with("Ev")
                 || !(3..=128).contains(&event_id.len())
@@ -340,16 +342,15 @@ fn normalize(config: &SlackConfig, body: &[u8]) -> Result<Ingress, StatusCode> {
                 .filter(|text| !text.trim().is_empty())
                 .ok_or(StatusCode::BAD_REQUEST)?;
             let channel = config.channel_id.clone();
-            Ok(Ingress::Accept(AcceptEventRequest {
+            Ok(Ingress::Accept(AcceptSlackEventRequest {
                 account_id: config.account_id.clone(),
                 event_id,
-                tag_id: config.tag_id.clone(),
-                session_id: format!("slack:{team_id}:{channel}:{thread}"),
+                team_id,
+                channel_id: channel,
+                message_ts: ts,
+                thread_ts: thread,
+                mention_tag_id: mention.then(|| config.tag_id.clone()),
                 prompt,
-                destination: Some(ReplyDestination {
-                    conversation_id: channel,
-                    thread_id: Some(thread),
-                }),
             }))
         }
     }

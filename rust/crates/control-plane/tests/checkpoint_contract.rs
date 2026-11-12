@@ -94,6 +94,7 @@ fn finish(
     checkpoint: Option<&CheckpointReference>,
 ) -> FinishTaskRequest {
     FinishTaskRequest {
+        workspace_delivery: None,
         task_id: attempt.task_id.clone(),
         attempt_id: attempt.attempt_id.clone(),
         lease_token: attempt.lease_token.clone(),

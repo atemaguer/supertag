@@ -110,3 +110,56 @@ impl v2::SessionCheckpoint {
         }
     }
 }
+
+pub const MAX_WORKSPACE_BLOB_BYTES: usize = 256 * 1024 * 1024;
+
+pub fn valid_workspace_id(value: &str) -> bool {
+    value.len() <= 80
+        && value
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphanumeric)
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+}
+
+pub fn valid_git_commit(value: &str) -> bool {
+    (value.len() == 40 || value.len() == 64)
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+}
+
+pub fn validate_workspace_delivery(
+    reference: &v2::WorkspaceDeliveryReference,
+) -> Result<(), Status> {
+    let blob = |value: &v2::BlobReference| {
+        valid_sha256(&value.sha256) && value.byte_length <= MAX_WORKSPACE_BLOB_BYTES as u64
+    };
+    if !valid_workspace_id(&reference.workspace_id)
+        || !valid_sha256(&reference.delivery_id)
+        || ![
+            &reference.base_commit,
+            &reference.start_commit,
+            &reference.head_commit,
+        ]
+        .iter()
+        .all(|pin| pin.len() == reference.base_commit.len() && valid_git_commit(pin))
+        || reference.committed != (reference.start_commit != reference.head_commit)
+        || reference.committed != (reference.changed_files > 0)
+        || reference
+            .patch
+            .as_ref()
+            .is_none_or(|value| !blob(value) || reference.committed != (value.byte_length > 0))
+        || reference
+            .bundle
+            .as_ref()
+            .is_none_or(|value| !blob(value) || value.byte_length == 0)
+    {
+        return Err(Status::invalid_argument(
+            "invalid workspace delivery reference",
+        ));
+    }
+    Ok(())
+}

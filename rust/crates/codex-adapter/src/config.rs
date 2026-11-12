@@ -88,6 +88,8 @@ pub(crate) fn arguments(
         "in_app_browser",
         "hooks",
         "code_mode",
+        // Native code-mode commands reached a non-loopback endpoint under the
+        // limited network profile in the Codex 0.163.0 macOS integration probe.
         "code_mode_host",
         "memories",
         "image_generation",

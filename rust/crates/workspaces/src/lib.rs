@@ -128,6 +128,27 @@ impl Workspace {
             "workspace state and source repository must be separate directories"
         );
         paths::create_private_root(&root)?;
+        Self::open_recorded(
+            root,
+            ConfigRecord {
+                source,
+                base_commit: config.base_commit,
+            },
+        )
+    }
+
+    /// Reopen host-owned state without consulting its original source repository.
+    /// This permits terminal cleanup and receipt inspection after source removal.
+    pub fn open_existing(state_dir: &Path) -> Result<Self> {
+        let root = paths::planned_path(state_dir)?;
+        paths::verify_directory(&root)?;
+        let record: ConfigRecord = read_json(&root.join("config.json"))?
+            .context("workspace state has no configuration")?;
+        git::validate_oid(&record.base_commit)?;
+        Self::open_recorded(root, record)
+    }
+
+    fn open_recorded(root: PathBuf, record: ConfigRecord) -> Result<Self> {
         let lock = OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -138,10 +159,6 @@ impl Workspace {
             .open(root.join("workspace.lock"))?;
         lock.try_lock()
             .context("another process owns this workspace state directory")?;
-        let record = ConfigRecord {
-            source,
-            base_commit: config.base_commit,
-        };
         let config_path = root.join("config.json");
         match read_json::<ConfigRecord>(&config_path)? {
             Some(prior) => ensure!(
@@ -510,12 +527,29 @@ impl Workspace {
 
     /// Remove only a finalized working copy. Immutable delivery artifacts remain available.
     pub fn remove_checkout(&self, checkout: &Checkout) -> Result<()> {
+        self.remove_checkout_inner(checkout, true)
+    }
+
+    /// Discard an exact prepared checkout after execution has stopped and its
+    /// owning Host has obtained terminal settlement or an audited recovery receipt.
+    /// The caller owns that authority check; uncertain running work must be retained.
+    /// Delivery artifacts and all preparation/finalization records are preserved.
+    pub fn discard_checkout(&self, checkout: &Checkout) -> Result<()> {
+        self.remove_checkout_inner(checkout, false)
+    }
+
+    fn remove_checkout_inner(&self, checkout: &Checkout, require_delivery: bool) -> Result<()> {
         let _guard = self
             .inner
             .gate
             .try_lock()
             .context("workspace operation is in progress")?;
         let id = identity(&checkout.task_id, &checkout.attempt_id);
+        ensure!(
+            checkout.path == self.inner.root.join("checkouts").join(&id)
+                && checkout.base_commit == self.inner.config.base_commit,
+            "checkout does not belong to this workspace state"
+        );
         let prepared: Preparation = read_json(
             &self
                 .inner
@@ -530,8 +564,10 @@ impl Workspace {
             "checkout differs from the accepted preparation"
         );
         ensure!(
-            self.delivery(&checkout.task_id, &checkout.attempt_id)?
-                .is_some(),
+            !require_delivery
+                || self
+                    .delivery(&checkout.task_id, &checkout.attempt_id)?
+                    .is_some(),
             "cannot remove a checkout before its delivery receipt is durable"
         );
         match fs::symlink_metadata(&checkout.path) {

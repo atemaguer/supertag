@@ -39,6 +39,19 @@ service WorkerHost {
   rpc FinishTask(FinishTaskRequest) returns (Task);
 }
 
+// Operator commands and durable history for input directed into a running Task.
+service LiveInputs {
+  rpc QueueInput(QueueInputRequest) returns (LiveInput);
+  rpc GetInput(GetInputRequest) returns (LiveInput);
+  rpc ResolveInput(ResolveInputRequest) returns (LiveInput);
+}
+
+// A separate lane for Worklets to take input and record native delivery evidence.
+service AttemptInputs {
+  rpc TakeInput(TakeInputRequest) returns (TakeInputResponse);
+  rpc SettleInput(SettleInputRequest) returns (LiveInput);
+}
+
 // A one-time Auth Key authorizes enrollment for one designated Worker Host.
 service HostEnrollment {
   rpc EnrollHost(EnrollHostRequest) returns (HostRecord);
@@ -54,6 +67,7 @@ service HostDirectory {
 // principal identifies the account. Provider request bodies cannot select it.
 service Connector {
   rpc AcceptEvent(AcceptEventRequest) returns (Task);
+  rpc AcceptSlackEvent(AcceptSlackEventRequest) returns (AcceptSlackEventResponse);
   rpc ClaimReply(ClaimReplyRequest) returns (ClaimReplyResponse);
   rpc SettleReply(SettleReplyRequest) returns (Reply);
 }
@@ -62,6 +76,9 @@ service Connector {
 service Transfers {
   rpc UploadCheckpoint(stream CheckpointUpload) returns (CheckpointReference);
   rpc DownloadCheckpoint(InspectAttemptRequest) returns (stream CheckpointDownload);
+  rpc UploadWorkspace(stream WorkspaceUpload) returns (WorkspaceDeliveryReference);
+  rpc DownloadWorkspace(InspectAttemptRequest) returns (stream WorkspaceDownload);
+  rpc DownloadWorkspaceArtifact(GetWorkspaceArtifactRequest) returns (stream WorkspaceDownload);
 }
 
 // Private authorization and commit for bytes stored by the Gateway.
@@ -71,13 +88,98 @@ service CheckpointDirectory {
   rpc CommitCheckpoint(CommitCheckpointRequest) returns (CheckpointReference);
 }
 
+// Private authorization and commit for work product stored by the Gateway.
+service WorkspaceDirectory {
+  rpc GetContinuation(InspectAttemptRequest) returns (WorkspaceContinuation);
+  rpc ReserveDelivery(WorkspaceDeliveryRequest) returns (WorkspaceDeliveryReference);
+  rpc CommitDelivery(WorkspaceDeliveryRequest) returns (WorkspaceDeliveryReference);
+  rpc GetArtifact(GetWorkspaceArtifactRequest) returns (WorkspaceDeliveryReference);
+}
+
 // An adapter connects only to its supervising Worker Host. The launch pipe
 // provides its endpoint and an execution-scoped credential.
 service Harness {
   rpc Attach(HarnessAttachRequest) returns (HarnessRun);
+  rpc TakeLiveInput(HarnessTakeLiveInputRequest) returns (TakeInputResponse);
+  rpc SettleLiveInput(HarnessSettleLiveInputRequest) returns (LiveInput);
   rpc Publish(HarnessPublishRequest) returns (TaskEvent);
   rpc ReportUsage(HarnessUsageRequest) returns (ReportAttemptUsageResponse);
   rpc Complete(HarnessCompleteRequest) returns (HarnessCompleteResponse);
+}
+
+enum LiveInputState {
+  LIVE_INPUT_STATE_UNSPECIFIED = 0;
+  LIVE_INPUT_STATE_PENDING = 1;
+  LIVE_INPUT_STATE_DISPATCHING = 2;
+  LIVE_INPUT_STATE_ACCEPTED = 3;
+  LIVE_INPUT_STATE_REJECTED = 4;
+  LIVE_INPUT_STATE_UNKNOWN = 5;
+  LIVE_INPUT_STATE_WITHDRAWN = 6;
+  LIVE_INPUT_STATE_FAILED = 7;
+  LIVE_INPUT_STATE_RETRIED = 8;
+}
+
+enum LiveInputDecision {
+  LIVE_INPUT_DECISION_UNSPECIFIED = 0;
+  LIVE_INPUT_DECISION_FAIL = 1;
+  LIVE_INPUT_DECISION_RETRY = 2;
+}
+
+enum LiveInputReceipt {
+  LIVE_INPUT_RECEIPT_UNSPECIFIED = 0;
+  LIVE_INPUT_RECEIPT_ACCEPTED = 1;
+  LIVE_INPUT_RECEIPT_REJECTED = 2;
+  LIVE_INPUT_RECEIPT_UNKNOWN = 3;
+  LIVE_INPUT_RECEIPT_WITHDRAWN = 4;
+}
+
+message QueueInputRequest {
+  string task_id = 1;
+  string operation_id = 2;
+  string text = 3;
+}
+
+message GetInputRequest {
+  string input_id = 1;
+}
+
+message ResolveInputRequest {
+  string input_id = 1;
+  string operation_id = 2;
+  LiveInputDecision decision = 3;
+  string evidence = 4;
+}
+
+message LiveInput {
+  string input_id = 1;
+  string task_id = 2;
+  string attempt_id = 3;
+  string follower_task_id = 4;
+  string text = 5;
+  LiveInputState state = 6;
+  uint64 order = 7;
+}
+
+message TakeInputRequest {
+  InspectAttemptRequest attempt = 1;
+}
+
+message TakeInputResponse {
+  LiveInput input = 1;
+  uint64 valid_for_ms = 2;
+}
+
+message HarnessTakeLiveInputRequest {}
+
+message HarnessSettleLiveInputRequest {
+  string input_id = 1;
+  LiveInputReceipt receipt = 2;
+}
+
+message SettleInputRequest {
+  InspectAttemptRequest attempt = 1;
+  string input_id = 2;
+  LiveInputReceipt receipt = 3;
 }
 
 message CreateAuthKeyRequest {
@@ -140,6 +242,7 @@ message PutTagRequest {
   string tag_id = 1;
   string instructions = 2;
   repeated string allowed_actions = 3;
+  WorkspaceSpec workspace = 4;
 }
 
 message Tag {
@@ -147,6 +250,7 @@ message Tag {
   string instructions = 2;
   repeated string allowed_actions = 3;
   uint64 revision = 4;
+  WorkspaceSpec workspace = 5;
 }
 
 message SubmitTaskRequest {
@@ -167,6 +271,8 @@ message Task {
   TaskState state = 8;
   optional string result = 9;
   optional string attempt_id = 10;
+  WorkspaceSpec workspace = 11;
+  WorkspaceDeliveryReference workspace_delivery = 12;
 }
 
 message GetTaskRequest {
@@ -189,6 +295,7 @@ message CancelTaskRequest {
 
 message ClaimTaskRequest {
   string operation_id = 1;
+  repeated string workspace_ids = 2;
 }
 
 message ClaimTaskResponse {
@@ -301,6 +408,7 @@ message FinishTaskRequest {
   bool succeeded = 5;
   ObjectiveSignal objective_signal = 6;
   optional string checkpoint_sha256 = 7;
+  WorkspaceDeliveryReference workspace_delivery = 8;
 }
 
 message HarnessAttachRequest {}
@@ -351,6 +459,63 @@ message CheckpointDownload {
     CheckpointReference reference = 1;
     bytes chunk = 2;
   }
+}
+
+message WorkspaceSpec {
+  string workspace_id = 1;
+  string base_commit = 2;
+}
+
+message BlobReference {
+  string sha256 = 1;
+  uint64 byte_length = 2;
+}
+
+message WorkspaceDeliveryReference {
+  string workspace_id = 1;
+  string delivery_id = 2;
+  string base_commit = 3;
+  string start_commit = 4;
+  string head_commit = 5;
+  bool committed = 6;
+  uint64 changed_files = 7;
+  BlobReference patch = 8;
+  BlobReference bundle = 9;
+}
+
+message WorkspaceDeliveryRequest {
+  InspectAttemptRequest attempt = 1;
+  WorkspaceDeliveryReference delivery = 2;
+}
+
+message WorkspaceContinuation {
+  WorkspaceDeliveryReference delivery = 1;
+}
+
+message WorkspaceUpload {
+  oneof part {
+    WorkspaceDeliveryRequest begin = 1;
+    bytes patch_chunk = 2;
+    bytes bundle_chunk = 3;
+  }
+}
+
+message WorkspaceDownload {
+  oneof part {
+    WorkspaceDeliveryReference reference = 1;
+    bytes chunk = 2;
+  }
+}
+
+enum WorkspaceArtifactKind {
+  WORKSPACE_ARTIFACT_KIND_UNSPECIFIED = 0;
+  WORKSPACE_ARTIFACT_KIND_PATCH = 1;
+  WORKSPACE_ARTIFACT_KIND_BUNDLE = 2;
+}
+
+message GetWorkspaceArtifactRequest {
+  string task_id = 1;
+  WorkspaceArtifactKind kind = 2;
 }
 
 message HarnessPublishRequest {
@@ -460,6 +625,21 @@ message AcceptEventRequest {
   string session_id = 4;
   string prompt = 5;
   ReplyDestination destination = 6;
+}
+
+message AcceptSlackEventRequest {
+  string account_id = 1;
+  string event_id = 2;
+  string team_id = 3;
+  string channel_id = 4;
+  string message_ts = 5;
+  string thread_ts = 6;
+  string prompt = 7;
+  optional string mention_tag_id = 8;
+}
+
+message AcceptSlackEventResponse {
+  Task task = 1;
 }
 
 enum ReplyState {

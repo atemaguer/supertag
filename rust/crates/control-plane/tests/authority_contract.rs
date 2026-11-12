@@ -130,6 +130,7 @@ fn event(identity: &InspectAttemptRequest, text: &str) -> AppendEventRequest {
 
 fn finish(identity: &InspectAttemptRequest) -> FinishTaskRequest {
     FinishTaskRequest {
+        workspace_delivery: None,
         task_id: identity.task_id.clone(),
         attempt_id: identity.attempt_id.clone(),
         lease_token: identity.lease_token.clone(),

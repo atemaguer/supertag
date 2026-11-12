@@ -1236,6 +1236,285 @@ class WorkerHost:
             _registered_method=True)
 
 
+class LiveInputsStub:
+    """Operator commands and durable history for input directed into a running Task.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.QueueInput = channel.unary_unary(
+                '/supertag.runtime.v2.LiveInputs/QueueInput',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.QueueInputRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.LiveInput.FromString,
+                _registered_method=True)
+        self.GetInput = channel.unary_unary(
+                '/supertag.runtime.v2.LiveInputs/GetInput',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetInputRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.LiveInput.FromString,
+                _registered_method=True)
+        self.ResolveInput = channel.unary_unary(
+                '/supertag.runtime.v2.LiveInputs/ResolveInput',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveInputRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.LiveInput.FromString,
+                _registered_method=True)
+
+
+class LiveInputsServicer:
+    """Operator commands and durable history for input directed into a running Task.
+    """
+
+    def QueueInput(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetInput(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ResolveInput(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_LiveInputsServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'QueueInput': grpc.unary_unary_rpc_method_handler(
+                    servicer.QueueInput,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.QueueInputRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.LiveInput.SerializeToString,
+            ),
+            'GetInput': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetInput,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetInputRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.LiveInput.SerializeToString,
+            ),
+            'ResolveInput': grpc.unary_unary_rpc_method_handler(
+                    servicer.ResolveInput,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveInputRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.LiveInput.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.LiveInputs', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.LiveInputs', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class LiveInputs:
+    """Operator commands and durable history for input directed into a running Task.
+    """
+
+    @staticmethod
+    def QueueInput(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.LiveInputs/QueueInput',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.QueueInputRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.LiveInput.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetInput(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.LiveInputs/GetInput',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetInputRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.LiveInput.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ResolveInput(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.LiveInputs/ResolveInput',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveInputRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.LiveInput.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class AttemptInputsStub:
+    """A separate lane for Worklets to take input and record native delivery evidence.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.TakeInput = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptInputs/TakeInput',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.TakeInputRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.TakeInputResponse.FromString,
+                _registered_method=True)
+        self.SettleInput = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptInputs/SettleInput',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleInputRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.LiveInput.FromString,
+                _registered_method=True)
+
+
+class AttemptInputsServicer:
+    """A separate lane for Worklets to take input and record native delivery evidence.
+    """
+
+    def TakeInput(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SettleInput(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_AttemptInputsServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'TakeInput': grpc.unary_unary_rpc_method_handler(
+                    servicer.TakeInput,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.TakeInputRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.TakeInputResponse.SerializeToString,
+            ),
+            'SettleInput': grpc.unary_unary_rpc_method_handler(
+                    servicer.SettleInput,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleInputRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.LiveInput.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.AttemptInputs', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.AttemptInputs', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class AttemptInputs:
+    """A separate lane for Worklets to take input and record native delivery evidence.
+    """
+
+    @staticmethod
+    def TakeInput(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptInputs/TakeInput',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.TakeInputRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.TakeInputResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SettleInput(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptInputs/SettleInput',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleInputRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.LiveInput.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
 class HostEnrollmentStub:
     """A one-time Auth Key authorizes enrollment for one designated Worker Host.
     """
@@ -1445,6 +1724,11 @@ class ConnectorStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptEventRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
                 _registered_method=True)
+        self.AcceptSlackEvent = channel.unary_unary(
+                '/supertag.runtime.v2.Connector/AcceptSlackEvent',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptSlackEventRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptSlackEventResponse.FromString,
+                _registered_method=True)
         self.ClaimReply = channel.unary_unary(
                 '/supertag.runtime.v2.Connector/ClaimReply',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ClaimReplyRequest.SerializeToString,
@@ -1463,6 +1747,12 @@ class ConnectorServicer:
     """
 
     def AcceptEvent(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def AcceptSlackEvent(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -1487,6 +1777,11 @@ def add_ConnectorServicer_to_server(servicer, server):
                     servicer.AcceptEvent,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptEventRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.SerializeToString,
+            ),
+            'AcceptSlackEvent': grpc.unary_unary_rpc_method_handler(
+                    servicer.AcceptSlackEvent,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptSlackEventRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptSlackEventResponse.SerializeToString,
             ),
             'ClaimReply': grpc.unary_unary_rpc_method_handler(
                     servicer.ClaimReply,
@@ -1528,6 +1823,33 @@ class Connector:
             '/supertag.runtime.v2.Connector/AcceptEvent',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptEventRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def AcceptSlackEvent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Connector/AcceptSlackEvent',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptSlackEventRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AcceptSlackEventResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1613,6 +1935,21 @@ class TransfersStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointDownload.FromString,
                 _registered_method=True)
+        self.UploadWorkspace = channel.stream_unary(
+                '/supertag.runtime.v2.Transfers/UploadWorkspace',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceUpload.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
+                _registered_method=True)
+        self.DownloadWorkspace = channel.unary_stream(
+                '/supertag.runtime.v2.Transfers/DownloadWorkspace',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
+                _registered_method=True)
+        self.DownloadWorkspaceArtifact = channel.unary_stream(
+                '/supertag.runtime.v2.Transfers/DownloadWorkspaceArtifact',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
+                _registered_method=True)
 
 
 class TransfersServicer:
@@ -1631,6 +1968,24 @@ class TransfersServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def UploadWorkspace(self, request_iterator, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DownloadWorkspace(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DownloadWorkspaceArtifact(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_TransfersServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -1643,6 +1998,21 @@ def add_TransfersServicer_to_server(servicer, server):
                     servicer.DownloadCheckpoint,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointDownload.SerializeToString,
+            ),
+            'UploadWorkspace': grpc.stream_unary_rpc_method_handler(
+                    servicer.UploadWorkspace,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceUpload.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.SerializeToString,
+            ),
+            'DownloadWorkspace': grpc.unary_stream_rpc_method_handler(
+                    servicer.DownloadWorkspace,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.SerializeToString,
+            ),
+            'DownloadWorkspaceArtifact': grpc.unary_stream_rpc_method_handler(
+                    servicer.DownloadWorkspaceArtifact,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -1700,6 +2070,87 @@ class Transfers:
             '/supertag.runtime.v2.Transfers/DownloadCheckpoint',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointDownload.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UploadWorkspace(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_unary(
+            request_iterator,
+            target,
+            '/supertag.runtime.v2.Transfers/UploadWorkspace',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceUpload.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DownloadWorkspace(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/supertag.runtime.v2.Transfers/DownloadWorkspace',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DownloadWorkspaceArtifact(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/supertag.runtime.v2.Transfers/DownloadWorkspaceArtifact',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDownload.FromString,
             options,
             channel_credentials,
             insecure,
@@ -1872,6 +2323,210 @@ class CheckpointDirectory:
             _registered_method=True)
 
 
+class WorkspaceDirectoryStub:
+    """Private authorization and commit for work product stored by the Gateway.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.GetContinuation = channel.unary_unary(
+                '/supertag.runtime.v2.WorkspaceDirectory/GetContinuation',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceContinuation.FromString,
+                _registered_method=True)
+        self.ReserveDelivery = channel.unary_unary(
+                '/supertag.runtime.v2.WorkspaceDirectory/ReserveDelivery',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
+                _registered_method=True)
+        self.CommitDelivery = channel.unary_unary(
+                '/supertag.runtime.v2.WorkspaceDirectory/CommitDelivery',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
+                _registered_method=True)
+        self.GetArtifact = channel.unary_unary(
+                '/supertag.runtime.v2.WorkspaceDirectory/GetArtifact',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
+                _registered_method=True)
+
+
+class WorkspaceDirectoryServicer:
+    """Private authorization and commit for work product stored by the Gateway.
+    """
+
+    def GetContinuation(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ReserveDelivery(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CommitDelivery(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetArtifact(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_WorkspaceDirectoryServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'GetContinuation': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetContinuation,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceContinuation.SerializeToString,
+            ),
+            'ReserveDelivery': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReserveDelivery,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.SerializeToString,
+            ),
+            'CommitDelivery': grpc.unary_unary_rpc_method_handler(
+                    servicer.CommitDelivery,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.SerializeToString,
+            ),
+            'GetArtifact': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetArtifact,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.WorkspaceDirectory', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.WorkspaceDirectory', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class WorkspaceDirectory:
+    """Private authorization and commit for work product stored by the Gateway.
+    """
+
+    @staticmethod
+    def GetContinuation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkspaceDirectory/GetContinuation',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceContinuation.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReserveDelivery(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkspaceDirectory/ReserveDelivery',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CommitDelivery(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkspaceDirectory/CommitDelivery',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetArtifact(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkspaceDirectory/GetArtifact',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkspaceArtifactRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkspaceDeliveryReference.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
 class HarnessStub:
     """An adapter connects only to its supervising Worker Host. The launch pipe
     provides its endpoint and an execution-scoped credential.
@@ -1887,6 +2542,16 @@ class HarnessStub:
                 '/supertag.runtime.v2.Harness/Attach',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAttachRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessRun.FromString,
+                _registered_method=True)
+        self.TakeLiveInput = channel.unary_unary(
+                '/supertag.runtime.v2.Harness/TakeLiveInput',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessTakeLiveInputRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.TakeInputResponse.FromString,
+                _registered_method=True)
+        self.SettleLiveInput = channel.unary_unary(
+                '/supertag.runtime.v2.Harness/SettleLiveInput',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessSettleLiveInputRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.LiveInput.FromString,
                 _registered_method=True)
         self.Publish = channel.unary_unary(
                 '/supertag.runtime.v2.Harness/Publish',
@@ -1911,6 +2576,18 @@ class HarnessServicer:
     """
 
     def Attach(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def TakeLiveInput(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SettleLiveInput(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -1941,6 +2618,16 @@ def add_HarnessServicer_to_server(servicer, server):
                     servicer.Attach,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAttachRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessRun.SerializeToString,
+            ),
+            'TakeLiveInput': grpc.unary_unary_rpc_method_handler(
+                    servicer.TakeLiveInput,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessTakeLiveInputRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.TakeInputResponse.SerializeToString,
+            ),
+            'SettleLiveInput': grpc.unary_unary_rpc_method_handler(
+                    servicer.SettleLiveInput,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessSettleLiveInputRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.LiveInput.SerializeToString,
             ),
             'Publish': grpc.unary_unary_rpc_method_handler(
                     servicer.Publish,
@@ -1987,6 +2674,60 @@ class Harness:
             '/supertag.runtime.v2.Harness/Attach',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAttachRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessRun.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def TakeLiveInput(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Harness/TakeLiveInput',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessTakeLiveInputRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.TakeInputResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SettleLiveInput(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Harness/SettleLiveInput',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessSettleLiveInputRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.LiveInput.FromString,
             options,
             channel_credentials,
             insecure,

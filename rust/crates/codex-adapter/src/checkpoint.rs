@@ -442,6 +442,8 @@ mod tests {
 
     fn task() -> Task {
         Task {
+            workspace: None,
+            workspace_delivery: None,
             tag_id: "tag".into(),
             session_id: "session".into(),
             ..Default::default()

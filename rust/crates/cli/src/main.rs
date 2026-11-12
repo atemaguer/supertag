@@ -1,4 +1,6 @@
+mod artifacts;
 mod harness;
+mod inputs;
 mod local;
 mod network;
 mod objectives;
@@ -14,19 +16,21 @@ use supertag_control_plane::ControlPlane;
 use supertag_gateway::{
     Gateway,
     slack::{Slack, SlackConfig},
-    transfers::CheckpointTransfers,
+    transfers::GatewayTransfers,
 };
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
         AttemptDecision, CancelTaskRequest, CreateAuthKeyRequest, GetTaskRequest,
         ListEventsRequest, ListNativeUsageRequest, PutTagRequest, ResolveAttemptRequest,
-        RevokeHostRequest, SubmitTaskRequest, Task,
+        RevokeHostRequest, SubmitTaskRequest, Task, WorkspaceSpec,
+        attempt_inputs_server::AttemptInputsServer,
         checkpoint_directory_server::CheckpointDirectoryServer, connector_server::ConnectorServer,
         host_directory_server::HostDirectoryServer, host_enrollment_server::HostEnrollmentServer,
-        objectives_server::ObjectivesServer, operator_client::OperatorClient,
-        operator_server::OperatorServer, transfers_server::TransfersServer,
-        worker_host_server::WorkerHostServer,
+        live_inputs_server::LiveInputsServer, objectives_server::ObjectivesServer,
+        operator_client::OperatorClient, operator_server::OperatorServer,
+        transfers_server::TransfersServer, worker_host_server::WorkerHostServer,
+        workspace_directory_server::WorkspaceDirectoryServer,
     },
 };
 use supertag_worker_host::HostOptions;
@@ -156,6 +160,12 @@ enum Command {
         instructions: String,
         #[arg(long)]
         allow: Vec<String>,
+        /// Host-local logical repository binding.
+        #[arg(long, requires = "workspace_base")]
+        workspace_id: Option<String>,
+        /// Full Git object ID from which new Sessions start.
+        #[arg(long, requires = "workspace_id")]
+        workspace_base: Option<String>,
     },
     /// Accept one turn of work in a Tag's Session.
     Submit {
@@ -174,6 +184,16 @@ enum Command {
         #[command(flatten)]
         connection: Connection,
         task_id: String,
+    },
+    /// Download the patch or Git bundle published by a successful workspace Task.
+    WorkspaceArtifact {
+        #[command(flatten)]
+        connection: Connection,
+        task_id: String,
+        #[arg(long, value_enum)]
+        kind: artifacts::ArtifactKind,
+        #[arg(long)]
+        output: PathBuf,
     },
     /// Read a page of recorded Task events.
     TaskEvents {
@@ -212,6 +232,13 @@ enum Command {
         confirmed_stopped: bool,
         #[arg(long)]
         operation_id: Option<String>,
+    },
+    /// Direct input into an active Task and inspect its delivery.
+    Input {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: inputs::InputCommand,
     },
     /// Manage an Objective and inspect its owner's work.
     Objective {
@@ -281,6 +308,7 @@ async fn run(command: Command) -> Result<()> {
             wait_for_recovery,
         } => {
             let forward_codex_credentials = adapter.uses_codex();
+            let workspace = adapter.workspace_mapping();
             let (adapter, adapter_args) = adapter.launch(attempt_timeout_seconds)?;
             let options = HostOptions {
                 gateway: network::endpoint(gateway, false).await?,
@@ -293,6 +321,7 @@ async fn run(command: Command) -> Result<()> {
                 attempt_timeout: Duration::from_secs(attempt_timeout_seconds),
                 wait_for_recovery,
                 once,
+                workspace,
             };
             let token = CancellationToken::new();
             let shutdown = token.clone();
@@ -391,7 +420,15 @@ async fn run(command: Command) -> Result<()> {
             tag_id,
             instructions,
             allow,
+            workspace_id,
+            workspace_base,
         } => {
+            let workspace = workspace_id
+                .zip(workspace_base)
+                .map(|(workspace_id, base_commit)| WorkspaceSpec {
+                    workspace_id,
+                    base_commit,
+                });
             let (mut operator, token) = operator(connection).await?;
             let tag = operator
                 .put_tag(request(
@@ -399,6 +436,7 @@ async fn run(command: Command) -> Result<()> {
                         tag_id,
                         instructions,
                         allowed_actions: allow,
+                        workspace,
                     },
                     &token,
                 )?)
@@ -441,6 +479,14 @@ async fn run(command: Command) -> Result<()> {
                 .await?
                 .into_inner();
             print_task(&task);
+        }
+        Command::WorkspaceArtifact {
+            connection,
+            task_id,
+            kind,
+            output,
+        } => {
+            artifacts::download(connection, task_id, kind, &output).await?;
         }
         Command::TaskEvents {
             connection,
@@ -548,6 +594,10 @@ async fn run(command: Command) -> Result<()> {
                 })
             );
         }
+        Command::Input {
+            connection,
+            command,
+        } => inputs::run(connection, command).await?,
         Command::Objective {
             connection,
             command,
@@ -580,6 +630,13 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .await;
     health
         .set_serving::<CheckpointDirectoryServer<ControlPlane>>()
+        .await;
+    health
+        .set_serving::<WorkspaceDirectoryServer<ControlPlane>>()
+        .await;
+    health.set_serving::<LiveInputsServer<ControlPlane>>().await;
+    health
+        .set_serving::<AttemptInputsServer<ControlPlane>>()
         .await;
     health.set_serving::<ConnectorServer<ControlPlane>>().await;
     health.set_serving::<ObjectivesServer<ControlPlane>>().await;
@@ -615,6 +672,21 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         )
         .add_service(
             CheckpointDirectoryServer::new(plane.clone())
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        )
+        .add_service(
+            WorkspaceDirectoryServer::new(plane.clone())
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        )
+        .add_service(
+            LiveInputsServer::new(plane.clone())
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        )
+        .add_service(
+            AttemptInputsServer::new(plane.clone())
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )
@@ -671,10 +743,12 @@ async fn gateway(
     health.set_serving::<WorkerHostServer<Gateway>>().await;
     health.set_serving::<HostEnrollmentServer<Gateway>>().await;
     health
-        .set_serving::<TransfersServer<CheckpointTransfers>>()
+        .set_serving::<TransfersServer<GatewayTransfers>>()
         .await;
-    let transfers = CheckpointTransfers::new(gateway.clone(), checkpoint_directory)?;
+    let transfers = GatewayTransfers::new(gateway.clone(), checkpoint_directory)?;
     health.set_serving::<ObjectivesServer<Gateway>>().await;
+    health.set_serving::<LiveInputsServer<Gateway>>().await;
+    health.set_serving::<AttemptInputsServer<Gateway>>().await;
     let listener = TcpListener::bind(listen).await?;
     println!("{}", listener.local_addr()?);
     if let Some((_, listener)) = &slack {
@@ -687,7 +761,9 @@ async fn gateway(
         .add_service(gateway.worker_host_service())
         .add_service(gateway.host_enrollment_service())
         .add_service(transfers.service())
-        .add_service(gateway.objectives_service());
+        .add_service(gateway.objectives_service())
+        .add_service(gateway.live_inputs_service())
+        .add_service(gateway.attempt_inputs_service());
     let grpc = async {
         let result = router
             .serve_with_incoming_shutdown(
@@ -824,6 +900,10 @@ fn print_task(task: &Task) {
         json!({
             "task_id": task.task_id, "tag_id": task.tag_id, "session_id": task.session_id,
             "state": task.state().as_str_name(), "result": task.result, "attempt_id": task.attempt_id,
+            "workspace": task.workspace.as_ref().map(|spec| json!({
+                "workspace_id": spec.workspace_id, "base_commit": spec.base_commit,
+            })),
+            "workspace_delivery": task.workspace_delivery.as_ref().map(artifacts::describe),
         })
     );
 }

@@ -3,9 +3,11 @@ mod checkpoints;
 mod enrollment;
 mod guardian;
 mod journal;
+mod workspaces;
 
 pub use enrollment::enroll;
 pub use guardian::{CODEX_ATTEMPT_DIRECTORY, guard_adapter};
+pub use workspaces::{WORKSPACE_DIRECTORY, WorkspaceMapping};
 
 use std::{ffi::OsString, path::PathBuf, time::Duration};
 
@@ -16,7 +18,7 @@ use supertag_protocol::{
     v2::{
         Assignment, ClaimTaskRequest, FinishTaskRequest, HarnessCompleteRequest,
         InspectAttemptRequest, RegisterHostRequest, StartTaskRequest, Task, TaskState,
-        worker_host_client::WorkerHostClient,
+        attempt_inputs_client::AttemptInputsClient, worker_host_client::WorkerHostClient,
     },
 };
 use tokio::time::{self, Instant};
@@ -43,6 +45,7 @@ pub struct HostOptions {
     pub attempt_timeout: Duration,
     pub wait_for_recovery: bool,
     pub once: bool,
+    pub workspace: Option<WorkspaceMapping>,
 }
 
 #[derive(Clone)]
@@ -58,6 +61,7 @@ impl Interceptor for HostHeaders {
 }
 
 pub(crate) type RegisteredHost = WorkerHostClient<InterceptedService<Channel, HostHeaders>>;
+pub(crate) type RegisteredInputs = AttemptInputsClient<InterceptedService<Channel, HostHeaders>>;
 
 impl Attempt {
     fn from_assignment(assignment: Assignment) -> Result<Self> {
@@ -92,6 +96,17 @@ pub async fn run(
         "attempt timeout must be positive"
     );
     let journal = Journal::open(&options.state_directory)?;
+    let workspaces =
+        workspaces::Workspaces::new(&options.state_directory, options.workspace.clone())?;
+    // Terminal proof is durable; finishing local cleanup needs neither the source
+    // repository nor a new network registration.
+    if let Some(Entry::Terminal { prepared, .. }) = journal.load()? {
+        cleanup_terminal(&journal, &workspaces, prepared.as_deref())?;
+        if options.once {
+            ready();
+            return Ok(());
+        }
+    }
     let token = match &options.token {
         Some(token) if !token.is_empty() => token.clone(),
         Some(_) => bail!("Worker Host credential is empty"),
@@ -128,6 +143,12 @@ pub async fn run(
         }
     };
     let headers = HostHeaders(generation.to_string().parse()?);
+    let inputs = AttemptInputsClient::with_interceptor(
+        options.gateway.clone().connect_lazy(),
+        headers.clone(),
+    )
+    .max_decoding_message_size(MAX_MESSAGE_BYTES)
+    .max_encoding_message_size(MAX_MESSAGE_BYTES);
     let transfers = checkpoints::Transfers::new(channel.clone(), headers.clone());
     let mut host = WorkerHostClient::with_interceptor(channel, headers)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -147,7 +168,13 @@ pub async fn run(
         match entry {
             Entry::Claim { operation_id } => {
                 let response = host
-                    .claim_task(request(ClaimTaskRequest { operation_id }, &token)?)
+                    .claim_task(request(
+                        ClaimTaskRequest {
+                            operation_id,
+                            workspace_ids: workspaces.ids(),
+                        },
+                        &token,
+                    )?)
                     .await;
                 let assignment = match response {
                     Ok(response) => response.into_inner().assignment,
@@ -176,7 +203,8 @@ pub async fn run(
                 run_assignment(
                     &options,
                     &journal,
-                    (&mut host, &transfers, &token),
+                    &workspaces,
+                    (&mut host, &inputs, &transfers, &token),
                     attempt,
                     &shutdown,
                     || {
@@ -187,33 +215,146 @@ pub async fn run(
                 )
                 .await?;
             }
-            Entry::Executing { attempt } => match resolved(&mut host, &attempt, &token).await {
-                Ok(true) => journal.clear()?,
-                Ok(false) if options.wait_for_recovery => {
-                    if let Some(ready) = ready.take() {
-                        ready();
-                        eprintln!(
-                            "Task {} Attempt {} needs recovery before this host can claim work",
-                            attempt.task_id, attempt.attempt_id
-                        );
+            Entry::Executing { attempt, prepared } => {
+                match resolved(&mut host, &attempt, &token).await {
+                    Ok(true) => journal.save(&Entry::Terminal { attempt, prepared })?,
+                    Ok(false) if options.wait_for_recovery => {
+                        if let Some(ready) = ready.take() {
+                            ready();
+                            eprintln!(
+                                "Task {} Attempt {} needs recovery before this host can claim work",
+                                attempt.task_id, attempt.attempt_id
+                            );
+                        }
+                        wait_for_work(&shutdown).await;
                     }
-                    wait_for_work(&shutdown).await;
+                    Ok(false) => bail!(
+                        "Task {} Attempt {} needs recovery before this host can claim work",
+                        attempt.task_id,
+                        attempt.attempt_id
+                    ),
+                    Err(error) if retryable(&error) => wait_for_work(&shutdown).await,
+                    Err(error) => return Err(error.into()),
                 }
-                Ok(false) => bail!(
-                    "Task {} Attempt {} needs recovery before this host can claim work",
-                    attempt.task_id,
-                    attempt.attempt_id
-                ),
-                Err(error) if retryable(&error) => wait_for_work(&shutdown).await,
-                Err(error) => return Err(error.into()),
-            },
+            }
+            Entry::Finalizing {
+                attempt,
+                result,
+                succeeded,
+                objective_signal,
+                checkpoint,
+                workspace,
+            } => {
+                // This stage is recorded only after the adapter process group was reaped.
+                // Exact finalization can safely resume after a Host restart.
+                let cancellation = shutdown.child_token();
+                let finalization = with_authority(
+                    &mut host,
+                    &attempt,
+                    &token,
+                    &shutdown,
+                    &cancellation,
+                    async {
+                        workspaces
+                            .finalize(&workspace, &result, succeeded, &cancellation)
+                            .await
+                            .map_err(|_| {
+                                Status::invalid_argument(
+                                    "Workspace output could not be captured safely",
+                                )
+                            })
+                    },
+                )
+                .await;
+                match finalization {
+                    Ok((pending, _)) => journal.save(&Entry::Finish {
+                        attempt,
+                        result,
+                        succeeded,
+                        objective_signal,
+                        checkpoint,
+                        workspace: Some(Box::new(pending)),
+                        prepared: Some(workspace),
+                    })?,
+                    Err(_) if shutdown.is_cancelled() => return Ok(()),
+                    Err(error) if retryable(&error) => wait_for_work(&shutdown).await,
+                    Err(_) => save_finish(
+                        &journal,
+                        attempt,
+                        adapter::failed("Workspace output could not be captured safely"),
+                    )?,
+                }
+            }
             Entry::Finish {
                 attempt,
                 result,
                 succeeded,
                 objective_signal,
                 checkpoint,
+                workspace,
+                prepared,
             } => {
+                let prepared = prepared.or_else(|| {
+                    workspace.as_ref().map(|pending| {
+                        Box::new(workspaces::PreparedWorkspace {
+                            workspace_id: pending.workspace_id.clone(),
+                            checkout: pending.checkout.clone(),
+                        })
+                    })
+                });
+                if let Some(mut pending) = workspace
+                    .as_ref()
+                    .filter(|pending| succeeded && !pending.uploaded)
+                    .cloned()
+                {
+                    let receipt = match workspaces.verify(&pending) {
+                        Ok(receipt) => receipt,
+                        Err(_) => {
+                            save_finish(
+                                &journal,
+                                attempt,
+                                adapter::failed("Workspace output no longer matches its receipt"),
+                            )?;
+                            continue;
+                        }
+                    };
+                    let cancellation = shutdown.child_token();
+                    let upload = with_authority(
+                        &mut host, &attempt, &token, &shutdown, &cancellation,
+                        async {
+                            tokio::select! {
+                                result = transfers.upload_workspace(&attempt, &token, &pending, receipt) => result,
+                                _ = cancellation.cancelled() => Err(Status::cancelled("workspace transfer cancelled")),
+                            }
+                        },
+                    ).await;
+                    match upload {
+                        Ok(_) => {
+                            pending.uploaded = true;
+                            journal.save(&Entry::Finish {
+                                attempt,
+                                result,
+                                succeeded,
+                                objective_signal,
+                                checkpoint,
+                                workspace: Some(pending),
+                                prepared,
+                            })?;
+                        }
+                        Err(error)
+                            if retryable(&error) || error.code() == Code::ResourceExhausted =>
+                        {
+                            wait_for_work(&shutdown).await
+                        }
+                        Err(_) if shutdown.is_cancelled() => return Ok(()),
+                        Err(_) => save_finish(
+                            &journal,
+                            attempt,
+                            adapter::failed("Workspace output could not be committed"),
+                        )?,
+                    }
+                    continue;
+                }
                 if let Some(mut pending) = checkpoint
                     .as_ref()
                     .filter(|pending| !pending.uploaded)
@@ -241,6 +382,8 @@ pub async fn run(
                                 succeeded,
                                 objective_signal,
                                 checkpoint: Some(pending),
+                                workspace,
+                                prepared,
                             })?;
                         }
                         Err(error)
@@ -274,12 +417,39 @@ pub async fn run(
                             succeeded,
                             objective_signal,
                             checkpoint_sha256: checkpoint.map(|pending| pending.sha256),
+                            workspace_delivery: workspace
+                                .as_ref()
+                                .filter(|_| succeeded)
+                                .map(|pending| workspaces.verify(pending))
+                                .transpose()?,
                         },
                         &token,
                     )?)
                     .await;
                 match outcome {
-                    Ok(_) => {}
+                    Ok(response) if response.get_ref().state() == TaskState::Uncertain => {
+                        // Cleanup was observed, but the operator still owns the
+                        // recovery decision. Preserve the checkout until its receipt.
+                        if prepared.is_some() {
+                            journal.save(&Entry::Executing { attempt, prepared })?;
+                            if options.once {
+                                return Ok(());
+                            }
+                        } else {
+                            journal.save(&Entry::Terminal {
+                                attempt,
+                                prepared: None,
+                            })?;
+                        }
+                        continue;
+                    }
+                    Ok(response) => ensure!(
+                        matches!(
+                            response.get_ref().state(),
+                            TaskState::Succeeded | TaskState::Failed | TaskState::Cancelled
+                        ),
+                        "Finish returned a nonterminal Task"
+                    ),
                     Err(error) if retryable(&error) => {
                         wait_for_work(&shutdown).await;
                         continue;
@@ -289,11 +459,15 @@ pub async fn run(
                     {
                         // An invalid owner signal is rejected before the Finish transaction
                         // commits. Settle the cleaned-up Attempt as a controlled failure.
-                        save_finish(
-                            &journal,
+                        journal.save(&Entry::Finish {
                             attempt,
-                            adapter::failed("Harness proposed an invalid Objective update"),
-                        )?;
+                            result: "Harness proposed an invalid Objective update".into(),
+                            succeeded: false,
+                            objective_signal: 0,
+                            checkpoint: None,
+                            workspace,
+                            prepared,
+                        })?;
                         continue;
                     }
                     Err(error) if lost_ownership(&error) || error.code() == Code::AlreadyExists => {
@@ -309,7 +483,10 @@ pub async fn run(
                     }
                     Err(error) => return Err(error.into()),
                 }
-                journal.clear()?;
+                journal.save(&Entry::Terminal { attempt, prepared })?;
+            }
+            Entry::Terminal { prepared, .. } => {
+                cleanup_terminal(&journal, &workspaces, prepared.as_deref())?;
                 if let Some(ready) = ready.take() {
                     ready();
                 }
@@ -320,6 +497,17 @@ pub async fn run(
         }
     }
     Ok(())
+}
+
+fn cleanup_terminal(
+    journal: &Journal,
+    workspaces: &workspaces::Workspaces,
+    prepared: Option<&workspaces::PreparedWorkspace>,
+) -> Result<()> {
+    if let Some(prepared) = prepared {
+        workspaces.discard(prepared)?;
+    }
+    journal.clear()
 }
 
 async fn resolved(
@@ -350,12 +538,18 @@ async fn resolved(
 async fn run_assignment(
     options: &HostOptions,
     journal: &Journal,
-    connection: (&mut RegisteredHost, &checkpoints::Transfers, &str),
+    workspaces: &workspaces::Workspaces,
+    connection: (
+        &mut RegisteredHost,
+        &RegisteredInputs,
+        &checkpoints::Transfers,
+        &str,
+    ),
     attempt: Attempt,
     shutdown: &CancellationToken,
     ready: impl FnOnce(),
 ) -> Result<()> {
-    let (host, transfers, token) = connection;
+    let (host, inputs, transfers, token) = connection;
     // Starting is durable before requesting authority and never records a launch.
     // A lost start response can therefore be retried using this exact Attempt.
     let start = host
@@ -460,6 +654,32 @@ async fn run_assignment(
             );
         }
     };
+    let operation_cancel = shutdown.child_token();
+    let prepared = with_authority(host, &attempt, token, shutdown, &operation_cancel, async {
+        workspaces
+            .prepare(&task, &attempt, transfers, token, &operation_cancel)
+            .await
+            .map_err(|error| {
+                error.downcast::<Status>().unwrap_or_else(|_| {
+                    Status::invalid_argument("Task workspace could not be prepared safely")
+                })
+            })
+    })
+    .await;
+    let (workspace, valid_until) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) if retryable(&error) && !shutdown.is_cancelled() => {
+            wait_for_work(shutdown).await;
+            return Ok(());
+        }
+        Err(_) => {
+            return save_finish(
+                journal,
+                attempt,
+                adapter::failed("Task workspace could not be prepared safely"),
+            );
+        }
+    };
     let assignment = Assignment {
         task: Some(task),
         attempt_id: attempt.attempt_id.clone(),
@@ -467,12 +687,20 @@ async fn run_assignment(
     };
     journal.save(&Entry::Executing {
         attempt: attempt.clone(),
+        prepared: workspace
+            .as_ref()
+            .map(|prepared| Box::new(prepared.clone())),
     })?;
     let outcome = adapter::execute(
         options,
         assignment,
-        checkpoint,
-        host.clone(),
+        (
+            checkpoint,
+            workspace
+                .as_ref()
+                .map(|prepared| prepared.checkout.path.as_path()),
+        ),
+        (host.clone(), inputs.clone()),
         token,
         valid_until,
         shutdown,
@@ -484,7 +712,23 @@ async fn run_assignment(
             attempt.task_id, attempt.attempt_id
         )
     })?;
-    save_finish(journal, attempt, outcome)
+    match workspace {
+        Some(workspace) => {
+            let checkpoint = outcome
+                .checkpoint
+                .map(|checkpoint| journal.stage_checkpoint(checkpoint))
+                .transpose()?;
+            journal.save(&Entry::Finalizing {
+                attempt,
+                result: outcome.result,
+                succeeded: outcome.succeeded,
+                objective_signal: outcome.objective_signal,
+                checkpoint,
+                workspace: Box::new(workspace),
+            })
+        }
+        None => save_finish(journal, attempt, outcome),
+    }
 }
 
 fn ensure_attempt(task: &Task, attempt: &Attempt) -> Result<()> {
@@ -497,6 +741,11 @@ fn ensure_attempt(task: &Task, attempt: &Attempt) -> Result<()> {
 }
 
 fn save_finish(journal: &Journal, attempt: Attempt, outcome: HarnessCompleteRequest) -> Result<()> {
+    let prepared = journal
+        .load()?
+        .map(|entry| entry.prepared(&attempt))
+        .transpose()?
+        .flatten();
     let checkpoint = outcome
         .checkpoint
         .map(|checkpoint| journal.stage_checkpoint(checkpoint))
@@ -507,7 +756,74 @@ fn save_finish(journal: &Journal, attempt: Attempt, outcome: HarnessCompleteRequ
         succeeded: outcome.succeeded,
         objective_signal: outcome.objective_signal,
         checkpoint,
+        workspace: None,
+        prepared,
     })
+}
+
+/// Keep the execution lease alive during repository preparation and transfer.
+/// The operation must observe `cancel` so native Git is reaped before returning.
+async fn with_authority<T>(
+    host: &mut RegisteredHost,
+    attempt: &Attempt,
+    token: &str,
+    shutdown: &CancellationToken,
+    cancel: &CancellationToken,
+    operation: impl std::future::Future<Output = Result<T, Status>>,
+) -> Result<(T, Instant), Status> {
+    let renew = |host: &mut RegisteredHost| {
+        let mut client = host.clone();
+        let inspection = attempt.inspect();
+        async move {
+            let sent = Instant::now();
+            let response = client
+                .renew_attempt(
+                    request(inspection, token)
+                        .map_err(|_| Status::internal("invalid authority request"))?,
+                )
+                .await?
+                .into_inner();
+            let task = response
+                .task
+                .as_ref()
+                .ok_or_else(|| Status::data_loss("execution authority has no Task"))?;
+            ensure_attempt(task, attempt)
+                .map_err(|_| Status::data_loss("execution authority has mismatched identity"))?;
+            if task.state() != TaskState::Running {
+                return Err(Status::failed_precondition("execution authority ended"));
+            }
+            let until = sent
+                .checked_add(Duration::from_millis(response.valid_for_ms))
+                .ok_or_else(|| Status::data_loss("invalid authority duration"))?;
+            if until <= Instant::now() {
+                return Err(Status::failed_precondition("execution authority expired"));
+            }
+            Ok(until)
+        }
+    };
+    let mut valid_until = renew(host).await?;
+    tokio::pin!(operation);
+    let mut interval = time::interval(Duration::from_secs(2));
+    interval.tick().await;
+    let error = loop {
+        tokio::select! {
+            biased;
+            _ = shutdown.cancelled() => break Status::cancelled("Worker Host is shutting down"),
+            _ = time::sleep_until(valid_until) => break Status::failed_precondition("execution authority expired"),
+            result = &mut operation => return result.map(|result| (result, valid_until)),
+            _ = interval.tick() => {
+                match time::timeout_at(valid_until, renew(host)).await {
+                    Ok(Ok(until)) => valid_until = until,
+                    Ok(Err(error)) if retryable(&error) => {},
+                    Ok(Err(error)) => break error,
+                    Err(_) => break Status::failed_precondition("execution authority expired"),
+                }
+            }
+        }
+    };
+    cancel.cancel();
+    let _ = operation.await;
+    Err(error)
 }
 
 fn request<T>(message: T, token: &str) -> Result<Request<T>> {

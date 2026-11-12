@@ -565,3 +565,48 @@ async fn sha256_repositories_keep_their_object_format() {
     assert_eq!(delivery.head_commit.len(), 64);
     assert!(delivery.committed);
 }
+
+#[tokio::test]
+async fn stopped_checkout_discard_reopens_without_source_and_preserves_receipts_and_other_paths() {
+    let fixture = Fixture::new();
+    let workspace = fixture.workspace();
+    let delivered = prepare(&workspace, "delivered", "first", None).await;
+    fs::write(delivered.path.join("README.md"), "delivered\n").unwrap();
+    let receipt = workspace
+        .finalize(&delivered, complete(), &CancellationToken::new())
+        .await
+        .unwrap();
+    let cancelled = prepare(
+        &workspace,
+        "cancelled",
+        "second",
+        Some(fixture.base.clone()),
+    )
+    .await;
+    fs::write(cancelled.path.join("README.md"), "cancelled edits\n").unwrap();
+    assert!(workspace.remove_checkout(&cancelled).is_err());
+    let outside = fixture._root.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("keep"), "retain me").unwrap();
+    symlink(&outside, cancelled.path.join("outside-link")).unwrap();
+    drop(workspace);
+    fs::remove_dir_all(&fixture.source).unwrap();
+    let recorded = Workspace::open_existing(&fixture.state).unwrap();
+    let mut forged = cancelled.clone();
+    forged.path = outside.clone();
+    assert!(recorded.discard_checkout(&forged).is_err());
+    assert!(cancelled.path.exists());
+    recorded.discard_checkout(&cancelled).unwrap();
+    recorded.discard_checkout(&cancelled).unwrap();
+    assert!(!cancelled.path.exists());
+    assert_eq!(
+        fs::read_to_string(outside.join("keep")).unwrap(),
+        "retain me"
+    );
+    assert!(recorded.delivery("cancelled", "second").unwrap().is_none());
+    recorded.discard_checkout(&delivered).unwrap();
+    assert_eq!(
+        recorded.delivery("delivered", "first").unwrap(),
+        Some(receipt)
+    );
+}
