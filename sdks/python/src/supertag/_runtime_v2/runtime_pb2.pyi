@@ -1,5 +1,6 @@
 from . import policy_pb2 as _policy_pb2
 from . import github_workspaces_pb2 as _github_workspaces_pb2
+from . import mcp_pb2 as _mcp_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
@@ -1765,16 +1766,18 @@ class ExecutionSelection(_message.Message):
     def __init__(self, model: _Optional[str] = ..., effort: _Optional[str] = ...) -> None: ...
 
 class HarnessExecutionProfile(_message.Message):
-    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace")
+    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace", "mcp_servers")
     MODEL_IDS_FIELD_NUMBER: _ClassVar[int]
     DEFAULT_MODEL_FIELD_NUMBER: _ClassVar[int]
     ALLOW_UNSANDBOXED_COMMANDS_FIELD_NUMBER: _ClassVar[int]
     REMOTE_FILE_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
+    MCP_SERVERS_FIELD_NUMBER: _ClassVar[int]
     model_ids: _containers.RepeatedScalarFieldContainer[str]
     default_model: str
     allow_unsandboxed_commands: bool
     remote_file_workspace: bool
-    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ...) -> None: ...
+    mcp_servers: _containers.RepeatedCompositeFieldContainer[_mcp_pb2.McpServerCapability]
+    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ..., mcp_servers: _Optional[_Iterable[_Union[_mcp_pb2.McpServerCapability, _Mapping]]] = ...) -> None: ...
 
 class AttemptExecutionSelection(_message.Message):
     __slots__ = ("selection", "model_source", "harness_kind", "effort_applied", "remote_file_workspace")

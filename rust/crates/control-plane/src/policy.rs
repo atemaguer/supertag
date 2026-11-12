@@ -243,25 +243,10 @@ fn element_id(input: &str, prior: Option<&String>) -> Result<String> {
     Ok(prior.cloned().unwrap_or_else(|| Uuid::new_v4().to_string()))
 }
 fn validate_mcp(action: &str, resource: &str) -> Result<()> {
-    let Some((server, tool)) = action.split_once('/') else {
+    if !action.contains('/') {
         return Err(invalid("MCP action must be server/tool"));
-    };
-    if server.is_empty()
-        || server.len() > 59
-        || server.starts_with("supertag")
-        || !server
-            .bytes()
-            .next()
-            .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
-        || !server
-            .bytes()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'-' | b'_'))
-        || tool.is_empty()
-        || tool.len() > 128
-        || !tool
-            .bytes()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'.' | b'-' | b'*'))
-    {
+    }
+    if supertag_protocol::mcp::parse_action(action).is_none() {
         return Err(invalid("invalid or reserved MCP server/tool permission"));
     }
     if !resource.is_empty() {

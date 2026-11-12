@@ -309,6 +309,134 @@ async fn last_usage(services: &LanguageServices, task: &Value) -> Result<Value> 
 }
 
 #[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+async fn claude_sdk_calls_only_the_frozen_scoped_http_mcp_tool() -> Result<()> {
+    let node =
+        std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
+    let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let directory = tempfile::tempdir()?;
+    let native = claude_fixture(directory.path())?;
+    let services = LanguageServices::start(directory.path()).await?;
+    let journal = directory.path().join("mcp-provider.jsonl");
+    let mut provider = Command::new(&node);
+    provider
+        .arg(repo_path(
+            "packages/runtime/harnesses/claude-code/fixtures/rust-mcp-provider.mjs",
+        )?)
+        .arg(&journal)
+        .env_clear()
+        .stdin(Stdio::null())
+        .kill_on_drop(true);
+    let (mut provider, endpoint) = service(provider).await?;
+    let catalog = directory.path().join("mcp-catalog.json");
+    let mapping = serde_json::json!([{
+        "prefix":"repository:", "separator":"/",
+        "components":[{"arguments":["owner","org"]},{"arguments":["repo"]}]
+    }]);
+    let config = serde_json::json!({"version":1,"servers":[{
+        "name":"catalog","url":format!("{endpoint}/mcp"),
+        "headerEnv":{"Authorization":"CATALOG_MCP_AUTH"},
+        "resources":{"tools":{"list_docs":mapping,"publish":mapping}}
+    }]});
+    use std::{io::Write, os::unix::fs::OpenOptionsExt};
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&catalog)?
+        .write_all(config.to_string().as_bytes())?;
+    let permissions = directory.path().join("mcp-grants.json");
+    std::fs::write(&permissions, serde_json::json!({
+        "set_id":"mcp-grants", "name":"mcp-grants", "approvers":["operator:local"],
+        "permissions":[
+            {"target":"mcp","action":"catalog/list_*","resource":"repository:acme/docs"},
+            {"target":"mcp","action":"catalog/publish"},
+            {"target":"mcp","action":"catalog/publish","resource":"repository:acme/docs","approval_required":true}
+        ]
+    }).to_string())?;
+    let role = directory.path().join("mcp-role.json");
+    std::fs::write(&role, serde_json::json!({
+        "role_id":"mcp-role", "name":"mcp-role", "purpose":"Read the catalog", "permission_set_ids":["mcp-grants"]
+    }).to_string())?;
+    services
+        .operator(&[
+            "put-tag",
+            "mcp-reader",
+            "--harness",
+            "claude-code",
+            "--instructions",
+            "Read the scoped catalog.",
+        ])
+        .await?;
+    services
+        .operator(&[
+            "policy",
+            "put",
+            "permission-set",
+            permissions.to_str().context("permission set path")?,
+        ])
+        .await?;
+    services
+        .operator(&["policy", "put", "role", role.to_str().context("role path")?])
+        .await?;
+    services
+        .operator(&["policy", "assign", "mcp-role", "mcp-reader"])
+        .await?;
+    let task = services
+        .operator(&[
+            "submit",
+            "--tag",
+            "mcp-reader",
+            "--session",
+            "mcp",
+            "scoped-http-mcp",
+        ])
+        .await?;
+    let task_id = task["task_id"].as_str().context("Task ID")?;
+    let worker = |state: &str| {
+        let mut host = services.worker(
+            "claude-code",
+            &directory.path().join(state),
+            Path::new(&node),
+            &entry,
+        );
+        host.arg("--claude-path")
+            .arg(&native)
+            .env("ANTHROPIC_API_KEY", "fixture-provider-key");
+        host
+    };
+    success(worker("no-catalog")).await?;
+    let pending = services.operator(&["get-task", task_id]).await?;
+    assert_eq!(pending["state"], "TASK_STATE_QUEUED");
+    assert!(pending["attempt_id"].is_null());
+    assert!(!journal.exists());
+    let mut host = worker("catalog-host");
+    host.arg("--mcp-catalog")
+        .arg(&catalog)
+        .env("CATALOG_MCP_AUTH", "Bearer synthetic-catalog-credential")
+        .env("CATALOG_MCP_URL", &endpoint);
+    success(host).await?;
+    let completed = services.operator(&["get-task", task_id]).await?;
+    assert_eq!(completed["state"], "TASK_STATE_SUCCEEDED", "{completed}");
+    assert_eq!(completed["result"], "fixture used one scoped MCP tool");
+    let provider_receipts = std::fs::read_to_string(journal)?;
+    let receipts = provider_receipts
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<Result<Vec<Value>, _>>()?;
+    assert_eq!(
+        receipts,
+        [
+            serde_json::json!({"tool":"list_docs","arguments":{"owner":"acme","repo":"docs"}}),
+            serde_json::json!({"tool":"list_docs","arguments":{"owner":"acme","repo":"docs","mirror":true}}),
+            serde_json::json!({"closed":true}),
+        ]
+    );
+    provider.kill().await?;
+    services.stop().await
+}
+
+#[tokio::test]
 #[ignore = "requires SUPERTAG_RUST_TEST_AGENTS_PYTHON with the Python SDK runtime and agents extras installed"]
 async fn python_agents_sdk_restores_session_on_a_fresh_host() -> Result<()> {
     let interpreter = std::env::var_os("SUPERTAG_RUST_TEST_AGENTS_PYTHON")

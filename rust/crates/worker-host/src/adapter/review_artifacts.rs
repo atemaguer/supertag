@@ -172,6 +172,8 @@ mod tests {
                 &tokio_util::sync::CancellationToken::new(),
             ),
             workspace: None,
+            mcp: None,
+            mcp_lane: Default::default(),
         }
     }
 

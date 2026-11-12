@@ -169,6 +169,43 @@ async fn contract(url: &str) {
     assert_eq!(current.state(), TaskState::Queued);
     assert!(current.attempt_id.is_none());
     assert_eq!(current.policy_snapshot, blocked.policy_snapshot);
+    let mut profile = HarnessExecutionProfile {
+        mcp_servers: vec![McpServerCapability {
+            name: "catalog".into(),
+            mapped_tools: vec!["List_docs".into(), "publish".into()],
+        }],
+        ..Default::default()
+    };
+    assert!(
+        store
+            .claim_task_with_profile(
+                &host,
+                "wrong-mapping",
+                &["repo".into()],
+                HarnessKind::ClaudeCode,
+                &[],
+                Some(&profile),
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
+    profile.mcp_servers[0].mapped_tools.push("list_docs".into());
+    let selected = store
+        .claim_task_with_profile(
+            &host,
+            "right-mapping",
+            &["repo".into()],
+            HarnessKind::ClaudeCode,
+            &[],
+            Some(&profile),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let task = selected.task.unwrap();
+    assert_eq!(task.task_id, blocked.task_id);
+    assert_eq!(task.policy_snapshot, blocked.policy_snapshot);
     store.close().await;
 }
 

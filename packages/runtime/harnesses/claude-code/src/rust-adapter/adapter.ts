@@ -33,6 +33,7 @@ import {
   WORKSTREAM_POST_ACTION,
 } from "./coordination.js";
 import { CREDENTIAL_KEYS, nativeEnvironment } from "./environment.js";
+import { taskMcpTools } from "./mcp.js";
 import { selectSkills, stageSkills } from "./skills.js";
 
 const ACTIONS: Readonly<Record<string, readonly string[]>> = {
@@ -111,6 +112,7 @@ export function permissionHook(
   signal: AbortSignal,
   skills: ReadonlySet<string> = new Set(),
   skillRoots: readonly string[] = [],
+  mcpToolServers: ReadonlyMap<string, string> = new Map(),
 ): HookCallback {
   return async (hook) => {
     if (hook.hook_event_name !== "PreToolUse") return {};
@@ -129,6 +131,12 @@ export function permissionHook(
         hook.mcp_server?.source === "sdk" &&
         hook.mcp_server.name === COORDINATION_SERVER &&
         validCoordinationArguments(hook.tool_name, hook.tool_input);
+    } else if (allowed && hook.tool_name.startsWith("mcp__")) {
+      const server = mcpToolServers.get(hook.tool_name);
+      allowed =
+        server !== undefined &&
+        hook.mcp_server?.source === "sdk" &&
+        hook.mcp_server.name === server;
     }
     if (allowed && ["Read", "Write", "Edit", "Glob", "Grep"].includes(hook.tool_name)) {
       const input = hook.tool_input as Record<string, unknown>;
@@ -269,6 +277,8 @@ export async function runAdapter(
       signal: controller.signal,
       active: () => !finalSeen,
     });
+    phase = "MCP tool preparation";
+    const mcp = await taskMcpTools(harness, task, controller.signal, () => !finalSeen, secrets);
     const { env, cwd } = await nativeEnvironment(environment);
     phase = "Skill preparation";
     const { plugins, names, roots } = await stageSkills(
@@ -277,7 +287,7 @@ export async function runAdapter(
       controller.signal,
     );
     if (names.size > 0) tools.push("Skill");
-    const allowedTools = [...tools, ...coordination.tools];
+    const allowedTools = [...tools, ...coordination.tools, ...mcp.toolServers.keys()];
     phase = "checkpoint validation";
     const restored = restoreCheckpoint(run.checkpoint, task, cwd);
     nativeSessionId = restored?.nativeSessionId;
@@ -328,7 +338,7 @@ export async function runAdapter(
       skills: [...names],
       plugins,
       strictMcpConfig: true,
-      mcpServers: coordination.servers,
+      mcpServers: { ...coordination.servers, ...mcp.servers },
       settings: {
         syncClaudeAiSkills: false,
         syncClaudeAiPlugins: false,
@@ -342,7 +352,11 @@ export async function runAdapter(
       sessionStoreFlush: "eager",
       hooks: {
         PreToolUse: [
-          { hooks: [permissionHook(allowedTools, cwd, controller.signal, names, roots)] },
+          {
+            hooks: [
+              permissionHook(allowedTools, cwd, controller.signal, names, roots, mcp.toolServers),
+            ],
+          },
         ],
       },
       ...(restored ? { resume: restored.nativeSessionId } : {}),

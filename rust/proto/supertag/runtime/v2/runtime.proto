@@ -4,6 +4,7 @@ package supertag.runtime.v2;
 
 import "supertag/runtime/v2/policy.proto";
 import "supertag/runtime/v2/github_workspaces.proto";
+import "supertag/runtime/v2/mcp.proto";
 
 // The Gateway exposes these services to operators and enrolled hosts. The
 // Control Plane serves the same messages on a private authenticated listener.
@@ -1203,6 +1204,7 @@ message HarnessExecutionProfile {
   optional string default_model = 2;
   bool allow_unsandboxed_commands = 3;
   bool remote_file_workspace = 4;
+  repeated McpServerCapability mcp_servers = 5;
 }
 
 enum ModelSource {

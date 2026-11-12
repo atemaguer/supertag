@@ -5,6 +5,7 @@ mod credentials;
 mod enrollment;
 mod guardian;
 mod journal;
+mod mcp;
 mod readiness;
 mod remote;
 mod remote_provider;
@@ -13,6 +14,7 @@ mod workspaces;
 pub use credentials::{provider_environment, provider_environment_for, validate_opencode_model};
 pub use enrollment::enroll;
 pub use guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
+pub use mcp::McpCatalog;
 pub use remote_provider::{ProviderAuthority, ProviderConfig};
 pub use workspaces::{WORKSPACE_DIRECTORY, WorkspaceMapping, WorkspaceSource};
 
@@ -59,6 +61,7 @@ pub struct HostOptions {
     pub workspace: Option<WorkspaceMapping>,
     pub remote_provider: Option<ProviderConfig>,
     pub context_catalog: context::ContextCatalog,
+    pub mcp_catalog: McpCatalog,
 }
 
 #[derive(Clone)]
@@ -160,6 +163,13 @@ pub async fn run(
     ensure!(
         !options.attempt_timeout.is_zero(),
         "attempt timeout must be positive"
+    );
+    ensure!(
+        options.execution_profile.mcp_servers == options.mcp_catalog.capabilities()
+            && (options.execution_profile.mcp_servers.is_empty()
+                || (options.harness == HarnessKind::ClaudeCode
+                    && options.remote_provider.is_none())),
+        "MCP tools require a local Claude Code Worker Host with the matching catalog"
     );
     provider_environment_for(options.harness, options.provider_model.as_deref())?;
     ensure!(
@@ -818,7 +828,7 @@ async fn run_assignment(
             adapter::failed("Execution authority expired before launch"),
         );
     }
-    if supertag_protocol::mcp::grants(&task).next().is_some() {
+    if !supertag_protocol::mcp::supports(&task, options.harness, &options.execution_profile) {
         return save_finish(
             journal,
             attempt,
@@ -914,6 +924,33 @@ async fn run_assignment(
             .as_ref()
             .map(|prepared| Box::new(prepared.clone())),
     })?;
+    let mcp = if supertag_protocol::mcp::grants(&task).next().is_some() {
+        let cancel = shutdown.child_token();
+        match with_authority(
+            host,
+            &attempt,
+            token,
+            shutdown,
+            &cancel,
+            mcp::AttemptMcp::prepare(&options.mcp_catalog, &task, &cancel),
+        )
+        .await
+        {
+            Ok((mcp, expires)) => {
+                valid_until = expires;
+                mcp.map(Arc::new)
+            }
+            Err(_) => {
+                return save_finish(
+                    journal,
+                    attempt,
+                    adapter::failed("Task MCP tools could not be resolved safely"),
+                );
+            }
+        }
+    } else {
+        None
+    };
     let mut provider = if options.remote_provider.is_some() {
         let workspace = workspace
             .as_ref()
@@ -972,12 +1009,13 @@ async fn run_assignment(
     let outcome = adapter::execute(
         options,
         assignment,
-        (
+        adapter::ExecutionInputs {
             checkpoint,
-            adapter_workspace,
+            workspace: adapter_workspace,
             resolved_skills,
             remote_workspace,
-        ),
+            mcp: mcp.clone(),
+        },
         (host.clone(), inputs.clone(), coordination.clone()),
         token,
         valid_until,
@@ -990,6 +1028,9 @@ async fn run_assignment(
             attempt.task_id, attempt.attempt_id
         )
     });
+    if let Some(mcp) = mcp {
+        mcp.close().await;
+    }
     let saved = async {
         let mut outcome = outcome?;
         let remote_tree = if let Some(provider) = provider.as_ref().filter(|_| outcome.succeeded) {

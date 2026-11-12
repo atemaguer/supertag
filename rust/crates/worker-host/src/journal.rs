@@ -583,6 +583,7 @@ mod tests {
                 default_model: Some("primary".into()),
                 allow_unsandboxed_commands: false,
                 remote_file_workspace: false,
+                mcp_servers: vec![],
             }),
             ..Default::default()
         };

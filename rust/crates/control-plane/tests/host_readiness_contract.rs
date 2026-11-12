@@ -35,6 +35,7 @@ fn report(sequence: u64) -> ReportHostRequest {
             default_model: Some("codex-alpha".into()),
             allow_unsandboxed_commands: false,
             remote_file_workspace: false,
+            mcp_servers: vec![],
         }),
     }
 }

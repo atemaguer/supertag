@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package supertag.runtime.v2;
+
+// Execution-local interface. The Worker Host owns the provider session and credentials.
+service HarnessMcp {
+  rpc List(ListHarnessMcpToolsRequest) returns (ListHarnessMcpToolsResponse);
+  rpc Call(CallHarnessMcpToolRequest) returns (CallHarnessMcpToolResponse);
+}
+
+message McpServerCapability {
+  string name = 1;
+  repeated string mapped_tools = 2;
+}
+
+message HarnessMcpTool {
+  string server = 1;
+  string name = 2;
+  string description = 3;
+  string input_schema_json = 4;
+}
+message ListHarnessMcpToolsRequest {}
+message ListHarnessMcpToolsResponse {
+  repeated HarnessMcpTool tools = 1;
+}
+message CallHarnessMcpToolRequest {
+  string server = 1;
+  string tool = 2;
+  string arguments_json = 3;
+}
+message CallHarnessMcpToolResponse {
+  string result_json = 1;
+}

@@ -18,6 +18,7 @@ fn profile(models: &[&str], default: Option<&str>, commands: bool) -> HarnessExe
         default_model: default.map(str::to_owned),
         allow_unsandboxed_commands: commands,
         remote_file_workspace: false,
+        mcp_servers: vec![],
     }
 }
 

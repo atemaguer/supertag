@@ -59,15 +59,65 @@ async function hook(tool, input, metadata = {}) {
   return !denied;
 }
 
-async function sdkMcp(method, params) {
+async function sdkMcp(method, params, serverName = "supertag") {
   const response = await requestControl({
     subtype: "mcp_message",
-    server_name: "supertag",
+    server_name: serverName,
     message: { jsonrpc: "2.0", id: randomUUID(), method, params },
   });
   if (response.subtype !== "success" || !response.response?.mcp_response)
     throw new Error("SDK MCP server did not answer");
   return response.response.mcp_response;
+}
+
+async function httpCatalog() {
+  const server = "catalog";
+  const name = "mcp__catalog__list_docs";
+  const provider = { mcp_server: { name: server, source: "sdk" } };
+  const inputs = { owner: "acme", repo: "docs" };
+  if (process.env.CATALOG_MCP_AUTH || process.env.CATALOG_MCP_URL)
+    throw new Error("MCP authority reached the native process");
+  const list = (await sdkMcp("tools/list", {}, server)).result?.tools;
+  if (
+    list?.map(({ name }) => name).join() !== "list_docs,publish" ||
+    list[0].inputSchema.additionalProperties !== false ||
+    list[0].inputSchema.required.join() !== "owner,repo"
+  )
+    throw new Error("MCP inventory or exact schema changed");
+  if (!(await hook(name, inputs, provider))) throw new Error("Granted MCP tool denied");
+  for (const metadata of [
+    { mcp_server: { name: server, source: "user" } },
+    { mcp_server: { name: "other", source: "sdk" } },
+    { ...provider, agent_id: "child-agent" },
+  ]) {
+    if (await hook(name, inputs, metadata))
+      throw new Error("Untrusted MCP tool provenance accepted");
+  }
+  if (await hook("mcp__catalog__List_docs", inputs, provider))
+    throw new Error("MCP tool names must match exactly");
+  const call = async (name, arguments_) =>
+    (await sdkMcp("tools/call", { name, arguments: arguments_ }, server)).result;
+  const expectDenied = async (name, args, message) => {
+    const result = await call(name, args);
+    if (
+      !result?.isError ||
+      !result.content[0].text.includes(message) ||
+      JSON.stringify(result).includes("synthetic-catalog-credential")
+    )
+      throw new Error("MCP policy failed closed incorrectly");
+  };
+  await expectDenied("ungranted", {}, "unavailable");
+  await expectDenied("list_docs", { ...inputs, repo: "internal" }, "outside accepted");
+  await expectDenied("list_docs", { ...inputs, org: "other" }, "outside accepted");
+  await expectDenied("publish", {}, "requires approval");
+  await expectDenied("publish", inputs, "requires approval");
+  await expectDenied("publish", { ...inputs, org: "other" }, "outside accepted");
+  const result = await call("list_docs", inputs);
+  if (result?.isError || result?.content[0].text !== "fixture release record")
+    throw new Error("Scoped MCP result did not reach Claude");
+  await expectDenied("list_docs", { ...inputs, mirror: true }, "could not be confirmed");
+  await expectDenied("list_docs", { ...inputs, mirror: true }, "could not be confirmed");
+  return "fixture used one scoped MCP tool";
 }
 
 async function coordinationCall(tool, input) {
@@ -563,6 +613,7 @@ async function turn(message) {
   if (prompt.startsWith("coordination-"))
     result = await coordinationTools(prompt === "coordination-tools");
   if (prompt === "direct-mailbox") result = await directMailbox();
+  if (prompt === "scoped-http-mcp") result = await httpCatalog();
   if (prompt === "commit-review-request") result = await commitReview("request");
   if (prompt === "commit-review-verdict") result = await commitReview("verdict");
   if (prompt === "start-work-session") result = await workSessionTools();

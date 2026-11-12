@@ -247,6 +247,17 @@ enum Command {
             allow_hyphen_values = true
         )]
         modal_workspace_provider_arg: Vec<std::ffi::OsString>,
+        /// Owner-only JSON catalog of HTTP MCP tools for Claude Code Tasks.
+        #[arg(
+            long,
+            conflicts_with_all = ["e2b_workspace_provider", "modal_workspace_provider"],
+            long_help = r#"Owner-only JSON catalog of HTTP MCP tools for Claude Code Tasks.
+
+Use {"version":1,"servers":[{"name":"catalog","url":"https://example.com/mcp","headerEnv":{"Authorization":"CATALOG_AUTH"}}]}. Set CATALOG_AUTH to the full header value in the Worker Host environment. The optional resources.tools object maps each tool name to a list of rules, for example [{"prefix":"repository:","separator":"/","components":[{"arguments":["owner"]},{"arguments":["repo"]}]}].
+
+Catalog entries expose tools only when the Task's accepted Permission Sets grant them. Calls requiring approval are refused. Endpoints must use HTTPS or literal loopback HTTP."#
+        )]
+        mcp_catalog: Option<PathBuf>,
         /// Private host allowlist of Skill packages.
         #[arg(long)]
         skill_catalog: Option<PathBuf>,
@@ -637,6 +648,7 @@ async fn run(command: Command) -> Result<()> {
             e2b_workspace_provider_arg,
             modal_workspace_provider,
             modal_workspace_provider_arg,
+            mcp_catalog,
             skill_catalog,
             attempt_timeout_seconds,
             once,
@@ -702,6 +714,8 @@ async fn run(command: Command) -> Result<()> {
                 execution_profile.remote_file_workspace = true;
             }
             let (adapter, adapter_args) = adapter.launch(attempt_timeout_seconds)?;
+            let mcp_catalog = supertag_worker_host::McpCatalog::load(mcp_catalog.as_deref())?;
+            execution_profile.mcp_servers = mcp_catalog.capabilities();
             let options = HostOptions {
                 gateway: network::endpoint(gateway, false).await?,
                 token: std::env::var("SUPERTAG_HOST_TOKEN").ok(),
@@ -720,6 +734,7 @@ async fn run(command: Command) -> Result<()> {
                 context_catalog: supertag_worker_host::context::ContextCatalog::load(
                     skill_catalog.as_deref(),
                 )?,
+                mcp_catalog,
             };
             let token = CancellationToken::new();
             let shutdown = token.clone();

@@ -1,5 +1,6 @@
 mod inputs;
 mod limits;
+mod mcp;
 mod questions;
 mod review_artifacts;
 mod work_sessions;
@@ -67,6 +68,8 @@ struct Bridge {
     attached: Arc<AtomicBool>,
     inputs: inputs::InputLane,
     workspace: Option<workspace::RemoteWorkspace>,
+    mcp: Option<Arc<crate::mcp::AttemptMcp>>,
+    mcp_lane: Arc<Mutex<()>>,
 }
 
 #[derive(Default)]
@@ -279,6 +282,11 @@ impl Harness for Bridge {
         request: Request<HarnessCompleteRequest>,
     ) -> Result<Response<HarnessCompleteResponse>, Status> {
         self.authenticate(&request)?;
+        let _mcp_call = if self.mcp.is_some() {
+            Some(self.mcp_lane.lock().await)
+        } else {
+            None
+        };
         let mut state = self.state.lock().await;
         if !self.attached.load(Ordering::Acquire) {
             return Err(Status::failed_precondition(
@@ -351,15 +359,24 @@ impl Harness for Bridge {
     }
 }
 
+pub(crate) struct ExecutionInputs<'a> {
+    pub checkpoint: Option<SessionCheckpoint>,
+    pub workspace: Option<&'a Path>,
+    pub resolved_skills: Vec<ResolvedSkill>,
+    pub remote_workspace: Option<workspace::RemoteWorkspace>,
+    pub mcp: Option<Arc<crate::mcp::AttemptMcp>>,
+}
+
 pub(crate) async fn execute(
     options: &HostOptions,
     assignment: Assignment,
-    (checkpoint, workspace, resolved_skills, remote_workspace): (
-        Option<SessionCheckpoint>,
-        Option<&Path>,
-        Vec<ResolvedSkill>,
-        Option<workspace::RemoteWorkspace>,
-    ),
+    ExecutionInputs {
+        checkpoint,
+        workspace,
+        resolved_skills,
+        remote_workspace,
+        mcp,
+    }: ExecutionInputs<'_>,
     (host, inputs, coordination): (RegisteredHost, RegisteredInputs, CoordinationClients),
     host_token: &str,
     valid_until: Instant,
@@ -384,6 +401,8 @@ pub(crate) async fn execute(
         attached: Arc::default(),
         inputs: inputs::InputLane::new(inputs, valid_until, shutdown),
         workspace: remote_workspace,
+        mcp,
+        mcp_lane: Arc::default(),
     };
     let stop_server = CancellationToken::new();
     let mut server = tokio::spawn(
@@ -398,6 +417,7 @@ pub(crate) async fn execute(
             .add_service(bridge.mailbox_service())
             .add_service(bridge.work_sessions_service())
             .add_service(bridge.workspace_service())
+            .add_service(bridge.mcp_service())
             .serve_with_incoming_shutdown(
                 TcpListenerStream::new(listener),
                 stop_server.clone().cancelled_owned(),

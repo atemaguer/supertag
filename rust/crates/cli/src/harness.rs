@@ -185,6 +185,7 @@ impl AdapterOptions {
             default_model,
             allow_unsandboxed_commands: self.allow_unsandboxed_commands,
             remote_file_workspace: false,
+            mcp_servers: vec![],
         })
     }
     pub fn provider_environment(&self) -> Result<&'static [&'static str]> {

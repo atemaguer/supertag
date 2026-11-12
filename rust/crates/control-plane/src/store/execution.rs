@@ -10,6 +10,9 @@ pub(super) fn normalize_profile(
     supplied: Option<&HarnessExecutionProfile>,
 ) -> Result<HarnessExecutionProfile> {
     let mut profile = supplied.cloned().unwrap_or_default();
+    if !supertag_protocol::mcp::normalize_capabilities(&mut profile.mcp_servers) {
+        return Err(invalid("invalid Worker Host MCP server capabilities"));
+    }
     if profile.remote_file_workspace && profile.allow_unsandboxed_commands {
         return Err(invalid(
             "remote file workspace cannot run unsandboxed commands",
@@ -107,7 +110,7 @@ pub(super) fn resolve_attempt(
     harness: HarnessKind,
     profile: &HarnessExecutionProfile,
 ) -> Option<AttemptExecutionSelection> {
-    if supertag_protocol::mcp::grants(task).next().is_some() {
+    if !supertag_protocol::mcp::supports(task, harness, profile) {
         return None;
     }
     if profile.remote_file_workspace && (harness != HarnessKind::Cursor || task.workspace.is_none())

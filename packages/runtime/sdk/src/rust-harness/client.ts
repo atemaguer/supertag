@@ -1,6 +1,7 @@
 import { fromBinary } from "@bufbuild/protobuf";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { createGrpcTransport } from "@connectrpc/connect-node";
+import { HarnessMcp } from "./gen/supertag/runtime/v2/mcp_pb.js";
 import {
   AdapterBootstrapSchema,
   Harness,
@@ -50,8 +51,9 @@ export function harnessClient(endpoint: string, token: string) {
   const mailbox = createClient(HarnessMailbox, transport);
   const workSessions = createClient(HarnessWorkSessions, transport);
   const workspace = createClient(HarnessWorkspace, transport);
+  const mcp = createClient(HarnessMcp, transport);
   const options = () => ({ headers: { authorization: `Bearer ${token}` }, timeoutMs: 5000 });
-  return { client, options, questions, workstreams, mailbox, workSessions, workspace };
+  return { client, options, questions, workstreams, mailbox, workSessions, workspace, mcp };
 }
 
 /** Retry the identical receipt only; callers allocate a sequence before entering this function. */
