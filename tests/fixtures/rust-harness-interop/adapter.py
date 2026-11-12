@@ -160,12 +160,16 @@ async def run(bootstrap: dict) -> None:
             raise ProtocolFailure("Control stream ended before shutdown")
 
     try:
-        await send(
-            hello=wire.Hello(
-                protocol_version=99 if scenario == "bad-version" else 1,
-                language="python",
+        # Invalid metadata must be rejected without consuming a request body. Sending
+        # Hello concurrently with rejection can make grpc.aio's write fail INTERNAL
+        # before it receives the server's UNAUTHENTICATED trailers.
+        if scenario != "bad-auth":
+            await send(
+                hello=wire.Hello(
+                    protocol_version=99 if scenario == "bad-version" else 1,
+                    language="python",
+                )
             )
-        )
         control_task = asyncio.create_task(read_control())
         done, _ = await asyncio.wait(
             (control_task, failure), return_when=asyncio.FIRST_COMPLETED

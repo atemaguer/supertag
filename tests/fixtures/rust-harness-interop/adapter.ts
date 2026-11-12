@@ -278,12 +278,15 @@ async function run(config: Bootstrap): Promise<void> {
         finish(new Error("Worker stream ended before close acknowledgement"));
       else finish();
     });
-    send({
-      hello: {
-        protocolVersion: config.scenario === "bad-version" ? 99 : 1,
-        language: "typescript",
-      },
-    });
+    // Authentication must reject invalid metadata before any request body is sent.
+    if (config.scenario !== "bad-auth") {
+      send({
+        hello: {
+          protocolVersion: config.scenario === "bad-version" ? 99 : 1,
+          language: "typescript",
+        },
+      });
+    }
   });
 }
 
