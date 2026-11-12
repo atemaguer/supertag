@@ -613,11 +613,13 @@ async fn run_case(
         "typescript" => {
             let mut command = Command::new("node");
             // Native type stripping avoids a loader's compiler helper outliving the adapter.
-            command.arg(if live.is_some() {
-                "codex-adapter.ts"
-            } else {
-                "adapter.ts"
-            });
+            command
+                .arg("--experimental-strip-types")
+                .arg(if live.is_some() {
+                    "codex-adapter.ts"
+                } else {
+                    "adapter.ts"
+                });
             command
         }
         "python" => {

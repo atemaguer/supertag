@@ -283,8 +283,8 @@ TypeScript and Python harness adapters running as its child processes. The defau
 produces deterministic text through real gRPC calls. A separate opt-in runner invokes Codex.
 The experiment does not replace the current Worker runtime.
 
-On macOS or Linux, install Rust/Cargo, Node.js 22.18 or newer with npm, and `uv`, then run from
-the checkout:
+On macOS or Linux, install Rust/Cargo, the [supported Node.js runtime](docs/operations/requirements.md#system-and-tools)
+with npm, and `uv`, then run from the checkout:
 
 ```sh
 bash tests/fixtures/rust-harness-interop/run.sh
