@@ -9,6 +9,8 @@ use supertag_worker_host::{
     ADAPTER_STATE_DIRECTORY, WORKSPACE_DIRECTORY, WorkspaceMapping, provider_environment,
 };
 
+use crate::node_bridges::{self, NodeBridge};
+
 #[derive(Clone, Copy, ValueEnum)]
 pub enum Harness {
     Codex,
@@ -55,7 +57,7 @@ pub struct AdapterOptions {
     /// Node or Python interpreter used by a language adapter.
     #[arg(long, requires = "harness")]
     harness_runtime: Option<PathBuf>,
-    /// JavaScript or Python application entrypoint.
+    /// Override the JavaScript or Python application entrypoint.
     #[arg(long, requires = "harness")]
     harness_entrypoint: Option<PathBuf>,
     #[arg(long, requires = "harness")]
@@ -66,13 +68,13 @@ pub struct AdapterOptions {
     /// Node interpreter for the Cursor SDK adapter application.
     #[arg(long, requires = "harness", conflicts_with = "harness_runtime")]
     cursor_node: Option<PathBuf>,
-    /// Compiled JavaScript entrypoint for the Cursor SDK adapter.
+    /// Override the compiled Cursor SDK adapter entrypoint.
     #[arg(long, requires = "harness", conflicts_with = "harness_entrypoint")]
     cursor_adapter: Option<PathBuf>,
     /// Node interpreter for the OpenCode adapter application.
     #[arg(long, requires = "harness", conflicts_with = "harness_runtime")]
     opencode_node: Option<PathBuf>,
-    /// Compiled JavaScript entrypoint for the OpenCode adapter.
+    /// Override the compiled OpenCode adapter entrypoint.
     #[arg(long, requires = "harness", conflicts_with = "harness_entrypoint")]
     opencode_adapter: Option<PathBuf>,
     /// Absolute OpenCode executable path. Otherwise resolve opencode on PATH.
@@ -269,6 +271,16 @@ impl AdapterOptions {
     }
 
     pub fn launch(self, timeout_seconds: u64) -> Result<(PathBuf, Vec<OsString>)> {
+        self.launch_from(timeout_seconds, || {
+            std::env::current_exe().context("locate installed SuperTag executable")
+        })
+    }
+
+    pub(super) fn launch_from(
+        self,
+        timeout_seconds: u64,
+        installed_executable: impl FnOnce() -> Result<PathBuf>,
+    ) -> Result<(PathBuf, Vec<OsString>)> {
         self.provider_environment()?;
         let auth_file = self.auth_file();
         ensure!(
@@ -331,17 +343,15 @@ impl AdapterOptions {
                         && self.claude_path.is_none(),
                     "other harness options cannot configure OpenCode"
                 );
-                let entrypoint = self
-                    .opencode_adapter
-                    .or(self.harness_entrypoint)
-                    .context("--opencode-adapter is required for OpenCode")?;
-                ensure!(
-                    entrypoint.is_file(),
-                    "OpenCode adapter entrypoint is unavailable"
-                );
+                let (runtime, entrypoint) = node_adapter(
+                    NodeBridge::Opencode,
+                    self.opencode_adapter.or(self.harness_entrypoint),
+                    self.opencode_node.or(self.harness_runtime),
+                    installed_executable,
+                )?;
                 let executable = opencode_executable(self.opencode_path)?;
                 let mut args = vec![
-                    entrypoint.canonicalize()?.into_os_string(),
+                    entrypoint.into_os_string(),
                     "--executable".into(),
                     executable.into_os_string(),
                     "--model".into(),
@@ -363,14 +373,7 @@ impl AdapterOptions {
                 if self.allow_unsandboxed_commands {
                     args.push("--allow-unsandboxed-commands".into());
                 }
-                Ok((
-                    interpreter_path(
-                        self.opencode_node
-                            .or(self.harness_runtime)
-                            .unwrap_or_else(|| "node".into()),
-                    )?,
-                    args,
-                ))
+                Ok((runtime, args))
             }
             Harness::Cursor => {
                 ensure!(
@@ -380,15 +383,13 @@ impl AdapterOptions {
                         && self.claude_path.is_none(),
                     "other harness options cannot configure Cursor"
                 );
-                let entrypoint = self
-                    .cursor_adapter
-                    .or(self.harness_entrypoint)
-                    .context("--cursor-adapter is required for Cursor")?;
-                ensure!(
-                    entrypoint.is_file(),
-                    "Cursor adapter entrypoint is unavailable"
-                );
-                let mut args = vec![entrypoint.canonicalize()?.into_os_string()];
+                let (runtime, entrypoint) = node_adapter(
+                    NodeBridge::Cursor,
+                    self.cursor_adapter.or(self.harness_entrypoint),
+                    self.cursor_node.or(self.harness_runtime),
+                    installed_executable,
+                )?;
+                let mut args = vec![entrypoint.into_os_string()];
                 if let Some(model) = self.harness_model {
                     ensure!(
                         !model.is_empty()
@@ -405,14 +406,7 @@ impl AdapterOptions {
                 if self.allow_unsandboxed_commands {
                     args.push("--allow-unsandboxed-commands".into());
                 }
-                Ok((
-                    interpreter_path(
-                        self.cursor_node
-                            .or(self.harness_runtime)
-                            .unwrap_or_else(|| "node".into()),
-                    )?,
-                    args,
-                ))
+                Ok((runtime, args))
             }
             harness => {
                 ensure!(
@@ -424,22 +418,20 @@ impl AdapterOptions {
                 let mut args = Vec::new();
                 let runtime = match harness {
                     Harness::ClaudeCode => {
-                        let entrypoint = self
-                            .harness_entrypoint
-                            .context("--harness-entrypoint is required for Claude Code")?;
-                        args.push(
-                            entrypoint
-                                .canonicalize()
-                                .context("resolve Claude Code adapter entrypoint")?
-                                .into_os_string(),
-                        );
+                        let (runtime, entrypoint) = node_adapter(
+                            NodeBridge::ClaudeCode,
+                            self.harness_entrypoint,
+                            self.harness_runtime,
+                            installed_executable,
+                        )?;
+                        args.push(entrypoint.into_os_string());
                         if let Some(path) = self.claude_path {
                             args.extend([
                                 "--executable".into(),
                                 executable_path(path)?.into_os_string(),
                             ]);
                         }
-                        "node"
+                        runtime
                     }
                     Harness::OpenaiAgents => {
                         ensure!(
@@ -457,7 +449,7 @@ impl AdapterOptions {
                         } else {
                             args.extend(["-m".into(), "supertag.openai_agents_adapter".into()]);
                         }
-                        "python3"
+                        interpreter_path(self.harness_runtime.unwrap_or_else(|| "python3".into()))?
                     }
                     Harness::Codex | Harness::Opencode | Harness::Cursor => unreachable!(),
                 };
@@ -468,13 +460,31 @@ impl AdapterOptions {
                     "--timeout-seconds".into(),
                     timeout_seconds.to_string().into(),
                 ]);
-                Ok((
-                    interpreter_path(self.harness_runtime.unwrap_or_else(|| runtime.into()))?,
-                    args,
-                ))
+                Ok((runtime, args))
             }
         }
     }
+}
+
+fn node_adapter(
+    bridge: NodeBridge,
+    entrypoint: Option<PathBuf>,
+    configured_runtime: Option<PathBuf>,
+    installed_executable: impl FnOnce() -> Result<PathBuf>,
+) -> Result<(PathBuf, PathBuf)> {
+    if let Some(entrypoint) = entrypoint {
+        ensure!(
+            entrypoint.is_file(),
+            "harness adapter entrypoint is unavailable"
+        );
+        let runtime = interpreter_path(configured_runtime.unwrap_or_else(|| "node".into()))?;
+        return Ok((runtime, entrypoint.canonicalize()?));
+    }
+    let runtime = configured_runtime
+        .map(interpreter_path)
+        .transpose()?
+        .unwrap_or_else(|| "node".into());
+    node_bridges::launch(&installed_executable()?, bridge, runtime)
 }
 
 fn opencode_executable(configured: Option<PathBuf>) -> Result<PathBuf> {
@@ -760,15 +770,15 @@ mod tests {
     }
 
     #[test]
-    fn cursor_requires_an_entrypoint_and_refuses_foreign_options() {
+    fn cursor_reports_a_missing_packaged_bridge_and_refuses_foreign_options() {
+        let (_d, binary, entry, node) = fixture();
         assert!(
             Command::try_parse_from(["test", "--harness", "cursor"])
                 .unwrap()
                 .options
-                .launch(1)
+                .launch_from(1, || Ok(binary.clone()))
                 .is_err()
         );
-        let (_d, binary, entry, node) = fixture();
         for (flag, value) in [
             ("--opencode-path", &binary),
             ("--claude-path", &binary),

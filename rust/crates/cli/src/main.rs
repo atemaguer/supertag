@@ -6,6 +6,7 @@ mod inputs;
 mod local;
 mod mailbox_grants;
 mod network;
+mod node_bridges;
 mod objectives;
 mod policy;
 mod surface_policy;

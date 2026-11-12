@@ -1,0 +1,176 @@
+# /// script
+# requires-python = ">=3.13"
+# dependencies = ["PyYAML==6.0.3"]
+# ///
+"""Stage version-matched Node helpers beside an installed Rust CLI."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import tempfile
+
+import yaml
+
+from native_archive import ArchiveError, REPO, check_architecture, native_platform, require, version_from_repo
+
+
+FORMAT = "supertag-node-bridges-v1"
+PROTOCOL = "supertag.runtime.v2"
+NODE_MAJOR = 22
+PACKAGES = {
+    "claude-code": "@supertag/worker-claude-code",
+    "cursor": "@supertag/worker-cursor",
+    "opencode": "@supertag/worker-opencode",
+}
+STARTUP_ERRORS = {
+    "claude-code": "Claude adapter could not complete its execution safely.",
+    "cursor": "Cursor adapter could not complete its execution safely.",
+    "opencode": "OpenCode adapter could not complete its execution safely.",
+}
+ENTRY = Path("dist/rust-adapter/entry.js")
+
+
+def lockfile(path):
+    require(path.is_file() and path.stat().st_size <= 16 * 1024 * 1024, "invalid pnpm lockfile")
+    document = yaml.safe_load(path.read_bytes())
+    require(isinstance(document, dict) and document.get("lockfileVersion") == "9.0", "unsupported pnpm lockfile")
+    return document
+
+
+def verify_deploy_lock(source, deployed, repo=REPO):
+    for section in ("packages", "snapshots"):
+        pinned = source[section]
+        for key, value in deployed[section].items():
+            if key in pinned:
+                require(value == pinned[key], f"staged dependency differs from the lockfile: {key}")
+                continue
+            # pnpm deploy rewrites linked private packages to local file dependencies.
+            match = re.fullmatch(r"(@supertag/[a-z0-9-]+)@file:(packages/[a-z0-9/-]+)(?:\(.+\))?", key)
+            require(match and match[2] in source["importers"], f"staged dependency is unlocked: {key}")
+            package = json.loads((repo / match[2] / "package.json").read_text())
+            require(package.get("private") is True and package.get("name") == match[1], f"unrecognized workspace dependency: {key}")
+
+
+def relocate_self_alias(stage, package, source):
+    alias = stage / "node_modules/.pnpm/node_modules" / package
+    if alias.is_symlink() and alias.resolve(strict=False) == source:
+        alias.unlink()
+        alias.symlink_to(os.path.relpath(stage, alias.parent), target_is_directory=True)
+
+
+def verify_relocatable_tree(root):
+    for entry in root.rglob("*"):
+        mode = entry.lstat().st_mode
+        if stat.S_ISLNK(mode):
+            target = entry.readlink()
+            try:
+                resolved = entry.resolve(strict=True)
+            except (FileNotFoundError, RuntimeError) as error:
+                raise ArchiveError(f"unresolved staged link: {entry.relative_to(root)}") from error
+            require(not target.is_absolute() and resolved.is_relative_to(root), f"staged link leaves bundle: {entry.relative_to(root)}")
+        else:
+            require((stat.S_ISDIR(mode) or stat.S_ISREG(mode)) and mode & 0o022 == 0,
+                    f"unexpected staged file or mode: {entry.relative_to(root)}")
+
+
+def verify_native_asset(package, pattern, platform, label):
+    candidates = {path.resolve(strict=True) for path in package.glob(pattern)}
+    require(len(candidates) == 1, f"{label} is unavailable or ambiguous")
+    path = candidates.pop()
+    require(path.is_file() and os.access(path, os.X_OK), f"{label} is not executable")
+    with path.open("rb") as binary:
+        check_architecture(binary.read(32), platform)
+
+
+def verify_cursor_assets(package, platform):
+    system, arch = platform.split("-")
+    vendor = f"sdk-{system}-{'x64' if arch == 'amd64' else arch}"
+    for name in ("cursorsandbox", "rg"):
+        verify_native_asset(package, f"node_modules/.pnpm/*/node_modules/@cursor/{vendor}/bin/{name}", platform, f"Cursor {name}")
+    for name in ("runner.js", "stop-watchdog-main.js"):
+        require((package / "dist" / name).is_file(), f"Cursor {name} is unavailable")
+
+
+def verify_claude_asset(package, platform):
+    system, arch = platform.split("-")
+    vendor = f"claude-agent-sdk-{system}-{'x64' if arch == 'amd64' else arch}"
+    verify_native_asset(package, f"node_modules/.pnpm/*/node_modules/@anthropic-ai/{vendor}/claude", platform, "Claude native executable")
+
+
+def verify_node(node):
+    result = subprocess.run([node, "--version"], env={"PATH": os.defpath}, check=True,
+                            stdout=subprocess.PIPE, text=True, timeout=10)
+    version = re.fullmatch(r"v(\d+)\.(\d+)\.\d+\n?", result.stdout)
+    require(version and int(version[1]) == NODE_MAJOR and int(version[2]) >= 13, "Node 22.13 or later in the Node 22 line is required")
+
+
+def smoke_entry(node, kind, package):
+    entry = package / ENTRY
+    require(entry.is_file(), f"compiled {kind} entry is unavailable")
+    with tempfile.TemporaryDirectory(prefix="supertag-bridge-home-") as home:
+        # EOF reaches the adapter's bootstrap check without sending a provider request.
+        result = subprocess.run([node, entry], cwd=home, env={"PATH": os.defpath, "HOME": home},
+                                input="", capture_output=True, text=True, timeout=15)
+        require(result.returncode == 1 and not result.stdout and result.stderr.strip() == STARTUP_ERRORS[kind],
+                f"packaged {kind} entry did not reach its bootstrap check")
+
+
+def stage(output, kinds, repo=REPO):
+    output = Path(output).resolve()
+    require(not output.exists(), "Node bridge output already exists")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    root_package = json.loads((repo / "package.json").read_text())
+    manager = subprocess.check_output(["pnpm", "--version"], cwd=repo, text=True).strip()
+    require(root_package["packageManager"] == f"pnpm@{manager}", "workspace pnpm version differs from its pin")
+    source_lock = lockfile(repo / "pnpm-lock.yaml")
+    node = Path(subprocess.check_output(["pnpm", "exec", "node", "-p", "process.execPath"], cwd=repo, text=True).strip())
+    verify_node(node)
+    selected = sorted(set(kinds))
+    command = ["pnpm"]
+    for kind in selected:
+        command.extend(["--filter", PACKAGES[kind]])
+    subprocess.run([*command, "build"], cwd=repo, check=True)
+    platform = native_platform()
+    with tempfile.TemporaryDirectory(prefix=".supertag-node-bridges-", dir=output.parent) as temporary:
+        staging = Path(temporary) / "node-bridges"
+        staging.mkdir()
+        for kind in selected:
+            package = PACKAGES[kind]
+            source_package = (repo / "packages/runtime/harnesses" / kind).resolve()
+            target = staging / "node_modules" / package
+            target.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["pnpm", "--filter", package, "--prod", "deploy", "--legacy", "--offline",
+                            "--frozen-lockfile", "--ignore-scripts", target], cwd=repo, check=True)
+            verify_deploy_lock(source_lock, lockfile(target / "node_modules/.pnpm/lock.yaml"), repo)
+            relocate_self_alias(target, package, source_package)
+            verify_relocatable_tree(target)
+            if kind == "cursor":
+                verify_cursor_assets(target, platform)
+            if kind == "claude-code":
+                verify_claude_asset(target, platform)
+            smoke_entry(node, kind, target)
+        manifest = {"format": FORMAT, "version": version_from_repo(repo), "protocol": PROTOCOL,
+                    "platform": platform, "node_major": NODE_MAJOR, "bridges": selected}
+        (staging / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        require(not output.exists(), "Node bridge output already exists")
+        staging.rename(output)
+    return output
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--bridge", action="append", choices=PACKAGES, help="bridge to include (default: all)")
+    args = parser.parse_args()
+    try:
+        print(stage(args.output, args.bridge or PACKAGES))
+    except (ArchiveError, OSError, ValueError, yaml.YAMLError, subprocess.SubprocessError) as error:
+        parser.exit(1, f"Node bridges: {error}\n")
+
+
+if __name__ == "__main__":
+    main()
