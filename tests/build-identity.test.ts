@@ -24,6 +24,32 @@ describe("build identity", () => {
     }
   });
 
+  it("ignores nested Cargo artifacts while hashing source and explicitly selected roots", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supertag-build-"));
+    try {
+      const source = join(root, "desktop", "src", "client.ts");
+      const target = join(root, "desktop", "src-tauri", "target");
+      const generated = join(target, "debug", "generated.js");
+      await mkdir(join(root, "desktop", "src"), { recursive: true });
+      await mkdir(join(target, "debug"), { recursive: true });
+      await writeFile(source, "source v1");
+      await writeFile(generated, "generated v1");
+      const first = digestCode([root]);
+      const explicitTarget = digestCode([target]);
+
+      await writeFile(generated, "generated v2");
+      expect(digestCode([root])).toBe(first);
+      expect(digestCode([target])).not.toBe(explicitTarget);
+
+      await rm(target, { recursive: true });
+      expect(digestCode([root])).toBe(first);
+      await writeFile(source, "source v2");
+      expect(digestCode([root])).not.toBe(first);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("changes when a built workspace dependency changes", async () => {
     const root = await mkdtemp(join(tmpdir(), "supertag-checkout-"));
     try {

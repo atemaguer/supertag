@@ -10,7 +10,8 @@ export function digestCode(roots: readonly string[]): string {
     for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) =>
       a.name.localeCompare(b.name),
     )) {
-      if (["node_modules", "dist", ".git"].includes(entry.name) && directory !== root) continue;
+      if (["node_modules", "dist", "target", ".git"].includes(entry.name) && directory !== root)
+        continue;
       const path = join(directory, entry.name);
       if (entry.isDirectory()) visit(root, path);
       else if (
