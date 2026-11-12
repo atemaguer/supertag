@@ -141,7 +141,8 @@ func runtimeObjective(objective *v2.Objective) *operatorv1.Objective {
 		OwnerTagId: objective.GetOwnerTagId(), OwnerTag: objective.GetOwnerTagId(),
 		TeamId: objective.GetTeamId(),
 		Status: objectiveStatus(objective.GetStatus()), Revision: int64(objective.GetRevision()),
-		Ongoing: objective.GetOngoing(),
+		Ongoing:        objective.GetOngoing(),
+		RuntimeActions: append([]string(nil), objective.GetRuntimeActions().GetActions()...),
 	}
 	if objective.DeadlineMs != nil {
 		out.Deadline = timestamppb.New(time.UnixMilli(*objective.DeadlineMs))

@@ -218,6 +218,23 @@ message TaskPolicySnapshot {
   repeated ContextSet context_sets = 4;
   PolicyExecutionSettings execution = 5;
   SurfacePolicyOrigin origin = 6;
+  TaskRuntimeAuthority runtime_authority = 7;
+}
+
+message RuntimeApprovalRequirement {
+  string action = 1;
+  repeated string permission_set_ids = 2;
+  // Typed operator: or tag: principal IDs.
+  repeated string approvers = 3;
+}
+
+message TaskRuntimeAuthority {
+  // Accepted semantic grants, including gated and coordination-only actions.
+  repeated string actions = 1;
+  repeated RuntimeApprovalRequirement approvals = 2;
+  optional string objective_id = 3;
+  optional uint64 objective_revision = 4;
+  optional string delegating_task_id = 5;
 }
 
 message PutPermissionSetRequest {

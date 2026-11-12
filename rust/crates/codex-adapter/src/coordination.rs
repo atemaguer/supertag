@@ -52,6 +52,10 @@ fn bounded_text(text: &str, maximum: usize) -> bool {
     !text.trim().is_empty() && text.encode_utf16().count() <= maximum && !text.contains('\0')
 }
 
+fn bounded_identity(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 256 && !value.chars().any(char::is_control)
+}
+
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct StartSession {
@@ -77,9 +81,7 @@ impl StartSession {
                 && !self.instruction.contains('\0')
                 && [&self.workspace, &self.tag]
                     .into_iter()
-                    .all(|field| field.as_ref().is_none_or(|value| !value.is_empty()
-                        && value.len() <= 256
-                        && !value.chars().any(char::is_control))),
+                    .all(|field| field.as_deref().is_none_or(bounded_identity)),
             "invalid Work Session arguments"
         );
         Ok(())
@@ -263,7 +265,7 @@ pub(crate) fn tool_specs(inventory: Inventory) -> Vec<Value> {
     if inventory >= Inventory::WorkSessions {
         tools.push(json!({
             "type":"function", "name":"start_session",
-            "description":"Start a Work Session with a short title and self-contained instruction. After it is accepted, acknowledge the work and finish this turn. The Work Session reports to this conversation.",
+            "description":"Start a Work Session with a short title and self-contained instruction. After it is accepted, acknowledge the work and finish this turn. The Work Session reports to this conversation. An Objective owner can specify an eligible Tag on its Team.",
             "inputSchema":{"type":"object","properties":{
                 "title":{"type":"string","minLength":1,"maxLength":120},
                 "instruction":{"type":"string","minLength":1,"maxLength":8000},
@@ -411,8 +413,11 @@ impl Client {
                 && receipt.parent_tag_id == tag
                 && receipt.parent_session_id == parent_session_id
                 && receipt.starter_task_id == task_id
-                && receipt.tag_id == tag
-                && !receipt.latest_task_id.is_empty()
+                && bounded_identity(&receipt.tag_id)
+                && crate::auth::redact(receipt.tag_id.clone(), secrets) == receipt.tag_id
+                && bounded_identity(&receipt.latest_task_id)
+                && crate::auth::redact(receipt.latest_task_id.clone(), secrets)
+                    == receipt.latest_task_id
                 && receipt.latest_task_id != task_id
                 && receipt.latest_task_state() == TaskState::Queued
                 && receipt.created_order > 0,

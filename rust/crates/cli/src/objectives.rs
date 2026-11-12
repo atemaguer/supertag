@@ -6,8 +6,8 @@ use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
         CreateObjectiveRequest, GetObjectiveRequest, ListObjectivesRequest, Objective,
-        ObjectiveActionRequest, ReviewObjectiveRequest, SetObjectiveLimitsRequest,
-        objectives_client::ObjectivesClient,
+        ObjectiveActionRequest, ReviewObjectiveRequest, RuntimeActions, SetObjectiveLimitsRequest,
+        SetObjectiveRuntimeActionsRequest, objectives_client::ObjectivesClient,
     },
 };
 use uuid::Uuid;
@@ -34,6 +34,12 @@ pub enum ObjectiveCommand {
         currency: Option<String>,
         #[arg(long)]
         operation_id: Option<String>,
+        /// Narrow runtime actions to this list; repeat for each allowed action.
+        #[arg(long = "runtime-action", conflicts_with = "no_runtime_actions")]
+        runtime_actions: Vec<String>,
+        /// Create the Objective with no runtime actions.
+        #[arg(long)]
+        no_runtime_actions: bool,
         outcome: String,
     },
     Get {
@@ -58,6 +64,22 @@ pub enum ObjectiveCommand {
         currency: Option<String>,
         #[arg(long, conflicts_with_all = ["budget_minor", "currency"])]
         clear_budget: bool,
+        #[arg(long)]
+        expected_revision: Option<u64>,
+        #[arg(long)]
+        operation_id: Option<String>,
+    },
+    /// Replace the runtime-action ceiling for future Objective turns.
+    SetRuntimeActions {
+        objective_id: String,
+        #[arg(
+            long = "runtime-action",
+            conflicts_with = "no_runtime_actions",
+            required_unless_present = "no_runtime_actions"
+        )]
+        runtime_actions: Vec<String>,
+        #[arg(long)]
+        no_runtime_actions: bool,
         #[arg(long)]
         expected_revision: Option<u64>,
         #[arg(long)]
@@ -117,6 +139,7 @@ pub async fn run(connection: Connection, command: ObjectiveCommand) -> Result<()
     let mut client = ObjectivesClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let mut requested_actions = None;
     let response = match command {
         ObjectiveCommand::Create {
             objective_id,
@@ -128,7 +151,12 @@ pub async fn run(connection: Connection, command: ObjectiveCommand) -> Result<()
             budget_minor,
             currency,
             operation_id: id,
+            runtime_actions,
+            no_runtime_actions,
         } => {
+            if no_runtime_actions || !runtime_actions.is_empty() {
+                requested_actions = Some(runtime_actions);
+            }
             client
                 .create_objective(request(
                     CreateObjectiveRequest {
@@ -141,6 +169,9 @@ pub async fn run(connection: Connection, command: ObjectiveCommand) -> Result<()
                         budget_limit_minor: budget_minor,
                         budget_currency: currency,
                         operation_id: operation_id(id),
+                        runtime_actions: requested_actions
+                            .clone()
+                            .map(|actions| RuntimeActions { actions }),
                     },
                     &token,
                 )?)
@@ -187,6 +218,43 @@ pub async fn run(connection: Connection, command: ObjectiveCommand) -> Result<()
                 )?)
                 .await?
         }
+        ObjectiveCommand::SetRuntimeActions {
+            objective_id,
+            runtime_actions,
+            no_runtime_actions: _,
+            expected_revision,
+            operation_id: id,
+        } => {
+            let revision = match expected_revision {
+                Some(revision) => revision,
+                None => {
+                    client
+                        .get_objective(request(
+                            GetObjectiveRequest {
+                                objective_id: objective_id.clone(),
+                            },
+                            &token,
+                        )?)
+                        .await?
+                        .into_inner()
+                        .revision
+                }
+            };
+            requested_actions = Some(runtime_actions.clone());
+            client
+                .set_runtime_actions(request(
+                    SetObjectiveRuntimeActionsRequest {
+                        objective_id,
+                        operation_id: operation_id(id),
+                        expected_revision: revision,
+                        runtime_actions: Some(RuntimeActions {
+                            actions: runtime_actions,
+                        }),
+                    },
+                    &token,
+                )?)
+                .await?
+        }
         ObjectiveCommand::Pause(action) => {
             client
                 .pause_objective(request(action.into(), &token)?)
@@ -221,7 +289,27 @@ pub async fn run(connection: Connection, command: ObjectiveCommand) -> Result<()
                 .await?
         }
     };
-    println!("{}", output(response.into_inner()));
+    let objective = response.into_inner();
+    if let Some(requested) = requested_actions {
+        let allowed = objective
+            .runtime_actions
+            .as_ref()
+            .map(|scope| scope.actions.as_slice())
+            .unwrap_or_default();
+        let mut dropped: Vec<_> = requested
+            .into_iter()
+            .filter(|action| !allowed.contains(action))
+            .collect();
+        dropped.sort();
+        dropped.dedup();
+        if !dropped.is_empty() {
+            eprintln!(
+                "Warning: Objective omitted actions its owner does not allow: {}.",
+                dropped.join(", ")
+            );
+        }
+    }
+    println!("{}", output(objective));
     Ok(())
 }
 
@@ -241,5 +329,6 @@ fn output(objective: Objective) -> Value {
         "budget_currency": objective.budget_currency,
         "paused_at_ms": objective.paused_at_ms,
         "reported_spend_minor": objective.reported_spend_minor,
+        "runtime_actions": objective.runtime_actions.as_ref().map(|scope| scope.actions.as_slice()).unwrap_or_default(),
     })
 }

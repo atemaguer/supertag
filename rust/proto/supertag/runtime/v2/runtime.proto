@@ -87,6 +87,7 @@ service Objectives {
   rpc GetObjective(GetObjectiveRequest) returns (Objective);
   rpc ListObjectives(ListObjectivesRequest) returns (ListObjectivesResponse);
   rpc SetLimits(SetObjectiveLimitsRequest) returns (Objective);
+  rpc SetRuntimeActions(SetObjectiveRuntimeActionsRequest) returns (Objective);
   rpc PauseObjective(ObjectiveActionRequest) returns (Objective);
   rpc ResumeObjective(ObjectiveActionRequest) returns (Objective);
   rpc CancelObjective(ObjectiveActionRequest) returns (Objective);
@@ -1267,6 +1268,12 @@ message CreateObjectiveRequest {
   optional uint64 budget_limit_minor = 7;
   optional string budget_currency = 8;
   optional string team_id = 9;
+  // Omit to capture the owner's current runtime grants. An empty selection grants none.
+  RuntimeActions runtime_actions = 10;
+}
+
+message RuntimeActions {
+  repeated string actions = 1;
 }
 
 message Objective {
@@ -1284,6 +1291,7 @@ message Objective {
   optional int64 paused_at_ms = 12;
   optional uint64 reported_spend_minor = 13;
   optional string team_id = 14;
+  RuntimeActions runtime_actions = 15;
 }
 
 message Team {
@@ -1408,6 +1416,13 @@ message SetObjectiveLimitsRequest {
   optional string budget_currency = 6;
   bool clear_budget = 7;
   optional uint64 expected_revision = 8;
+}
+
+message SetObjectiveRuntimeActionsRequest {
+  string objective_id = 1;
+  string operation_id = 2;
+  uint64 expected_revision = 3;
+  RuntimeActions runtime_actions = 4;
 }
 
 message ObjectiveActionRequest {

@@ -136,6 +136,9 @@ const (
 	ObjectivesListObjectivesProcedure = "/supertag.runtime.v2.Objectives/ListObjectives"
 	// ObjectivesSetLimitsProcedure is the fully-qualified name of the Objectives's SetLimits RPC.
 	ObjectivesSetLimitsProcedure = "/supertag.runtime.v2.Objectives/SetLimits"
+	// ObjectivesSetRuntimeActionsProcedure is the fully-qualified name of the Objectives's
+	// SetRuntimeActions RPC.
+	ObjectivesSetRuntimeActionsProcedure = "/supertag.runtime.v2.Objectives/SetRuntimeActions"
 	// ObjectivesPauseObjectiveProcedure is the fully-qualified name of the Objectives's PauseObjective
 	// RPC.
 	ObjectivesPauseObjectiveProcedure = "/supertag.runtime.v2.Objectives/PauseObjective"
@@ -982,6 +985,7 @@ type ObjectivesClient interface {
 	GetObjective(context.Context, *connect.Request[runtimev2.GetObjectiveRequest]) (*connect.Response[runtimev2.Objective], error)
 	ListObjectives(context.Context, *connect.Request[runtimev2.ListObjectivesRequest]) (*connect.Response[runtimev2.ListObjectivesResponse], error)
 	SetLimits(context.Context, *connect.Request[runtimev2.SetObjectiveLimitsRequest]) (*connect.Response[runtimev2.Objective], error)
+	SetRuntimeActions(context.Context, *connect.Request[runtimev2.SetObjectiveRuntimeActionsRequest]) (*connect.Response[runtimev2.Objective], error)
 	PauseObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error)
 	ResumeObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error)
 	CancelObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error)
@@ -1023,6 +1027,12 @@ func NewObjectivesClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(objectivesMethods.ByName("SetLimits")),
 			connect.WithClientOptions(opts...),
 		),
+		setRuntimeActions: connect.NewClient[runtimev2.SetObjectiveRuntimeActionsRequest, runtimev2.Objective](
+			httpClient,
+			baseURL+ObjectivesSetRuntimeActionsProcedure,
+			connect.WithSchema(objectivesMethods.ByName("SetRuntimeActions")),
+			connect.WithClientOptions(opts...),
+		),
 		pauseObjective: connect.NewClient[runtimev2.ObjectiveActionRequest, runtimev2.Objective](
 			httpClient,
 			baseURL+ObjectivesPauseObjectiveProcedure,
@@ -1052,14 +1062,15 @@ func NewObjectivesClient(httpClient connect.HTTPClient, baseURL string, opts ...
 
 // objectivesClient implements ObjectivesClient.
 type objectivesClient struct {
-	createObjective *connect.Client[runtimev2.CreateObjectiveRequest, runtimev2.Objective]
-	getObjective    *connect.Client[runtimev2.GetObjectiveRequest, runtimev2.Objective]
-	listObjectives  *connect.Client[runtimev2.ListObjectivesRequest, runtimev2.ListObjectivesResponse]
-	setLimits       *connect.Client[runtimev2.SetObjectiveLimitsRequest, runtimev2.Objective]
-	pauseObjective  *connect.Client[runtimev2.ObjectiveActionRequest, runtimev2.Objective]
-	resumeObjective *connect.Client[runtimev2.ObjectiveActionRequest, runtimev2.Objective]
-	cancelObjective *connect.Client[runtimev2.ObjectiveActionRequest, runtimev2.Objective]
-	reviewObjective *connect.Client[runtimev2.ReviewObjectiveRequest, runtimev2.Objective]
+	createObjective   *connect.Client[runtimev2.CreateObjectiveRequest, runtimev2.Objective]
+	getObjective      *connect.Client[runtimev2.GetObjectiveRequest, runtimev2.Objective]
+	listObjectives    *connect.Client[runtimev2.ListObjectivesRequest, runtimev2.ListObjectivesResponse]
+	setLimits         *connect.Client[runtimev2.SetObjectiveLimitsRequest, runtimev2.Objective]
+	setRuntimeActions *connect.Client[runtimev2.SetObjectiveRuntimeActionsRequest, runtimev2.Objective]
+	pauseObjective    *connect.Client[runtimev2.ObjectiveActionRequest, runtimev2.Objective]
+	resumeObjective   *connect.Client[runtimev2.ObjectiveActionRequest, runtimev2.Objective]
+	cancelObjective   *connect.Client[runtimev2.ObjectiveActionRequest, runtimev2.Objective]
+	reviewObjective   *connect.Client[runtimev2.ReviewObjectiveRequest, runtimev2.Objective]
 }
 
 // CreateObjective calls supertag.runtime.v2.Objectives.CreateObjective.
@@ -1080,6 +1091,11 @@ func (c *objectivesClient) ListObjectives(ctx context.Context, req *connect.Requ
 // SetLimits calls supertag.runtime.v2.Objectives.SetLimits.
 func (c *objectivesClient) SetLimits(ctx context.Context, req *connect.Request[runtimev2.SetObjectiveLimitsRequest]) (*connect.Response[runtimev2.Objective], error) {
 	return c.setLimits.CallUnary(ctx, req)
+}
+
+// SetRuntimeActions calls supertag.runtime.v2.Objectives.SetRuntimeActions.
+func (c *objectivesClient) SetRuntimeActions(ctx context.Context, req *connect.Request[runtimev2.SetObjectiveRuntimeActionsRequest]) (*connect.Response[runtimev2.Objective], error) {
+	return c.setRuntimeActions.CallUnary(ctx, req)
 }
 
 // PauseObjective calls supertag.runtime.v2.Objectives.PauseObjective.
@@ -1108,6 +1124,7 @@ type ObjectivesHandler interface {
 	GetObjective(context.Context, *connect.Request[runtimev2.GetObjectiveRequest]) (*connect.Response[runtimev2.Objective], error)
 	ListObjectives(context.Context, *connect.Request[runtimev2.ListObjectivesRequest]) (*connect.Response[runtimev2.ListObjectivesResponse], error)
 	SetLimits(context.Context, *connect.Request[runtimev2.SetObjectiveLimitsRequest]) (*connect.Response[runtimev2.Objective], error)
+	SetRuntimeActions(context.Context, *connect.Request[runtimev2.SetObjectiveRuntimeActionsRequest]) (*connect.Response[runtimev2.Objective], error)
 	PauseObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error)
 	ResumeObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error)
 	CancelObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error)
@@ -1145,6 +1162,12 @@ func NewObjectivesHandler(svc ObjectivesHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(objectivesMethods.ByName("SetLimits")),
 		connect.WithHandlerOptions(opts...),
 	)
+	objectivesSetRuntimeActionsHandler := connect.NewUnaryHandler(
+		ObjectivesSetRuntimeActionsProcedure,
+		svc.SetRuntimeActions,
+		connect.WithSchema(objectivesMethods.ByName("SetRuntimeActions")),
+		connect.WithHandlerOptions(opts...),
+	)
 	objectivesPauseObjectiveHandler := connect.NewUnaryHandler(
 		ObjectivesPauseObjectiveProcedure,
 		svc.PauseObjective,
@@ -1179,6 +1202,8 @@ func NewObjectivesHandler(svc ObjectivesHandler, opts ...connect.HandlerOption) 
 			objectivesListObjectivesHandler.ServeHTTP(w, r)
 		case ObjectivesSetLimitsProcedure:
 			objectivesSetLimitsHandler.ServeHTTP(w, r)
+		case ObjectivesSetRuntimeActionsProcedure:
+			objectivesSetRuntimeActionsHandler.ServeHTTP(w, r)
 		case ObjectivesPauseObjectiveProcedure:
 			objectivesPauseObjectiveHandler.ServeHTTP(w, r)
 		case ObjectivesResumeObjectiveProcedure:
@@ -1210,6 +1235,10 @@ func (UnimplementedObjectivesHandler) ListObjectives(context.Context, *connect.R
 
 func (UnimplementedObjectivesHandler) SetLimits(context.Context, *connect.Request[runtimev2.SetObjectiveLimitsRequest]) (*connect.Response[runtimev2.Objective], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Objectives.SetLimits is not implemented"))
+}
+
+func (UnimplementedObjectivesHandler) SetRuntimeActions(context.Context, *connect.Request[runtimev2.SetObjectiveRuntimeActionsRequest]) (*connect.Response[runtimev2.Objective], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Objectives.SetRuntimeActions is not implemented"))
 }
 
 func (UnimplementedObjectivesHandler) PauseObjective(context.Context, *connect.Request[runtimev2.ObjectiveActionRequest]) (*connect.Response[runtimev2.Objective], error) {

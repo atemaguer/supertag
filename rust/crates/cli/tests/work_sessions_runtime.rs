@@ -826,3 +826,364 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports() -
     plane.kill().await?;
     Ok(())
 }
+
+#[tokio::test]
+async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let service_token = Uuid::new_v4().to_string();
+    let operator_token = Uuid::new_v4().to_string();
+    let host_token = Uuid::new_v4().to_string();
+    let mut plane = command(&["control-plane"]);
+    plane
+        .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+        .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
+        .env(
+            "SUPERTAG_DATABASE_URL",
+            format!(
+                "sqlite://{}?mode=rwc",
+                directory.path().join("control.db").display()
+            ),
+        );
+    let (mut plane, private) = service(plane).await?;
+    let (mut gateway_process, public) = service(gateway(
+        &private,
+        &service_token,
+        &operator_token,
+        "operator:alice",
+    ))
+    .await?;
+    let connected = channel(&public).await?;
+    let mut operator = operator_client::OperatorClient::new(connected.clone());
+    let mut objectives = objectives_client::ObjectivesClient::new(connected.clone());
+    let mut work = work_sessions_client::WorkSessionsClient::new(connected);
+    for (tag_id, instructions) in [
+        ("owner", "Owner coordinates the release"),
+        ("builder", "Builder inspects the release"),
+    ] {
+        operator
+            .put_tag(authenticated_request(
+                PutTagRequest {
+                    tag_id: tag_id.into(),
+                    instructions: instructions.into(),
+                    allowed_actions: vec!["files:read".into(), "files:write".into()],
+                    ..Default::default()
+                },
+                &operator_token,
+                None,
+            )?)
+            .await?;
+    }
+    cli(
+        &[
+            "team",
+            "--gateway",
+            &public,
+            "create",
+            "release-team",
+            "--member",
+            "owner",
+            "--member",
+            "builder",
+        ],
+        &operator_token,
+    )
+    .await?;
+    let created = cli(
+        &[
+            "objective",
+            "--gateway",
+            &public,
+            "create",
+            "release",
+            "--owner",
+            "owner",
+            "--team",
+            "release-team",
+            "--ongoing",
+            "--runtime-action",
+            "files:read",
+            "--operation-id",
+            "create-release",
+            "Inspect the release",
+        ],
+        &operator_token,
+    )
+    .await?;
+    assert_eq!(
+        created["runtime_actions"],
+        serde_json::json!(["files:read"])
+    );
+    let first_task = created["starting_task_id"]
+        .as_str()
+        .context("Objective owner Task")?
+        .to_owned();
+    let owner_session = created["session_id"]
+        .as_str()
+        .context("Objective owner Session")?
+        .to_owned();
+    let host_state = directory.path().join("host");
+    run_host(
+        &public,
+        &host_token,
+        &host_state,
+        "--target-work-session=builder",
+    )
+    .await?;
+    let owner_task = operator
+        .get_task(authenticated_request(
+            GetTaskRequest {
+                task_id: first_task.clone(),
+            },
+            &operator_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    ensure!(
+        owner_task.state() == TaskState::Succeeded,
+        "owner delegation failed: {:?}",
+        owner_task.result
+    );
+    assert_eq!(owner_task.allowed_actions, ["files:read"]);
+    let page = work
+        .list(authenticated_request(
+            ListWorkSessionsRequest {
+                parent_tag_id: "owner".into(),
+                parent_session_id: owner_session.clone(),
+                starter_task_id: Some(first_task),
+                limit: 4,
+                cursor: String::new(),
+            },
+            &operator_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    ensure!(
+        page.work_sessions.len() == 1,
+        "delegated Work Session missing"
+    );
+    let started = &page.work_sessions[0];
+    ensure!(
+        started.parent_tag_id == "owner"
+            && started.tag_id == "builder"
+            && started.objective_id.as_deref() == Some("release")
+    );
+    let child = operator
+        .get_task(authenticated_request(
+            GetTaskRequest {
+                task_id: started.latest_task_id.clone(),
+            },
+            &operator_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    ensure!(child.tag_id == "builder" && child.session_id == started.work_session_id);
+    ensure!(
+        child.instructions.contains("Builder inspects the release")
+            && !child.instructions.contains("Owner coordinates the release")
+    );
+    assert_eq!(child.allowed_actions, ["files:read"]);
+    // Editing the recipient after acceptance must not change this child's role
+    // identity or widen its accepted Objective permissions.
+    operator
+        .put_tag(authenticated_request(
+            PutTagRequest {
+                tag_id: "builder".into(),
+                instructions: "Edited builder instructions".into(),
+                allowed_actions: vec!["files:write".into()],
+                ..Default::default()
+            },
+            &operator_token,
+            None,
+        )?)
+        .await?;
+    run_host(
+        &public,
+        &host_token,
+        &host_state,
+        "--reject-work-session-start",
+    )
+    .await?;
+    let child_done = wait_for_work(&mut work, &operator_token, &started.work_session_id, |w| {
+        w.report_task_id.is_some()
+    })
+    .await?;
+    ensure!(child_done.latest_task_state() == TaskState::Succeeded);
+    let report_id = child_done.report_task_id.clone().context("owner report")?;
+    let report = operator
+        .get_task(authenticated_request(
+            GetTaskRequest {
+                task_id: report_id.clone(),
+            },
+            &operator_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    ensure!(report.tag_id == "owner" && report.session_id == owner_session);
+    ensure!(
+        report
+            .instructions
+            .contains("Owner coordinates the release")
+            && !report.instructions.contains("Builder inspects the release")
+    );
+    assert_eq!(report.allowed_actions, ["files:read"]);
+    run_host(
+        &public,
+        &host_token,
+        &host_state,
+        "--reject-work-session-start",
+    )
+    .await?;
+    wait_for_work(&mut work, &operator_token, &started.work_session_id, |w| {
+        w.report_task_state() == TaskState::Succeeded
+    })
+    .await?;
+    let child = operator
+        .get_task(authenticated_request(
+            GetTaskRequest {
+                task_id: started.latest_task_id.clone(),
+            },
+            &operator_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    ensure!(
+        child
+            .result
+            .as_deref()
+            .is_some_and(|text| text.starts_with("Builder inspects the release:"))
+    );
+
+    // The operator manages the ceiling with an exact revision and operation
+    // receipt. Host credentials cannot use this management entry point.
+    let current = cli(
+        &["objective", "--gateway", &public, "get", "release"],
+        &operator_token,
+    )
+    .await?;
+    let revision = current["revision"].as_u64().context("Objective revision")?;
+    let denied = objectives
+        .set_runtime_actions(authenticated_request(
+            SetObjectiveRuntimeActionsRequest {
+                objective_id: "release".into(),
+                operation_id: "host-cannot-manage".into(),
+                expected_revision: revision,
+                runtime_actions: Some(RuntimeActions { actions: vec![] }),
+            },
+            &host_token,
+            None,
+        )?)
+        .await
+        .expect_err("Host changed Objective ceiling");
+    assert_eq!(denied.code(), Code::Unauthenticated);
+    let revision_arg = revision.to_string();
+    let clear = [
+        "objective",
+        "--gateway",
+        &public,
+        "set-runtime-actions",
+        "release",
+        "--no-runtime-actions",
+        "--expected-revision",
+        &revision_arg,
+        "--operation-id",
+        "clear-runtime",
+    ];
+    let cleared = cli(&clear, &operator_token).await?;
+    assert_eq!(cleared["runtime_actions"], serde_json::json!([]));
+    assert_eq!(cleared["revision"].as_u64(), Some(revision + 1));
+    assert_eq!(cli(&clear, &operator_token).await?, cleared);
+    let stale = objectives
+        .set_runtime_actions(authenticated_request(
+            SetObjectiveRuntimeActionsRequest {
+                objective_id: "release".into(),
+                operation_id: "stale-runtime".into(),
+                expected_revision: revision,
+                runtime_actions: Some(RuntimeActions {
+                    actions: vec!["files:read".into()],
+                }),
+            },
+            &operator_token,
+            None,
+        )?)
+        .await
+        .expect_err("stale runtime-action revision");
+    assert_eq!(stale.code(), Code::AlreadyExists);
+    let mut update = command(&[
+        "objective",
+        "--gateway",
+        &public,
+        "set-runtime-actions",
+        "release",
+        "--runtime-action",
+        "files:read",
+        "--runtime-action",
+        "network:ungranted",
+        "--operation-id",
+        "narrow-ungranted",
+    ]);
+    let output = timeout(
+        WAIT,
+        update
+            .env("SUPERTAG_OPERATOR_TOKEN", &operator_token)
+            .output(),
+    )
+    .await??;
+    ensure!(
+        output.status.success(),
+        "ceiling update failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let updated: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(
+        updated["runtime_actions"],
+        serde_json::json!(["files:read"])
+    );
+    ensure!(
+        String::from_utf8_lossy(&output.stderr).contains("network:ungranted"),
+        "explicit dropped action was not explained"
+    );
+    let defaults = cli(
+        &[
+            "objective",
+            "--gateway",
+            &public,
+            "create",
+            "owner-defaults",
+            "--owner",
+            "owner",
+            "--ongoing",
+            "Default actions",
+        ],
+        &operator_token,
+    )
+    .await?;
+    assert_eq!(
+        defaults["runtime_actions"],
+        serde_json::json!(["files:read", "files:write"])
+    );
+    let empty = cli(
+        &[
+            "objective",
+            "--gateway",
+            &public,
+            "create",
+            "explicit-empty",
+            "--owner",
+            "owner",
+            "--ongoing",
+            "--no-runtime-actions",
+            "No native actions",
+        ],
+        &operator_token,
+    )
+    .await?;
+    assert_eq!(empty["runtime_actions"], serde_json::json!([]));
+    gateway_process.kill().await?;
+    plane.kill().await?;
+    Ok(())
+}

@@ -1150,42 +1150,27 @@ pub(crate) async fn admission_in(
         ));
     }
     let mut actions: BTreeSet<String> = base.allowed_actions.iter().cloned().collect();
-    let mut unsupported_approval_actions = BTreeSet::new();
-    let mut approvals: BTreeMap<String, BTreeSet<String>> = base
-        .approval_rules
-        .iter()
-        .map(|r| (r.action.clone(), r.operator_ids.iter().cloned().collect()))
-        .collect();
+    let mut approvals = BTreeMap::new();
+    for rule in base.approval_rules {
+        merge_runtime_requirement(&mut approvals, base_runtime_requirement(rule));
+    }
     for set in &snapshot.permission_sets {
-        for p in &set.permissions {
-            if p.target == PolicyPermissionTarget::Runtime as i32 {
-                actions.insert(p.action.clone());
-                let supported = matches!(
-                    p.action.as_str(),
-                    WORKSTREAM_POST_ACTION | MAILBOX_SEND_ACTION
+        for permission in &set.permissions {
+            if permission.target != PolicyPermissionTarget::Runtime as i32 {
+                continue;
+            }
+            actions.insert(permission.action.clone());
+            if permission.approval_required {
+                merge_runtime_requirement(
+                    &mut approvals,
+                    RuntimeApprovalRequirement {
+                        action: permission.action.clone(),
+                        permission_set_ids: vec![set.set_id.clone()],
+                        approvers: set.approvers.clone(),
+                    },
                 );
-                if p.approval_required && !supported {
-                    unsupported_approval_actions.insert(p.action.clone());
-                }
-                if p.approval_required && supported {
-                    let operators: BTreeSet<String> = set
-                        .approvers
-                        .iter()
-                        .filter_map(|a| a.strip_prefix("operator:").map(str::to_owned))
-                        .collect();
-                    approvals
-                        .entry(p.action.clone())
-                        .and_modify(|current| current.extend(operators.clone()))
-                        .or_insert(operators);
-                }
             }
         }
-    }
-    // A requiring Set wins over every unrestricted grant. Workstream posts and
-    // Mailbox sends have approval boundaries; preserve the other grants
-    // in the snapshot without allowing an adapter to execute them unrestricted.
-    for action in unsupported_approval_actions {
-        actions.remove(&action);
     }
     let mut execution_roles: Vec<&Role> = snapshot
         .roles
@@ -1235,22 +1220,226 @@ pub(crate) async fn admission_in(
             ));
         }
     };
-    size(&snapshot, SNAPSHOT_BYTES)?;
-    let effective_digest = effective_digest(&snapshot)?;
-    Ok(AdmissionPolicy {
+    let mut policy = AdmissionPolicy {
         instructions,
-        allowed_actions: actions.into_iter().collect(),
+        allowed_actions: Vec::new(),
         harness_kind,
-        approval_rules: approvals
-            .into_iter()
-            .map(|(action, operator_ids)| ApprovalRule {
-                action,
-                operator_ids: operator_ids.into_iter().collect(),
-            })
-            .collect(),
+        approval_rules: Vec::new(),
         snapshot,
-        effective_digest,
-    })
+        effective_digest: String::new(),
+    };
+    project_runtime(
+        &mut policy,
+        TaskRuntimeAuthority {
+            actions: actions.into_iter().collect(),
+            approvals: approvals.into_values().collect(),
+            ..Default::default()
+        },
+    )?;
+    Ok(policy)
+}
+
+const DELEGATE_WRITE: &str = "files:delegate-write";
+const FILES_WRITE: &str = "files:write";
+
+fn base_runtime_requirement(rule: &ApprovalRule) -> RuntimeApprovalRequirement {
+    RuntimeApprovalRequirement {
+        action: rule.action.clone(),
+        permission_set_ids: Vec::new(),
+        approvers: rule
+            .operator_ids
+            .iter()
+            .map(|id| format!("operator:{id}"))
+            .collect(),
+    }
+}
+
+fn merge_runtime_requirement(
+    requirements: &mut BTreeMap<String, RuntimeApprovalRequirement>,
+    requirement: RuntimeApprovalRequirement,
+) {
+    let RuntimeApprovalRequirement {
+        action,
+        permission_set_ids,
+        approvers,
+    } = requirement;
+    let current =
+        requirements
+            .entry(action.clone())
+            .or_insert_with(|| RuntimeApprovalRequirement {
+                action,
+                ..Default::default()
+            });
+    current.permission_set_ids.extend(permission_set_ids);
+    current.permission_set_ids.sort();
+    current.permission_set_ids.dedup();
+    current.approvers.extend(approvers);
+    current.approvers.sort();
+    current.approvers.dedup();
+}
+
+fn supported_runtime_gate(action: &str) -> bool {
+    matches!(action, WORKSTREAM_POST_ACTION | MAILBOX_SEND_ACTION)
+}
+
+fn project_runtime(
+    policy: &mut AdmissionPolicy,
+    mut authority: TaskRuntimeAuthority,
+) -> Result<()> {
+    authority.actions.sort();
+    authority.actions.dedup();
+    let requirements: BTreeMap<&str, &RuntimeApprovalRequirement> = authority
+        .approvals
+        .iter()
+        .map(|requirement| (requirement.action.as_str(), requirement))
+        .collect();
+    policy.allowed_actions = authority
+        .actions
+        .iter()
+        .filter(|action| {
+            action.as_str() != DELEGATE_WRITE
+                && requirements.get(action.as_str()).is_none_or(|requirement| {
+                    supported_runtime_gate(action)
+                        && (requirement.approvers.is_empty()
+                            || requirement
+                                .approvers
+                                .iter()
+                                .any(|id| id.starts_with("operator:")))
+                })
+        })
+        .cloned()
+        .collect();
+    // Keep configured effect gates even if the Objective removed their grant.
+    // The effect boundary checks allowed_actions before offering approval.
+    policy.approval_rules = authority
+        .approvals
+        .iter()
+        .filter(|requirement| supported_runtime_gate(&requirement.action))
+        .map(|requirement| ApprovalRule {
+            action: requirement.action.clone(),
+            operator_ids: requirement
+                .approvers
+                .iter()
+                .filter_map(|id| id.strip_prefix("operator:").map(str::to_owned))
+                .collect(),
+        })
+        .collect();
+    authority
+        .approvals
+        .retain(|requirement| authority.actions.binary_search(&requirement.action).is_ok());
+    policy.snapshot.runtime_authority = Some(authority);
+    size(&policy.snapshot, SNAPSHOT_BYTES)?;
+    policy.effective_digest = effective_digest(&policy.snapshot)?;
+    Ok(())
+}
+
+pub(crate) fn runtime_authority(task: &Task) -> TaskRuntimeAuthority {
+    if let Some(authority) = task
+        .policy_snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.runtime_authority.as_ref())
+    {
+        return authority.clone();
+    }
+    let mut actions = task.allowed_actions.clone();
+    actions.sort();
+    actions.dedup();
+    let mut approvals = BTreeMap::new();
+    for rule in &task.approval_rules {
+        if actions.binary_search(&rule.action).is_ok() {
+            merge_runtime_requirement(&mut approvals, base_runtime_requirement(rule));
+        }
+    }
+    TaskRuntimeAuthority {
+        actions,
+        approvals: approvals.into_values().collect(),
+        ..Default::default()
+    }
+}
+
+pub(crate) fn apply_objective_runtime(
+    policy: &mut AdmissionPolicy,
+    objective_id: &str,
+    revision: u64,
+    actions: Vec<String>,
+) -> Result<()> {
+    let mut authority = policy.snapshot.runtime_authority.take().unwrap_or_default();
+    let mut requirements = BTreeMap::new();
+    for rule in &policy.approval_rules {
+        if !authority
+            .approvals
+            .iter()
+            .any(|gate| gate.action == rule.action)
+        {
+            merge_runtime_requirement(&mut requirements, base_runtime_requirement(rule));
+        }
+    }
+    for requirement in authority.approvals {
+        merge_runtime_requirement(&mut requirements, requirement);
+    }
+    authority.actions = actions;
+    authority.approvals = requirements.into_values().collect();
+    authority.objective_id = Some(objective_id.to_owned());
+    authority.objective_revision = Some(revision);
+    project_runtime(policy, authority)
+}
+
+pub(crate) fn apply_delegated_runtime(
+    policy: &mut AdmissionPolicy,
+    parent: &Task,
+    objective_id: &str,
+    revision: u64,
+    objective_actions: &[String],
+) -> Result<()> {
+    let target = policy.snapshot.runtime_authority.take().unwrap_or_default();
+    let source = runtime_authority(parent);
+    let mut actions: BTreeSet<String> = source
+        .actions
+        .into_iter()
+        .filter(|action| objective_actions.contains(action))
+        .collect();
+    let delegated_write = actions.contains(DELEGATE_WRITE)
+        && target.actions.iter().any(|action| action == FILES_WRITE);
+    if delegated_write {
+        actions.insert(FILES_WRITE.to_owned());
+    }
+    let mut approvals = BTreeMap::new();
+    for rule in policy.approval_rules.iter().chain(&parent.approval_rules) {
+        // Preserve configured effects which the semantic grant set excluded.
+        if !target
+            .approvals
+            .iter()
+            .chain(&source.approvals)
+            .any(|gate| gate.action == rule.action)
+        {
+            merge_runtime_requirement(&mut approvals, base_runtime_requirement(rule));
+        }
+    }
+    for requirement in target.approvals {
+        merge_runtime_requirement(&mut approvals, requirement);
+    }
+    for requirement in source.approvals {
+        if delegated_write && requirement.action == DELEGATE_WRITE {
+            merge_runtime_requirement(
+                &mut approvals,
+                RuntimeApprovalRequirement {
+                    action: FILES_WRITE.to_owned(),
+                    ..requirement.clone()
+                },
+            );
+        }
+        merge_runtime_requirement(&mut approvals, requirement);
+    }
+    project_runtime(
+        policy,
+        TaskRuntimeAuthority {
+            actions: actions.into_iter().collect(),
+            approvals: approvals.into_values().collect(),
+            objective_id: Some(objective_id.to_owned()),
+            objective_revision: Some(revision),
+            delegating_task_id: Some(parent.task_id.clone()),
+        },
+    )
 }
 
 /// Semantic policy excludes mutable catalog identity, revisions and capture time.
@@ -1307,14 +1496,35 @@ fn effective_digest(snapshot: &TaskPolicySnapshot) -> Result<String> {
             Some((&e.models, efforts))
         }
     });
+    let runtime = snapshot.runtime_authority.as_ref().and_then(|authority| {
+        // Executable actions are already compared on the Task. The marker and
+        // typed gates are additional authority a live-input join must match.
+        let delegate_write = authority
+            .actions
+            .iter()
+            .any(|action| action == DELEGATE_WRITE);
+        if !delegate_write && authority.approvals.is_empty() {
+            return None;
+        }
+        let approvals: Vec<_> = authority
+            .approvals
+            .iter()
+            .map(|requirement| (&requirement.action, &requirement.approvers))
+            .collect();
+        Some((delegate_write, approvals))
+    });
     if permissions.is_empty()
         && contexts.is_empty()
         && execution.is_none()
         && snapshot.origin.is_none()
+        && runtime.is_none()
     {
         return Ok(String::new());
     }
     let mut encoded = serde_json::to_vec(&(permissions, contexts, execution))?;
+    if let Some(runtime) = runtime {
+        encoded.extend(serde_json::to_vec(&runtime)?);
+    }
     if let Some(origin) = &snapshot.origin {
         let coordinates = origin.scope.as_ref().map(Message::encode_to_vec);
         encoded.extend(serde_json::to_vec(&(

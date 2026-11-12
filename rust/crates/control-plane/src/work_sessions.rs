@@ -13,7 +13,10 @@ use crate::{
     ControlPlane, HostAuthority, Store, StoreError,
     conversations::work_session_in,
     objectives::work_session_admission_in,
-    store::{Result, insert_task_from_snapshot, invalid, lease_is_live, name, owned, task_row},
+    store::{
+        Result, insert_delegated_task_in, insert_task_from_snapshot, invalid, lease_is_live, name,
+        owned, task_row,
+    },
 };
 
 pub(crate) const CHILD: i64 = 1;
@@ -62,6 +65,59 @@ pub(crate) async fn can_claim_in(tx: &mut Transaction<'_, Any>, task: &Task) -> 
     Ok(running.is_some_and(|count| count < MAX_RUNNING))
 }
 
+async fn insert_child_in(
+    tx: &mut Transaction<'_, Any>,
+    order: i64,
+    parent: &Task,
+    objective_id: Option<&str>,
+    target: &str,
+    session_id: &str,
+    prompt: &str,
+) -> Result<Task> {
+    if target == parent.tag_id {
+        return insert_task_from_snapshot(tx, order, parent, session_id, prompt).await;
+    }
+    let objective = objective_id.ok_or(StoreError::PermissionDenied)?;
+    let team: Option<String> =
+        sqlx::query_scalar("SELECT team_id FROM supertag_v2_objectives WHERE objective_id=$1")
+            .bind(objective)
+            .fetch_one(&mut **tx)
+            .await?;
+    let team = team.ok_or_else(|| {
+        StoreError::FailedPrecondition("the Objective must name a Team to delegate work".into())
+    })?;
+    let member: Option<String> = sqlx::query_scalar(
+        "SELECT tag_id FROM supertag_v2_team_members WHERE team_id=$1 AND tag_id=$2",
+    )
+    .bind(team)
+    .bind(target)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if member.is_none() {
+        return Err(StoreError::PermissionDenied);
+    }
+    let host: Option<String> = sqlx::query_scalar(
+        "SELECT h.host_id FROM supertag_v2_hosts h
+         WHERE h.generation>0 AND h.revoked_at_ms IS NULL
+           AND (h.all_tags=1 OR EXISTS (
+               SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=h.host_id AND scope.tag_id=$1))
+         LIMIT 1",
+    )
+    .bind(target)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if host.is_none() {
+        return Err(StoreError::FailedPrecondition(
+            "the delegated Tag has no registered Worker Host".into(),
+        ));
+    }
+    // Keep the policy composer's larger async state off the same-Tag path.
+    Box::pin(insert_delegated_task_in(
+        tx, order, parent, objective, target, session_id, prompt,
+    ))
+    .await
+}
+
 impl Store {
     pub async fn start_work_session(
         &self,
@@ -103,9 +159,7 @@ impl Store {
             return Err(StoreError::PermissionDenied);
         }
         let target = input.target_tag_id.as_deref().unwrap_or(&parent.tag_id);
-        if target != parent.tag_id {
-            return Err(StoreError::PermissionDenied);
-        }
+        name("target Tag ID", target)?;
         let workspace = parent
             .workspace
             .as_ref()
@@ -164,7 +218,16 @@ impl Store {
             "Complete the following Work Session assignment. Return the result for the parent Session. If you need an answer to proceed, call ask with a text argument containing one question, then end this turn.\n\n{}",
             serde_json::json!({ "title": title, "instruction": instruction }),
         );
-        let child = insert_task_from_snapshot(&mut tx, order, &parent, &id, &prompt).await?;
+        let child = insert_child_in(
+            &mut tx,
+            order,
+            &parent,
+            objective_id.as_deref(),
+            target,
+            &id,
+            &prompt,
+        )
+        .await?;
         sqlx::query("INSERT INTO supertag_v2_work_sessions (work_session_id,title,parent_tag_id,parent_session_id,starter_task_id,tag_id,latest_task_id,objective_id,created_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)")
             .bind(&id).bind(&title).bind(&parent.tag_id).bind(&parent.session_id)
             .bind(&parent.task_id).bind(&child.tag_id).bind(&child.task_id).bind(&objective_id)

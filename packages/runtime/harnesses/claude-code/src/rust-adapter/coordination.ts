@@ -108,13 +108,15 @@ function verifiedWorkSession(
   stored: WorkSession,
   scope: Scope,
   parentSession: string,
-  targetTag: string,
+  targetTag?: string,
 ) {
   return (
     stored.starterTaskId === scope.taskId &&
     stored.parentTagId === scope.tagId &&
     stored.parentSessionId === parentSession &&
-    stored.tagId === targetTag &&
+    (targetTag === undefined || stored.tagId === targetTag) &&
+    tagId.safeParse(stored.tagId).success &&
+    redact(stored.tagId, scope.secrets) === stored.tagId &&
     workSessionId.test(stored.workSessionId) &&
     stored.workSessionId !== parentSession &&
     stored.latestTaskId !== scope.taskId &&
@@ -232,7 +234,7 @@ export function coordinationTools(
       "start_session",
       {
         description:
-          "Start a separate Work Session for one piece of the current Task. Its result comes back to this Session. Provide a short title and an instruction. You may specify the accepted Workspace ID or your Tag ID.",
+          "Start a separate Work Session for one piece of the current Task. Its result comes back to this Session. Provide a short title and an instruction. You may specify the accepted Workspace ID. When this Task owns an Objective, you can delegate to an eligible Tag on its Team.",
         inputSchema: schemas.start_session,
         _meta: meta,
       },
@@ -319,7 +321,7 @@ export function coordinationTools(
               ),
             );
             if (
-              verifiedWorkSession(stored, scope, parentSession, scope.tagId) &&
+              verifiedWorkSession(stored, scope, parentSession) &&
               stored.workSessionId === sessionId &&
               stored.latestTaskState === TaskState.QUEUED
             ) {

@@ -429,7 +429,7 @@ impl HarnessWorkSessions for HarnessFixture {
             starter_task_id: self.task.task_id.clone(),
             parent_session_id: self.task.session_id.clone(),
             parent_tag_id: self.task.tag_id.clone(),
-            tag_id: self.task.tag_id.clone(),
+            tag_id: "other-team-tag".into(),
             latest_task_id: "continued-child-task".into(),
             latest_task_state: supertag_protocol::v2::TaskState::Queued as i32,
             created_order: 11,

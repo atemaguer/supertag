@@ -91,6 +91,11 @@ func describeRuntimeObjective(view *operatorv1.ObjectiveOverview, teamName strin
 		"Outcome: " + objective.GetOutcome(),
 		"Owner: " + objective.GetOwnerTag(),
 	}
+	actions := strings.Join(objective.GetRuntimeActions(), ", ")
+	if actions == "" {
+		actions = "none"
+	}
+	lines = append(lines, "Allowed actions: "+actions)
 	if id := objective.GetTeamId(); id != "" {
 		if teamName == "" {
 			teamName = id

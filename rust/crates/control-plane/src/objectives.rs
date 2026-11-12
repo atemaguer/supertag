@@ -1,6 +1,6 @@
 //! Durable Objective lifecycle. Every mutation and execution hook shares the Store write lock.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use prost::Message;
 use sha2::{Digest, Sha256};
@@ -81,6 +81,27 @@ fn currency(value: &str) -> Result<()> {
     Ok(())
 }
 
+fn select_runtime_actions(
+    allowed: &[String],
+    requested: Option<&RuntimeActions>,
+) -> Result<Vec<String>> {
+    let allowed: BTreeSet<String> = allowed.iter().cloned().collect();
+    let Some(requested) = requested else {
+        return Ok(allowed.into_iter().collect());
+    };
+    if requested.actions.len() > 256 {
+        return Err(invalid("too many Objective runtime actions"));
+    }
+    let mut selected = BTreeSet::new();
+    for action in &requested.actions {
+        name("runtime action", action)?;
+        if allowed.contains(action) {
+            selected.insert(action.clone());
+        }
+    }
+    Ok(selected.into_iter().collect())
+}
+
 fn operator(principal: &str) -> Result<()> {
     name("operator principal", principal)?;
     if principal
@@ -136,6 +157,9 @@ fn record_row(row: &AnyRow) -> Result<Record> {
                 .as_ref()
                 .map(|value| value.spend.amount_minor),
             team_id: row.try_get("team_id")?,
+            runtime_actions: Some(RuntimeActions {
+                actions: serde_json::from_str(&row.try_get::<String, _>("runtime_actions")?)?,
+            }),
         },
         limits: limits::ObjectiveLimits {
             status: domain_status(status),
@@ -168,11 +192,12 @@ async fn get_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Record> {
 }
 
 async fn save_in(tx: &mut Transaction<'_, Any>, record: &Record) -> Result<()> {
-    sqlx::query("UPDATE supertag_v2_objectives SET status=$1, revision=$2, deadline_ms=$3, budget_limit_minor=$4, budget_currency=$5, paused_at_ms=$6, cancelled_at_ms=$7, cancellation_reason=$8, completion_summary=$9, limit_state=$10, updated_at_ms=$11, starting_task_id=$12, idle_wake_count=$14 WHERE objective_id=$13")
+    sqlx::query("UPDATE supertag_v2_objectives SET status=$1, revision=$2, deadline_ms=$3, budget_limit_minor=$4, budget_currency=$5, paused_at_ms=$6, cancelled_at_ms=$7, cancellation_reason=$8, completion_summary=$9, limit_state=$10, updated_at_ms=$11, starting_task_id=$12, idle_wake_count=$14, runtime_actions=$15 WHERE objective_id=$13")
         .bind(record.value.status as i64).bind(record.value.revision as i64).bind(record.value.deadline_ms)
         .bind(record.value.budget_limit_minor.map(|value| value as i64)).bind(&record.value.budget_currency)
         .bind(record.value.paused_at_ms).bind(record.cancelled_at_ms).bind(&record.cancellation_reason).bind(&record.completion_summary)
         .bind(serde_json::to_string(&record.limits.state)?).bind(record.updated_at_ms).bind(&record.value.starting_task_id).bind(&record.value.objective_id).bind(record.idle_wake_count)
+        .bind(serde_json::to_string(&record.value.runtime_actions.as_ref().map(|value| value.actions.as_slice()).unwrap_or_default())?)
         .execute(&mut **tx).await?;
     Ok(())
 }
@@ -228,13 +253,15 @@ async fn internal_turn_in(
         return Ok(());
     }
     let order = next_order(tx).await?;
-    let task = insert_task(
+    // Policy composition carries a large future. Keep it off the controller's
+    // stack, which also holds the Objective reconciliation state.
+    let task = Box::pin(insert_task(
         tx,
         order,
         &record.value.owner_tag_id,
         &record.value.session_id,
         prompt,
-    )
+    ))
     .await?;
     // Limit notices communicate exhausted authority; they never grant a fresh work budget.
     if kind == "notice" && limits::admission_blocker(&record.limits, timestamp(now_ms)?).is_some() {
@@ -321,6 +348,12 @@ impl Store {
         if tag.is_none() {
             return Err(StoreError::NotFound("owner Tag was not found".into()));
         }
+        let allowed = Box::pin(crate::store::owner_runtime_actions_in(
+            &mut tx,
+            &input.owner_tag_id,
+        ))
+        .await?;
+        let runtime_actions = select_runtime_actions(&allowed, input.runtime_actions.as_ref())?;
         let team_id = match &input.team_id {
             Some(team) => Some(
                 crate::teams::team_by_reference_in(&mut tx, team)
@@ -337,9 +370,9 @@ impl Store {
                 at: timestamp(now_ms)?,
             });
         }
-        sqlx::query("INSERT INTO supertag_v2_objectives (objective_id,owner_tag_id,session_id,outcome,ongoing,status,revision,deadline_ms,budget_limit_minor,budget_currency,limit_state,created_at_ms,updated_at_ms,team_id) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11,$11,$12)")
+        sqlx::query("INSERT INTO supertag_v2_objectives (objective_id,owner_tag_id,session_id,outcome,ongoing,status,revision,deadline_ms,budget_limit_minor,budget_currency,limit_state,created_at_ms,updated_at_ms,team_id,runtime_actions) VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,$10,$11,$11,$12,$13)")
             .bind(&input.objective_id).bind(&input.owner_tag_id).bind(&session_id).bind(&input.outcome).bind(i64::from(input.ongoing)).bind(ObjectiveStatus::Working as i64)
-            .bind(input.deadline_ms).bind(input.budget_limit_minor.map(|value| value as i64)).bind(&input.budget_currency).bind(serde_json::to_string(&state)?).bind(now_ms).bind(team_id).execute(&mut *tx).await?;
+            .bind(input.deadline_ms).bind(input.budget_limit_minor.map(|value| value as i64)).bind(&input.budget_currency).bind(serde_json::to_string(&state)?).bind(now_ms).bind(team_id).bind(serde_json::to_string(&runtime_actions)?).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO supertag_v2_objective_sessions (tag_id,session_id,objective_id) VALUES ($1,$2,$3)")
             .bind(&input.owner_tag_id).bind(&session_id).bind(&input.objective_id).execute(&mut *tx).await?;
         let prompt = format!(
@@ -351,7 +384,14 @@ impl Store {
                 "When the outcome is met, report ready_for_review or completed with your result."
             }
         );
-        let task = insert_task(&mut tx, order, &input.owner_tag_id, &session_id, &prompt).await?;
+        let task = Box::pin(insert_task(
+            &mut tx,
+            order,
+            &input.owner_tag_id,
+            &session_id,
+            &prompt,
+        ))
+        .await?;
         objective_link_task_in(&mut tx, &task).await?;
         sqlx::query("UPDATE supertag_v2_objectives SET starting_task_id=$1 WHERE objective_id=$2")
             .bind(&task.task_id)
@@ -394,6 +434,68 @@ impl Store {
         } as i64;
         sqlx::query("SELECT * FROM supertag_v2_objectives WHERE objective_id>$1 ORDER BY objective_id LIMIT $2")
             .bind(&input.after_id).bind(count).fetch_all(&self.pool).await?.iter().map(|row| Ok(record_row(row)?.value)).collect()
+    }
+
+    pub async fn set_objective_runtime_actions(
+        &self,
+        principal: &str,
+        input: &SetObjectiveRuntimeActionsRequest,
+    ) -> Result<Objective> {
+        operator(principal)?;
+        name("operation ID", &input.operation_id)?;
+        name("Objective ID", &input.objective_id)?;
+        if input.expected_revision == 0 || input.expected_revision > i64::MAX as u64 {
+            return Err(invalid("a valid expected Objective revision is required"));
+        }
+        let requested = input
+            .runtime_actions
+            .as_ref()
+            .ok_or_else(|| invalid("runtime actions must be explicitly provided"))?;
+        // Validate even an empty or fully dropped selection before acquiring the
+        // transaction. Presence, unlike an omitted create field, means replace.
+        select_runtime_actions(&[], Some(requested))?;
+        let fingerprint = digest("runtime-actions", input);
+        let (mut tx, _) = self.write().await?;
+        if let Some(prior) =
+            replay_in(&mut tx, principal, &input.operation_id, &fingerprint).await?
+        {
+            tx.commit().await?;
+            return Ok(prior);
+        }
+        let mut record = get_in(&mut tx, &input.objective_id).await?;
+        if record.closed() {
+            return Err(refused(
+                "a closed Objective's runtime actions cannot change",
+            ));
+        }
+        if record.value.revision != input.expected_revision {
+            return Err(StoreError::Conflict(
+                "Objective revision changed; reload before updating".into(),
+            ));
+        }
+        let allowed = Box::pin(crate::store::owner_runtime_actions_in(
+            &mut tx,
+            &record.value.owner_tag_id,
+        ))
+        .await?;
+        let selected = RuntimeActions {
+            actions: select_runtime_actions(&allowed, Some(requested))?,
+        };
+        if record.value.runtime_actions.as_ref() != Some(&selected) {
+            record.value.runtime_actions = Some(selected);
+            record.changed(self.execution_now_ms());
+            save_in(&mut tx, &record).await?;
+        }
+        receipt_in(
+            &mut tx,
+            principal,
+            &input.operation_id,
+            &fingerprint,
+            &record.value,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(record.value)
     }
 
     pub async fn set_objective_limits(
@@ -1189,6 +1291,17 @@ impl objectives_server::Objectives for ControlPlane {
         Ok(Response::new(
             self.store
                 .set_objective_limits(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+    async fn set_runtime_actions(
+        &self,
+        request: Request<SetObjectiveRuntimeActionsRequest>,
+    ) -> std::result::Result<Response<Objective>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .set_objective_runtime_actions(&principal, &request.into_inner())
                 .await?,
         ))
     }

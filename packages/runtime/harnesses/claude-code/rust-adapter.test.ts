@@ -282,7 +282,7 @@ async function invoke({
               parentTagId: "actor",
               parentSessionId: sessionId,
               starterTaskId: "task",
-              tagId: "actor",
+              tagId: "other-team-tag",
               latestTaskId: "next-child-task",
               latestTaskState: TaskState.QUEUED,
               createdOrder: 2n,

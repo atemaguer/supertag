@@ -68,7 +68,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 28;
+        const SCHEMA_VERSION: i64 = 29;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -147,6 +147,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0026_context_resolution.sql"),
                 include_str!("../migrations/sqlite/0027_work_sessions.sql"),
                 include_str!("../migrations/sqlite/0028_work_session_lifecycle.sql"),
+                include_str!("../migrations/sqlite/0029_objective_runtime_actions.sql"),
             ]
         } else {
             [
@@ -178,6 +179,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0026_context_resolution.sql"),
                 include_str!("../migrations/postgresql/0027_work_sessions.sql"),
                 include_str!("../migrations/postgresql/0028_work_session_lifecycle.sql"),
+                include_str!("../migrations/postgresql/0029_objective_runtime_actions.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -1006,6 +1008,50 @@ pub(crate) async fn insert_task_with_surface(
             "Work Session IDs are reserved for internal admission",
         ));
     }
+    let objective = sqlx::query("SELECT o.objective_id,o.revision,o.runtime_actions FROM supertag_v2_objective_sessions s JOIN supertag_v2_objectives o ON o.objective_id=s.objective_id WHERE s.tag_id=$1 AND s.session_id=$2")
+        .bind(tag_id)
+        .bind(session_id)
+        .fetch_optional(&mut **transaction)
+        .await?;
+    let objective_surface = surface.filter(|_| objective.is_some()).map(|surface| {
+        crate::surface_policy::AdmissionSurface {
+            origin: surface.origin.clone(),
+            permission_set_ids: Vec::new(),
+            context_set_ids: Vec::new(),
+        }
+    });
+    let mut accepted =
+        tag_policy_in(transaction, tag_id, objective_surface.as_ref().or(surface)).await?;
+    if let Some(objective) = objective {
+        let objective_id: String = objective.try_get("objective_id")?;
+        crate::policy::apply_objective_runtime(
+            &mut accepted.policy,
+            &objective_id,
+            objective.try_get::<i64, _>("revision")? as u64,
+            serde_json::from_str(&objective.try_get::<String, _>("runtime_actions")?)?,
+        )?;
+    }
+    let harness = i64::from(accepted.policy.harness_kind);
+    if let Some(previous) = sqlx::query("SELECT workspace_id,workspace_base_commit,harness_kind FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 ORDER BY accepted_order LIMIT 1")
+        .bind(tag_id).bind(session_id).fetch_optional(&mut **transaction).await?
+        && (crate::workspaces::workspace_from_row(&previous)? != accepted.workspace || previous.try_get::<i64,_>("harness_kind")? != harness)
+    {
+        return Err(StoreError::FailedPrecondition("workspace or harness changed; start a new Session".into()));
+    }
+    insert_accepted_task(transaction, order, tag_id, session_id, prompt, accepted).await
+}
+
+struct AcceptedTag {
+    revision: i64,
+    workspace: Option<WorkspaceSpec>,
+    policy: crate::policy::AdmissionPolicy,
+}
+
+async fn tag_policy_in(
+    transaction: &mut Transaction<'_, Any>,
+    tag_id: &str,
+    surface: Option<&crate::surface_policy::AdmissionSurface>,
+) -> Result<AcceptedTag> {
     let tag = sqlx::query(
         "SELECT instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules FROM supertag_v2_tags WHERE tag_id = $1",
     )
@@ -1031,21 +1077,77 @@ pub(crate) async fn insert_task_with_surface(
         surface,
     )
     .await?;
-    let harness = i64::from(policy.harness_kind);
-    if let Some(previous) = sqlx::query("SELECT workspace_id,workspace_base_commit,harness_kind FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 ORDER BY accepted_order LIMIT 1")
-        .bind(tag_id).bind(session_id).fetch_optional(&mut **transaction).await?
-        && (crate::workspaces::workspace_from_row(&previous)? != workspace || previous.try_get::<i64,_>("harness_kind")? != harness)
-    {
-        return Err(StoreError::FailedPrecondition("workspace or harness changed; start a new Session".into()));
-    }
+    Ok(AcceptedTag {
+        revision: tag.try_get("revision")?,
+        workspace,
+        policy,
+    })
+}
+
+pub(crate) async fn owner_runtime_actions_in(
+    transaction: &mut Transaction<'_, Any>,
+    tag_id: &str,
+) -> Result<Vec<String>> {
+    let tag = tag_policy_in(transaction, tag_id, None).await?;
+    Ok(tag
+        .policy
+        .snapshot
+        .runtime_authority
+        .unwrap_or_default()
+        .actions)
+}
+
+pub(crate) async fn insert_delegated_task_in(
+    transaction: &mut Transaction<'_, Any>,
+    order: i64,
+    parent: &Task,
+    objective_id: &str,
+    tag_id: &str,
+    session_id: &str,
+    prompt: &str,
+) -> Result<Task> {
+    let objective = sqlx::query(
+        "SELECT revision,runtime_actions FROM supertag_v2_objectives WHERE objective_id=$1",
+    )
+    .bind(objective_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let objective_actions: Vec<String> =
+        serde_json::from_str(&objective.try_get::<String, _>("runtime_actions")?)?;
+    let mut accepted = tag_policy_in(transaction, tag_id, None).await?;
+    accepted.workspace = parent.workspace.clone();
+    crate::policy::apply_delegated_runtime(
+        &mut accepted.policy,
+        parent,
+        objective_id,
+        objective.try_get::<i64, _>("revision")? as u64,
+        &objective_actions,
+    )?;
+    insert_accepted_task(transaction, order, tag_id, session_id, prompt, accepted).await
+}
+
+async fn insert_accepted_task(
+    transaction: &mut Transaction<'_, Any>,
+    order: i64,
+    tag_id: &str,
+    session_id: &str,
+    prompt: &str,
+    accepted: AcceptedTag,
+) -> Result<Task> {
+    text("Task prompt", prompt, MAX_TASK_PROMPT_BYTES)?;
+    let AcceptedTag {
+        revision,
+        workspace,
+        policy,
+    } = accepted;
     let id = Uuid::new_v4().to_string();
     sqlx::query("INSERT INTO supertag_v2_tasks (task_id, tag_id, session_id, prompt, instructions, allowed_actions, tag_revision, state, accepted_order, workspace_id, workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)")
         .bind(&id).bind(tag_id).bind(session_id).bind(prompt)
         .bind(policy.instructions).bind(serde_json::to_string(&policy.allowed_actions)?)
-        .bind(tag.try_get::<i64, _>("revision")?).bind(TaskState::Queued as i64).bind(order)
+        .bind(revision).bind(TaskState::Queued as i64).bind(order)
         .bind(workspace.as_ref().map(|spec| &spec.workspace_id))
         .bind(workspace.as_ref().map(|spec| &spec.base_commit))
-        .bind(harness)
+        .bind(i64::from(policy.harness_kind))
         .bind(stored_approval_rules(&policy.approval_rules)?)
         .bind(policy.snapshot.encode_to_vec())
         .bind(policy.effective_digest)

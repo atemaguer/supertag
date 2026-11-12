@@ -428,6 +428,22 @@ impl Objectives for Gateway {
         .await
     }
 
+    async fn set_runtime_actions(
+        &self,
+        request: Request<SetObjectiveRuntimeActionsRequest>,
+    ) -> Result<Response<Objective>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async {
+                objectives_client(channel)
+                    .set_runtime_actions(request)
+                    .await
+            },
+        )
+        .await
+    }
+
     async fn pause_objective(
         &self,
         request: Request<ObjectiveActionRequest>,

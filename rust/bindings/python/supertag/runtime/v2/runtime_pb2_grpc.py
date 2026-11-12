@@ -970,6 +970,11 @@ class ObjectivesStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SetObjectiveLimitsRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
                 _registered_method=True)
+        self.SetRuntimeActions = channel.unary_unary(
+                '/supertag.runtime.v2.Objectives/SetRuntimeActions',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SetObjectiveRuntimeActionsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
+                _registered_method=True)
         self.PauseObjective = channel.unary_unary(
                 '/supertag.runtime.v2.Objectives/PauseObjective',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ObjectiveActionRequest.SerializeToString,
@@ -1014,6 +1019,12 @@ class ObjectivesServicer:
         raise NotImplementedError('Method not implemented!')
 
     def SetLimits(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SetRuntimeActions(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -1064,6 +1075,11 @@ def add_ObjectivesServicer_to_server(servicer, server):
             'SetLimits': grpc.unary_unary_rpc_method_handler(
                     servicer.SetLimits,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SetObjectiveLimitsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.SerializeToString,
+            ),
+            'SetRuntimeActions': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetRuntimeActions,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SetObjectiveRuntimeActionsRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.SerializeToString,
             ),
             'PauseObjective': grpc.unary_unary_rpc_method_handler(
@@ -1194,6 +1210,33 @@ class Objectives:
             target,
             '/supertag.runtime.v2.Objectives/SetLimits',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.SetObjectiveLimitsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SetRuntimeActions(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Objectives/SetRuntimeActions',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.SetObjectiveRuntimeActionsRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.Objective.FromString,
             options,
             channel_credentials,

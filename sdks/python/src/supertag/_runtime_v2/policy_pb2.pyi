@@ -375,20 +375,46 @@ class PolicyRoleSnapshot(_message.Message):
     def __init__(self, assignment: _Optional[_Union[RoleAssignment, _Mapping]] = ..., role: _Optional[_Union[Role, _Mapping]] = ...) -> None: ...
 
 class TaskPolicySnapshot(_message.Message):
-    __slots__ = ("version", "roles", "permission_sets", "context_sets", "execution", "origin")
+    __slots__ = ("version", "roles", "permission_sets", "context_sets", "execution", "origin", "runtime_authority")
     VERSION_FIELD_NUMBER: _ClassVar[int]
     ROLES_FIELD_NUMBER: _ClassVar[int]
     PERMISSION_SETS_FIELD_NUMBER: _ClassVar[int]
     CONTEXT_SETS_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_FIELD_NUMBER: _ClassVar[int]
     ORIGIN_FIELD_NUMBER: _ClassVar[int]
+    RUNTIME_AUTHORITY_FIELD_NUMBER: _ClassVar[int]
     version: int
     roles: _containers.RepeatedCompositeFieldContainer[PolicyRoleSnapshot]
     permission_sets: _containers.RepeatedCompositeFieldContainer[PermissionSet]
     context_sets: _containers.RepeatedCompositeFieldContainer[ContextSet]
     execution: PolicyExecutionSettings
     origin: SurfacePolicyOrigin
-    def __init__(self, version: _Optional[int] = ..., roles: _Optional[_Iterable[_Union[PolicyRoleSnapshot, _Mapping]]] = ..., permission_sets: _Optional[_Iterable[_Union[PermissionSet, _Mapping]]] = ..., context_sets: _Optional[_Iterable[_Union[ContextSet, _Mapping]]] = ..., execution: _Optional[_Union[PolicyExecutionSettings, _Mapping]] = ..., origin: _Optional[_Union[SurfacePolicyOrigin, _Mapping]] = ...) -> None: ...
+    runtime_authority: TaskRuntimeAuthority
+    def __init__(self, version: _Optional[int] = ..., roles: _Optional[_Iterable[_Union[PolicyRoleSnapshot, _Mapping]]] = ..., permission_sets: _Optional[_Iterable[_Union[PermissionSet, _Mapping]]] = ..., context_sets: _Optional[_Iterable[_Union[ContextSet, _Mapping]]] = ..., execution: _Optional[_Union[PolicyExecutionSettings, _Mapping]] = ..., origin: _Optional[_Union[SurfacePolicyOrigin, _Mapping]] = ..., runtime_authority: _Optional[_Union[TaskRuntimeAuthority, _Mapping]] = ...) -> None: ...
+
+class RuntimeApprovalRequirement(_message.Message):
+    __slots__ = ("action", "permission_set_ids", "approvers")
+    ACTION_FIELD_NUMBER: _ClassVar[int]
+    PERMISSION_SET_IDS_FIELD_NUMBER: _ClassVar[int]
+    APPROVERS_FIELD_NUMBER: _ClassVar[int]
+    action: str
+    permission_set_ids: _containers.RepeatedScalarFieldContainer[str]
+    approvers: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, action: _Optional[str] = ..., permission_set_ids: _Optional[_Iterable[str]] = ..., approvers: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class TaskRuntimeAuthority(_message.Message):
+    __slots__ = ("actions", "approvals", "objective_id", "objective_revision", "delegating_task_id")
+    ACTIONS_FIELD_NUMBER: _ClassVar[int]
+    APPROVALS_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_REVISION_FIELD_NUMBER: _ClassVar[int]
+    DELEGATING_TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    actions: _containers.RepeatedScalarFieldContainer[str]
+    approvals: _containers.RepeatedCompositeFieldContainer[RuntimeApprovalRequirement]
+    objective_id: str
+    objective_revision: int
+    delegating_task_id: str
+    def __init__(self, actions: _Optional[_Iterable[str]] = ..., approvals: _Optional[_Iterable[_Union[RuntimeApprovalRequirement, _Mapping]]] = ..., objective_id: _Optional[str] = ..., objective_revision: _Optional[int] = ..., delegating_task_id: _Optional[str] = ...) -> None: ...
 
 class PutPermissionSetRequest(_message.Message):
     __slots__ = ("operation_id", "permission_set", "expected_revision")

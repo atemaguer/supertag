@@ -1852,7 +1852,7 @@ class HarnessCompleteResponse(_message.Message):
     def __init__(self) -> None: ...
 
 class CreateObjectiveRequest(_message.Message):
-    __slots__ = ("operation_id", "objective_id", "owner_tag_id", "outcome", "ongoing", "deadline_ms", "budget_limit_minor", "budget_currency", "team_id")
+    __slots__ = ("operation_id", "objective_id", "owner_tag_id", "outcome", "ongoing", "deadline_ms", "budget_limit_minor", "budget_currency", "team_id", "runtime_actions")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
     OWNER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
@@ -1862,6 +1862,7 @@ class CreateObjectiveRequest(_message.Message):
     BUDGET_LIMIT_MINOR_FIELD_NUMBER: _ClassVar[int]
     BUDGET_CURRENCY_FIELD_NUMBER: _ClassVar[int]
     TEAM_ID_FIELD_NUMBER: _ClassVar[int]
+    RUNTIME_ACTIONS_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     objective_id: str
     owner_tag_id: str
@@ -1871,10 +1872,17 @@ class CreateObjectiveRequest(_message.Message):
     budget_limit_minor: int
     budget_currency: str
     team_id: str
-    def __init__(self, operation_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., team_id: _Optional[str] = ...) -> None: ...
+    runtime_actions: RuntimeActions
+    def __init__(self, operation_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., team_id: _Optional[str] = ..., runtime_actions: _Optional[_Union[RuntimeActions, _Mapping]] = ...) -> None: ...
+
+class RuntimeActions(_message.Message):
+    __slots__ = ("actions",)
+    ACTIONS_FIELD_NUMBER: _ClassVar[int]
+    actions: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, actions: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class Objective(_message.Message):
-    __slots__ = ("objective_id", "owner_tag_id", "session_id", "outcome", "ongoing", "starting_task_id", "status", "revision", "deadline_ms", "budget_limit_minor", "budget_currency", "paused_at_ms", "reported_spend_minor", "team_id")
+    __slots__ = ("objective_id", "owner_tag_id", "session_id", "outcome", "ongoing", "starting_task_id", "status", "revision", "deadline_ms", "budget_limit_minor", "budget_currency", "paused_at_ms", "reported_spend_minor", "team_id", "runtime_actions")
     OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
     OWNER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -1889,6 +1897,7 @@ class Objective(_message.Message):
     PAUSED_AT_MS_FIELD_NUMBER: _ClassVar[int]
     REPORTED_SPEND_MINOR_FIELD_NUMBER: _ClassVar[int]
     TEAM_ID_FIELD_NUMBER: _ClassVar[int]
+    RUNTIME_ACTIONS_FIELD_NUMBER: _ClassVar[int]
     objective_id: str
     owner_tag_id: str
     session_id: str
@@ -1903,7 +1912,8 @@ class Objective(_message.Message):
     paused_at_ms: int
     reported_spend_minor: int
     team_id: str
-    def __init__(self, objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., starting_task_id: _Optional[str] = ..., status: _Optional[_Union[ObjectiveStatus, str]] = ..., revision: _Optional[int] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., paused_at_ms: _Optional[int] = ..., reported_spend_minor: _Optional[int] = ..., team_id: _Optional[str] = ...) -> None: ...
+    runtime_actions: RuntimeActions
+    def __init__(self, objective_id: _Optional[str] = ..., owner_tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., outcome: _Optional[str] = ..., ongoing: _Optional[bool] = ..., starting_task_id: _Optional[str] = ..., status: _Optional[_Union[ObjectiveStatus, str]] = ..., revision: _Optional[int] = ..., deadline_ms: _Optional[int] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., paused_at_ms: _Optional[int] = ..., reported_spend_minor: _Optional[int] = ..., team_id: _Optional[str] = ..., runtime_actions: _Optional[_Union[RuntimeActions, _Mapping]] = ...) -> None: ...
 
 class Team(_message.Message):
     __slots__ = ("team_id", "name", "member_tag_ids", "max_concurrency", "revision", "created_at_ms", "updated_at_ms")
@@ -2112,6 +2122,18 @@ class SetObjectiveLimitsRequest(_message.Message):
     clear_budget: bool
     expected_revision: int
     def __init__(self, objective_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., deadline_ms: _Optional[int] = ..., clear_deadline: _Optional[bool] = ..., budget_limit_minor: _Optional[int] = ..., budget_currency: _Optional[str] = ..., clear_budget: _Optional[bool] = ..., expected_revision: _Optional[int] = ...) -> None: ...
+
+class SetObjectiveRuntimeActionsRequest(_message.Message):
+    __slots__ = ("objective_id", "operation_id", "expected_revision", "runtime_actions")
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
+    RUNTIME_ACTIONS_FIELD_NUMBER: _ClassVar[int]
+    objective_id: str
+    operation_id: str
+    expected_revision: int
+    runtime_actions: RuntimeActions
+    def __init__(self, objective_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., expected_revision: _Optional[int] = ..., runtime_actions: _Optional[_Union[RuntimeActions, _Mapping]] = ...) -> None: ...
 
 class ObjectiveActionRequest(_message.Message):
     __slots__ = ("objective_id", "operation_id", "reason")

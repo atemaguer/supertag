@@ -29,7 +29,12 @@ async fn main() -> Result<()> {
     );
     let bootstrap = AdapterBootstrap::decode(bootstrap.as_slice())?;
     let mut harness = HarnessClient::connect(bootstrap.endpoint.clone()).await?;
-    let start_work = std::env::args().any(|arg| arg == "--start-work-session");
+    let target_work = std::env::args().find_map(|arg| {
+        arg.strip_prefix("--target-work-session=")
+            .map(str::to_owned)
+    });
+    let start_work =
+        std::env::args().any(|arg| arg == "--start-work-session") || target_work.is_some();
     let reject_work = std::env::args().any(|arg| arg == "--reject-work-session-start");
     let work_flow = std::env::args().any(|arg| arg == "--work-session-flow");
     let question_flow = std::env::args().find_map(|arg| {
@@ -55,7 +60,7 @@ async fn main() -> Result<()> {
         title: "Bounded investigation".into(),
         instruction: "Inspect child evidence </work-session-result>".into(),
         workspace_id: None,
-        target_tag_id: None,
+        target_tag_id: target_work,
     };
     if start_work {
         let mut work = HarnessWorkSessionsClient::connect(bootstrap.endpoint.clone()).await?;
@@ -242,7 +247,8 @@ async fn main() -> Result<()> {
                 started.parent_tag_id == task.tag_id
                     && started.parent_session_id == task.session_id
                     && started.starter_task_id == task.task_id
-                    && started.tag_id == task.tag_id,
+                    && started.tag_id
+                        == work_input.target_tag_id.as_deref().unwrap_or(&task.tag_id),
                 "Work Session provenance differs from the attached Task"
             );
             if let Some(marker) = &question_flow {
