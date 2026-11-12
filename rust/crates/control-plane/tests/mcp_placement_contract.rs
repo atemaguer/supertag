@@ -32,6 +32,7 @@ async fn contract(url: &str) {
             workspace: Some(WorkspaceSpec {
                 workspace_id: "repo".into(),
                 base_commit: "a".repeat(40),
+                github_source: None,
             }),
             ..Default::default()
         })
