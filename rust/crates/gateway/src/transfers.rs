@@ -42,6 +42,7 @@ pub struct GatewayTransfers {
     gateway: Gateway,
     directory: Option<PathBuf>,
     capacity: Arc<Semaphore>,
+    github_sources: Option<crate::github::workspaces::GithubWorkspaceSources>,
 }
 
 impl GatewayTransfers {
@@ -64,7 +65,28 @@ impl GatewayTransfers {
             gateway,
             directory,
             capacity: Arc::new(Semaphore::new(16)),
+            github_sources: None,
         })
+    }
+
+    pub fn with_github_sources(
+        mut self,
+        sources: crate::github::workspaces::GithubWorkspaceSources,
+    ) -> Self {
+        self.github_sources = Some(sources);
+        self
+    }
+
+    async fn get_source(
+        &self,
+        request: Request<InspectAttemptRequest>,
+    ) -> Result<GithubWorkspace, Status> {
+        self.gateway
+            .forward_host(request, true, |channel, request| async {
+                workspace_client(channel).get_source(request).await
+            })
+            .await
+            .map(Response::into_inner)
     }
 
     pub fn service(self) -> TransfersServer<Self> {
@@ -306,6 +328,76 @@ impl GatewayTransfers {
 
 #[tonic::async_trait]
 impl Transfers for GatewayTransfers {
+    type DownloadWorkspaceSourceStream = ReceiverStream<Result<GithubWorkspaceDownload, Status>>;
+
+    async fn download_workspace_source(
+        &self,
+        request: Request<InspectAttemptRequest>,
+    ) -> Result<Response<Self::DownloadWorkspaceSourceStream>, Status> {
+        let attempt = request.get_ref().clone();
+        let metadata = request.metadata().clone();
+        // This authoritative check precedes credential resolution or provider I/O.
+        let workspace = self.get_source(request).await?;
+        let sources = self.github_sources.as_ref().ok_or_else(|| {
+            Status::failed_precondition("GitHub Workspace source is not configured on this Gateway")
+        })?;
+        let permit = self.acquire()?;
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let _cancel_on_drop = cancel.clone().drop_guard();
+        let fetched = Arc::new(
+            timeout(
+                WORKSPACE_TRANSFER_TIMEOUT,
+                sources.fetch(&workspace, &cancel),
+            )
+            .await
+            .map_err(|_| Status::deadline_exceeded("GitHub source retrieval timed out"))?
+            .map_err(|_| Status::unavailable("GitHub source could not be retrieved safely"))?,
+        );
+        let reference = BlobReference {
+            sha256: fetched.bundle.sha256.clone(),
+            byte_length: fetched.bundle.byte_length,
+        };
+        let header = GithubWorkspaceDownload {
+            part: Some(github_workspace_download::Part::Reference(
+                GithubWorkspaceBundle {
+                    workspace: Some(workspace.clone()),
+                    bundle: Some(reference.clone()),
+                },
+            )),
+        };
+        let file = open_blob(&fetched.bundle.path).await?;
+        let service = self.clone();
+        let authorize = move || {
+            let service = service.clone();
+            let workspace = workspace.clone();
+            let keep = fetched.clone();
+            let mut request = Request::new(attempt.clone());
+            *request.metadata_mut() = metadata.clone();
+            async move {
+                let _keep = keep;
+                if service.get_source(request).await? == workspace {
+                    Ok(())
+                } else {
+                    Err(Status::permission_denied(
+                        "GitHub source is no longer authorized",
+                    ))
+                }
+            }
+        };
+        authorize().await?;
+        Ok(Response::new(download_stream(
+            file,
+            permit,
+            reference,
+            header,
+            |bytes| GithubWorkspaceDownload {
+                part: Some(github_workspace_download::Part::Chunk(bytes)),
+            },
+            authorize,
+            WORKSPACE_TRANSFER_TIMEOUT,
+        )))
+    }
+
     async fn upload_checkpoint(
         &self,
         request: Request<Streaming<CheckpointUpload>>,

@@ -2297,6 +2297,8 @@ name = "supertag-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "futures-util",
@@ -2389,6 +2391,7 @@ dependencies = [
  "sha2",
  "subtle",
  "supertag-protocol",
+ "supertag-workspaces",
  "tempfile",
  "tokio",
  "tokio-stream",

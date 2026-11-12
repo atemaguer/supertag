@@ -6,7 +6,8 @@ use prost::Message;
 use supertag_codex_adapter::CodexOptions;
 use supertag_protocol::v2::{AdapterBootstrap, HarnessKind};
 use supertag_worker_host::{
-    ADAPTER_STATE_DIRECTORY, WORKSPACE_DIRECTORY, WorkspaceMapping, provider_environment,
+    ADAPTER_STATE_DIRECTORY, WORKSPACE_DIRECTORY, WorkspaceMapping, WorkspaceSource,
+    provider_environment,
 };
 
 use crate::node_bridges::{self, NodeBridge};
@@ -97,21 +98,42 @@ pub struct AdapterOptions {
     #[arg(long, requires = "harness", conflicts_with = "workspace_id")]
     codex_workspace: Option<PathBuf>,
     /// Repository identity that this host can prepare for accepted Tasks.
-    #[arg(long, requires = "workspace_source")]
+    #[arg(long, requires = "workspace_source_kind")]
     workspace_id: Option<String>,
     /// Trusted local Git source; Tasks run in separate pinned checkouts.
-    #[arg(long, requires = "workspace_id")]
+    #[arg(long, requires = "workspace_id", group = "workspace_source_kind")]
     workspace_source: Option<PathBuf>,
+    /// Retrieve this Workspace's accepted GitHub source from the Gateway.
+    #[arg(
+        long,
+        requires = "workspace_id",
+        group = "workspace_source_kind",
+        conflicts_with = "workspace_source"
+    )]
+    workspace_from_gateway: bool,
 }
 
 impl AdapterOptions {
+    pub fn uses_gateway_workspace(&self) -> bool {
+        self.workspace_from_gateway
+    }
+
     pub fn workspace_mapping(&self) -> Option<WorkspaceMapping> {
+        if self.workspace_from_gateway {
+            return self
+                .workspace_id
+                .as_ref()
+                .map(|workspace_id| WorkspaceMapping {
+                    workspace_id: workspace_id.clone(),
+                    source: WorkspaceSource::Gateway,
+                });
+        }
         self.workspace_id
             .as_ref()
             .zip(self.workspace_source.as_ref())
             .map(|(workspace_id, source)| WorkspaceMapping {
                 workspace_id: workspace_id.clone(),
-                source: source.clone(),
+                source: WorkspaceSource::Local(source.clone()),
             })
     }
 
@@ -264,9 +286,14 @@ impl AdapterOptions {
             args.extend([
                 OsString::from("--workspace-id"),
                 mapping.workspace_id.into(),
-                OsString::from("--workspace-source"),
-                mapping.source.into_os_string(),
             ]);
+            match mapping.source {
+                WorkspaceSource::Local(source) => args.extend([
+                    OsString::from("--workspace-source"),
+                    source.into_os_string(),
+                ]),
+                WorkspaceSource::Gateway => args.push(OsString::from("--workspace-from-gateway")),
+            }
         }
     }
 

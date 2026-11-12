@@ -77,6 +77,21 @@ fn initialize(git_dir: &Path, oid_length: usize, bare: bool) -> Result<()> {
 }
 
 impl Repository {
+    pub(crate) fn empty(root: &Path, oid_length: usize) -> Result<Self> {
+        let git_dir = root.join("repository.git");
+        initialize(&git_dir, oid_length, true)?;
+        Ok(Self {
+            root: root.to_owned(),
+            git_dir,
+            oid_length,
+            bare: true,
+        })
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.git_dir
+    }
+
     pub(crate) async fn open(
         root: &Path,
         source: &Path,

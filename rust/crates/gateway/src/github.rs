@@ -3,6 +3,7 @@ mod auth;
 mod delivery;
 #[cfg(test)]
 mod tests;
+pub mod workspaces;
 
 use crate::delivery_journal::Journal;
 use anyhow::{Context, Result, ensure};

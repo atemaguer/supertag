@@ -268,6 +268,7 @@ impl<'a> Runtime<'a> {
                 workspace: Some(WorkspaceSpec {
                     workspace_id: WORKSPACE.into(),
                     base_commit: fixture.base.clone(),
+                    github_source: None,
                 }),
                 harness_kind: harness as i32,
                 ..Default::default()

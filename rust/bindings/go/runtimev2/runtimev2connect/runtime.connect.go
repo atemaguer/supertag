@@ -325,6 +325,9 @@ const (
 	// TransfersDownloadReviewArtifactProcedure is the fully-qualified name of the Transfers's
 	// DownloadReviewArtifact RPC.
 	TransfersDownloadReviewArtifactProcedure = "/supertag.runtime.v2.Transfers/DownloadReviewArtifact"
+	// TransfersDownloadWorkspaceSourceProcedure is the fully-qualified name of the Transfers's
+	// DownloadWorkspaceSource RPC.
+	TransfersDownloadWorkspaceSourceProcedure = "/supertag.runtime.v2.Transfers/DownloadWorkspaceSource"
 	// CheckpointDirectoryGetCheckpointProcedure is the fully-qualified name of the
 	// CheckpointDirectory's GetCheckpoint RPC.
 	CheckpointDirectoryGetCheckpointProcedure = "/supertag.runtime.v2.CheckpointDirectory/GetCheckpoint"
@@ -334,6 +337,9 @@ const (
 	// CheckpointDirectoryCommitCheckpointProcedure is the fully-qualified name of the
 	// CheckpointDirectory's CommitCheckpoint RPC.
 	CheckpointDirectoryCommitCheckpointProcedure = "/supertag.runtime.v2.CheckpointDirectory/CommitCheckpoint"
+	// WorkspaceDirectoryGetSourceProcedure is the fully-qualified name of the WorkspaceDirectory's
+	// GetSource RPC.
+	WorkspaceDirectoryGetSourceProcedure = "/supertag.runtime.v2.WorkspaceDirectory/GetSource"
 	// WorkspaceDirectoryGetContinuationProcedure is the fully-qualified name of the
 	// WorkspaceDirectory's GetContinuation RPC.
 	WorkspaceDirectoryGetContinuationProcedure = "/supertag.runtime.v2.WorkspaceDirectory/GetContinuation"
@@ -3528,6 +3534,7 @@ type TransfersClient interface {
 	DownloadWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
 	DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
 	DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest]) (*connect.ServerStreamForClient[runtimev2.WorkspaceDownload], error)
+	DownloadWorkspaceSource(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.GithubWorkspaceDownload], error)
 }
 
 // NewTransfersClient constructs a client for the supertag.runtime.v2.Transfers service. By default,
@@ -3577,6 +3584,12 @@ func NewTransfersClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(transfersMethods.ByName("DownloadReviewArtifact")),
 			connect.WithClientOptions(opts...),
 		),
+		downloadWorkspaceSource: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.GithubWorkspaceDownload](
+			httpClient,
+			baseURL+TransfersDownloadWorkspaceSourceProcedure,
+			connect.WithSchema(transfersMethods.ByName("DownloadWorkspaceSource")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -3588,6 +3601,7 @@ type transfersClient struct {
 	downloadWorkspace         *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceDownload]
 	downloadWorkspaceArtifact *connect.Client[runtimev2.GetWorkspaceArtifactRequest, runtimev2.WorkspaceDownload]
 	downloadReviewArtifact    *connect.Client[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDownload]
+	downloadWorkspaceSource   *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.GithubWorkspaceDownload]
 }
 
 // UploadCheckpoint calls supertag.runtime.v2.Transfers.UploadCheckpoint.
@@ -3620,6 +3634,11 @@ func (c *transfersClient) DownloadReviewArtifact(ctx context.Context, req *conne
 	return c.downloadReviewArtifact.CallServerStream(ctx, req)
 }
 
+// DownloadWorkspaceSource calls supertag.runtime.v2.Transfers.DownloadWorkspaceSource.
+func (c *transfersClient) DownloadWorkspaceSource(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.GithubWorkspaceDownload], error) {
+	return c.downloadWorkspaceSource.CallServerStream(ctx, req)
+}
+
 // TransfersHandler is an implementation of the supertag.runtime.v2.Transfers service.
 type TransfersHandler interface {
 	UploadCheckpoint(context.Context, *connect.ClientStream[runtimev2.CheckpointUpload]) (*connect.Response[runtimev2.CheckpointReference], error)
@@ -3628,6 +3647,7 @@ type TransfersHandler interface {
 	DownloadWorkspace(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
 	DownloadWorkspaceArtifact(context.Context, *connect.Request[runtimev2.GetWorkspaceArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
 	DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error
+	DownloadWorkspaceSource(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.GithubWorkspaceDownload]) error
 }
 
 // NewTransfersHandler builds an HTTP handler from the service implementation. It returns the path
@@ -3673,6 +3693,12 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(transfersMethods.ByName("DownloadReviewArtifact")),
 		connect.WithHandlerOptions(opts...),
 	)
+	transfersDownloadWorkspaceSourceHandler := connect.NewServerStreamHandler(
+		TransfersDownloadWorkspaceSourceProcedure,
+		svc.DownloadWorkspaceSource,
+		connect.WithSchema(transfersMethods.ByName("DownloadWorkspaceSource")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.Transfers/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case TransfersUploadCheckpointProcedure:
@@ -3687,6 +3713,8 @@ func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (s
 			transfersDownloadWorkspaceArtifactHandler.ServeHTTP(w, r)
 		case TransfersDownloadReviewArtifactProcedure:
 			transfersDownloadReviewArtifactHandler.ServeHTTP(w, r)
+		case TransfersDownloadWorkspaceSourceProcedure:
+			transfersDownloadWorkspaceSourceHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -3718,6 +3746,10 @@ func (UnimplementedTransfersHandler) DownloadWorkspaceArtifact(context.Context, 
 
 func (UnimplementedTransfersHandler) DownloadReviewArtifact(context.Context, *connect.Request[runtimev2.GetReviewArtifactRequest], *connect.ServerStream[runtimev2.WorkspaceDownload]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadReviewArtifact is not implemented"))
+}
+
+func (UnimplementedTransfersHandler) DownloadWorkspaceSource(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.GithubWorkspaceDownload]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadWorkspaceSource is not implemented"))
 }
 
 // CheckpointDirectoryClient is a client for the supertag.runtime.v2.CheckpointDirectory service.
@@ -3845,6 +3877,7 @@ func (UnimplementedCheckpointDirectoryHandler) CommitCheckpoint(context.Context,
 
 // WorkspaceDirectoryClient is a client for the supertag.runtime.v2.WorkspaceDirectory service.
 type WorkspaceDirectoryClient interface {
+	GetSource(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GithubWorkspace], error)
 	GetContinuation(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceContinuation], error)
 	ReserveDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 	CommitDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
@@ -3863,6 +3896,12 @@ func NewWorkspaceDirectoryClient(httpClient connect.HTTPClient, baseURL string, 
 	baseURL = strings.TrimRight(baseURL, "/")
 	workspaceDirectoryMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("WorkspaceDirectory").Methods()
 	return &workspaceDirectoryClient{
+		getSource: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.GithubWorkspace](
+			httpClient,
+			baseURL+WorkspaceDirectoryGetSourceProcedure,
+			connect.WithSchema(workspaceDirectoryMethods.ByName("GetSource")),
+			connect.WithClientOptions(opts...),
+		),
 		getContinuation: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceContinuation](
 			httpClient,
 			baseURL+WorkspaceDirectoryGetContinuationProcedure,
@@ -3898,11 +3937,17 @@ func NewWorkspaceDirectoryClient(httpClient connect.HTTPClient, baseURL string, 
 
 // workspaceDirectoryClient implements WorkspaceDirectoryClient.
 type workspaceDirectoryClient struct {
+	getSource         *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.GithubWorkspace]
 	getContinuation   *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.WorkspaceContinuation]
 	reserveDelivery   *connect.Client[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference]
 	commitDelivery    *connect.Client[runtimev2.WorkspaceDeliveryRequest, runtimev2.WorkspaceDeliveryReference]
 	getArtifact       *connect.Client[runtimev2.GetWorkspaceArtifactRequest, runtimev2.WorkspaceDeliveryReference]
 	getReviewArtifact *connect.Client[runtimev2.GetReviewArtifactRequest, runtimev2.WorkspaceDeliveryReference]
+}
+
+// GetSource calls supertag.runtime.v2.WorkspaceDirectory.GetSource.
+func (c *workspaceDirectoryClient) GetSource(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GithubWorkspace], error) {
+	return c.getSource.CallUnary(ctx, req)
 }
 
 // GetContinuation calls supertag.runtime.v2.WorkspaceDirectory.GetContinuation.
@@ -3933,6 +3978,7 @@ func (c *workspaceDirectoryClient) GetReviewArtifact(ctx context.Context, req *c
 // WorkspaceDirectoryHandler is an implementation of the supertag.runtime.v2.WorkspaceDirectory
 // service.
 type WorkspaceDirectoryHandler interface {
+	GetSource(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GithubWorkspace], error)
 	GetContinuation(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceContinuation], error)
 	ReserveDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
 	CommitDelivery(context.Context, *connect.Request[runtimev2.WorkspaceDeliveryRequest]) (*connect.Response[runtimev2.WorkspaceDeliveryReference], error)
@@ -3947,6 +3993,12 @@ type WorkspaceDirectoryHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewWorkspaceDirectoryHandler(svc WorkspaceDirectoryHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	workspaceDirectoryMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("WorkspaceDirectory").Methods()
+	workspaceDirectoryGetSourceHandler := connect.NewUnaryHandler(
+		WorkspaceDirectoryGetSourceProcedure,
+		svc.GetSource,
+		connect.WithSchema(workspaceDirectoryMethods.ByName("GetSource")),
+		connect.WithHandlerOptions(opts...),
+	)
 	workspaceDirectoryGetContinuationHandler := connect.NewUnaryHandler(
 		WorkspaceDirectoryGetContinuationProcedure,
 		svc.GetContinuation,
@@ -3979,6 +4031,8 @@ func NewWorkspaceDirectoryHandler(svc WorkspaceDirectoryHandler, opts ...connect
 	)
 	return "/supertag.runtime.v2.WorkspaceDirectory/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case WorkspaceDirectoryGetSourceProcedure:
+			workspaceDirectoryGetSourceHandler.ServeHTTP(w, r)
 		case WorkspaceDirectoryGetContinuationProcedure:
 			workspaceDirectoryGetContinuationHandler.ServeHTTP(w, r)
 		case WorkspaceDirectoryReserveDeliveryProcedure:
@@ -3997,6 +4051,10 @@ func NewWorkspaceDirectoryHandler(svc WorkspaceDirectoryHandler, opts ...connect
 
 // UnimplementedWorkspaceDirectoryHandler returns CodeUnimplemented from all methods.
 type UnimplementedWorkspaceDirectoryHandler struct{}
+
+func (UnimplementedWorkspaceDirectoryHandler) GetSource(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GithubWorkspace], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkspaceDirectory.GetSource is not implemented"))
+}
 
 func (UnimplementedWorkspaceDirectoryHandler) GetContinuation(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.WorkspaceContinuation], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkspaceDirectory.GetContinuation is not implemented"))

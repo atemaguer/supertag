@@ -1,0 +1,40 @@
+syntax = "proto3";
+package supertag.runtime.v2;
+
+// Credential-free repository configuration. A Task receives an immutable copy.
+service GithubWorkspaces {
+  rpc Put(PutGithubWorkspaceRequest) returns (GithubWorkspace);
+  rpc Get(GetGithubWorkspaceRequest) returns (GithubWorkspace);
+  rpc List(ListGithubWorkspacesRequest) returns (ListGithubWorkspacesResponse);
+  rpc Delete(DeleteGithubWorkspaceRequest) returns (DeleteGithubWorkspaceResponse);
+}
+
+message GithubWorkspaceSource {
+  string account_id = 1;
+  uint64 repository_id = 2;
+  string repository = 3;
+  // A full immutable SHA-1 Git commit, never a branch or tag.
+  string commit_sha = 4;
+}
+message GithubWorkspace {
+  string workspace_id = 1;
+  GithubWorkspaceSource source = 2;
+  uint64 revision = 3;
+}
+message PutGithubWorkspaceRequest {
+  string operation_id = 1;
+  GithubWorkspace workspace = 2;
+  optional uint64 expected_revision = 3;
+}
+message GetGithubWorkspaceRequest { string workspace_id = 1; }
+message ListGithubWorkspacesRequest { string after_id = 1; uint32 limit = 2; }
+message ListGithubWorkspacesResponse {
+  repeated GithubWorkspace workspaces = 1;
+  string next_cursor = 2;
+}
+message DeleteGithubWorkspaceRequest {
+  string operation_id = 1;
+  string workspace_id = 2;
+  uint64 expected_revision = 3;
+}
+message DeleteGithubWorkspaceResponse {}

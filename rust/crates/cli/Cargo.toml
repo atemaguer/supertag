@@ -40,6 +40,8 @@ tonic-health.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+axum = "0.8"
+base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", features = ["sink"] }
 hmac.workspace = true
@@ -120,4 +122,9 @@ required-features = ["test-fixtures"]
 [[test]]
 name = "cursor_runtime"
 path = "tests/cursor_runtime.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "github_workspace_runtime"
+path = "tests/github_workspace_runtime.rs"
 required-features = ["test-fixtures"]

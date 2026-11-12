@@ -10126,14 +10126,15 @@ func (x *CancelTaskRequest) GetTaskId() string {
 }
 
 type ClaimTaskRequest struct {
-	state            protoimpl.MessageState   `protogen:"open.v1"`
-	OperationId      string                   `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
-	WorkspaceIds     []string                 `protobuf:"bytes,2,rep,name=workspace_ids,json=workspaceIds,proto3" json:"workspace_ids,omitempty"`
-	HarnessKind      HarnessKind              `protobuf:"varint,3,opt,name=harness_kind,json=harnessKind,proto3,enum=supertag.runtime.v2.HarnessKind" json:"harness_kind,omitempty"`
-	ContextContracts []*ContextContract       `protobuf:"bytes,4,rep,name=context_contracts,json=contextContracts,proto3" json:"context_contracts,omitempty"`
-	ExecutionProfile *HarnessExecutionProfile `protobuf:"bytes,5,opt,name=execution_profile,json=executionProfile,proto3" json:"execution_profile,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state               protoimpl.MessageState   `protogen:"open.v1"`
+	OperationId         string                   `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	WorkspaceIds        []string                 `protobuf:"bytes,2,rep,name=workspace_ids,json=workspaceIds,proto3" json:"workspace_ids,omitempty"`
+	HarnessKind         HarnessKind              `protobuf:"varint,3,opt,name=harness_kind,json=harnessKind,proto3,enum=supertag.runtime.v2.HarnessKind" json:"harness_kind,omitempty"`
+	ContextContracts    []*ContextContract       `protobuf:"bytes,4,rep,name=context_contracts,json=contextContracts,proto3" json:"context_contracts,omitempty"`
+	ExecutionProfile    *HarnessExecutionProfile `protobuf:"bytes,5,opt,name=execution_profile,json=executionProfile,proto3" json:"execution_profile,omitempty"`
+	GatewayWorkspaceIds []string                 `protobuf:"bytes,6,rep,name=gateway_workspace_ids,json=gatewayWorkspaceIds,proto3" json:"gateway_workspace_ids,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ClaimTaskRequest) Reset() {
@@ -10197,6 +10198,13 @@ func (x *ClaimTaskRequest) GetContextContracts() []*ContextContract {
 func (x *ClaimTaskRequest) GetExecutionProfile() *HarnessExecutionProfile {
 	if x != nil {
 		return x.ExecutionProfile
+	}
+	return nil
+}
+
+func (x *ClaimTaskRequest) GetGatewayWorkspaceIds() []string {
+	if x != nil {
+		return x.GatewayWorkspaceIds
 	}
 	return nil
 }
@@ -12479,9 +12487,11 @@ func (*CheckpointDownload_Reference) isCheckpointDownload_Part() {}
 func (*CheckpointDownload_Chunk) isCheckpointDownload_Part() {}
 
 type WorkspaceSpec struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	BaseCommit    string                 `protobuf:"bytes,2,opt,name=base_commit,json=baseCommit,proto3" json:"base_commit,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	BaseCommit  string                 `protobuf:"bytes,2,opt,name=base_commit,json=baseCommit,proto3" json:"base_commit,omitempty"`
+	// Set by admission from the catalog, never accepted from PutTag input.
+	GithubSource  *GithubWorkspace `protobuf:"bytes,3,opt,name=github_source,json=githubSource,proto3" json:"github_source,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -12530,6 +12540,147 @@ func (x *WorkspaceSpec) GetBaseCommit() string {
 	return ""
 }
 
+func (x *WorkspaceSpec) GetGithubSource() *GithubWorkspace {
+	if x != nil {
+		return x.GithubSource
+	}
+	return nil
+}
+
+type GithubWorkspaceBundle struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Workspace     *GithubWorkspace       `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	Bundle        *BlobReference         `protobuf:"bytes,2,opt,name=bundle,proto3" json:"bundle,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GithubWorkspaceBundle) Reset() {
+	*x = GithubWorkspaceBundle{}
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[164]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GithubWorkspaceBundle) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GithubWorkspaceBundle) ProtoMessage() {}
+
+func (x *GithubWorkspaceBundle) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[164]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GithubWorkspaceBundle.ProtoReflect.Descriptor instead.
+func (*GithubWorkspaceBundle) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{164}
+}
+
+func (x *GithubWorkspaceBundle) GetWorkspace() *GithubWorkspace {
+	if x != nil {
+		return x.Workspace
+	}
+	return nil
+}
+
+func (x *GithubWorkspaceBundle) GetBundle() *BlobReference {
+	if x != nil {
+		return x.Bundle
+	}
+	return nil
+}
+
+type GithubWorkspaceDownload struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Part:
+	//
+	//	*GithubWorkspaceDownload_Reference
+	//	*GithubWorkspaceDownload_Chunk
+	Part          isGithubWorkspaceDownload_Part `protobuf_oneof:"part"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GithubWorkspaceDownload) Reset() {
+	*x = GithubWorkspaceDownload{}
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[165]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GithubWorkspaceDownload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GithubWorkspaceDownload) ProtoMessage() {}
+
+func (x *GithubWorkspaceDownload) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[165]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GithubWorkspaceDownload.ProtoReflect.Descriptor instead.
+func (*GithubWorkspaceDownload) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{165}
+}
+
+func (x *GithubWorkspaceDownload) GetPart() isGithubWorkspaceDownload_Part {
+	if x != nil {
+		return x.Part
+	}
+	return nil
+}
+
+func (x *GithubWorkspaceDownload) GetReference() *GithubWorkspaceBundle {
+	if x != nil {
+		if x, ok := x.Part.(*GithubWorkspaceDownload_Reference); ok {
+			return x.Reference
+		}
+	}
+	return nil
+}
+
+func (x *GithubWorkspaceDownload) GetChunk() []byte {
+	if x != nil {
+		if x, ok := x.Part.(*GithubWorkspaceDownload_Chunk); ok {
+			return x.Chunk
+		}
+	}
+	return nil
+}
+
+type isGithubWorkspaceDownload_Part interface {
+	isGithubWorkspaceDownload_Part()
+}
+
+type GithubWorkspaceDownload_Reference struct {
+	Reference *GithubWorkspaceBundle `protobuf:"bytes,1,opt,name=reference,proto3,oneof"`
+}
+
+type GithubWorkspaceDownload_Chunk struct {
+	Chunk []byte `protobuf:"bytes,2,opt,name=chunk,proto3,oneof"`
+}
+
+func (*GithubWorkspaceDownload_Reference) isGithubWorkspaceDownload_Part() {}
+
+func (*GithubWorkspaceDownload_Chunk) isGithubWorkspaceDownload_Part() {}
+
 type BlobReference struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Sha256        string                 `protobuf:"bytes,1,opt,name=sha256,proto3" json:"sha256,omitempty"`
@@ -12540,7 +12691,7 @@ type BlobReference struct {
 
 func (x *BlobReference) Reset() {
 	*x = BlobReference{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[164]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[166]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12552,7 +12703,7 @@ func (x *BlobReference) String() string {
 func (*BlobReference) ProtoMessage() {}
 
 func (x *BlobReference) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[164]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[166]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12565,7 +12716,7 @@ func (x *BlobReference) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BlobReference.ProtoReflect.Descriptor instead.
 func (*BlobReference) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{164}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{166}
 }
 
 func (x *BlobReference) GetSha256() string {
@@ -12599,7 +12750,7 @@ type WorkspaceDeliveryReference struct {
 
 func (x *WorkspaceDeliveryReference) Reset() {
 	*x = WorkspaceDeliveryReference{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[165]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[167]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12611,7 +12762,7 @@ func (x *WorkspaceDeliveryReference) String() string {
 func (*WorkspaceDeliveryReference) ProtoMessage() {}
 
 func (x *WorkspaceDeliveryReference) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[165]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[167]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12624,7 +12775,7 @@ func (x *WorkspaceDeliveryReference) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceDeliveryReference.ProtoReflect.Descriptor instead.
 func (*WorkspaceDeliveryReference) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{165}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{167}
 }
 
 func (x *WorkspaceDeliveryReference) GetWorkspaceId() string {
@@ -12700,7 +12851,7 @@ type WorkspaceDeliveryRequest struct {
 
 func (x *WorkspaceDeliveryRequest) Reset() {
 	*x = WorkspaceDeliveryRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[166]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[168]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12712,7 +12863,7 @@ func (x *WorkspaceDeliveryRequest) String() string {
 func (*WorkspaceDeliveryRequest) ProtoMessage() {}
 
 func (x *WorkspaceDeliveryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[166]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[168]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12725,7 +12876,7 @@ func (x *WorkspaceDeliveryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceDeliveryRequest.ProtoReflect.Descriptor instead.
 func (*WorkspaceDeliveryRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{166}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{168}
 }
 
 func (x *WorkspaceDeliveryRequest) GetAttempt() *InspectAttemptRequest {
@@ -12751,7 +12902,7 @@ type WorkspaceContinuation struct {
 
 func (x *WorkspaceContinuation) Reset() {
 	*x = WorkspaceContinuation{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[167]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[169]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12763,7 +12914,7 @@ func (x *WorkspaceContinuation) String() string {
 func (*WorkspaceContinuation) ProtoMessage() {}
 
 func (x *WorkspaceContinuation) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[167]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[169]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12776,7 +12927,7 @@ func (x *WorkspaceContinuation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceContinuation.ProtoReflect.Descriptor instead.
 func (*WorkspaceContinuation) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{167}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{169}
 }
 
 func (x *WorkspaceContinuation) GetDelivery() *WorkspaceDeliveryReference {
@@ -12800,7 +12951,7 @@ type WorkspaceUpload struct {
 
 func (x *WorkspaceUpload) Reset() {
 	*x = WorkspaceUpload{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[168]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[170]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12812,7 +12963,7 @@ func (x *WorkspaceUpload) String() string {
 func (*WorkspaceUpload) ProtoMessage() {}
 
 func (x *WorkspaceUpload) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[168]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[170]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12825,7 +12976,7 @@ func (x *WorkspaceUpload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceUpload.ProtoReflect.Descriptor instead.
 func (*WorkspaceUpload) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{168}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{170}
 }
 
 func (x *WorkspaceUpload) GetPart() isWorkspaceUpload_Part {
@@ -12897,7 +13048,7 @@ type WorkspaceDownload struct {
 
 func (x *WorkspaceDownload) Reset() {
 	*x = WorkspaceDownload{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[169]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[171]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12909,7 +13060,7 @@ func (x *WorkspaceDownload) String() string {
 func (*WorkspaceDownload) ProtoMessage() {}
 
 func (x *WorkspaceDownload) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[169]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[171]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -12922,7 +13073,7 @@ func (x *WorkspaceDownload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceDownload.ProtoReflect.Descriptor instead.
 func (*WorkspaceDownload) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{169}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{171}
 }
 
 func (x *WorkspaceDownload) GetPart() isWorkspaceDownload_Part {
@@ -12976,7 +13127,7 @@ type GetWorkspaceArtifactRequest struct {
 
 func (x *GetWorkspaceArtifactRequest) Reset() {
 	*x = GetWorkspaceArtifactRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[170]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[172]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -12988,7 +13139,7 @@ func (x *GetWorkspaceArtifactRequest) String() string {
 func (*GetWorkspaceArtifactRequest) ProtoMessage() {}
 
 func (x *GetWorkspaceArtifactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[170]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[172]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13001,7 +13152,7 @@ func (x *GetWorkspaceArtifactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetWorkspaceArtifactRequest.ProtoReflect.Descriptor instead.
 func (*GetWorkspaceArtifactRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{170}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{172}
 }
 
 func (x *GetWorkspaceArtifactRequest) GetTaskId() string {
@@ -13028,7 +13179,7 @@ type GetReviewArtifactRequest struct {
 
 func (x *GetReviewArtifactRequest) Reset() {
 	*x = GetReviewArtifactRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[171]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[173]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13040,7 +13191,7 @@ func (x *GetReviewArtifactRequest) String() string {
 func (*GetReviewArtifactRequest) ProtoMessage() {}
 
 func (x *GetReviewArtifactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[171]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[173]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13053,7 +13204,7 @@ func (x *GetReviewArtifactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetReviewArtifactRequest.ProtoReflect.Descriptor instead.
 func (*GetReviewArtifactRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{171}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{173}
 }
 
 func (x *GetReviewArtifactRequest) GetAttempt() *InspectAttemptRequest {
@@ -13080,7 +13231,7 @@ type HarnessPublishRequest struct {
 
 func (x *HarnessPublishRequest) Reset() {
 	*x = HarnessPublishRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[172]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[174]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13092,7 +13243,7 @@ func (x *HarnessPublishRequest) String() string {
 func (*HarnessPublishRequest) ProtoMessage() {}
 
 func (x *HarnessPublishRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[172]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[174]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13105,7 +13256,7 @@ func (x *HarnessPublishRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HarnessPublishRequest.ProtoReflect.Descriptor instead.
 func (*HarnessPublishRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{172}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{174}
 }
 
 func (x *HarnessPublishRequest) GetSequence() uint64 {
@@ -13135,7 +13286,7 @@ type HarnessCompleteRequest struct {
 
 func (x *HarnessCompleteRequest) Reset() {
 	*x = HarnessCompleteRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[173]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[175]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13147,7 +13298,7 @@ func (x *HarnessCompleteRequest) String() string {
 func (*HarnessCompleteRequest) ProtoMessage() {}
 
 func (x *HarnessCompleteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[173]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[175]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13160,7 +13311,7 @@ func (x *HarnessCompleteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HarnessCompleteRequest.ProtoReflect.Descriptor instead.
 func (*HarnessCompleteRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{173}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{175}
 }
 
 func (x *HarnessCompleteRequest) GetResult() string {
@@ -13206,7 +13357,7 @@ type HarnessCompleteResponse struct {
 
 func (x *HarnessCompleteResponse) Reset() {
 	*x = HarnessCompleteResponse{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[174]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[176]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13218,7 +13369,7 @@ func (x *HarnessCompleteResponse) String() string {
 func (*HarnessCompleteResponse) ProtoMessage() {}
 
 func (x *HarnessCompleteResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[174]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[176]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13231,7 +13382,7 @@ func (x *HarnessCompleteResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HarnessCompleteResponse.ProtoReflect.Descriptor instead.
 func (*HarnessCompleteResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{174}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{176}
 }
 
 type CreateObjectiveRequest struct {
@@ -13253,7 +13404,7 @@ type CreateObjectiveRequest struct {
 
 func (x *CreateObjectiveRequest) Reset() {
 	*x = CreateObjectiveRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[175]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[177]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13265,7 +13416,7 @@ func (x *CreateObjectiveRequest) String() string {
 func (*CreateObjectiveRequest) ProtoMessage() {}
 
 func (x *CreateObjectiveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[175]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[177]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13278,7 +13429,7 @@ func (x *CreateObjectiveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateObjectiveRequest.ProtoReflect.Descriptor instead.
 func (*CreateObjectiveRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{175}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{177}
 }
 
 func (x *CreateObjectiveRequest) GetOperationId() string {
@@ -13360,7 +13511,7 @@ type RuntimeActions struct {
 
 func (x *RuntimeActions) Reset() {
 	*x = RuntimeActions{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[176]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[178]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13372,7 +13523,7 @@ func (x *RuntimeActions) String() string {
 func (*RuntimeActions) ProtoMessage() {}
 
 func (x *RuntimeActions) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[176]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[178]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13385,7 +13536,7 @@ func (x *RuntimeActions) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RuntimeActions.ProtoReflect.Descriptor instead.
 func (*RuntimeActions) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{176}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{178}
 }
 
 func (x *RuntimeActions) GetActions() []string {
@@ -13418,7 +13569,7 @@ type Objective struct {
 
 func (x *Objective) Reset() {
 	*x = Objective{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[177]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[179]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13430,7 +13581,7 @@ func (x *Objective) String() string {
 func (*Objective) ProtoMessage() {}
 
 func (x *Objective) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[177]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[179]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13443,7 +13594,7 @@ func (x *Objective) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Objective.ProtoReflect.Descriptor instead.
 func (*Objective) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{177}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{179}
 }
 
 func (x *Objective) GetObjectiveId() string {
@@ -13566,7 +13717,7 @@ type Team struct {
 
 func (x *Team) Reset() {
 	*x = Team{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[178]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[180]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13578,7 +13729,7 @@ func (x *Team) String() string {
 func (*Team) ProtoMessage() {}
 
 func (x *Team) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[178]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[180]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13591,7 +13742,7 @@ func (x *Team) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Team.ProtoReflect.Descriptor instead.
 func (*Team) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{178}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{180}
 }
 
 func (x *Team) GetTeamId() string {
@@ -13656,7 +13807,7 @@ type CreateTeamRequest struct {
 
 func (x *CreateTeamRequest) Reset() {
 	*x = CreateTeamRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[179]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[181]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13668,7 +13819,7 @@ func (x *CreateTeamRequest) String() string {
 func (*CreateTeamRequest) ProtoMessage() {}
 
 func (x *CreateTeamRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[179]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[181]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13681,7 +13832,7 @@ func (x *CreateTeamRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateTeamRequest.ProtoReflect.Descriptor instead.
 func (*CreateTeamRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{179}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{181}
 }
 
 func (x *CreateTeamRequest) GetOperationId() string {
@@ -13728,7 +13879,7 @@ type GetTeamRequest struct {
 
 func (x *GetTeamRequest) Reset() {
 	*x = GetTeamRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[180]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[182]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13740,7 +13891,7 @@ func (x *GetTeamRequest) String() string {
 func (*GetTeamRequest) ProtoMessage() {}
 
 func (x *GetTeamRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[180]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[182]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13753,7 +13904,7 @@ func (x *GetTeamRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTeamRequest.ProtoReflect.Descriptor instead.
 func (*GetTeamRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{180}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{182}
 }
 
 func (x *GetTeamRequest) GetTeam() string {
@@ -13774,7 +13925,7 @@ type ListTeamsRequest struct {
 
 func (x *ListTeamsRequest) Reset() {
 	*x = ListTeamsRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[181]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[183]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13786,7 +13937,7 @@ func (x *ListTeamsRequest) String() string {
 func (*ListTeamsRequest) ProtoMessage() {}
 
 func (x *ListTeamsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[181]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[183]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13799,7 +13950,7 @@ func (x *ListTeamsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTeamsRequest.ProtoReflect.Descriptor instead.
 func (*ListTeamsRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{181}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{183}
 }
 
 func (x *ListTeamsRequest) GetMemberTagId() string {
@@ -13833,7 +13984,7 @@ type ListTeamsResponse struct {
 
 func (x *ListTeamsResponse) Reset() {
 	*x = ListTeamsResponse{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[182]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[184]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13845,7 +13996,7 @@ func (x *ListTeamsResponse) String() string {
 func (*ListTeamsResponse) ProtoMessage() {}
 
 func (x *ListTeamsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[182]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[184]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13858,7 +14009,7 @@ func (x *ListTeamsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTeamsResponse.ProtoReflect.Descriptor instead.
 func (*ListTeamsResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{182}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{184}
 }
 
 func (x *ListTeamsResponse) GetTeams() []*Team {
@@ -13884,7 +14035,7 @@ type TeamMembers struct {
 
 func (x *TeamMembers) Reset() {
 	*x = TeamMembers{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[183]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[185]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13896,7 +14047,7 @@ func (x *TeamMembers) String() string {
 func (*TeamMembers) ProtoMessage() {}
 
 func (x *TeamMembers) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[183]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[185]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13909,7 +14060,7 @@ func (x *TeamMembers) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TeamMembers.ProtoReflect.Descriptor instead.
 func (*TeamMembers) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{183}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{185}
 }
 
 func (x *TeamMembers) GetTagIds() []string {
@@ -13933,7 +14084,7 @@ type UpdateTeamRequest struct {
 
 func (x *UpdateTeamRequest) Reset() {
 	*x = UpdateTeamRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[184]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[186]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -13945,7 +14096,7 @@ func (x *UpdateTeamRequest) String() string {
 func (*UpdateTeamRequest) ProtoMessage() {}
 
 func (x *UpdateTeamRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[184]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[186]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -13958,7 +14109,7 @@ func (x *UpdateTeamRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateTeamRequest.ProtoReflect.Descriptor instead.
 func (*UpdateTeamRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{184}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{186}
 }
 
 func (x *UpdateTeamRequest) GetOperationId() string {
@@ -14013,7 +14164,7 @@ type DeleteTeamRequest struct {
 
 func (x *DeleteTeamRequest) Reset() {
 	*x = DeleteTeamRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[185]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[187]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14025,7 +14176,7 @@ func (x *DeleteTeamRequest) String() string {
 func (*DeleteTeamRequest) ProtoMessage() {}
 
 func (x *DeleteTeamRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[185]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[187]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14038,7 +14189,7 @@ func (x *DeleteTeamRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteTeamRequest.ProtoReflect.Descriptor instead.
 func (*DeleteTeamRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{185}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{187}
 }
 
 func (x *DeleteTeamRequest) GetOperationId() string {
@@ -14071,7 +14222,7 @@ type WorkstreamPost struct {
 
 func (x *WorkstreamPost) Reset() {
 	*x = WorkstreamPost{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[186]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[188]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14083,7 +14234,7 @@ func (x *WorkstreamPost) String() string {
 func (*WorkstreamPost) ProtoMessage() {}
 
 func (x *WorkstreamPost) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[186]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[188]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14096,7 +14247,7 @@ func (x *WorkstreamPost) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkstreamPost.ProtoReflect.Descriptor instead.
 func (*WorkstreamPost) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{186}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{188}
 }
 
 func (x *WorkstreamPost) GetPostId() string {
@@ -14167,7 +14318,7 @@ type ListWorkstreamPostsRequest struct {
 
 func (x *ListWorkstreamPostsRequest) Reset() {
 	*x = ListWorkstreamPostsRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[187]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[189]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14179,7 +14330,7 @@ func (x *ListWorkstreamPostsRequest) String() string {
 func (*ListWorkstreamPostsRequest) ProtoMessage() {}
 
 func (x *ListWorkstreamPostsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[187]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[189]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14192,7 +14343,7 @@ func (x *ListWorkstreamPostsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkstreamPostsRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkstreamPostsRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{187}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{189}
 }
 
 func (x *ListWorkstreamPostsRequest) GetTeam() string {
@@ -14233,7 +14384,7 @@ type ListWorkstreamPostsResponse struct {
 
 func (x *ListWorkstreamPostsResponse) Reset() {
 	*x = ListWorkstreamPostsResponse{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[188]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[190]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14245,7 +14396,7 @@ func (x *ListWorkstreamPostsResponse) String() string {
 func (*ListWorkstreamPostsResponse) ProtoMessage() {}
 
 func (x *ListWorkstreamPostsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[188]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[190]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14258,7 +14409,7 @@ func (x *ListWorkstreamPostsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkstreamPostsResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkstreamPostsResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{188}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{190}
 }
 
 func (x *ListWorkstreamPostsResponse) GetPosts() []*WorkstreamPost {
@@ -14287,7 +14438,7 @@ type ReadAttemptWorkstreamRequest struct {
 
 func (x *ReadAttemptWorkstreamRequest) Reset() {
 	*x = ReadAttemptWorkstreamRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[189]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[191]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14299,7 +14450,7 @@ func (x *ReadAttemptWorkstreamRequest) String() string {
 func (*ReadAttemptWorkstreamRequest) ProtoMessage() {}
 
 func (x *ReadAttemptWorkstreamRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[189]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[191]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14312,7 +14463,7 @@ func (x *ReadAttemptWorkstreamRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadAttemptWorkstreamRequest.ProtoReflect.Descriptor instead.
 func (*ReadAttemptWorkstreamRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{189}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{191}
 }
 
 func (x *ReadAttemptWorkstreamRequest) GetAttempt() *InspectAttemptRequest {
@@ -14353,7 +14504,7 @@ type ReadAttemptWorkstreamResponse struct {
 
 func (x *ReadAttemptWorkstreamResponse) Reset() {
 	*x = ReadAttemptWorkstreamResponse{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[190]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[192]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14365,7 +14516,7 @@ func (x *ReadAttemptWorkstreamResponse) String() string {
 func (*ReadAttemptWorkstreamResponse) ProtoMessage() {}
 
 func (x *ReadAttemptWorkstreamResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[190]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[192]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14378,7 +14529,7 @@ func (x *ReadAttemptWorkstreamResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadAttemptWorkstreamResponse.ProtoReflect.Descriptor instead.
 func (*ReadAttemptWorkstreamResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{190}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{192}
 }
 
 func (x *ReadAttemptWorkstreamResponse) GetTeam() *Team {
@@ -14407,7 +14558,7 @@ type PostAttemptWorkstreamRequest struct {
 
 func (x *PostAttemptWorkstreamRequest) Reset() {
 	*x = PostAttemptWorkstreamRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[191]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[193]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14419,7 +14570,7 @@ func (x *PostAttemptWorkstreamRequest) String() string {
 func (*PostAttemptWorkstreamRequest) ProtoMessage() {}
 
 func (x *PostAttemptWorkstreamRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[191]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[193]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14432,7 +14583,7 @@ func (x *PostAttemptWorkstreamRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PostAttemptWorkstreamRequest.ProtoReflect.Descriptor instead.
 func (*PostAttemptWorkstreamRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{191}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{193}
 }
 
 func (x *PostAttemptWorkstreamRequest) GetAttempt() *InspectAttemptRequest {
@@ -14475,7 +14626,7 @@ type PostAttemptWorkstreamResponse struct {
 
 func (x *PostAttemptWorkstreamResponse) Reset() {
 	*x = PostAttemptWorkstreamResponse{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[192]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[194]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14487,7 +14638,7 @@ func (x *PostAttemptWorkstreamResponse) String() string {
 func (*PostAttemptWorkstreamResponse) ProtoMessage() {}
 
 func (x *PostAttemptWorkstreamResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[192]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[194]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14500,7 +14651,7 @@ func (x *PostAttemptWorkstreamResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PostAttemptWorkstreamResponse.ProtoReflect.Descriptor instead.
 func (*PostAttemptWorkstreamResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{192}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{194}
 }
 
 func (x *PostAttemptWorkstreamResponse) GetPost() *WorkstreamPost {
@@ -14533,7 +14684,7 @@ type GetObjectiveRequest struct {
 
 func (x *GetObjectiveRequest) Reset() {
 	*x = GetObjectiveRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[193]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[195]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14545,7 +14696,7 @@ func (x *GetObjectiveRequest) String() string {
 func (*GetObjectiveRequest) ProtoMessage() {}
 
 func (x *GetObjectiveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[193]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[195]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14558,7 +14709,7 @@ func (x *GetObjectiveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetObjectiveRequest.ProtoReflect.Descriptor instead.
 func (*GetObjectiveRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{193}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{195}
 }
 
 func (x *GetObjectiveRequest) GetObjectiveId() string {
@@ -14578,7 +14729,7 @@ type ListObjectivesRequest struct {
 
 func (x *ListObjectivesRequest) Reset() {
 	*x = ListObjectivesRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[194]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[196]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14590,7 +14741,7 @@ func (x *ListObjectivesRequest) String() string {
 func (*ListObjectivesRequest) ProtoMessage() {}
 
 func (x *ListObjectivesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[194]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[196]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14603,7 +14754,7 @@ func (x *ListObjectivesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListObjectivesRequest.ProtoReflect.Descriptor instead.
 func (*ListObjectivesRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{194}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{196}
 }
 
 func (x *ListObjectivesRequest) GetLimit() uint32 {
@@ -14629,7 +14780,7 @@ type ListObjectivesResponse struct {
 
 func (x *ListObjectivesResponse) Reset() {
 	*x = ListObjectivesResponse{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[195]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[197]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14641,7 +14792,7 @@ func (x *ListObjectivesResponse) String() string {
 func (*ListObjectivesResponse) ProtoMessage() {}
 
 func (x *ListObjectivesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[195]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[197]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14654,7 +14805,7 @@ func (x *ListObjectivesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListObjectivesResponse.ProtoReflect.Descriptor instead.
 func (*ListObjectivesResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{195}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{197}
 }
 
 func (x *ListObjectivesResponse) GetObjectives() []*Objective {
@@ -14675,7 +14826,7 @@ type ListObjectiveCommitReviewsRequest struct {
 
 func (x *ListObjectiveCommitReviewsRequest) Reset() {
 	*x = ListObjectiveCommitReviewsRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[196]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[198]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14687,7 +14838,7 @@ func (x *ListObjectiveCommitReviewsRequest) String() string {
 func (*ListObjectiveCommitReviewsRequest) ProtoMessage() {}
 
 func (x *ListObjectiveCommitReviewsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[196]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[198]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14700,7 +14851,7 @@ func (x *ListObjectiveCommitReviewsRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use ListObjectiveCommitReviewsRequest.ProtoReflect.Descriptor instead.
 func (*ListObjectiveCommitReviewsRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{196}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{198}
 }
 
 func (x *ListObjectiveCommitReviewsRequest) GetObjectiveId() string {
@@ -14734,7 +14885,7 @@ type ListObjectiveCommitReviewsResponse struct {
 
 func (x *ListObjectiveCommitReviewsResponse) Reset() {
 	*x = ListObjectiveCommitReviewsResponse{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[197]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[199]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14746,7 +14897,7 @@ func (x *ListObjectiveCommitReviewsResponse) String() string {
 func (*ListObjectiveCommitReviewsResponse) ProtoMessage() {}
 
 func (x *ListObjectiveCommitReviewsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[197]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[199]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14759,7 +14910,7 @@ func (x *ListObjectiveCommitReviewsResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use ListObjectiveCommitReviewsResponse.ProtoReflect.Descriptor instead.
 func (*ListObjectiveCommitReviewsResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{197}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{199}
 }
 
 func (x *ListObjectiveCommitReviewsResponse) GetReviews() []*CommitReview {
@@ -14792,7 +14943,7 @@ type SetObjectiveLimitsRequest struct {
 
 func (x *SetObjectiveLimitsRequest) Reset() {
 	*x = SetObjectiveLimitsRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[198]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[200]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14804,7 +14955,7 @@ func (x *SetObjectiveLimitsRequest) String() string {
 func (*SetObjectiveLimitsRequest) ProtoMessage() {}
 
 func (x *SetObjectiveLimitsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[198]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[200]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14817,7 +14968,7 @@ func (x *SetObjectiveLimitsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetObjectiveLimitsRequest.ProtoReflect.Descriptor instead.
 func (*SetObjectiveLimitsRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{198}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{200}
 }
 
 func (x *SetObjectiveLimitsRequest) GetObjectiveId() string {
@@ -14888,7 +15039,7 @@ type SetObjectiveRuntimeActionsRequest struct {
 
 func (x *SetObjectiveRuntimeActionsRequest) Reset() {
 	*x = SetObjectiveRuntimeActionsRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[199]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[201]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14900,7 +15051,7 @@ func (x *SetObjectiveRuntimeActionsRequest) String() string {
 func (*SetObjectiveRuntimeActionsRequest) ProtoMessage() {}
 
 func (x *SetObjectiveRuntimeActionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[199]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[201]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14913,7 +15064,7 @@ func (x *SetObjectiveRuntimeActionsRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use SetObjectiveRuntimeActionsRequest.ProtoReflect.Descriptor instead.
 func (*SetObjectiveRuntimeActionsRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{199}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{201}
 }
 
 func (x *SetObjectiveRuntimeActionsRequest) GetObjectiveId() string {
@@ -14955,7 +15106,7 @@ type ObjectiveActionRequest struct {
 
 func (x *ObjectiveActionRequest) Reset() {
 	*x = ObjectiveActionRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[200]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[202]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14967,7 +15118,7 @@ func (x *ObjectiveActionRequest) String() string {
 func (*ObjectiveActionRequest) ProtoMessage() {}
 
 func (x *ObjectiveActionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[200]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[202]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14980,7 +15131,7 @@ func (x *ObjectiveActionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObjectiveActionRequest.ProtoReflect.Descriptor instead.
 func (*ObjectiveActionRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{200}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{202}
 }
 
 func (x *ObjectiveActionRequest) GetObjectiveId() string {
@@ -15016,7 +15167,7 @@ type ReviewObjectiveRequest struct {
 
 func (x *ReviewObjectiveRequest) Reset() {
 	*x = ReviewObjectiveRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[201]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[203]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15028,7 +15179,7 @@ func (x *ReviewObjectiveRequest) String() string {
 func (*ReviewObjectiveRequest) ProtoMessage() {}
 
 func (x *ReviewObjectiveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[201]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[203]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15041,7 +15192,7 @@ func (x *ReviewObjectiveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReviewObjectiveRequest.ProtoReflect.Descriptor instead.
 func (*ReviewObjectiveRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{201}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{203}
 }
 
 func (x *ReviewObjectiveRequest) GetObjectiveId() string {
@@ -15082,7 +15233,7 @@ type ReplyDestination struct {
 
 func (x *ReplyDestination) Reset() {
 	*x = ReplyDestination{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[202]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[204]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15094,7 +15245,7 @@ func (x *ReplyDestination) String() string {
 func (*ReplyDestination) ProtoMessage() {}
 
 func (x *ReplyDestination) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[202]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[204]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15107,7 +15258,7 @@ func (x *ReplyDestination) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplyDestination.ProtoReflect.Descriptor instead.
 func (*ReplyDestination) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{202}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{204}
 }
 
 func (x *ReplyDestination) GetConversationId() string {
@@ -15140,7 +15291,7 @@ type AcceptEventRequest struct {
 
 func (x *AcceptEventRequest) Reset() {
 	*x = AcceptEventRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[203]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[205]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15152,7 +15303,7 @@ func (x *AcceptEventRequest) String() string {
 func (*AcceptEventRequest) ProtoMessage() {}
 
 func (x *AcceptEventRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[203]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[205]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15165,7 +15316,7 @@ func (x *AcceptEventRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcceptEventRequest.ProtoReflect.Descriptor instead.
 func (*AcceptEventRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{203}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{205}
 }
 
 func (x *AcceptEventRequest) GetAccountId() string {
@@ -15233,7 +15384,7 @@ type AcceptSlackEventRequest struct {
 
 func (x *AcceptSlackEventRequest) Reset() {
 	*x = AcceptSlackEventRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[204]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[206]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15245,7 +15396,7 @@ func (x *AcceptSlackEventRequest) String() string {
 func (*AcceptSlackEventRequest) ProtoMessage() {}
 
 func (x *AcceptSlackEventRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[204]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[206]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15258,7 +15409,7 @@ func (x *AcceptSlackEventRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcceptSlackEventRequest.ProtoReflect.Descriptor instead.
 func (*AcceptSlackEventRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{204}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{206}
 }
 
 func (x *AcceptSlackEventRequest) GetAccountId() string {
@@ -15326,7 +15477,7 @@ type AcceptSlackEventResponse struct {
 
 func (x *AcceptSlackEventResponse) Reset() {
 	*x = AcceptSlackEventResponse{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[205]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[207]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15338,7 +15489,7 @@ func (x *AcceptSlackEventResponse) String() string {
 func (*AcceptSlackEventResponse) ProtoMessage() {}
 
 func (x *AcceptSlackEventResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[205]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[207]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15351,7 +15502,7 @@ func (x *AcceptSlackEventResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcceptSlackEventResponse.ProtoReflect.Descriptor instead.
 func (*AcceptSlackEventResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{205}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{207}
 }
 
 func (x *AcceptSlackEventResponse) GetTask() *Task {
@@ -15380,7 +15531,7 @@ type AcceptGithubEventRequest struct {
 
 func (x *AcceptGithubEventRequest) Reset() {
 	*x = AcceptGithubEventRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[206]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[208]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15392,7 +15543,7 @@ func (x *AcceptGithubEventRequest) String() string {
 func (*AcceptGithubEventRequest) ProtoMessage() {}
 
 func (x *AcceptGithubEventRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[206]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[208]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15405,7 +15556,7 @@ func (x *AcceptGithubEventRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcceptGithubEventRequest.ProtoReflect.Descriptor instead.
 func (*AcceptGithubEventRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{206}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{208}
 }
 
 func (x *AcceptGithubEventRequest) GetAccountId() string {
@@ -15494,7 +15645,7 @@ type AcceptGithubEventResponse struct {
 
 func (x *AcceptGithubEventResponse) Reset() {
 	*x = AcceptGithubEventResponse{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[207]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[209]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15506,7 +15657,7 @@ func (x *AcceptGithubEventResponse) String() string {
 func (*AcceptGithubEventResponse) ProtoMessage() {}
 
 func (x *AcceptGithubEventResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[207]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[209]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15519,7 +15670,7 @@ func (x *AcceptGithubEventResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcceptGithubEventResponse.ProtoReflect.Descriptor instead.
 func (*AcceptGithubEventResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{207}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{209}
 }
 
 func (x *AcceptGithubEventResponse) GetTask() *Task {
@@ -15547,7 +15698,7 @@ type AcceptLinearEventRequest struct {
 
 func (x *AcceptLinearEventRequest) Reset() {
 	*x = AcceptLinearEventRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[208]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[210]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15559,7 +15710,7 @@ func (x *AcceptLinearEventRequest) String() string {
 func (*AcceptLinearEventRequest) ProtoMessage() {}
 
 func (x *AcceptLinearEventRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[208]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[210]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15572,7 +15723,7 @@ func (x *AcceptLinearEventRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcceptLinearEventRequest.ProtoReflect.Descriptor instead.
 func (*AcceptLinearEventRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{208}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{210}
 }
 
 func (x *AcceptLinearEventRequest) GetAccountId() string {
@@ -15654,7 +15805,7 @@ type AcceptLinearEventResponse struct {
 
 func (x *AcceptLinearEventResponse) Reset() {
 	*x = AcceptLinearEventResponse{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[209]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[211]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15666,7 +15817,7 @@ func (x *AcceptLinearEventResponse) String() string {
 func (*AcceptLinearEventResponse) ProtoMessage() {}
 
 func (x *AcceptLinearEventResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[209]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[211]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15679,7 +15830,7 @@ func (x *AcceptLinearEventResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcceptLinearEventResponse.ProtoReflect.Descriptor instead.
 func (*AcceptLinearEventResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{209}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{211}
 }
 
 func (x *AcceptLinearEventResponse) GetTask() *Task {
@@ -15709,7 +15860,7 @@ type AcceptLarkEventRequest struct {
 
 func (x *AcceptLarkEventRequest) Reset() {
 	*x = AcceptLarkEventRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[210]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[212]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15721,7 +15872,7 @@ func (x *AcceptLarkEventRequest) String() string {
 func (*AcceptLarkEventRequest) ProtoMessage() {}
 
 func (x *AcceptLarkEventRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[210]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[212]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15734,7 +15885,7 @@ func (x *AcceptLarkEventRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcceptLarkEventRequest.ProtoReflect.Descriptor instead.
 func (*AcceptLarkEventRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{210}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{212}
 }
 
 func (x *AcceptLarkEventRequest) GetAccountId() string {
@@ -15830,7 +15981,7 @@ type AcceptLarkEventResponse struct {
 
 func (x *AcceptLarkEventResponse) Reset() {
 	*x = AcceptLarkEventResponse{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[211]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[213]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15842,7 +15993,7 @@ func (x *AcceptLarkEventResponse) String() string {
 func (*AcceptLarkEventResponse) ProtoMessage() {}
 
 func (x *AcceptLarkEventResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[211]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[213]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15855,7 +16006,7 @@ func (x *AcceptLarkEventResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcceptLarkEventResponse.ProtoReflect.Descriptor instead.
 func (*AcceptLarkEventResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{211}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{213}
 }
 
 func (x *AcceptLarkEventResponse) GetTask() *Task {
@@ -15885,7 +16036,7 @@ type AcceptMicrosoftTeamsActivityRequest struct {
 
 func (x *AcceptMicrosoftTeamsActivityRequest) Reset() {
 	*x = AcceptMicrosoftTeamsActivityRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[212]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[214]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15897,7 +16048,7 @@ func (x *AcceptMicrosoftTeamsActivityRequest) String() string {
 func (*AcceptMicrosoftTeamsActivityRequest) ProtoMessage() {}
 
 func (x *AcceptMicrosoftTeamsActivityRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[212]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[214]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15910,7 +16061,7 @@ func (x *AcceptMicrosoftTeamsActivityRequest) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use AcceptMicrosoftTeamsActivityRequest.ProtoReflect.Descriptor instead.
 func (*AcceptMicrosoftTeamsActivityRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{212}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{214}
 }
 
 func (x *AcceptMicrosoftTeamsActivityRequest) GetAccountId() string {
@@ -16006,7 +16157,7 @@ type AcceptMicrosoftTeamsActivityResponse struct {
 
 func (x *AcceptMicrosoftTeamsActivityResponse) Reset() {
 	*x = AcceptMicrosoftTeamsActivityResponse{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[213]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[215]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16018,7 +16169,7 @@ func (x *AcceptMicrosoftTeamsActivityResponse) String() string {
 func (*AcceptMicrosoftTeamsActivityResponse) ProtoMessage() {}
 
 func (x *AcceptMicrosoftTeamsActivityResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[213]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[215]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16031,7 +16182,7 @@ func (x *AcceptMicrosoftTeamsActivityResponse) ProtoReflect() protoreflect.Messa
 
 // Deprecated: Use AcceptMicrosoftTeamsActivityResponse.ProtoReflect.Descriptor instead.
 func (*AcceptMicrosoftTeamsActivityResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{213}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{215}
 }
 
 func (x *AcceptMicrosoftTeamsActivityResponse) GetTask() *Task {
@@ -16051,7 +16202,7 @@ type GetMicrosoftTeamsReplyRouteRequest struct {
 
 func (x *GetMicrosoftTeamsReplyRouteRequest) Reset() {
 	*x = GetMicrosoftTeamsReplyRouteRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[214]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[216]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16063,7 +16214,7 @@ func (x *GetMicrosoftTeamsReplyRouteRequest) String() string {
 func (*GetMicrosoftTeamsReplyRouteRequest) ProtoMessage() {}
 
 func (x *GetMicrosoftTeamsReplyRouteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[214]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[216]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16076,7 +16227,7 @@ func (x *GetMicrosoftTeamsReplyRouteRequest) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use GetMicrosoftTeamsReplyRouteRequest.ProtoReflect.Descriptor instead.
 func (*GetMicrosoftTeamsReplyRouteRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{214}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{216}
 }
 
 func (x *GetMicrosoftTeamsReplyRouteRequest) GetReplyId() string {
@@ -16108,7 +16259,7 @@ type MicrosoftTeamsReplyRoute struct {
 
 func (x *MicrosoftTeamsReplyRoute) Reset() {
 	*x = MicrosoftTeamsReplyRoute{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[215]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[217]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16120,7 +16271,7 @@ func (x *MicrosoftTeamsReplyRoute) String() string {
 func (*MicrosoftTeamsReplyRoute) ProtoMessage() {}
 
 func (x *MicrosoftTeamsReplyRoute) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[215]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[217]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16133,7 +16284,7 @@ func (x *MicrosoftTeamsReplyRoute) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MicrosoftTeamsReplyRoute.ProtoReflect.Descriptor instead.
 func (*MicrosoftTeamsReplyRoute) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{215}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{217}
 }
 
 func (x *MicrosoftTeamsReplyRoute) GetServiceUrl() string {
@@ -16200,7 +16351,7 @@ type Reply struct {
 
 func (x *Reply) Reset() {
 	*x = Reply{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[216]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[218]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16212,7 +16363,7 @@ func (x *Reply) String() string {
 func (*Reply) ProtoMessage() {}
 
 func (x *Reply) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[216]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[218]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16225,7 +16376,7 @@ func (x *Reply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Reply.ProtoReflect.Descriptor instead.
 func (*Reply) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{216}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{218}
 }
 
 func (x *Reply) GetReplyId() string {
@@ -16286,7 +16437,7 @@ type ClaimReplyRequest struct {
 
 func (x *ClaimReplyRequest) Reset() {
 	*x = ClaimReplyRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[217]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[219]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16298,7 +16449,7 @@ func (x *ClaimReplyRequest) String() string {
 func (*ClaimReplyRequest) ProtoMessage() {}
 
 func (x *ClaimReplyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[217]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[219]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16311,7 +16462,7 @@ func (x *ClaimReplyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClaimReplyRequest.ProtoReflect.Descriptor instead.
 func (*ClaimReplyRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{217}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{219}
 }
 
 func (x *ClaimReplyRequest) GetOperationId() string {
@@ -16331,7 +16482,7 @@ type ClaimReplyResponse struct {
 
 func (x *ClaimReplyResponse) Reset() {
 	*x = ClaimReplyResponse{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[218]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[220]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16343,7 +16494,7 @@ func (x *ClaimReplyResponse) String() string {
 func (*ClaimReplyResponse) ProtoMessage() {}
 
 func (x *ClaimReplyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[218]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[220]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16356,7 +16507,7 @@ func (x *ClaimReplyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClaimReplyResponse.ProtoReflect.Descriptor instead.
 func (*ClaimReplyResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{218}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{220}
 }
 
 func (x *ClaimReplyResponse) GetReply() *Reply {
@@ -16385,7 +16536,7 @@ type SettleReplyRequest struct {
 
 func (x *SettleReplyRequest) Reset() {
 	*x = SettleReplyRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[219]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[221]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16397,7 +16548,7 @@ func (x *SettleReplyRequest) String() string {
 func (*SettleReplyRequest) ProtoMessage() {}
 
 func (x *SettleReplyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[219]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[221]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16410,7 +16561,7 @@ func (x *SettleReplyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SettleReplyRequest.ProtoReflect.Descriptor instead.
 func (*SettleReplyRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{219}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{221}
 }
 
 func (x *SettleReplyRequest) GetReplyId() string {
@@ -16452,7 +16603,7 @@ type RenewReplyRequest struct {
 
 func (x *RenewReplyRequest) Reset() {
 	*x = RenewReplyRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[220]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[222]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16464,7 +16615,7 @@ func (x *RenewReplyRequest) String() string {
 func (*RenewReplyRequest) ProtoMessage() {}
 
 func (x *RenewReplyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[220]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[222]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16477,7 +16628,7 @@ func (x *RenewReplyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenewReplyRequest.ProtoReflect.Descriptor instead.
 func (*RenewReplyRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{220}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{222}
 }
 
 func (x *RenewReplyRequest) GetReplyId() string {
@@ -16503,7 +16654,7 @@ type ReplyLease struct {
 
 func (x *ReplyLease) Reset() {
 	*x = ReplyLease{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[221]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[223]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16515,7 +16666,7 @@ func (x *ReplyLease) String() string {
 func (*ReplyLease) ProtoMessage() {}
 
 func (x *ReplyLease) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[221]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[223]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16528,7 +16679,7 @@ func (x *ReplyLease) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplyLease.ProtoReflect.Descriptor instead.
 func (*ReplyLease) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{221}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{223}
 }
 
 func (x *ReplyLease) GetValidForMs() uint64 {
@@ -16547,7 +16698,7 @@ type GetReplyDeliveryRequest struct {
 
 func (x *GetReplyDeliveryRequest) Reset() {
 	*x = GetReplyDeliveryRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[222]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[224]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16559,7 +16710,7 @@ func (x *GetReplyDeliveryRequest) String() string {
 func (*GetReplyDeliveryRequest) ProtoMessage() {}
 
 func (x *GetReplyDeliveryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[222]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[224]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16572,7 +16723,7 @@ func (x *GetReplyDeliveryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetReplyDeliveryRequest.ProtoReflect.Descriptor instead.
 func (*GetReplyDeliveryRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{222}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{224}
 }
 
 func (x *GetReplyDeliveryRequest) GetReplyId() string {
@@ -16596,7 +16747,7 @@ type ReplyDeliveryAudit struct {
 
 func (x *ReplyDeliveryAudit) Reset() {
 	*x = ReplyDeliveryAudit{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[223]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[225]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16608,7 +16759,7 @@ func (x *ReplyDeliveryAudit) String() string {
 func (*ReplyDeliveryAudit) ProtoMessage() {}
 
 func (x *ReplyDeliveryAudit) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[223]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[225]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16621,7 +16772,7 @@ func (x *ReplyDeliveryAudit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplyDeliveryAudit.ProtoReflect.Descriptor instead.
 func (*ReplyDeliveryAudit) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{223}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{225}
 }
 
 func (x *ReplyDeliveryAudit) GetKind() string {
@@ -16677,7 +16828,7 @@ type ReplyDelivery struct {
 
 func (x *ReplyDelivery) Reset() {
 	*x = ReplyDelivery{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[224]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[226]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16689,7 +16840,7 @@ func (x *ReplyDelivery) String() string {
 func (*ReplyDelivery) ProtoMessage() {}
 
 func (x *ReplyDelivery) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[224]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[226]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16702,7 +16853,7 @@ func (x *ReplyDelivery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplyDelivery.ProtoReflect.Descriptor instead.
 func (*ReplyDelivery) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{224}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{226}
 }
 
 func (x *ReplyDelivery) GetReply() *Reply {
@@ -16738,7 +16889,7 @@ type ListReplyDeliveriesRequest struct {
 
 func (x *ListReplyDeliveriesRequest) Reset() {
 	*x = ListReplyDeliveriesRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[225]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[227]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16750,7 +16901,7 @@ func (x *ListReplyDeliveriesRequest) String() string {
 func (*ListReplyDeliveriesRequest) ProtoMessage() {}
 
 func (x *ListReplyDeliveriesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[225]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[227]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16763,7 +16914,7 @@ func (x *ListReplyDeliveriesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListReplyDeliveriesRequest.ProtoReflect.Descriptor instead.
 func (*ListReplyDeliveriesRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{225}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{227}
 }
 
 func (x *ListReplyDeliveriesRequest) GetAccountId() string {
@@ -16804,7 +16955,7 @@ type ListReplyDeliveriesResponse struct {
 
 func (x *ListReplyDeliveriesResponse) Reset() {
 	*x = ListReplyDeliveriesResponse{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[226]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[228]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16816,7 +16967,7 @@ func (x *ListReplyDeliveriesResponse) String() string {
 func (*ListReplyDeliveriesResponse) ProtoMessage() {}
 
 func (x *ListReplyDeliveriesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[226]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[228]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16829,7 +16980,7 @@ func (x *ListReplyDeliveriesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListReplyDeliveriesResponse.ProtoReflect.Descriptor instead.
 func (*ListReplyDeliveriesResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{226}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{228}
 }
 
 func (x *ListReplyDeliveriesResponse) GetDeliveries() []*ReplyDelivery {
@@ -16860,7 +17011,7 @@ type ResolveReplyRequest struct {
 
 func (x *ResolveReplyRequest) Reset() {
 	*x = ResolveReplyRequest{}
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[227]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[229]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16872,7 +17023,7 @@ func (x *ResolveReplyRequest) String() string {
 func (*ResolveReplyRequest) ProtoMessage() {}
 
 func (x *ResolveReplyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[227]
+	mi := &file_supertag_runtime_v2_runtime_proto_msgTypes[229]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16885,7 +17036,7 @@ func (x *ResolveReplyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResolveReplyRequest.ProtoReflect.Descriptor instead.
 func (*ResolveReplyRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{227}
+	return file_supertag_runtime_v2_runtime_proto_rawDescGZIP(), []int{229}
 }
 
 func (x *ResolveReplyRequest) GetReplyId() string {
@@ -16927,7 +17078,7 @@ var File_supertag_runtime_v2_runtime_proto protoreflect.FileDescriptor
 
 const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\n" +
-	"!supertag/runtime/v2/runtime.proto\x12\x13supertag.runtime.v2\x1a supertag/runtime/v2/policy.proto\"g\n" +
+	"!supertag/runtime/v2/runtime.proto\x12\x13supertag.runtime.v2\x1a supertag/runtime/v2/policy.proto\x1a+supertag/runtime/v2/github_workspaces.proto\"g\n" +
 	"\fWatchRequest\x12!\n" +
 	"\fresume_token\x18\x01 \x01(\tR\vresumeToken\x124\n" +
 	"\x05kinds\x18\x02 \x03(\x0e2\x1e.supertag.runtime.v2.WatchKindR\x05kinds\"\xf6\x01\n" +
@@ -17648,13 +17799,14 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x12ListEventsResponse\x126\n" +
 	"\x06events\x18\x01 \x03(\v2\x1e.supertag.runtime.v2.TaskEventR\x06events\",\n" +
 	"\x11CancelTaskRequest\x12\x17\n" +
-	"\atask_id\x18\x01 \x01(\tR\x06taskId\"\xcd\x02\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\"\x81\x03\n" +
 	"\x10ClaimTaskRequest\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12#\n" +
 	"\rworkspace_ids\x18\x02 \x03(\tR\fworkspaceIds\x12C\n" +
 	"\fharness_kind\x18\x03 \x01(\x0e2 .supertag.runtime.v2.HarnessKindR\vharnessKind\x12Q\n" +
 	"\x11context_contracts\x18\x04 \x03(\v2$.supertag.runtime.v2.ContextContractR\x10contextContracts\x12Y\n" +
-	"\x11execution_profile\x18\x05 \x01(\v2,.supertag.runtime.v2.HarnessExecutionProfileR\x10executionProfile\"T\n" +
+	"\x11execution_profile\x18\x05 \x01(\v2,.supertag.runtime.v2.HarnessExecutionProfileR\x10executionProfile\x122\n" +
+	"\x15gateway_workspace_ids\x18\x06 \x03(\tR\x13gatewayWorkspaceIds\"T\n" +
 	"\x11ClaimTaskResponse\x12?\n" +
 	"\n" +
 	"assignment\x18\x01 \x01(\v2\x1f.supertag.runtime.v2.AssignmentR\n" +
@@ -17842,11 +17994,19 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x12CheckpointDownload\x12H\n" +
 	"\treference\x18\x01 \x01(\v2(.supertag.runtime.v2.CheckpointReferenceH\x00R\treference\x12\x16\n" +
 	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x06\n" +
-	"\x04part\"S\n" +
+	"\x04part\"\x9e\x01\n" +
 	"\rWorkspaceSpec\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x1f\n" +
 	"\vbase_commit\x18\x02 \x01(\tR\n" +
-	"baseCommit\"H\n" +
+	"baseCommit\x12I\n" +
+	"\rgithub_source\x18\x03 \x01(\v2$.supertag.runtime.v2.GithubWorkspaceR\fgithubSource\"\x97\x01\n" +
+	"\x15GithubWorkspaceBundle\x12B\n" +
+	"\tworkspace\x18\x01 \x01(\v2$.supertag.runtime.v2.GithubWorkspaceR\tworkspace\x12:\n" +
+	"\x06bundle\x18\x02 \x01(\v2\".supertag.runtime.v2.BlobReferenceR\x06bundle\"\x85\x01\n" +
+	"\x17GithubWorkspaceDownload\x12J\n" +
+	"\treference\x18\x01 \x01(\v2*.supertag.runtime.v2.GithubWorkspaceBundleH\x00R\treference\x12\x16\n" +
+	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x06\n" +
+	"\x04part\"H\n" +
 	"\rBlobReference\x12\x16\n" +
 	"\x06sha256\x18\x01 \x01(\tR\x06sha256\x12\x1f\n" +
 	"\vbyte_length\x18\x02 \x01(\x04R\n" +
@@ -18542,19 +18702,21 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"ClaimReply\x12&.supertag.runtime.v2.ClaimReplyRequest\x1a'.supertag.runtime.v2.ClaimReplyResponse\x12U\n" +
 	"\n" +
 	"RenewReply\x12&.supertag.runtime.v2.RenewReplyRequest\x1a\x1f.supertag.runtime.v2.ReplyLease\x12R\n" +
-	"\vSettleReply\x12'.supertag.runtime.v2.SettleReplyRequest\x1a\x1a.supertag.runtime.v2.Reply2\xa2\x05\n" +
+	"\vSettleReply\x12'.supertag.runtime.v2.SettleReplyRequest\x1a\x1a.supertag.runtime.v2.Reply2\x99\x06\n" +
 	"\tTransfers\x12e\n" +
 	"\x10UploadCheckpoint\x12%.supertag.runtime.v2.CheckpointUpload\x1a(.supertag.runtime.v2.CheckpointReference(\x01\x12k\n" +
 	"\x12DownloadCheckpoint\x12*.supertag.runtime.v2.InspectAttemptRequest\x1a'.supertag.runtime.v2.CheckpointDownload0\x01\x12j\n" +
 	"\x0fUploadWorkspace\x12$.supertag.runtime.v2.WorkspaceUpload\x1a/.supertag.runtime.v2.WorkspaceDeliveryReference(\x01\x12i\n" +
 	"\x11DownloadWorkspace\x12*.supertag.runtime.v2.InspectAttemptRequest\x1a&.supertag.runtime.v2.WorkspaceDownload0\x01\x12w\n" +
 	"\x19DownloadWorkspaceArtifact\x120.supertag.runtime.v2.GetWorkspaceArtifactRequest\x1a&.supertag.runtime.v2.WorkspaceDownload0\x01\x12q\n" +
-	"\x16DownloadReviewArtifact\x12-.supertag.runtime.v2.GetReviewArtifactRequest\x1a&.supertag.runtime.v2.WorkspaceDownload0\x012\xd7\x02\n" +
+	"\x16DownloadReviewArtifact\x12-.supertag.runtime.v2.GetReviewArtifactRequest\x1a&.supertag.runtime.v2.WorkspaceDownload0\x01\x12u\n" +
+	"\x17DownloadWorkspaceSource\x12*.supertag.runtime.v2.InspectAttemptRequest\x1a,.supertag.runtime.v2.GithubWorkspaceDownload0\x012\xd7\x02\n" +
 	"\x13CheckpointDirectory\x12g\n" +
 	"\rGetCheckpoint\x12*.supertag.runtime.v2.InspectAttemptRequest\x1a*.supertag.runtime.v2.GetCheckpointResponse\x12k\n" +
 	"\x11ReserveCheckpoint\x12,.supertag.runtime.v2.CommitCheckpointRequest\x1a(.supertag.runtime.v2.CheckpointReference\x12j\n" +
-	"\x10CommitCheckpoint\x12,.supertag.runtime.v2.CommitCheckpointRequest\x1a(.supertag.runtime.v2.CheckpointReference2\xcb\x04\n" +
-	"\x12WorkspaceDirectory\x12i\n" +
+	"\x10CommitCheckpoint\x12,.supertag.runtime.v2.CommitCheckpointRequest\x1a(.supertag.runtime.v2.CheckpointReference2\xaa\x05\n" +
+	"\x12WorkspaceDirectory\x12]\n" +
+	"\tGetSource\x12*.supertag.runtime.v2.InspectAttemptRequest\x1a$.supertag.runtime.v2.GithubWorkspace\x12i\n" +
 	"\x0fGetContinuation\x12*.supertag.runtime.v2.InspectAttemptRequest\x1a*.supertag.runtime.v2.WorkspaceContinuation\x12q\n" +
 	"\x0fReserveDelivery\x12-.supertag.runtime.v2.WorkspaceDeliveryRequest\x1a/.supertag.runtime.v2.WorkspaceDeliveryReference\x12p\n" +
 	"\x0eCommitDelivery\x12-.supertag.runtime.v2.WorkspaceDeliveryRequest\x1a/.supertag.runtime.v2.WorkspaceDeliveryReference\x12p\n" +
@@ -18602,7 +18764,7 @@ func file_supertag_runtime_v2_runtime_proto_rawDescGZIP() []byte {
 }
 
 var file_supertag_runtime_v2_runtime_proto_enumTypes = make([]protoimpl.EnumInfo, 29)
-var file_supertag_runtime_v2_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 228)
+var file_supertag_runtime_v2_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 230)
 var file_supertag_runtime_v2_runtime_proto_goTypes = []any{
 	(WatchKind)(0),                               // 0: supertag.runtime.v2.WatchKind
 	(WatchReason)(0),                             // 1: supertag.runtime.v2.WatchReason
@@ -18797,72 +18959,75 @@ var file_supertag_runtime_v2_runtime_proto_goTypes = []any{
 	(*CheckpointUpload)(nil),                     // 190: supertag.runtime.v2.CheckpointUpload
 	(*CheckpointDownload)(nil),                   // 191: supertag.runtime.v2.CheckpointDownload
 	(*WorkspaceSpec)(nil),                        // 192: supertag.runtime.v2.WorkspaceSpec
-	(*BlobReference)(nil),                        // 193: supertag.runtime.v2.BlobReference
-	(*WorkspaceDeliveryReference)(nil),           // 194: supertag.runtime.v2.WorkspaceDeliveryReference
-	(*WorkspaceDeliveryRequest)(nil),             // 195: supertag.runtime.v2.WorkspaceDeliveryRequest
-	(*WorkspaceContinuation)(nil),                // 196: supertag.runtime.v2.WorkspaceContinuation
-	(*WorkspaceUpload)(nil),                      // 197: supertag.runtime.v2.WorkspaceUpload
-	(*WorkspaceDownload)(nil),                    // 198: supertag.runtime.v2.WorkspaceDownload
-	(*GetWorkspaceArtifactRequest)(nil),          // 199: supertag.runtime.v2.GetWorkspaceArtifactRequest
-	(*GetReviewArtifactRequest)(nil),             // 200: supertag.runtime.v2.GetReviewArtifactRequest
-	(*HarnessPublishRequest)(nil),                // 201: supertag.runtime.v2.HarnessPublishRequest
-	(*HarnessCompleteRequest)(nil),               // 202: supertag.runtime.v2.HarnessCompleteRequest
-	(*HarnessCompleteResponse)(nil),              // 203: supertag.runtime.v2.HarnessCompleteResponse
-	(*CreateObjectiveRequest)(nil),               // 204: supertag.runtime.v2.CreateObjectiveRequest
-	(*RuntimeActions)(nil),                       // 205: supertag.runtime.v2.RuntimeActions
-	(*Objective)(nil),                            // 206: supertag.runtime.v2.Objective
-	(*Team)(nil),                                 // 207: supertag.runtime.v2.Team
-	(*CreateTeamRequest)(nil),                    // 208: supertag.runtime.v2.CreateTeamRequest
-	(*GetTeamRequest)(nil),                       // 209: supertag.runtime.v2.GetTeamRequest
-	(*ListTeamsRequest)(nil),                     // 210: supertag.runtime.v2.ListTeamsRequest
-	(*ListTeamsResponse)(nil),                    // 211: supertag.runtime.v2.ListTeamsResponse
-	(*TeamMembers)(nil),                          // 212: supertag.runtime.v2.TeamMembers
-	(*UpdateTeamRequest)(nil),                    // 213: supertag.runtime.v2.UpdateTeamRequest
-	(*DeleteTeamRequest)(nil),                    // 214: supertag.runtime.v2.DeleteTeamRequest
-	(*WorkstreamPost)(nil),                       // 215: supertag.runtime.v2.WorkstreamPost
-	(*ListWorkstreamPostsRequest)(nil),           // 216: supertag.runtime.v2.ListWorkstreamPostsRequest
-	(*ListWorkstreamPostsResponse)(nil),          // 217: supertag.runtime.v2.ListWorkstreamPostsResponse
-	(*ReadAttemptWorkstreamRequest)(nil),         // 218: supertag.runtime.v2.ReadAttemptWorkstreamRequest
-	(*ReadAttemptWorkstreamResponse)(nil),        // 219: supertag.runtime.v2.ReadAttemptWorkstreamResponse
-	(*PostAttemptWorkstreamRequest)(nil),         // 220: supertag.runtime.v2.PostAttemptWorkstreamRequest
-	(*PostAttemptWorkstreamResponse)(nil),        // 221: supertag.runtime.v2.PostAttemptWorkstreamResponse
-	(*GetObjectiveRequest)(nil),                  // 222: supertag.runtime.v2.GetObjectiveRequest
-	(*ListObjectivesRequest)(nil),                // 223: supertag.runtime.v2.ListObjectivesRequest
-	(*ListObjectivesResponse)(nil),               // 224: supertag.runtime.v2.ListObjectivesResponse
-	(*ListObjectiveCommitReviewsRequest)(nil),    // 225: supertag.runtime.v2.ListObjectiveCommitReviewsRequest
-	(*ListObjectiveCommitReviewsResponse)(nil),   // 226: supertag.runtime.v2.ListObjectiveCommitReviewsResponse
-	(*SetObjectiveLimitsRequest)(nil),            // 227: supertag.runtime.v2.SetObjectiveLimitsRequest
-	(*SetObjectiveRuntimeActionsRequest)(nil),    // 228: supertag.runtime.v2.SetObjectiveRuntimeActionsRequest
-	(*ObjectiveActionRequest)(nil),               // 229: supertag.runtime.v2.ObjectiveActionRequest
-	(*ReviewObjectiveRequest)(nil),               // 230: supertag.runtime.v2.ReviewObjectiveRequest
-	(*ReplyDestination)(nil),                     // 231: supertag.runtime.v2.ReplyDestination
-	(*AcceptEventRequest)(nil),                   // 232: supertag.runtime.v2.AcceptEventRequest
-	(*AcceptSlackEventRequest)(nil),              // 233: supertag.runtime.v2.AcceptSlackEventRequest
-	(*AcceptSlackEventResponse)(nil),             // 234: supertag.runtime.v2.AcceptSlackEventResponse
-	(*AcceptGithubEventRequest)(nil),             // 235: supertag.runtime.v2.AcceptGithubEventRequest
-	(*AcceptGithubEventResponse)(nil),            // 236: supertag.runtime.v2.AcceptGithubEventResponse
-	(*AcceptLinearEventRequest)(nil),             // 237: supertag.runtime.v2.AcceptLinearEventRequest
-	(*AcceptLinearEventResponse)(nil),            // 238: supertag.runtime.v2.AcceptLinearEventResponse
-	(*AcceptLarkEventRequest)(nil),               // 239: supertag.runtime.v2.AcceptLarkEventRequest
-	(*AcceptLarkEventResponse)(nil),              // 240: supertag.runtime.v2.AcceptLarkEventResponse
-	(*AcceptMicrosoftTeamsActivityRequest)(nil),  // 241: supertag.runtime.v2.AcceptMicrosoftTeamsActivityRequest
-	(*AcceptMicrosoftTeamsActivityResponse)(nil), // 242: supertag.runtime.v2.AcceptMicrosoftTeamsActivityResponse
-	(*GetMicrosoftTeamsReplyRouteRequest)(nil),   // 243: supertag.runtime.v2.GetMicrosoftTeamsReplyRouteRequest
-	(*MicrosoftTeamsReplyRoute)(nil),             // 244: supertag.runtime.v2.MicrosoftTeamsReplyRoute
-	(*Reply)(nil),                                // 245: supertag.runtime.v2.Reply
-	(*ClaimReplyRequest)(nil),                    // 246: supertag.runtime.v2.ClaimReplyRequest
-	(*ClaimReplyResponse)(nil),                   // 247: supertag.runtime.v2.ClaimReplyResponse
-	(*SettleReplyRequest)(nil),                   // 248: supertag.runtime.v2.SettleReplyRequest
-	(*RenewReplyRequest)(nil),                    // 249: supertag.runtime.v2.RenewReplyRequest
-	(*ReplyLease)(nil),                           // 250: supertag.runtime.v2.ReplyLease
-	(*GetReplyDeliveryRequest)(nil),              // 251: supertag.runtime.v2.GetReplyDeliveryRequest
-	(*ReplyDeliveryAudit)(nil),                   // 252: supertag.runtime.v2.ReplyDeliveryAudit
-	(*ReplyDelivery)(nil),                        // 253: supertag.runtime.v2.ReplyDelivery
-	(*ListReplyDeliveriesRequest)(nil),           // 254: supertag.runtime.v2.ListReplyDeliveriesRequest
-	(*ListReplyDeliveriesResponse)(nil),          // 255: supertag.runtime.v2.ListReplyDeliveriesResponse
-	(*ResolveReplyRequest)(nil),                  // 256: supertag.runtime.v2.ResolveReplyRequest
-	(*PolicyExecutionSettings)(nil),              // 257: supertag.runtime.v2.PolicyExecutionSettings
-	(*TaskPolicySnapshot)(nil),                   // 258: supertag.runtime.v2.TaskPolicySnapshot
+	(*GithubWorkspaceBundle)(nil),                // 193: supertag.runtime.v2.GithubWorkspaceBundle
+	(*GithubWorkspaceDownload)(nil),              // 194: supertag.runtime.v2.GithubWorkspaceDownload
+	(*BlobReference)(nil),                        // 195: supertag.runtime.v2.BlobReference
+	(*WorkspaceDeliveryReference)(nil),           // 196: supertag.runtime.v2.WorkspaceDeliveryReference
+	(*WorkspaceDeliveryRequest)(nil),             // 197: supertag.runtime.v2.WorkspaceDeliveryRequest
+	(*WorkspaceContinuation)(nil),                // 198: supertag.runtime.v2.WorkspaceContinuation
+	(*WorkspaceUpload)(nil),                      // 199: supertag.runtime.v2.WorkspaceUpload
+	(*WorkspaceDownload)(nil),                    // 200: supertag.runtime.v2.WorkspaceDownload
+	(*GetWorkspaceArtifactRequest)(nil),          // 201: supertag.runtime.v2.GetWorkspaceArtifactRequest
+	(*GetReviewArtifactRequest)(nil),             // 202: supertag.runtime.v2.GetReviewArtifactRequest
+	(*HarnessPublishRequest)(nil),                // 203: supertag.runtime.v2.HarnessPublishRequest
+	(*HarnessCompleteRequest)(nil),               // 204: supertag.runtime.v2.HarnessCompleteRequest
+	(*HarnessCompleteResponse)(nil),              // 205: supertag.runtime.v2.HarnessCompleteResponse
+	(*CreateObjectiveRequest)(nil),               // 206: supertag.runtime.v2.CreateObjectiveRequest
+	(*RuntimeActions)(nil),                       // 207: supertag.runtime.v2.RuntimeActions
+	(*Objective)(nil),                            // 208: supertag.runtime.v2.Objective
+	(*Team)(nil),                                 // 209: supertag.runtime.v2.Team
+	(*CreateTeamRequest)(nil),                    // 210: supertag.runtime.v2.CreateTeamRequest
+	(*GetTeamRequest)(nil),                       // 211: supertag.runtime.v2.GetTeamRequest
+	(*ListTeamsRequest)(nil),                     // 212: supertag.runtime.v2.ListTeamsRequest
+	(*ListTeamsResponse)(nil),                    // 213: supertag.runtime.v2.ListTeamsResponse
+	(*TeamMembers)(nil),                          // 214: supertag.runtime.v2.TeamMembers
+	(*UpdateTeamRequest)(nil),                    // 215: supertag.runtime.v2.UpdateTeamRequest
+	(*DeleteTeamRequest)(nil),                    // 216: supertag.runtime.v2.DeleteTeamRequest
+	(*WorkstreamPost)(nil),                       // 217: supertag.runtime.v2.WorkstreamPost
+	(*ListWorkstreamPostsRequest)(nil),           // 218: supertag.runtime.v2.ListWorkstreamPostsRequest
+	(*ListWorkstreamPostsResponse)(nil),          // 219: supertag.runtime.v2.ListWorkstreamPostsResponse
+	(*ReadAttemptWorkstreamRequest)(nil),         // 220: supertag.runtime.v2.ReadAttemptWorkstreamRequest
+	(*ReadAttemptWorkstreamResponse)(nil),        // 221: supertag.runtime.v2.ReadAttemptWorkstreamResponse
+	(*PostAttemptWorkstreamRequest)(nil),         // 222: supertag.runtime.v2.PostAttemptWorkstreamRequest
+	(*PostAttemptWorkstreamResponse)(nil),        // 223: supertag.runtime.v2.PostAttemptWorkstreamResponse
+	(*GetObjectiveRequest)(nil),                  // 224: supertag.runtime.v2.GetObjectiveRequest
+	(*ListObjectivesRequest)(nil),                // 225: supertag.runtime.v2.ListObjectivesRequest
+	(*ListObjectivesResponse)(nil),               // 226: supertag.runtime.v2.ListObjectivesResponse
+	(*ListObjectiveCommitReviewsRequest)(nil),    // 227: supertag.runtime.v2.ListObjectiveCommitReviewsRequest
+	(*ListObjectiveCommitReviewsResponse)(nil),   // 228: supertag.runtime.v2.ListObjectiveCommitReviewsResponse
+	(*SetObjectiveLimitsRequest)(nil),            // 229: supertag.runtime.v2.SetObjectiveLimitsRequest
+	(*SetObjectiveRuntimeActionsRequest)(nil),    // 230: supertag.runtime.v2.SetObjectiveRuntimeActionsRequest
+	(*ObjectiveActionRequest)(nil),               // 231: supertag.runtime.v2.ObjectiveActionRequest
+	(*ReviewObjectiveRequest)(nil),               // 232: supertag.runtime.v2.ReviewObjectiveRequest
+	(*ReplyDestination)(nil),                     // 233: supertag.runtime.v2.ReplyDestination
+	(*AcceptEventRequest)(nil),                   // 234: supertag.runtime.v2.AcceptEventRequest
+	(*AcceptSlackEventRequest)(nil),              // 235: supertag.runtime.v2.AcceptSlackEventRequest
+	(*AcceptSlackEventResponse)(nil),             // 236: supertag.runtime.v2.AcceptSlackEventResponse
+	(*AcceptGithubEventRequest)(nil),             // 237: supertag.runtime.v2.AcceptGithubEventRequest
+	(*AcceptGithubEventResponse)(nil),            // 238: supertag.runtime.v2.AcceptGithubEventResponse
+	(*AcceptLinearEventRequest)(nil),             // 239: supertag.runtime.v2.AcceptLinearEventRequest
+	(*AcceptLinearEventResponse)(nil),            // 240: supertag.runtime.v2.AcceptLinearEventResponse
+	(*AcceptLarkEventRequest)(nil),               // 241: supertag.runtime.v2.AcceptLarkEventRequest
+	(*AcceptLarkEventResponse)(nil),              // 242: supertag.runtime.v2.AcceptLarkEventResponse
+	(*AcceptMicrosoftTeamsActivityRequest)(nil),  // 243: supertag.runtime.v2.AcceptMicrosoftTeamsActivityRequest
+	(*AcceptMicrosoftTeamsActivityResponse)(nil), // 244: supertag.runtime.v2.AcceptMicrosoftTeamsActivityResponse
+	(*GetMicrosoftTeamsReplyRouteRequest)(nil),   // 245: supertag.runtime.v2.GetMicrosoftTeamsReplyRouteRequest
+	(*MicrosoftTeamsReplyRoute)(nil),             // 246: supertag.runtime.v2.MicrosoftTeamsReplyRoute
+	(*Reply)(nil),                                // 247: supertag.runtime.v2.Reply
+	(*ClaimReplyRequest)(nil),                    // 248: supertag.runtime.v2.ClaimReplyRequest
+	(*ClaimReplyResponse)(nil),                   // 249: supertag.runtime.v2.ClaimReplyResponse
+	(*SettleReplyRequest)(nil),                   // 250: supertag.runtime.v2.SettleReplyRequest
+	(*RenewReplyRequest)(nil),                    // 251: supertag.runtime.v2.RenewReplyRequest
+	(*ReplyLease)(nil),                           // 252: supertag.runtime.v2.ReplyLease
+	(*GetReplyDeliveryRequest)(nil),              // 253: supertag.runtime.v2.GetReplyDeliveryRequest
+	(*ReplyDeliveryAudit)(nil),                   // 254: supertag.runtime.v2.ReplyDeliveryAudit
+	(*ReplyDelivery)(nil),                        // 255: supertag.runtime.v2.ReplyDelivery
+	(*ListReplyDeliveriesRequest)(nil),           // 256: supertag.runtime.v2.ListReplyDeliveriesRequest
+	(*ListReplyDeliveriesResponse)(nil),          // 257: supertag.runtime.v2.ListReplyDeliveriesResponse
+	(*ResolveReplyRequest)(nil),                  // 258: supertag.runtime.v2.ResolveReplyRequest
+	(*PolicyExecutionSettings)(nil),              // 259: supertag.runtime.v2.PolicyExecutionSettings
+	(*TaskPolicySnapshot)(nil),                   // 260: supertag.runtime.v2.TaskPolicySnapshot
+	(*GithubWorkspace)(nil),                      // 261: supertag.runtime.v2.GithubWorkspace
 }
 var file_supertag_runtime_v2_runtime_proto_depIdxs = []int32{
 	0,   // 0: supertag.runtime.v2.WatchRequest.kinds:type_name -> supertag.runtime.v2.WatchKind
@@ -18887,7 +19052,7 @@ var file_supertag_runtime_v2_runtime_proto_depIdxs = []int32{
 	159, // 19: supertag.runtime.v2.AskQuestionRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
 	15,  // 20: supertag.runtime.v2.WorkSession.latest_task_state:type_name -> supertag.runtime.v2.TaskState
 	15,  // 21: supertag.runtime.v2.WorkSession.report_task_state:type_name -> supertag.runtime.v2.TaskState
-	194, // 22: supertag.runtime.v2.WorkSession.workspace_delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	196, // 22: supertag.runtime.v2.WorkSession.workspace_delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
 	53,  // 23: supertag.runtime.v2.WorkSession.question:type_name -> supertag.runtime.v2.WorkSessionQuestion
 	159, // 24: supertag.runtime.v2.StartWorkSessionRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
 	159, // 25: supertag.runtime.v2.ContinueWorkSessionRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
@@ -18926,12 +19091,12 @@ var file_supertag_runtime_v2_runtime_proto_depIdxs = []int32{
 	88,  // 58: supertag.runtime.v2.HarnessWorkspaceRequest.command:type_name -> supertag.runtime.v2.WorkspaceCommand
 	11,  // 59: supertag.runtime.v2.WorkspaceGrep.mode:type_name -> supertag.runtime.v2.WorkspaceGrepMode
 	91,  // 60: supertag.runtime.v2.RemoteWorkspaceAllocateRequest.owner:type_name -> supertag.runtime.v2.RemoteWorkspaceOwner
-	193, // 61: supertag.runtime.v2.RemoteWorkspaceStageHeader.bundle:type_name -> supertag.runtime.v2.BlobReference
+	195, // 61: supertag.runtime.v2.RemoteWorkspaceStageHeader.bundle:type_name -> supertag.runtime.v2.BlobReference
 	94,  // 62: supertag.runtime.v2.RemoteWorkspaceStageChunk.header:type_name -> supertag.runtime.v2.RemoteWorkspaceStageHeader
-	193, // 63: supertag.runtime.v2.RemoteWorkspaceCaptureChunk.tree:type_name -> supertag.runtime.v2.BlobReference
+	195, // 63: supertag.runtime.v2.RemoteWorkspaceCaptureChunk.tree:type_name -> supertag.runtime.v2.BlobReference
 	91,  // 64: supertag.runtime.v2.RemoteWorkspaceStopRequest.owner:type_name -> supertag.runtime.v2.RemoteWorkspaceOwner
 	61,  // 65: supertag.runtime.v2.HarnessSendTagMessageRequest.review:type_name -> supertag.runtime.v2.CommitReviewSubmission
-	194, // 66: supertag.runtime.v2.HarnessReviewPatch.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	196, // 66: supertag.runtime.v2.HarnessReviewPatch.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
 	13,  // 67: supertag.runtime.v2.ResolveInputRequest.decision:type_name -> supertag.runtime.v2.LiveInputDecision
 	12,  // 68: supertag.runtime.v2.LiveInput.state:type_name -> supertag.runtime.v2.LiveInputState
 	159, // 69: supertag.runtime.v2.TakeInputRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
@@ -18943,11 +19108,11 @@ var file_supertag_runtime_v2_runtime_proto_depIdxs = []int32{
 	192, // 75: supertag.runtime.v2.PutTagRequest.workspace:type_name -> supertag.runtime.v2.WorkspaceSpec
 	16,  // 76: supertag.runtime.v2.PutTagRequest.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
 	38,  // 77: supertag.runtime.v2.PutTagRequest.approval_rules:type_name -> supertag.runtime.v2.ApprovalRule
-	257, // 78: supertag.runtime.v2.PutTagRequest.execution:type_name -> supertag.runtime.v2.PolicyExecutionSettings
+	259, // 78: supertag.runtime.v2.PutTagRequest.execution:type_name -> supertag.runtime.v2.PolicyExecutionSettings
 	192, // 79: supertag.runtime.v2.Tag.workspace:type_name -> supertag.runtime.v2.WorkspaceSpec
 	16,  // 80: supertag.runtime.v2.Tag.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
 	38,  // 81: supertag.runtime.v2.Tag.approval_rules:type_name -> supertag.runtime.v2.ApprovalRule
-	257, // 82: supertag.runtime.v2.Tag.execution:type_name -> supertag.runtime.v2.PolicyExecutionSettings
+	259, // 82: supertag.runtime.v2.Tag.execution:type_name -> supertag.runtime.v2.PolicyExecutionSettings
 	129, // 83: supertag.runtime.v2.ListTagsResponse.tags:type_name -> supertag.runtime.v2.Tag
 	129, // 84: supertag.runtime.v2.RetireTagResponse.tag:type_name -> supertag.runtime.v2.Tag
 	147, // 85: supertag.runtime.v2.Conversation.latest_task:type_name -> supertag.runtime.v2.Task
@@ -18960,10 +19125,10 @@ var file_supertag_runtime_v2_runtime_proto_depIdxs = []int32{
 	145, // 92: supertag.runtime.v2.ExecutionLimits.max_reported_cost:type_name -> supertag.runtime.v2.ReportedCostLimit
 	15,  // 93: supertag.runtime.v2.Task.state:type_name -> supertag.runtime.v2.TaskState
 	192, // 94: supertag.runtime.v2.Task.workspace:type_name -> supertag.runtime.v2.WorkspaceSpec
-	194, // 95: supertag.runtime.v2.Task.workspace_delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	196, // 95: supertag.runtime.v2.Task.workspace_delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
 	16,  // 96: supertag.runtime.v2.Task.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
 	38,  // 97: supertag.runtime.v2.Task.approval_rules:type_name -> supertag.runtime.v2.ApprovalRule
-	258, // 98: supertag.runtime.v2.Task.policy_snapshot:type_name -> supertag.runtime.v2.TaskPolicySnapshot
+	260, // 98: supertag.runtime.v2.Task.policy_snapshot:type_name -> supertag.runtime.v2.TaskPolicySnapshot
 	146, // 99: supertag.runtime.v2.Task.execution_limits:type_name -> supertag.runtime.v2.ExecutionLimits
 	148, // 100: supertag.runtime.v2.Task.execution_selection:type_name -> supertag.runtime.v2.ExecutionSelection
 	150, // 101: supertag.runtime.v2.Task.attempt_execution:type_name -> supertag.runtime.v2.AttemptExecutionSelection
@@ -18985,7 +19150,7 @@ var file_supertag_runtime_v2_runtime_proto_depIdxs = []int32{
 	169, // 117: supertag.runtime.v2.ListNativeUsageResponse.reports:type_name -> supertag.runtime.v2.HarnessUsageRequest
 	166, // 118: supertag.runtime.v2.HarnessUsageRequest.native_usage:type_name -> supertag.runtime.v2.NativeTokenUsage
 	22,  // 119: supertag.runtime.v2.FinishTaskRequest.objective_signal:type_name -> supertag.runtime.v2.ObjectiveSignal
-	194, // 120: supertag.runtime.v2.FinishTaskRequest.workspace_delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	196, // 120: supertag.runtime.v2.FinishTaskRequest.workspace_delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
 	146, // 121: supertag.runtime.v2.AppliedExecutionLimits.limits:type_name -> supertag.runtime.v2.ExecutionLimits
 	19,  // 122: supertag.runtime.v2.AppliedExecutionLimits.native_agents:type_name -> supertag.runtime.v2.ExecutionLimitEnforcement
 	19,  // 123: supertag.runtime.v2.AppliedExecutionLimits.reported_tokens:type_name -> supertag.runtime.v2.ExecutionLimitEnforcement
@@ -19006,311 +19171,319 @@ var file_supertag_runtime_v2_runtime_proto_depIdxs = []int32{
 	187, // 138: supertag.runtime.v2.CommitCheckpointRequest.reference:type_name -> supertag.runtime.v2.CheckpointReference
 	189, // 139: supertag.runtime.v2.CheckpointUpload.begin:type_name -> supertag.runtime.v2.CommitCheckpointRequest
 	187, // 140: supertag.runtime.v2.CheckpointDownload.reference:type_name -> supertag.runtime.v2.CheckpointReference
-	193, // 141: supertag.runtime.v2.WorkspaceDeliveryReference.patch:type_name -> supertag.runtime.v2.BlobReference
-	193, // 142: supertag.runtime.v2.WorkspaceDeliveryReference.bundle:type_name -> supertag.runtime.v2.BlobReference
-	159, // 143: supertag.runtime.v2.WorkspaceDeliveryRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	194, // 144: supertag.runtime.v2.WorkspaceDeliveryRequest.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
-	194, // 145: supertag.runtime.v2.WorkspaceContinuation.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
-	195, // 146: supertag.runtime.v2.WorkspaceUpload.begin:type_name -> supertag.runtime.v2.WorkspaceDeliveryRequest
-	194, // 147: supertag.runtime.v2.WorkspaceDownload.reference:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
-	20,  // 148: supertag.runtime.v2.GetWorkspaceArtifactRequest.kind:type_name -> supertag.runtime.v2.WorkspaceArtifactKind
-	159, // 149: supertag.runtime.v2.GetReviewArtifactRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	22,  // 150: supertag.runtime.v2.HarnessCompleteRequest.objective_signal:type_name -> supertag.runtime.v2.ObjectiveSignal
-	186, // 151: supertag.runtime.v2.HarnessCompleteRequest.checkpoint:type_name -> supertag.runtime.v2.SessionCheckpoint
-	205, // 152: supertag.runtime.v2.CreateObjectiveRequest.runtime_actions:type_name -> supertag.runtime.v2.RuntimeActions
-	21,  // 153: supertag.runtime.v2.Objective.status:type_name -> supertag.runtime.v2.ObjectiveStatus
-	205, // 154: supertag.runtime.v2.Objective.runtime_actions:type_name -> supertag.runtime.v2.RuntimeActions
-	207, // 155: supertag.runtime.v2.ListTeamsResponse.teams:type_name -> supertag.runtime.v2.Team
-	212, // 156: supertag.runtime.v2.UpdateTeamRequest.members:type_name -> supertag.runtime.v2.TeamMembers
-	215, // 157: supertag.runtime.v2.ListWorkstreamPostsResponse.posts:type_name -> supertag.runtime.v2.WorkstreamPost
-	159, // 158: supertag.runtime.v2.ReadAttemptWorkstreamRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	207, // 159: supertag.runtime.v2.ReadAttemptWorkstreamResponse.team:type_name -> supertag.runtime.v2.Team
-	217, // 160: supertag.runtime.v2.ReadAttemptWorkstreamResponse.page:type_name -> supertag.runtime.v2.ListWorkstreamPostsResponse
-	159, // 161: supertag.runtime.v2.PostAttemptWorkstreamRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	215, // 162: supertag.runtime.v2.PostAttemptWorkstreamResponse.post:type_name -> supertag.runtime.v2.WorkstreamPost
-	39,  // 163: supertag.runtime.v2.PostAttemptWorkstreamResponse.approval:type_name -> supertag.runtime.v2.Approval
-	206, // 164: supertag.runtime.v2.ListObjectivesResponse.objectives:type_name -> supertag.runtime.v2.Objective
-	64,  // 165: supertag.runtime.v2.ListObjectiveCommitReviewsResponse.reviews:type_name -> supertag.runtime.v2.CommitReview
-	205, // 166: supertag.runtime.v2.SetObjectiveRuntimeActionsRequest.runtime_actions:type_name -> supertag.runtime.v2.RuntimeActions
-	231, // 167: supertag.runtime.v2.AcceptEventRequest.destination:type_name -> supertag.runtime.v2.ReplyDestination
-	148, // 168: supertag.runtime.v2.AcceptEventRequest.requested_execution:type_name -> supertag.runtime.v2.ExecutionSelection
-	147, // 169: supertag.runtime.v2.AcceptSlackEventResponse.task:type_name -> supertag.runtime.v2.Task
-	23,  // 170: supertag.runtime.v2.AcceptGithubEventRequest.kind:type_name -> supertag.runtime.v2.GithubEventKind
-	24,  // 171: supertag.runtime.v2.AcceptGithubEventRequest.action:type_name -> supertag.runtime.v2.GithubEventAction
-	147, // 172: supertag.runtime.v2.AcceptGithubEventResponse.task:type_name -> supertag.runtime.v2.Task
-	25,  // 173: supertag.runtime.v2.AcceptLinearEventRequest.kind:type_name -> supertag.runtime.v2.LinearEventKind
-	26,  // 174: supertag.runtime.v2.AcceptLinearEventRequest.action:type_name -> supertag.runtime.v2.LinearEventAction
-	147, // 175: supertag.runtime.v2.AcceptLinearEventResponse.task:type_name -> supertag.runtime.v2.Task
-	27,  // 176: supertag.runtime.v2.AcceptLarkEventRequest.domain:type_name -> supertag.runtime.v2.LarkDomain
-	147, // 177: supertag.runtime.v2.AcceptLarkEventResponse.task:type_name -> supertag.runtime.v2.Task
-	147, // 178: supertag.runtime.v2.AcceptMicrosoftTeamsActivityResponse.task:type_name -> supertag.runtime.v2.Task
-	231, // 179: supertag.runtime.v2.Reply.destination:type_name -> supertag.runtime.v2.ReplyDestination
-	28,  // 180: supertag.runtime.v2.Reply.state:type_name -> supertag.runtime.v2.ReplyState
-	245, // 181: supertag.runtime.v2.ClaimReplyResponse.reply:type_name -> supertag.runtime.v2.Reply
-	28,  // 182: supertag.runtime.v2.SettleReplyRequest.state:type_name -> supertag.runtime.v2.ReplyState
-	28,  // 183: supertag.runtime.v2.ReplyDeliveryAudit.state:type_name -> supertag.runtime.v2.ReplyState
-	245, // 184: supertag.runtime.v2.ReplyDelivery.reply:type_name -> supertag.runtime.v2.Reply
-	252, // 185: supertag.runtime.v2.ReplyDelivery.audit:type_name -> supertag.runtime.v2.ReplyDeliveryAudit
-	28,  // 186: supertag.runtime.v2.ListReplyDeliveriesRequest.state:type_name -> supertag.runtime.v2.ReplyState
-	253, // 187: supertag.runtime.v2.ListReplyDeliveriesResponse.deliveries:type_name -> supertag.runtime.v2.ReplyDelivery
-	28,  // 188: supertag.runtime.v2.ResolveReplyRequest.state:type_name -> supertag.runtime.v2.ReplyState
-	120, // 189: supertag.runtime.v2.Operator.CreateAuthKey:input_type -> supertag.runtime.v2.CreateAuthKeyRequest
-	122, // 190: supertag.runtime.v2.Operator.RevokeHost:input_type -> supertag.runtime.v2.RevokeHostRequest
-	77,  // 191: supertag.runtime.v2.Operator.ListHosts:input_type -> supertag.runtime.v2.ListHostsRequest
-	79,  // 192: supertag.runtime.v2.Operator.GetHost:input_type -> supertag.runtime.v2.GetHostRequest
-	80,  // 193: supertag.runtime.v2.Operator.SetHostDraining:input_type -> supertag.runtime.v2.SetHostDrainingRequest
-	128, // 194: supertag.runtime.v2.Operator.PutTag:input_type -> supertag.runtime.v2.PutTagRequest
-	130, // 195: supertag.runtime.v2.Operator.ListTags:input_type -> supertag.runtime.v2.ListTagsRequest
-	144, // 196: supertag.runtime.v2.Operator.SubmitTask:input_type -> supertag.runtime.v2.SubmitTaskRequest
-	151, // 197: supertag.runtime.v2.Operator.GetTask:input_type -> supertag.runtime.v2.GetTaskRequest
-	167, // 198: supertag.runtime.v2.Operator.ListNativeUsage:input_type -> supertag.runtime.v2.ListNativeUsageRequest
-	152, // 199: supertag.runtime.v2.Operator.ListEvents:input_type -> supertag.runtime.v2.ListEventsRequest
-	154, // 200: supertag.runtime.v2.Operator.CancelTask:input_type -> supertag.runtime.v2.CancelTaskRequest
-	161, // 201: supertag.runtime.v2.Operator.ResolveAttempt:input_type -> supertag.runtime.v2.ResolveAttemptRequest
-	132, // 202: supertag.runtime.v2.Operator.GetTag:input_type -> supertag.runtime.v2.GetTagRequest
-	133, // 203: supertag.runtime.v2.Operator.RetireTag:input_type -> supertag.runtime.v2.RetireTagRequest
-	251, // 204: supertag.runtime.v2.Operator.GetReplyDelivery:input_type -> supertag.runtime.v2.GetReplyDeliveryRequest
-	254, // 205: supertag.runtime.v2.Operator.ListReplyDeliveries:input_type -> supertag.runtime.v2.ListReplyDeliveriesRequest
-	256, // 206: supertag.runtime.v2.Operator.ResolveReply:input_type -> supertag.runtime.v2.ResolveReplyRequest
-	137, // 207: supertag.runtime.v2.Conversations.ListConversations:input_type -> supertag.runtime.v2.ListConversationsRequest
-	139, // 208: supertag.runtime.v2.Conversations.ListMessages:input_type -> supertag.runtime.v2.ListMessagesRequest
-	141, // 209: supertag.runtime.v2.Conversations.SendMessage:input_type -> supertag.runtime.v2.SendMessageRequest
-	142, // 210: supertag.runtime.v2.Conversations.GetMessage:input_type -> supertag.runtime.v2.GetMessageRequest
-	143, // 211: supertag.runtime.v2.Conversations.ListMessageEvents:input_type -> supertag.runtime.v2.ListMessageEventsRequest
-	29,  // 212: supertag.runtime.v2.OperatorEvents.Watch:input_type -> supertag.runtime.v2.WatchRequest
-	204, // 213: supertag.runtime.v2.Objectives.CreateObjective:input_type -> supertag.runtime.v2.CreateObjectiveRequest
-	222, // 214: supertag.runtime.v2.Objectives.GetObjective:input_type -> supertag.runtime.v2.GetObjectiveRequest
-	223, // 215: supertag.runtime.v2.Objectives.ListObjectives:input_type -> supertag.runtime.v2.ListObjectivesRequest
-	225, // 216: supertag.runtime.v2.Objectives.ListCommitReviews:input_type -> supertag.runtime.v2.ListObjectiveCommitReviewsRequest
-	227, // 217: supertag.runtime.v2.Objectives.SetLimits:input_type -> supertag.runtime.v2.SetObjectiveLimitsRequest
-	228, // 218: supertag.runtime.v2.Objectives.SetRuntimeActions:input_type -> supertag.runtime.v2.SetObjectiveRuntimeActionsRequest
-	229, // 219: supertag.runtime.v2.Objectives.PauseObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
-	229, // 220: supertag.runtime.v2.Objectives.ResumeObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
-	229, // 221: supertag.runtime.v2.Objectives.CancelObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
-	230, // 222: supertag.runtime.v2.Objectives.ReviewObjective:input_type -> supertag.runtime.v2.ReviewObjectiveRequest
-	34,  // 223: supertag.runtime.v2.Inbox.ListItems:input_type -> supertag.runtime.v2.ListInboxItemsRequest
-	47,  // 224: supertag.runtime.v2.Inbox.GetQuestion:input_type -> supertag.runtime.v2.GetQuestionRequest
-	48,  // 225: supertag.runtime.v2.Inbox.AnswerQuestion:input_type -> supertag.runtime.v2.AnswerQuestionRequest
-	40,  // 226: supertag.runtime.v2.Inbox.GetApproval:input_type -> supertag.runtime.v2.GetApprovalRequest
-	41,  // 227: supertag.runtime.v2.Inbox.ListApprovals:input_type -> supertag.runtime.v2.ListApprovalsRequest
-	43,  // 228: supertag.runtime.v2.Inbox.DecideApproval:input_type -> supertag.runtime.v2.DecideApprovalRequest
-	55,  // 229: supertag.runtime.v2.WorkSessions.Get:input_type -> supertag.runtime.v2.GetWorkSessionRequest
-	58,  // 230: supertag.runtime.v2.WorkSessions.List:input_type -> supertag.runtime.v2.ListWorkSessionsRequest
-	54,  // 231: supertag.runtime.v2.AttemptWorkSessions.Start:input_type -> supertag.runtime.v2.StartWorkSessionRequest
-	56,  // 232: supertag.runtime.v2.AttemptWorkSessions.Continue:input_type -> supertag.runtime.v2.ContinueWorkSessionRequest
-	57,  // 233: supertag.runtime.v2.AttemptWorkSessions.Ask:input_type -> supertag.runtime.v2.AskWorkSessionQuestionRequest
-	208, // 234: supertag.runtime.v2.Teams.CreateTeam:input_type -> supertag.runtime.v2.CreateTeamRequest
-	209, // 235: supertag.runtime.v2.Teams.GetTeam:input_type -> supertag.runtime.v2.GetTeamRequest
-	210, // 236: supertag.runtime.v2.Teams.ListTeams:input_type -> supertag.runtime.v2.ListTeamsRequest
-	213, // 237: supertag.runtime.v2.Teams.UpdateTeam:input_type -> supertag.runtime.v2.UpdateTeamRequest
-	214, // 238: supertag.runtime.v2.Teams.DeleteTeam:input_type -> supertag.runtime.v2.DeleteTeamRequest
-	216, // 239: supertag.runtime.v2.Teams.ListWorkstreamPosts:input_type -> supertag.runtime.v2.ListWorkstreamPostsRequest
-	218, // 240: supertag.runtime.v2.AttemptWorkstreams.ReadAttemptWorkstream:input_type -> supertag.runtime.v2.ReadAttemptWorkstreamRequest
-	220, // 241: supertag.runtime.v2.AttemptWorkstreams.PostAttemptWorkstream:input_type -> supertag.runtime.v2.PostAttemptWorkstreamRequest
-	72,  // 242: supertag.runtime.v2.Mailbox.ListMessages:input_type -> supertag.runtime.v2.ListMailboxMessagesRequest
-	67,  // 243: supertag.runtime.v2.Mailbox.ChangeGrant:input_type -> supertag.runtime.v2.ChangeMailboxGrantRequest
-	69,  // 244: supertag.runtime.v2.Mailbox.ListGrants:input_type -> supertag.runtime.v2.ListMailboxGrantsRequest
-	74,  // 245: supertag.runtime.v2.AttemptMailbox.ReadMailbox:input_type -> supertag.runtime.v2.ReadMailboxRequest
-	65,  // 246: supertag.runtime.v2.AttemptMailbox.SendMessage:input_type -> supertag.runtime.v2.SendAttemptTagMessageRequest
-	123, // 247: supertag.runtime.v2.WorkerHost.RegisterHost:input_type -> supertag.runtime.v2.RegisterHostRequest
-	75,  // 248: supertag.runtime.v2.WorkerHost.ReportHost:input_type -> supertag.runtime.v2.ReportHostRequest
-	155, // 249: supertag.runtime.v2.WorkerHost.ClaimTask:input_type -> supertag.runtime.v2.ClaimTaskRequest
-	158, // 250: supertag.runtime.v2.WorkerHost.StartTask:input_type -> supertag.runtime.v2.StartTaskRequest
-	159, // 251: supertag.runtime.v2.WorkerHost.InspectAttempt:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	159, // 252: supertag.runtime.v2.WorkerHost.GetAttemptCapabilities:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	159, // 253: supertag.runtime.v2.WorkerHost.GetAttemptHistory:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	159, // 254: supertag.runtime.v2.WorkerHost.GetContextPins:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	185, // 255: supertag.runtime.v2.WorkerHost.CommitContextResolution:input_type -> supertag.runtime.v2.CommitContextResolutionRequest
-	159, // 256: supertag.runtime.v2.WorkerHost.RenewAttempt:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	159, // 257: supertag.runtime.v2.WorkerHost.GetAttemptResolution:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	164, // 258: supertag.runtime.v2.WorkerHost.ReportAttemptUsage:input_type -> supertag.runtime.v2.ReportAttemptUsageRequest
-	170, // 259: supertag.runtime.v2.WorkerHost.AppendEvent:input_type -> supertag.runtime.v2.AppendEventRequest
-	50,  // 260: supertag.runtime.v2.WorkerHost.AskQuestion:input_type -> supertag.runtime.v2.AskQuestionRequest
-	172, // 261: supertag.runtime.v2.WorkerHost.FinishTask:input_type -> supertag.runtime.v2.FinishTaskRequest
-	111, // 262: supertag.runtime.v2.LiveInputs.QueueInput:input_type -> supertag.runtime.v2.QueueInputRequest
-	112, // 263: supertag.runtime.v2.LiveInputs.GetInput:input_type -> supertag.runtime.v2.GetInputRequest
-	113, // 264: supertag.runtime.v2.LiveInputs.ResolveInput:input_type -> supertag.runtime.v2.ResolveInputRequest
-	115, // 265: supertag.runtime.v2.AttemptInputs.TakeInput:input_type -> supertag.runtime.v2.TakeInputRequest
-	119, // 266: supertag.runtime.v2.AttemptInputs.SettleInput:input_type -> supertag.runtime.v2.SettleInputRequest
-	125, // 267: supertag.runtime.v2.HostEnrollment.EnrollHost:input_type -> supertag.runtime.v2.EnrollHostRequest
-	126, // 268: supertag.runtime.v2.HostDirectory.Enroll:input_type -> supertag.runtime.v2.PrivateEnrollHostRequest
-	127, // 269: supertag.runtime.v2.HostDirectory.Authenticate:input_type -> supertag.runtime.v2.AuthenticateHostRequest
-	232, // 270: supertag.runtime.v2.Connector.AcceptEvent:input_type -> supertag.runtime.v2.AcceptEventRequest
-	233, // 271: supertag.runtime.v2.Connector.AcceptSlackEvent:input_type -> supertag.runtime.v2.AcceptSlackEventRequest
-	235, // 272: supertag.runtime.v2.Connector.AcceptGithubEvent:input_type -> supertag.runtime.v2.AcceptGithubEventRequest
-	237, // 273: supertag.runtime.v2.Connector.AcceptLinearEvent:input_type -> supertag.runtime.v2.AcceptLinearEventRequest
-	239, // 274: supertag.runtime.v2.Connector.AcceptLarkEvent:input_type -> supertag.runtime.v2.AcceptLarkEventRequest
-	241, // 275: supertag.runtime.v2.Connector.AcceptMicrosoftTeamsActivity:input_type -> supertag.runtime.v2.AcceptMicrosoftTeamsActivityRequest
-	243, // 276: supertag.runtime.v2.Connector.GetMicrosoftTeamsReplyRoute:input_type -> supertag.runtime.v2.GetMicrosoftTeamsReplyRouteRequest
-	246, // 277: supertag.runtime.v2.Connector.ClaimReply:input_type -> supertag.runtime.v2.ClaimReplyRequest
-	249, // 278: supertag.runtime.v2.Connector.RenewReply:input_type -> supertag.runtime.v2.RenewReplyRequest
-	248, // 279: supertag.runtime.v2.Connector.SettleReply:input_type -> supertag.runtime.v2.SettleReplyRequest
-	190, // 280: supertag.runtime.v2.Transfers.UploadCheckpoint:input_type -> supertag.runtime.v2.CheckpointUpload
-	159, // 281: supertag.runtime.v2.Transfers.DownloadCheckpoint:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	197, // 282: supertag.runtime.v2.Transfers.UploadWorkspace:input_type -> supertag.runtime.v2.WorkspaceUpload
-	159, // 283: supertag.runtime.v2.Transfers.DownloadWorkspace:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	199, // 284: supertag.runtime.v2.Transfers.DownloadWorkspaceArtifact:input_type -> supertag.runtime.v2.GetWorkspaceArtifactRequest
-	200, // 285: supertag.runtime.v2.Transfers.DownloadReviewArtifact:input_type -> supertag.runtime.v2.GetReviewArtifactRequest
-	159, // 286: supertag.runtime.v2.CheckpointDirectory.GetCheckpoint:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	189, // 287: supertag.runtime.v2.CheckpointDirectory.ReserveCheckpoint:input_type -> supertag.runtime.v2.CommitCheckpointRequest
-	189, // 288: supertag.runtime.v2.CheckpointDirectory.CommitCheckpoint:input_type -> supertag.runtime.v2.CommitCheckpointRequest
-	159, // 289: supertag.runtime.v2.WorkspaceDirectory.GetContinuation:input_type -> supertag.runtime.v2.InspectAttemptRequest
-	195, // 290: supertag.runtime.v2.WorkspaceDirectory.ReserveDelivery:input_type -> supertag.runtime.v2.WorkspaceDeliveryRequest
-	195, // 291: supertag.runtime.v2.WorkspaceDirectory.CommitDelivery:input_type -> supertag.runtime.v2.WorkspaceDeliveryRequest
-	199, // 292: supertag.runtime.v2.WorkspaceDirectory.GetArtifact:input_type -> supertag.runtime.v2.GetWorkspaceArtifactRequest
-	200, // 293: supertag.runtime.v2.WorkspaceDirectory.GetReviewArtifact:input_type -> supertag.runtime.v2.GetReviewArtifactRequest
-	173, // 294: supertag.runtime.v2.Harness.Attach:input_type -> supertag.runtime.v2.HarnessAttachRequest
-	174, // 295: supertag.runtime.v2.Harness.ConfirmExecutionLimits:input_type -> supertag.runtime.v2.AppliedExecutionLimits
-	117, // 296: supertag.runtime.v2.Harness.TakeLiveInput:input_type -> supertag.runtime.v2.HarnessTakeLiveInputRequest
-	118, // 297: supertag.runtime.v2.Harness.SettleLiveInput:input_type -> supertag.runtime.v2.HarnessSettleLiveInputRequest
-	201, // 298: supertag.runtime.v2.Harness.Publish:input_type -> supertag.runtime.v2.HarnessPublishRequest
-	169, // 299: supertag.runtime.v2.Harness.ReportUsage:input_type -> supertag.runtime.v2.HarnessUsageRequest
-	202, // 300: supertag.runtime.v2.Harness.Complete:input_type -> supertag.runtime.v2.HarnessCompleteRequest
-	81,  // 301: supertag.runtime.v2.HarnessWorkspace.Execute:input_type -> supertag.runtime.v2.HarnessWorkspaceRequest
-	92,  // 302: supertag.runtime.v2.RemoteWorkspaceProvider.Allocate:input_type -> supertag.runtime.v2.RemoteWorkspaceAllocateRequest
-	95,  // 303: supertag.runtime.v2.RemoteWorkspaceProvider.Stage:input_type -> supertag.runtime.v2.RemoteWorkspaceStageChunk
-	97,  // 304: supertag.runtime.v2.RemoteWorkspaceProvider.Capture:input_type -> supertag.runtime.v2.RemoteWorkspaceCaptureRequest
-	99,  // 305: supertag.runtime.v2.RemoteWorkspaceProvider.Stop:input_type -> supertag.runtime.v2.RemoteWorkspaceStopRequest
-	101, // 306: supertag.runtime.v2.HarnessQuestions.AskQuestion:input_type -> supertag.runtime.v2.HarnessAskQuestionRequest
-	102, // 307: supertag.runtime.v2.HarnessWorkstreams.Read:input_type -> supertag.runtime.v2.HarnessReadWorkstreamRequest
-	103, // 308: supertag.runtime.v2.HarnessWorkstreams.Post:input_type -> supertag.runtime.v2.HarnessPostWorkstreamRequest
-	108, // 309: supertag.runtime.v2.HarnessMailbox.Read:input_type -> supertag.runtime.v2.HarnessReadMailboxRequest
-	107, // 310: supertag.runtime.v2.HarnessMailbox.SendMessage:input_type -> supertag.runtime.v2.HarnessSendTagMessageRequest
-	109, // 311: supertag.runtime.v2.HarnessMailbox.ReadReviewPatch:input_type -> supertag.runtime.v2.HarnessReadReviewPatchRequest
-	106, // 312: supertag.runtime.v2.HarnessWorkSessions.Start:input_type -> supertag.runtime.v2.HarnessStartWorkSessionRequest
-	104, // 313: supertag.runtime.v2.HarnessWorkSessions.Continue:input_type -> supertag.runtime.v2.HarnessContinueWorkSessionRequest
-	105, // 314: supertag.runtime.v2.HarnessWorkSessions.Ask:input_type -> supertag.runtime.v2.HarnessAskWorkSessionQuestionRequest
-	121, // 315: supertag.runtime.v2.Operator.CreateAuthKey:output_type -> supertag.runtime.v2.AuthKey
-	124, // 316: supertag.runtime.v2.Operator.RevokeHost:output_type -> supertag.runtime.v2.HostRecord
-	78,  // 317: supertag.runtime.v2.Operator.ListHosts:output_type -> supertag.runtime.v2.ListHostsResponse
-	76,  // 318: supertag.runtime.v2.Operator.GetHost:output_type -> supertag.runtime.v2.WorkerHostStatus
-	76,  // 319: supertag.runtime.v2.Operator.SetHostDraining:output_type -> supertag.runtime.v2.WorkerHostStatus
-	129, // 320: supertag.runtime.v2.Operator.PutTag:output_type -> supertag.runtime.v2.Tag
-	131, // 321: supertag.runtime.v2.Operator.ListTags:output_type -> supertag.runtime.v2.ListTagsResponse
-	147, // 322: supertag.runtime.v2.Operator.SubmitTask:output_type -> supertag.runtime.v2.Task
-	147, // 323: supertag.runtime.v2.Operator.GetTask:output_type -> supertag.runtime.v2.Task
-	168, // 324: supertag.runtime.v2.Operator.ListNativeUsage:output_type -> supertag.runtime.v2.ListNativeUsageResponse
-	153, // 325: supertag.runtime.v2.Operator.ListEvents:output_type -> supertag.runtime.v2.ListEventsResponse
-	147, // 326: supertag.runtime.v2.Operator.CancelTask:output_type -> supertag.runtime.v2.Task
-	162, // 327: supertag.runtime.v2.Operator.ResolveAttempt:output_type -> supertag.runtime.v2.AttemptResolution
-	129, // 328: supertag.runtime.v2.Operator.GetTag:output_type -> supertag.runtime.v2.Tag
-	134, // 329: supertag.runtime.v2.Operator.RetireTag:output_type -> supertag.runtime.v2.RetireTagResponse
-	253, // 330: supertag.runtime.v2.Operator.GetReplyDelivery:output_type -> supertag.runtime.v2.ReplyDelivery
-	255, // 331: supertag.runtime.v2.Operator.ListReplyDeliveries:output_type -> supertag.runtime.v2.ListReplyDeliveriesResponse
-	253, // 332: supertag.runtime.v2.Operator.ResolveReply:output_type -> supertag.runtime.v2.ReplyDelivery
-	138, // 333: supertag.runtime.v2.Conversations.ListConversations:output_type -> supertag.runtime.v2.ListConversationsResponse
-	140, // 334: supertag.runtime.v2.Conversations.ListMessages:output_type -> supertag.runtime.v2.ListMessagesResponse
-	136, // 335: supertag.runtime.v2.Conversations.SendMessage:output_type -> supertag.runtime.v2.ConversationMessage
-	136, // 336: supertag.runtime.v2.Conversations.GetMessage:output_type -> supertag.runtime.v2.ConversationMessage
-	153, // 337: supertag.runtime.v2.Conversations.ListMessageEvents:output_type -> supertag.runtime.v2.ListEventsResponse
-	30,  // 338: supertag.runtime.v2.OperatorEvents.Watch:output_type -> supertag.runtime.v2.WatchEvent
-	206, // 339: supertag.runtime.v2.Objectives.CreateObjective:output_type -> supertag.runtime.v2.Objective
-	206, // 340: supertag.runtime.v2.Objectives.GetObjective:output_type -> supertag.runtime.v2.Objective
-	224, // 341: supertag.runtime.v2.Objectives.ListObjectives:output_type -> supertag.runtime.v2.ListObjectivesResponse
-	226, // 342: supertag.runtime.v2.Objectives.ListCommitReviews:output_type -> supertag.runtime.v2.ListObjectiveCommitReviewsResponse
-	206, // 343: supertag.runtime.v2.Objectives.SetLimits:output_type -> supertag.runtime.v2.Objective
-	206, // 344: supertag.runtime.v2.Objectives.SetRuntimeActions:output_type -> supertag.runtime.v2.Objective
-	206, // 345: supertag.runtime.v2.Objectives.PauseObjective:output_type -> supertag.runtime.v2.Objective
-	206, // 346: supertag.runtime.v2.Objectives.ResumeObjective:output_type -> supertag.runtime.v2.Objective
-	206, // 347: supertag.runtime.v2.Objectives.CancelObjective:output_type -> supertag.runtime.v2.Objective
-	206, // 348: supertag.runtime.v2.Objectives.ReviewObjective:output_type -> supertag.runtime.v2.Objective
-	35,  // 349: supertag.runtime.v2.Inbox.ListItems:output_type -> supertag.runtime.v2.ListInboxItemsResponse
-	49,  // 350: supertag.runtime.v2.Inbox.GetQuestion:output_type -> supertag.runtime.v2.ObjectiveQuestion
-	147, // 351: supertag.runtime.v2.Inbox.AnswerQuestion:output_type -> supertag.runtime.v2.Task
-	39,  // 352: supertag.runtime.v2.Inbox.GetApproval:output_type -> supertag.runtime.v2.Approval
-	42,  // 353: supertag.runtime.v2.Inbox.ListApprovals:output_type -> supertag.runtime.v2.ListApprovalsResponse
-	39,  // 354: supertag.runtime.v2.Inbox.DecideApproval:output_type -> supertag.runtime.v2.Approval
-	52,  // 355: supertag.runtime.v2.WorkSessions.Get:output_type -> supertag.runtime.v2.WorkSession
-	59,  // 356: supertag.runtime.v2.WorkSessions.List:output_type -> supertag.runtime.v2.ListWorkSessionsResponse
-	52,  // 357: supertag.runtime.v2.AttemptWorkSessions.Start:output_type -> supertag.runtime.v2.WorkSession
-	52,  // 358: supertag.runtime.v2.AttemptWorkSessions.Continue:output_type -> supertag.runtime.v2.WorkSession
-	53,  // 359: supertag.runtime.v2.AttemptWorkSessions.Ask:output_type -> supertag.runtime.v2.WorkSessionQuestion
-	207, // 360: supertag.runtime.v2.Teams.CreateTeam:output_type -> supertag.runtime.v2.Team
-	207, // 361: supertag.runtime.v2.Teams.GetTeam:output_type -> supertag.runtime.v2.Team
-	211, // 362: supertag.runtime.v2.Teams.ListTeams:output_type -> supertag.runtime.v2.ListTeamsResponse
-	207, // 363: supertag.runtime.v2.Teams.UpdateTeam:output_type -> supertag.runtime.v2.Team
-	207, // 364: supertag.runtime.v2.Teams.DeleteTeam:output_type -> supertag.runtime.v2.Team
-	217, // 365: supertag.runtime.v2.Teams.ListWorkstreamPosts:output_type -> supertag.runtime.v2.ListWorkstreamPostsResponse
-	219, // 366: supertag.runtime.v2.AttemptWorkstreams.ReadAttemptWorkstream:output_type -> supertag.runtime.v2.ReadAttemptWorkstreamResponse
-	221, // 367: supertag.runtime.v2.AttemptWorkstreams.PostAttemptWorkstream:output_type -> supertag.runtime.v2.PostAttemptWorkstreamResponse
-	73,  // 368: supertag.runtime.v2.Mailbox.ListMessages:output_type -> supertag.runtime.v2.ListMailboxMessagesResponse
-	68,  // 369: supertag.runtime.v2.Mailbox.ChangeGrant:output_type -> supertag.runtime.v2.ChangeMailboxGrantResponse
-	71,  // 370: supertag.runtime.v2.Mailbox.ListGrants:output_type -> supertag.runtime.v2.ListMailboxGrantsResponse
-	73,  // 371: supertag.runtime.v2.AttemptMailbox.ReadMailbox:output_type -> supertag.runtime.v2.ListMailboxMessagesResponse
-	66,  // 372: supertag.runtime.v2.AttemptMailbox.SendMessage:output_type -> supertag.runtime.v2.SendTagMessageResponse
-	124, // 373: supertag.runtime.v2.WorkerHost.RegisterHost:output_type -> supertag.runtime.v2.HostRecord
-	76,  // 374: supertag.runtime.v2.WorkerHost.ReportHost:output_type -> supertag.runtime.v2.WorkerHostStatus
-	156, // 375: supertag.runtime.v2.WorkerHost.ClaimTask:output_type -> supertag.runtime.v2.ClaimTaskResponse
-	147, // 376: supertag.runtime.v2.WorkerHost.StartTask:output_type -> supertag.runtime.v2.Task
-	147, // 377: supertag.runtime.v2.WorkerHost.InspectAttempt:output_type -> supertag.runtime.v2.Task
-	51,  // 378: supertag.runtime.v2.WorkerHost.GetAttemptCapabilities:output_type -> supertag.runtime.v2.AttemptCapabilities
-	178, // 379: supertag.runtime.v2.WorkerHost.GetAttemptHistory:output_type -> supertag.runtime.v2.AttemptHistory
-	183, // 380: supertag.runtime.v2.WorkerHost.GetContextPins:output_type -> supertag.runtime.v2.ContextResolutionManifest
-	183, // 381: supertag.runtime.v2.WorkerHost.CommitContextResolution:output_type -> supertag.runtime.v2.ContextResolutionManifest
-	160, // 382: supertag.runtime.v2.WorkerHost.RenewAttempt:output_type -> supertag.runtime.v2.AttemptAuthority
-	163, // 383: supertag.runtime.v2.WorkerHost.GetAttemptResolution:output_type -> supertag.runtime.v2.GetAttemptResolutionResponse
-	165, // 384: supertag.runtime.v2.WorkerHost.ReportAttemptUsage:output_type -> supertag.runtime.v2.ReportAttemptUsageResponse
-	171, // 385: supertag.runtime.v2.WorkerHost.AppendEvent:output_type -> supertag.runtime.v2.TaskEvent
-	49,  // 386: supertag.runtime.v2.WorkerHost.AskQuestion:output_type -> supertag.runtime.v2.ObjectiveQuestion
-	147, // 387: supertag.runtime.v2.WorkerHost.FinishTask:output_type -> supertag.runtime.v2.Task
-	114, // 388: supertag.runtime.v2.LiveInputs.QueueInput:output_type -> supertag.runtime.v2.LiveInput
-	114, // 389: supertag.runtime.v2.LiveInputs.GetInput:output_type -> supertag.runtime.v2.LiveInput
-	114, // 390: supertag.runtime.v2.LiveInputs.ResolveInput:output_type -> supertag.runtime.v2.LiveInput
-	116, // 391: supertag.runtime.v2.AttemptInputs.TakeInput:output_type -> supertag.runtime.v2.TakeInputResponse
-	114, // 392: supertag.runtime.v2.AttemptInputs.SettleInput:output_type -> supertag.runtime.v2.LiveInput
-	124, // 393: supertag.runtime.v2.HostEnrollment.EnrollHost:output_type -> supertag.runtime.v2.HostRecord
-	124, // 394: supertag.runtime.v2.HostDirectory.Enroll:output_type -> supertag.runtime.v2.HostRecord
-	124, // 395: supertag.runtime.v2.HostDirectory.Authenticate:output_type -> supertag.runtime.v2.HostRecord
-	147, // 396: supertag.runtime.v2.Connector.AcceptEvent:output_type -> supertag.runtime.v2.Task
-	234, // 397: supertag.runtime.v2.Connector.AcceptSlackEvent:output_type -> supertag.runtime.v2.AcceptSlackEventResponse
-	236, // 398: supertag.runtime.v2.Connector.AcceptGithubEvent:output_type -> supertag.runtime.v2.AcceptGithubEventResponse
-	238, // 399: supertag.runtime.v2.Connector.AcceptLinearEvent:output_type -> supertag.runtime.v2.AcceptLinearEventResponse
-	240, // 400: supertag.runtime.v2.Connector.AcceptLarkEvent:output_type -> supertag.runtime.v2.AcceptLarkEventResponse
-	242, // 401: supertag.runtime.v2.Connector.AcceptMicrosoftTeamsActivity:output_type -> supertag.runtime.v2.AcceptMicrosoftTeamsActivityResponse
-	244, // 402: supertag.runtime.v2.Connector.GetMicrosoftTeamsReplyRoute:output_type -> supertag.runtime.v2.MicrosoftTeamsReplyRoute
-	247, // 403: supertag.runtime.v2.Connector.ClaimReply:output_type -> supertag.runtime.v2.ClaimReplyResponse
-	250, // 404: supertag.runtime.v2.Connector.RenewReply:output_type -> supertag.runtime.v2.ReplyLease
-	245, // 405: supertag.runtime.v2.Connector.SettleReply:output_type -> supertag.runtime.v2.Reply
-	187, // 406: supertag.runtime.v2.Transfers.UploadCheckpoint:output_type -> supertag.runtime.v2.CheckpointReference
-	191, // 407: supertag.runtime.v2.Transfers.DownloadCheckpoint:output_type -> supertag.runtime.v2.CheckpointDownload
-	194, // 408: supertag.runtime.v2.Transfers.UploadWorkspace:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
-	198, // 409: supertag.runtime.v2.Transfers.DownloadWorkspace:output_type -> supertag.runtime.v2.WorkspaceDownload
-	198, // 410: supertag.runtime.v2.Transfers.DownloadWorkspaceArtifact:output_type -> supertag.runtime.v2.WorkspaceDownload
-	198, // 411: supertag.runtime.v2.Transfers.DownloadReviewArtifact:output_type -> supertag.runtime.v2.WorkspaceDownload
-	188, // 412: supertag.runtime.v2.CheckpointDirectory.GetCheckpoint:output_type -> supertag.runtime.v2.GetCheckpointResponse
-	187, // 413: supertag.runtime.v2.CheckpointDirectory.ReserveCheckpoint:output_type -> supertag.runtime.v2.CheckpointReference
-	187, // 414: supertag.runtime.v2.CheckpointDirectory.CommitCheckpoint:output_type -> supertag.runtime.v2.CheckpointReference
-	196, // 415: supertag.runtime.v2.WorkspaceDirectory.GetContinuation:output_type -> supertag.runtime.v2.WorkspaceContinuation
-	194, // 416: supertag.runtime.v2.WorkspaceDirectory.ReserveDelivery:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
-	194, // 417: supertag.runtime.v2.WorkspaceDirectory.CommitDelivery:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
-	194, // 418: supertag.runtime.v2.WorkspaceDirectory.GetArtifact:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
-	194, // 419: supertag.runtime.v2.WorkspaceDirectory.GetReviewArtifact:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
-	179, // 420: supertag.runtime.v2.Harness.Attach:output_type -> supertag.runtime.v2.HarnessRun
-	175, // 421: supertag.runtime.v2.Harness.ConfirmExecutionLimits:output_type -> supertag.runtime.v2.ConfirmExecutionLimitsResponse
-	116, // 422: supertag.runtime.v2.Harness.TakeLiveInput:output_type -> supertag.runtime.v2.TakeInputResponse
-	114, // 423: supertag.runtime.v2.Harness.SettleLiveInput:output_type -> supertag.runtime.v2.LiveInput
-	171, // 424: supertag.runtime.v2.Harness.Publish:output_type -> supertag.runtime.v2.TaskEvent
-	165, // 425: supertag.runtime.v2.Harness.ReportUsage:output_type -> supertag.runtime.v2.ReportAttemptUsageResponse
-	203, // 426: supertag.runtime.v2.Harness.Complete:output_type -> supertag.runtime.v2.HarnessCompleteResponse
-	89,  // 427: supertag.runtime.v2.HarnessWorkspace.Execute:output_type -> supertag.runtime.v2.HarnessWorkspaceResult
-	93,  // 428: supertag.runtime.v2.RemoteWorkspaceProvider.Allocate:output_type -> supertag.runtime.v2.RemoteWorkspaceAllocation
-	96,  // 429: supertag.runtime.v2.RemoteWorkspaceProvider.Stage:output_type -> supertag.runtime.v2.RemoteWorkspaceStageResponse
-	98,  // 430: supertag.runtime.v2.RemoteWorkspaceProvider.Capture:output_type -> supertag.runtime.v2.RemoteWorkspaceCaptureChunk
-	100, // 431: supertag.runtime.v2.RemoteWorkspaceProvider.Stop:output_type -> supertag.runtime.v2.RemoteWorkspaceStopResponse
-	49,  // 432: supertag.runtime.v2.HarnessQuestions.AskQuestion:output_type -> supertag.runtime.v2.ObjectiveQuestion
-	219, // 433: supertag.runtime.v2.HarnessWorkstreams.Read:output_type -> supertag.runtime.v2.ReadAttemptWorkstreamResponse
-	221, // 434: supertag.runtime.v2.HarnessWorkstreams.Post:output_type -> supertag.runtime.v2.PostAttemptWorkstreamResponse
-	73,  // 435: supertag.runtime.v2.HarnessMailbox.Read:output_type -> supertag.runtime.v2.ListMailboxMessagesResponse
-	66,  // 436: supertag.runtime.v2.HarnessMailbox.SendMessage:output_type -> supertag.runtime.v2.SendTagMessageResponse
-	110, // 437: supertag.runtime.v2.HarnessMailbox.ReadReviewPatch:output_type -> supertag.runtime.v2.HarnessReviewPatch
-	52,  // 438: supertag.runtime.v2.HarnessWorkSessions.Start:output_type -> supertag.runtime.v2.WorkSession
-	52,  // 439: supertag.runtime.v2.HarnessWorkSessions.Continue:output_type -> supertag.runtime.v2.WorkSession
-	53,  // 440: supertag.runtime.v2.HarnessWorkSessions.Ask:output_type -> supertag.runtime.v2.WorkSessionQuestion
-	315, // [315:441] is the sub-list for method output_type
-	189, // [189:315] is the sub-list for method input_type
-	189, // [189:189] is the sub-list for extension type_name
-	189, // [189:189] is the sub-list for extension extendee
-	0,   // [0:189] is the sub-list for field type_name
+	261, // 141: supertag.runtime.v2.WorkspaceSpec.github_source:type_name -> supertag.runtime.v2.GithubWorkspace
+	261, // 142: supertag.runtime.v2.GithubWorkspaceBundle.workspace:type_name -> supertag.runtime.v2.GithubWorkspace
+	195, // 143: supertag.runtime.v2.GithubWorkspaceBundle.bundle:type_name -> supertag.runtime.v2.BlobReference
+	193, // 144: supertag.runtime.v2.GithubWorkspaceDownload.reference:type_name -> supertag.runtime.v2.GithubWorkspaceBundle
+	195, // 145: supertag.runtime.v2.WorkspaceDeliveryReference.patch:type_name -> supertag.runtime.v2.BlobReference
+	195, // 146: supertag.runtime.v2.WorkspaceDeliveryReference.bundle:type_name -> supertag.runtime.v2.BlobReference
+	159, // 147: supertag.runtime.v2.WorkspaceDeliveryRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	196, // 148: supertag.runtime.v2.WorkspaceDeliveryRequest.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	196, // 149: supertag.runtime.v2.WorkspaceContinuation.delivery:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	197, // 150: supertag.runtime.v2.WorkspaceUpload.begin:type_name -> supertag.runtime.v2.WorkspaceDeliveryRequest
+	196, // 151: supertag.runtime.v2.WorkspaceDownload.reference:type_name -> supertag.runtime.v2.WorkspaceDeliveryReference
+	20,  // 152: supertag.runtime.v2.GetWorkspaceArtifactRequest.kind:type_name -> supertag.runtime.v2.WorkspaceArtifactKind
+	159, // 153: supertag.runtime.v2.GetReviewArtifactRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	22,  // 154: supertag.runtime.v2.HarnessCompleteRequest.objective_signal:type_name -> supertag.runtime.v2.ObjectiveSignal
+	186, // 155: supertag.runtime.v2.HarnessCompleteRequest.checkpoint:type_name -> supertag.runtime.v2.SessionCheckpoint
+	207, // 156: supertag.runtime.v2.CreateObjectiveRequest.runtime_actions:type_name -> supertag.runtime.v2.RuntimeActions
+	21,  // 157: supertag.runtime.v2.Objective.status:type_name -> supertag.runtime.v2.ObjectiveStatus
+	207, // 158: supertag.runtime.v2.Objective.runtime_actions:type_name -> supertag.runtime.v2.RuntimeActions
+	209, // 159: supertag.runtime.v2.ListTeamsResponse.teams:type_name -> supertag.runtime.v2.Team
+	214, // 160: supertag.runtime.v2.UpdateTeamRequest.members:type_name -> supertag.runtime.v2.TeamMembers
+	217, // 161: supertag.runtime.v2.ListWorkstreamPostsResponse.posts:type_name -> supertag.runtime.v2.WorkstreamPost
+	159, // 162: supertag.runtime.v2.ReadAttemptWorkstreamRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	209, // 163: supertag.runtime.v2.ReadAttemptWorkstreamResponse.team:type_name -> supertag.runtime.v2.Team
+	219, // 164: supertag.runtime.v2.ReadAttemptWorkstreamResponse.page:type_name -> supertag.runtime.v2.ListWorkstreamPostsResponse
+	159, // 165: supertag.runtime.v2.PostAttemptWorkstreamRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	217, // 166: supertag.runtime.v2.PostAttemptWorkstreamResponse.post:type_name -> supertag.runtime.v2.WorkstreamPost
+	39,  // 167: supertag.runtime.v2.PostAttemptWorkstreamResponse.approval:type_name -> supertag.runtime.v2.Approval
+	208, // 168: supertag.runtime.v2.ListObjectivesResponse.objectives:type_name -> supertag.runtime.v2.Objective
+	64,  // 169: supertag.runtime.v2.ListObjectiveCommitReviewsResponse.reviews:type_name -> supertag.runtime.v2.CommitReview
+	207, // 170: supertag.runtime.v2.SetObjectiveRuntimeActionsRequest.runtime_actions:type_name -> supertag.runtime.v2.RuntimeActions
+	233, // 171: supertag.runtime.v2.AcceptEventRequest.destination:type_name -> supertag.runtime.v2.ReplyDestination
+	148, // 172: supertag.runtime.v2.AcceptEventRequest.requested_execution:type_name -> supertag.runtime.v2.ExecutionSelection
+	147, // 173: supertag.runtime.v2.AcceptSlackEventResponse.task:type_name -> supertag.runtime.v2.Task
+	23,  // 174: supertag.runtime.v2.AcceptGithubEventRequest.kind:type_name -> supertag.runtime.v2.GithubEventKind
+	24,  // 175: supertag.runtime.v2.AcceptGithubEventRequest.action:type_name -> supertag.runtime.v2.GithubEventAction
+	147, // 176: supertag.runtime.v2.AcceptGithubEventResponse.task:type_name -> supertag.runtime.v2.Task
+	25,  // 177: supertag.runtime.v2.AcceptLinearEventRequest.kind:type_name -> supertag.runtime.v2.LinearEventKind
+	26,  // 178: supertag.runtime.v2.AcceptLinearEventRequest.action:type_name -> supertag.runtime.v2.LinearEventAction
+	147, // 179: supertag.runtime.v2.AcceptLinearEventResponse.task:type_name -> supertag.runtime.v2.Task
+	27,  // 180: supertag.runtime.v2.AcceptLarkEventRequest.domain:type_name -> supertag.runtime.v2.LarkDomain
+	147, // 181: supertag.runtime.v2.AcceptLarkEventResponse.task:type_name -> supertag.runtime.v2.Task
+	147, // 182: supertag.runtime.v2.AcceptMicrosoftTeamsActivityResponse.task:type_name -> supertag.runtime.v2.Task
+	233, // 183: supertag.runtime.v2.Reply.destination:type_name -> supertag.runtime.v2.ReplyDestination
+	28,  // 184: supertag.runtime.v2.Reply.state:type_name -> supertag.runtime.v2.ReplyState
+	247, // 185: supertag.runtime.v2.ClaimReplyResponse.reply:type_name -> supertag.runtime.v2.Reply
+	28,  // 186: supertag.runtime.v2.SettleReplyRequest.state:type_name -> supertag.runtime.v2.ReplyState
+	28,  // 187: supertag.runtime.v2.ReplyDeliveryAudit.state:type_name -> supertag.runtime.v2.ReplyState
+	247, // 188: supertag.runtime.v2.ReplyDelivery.reply:type_name -> supertag.runtime.v2.Reply
+	254, // 189: supertag.runtime.v2.ReplyDelivery.audit:type_name -> supertag.runtime.v2.ReplyDeliveryAudit
+	28,  // 190: supertag.runtime.v2.ListReplyDeliveriesRequest.state:type_name -> supertag.runtime.v2.ReplyState
+	255, // 191: supertag.runtime.v2.ListReplyDeliveriesResponse.deliveries:type_name -> supertag.runtime.v2.ReplyDelivery
+	28,  // 192: supertag.runtime.v2.ResolveReplyRequest.state:type_name -> supertag.runtime.v2.ReplyState
+	120, // 193: supertag.runtime.v2.Operator.CreateAuthKey:input_type -> supertag.runtime.v2.CreateAuthKeyRequest
+	122, // 194: supertag.runtime.v2.Operator.RevokeHost:input_type -> supertag.runtime.v2.RevokeHostRequest
+	77,  // 195: supertag.runtime.v2.Operator.ListHosts:input_type -> supertag.runtime.v2.ListHostsRequest
+	79,  // 196: supertag.runtime.v2.Operator.GetHost:input_type -> supertag.runtime.v2.GetHostRequest
+	80,  // 197: supertag.runtime.v2.Operator.SetHostDraining:input_type -> supertag.runtime.v2.SetHostDrainingRequest
+	128, // 198: supertag.runtime.v2.Operator.PutTag:input_type -> supertag.runtime.v2.PutTagRequest
+	130, // 199: supertag.runtime.v2.Operator.ListTags:input_type -> supertag.runtime.v2.ListTagsRequest
+	144, // 200: supertag.runtime.v2.Operator.SubmitTask:input_type -> supertag.runtime.v2.SubmitTaskRequest
+	151, // 201: supertag.runtime.v2.Operator.GetTask:input_type -> supertag.runtime.v2.GetTaskRequest
+	167, // 202: supertag.runtime.v2.Operator.ListNativeUsage:input_type -> supertag.runtime.v2.ListNativeUsageRequest
+	152, // 203: supertag.runtime.v2.Operator.ListEvents:input_type -> supertag.runtime.v2.ListEventsRequest
+	154, // 204: supertag.runtime.v2.Operator.CancelTask:input_type -> supertag.runtime.v2.CancelTaskRequest
+	161, // 205: supertag.runtime.v2.Operator.ResolveAttempt:input_type -> supertag.runtime.v2.ResolveAttemptRequest
+	132, // 206: supertag.runtime.v2.Operator.GetTag:input_type -> supertag.runtime.v2.GetTagRequest
+	133, // 207: supertag.runtime.v2.Operator.RetireTag:input_type -> supertag.runtime.v2.RetireTagRequest
+	253, // 208: supertag.runtime.v2.Operator.GetReplyDelivery:input_type -> supertag.runtime.v2.GetReplyDeliveryRequest
+	256, // 209: supertag.runtime.v2.Operator.ListReplyDeliveries:input_type -> supertag.runtime.v2.ListReplyDeliveriesRequest
+	258, // 210: supertag.runtime.v2.Operator.ResolveReply:input_type -> supertag.runtime.v2.ResolveReplyRequest
+	137, // 211: supertag.runtime.v2.Conversations.ListConversations:input_type -> supertag.runtime.v2.ListConversationsRequest
+	139, // 212: supertag.runtime.v2.Conversations.ListMessages:input_type -> supertag.runtime.v2.ListMessagesRequest
+	141, // 213: supertag.runtime.v2.Conversations.SendMessage:input_type -> supertag.runtime.v2.SendMessageRequest
+	142, // 214: supertag.runtime.v2.Conversations.GetMessage:input_type -> supertag.runtime.v2.GetMessageRequest
+	143, // 215: supertag.runtime.v2.Conversations.ListMessageEvents:input_type -> supertag.runtime.v2.ListMessageEventsRequest
+	29,  // 216: supertag.runtime.v2.OperatorEvents.Watch:input_type -> supertag.runtime.v2.WatchRequest
+	206, // 217: supertag.runtime.v2.Objectives.CreateObjective:input_type -> supertag.runtime.v2.CreateObjectiveRequest
+	224, // 218: supertag.runtime.v2.Objectives.GetObjective:input_type -> supertag.runtime.v2.GetObjectiveRequest
+	225, // 219: supertag.runtime.v2.Objectives.ListObjectives:input_type -> supertag.runtime.v2.ListObjectivesRequest
+	227, // 220: supertag.runtime.v2.Objectives.ListCommitReviews:input_type -> supertag.runtime.v2.ListObjectiveCommitReviewsRequest
+	229, // 221: supertag.runtime.v2.Objectives.SetLimits:input_type -> supertag.runtime.v2.SetObjectiveLimitsRequest
+	230, // 222: supertag.runtime.v2.Objectives.SetRuntimeActions:input_type -> supertag.runtime.v2.SetObjectiveRuntimeActionsRequest
+	231, // 223: supertag.runtime.v2.Objectives.PauseObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
+	231, // 224: supertag.runtime.v2.Objectives.ResumeObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
+	231, // 225: supertag.runtime.v2.Objectives.CancelObjective:input_type -> supertag.runtime.v2.ObjectiveActionRequest
+	232, // 226: supertag.runtime.v2.Objectives.ReviewObjective:input_type -> supertag.runtime.v2.ReviewObjectiveRequest
+	34,  // 227: supertag.runtime.v2.Inbox.ListItems:input_type -> supertag.runtime.v2.ListInboxItemsRequest
+	47,  // 228: supertag.runtime.v2.Inbox.GetQuestion:input_type -> supertag.runtime.v2.GetQuestionRequest
+	48,  // 229: supertag.runtime.v2.Inbox.AnswerQuestion:input_type -> supertag.runtime.v2.AnswerQuestionRequest
+	40,  // 230: supertag.runtime.v2.Inbox.GetApproval:input_type -> supertag.runtime.v2.GetApprovalRequest
+	41,  // 231: supertag.runtime.v2.Inbox.ListApprovals:input_type -> supertag.runtime.v2.ListApprovalsRequest
+	43,  // 232: supertag.runtime.v2.Inbox.DecideApproval:input_type -> supertag.runtime.v2.DecideApprovalRequest
+	55,  // 233: supertag.runtime.v2.WorkSessions.Get:input_type -> supertag.runtime.v2.GetWorkSessionRequest
+	58,  // 234: supertag.runtime.v2.WorkSessions.List:input_type -> supertag.runtime.v2.ListWorkSessionsRequest
+	54,  // 235: supertag.runtime.v2.AttemptWorkSessions.Start:input_type -> supertag.runtime.v2.StartWorkSessionRequest
+	56,  // 236: supertag.runtime.v2.AttemptWorkSessions.Continue:input_type -> supertag.runtime.v2.ContinueWorkSessionRequest
+	57,  // 237: supertag.runtime.v2.AttemptWorkSessions.Ask:input_type -> supertag.runtime.v2.AskWorkSessionQuestionRequest
+	210, // 238: supertag.runtime.v2.Teams.CreateTeam:input_type -> supertag.runtime.v2.CreateTeamRequest
+	211, // 239: supertag.runtime.v2.Teams.GetTeam:input_type -> supertag.runtime.v2.GetTeamRequest
+	212, // 240: supertag.runtime.v2.Teams.ListTeams:input_type -> supertag.runtime.v2.ListTeamsRequest
+	215, // 241: supertag.runtime.v2.Teams.UpdateTeam:input_type -> supertag.runtime.v2.UpdateTeamRequest
+	216, // 242: supertag.runtime.v2.Teams.DeleteTeam:input_type -> supertag.runtime.v2.DeleteTeamRequest
+	218, // 243: supertag.runtime.v2.Teams.ListWorkstreamPosts:input_type -> supertag.runtime.v2.ListWorkstreamPostsRequest
+	220, // 244: supertag.runtime.v2.AttemptWorkstreams.ReadAttemptWorkstream:input_type -> supertag.runtime.v2.ReadAttemptWorkstreamRequest
+	222, // 245: supertag.runtime.v2.AttemptWorkstreams.PostAttemptWorkstream:input_type -> supertag.runtime.v2.PostAttemptWorkstreamRequest
+	72,  // 246: supertag.runtime.v2.Mailbox.ListMessages:input_type -> supertag.runtime.v2.ListMailboxMessagesRequest
+	67,  // 247: supertag.runtime.v2.Mailbox.ChangeGrant:input_type -> supertag.runtime.v2.ChangeMailboxGrantRequest
+	69,  // 248: supertag.runtime.v2.Mailbox.ListGrants:input_type -> supertag.runtime.v2.ListMailboxGrantsRequest
+	74,  // 249: supertag.runtime.v2.AttemptMailbox.ReadMailbox:input_type -> supertag.runtime.v2.ReadMailboxRequest
+	65,  // 250: supertag.runtime.v2.AttemptMailbox.SendMessage:input_type -> supertag.runtime.v2.SendAttemptTagMessageRequest
+	123, // 251: supertag.runtime.v2.WorkerHost.RegisterHost:input_type -> supertag.runtime.v2.RegisterHostRequest
+	75,  // 252: supertag.runtime.v2.WorkerHost.ReportHost:input_type -> supertag.runtime.v2.ReportHostRequest
+	155, // 253: supertag.runtime.v2.WorkerHost.ClaimTask:input_type -> supertag.runtime.v2.ClaimTaskRequest
+	158, // 254: supertag.runtime.v2.WorkerHost.StartTask:input_type -> supertag.runtime.v2.StartTaskRequest
+	159, // 255: supertag.runtime.v2.WorkerHost.InspectAttempt:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	159, // 256: supertag.runtime.v2.WorkerHost.GetAttemptCapabilities:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	159, // 257: supertag.runtime.v2.WorkerHost.GetAttemptHistory:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	159, // 258: supertag.runtime.v2.WorkerHost.GetContextPins:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	185, // 259: supertag.runtime.v2.WorkerHost.CommitContextResolution:input_type -> supertag.runtime.v2.CommitContextResolutionRequest
+	159, // 260: supertag.runtime.v2.WorkerHost.RenewAttempt:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	159, // 261: supertag.runtime.v2.WorkerHost.GetAttemptResolution:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	164, // 262: supertag.runtime.v2.WorkerHost.ReportAttemptUsage:input_type -> supertag.runtime.v2.ReportAttemptUsageRequest
+	170, // 263: supertag.runtime.v2.WorkerHost.AppendEvent:input_type -> supertag.runtime.v2.AppendEventRequest
+	50,  // 264: supertag.runtime.v2.WorkerHost.AskQuestion:input_type -> supertag.runtime.v2.AskQuestionRequest
+	172, // 265: supertag.runtime.v2.WorkerHost.FinishTask:input_type -> supertag.runtime.v2.FinishTaskRequest
+	111, // 266: supertag.runtime.v2.LiveInputs.QueueInput:input_type -> supertag.runtime.v2.QueueInputRequest
+	112, // 267: supertag.runtime.v2.LiveInputs.GetInput:input_type -> supertag.runtime.v2.GetInputRequest
+	113, // 268: supertag.runtime.v2.LiveInputs.ResolveInput:input_type -> supertag.runtime.v2.ResolveInputRequest
+	115, // 269: supertag.runtime.v2.AttemptInputs.TakeInput:input_type -> supertag.runtime.v2.TakeInputRequest
+	119, // 270: supertag.runtime.v2.AttemptInputs.SettleInput:input_type -> supertag.runtime.v2.SettleInputRequest
+	125, // 271: supertag.runtime.v2.HostEnrollment.EnrollHost:input_type -> supertag.runtime.v2.EnrollHostRequest
+	126, // 272: supertag.runtime.v2.HostDirectory.Enroll:input_type -> supertag.runtime.v2.PrivateEnrollHostRequest
+	127, // 273: supertag.runtime.v2.HostDirectory.Authenticate:input_type -> supertag.runtime.v2.AuthenticateHostRequest
+	234, // 274: supertag.runtime.v2.Connector.AcceptEvent:input_type -> supertag.runtime.v2.AcceptEventRequest
+	235, // 275: supertag.runtime.v2.Connector.AcceptSlackEvent:input_type -> supertag.runtime.v2.AcceptSlackEventRequest
+	237, // 276: supertag.runtime.v2.Connector.AcceptGithubEvent:input_type -> supertag.runtime.v2.AcceptGithubEventRequest
+	239, // 277: supertag.runtime.v2.Connector.AcceptLinearEvent:input_type -> supertag.runtime.v2.AcceptLinearEventRequest
+	241, // 278: supertag.runtime.v2.Connector.AcceptLarkEvent:input_type -> supertag.runtime.v2.AcceptLarkEventRequest
+	243, // 279: supertag.runtime.v2.Connector.AcceptMicrosoftTeamsActivity:input_type -> supertag.runtime.v2.AcceptMicrosoftTeamsActivityRequest
+	245, // 280: supertag.runtime.v2.Connector.GetMicrosoftTeamsReplyRoute:input_type -> supertag.runtime.v2.GetMicrosoftTeamsReplyRouteRequest
+	248, // 281: supertag.runtime.v2.Connector.ClaimReply:input_type -> supertag.runtime.v2.ClaimReplyRequest
+	251, // 282: supertag.runtime.v2.Connector.RenewReply:input_type -> supertag.runtime.v2.RenewReplyRequest
+	250, // 283: supertag.runtime.v2.Connector.SettleReply:input_type -> supertag.runtime.v2.SettleReplyRequest
+	190, // 284: supertag.runtime.v2.Transfers.UploadCheckpoint:input_type -> supertag.runtime.v2.CheckpointUpload
+	159, // 285: supertag.runtime.v2.Transfers.DownloadCheckpoint:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	199, // 286: supertag.runtime.v2.Transfers.UploadWorkspace:input_type -> supertag.runtime.v2.WorkspaceUpload
+	159, // 287: supertag.runtime.v2.Transfers.DownloadWorkspace:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	201, // 288: supertag.runtime.v2.Transfers.DownloadWorkspaceArtifact:input_type -> supertag.runtime.v2.GetWorkspaceArtifactRequest
+	202, // 289: supertag.runtime.v2.Transfers.DownloadReviewArtifact:input_type -> supertag.runtime.v2.GetReviewArtifactRequest
+	159, // 290: supertag.runtime.v2.Transfers.DownloadWorkspaceSource:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	159, // 291: supertag.runtime.v2.CheckpointDirectory.GetCheckpoint:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	189, // 292: supertag.runtime.v2.CheckpointDirectory.ReserveCheckpoint:input_type -> supertag.runtime.v2.CommitCheckpointRequest
+	189, // 293: supertag.runtime.v2.CheckpointDirectory.CommitCheckpoint:input_type -> supertag.runtime.v2.CommitCheckpointRequest
+	159, // 294: supertag.runtime.v2.WorkspaceDirectory.GetSource:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	159, // 295: supertag.runtime.v2.WorkspaceDirectory.GetContinuation:input_type -> supertag.runtime.v2.InspectAttemptRequest
+	197, // 296: supertag.runtime.v2.WorkspaceDirectory.ReserveDelivery:input_type -> supertag.runtime.v2.WorkspaceDeliveryRequest
+	197, // 297: supertag.runtime.v2.WorkspaceDirectory.CommitDelivery:input_type -> supertag.runtime.v2.WorkspaceDeliveryRequest
+	201, // 298: supertag.runtime.v2.WorkspaceDirectory.GetArtifact:input_type -> supertag.runtime.v2.GetWorkspaceArtifactRequest
+	202, // 299: supertag.runtime.v2.WorkspaceDirectory.GetReviewArtifact:input_type -> supertag.runtime.v2.GetReviewArtifactRequest
+	173, // 300: supertag.runtime.v2.Harness.Attach:input_type -> supertag.runtime.v2.HarnessAttachRequest
+	174, // 301: supertag.runtime.v2.Harness.ConfirmExecutionLimits:input_type -> supertag.runtime.v2.AppliedExecutionLimits
+	117, // 302: supertag.runtime.v2.Harness.TakeLiveInput:input_type -> supertag.runtime.v2.HarnessTakeLiveInputRequest
+	118, // 303: supertag.runtime.v2.Harness.SettleLiveInput:input_type -> supertag.runtime.v2.HarnessSettleLiveInputRequest
+	203, // 304: supertag.runtime.v2.Harness.Publish:input_type -> supertag.runtime.v2.HarnessPublishRequest
+	169, // 305: supertag.runtime.v2.Harness.ReportUsage:input_type -> supertag.runtime.v2.HarnessUsageRequest
+	204, // 306: supertag.runtime.v2.Harness.Complete:input_type -> supertag.runtime.v2.HarnessCompleteRequest
+	81,  // 307: supertag.runtime.v2.HarnessWorkspace.Execute:input_type -> supertag.runtime.v2.HarnessWorkspaceRequest
+	92,  // 308: supertag.runtime.v2.RemoteWorkspaceProvider.Allocate:input_type -> supertag.runtime.v2.RemoteWorkspaceAllocateRequest
+	95,  // 309: supertag.runtime.v2.RemoteWorkspaceProvider.Stage:input_type -> supertag.runtime.v2.RemoteWorkspaceStageChunk
+	97,  // 310: supertag.runtime.v2.RemoteWorkspaceProvider.Capture:input_type -> supertag.runtime.v2.RemoteWorkspaceCaptureRequest
+	99,  // 311: supertag.runtime.v2.RemoteWorkspaceProvider.Stop:input_type -> supertag.runtime.v2.RemoteWorkspaceStopRequest
+	101, // 312: supertag.runtime.v2.HarnessQuestions.AskQuestion:input_type -> supertag.runtime.v2.HarnessAskQuestionRequest
+	102, // 313: supertag.runtime.v2.HarnessWorkstreams.Read:input_type -> supertag.runtime.v2.HarnessReadWorkstreamRequest
+	103, // 314: supertag.runtime.v2.HarnessWorkstreams.Post:input_type -> supertag.runtime.v2.HarnessPostWorkstreamRequest
+	108, // 315: supertag.runtime.v2.HarnessMailbox.Read:input_type -> supertag.runtime.v2.HarnessReadMailboxRequest
+	107, // 316: supertag.runtime.v2.HarnessMailbox.SendMessage:input_type -> supertag.runtime.v2.HarnessSendTagMessageRequest
+	109, // 317: supertag.runtime.v2.HarnessMailbox.ReadReviewPatch:input_type -> supertag.runtime.v2.HarnessReadReviewPatchRequest
+	106, // 318: supertag.runtime.v2.HarnessWorkSessions.Start:input_type -> supertag.runtime.v2.HarnessStartWorkSessionRequest
+	104, // 319: supertag.runtime.v2.HarnessWorkSessions.Continue:input_type -> supertag.runtime.v2.HarnessContinueWorkSessionRequest
+	105, // 320: supertag.runtime.v2.HarnessWorkSessions.Ask:input_type -> supertag.runtime.v2.HarnessAskWorkSessionQuestionRequest
+	121, // 321: supertag.runtime.v2.Operator.CreateAuthKey:output_type -> supertag.runtime.v2.AuthKey
+	124, // 322: supertag.runtime.v2.Operator.RevokeHost:output_type -> supertag.runtime.v2.HostRecord
+	78,  // 323: supertag.runtime.v2.Operator.ListHosts:output_type -> supertag.runtime.v2.ListHostsResponse
+	76,  // 324: supertag.runtime.v2.Operator.GetHost:output_type -> supertag.runtime.v2.WorkerHostStatus
+	76,  // 325: supertag.runtime.v2.Operator.SetHostDraining:output_type -> supertag.runtime.v2.WorkerHostStatus
+	129, // 326: supertag.runtime.v2.Operator.PutTag:output_type -> supertag.runtime.v2.Tag
+	131, // 327: supertag.runtime.v2.Operator.ListTags:output_type -> supertag.runtime.v2.ListTagsResponse
+	147, // 328: supertag.runtime.v2.Operator.SubmitTask:output_type -> supertag.runtime.v2.Task
+	147, // 329: supertag.runtime.v2.Operator.GetTask:output_type -> supertag.runtime.v2.Task
+	168, // 330: supertag.runtime.v2.Operator.ListNativeUsage:output_type -> supertag.runtime.v2.ListNativeUsageResponse
+	153, // 331: supertag.runtime.v2.Operator.ListEvents:output_type -> supertag.runtime.v2.ListEventsResponse
+	147, // 332: supertag.runtime.v2.Operator.CancelTask:output_type -> supertag.runtime.v2.Task
+	162, // 333: supertag.runtime.v2.Operator.ResolveAttempt:output_type -> supertag.runtime.v2.AttemptResolution
+	129, // 334: supertag.runtime.v2.Operator.GetTag:output_type -> supertag.runtime.v2.Tag
+	134, // 335: supertag.runtime.v2.Operator.RetireTag:output_type -> supertag.runtime.v2.RetireTagResponse
+	255, // 336: supertag.runtime.v2.Operator.GetReplyDelivery:output_type -> supertag.runtime.v2.ReplyDelivery
+	257, // 337: supertag.runtime.v2.Operator.ListReplyDeliveries:output_type -> supertag.runtime.v2.ListReplyDeliveriesResponse
+	255, // 338: supertag.runtime.v2.Operator.ResolveReply:output_type -> supertag.runtime.v2.ReplyDelivery
+	138, // 339: supertag.runtime.v2.Conversations.ListConversations:output_type -> supertag.runtime.v2.ListConversationsResponse
+	140, // 340: supertag.runtime.v2.Conversations.ListMessages:output_type -> supertag.runtime.v2.ListMessagesResponse
+	136, // 341: supertag.runtime.v2.Conversations.SendMessage:output_type -> supertag.runtime.v2.ConversationMessage
+	136, // 342: supertag.runtime.v2.Conversations.GetMessage:output_type -> supertag.runtime.v2.ConversationMessage
+	153, // 343: supertag.runtime.v2.Conversations.ListMessageEvents:output_type -> supertag.runtime.v2.ListEventsResponse
+	30,  // 344: supertag.runtime.v2.OperatorEvents.Watch:output_type -> supertag.runtime.v2.WatchEvent
+	208, // 345: supertag.runtime.v2.Objectives.CreateObjective:output_type -> supertag.runtime.v2.Objective
+	208, // 346: supertag.runtime.v2.Objectives.GetObjective:output_type -> supertag.runtime.v2.Objective
+	226, // 347: supertag.runtime.v2.Objectives.ListObjectives:output_type -> supertag.runtime.v2.ListObjectivesResponse
+	228, // 348: supertag.runtime.v2.Objectives.ListCommitReviews:output_type -> supertag.runtime.v2.ListObjectiveCommitReviewsResponse
+	208, // 349: supertag.runtime.v2.Objectives.SetLimits:output_type -> supertag.runtime.v2.Objective
+	208, // 350: supertag.runtime.v2.Objectives.SetRuntimeActions:output_type -> supertag.runtime.v2.Objective
+	208, // 351: supertag.runtime.v2.Objectives.PauseObjective:output_type -> supertag.runtime.v2.Objective
+	208, // 352: supertag.runtime.v2.Objectives.ResumeObjective:output_type -> supertag.runtime.v2.Objective
+	208, // 353: supertag.runtime.v2.Objectives.CancelObjective:output_type -> supertag.runtime.v2.Objective
+	208, // 354: supertag.runtime.v2.Objectives.ReviewObjective:output_type -> supertag.runtime.v2.Objective
+	35,  // 355: supertag.runtime.v2.Inbox.ListItems:output_type -> supertag.runtime.v2.ListInboxItemsResponse
+	49,  // 356: supertag.runtime.v2.Inbox.GetQuestion:output_type -> supertag.runtime.v2.ObjectiveQuestion
+	147, // 357: supertag.runtime.v2.Inbox.AnswerQuestion:output_type -> supertag.runtime.v2.Task
+	39,  // 358: supertag.runtime.v2.Inbox.GetApproval:output_type -> supertag.runtime.v2.Approval
+	42,  // 359: supertag.runtime.v2.Inbox.ListApprovals:output_type -> supertag.runtime.v2.ListApprovalsResponse
+	39,  // 360: supertag.runtime.v2.Inbox.DecideApproval:output_type -> supertag.runtime.v2.Approval
+	52,  // 361: supertag.runtime.v2.WorkSessions.Get:output_type -> supertag.runtime.v2.WorkSession
+	59,  // 362: supertag.runtime.v2.WorkSessions.List:output_type -> supertag.runtime.v2.ListWorkSessionsResponse
+	52,  // 363: supertag.runtime.v2.AttemptWorkSessions.Start:output_type -> supertag.runtime.v2.WorkSession
+	52,  // 364: supertag.runtime.v2.AttemptWorkSessions.Continue:output_type -> supertag.runtime.v2.WorkSession
+	53,  // 365: supertag.runtime.v2.AttemptWorkSessions.Ask:output_type -> supertag.runtime.v2.WorkSessionQuestion
+	209, // 366: supertag.runtime.v2.Teams.CreateTeam:output_type -> supertag.runtime.v2.Team
+	209, // 367: supertag.runtime.v2.Teams.GetTeam:output_type -> supertag.runtime.v2.Team
+	213, // 368: supertag.runtime.v2.Teams.ListTeams:output_type -> supertag.runtime.v2.ListTeamsResponse
+	209, // 369: supertag.runtime.v2.Teams.UpdateTeam:output_type -> supertag.runtime.v2.Team
+	209, // 370: supertag.runtime.v2.Teams.DeleteTeam:output_type -> supertag.runtime.v2.Team
+	219, // 371: supertag.runtime.v2.Teams.ListWorkstreamPosts:output_type -> supertag.runtime.v2.ListWorkstreamPostsResponse
+	221, // 372: supertag.runtime.v2.AttemptWorkstreams.ReadAttemptWorkstream:output_type -> supertag.runtime.v2.ReadAttemptWorkstreamResponse
+	223, // 373: supertag.runtime.v2.AttemptWorkstreams.PostAttemptWorkstream:output_type -> supertag.runtime.v2.PostAttemptWorkstreamResponse
+	73,  // 374: supertag.runtime.v2.Mailbox.ListMessages:output_type -> supertag.runtime.v2.ListMailboxMessagesResponse
+	68,  // 375: supertag.runtime.v2.Mailbox.ChangeGrant:output_type -> supertag.runtime.v2.ChangeMailboxGrantResponse
+	71,  // 376: supertag.runtime.v2.Mailbox.ListGrants:output_type -> supertag.runtime.v2.ListMailboxGrantsResponse
+	73,  // 377: supertag.runtime.v2.AttemptMailbox.ReadMailbox:output_type -> supertag.runtime.v2.ListMailboxMessagesResponse
+	66,  // 378: supertag.runtime.v2.AttemptMailbox.SendMessage:output_type -> supertag.runtime.v2.SendTagMessageResponse
+	124, // 379: supertag.runtime.v2.WorkerHost.RegisterHost:output_type -> supertag.runtime.v2.HostRecord
+	76,  // 380: supertag.runtime.v2.WorkerHost.ReportHost:output_type -> supertag.runtime.v2.WorkerHostStatus
+	156, // 381: supertag.runtime.v2.WorkerHost.ClaimTask:output_type -> supertag.runtime.v2.ClaimTaskResponse
+	147, // 382: supertag.runtime.v2.WorkerHost.StartTask:output_type -> supertag.runtime.v2.Task
+	147, // 383: supertag.runtime.v2.WorkerHost.InspectAttempt:output_type -> supertag.runtime.v2.Task
+	51,  // 384: supertag.runtime.v2.WorkerHost.GetAttemptCapabilities:output_type -> supertag.runtime.v2.AttemptCapabilities
+	178, // 385: supertag.runtime.v2.WorkerHost.GetAttemptHistory:output_type -> supertag.runtime.v2.AttemptHistory
+	183, // 386: supertag.runtime.v2.WorkerHost.GetContextPins:output_type -> supertag.runtime.v2.ContextResolutionManifest
+	183, // 387: supertag.runtime.v2.WorkerHost.CommitContextResolution:output_type -> supertag.runtime.v2.ContextResolutionManifest
+	160, // 388: supertag.runtime.v2.WorkerHost.RenewAttempt:output_type -> supertag.runtime.v2.AttemptAuthority
+	163, // 389: supertag.runtime.v2.WorkerHost.GetAttemptResolution:output_type -> supertag.runtime.v2.GetAttemptResolutionResponse
+	165, // 390: supertag.runtime.v2.WorkerHost.ReportAttemptUsage:output_type -> supertag.runtime.v2.ReportAttemptUsageResponse
+	171, // 391: supertag.runtime.v2.WorkerHost.AppendEvent:output_type -> supertag.runtime.v2.TaskEvent
+	49,  // 392: supertag.runtime.v2.WorkerHost.AskQuestion:output_type -> supertag.runtime.v2.ObjectiveQuestion
+	147, // 393: supertag.runtime.v2.WorkerHost.FinishTask:output_type -> supertag.runtime.v2.Task
+	114, // 394: supertag.runtime.v2.LiveInputs.QueueInput:output_type -> supertag.runtime.v2.LiveInput
+	114, // 395: supertag.runtime.v2.LiveInputs.GetInput:output_type -> supertag.runtime.v2.LiveInput
+	114, // 396: supertag.runtime.v2.LiveInputs.ResolveInput:output_type -> supertag.runtime.v2.LiveInput
+	116, // 397: supertag.runtime.v2.AttemptInputs.TakeInput:output_type -> supertag.runtime.v2.TakeInputResponse
+	114, // 398: supertag.runtime.v2.AttemptInputs.SettleInput:output_type -> supertag.runtime.v2.LiveInput
+	124, // 399: supertag.runtime.v2.HostEnrollment.EnrollHost:output_type -> supertag.runtime.v2.HostRecord
+	124, // 400: supertag.runtime.v2.HostDirectory.Enroll:output_type -> supertag.runtime.v2.HostRecord
+	124, // 401: supertag.runtime.v2.HostDirectory.Authenticate:output_type -> supertag.runtime.v2.HostRecord
+	147, // 402: supertag.runtime.v2.Connector.AcceptEvent:output_type -> supertag.runtime.v2.Task
+	236, // 403: supertag.runtime.v2.Connector.AcceptSlackEvent:output_type -> supertag.runtime.v2.AcceptSlackEventResponse
+	238, // 404: supertag.runtime.v2.Connector.AcceptGithubEvent:output_type -> supertag.runtime.v2.AcceptGithubEventResponse
+	240, // 405: supertag.runtime.v2.Connector.AcceptLinearEvent:output_type -> supertag.runtime.v2.AcceptLinearEventResponse
+	242, // 406: supertag.runtime.v2.Connector.AcceptLarkEvent:output_type -> supertag.runtime.v2.AcceptLarkEventResponse
+	244, // 407: supertag.runtime.v2.Connector.AcceptMicrosoftTeamsActivity:output_type -> supertag.runtime.v2.AcceptMicrosoftTeamsActivityResponse
+	246, // 408: supertag.runtime.v2.Connector.GetMicrosoftTeamsReplyRoute:output_type -> supertag.runtime.v2.MicrosoftTeamsReplyRoute
+	249, // 409: supertag.runtime.v2.Connector.ClaimReply:output_type -> supertag.runtime.v2.ClaimReplyResponse
+	252, // 410: supertag.runtime.v2.Connector.RenewReply:output_type -> supertag.runtime.v2.ReplyLease
+	247, // 411: supertag.runtime.v2.Connector.SettleReply:output_type -> supertag.runtime.v2.Reply
+	187, // 412: supertag.runtime.v2.Transfers.UploadCheckpoint:output_type -> supertag.runtime.v2.CheckpointReference
+	191, // 413: supertag.runtime.v2.Transfers.DownloadCheckpoint:output_type -> supertag.runtime.v2.CheckpointDownload
+	196, // 414: supertag.runtime.v2.Transfers.UploadWorkspace:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
+	200, // 415: supertag.runtime.v2.Transfers.DownloadWorkspace:output_type -> supertag.runtime.v2.WorkspaceDownload
+	200, // 416: supertag.runtime.v2.Transfers.DownloadWorkspaceArtifact:output_type -> supertag.runtime.v2.WorkspaceDownload
+	200, // 417: supertag.runtime.v2.Transfers.DownloadReviewArtifact:output_type -> supertag.runtime.v2.WorkspaceDownload
+	194, // 418: supertag.runtime.v2.Transfers.DownloadWorkspaceSource:output_type -> supertag.runtime.v2.GithubWorkspaceDownload
+	188, // 419: supertag.runtime.v2.CheckpointDirectory.GetCheckpoint:output_type -> supertag.runtime.v2.GetCheckpointResponse
+	187, // 420: supertag.runtime.v2.CheckpointDirectory.ReserveCheckpoint:output_type -> supertag.runtime.v2.CheckpointReference
+	187, // 421: supertag.runtime.v2.CheckpointDirectory.CommitCheckpoint:output_type -> supertag.runtime.v2.CheckpointReference
+	261, // 422: supertag.runtime.v2.WorkspaceDirectory.GetSource:output_type -> supertag.runtime.v2.GithubWorkspace
+	198, // 423: supertag.runtime.v2.WorkspaceDirectory.GetContinuation:output_type -> supertag.runtime.v2.WorkspaceContinuation
+	196, // 424: supertag.runtime.v2.WorkspaceDirectory.ReserveDelivery:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
+	196, // 425: supertag.runtime.v2.WorkspaceDirectory.CommitDelivery:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
+	196, // 426: supertag.runtime.v2.WorkspaceDirectory.GetArtifact:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
+	196, // 427: supertag.runtime.v2.WorkspaceDirectory.GetReviewArtifact:output_type -> supertag.runtime.v2.WorkspaceDeliveryReference
+	179, // 428: supertag.runtime.v2.Harness.Attach:output_type -> supertag.runtime.v2.HarnessRun
+	175, // 429: supertag.runtime.v2.Harness.ConfirmExecutionLimits:output_type -> supertag.runtime.v2.ConfirmExecutionLimitsResponse
+	116, // 430: supertag.runtime.v2.Harness.TakeLiveInput:output_type -> supertag.runtime.v2.TakeInputResponse
+	114, // 431: supertag.runtime.v2.Harness.SettleLiveInput:output_type -> supertag.runtime.v2.LiveInput
+	171, // 432: supertag.runtime.v2.Harness.Publish:output_type -> supertag.runtime.v2.TaskEvent
+	165, // 433: supertag.runtime.v2.Harness.ReportUsage:output_type -> supertag.runtime.v2.ReportAttemptUsageResponse
+	205, // 434: supertag.runtime.v2.Harness.Complete:output_type -> supertag.runtime.v2.HarnessCompleteResponse
+	89,  // 435: supertag.runtime.v2.HarnessWorkspace.Execute:output_type -> supertag.runtime.v2.HarnessWorkspaceResult
+	93,  // 436: supertag.runtime.v2.RemoteWorkspaceProvider.Allocate:output_type -> supertag.runtime.v2.RemoteWorkspaceAllocation
+	96,  // 437: supertag.runtime.v2.RemoteWorkspaceProvider.Stage:output_type -> supertag.runtime.v2.RemoteWorkspaceStageResponse
+	98,  // 438: supertag.runtime.v2.RemoteWorkspaceProvider.Capture:output_type -> supertag.runtime.v2.RemoteWorkspaceCaptureChunk
+	100, // 439: supertag.runtime.v2.RemoteWorkspaceProvider.Stop:output_type -> supertag.runtime.v2.RemoteWorkspaceStopResponse
+	49,  // 440: supertag.runtime.v2.HarnessQuestions.AskQuestion:output_type -> supertag.runtime.v2.ObjectiveQuestion
+	221, // 441: supertag.runtime.v2.HarnessWorkstreams.Read:output_type -> supertag.runtime.v2.ReadAttemptWorkstreamResponse
+	223, // 442: supertag.runtime.v2.HarnessWorkstreams.Post:output_type -> supertag.runtime.v2.PostAttemptWorkstreamResponse
+	73,  // 443: supertag.runtime.v2.HarnessMailbox.Read:output_type -> supertag.runtime.v2.ListMailboxMessagesResponse
+	66,  // 444: supertag.runtime.v2.HarnessMailbox.SendMessage:output_type -> supertag.runtime.v2.SendTagMessageResponse
+	110, // 445: supertag.runtime.v2.HarnessMailbox.ReadReviewPatch:output_type -> supertag.runtime.v2.HarnessReviewPatch
+	52,  // 446: supertag.runtime.v2.HarnessWorkSessions.Start:output_type -> supertag.runtime.v2.WorkSession
+	52,  // 447: supertag.runtime.v2.HarnessWorkSessions.Continue:output_type -> supertag.runtime.v2.WorkSession
+	53,  // 448: supertag.runtime.v2.HarnessWorkSessions.Ask:output_type -> supertag.runtime.v2.WorkSessionQuestion
+	321, // [321:449] is the sub-list for method output_type
+	193, // [193:321] is the sub-list for method input_type
+	193, // [193:193] is the sub-list for extension type_name
+	193, // [193:193] is the sub-list for extension extendee
+	0,   // [0:193] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_runtime_proto_init() }
@@ -19319,6 +19492,7 @@ func file_supertag_runtime_v2_runtime_proto_init() {
 		return
 	}
 	file_supertag_runtime_v2_policy_proto_init()
+	file_supertag_runtime_v2_github_workspaces_proto_init()
 	file_supertag_runtime_v2_runtime_proto_msgTypes[1].OneofWrappers = []any{
 		(*WatchEvent_Heartbeat)(nil),
 		(*WatchEvent_Resync)(nil),
@@ -19387,38 +19561,42 @@ func file_supertag_runtime_v2_runtime_proto_init() {
 		(*CheckpointDownload_Reference)(nil),
 		(*CheckpointDownload_Chunk)(nil),
 	}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[168].OneofWrappers = []any{
+	file_supertag_runtime_v2_runtime_proto_msgTypes[165].OneofWrappers = []any{
+		(*GithubWorkspaceDownload_Reference)(nil),
+		(*GithubWorkspaceDownload_Chunk)(nil),
+	}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[170].OneofWrappers = []any{
 		(*WorkspaceUpload_Begin)(nil),
 		(*WorkspaceUpload_PatchChunk)(nil),
 		(*WorkspaceUpload_BundleChunk)(nil),
 	}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[169].OneofWrappers = []any{
+	file_supertag_runtime_v2_runtime_proto_msgTypes[171].OneofWrappers = []any{
 		(*WorkspaceDownload_Reference)(nil),
 		(*WorkspaceDownload_Chunk)(nil),
 	}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[175].OneofWrappers = []any{}
 	file_supertag_runtime_v2_runtime_proto_msgTypes[177].OneofWrappers = []any{}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[178].OneofWrappers = []any{}
 	file_supertag_runtime_v2_runtime_proto_msgTypes[179].OneofWrappers = []any{}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[184].OneofWrappers = []any{}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[187].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[180].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[181].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[186].OneofWrappers = []any{}
 	file_supertag_runtime_v2_runtime_proto_msgTypes[189].OneofWrappers = []any{}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[198].OneofWrappers = []any{}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[202].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[191].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[200].OneofWrappers = []any{}
 	file_supertag_runtime_v2_runtime_proto_msgTypes[204].OneofWrappers = []any{}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[210].OneofWrappers = []any{}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[216].OneofWrappers = []any{}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[219].OneofWrappers = []any{}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[223].OneofWrappers = []any{}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[224].OneofWrappers = []any{}
-	file_supertag_runtime_v2_runtime_proto_msgTypes[227].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[206].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[212].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[218].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[221].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[225].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[226].OneofWrappers = []any{}
+	file_supertag_runtime_v2_runtime_proto_msgTypes[229].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_runtime_proto_rawDesc), len(file_supertag_runtime_v2_runtime_proto_rawDesc)),
 			NumEnums:      29,
-			NumMessages:   228,
+			NumMessages:   230,
 			NumExtensions: 0,
 			NumServices:   27,
 		},

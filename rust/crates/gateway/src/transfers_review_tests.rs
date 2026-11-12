@@ -52,6 +52,12 @@ impl HostDirectory for Directory {
 
 #[tonic::async_trait]
 impl WorkspaceDirectory for Directory {
+    async fn get_source(
+        &self,
+        _: Request<InspectAttemptRequest>,
+    ) -> Result<Response<GithubWorkspace>, Status> {
+        Err(Status::unimplemented("review artifact fixture"))
+    }
     async fn get_review_artifact(
         &self,
         request: Request<GetReviewArtifactRequest>,

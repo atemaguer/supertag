@@ -4,6 +4,7 @@ mod checkpoints;
 mod commit_reviews;
 mod context;
 mod conversations;
+mod github_workspaces;
 mod history;
 mod inbox;
 mod inputs;
@@ -405,10 +406,10 @@ impl worker_host_server::WorkerHost for ControlPlane {
         Ok(Response::new(ClaimTaskResponse {
             assignment: self
                 .store
-                .claim_task_with_profile(
+                .claim_task_with_sources(
                     &principal,
                     &input.operation_id,
-                    &input.workspace_ids,
+                    (&input.workspace_ids, &input.gateway_workspace_ids),
                     harness,
                     &input.context_contracts,
                     input.execution_profile.as_ref(),
@@ -800,6 +801,7 @@ mod tests {
             operation_id: "claim".into(),
             context_contracts: vec![],
             execution_profile: None,
+            gateway_workspace_ids: vec![],
         };
         assert_eq!(
             cp.claim_task(

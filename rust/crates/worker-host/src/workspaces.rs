@@ -2,7 +2,7 @@
 use std::{
     fs::{self, OpenOptions},
     io::{Read, Write},
-    os::unix::fs::OpenOptionsExt,
+    os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -29,7 +29,13 @@ use crate::{checkpoints::Transfers, journal::Attempt, request};
 #[derive(Clone, Debug)]
 pub struct WorkspaceMapping {
     pub workspace_id: String,
-    pub source: PathBuf,
+    pub source: WorkspaceSource,
+}
+
+#[derive(Clone, Debug)]
+pub enum WorkspaceSource {
+    Local(PathBuf),
+    Gateway,
 }
 
 /// Passed only to the adapter; it never contains the operator's source path.
@@ -64,8 +70,10 @@ impl Workspaces {
                 );
                 // An unavailable source cannot be advertised for new work, but
                 // must not prevent recovery cleanup from recorded private state.
-                if let Ok(source) = mapping.source.canonicalize() {
-                    mapping.source = source;
+                if let WorkspaceSource::Local(path) = &mapping.source
+                    && let Ok(source) = path.canonicalize()
+                {
+                    mapping.source = WorkspaceSource::Local(source);
                 }
                 Ok(mapping)
             })
@@ -79,7 +87,18 @@ impl Workspaces {
     pub fn ids(&self) -> Vec<String> {
         self.mapping
             .iter()
-            .filter(|mapping| mapping.source.is_dir())
+            .filter(|mapping| match &mapping.source {
+                WorkspaceSource::Local(source) => source.is_dir(),
+                WorkspaceSource::Gateway => false,
+            })
+            .map(|mapping| mapping.workspace_id.clone())
+            .collect()
+    }
+
+    pub fn gateway_ids(&self) -> Vec<String> {
+        self.mapping
+            .iter()
+            .filter(|mapping| matches!(mapping.source, WorkspaceSource::Gateway))
             .map(|mapping| mapping.workspace_id.clone())
             .collect()
     }
@@ -96,9 +115,23 @@ impl Workspaces {
         );
         Workspace::open(WorkspaceConfig {
             state_dir: self.directory.join(identity),
-            source: mapping.source.clone(),
+            source: match &mapping.source {
+                WorkspaceSource::Local(source) => source.clone(),
+                WorkspaceSource::Gateway => self
+                    .source_directory(workspace_id, base_commit)
+                    .join("repository.git"),
+            },
             base_commit: base_commit.to_owned(),
         })
+    }
+
+    fn source_directory(&self, workspace_id: &str, base_commit: &str) -> PathBuf {
+        self.directory.join("sources").join(format!(
+            "{:x}",
+            Sha256::digest(
+                serde_json::to_vec(&(workspace_id, base_commit)).expect("string pair serializes")
+            )
+        ))
     }
 
     pub async fn prepare(
@@ -112,6 +145,51 @@ impl Workspaces {
         let Some(spec) = &task.workspace else {
             return Ok(None);
         };
+        let mapping = self
+            .mapping
+            .as_ref()
+            .filter(|mapping| mapping.workspace_id == spec.workspace_id)
+            .context("Task workspace is not configured on this Worker Host")?;
+        match (&mapping.source, &spec.github_source) {
+            (WorkspaceSource::Gateway, Some(expected)) => {
+                let (reference, bytes) = tokio::select! {
+                    result = transfers.download_source(attempt, token) => result?,
+                    _ = cancel.cancelled() => return Err(Status::cancelled("source download cancelled").into()),
+                };
+                ensure!(
+                    reference.workspace.as_ref() == Some(expected)
+                        && expected.workspace_id == spec.workspace_id
+                        && expected
+                            .source
+                            .as_ref()
+                            .is_some_and(|source| source.commit_sha == spec.base_commit),
+                    "Gateway returned a different Workspace source"
+                );
+                fs::DirBuilder::new()
+                    .recursive(true)
+                    .mode(0o700)
+                    .create(&self.directory)?;
+                let mut file = NamedTempFile::new_in(self.directory.canonicalize()?)?;
+                file.write_all(&bytes)?;
+                file.as_file().sync_all()?;
+                let blob = reference.bundle.context("source download has no bundle")?;
+                supertag_workspaces::source::materialize(
+                    &self.source_directory(&spec.workspace_id, &spec.base_commit),
+                    &TransferArtifact {
+                        path: file.path().to_owned(),
+                        sha256: blob.sha256,
+                        byte_length: blob.byte_length,
+                    },
+                    &spec.base_commit,
+                    cancel,
+                )
+                .await?;
+            }
+            (WorkspaceSource::Local(_), _) => {}
+            _ => {
+                anyhow::bail!("Workspace source does not match this Host's configured source mode")
+            }
+        }
         let workspace = self.open(&spec.workspace_id, &spec.base_commit)?;
         let previous = tokio::select! {
             previous = transfers.download_workspace(attempt, token) => previous?,
@@ -284,6 +362,55 @@ fn read_blob(path: &Path, reference: &BlobReference) -> Result<Vec<u8>, Status> 
 }
 
 impl Transfers {
+    async fn download_source(
+        &self,
+        attempt: &Attempt,
+        token: &str,
+    ) -> Result<(GithubWorkspaceBundle, Vec<u8>), Status> {
+        let mut request = request(attempt.inspect(), token)
+            .map_err(|_| Status::internal("cannot authenticate source download"))?;
+        request.set_timeout(Duration::from_secs(120));
+        let mut stream =
+            TransfersClient::with_interceptor(self.channel.clone(), self.headers.clone())
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .download_workspace_source(request)
+                .await?
+                .into_inner();
+        let reference = match stream.message().await? {
+            Some(GithubWorkspaceDownload {
+                part: Some(github_workspace_download::Part::Reference(reference)),
+            }) => reference,
+            _ => return Err(Status::data_loss("source download has no receipt")),
+        };
+        let blob = reference
+            .bundle
+            .as_ref()
+            .ok_or_else(|| Status::data_loss("source receipt has no bundle"))?;
+        if blob.byte_length == 0 || blob.byte_length > MAX_WORKSPACE_BLOB_BYTES as u64 {
+            return Err(Status::data_loss("source bundle size is invalid"));
+        }
+        let mut bytes = Vec::new();
+        while let Some(message) = stream.message().await? {
+            let Some(github_workspace_download::Part::Chunk(chunk)) = message.part else {
+                return Err(Status::data_loss("unexpected source download record"));
+            };
+            if chunk.is_empty()
+                || chunk.len() > CHECKPOINT_CHUNK_BYTES
+                || bytes.len() as u64 + chunk.len() as u64 > blob.byte_length
+            {
+                return Err(Status::data_loss("invalid source bundle chunk"));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        if bytes.len() as u64 != blob.byte_length
+            || format!("{:x}", Sha256::digest(&bytes)) != blob.sha256
+        {
+            return Err(Status::data_loss(
+                "source bundle does not match its receipt",
+            ));
+        }
+        Ok((reference, bytes))
+    }
     pub(crate) async fn upload_workspace(
         &self,
         attempt: &Attempt,
@@ -433,7 +560,7 @@ mod tests {
         let state = root.path().join("host");
         let mapping = WorkspaceMapping {
             workspace_id: "project".into(),
-            source: source.clone(),
+            source: WorkspaceSource::Local(source.clone()),
         };
         let workspaces = Workspaces::new(&state, Some(mapping.clone()))?;
         assert_eq!(workspaces.ids(), ["project"]);

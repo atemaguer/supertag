@@ -172,6 +172,7 @@ async fn contract(url: &str) {
             Some(WorkspaceSpec {
                 workspace_id: "repo".into(),
                 base_commit: BASE.into(),
+                github_source: None,
             }),
         )
         .await
@@ -533,6 +534,7 @@ async fn contract(url: &str) {
             Some(WorkspaceSpec {
                 workspace_id: "repo".into(),
                 base_commit: BASE.into(),
+                github_source: None,
             }),
         )
         .await
@@ -583,6 +585,7 @@ async fn contract(url: &str) {
             Some(WorkspaceSpec {
                 workspace_id: "repo".into(),
                 base_commit: BASE.into(),
+                github_source: None,
             }),
         )
         .await
@@ -888,6 +891,7 @@ async fn gated_request_contract(url: &str) {
             workspace: Some(WorkspaceSpec {
                 workspace_id: "repo".into(),
                 base_commit: BASE.into(),
+                github_source: None,
             }),
             approval_rules: vec![ApprovalRule {
                 action: "mailbox:send".into(),
@@ -994,6 +998,7 @@ async fn gated_request_contract(url: &str) {
             workspace: Some(WorkspaceSpec {
                 workspace_id: "repo".into(),
                 base_commit: BASE.into(),
+                github_source: None,
             }),
             ..Default::default()
         })

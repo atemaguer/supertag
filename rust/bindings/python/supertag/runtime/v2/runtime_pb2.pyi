@@ -1,4 +1,5 @@
 from supertag.runtime.v2 import policy_pb2 as _policy_pb2
+from supertag.runtime.v2 import github_workspaces_pb2 as _github_workspaces_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
@@ -1818,18 +1819,20 @@ class CancelTaskRequest(_message.Message):
     def __init__(self, task_id: _Optional[str] = ...) -> None: ...
 
 class ClaimTaskRequest(_message.Message):
-    __slots__ = ("operation_id", "workspace_ids", "harness_kind", "context_contracts", "execution_profile")
+    __slots__ = ("operation_id", "workspace_ids", "harness_kind", "context_contracts", "execution_profile", "gateway_workspace_ids")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_IDS_FIELD_NUMBER: _ClassVar[int]
     HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
     CONTEXT_CONTRACTS_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_PROFILE_FIELD_NUMBER: _ClassVar[int]
+    GATEWAY_WORKSPACE_IDS_FIELD_NUMBER: _ClassVar[int]
     operation_id: str
     workspace_ids: _containers.RepeatedScalarFieldContainer[str]
     harness_kind: HarnessKind
     context_contracts: _containers.RepeatedCompositeFieldContainer[ContextContract]
     execution_profile: HarnessExecutionProfile
-    def __init__(self, operation_id: _Optional[str] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., context_contracts: _Optional[_Iterable[_Union[ContextContract, _Mapping]]] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ...) -> None: ...
+    gateway_workspace_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, operation_id: _Optional[str] = ..., workspace_ids: _Optional[_Iterable[str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., context_contracts: _Optional[_Iterable[_Union[ContextContract, _Mapping]]] = ..., execution_profile: _Optional[_Union[HarnessExecutionProfile, _Mapping]] = ..., gateway_workspace_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ClaimTaskResponse(_message.Message):
     __slots__ = ("assignment",)
@@ -2206,12 +2209,30 @@ class CheckpointDownload(_message.Message):
     def __init__(self, reference: _Optional[_Union[CheckpointReference, _Mapping]] = ..., chunk: _Optional[bytes] = ...) -> None: ...
 
 class WorkspaceSpec(_message.Message):
-    __slots__ = ("workspace_id", "base_commit")
+    __slots__ = ("workspace_id", "base_commit", "github_source")
     WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
     BASE_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    GITHUB_SOURCE_FIELD_NUMBER: _ClassVar[int]
     workspace_id: str
     base_commit: str
-    def __init__(self, workspace_id: _Optional[str] = ..., base_commit: _Optional[str] = ...) -> None: ...
+    github_source: _github_workspaces_pb2.GithubWorkspace
+    def __init__(self, workspace_id: _Optional[str] = ..., base_commit: _Optional[str] = ..., github_source: _Optional[_Union[_github_workspaces_pb2.GithubWorkspace, _Mapping]] = ...) -> None: ...
+
+class GithubWorkspaceBundle(_message.Message):
+    __slots__ = ("workspace", "bundle")
+    WORKSPACE_FIELD_NUMBER: _ClassVar[int]
+    BUNDLE_FIELD_NUMBER: _ClassVar[int]
+    workspace: _github_workspaces_pb2.GithubWorkspace
+    bundle: BlobReference
+    def __init__(self, workspace: _Optional[_Union[_github_workspaces_pb2.GithubWorkspace, _Mapping]] = ..., bundle: _Optional[_Union[BlobReference, _Mapping]] = ...) -> None: ...
+
+class GithubWorkspaceDownload(_message.Message):
+    __slots__ = ("reference", "chunk")
+    REFERENCE_FIELD_NUMBER: _ClassVar[int]
+    CHUNK_FIELD_NUMBER: _ClassVar[int]
+    reference: GithubWorkspaceBundle
+    chunk: bytes
+    def __init__(self, reference: _Optional[_Union[GithubWorkspaceBundle, _Mapping]] = ..., chunk: _Optional[bytes] = ...) -> None: ...
 
 class BlobReference(_message.Message):
     __slots__ = ("sha256", "byte_length")

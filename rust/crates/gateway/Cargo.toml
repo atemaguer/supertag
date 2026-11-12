@@ -31,6 +31,7 @@ serde_json.workspace = true
 sha2.workspace = true
 subtle.workspace = true
 supertag-protocol.workspace = true
+supertag-workspaces = { path = "../workspaces" }
 tempfile.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true

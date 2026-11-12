@@ -3,6 +3,7 @@ syntax = "proto3";
 package supertag.runtime.v2;
 
 import "supertag/runtime/v2/policy.proto";
+import "supertag/runtime/v2/github_workspaces.proto";
 
 // The Gateway exposes these services to operators and enrolled hosts. The
 // Control Plane serves the same messages on a private authenticated listener.
@@ -646,6 +647,7 @@ service Transfers {
   rpc DownloadWorkspace(InspectAttemptRequest) returns (stream WorkspaceDownload);
   rpc DownloadWorkspaceArtifact(GetWorkspaceArtifactRequest) returns (stream WorkspaceDownload);
   rpc DownloadReviewArtifact(GetReviewArtifactRequest) returns (stream WorkspaceDownload);
+  rpc DownloadWorkspaceSource(InspectAttemptRequest) returns (stream GithubWorkspaceDownload);
 }
 
 // Private authorization and commit for bytes stored by the Gateway.
@@ -657,6 +659,7 @@ service CheckpointDirectory {
 
 // Private authorization and commit for work product stored by the Gateway.
 service WorkspaceDirectory {
+  rpc GetSource(InspectAttemptRequest) returns (GithubWorkspace);
   rpc GetContinuation(InspectAttemptRequest) returns (WorkspaceContinuation);
   rpc ReserveDelivery(WorkspaceDeliveryRequest) returns (WorkspaceDeliveryReference);
   rpc CommitDelivery(WorkspaceDeliveryRequest) returns (WorkspaceDeliveryReference);
@@ -1241,6 +1244,7 @@ message ClaimTaskRequest {
   HarnessKind harness_kind = 3;
   repeated ContextContract context_contracts = 4;
   HarnessExecutionProfile execution_profile = 5;
+  repeated string gateway_workspace_ids = 6;
 }
 
 message ClaimTaskResponse {
@@ -1484,6 +1488,20 @@ message CheckpointDownload {
 message WorkspaceSpec {
   string workspace_id = 1;
   string base_commit = 2;
+  // Set by admission from the catalog, never accepted from PutTag input.
+  GithubWorkspace github_source = 3;
+}
+
+message GithubWorkspaceBundle {
+  GithubWorkspace workspace = 1;
+  BlobReference bundle = 2;
+}
+
+message GithubWorkspaceDownload {
+  oneof part {
+    GithubWorkspaceBundle reference = 1;
+    bytes chunk = 2;
+  }
 }
 
 message BlobReference {

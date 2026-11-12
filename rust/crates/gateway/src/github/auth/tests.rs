@@ -37,6 +37,7 @@ fn app() -> GithubAuthentication {
 
 struct FakeApi {
     requests: AtomicUsize,
+    source_read: AtomicBool,
     mints: AtomicUsize,
     posts: AtomicUsize,
     reject: AtomicBool,
@@ -53,6 +54,7 @@ impl FakeApi {
     fn new(now: i64) -> Self {
         Self {
             requests: AtomicUsize::new(0),
+            source_read: AtomicBool::new(false),
             mints: AtomicUsize::new(0),
             posts: AtomicUsize::new(0),
             reject: AtomicBool::new(false),
@@ -126,7 +128,11 @@ async fn mint(State(api): State<Arc<FakeApi>>, headers: HeaderMap, body: Bytes) 
     api.check_jwt(&headers);
     assert_eq!(
         serde_json::from_slice::<Value>(&body).unwrap(),
-        json!({"repository_ids":[123],"permissions":{"issues":"write"}})
+        if api.source_read.load(Ordering::SeqCst) {
+            json!({"repository_ids":[123],"permissions":{"contents":"read"}})
+        } else {
+            json!({"repository_ids":[123],"permissions":{"issues":"write"}})
+        }
     );
     (
         StatusCode::CREATED,
@@ -546,4 +552,27 @@ async fn lease_fixture() -> Result<(tonic::transport::Channel, tokio::task::Join
             .await?,
         server,
     ))
+}
+
+#[tokio::test]
+async fn source_read_token_is_scoped_and_never_reuses_comment_authority() -> Result<()> {
+    let api = Arc::new(FakeApi::new(now()?));
+    api.source_read.store(true, Ordering::SeqCst);
+    api.response.lock().await["permissions"] = json!({"contents":"read","metadata":"read"});
+    let (url, server) = serve(api.clone()).await?;
+    let auth = Authentication::source_reader(&app(), 123, "acme/project")?;
+    let client = client();
+    assert_eq!(
+        auth.access_token(&client, &url).await?.expose(),
+        "ghs_fixture-installation-token"
+    );
+    auth.access_token(&client, &url).await?;
+    assert_eq!(api.mints.load(Ordering::SeqCst), 1);
+    auth.invalidate().await;
+    api.response.lock().await["permissions"] = json!({"contents":"write","metadata":"read"});
+    assert!(auth.access_token(&client, &url).await.is_err());
+    api.response.lock().await["permissions"] = json!({"issues":"write","metadata":"read"});
+    assert!(auth.access_token(&client, &url).await.is_err());
+    server.abort();
+    Ok(())
 }

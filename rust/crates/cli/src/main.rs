@@ -1,4 +1,5 @@
 mod artifacts;
+mod github_workspaces;
 mod harness;
 mod host_status;
 mod inbox;
@@ -25,7 +26,10 @@ use sha2::{Digest, Sha256};
 use supertag_control_plane::{ControlPlane, OperatorWatch};
 use supertag_gateway::{
     Gateway, GatewayWatch,
-    github::{Github, GithubAppConfig, GithubAuthentication, GithubConfig},
+    github::{
+        Github, GithubAppConfig, GithubAuthentication, GithubConfig,
+        workspaces::{GithubWorkspaceAccount, GithubWorkspaceSources},
+    },
     lark::{Lark, LarkConfig},
     linear::{Linear, LinearConfig},
     microsoft_teams::{MicrosoftTeams, MicrosoftTeamsConfig},
@@ -89,6 +93,13 @@ enum RecoveryDecision {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Manage GitHub Workspace sources pinned to one repository and commit.
+    GithubWorkspace {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: github_workspaces::GithubWorkspaceCommand,
+    },
     /// Inspect connector deliveries and resolve uncertain replies from provider evidence.
     Replies {
         #[command(flatten)]
@@ -188,6 +199,9 @@ enum Command {
         github_listen: Option<SocketAddr>,
         #[arg(long, requires = "github_listen")]
         github_state_directory: Option<PathBuf>,
+        /// Private scratch for GitHub source bundles, using the configured GitHub account.
+        #[arg(long)]
+        github_workspace_directory: Option<PathBuf>,
         #[arg(long, requires = "linear_state_directory")]
         linear_listen: Option<SocketAddr>,
         #[arg(long, requires = "linear_listen")]
@@ -552,6 +566,10 @@ async fn run(command: Command) -> Result<()> {
                 json!({ "messages": messages, "next_cursor": page.next_cursor })
             );
         }
+        Command::GithubWorkspace {
+            connection,
+            command,
+        } => github_workspaces::run(connection, command).await?,
         Command::Team {
             connection,
             command,
@@ -582,6 +600,7 @@ async fn run(command: Command) -> Result<()> {
             slack_state_directory,
             github_listen,
             github_state_directory,
+            github_workspace_directory,
             linear_listen,
             linear_state_directory,
             lark_state_directory,
@@ -595,6 +614,7 @@ async fn run(command: Command) -> Result<()> {
                 GatewayConnectors {
                     slack: slack_listen.zip(slack_state_directory),
                     github: github_listen.zip(github_state_directory),
+                    github_workspace: github_workspace_directory,
                     linear: linear_listen.zip(linear_state_directory),
                     lark: lark_state_directory,
                     microsoft_teams: microsoft_teams_listen.zip(microsoft_teams_state_directory),
@@ -814,6 +834,7 @@ async fn run(command: Command) -> Result<()> {
                 .map(|(workspace_id, base_commit)| WorkspaceSpec {
                     workspace_id,
                     base_commit,
+                    github_source: None,
                 });
             let mut approval_rules = Vec::new();
             for (required, action, operator_ids) in [
@@ -1228,6 +1249,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .add_service(plane.attempt_workstreams_service())
         .add_service(plane.mailbox_service())
         .add_service(plane.inbox_service())
+        .add_service(plane.github_workspaces_service())
         .add_service(plane.policy_service())
         .add_service(plane.surface_policy_service())
         .add_service(plane.work_sessions_service())
@@ -1262,6 +1284,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
 struct GatewayConnectors {
     slack: Option<(SocketAddr, PathBuf)>,
     github: Option<(SocketAddr, PathBuf)>,
+    github_workspace: Option<PathBuf>,
     linear: Option<(SocketAddr, PathBuf)>,
     lark: Option<PathBuf>,
     microsoft_teams: Option<(SocketAddr, PathBuf)>,
@@ -1345,7 +1368,10 @@ async fn gateway(
     health
         .set_serving::<TransfersServer<GatewayTransfers>>()
         .await;
-    let transfers = GatewayTransfers::new(gateway.clone(), checkpoint_directory)?;
+    let mut transfers = GatewayTransfers::new(gateway.clone(), checkpoint_directory)?;
+    if let Some(directory) = connectors.github_workspace {
+        transfers = transfers.with_github_sources(github_workspace_sources(directory)?);
+    }
     health.set_serving::<ObjectivesServer<Gateway>>().await;
     health.set_serving::<LiveInputsServer<Gateway>>().await;
     health.set_serving::<AttemptInputsServer<Gateway>>().await;
@@ -1396,6 +1422,7 @@ async fn gateway(
         .add_service(gateway.attempt_workstreams_service())
         .add_service(gateway.mailbox_service())
         .add_service(gateway.inbox_service())
+        .add_service(gateway.github_workspaces_service())
         .add_service(gateway.policy_service())
         .add_service(gateway.surface_policy_service())
         .add_service(gateway.work_sessions_service())
@@ -1516,6 +1543,35 @@ fn slack_connector(
         return connector.with_test_reply_url(&url);
     }
     Ok(connector)
+}
+
+fn github_workspace_sources(directory: PathBuf) -> Result<GithubWorkspaceSources> {
+    use std::os::unix::fs::DirBuilderExt as _;
+    if !directory.exists() {
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&directory)
+            .context("create private GitHub Workspace directory")?;
+    }
+    let sources = GithubWorkspaceSources::new(
+        GithubWorkspaceAccount {
+            account_id: required_env("SUPERTAG_GITHUB_ACCOUNT_ID")?,
+            repository_id: required_env("SUPERTAG_GITHUB_REPOSITORY_ID")?
+                .parse()
+                .context("invalid GitHub repository ID")?,
+            repository: required_env("SUPERTAG_GITHUB_REPOSITORY")?,
+            authentication: github_authentication()?,
+        },
+        &directory,
+    )?;
+    #[cfg(feature = "test-fixtures")]
+    if let Ok(api) = std::env::var("SUPERTAG_TEST_GITHUB_API_URL") {
+        return sources.with_test_endpoints(
+            api.parse()?,
+            required_env("SUPERTAG_TEST_GITHUB_GIT_URL")?.parse()?,
+        );
+    }
+    Ok(sources)
 }
 
 fn github_connector(
@@ -1792,6 +1848,7 @@ fn print_task(task: &Task) {
             "harness": task.harness_kind().as_str_name(),
             "workspace": task.workspace.as_ref().map(|spec| json!({
                 "workspace_id": spec.workspace_id, "base_commit": spec.base_commit,
+                "github_source": spec.github_source.as_ref().map(|value| json!({"workspace_id":value.workspace_id,"revision":value.revision,"source":value.source.as_ref().map(|source|json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha}))})),
             })),
             "workspace_delivery": task.workspace_delivery.as_ref().map(artifacts::describe),
             "execution_limits": task.execution_limits.as_ref().map(|limits| json!({

@@ -202,10 +202,22 @@ async fn continuation_in(
 pub(crate) fn workspace_from_row(row: &AnyRow) -> Result<Option<WorkspaceSpec>> {
     let id: Option<String> = row.try_get("workspace_id")?;
     let base: Option<String> = row.try_get("workspace_base_commit")?;
+    // Tag rows have no source pin: admission resolves their configured catalog.
+    let bytes = match row.try_get::<Vec<u8>, _>("workspace_github_source") {
+        Ok(bytes) => bytes,
+        Err(sqlx::Error::ColumnNotFound(_)) => Vec::new(),
+        Err(error) => return Err(error.into()),
+    };
+    let github_source = if bytes.is_empty() {
+        None
+    } else {
+        Some(crate::policy::decode(&bytes)?)
+    };
     match (id, base) {
         (Some(workspace_id), Some(base_commit)) => Ok(Some(WorkspaceSpec {
             workspace_id,
             base_commit,
+            github_source,
         })),
         (None, None) => Ok(None),
         _ => Err(sqlx::Error::Protocol("incomplete stored workspace policy".into()).into()),
@@ -234,6 +246,18 @@ fn require_running(row: &AnyRow, now: i64) -> Result<()> {
 
 #[tonic::async_trait]
 impl workspace_directory_server::WorkspaceDirectory for ControlPlane {
+    async fn get_source(
+        &self,
+        request: Request<InspectAttemptRequest>,
+    ) -> std::result::Result<Response<GithubWorkspace>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .get_github_workspace_source(&host, request.get_ref())
+                .await?,
+        ))
+    }
+
     async fn get_review_artifact(
         &self,
         request: Request<GetReviewArtifactRequest>,

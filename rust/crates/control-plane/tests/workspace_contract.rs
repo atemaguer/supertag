@@ -112,6 +112,7 @@ async fn exercise(url: &str) {
     let spec = WorkspaceSpec {
         workspace_id: REPOSITORY.into(),
         base_commit: BASE.into(),
+        github_source: None,
     };
     let tag = store
         .put_tag_with_workspace(

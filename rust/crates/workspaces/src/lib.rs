@@ -7,6 +7,7 @@
 mod git;
 pub mod packages;
 mod paths;
+pub mod source;
 mod transfer;
 pub use transfer::{PreparedExport, TransferArtifact};
 

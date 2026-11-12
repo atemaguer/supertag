@@ -294,7 +294,7 @@ pub(super) async fn claim_candidate(
     now: i64,
     host_id: &str,
     all_tags: i64,
-    workspace_ids: &[String],
+    (workspace_ids, gateway_workspace_ids): (&[String], &[String]),
     (harness, profile): (HarnessKind, &HarnessExecutionProfile),
     context_contracts: &[supertag_protocol::v2::ContextContract],
 ) -> Result<Option<(String, AttemptExecutionSelection)>> {
@@ -316,10 +316,13 @@ pub(super) async fn claim_candidate(
         for candidate in candidates {
             let id: String = candidate.try_get("task_id")?;
             let task = task_in(transaction, &id).await?;
-            let has_workspace = task
-                .workspace
-                .as_ref()
-                .is_none_or(|spec| workspace_ids.binary_search(&spec.workspace_id).is_ok());
+            let has_workspace = task.workspace.as_ref().is_none_or(|spec| {
+                workspace_ids.binary_search(&spec.workspace_id).is_ok()
+                    || (spec.github_source.is_some()
+                        && gateway_workspace_ids
+                            .binary_search(&spec.workspace_id)
+                            .is_ok())
+            });
             if let Some(attempt_execution) = execution::resolve_attempt(&task, harness, profile)
                 && has_workspace
                 && supports_execution_limits(harness, &task)

@@ -69,7 +69,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 39;
+        const SCHEMA_VERSION: i64 = 40;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -159,6 +159,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0037_accepted_execution.sql"),
                 include_str!("../migrations/sqlite/0038_reply_recovery.sql"),
                 include_str!("../migrations/sqlite/0039_tag_retirement.sql"),
+                include_str!("../migrations/sqlite/0040_github_workspaces.sql"),
             ]
         } else {
             [
@@ -201,6 +202,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0037_accepted_execution.sql"),
                 include_str!("../migrations/postgresql/0038_reply_recovery.sql"),
                 include_str!("../migrations/postgresql/0039_tag_retirement.sql"),
+                include_str!("../migrations/postgresql/0040_github_workspaces.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -309,7 +311,9 @@ impl Store {
             crate::tags::validate_display_name(display_name)?;
         }
         if let Some(spec) = &workspace
-            && (!valid_workspace_id(&spec.workspace_id) || !valid_git_commit(&spec.base_commit))
+            && (!valid_workspace_id(&spec.workspace_id)
+                || !valid_git_commit(&spec.base_commit)
+                || spec.github_source.is_some())
         {
             return Err(invalid("workspace ID and full Git base commit required"));
         }
@@ -510,6 +514,26 @@ impl Store {
         context_contracts: &[ContextContract],
         execution_profile: Option<&HarnessExecutionProfile>,
     ) -> Result<Option<Assignment>> {
+        self.claim_task_with_sources(
+            host,
+            operation_id,
+            (workspace_ids, &[]),
+            harness,
+            context_contracts,
+            execution_profile,
+        )
+        .await
+    }
+
+    pub async fn claim_task_with_sources(
+        &self,
+        host: &HostAuthority,
+        operation_id: &str,
+        (workspace_ids, gateway_workspace_ids): (&[String], &[String]),
+        harness: HarnessKind,
+        context_contracts: &[ContextContract],
+        execution_profile: Option<&HarnessExecutionProfile>,
+    ) -> Result<Option<Assignment>> {
         name("operation ID", operation_id)?;
         let profile = execution::normalize_profile(execution_profile)?;
         let profile_bytes = profile.encode_to_vec();
@@ -520,6 +544,17 @@ impl Store {
         workspace_ids.sort();
         workspace_ids.dedup();
         let workspace_scope = serde_json::to_string(&workspace_ids)?;
+        if gateway_workspace_ids.len() > 128
+            || gateway_workspace_ids
+                .iter()
+                .any(|id| !valid_workspace_id(id))
+        {
+            return Err(invalid("invalid Gateway workspace capabilities"));
+        }
+        let mut gateway_workspace_ids = gateway_workspace_ids.to_vec();
+        gateway_workspace_ids.sort();
+        gateway_workspace_ids.dedup();
+        let gateway_workspace_scope = serde_json::to_string(&gateway_workspace_ids)?;
         if context_contracts.len() > 64 {
             return Err(invalid("too many Worker Host Context Item capabilities"));
         }
@@ -548,11 +583,12 @@ impl Store {
         crate::inputs::sweep_in(&mut transaction, now).await?;
         crate::mailbox::sweep_in(&mut transaction).await?;
         crate::work_sessions::reports::sweep_in(&mut transaction, now).await?;
-        let prior = sqlx::query("SELECT task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope, execution_profile, attempt_execution FROM supertag_v2_claims WHERE principal = $1 AND operation_id = $2")
+        let prior = sqlx::query("SELECT task_id, attempt_id, lease_token, workspace_scope, gateway_workspace_scope, harness_kind, context_scope, execution_profile, attempt_execution FROM supertag_v2_claims WHERE principal = $1 AND operation_id = $2")
             .bind(&host.principal).bind(operation_id).fetch_optional(&mut *transaction).await?;
         if let Some(prior) = prior {
             let previous: Option<String> = prior.try_get("workspace_scope")?;
             if previous.as_deref().unwrap_or("[]") != workspace_scope
+                || prior.try_get::<String, _>("gateway_workspace_scope")? != gateway_workspace_scope
                 || prior.try_get::<i64, _>("harness_kind")? != harness as i64
                 || prior.try_get::<String, _>("context_scope")? != context_scope
                 || prior
@@ -602,7 +638,7 @@ impl Store {
             now,
             host.id(),
             all_tags,
-            &workspace_ids,
+            (&workspace_ids, &gateway_workspace_ids),
             (harness, &profile),
             &contracts,
         )
@@ -618,8 +654,8 @@ impl Store {
         sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, host_generation = $4, lease_token = $5, lease_expires_at_ms = $6, event_sequence_base = next_sequence - 1, attempt_execution = $7 WHERE task_id = $8")
             .bind(TaskState::Claimed as i64).bind(&attempt).bind(&host.principal).bind(host.generation).bind(&lease)
             .bind(authority::lease_deadline(now)).bind(&attempt_execution).bind(&id).execute(&mut *transaction).await?;
-        sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope, execution_profile, attempt_execution) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)")
-            .bind(&host.principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).bind(workspace_scope).bind(harness as i64).bind(context_scope).bind(profile_bytes).bind(attempt_execution).execute(&mut *transaction).await?;
+        sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope, execution_profile, attempt_execution, gateway_workspace_scope) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)")
+            .bind(&host.principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).bind(workspace_scope).bind(harness as i64).bind(context_scope).bind(profile_bytes).bind(attempt_execution).bind(gateway_workspace_scope).execute(&mut *transaction).await?;
         let task = task_in(&mut transaction, &id).await?;
         transaction.commit().await?;
         Ok(Some(Assignment {
@@ -1097,7 +1133,7 @@ async fn insert_task_options(
         )?;
     }
     let harness = i64::from(accepted.policy.harness_kind);
-    if let Some(previous) = sqlx::query("SELECT workspace_id,workspace_base_commit,harness_kind FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 ORDER BY accepted_order LIMIT 1")
+    if let Some(previous) = sqlx::query("SELECT workspace_id,workspace_base_commit,workspace_github_source,harness_kind FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 ORDER BY accepted_order LIMIT 1")
         .bind(tag_id).bind(session_id).fetch_optional(&mut **transaction).await?
         && (crate::workspaces::workspace_from_row(&previous)? != accepted.workspace || previous.try_get::<i64,_>("harness_kind")? != harness)
     {
@@ -1142,7 +1178,7 @@ async fn tag_policy_in(
         .await?
         .ok_or_else(|| StoreError::NotFound("Tag was not found".into()))?;
     crate::tags::ensure_active(&tag, tag_id)?;
-    let workspace = crate::workspaces::workspace_from_row(&tag)?;
+    let mut workspace = crate::workspaces::workspace_from_row(&tag)?;
     let instructions: String = tag.try_get("instructions")?;
     let allowed_actions: Vec<String> =
         serde_json::from_str(&tag.try_get::<String, _>("allowed_actions")?)?;
@@ -1162,6 +1198,7 @@ async fn tag_policy_in(
         surface,
     )
     .await?;
+    crate::github_workspaces::admission_in(transaction, &mut workspace, &policy.snapshot).await?;
     Ok(AcceptedTag {
         revision: tag.try_get("revision")?,
         workspace,
@@ -1340,7 +1377,7 @@ async fn insert_accepted_task(
     } = accepted;
     let selection = execution::select(&policy.snapshot, requested_execution)?;
     let id = Uuid::new_v4().to_string();
-    sqlx::query("INSERT INTO supertag_v2_tasks (task_id, tag_id, session_id, prompt, instructions, allowed_actions, tag_revision, state, accepted_order, workspace_id, workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest,execution_selection) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)")
+    sqlx::query("INSERT INTO supertag_v2_tasks (task_id, tag_id, session_id, prompt, instructions, allowed_actions, tag_revision, state, accepted_order, workspace_id, workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest,execution_selection,workspace_github_source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)")
         .bind(&id).bind(tag_id).bind(session_id).bind(prompt)
         .bind(policy.instructions).bind(serde_json::to_string(&policy.allowed_actions)?)
         .bind(revision).bind(TaskState::Queued as i64).bind(order)
@@ -1351,6 +1388,7 @@ async fn insert_accepted_task(
         .bind(policy.snapshot.encode_to_vec())
         .bind(policy.effective_digest)
         .bind(selection.encode_to_vec())
+        .bind(workspace.as_ref().and_then(|spec| spec.github_source.as_ref()).map(Message::encode_to_vec).unwrap_or_default())
         .execute(&mut **transaction).await?;
     bounded_task_in(transaction, &id).await
 }
@@ -1368,9 +1406,9 @@ pub(crate) async fn insert_task_from_snapshot(
     sqlx::query(
         "INSERT INTO supertag_v2_tasks
            (task_id,tag_id,session_id,prompt,instructions,allowed_actions,tag_revision,state,accepted_order,
-            workspace_id,workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest,execution_limits,execution_selection)
+            workspace_id,workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest,execution_limits,execution_selection,workspace_github_source)
          SELECT $1, tag_id, $2, $3, instructions, allowed_actions, tag_revision, $4, $5,
-                workspace_id, workspace_base_commit, harness_kind, approval_rules, policy_snapshot, policy_effective_digest,execution_limits,execution_selection
+                workspace_id, workspace_base_commit, harness_kind, approval_rules, policy_snapshot, policy_effective_digest,execution_limits,execution_selection,workspace_github_source
          FROM supertag_v2_tasks WHERE task_id=$6",
     )
     .bind(&id).bind(session_id).bind(prompt).bind(TaskState::Queued as i64).bind(order)

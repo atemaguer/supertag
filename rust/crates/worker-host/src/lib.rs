@@ -14,7 +14,7 @@ pub use credentials::{provider_environment, provider_environment_for, validate_o
 pub use enrollment::enroll;
 pub use guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
 pub use remote_provider::{ProviderAuthority, ProviderConfig};
-pub use workspaces::{WORKSPACE_DIRECTORY, WorkspaceMapping};
+pub use workspaces::{WORKSPACE_DIRECTORY, WorkspaceMapping, WorkspaceSource};
 
 use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
 
@@ -145,6 +145,7 @@ fn claim_request(
     ClaimTaskRequest {
         operation_id,
         workspace_ids: workspaces.ids(),
+        gateway_workspace_ids: workspaces.gateway_ids(),
         harness_kind: options.harness as i32,
         context_contracts: options.context_catalog.supported_contracts(),
         execution_profile: Some(options.execution_profile.clone()),
@@ -261,7 +262,11 @@ pub async fn run(
         host.clone(),
         token.clone(),
         options.harness as i32,
-        workspaces.ids(),
+        workspaces
+            .ids()
+            .into_iter()
+            .chain(workspaces.gateway_ids())
+            .collect(),
         options.execution_profile.clone(),
         shutdown.clone(),
     );

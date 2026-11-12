@@ -151,6 +151,33 @@ impl Children {
             .arg(directory.join("checkpoints"))
             .env("SUPERTAG_GATEWAY_TOKEN", &credentials.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &credentials.operator);
+        if options.adapter.uses_gateway_workspace() {
+            gateway
+                .arg("--github-workspace-directory")
+                .arg(directory.join("github-sources"));
+            for name in [
+                "SUPERTAG_GITHUB_ACCOUNT_ID",
+                "SUPERTAG_GITHUB_REPOSITORY_ID",
+                "SUPERTAG_GITHUB_REPOSITORY",
+                "SUPERTAG_GITHUB_TOKEN",
+                "SUPERTAG_GITHUB_APP_ID",
+                "SUPERTAG_GITHUB_INSTALLATION_ID",
+                "SUPERTAG_GITHUB_PRIVATE_KEY_FILE",
+            ] {
+                if let Some(value) = std::env::var_os(name) {
+                    gateway.env(name, value);
+                }
+            }
+            #[cfg(feature = "test-fixtures")]
+            for name in [
+                "SUPERTAG_TEST_GITHUB_API_URL",
+                "SUPERTAG_TEST_GITHUB_GIT_URL",
+            ] {
+                if let Some(value) = std::env::var_os(name) {
+                    gateway.env(name, value);
+                }
+            }
+        }
         let address = start_child(&mut self.gateway, &mut gateway, "Gateway").await?;
         let endpoint = format!("http://{}", loopback_address(&address)?);
 

@@ -13,11 +13,13 @@ use serde_json::{Value, json};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 
+#[derive(Clone)]
 pub enum GithubAuthentication {
     Token(String),
     App(GithubAppConfig),
 }
 
+#[derive(Clone)]
 pub struct GithubAppConfig {
     pub app_id: u64,
     pub installation_id: u64,
@@ -39,6 +41,21 @@ pub(super) struct Authentication {
     repository_id: u64,
     repository: String,
     cached: Mutex<Option<CachedToken>>,
+    scope: TokenScope,
+}
+
+#[derive(Clone, Copy)]
+enum TokenScope {
+    Comments,
+    SourceRead,
+}
+impl TokenScope {
+    fn permission(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Comments => ("issues", "write"),
+            Self::SourceRead => ("contents", "read"),
+        }
+    }
 }
 
 struct CachedToken {
@@ -106,7 +123,18 @@ impl Authentication {
             repository_id,
             repository: repository.into(),
             cached: Mutex::new(None),
+            scope: TokenScope::Comments,
         })
+    }
+
+    pub(super) fn source_reader(
+        configuration: &GithubAuthentication,
+        repository_id: u64,
+        repository: &str,
+    ) -> Result<Self> {
+        let mut value = Self::new(configuration, repository_id, repository)?;
+        value.scope = TokenScope::SourceRead;
+        Ok(value)
     }
 
     pub(super) async fn access_token(&self, client: &Client, api: &Url) -> Result<AccessToken> {
@@ -161,16 +189,23 @@ impl Authentication {
         let target = api.join(&format!(
             "app/installations/{installation_id}/access_tokens"
         ))?;
+        let (permission, access) = self.scope.permission();
         let response = client
             .post(target)
             .bearer_auth(&jwt)
             .headers(headers())
-            .json(&json!({"repository_ids":[self.repository_id],"permissions":{"issues":"write"}}))
+            .json(&json!({"repository_ids":[self.repository_id],"permissions":{permission:access}}))
             .send()
             .await
             .map_err(|_| anyhow!("GitHub installation token acquisition unavailable"))?;
         let value = response_json(response, StatusCode::CREATED).await?;
-        let token = validate_token_response(&value, self.repository_id, &self.repository, now)?;
+        let token = validate_scoped_token_response(
+            &value,
+            self.repository_id,
+            &self.repository,
+            now,
+            self.scope,
+        )?;
         let expires_at =
             DateTime::parse_from_rfc3339(value["expires_at"].as_str().unwrap_or_default())
                 .map_err(|_| anyhow!("invalid GitHub installation token expiry"))?
@@ -219,11 +254,12 @@ fn valid_token(value: &str) -> bool {
         && value.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
 }
 
-fn validate_token_response<'a>(
+fn validate_scoped_token_response<'a>(
     value: &'a Value,
     repository_id: u64,
     repository: &str,
     now: i64,
+    scope: TokenScope,
 ) -> Result<&'a str> {
     let token = value
         .get("token")
@@ -245,10 +281,11 @@ fn validate_token_response<'a>(
         .get("permissions")
         .and_then(Value::as_object)
         .ok_or_else(|| anyhow!("GitHub installation token has no permission scope"))?;
+    let (permission, access) = scope.permission();
     ensure!(
-        permissions.get("issues").and_then(Value::as_str) == Some("write")
-            && permissions.iter().all(|(key, value)| (key == "issues"
-                && value.as_str() == Some("write"))
+        permissions.get(permission).and_then(Value::as_str) == Some(access)
+            && permissions.iter().all(|(key, value)| (key == permission
+                && value.as_str() == Some(access))
                 || (key == "metadata" && value.as_str() == Some("read"))),
         "GitHub installation token permissions exceed the requested scope"
     );
