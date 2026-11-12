@@ -14,11 +14,11 @@ import (
 
 // objectiveMessage is the latest follow-up sent from each Objective's pane.
 type objectiveMessage struct {
-	text, status, tag, reply, waiting string
-	sending                           bool
-	cancel                            context.CancelFunc
-	work                              []string
-	workShown                         map[string]bool
+	text, status, tag, task, reply, waiting string
+	sending                                 bool
+	cancel                                  context.CancelFunc
+	work                                    []string
+	workShown                               map[string]bool
 }
 
 type objectiveSentMsg struct {
@@ -89,6 +89,7 @@ func (m *model) objectiveMessageSent(msg objectiveSentMsg) tea.Cmd {
 	}
 	message.status = "Follow-up sent."
 	message.tag = msg.response.GetTag()
+	message.task = msg.response.GetTaskId()
 	if previous := msg.response.GetStatusChange(); previous != operatorv1.ObjectiveStatus_OBJECTIVE_STATUS_UNSPECIFIED {
 		message.status += " The Objective moved from " + statusWords(previous) + " back to working."
 	}

@@ -60,6 +60,7 @@ type app struct {
 	choiceErr string
 	// palette is the command palette while it shows.
 	palette *palette
+	files   *taskFilesDialog
 
 	width, height int
 }
@@ -87,6 +88,7 @@ func (a *app) start(i int) error {
 		cancel()
 		return err
 	}
+	a.closeTaskFiles()
 	if a.cancel != nil {
 		a.cancel()
 		a.inner.client.Close()
@@ -106,6 +108,7 @@ func (a *app) start(i int) error {
 
 // stop ends the current model's streams and calls.
 func (a *app) stop() {
+	a.closeTaskFiles()
 	if a.cancel != nil {
 		a.cancel()
 		a.inner.client.Close()
@@ -123,10 +126,16 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.forward(msg.msg)
 	case tea.WindowSizeMsg:
 		a.width, a.height = msg.Width, msg.Height
+		if a.files != nil {
+			a.files.input.SetWidth(max(a.width-6, 10))
+		}
 		if a.palette != nil {
 			a.palette.filter.SetWidth(max(a.width-6, 10))
 		}
 	case tea.KeyPressMsg:
+		if a.files != nil {
+			return a, a.taskFilesKey(msg)
+		}
 		if a.palette != nil {
 			return a, a.paletteKeyPress(msg)
 		}
@@ -141,6 +150,14 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, a.openPalette(msg.String() == "/")
 		}
 	default:
+		if a.files != nil {
+			var cmd tea.Cmd
+			a.files.input, cmd = a.files.input.Update(msg)
+			if _, paste := msg.(tea.PasteMsg); paste {
+				return a, cmd
+			}
+			return a, tea.Batch(cmd, a.forward(msg))
+		}
 		if a.palette != nil {
 			var cmd tea.Cmd
 			a.palette.filter, cmd = a.palette.filter.Update(msg)
@@ -155,6 +172,9 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *app) forward(msg tea.Msg) tea.Cmd {
+	if a.taskFilesMessage(msg) {
+		return nil
+	}
 	next, cmd := a.inner.Update(msg)
 	a.inner = next.(model)
 	return a.scope(cmd)
@@ -231,12 +251,15 @@ func ownMessage(msg tea.Msg) bool {
 }
 
 func (a *app) View() tea.View {
-	if (!a.choosing && a.palette == nil) || a.width == 0 {
+	if (!a.choosing && a.palette == nil && a.files == nil) || a.width == 0 {
 		return a.inner.View()
 	}
 	shown := a.renderChoices
 	if a.palette != nil {
 		shown = a.renderPalette
+	}
+	if a.files != nil {
+		shown = a.renderTaskFiles
 	}
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, shown(), a.inner.renderStatus()))
 	v.AltScreen = true

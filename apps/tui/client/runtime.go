@@ -29,6 +29,8 @@ type runtimeClient struct {
 	events        runtimev2connect.OperatorEventsClient
 	inbox         runtimev2connect.InboxClient
 	workSessions  runtimev2connect.WorkSessionsClient
+	artifacts     runtimev2connect.ArtifactCatalogClient
+	artifactFiles runtimev2connect.ArtifactTransfersClient
 }
 
 // NewRuntimeV2 connects to the public Gateway over binary gRPC and HTTP/2.
@@ -87,6 +89,8 @@ func NewRuntimeV2(target Target, version string) (*Client, error) {
 		events:        runtimev2connect.NewOperatorEventsClient(httpClient, origin, options...),
 		inbox:         runtimev2connect.NewInboxClient(httpClient, origin, options...),
 		workSessions:  runtimev2connect.NewWorkSessionsClient(httpClient, origin, options...),
+		artifacts:     runtimev2connect.NewArtifactCatalogClient(httpClient, origin, options...),
+		artifactFiles: runtimev2connect.NewArtifactTransfersClient(httpClient, origin, options...),
 	}
 	return c, nil
 }
@@ -298,7 +302,7 @@ func runtimeReply(task *v2.Task) *operatorv1.Reply {
 	text := task.GetResult()
 	switch task.GetState() {
 	case v2.TaskState_TASK_STATE_SUCCEEDED:
-		return &operatorv1.Reply{Presentation: operatorv1.ReplyPresentation_REPLY_PRESENTATION_FINAL_RESULT, Text: text}
+		return &operatorv1.Reply{Presentation: operatorv1.ReplyPresentation_REPLY_PRESENTATION_FINAL_RESULT, Text: text + taskFilesNotice(task)}
 	case v2.TaskState_TASK_STATE_FAILED:
 		if text == "" {
 			text = "Task failed."

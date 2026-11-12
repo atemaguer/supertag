@@ -21,6 +21,7 @@ const (
 	commandCreateObjective
 	commandSwitchControlPlane
 	commandOpenInbox
+	commandTaskFiles
 )
 
 // paletteCommand is one row of the palette: what it does, and what it applies to.
@@ -69,6 +70,9 @@ func (a *app) commands() []paletteCommand {
 	}
 	if len(a.contexts) > 1 {
 		out = append(out, paletteCommand{commandSwitchControlPlane, "Switch Control Plane", contextLabel(a.contexts[a.current]) + " · " + switchKey})
+	}
+	if a.inner.client.RuntimeV2() {
+		out = append(out, paletteCommand{commandTaskFiles, "Task files", "save files from a completed Task"})
 	}
 	waiting := fmt.Sprintf("%d waiting", len(a.inner.inbox.Items))
 	if a.inner.inbox.Truncated {
@@ -157,6 +161,8 @@ func (a *app) run(id commandID, outcome string) tea.Cmd {
 		cmd = a.inner.openPicker()
 	case commandCreateObjective:
 		cmd = a.inner.openObjectiveForm(outcome)
+	case commandTaskFiles:
+		return a.openTaskFiles()
 	case commandOpenInbox:
 		cmd = a.inner.openInbox()
 	}

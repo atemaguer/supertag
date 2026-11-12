@@ -131,7 +131,21 @@ async fn retirement_removes_tag_from_roster_and_preserves_identity() -> Result<(
 
 #[tokio::test]
 async fn captured_artifact_bytes_survive_gateway_restart_with_private_metadata() -> Result<()> {
-    let directory = tempfile::tempdir()?;
+    captured_artifact_round_trip(None).await
+}
+
+#[tokio::test]
+#[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
+async fn go_tui_lists_and_saves_completed_task_files() -> Result<()> {
+    let binary = std::env::var_os("SUPERTAG_RUST_TEST_TUI")
+        .context("version-matched terminal UI binary required")?;
+    captured_artifact_round_trip(Some(Path::new(&binary))).await
+}
+
+async fn captured_artifact_round_trip(tui: Option<&Path>) -> Result<()> {
+    let directory = tempfile::Builder::new()
+        .prefix("files-tui-")
+        .tempdir_in("/tmp")?;
     let database = directory.path().join("control.db");
     let blobs = directory.path().join("blobs");
     let secret = Uuid::new_v4().to_string();
@@ -170,7 +184,7 @@ async fn captured_artifact_bytes_survive_gateway_restart_with_private_metadata()
         .send_message(authenticated_request(
             SendMessageRequest {
                 tag_id: "producer".into(),
-                conversation: "private".into(),
+                conversation: if tui.is_some() { "default" } else { "private" }.into(),
                 operation_id: "request-evidence".into(),
                 text: "Capture two files".into(),
                 ..Default::default()
@@ -226,7 +240,7 @@ async fn captured_artifact_bytes_survive_gateway_restart_with_private_metadata()
     let bytes = b"artifact bytes kept by the Gateway, never the Control Plane";
     let digest = format!("{:x}", Sha256::digest(bytes));
     let capture = CommitArtifactCaptureRequest {
-        attempt: Some(attempt),
+        attempt: Some(attempt.clone()),
         operation_id: "capture".into(),
         description: Some(ArtifactDescription {
             title: "Evidence".into(),
@@ -276,7 +290,7 @@ async fn captured_artifact_bytes_survive_gateway_restart_with_private_metadata()
         .unwrap_err();
     assert_eq!(error.code(), Code::InvalidArgument);
     let list = ListCapturedArtifactsRequest {
-        task_id: task.task_id,
+        task_id: task.task_id.clone(),
         ..Default::default()
     };
     assert!(
@@ -354,9 +368,105 @@ async fn captured_artifact_bytes_survive_gateway_restart_with_private_metadata()
             .into_inner(),
         captured
     );
+    if let Some(binary) = tui {
+        let mut host = worker_host_client::WorkerHostClient::new(channel(&endpoint).await?);
+        host.finish_task(artifact_host_request(
+            FinishTaskRequest {
+                task_id: task.task_id,
+                attempt_id: attempt.attempt_id,
+                lease_token: attempt.lease_token,
+                result: "Evidence is ready.".into(),
+                succeeded: true,
+                artifacts: vec![ArtifactSelection {
+                    artifact_id: captured
+                        .summary
+                        .context("capture summary missing")?
+                        .artifact_id,
+                    paths: vec!["report.txt".into()],
+                }],
+                ..Default::default()
+            },
+            &host_token,
+            generation,
+        )?)
+        .await?;
+        tui_save_task_file(directory.path(), binary, &endpoint, &token, bytes).await?;
+    }
     bob.kill().await?;
     public.kill().await?;
     control.kill().await?;
+    Ok(())
+}
+
+async fn tui_save_task_file(
+    directory: &Path,
+    binary: &Path,
+    endpoint: &str,
+    token: &str,
+    bytes: &[u8],
+) -> Result<()> {
+    // The synthetic operator token is a provider environment value, never a CLI argument.
+    let script = directory.join("launch-tui");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nexport SUPERTAG_OPERATOR_TOKEN='{}'\nexec env HOME={} {} tui --gateway '{}' --binary {}\n",
+            token,
+            shell_path(directory)?,
+            shell_path(Path::new(BINARY))?,
+            endpoint,
+            shell_path(binary)?
+        ),
+    )?;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))?;
+    let tmux = Tmux {
+        socket: directory.join("tmux.sock"),
+    };
+    tmux.run(&[
+        "new-session",
+        "-d",
+        "-s",
+        "runtime",
+        "-x",
+        "160",
+        "-y",
+        "45",
+        &format!(
+            "env -i PATH=/usr/bin:/bin TERM=xterm-256color {}",
+            shell_path(&script)?
+        ),
+    ])
+    .await?;
+    tmux.wait_for("Evidence is ready.").await?;
+    tmux.wait_for("Save from Ctrl+k").await?;
+    tmux.run(&["send-keys", "-t", "runtime", "C-k"]).await?;
+    tmux.run(&["send-keys", "-t", "runtime", "-l", "Task files"])
+        .await?;
+    tmux.run(&["send-keys", "-t", "runtime", "Enter"]).await?;
+    tmux.wait_for("report.txt").await?;
+    tmux.wait_for("Evidence").await?;
+    tmux.run(&["send-keys", "-t", "runtime", "Enter"]).await?;
+    tmux.wait_for("Save to a local path").await?;
+    let output = directory.join("saved-report.txt");
+    tmux.run(&["send-keys", "-t", "runtime", "C-u"]).await?;
+    tmux.run(&[
+        "send-keys",
+        "-t",
+        "runtime",
+        "-l",
+        output.to_str().context("output path UTF-8")?,
+    ])
+    .await?;
+    tmux.run(&["send-keys", "-t", "runtime", "Enter"]).await?;
+    tmux.wait_for("Saved ").await?;
+    assert_eq!(std::fs::read(&output)?, bytes);
+    assert_eq!(
+        std::fs::metadata(&output)?.permissions().mode() & 0o777,
+        0o600
+    );
+    tmux.run(&["send-keys", "-t", "runtime", "Escape"]).await?;
+    tmux.wait_for("Evidence is ready.").await?;
+    tmux.run(&["send-keys", "-t", "runtime", "C-c"]).await?;
     Ok(())
 }
 
