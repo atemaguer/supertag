@@ -2415,6 +2415,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "supertag-shared-execution"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "libc",
+ "prost",
+ "protoc-bin-vendored",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "subtle",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
+ "uuid",
+]
+
+[[package]]
 name = "supertag-worker-host"
 version = "0.1.0"
 dependencies = [
