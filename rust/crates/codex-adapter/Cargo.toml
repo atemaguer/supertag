@@ -13,11 +13,12 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 supertag-protocol.workspace = true
+supertag-workspaces = { path = "../workspaces" }
 tempfile.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tonic.workspace = true
 
 [dev-dependencies]
 tokio-stream.workspace = true
-tokio-util.workspace = true
 uuid.workspace = true

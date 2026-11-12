@@ -213,7 +213,7 @@ async fn durable_delivery(url: &str) {
     assert_eq!(initial.len(), 1);
     assert_eq!(
         initial[0].workstream_post_id,
-        addressed.post.as_ref().unwrap().post_id
+        Some(addressed.post.as_ref().unwrap().post_id.clone())
     );
     assert_eq!(initial[0].source_task_id, source.task_id);
     assert_eq!(

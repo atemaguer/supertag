@@ -1,5 +1,6 @@
 //! A configured GitHub repository route and both receipt identities are durable.
 use super::*;
+use crate::surface_policy::{VerifiedConnectorOrigin, VerifiedScope, admit_connector_task_in};
 use supertag_protocol::v2::{
     AcceptGithubEventRequest, AcceptGithubEventResponse, GithubEventAction, GithubEventKind,
 };
@@ -142,15 +143,25 @@ impl Store {
             "github:{account}:{}:{thread_kind}:{}",
             input.repository_id, input.number
         );
-        crate::objectives::objective_admission_in(
+        let Some(task) = admit_connector_task_in(
             &mut tx,
-            &input.tag_id,
+            order,
+            VerifiedConnectorOrigin {
+                connector_account_id: account,
+                tag_id: &input.tag_id,
+                scope: VerifiedScope::Github {
+                    repository_id: input.repository_id,
+                },
+            },
             &session,
+            &input.prompt,
             self.execution_now_ms(),
         )
-        .await?;
-        let task = insert_task(&mut tx, order, &input.tag_id, &session, &input.prompt).await?;
-        crate::objectives::objective_link_task_in(&mut tx, &task).await?;
+        .await?
+        else {
+            tx.commit().await?;
+            return Ok(AcceptGithubEventResponse { task: None });
+        };
         if route.is_none() {
             sqlx::query("INSERT INTO supertag_v2_github_repositories (account_id,repository_id,repository,tag_id) VALUES ($1,$2,$3,$4)")
                 .bind(account).bind(input.repository_id as i64).bind(&repository).bind(&input.tag_id).execute(&mut *tx).await?;

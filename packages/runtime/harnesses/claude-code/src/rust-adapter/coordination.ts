@@ -1,14 +1,19 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createSdkMcpServer } from "@anthropic-ai/claude-agent-sdk";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { z } from "zod";
 import { redact } from "./checkpoint.js";
 import { type harnessClient, receipt } from "./client.js";
-import { ApprovalState, type HarnessRun } from "./gen/supertag/runtime/v2/runtime_pb.js";
+import {
+  ApprovalState,
+  type HarnessRun,
+  TagMessageOrigin,
+} from "./gen/supertag/runtime/v2/runtime_pb.js";
 
 export const COORDINATION_SERVER = "supertag";
 export const COORDINATION_PREFIX = `mcp__${COORDINATION_SERVER}__`;
 export const WORKSTREAM_POST_ACTION = "workstream:post";
+export const MAILBOX_SEND_ACTION = "mailbox:send";
 const QUESTION_OPERATION = "claude-objective-question";
 const MAX_PENDING_APPROVALS = 32;
 
@@ -51,6 +56,7 @@ const schemas = {
     .strictObject({ afterSequence, limit, cursor })
     .refine((input) => input.afterSequence === undefined || input.cursor === undefined),
   read_mailbox: z.strictObject({ limit, cursor }),
+  send_message: z.strictObject({ to: tagId, text: nonblankText(8000) }),
 };
 
 type Tool = keyof typeof schemas;
@@ -300,11 +306,18 @@ export function coordinationTools(
           const page = await call(tool.signal, (config) =>
             mailbox.read({ limit: limit ?? 0, cursor: cursor ?? "" }, config),
           );
-          if (page.messages.every((message) => message.recipientTagId === scope.tagId)) {
+          if (
+            page.messages.every(
+              (message) =>
+                message.recipientTagId === scope.tagId || message.senderTagId === scope.tagId,
+            )
+          ) {
             return untrusted({
               messages: page.messages.map((message) => ({
                 id: message.messageId,
                 from: message.senderTagId,
+                to: message.recipientTagId,
+                origin: message.origin === TagMessageOrigin.DIRECT ? "direct" : "workstream",
                 text: safeText(message.text),
               })),
               nextCursor: page.nextCursor,
@@ -313,6 +326,80 @@ export function coordinationTools(
         } catch {}
         return response("The Mailbox could not be read.", true);
       },
+    );
+  }
+  if (run.coordination?.maySendTagMessage) {
+    tools.push(`${COORDINATION_PREFIX}send_message`);
+    server.instance.registerTool(
+      "send_message",
+      {
+        description:
+          "Send a private message to another Tag. If approval is pending, finish this turn and wait for the decision.",
+        inputSchema: schemas.send_message,
+        _meta: meta,
+      },
+      ({ to, text }, tool) =>
+        write(async () => {
+          if (asked)
+            return response("Finish this turn and wait for the Objective answer first.", true);
+          const safe = trim(safeText(text));
+          if (!schemas.send_message.safeParse({ to, text: safe }).success)
+            return response("Provide valid direct message text.", true);
+          const key = JSON.stringify(["mailbox", to, safe]);
+          if (!pending.has(key) && pending.size >= MAX_PENDING_APPROVALS)
+            return response("Finish this turn and wait for the pending approvals.", true);
+          const operationId = `claude-mailbox:${randomUUID()}`;
+          try {
+            const { message, approval, duplicate } = await call(tool.signal, (config) =>
+              mailbox.sendMessage({ operationId, recipientTagId: to, text: safe }, config),
+            );
+            if (
+              message?.messageId &&
+              message.sourceTaskId === scope.taskId &&
+              message.senderTagId === scope.tagId &&
+              message.recipientTagId === to &&
+              message.text === safe &&
+              message.origin === TagMessageOrigin.DIRECT &&
+              message.workstreamPostId === undefined &&
+              !approval
+            ) {
+              pending.delete(key);
+              return response(
+                JSON.stringify({ status: "sent", messageId: message.messageId, duplicate }),
+              );
+            }
+            if (
+              !message &&
+              approval?.approvalId &&
+              approval.action === MAILBOX_SEND_ACTION &&
+              approval.resource === to
+            ) {
+              if (
+                approval.state === ApprovalState.PENDING &&
+                approval.taskId === scope.taskId &&
+                approval.attemptId === scope.attemptId &&
+                approval.tagId === scope.tagId
+              ) {
+                pending.set(key, approval.approvalId);
+                return response(
+                  JSON.stringify({
+                    status: "pending",
+                    approvalId: approval.approvalId,
+                    next: "Finish this turn and wait for the operator decision.",
+                  }),
+                );
+              }
+              if (
+                approval.state === ApprovalState.DENIED ||
+                approval.state === ApprovalState.EXPIRED
+              ) {
+                pending.delete(key);
+                return response("The direct message approval was denied or expired.", true);
+              }
+            }
+          } catch {}
+          return response("The direct message could not be confirmed.", true);
+        }),
     );
   }
   return {

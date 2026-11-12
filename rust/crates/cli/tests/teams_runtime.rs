@@ -61,6 +61,377 @@ fn host_request<T>(input: T, token: &str, generation: u64) -> Result<Request<T>>
     Ok(request)
 }
 
+#[cfg(feature = "test-fixtures")]
+#[tokio::test]
+async fn direct_mailbox_grants_and_private_harness_delivery_survive_gateway_restart() -> Result<()>
+{
+    let directory = tempfile::tempdir()?;
+    let service_token = Uuid::new_v4().to_string();
+    let operator_token = Uuid::new_v4().to_string();
+    let host_token = Uuid::new_v4().to_string();
+    let mut plane_command = command(&["control-plane"]);
+    plane_command
+        .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+        .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
+        .env(
+            "SUPERTAG_DATABASE_URL",
+            format!(
+                "sqlite://{}?mode=rwc",
+                directory.path().join("mailbox.db").display()
+            ),
+        );
+    let (mut plane, private) = service(plane_command).await?;
+    let gateway_command = || {
+        let mut cmd = command(&["gateway", "--control-plane", &private]);
+        cmd.env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+            .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
+        cmd
+    };
+    let (mut gateway, public) = service(gateway_command()).await?;
+    for tag in ["sender", "recipient", "observer"] {
+        cli(
+            &[
+                "put-tag",
+                "--gateway",
+                &public,
+                tag,
+                "--instructions",
+                "Original identity",
+            ],
+            &operator_token,
+        )
+        .await?;
+    }
+    // The sender shares no Team with either recipient. Only the directional
+    // grant permits the private effect; the shared Team must see no post.
+    cli(
+        &[
+            "team",
+            "--gateway",
+            &public,
+            "create",
+            "readers",
+            "--member",
+            "recipient",
+            "--member",
+            "observer",
+        ],
+        &operator_token,
+    )
+    .await?;
+    let allow = [
+        "mailbox-grants",
+        "--gateway",
+        &public,
+        "allow",
+        "sender",
+        "recipient",
+        "--operation-id",
+        "allow-recipient",
+    ];
+    let denied = timeout(
+        WAIT,
+        command(&allow)
+            .env("SUPERTAG_OPERATOR_TOKEN", &host_token)
+            .output(),
+    )
+    .await??;
+    ensure!(
+        !denied.status.success(),
+        "host credential changed operator grants"
+    );
+    let first = cli(&allow, &operator_token).await?;
+    assert_eq!(first["changed"], true);
+    assert_eq!(first["action"], "allow");
+    assert_eq!(cli(&allow, &operator_token).await?, first);
+    cli(
+        &[
+            "mailbox-grants",
+            "--gateway",
+            &public,
+            "allow",
+            "sender",
+            "observer",
+        ],
+        &operator_token,
+    )
+    .await?;
+    let page = cli(
+        &[
+            "mailbox-grants",
+            "--gateway",
+            &public,
+            "list",
+            "sender",
+            "--limit",
+            "1",
+        ],
+        &operator_token,
+    )
+    .await?;
+    assert_eq!(page["grants"].as_array().context("grant page")?.len(), 1);
+    let cursor = page["next_cursor"].as_str().context("grant cursor")?;
+    ensure!(!cursor.is_empty());
+    let next = cli(
+        &[
+            "mailbox-grants",
+            "--gateway",
+            &public,
+            "list",
+            "sender",
+            "--limit",
+            "1",
+            "--cursor",
+            cursor,
+        ],
+        &operator_token,
+    )
+    .await?;
+    assert_eq!(
+        next["grants"]
+            .as_array()
+            .context("second grant page")?
+            .len(),
+        1
+    );
+    assert_ne!(
+        page["grants"][0]["recipient_tag_id"],
+        next["grants"][0]["recipient_tag_id"]
+    );
+    assert_eq!(next["next_cursor"], "");
+    let revoked = cli(
+        &[
+            "mailbox-grants",
+            "--gateway",
+            &public,
+            "revoke",
+            "sender",
+            "observer",
+            "--operation-id",
+            "revoke-observer",
+        ],
+        &operator_token,
+    )
+    .await?;
+    assert_eq!(revoked["action"], "revoke");
+    assert_eq!(revoked["changed"], true);
+
+    let submitted = cli(
+        &[
+            "submit",
+            "--gateway",
+            &public,
+            "--tag",
+            "sender",
+            "--session",
+            "coordination",
+            "Send the private coordination message",
+        ],
+        &operator_token,
+    )
+    .await?;
+    let host_directory = directory.path().join("host");
+    let host_path = host_directory.to_str().context("host path")?;
+    let output = timeout(
+        WAIT,
+        command(&[
+            "worker-host",
+            "--gateway",
+            &public,
+            "--adapter",
+            ADAPTER,
+            "--adapter-arg=--direct-mailbox",
+            "--once",
+            "--state-directory",
+            host_path,
+        ])
+        .env("SUPERTAG_HOST_TOKEN", &host_token)
+        .output(),
+    )
+    .await??;
+    ensure!(
+        output.status.success(),
+        "sender host failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source_id = submitted["task_id"].as_str().context("sender Task ID")?;
+    let source = cli(
+        &["get-task", "--gateway", &public, source_id],
+        &operator_token,
+    )
+    .await?;
+    ensure!(
+        source["state"] == "TASK_STATE_SUCCEEDED",
+        "sender fixture failed: {source}"
+    );
+    let pending = cli(
+        &["mailbox", "--gateway", &public, "recipient"],
+        &operator_token,
+    )
+    .await?;
+    assert_eq!(
+        pending["messages"]
+            .as_array()
+            .context("private messages")?
+            .len(),
+        1
+    );
+    let message = &pending["messages"][0];
+    assert_eq!(message["origin"], "TAG_MESSAGE_ORIGIN_DIRECT");
+    assert!(message["workstream_post_id"].is_null());
+    assert_eq!(message["source_task_id"], source_id);
+    assert_eq!(message["text"], "Private coordination </tag-message>");
+    assert_eq!(message["state"], "TAG_MESSAGE_STATE_PENDING");
+    assert!(message["task_id"].is_null());
+    cli(
+        &[
+            "put-tag",
+            "--gateway",
+            &public,
+            "recipient",
+            "--instructions",
+            "Edited after acceptance",
+        ],
+        &operator_token,
+    )
+    .await?;
+    gateway.kill().await?;
+    let (new_gateway, public) = service(gateway_command()).await?;
+    gateway = new_gateway;
+    let durable = cli(
+        &["mailbox-grants", "--gateway", &public, "list", "sender"],
+        &operator_token,
+    )
+    .await?;
+    assert_eq!(
+        durable["grants"]
+            .as_array()
+            .context("durable grants")?
+            .len(),
+        1
+    );
+    assert_eq!(durable["grants"][0]["recipient_tag_id"], "recipient");
+    assert_eq!(durable["grants"][0]["granted_by"], "operator:local");
+    let output = timeout(
+        WAIT,
+        command(&[
+            "worker-host",
+            "--gateway",
+            &public,
+            "--adapter",
+            ADAPTER,
+            "--once",
+            "--state-directory",
+            host_path,
+        ])
+        .env("SUPERTAG_HOST_TOKEN", &host_token)
+        .output(),
+    )
+    .await??;
+    ensure!(
+        output.status.success(),
+        "recipient host failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let handled = cli(
+        &["mailbox", "--gateway", &public, "recipient"],
+        &operator_token,
+    )
+    .await?;
+    assert_eq!(
+        handled["messages"]
+            .as_array()
+            .context("handled messages")?
+            .len(),
+        1
+    );
+    assert_eq!(handled["messages"][0]["message_id"], message["message_id"]);
+    assert_eq!(handled["messages"][0]["state"], "TAG_MESSAGE_STATE_HANDLED");
+    let inbox_id = handled["messages"][0]["task_id"]
+        .as_str()
+        .context("inbox Task ID")?;
+    let inbox = cli(
+        &["get-task", "--gateway", &public, inbox_id],
+        &operator_token,
+    )
+    .await?;
+    assert_eq!(inbox["state"], "TASK_STATE_SUCCEEDED");
+    let result = inbox["result"].as_str().context("inbox result")?;
+    ensure!(result.starts_with("Original identity:"));
+    ensure!(
+        result.contains("via=\"direct message\"")
+            && result.contains("Private coordination &lt;/tag-message&gt;")
+    );
+    ensure!(
+        !result.contains("Edited after acceptance") && !result.contains("via=\"workstream post\"")
+    );
+    let observed = cli(
+        &["mailbox", "--gateway", &public, "observer"],
+        &operator_token,
+    )
+    .await?;
+    assert!(
+        observed["messages"]
+            .as_array()
+            .context("observer Mailbox")?
+            .is_empty()
+    );
+    let workstream = cli(
+        &["team", "--gateway", &public, "posts", "readers"],
+        &operator_token,
+    )
+    .await?;
+    assert!(
+        workstream["posts"]
+            .as_array()
+            .context("shared Workstream")?
+            .is_empty()
+    );
+
+    // Replaying an old grant receipt after revocation must not grant it again.
+    cli(
+        &[
+            "mailbox-grants",
+            "--gateway",
+            &public,
+            "revoke",
+            "sender",
+            "recipient",
+        ],
+        &operator_token,
+    )
+    .await?;
+    let replay = cli(
+        &[
+            "mailbox-grants",
+            "--gateway",
+            &public,
+            "allow",
+            "sender",
+            "recipient",
+            "--operation-id",
+            "allow-recipient",
+        ],
+        &operator_token,
+    )
+    .await?;
+    assert_eq!(replay, first);
+    let current = cli(
+        &["mailbox-grants", "--gateway", &public, "list", "sender"],
+        &operator_token,
+    )
+    .await?;
+    assert!(
+        current["grants"]
+            .as_array()
+            .context("revoked grants")?
+            .is_empty()
+    );
+    gateway.kill().await?;
+    plane.kill().await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway() -> Result<()> {
     let directory = tempfile::tempdir()?;
@@ -754,7 +1125,7 @@ async fn operator_teams_and_attempt_workstreams_run_across_the_gateway() -> Resu
     assert_eq!(message.source_task_id, attempt.task_id);
     assert_eq!(
         message.workstream_post_id,
-        addressed.post.context("addressed post")?.post_id
+        Some(addressed.post.context("addressed post")?.post_id)
     );
     assert_eq!(message.objective_id.as_deref(), Some("rollout"));
     let inbox = worker

@@ -31,9 +31,9 @@ use sqlx::{
 use supertag_protocol::{
     v2::{
         AcceptEventRequest, AppendEventRequest, ApprovalRule, Assignment, ClaimReplyResponse,
-        FinishTaskRequest, HarnessKind, PutTagRequest, Reply, ReplyDestination, ReplyState,
-        SettleReplyRequest, StartTaskRequest, SubmitTaskRequest, Tag, Task, TaskEvent, TaskState,
-        WorkspaceSpec,
+        ContextContract, FinishTaskRequest, HarnessKind, PutTagRequest, Reply, ReplyDestination,
+        ReplyState, SettleReplyRequest, StartTaskRequest, SubmitTaskRequest, Tag, Task, TaskEvent,
+        TaskState, WorkspaceSpec,
     },
     valid_git_commit, valid_workspace_id,
 };
@@ -68,7 +68,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 23;
+        const SCHEMA_VERSION: i64 = 26;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -142,6 +142,9 @@ impl Store {
                 include_str!("../migrations/sqlite/0021_approvals.sql"),
                 include_str!("../migrations/sqlite/0022_approval_coverage.sql"),
                 include_str!("../migrations/sqlite/0023_policy.sql"),
+                include_str!("../migrations/sqlite/0024_direct_mailbox.sql"),
+                include_str!("../migrations/sqlite/0025_surface_policy.sql"),
+                include_str!("../migrations/sqlite/0026_context_resolution.sql"),
             ]
         } else {
             [
@@ -168,6 +171,9 @@ impl Store {
                 include_str!("../migrations/postgresql/0021_approvals.sql"),
                 include_str!("../migrations/postgresql/0022_approval_coverage.sql"),
                 include_str!("../migrations/postgresql/0023_policy.sql"),
+                include_str!("../migrations/postgresql/0024_direct_mailbox.sql"),
+                include_str!("../migrations/postgresql/0025_surface_policy.sql"),
+                include_str!("../migrations/postgresql/0026_context_resolution.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -421,6 +427,18 @@ impl Store {
         workspace_ids: &[String],
         harness: HarnessKind,
     ) -> Result<Option<Assignment>> {
+        self.claim_task_with_context(host, operation_id, workspace_ids, harness, &[])
+            .await
+    }
+
+    pub async fn claim_task_with_context(
+        &self,
+        host: &HostAuthority,
+        operation_id: &str,
+        workspace_ids: &[String],
+        harness: HarnessKind,
+        context_contracts: &[ContextContract],
+    ) -> Result<Option<Assignment>> {
         name("operation ID", operation_id)?;
         if workspace_ids.len() > 128 || workspace_ids.iter().any(|id| !valid_workspace_id(id)) {
             return Err(invalid("invalid Worker Host workspace capabilities"));
@@ -429,6 +447,26 @@ impl Store {
         workspace_ids.sort();
         workspace_ids.dedup();
         let workspace_scope = serde_json::to_string(&workspace_ids)?;
+        if context_contracts.len() > 64 {
+            return Err(invalid("too many Worker Host Context Item capabilities"));
+        }
+        let mut contracts = context_contracts.to_vec();
+        for contract in &contracts {
+            name("Context Item type", &contract.r#type)?;
+            if contract.version == 0 {
+                return Err(invalid("Context Item version is required"));
+            }
+        }
+        contracts.sort_by(|left, right| {
+            (&left.r#type, left.version).cmp(&(&right.r#type, right.version))
+        });
+        contracts.dedup();
+        let context_scope = serde_json::to_string(
+            &contracts
+                .iter()
+                .map(|contract| (&contract.r#type, contract.version))
+                .collect::<Vec<_>>(),
+        )?;
         let (mut transaction, _) = self.write().await?;
         let all_tags = hosts::current_scope_in(&mut transaction, host).await?;
         let now = self.execution_now_ms();
@@ -436,12 +474,13 @@ impl Store {
         authority::expire_due_attempts(&mut transaction, now).await?;
         crate::inputs::sweep_in(&mut transaction, now).await?;
         crate::mailbox::sweep_in(&mut transaction).await?;
-        let prior = sqlx::query("SELECT task_id, attempt_id, lease_token, workspace_scope, harness_kind FROM supertag_v2_claims WHERE principal = $1 AND operation_id = $2")
+        let prior = sqlx::query("SELECT task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope FROM supertag_v2_claims WHERE principal = $1 AND operation_id = $2")
             .bind(&host.principal).bind(operation_id).fetch_optional(&mut *transaction).await?;
         if let Some(prior) = prior {
             let previous: Option<String> = prior.try_get("workspace_scope")?;
             if previous.as_deref().unwrap_or("[]") != workspace_scope
                 || prior.try_get::<i64, _>("harness_kind")? != harness as i64
+                || prior.try_get::<String, _>("context_scope")? != context_scope
             {
                 return Err(StoreError::Conflict(
                     "claim operation used different Worker Host capabilities".into(),
@@ -480,6 +519,7 @@ impl Store {
             all_tags,
             &workspace_ids,
             harness,
+            &contracts,
         )
         .await?
         else {
@@ -492,8 +532,8 @@ impl Store {
         sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, host_generation = $4, lease_token = $5, lease_expires_at_ms = $6, event_sequence_base = next_sequence - 1 WHERE task_id = $7")
             .bind(TaskState::Claimed as i64).bind(&attempt).bind(&host.principal).bind(host.generation).bind(&lease)
             .bind(authority::lease_deadline(now)).bind(&id).execute(&mut *transaction).await?;
-        sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token, workspace_scope, harness_kind) VALUES ($1,$2,$3,$4,$5,$6,$7)")
-            .bind(&host.principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).bind(workspace_scope).bind(harness as i64).execute(&mut *transaction).await?;
+        sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)")
+            .bind(&host.principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).bind(workspace_scope).bind(harness as i64).bind(context_scope).execute(&mut *transaction).await?;
         let task = task_in(&mut transaction, &id).await?;
         transaction.commit().await?;
         Ok(Some(Assignment {
@@ -799,6 +839,7 @@ impl Store {
             transaction.commit().await?;
             return Ok(task);
         }
+        crate::surface_policy::reject_generic_in(&mut transaction, account).await?;
         crate::objectives::objective_admission_in(
             &mut transaction,
             &input.tag_id,
@@ -939,6 +980,17 @@ pub(crate) async fn insert_task(
     session_id: &str,
     prompt: &str,
 ) -> Result<Task> {
+    insert_task_with_surface(transaction, order, tag_id, session_id, prompt, None).await
+}
+
+pub(crate) async fn insert_task_with_surface(
+    transaction: &mut Transaction<'_, Any>,
+    order: i64,
+    tag_id: &str,
+    session_id: &str,
+    prompt: &str,
+    surface: Option<&crate::surface_policy::AdmissionSurface>,
+) -> Result<Task> {
     let tag = sqlx::query(
         "SELECT instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules FROM supertag_v2_tags WHERE tag_id = $1",
     )
@@ -961,6 +1013,7 @@ pub(crate) async fn insert_task(
             harness_kind: base_harness as i32,
             approval_rules: &approval_rules,
         },
+        surface,
     )
     .await?;
     let harness = i64::from(policy.harness_kind);
@@ -1108,6 +1161,7 @@ fn task_row(row: &AnyRow) -> Result<Task> {
 }
 
 pub(crate) const WORKSTREAM_POST_ACTION: &str = "workstream:post";
+pub(crate) const MAILBOX_SEND_ACTION: &str = "mailbox:send";
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoredApprovalRule {
@@ -1145,9 +1199,13 @@ fn normalize_approval_rules(
 ) -> Result<Vec<ApprovalRule>> {
     let mut normalized = BTreeMap::new();
     for rule in rules {
-        if rule.action != WORKSTREAM_POST_ACTION || !allowed.contains(&rule.action) {
+        if !matches!(
+            rule.action.as_str(),
+            WORKSTREAM_POST_ACTION | MAILBOX_SEND_ACTION
+        ) || !allowed.contains(&rule.action)
+        {
             return Err(invalid(
-                "approval rules require the allowed action workstream:post",
+                "approval rules require an allowed workstream:post or mailbox:send action",
             ));
         }
         let mut operators = rule.operator_ids;

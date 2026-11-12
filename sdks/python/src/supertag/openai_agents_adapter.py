@@ -231,7 +231,7 @@ async def _execute(
         if snapshot.HasField("execution") and snapshot.execution.models:
             model = snapshot.execution.models[0]
     actions = set(task.allowed_actions)
-    if actions - {"files:read", "workstream:post"}:
+    if actions - {"files:read", "workstream:post", "mailbox:send"}:
         raise _AdapterFailure("OpenAI Agents cannot enforce the Task's allowed actions")
     if not workspace.is_dir():
         raise _AdapterFailure("OpenAI Agents workspace is unavailable")

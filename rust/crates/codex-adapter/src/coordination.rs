@@ -7,7 +7,8 @@ use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
         ApprovalState, HarnessPostWorkstreamRequest, HarnessReadMailboxRequest,
-        HarnessReadWorkstreamRequest, harness_mailbox_client::HarnessMailboxClient,
+        HarnessReadWorkstreamRequest, HarnessSendTagMessageRequest, TagMessageOrigin,
+        harness_mailbox_client::HarnessMailboxClient,
         harness_workstreams_client::HarnessWorkstreamsClient,
     },
 };
@@ -22,6 +23,22 @@ pub(crate) enum Arguments {
     Post(Post),
     ReadWorkstream(WorkstreamPage),
     ReadMailbox(Page),
+    Send(DirectMessage),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Inventory {
+    None,
+    Ask,
+    Workstream,
+    Direct,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DirectMessage {
+    to: String,
+    text: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -49,7 +66,7 @@ pub(crate) struct Page {
     cursor: String,
 }
 
-pub(crate) fn arguments(params: &Value, full_inventory: bool) -> Result<Arguments> {
+pub(crate) fn arguments(params: &Value, inventory: Inventory) -> Result<Arguments> {
     ensure!(
         params["namespace"] == "supertag",
         "Codex requested an unregistered coordination tool"
@@ -58,8 +75,10 @@ pub(crate) fn arguments(params: &Value, full_inventory: bool) -> Result<Argument
         .get("arguments")
         .context("Codex coordination arguments are missing")?;
     match params["tool"].as_str() {
-        Some("ask") => Ok(Arguments::Ask(crate::questions::validate_tool(params)?)),
-        Some("post") if full_inventory => {
+        Some("ask") if inventory >= Inventory::Ask => {
+            Ok(Arguments::Ask(crate::questions::validate_tool(params)?))
+        }
+        Some("post") if inventory >= Inventory::Workstream => {
             let mut post: Post = serde_json::from_value(input.clone())
                 .context("invalid Codex Workstream post arguments")?;
             post.text = post.text.trim().to_owned();
@@ -77,17 +96,32 @@ pub(crate) fn arguments(params: &Value, full_inventory: bool) -> Result<Argument
             post.to.dedup();
             Ok(Arguments::Post(post))
         }
-        Some("read_workstream") if full_inventory => {
+        Some("read_workstream") if inventory >= Inventory::Workstream => {
             let page: WorkstreamPage = serde_json::from_value(input.clone())
                 .context("invalid Codex Workstream read arguments")?;
             validate_page(page.limit, &page.cursor)?;
             Ok(Arguments::ReadWorkstream(page))
         }
-        Some("read_mailbox") if full_inventory => {
+        Some("read_mailbox") if inventory >= Inventory::Workstream => {
             let page: Page = serde_json::from_value(input.clone())
                 .context("invalid Codex Mailbox read arguments")?;
             validate_page(page.limit, &page.cursor)?;
             Ok(Arguments::ReadMailbox(page))
+        }
+        Some("send_message") if inventory == Inventory::Direct => {
+            let mut message: DirectMessage = serde_json::from_value(input.clone())
+                .context("invalid Codex direct message arguments")?;
+            message.text = message.text.trim().to_owned();
+            ensure!(
+                !message.text.is_empty()
+                    && message.text.encode_utf16().count() <= 8000
+                    && !message.text.contains('\0')
+                    && !message.to.is_empty()
+                    && message.to.len() <= 256
+                    && !message.to.chars().any(char::is_control),
+                "invalid Codex direct message"
+            );
+            Ok(Arguments::Send(message))
         }
         _ => bail!("Codex requested an unregistered coordination tool"),
     }
@@ -103,7 +137,7 @@ fn validate_page(limit: Option<u32>, cursor: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn tool_specs() -> Vec<Value> {
+pub(crate) fn tool_specs(inventory: Inventory) -> Vec<Value> {
     let mut tools = vec![json!({
         "type":"function", "name":"post",
         "description":"Post progress to the Team Workstream. Optional Tag IDs in to wake their Mailboxes. A pending approval requires ending the turn and waiting for a decision.",
@@ -134,13 +168,29 @@ pub(crate) fn tool_specs() -> Vec<Value> {
             "inputSchema":{"type":"object","properties":properties,"additionalProperties":false}
         }));
     }
+    if inventory == Inventory::Direct {
+        tools.push(json!({
+            "type":"function", "name":"send_message",
+            "description":"Send a private message to another Tag. A pending approval requires ending the turn and waiting for a decision.",
+            "inputSchema":{"type":"object","properties":{
+                "to":{"type":"string","minLength":1,"maxLength":256},
+                "text":{"type":"string","minLength":1,"maxLength":8000}
+            },"required":["to","text"],"additionalProperties":false}
+        }));
+    }
     tools
 }
 
 pub(crate) struct Client {
     workstreams: HarnessWorkstreamsClient<Channel>,
     mailbox: HarnessMailboxClient<Channel>,
-    pub(crate) pending: BTreeMap<Post, String>,
+    pub(crate) pending: BTreeMap<PendingEffect, String>,
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum PendingEffect {
+    Post(Post),
+    Send { to: String, text: String },
 }
 
 impl Client {
@@ -165,14 +215,15 @@ impl Client {
         token: &str,
         secrets: &[String],
     ) -> Result<Value> {
-        let effect = Post {
+        let post = Post {
             text: crate::auth::redact(post.text.clone(), secrets),
             to: post.to.clone(),
         };
+        let effect = PendingEffect::Post(post.clone());
         let input = HarnessPostWorkstreamRequest {
             operation_id,
-            body: effect.text.clone(),
-            to_tag_ids: effect.to.clone(),
+            body: post.text.clone(),
+            to_tag_ids: post.to.clone(),
         };
         let result = confirm(async || {
             self.workstreams
@@ -190,8 +241,8 @@ impl Client {
             (Some(posted), None) => {
                 ensure!(
                     posted.source_task_id == task_id
-                        && posted.body == effect.text
-                        && posted.to_tag_ids == effect.to
+                        && posted.body == post.text
+                        && posted.to_tag_ids == post.to
                         && !posted.post_id.is_empty(),
                     "Workstream receipt has mismatched identity or content"
                 );
@@ -222,6 +273,83 @@ impl Client {
                 Ok(refused())
             }
             _ => bail!("invalid Workstream post receipt"),
+        }
+    }
+
+    pub(crate) async fn send(
+        &mut self,
+        message: &DirectMessage,
+        operation_id: String,
+        (task_id, attempt_id, tag_id): (&str, &str, &str),
+        token: &str,
+        secrets: &[String],
+    ) -> Result<Value> {
+        let text = crate::auth::redact(message.text.clone(), secrets);
+        let effect = PendingEffect::Send {
+            to: message.to.clone(),
+            text: text.clone(),
+        };
+        let input = HarnessSendTagMessageRequest {
+            operation_id,
+            recipient_tag_id: message.to.clone(),
+            text: text.clone(),
+        };
+        let result = confirm(async || {
+            self.mailbox
+                .send_message(
+                    crate::request(input.clone(), token)
+                        .map_err(|_| Status::unauthenticated("invalid execution credential"))?,
+                )
+                .await
+        })
+        .await?;
+        let Some(result) = result else {
+            return Ok(refused());
+        };
+        match (result.message, result.approval) {
+            (Some(sent), None) => {
+                ensure!(
+                    sent.source_task_id == task_id
+                        && sent.sender_tag_id == tag_id
+                        && sent.recipient_tag_id == message.to
+                        && sent.text == text
+                        && sent.origin() == TagMessageOrigin::Direct
+                        && sent.workstream_post_id.is_none()
+                        && !sent.message_id.is_empty(),
+                    "direct message receipt has mismatched identity or content"
+                );
+                self.pending.remove(&effect);
+                Ok(response(
+                    json!({"messageId":sent.message_id,"duplicate":result.duplicate}).to_string(),
+                    true,
+                ))
+            }
+            (None, Some(approval)) if approval.state() == ApprovalState::Pending => {
+                ensure!(
+                    approval.task_id == task_id
+                        && approval.attempt_id == attempt_id
+                        && approval.tag_id == tag_id
+                        && approval.action == "mailbox:send"
+                        && approval.resource == message.to
+                        && !approval.approval_id.is_empty(),
+                    "direct message approval belongs to a different Attempt"
+                );
+                self.pending.insert(effect, approval.approval_id);
+                Ok(response(
+                    "This message is awaiting operator approval. End the turn and wait for the decision.",
+                    false,
+                ))
+            }
+            (None, Some(approval))
+                if matches!(
+                    approval.state(),
+                    ApprovalState::Denied | ApprovalState::Expired
+                ) =>
+            {
+                self.pending.remove(&effect);
+                Ok(refused())
+            }
+            _ => bail!("invalid direct message receipt"),
         }
     }
 
@@ -299,9 +427,10 @@ impl Client {
         );
         let messages = result.messages.into_iter().map(|message| {
             let state = message.state().as_str_name();
+            let origin = message.origin().as_str_name();
             json!({
                 "id":message.message_id,"from":message.sender_tag_id,"to":message.recipient_tag_id,
-                "text":crate::auth::redact(message.text,secrets),"state":state
+                "text":crate::auth::redact(message.text,secrets),"state":state,"origin":origin
             })
         }).collect::<Vec<_>>();
         Ok(history(

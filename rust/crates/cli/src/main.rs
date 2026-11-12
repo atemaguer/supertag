@@ -4,9 +4,11 @@ mod host_status;
 mod inbox;
 mod inputs;
 mod local;
+mod mailbox_grants;
 mod network;
 mod objectives;
 mod policy;
+mod surface_policy;
 mod teams;
 mod tui;
 
@@ -41,7 +43,8 @@ use supertag_protocol::{
         live_inputs_server::LiveInputsServer, mailbox_server::MailboxServer,
         objectives_server::ObjectivesServer, operator_client::OperatorClient,
         operator_events_server::OperatorEventsServer, operator_server::OperatorServer,
-        policy_catalog_server::PolicyCatalogServer, teams_server::TeamsServer,
+        policy_catalog_server::PolicyCatalogServer,
+        surface_policy_catalog_server::SurfacePolicyCatalogServer, teams_server::TeamsServer,
         transfers_server::TransfersServer, worker_host_server::WorkerHostServer,
         workspace_directory_server::WorkspaceDirectoryServer,
     },
@@ -87,6 +90,13 @@ enum Command {
         #[command(subcommand)]
         command: policy::PolicyCommand,
     },
+    /// Bind verified connector accounts and locations to Tag policy.
+    SurfacePolicy {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(flatten)]
+        args: surface_policy::SurfacePolicyArgs,
+    },
     /// Read Worker Host readiness and manage draining.
     Host {
         #[command(flatten)]
@@ -111,6 +121,13 @@ enum Command {
         #[arg(long, default_value = "")]
         cursor: String,
     },
+    /// Manage permission to send direct messages between Tags.
+    MailboxGrants {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: mailbox_grants::MailboxGrantCommand,
+    },
     /// Manage Teams and read their Workstream posts.
     Team {
         #[command(flatten)]
@@ -124,6 +141,9 @@ enum Command {
         state_directory: PathBuf,
         #[command(flatten)]
         adapter: AdapterOptions,
+        /// Private host allowlist of Skill packages.
+        #[arg(long)]
+        skill_catalog: Option<PathBuf>,
         #[arg(long, default_value = "127.0.0.1:0")]
         gateway_listen: SocketAddr,
     },
@@ -177,6 +197,9 @@ enum Command {
         state_directory: PathBuf,
         #[command(flatten)]
         adapter: AdapterOptions,
+        /// Private host allowlist of Skill packages.
+        #[arg(long)]
+        skill_catalog: Option<PathBuf>,
         #[arg(long, default_value_t = 120)]
         attempt_timeout_seconds: u64,
         #[arg(long)]
@@ -241,6 +264,12 @@ enum Command {
         /// Bare operator ID eligible to approve. Omit to allow any eligible operator.
         #[arg(long, requires = "require_workstream_approval")]
         workstream_approver: Vec<String>,
+        /// Require approval before this Tag sends a direct message.
+        #[arg(long)]
+        require_mailbox_approval: bool,
+        /// Bare operator ID eligible to approve a direct message.
+        #[arg(long, requires = "require_mailbox_approval")]
+        mailbox_approver: Vec<String>,
         /// Host-local logical repository binding.
         #[arg(long, requires = "workspace_base")]
         workspace_id: Option<String>,
@@ -364,6 +393,14 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => policy::run(connection, command).await?,
+        Command::SurfacePolicy { connection, args } => {
+            use supertag_protocol::v2::surface_policy_catalog_client::SurfacePolicyCatalogClient;
+            let (channel, token) = connect_operator(connection).await?;
+            let client = SurfacePolicyCatalogClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES);
+            surface_policy::run(client, &token, args).await?;
+        }
         Command::Host {
             connection,
             command,
@@ -372,6 +409,10 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => inbox::run(connection, command).await?,
+        Command::MailboxGrants {
+            connection,
+            command,
+        } => mailbox_grants::run(connection, command).await?,
         Command::Mailbox {
             connection,
             tag_id,
@@ -404,6 +445,7 @@ async fn run(command: Command) -> Result<()> {
                         "sender_tag_id": message.sender_tag_id,
                         "recipient_tag_id": message.recipient_tag_id,
                         "source_task_id": message.source_task_id,
+                        "origin": message.origin().as_str_name(),
                         "workstream_post_id": message.workstream_post_id,
                         "objective_id": message.objective_id,
                         "text": message.text,
@@ -426,12 +468,14 @@ async fn run(command: Command) -> Result<()> {
         Command::Up {
             state_directory,
             adapter,
+            skill_catalog,
             gateway_listen,
         } => {
             local::up(
                 local::LocalOptions {
                     state_directory,
                     adapter,
+                    skill_catalog,
                     gateway_listen,
                 },
                 termination_signal(),
@@ -478,11 +522,16 @@ async fn run(command: Command) -> Result<()> {
             gateway,
             state_directory,
             adapter,
+            skill_catalog,
             attempt_timeout_seconds,
             once,
             wait_for_recovery,
         } => {
             let harness = adapter.harness_kind();
+            ensure!(
+                skill_catalog.is_none() || harness != HarnessKind::OpenaiAgents,
+                "This Worker Host's OpenAI Agents harness does not load Skills"
+            );
             let workspace = adapter.workspace_mapping();
             let (adapter, adapter_args) = adapter.launch(attempt_timeout_seconds)?;
             let options = HostOptions {
@@ -497,6 +546,9 @@ async fn run(command: Command) -> Result<()> {
                 wait_for_recovery,
                 once,
                 workspace,
+                context_catalog: supertag_worker_host::context::ContextCatalog::load(
+                    skill_catalog.as_deref(),
+                )?,
             };
             let token = CancellationToken::new();
             let shutdown = token.clone();
@@ -597,6 +649,8 @@ async fn run(command: Command) -> Result<()> {
             mut allow,
             require_workstream_approval,
             workstream_approver,
+            require_mailbox_approval,
+            mailbox_approver,
             workspace_id,
             workspace_base,
             harness,
@@ -608,12 +662,22 @@ async fn run(command: Command) -> Result<()> {
                     base_commit,
                 });
             let mut approval_rules = Vec::new();
-            if require_workstream_approval {
-                let action = "workstream:post".to_string();
+            for (required, action, operator_ids) in [
+                (
+                    require_workstream_approval,
+                    "workstream:post",
+                    workstream_approver,
+                ),
+                (require_mailbox_approval, "mailbox:send", mailbox_approver),
+            ] {
+                if !required {
+                    continue;
+                }
+                let action = action.to_string();
                 allow.push(action.clone());
                 approval_rules.push(ApprovalRule {
                     action,
-                    operator_ids: workstream_approver,
+                    operator_ids,
                 });
             }
             let (mut operator, token) = operator(connection).await?;
@@ -843,6 +907,9 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .set_serving::<PolicyCatalogServer<ControlPlane>>()
         .await;
     health
+        .set_serving::<SurfacePolicyCatalogServer<ControlPlane>>()
+        .await;
+    health
         .set_serving::<AttemptMailboxServer<ControlPlane>>()
         .await;
     health
@@ -914,6 +981,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .add_service(plane.mailbox_service())
         .add_service(plane.inbox_service())
         .add_service(plane.policy_service())
+        .add_service(plane.surface_policy_service())
         .add_service(plane.attempt_mailbox_service())
         .add_service(plane.operator_events_service(watch_shutdown.clone()))
         .add_service(
@@ -1038,6 +1106,9 @@ async fn gateway(
     health.set_serving::<MailboxServer<Gateway>>().await;
     health.set_serving::<InboxServer<Gateway>>().await;
     health.set_serving::<PolicyCatalogServer<Gateway>>().await;
+    health
+        .set_serving::<SurfacePolicyCatalogServer<Gateway>>()
+        .await;
     health.set_serving::<AttemptMailboxServer<Gateway>>().await;
     health
         .set_serving::<OperatorEventsServer<GatewayWatch>>()
@@ -1072,6 +1143,7 @@ async fn gateway(
         .add_service(gateway.mailbox_service())
         .add_service(gateway.inbox_service())
         .add_service(gateway.policy_service())
+        .add_service(gateway.surface_policy_service())
         .add_service(gateway.attempt_mailbox_service())
         .add_service(gateway.operator_events_service(shutdown.clone()));
     let grpc = async {

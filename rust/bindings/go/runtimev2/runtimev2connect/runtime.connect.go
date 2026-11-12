@@ -175,9 +175,16 @@ const (
 	AttemptWorkstreamsPostAttemptWorkstreamProcedure = "/supertag.runtime.v2.AttemptWorkstreams/PostAttemptWorkstream"
 	// MailboxListMessagesProcedure is the fully-qualified name of the Mailbox's ListMessages RPC.
 	MailboxListMessagesProcedure = "/supertag.runtime.v2.Mailbox/ListMessages"
+	// MailboxChangeGrantProcedure is the fully-qualified name of the Mailbox's ChangeGrant RPC.
+	MailboxChangeGrantProcedure = "/supertag.runtime.v2.Mailbox/ChangeGrant"
+	// MailboxListGrantsProcedure is the fully-qualified name of the Mailbox's ListGrants RPC.
+	MailboxListGrantsProcedure = "/supertag.runtime.v2.Mailbox/ListGrants"
 	// AttemptMailboxReadMailboxProcedure is the fully-qualified name of the AttemptMailbox's
 	// ReadMailbox RPC.
 	AttemptMailboxReadMailboxProcedure = "/supertag.runtime.v2.AttemptMailbox/ReadMailbox"
+	// AttemptMailboxSendMessageProcedure is the fully-qualified name of the AttemptMailbox's
+	// SendMessage RPC.
+	AttemptMailboxSendMessageProcedure = "/supertag.runtime.v2.AttemptMailbox/SendMessage"
 	// WorkerHostRegisterHostProcedure is the fully-qualified name of the WorkerHost's RegisterHost RPC.
 	WorkerHostRegisterHostProcedure = "/supertag.runtime.v2.WorkerHost/RegisterHost"
 	// WorkerHostReportHostProcedure is the fully-qualified name of the WorkerHost's ReportHost RPC.
@@ -192,6 +199,12 @@ const (
 	// WorkerHostGetAttemptCapabilitiesProcedure is the fully-qualified name of the WorkerHost's
 	// GetAttemptCapabilities RPC.
 	WorkerHostGetAttemptCapabilitiesProcedure = "/supertag.runtime.v2.WorkerHost/GetAttemptCapabilities"
+	// WorkerHostGetContextPinsProcedure is the fully-qualified name of the WorkerHost's GetContextPins
+	// RPC.
+	WorkerHostGetContextPinsProcedure = "/supertag.runtime.v2.WorkerHost/GetContextPins"
+	// WorkerHostCommitContextResolutionProcedure is the fully-qualified name of the WorkerHost's
+	// CommitContextResolution RPC.
+	WorkerHostCommitContextResolutionProcedure = "/supertag.runtime.v2.WorkerHost/CommitContextResolution"
 	// WorkerHostRenewAttemptProcedure is the fully-qualified name of the WorkerHost's RenewAttempt RPC.
 	WorkerHostRenewAttemptProcedure = "/supertag.runtime.v2.WorkerHost/RenewAttempt"
 	// WorkerHostGetAttemptResolutionProcedure is the fully-qualified name of the WorkerHost's
@@ -306,6 +319,9 @@ const (
 	HarnessWorkstreamsPostProcedure = "/supertag.runtime.v2.HarnessWorkstreams/Post"
 	// HarnessMailboxReadProcedure is the fully-qualified name of the HarnessMailbox's Read RPC.
 	HarnessMailboxReadProcedure = "/supertag.runtime.v2.HarnessMailbox/Read"
+	// HarnessMailboxSendMessageProcedure is the fully-qualified name of the HarnessMailbox's
+	// SendMessage RPC.
+	HarnessMailboxSendMessageProcedure = "/supertag.runtime.v2.HarnessMailbox/SendMessage"
 )
 
 // OperatorClient is a client for the supertag.runtime.v2.Operator service.
@@ -1686,6 +1702,8 @@ func (UnimplementedAttemptWorkstreamsHandler) PostAttemptWorkstream(context.Cont
 // MailboxClient is a client for the supertag.runtime.v2.Mailbox service.
 type MailboxClient interface {
 	ListMessages(context.Context, *connect.Request[runtimev2.ListMailboxMessagesRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error)
+	ChangeGrant(context.Context, *connect.Request[runtimev2.ChangeMailboxGrantRequest]) (*connect.Response[runtimev2.ChangeMailboxGrantResponse], error)
+	ListGrants(context.Context, *connect.Request[runtimev2.ListMailboxGrantsRequest]) (*connect.Response[runtimev2.ListMailboxGrantsResponse], error)
 }
 
 // NewMailboxClient constructs a client for the supertag.runtime.v2.Mailbox service. By default, it
@@ -1705,12 +1723,26 @@ func NewMailboxClient(httpClient connect.HTTPClient, baseURL string, opts ...con
 			connect.WithSchema(mailboxMethods.ByName("ListMessages")),
 			connect.WithClientOptions(opts...),
 		),
+		changeGrant: connect.NewClient[runtimev2.ChangeMailboxGrantRequest, runtimev2.ChangeMailboxGrantResponse](
+			httpClient,
+			baseURL+MailboxChangeGrantProcedure,
+			connect.WithSchema(mailboxMethods.ByName("ChangeGrant")),
+			connect.WithClientOptions(opts...),
+		),
+		listGrants: connect.NewClient[runtimev2.ListMailboxGrantsRequest, runtimev2.ListMailboxGrantsResponse](
+			httpClient,
+			baseURL+MailboxListGrantsProcedure,
+			connect.WithSchema(mailboxMethods.ByName("ListGrants")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // mailboxClient implements MailboxClient.
 type mailboxClient struct {
 	listMessages *connect.Client[runtimev2.ListMailboxMessagesRequest, runtimev2.ListMailboxMessagesResponse]
+	changeGrant  *connect.Client[runtimev2.ChangeMailboxGrantRequest, runtimev2.ChangeMailboxGrantResponse]
+	listGrants   *connect.Client[runtimev2.ListMailboxGrantsRequest, runtimev2.ListMailboxGrantsResponse]
 }
 
 // ListMessages calls supertag.runtime.v2.Mailbox.ListMessages.
@@ -1718,9 +1750,21 @@ func (c *mailboxClient) ListMessages(ctx context.Context, req *connect.Request[r
 	return c.listMessages.CallUnary(ctx, req)
 }
 
+// ChangeGrant calls supertag.runtime.v2.Mailbox.ChangeGrant.
+func (c *mailboxClient) ChangeGrant(ctx context.Context, req *connect.Request[runtimev2.ChangeMailboxGrantRequest]) (*connect.Response[runtimev2.ChangeMailboxGrantResponse], error) {
+	return c.changeGrant.CallUnary(ctx, req)
+}
+
+// ListGrants calls supertag.runtime.v2.Mailbox.ListGrants.
+func (c *mailboxClient) ListGrants(ctx context.Context, req *connect.Request[runtimev2.ListMailboxGrantsRequest]) (*connect.Response[runtimev2.ListMailboxGrantsResponse], error) {
+	return c.listGrants.CallUnary(ctx, req)
+}
+
 // MailboxHandler is an implementation of the supertag.runtime.v2.Mailbox service.
 type MailboxHandler interface {
 	ListMessages(context.Context, *connect.Request[runtimev2.ListMailboxMessagesRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error)
+	ChangeGrant(context.Context, *connect.Request[runtimev2.ChangeMailboxGrantRequest]) (*connect.Response[runtimev2.ChangeMailboxGrantResponse], error)
+	ListGrants(context.Context, *connect.Request[runtimev2.ListMailboxGrantsRequest]) (*connect.Response[runtimev2.ListMailboxGrantsResponse], error)
 }
 
 // NewMailboxHandler builds an HTTP handler from the service implementation. It returns the path on
@@ -1736,10 +1780,26 @@ func NewMailboxHandler(svc MailboxHandler, opts ...connect.HandlerOption) (strin
 		connect.WithSchema(mailboxMethods.ByName("ListMessages")),
 		connect.WithHandlerOptions(opts...),
 	)
+	mailboxChangeGrantHandler := connect.NewUnaryHandler(
+		MailboxChangeGrantProcedure,
+		svc.ChangeGrant,
+		connect.WithSchema(mailboxMethods.ByName("ChangeGrant")),
+		connect.WithHandlerOptions(opts...),
+	)
+	mailboxListGrantsHandler := connect.NewUnaryHandler(
+		MailboxListGrantsProcedure,
+		svc.ListGrants,
+		connect.WithSchema(mailboxMethods.ByName("ListGrants")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.Mailbox/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case MailboxListMessagesProcedure:
 			mailboxListMessagesHandler.ServeHTTP(w, r)
+		case MailboxChangeGrantProcedure:
+			mailboxChangeGrantHandler.ServeHTTP(w, r)
+		case MailboxListGrantsProcedure:
+			mailboxListGrantsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1753,9 +1813,18 @@ func (UnimplementedMailboxHandler) ListMessages(context.Context, *connect.Reques
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Mailbox.ListMessages is not implemented"))
 }
 
+func (UnimplementedMailboxHandler) ChangeGrant(context.Context, *connect.Request[runtimev2.ChangeMailboxGrantRequest]) (*connect.Response[runtimev2.ChangeMailboxGrantResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Mailbox.ChangeGrant is not implemented"))
+}
+
+func (UnimplementedMailboxHandler) ListGrants(context.Context, *connect.Request[runtimev2.ListMailboxGrantsRequest]) (*connect.Response[runtimev2.ListMailboxGrantsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Mailbox.ListGrants is not implemented"))
+}
+
 // AttemptMailboxClient is a client for the supertag.runtime.v2.AttemptMailbox service.
 type AttemptMailboxClient interface {
 	ReadMailbox(context.Context, *connect.Request[runtimev2.ReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error)
+	SendMessage(context.Context, *connect.Request[runtimev2.SendAttemptTagMessageRequest]) (*connect.Response[runtimev2.SendTagMessageResponse], error)
 }
 
 // NewAttemptMailboxClient constructs a client for the supertag.runtime.v2.AttemptMailbox service.
@@ -1775,12 +1844,19 @@ func NewAttemptMailboxClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(attemptMailboxMethods.ByName("ReadMailbox")),
 			connect.WithClientOptions(opts...),
 		),
+		sendMessage: connect.NewClient[runtimev2.SendAttemptTagMessageRequest, runtimev2.SendTagMessageResponse](
+			httpClient,
+			baseURL+AttemptMailboxSendMessageProcedure,
+			connect.WithSchema(attemptMailboxMethods.ByName("SendMessage")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // attemptMailboxClient implements AttemptMailboxClient.
 type attemptMailboxClient struct {
 	readMailbox *connect.Client[runtimev2.ReadMailboxRequest, runtimev2.ListMailboxMessagesResponse]
+	sendMessage *connect.Client[runtimev2.SendAttemptTagMessageRequest, runtimev2.SendTagMessageResponse]
 }
 
 // ReadMailbox calls supertag.runtime.v2.AttemptMailbox.ReadMailbox.
@@ -1788,9 +1864,15 @@ func (c *attemptMailboxClient) ReadMailbox(ctx context.Context, req *connect.Req
 	return c.readMailbox.CallUnary(ctx, req)
 }
 
+// SendMessage calls supertag.runtime.v2.AttemptMailbox.SendMessage.
+func (c *attemptMailboxClient) SendMessage(ctx context.Context, req *connect.Request[runtimev2.SendAttemptTagMessageRequest]) (*connect.Response[runtimev2.SendTagMessageResponse], error) {
+	return c.sendMessage.CallUnary(ctx, req)
+}
+
 // AttemptMailboxHandler is an implementation of the supertag.runtime.v2.AttemptMailbox service.
 type AttemptMailboxHandler interface {
 	ReadMailbox(context.Context, *connect.Request[runtimev2.ReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error)
+	SendMessage(context.Context, *connect.Request[runtimev2.SendAttemptTagMessageRequest]) (*connect.Response[runtimev2.SendTagMessageResponse], error)
 }
 
 // NewAttemptMailboxHandler builds an HTTP handler from the service implementation. It returns the
@@ -1806,10 +1888,18 @@ func NewAttemptMailboxHandler(svc AttemptMailboxHandler, opts ...connect.Handler
 		connect.WithSchema(attemptMailboxMethods.ByName("ReadMailbox")),
 		connect.WithHandlerOptions(opts...),
 	)
+	attemptMailboxSendMessageHandler := connect.NewUnaryHandler(
+		AttemptMailboxSendMessageProcedure,
+		svc.SendMessage,
+		connect.WithSchema(attemptMailboxMethods.ByName("SendMessage")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.AttemptMailbox/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AttemptMailboxReadMailboxProcedure:
 			attemptMailboxReadMailboxHandler.ServeHTTP(w, r)
+		case AttemptMailboxSendMessageProcedure:
+			attemptMailboxSendMessageHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1823,6 +1913,10 @@ func (UnimplementedAttemptMailboxHandler) ReadMailbox(context.Context, *connect.
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptMailbox.ReadMailbox is not implemented"))
 }
 
+func (UnimplementedAttemptMailboxHandler) SendMessage(context.Context, *connect.Request[runtimev2.SendAttemptTagMessageRequest]) (*connect.Response[runtimev2.SendTagMessageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptMailbox.SendMessage is not implemented"))
+}
+
 // WorkerHostClient is a client for the supertag.runtime.v2.WorkerHost service.
 type WorkerHostClient interface {
 	RegisterHost(context.Context, *connect.Request[runtimev2.RegisterHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
@@ -1831,6 +1925,8 @@ type WorkerHostClient interface {
 	StartTask(context.Context, *connect.Request[runtimev2.StartTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	InspectAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.Task], error)
 	GetAttemptCapabilities(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptCapabilities], error)
+	GetContextPins(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.ContextResolutionManifest], error)
+	CommitContextResolution(context.Context, *connect.Request[runtimev2.CommitContextResolutionRequest]) (*connect.Response[runtimev2.ContextResolutionManifest], error)
 	RenewAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptAuthority], error)
 	GetAttemptResolution(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetAttemptResolutionResponse], error)
 	ReportAttemptUsage(context.Context, *connect.Request[runtimev2.ReportAttemptUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error)
@@ -1886,6 +1982,18 @@ func NewWorkerHostClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(workerHostMethods.ByName("GetAttemptCapabilities")),
 			connect.WithClientOptions(opts...),
 		),
+		getContextPins: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.ContextResolutionManifest](
+			httpClient,
+			baseURL+WorkerHostGetContextPinsProcedure,
+			connect.WithSchema(workerHostMethods.ByName("GetContextPins")),
+			connect.WithClientOptions(opts...),
+		),
+		commitContextResolution: connect.NewClient[runtimev2.CommitContextResolutionRequest, runtimev2.ContextResolutionManifest](
+			httpClient,
+			baseURL+WorkerHostCommitContextResolutionProcedure,
+			connect.WithSchema(workerHostMethods.ByName("CommitContextResolution")),
+			connect.WithClientOptions(opts...),
+		),
 		renewAttempt: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.AttemptAuthority](
 			httpClient,
 			baseURL+WorkerHostRenewAttemptProcedure,
@@ -1927,18 +2035,20 @@ func NewWorkerHostClient(httpClient connect.HTTPClient, baseURL string, opts ...
 
 // workerHostClient implements WorkerHostClient.
 type workerHostClient struct {
-	registerHost           *connect.Client[runtimev2.RegisterHostRequest, runtimev2.HostRecord]
-	reportHost             *connect.Client[runtimev2.ReportHostRequest, runtimev2.WorkerHostStatus]
-	claimTask              *connect.Client[runtimev2.ClaimTaskRequest, runtimev2.ClaimTaskResponse]
-	startTask              *connect.Client[runtimev2.StartTaskRequest, runtimev2.Task]
-	inspectAttempt         *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.Task]
-	getAttemptCapabilities *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.AttemptCapabilities]
-	renewAttempt           *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.AttemptAuthority]
-	getAttemptResolution   *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.GetAttemptResolutionResponse]
-	reportAttemptUsage     *connect.Client[runtimev2.ReportAttemptUsageRequest, runtimev2.ReportAttemptUsageResponse]
-	appendEvent            *connect.Client[runtimev2.AppendEventRequest, runtimev2.TaskEvent]
-	askQuestion            *connect.Client[runtimev2.AskQuestionRequest, runtimev2.ObjectiveQuestion]
-	finishTask             *connect.Client[runtimev2.FinishTaskRequest, runtimev2.Task]
+	registerHost            *connect.Client[runtimev2.RegisterHostRequest, runtimev2.HostRecord]
+	reportHost              *connect.Client[runtimev2.ReportHostRequest, runtimev2.WorkerHostStatus]
+	claimTask               *connect.Client[runtimev2.ClaimTaskRequest, runtimev2.ClaimTaskResponse]
+	startTask               *connect.Client[runtimev2.StartTaskRequest, runtimev2.Task]
+	inspectAttempt          *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.Task]
+	getAttemptCapabilities  *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.AttemptCapabilities]
+	getContextPins          *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.ContextResolutionManifest]
+	commitContextResolution *connect.Client[runtimev2.CommitContextResolutionRequest, runtimev2.ContextResolutionManifest]
+	renewAttempt            *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.AttemptAuthority]
+	getAttemptResolution    *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.GetAttemptResolutionResponse]
+	reportAttemptUsage      *connect.Client[runtimev2.ReportAttemptUsageRequest, runtimev2.ReportAttemptUsageResponse]
+	appendEvent             *connect.Client[runtimev2.AppendEventRequest, runtimev2.TaskEvent]
+	askQuestion             *connect.Client[runtimev2.AskQuestionRequest, runtimev2.ObjectiveQuestion]
+	finishTask              *connect.Client[runtimev2.FinishTaskRequest, runtimev2.Task]
 }
 
 // RegisterHost calls supertag.runtime.v2.WorkerHost.RegisterHost.
@@ -1969,6 +2079,16 @@ func (c *workerHostClient) InspectAttempt(ctx context.Context, req *connect.Requ
 // GetAttemptCapabilities calls supertag.runtime.v2.WorkerHost.GetAttemptCapabilities.
 func (c *workerHostClient) GetAttemptCapabilities(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptCapabilities], error) {
 	return c.getAttemptCapabilities.CallUnary(ctx, req)
+}
+
+// GetContextPins calls supertag.runtime.v2.WorkerHost.GetContextPins.
+func (c *workerHostClient) GetContextPins(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.ContextResolutionManifest], error) {
+	return c.getContextPins.CallUnary(ctx, req)
+}
+
+// CommitContextResolution calls supertag.runtime.v2.WorkerHost.CommitContextResolution.
+func (c *workerHostClient) CommitContextResolution(ctx context.Context, req *connect.Request[runtimev2.CommitContextResolutionRequest]) (*connect.Response[runtimev2.ContextResolutionManifest], error) {
+	return c.commitContextResolution.CallUnary(ctx, req)
 }
 
 // RenewAttempt calls supertag.runtime.v2.WorkerHost.RenewAttempt.
@@ -2009,6 +2129,8 @@ type WorkerHostHandler interface {
 	StartTask(context.Context, *connect.Request[runtimev2.StartTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	InspectAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.Task], error)
 	GetAttemptCapabilities(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptCapabilities], error)
+	GetContextPins(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.ContextResolutionManifest], error)
+	CommitContextResolution(context.Context, *connect.Request[runtimev2.CommitContextResolutionRequest]) (*connect.Response[runtimev2.ContextResolutionManifest], error)
 	RenewAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptAuthority], error)
 	GetAttemptResolution(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetAttemptResolutionResponse], error)
 	ReportAttemptUsage(context.Context, *connect.Request[runtimev2.ReportAttemptUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error)
@@ -2058,6 +2180,18 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 		WorkerHostGetAttemptCapabilitiesProcedure,
 		svc.GetAttemptCapabilities,
 		connect.WithSchema(workerHostMethods.ByName("GetAttemptCapabilities")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workerHostGetContextPinsHandler := connect.NewUnaryHandler(
+		WorkerHostGetContextPinsProcedure,
+		svc.GetContextPins,
+		connect.WithSchema(workerHostMethods.ByName("GetContextPins")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workerHostCommitContextResolutionHandler := connect.NewUnaryHandler(
+		WorkerHostCommitContextResolutionProcedure,
+		svc.CommitContextResolution,
+		connect.WithSchema(workerHostMethods.ByName("CommitContextResolution")),
 		connect.WithHandlerOptions(opts...),
 	)
 	workerHostRenewAttemptHandler := connect.NewUnaryHandler(
@@ -2110,6 +2244,10 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 			workerHostInspectAttemptHandler.ServeHTTP(w, r)
 		case WorkerHostGetAttemptCapabilitiesProcedure:
 			workerHostGetAttemptCapabilitiesHandler.ServeHTTP(w, r)
+		case WorkerHostGetContextPinsProcedure:
+			workerHostGetContextPinsHandler.ServeHTTP(w, r)
+		case WorkerHostCommitContextResolutionProcedure:
+			workerHostCommitContextResolutionHandler.ServeHTTP(w, r)
 		case WorkerHostRenewAttemptProcedure:
 			workerHostRenewAttemptHandler.ServeHTTP(w, r)
 		case WorkerHostGetAttemptResolutionProcedure:
@@ -2153,6 +2291,14 @@ func (UnimplementedWorkerHostHandler) InspectAttempt(context.Context, *connect.R
 
 func (UnimplementedWorkerHostHandler) GetAttemptCapabilities(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptCapabilities], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.GetAttemptCapabilities is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) GetContextPins(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.ContextResolutionManifest], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.GetContextPins is not implemented"))
+}
+
+func (UnimplementedWorkerHostHandler) CommitContextResolution(context.Context, *connect.Request[runtimev2.CommitContextResolutionRequest]) (*connect.Response[runtimev2.ContextResolutionManifest], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.CommitContextResolution is not implemented"))
 }
 
 func (UnimplementedWorkerHostHandler) RenewAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.AttemptAuthority], error) {
@@ -3657,6 +3803,7 @@ func (UnimplementedHarnessWorkstreamsHandler) Post(context.Context, *connect.Req
 // HarnessMailboxClient is a client for the supertag.runtime.v2.HarnessMailbox service.
 type HarnessMailboxClient interface {
 	Read(context.Context, *connect.Request[runtimev2.HarnessReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error)
+	SendMessage(context.Context, *connect.Request[runtimev2.HarnessSendTagMessageRequest]) (*connect.Response[runtimev2.SendTagMessageResponse], error)
 }
 
 // NewHarnessMailboxClient constructs a client for the supertag.runtime.v2.HarnessMailbox service.
@@ -3676,12 +3823,19 @@ func NewHarnessMailboxClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(harnessMailboxMethods.ByName("Read")),
 			connect.WithClientOptions(opts...),
 		),
+		sendMessage: connect.NewClient[runtimev2.HarnessSendTagMessageRequest, runtimev2.SendTagMessageResponse](
+			httpClient,
+			baseURL+HarnessMailboxSendMessageProcedure,
+			connect.WithSchema(harnessMailboxMethods.ByName("SendMessage")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // harnessMailboxClient implements HarnessMailboxClient.
 type harnessMailboxClient struct {
-	read *connect.Client[runtimev2.HarnessReadMailboxRequest, runtimev2.ListMailboxMessagesResponse]
+	read        *connect.Client[runtimev2.HarnessReadMailboxRequest, runtimev2.ListMailboxMessagesResponse]
+	sendMessage *connect.Client[runtimev2.HarnessSendTagMessageRequest, runtimev2.SendTagMessageResponse]
 }
 
 // Read calls supertag.runtime.v2.HarnessMailbox.Read.
@@ -3689,9 +3843,15 @@ func (c *harnessMailboxClient) Read(ctx context.Context, req *connect.Request[ru
 	return c.read.CallUnary(ctx, req)
 }
 
+// SendMessage calls supertag.runtime.v2.HarnessMailbox.SendMessage.
+func (c *harnessMailboxClient) SendMessage(ctx context.Context, req *connect.Request[runtimev2.HarnessSendTagMessageRequest]) (*connect.Response[runtimev2.SendTagMessageResponse], error) {
+	return c.sendMessage.CallUnary(ctx, req)
+}
+
 // HarnessMailboxHandler is an implementation of the supertag.runtime.v2.HarnessMailbox service.
 type HarnessMailboxHandler interface {
 	Read(context.Context, *connect.Request[runtimev2.HarnessReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error)
+	SendMessage(context.Context, *connect.Request[runtimev2.HarnessSendTagMessageRequest]) (*connect.Response[runtimev2.SendTagMessageResponse], error)
 }
 
 // NewHarnessMailboxHandler builds an HTTP handler from the service implementation. It returns the
@@ -3707,10 +3867,18 @@ func NewHarnessMailboxHandler(svc HarnessMailboxHandler, opts ...connect.Handler
 		connect.WithSchema(harnessMailboxMethods.ByName("Read")),
 		connect.WithHandlerOptions(opts...),
 	)
+	harnessMailboxSendMessageHandler := connect.NewUnaryHandler(
+		HarnessMailboxSendMessageProcedure,
+		svc.SendMessage,
+		connect.WithSchema(harnessMailboxMethods.ByName("SendMessage")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.HarnessMailbox/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case HarnessMailboxReadProcedure:
 			harnessMailboxReadHandler.ServeHTTP(w, r)
+		case HarnessMailboxSendMessageProcedure:
+			harnessMailboxSendMessageHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -3722,4 +3890,8 @@ type UnimplementedHarnessMailboxHandler struct{}
 
 func (UnimplementedHarnessMailboxHandler) Read(context.Context, *connect.Request[runtimev2.HarnessReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessMailbox.Read is not implemented"))
+}
+
+func (UnimplementedHarnessMailboxHandler) SendMessage(context.Context, *connect.Request[runtimev2.HarnessSendTagMessageRequest]) (*connect.Response[runtimev2.SendTagMessageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessMailbox.SendMessage is not implemented"))
 }

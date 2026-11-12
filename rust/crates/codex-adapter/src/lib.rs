@@ -6,6 +6,7 @@ mod config;
 mod coordination;
 mod events;
 mod questions;
+mod skills;
 
 use std::{collections::BTreeMap, ffi::OsString, path::PathBuf, process::Stdio, time::Duration};
 
@@ -77,27 +78,35 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         .context("attach Codex adapter")?
         .into_inner();
     let task = attached.task.context("Worker Host returned no Task")?;
-    let full_inventory = attached.coordination.is_some()
-        && attached
-            .checkpoint
-            .as_ref()
-            .is_none_or(checkpoint::has_full_coordination);
-    let mut questions = questions::Bridge::new(
-        channel,
-        &bootstrap.token,
-        &task,
-        &attached.attempt_id,
+    let capabilities =
         attached
             .coordination
             .unwrap_or_else(|| supertag_protocol::v2::AttemptCapabilities {
                 may_ask_objective_question: attached.may_ask_objective_question,
                 ..Default::default()
-            }),
-        full_inventory,
+            });
+    let inventory = if let Some(previous) = &attached.checkpoint
+        && let Some(inventory) = checkpoint::coordination_inventory(previous)
+    {
+        inventory
+    } else if attached.coordination.is_some() && attached.checkpoint.is_none() {
+        coordination::Inventory::Direct
+    } else if capabilities.may_ask_objective_question {
+        coordination::Inventory::Ask
+    } else {
+        coordination::Inventory::None
+    };
+    let mut questions = questions::Bridge::new(
+        channel,
+        &bootstrap.token,
+        &task,
+        &attached.attempt_id,
+        capabilities,
+        inventory,
     );
     let outcome = execute(
         &options,
-        &task,
+        (&task, &attached.resolved_skills),
         attached.checkpoint.as_ref(),
         &attached.attempt_id,
         &mut harness,
@@ -137,13 +146,22 @@ fn request<T>(message: T, token: &str) -> Result<Request<T>> {
 
 async fn execute(
     options: &CodexOptions,
-    task: &Task,
+    task_and_skills: (&Task, &[supertag_protocol::v2::ResolvedSkill]),
     previous_checkpoint: Option<&SessionCheckpoint>,
     attempt_id: &str,
     harness: &mut HarnessClient<Channel>,
     questions: &mut questions::Bridge,
     token: &str,
 ) -> Result<(String, SessionCheckpoint)> {
+    let (task, resolved_skills) = task_and_skills;
+    ensure!(
+        resolved_skills.is_empty()
+            || !task
+                .allowed_actions
+                .iter()
+                .any(|action| matches!(action.as_str(), "files:write" | "commands:execute")),
+        "Codex Skill delivery currently requires read-only file access without command execution"
+    );
     ensure!(
         !options.timeout.is_zero(),
         "Codex execution timeout must be positive"
@@ -153,16 +171,6 @@ async fn execute(
         .canonicalize()
         .context("Codex workspace is unavailable")?;
     ensure!(workspace.is_dir(), "Codex workspace must be a directory");
-    ensure!(
-        !task
-            .policy_snapshot
-            .as_ref()
-            .is_some_and(|snapshot| snapshot
-                .context_sets
-                .iter()
-                .any(|set| set.items.iter().any(|item| item.required))),
-        "a required Context Item has no Codex resolver"
-    );
     let accepted_model = task
         .policy_snapshot
         .as_ref()
@@ -178,6 +186,10 @@ async fn execute(
     )?;
     let thread_parameters = config::thread_parameters(&workspace, &arguments)?;
     let authentication = auth::Prepared::new(&options.environment, &options.state_directory)?;
+    let skills = skills::prepare(task, resolved_skills, authentication.home())?;
+    if let Some(checkpoint) = previous_checkpoint {
+        checkpoint::check_context(checkpoint, &skills.manifest)?;
+    }
     let mut environment = authentication.environment(&options.environment);
     // Secrets belonging to the transport are never forwarded to the native process.
     environment.remove(&OsString::from("SUPERTAG_HOST_TOKEN"));
@@ -233,6 +245,7 @@ async fn execute(
             attempt_id,
             thread_parameters,
             policy,
+            &skills.paths,
             expected_thread,
             baseline,
             harness,
@@ -257,7 +270,10 @@ async fn execute(
             &secrets,
         )
         .context("could not preserve Codex Session continuity")?;
-        Ok::<_, anyhow::Error>((result, checkpoint))
+        Ok::<_, anyhow::Error>((
+            result,
+            checkpoint::bind_context(checkpoint, &skills.manifest)?,
+        ))
     })
     .await;
     // On malformed streams, timeouts, or RPC failure, stop and reap the actual

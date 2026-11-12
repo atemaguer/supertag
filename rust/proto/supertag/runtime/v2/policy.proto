@@ -19,6 +19,121 @@ service PolicyCatalog {
   rpc DeactivateRoleAssignment(DeactivateRoleAssignmentRequest) returns (RoleAssignment);
 }
 
+// Operator-managed policy bindings. Provider credentials stay at the Gateway.
+service SurfacePolicyCatalog {
+  rpc PutSurfaceAccount(PutSurfaceAccountRequest) returns (SurfaceAccount);
+  rpc GetSurfaceAccount(GetSurfaceAccountRequest) returns (SurfaceAccount);
+  rpc ListSurfaceAccounts(ListSurfaceAccountsRequest) returns (ListSurfaceAccountsResponse);
+  rpc PutSurfaceLocation(PutSurfaceLocationRequest) returns (SurfaceLocation);
+  rpc GetSurfaceLocation(GetSurfaceLocationRequest) returns (SurfaceLocation);
+  rpc ListSurfaceLocations(ListSurfaceLocationsRequest) returns (ListSurfaceLocationsResponse);
+  rpc DeleteSurfaceLocation(DeleteSurfaceLocationRequest) returns (DeletePolicyResourceResponse);
+}
+
+message SlackSurfaceIdentity { string team_id = 1; }
+message GithubSurfaceIdentity {
+  // The operator's non-secret installation or user identity. The current
+  // connector attests its own authenticated alias and the numeric repository.
+  string external_account_id = 1;
+}
+message LinearSurfaceIdentity { string workspace_id = 1; }
+message LarkSurfaceIdentity {
+  bool feishu = 1;
+  string app_id = 2;
+  string tenant_key = 3;
+}
+message MicrosoftTeamsSurfaceIdentity {
+  string app_id = 1;
+  string tenant_id = 2;
+}
+message SurfaceAccountIdentity {
+  oneof provider {
+    SlackSurfaceIdentity slack = 1;
+    GithubSurfaceIdentity github = 2;
+    LinearSurfaceIdentity linear = 3;
+    LarkSurfaceIdentity lark = 4;
+    MicrosoftTeamsSurfaceIdentity microsoft_teams = 5;
+  }
+}
+message SurfaceAccount {
+  string account_id = 1;
+  SurfaceAccountIdentity identity = 2;
+  bool enabled = 3;
+  uint64 revision = 4;
+}
+message SlackSurfaceChannel { string channel_id = 1; }
+message GithubSurfaceRepository { uint64 repository_id = 1; }
+message LinearSurfaceTeam { string team_id = 1; }
+message LarkSurfaceChat { string chat_id = 1; }
+message MicrosoftTeamsSurfaceChannel {
+  string team_id = 1;
+  string channel_id = 2;
+}
+message SurfaceLocationScope {
+  oneof provider {
+    SlackSurfaceChannel slack = 1;
+    GithubSurfaceRepository github = 2;
+    LinearSurfaceTeam linear = 3;
+    LarkSurfaceChat lark = 4;
+    MicrosoftTeamsSurfaceChannel microsoft_teams = 5;
+  }
+}
+message SurfaceLocation {
+  string location_id = 1;
+  string account_id = 2;
+  // This alias has one outbox writer and may bind only one exact location.
+  string connector_account_id = 3;
+  SurfaceLocationScope scope = 4;
+  string tag_id = 5;
+  bool enabled = 6;
+  uint64 revision = 7;
+  repeated string permission_set_ids = 8;
+  repeated string context_set_ids = 9;
+}
+message SurfacePolicyOrigin {
+  string location_id = 1;
+  uint64 location_revision = 2;
+  string account_id = 3;
+  string connector_account_id = 4;
+  SurfaceLocationScope scope = 5;
+  repeated string origin_actions = 6;
+}
+
+message PutSurfaceAccountRequest {
+  string operation_id = 1;
+  SurfaceAccount account = 2;
+  optional uint64 expected_revision = 3;
+}
+message GetSurfaceAccountRequest { string account_id = 1; }
+message ListSurfaceAccountsRequest {
+  uint32 limit = 1;
+  string cursor = 2;
+}
+message ListSurfaceAccountsResponse {
+  repeated SurfaceAccount accounts = 1;
+  string next_cursor = 2;
+}
+message PutSurfaceLocationRequest {
+  string operation_id = 1;
+  SurfaceLocation location = 2;
+  optional uint64 expected_revision = 3;
+}
+message GetSurfaceLocationRequest { string location_id = 1; }
+message ListSurfaceLocationsRequest {
+  string account_id = 1;
+  uint32 limit = 2;
+  string cursor = 3;
+}
+message ListSurfaceLocationsResponse {
+  repeated SurfaceLocation locations = 1;
+  string next_cursor = 2;
+}
+message DeleteSurfaceLocationRequest {
+  string operation_id = 1;
+  string location_id = 2;
+  uint64 expected_revision = 3;
+}
+
 enum PolicyPermissionTarget {
   POLICY_PERMISSION_TARGET_UNSPECIFIED = 0;
   POLICY_PERMISSION_TARGET_RUNTIME = 1;
@@ -102,6 +217,7 @@ message TaskPolicySnapshot {
   repeated PermissionSet permission_sets = 3;
   repeated ContextSet context_sets = 4;
   PolicyExecutionSettings execution = 5;
+  SurfacePolicyOrigin origin = 6;
 }
 
 message PutPermissionSetRequest {

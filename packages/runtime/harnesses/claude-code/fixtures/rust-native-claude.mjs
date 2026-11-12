@@ -20,6 +20,7 @@ const cwd = process.cwd();
 const responses = new Map();
 let hooks = [];
 let sdkServers = [];
+let initialized = {};
 let started = false;
 let waiting = false;
 let waitingForInput = false;
@@ -74,6 +75,45 @@ async function coordinationCall(tool, input) {
   if (!(await hook(`mcp__supertag__${tool}`, input, metadata)))
     throw new Error(`Admitted ${tool} denied`);
   return (await sdkMcp("tools/call", { name: tool, arguments: input })).result;
+}
+
+async function directMailbox() {
+  const tools = (await sdkMcp("tools/list", {})).result?.tools;
+  if (tools?.map(({ name }) => name).join() !== "send_message")
+    throw new Error("Unexpected direct Mailbox tool inventory");
+  const result = await coordinationCall("send_message", {
+    to: "lead",
+    text: ` Private note ${process.env.ANTHROPIC_API_KEY} `,
+  });
+  if (result.isError || JSON.parse(result.content[0].text).messageId !== "direct-receipt")
+    throw new Error("Private message receipt missing");
+  return "fixture sent a direct message";
+}
+
+async function inspectSkillPackage() {
+  const plugin = initialized.plugins?.[0];
+  const root = plugin?.path ?? arg("--plugin-dir-no-mcp");
+  const qualified = "supertag-context:release-runbook";
+  if (!root || (plugin && !plugin.skipMcpDiscovery))
+    throw new Error("Expected a Skill-only plugin");
+  if (initialized.skills?.join() !== qualified)
+    throw new Error(`Unexpected native Skill selection: ${JSON.stringify(initialized.skills)}`);
+  const packages = await readdir(join(root, "skills"));
+  if (packages.length !== 1) throw new Error("Unexpected number of Skill packages");
+  const markdown = await readFile(join(root, "skills", packages[0], "SKILL.md"), "utf8");
+  if (!markdown.includes("Use the release checklist.")) throw new Error("Expected pinned Skill");
+  if (!(await hook("Skill", { skill: qualified }))) throw new Error("Admitted Skill denied");
+  if (await hook("Skill", { skill: "ambient" })) throw new Error("Ambient Skill allowed");
+  const reference = join(root, "skills", packages[0], "reference.md");
+  if (!(await hook("Read", { file_path: reference }))) throw new Error("Skill reference denied");
+  if ((await readFile(reference, "utf8")) !== "Pinned checklist details.")
+    throw new Error("Skill reference was not pinned");
+  if (await hook("Write", { file_path: reference, content: "changed" }))
+    throw new Error("Skill package writable");
+  if (await hook("Read", { file_path: join(root, ".claude-plugin", "plugin.json") }))
+    throw new Error("Adapter state readable");
+  if (await hook("Bash", { command: "echo unintended" })) throw new Error("Skill widened tools");
+  return "fixture verified Skill package";
 }
 
 async function objectiveQuestion(allowed) {
@@ -363,6 +403,8 @@ async function turn(message) {
     result = await objectiveQuestion(prompt === "objective-question");
   if (prompt.startsWith("coordination-"))
     result = await coordinationTools(prompt === "coordination-tools");
+  if (prompt === "direct-mailbox") result = await directMailbox();
+  if (prompt === "inspect-skill-package") result = await inspectSkillPackage();
   if (message.uuid) result += `; input: ${prompt}`;
   if (prompt.includes("write")) {
     if (!(await hook("Write", { file_path: join(cwd, "answer.txt"), content: result })))
@@ -451,6 +493,7 @@ lines.on("line", (line) => {
     callback?.(message.response);
   } else if (message.type === "control_request") {
     if (message.request.subtype === "initialize") {
+      initialized = message.request;
       hooks = (message.request.hooks?.PreToolUse ?? []).flatMap(
         (matcher) => matcher.hookCallbackIds,
       );
@@ -461,7 +504,17 @@ lines.on("line", (line) => {
       response: {
         subtype: "success",
         request_id: message.request_id,
-        response: { commands: [], models: [], account: {}, output_style: "default" },
+        response: {
+          commands: (initialized.skills ?? []).map((name) => ({
+            name,
+            description: "",
+            argumentHint: "",
+          })),
+          ...(initialized.plugins?.length ? { plugins_applied: true, hooks_applied: true } : {}),
+          models: [],
+          account: {},
+          output_style: "default",
+        },
       },
     });
     if (message.request.subtype === "interrupt" && waiting) {

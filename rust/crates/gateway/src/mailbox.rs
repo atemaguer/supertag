@@ -36,10 +36,55 @@ impl mailbox_server::Mailbox for Gateway {
         )
         .await
     }
+
+    async fn change_grant(
+        &self,
+        request: Request<ChangeMailboxGrantRequest>,
+    ) -> Result<Response<ChangeMailboxGrantResponse>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async {
+                mailbox_client::MailboxClient::new(channel)
+                    .change_grant(request)
+                    .await
+            },
+        )
+        .await
+    }
+
+    async fn list_grants(
+        &self,
+        request: Request<ListMailboxGrantsRequest>,
+    ) -> Result<Response<ListMailboxGrantsResponse>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async {
+                mailbox_client::MailboxClient::new(channel)
+                    .list_grants(request)
+                    .await
+            },
+        )
+        .await
+    }
 }
 
 #[tonic::async_trait]
 impl attempt_mailbox_server::AttemptMailbox for Gateway {
+    async fn send_message(
+        &self,
+        request: Request<SendAttemptTagMessageRequest>,
+    ) -> Result<Response<SendTagMessageResponse>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            attempt_mailbox_client::AttemptMailboxClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                .send_message(request)
+                .await
+        })
+        .await
+    }
     async fn read_mailbox(
         &self,
         request: Request<ReadMailboxRequest>,

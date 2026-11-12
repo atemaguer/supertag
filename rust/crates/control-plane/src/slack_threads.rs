@@ -1,6 +1,7 @@
 //! Slack thread activation and message admission share one durable transaction.
 //! Gateway memory and its configured default Tag never own an activated route.
 use super::*;
+use crate::surface_policy::{VerifiedConnectorOrigin, VerifiedScope, admit_connector_task_in};
 use supertag_protocol::v2::{AcceptSlackEventRequest, AcceptSlackEventResponse};
 
 impl Store {
@@ -84,8 +85,13 @@ impl Store {
             (
                 tag.clone(),
                 format!(
-                    "slack:{}:{}:{}",
-                    input.team_id, input.channel_id, input.thread_ts
+                    "slack:{:x}",
+                    Sha256::digest(serde_json::to_vec(&(
+                        account,
+                        &input.team_id,
+                        &input.channel_id,
+                        &input.thread_ts,
+                    ))?)
                 ),
             )
         } else {
@@ -94,10 +100,26 @@ impl Store {
             tx.commit().await?;
             return Ok(AcceptSlackEventResponse { task: None });
         };
-        crate::objectives::objective_admission_in(&mut tx, &tag, &session, self.execution_now_ms())
-            .await?;
-        let task = insert_task(&mut tx, order, &tag, &session, &input.prompt).await?;
-        crate::objectives::objective_link_task_in(&mut tx, &task).await?;
+        let Some(task) = admit_connector_task_in(
+            &mut tx,
+            order,
+            VerifiedConnectorOrigin {
+                connector_account_id: account,
+                tag_id: &tag,
+                scope: VerifiedScope::Slack {
+                    team_id: &input.team_id,
+                    channel_id: &input.channel_id,
+                },
+            },
+            &session,
+            &input.prompt,
+            self.execution_now_ms(),
+        )
+        .await?
+        else {
+            tx.commit().await?;
+            return Ok(AcceptSlackEventResponse { task: None });
+        };
         if activate {
             sqlx::query("INSERT INTO supertag_v2_slack_threads (account_id,team_id,channel_id,thread_ts,tag_id,session_id) VALUES ($1,$2,$3,$4,$5,$6)")
                 .bind(account).bind(&input.team_id).bind(&input.channel_id).bind(&input.thread_ts).bind(&tag).bind(&session)
@@ -236,10 +258,8 @@ mod tests {
             .task
             .unwrap();
         assert_eq!(accepted.tag_id, "builder");
-        assert_eq!(
-            accepted.session_id,
-            "slack:TTEAM1:CCHANNEL1:1794470000.100000"
-        );
+        assert!(accepted.session_id.starts_with("slack:"));
+        assert_eq!(accepted.session_id.len(), "slack:".len() + 64);
         store.close().await;
 
         let first = Store::open(url).await.unwrap();

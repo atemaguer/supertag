@@ -171,6 +171,1485 @@ func (RoleAssignmentStatus) EnumDescriptor() ([]byte, []int) {
 	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{2}
 }
 
+type SlackSurfaceIdentity struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TeamId        string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SlackSurfaceIdentity) Reset() {
+	*x = SlackSurfaceIdentity{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SlackSurfaceIdentity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SlackSurfaceIdentity) ProtoMessage() {}
+
+func (x *SlackSurfaceIdentity) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SlackSurfaceIdentity.ProtoReflect.Descriptor instead.
+func (*SlackSurfaceIdentity) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *SlackSurfaceIdentity) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+type GithubSurfaceIdentity struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The operator's non-secret installation or user identity. The current
+	// connector attests its own authenticated alias and the numeric repository.
+	ExternalAccountId string `protobuf:"bytes,1,opt,name=external_account_id,json=externalAccountId,proto3" json:"external_account_id,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *GithubSurfaceIdentity) Reset() {
+	*x = GithubSurfaceIdentity{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GithubSurfaceIdentity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GithubSurfaceIdentity) ProtoMessage() {}
+
+func (x *GithubSurfaceIdentity) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GithubSurfaceIdentity.ProtoReflect.Descriptor instead.
+func (*GithubSurfaceIdentity) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *GithubSurfaceIdentity) GetExternalAccountId() string {
+	if x != nil {
+		return x.ExternalAccountId
+	}
+	return ""
+}
+
+type LinearSurfaceIdentity struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LinearSurfaceIdentity) Reset() {
+	*x = LinearSurfaceIdentity{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LinearSurfaceIdentity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LinearSurfaceIdentity) ProtoMessage() {}
+
+func (x *LinearSurfaceIdentity) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LinearSurfaceIdentity.ProtoReflect.Descriptor instead.
+func (*LinearSurfaceIdentity) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *LinearSurfaceIdentity) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+type LarkSurfaceIdentity struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Feishu        bool                   `protobuf:"varint,1,opt,name=feishu,proto3" json:"feishu,omitempty"`
+	AppId         string                 `protobuf:"bytes,2,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	TenantKey     string                 `protobuf:"bytes,3,opt,name=tenant_key,json=tenantKey,proto3" json:"tenant_key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LarkSurfaceIdentity) Reset() {
+	*x = LarkSurfaceIdentity{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LarkSurfaceIdentity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LarkSurfaceIdentity) ProtoMessage() {}
+
+func (x *LarkSurfaceIdentity) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LarkSurfaceIdentity.ProtoReflect.Descriptor instead.
+func (*LarkSurfaceIdentity) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *LarkSurfaceIdentity) GetFeishu() bool {
+	if x != nil {
+		return x.Feishu
+	}
+	return false
+}
+
+func (x *LarkSurfaceIdentity) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *LarkSurfaceIdentity) GetTenantKey() string {
+	if x != nil {
+		return x.TenantKey
+	}
+	return ""
+}
+
+type MicrosoftTeamsSurfaceIdentity struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AppId         string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	TenantId      string                 `protobuf:"bytes,2,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MicrosoftTeamsSurfaceIdentity) Reset() {
+	*x = MicrosoftTeamsSurfaceIdentity{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MicrosoftTeamsSurfaceIdentity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MicrosoftTeamsSurfaceIdentity) ProtoMessage() {}
+
+func (x *MicrosoftTeamsSurfaceIdentity) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MicrosoftTeamsSurfaceIdentity.ProtoReflect.Descriptor instead.
+func (*MicrosoftTeamsSurfaceIdentity) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *MicrosoftTeamsSurfaceIdentity) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *MicrosoftTeamsSurfaceIdentity) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+type SurfaceAccountIdentity struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Provider:
+	//
+	//	*SurfaceAccountIdentity_Slack
+	//	*SurfaceAccountIdentity_Github
+	//	*SurfaceAccountIdentity_Linear
+	//	*SurfaceAccountIdentity_Lark
+	//	*SurfaceAccountIdentity_MicrosoftTeams
+	Provider      isSurfaceAccountIdentity_Provider `protobuf_oneof:"provider"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SurfaceAccountIdentity) Reset() {
+	*x = SurfaceAccountIdentity{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SurfaceAccountIdentity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SurfaceAccountIdentity) ProtoMessage() {}
+
+func (x *SurfaceAccountIdentity) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SurfaceAccountIdentity.ProtoReflect.Descriptor instead.
+func (*SurfaceAccountIdentity) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SurfaceAccountIdentity) GetProvider() isSurfaceAccountIdentity_Provider {
+	if x != nil {
+		return x.Provider
+	}
+	return nil
+}
+
+func (x *SurfaceAccountIdentity) GetSlack() *SlackSurfaceIdentity {
+	if x != nil {
+		if x, ok := x.Provider.(*SurfaceAccountIdentity_Slack); ok {
+			return x.Slack
+		}
+	}
+	return nil
+}
+
+func (x *SurfaceAccountIdentity) GetGithub() *GithubSurfaceIdentity {
+	if x != nil {
+		if x, ok := x.Provider.(*SurfaceAccountIdentity_Github); ok {
+			return x.Github
+		}
+	}
+	return nil
+}
+
+func (x *SurfaceAccountIdentity) GetLinear() *LinearSurfaceIdentity {
+	if x != nil {
+		if x, ok := x.Provider.(*SurfaceAccountIdentity_Linear); ok {
+			return x.Linear
+		}
+	}
+	return nil
+}
+
+func (x *SurfaceAccountIdentity) GetLark() *LarkSurfaceIdentity {
+	if x != nil {
+		if x, ok := x.Provider.(*SurfaceAccountIdentity_Lark); ok {
+			return x.Lark
+		}
+	}
+	return nil
+}
+
+func (x *SurfaceAccountIdentity) GetMicrosoftTeams() *MicrosoftTeamsSurfaceIdentity {
+	if x != nil {
+		if x, ok := x.Provider.(*SurfaceAccountIdentity_MicrosoftTeams); ok {
+			return x.MicrosoftTeams
+		}
+	}
+	return nil
+}
+
+type isSurfaceAccountIdentity_Provider interface {
+	isSurfaceAccountIdentity_Provider()
+}
+
+type SurfaceAccountIdentity_Slack struct {
+	Slack *SlackSurfaceIdentity `protobuf:"bytes,1,opt,name=slack,proto3,oneof"`
+}
+
+type SurfaceAccountIdentity_Github struct {
+	Github *GithubSurfaceIdentity `protobuf:"bytes,2,opt,name=github,proto3,oneof"`
+}
+
+type SurfaceAccountIdentity_Linear struct {
+	Linear *LinearSurfaceIdentity `protobuf:"bytes,3,opt,name=linear,proto3,oneof"`
+}
+
+type SurfaceAccountIdentity_Lark struct {
+	Lark *LarkSurfaceIdentity `protobuf:"bytes,4,opt,name=lark,proto3,oneof"`
+}
+
+type SurfaceAccountIdentity_MicrosoftTeams struct {
+	MicrosoftTeams *MicrosoftTeamsSurfaceIdentity `protobuf:"bytes,5,opt,name=microsoft_teams,json=microsoftTeams,proto3,oneof"`
+}
+
+func (*SurfaceAccountIdentity_Slack) isSurfaceAccountIdentity_Provider() {}
+
+func (*SurfaceAccountIdentity_Github) isSurfaceAccountIdentity_Provider() {}
+
+func (*SurfaceAccountIdentity_Linear) isSurfaceAccountIdentity_Provider() {}
+
+func (*SurfaceAccountIdentity_Lark) isSurfaceAccountIdentity_Provider() {}
+
+func (*SurfaceAccountIdentity_MicrosoftTeams) isSurfaceAccountIdentity_Provider() {}
+
+type SurfaceAccount struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	AccountId     string                  `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	Identity      *SurfaceAccountIdentity `protobuf:"bytes,2,opt,name=identity,proto3" json:"identity,omitempty"`
+	Enabled       bool                    `protobuf:"varint,3,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Revision      uint64                  `protobuf:"varint,4,opt,name=revision,proto3" json:"revision,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SurfaceAccount) Reset() {
+	*x = SurfaceAccount{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SurfaceAccount) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SurfaceAccount) ProtoMessage() {}
+
+func (x *SurfaceAccount) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SurfaceAccount.ProtoReflect.Descriptor instead.
+func (*SurfaceAccount) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SurfaceAccount) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+func (x *SurfaceAccount) GetIdentity() *SurfaceAccountIdentity {
+	if x != nil {
+		return x.Identity
+	}
+	return nil
+}
+
+func (x *SurfaceAccount) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *SurfaceAccount) GetRevision() uint64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+type SlackSurfaceChannel struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChannelId     string                 `protobuf:"bytes,1,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SlackSurfaceChannel) Reset() {
+	*x = SlackSurfaceChannel{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SlackSurfaceChannel) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SlackSurfaceChannel) ProtoMessage() {}
+
+func (x *SlackSurfaceChannel) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SlackSurfaceChannel.ProtoReflect.Descriptor instead.
+func (*SlackSurfaceChannel) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *SlackSurfaceChannel) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
+type GithubSurfaceRepository struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RepositoryId  uint64                 `protobuf:"varint,1,opt,name=repository_id,json=repositoryId,proto3" json:"repository_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GithubSurfaceRepository) Reset() {
+	*x = GithubSurfaceRepository{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GithubSurfaceRepository) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GithubSurfaceRepository) ProtoMessage() {}
+
+func (x *GithubSurfaceRepository) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GithubSurfaceRepository.ProtoReflect.Descriptor instead.
+func (*GithubSurfaceRepository) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *GithubSurfaceRepository) GetRepositoryId() uint64 {
+	if x != nil {
+		return x.RepositoryId
+	}
+	return 0
+}
+
+type LinearSurfaceTeam struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TeamId        string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LinearSurfaceTeam) Reset() {
+	*x = LinearSurfaceTeam{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LinearSurfaceTeam) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LinearSurfaceTeam) ProtoMessage() {}
+
+func (x *LinearSurfaceTeam) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LinearSurfaceTeam.ProtoReflect.Descriptor instead.
+func (*LinearSurfaceTeam) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *LinearSurfaceTeam) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+type LarkSurfaceChat struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChatId        string                 `protobuf:"bytes,1,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LarkSurfaceChat) Reset() {
+	*x = LarkSurfaceChat{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LarkSurfaceChat) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LarkSurfaceChat) ProtoMessage() {}
+
+func (x *LarkSurfaceChat) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LarkSurfaceChat.ProtoReflect.Descriptor instead.
+func (*LarkSurfaceChat) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *LarkSurfaceChat) GetChatId() string {
+	if x != nil {
+		return x.ChatId
+	}
+	return ""
+}
+
+type MicrosoftTeamsSurfaceChannel struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TeamId        string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	ChannelId     string                 `protobuf:"bytes,2,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MicrosoftTeamsSurfaceChannel) Reset() {
+	*x = MicrosoftTeamsSurfaceChannel{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MicrosoftTeamsSurfaceChannel) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MicrosoftTeamsSurfaceChannel) ProtoMessage() {}
+
+func (x *MicrosoftTeamsSurfaceChannel) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MicrosoftTeamsSurfaceChannel.ProtoReflect.Descriptor instead.
+func (*MicrosoftTeamsSurfaceChannel) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *MicrosoftTeamsSurfaceChannel) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+func (x *MicrosoftTeamsSurfaceChannel) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
+type SurfaceLocationScope struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Provider:
+	//
+	//	*SurfaceLocationScope_Slack
+	//	*SurfaceLocationScope_Github
+	//	*SurfaceLocationScope_Linear
+	//	*SurfaceLocationScope_Lark
+	//	*SurfaceLocationScope_MicrosoftTeams
+	Provider      isSurfaceLocationScope_Provider `protobuf_oneof:"provider"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SurfaceLocationScope) Reset() {
+	*x = SurfaceLocationScope{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SurfaceLocationScope) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SurfaceLocationScope) ProtoMessage() {}
+
+func (x *SurfaceLocationScope) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SurfaceLocationScope.ProtoReflect.Descriptor instead.
+func (*SurfaceLocationScope) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *SurfaceLocationScope) GetProvider() isSurfaceLocationScope_Provider {
+	if x != nil {
+		return x.Provider
+	}
+	return nil
+}
+
+func (x *SurfaceLocationScope) GetSlack() *SlackSurfaceChannel {
+	if x != nil {
+		if x, ok := x.Provider.(*SurfaceLocationScope_Slack); ok {
+			return x.Slack
+		}
+	}
+	return nil
+}
+
+func (x *SurfaceLocationScope) GetGithub() *GithubSurfaceRepository {
+	if x != nil {
+		if x, ok := x.Provider.(*SurfaceLocationScope_Github); ok {
+			return x.Github
+		}
+	}
+	return nil
+}
+
+func (x *SurfaceLocationScope) GetLinear() *LinearSurfaceTeam {
+	if x != nil {
+		if x, ok := x.Provider.(*SurfaceLocationScope_Linear); ok {
+			return x.Linear
+		}
+	}
+	return nil
+}
+
+func (x *SurfaceLocationScope) GetLark() *LarkSurfaceChat {
+	if x != nil {
+		if x, ok := x.Provider.(*SurfaceLocationScope_Lark); ok {
+			return x.Lark
+		}
+	}
+	return nil
+}
+
+func (x *SurfaceLocationScope) GetMicrosoftTeams() *MicrosoftTeamsSurfaceChannel {
+	if x != nil {
+		if x, ok := x.Provider.(*SurfaceLocationScope_MicrosoftTeams); ok {
+			return x.MicrosoftTeams
+		}
+	}
+	return nil
+}
+
+type isSurfaceLocationScope_Provider interface {
+	isSurfaceLocationScope_Provider()
+}
+
+type SurfaceLocationScope_Slack struct {
+	Slack *SlackSurfaceChannel `protobuf:"bytes,1,opt,name=slack,proto3,oneof"`
+}
+
+type SurfaceLocationScope_Github struct {
+	Github *GithubSurfaceRepository `protobuf:"bytes,2,opt,name=github,proto3,oneof"`
+}
+
+type SurfaceLocationScope_Linear struct {
+	Linear *LinearSurfaceTeam `protobuf:"bytes,3,opt,name=linear,proto3,oneof"`
+}
+
+type SurfaceLocationScope_Lark struct {
+	Lark *LarkSurfaceChat `protobuf:"bytes,4,opt,name=lark,proto3,oneof"`
+}
+
+type SurfaceLocationScope_MicrosoftTeams struct {
+	MicrosoftTeams *MicrosoftTeamsSurfaceChannel `protobuf:"bytes,5,opt,name=microsoft_teams,json=microsoftTeams,proto3,oneof"`
+}
+
+func (*SurfaceLocationScope_Slack) isSurfaceLocationScope_Provider() {}
+
+func (*SurfaceLocationScope_Github) isSurfaceLocationScope_Provider() {}
+
+func (*SurfaceLocationScope_Linear) isSurfaceLocationScope_Provider() {}
+
+func (*SurfaceLocationScope_Lark) isSurfaceLocationScope_Provider() {}
+
+func (*SurfaceLocationScope_MicrosoftTeams) isSurfaceLocationScope_Provider() {}
+
+type SurfaceLocation struct {
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	LocationId string                 `protobuf:"bytes,1,opt,name=location_id,json=locationId,proto3" json:"location_id,omitempty"`
+	AccountId  string                 `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	// This alias has one outbox writer and may bind only one exact location.
+	ConnectorAccountId string                `protobuf:"bytes,3,opt,name=connector_account_id,json=connectorAccountId,proto3" json:"connector_account_id,omitempty"`
+	Scope              *SurfaceLocationScope `protobuf:"bytes,4,opt,name=scope,proto3" json:"scope,omitempty"`
+	TagId              string                `protobuf:"bytes,5,opt,name=tag_id,json=tagId,proto3" json:"tag_id,omitempty"`
+	Enabled            bool                  `protobuf:"varint,6,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Revision           uint64                `protobuf:"varint,7,opt,name=revision,proto3" json:"revision,omitempty"`
+	PermissionSetIds   []string              `protobuf:"bytes,8,rep,name=permission_set_ids,json=permissionSetIds,proto3" json:"permission_set_ids,omitempty"`
+	ContextSetIds      []string              `protobuf:"bytes,9,rep,name=context_set_ids,json=contextSetIds,proto3" json:"context_set_ids,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *SurfaceLocation) Reset() {
+	*x = SurfaceLocation{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SurfaceLocation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SurfaceLocation) ProtoMessage() {}
+
+func (x *SurfaceLocation) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SurfaceLocation.ProtoReflect.Descriptor instead.
+func (*SurfaceLocation) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *SurfaceLocation) GetLocationId() string {
+	if x != nil {
+		return x.LocationId
+	}
+	return ""
+}
+
+func (x *SurfaceLocation) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+func (x *SurfaceLocation) GetConnectorAccountId() string {
+	if x != nil {
+		return x.ConnectorAccountId
+	}
+	return ""
+}
+
+func (x *SurfaceLocation) GetScope() *SurfaceLocationScope {
+	if x != nil {
+		return x.Scope
+	}
+	return nil
+}
+
+func (x *SurfaceLocation) GetTagId() string {
+	if x != nil {
+		return x.TagId
+	}
+	return ""
+}
+
+func (x *SurfaceLocation) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *SurfaceLocation) GetRevision() uint64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+func (x *SurfaceLocation) GetPermissionSetIds() []string {
+	if x != nil {
+		return x.PermissionSetIds
+	}
+	return nil
+}
+
+func (x *SurfaceLocation) GetContextSetIds() []string {
+	if x != nil {
+		return x.ContextSetIds
+	}
+	return nil
+}
+
+type SurfacePolicyOrigin struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	LocationId         string                 `protobuf:"bytes,1,opt,name=location_id,json=locationId,proto3" json:"location_id,omitempty"`
+	LocationRevision   uint64                 `protobuf:"varint,2,opt,name=location_revision,json=locationRevision,proto3" json:"location_revision,omitempty"`
+	AccountId          string                 `protobuf:"bytes,3,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	ConnectorAccountId string                 `protobuf:"bytes,4,opt,name=connector_account_id,json=connectorAccountId,proto3" json:"connector_account_id,omitempty"`
+	Scope              *SurfaceLocationScope  `protobuf:"bytes,5,opt,name=scope,proto3" json:"scope,omitempty"`
+	OriginActions      []string               `protobuf:"bytes,6,rep,name=origin_actions,json=originActions,proto3" json:"origin_actions,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *SurfacePolicyOrigin) Reset() {
+	*x = SurfacePolicyOrigin{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SurfacePolicyOrigin) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SurfacePolicyOrigin) ProtoMessage() {}
+
+func (x *SurfacePolicyOrigin) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SurfacePolicyOrigin.ProtoReflect.Descriptor instead.
+func (*SurfacePolicyOrigin) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *SurfacePolicyOrigin) GetLocationId() string {
+	if x != nil {
+		return x.LocationId
+	}
+	return ""
+}
+
+func (x *SurfacePolicyOrigin) GetLocationRevision() uint64 {
+	if x != nil {
+		return x.LocationRevision
+	}
+	return 0
+}
+
+func (x *SurfacePolicyOrigin) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+func (x *SurfacePolicyOrigin) GetConnectorAccountId() string {
+	if x != nil {
+		return x.ConnectorAccountId
+	}
+	return ""
+}
+
+func (x *SurfacePolicyOrigin) GetScope() *SurfaceLocationScope {
+	if x != nil {
+		return x.Scope
+	}
+	return nil
+}
+
+func (x *SurfacePolicyOrigin) GetOriginActions() []string {
+	if x != nil {
+		return x.OriginActions
+	}
+	return nil
+}
+
+type PutSurfaceAccountRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	OperationId      string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	Account          *SurfaceAccount        `protobuf:"bytes,2,opt,name=account,proto3" json:"account,omitempty"`
+	ExpectedRevision *uint64                `protobuf:"varint,3,opt,name=expected_revision,json=expectedRevision,proto3,oneof" json:"expected_revision,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *PutSurfaceAccountRequest) Reset() {
+	*x = PutSurfaceAccountRequest{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PutSurfaceAccountRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PutSurfaceAccountRequest) ProtoMessage() {}
+
+func (x *PutSurfaceAccountRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PutSurfaceAccountRequest.ProtoReflect.Descriptor instead.
+func (*PutSurfaceAccountRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *PutSurfaceAccountRequest) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *PutSurfaceAccountRequest) GetAccount() *SurfaceAccount {
+	if x != nil {
+		return x.Account
+	}
+	return nil
+}
+
+func (x *PutSurfaceAccountRequest) GetExpectedRevision() uint64 {
+	if x != nil && x.ExpectedRevision != nil {
+		return *x.ExpectedRevision
+	}
+	return 0
+}
+
+type GetSurfaceAccountRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AccountId     string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetSurfaceAccountRequest) Reset() {
+	*x = GetSurfaceAccountRequest{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetSurfaceAccountRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSurfaceAccountRequest) ProtoMessage() {}
+
+func (x *GetSurfaceAccountRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSurfaceAccountRequest.ProtoReflect.Descriptor instead.
+func (*GetSurfaceAccountRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *GetSurfaceAccountRequest) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+type ListSurfaceAccountsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Limit         uint32                 `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor        string                 `protobuf:"bytes,2,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListSurfaceAccountsRequest) Reset() {
+	*x = ListSurfaceAccountsRequest{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListSurfaceAccountsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListSurfaceAccountsRequest) ProtoMessage() {}
+
+func (x *ListSurfaceAccountsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListSurfaceAccountsRequest.ProtoReflect.Descriptor instead.
+func (*ListSurfaceAccountsRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ListSurfaceAccountsRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListSurfaceAccountsRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+type ListSurfaceAccountsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Accounts      []*SurfaceAccount      `protobuf:"bytes,1,rep,name=accounts,proto3" json:"accounts,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListSurfaceAccountsResponse) Reset() {
+	*x = ListSurfaceAccountsResponse{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListSurfaceAccountsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListSurfaceAccountsResponse) ProtoMessage() {}
+
+func (x *ListSurfaceAccountsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListSurfaceAccountsResponse.ProtoReflect.Descriptor instead.
+func (*ListSurfaceAccountsResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ListSurfaceAccountsResponse) GetAccounts() []*SurfaceAccount {
+	if x != nil {
+		return x.Accounts
+	}
+	return nil
+}
+
+func (x *ListSurfaceAccountsResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
+type PutSurfaceLocationRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	OperationId      string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	Location         *SurfaceLocation       `protobuf:"bytes,2,opt,name=location,proto3" json:"location,omitempty"`
+	ExpectedRevision *uint64                `protobuf:"varint,3,opt,name=expected_revision,json=expectedRevision,proto3,oneof" json:"expected_revision,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *PutSurfaceLocationRequest) Reset() {
+	*x = PutSurfaceLocationRequest{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PutSurfaceLocationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PutSurfaceLocationRequest) ProtoMessage() {}
+
+func (x *PutSurfaceLocationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PutSurfaceLocationRequest.ProtoReflect.Descriptor instead.
+func (*PutSurfaceLocationRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *PutSurfaceLocationRequest) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *PutSurfaceLocationRequest) GetLocation() *SurfaceLocation {
+	if x != nil {
+		return x.Location
+	}
+	return nil
+}
+
+func (x *PutSurfaceLocationRequest) GetExpectedRevision() uint64 {
+	if x != nil && x.ExpectedRevision != nil {
+		return *x.ExpectedRevision
+	}
+	return 0
+}
+
+type GetSurfaceLocationRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	LocationId    string                 `protobuf:"bytes,1,opt,name=location_id,json=locationId,proto3" json:"location_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetSurfaceLocationRequest) Reset() {
+	*x = GetSurfaceLocationRequest{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetSurfaceLocationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetSurfaceLocationRequest) ProtoMessage() {}
+
+func (x *GetSurfaceLocationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetSurfaceLocationRequest.ProtoReflect.Descriptor instead.
+func (*GetSurfaceLocationRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *GetSurfaceLocationRequest) GetLocationId() string {
+	if x != nil {
+		return x.LocationId
+	}
+	return ""
+}
+
+type ListSurfaceLocationsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AccountId     string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	Limit         uint32                 `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor        string                 `protobuf:"bytes,3,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListSurfaceLocationsRequest) Reset() {
+	*x = ListSurfaceLocationsRequest{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListSurfaceLocationsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListSurfaceLocationsRequest) ProtoMessage() {}
+
+func (x *ListSurfaceLocationsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListSurfaceLocationsRequest.ProtoReflect.Descriptor instead.
+func (*ListSurfaceLocationsRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *ListSurfaceLocationsRequest) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+func (x *ListSurfaceLocationsRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListSurfaceLocationsRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+type ListSurfaceLocationsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Locations     []*SurfaceLocation     `protobuf:"bytes,1,rep,name=locations,proto3" json:"locations,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListSurfaceLocationsResponse) Reset() {
+	*x = ListSurfaceLocationsResponse{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListSurfaceLocationsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListSurfaceLocationsResponse) ProtoMessage() {}
+
+func (x *ListSurfaceLocationsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListSurfaceLocationsResponse.ProtoReflect.Descriptor instead.
+func (*ListSurfaceLocationsResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *ListSurfaceLocationsResponse) GetLocations() []*SurfaceLocation {
+	if x != nil {
+		return x.Locations
+	}
+	return nil
+}
+
+func (x *ListSurfaceLocationsResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
+type DeleteSurfaceLocationRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	OperationId      string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	LocationId       string                 `protobuf:"bytes,2,opt,name=location_id,json=locationId,proto3" json:"location_id,omitempty"`
+	ExpectedRevision uint64                 `protobuf:"varint,3,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *DeleteSurfaceLocationRequest) Reset() {
+	*x = DeleteSurfaceLocationRequest{}
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteSurfaceLocationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteSurfaceLocationRequest) ProtoMessage() {}
+
+func (x *DeleteSurfaceLocationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteSurfaceLocationRequest.ProtoReflect.Descriptor instead.
+func (*DeleteSurfaceLocationRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *DeleteSurfaceLocationRequest) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *DeleteSurfaceLocationRequest) GetLocationId() string {
+	if x != nil {
+		return x.LocationId
+	}
+	return ""
+}
+
+func (x *DeleteSurfaceLocationRequest) GetExpectedRevision() uint64 {
+	if x != nil {
+		return x.ExpectedRevision
+	}
+	return 0
+}
+
 type PolicyPermission struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Assigned by the catalog; a replacement preserves the identity of the same grant.
@@ -188,7 +1667,7 @@ type PolicyPermission struct {
 
 func (x *PolicyPermission) Reset() {
 	*x = PolicyPermission{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[0]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -200,7 +1679,7 @@ func (x *PolicyPermission) String() string {
 func (*PolicyPermission) ProtoMessage() {}
 
 func (x *PolicyPermission) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[0]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -213,7 +1692,7 @@ func (x *PolicyPermission) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolicyPermission.ProtoReflect.Descriptor instead.
 func (*PolicyPermission) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{0}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *PolicyPermission) GetPermissionId() string {
@@ -285,7 +1764,7 @@ type PermissionSet struct {
 
 func (x *PermissionSet) Reset() {
 	*x = PermissionSet{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[1]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -297,7 +1776,7 @@ func (x *PermissionSet) String() string {
 func (*PermissionSet) ProtoMessage() {}
 
 func (x *PermissionSet) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[1]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -310,7 +1789,7 @@ func (x *PermissionSet) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PermissionSet.ProtoReflect.Descriptor instead.
 func (*PermissionSet) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{1}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *PermissionSet) GetSetId() string {
@@ -363,7 +1842,7 @@ type PolicyContextItem struct {
 
 func (x *PolicyContextItem) Reset() {
 	*x = PolicyContextItem{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[2]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -375,7 +1854,7 @@ func (x *PolicyContextItem) String() string {
 func (*PolicyContextItem) ProtoMessage() {}
 
 func (x *PolicyContextItem) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[2]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -388,7 +1867,7 @@ func (x *PolicyContextItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolicyContextItem.ProtoReflect.Descriptor instead.
 func (*PolicyContextItem) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{2}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *PolicyContextItem) GetItemId() string {
@@ -445,7 +1924,7 @@ type ContextSet struct {
 
 func (x *ContextSet) Reset() {
 	*x = ContextSet{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[3]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -457,7 +1936,7 @@ func (x *ContextSet) String() string {
 func (*ContextSet) ProtoMessage() {}
 
 func (x *ContextSet) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[3]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -470,7 +1949,7 @@ func (x *ContextSet) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContextSet.ProtoReflect.Descriptor instead.
 func (*ContextSet) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{3}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ContextSet) GetSetId() string {
@@ -513,7 +1992,7 @@ type PolicyExecutionSettings struct {
 
 func (x *PolicyExecutionSettings) Reset() {
 	*x = PolicyExecutionSettings{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[4]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -525,7 +2004,7 @@ func (x *PolicyExecutionSettings) String() string {
 func (*PolicyExecutionSettings) ProtoMessage() {}
 
 func (x *PolicyExecutionSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[4]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -538,7 +2017,7 @@ func (x *PolicyExecutionSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolicyExecutionSettings.ProtoReflect.Descriptor instead.
 func (*PolicyExecutionSettings) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{4}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *PolicyExecutionSettings) GetHarness() string {
@@ -579,7 +2058,7 @@ type Role struct {
 
 func (x *Role) Reset() {
 	*x = Role{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[5]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -591,7 +2070,7 @@ func (x *Role) String() string {
 func (*Role) ProtoMessage() {}
 
 func (x *Role) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[5]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -604,7 +2083,7 @@ func (x *Role) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Role.ProtoReflect.Descriptor instead.
 func (*Role) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{5}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *Role) GetRoleId() string {
@@ -683,7 +2162,7 @@ type RoleAssignment struct {
 
 func (x *RoleAssignment) Reset() {
 	*x = RoleAssignment{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[6]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -695,7 +2174,7 @@ func (x *RoleAssignment) String() string {
 func (*RoleAssignment) ProtoMessage() {}
 
 func (x *RoleAssignment) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[6]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -708,7 +2187,7 @@ func (x *RoleAssignment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RoleAssignment.ProtoReflect.Descriptor instead.
 func (*RoleAssignment) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{6}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *RoleAssignment) GetAssignmentId() string {
@@ -756,7 +2235,7 @@ type PolicyRoleSnapshot struct {
 
 func (x *PolicyRoleSnapshot) Reset() {
 	*x = PolicyRoleSnapshot{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[7]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -768,7 +2247,7 @@ func (x *PolicyRoleSnapshot) String() string {
 func (*PolicyRoleSnapshot) ProtoMessage() {}
 
 func (x *PolicyRoleSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[7]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -781,7 +2260,7 @@ func (x *PolicyRoleSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolicyRoleSnapshot.ProtoReflect.Descriptor instead.
 func (*PolicyRoleSnapshot) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{7}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *PolicyRoleSnapshot) GetAssignment() *RoleAssignment {
@@ -805,13 +2284,14 @@ type TaskPolicySnapshot struct {
 	PermissionSets []*PermissionSet         `protobuf:"bytes,3,rep,name=permission_sets,json=permissionSets,proto3" json:"permission_sets,omitempty"`
 	ContextSets    []*ContextSet            `protobuf:"bytes,4,rep,name=context_sets,json=contextSets,proto3" json:"context_sets,omitempty"`
 	Execution      *PolicyExecutionSettings `protobuf:"bytes,5,opt,name=execution,proto3" json:"execution,omitempty"`
+	Origin         *SurfacePolicyOrigin     `protobuf:"bytes,6,opt,name=origin,proto3" json:"origin,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
 
 func (x *TaskPolicySnapshot) Reset() {
 	*x = TaskPolicySnapshot{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[8]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -823,7 +2303,7 @@ func (x *TaskPolicySnapshot) String() string {
 func (*TaskPolicySnapshot) ProtoMessage() {}
 
 func (x *TaskPolicySnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[8]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -836,7 +2316,7 @@ func (x *TaskPolicySnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskPolicySnapshot.ProtoReflect.Descriptor instead.
 func (*TaskPolicySnapshot) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{8}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *TaskPolicySnapshot) GetVersion() uint32 {
@@ -874,6 +2354,13 @@ func (x *TaskPolicySnapshot) GetExecution() *PolicyExecutionSettings {
 	return nil
 }
 
+func (x *TaskPolicySnapshot) GetOrigin() *SurfacePolicyOrigin {
+	if x != nil {
+		return x.Origin
+	}
+	return nil
+}
+
 type PutPermissionSetRequest struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	OperationId      string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
@@ -885,7 +2372,7 @@ type PutPermissionSetRequest struct {
 
 func (x *PutPermissionSetRequest) Reset() {
 	*x = PutPermissionSetRequest{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[9]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -897,7 +2384,7 @@ func (x *PutPermissionSetRequest) String() string {
 func (*PutPermissionSetRequest) ProtoMessage() {}
 
 func (x *PutPermissionSetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[9]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -910,7 +2397,7 @@ func (x *PutPermissionSetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutPermissionSetRequest.ProtoReflect.Descriptor instead.
 func (*PutPermissionSetRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{9}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *PutPermissionSetRequest) GetOperationId() string {
@@ -945,7 +2432,7 @@ type PutContextSetRequest struct {
 
 func (x *PutContextSetRequest) Reset() {
 	*x = PutContextSetRequest{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[10]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -957,7 +2444,7 @@ func (x *PutContextSetRequest) String() string {
 func (*PutContextSetRequest) ProtoMessage() {}
 
 func (x *PutContextSetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[10]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -970,7 +2457,7 @@ func (x *PutContextSetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutContextSetRequest.ProtoReflect.Descriptor instead.
 func (*PutContextSetRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{10}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *PutContextSetRequest) GetOperationId() string {
@@ -1005,7 +2492,7 @@ type PutRoleRequest struct {
 
 func (x *PutRoleRequest) Reset() {
 	*x = PutRoleRequest{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[11]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1017,7 +2504,7 @@ func (x *PutRoleRequest) String() string {
 func (*PutRoleRequest) ProtoMessage() {}
 
 func (x *PutRoleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[11]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1030,7 +2517,7 @@ func (x *PutRoleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutRoleRequest.ProtoReflect.Descriptor instead.
 func (*PutRoleRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{11}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *PutRoleRequest) GetOperationId() string {
@@ -1063,7 +2550,7 @@ type GetPolicyResourceRequest struct {
 
 func (x *GetPolicyResourceRequest) Reset() {
 	*x = GetPolicyResourceRequest{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[12]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1075,7 +2562,7 @@ func (x *GetPolicyResourceRequest) String() string {
 func (*GetPolicyResourceRequest) ProtoMessage() {}
 
 func (x *GetPolicyResourceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[12]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1088,7 +2575,7 @@ func (x *GetPolicyResourceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPolicyResourceRequest.ProtoReflect.Descriptor instead.
 func (*GetPolicyResourceRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{12}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *GetPolicyResourceRequest) GetReference() string {
@@ -1108,7 +2595,7 @@ type ListPolicyResourcesRequest struct {
 
 func (x *ListPolicyResourcesRequest) Reset() {
 	*x = ListPolicyResourcesRequest{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[13]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1120,7 +2607,7 @@ func (x *ListPolicyResourcesRequest) String() string {
 func (*ListPolicyResourcesRequest) ProtoMessage() {}
 
 func (x *ListPolicyResourcesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[13]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1133,7 +2620,7 @@ func (x *ListPolicyResourcesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPolicyResourcesRequest.ProtoReflect.Descriptor instead.
 func (*ListPolicyResourcesRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{13}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ListPolicyResourcesRequest) GetLimit() uint32 {
@@ -1160,7 +2647,7 @@ type ListPermissionSetsResponse struct {
 
 func (x *ListPermissionSetsResponse) Reset() {
 	*x = ListPermissionSetsResponse{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[14]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1172,7 +2659,7 @@ func (x *ListPermissionSetsResponse) String() string {
 func (*ListPermissionSetsResponse) ProtoMessage() {}
 
 func (x *ListPermissionSetsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[14]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1185,7 +2672,7 @@ func (x *ListPermissionSetsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPermissionSetsResponse.ProtoReflect.Descriptor instead.
 func (*ListPermissionSetsResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{14}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ListPermissionSetsResponse) GetPermissionSets() []*PermissionSet {
@@ -1212,7 +2699,7 @@ type ListContextSetsResponse struct {
 
 func (x *ListContextSetsResponse) Reset() {
 	*x = ListContextSetsResponse{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[15]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1224,7 +2711,7 @@ func (x *ListContextSetsResponse) String() string {
 func (*ListContextSetsResponse) ProtoMessage() {}
 
 func (x *ListContextSetsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[15]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1237,7 +2724,7 @@ func (x *ListContextSetsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListContextSetsResponse.ProtoReflect.Descriptor instead.
 func (*ListContextSetsResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{15}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ListContextSetsResponse) GetContextSets() []*ContextSet {
@@ -1264,7 +2751,7 @@ type ListRolesResponse struct {
 
 func (x *ListRolesResponse) Reset() {
 	*x = ListRolesResponse{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[16]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1276,7 +2763,7 @@ func (x *ListRolesResponse) String() string {
 func (*ListRolesResponse) ProtoMessage() {}
 
 func (x *ListRolesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[16]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1289,7 +2776,7 @@ func (x *ListRolesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRolesResponse.ProtoReflect.Descriptor instead.
 func (*ListRolesResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{16}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ListRolesResponse) GetRoles() []*Role {
@@ -1317,7 +2804,7 @@ type DeletePolicyResourceRequest struct {
 
 func (x *DeletePolicyResourceRequest) Reset() {
 	*x = DeletePolicyResourceRequest{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[17]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1329,7 +2816,7 @@ func (x *DeletePolicyResourceRequest) String() string {
 func (*DeletePolicyResourceRequest) ProtoMessage() {}
 
 func (x *DeletePolicyResourceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[17]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1342,7 +2829,7 @@ func (x *DeletePolicyResourceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeletePolicyResourceRequest.ProtoReflect.Descriptor instead.
 func (*DeletePolicyResourceRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{17}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *DeletePolicyResourceRequest) GetOperationId() string {
@@ -1375,7 +2862,7 @@ type DeletePolicyResourceResponse struct {
 
 func (x *DeletePolicyResourceResponse) Reset() {
 	*x = DeletePolicyResourceResponse{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[18]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1387,7 +2874,7 @@ func (x *DeletePolicyResourceResponse) String() string {
 func (*DeletePolicyResourceResponse) ProtoMessage() {}
 
 func (x *DeletePolicyResourceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[18]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1400,7 +2887,7 @@ func (x *DeletePolicyResourceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeletePolicyResourceResponse.ProtoReflect.Descriptor instead.
 func (*DeletePolicyResourceResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{18}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *DeletePolicyResourceResponse) GetDeleted() bool {
@@ -1421,7 +2908,7 @@ type AssignRoleRequest struct {
 
 func (x *AssignRoleRequest) Reset() {
 	*x = AssignRoleRequest{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[19]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1433,7 +2920,7 @@ func (x *AssignRoleRequest) String() string {
 func (*AssignRoleRequest) ProtoMessage() {}
 
 func (x *AssignRoleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[19]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1446,7 +2933,7 @@ func (x *AssignRoleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AssignRoleRequest.ProtoReflect.Descriptor instead.
 func (*AssignRoleRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{19}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *AssignRoleRequest) GetOperationId() string {
@@ -1483,7 +2970,7 @@ type ListRoleAssignmentsRequest struct {
 
 func (x *ListRoleAssignmentsRequest) Reset() {
 	*x = ListRoleAssignmentsRequest{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[20]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1495,7 +2982,7 @@ func (x *ListRoleAssignmentsRequest) String() string {
 func (*ListRoleAssignmentsRequest) ProtoMessage() {}
 
 func (x *ListRoleAssignmentsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[20]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1508,7 +2995,7 @@ func (x *ListRoleAssignmentsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRoleAssignmentsRequest.ProtoReflect.Descriptor instead.
 func (*ListRoleAssignmentsRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{20}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ListRoleAssignmentsRequest) GetRole() string {
@@ -1556,7 +3043,7 @@ type ListRoleAssignmentsResponse struct {
 
 func (x *ListRoleAssignmentsResponse) Reset() {
 	*x = ListRoleAssignmentsResponse{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[21]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1568,7 +3055,7 @@ func (x *ListRoleAssignmentsResponse) String() string {
 func (*ListRoleAssignmentsResponse) ProtoMessage() {}
 
 func (x *ListRoleAssignmentsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[21]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1581,7 +3068,7 @@ func (x *ListRoleAssignmentsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRoleAssignmentsResponse.ProtoReflect.Descriptor instead.
 func (*ListRoleAssignmentsResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{21}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *ListRoleAssignmentsResponse) GetAssignments() []*RoleAssignment {
@@ -1609,7 +3096,7 @@ type DeactivateRoleAssignmentRequest struct {
 
 func (x *DeactivateRoleAssignmentRequest) Reset() {
 	*x = DeactivateRoleAssignmentRequest{}
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[22]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1621,7 +3108,7 @@ func (x *DeactivateRoleAssignmentRequest) String() string {
 func (*DeactivateRoleAssignmentRequest) ProtoMessage() {}
 
 func (x *DeactivateRoleAssignmentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[22]
+	mi := &file_supertag_runtime_v2_policy_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1634,7 +3121,7 @@ func (x *DeactivateRoleAssignmentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeactivateRoleAssignmentRequest.ProtoReflect.Descriptor instead.
 func (*DeactivateRoleAssignmentRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{22}
+	return file_supertag_runtime_v2_policy_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *DeactivateRoleAssignmentRequest) GetOperationId() string {
@@ -1662,7 +3149,114 @@ var File_supertag_runtime_v2_policy_proto protoreflect.FileDescriptor
 
 const file_supertag_runtime_v2_policy_proto_rawDesc = "" +
 	"\n" +
-	" supertag/runtime/v2/policy.proto\x12\x13supertag.runtime.v2\"\xbf\x02\n" +
+	" supertag/runtime/v2/policy.proto\x12\x13supertag.runtime.v2\"/\n" +
+	"\x14SlackSurfaceIdentity\x12\x17\n" +
+	"\ateam_id\x18\x01 \x01(\tR\x06teamId\"G\n" +
+	"\x15GithubSurfaceIdentity\x12.\n" +
+	"\x13external_account_id\x18\x01 \x01(\tR\x11externalAccountId\":\n" +
+	"\x15LinearSurfaceIdentity\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\"c\n" +
+	"\x13LarkSurfaceIdentity\x12\x16\n" +
+	"\x06feishu\x18\x01 \x01(\bR\x06feishu\x12\x15\n" +
+	"\x06app_id\x18\x02 \x01(\tR\x05appId\x12\x1d\n" +
+	"\n" +
+	"tenant_key\x18\x03 \x01(\tR\ttenantKey\"S\n" +
+	"\x1dMicrosoftTeamsSurfaceIdentity\x12\x15\n" +
+	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x1b\n" +
+	"\ttenant_id\x18\x02 \x01(\tR\btenantId\"\x92\x03\n" +
+	"\x16SurfaceAccountIdentity\x12A\n" +
+	"\x05slack\x18\x01 \x01(\v2).supertag.runtime.v2.SlackSurfaceIdentityH\x00R\x05slack\x12D\n" +
+	"\x06github\x18\x02 \x01(\v2*.supertag.runtime.v2.GithubSurfaceIdentityH\x00R\x06github\x12D\n" +
+	"\x06linear\x18\x03 \x01(\v2*.supertag.runtime.v2.LinearSurfaceIdentityH\x00R\x06linear\x12>\n" +
+	"\x04lark\x18\x04 \x01(\v2(.supertag.runtime.v2.LarkSurfaceIdentityH\x00R\x04lark\x12]\n" +
+	"\x0fmicrosoft_teams\x18\x05 \x01(\v22.supertag.runtime.v2.MicrosoftTeamsSurfaceIdentityH\x00R\x0emicrosoftTeamsB\n" +
+	"\n" +
+	"\bprovider\"\xae\x01\n" +
+	"\x0eSurfaceAccount\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x01 \x01(\tR\taccountId\x12G\n" +
+	"\bidentity\x18\x02 \x01(\v2+.supertag.runtime.v2.SurfaceAccountIdentityR\bidentity\x12\x18\n" +
+	"\aenabled\x18\x03 \x01(\bR\aenabled\x12\x1a\n" +
+	"\brevision\x18\x04 \x01(\x04R\brevision\"4\n" +
+	"\x13SlackSurfaceChannel\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x01 \x01(\tR\tchannelId\">\n" +
+	"\x17GithubSurfaceRepository\x12#\n" +
+	"\rrepository_id\x18\x01 \x01(\x04R\frepositoryId\",\n" +
+	"\x11LinearSurfaceTeam\x12\x17\n" +
+	"\ateam_id\x18\x01 \x01(\tR\x06teamId\"*\n" +
+	"\x0fLarkSurfaceChat\x12\x17\n" +
+	"\achat_id\x18\x01 \x01(\tR\x06chatId\"V\n" +
+	"\x1cMicrosoftTeamsSurfaceChannel\x12\x17\n" +
+	"\ateam_id\x18\x01 \x01(\tR\x06teamId\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x02 \x01(\tR\tchannelId\"\x88\x03\n" +
+	"\x14SurfaceLocationScope\x12@\n" +
+	"\x05slack\x18\x01 \x01(\v2(.supertag.runtime.v2.SlackSurfaceChannelH\x00R\x05slack\x12F\n" +
+	"\x06github\x18\x02 \x01(\v2,.supertag.runtime.v2.GithubSurfaceRepositoryH\x00R\x06github\x12@\n" +
+	"\x06linear\x18\x03 \x01(\v2&.supertag.runtime.v2.LinearSurfaceTeamH\x00R\x06linear\x12:\n" +
+	"\x04lark\x18\x04 \x01(\v2$.supertag.runtime.v2.LarkSurfaceChatH\x00R\x04lark\x12\\\n" +
+	"\x0fmicrosoft_teams\x18\x05 \x01(\v21.supertag.runtime.v2.MicrosoftTeamsSurfaceChannelH\x00R\x0emicrosoftTeamsB\n" +
+	"\n" +
+	"\bprovider\"\xe7\x02\n" +
+	"\x0fSurfaceLocation\x12\x1f\n" +
+	"\vlocation_id\x18\x01 \x01(\tR\n" +
+	"locationId\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x02 \x01(\tR\taccountId\x120\n" +
+	"\x14connector_account_id\x18\x03 \x01(\tR\x12connectorAccountId\x12?\n" +
+	"\x05scope\x18\x04 \x01(\v2).supertag.runtime.v2.SurfaceLocationScopeR\x05scope\x12\x15\n" +
+	"\x06tag_id\x18\x05 \x01(\tR\x05tagId\x12\x18\n" +
+	"\aenabled\x18\x06 \x01(\bR\aenabled\x12\x1a\n" +
+	"\brevision\x18\a \x01(\x04R\brevision\x12,\n" +
+	"\x12permission_set_ids\x18\b \x03(\tR\x10permissionSetIds\x12&\n" +
+	"\x0fcontext_set_ids\x18\t \x03(\tR\rcontextSetIds\"\x9c\x02\n" +
+	"\x13SurfacePolicyOrigin\x12\x1f\n" +
+	"\vlocation_id\x18\x01 \x01(\tR\n" +
+	"locationId\x12+\n" +
+	"\x11location_revision\x18\x02 \x01(\x04R\x10locationRevision\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x03 \x01(\tR\taccountId\x120\n" +
+	"\x14connector_account_id\x18\x04 \x01(\tR\x12connectorAccountId\x12?\n" +
+	"\x05scope\x18\x05 \x01(\v2).supertag.runtime.v2.SurfaceLocationScopeR\x05scope\x12%\n" +
+	"\x0eorigin_actions\x18\x06 \x03(\tR\roriginActions\"\xc4\x01\n" +
+	"\x18PutSurfaceAccountRequest\x12!\n" +
+	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12=\n" +
+	"\aaccount\x18\x02 \x01(\v2#.supertag.runtime.v2.SurfaceAccountR\aaccount\x120\n" +
+	"\x11expected_revision\x18\x03 \x01(\x04H\x00R\x10expectedRevision\x88\x01\x01B\x14\n" +
+	"\x12_expected_revision\"9\n" +
+	"\x18GetSurfaceAccountRequest\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x01 \x01(\tR\taccountId\"J\n" +
+	"\x1aListSurfaceAccountsRequest\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\rR\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x02 \x01(\tR\x06cursor\"\x7f\n" +
+	"\x1bListSurfaceAccountsResponse\x12?\n" +
+	"\baccounts\x18\x01 \x03(\v2#.supertag.runtime.v2.SurfaceAccountR\baccounts\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\"\xc8\x01\n" +
+	"\x19PutSurfaceLocationRequest\x12!\n" +
+	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12@\n" +
+	"\blocation\x18\x02 \x01(\v2$.supertag.runtime.v2.SurfaceLocationR\blocation\x120\n" +
+	"\x11expected_revision\x18\x03 \x01(\x04H\x00R\x10expectedRevision\x88\x01\x01B\x14\n" +
+	"\x12_expected_revision\"<\n" +
+	"\x19GetSurfaceLocationRequest\x12\x1f\n" +
+	"\vlocation_id\x18\x01 \x01(\tR\n" +
+	"locationId\"j\n" +
+	"\x1bListSurfaceLocationsRequest\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x01 \x01(\tR\taccountId\x12\x14\n" +
+	"\x05limit\x18\x02 \x01(\rR\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x03 \x01(\tR\x06cursor\"\x83\x01\n" +
+	"\x1cListSurfaceLocationsResponse\x12B\n" +
+	"\tlocations\x18\x01 \x03(\v2$.supertag.runtime.v2.SurfaceLocationR\tlocations\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\"\x8f\x01\n" +
+	"\x1cDeleteSurfaceLocationRequest\x12!\n" +
+	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x1f\n" +
+	"\vlocation_id\x18\x02 \x01(\tR\n" +
+	"locationId\x12+\n" +
+	"\x11expected_revision\x18\x03 \x01(\x04R\x10expectedRevision\"\xbf\x02\n" +
 	"\x10PolicyPermission\x12#\n" +
 	"\rpermission_id\x18\x01 \x01(\tR\fpermissionId\x12C\n" +
 	"\x06target\x18\x02 \x01(\x0e2+.supertag.runtime.v2.PolicyPermissionTargetR\x06target\x12\x16\n" +
@@ -1718,13 +3312,14 @@ const file_supertag_runtime_v2_policy_proto_rawDesc = "" +
 	"\n" +
 	"assignment\x18\x01 \x01(\v2#.supertag.runtime.v2.RoleAssignmentR\n" +
 	"assignment\x12-\n" +
-	"\x04role\x18\x02 \x01(\v2\x19.supertag.runtime.v2.RoleR\x04role\"\xca\x02\n" +
+	"\x04role\x18\x02 \x01(\v2\x19.supertag.runtime.v2.RoleR\x04role\"\x8c\x03\n" +
 	"\x12TaskPolicySnapshot\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\rR\aversion\x12=\n" +
 	"\x05roles\x18\x02 \x03(\v2'.supertag.runtime.v2.PolicyRoleSnapshotR\x05roles\x12K\n" +
 	"\x0fpermission_sets\x18\x03 \x03(\v2\".supertag.runtime.v2.PermissionSetR\x0epermissionSets\x12B\n" +
 	"\fcontext_sets\x18\x04 \x03(\v2\x1f.supertag.runtime.v2.ContextSetR\vcontextSets\x12J\n" +
-	"\texecution\x18\x05 \x01(\v2,.supertag.runtime.v2.PolicyExecutionSettingsR\texecution\"\xcf\x01\n" +
+	"\texecution\x18\x05 \x01(\v2,.supertag.runtime.v2.PolicyExecutionSettingsR\texecution\x12@\n" +
+	"\x06origin\x18\x06 \x01(\v2(.supertag.runtime.v2.SurfacePolicyOriginR\x06origin\"\xcf\x01\n" +
 	"\x17PutPermissionSetRequest\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12I\n" +
 	"\x0epermission_set\x18\x02 \x01(\v2\".supertag.runtime.v2.PermissionSetR\rpermissionSet\x120\n" +
@@ -1811,7 +3406,15 @@ const file_supertag_runtime_v2_policy_proto_rawDesc = "" +
 	"\n" +
 	"AssignRole\x12&.supertag.runtime.v2.AssignRoleRequest\x1a#.supertag.runtime.v2.RoleAssignment\x12x\n" +
 	"\x13ListRoleAssignments\x12/.supertag.runtime.v2.ListRoleAssignmentsRequest\x1a0.supertag.runtime.v2.ListRoleAssignmentsResponse\x12u\n" +
-	"\x18DeactivateRoleAssignment\x124.supertag.runtime.v2.DeactivateRoleAssignmentRequest\x1a#.supertag.runtime.v2.RoleAssignmentb\x06proto3"
+	"\x18DeactivateRoleAssignment\x124.supertag.runtime.v2.DeactivateRoleAssignmentRequest\x1a#.supertag.runtime.v2.RoleAssignment2\xb6\x06\n" +
+	"\x14SurfacePolicyCatalog\x12g\n" +
+	"\x11PutSurfaceAccount\x12-.supertag.runtime.v2.PutSurfaceAccountRequest\x1a#.supertag.runtime.v2.SurfaceAccount\x12g\n" +
+	"\x11GetSurfaceAccount\x12-.supertag.runtime.v2.GetSurfaceAccountRequest\x1a#.supertag.runtime.v2.SurfaceAccount\x12x\n" +
+	"\x13ListSurfaceAccounts\x12/.supertag.runtime.v2.ListSurfaceAccountsRequest\x1a0.supertag.runtime.v2.ListSurfaceAccountsResponse\x12j\n" +
+	"\x12PutSurfaceLocation\x12..supertag.runtime.v2.PutSurfaceLocationRequest\x1a$.supertag.runtime.v2.SurfaceLocation\x12j\n" +
+	"\x12GetSurfaceLocation\x12..supertag.runtime.v2.GetSurfaceLocationRequest\x1a$.supertag.runtime.v2.SurfaceLocation\x12{\n" +
+	"\x14ListSurfaceLocations\x120.supertag.runtime.v2.ListSurfaceLocationsRequest\x1a1.supertag.runtime.v2.ListSurfaceLocationsResponse\x12}\n" +
+	"\x15DeleteSurfaceLocation\x121.supertag.runtime.v2.DeleteSurfaceLocationRequest\x1a1.supertag.runtime.v2.DeletePolicyResourceResponseb\x06proto3"
 
 var (
 	file_supertag_runtime_v2_policy_proto_rawDescOnce sync.Once
@@ -1826,89 +3429,145 @@ func file_supertag_runtime_v2_policy_proto_rawDescGZIP() []byte {
 }
 
 var file_supertag_runtime_v2_policy_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_supertag_runtime_v2_policy_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_supertag_runtime_v2_policy_proto_msgTypes = make([]protoimpl.MessageInfo, 47)
 var file_supertag_runtime_v2_policy_proto_goTypes = []any{
 	(PolicyPermissionTarget)(0),             // 0: supertag.runtime.v2.PolicyPermissionTarget
 	(RoleStatus)(0),                         // 1: supertag.runtime.v2.RoleStatus
 	(RoleAssignmentStatus)(0),               // 2: supertag.runtime.v2.RoleAssignmentStatus
-	(*PolicyPermission)(nil),                // 3: supertag.runtime.v2.PolicyPermission
-	(*PermissionSet)(nil),                   // 4: supertag.runtime.v2.PermissionSet
-	(*PolicyContextItem)(nil),               // 5: supertag.runtime.v2.PolicyContextItem
-	(*ContextSet)(nil),                      // 6: supertag.runtime.v2.ContextSet
-	(*PolicyExecutionSettings)(nil),         // 7: supertag.runtime.v2.PolicyExecutionSettings
-	(*Role)(nil),                            // 8: supertag.runtime.v2.Role
-	(*RoleAssignment)(nil),                  // 9: supertag.runtime.v2.RoleAssignment
-	(*PolicyRoleSnapshot)(nil),              // 10: supertag.runtime.v2.PolicyRoleSnapshot
-	(*TaskPolicySnapshot)(nil),              // 11: supertag.runtime.v2.TaskPolicySnapshot
-	(*PutPermissionSetRequest)(nil),         // 12: supertag.runtime.v2.PutPermissionSetRequest
-	(*PutContextSetRequest)(nil),            // 13: supertag.runtime.v2.PutContextSetRequest
-	(*PutRoleRequest)(nil),                  // 14: supertag.runtime.v2.PutRoleRequest
-	(*GetPolicyResourceRequest)(nil),        // 15: supertag.runtime.v2.GetPolicyResourceRequest
-	(*ListPolicyResourcesRequest)(nil),      // 16: supertag.runtime.v2.ListPolicyResourcesRequest
-	(*ListPermissionSetsResponse)(nil),      // 17: supertag.runtime.v2.ListPermissionSetsResponse
-	(*ListContextSetsResponse)(nil),         // 18: supertag.runtime.v2.ListContextSetsResponse
-	(*ListRolesResponse)(nil),               // 19: supertag.runtime.v2.ListRolesResponse
-	(*DeletePolicyResourceRequest)(nil),     // 20: supertag.runtime.v2.DeletePolicyResourceRequest
-	(*DeletePolicyResourceResponse)(nil),    // 21: supertag.runtime.v2.DeletePolicyResourceResponse
-	(*AssignRoleRequest)(nil),               // 22: supertag.runtime.v2.AssignRoleRequest
-	(*ListRoleAssignmentsRequest)(nil),      // 23: supertag.runtime.v2.ListRoleAssignmentsRequest
-	(*ListRoleAssignmentsResponse)(nil),     // 24: supertag.runtime.v2.ListRoleAssignmentsResponse
-	(*DeactivateRoleAssignmentRequest)(nil), // 25: supertag.runtime.v2.DeactivateRoleAssignmentRequest
+	(*SlackSurfaceIdentity)(nil),            // 3: supertag.runtime.v2.SlackSurfaceIdentity
+	(*GithubSurfaceIdentity)(nil),           // 4: supertag.runtime.v2.GithubSurfaceIdentity
+	(*LinearSurfaceIdentity)(nil),           // 5: supertag.runtime.v2.LinearSurfaceIdentity
+	(*LarkSurfaceIdentity)(nil),             // 6: supertag.runtime.v2.LarkSurfaceIdentity
+	(*MicrosoftTeamsSurfaceIdentity)(nil),   // 7: supertag.runtime.v2.MicrosoftTeamsSurfaceIdentity
+	(*SurfaceAccountIdentity)(nil),          // 8: supertag.runtime.v2.SurfaceAccountIdentity
+	(*SurfaceAccount)(nil),                  // 9: supertag.runtime.v2.SurfaceAccount
+	(*SlackSurfaceChannel)(nil),             // 10: supertag.runtime.v2.SlackSurfaceChannel
+	(*GithubSurfaceRepository)(nil),         // 11: supertag.runtime.v2.GithubSurfaceRepository
+	(*LinearSurfaceTeam)(nil),               // 12: supertag.runtime.v2.LinearSurfaceTeam
+	(*LarkSurfaceChat)(nil),                 // 13: supertag.runtime.v2.LarkSurfaceChat
+	(*MicrosoftTeamsSurfaceChannel)(nil),    // 14: supertag.runtime.v2.MicrosoftTeamsSurfaceChannel
+	(*SurfaceLocationScope)(nil),            // 15: supertag.runtime.v2.SurfaceLocationScope
+	(*SurfaceLocation)(nil),                 // 16: supertag.runtime.v2.SurfaceLocation
+	(*SurfacePolicyOrigin)(nil),             // 17: supertag.runtime.v2.SurfacePolicyOrigin
+	(*PutSurfaceAccountRequest)(nil),        // 18: supertag.runtime.v2.PutSurfaceAccountRequest
+	(*GetSurfaceAccountRequest)(nil),        // 19: supertag.runtime.v2.GetSurfaceAccountRequest
+	(*ListSurfaceAccountsRequest)(nil),      // 20: supertag.runtime.v2.ListSurfaceAccountsRequest
+	(*ListSurfaceAccountsResponse)(nil),     // 21: supertag.runtime.v2.ListSurfaceAccountsResponse
+	(*PutSurfaceLocationRequest)(nil),       // 22: supertag.runtime.v2.PutSurfaceLocationRequest
+	(*GetSurfaceLocationRequest)(nil),       // 23: supertag.runtime.v2.GetSurfaceLocationRequest
+	(*ListSurfaceLocationsRequest)(nil),     // 24: supertag.runtime.v2.ListSurfaceLocationsRequest
+	(*ListSurfaceLocationsResponse)(nil),    // 25: supertag.runtime.v2.ListSurfaceLocationsResponse
+	(*DeleteSurfaceLocationRequest)(nil),    // 26: supertag.runtime.v2.DeleteSurfaceLocationRequest
+	(*PolicyPermission)(nil),                // 27: supertag.runtime.v2.PolicyPermission
+	(*PermissionSet)(nil),                   // 28: supertag.runtime.v2.PermissionSet
+	(*PolicyContextItem)(nil),               // 29: supertag.runtime.v2.PolicyContextItem
+	(*ContextSet)(nil),                      // 30: supertag.runtime.v2.ContextSet
+	(*PolicyExecutionSettings)(nil),         // 31: supertag.runtime.v2.PolicyExecutionSettings
+	(*Role)(nil),                            // 32: supertag.runtime.v2.Role
+	(*RoleAssignment)(nil),                  // 33: supertag.runtime.v2.RoleAssignment
+	(*PolicyRoleSnapshot)(nil),              // 34: supertag.runtime.v2.PolicyRoleSnapshot
+	(*TaskPolicySnapshot)(nil),              // 35: supertag.runtime.v2.TaskPolicySnapshot
+	(*PutPermissionSetRequest)(nil),         // 36: supertag.runtime.v2.PutPermissionSetRequest
+	(*PutContextSetRequest)(nil),            // 37: supertag.runtime.v2.PutContextSetRequest
+	(*PutRoleRequest)(nil),                  // 38: supertag.runtime.v2.PutRoleRequest
+	(*GetPolicyResourceRequest)(nil),        // 39: supertag.runtime.v2.GetPolicyResourceRequest
+	(*ListPolicyResourcesRequest)(nil),      // 40: supertag.runtime.v2.ListPolicyResourcesRequest
+	(*ListPermissionSetsResponse)(nil),      // 41: supertag.runtime.v2.ListPermissionSetsResponse
+	(*ListContextSetsResponse)(nil),         // 42: supertag.runtime.v2.ListContextSetsResponse
+	(*ListRolesResponse)(nil),               // 43: supertag.runtime.v2.ListRolesResponse
+	(*DeletePolicyResourceRequest)(nil),     // 44: supertag.runtime.v2.DeletePolicyResourceRequest
+	(*DeletePolicyResourceResponse)(nil),    // 45: supertag.runtime.v2.DeletePolicyResourceResponse
+	(*AssignRoleRequest)(nil),               // 46: supertag.runtime.v2.AssignRoleRequest
+	(*ListRoleAssignmentsRequest)(nil),      // 47: supertag.runtime.v2.ListRoleAssignmentsRequest
+	(*ListRoleAssignmentsResponse)(nil),     // 48: supertag.runtime.v2.ListRoleAssignmentsResponse
+	(*DeactivateRoleAssignmentRequest)(nil), // 49: supertag.runtime.v2.DeactivateRoleAssignmentRequest
 }
 var file_supertag_runtime_v2_policy_proto_depIdxs = []int32{
-	0,  // 0: supertag.runtime.v2.PolicyPermission.target:type_name -> supertag.runtime.v2.PolicyPermissionTarget
-	3,  // 1: supertag.runtime.v2.PermissionSet.permissions:type_name -> supertag.runtime.v2.PolicyPermission
-	5,  // 2: supertag.runtime.v2.ContextSet.items:type_name -> supertag.runtime.v2.PolicyContextItem
-	1,  // 3: supertag.runtime.v2.Role.status:type_name -> supertag.runtime.v2.RoleStatus
-	7,  // 4: supertag.runtime.v2.Role.execution:type_name -> supertag.runtime.v2.PolicyExecutionSettings
-	2,  // 5: supertag.runtime.v2.RoleAssignment.status:type_name -> supertag.runtime.v2.RoleAssignmentStatus
-	9,  // 6: supertag.runtime.v2.PolicyRoleSnapshot.assignment:type_name -> supertag.runtime.v2.RoleAssignment
-	8,  // 7: supertag.runtime.v2.PolicyRoleSnapshot.role:type_name -> supertag.runtime.v2.Role
-	10, // 8: supertag.runtime.v2.TaskPolicySnapshot.roles:type_name -> supertag.runtime.v2.PolicyRoleSnapshot
-	4,  // 9: supertag.runtime.v2.TaskPolicySnapshot.permission_sets:type_name -> supertag.runtime.v2.PermissionSet
-	6,  // 10: supertag.runtime.v2.TaskPolicySnapshot.context_sets:type_name -> supertag.runtime.v2.ContextSet
-	7,  // 11: supertag.runtime.v2.TaskPolicySnapshot.execution:type_name -> supertag.runtime.v2.PolicyExecutionSettings
-	4,  // 12: supertag.runtime.v2.PutPermissionSetRequest.permission_set:type_name -> supertag.runtime.v2.PermissionSet
-	6,  // 13: supertag.runtime.v2.PutContextSetRequest.context_set:type_name -> supertag.runtime.v2.ContextSet
-	8,  // 14: supertag.runtime.v2.PutRoleRequest.role:type_name -> supertag.runtime.v2.Role
-	4,  // 15: supertag.runtime.v2.ListPermissionSetsResponse.permission_sets:type_name -> supertag.runtime.v2.PermissionSet
-	6,  // 16: supertag.runtime.v2.ListContextSetsResponse.context_sets:type_name -> supertag.runtime.v2.ContextSet
-	8,  // 17: supertag.runtime.v2.ListRolesResponse.roles:type_name -> supertag.runtime.v2.Role
-	2,  // 18: supertag.runtime.v2.ListRoleAssignmentsRequest.status:type_name -> supertag.runtime.v2.RoleAssignmentStatus
-	9,  // 19: supertag.runtime.v2.ListRoleAssignmentsResponse.assignments:type_name -> supertag.runtime.v2.RoleAssignment
-	12, // 20: supertag.runtime.v2.PolicyCatalog.PutPermissionSet:input_type -> supertag.runtime.v2.PutPermissionSetRequest
-	15, // 21: supertag.runtime.v2.PolicyCatalog.GetPermissionSet:input_type -> supertag.runtime.v2.GetPolicyResourceRequest
-	16, // 22: supertag.runtime.v2.PolicyCatalog.ListPermissionSets:input_type -> supertag.runtime.v2.ListPolicyResourcesRequest
-	20, // 23: supertag.runtime.v2.PolicyCatalog.DeletePermissionSet:input_type -> supertag.runtime.v2.DeletePolicyResourceRequest
-	13, // 24: supertag.runtime.v2.PolicyCatalog.PutContextSet:input_type -> supertag.runtime.v2.PutContextSetRequest
-	15, // 25: supertag.runtime.v2.PolicyCatalog.GetContextSet:input_type -> supertag.runtime.v2.GetPolicyResourceRequest
-	16, // 26: supertag.runtime.v2.PolicyCatalog.ListContextSets:input_type -> supertag.runtime.v2.ListPolicyResourcesRequest
-	20, // 27: supertag.runtime.v2.PolicyCatalog.DeleteContextSet:input_type -> supertag.runtime.v2.DeletePolicyResourceRequest
-	14, // 28: supertag.runtime.v2.PolicyCatalog.PutRole:input_type -> supertag.runtime.v2.PutRoleRequest
-	15, // 29: supertag.runtime.v2.PolicyCatalog.GetRole:input_type -> supertag.runtime.v2.GetPolicyResourceRequest
-	16, // 30: supertag.runtime.v2.PolicyCatalog.ListRoles:input_type -> supertag.runtime.v2.ListPolicyResourcesRequest
-	22, // 31: supertag.runtime.v2.PolicyCatalog.AssignRole:input_type -> supertag.runtime.v2.AssignRoleRequest
-	23, // 32: supertag.runtime.v2.PolicyCatalog.ListRoleAssignments:input_type -> supertag.runtime.v2.ListRoleAssignmentsRequest
-	25, // 33: supertag.runtime.v2.PolicyCatalog.DeactivateRoleAssignment:input_type -> supertag.runtime.v2.DeactivateRoleAssignmentRequest
-	4,  // 34: supertag.runtime.v2.PolicyCatalog.PutPermissionSet:output_type -> supertag.runtime.v2.PermissionSet
-	4,  // 35: supertag.runtime.v2.PolicyCatalog.GetPermissionSet:output_type -> supertag.runtime.v2.PermissionSet
-	17, // 36: supertag.runtime.v2.PolicyCatalog.ListPermissionSets:output_type -> supertag.runtime.v2.ListPermissionSetsResponse
-	21, // 37: supertag.runtime.v2.PolicyCatalog.DeletePermissionSet:output_type -> supertag.runtime.v2.DeletePolicyResourceResponse
-	6,  // 38: supertag.runtime.v2.PolicyCatalog.PutContextSet:output_type -> supertag.runtime.v2.ContextSet
-	6,  // 39: supertag.runtime.v2.PolicyCatalog.GetContextSet:output_type -> supertag.runtime.v2.ContextSet
-	18, // 40: supertag.runtime.v2.PolicyCatalog.ListContextSets:output_type -> supertag.runtime.v2.ListContextSetsResponse
-	21, // 41: supertag.runtime.v2.PolicyCatalog.DeleteContextSet:output_type -> supertag.runtime.v2.DeletePolicyResourceResponse
-	8,  // 42: supertag.runtime.v2.PolicyCatalog.PutRole:output_type -> supertag.runtime.v2.Role
-	8,  // 43: supertag.runtime.v2.PolicyCatalog.GetRole:output_type -> supertag.runtime.v2.Role
-	19, // 44: supertag.runtime.v2.PolicyCatalog.ListRoles:output_type -> supertag.runtime.v2.ListRolesResponse
-	9,  // 45: supertag.runtime.v2.PolicyCatalog.AssignRole:output_type -> supertag.runtime.v2.RoleAssignment
-	24, // 46: supertag.runtime.v2.PolicyCatalog.ListRoleAssignments:output_type -> supertag.runtime.v2.ListRoleAssignmentsResponse
-	9,  // 47: supertag.runtime.v2.PolicyCatalog.DeactivateRoleAssignment:output_type -> supertag.runtime.v2.RoleAssignment
-	34, // [34:48] is the sub-list for method output_type
-	20, // [20:34] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	3,  // 0: supertag.runtime.v2.SurfaceAccountIdentity.slack:type_name -> supertag.runtime.v2.SlackSurfaceIdentity
+	4,  // 1: supertag.runtime.v2.SurfaceAccountIdentity.github:type_name -> supertag.runtime.v2.GithubSurfaceIdentity
+	5,  // 2: supertag.runtime.v2.SurfaceAccountIdentity.linear:type_name -> supertag.runtime.v2.LinearSurfaceIdentity
+	6,  // 3: supertag.runtime.v2.SurfaceAccountIdentity.lark:type_name -> supertag.runtime.v2.LarkSurfaceIdentity
+	7,  // 4: supertag.runtime.v2.SurfaceAccountIdentity.microsoft_teams:type_name -> supertag.runtime.v2.MicrosoftTeamsSurfaceIdentity
+	8,  // 5: supertag.runtime.v2.SurfaceAccount.identity:type_name -> supertag.runtime.v2.SurfaceAccountIdentity
+	10, // 6: supertag.runtime.v2.SurfaceLocationScope.slack:type_name -> supertag.runtime.v2.SlackSurfaceChannel
+	11, // 7: supertag.runtime.v2.SurfaceLocationScope.github:type_name -> supertag.runtime.v2.GithubSurfaceRepository
+	12, // 8: supertag.runtime.v2.SurfaceLocationScope.linear:type_name -> supertag.runtime.v2.LinearSurfaceTeam
+	13, // 9: supertag.runtime.v2.SurfaceLocationScope.lark:type_name -> supertag.runtime.v2.LarkSurfaceChat
+	14, // 10: supertag.runtime.v2.SurfaceLocationScope.microsoft_teams:type_name -> supertag.runtime.v2.MicrosoftTeamsSurfaceChannel
+	15, // 11: supertag.runtime.v2.SurfaceLocation.scope:type_name -> supertag.runtime.v2.SurfaceLocationScope
+	15, // 12: supertag.runtime.v2.SurfacePolicyOrigin.scope:type_name -> supertag.runtime.v2.SurfaceLocationScope
+	9,  // 13: supertag.runtime.v2.PutSurfaceAccountRequest.account:type_name -> supertag.runtime.v2.SurfaceAccount
+	9,  // 14: supertag.runtime.v2.ListSurfaceAccountsResponse.accounts:type_name -> supertag.runtime.v2.SurfaceAccount
+	16, // 15: supertag.runtime.v2.PutSurfaceLocationRequest.location:type_name -> supertag.runtime.v2.SurfaceLocation
+	16, // 16: supertag.runtime.v2.ListSurfaceLocationsResponse.locations:type_name -> supertag.runtime.v2.SurfaceLocation
+	0,  // 17: supertag.runtime.v2.PolicyPermission.target:type_name -> supertag.runtime.v2.PolicyPermissionTarget
+	27, // 18: supertag.runtime.v2.PermissionSet.permissions:type_name -> supertag.runtime.v2.PolicyPermission
+	29, // 19: supertag.runtime.v2.ContextSet.items:type_name -> supertag.runtime.v2.PolicyContextItem
+	1,  // 20: supertag.runtime.v2.Role.status:type_name -> supertag.runtime.v2.RoleStatus
+	31, // 21: supertag.runtime.v2.Role.execution:type_name -> supertag.runtime.v2.PolicyExecutionSettings
+	2,  // 22: supertag.runtime.v2.RoleAssignment.status:type_name -> supertag.runtime.v2.RoleAssignmentStatus
+	33, // 23: supertag.runtime.v2.PolicyRoleSnapshot.assignment:type_name -> supertag.runtime.v2.RoleAssignment
+	32, // 24: supertag.runtime.v2.PolicyRoleSnapshot.role:type_name -> supertag.runtime.v2.Role
+	34, // 25: supertag.runtime.v2.TaskPolicySnapshot.roles:type_name -> supertag.runtime.v2.PolicyRoleSnapshot
+	28, // 26: supertag.runtime.v2.TaskPolicySnapshot.permission_sets:type_name -> supertag.runtime.v2.PermissionSet
+	30, // 27: supertag.runtime.v2.TaskPolicySnapshot.context_sets:type_name -> supertag.runtime.v2.ContextSet
+	31, // 28: supertag.runtime.v2.TaskPolicySnapshot.execution:type_name -> supertag.runtime.v2.PolicyExecutionSettings
+	17, // 29: supertag.runtime.v2.TaskPolicySnapshot.origin:type_name -> supertag.runtime.v2.SurfacePolicyOrigin
+	28, // 30: supertag.runtime.v2.PutPermissionSetRequest.permission_set:type_name -> supertag.runtime.v2.PermissionSet
+	30, // 31: supertag.runtime.v2.PutContextSetRequest.context_set:type_name -> supertag.runtime.v2.ContextSet
+	32, // 32: supertag.runtime.v2.PutRoleRequest.role:type_name -> supertag.runtime.v2.Role
+	28, // 33: supertag.runtime.v2.ListPermissionSetsResponse.permission_sets:type_name -> supertag.runtime.v2.PermissionSet
+	30, // 34: supertag.runtime.v2.ListContextSetsResponse.context_sets:type_name -> supertag.runtime.v2.ContextSet
+	32, // 35: supertag.runtime.v2.ListRolesResponse.roles:type_name -> supertag.runtime.v2.Role
+	2,  // 36: supertag.runtime.v2.ListRoleAssignmentsRequest.status:type_name -> supertag.runtime.v2.RoleAssignmentStatus
+	33, // 37: supertag.runtime.v2.ListRoleAssignmentsResponse.assignments:type_name -> supertag.runtime.v2.RoleAssignment
+	36, // 38: supertag.runtime.v2.PolicyCatalog.PutPermissionSet:input_type -> supertag.runtime.v2.PutPermissionSetRequest
+	39, // 39: supertag.runtime.v2.PolicyCatalog.GetPermissionSet:input_type -> supertag.runtime.v2.GetPolicyResourceRequest
+	40, // 40: supertag.runtime.v2.PolicyCatalog.ListPermissionSets:input_type -> supertag.runtime.v2.ListPolicyResourcesRequest
+	44, // 41: supertag.runtime.v2.PolicyCatalog.DeletePermissionSet:input_type -> supertag.runtime.v2.DeletePolicyResourceRequest
+	37, // 42: supertag.runtime.v2.PolicyCatalog.PutContextSet:input_type -> supertag.runtime.v2.PutContextSetRequest
+	39, // 43: supertag.runtime.v2.PolicyCatalog.GetContextSet:input_type -> supertag.runtime.v2.GetPolicyResourceRequest
+	40, // 44: supertag.runtime.v2.PolicyCatalog.ListContextSets:input_type -> supertag.runtime.v2.ListPolicyResourcesRequest
+	44, // 45: supertag.runtime.v2.PolicyCatalog.DeleteContextSet:input_type -> supertag.runtime.v2.DeletePolicyResourceRequest
+	38, // 46: supertag.runtime.v2.PolicyCatalog.PutRole:input_type -> supertag.runtime.v2.PutRoleRequest
+	39, // 47: supertag.runtime.v2.PolicyCatalog.GetRole:input_type -> supertag.runtime.v2.GetPolicyResourceRequest
+	40, // 48: supertag.runtime.v2.PolicyCatalog.ListRoles:input_type -> supertag.runtime.v2.ListPolicyResourcesRequest
+	46, // 49: supertag.runtime.v2.PolicyCatalog.AssignRole:input_type -> supertag.runtime.v2.AssignRoleRequest
+	47, // 50: supertag.runtime.v2.PolicyCatalog.ListRoleAssignments:input_type -> supertag.runtime.v2.ListRoleAssignmentsRequest
+	49, // 51: supertag.runtime.v2.PolicyCatalog.DeactivateRoleAssignment:input_type -> supertag.runtime.v2.DeactivateRoleAssignmentRequest
+	18, // 52: supertag.runtime.v2.SurfacePolicyCatalog.PutSurfaceAccount:input_type -> supertag.runtime.v2.PutSurfaceAccountRequest
+	19, // 53: supertag.runtime.v2.SurfacePolicyCatalog.GetSurfaceAccount:input_type -> supertag.runtime.v2.GetSurfaceAccountRequest
+	20, // 54: supertag.runtime.v2.SurfacePolicyCatalog.ListSurfaceAccounts:input_type -> supertag.runtime.v2.ListSurfaceAccountsRequest
+	22, // 55: supertag.runtime.v2.SurfacePolicyCatalog.PutSurfaceLocation:input_type -> supertag.runtime.v2.PutSurfaceLocationRequest
+	23, // 56: supertag.runtime.v2.SurfacePolicyCatalog.GetSurfaceLocation:input_type -> supertag.runtime.v2.GetSurfaceLocationRequest
+	24, // 57: supertag.runtime.v2.SurfacePolicyCatalog.ListSurfaceLocations:input_type -> supertag.runtime.v2.ListSurfaceLocationsRequest
+	26, // 58: supertag.runtime.v2.SurfacePolicyCatalog.DeleteSurfaceLocation:input_type -> supertag.runtime.v2.DeleteSurfaceLocationRequest
+	28, // 59: supertag.runtime.v2.PolicyCatalog.PutPermissionSet:output_type -> supertag.runtime.v2.PermissionSet
+	28, // 60: supertag.runtime.v2.PolicyCatalog.GetPermissionSet:output_type -> supertag.runtime.v2.PermissionSet
+	41, // 61: supertag.runtime.v2.PolicyCatalog.ListPermissionSets:output_type -> supertag.runtime.v2.ListPermissionSetsResponse
+	45, // 62: supertag.runtime.v2.PolicyCatalog.DeletePermissionSet:output_type -> supertag.runtime.v2.DeletePolicyResourceResponse
+	30, // 63: supertag.runtime.v2.PolicyCatalog.PutContextSet:output_type -> supertag.runtime.v2.ContextSet
+	30, // 64: supertag.runtime.v2.PolicyCatalog.GetContextSet:output_type -> supertag.runtime.v2.ContextSet
+	42, // 65: supertag.runtime.v2.PolicyCatalog.ListContextSets:output_type -> supertag.runtime.v2.ListContextSetsResponse
+	45, // 66: supertag.runtime.v2.PolicyCatalog.DeleteContextSet:output_type -> supertag.runtime.v2.DeletePolicyResourceResponse
+	32, // 67: supertag.runtime.v2.PolicyCatalog.PutRole:output_type -> supertag.runtime.v2.Role
+	32, // 68: supertag.runtime.v2.PolicyCatalog.GetRole:output_type -> supertag.runtime.v2.Role
+	43, // 69: supertag.runtime.v2.PolicyCatalog.ListRoles:output_type -> supertag.runtime.v2.ListRolesResponse
+	33, // 70: supertag.runtime.v2.PolicyCatalog.AssignRole:output_type -> supertag.runtime.v2.RoleAssignment
+	48, // 71: supertag.runtime.v2.PolicyCatalog.ListRoleAssignments:output_type -> supertag.runtime.v2.ListRoleAssignmentsResponse
+	33, // 72: supertag.runtime.v2.PolicyCatalog.DeactivateRoleAssignment:output_type -> supertag.runtime.v2.RoleAssignment
+	9,  // 73: supertag.runtime.v2.SurfacePolicyCatalog.PutSurfaceAccount:output_type -> supertag.runtime.v2.SurfaceAccount
+	9,  // 74: supertag.runtime.v2.SurfacePolicyCatalog.GetSurfaceAccount:output_type -> supertag.runtime.v2.SurfaceAccount
+	21, // 75: supertag.runtime.v2.SurfacePolicyCatalog.ListSurfaceAccounts:output_type -> supertag.runtime.v2.ListSurfaceAccountsResponse
+	16, // 76: supertag.runtime.v2.SurfacePolicyCatalog.PutSurfaceLocation:output_type -> supertag.runtime.v2.SurfaceLocation
+	16, // 77: supertag.runtime.v2.SurfacePolicyCatalog.GetSurfaceLocation:output_type -> supertag.runtime.v2.SurfaceLocation
+	25, // 78: supertag.runtime.v2.SurfacePolicyCatalog.ListSurfaceLocations:output_type -> supertag.runtime.v2.ListSurfaceLocationsResponse
+	45, // 79: supertag.runtime.v2.SurfacePolicyCatalog.DeleteSurfaceLocation:output_type -> supertag.runtime.v2.DeletePolicyResourceResponse
+	59, // [59:80] is the sub-list for method output_type
+	38, // [38:59] is the sub-list for method input_type
+	38, // [38:38] is the sub-list for extension type_name
+	38, // [38:38] is the sub-list for extension extendee
+	0,  // [0:38] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_policy_proto_init() }
@@ -1916,19 +3575,35 @@ func file_supertag_runtime_v2_policy_proto_init() {
 	if File_supertag_runtime_v2_policy_proto != nil {
 		return
 	}
-	file_supertag_runtime_v2_policy_proto_msgTypes[4].OneofWrappers = []any{}
-	file_supertag_runtime_v2_policy_proto_msgTypes[9].OneofWrappers = []any{}
-	file_supertag_runtime_v2_policy_proto_msgTypes[10].OneofWrappers = []any{}
-	file_supertag_runtime_v2_policy_proto_msgTypes[11].OneofWrappers = []any{}
+	file_supertag_runtime_v2_policy_proto_msgTypes[5].OneofWrappers = []any{
+		(*SurfaceAccountIdentity_Slack)(nil),
+		(*SurfaceAccountIdentity_Github)(nil),
+		(*SurfaceAccountIdentity_Linear)(nil),
+		(*SurfaceAccountIdentity_Lark)(nil),
+		(*SurfaceAccountIdentity_MicrosoftTeams)(nil),
+	}
+	file_supertag_runtime_v2_policy_proto_msgTypes[12].OneofWrappers = []any{
+		(*SurfaceLocationScope_Slack)(nil),
+		(*SurfaceLocationScope_Github)(nil),
+		(*SurfaceLocationScope_Linear)(nil),
+		(*SurfaceLocationScope_Lark)(nil),
+		(*SurfaceLocationScope_MicrosoftTeams)(nil),
+	}
+	file_supertag_runtime_v2_policy_proto_msgTypes[15].OneofWrappers = []any{}
+	file_supertag_runtime_v2_policy_proto_msgTypes[19].OneofWrappers = []any{}
+	file_supertag_runtime_v2_policy_proto_msgTypes[28].OneofWrappers = []any{}
+	file_supertag_runtime_v2_policy_proto_msgTypes[33].OneofWrappers = []any{}
+	file_supertag_runtime_v2_policy_proto_msgTypes[34].OneofWrappers = []any{}
+	file_supertag_runtime_v2_policy_proto_msgTypes[35].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_policy_proto_rawDesc), len(file_supertag_runtime_v2_policy_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   23,
+			NumMessages:   47,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   2,
 		},
 		GoTypes:           file_supertag_runtime_v2_policy_proto_goTypes,
 		DependencyIndexes: file_supertag_runtime_v2_policy_proto_depIdxs,

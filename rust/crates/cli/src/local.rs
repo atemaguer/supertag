@@ -33,6 +33,7 @@ pub const LOCAL_SERVICE_LIFELINE: &str = "SUPERTAG_LOCAL_SERVICE_LIFELINE";
 pub struct LocalOptions {
     pub state_directory: PathBuf,
     pub adapter: crate::AdapterOptions,
+    pub skill_catalog: Option<PathBuf>,
     pub gateway_listen: SocketAddr,
 }
 
@@ -158,6 +159,9 @@ impl Children {
             .arg("--wait-for-recovery")
             .args(options.adapter.worker_args())
             .env("SUPERTAG_HOST_TOKEN", &credentials.host);
+        if let Some(catalog) = &options.skill_catalog {
+            host.arg("--skill-catalog").arg(catalog);
+        }
         host.envs(
             supertag_worker_host::provider_environment(options.adapter.harness_kind())
                 .iter()

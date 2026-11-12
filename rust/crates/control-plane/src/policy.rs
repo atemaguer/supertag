@@ -11,14 +11,15 @@ use uuid::Uuid;
 
 use crate::{
     ControlPlane, Store, StoreError,
-    store::{Result, invalid, name},
+    store::{MAILBOX_SEND_ACTION, Result, WORKSTREAM_POST_ACTION, invalid, name},
+    surface_policy::AdmissionSurface,
 };
 
 const RESOURCE_BYTES: usize = 192 * 1024;
 const SNAPSHOT_BYTES: usize = 384 * 1024;
-const PAGE_BYTES: usize = 768 * 1024;
+pub(crate) const PAGE_BYTES: usize = 768 * 1024;
 
-fn operator(principal: &str) -> Result<()> {
+pub(crate) fn operator(principal: &str) -> Result<()> {
     if principal
         .strip_prefix("operator:")
         .is_none_or(str::is_empty)
@@ -50,7 +51,7 @@ fn size<M: Message>(value: &M, maximum: usize) -> Result<()> {
     }
     Ok(())
 }
-fn decode<M: Message + Default>(bytes: &[u8]) -> Result<M> {
+pub(crate) fn decode<M: Message + Default>(bytes: &[u8]) -> Result<M> {
     M::decode(bytes).map_err(|_| StoreError::FailedPrecondition("stored policy is invalid".into()))
 }
 pub(crate) fn snapshot_from_row(row: &AnyRow) -> Result<Option<TaskPolicySnapshot>> {
@@ -61,14 +62,14 @@ pub(crate) fn snapshot_from_row(row: &AnyRow) -> Result<Option<TaskPolicySnapsho
         Ok(Some(decode(&bytes)?))
     }
 }
-fn digest<M: Message>(method: &str, input: &M) -> String {
+pub(crate) fn digest<M: Message>(method: &str, input: &M) -> String {
     let mut hash = Sha256::new();
     hash.update(method.as_bytes());
     hash.update([0]);
     hash.update(input.encode_to_vec());
     format!("{:x}", hash.finalize())
 }
-async fn replay<M: Message + Default>(
+pub(crate) async fn replay<M: Message + Default>(
     tx: &mut Transaction<'_, Any>,
     principal: &str,
     operation: &str,
@@ -85,7 +86,7 @@ async fn replay<M: Message + Default>(
     }
     Ok(None)
 }
-async fn receipt<M: Message>(
+pub(crate) async fn receipt<M: Message>(
     tx: &mut Transaction<'_, Any>,
     principal: &str,
     operation: &str,
@@ -556,19 +557,28 @@ async fn prepare_resource<M: Resource>(
         }
     }
     // Deleting a Set never reuses its historical (identity, revision) pair.
+    let revision = next_revision_in(tx, M::KIND, &id).await?;
+    value.set_identity(id, revision);
+    size(&value, RESOURCE_BYTES)?;
+    Ok(value)
+}
+
+pub(crate) async fn next_revision_in(
+    tx: &mut Transaction<'_, Any>,
+    kind: &str,
+    id: &str,
+) -> Result<u64> {
     let historical: Option<i64> = sqlx::query_scalar(
         "SELECT revision FROM supertag_v2_policy_revisions WHERE kind=$1 AND resource_id=$2",
     )
-    .bind(M::KIND)
-    .bind(&id)
+    .bind(kind)
+    .bind(id)
     .fetch_optional(&mut **tx)
     .await?;
     let revision = increment(historical.unwrap_or(0) as u64)?;
-    value.set_identity(id, revision);
-    size(&value, RESOURCE_BYTES)?;
     sqlx::query("INSERT INTO supertag_v2_policy_revisions (kind,resource_id,revision) VALUES ($1,$2,$3) ON CONFLICT(kind,resource_id) DO UPDATE SET revision=excluded.revision")
-        .bind(M::KIND).bind(value.id()).bind(revision as i64).execute(&mut **tx).await?;
-    Ok(value)
+        .bind(kind).bind(id).bind(revision as i64).execute(&mut **tx).await?;
+    Ok(revision)
 }
 async fn save_resource<M: Resource>(tx: &mut Transaction<'_, Any>, value: &M) -> Result<()> {
     let query = format!(
@@ -595,7 +605,11 @@ struct Cursor {
     scope: String,
     after: String,
 }
-fn page(input: &ListPolicyResourcesRequest, kind: &str, scope: &str) -> Result<(usize, String)> {
+pub(crate) fn page(
+    input: &ListPolicyResourcesRequest,
+    kind: &str,
+    scope: &str,
+) -> Result<(usize, String)> {
     let limit = if input.limit == 0 {
         50
     } else {
@@ -614,7 +628,7 @@ fn page(input: &ListPolicyResourcesRequest, kind: &str, scope: &str) -> Result<(
     }
     Ok((limit, cursor.after))
 }
-fn next_cursor(kind: &str, scope: &str, after: &str) -> Result<String> {
+pub(crate) fn next_cursor(kind: &str, scope: &str, after: &str) -> Result<String> {
     Ok(serde_json::to_string(&Cursor {
         version: 1,
         kind: kind.into(),
@@ -826,22 +840,33 @@ impl Store {
         principal: &str,
         input: &DeletePolicyResourceRequest,
     ) -> Result<DeletePolicyResourceResponse> {
-        self.delete_policy::<PermissionSet>(principal, input, "supertag_v2_role_permission_sets")
-            .await
+        self.delete_policy::<PermissionSet>(
+            principal,
+            input,
+            "supertag_v2_role_permission_sets",
+            "supertag_v2_surface_location_permission_sets",
+        )
+        .await
     }
     pub async fn delete_context_set(
         &self,
         principal: &str,
         input: &DeletePolicyResourceRequest,
     ) -> Result<DeletePolicyResourceResponse> {
-        self.delete_policy::<ContextSet>(principal, input, "supertag_v2_role_context_sets")
-            .await
+        self.delete_policy::<ContextSet>(
+            principal,
+            input,
+            "supertag_v2_role_context_sets",
+            "supertag_v2_surface_location_context_sets",
+        )
+        .await
     }
     async fn delete_policy<M: Resource>(
         &self,
         principal: &str,
         input: &DeletePolicyResourceRequest,
         references: &str,
+        locations: &str,
     ) -> Result<DeletePolicyResourceResponse> {
         operator(principal)?;
         name("operation ID", &input.operation_id)?;
@@ -864,6 +889,17 @@ impl Store {
         if reference.is_some() {
             return Err(StoreError::FailedPrecondition(
                 "policy Set is still referenced by a Role".into(),
+            ));
+        }
+        let location: Option<String> = sqlx::query_scalar(&format!(
+            "SELECT location_id FROM {locations} WHERE set_id=$1 LIMIT 1"
+        ))
+        .bind(value.id())
+        .fetch_optional(&mut *tx)
+        .await?;
+        if location.is_some() {
+            return Err(StoreError::FailedPrecondition(
+                "policy Set is still referenced by a Surface location".into(),
             ));
         }
         sqlx::query(&format!("DELETE FROM {} WHERE {}=$1", M::TABLE, M::KEY))
@@ -1048,6 +1084,7 @@ pub(crate) async fn admission_in(
     tx: &mut Transaction<'_, Any>,
     tag_id: &str,
     base: AdmissionBase<'_>,
+    surface: Option<&AdmissionSurface>,
 ) -> Result<AdmissionPolicy> {
     let rows=sqlx::query("SELECT a.* FROM supertag_v2_role_assignments a JOIN supertag_v2_roles r ON a.role_id=r.role_id WHERE a.tag_id=$1 AND a.status=1 AND r.status=1 ORDER BY a.role_id,a.assignment_id").bind(tag_id).fetch_all(&mut **tx).await?;
     if rows.len() > 128 {
@@ -1057,10 +1094,15 @@ pub(crate) async fn admission_in(
     }
     let mut snapshot = TaskPolicySnapshot {
         version: 1,
+        origin: surface.map(|surface| surface.origin.clone()),
         ..Default::default()
     };
     let mut permission_ids = BTreeSet::new();
     let mut context_ids = BTreeSet::new();
+    if let Some(surface) = surface {
+        permission_ids.extend(surface.permission_set_ids.iter().cloned());
+        context_ids.extend(surface.context_set_ids.iter().cloned());
+    }
     let mut instructions = base.instructions.to_owned();
     for row in rows {
         let assignment = assignment_row(&row)?;
@@ -1095,8 +1137,8 @@ pub(crate) async fn admission_in(
     snapshot
         .context_sets
         .sort_by(|a, b| a.name.cmp(&b.name).then(a.set_id.cmp(&b.set_id)));
-    // Artifact selection depends on a surface Route that the first Rust catalog does
-    // not yet resolve. Keep the catalog entry, but never pretend internal admission did.
+    // A location can select a Set, but artifact selection still needs its own
+    // admission-time resolver. An unresolved item must never grant access.
     if snapshot
         .context_sets
         .iter()
@@ -1104,7 +1146,7 @@ pub(crate) async fn admission_in(
         .any(|i| i.r#type == "supertag/artifacts")
     {
         return Err(StoreError::FailedPrecondition(
-            "artifact context requires a supported surface Route admission".into(),
+            "artifact context requires a supported surface selection resolver".into(),
         ));
     }
     let mut actions: BTreeSet<String> = base.allowed_actions.iter().cloned().collect();
@@ -1118,10 +1160,14 @@ pub(crate) async fn admission_in(
         for p in &set.permissions {
             if p.target == PolicyPermissionTarget::Runtime as i32 {
                 actions.insert(p.action.clone());
-                if p.approval_required && p.action != "workstream:post" {
+                let supported = matches!(
+                    p.action.as_str(),
+                    WORKSTREAM_POST_ACTION | MAILBOX_SEND_ACTION
+                );
+                if p.approval_required && !supported {
                     unsupported_approval_actions.insert(p.action.clone());
                 }
-                if p.approval_required && p.action == "workstream:post" {
+                if p.approval_required && supported {
                     let operators: BTreeSet<String> = set
                         .approvers
                         .iter()
@@ -1135,8 +1181,8 @@ pub(crate) async fn admission_in(
             }
         }
     }
-    // A requiring Set wins over every unrestricted grant. Only Workstream post
-    // has a native approval boundary in this runtime; preserve the other grants
+    // A requiring Set wins over every unrestricted grant. Workstream posts and
+    // Mailbox sends have approval boundaries; preserve the other grants
     // in the snapshot without allowing an adapter to execute them unrestricted.
     for action in unsupported_approval_actions {
         actions.remove(&action);
@@ -1261,10 +1307,23 @@ fn effective_digest(snapshot: &TaskPolicySnapshot) -> Result<String> {
             Some((&e.models, efforts))
         }
     });
-    if permissions.is_empty() && contexts.is_empty() && execution.is_none() {
+    if permissions.is_empty()
+        && contexts.is_empty()
+        && execution.is_none()
+        && snapshot.origin.is_none()
+    {
         return Ok(String::new());
     }
-    let encoded = serde_json::to_vec(&(permissions, contexts, execution))?;
+    let mut encoded = serde_json::to_vec(&(permissions, contexts, execution))?;
+    if let Some(origin) = &snapshot.origin {
+        let coordinates = origin.scope.as_ref().map(Message::encode_to_vec);
+        encoded.extend(serde_json::to_vec(&(
+            &origin.account_id,
+            &origin.connector_account_id,
+            coordinates,
+            &origin.origin_actions,
+        ))?);
+    }
     Ok(format!("{:x}", Sha256::digest(encoded)))
 }
 

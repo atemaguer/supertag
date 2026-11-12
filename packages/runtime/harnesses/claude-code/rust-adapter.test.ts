@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer, type ServerHttp2Session } from "node:http2";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { create, toBinary } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
+import { digestContextPackage } from "@supertag/worker-sdk";
 import { afterEach, expect, it } from "vitest";
 import { permissionHook } from "./src/rust-adapter/adapter.js";
 import {
@@ -18,6 +19,7 @@ import {
   AdapterBootstrapSchema,
   ApprovalState,
   type AttemptCapabilities,
+  ContextPinSchema,
   Harness,
   type HarnessAskQuestionRequest,
   type HarnessCompleteRequest,
@@ -26,10 +28,13 @@ import {
   HarnessQuestions,
   type HarnessReadMailboxRequest,
   type HarnessReadWorkstreamRequest,
+  type HarnessSendTagMessageRequest,
   type HarnessUsageRequest,
   HarnessWorkstreams,
   LiveInputReceipt,
+  type ResolvedSkill,
   type SessionCheckpoint,
+  TagMessageOrigin,
   TaskSchema,
   TaskState,
 } from "./src/rust-adapter/gen/supertag/runtime/v2/runtime_pb.js";
@@ -56,6 +61,7 @@ async function invoke({
   coordination,
   policySnapshot,
   model,
+  skill,
 }: {
   prompt?: string;
   checkpoint?: SessionCheckpoint;
@@ -65,9 +71,11 @@ async function invoke({
   liveInput?: string;
   mayAskObjectiveQuestion?: boolean;
   lostQuestion?: boolean;
-  coordination?: Pick<AttemptCapabilities, "mayUseWorkstream" | "mayReadMailbox">;
+  coordination?: Pick<AttemptCapabilities, "mayUseWorkstream" | "mayReadMailbox"> &
+    Partial<Pick<AttemptCapabilities, "maySendTagMessage">>;
   policySnapshot?: TaskPolicySnapshot;
   model?: string;
+  skill?: { markdown: string; tamper?: boolean };
 } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "supertag-rust-claude-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
@@ -84,6 +92,28 @@ async function invoke({
   const posts: HarnessPostWorkstreamRequest[] = [];
   const workstreamReads: HarnessReadWorkstreamRequest[] = [];
   const mailboxReads: HarnessReadMailboxRequest[] = [];
+  const mailboxSends: HarnessSendTagMessageRequest[] = [];
+  const resolvedSkills: Array<Omit<ResolvedSkill, "$typeName">> = [];
+  if (skill) {
+    const localPath = join(state, `skill-${"a".repeat(64)}`);
+    await mkdir(localPath, { mode: 0o700 });
+    const markdownPath = join(localPath, "SKILL.md");
+    await writeFile(markdownPath, skill.markdown, { mode: 0o600 });
+    await writeFile(join(localPath, "reference.md"), "Pinned checklist details.", { mode: 0o600 });
+    const digest = await digestContextPackage(localPath, { maxFiles: 2, maxBytes: 4096 });
+    if (skill.tamper) await writeFile(markdownPath, "Tampered.");
+    resolvedSkills.push({
+      localPath,
+      pin: create(ContextPinSchema, {
+        setId: "context",
+        itemId: "runbook",
+        itemKey: "runbook",
+        reference: "release-runbook",
+        version: "1",
+        digest,
+      }),
+    });
+  }
   let question: HarnessAskQuestionRequest | undefined;
   let taken = false;
   const sessions = new Set<ServerHttp2Session>();
@@ -109,6 +139,7 @@ async function invoke({
               task,
               attemptId: "attempt",
               mayAskObjectiveQuestion,
+              resolvedSkills,
               ...(coordination
                 ? { coordination: { ...coordination, mayAskObjectiveQuestion } }
                 : {}),
@@ -222,6 +253,22 @@ async function invoke({
           },
         });
         router.service(HarnessMailbox, {
+          sendMessage(request, context) {
+            expect(context.requestHeader.get("authorization")).toBe(`Bearer ${token}`);
+            mailboxSends.push(request);
+            if (mailboxSends.length === 1) throw new ConnectError("reply lost", Code.Unavailable);
+            return {
+              duplicate: true,
+              message: {
+                messageId: "direct-receipt",
+                sourceTaskId: "task",
+                senderTagId: "actor",
+                recipientTagId: request.recipientTagId,
+                text: request.text,
+                origin: TagMessageOrigin.DIRECT,
+              },
+            };
+          },
           read(request, context) {
             expect(context.requestHeader.get("authorization")).toBe(`Bearer ${token}`);
             mailboxReads.push(request);
@@ -314,6 +361,7 @@ async function invoke({
     posts,
     workstreamReads,
     mailboxReads,
+    mailboxSends,
   };
 }
 
@@ -496,6 +544,27 @@ it("does not allow Workstream tools from a Task action alone", async () => {
   expect(run.mailboxReads).toHaveLength(1);
 }, 30000);
 
+it("sends direct Mailbox messages through the real Claude SDK with a stable retry receipt", async () => {
+  const run = await invoke({
+    prompt: "direct-mailbox",
+    coordination: { mayUseWorkstream: false, mayReadMailbox: false, maySendTagMessage: true },
+  });
+  expect(
+    run.completions[0]?.succeeded,
+    await readFile(join(run.workspace, "fixture-error.txt"), "utf8").catch(
+      () => run.completions[0]?.result,
+    ),
+  ).toBe(true);
+  expect(run.mailboxSends).toHaveLength(2);
+  expect(run.mailboxSends[0]).toEqual(run.mailboxSends[1]);
+  expect(run.mailboxSends[0]).toMatchObject({
+    operationId: expect.any(String),
+    recipientTagId: "lead",
+    text: "Private note [REDACTED]",
+  });
+  expect(run.posts).toEqual([]);
+}, 30000);
+
 it.each(["ask-first", "post-first"])(
   "keeps approval and question waits separate (%s)",
   async (order) => {
@@ -546,6 +615,50 @@ it("fails before native launch when a required Context Item has no resolver", as
   expect(run.completions[0]?.checkpoint).toBeUndefined();
   await expect(readFile(join(run.workspace, "native-started"))).rejects.toThrow();
 }, 30000);
+
+it.each(["valid", "tampered", "hooks"] as const)(
+  "stages only admitted static Skills before the Claude SDK launches (%s)",
+  async (kind) => {
+    const policySnapshot = create(TaskPolicySnapshotSchema, {
+      version: 1,
+      contextSets: [
+        {
+          setId: "context",
+          items: [
+            {
+              itemId: "runbook",
+              itemKey: "runbook",
+              type: "supertag/skill",
+              version: 1,
+              required: true,
+              configJson: JSON.stringify({ reference: "release-runbook", version: "1" }),
+            },
+          ],
+        },
+      ],
+    });
+    const run = await invoke({
+      prompt: "inspect-skill-package",
+      policySnapshot,
+      skill: {
+        markdown: `---\nname: release-runbook\ndescription: Verify the release.\n${kind === "hooks" ? "hooks: {}\n" : ""}---\nUse the release checklist.\n`,
+        tamper: kind === "tampered",
+      },
+    });
+    expect(
+      run.completions[0]?.succeeded,
+      await readFile(join(run.workspace, "fixture-error.txt"), "utf8").catch(
+        () => run.completions[0]?.result,
+      ),
+    ).toBe(kind === "valid");
+    if (kind === "valid") {
+      expect(run.completions[0]?.result).toBe("fixture verified Skill package");
+    } else {
+      await expect(readFile(join(run.workspace, "native-started"))).rejects.toThrow();
+    }
+  },
+  30000,
+);
 
 it("uses the first accepted model and falls back to the host model without one", async () => {
   const policySnapshot = create(TaskPolicySnapshotSchema, {

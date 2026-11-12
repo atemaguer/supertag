@@ -89,6 +89,7 @@ impl Store {
             may_ask_objective_question,
             may_use_workstream,
             may_read_mailbox: true,
+            may_send_tag_message: true,
         })
     }
 

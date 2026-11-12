@@ -15,9 +15,10 @@ use sha2::{Digest, Sha256};
 use supertag_codex_adapter::{CodexOptions, run};
 use supertag_protocol::v2::{
     Approval, ApprovalState, AttemptCapabilities, HarnessPostWorkstreamRequest,
-    HarnessReadMailboxRequest, HarnessReadWorkstreamRequest, ListMailboxMessagesResponse,
-    ListWorkstreamPostsResponse, PostAttemptWorkstreamResponse, ReadAttemptWorkstreamResponse,
-    TagMessage, Team, WorkstreamPost,
+    HarnessReadMailboxRequest, HarnessReadWorkstreamRequest, HarnessSendTagMessageRequest,
+    ListMailboxMessagesResponse, ListWorkstreamPostsResponse, PostAttemptWorkstreamResponse,
+    ReadAttemptWorkstreamResponse, SendTagMessageResponse, TagMessage, TagMessageOrigin, Team,
+    WorkstreamPost,
     harness_mailbox_server::{HarnessMailbox, HarnessMailboxServer},
     harness_workstreams_server::{HarnessWorkstreams, HarnessWorkstreamsServer},
 };
@@ -43,6 +44,8 @@ const TOKEN: &str = "synthetic-harness-transport-secret";
 
 #[derive(Default)]
 struct Observed {
+    resolved_skills: Vec<supertag_protocol::v2::ResolvedSkill>,
+    policy_snapshot: Option<supertag_protocol::v2::TaskPolicySnapshot>,
     events: Vec<HarnessPublishRequest>,
     outcome: Option<HarnessCompleteRequest>,
     usage: Vec<HarnessUsageRequest>,
@@ -61,6 +64,7 @@ struct Observed {
     posts: Vec<HarnessPostWorkstreamRequest>,
     workstream_reads: Vec<HarnessReadWorkstreamRequest>,
     mailbox_reads: Vec<HarnessReadMailboxRequest>,
+    mailbox_sends: Vec<HarnessSendTagMessageRequest>,
     pending_post: bool,
     lose_post_response: bool,
 }
@@ -90,12 +94,18 @@ impl Harness for HarnessFixture {
         request: Request<HarnessAttachRequest>,
     ) -> Result<Response<HarnessRun>, Status> {
         self.authenticate(&request)?;
+        let observed = self.observed.lock().await;
+        let mut task = self.task.clone();
+        if let Some(snapshot) = &observed.policy_snapshot {
+            task.policy_snapshot = Some(snapshot.clone());
+        }
         Ok(Response::new(HarnessRun {
-            task: Some(self.task.clone()),
+            task: Some(task),
             attempt_id: "native-attempt".into(),
             checkpoint: self.checkpoint.clone(),
             may_ask_objective_question: self.may_ask,
             coordination: self.coordination,
+            resolved_skills: observed.resolved_skills.clone(),
         }))
     }
     async fn take_live_input(
@@ -313,6 +323,35 @@ impl HarnessWorkstreams for HarnessFixture {
 
 #[tonic::async_trait]
 impl HarnessMailbox for HarnessFixture {
+    async fn send_message(
+        &self,
+        request: Request<HarnessSendTagMessageRequest>,
+    ) -> Result<Response<SendTagMessageResponse>, Status> {
+        self.authenticate(&request)?;
+        let mut observed = self.observed.lock().await;
+        let request = request.into_inner();
+        if let Some(previous) = observed.mailbox_sends.first() {
+            assert_eq!(previous, &request);
+        }
+        observed.mailbox_sends.push(request.clone());
+        if observed.mailbox_sends.len() == 1 {
+            return Err(Status::unavailable("synthetic response loss"));
+        }
+        Ok(Response::new(SendTagMessageResponse {
+            message: Some(TagMessage {
+                message_id: "direct-receipt".into(),
+                source_task_id: "native-task".into(),
+                sender_tag_id: "native-tag".into(),
+                recipient_tag_id: request.recipient_tag_id,
+                text: request.text,
+                origin: TagMessageOrigin::Direct as i32,
+                ..Default::default()
+            }),
+            approval: None,
+            duplicate: true,
+        }))
+    }
+
     async fn read(
         &self,
         request: Request<HarnessReadMailboxRequest>,
@@ -429,6 +468,7 @@ async fn native_coordination_pins_tools_and_stages_only_verified_workstream_appr
     for (index, workstream_allowed) in [true, true, false].into_iter().enumerate() {
         let native = NativeFixture::new(&successful("Reviewed the release"), "exit 0")?;
         std::fs::write(native.directory.path().join("coordination-mode"), "")?;
+        std::fs::write(native.directory.path().join("direct-mode"), "")?;
         let server = HarnessProcess::configured_tools(
             &["files:read", "workstream:post"],
             checkpoint,
@@ -437,6 +477,7 @@ async fn native_coordination_pins_tools_and_stages_only_verified_workstream_appr
             Some(AttemptCapabilities {
                 may_use_workstream: workstream_allowed,
                 may_read_mailbox: true,
+                may_send_tag_message: index < 2,
                 ..Default::default()
             }),
         )
@@ -458,11 +499,17 @@ async fn native_coordination_pins_tools_and_stages_only_verified_workstream_appr
             usize::from(workstream_allowed)
         );
         assert_eq!(observed.posts.len(), [2, 1, 0][index]);
+        assert_eq!(observed.mailbox_sends.len(), [2, 2, 0][index]);
+        if let Some(send) = observed.mailbox_sends.first() {
+            assert_eq!(send.recipient_tag_id, "reviewer");
+            assert_eq!(send.text, "Private rollout note.");
+        }
         let logs = native.read("requests.jsonl")?;
         assert!(logs.contains("Untrusted coordination history"));
         if index == 0 {
             assert_eq!(outcome.waiting_approval_ids, ["approve-post"]);
             assert!(logs.contains("read_workstream") && logs.contains("read_mailbox"));
+            assert!(logs.contains("send_message") && logs.contains("direct-receipt"));
         } else {
             assert!(outcome.waiting_approval_ids.is_empty());
             assert!(logs.contains("thread/resume") && !logs.contains("dynamicTools"));
@@ -578,6 +625,114 @@ fn successful(text: &str) -> String {
         json!({"type":"item.completed","item":{"id":"answer","type":"agent_message","text":text}}),
         json!({"type":"turn.completed","usage":{"input_tokens":4,"cached_input_tokens":1,"output_tokens":3}}),
     ])
+}
+
+#[tokio::test]
+async fn native_skill_delivery_is_explicit_pinned_and_read_only() -> Result<()> {
+    use supertag_protocol::v2::{
+        ContextPin, ContextSet, PolicyContextItem, ResolvedSkill, TaskPolicySnapshot,
+    };
+    let source = tempfile::tempdir()?;
+    let path = source.path().canonicalize()?;
+    std::fs::write(
+        path.join("SKILL.md"),
+        "---\nname: selected-review\ndescription: Review fixture code.\n---\nInspect only fixture data.\n",
+    )?;
+    let digest =
+        supertag_workspaces::packages::capture(&path, &tokio_util::sync::CancellationToken::new())?
+            .digest;
+    let snapshot = TaskPolicySnapshot {
+        version: 1,
+        context_sets: vec![ContextSet {
+            set_id: "set".into(),
+            items: vec![PolicyContextItem {
+                item_id: "item".into(),
+                item_key: "review".into(),
+                r#type: "supertag/skill".into(),
+                version: 1,
+                required: true,
+                config_json: r#"{"reference":"review"}"#.into(),
+            }],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let mut skill = ResolvedSkill {
+        pin: Some(ContextPin {
+            set_id: "set".into(),
+            item_id: "item".into(),
+            item_key: "review".into(),
+            reference: "review".into(),
+            digest,
+            ..Default::default()
+        }),
+        local_path: path.to_str().unwrap().into(),
+    };
+    let mut checkpoint = None;
+    for (index, actions) in [
+        &["files:read"][..],
+        &["files:read"][..],
+        &["files:read", "files:write"][..],
+        &["files:read"][..],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let native = NativeFixture::new(&successful("Skill review complete"), "exit 0")?;
+        let ambient = native.workspace.join(".agents/skills/unselected");
+        std::fs::create_dir_all(&ambient)?;
+        std::fs::write(ambient.join("SKILL.md"), "unselected fixture")?;
+        if index == 3 {
+            std::fs::write(
+                path.join("SKILL.md"),
+                "---\nname: changed-review\ndescription: Changed fixture.\n---\nChanged.\n",
+            )?;
+            skill.pin.as_mut().unwrap().digest = supertag_workspaces::packages::capture(
+                &path,
+                &tokio_util::sync::CancellationToken::new(),
+            )?
+            .digest;
+        }
+        let server = HarnessProcess::configured_tools(
+            actions,
+            checkpoint.clone(),
+            "Review fixture",
+            false,
+            None,
+        )
+        .await?;
+        {
+            let mut observed = server.observed.lock().await;
+            observed.resolved_skills = vec![skill.clone()];
+            observed.policy_snapshot = Some(snapshot.clone());
+        }
+        run(native.options(), server.bootstrap.clone()).await?;
+        let observed = server.observed.lock().await;
+        let outcome = observed.outcome.as_ref().context("Skill outcome")?;
+        if index < 2 {
+            ensure!(outcome.succeeded, "{}", outcome.result);
+            checkpoint = outcome.checkpoint.clone();
+            let requests = native.read("requests.jsonl")?;
+            assert!(requests.contains("skills/list") && requests.contains("skills/config/write"));
+            assert!(requests.contains("unselected/SKILL.md"));
+            assert!(
+                !native
+                    .workspace
+                    .join(".agents/skills/skill-review")
+                    .exists()
+            );
+        } else {
+            assert!(!outcome.succeeded);
+            assert!(outcome.checkpoint.is_none());
+            assert!(!native.directory.path().join("pid").exists());
+            assert!(outcome.result.contains(if index == 2 {
+                "read-only"
+            } else {
+                "changed resolved context"
+            }));
+        }
+    }
+    Ok(())
 }
 
 async fn steering_fixture(

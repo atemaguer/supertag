@@ -1,5 +1,6 @@
 //! App/tenant identity, activated threads, and message receipts are durable.
 use super::*;
+use crate::surface_policy::{VerifiedConnectorOrigin, VerifiedScope, admit_connector_task_in};
 use supertag_protocol::v2::{AcceptLarkEventRequest, AcceptLarkEventResponse, LarkDomain};
 
 impl Store {
@@ -130,10 +131,28 @@ impl Store {
                 "event ID belongs to another connector route".into(),
             ));
         }
-        crate::objectives::objective_admission_in(&mut tx, &tag, &session, self.execution_now_ms())
-            .await?;
-        let task = insert_task(&mut tx, order, &tag, &session, &input.prompt).await?;
-        crate::objectives::objective_link_task_in(&mut tx, &task).await?;
+        let Some(task) = admit_connector_task_in(
+            &mut tx,
+            order,
+            VerifiedConnectorOrigin {
+                connector_account_id: account,
+                tag_id: &tag,
+                scope: VerifiedScope::Lark {
+                    feishu: input.domain == LarkDomain::Feishu as i32,
+                    app_id: &input.app_id,
+                    tenant_key: &input.tenant_key,
+                    chat_id: &input.chat_id,
+                },
+            },
+            &session,
+            &input.prompt,
+            self.execution_now_ms(),
+        )
+        .await?
+        else {
+            tx.commit().await?;
+            return Ok(AcceptLarkEventResponse { task: None });
+        };
         if identity.is_none() {
             sqlx::query("INSERT INTO supertag_v2_lark_accounts (account_id,domain,app_id,tenant_key) VALUES ($1,$2,$3,$4)").bind(account).bind(i64::from(input.domain)).bind(&input.app_id).bind(&input.tenant_key).execute(&mut *tx).await?;
         }

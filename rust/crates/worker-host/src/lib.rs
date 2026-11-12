@@ -1,5 +1,6 @@
 mod adapter;
 mod checkpoints;
+pub mod context;
 mod enrollment;
 mod guardian;
 mod journal;
@@ -17,8 +18,9 @@ use journal::{Attempt, Entry, Journal};
 use supertag_protocol::{
     HOST_GENERATION_HEADER, MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
-        Assignment, ClaimTaskRequest, FinishTaskRequest, HarnessCompleteRequest, HarnessKind,
-        InspectAttemptRequest, RegisterHostRequest, StartTaskRequest, Task, TaskState,
+        Assignment, ClaimTaskRequest, CommitContextResolutionRequest, FinishTaskRequest,
+        HarnessCompleteRequest, HarnessKind, InspectAttemptRequest, RegisterHostRequest,
+        ResolvedSkill, StartTaskRequest, Task, TaskState,
         attempt_inputs_client::AttemptInputsClient, attempt_mailbox_client::AttemptMailboxClient,
         attempt_workstreams_client::AttemptWorkstreamsClient, worker_host_client::WorkerHostClient,
     },
@@ -61,6 +63,7 @@ pub struct HostOptions {
     pub wait_for_recovery: bool,
     pub once: bool,
     pub workspace: Option<WorkspaceMapping>,
+    pub context_catalog: context::ContextCatalog,
 }
 
 #[derive(Clone)]
@@ -121,8 +124,14 @@ pub async fn run(
         workspaces::Workspaces::new(&options.state_directory, options.workspace.clone())?;
     // Terminal proof is durable; finishing local cleanup needs neither the source
     // repository nor a new network registration.
-    if let Some(Entry::Terminal { prepared, .. }) = journal.load()? {
-        cleanup_terminal(&journal, &workspaces, prepared.as_deref())?;
+    if let Some(Entry::Terminal { attempt, prepared }) = journal.load()? {
+        cleanup_terminal(
+            &journal,
+            &workspaces,
+            &options.state_directory,
+            &attempt,
+            prepared.as_deref(),
+        )?;
         if options.once {
             ready();
             return Ok(());
@@ -216,6 +225,7 @@ pub async fn run(
                             operation_id,
                             workspace_ids: workspaces.ids(),
                             harness_kind: options.harness as i32,
+                            context_contracts: options.context_catalog.supported_contracts(),
                         },
                         &token,
                     )?)
@@ -537,8 +547,8 @@ pub async fn run(
                 }
                 journal.save(&Entry::Terminal { attempt, prepared })?;
             }
-            Entry::Terminal { prepared, .. } => {
-                cleanup_terminal(&journal, &workspaces, prepared.as_deref())?;
+            Entry::Terminal { attempt, prepared } => {
+                cleanup_terminal(&journal, &workspaces, &options.state_directory, &attempt, prepared.as_deref())?;
                 if let Some(ready) = ready.take() {
                     ready();
                 }
@@ -557,11 +567,14 @@ pub async fn run(
 fn cleanup_terminal(
     journal: &Journal,
     workspaces: &workspaces::Workspaces,
+    state_directory: &std::path::Path,
+    attempt: &Attempt,
     prepared: Option<&workspaces::PreparedWorkspace>,
 ) -> Result<()> {
     if let Some(prepared) = prepared {
         workspaces.discard(prepared)?;
     }
+    context::discard_attempt(state_directory, &attempt.attempt_id)?;
     journal.clear()
 }
 
@@ -636,7 +649,10 @@ async fn run_assignment(
                 }
                 // No adapter was launched for Starting. The Control Plane can
                 // safely retire a reservation that expired before start.
-                Err(error) if lost_ownership(&error) => return journal.clear(),
+                Err(error) if lost_ownership(&error) => {
+                    context::discard_attempt(&options.state_directory, &attempt.attempt_id)?;
+                    return journal.clear();
+                }
                 Err(error) => return Err(error.into()),
             }
         }
@@ -671,7 +687,10 @@ async fn run_assignment(
             wait_for_work(shutdown).await;
             return Ok(());
         }
-        Err(error) if lost_ownership(&error) => return journal.clear(),
+        Err(error) if lost_ownership(&error) => {
+            context::discard_attempt(&options.state_directory, &attempt.attempt_id)?;
+            return journal.clear();
+        }
         Err(error) => return Err(error.into()),
     };
     ready();
@@ -709,6 +728,40 @@ async fn run_assignment(
                 adapter::failed("Execution authority expired during checkpoint transfer"),
             );
         }
+    };
+    let resolved_skills = if task.policy_snapshot.as_ref().is_some_and(|snapshot| {
+        snapshot
+            .context_sets
+            .iter()
+            .any(|set| !set.items.is_empty())
+    }) {
+        let cancel = shutdown.child_token();
+        let context_host = host.clone();
+        match with_authority(
+            host,
+            &attempt,
+            token,
+            shutdown,
+            &cancel,
+            prepare_context(options, &task, &attempt, context_host, token, &cancel),
+        )
+        .await
+        {
+            Ok((skills, _)) => skills,
+            Err(error) if retryable(&error) && !shutdown.is_cancelled() => {
+                wait_for_work(shutdown).await;
+                return Ok(());
+            }
+            Err(_) => {
+                return save_finish(
+                    journal,
+                    attempt,
+                    adapter::failed("Task Context Items could not be resolved safely"),
+                );
+            }
+        }
+    } else {
+        vec![]
     };
     let operation_cancel = shutdown.child_token();
     let prepared = with_authority(host, &attempt, token, shutdown, &operation_cancel, async {
@@ -755,6 +808,7 @@ async fn run_assignment(
             workspace
                 .as_ref()
                 .map(|prepared| prepared.checkout.path.as_path()),
+            resolved_skills,
         ),
         (host.clone(), inputs.clone(), coordination.clone()),
         token,
@@ -786,6 +840,56 @@ async fn run_assignment(
         }
         None => save_finish(journal, attempt, outcome),
     }
+}
+
+async fn prepare_context(
+    options: &HostOptions,
+    task: &Task,
+    attempt: &Attempt,
+    mut host: RegisteredHost,
+    token: &str,
+    cancel: &CancellationToken,
+) -> Result<Vec<ResolvedSkill>, Status> {
+    let credential = |_| Status::internal("invalid Context Item authority request");
+    let expected = host
+        .get_context_pins(request(attempt.inspect(), token).map_err(credential)?)
+        .await?
+        .into_inner();
+    let prepared = options
+        .context_catalog
+        .prepare(
+            task,
+            &options.state_directory,
+            &attempt.attempt_id,
+            &expected,
+            cancel,
+        )
+        .await
+        .map_err(|_| Status::failed_precondition("Context Item could not be prepared"))?;
+    let manifest = prepared
+        .manifest()
+        .map_err(|_| Status::data_loss("invalid prepared Context Items"))?;
+    let receipt = host
+        .commit_context_resolution(
+            request(
+                CommitContextResolutionRequest {
+                    attempt: Some(attempt.inspect()),
+                    manifest: Some(manifest.clone()),
+                },
+                token,
+            )
+            .map_err(credential)?,
+        )
+        .await?
+        .into_inner();
+    if receipt != manifest {
+        return Err(Status::data_loss(
+            "Context Item receipt has mismatched contents",
+        ));
+    }
+    prepared
+        .delivery()
+        .map_err(|_| Status::data_loss("invalid Context Item delivery"))
 }
 
 fn ensure_attempt(task: &Task, attempt: &Attempt) -> Result<()> {

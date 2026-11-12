@@ -18,9 +18,9 @@ use sqlx::{ConnectOptions, Connection, Executor, PgConnection, postgres::PgConne
 use supertag_protocol::{
     HOST_GENERATION_HEADER, authenticated_request,
     v2::{
-        AcceptEventRequest, AttemptDecision, CancelTaskRequest, ClaimReplyRequest, GetTaskRequest,
-        InspectAttemptRequest, ListEventsRequest, PutTagRequest, ReplyDestination, ReplyState,
-        ResolveAttemptRequest, SettleReplyRequest, SubmitTaskRequest, Task, TaskEvent, TaskState,
+        AttemptDecision, CancelTaskRequest, ClaimReplyRequest, GetTaskRequest,
+        InspectAttemptRequest, ListEventsRequest, PutTagRequest, ReplyState, ResolveAttemptRequest,
+        SettleReplyRequest, SubmitTaskRequest, Task, TaskEvent, TaskState,
         connector_client::ConnectorClient, operator_client::OperatorClient,
         worker_host_client::WorkerHostClient,
     },
@@ -1432,6 +1432,12 @@ async fn wait_for_reply_journal(path: &Path, stage: &str) -> Result<Value> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_resending()
 -> Result<()> {
+    use supertag_protocol::v2::{
+        AcceptSlackEventRequest, DeleteSurfaceLocationRequest, PutSurfaceAccountRequest,
+        PutSurfaceLocationRequest, SlackSurfaceChannel, SlackSurfaceIdentity, SurfaceAccount,
+        SurfaceAccountIdentity, SurfaceLocation, SurfaceLocationScope, surface_account_identity,
+        surface_location_scope, surface_policy_catalog_client::SurfacePolicyCatalogClient,
+    };
     let directory = TempDir::new()?;
     let database = format!(
         "sqlite://{}?mode=rwc",
@@ -1463,6 +1469,47 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
             allowed_actions: vec!["files:read".into()],
         })?)
         .await?;
+    let mut policy = SurfacePolicyCatalogClient::connect(services.endpoint.clone()).await?;
+    policy
+        .put_surface_account(credentials.request(PutSurfaceAccountRequest {
+            operation_id: "account-fixture".into(),
+            account: Some(SurfaceAccount {
+                account_id: "slack-installation".into(),
+                enabled: true,
+                identity: Some(SurfaceAccountIdentity {
+                    provider: Some(surface_account_identity::Provider::Slack(
+                        SlackSurfaceIdentity {
+                            team_id: SLACK_TEAM.into(),
+                        },
+                    )),
+                }),
+                ..Default::default()
+            }),
+            expected_revision: None,
+        })?)
+        .await?;
+    let location = policy
+        .put_surface_location(credentials.request(PutSurfaceLocationRequest {
+            operation_id: "location-fixture".into(),
+            location: Some(SurfaceLocation {
+                location_id: "slack-release".into(),
+                account_id: "slack-installation".into(),
+                connector_account_id: SLACK_ACCOUNT.into(),
+                tag_id: "slack-engineer".into(),
+                enabled: true,
+                scope: Some(SurfaceLocationScope {
+                    provider: Some(surface_location_scope::Provider::Slack(
+                        SlackSurfaceChannel {
+                            channel_id: SLACK_CHANNEL.into(),
+                        },
+                    )),
+                }),
+                ..Default::default()
+            }),
+            expected_revision: None,
+        })?)
+        .await?
+        .into_inner();
     let prompt = "inspect the fixture repository";
     assert_eq!(
         signed_slack_event(&http, prompt).await?,
@@ -1479,23 +1526,33 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
         reqwest::StatusCode::CONFLICT
     );
     let mut connector = ConnectorClient::connect(private_endpoint.clone()).await?;
-    let accepted_input = AcceptEventRequest {
+    let accepted_input = AcceptSlackEventRequest {
         account_id: SLACK_ACCOUNT.into(),
         event_id: SLACK_EVENT.into(),
-        tag_id: "slack-engineer".into(),
-        session_id: format!("slack:{SLACK_TEAM}:{SLACK_CHANNEL}:{SLACK_THREAD}"),
+        mention_tag_id: Some("slack-engineer".into()),
+        team_id: SLACK_TEAM.into(),
+        channel_id: SLACK_CHANNEL.into(),
+        message_ts: "1794470000.123456".into(),
+        thread_ts: SLACK_THREAD.into(),
         prompt: prompt.into(),
-        destination: Some(ReplyDestination {
-            conversation_id: SLACK_CHANNEL.into(),
-            thread_id: Some(SLACK_THREAD.into()),
-        }),
     };
     let accepted = connector
-        .accept_event(connector_request(&credentials, accepted_input.clone())?)
+        .accept_slack_event(connector_request(&credentials, accepted_input.clone())?)
         .await?
-        .into_inner();
+        .into_inner()
+        .task
+        .context("signed Slack event was not accepted")?;
     assert_eq!(accepted.state(), TaskState::Queued);
     assert_eq!(accepted.allowed_actions, ["files:read"]);
+    assert_eq!(
+        accepted
+            .policy_snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.origin.as_ref())
+            .context("verified location was not frozen")?
+            .location_id,
+        location.location_id
+    );
     let mut host = worker(&services, directory.path(), &credentials, false)?;
     let completed = wait_for_state(
         &mut operator,
@@ -1571,15 +1628,25 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
         );
         sleep(Duration::from_millis(10)).await;
     }
+    let mut policy = SurfacePolicyCatalogClient::connect(services.endpoint.clone()).await?;
+    policy
+        .delete_surface_location(credentials.request(DeleteSurfaceLocationRequest {
+            operation_id: "retire-location".into(),
+            location_id: location.location_id,
+            expected_revision: location.revision,
+        })?)
+        .await?;
     assert_eq!(
         signed_slack_event(&http, prompt).await?,
         reqwest::StatusCode::OK
     );
     let mut connector = ConnectorClient::connect(private_endpoint).await?;
     let replayed = connector
-        .accept_event(connector_request(&credentials, accepted_input)?)
+        .accept_slack_event(connector_request(&credentials, accepted_input)?)
         .await?
-        .into_inner();
+        .into_inner()
+        .task
+        .context("signed Slack replay lost its accepted Task")?;
     assert_eq!(replayed, completed);
     // A replay of the recorded settlement must agree with the stored outcome;
     // settling as failed or uncertain during restart would conflict here.

@@ -3,10 +3,11 @@ use std::time::Duration;
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
-        ApprovalState, HarnessPostWorkstreamRequest, HarnessReadMailboxRequest,
-        HarnessReadWorkstreamRequest, ListMailboxMessagesResponse, PostAttemptWorkstreamRequest,
-        PostAttemptWorkstreamResponse, ReadAttemptWorkstreamRequest, ReadAttemptWorkstreamResponse,
-        ReadMailboxRequest,
+        Approval, ApprovalState, HarnessPostWorkstreamRequest, HarnessReadMailboxRequest,
+        HarnessReadWorkstreamRequest, HarnessSendTagMessageRequest, ListMailboxMessagesResponse,
+        PostAttemptWorkstreamRequest, PostAttemptWorkstreamResponse, ReadAttemptWorkstreamRequest,
+        ReadAttemptWorkstreamResponse, ReadMailboxRequest, SendAttemptTagMessageRequest,
+        SendTagMessageResponse,
         harness_mailbox_server::{HarnessMailbox, HarnessMailboxServer},
         harness_workstreams_server::{HarnessWorkstreams, HarnessWorkstreamsServer},
     },
@@ -26,6 +27,28 @@ impl Bridge {
         HarnessMailboxServer::new(self.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
+    }
+
+    fn record_pending(
+        &self,
+        state: &mut super::RunState,
+        approval: Option<&Approval>,
+    ) -> Result<(), Status> {
+        if let Some(approval) = approval
+            && approval.state() == ApprovalState::Pending
+        {
+            if approval.task_id != self.task_id()
+                || approval.attempt_id != self.assignment.attempt_id
+            {
+                return Err(Status::data_loss(
+                    "approval response belongs to a different Attempt",
+                ));
+            }
+            state
+                .observed_approvals
+                .insert(approval.approval_id.clone());
+        }
+        Ok(())
     }
 }
 
@@ -89,26 +112,44 @@ impl HarnessWorkstreams for Bridge {
             .clone()
             .post_attempt_workstream(upstream)
             .await?;
-        if let Some(approval) = &post.get_ref().approval
-            && approval.state() == ApprovalState::Pending
-        {
-            if approval.task_id != self.task_id()
-                || approval.attempt_id != self.assignment.attempt_id
-            {
-                return Err(Status::data_loss(
-                    "approval response belongs to a different Attempt",
-                ));
-            }
-            state
-                .observed_approvals
-                .insert(approval.approval_id.clone());
-        }
+        self.record_pending(&mut state, post.get_ref().approval.as_ref())?;
         Ok(post)
     }
 }
 
 #[tonic::async_trait]
 impl HarnessMailbox for Bridge {
+    async fn send_message(
+        &self,
+        request: Request<HarnessSendTagMessageRequest>,
+    ) -> Result<Response<SendTagMessageResponse>, Status> {
+        self.authenticate(&request)?;
+        self.require_attached()?;
+        let mut state = self.state.lock().await;
+        if state.outcome.is_some() {
+            return Err(Status::failed_precondition("execution is complete"));
+        }
+        let input = request.into_inner();
+        let mut upstream = authenticated_request(
+            SendAttemptTagMessageRequest {
+                attempt: Some(self.attempt()),
+                operation_id: input.operation_id,
+                recipient_tag_id: input.recipient_tag_id,
+                text: input.text,
+            },
+            &self.host_token,
+            None,
+        )?;
+        upstream.set_timeout(Duration::from_secs(5));
+        let sent = self
+            .coordination
+            .mailbox
+            .clone()
+            .send_message(upstream)
+            .await?;
+        self.record_pending(&mut state, sent.get_ref().approval.as_ref())?;
+        Ok(sent)
+    }
     async fn read(
         &self,
         request: Request<HarnessReadMailboxRequest>,

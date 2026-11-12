@@ -657,3 +657,336 @@ class PolicyCatalog:
             timeout,
             metadata,
             _registered_method=True)
+
+
+class SurfacePolicyCatalogStub:
+    """Operator-managed policy bindings. Provider credentials stay at the Gateway.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.PutSurfaceAccount = channel.unary_unary(
+                '/supertag.runtime.v2.SurfacePolicyCatalog/PutSurfaceAccount',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.PutSurfaceAccountRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.SurfaceAccount.FromString,
+                _registered_method=True)
+        self.GetSurfaceAccount = channel.unary_unary(
+                '/supertag.runtime.v2.SurfacePolicyCatalog/GetSurfaceAccount',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.GetSurfaceAccountRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.SurfaceAccount.FromString,
+                _registered_method=True)
+        self.ListSurfaceAccounts = channel.unary_unary(
+                '/supertag.runtime.v2.SurfacePolicyCatalog/ListSurfaceAccounts',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.ListSurfaceAccountsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.ListSurfaceAccountsResponse.FromString,
+                _registered_method=True)
+        self.PutSurfaceLocation = channel.unary_unary(
+                '/supertag.runtime.v2.SurfacePolicyCatalog/PutSurfaceLocation',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.PutSurfaceLocationRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.SurfaceLocation.FromString,
+                _registered_method=True)
+        self.GetSurfaceLocation = channel.unary_unary(
+                '/supertag.runtime.v2.SurfacePolicyCatalog/GetSurfaceLocation',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.GetSurfaceLocationRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.SurfaceLocation.FromString,
+                _registered_method=True)
+        self.ListSurfaceLocations = channel.unary_unary(
+                '/supertag.runtime.v2.SurfacePolicyCatalog/ListSurfaceLocations',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.ListSurfaceLocationsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.ListSurfaceLocationsResponse.FromString,
+                _registered_method=True)
+        self.DeleteSurfaceLocation = channel.unary_unary(
+                '/supertag.runtime.v2.SurfacePolicyCatalog/DeleteSurfaceLocation',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.DeleteSurfaceLocationRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.DeletePolicyResourceResponse.FromString,
+                _registered_method=True)
+
+
+class SurfacePolicyCatalogServicer:
+    """Operator-managed policy bindings. Provider credentials stay at the Gateway.
+    """
+
+    def PutSurfaceAccount(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetSurfaceAccount(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListSurfaceAccounts(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def PutSurfaceLocation(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetSurfaceLocation(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListSurfaceLocations(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteSurfaceLocation(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_SurfacePolicyCatalogServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'PutSurfaceAccount': grpc.unary_unary_rpc_method_handler(
+                    servicer.PutSurfaceAccount,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.PutSurfaceAccountRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.SurfaceAccount.SerializeToString,
+            ),
+            'GetSurfaceAccount': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetSurfaceAccount,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.GetSurfaceAccountRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.SurfaceAccount.SerializeToString,
+            ),
+            'ListSurfaceAccounts': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListSurfaceAccounts,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.ListSurfaceAccountsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.ListSurfaceAccountsResponse.SerializeToString,
+            ),
+            'PutSurfaceLocation': grpc.unary_unary_rpc_method_handler(
+                    servicer.PutSurfaceLocation,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.PutSurfaceLocationRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.SurfaceLocation.SerializeToString,
+            ),
+            'GetSurfaceLocation': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetSurfaceLocation,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.GetSurfaceLocationRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.SurfaceLocation.SerializeToString,
+            ),
+            'ListSurfaceLocations': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListSurfaceLocations,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.ListSurfaceLocationsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.ListSurfaceLocationsResponse.SerializeToString,
+            ),
+            'DeleteSurfaceLocation': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteSurfaceLocation,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.DeleteSurfaceLocationRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_policy__pb2.DeletePolicyResourceResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.SurfacePolicyCatalog', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.SurfacePolicyCatalog', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class SurfacePolicyCatalog:
+    """Operator-managed policy bindings. Provider credentials stay at the Gateway.
+    """
+
+    @staticmethod
+    def PutSurfaceAccount(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.SurfacePolicyCatalog/PutSurfaceAccount',
+            supertag_dot_runtime_dot_v2_dot_policy__pb2.PutSurfaceAccountRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_policy__pb2.SurfaceAccount.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetSurfaceAccount(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.SurfacePolicyCatalog/GetSurfaceAccount',
+            supertag_dot_runtime_dot_v2_dot_policy__pb2.GetSurfaceAccountRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_policy__pb2.SurfaceAccount.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListSurfaceAccounts(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.SurfacePolicyCatalog/ListSurfaceAccounts',
+            supertag_dot_runtime_dot_v2_dot_policy__pb2.ListSurfaceAccountsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_policy__pb2.ListSurfaceAccountsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def PutSurfaceLocation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.SurfacePolicyCatalog/PutSurfaceLocation',
+            supertag_dot_runtime_dot_v2_dot_policy__pb2.PutSurfaceLocationRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_policy__pb2.SurfaceLocation.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetSurfaceLocation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.SurfacePolicyCatalog/GetSurfaceLocation',
+            supertag_dot_runtime_dot_v2_dot_policy__pb2.GetSurfaceLocationRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_policy__pb2.SurfaceLocation.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListSurfaceLocations(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.SurfacePolicyCatalog/ListSurfaceLocations',
+            supertag_dot_runtime_dot_v2_dot_policy__pb2.ListSurfaceLocationsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_policy__pb2.ListSurfaceLocationsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DeleteSurfaceLocation(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.SurfacePolicyCatalog/DeleteSurfaceLocation',
+            supertag_dot_runtime_dot_v2_dot_policy__pb2.DeleteSurfaceLocationRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_policy__pb2.DeletePolicyResourceResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)

@@ -10,7 +10,635 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/policy.proto.
  */
 export const file_supertag_runtime_v2_policy: GenFile = /*@__PURE__*/
-  fileDesc("CiBzdXBlcnRhZy9ydW50aW1lL3YyL3BvbGljeS5wcm90bxITc3VwZXJ0YWcucnVudGltZS52MiLhAQoQUG9saWN5UGVybWlzc2lvbhIVCg1wZXJtaXNzaW9uX2lkGAEgASgJEjsKBnRhcmdldBgCIAEoDjIrLnN1cGVydGFnLnJ1bnRpbWUudjIuUG9saWN5UGVybWlzc2lvblRhcmdldBIOCgZhY3Rpb24YAyABKAkSGgoSc3VyZmFjZV9hY2NvdW50X2lkGAQgASgJEg0KBXNjb3BlGAUgASgJEhEKCXJlZmVyZW5jZRgGIAEoCRIQCghyZXNvdXJjZRgHIAEoCRIZChFhcHByb3ZhbF9yZXF1aXJlZBgIIAEoCCKOAQoNUGVybWlzc2lvblNldBIOCgZzZXRfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIQCghyZXZpc2lvbhgDIAEoBBIRCglhcHByb3ZlcnMYBCADKAkSOgoLcGVybWlzc2lvbnMYBSADKAsyJS5zdXBlcnRhZy5ydW50aW1lLnYyLlBvbGljeVBlcm1pc3Npb24ifAoRUG9saWN5Q29udGV4dEl0ZW0SDwoHaXRlbV9pZBgBIAEoCRIQCghpdGVtX2tleRgCIAEoCRIMCgR0eXBlGAMgASgJEg8KB3ZlcnNpb24YBCABKA0SEAoIcmVxdWlyZWQYBSABKAgSEwoLY29uZmlnX2pzb24YBiABKAkicwoKQ29udGV4dFNldBIOCgZzZXRfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIQCghyZXZpc2lvbhgDIAEoBBI1CgVpdGVtcxgEIAMoCzImLnN1cGVydGFnLnJ1bnRpbWUudjIuUG9saWN5Q29udGV4dEl0ZW0iXAoXUG9saWN5RXhlY3V0aW9uU2V0dGluZ3MSFAoHaGFybmVzcxgBIAEoCUgAiAEBEg4KBm1vZGVscxgCIAMoCRIPCgdlZmZvcnRzGAMgAygJQgoKCF9oYXJuZXNzIoUCCgRSb2xlEg8KB3JvbGVfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIPCgdwdXJwb3NlGAMgASgJEhQKDGluc3RydWN0aW9ucxgEIAEoCRIaChJwZXJtaXNzaW9uX3NldF9pZHMYBSADKAkSFwoPY29udGV4dF9zZXRfaWRzGAYgAygJEi8KBnN0YXR1cxgHIAEoDjIfLnN1cGVydGFnLnJ1bnRpbWUudjIuUm9sZVN0YXR1cxIQCghyZXZpc2lvbhgIIAEoBBI/CglleGVjdXRpb24YCSABKAsyLC5zdXBlcnRhZy5ydW50aW1lLnYyLlBvbGljeUV4ZWN1dGlvblNldHRpbmdzIpUBCg5Sb2xlQXNzaWdubWVudBIVCg1hc3NpZ25tZW50X2lkGAEgASgJEg8KB3JvbGVfaWQYAiABKAkSDgoGdGFnX2lkGAMgASgJEjkKBnN0YXR1cxgEIAEoDjIpLnN1cGVydGFnLnJ1bnRpbWUudjIuUm9sZUFzc2lnbm1lbnRTdGF0dXMSEAoIcmV2aXNpb24YBSABKAQidgoSUG9saWN5Um9sZVNuYXBzaG90EjcKCmFzc2lnbm1lbnQYASABKAsyIy5zdXBlcnRhZy5ydW50aW1lLnYyLlJvbGVBc3NpZ25tZW50EicKBHJvbGUYAiABKAsyGS5zdXBlcnRhZy5ydW50aW1lLnYyLlJvbGUikgIKElRhc2tQb2xpY3lTbmFwc2hvdBIPCgd2ZXJzaW9uGAEgASgNEjYKBXJvbGVzGAIgAygLMicuc3VwZXJ0YWcucnVudGltZS52Mi5Qb2xpY3lSb2xlU25hcHNob3QSOwoPcGVybWlzc2lvbl9zZXRzGAMgAygLMiIuc3VwZXJ0YWcucnVudGltZS52Mi5QZXJtaXNzaW9uU2V0EjUKDGNvbnRleHRfc2V0cxgEIAMoCzIfLnN1cGVydGFnLnJ1bnRpbWUudjIuQ29udGV4dFNldBI/CglleGVjdXRpb24YBSABKAsyLC5zdXBlcnRhZy5ydW50aW1lLnYyLlBvbGljeUV4ZWN1dGlvblNldHRpbmdzIqEBChdQdXRQZXJtaXNzaW9uU2V0UmVxdWVzdBIUCgxvcGVyYXRpb25faWQYASABKAkSOgoOcGVybWlzc2lvbl9zZXQYAiABKAsyIi5zdXBlcnRhZy5ydW50aW1lLnYyLlBlcm1pc3Npb25TZXQSHgoRZXhwZWN0ZWRfcmV2aXNpb24YAyABKARIAIgBAUIUChJfZXhwZWN0ZWRfcmV2aXNpb24imAEKFFB1dENvbnRleHRTZXRSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRI0Cgtjb250ZXh0X3NldBgCIAEoCzIfLnN1cGVydGFnLnJ1bnRpbWUudjIuQ29udGV4dFNldBIeChFleHBlY3RlZF9yZXZpc2lvbhgDIAEoBEgAiAEBQhQKEl9leHBlY3RlZF9yZXZpc2lvbiKFAQoOUHV0Um9sZVJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAEgASgJEicKBHJvbGUYAiABKAsyGS5zdXBlcnRhZy5ydW50aW1lLnYyLlJvbGUSHgoRZXhwZWN0ZWRfcmV2aXNpb24YAyABKARIAIgBAUIUChJfZXhwZWN0ZWRfcmV2aXNpb24iLQoYR2V0UG9saWN5UmVzb3VyY2VSZXF1ZXN0EhEKCXJlZmVyZW5jZRgBIAEoCSI7ChpMaXN0UG9saWN5UmVzb3VyY2VzUmVxdWVzdBINCgVsaW1pdBgBIAEoDRIOCgZjdXJzb3IYAiABKAkibgoaTGlzdFBlcm1pc3Npb25TZXRzUmVzcG9uc2USOwoPcGVybWlzc2lvbl9zZXRzGAEgAygLMiIuc3VwZXJ0YWcucnVudGltZS52Mi5QZXJtaXNzaW9uU2V0EhMKC25leHRfY3Vyc29yGAIgASgJImUKF0xpc3RDb250ZXh0U2V0c1Jlc3BvbnNlEjUKDGNvbnRleHRfc2V0cxgBIAMoCzIfLnN1cGVydGFnLnJ1bnRpbWUudjIuQ29udGV4dFNldBITCgtuZXh0X2N1cnNvchgCIAEoCSJSChFMaXN0Um9sZXNSZXNwb25zZRIoCgVyb2xlcxgBIAMoCzIZLnN1cGVydGFnLnJ1bnRpbWUudjIuUm9sZRITCgtuZXh0X2N1cnNvchgCIAEoCSJhChtEZWxldGVQb2xpY3lSZXNvdXJjZVJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAEgASgJEhEKCXJlZmVyZW5jZRgCIAEoCRIZChFleHBlY3RlZF9yZXZpc2lvbhgDIAEoBCIvChxEZWxldGVQb2xpY3lSZXNvdXJjZVJlc3BvbnNlEg8KB2RlbGV0ZWQYASABKAgiRwoRQXNzaWduUm9sZVJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAEgASgJEgwKBHJvbGUYAiABKAkSDgoGdGFnX2lkGAMgASgJIpQBChpMaXN0Um9sZUFzc2lnbm1lbnRzUmVxdWVzdBIMCgRyb2xlGAEgASgJEg4KBnRhZ19pZBgCIAEoCRI5CgZzdGF0dXMYAyABKA4yKS5zdXBlcnRhZy5ydW50aW1lLnYyLlJvbGVBc3NpZ25tZW50U3RhdHVzEg0KBWxpbWl0GAQgASgNEg4KBmN1cnNvchgFIAEoCSJsChtMaXN0Um9sZUFzc2lnbm1lbnRzUmVzcG9uc2USOAoLYXNzaWdubWVudHMYASADKAsyIy5zdXBlcnRhZy5ydW50aW1lLnYyLlJvbGVBc3NpZ25tZW50EhMKC25leHRfY3Vyc29yGAIgASgJImkKH0RlYWN0aXZhdGVSb2xlQXNzaWdubWVudFJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAEgASgJEhUKDWFzc2lnbm1lbnRfaWQYAiABKAkSGQoRZXhwZWN0ZWRfcmV2aXNpb24YAyABKAQqsAEKFlBvbGljeVBlcm1pc3Npb25UYXJnZXQSKAokUE9MSUNZX1BFUk1JU1NJT05fVEFSR0VUX1VOU1BFQ0lGSUVEEAASJAogUE9MSUNZX1BFUk1JU1NJT05fVEFSR0VUX1JVTlRJTUUQARIkCiBQT0xJQ1lfUEVSTUlTU0lPTl9UQVJHRVRfU1VSRkFDRRACEiAKHFBPTElDWV9QRVJNSVNTSU9OX1RBUkdFVF9NQ1AQAypaCgpSb2xlU3RhdHVzEhsKF1JPTEVfU1RBVFVTX1VOU1BFQ0lGSUVEEAASFgoSUk9MRV9TVEFUVVNfQUNUSVZFEAESFwoTUk9MRV9TVEFUVVNfUkVUSVJFRBACKoYBChRSb2xlQXNzaWdubWVudFN0YXR1cxImCiJST0xFX0FTU0lHTk1FTlRfU1RBVFVTX1VOU1BFQ0lGSUVEEAASIQodUk9MRV9BU1NJR05NRU5UX1NUQVRVU19BQ1RJVkUQARIjCh9ST0xFX0FTU0lHTk1FTlRfU1RBVFVTX0lOQUNUSVZFEAIyywsKDVBvbGljeUNhdGFsb2cSZAoQUHV0UGVybWlzc2lvblNldBIsLnN1cGVydGFnLnJ1bnRpbWUudjIuUHV0UGVybWlzc2lvblNldFJlcXVlc3QaIi5zdXBlcnRhZy5ydW50aW1lLnYyLlBlcm1pc3Npb25TZXQSZQoQR2V0UGVybWlzc2lvblNldBItLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0UG9saWN5UmVzb3VyY2VSZXF1ZXN0GiIuc3VwZXJ0YWcucnVudGltZS52Mi5QZXJtaXNzaW9uU2V0EnYKEkxpc3RQZXJtaXNzaW9uU2V0cxIvLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdFBvbGljeVJlc291cmNlc1JlcXVlc3QaLy5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RQZXJtaXNzaW9uU2V0c1Jlc3BvbnNlEnoKE0RlbGV0ZVBlcm1pc3Npb25TZXQSMC5zdXBlcnRhZy5ydW50aW1lLnYyLkRlbGV0ZVBvbGljeVJlc291cmNlUmVxdWVzdBoxLnN1cGVydGFnLnJ1bnRpbWUudjIuRGVsZXRlUG9saWN5UmVzb3VyY2VSZXNwb25zZRJbCg1QdXRDb250ZXh0U2V0Eikuc3VwZXJ0YWcucnVudGltZS52Mi5QdXRDb250ZXh0U2V0UmVxdWVzdBofLnN1cGVydGFnLnJ1bnRpbWUudjIuQ29udGV4dFNldBJfCg1HZXRDb250ZXh0U2V0Ei0uc3VwZXJ0YWcucnVudGltZS52Mi5HZXRQb2xpY3lSZXNvdXJjZVJlcXVlc3QaHy5zdXBlcnRhZy5ydW50aW1lLnYyLkNvbnRleHRTZXQScAoPTGlzdENvbnRleHRTZXRzEi8uc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0UG9saWN5UmVzb3VyY2VzUmVxdWVzdBosLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdENvbnRleHRTZXRzUmVzcG9uc2USdwoQRGVsZXRlQ29udGV4dFNldBIwLnN1cGVydGFnLnJ1bnRpbWUudjIuRGVsZXRlUG9saWN5UmVzb3VyY2VSZXF1ZXN0GjEuc3VwZXJ0YWcucnVudGltZS52Mi5EZWxldGVQb2xpY3lSZXNvdXJjZVJlc3BvbnNlEkkKB1B1dFJvbGUSIy5zdXBlcnRhZy5ydW50aW1lLnYyLlB1dFJvbGVSZXF1ZXN0Ghkuc3VwZXJ0YWcucnVudGltZS52Mi5Sb2xlElMKB0dldFJvbGUSLS5zdXBlcnRhZy5ydW50aW1lLnYyLkdldFBvbGljeVJlc291cmNlUmVxdWVzdBoZLnN1cGVydGFnLnJ1bnRpbWUudjIuUm9sZRJkCglMaXN0Um9sZXMSLy5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RQb2xpY3lSZXNvdXJjZXNSZXF1ZXN0GiYuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0Um9sZXNSZXNwb25zZRJZCgpBc3NpZ25Sb2xlEiYuc3VwZXJ0YWcucnVudGltZS52Mi5Bc3NpZ25Sb2xlUmVxdWVzdBojLnN1cGVydGFnLnJ1bnRpbWUudjIuUm9sZUFzc2lnbm1lbnQSeAoTTGlzdFJvbGVBc3NpZ25tZW50cxIvLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdFJvbGVBc3NpZ25tZW50c1JlcXVlc3QaMC5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RSb2xlQXNzaWdubWVudHNSZXNwb25zZRJ1ChhEZWFjdGl2YXRlUm9sZUFzc2lnbm1lbnQSNC5zdXBlcnRhZy5ydW50aW1lLnYyLkRlYWN0aXZhdGVSb2xlQXNzaWdubWVudFJlcXVlc3QaIy5zdXBlcnRhZy5ydW50aW1lLnYyLlJvbGVBc3NpZ25tZW50YgZwcm90bzM");
+  fileDesc("CiBzdXBlcnRhZy9ydW50aW1lL3YyL3BvbGljeS5wcm90bxITc3VwZXJ0YWcucnVudGltZS52MiInChRTbGFja1N1cmZhY2VJZGVudGl0eRIPCgd0ZWFtX2lkGAEgASgJIjQKFUdpdGh1YlN1cmZhY2VJZGVudGl0eRIbChNleHRlcm5hbF9hY2NvdW50X2lkGAEgASgJIi0KFUxpbmVhclN1cmZhY2VJZGVudGl0eRIUCgx3b3Jrc3BhY2VfaWQYASABKAkiSQoTTGFya1N1cmZhY2VJZGVudGl0eRIOCgZmZWlzaHUYASABKAgSDgoGYXBwX2lkGAIgASgJEhIKCnRlbmFudF9rZXkYAyABKAkiQgodTWljcm9zb2Z0VGVhbXNTdXJmYWNlSWRlbnRpdHkSDgoGYXBwX2lkGAEgASgJEhEKCXRlbmFudF9pZBgCIAEoCSLlAgoWU3VyZmFjZUFjY291bnRJZGVudGl0eRI6CgVzbGFjaxgBIAEoCzIpLnN1cGVydGFnLnJ1bnRpbWUudjIuU2xhY2tTdXJmYWNlSWRlbnRpdHlIABI8CgZnaXRodWIYAiABKAsyKi5zdXBlcnRhZy5ydW50aW1lLnYyLkdpdGh1YlN1cmZhY2VJZGVudGl0eUgAEjwKBmxpbmVhchgDIAEoCzIqLnN1cGVydGFnLnJ1bnRpbWUudjIuTGluZWFyU3VyZmFjZUlkZW50aXR5SAASOAoEbGFyaxgEIAEoCzIoLnN1cGVydGFnLnJ1bnRpbWUudjIuTGFya1N1cmZhY2VJZGVudGl0eUgAEk0KD21pY3Jvc29mdF90ZWFtcxgFIAEoCzIyLnN1cGVydGFnLnJ1bnRpbWUudjIuTWljcm9zb2Z0VGVhbXNTdXJmYWNlSWRlbnRpdHlIAEIKCghwcm92aWRlciKGAQoOU3VyZmFjZUFjY291bnQSEgoKYWNjb3VudF9pZBgBIAEoCRI9CghpZGVudGl0eRgCIAEoCzIrLnN1cGVydGFnLnJ1bnRpbWUudjIuU3VyZmFjZUFjY291bnRJZGVudGl0eRIPCgdlbmFibGVkGAMgASgIEhAKCHJldmlzaW9uGAQgASgEIikKE1NsYWNrU3VyZmFjZUNoYW5uZWwSEgoKY2hhbm5lbF9pZBgBIAEoCSIwChdHaXRodWJTdXJmYWNlUmVwb3NpdG9yeRIVCg1yZXBvc2l0b3J5X2lkGAEgASgEIiQKEUxpbmVhclN1cmZhY2VUZWFtEg8KB3RlYW1faWQYASABKAkiIgoPTGFya1N1cmZhY2VDaGF0Eg8KB2NoYXRfaWQYASABKAkiQwocTWljcm9zb2Z0VGVhbXNTdXJmYWNlQ2hhbm5lbBIPCgd0ZWFtX2lkGAEgASgJEhIKCmNoYW5uZWxfaWQYAiABKAki2wIKFFN1cmZhY2VMb2NhdGlvblNjb3BlEjkKBXNsYWNrGAEgASgLMiguc3VwZXJ0YWcucnVudGltZS52Mi5TbGFja1N1cmZhY2VDaGFubmVsSAASPgoGZ2l0aHViGAIgASgLMiwuc3VwZXJ0YWcucnVudGltZS52Mi5HaXRodWJTdXJmYWNlUmVwb3NpdG9yeUgAEjgKBmxpbmVhchgDIAEoCzImLnN1cGVydGFnLnJ1bnRpbWUudjIuTGluZWFyU3VyZmFjZVRlYW1IABI0CgRsYXJrGAQgASgLMiQuc3VwZXJ0YWcucnVudGltZS52Mi5MYXJrU3VyZmFjZUNoYXRIABJMCg9taWNyb3NvZnRfdGVhbXMYBSABKAsyMS5zdXBlcnRhZy5ydW50aW1lLnYyLk1pY3Jvc29mdFRlYW1zU3VyZmFjZUNoYW5uZWxIAEIKCghwcm92aWRlciL6AQoPU3VyZmFjZUxvY2F0aW9uEhMKC2xvY2F0aW9uX2lkGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkSHAoUY29ubmVjdG9yX2FjY291bnRfaWQYAyABKAkSOAoFc2NvcGUYBCABKAsyKS5zdXBlcnRhZy5ydW50aW1lLnYyLlN1cmZhY2VMb2NhdGlvblNjb3BlEg4KBnRhZ19pZBgFIAEoCRIPCgdlbmFibGVkGAYgASgIEhAKCHJldmlzaW9uGAcgASgEEhoKEnBlcm1pc3Npb25fc2V0X2lkcxgIIAMoCRIXCg9jb250ZXh0X3NldF9pZHMYCSADKAkiyQEKE1N1cmZhY2VQb2xpY3lPcmlnaW4SEwoLbG9jYXRpb25faWQYASABKAkSGQoRbG9jYXRpb25fcmV2aXNpb24YAiABKAQSEgoKYWNjb3VudF9pZBgDIAEoCRIcChRjb25uZWN0b3JfYWNjb3VudF9pZBgEIAEoCRI4CgVzY29wZRgFIAEoCzIpLnN1cGVydGFnLnJ1bnRpbWUudjIuU3VyZmFjZUxvY2F0aW9uU2NvcGUSFgoOb3JpZ2luX2FjdGlvbnMYBiADKAkinAEKGFB1dFN1cmZhY2VBY2NvdW50UmVxdWVzdBIUCgxvcGVyYXRpb25faWQYASABKAkSNAoHYWNjb3VudBgCIAEoCzIjLnN1cGVydGFnLnJ1bnRpbWUudjIuU3VyZmFjZUFjY291bnQSHgoRZXhwZWN0ZWRfcmV2aXNpb24YAyABKARIAIgBAUIUChJfZXhwZWN0ZWRfcmV2aXNpb24iLgoYR2V0U3VyZmFjZUFjY291bnRSZXF1ZXN0EhIKCmFjY291bnRfaWQYASABKAkiOwoaTGlzdFN1cmZhY2VBY2NvdW50c1JlcXVlc3QSDQoFbGltaXQYASABKA0SDgoGY3Vyc29yGAIgASgJImkKG0xpc3RTdXJmYWNlQWNjb3VudHNSZXNwb25zZRI1CghhY2NvdW50cxgBIAMoCzIjLnN1cGVydGFnLnJ1bnRpbWUudjIuU3VyZmFjZUFjY291bnQSEwoLbmV4dF9jdXJzb3IYAiABKAkinwEKGVB1dFN1cmZhY2VMb2NhdGlvblJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAEgASgJEjYKCGxvY2F0aW9uGAIgASgLMiQuc3VwZXJ0YWcucnVudGltZS52Mi5TdXJmYWNlTG9jYXRpb24SHgoRZXhwZWN0ZWRfcmV2aXNpb24YAyABKARIAIgBAUIUChJfZXhwZWN0ZWRfcmV2aXNpb24iMAoZR2V0U3VyZmFjZUxvY2F0aW9uUmVxdWVzdBITCgtsb2NhdGlvbl9pZBgBIAEoCSJQChtMaXN0U3VyZmFjZUxvY2F0aW9uc1JlcXVlc3QSEgoKYWNjb3VudF9pZBgBIAEoCRINCgVsaW1pdBgCIAEoDRIOCgZjdXJzb3IYAyABKAkibAocTGlzdFN1cmZhY2VMb2NhdGlvbnNSZXNwb25zZRI3Cglsb2NhdGlvbnMYASADKAsyJC5zdXBlcnRhZy5ydW50aW1lLnYyLlN1cmZhY2VMb2NhdGlvbhITCgtuZXh0X2N1cnNvchgCIAEoCSJkChxEZWxldGVTdXJmYWNlTG9jYXRpb25SZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRITCgtsb2NhdGlvbl9pZBgCIAEoCRIZChFleHBlY3RlZF9yZXZpc2lvbhgDIAEoBCLhAQoQUG9saWN5UGVybWlzc2lvbhIVCg1wZXJtaXNzaW9uX2lkGAEgASgJEjsKBnRhcmdldBgCIAEoDjIrLnN1cGVydGFnLnJ1bnRpbWUudjIuUG9saWN5UGVybWlzc2lvblRhcmdldBIOCgZhY3Rpb24YAyABKAkSGgoSc3VyZmFjZV9hY2NvdW50X2lkGAQgASgJEg0KBXNjb3BlGAUgASgJEhEKCXJlZmVyZW5jZRgGIAEoCRIQCghyZXNvdXJjZRgHIAEoCRIZChFhcHByb3ZhbF9yZXF1aXJlZBgIIAEoCCKOAQoNUGVybWlzc2lvblNldBIOCgZzZXRfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIQCghyZXZpc2lvbhgDIAEoBBIRCglhcHByb3ZlcnMYBCADKAkSOgoLcGVybWlzc2lvbnMYBSADKAsyJS5zdXBlcnRhZy5ydW50aW1lLnYyLlBvbGljeVBlcm1pc3Npb24ifAoRUG9saWN5Q29udGV4dEl0ZW0SDwoHaXRlbV9pZBgBIAEoCRIQCghpdGVtX2tleRgCIAEoCRIMCgR0eXBlGAMgASgJEg8KB3ZlcnNpb24YBCABKA0SEAoIcmVxdWlyZWQYBSABKAgSEwoLY29uZmlnX2pzb24YBiABKAkicwoKQ29udGV4dFNldBIOCgZzZXRfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIQCghyZXZpc2lvbhgDIAEoBBI1CgVpdGVtcxgEIAMoCzImLnN1cGVydGFnLnJ1bnRpbWUudjIuUG9saWN5Q29udGV4dEl0ZW0iXAoXUG9saWN5RXhlY3V0aW9uU2V0dGluZ3MSFAoHaGFybmVzcxgBIAEoCUgAiAEBEg4KBm1vZGVscxgCIAMoCRIPCgdlZmZvcnRzGAMgAygJQgoKCF9oYXJuZXNzIoUCCgRSb2xlEg8KB3JvbGVfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIPCgdwdXJwb3NlGAMgASgJEhQKDGluc3RydWN0aW9ucxgEIAEoCRIaChJwZXJtaXNzaW9uX3NldF9pZHMYBSADKAkSFwoPY29udGV4dF9zZXRfaWRzGAYgAygJEi8KBnN0YXR1cxgHIAEoDjIfLnN1cGVydGFnLnJ1bnRpbWUudjIuUm9sZVN0YXR1cxIQCghyZXZpc2lvbhgIIAEoBBI/CglleGVjdXRpb24YCSABKAsyLC5zdXBlcnRhZy5ydW50aW1lLnYyLlBvbGljeUV4ZWN1dGlvblNldHRpbmdzIpUBCg5Sb2xlQXNzaWdubWVudBIVCg1hc3NpZ25tZW50X2lkGAEgASgJEg8KB3JvbGVfaWQYAiABKAkSDgoGdGFnX2lkGAMgASgJEjkKBnN0YXR1cxgEIAEoDjIpLnN1cGVydGFnLnJ1bnRpbWUudjIuUm9sZUFzc2lnbm1lbnRTdGF0dXMSEAoIcmV2aXNpb24YBSABKAQidgoSUG9saWN5Um9sZVNuYXBzaG90EjcKCmFzc2lnbm1lbnQYASABKAsyIy5zdXBlcnRhZy5ydW50aW1lLnYyLlJvbGVBc3NpZ25tZW50EicKBHJvbGUYAiABKAsyGS5zdXBlcnRhZy5ydW50aW1lLnYyLlJvbGUizAIKElRhc2tQb2xpY3lTbmFwc2hvdBIPCgd2ZXJzaW9uGAEgASgNEjYKBXJvbGVzGAIgAygLMicuc3VwZXJ0YWcucnVudGltZS52Mi5Qb2xpY3lSb2xlU25hcHNob3QSOwoPcGVybWlzc2lvbl9zZXRzGAMgAygLMiIuc3VwZXJ0YWcucnVudGltZS52Mi5QZXJtaXNzaW9uU2V0EjUKDGNvbnRleHRfc2V0cxgEIAMoCzIfLnN1cGVydGFnLnJ1bnRpbWUudjIuQ29udGV4dFNldBI/CglleGVjdXRpb24YBSABKAsyLC5zdXBlcnRhZy5ydW50aW1lLnYyLlBvbGljeUV4ZWN1dGlvblNldHRpbmdzEjgKBm9yaWdpbhgGIAEoCzIoLnN1cGVydGFnLnJ1bnRpbWUudjIuU3VyZmFjZVBvbGljeU9yaWdpbiKhAQoXUHV0UGVybWlzc2lvblNldFJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAEgASgJEjoKDnBlcm1pc3Npb25fc2V0GAIgASgLMiIuc3VwZXJ0YWcucnVudGltZS52Mi5QZXJtaXNzaW9uU2V0Eh4KEWV4cGVjdGVkX3JldmlzaW9uGAMgASgESACIAQFCFAoSX2V4cGVjdGVkX3JldmlzaW9uIpgBChRQdXRDb250ZXh0U2V0UmVxdWVzdBIUCgxvcGVyYXRpb25faWQYASABKAkSNAoLY29udGV4dF9zZXQYAiABKAsyHy5zdXBlcnRhZy5ydW50aW1lLnYyLkNvbnRleHRTZXQSHgoRZXhwZWN0ZWRfcmV2aXNpb24YAyABKARIAIgBAUIUChJfZXhwZWN0ZWRfcmV2aXNpb24ihQEKDlB1dFJvbGVSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRInCgRyb2xlGAIgASgLMhkuc3VwZXJ0YWcucnVudGltZS52Mi5Sb2xlEh4KEWV4cGVjdGVkX3JldmlzaW9uGAMgASgESACIAQFCFAoSX2V4cGVjdGVkX3JldmlzaW9uIi0KGEdldFBvbGljeVJlc291cmNlUmVxdWVzdBIRCglyZWZlcmVuY2UYASABKAkiOwoaTGlzdFBvbGljeVJlc291cmNlc1JlcXVlc3QSDQoFbGltaXQYASABKA0SDgoGY3Vyc29yGAIgASgJIm4KGkxpc3RQZXJtaXNzaW9uU2V0c1Jlc3BvbnNlEjsKD3Blcm1pc3Npb25fc2V0cxgBIAMoCzIiLnN1cGVydGFnLnJ1bnRpbWUudjIuUGVybWlzc2lvblNldBITCgtuZXh0X2N1cnNvchgCIAEoCSJlChdMaXN0Q29udGV4dFNldHNSZXNwb25zZRI1Cgxjb250ZXh0X3NldHMYASADKAsyHy5zdXBlcnRhZy5ydW50aW1lLnYyLkNvbnRleHRTZXQSEwoLbmV4dF9jdXJzb3IYAiABKAkiUgoRTGlzdFJvbGVzUmVzcG9uc2USKAoFcm9sZXMYASADKAsyGS5zdXBlcnRhZy5ydW50aW1lLnYyLlJvbGUSEwoLbmV4dF9jdXJzb3IYAiABKAkiYQobRGVsZXRlUG9saWN5UmVzb3VyY2VSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRIRCglyZWZlcmVuY2UYAiABKAkSGQoRZXhwZWN0ZWRfcmV2aXNpb24YAyABKAQiLwocRGVsZXRlUG9saWN5UmVzb3VyY2VSZXNwb25zZRIPCgdkZWxldGVkGAEgASgIIkcKEUFzc2lnblJvbGVSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRIMCgRyb2xlGAIgASgJEg4KBnRhZ19pZBgDIAEoCSKUAQoaTGlzdFJvbGVBc3NpZ25tZW50c1JlcXVlc3QSDAoEcm9sZRgBIAEoCRIOCgZ0YWdfaWQYAiABKAkSOQoGc3RhdHVzGAMgASgOMikuc3VwZXJ0YWcucnVudGltZS52Mi5Sb2xlQXNzaWdubWVudFN0YXR1cxINCgVsaW1pdBgEIAEoDRIOCgZjdXJzb3IYBSABKAkibAobTGlzdFJvbGVBc3NpZ25tZW50c1Jlc3BvbnNlEjgKC2Fzc2lnbm1lbnRzGAEgAygLMiMuc3VwZXJ0YWcucnVudGltZS52Mi5Sb2xlQXNzaWdubWVudBITCgtuZXh0X2N1cnNvchgCIAEoCSJpCh9EZWFjdGl2YXRlUm9sZUFzc2lnbm1lbnRSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRIVCg1hc3NpZ25tZW50X2lkGAIgASgJEhkKEWV4cGVjdGVkX3JldmlzaW9uGAMgASgEKrABChZQb2xpY3lQZXJtaXNzaW9uVGFyZ2V0EigKJFBPTElDWV9QRVJNSVNTSU9OX1RBUkdFVF9VTlNQRUNJRklFRBAAEiQKIFBPTElDWV9QRVJNSVNTSU9OX1RBUkdFVF9SVU5USU1FEAESJAogUE9MSUNZX1BFUk1JU1NJT05fVEFSR0VUX1NVUkZBQ0UQAhIgChxQT0xJQ1lfUEVSTUlTU0lPTl9UQVJHRVRfTUNQEAMqWgoKUm9sZVN0YXR1cxIbChdST0xFX1NUQVRVU19VTlNQRUNJRklFRBAAEhYKElJPTEVfU1RBVFVTX0FDVElWRRABEhcKE1JPTEVfU1RBVFVTX1JFVElSRUQQAiqGAQoUUm9sZUFzc2lnbm1lbnRTdGF0dXMSJgoiUk9MRV9BU1NJR05NRU5UX1NUQVRVU19VTlNQRUNJRklFRBAAEiEKHVJPTEVfQVNTSUdOTUVOVF9TVEFUVVNfQUNUSVZFEAESIwofUk9MRV9BU1NJR05NRU5UX1NUQVRVU19JTkFDVElWRRACMssLCg1Qb2xpY3lDYXRhbG9nEmQKEFB1dFBlcm1pc3Npb25TZXQSLC5zdXBlcnRhZy5ydW50aW1lLnYyLlB1dFBlcm1pc3Npb25TZXRSZXF1ZXN0GiIuc3VwZXJ0YWcucnVudGltZS52Mi5QZXJtaXNzaW9uU2V0EmUKEEdldFBlcm1pc3Npb25TZXQSLS5zdXBlcnRhZy5ydW50aW1lLnYyLkdldFBvbGljeVJlc291cmNlUmVxdWVzdBoiLnN1cGVydGFnLnJ1bnRpbWUudjIuUGVybWlzc2lvblNldBJ2ChJMaXN0UGVybWlzc2lvblNldHMSLy5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RQb2xpY3lSZXNvdXJjZXNSZXF1ZXN0Gi8uc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0UGVybWlzc2lvblNldHNSZXNwb25zZRJ6ChNEZWxldGVQZXJtaXNzaW9uU2V0EjAuc3VwZXJ0YWcucnVudGltZS52Mi5EZWxldGVQb2xpY3lSZXNvdXJjZVJlcXVlc3QaMS5zdXBlcnRhZy5ydW50aW1lLnYyLkRlbGV0ZVBvbGljeVJlc291cmNlUmVzcG9uc2USWwoNUHV0Q29udGV4dFNldBIpLnN1cGVydGFnLnJ1bnRpbWUudjIuUHV0Q29udGV4dFNldFJlcXVlc3QaHy5zdXBlcnRhZy5ydW50aW1lLnYyLkNvbnRleHRTZXQSXwoNR2V0Q29udGV4dFNldBItLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0UG9saWN5UmVzb3VyY2VSZXF1ZXN0Gh8uc3VwZXJ0YWcucnVudGltZS52Mi5Db250ZXh0U2V0EnAKD0xpc3RDb250ZXh0U2V0cxIvLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdFBvbGljeVJlc291cmNlc1JlcXVlc3QaLC5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RDb250ZXh0U2V0c1Jlc3BvbnNlEncKEERlbGV0ZUNvbnRleHRTZXQSMC5zdXBlcnRhZy5ydW50aW1lLnYyLkRlbGV0ZVBvbGljeVJlc291cmNlUmVxdWVzdBoxLnN1cGVydGFnLnJ1bnRpbWUudjIuRGVsZXRlUG9saWN5UmVzb3VyY2VSZXNwb25zZRJJCgdQdXRSb2xlEiMuc3VwZXJ0YWcucnVudGltZS52Mi5QdXRSb2xlUmVxdWVzdBoZLnN1cGVydGFnLnJ1bnRpbWUudjIuUm9sZRJTCgdHZXRSb2xlEi0uc3VwZXJ0YWcucnVudGltZS52Mi5HZXRQb2xpY3lSZXNvdXJjZVJlcXVlc3QaGS5zdXBlcnRhZy5ydW50aW1lLnYyLlJvbGUSZAoJTGlzdFJvbGVzEi8uc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0UG9saWN5UmVzb3VyY2VzUmVxdWVzdBomLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdFJvbGVzUmVzcG9uc2USWQoKQXNzaWduUm9sZRImLnN1cGVydGFnLnJ1bnRpbWUudjIuQXNzaWduUm9sZVJlcXVlc3QaIy5zdXBlcnRhZy5ydW50aW1lLnYyLlJvbGVBc3NpZ25tZW50EngKE0xpc3RSb2xlQXNzaWdubWVudHMSLy5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RSb2xlQXNzaWdubWVudHNSZXF1ZXN0GjAuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0Um9sZUFzc2lnbm1lbnRzUmVzcG9uc2USdQoYRGVhY3RpdmF0ZVJvbGVBc3NpZ25tZW50EjQuc3VwZXJ0YWcucnVudGltZS52Mi5EZWFjdGl2YXRlUm9sZUFzc2lnbm1lbnRSZXF1ZXN0GiMuc3VwZXJ0YWcucnVudGltZS52Mi5Sb2xlQXNzaWdubWVudDK2BgoUU3VyZmFjZVBvbGljeUNhdGFsb2cSZwoRUHV0U3VyZmFjZUFjY291bnQSLS5zdXBlcnRhZy5ydW50aW1lLnYyLlB1dFN1cmZhY2VBY2NvdW50UmVxdWVzdBojLnN1cGVydGFnLnJ1bnRpbWUudjIuU3VyZmFjZUFjY291bnQSZwoRR2V0U3VyZmFjZUFjY291bnQSLS5zdXBlcnRhZy5ydW50aW1lLnYyLkdldFN1cmZhY2VBY2NvdW50UmVxdWVzdBojLnN1cGVydGFnLnJ1bnRpbWUudjIuU3VyZmFjZUFjY291bnQSeAoTTGlzdFN1cmZhY2VBY2NvdW50cxIvLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdFN1cmZhY2VBY2NvdW50c1JlcXVlc3QaMC5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RTdXJmYWNlQWNjb3VudHNSZXNwb25zZRJqChJQdXRTdXJmYWNlTG9jYXRpb24SLi5zdXBlcnRhZy5ydW50aW1lLnYyLlB1dFN1cmZhY2VMb2NhdGlvblJlcXVlc3QaJC5zdXBlcnRhZy5ydW50aW1lLnYyLlN1cmZhY2VMb2NhdGlvbhJqChJHZXRTdXJmYWNlTG9jYXRpb24SLi5zdXBlcnRhZy5ydW50aW1lLnYyLkdldFN1cmZhY2VMb2NhdGlvblJlcXVlc3QaJC5zdXBlcnRhZy5ydW50aW1lLnYyLlN1cmZhY2VMb2NhdGlvbhJ7ChRMaXN0U3VyZmFjZUxvY2F0aW9ucxIwLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdFN1cmZhY2VMb2NhdGlvbnNSZXF1ZXN0GjEuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0U3VyZmFjZUxvY2F0aW9uc1Jlc3BvbnNlEn0KFURlbGV0ZVN1cmZhY2VMb2NhdGlvbhIxLnN1cGVydGFnLnJ1bnRpbWUudjIuRGVsZXRlU3VyZmFjZUxvY2F0aW9uUmVxdWVzdBoxLnN1cGVydGFnLnJ1bnRpbWUudjIuRGVsZXRlUG9saWN5UmVzb3VyY2VSZXNwb25zZWIGcHJvdG8z");
+
+/**
+ * @generated from message supertag.runtime.v2.SlackSurfaceIdentity
+ */
+export type SlackSurfaceIdentity = Message<"supertag.runtime.v2.SlackSurfaceIdentity"> & {
+  /**
+   * @generated from field: string team_id = 1;
+   */
+  teamId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.SlackSurfaceIdentity.
+ * Use `create(SlackSurfaceIdentitySchema)` to create a new message.
+ */
+export const SlackSurfaceIdentitySchema: GenMessage<SlackSurfaceIdentity> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 0);
+
+/**
+ * @generated from message supertag.runtime.v2.GithubSurfaceIdentity
+ */
+export type GithubSurfaceIdentity = Message<"supertag.runtime.v2.GithubSurfaceIdentity"> & {
+  /**
+   * The operator's non-secret installation or user identity. The current
+   * connector attests its own authenticated alias and the numeric repository.
+   *
+   * @generated from field: string external_account_id = 1;
+   */
+  externalAccountId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.GithubSurfaceIdentity.
+ * Use `create(GithubSurfaceIdentitySchema)` to create a new message.
+ */
+export const GithubSurfaceIdentitySchema: GenMessage<GithubSurfaceIdentity> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 1);
+
+/**
+ * @generated from message supertag.runtime.v2.LinearSurfaceIdentity
+ */
+export type LinearSurfaceIdentity = Message<"supertag.runtime.v2.LinearSurfaceIdentity"> & {
+  /**
+   * @generated from field: string workspace_id = 1;
+   */
+  workspaceId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.LinearSurfaceIdentity.
+ * Use `create(LinearSurfaceIdentitySchema)` to create a new message.
+ */
+export const LinearSurfaceIdentitySchema: GenMessage<LinearSurfaceIdentity> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 2);
+
+/**
+ * @generated from message supertag.runtime.v2.LarkSurfaceIdentity
+ */
+export type LarkSurfaceIdentity = Message<"supertag.runtime.v2.LarkSurfaceIdentity"> & {
+  /**
+   * @generated from field: bool feishu = 1;
+   */
+  feishu: boolean;
+
+  /**
+   * @generated from field: string app_id = 2;
+   */
+  appId: string;
+
+  /**
+   * @generated from field: string tenant_key = 3;
+   */
+  tenantKey: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.LarkSurfaceIdentity.
+ * Use `create(LarkSurfaceIdentitySchema)` to create a new message.
+ */
+export const LarkSurfaceIdentitySchema: GenMessage<LarkSurfaceIdentity> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 3);
+
+/**
+ * @generated from message supertag.runtime.v2.MicrosoftTeamsSurfaceIdentity
+ */
+export type MicrosoftTeamsSurfaceIdentity = Message<"supertag.runtime.v2.MicrosoftTeamsSurfaceIdentity"> & {
+  /**
+   * @generated from field: string app_id = 1;
+   */
+  appId: string;
+
+  /**
+   * @generated from field: string tenant_id = 2;
+   */
+  tenantId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.MicrosoftTeamsSurfaceIdentity.
+ * Use `create(MicrosoftTeamsSurfaceIdentitySchema)` to create a new message.
+ */
+export const MicrosoftTeamsSurfaceIdentitySchema: GenMessage<MicrosoftTeamsSurfaceIdentity> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 4);
+
+/**
+ * @generated from message supertag.runtime.v2.SurfaceAccountIdentity
+ */
+export type SurfaceAccountIdentity = Message<"supertag.runtime.v2.SurfaceAccountIdentity"> & {
+  /**
+   * @generated from oneof supertag.runtime.v2.SurfaceAccountIdentity.provider
+   */
+  provider: {
+    /**
+     * @generated from field: supertag.runtime.v2.SlackSurfaceIdentity slack = 1;
+     */
+    value: SlackSurfaceIdentity;
+    case: "slack";
+  } | {
+    /**
+     * @generated from field: supertag.runtime.v2.GithubSurfaceIdentity github = 2;
+     */
+    value: GithubSurfaceIdentity;
+    case: "github";
+  } | {
+    /**
+     * @generated from field: supertag.runtime.v2.LinearSurfaceIdentity linear = 3;
+     */
+    value: LinearSurfaceIdentity;
+    case: "linear";
+  } | {
+    /**
+     * @generated from field: supertag.runtime.v2.LarkSurfaceIdentity lark = 4;
+     */
+    value: LarkSurfaceIdentity;
+    case: "lark";
+  } | {
+    /**
+     * @generated from field: supertag.runtime.v2.MicrosoftTeamsSurfaceIdentity microsoft_teams = 5;
+     */
+    value: MicrosoftTeamsSurfaceIdentity;
+    case: "microsoftTeams";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message supertag.runtime.v2.SurfaceAccountIdentity.
+ * Use `create(SurfaceAccountIdentitySchema)` to create a new message.
+ */
+export const SurfaceAccountIdentitySchema: GenMessage<SurfaceAccountIdentity> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 5);
+
+/**
+ * @generated from message supertag.runtime.v2.SurfaceAccount
+ */
+export type SurfaceAccount = Message<"supertag.runtime.v2.SurfaceAccount"> & {
+  /**
+   * @generated from field: string account_id = 1;
+   */
+  accountId: string;
+
+  /**
+   * @generated from field: supertag.runtime.v2.SurfaceAccountIdentity identity = 2;
+   */
+  identity?: SurfaceAccountIdentity | undefined;
+
+  /**
+   * @generated from field: bool enabled = 3;
+   */
+  enabled: boolean;
+
+  /**
+   * @generated from field: uint64 revision = 4;
+   */
+  revision: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.SurfaceAccount.
+ * Use `create(SurfaceAccountSchema)` to create a new message.
+ */
+export const SurfaceAccountSchema: GenMessage<SurfaceAccount> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 6);
+
+/**
+ * @generated from message supertag.runtime.v2.SlackSurfaceChannel
+ */
+export type SlackSurfaceChannel = Message<"supertag.runtime.v2.SlackSurfaceChannel"> & {
+  /**
+   * @generated from field: string channel_id = 1;
+   */
+  channelId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.SlackSurfaceChannel.
+ * Use `create(SlackSurfaceChannelSchema)` to create a new message.
+ */
+export const SlackSurfaceChannelSchema: GenMessage<SlackSurfaceChannel> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 7);
+
+/**
+ * @generated from message supertag.runtime.v2.GithubSurfaceRepository
+ */
+export type GithubSurfaceRepository = Message<"supertag.runtime.v2.GithubSurfaceRepository"> & {
+  /**
+   * @generated from field: uint64 repository_id = 1;
+   */
+  repositoryId: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.GithubSurfaceRepository.
+ * Use `create(GithubSurfaceRepositorySchema)` to create a new message.
+ */
+export const GithubSurfaceRepositorySchema: GenMessage<GithubSurfaceRepository> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 8);
+
+/**
+ * @generated from message supertag.runtime.v2.LinearSurfaceTeam
+ */
+export type LinearSurfaceTeam = Message<"supertag.runtime.v2.LinearSurfaceTeam"> & {
+  /**
+   * @generated from field: string team_id = 1;
+   */
+  teamId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.LinearSurfaceTeam.
+ * Use `create(LinearSurfaceTeamSchema)` to create a new message.
+ */
+export const LinearSurfaceTeamSchema: GenMessage<LinearSurfaceTeam> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 9);
+
+/**
+ * @generated from message supertag.runtime.v2.LarkSurfaceChat
+ */
+export type LarkSurfaceChat = Message<"supertag.runtime.v2.LarkSurfaceChat"> & {
+  /**
+   * @generated from field: string chat_id = 1;
+   */
+  chatId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.LarkSurfaceChat.
+ * Use `create(LarkSurfaceChatSchema)` to create a new message.
+ */
+export const LarkSurfaceChatSchema: GenMessage<LarkSurfaceChat> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 10);
+
+/**
+ * @generated from message supertag.runtime.v2.MicrosoftTeamsSurfaceChannel
+ */
+export type MicrosoftTeamsSurfaceChannel = Message<"supertag.runtime.v2.MicrosoftTeamsSurfaceChannel"> & {
+  /**
+   * @generated from field: string team_id = 1;
+   */
+  teamId: string;
+
+  /**
+   * @generated from field: string channel_id = 2;
+   */
+  channelId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.MicrosoftTeamsSurfaceChannel.
+ * Use `create(MicrosoftTeamsSurfaceChannelSchema)` to create a new message.
+ */
+export const MicrosoftTeamsSurfaceChannelSchema: GenMessage<MicrosoftTeamsSurfaceChannel> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 11);
+
+/**
+ * @generated from message supertag.runtime.v2.SurfaceLocationScope
+ */
+export type SurfaceLocationScope = Message<"supertag.runtime.v2.SurfaceLocationScope"> & {
+  /**
+   * @generated from oneof supertag.runtime.v2.SurfaceLocationScope.provider
+   */
+  provider: {
+    /**
+     * @generated from field: supertag.runtime.v2.SlackSurfaceChannel slack = 1;
+     */
+    value: SlackSurfaceChannel;
+    case: "slack";
+  } | {
+    /**
+     * @generated from field: supertag.runtime.v2.GithubSurfaceRepository github = 2;
+     */
+    value: GithubSurfaceRepository;
+    case: "github";
+  } | {
+    /**
+     * @generated from field: supertag.runtime.v2.LinearSurfaceTeam linear = 3;
+     */
+    value: LinearSurfaceTeam;
+    case: "linear";
+  } | {
+    /**
+     * @generated from field: supertag.runtime.v2.LarkSurfaceChat lark = 4;
+     */
+    value: LarkSurfaceChat;
+    case: "lark";
+  } | {
+    /**
+     * @generated from field: supertag.runtime.v2.MicrosoftTeamsSurfaceChannel microsoft_teams = 5;
+     */
+    value: MicrosoftTeamsSurfaceChannel;
+    case: "microsoftTeams";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message supertag.runtime.v2.SurfaceLocationScope.
+ * Use `create(SurfaceLocationScopeSchema)` to create a new message.
+ */
+export const SurfaceLocationScopeSchema: GenMessage<SurfaceLocationScope> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 12);
+
+/**
+ * @generated from message supertag.runtime.v2.SurfaceLocation
+ */
+export type SurfaceLocation = Message<"supertag.runtime.v2.SurfaceLocation"> & {
+  /**
+   * @generated from field: string location_id = 1;
+   */
+  locationId: string;
+
+  /**
+   * @generated from field: string account_id = 2;
+   */
+  accountId: string;
+
+  /**
+   * This alias has one outbox writer and may bind only one exact location.
+   *
+   * @generated from field: string connector_account_id = 3;
+   */
+  connectorAccountId: string;
+
+  /**
+   * @generated from field: supertag.runtime.v2.SurfaceLocationScope scope = 4;
+   */
+  scope?: SurfaceLocationScope | undefined;
+
+  /**
+   * @generated from field: string tag_id = 5;
+   */
+  tagId: string;
+
+  /**
+   * @generated from field: bool enabled = 6;
+   */
+  enabled: boolean;
+
+  /**
+   * @generated from field: uint64 revision = 7;
+   */
+  revision: bigint;
+
+  /**
+   * @generated from field: repeated string permission_set_ids = 8;
+   */
+  permissionSetIds: string[];
+
+  /**
+   * @generated from field: repeated string context_set_ids = 9;
+   */
+  contextSetIds: string[];
+};
+
+/**
+ * Describes the message supertag.runtime.v2.SurfaceLocation.
+ * Use `create(SurfaceLocationSchema)` to create a new message.
+ */
+export const SurfaceLocationSchema: GenMessage<SurfaceLocation> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 13);
+
+/**
+ * @generated from message supertag.runtime.v2.SurfacePolicyOrigin
+ */
+export type SurfacePolicyOrigin = Message<"supertag.runtime.v2.SurfacePolicyOrigin"> & {
+  /**
+   * @generated from field: string location_id = 1;
+   */
+  locationId: string;
+
+  /**
+   * @generated from field: uint64 location_revision = 2;
+   */
+  locationRevision: bigint;
+
+  /**
+   * @generated from field: string account_id = 3;
+   */
+  accountId: string;
+
+  /**
+   * @generated from field: string connector_account_id = 4;
+   */
+  connectorAccountId: string;
+
+  /**
+   * @generated from field: supertag.runtime.v2.SurfaceLocationScope scope = 5;
+   */
+  scope?: SurfaceLocationScope | undefined;
+
+  /**
+   * @generated from field: repeated string origin_actions = 6;
+   */
+  originActions: string[];
+};
+
+/**
+ * Describes the message supertag.runtime.v2.SurfacePolicyOrigin.
+ * Use `create(SurfacePolicyOriginSchema)` to create a new message.
+ */
+export const SurfacePolicyOriginSchema: GenMessage<SurfacePolicyOrigin> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 14);
+
+/**
+ * @generated from message supertag.runtime.v2.PutSurfaceAccountRequest
+ */
+export type PutSurfaceAccountRequest = Message<"supertag.runtime.v2.PutSurfaceAccountRequest"> & {
+  /**
+   * @generated from field: string operation_id = 1;
+   */
+  operationId: string;
+
+  /**
+   * @generated from field: supertag.runtime.v2.SurfaceAccount account = 2;
+   */
+  account?: SurfaceAccount | undefined;
+
+  /**
+   * @generated from field: optional uint64 expected_revision = 3;
+   */
+  expectedRevision?: bigint | undefined;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.PutSurfaceAccountRequest.
+ * Use `create(PutSurfaceAccountRequestSchema)` to create a new message.
+ */
+export const PutSurfaceAccountRequestSchema: GenMessage<PutSurfaceAccountRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 15);
+
+/**
+ * @generated from message supertag.runtime.v2.GetSurfaceAccountRequest
+ */
+export type GetSurfaceAccountRequest = Message<"supertag.runtime.v2.GetSurfaceAccountRequest"> & {
+  /**
+   * @generated from field: string account_id = 1;
+   */
+  accountId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.GetSurfaceAccountRequest.
+ * Use `create(GetSurfaceAccountRequestSchema)` to create a new message.
+ */
+export const GetSurfaceAccountRequestSchema: GenMessage<GetSurfaceAccountRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 16);
+
+/**
+ * @generated from message supertag.runtime.v2.ListSurfaceAccountsRequest
+ */
+export type ListSurfaceAccountsRequest = Message<"supertag.runtime.v2.ListSurfaceAccountsRequest"> & {
+  /**
+   * @generated from field: uint32 limit = 1;
+   */
+  limit: number;
+
+  /**
+   * @generated from field: string cursor = 2;
+   */
+  cursor: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ListSurfaceAccountsRequest.
+ * Use `create(ListSurfaceAccountsRequestSchema)` to create a new message.
+ */
+export const ListSurfaceAccountsRequestSchema: GenMessage<ListSurfaceAccountsRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 17);
+
+/**
+ * @generated from message supertag.runtime.v2.ListSurfaceAccountsResponse
+ */
+export type ListSurfaceAccountsResponse = Message<"supertag.runtime.v2.ListSurfaceAccountsResponse"> & {
+  /**
+   * @generated from field: repeated supertag.runtime.v2.SurfaceAccount accounts = 1;
+   */
+  accounts: SurfaceAccount[];
+
+  /**
+   * @generated from field: string next_cursor = 2;
+   */
+  nextCursor: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ListSurfaceAccountsResponse.
+ * Use `create(ListSurfaceAccountsResponseSchema)` to create a new message.
+ */
+export const ListSurfaceAccountsResponseSchema: GenMessage<ListSurfaceAccountsResponse> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 18);
+
+/**
+ * @generated from message supertag.runtime.v2.PutSurfaceLocationRequest
+ */
+export type PutSurfaceLocationRequest = Message<"supertag.runtime.v2.PutSurfaceLocationRequest"> & {
+  /**
+   * @generated from field: string operation_id = 1;
+   */
+  operationId: string;
+
+  /**
+   * @generated from field: supertag.runtime.v2.SurfaceLocation location = 2;
+   */
+  location?: SurfaceLocation | undefined;
+
+  /**
+   * @generated from field: optional uint64 expected_revision = 3;
+   */
+  expectedRevision?: bigint | undefined;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.PutSurfaceLocationRequest.
+ * Use `create(PutSurfaceLocationRequestSchema)` to create a new message.
+ */
+export const PutSurfaceLocationRequestSchema: GenMessage<PutSurfaceLocationRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 19);
+
+/**
+ * @generated from message supertag.runtime.v2.GetSurfaceLocationRequest
+ */
+export type GetSurfaceLocationRequest = Message<"supertag.runtime.v2.GetSurfaceLocationRequest"> & {
+  /**
+   * @generated from field: string location_id = 1;
+   */
+  locationId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.GetSurfaceLocationRequest.
+ * Use `create(GetSurfaceLocationRequestSchema)` to create a new message.
+ */
+export const GetSurfaceLocationRequestSchema: GenMessage<GetSurfaceLocationRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 20);
+
+/**
+ * @generated from message supertag.runtime.v2.ListSurfaceLocationsRequest
+ */
+export type ListSurfaceLocationsRequest = Message<"supertag.runtime.v2.ListSurfaceLocationsRequest"> & {
+  /**
+   * @generated from field: string account_id = 1;
+   */
+  accountId: string;
+
+  /**
+   * @generated from field: uint32 limit = 2;
+   */
+  limit: number;
+
+  /**
+   * @generated from field: string cursor = 3;
+   */
+  cursor: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ListSurfaceLocationsRequest.
+ * Use `create(ListSurfaceLocationsRequestSchema)` to create a new message.
+ */
+export const ListSurfaceLocationsRequestSchema: GenMessage<ListSurfaceLocationsRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 21);
+
+/**
+ * @generated from message supertag.runtime.v2.ListSurfaceLocationsResponse
+ */
+export type ListSurfaceLocationsResponse = Message<"supertag.runtime.v2.ListSurfaceLocationsResponse"> & {
+  /**
+   * @generated from field: repeated supertag.runtime.v2.SurfaceLocation locations = 1;
+   */
+  locations: SurfaceLocation[];
+
+  /**
+   * @generated from field: string next_cursor = 2;
+   */
+  nextCursor: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ListSurfaceLocationsResponse.
+ * Use `create(ListSurfaceLocationsResponseSchema)` to create a new message.
+ */
+export const ListSurfaceLocationsResponseSchema: GenMessage<ListSurfaceLocationsResponse> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 22);
+
+/**
+ * @generated from message supertag.runtime.v2.DeleteSurfaceLocationRequest
+ */
+export type DeleteSurfaceLocationRequest = Message<"supertag.runtime.v2.DeleteSurfaceLocationRequest"> & {
+  /**
+   * @generated from field: string operation_id = 1;
+   */
+  operationId: string;
+
+  /**
+   * @generated from field: string location_id = 2;
+   */
+  locationId: string;
+
+  /**
+   * @generated from field: uint64 expected_revision = 3;
+   */
+  expectedRevision: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.DeleteSurfaceLocationRequest.
+ * Use `create(DeleteSurfaceLocationRequestSchema)` to create a new message.
+ */
+export const DeleteSurfaceLocationRequestSchema: GenMessage<DeleteSurfaceLocationRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_policy, 23);
 
 /**
  * @generated from message supertag.runtime.v2.PolicyPermission
@@ -64,7 +692,7 @@ export type PolicyPermission = Message<"supertag.runtime.v2.PolicyPermission"> &
  * Use `create(PolicyPermissionSchema)` to create a new message.
  */
 export const PolicyPermissionSchema: GenMessage<PolicyPermission> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 0);
+  messageDesc(file_supertag_runtime_v2_policy, 24);
 
 /**
  * @generated from message supertag.runtime.v2.PermissionSet
@@ -101,7 +729,7 @@ export type PermissionSet = Message<"supertag.runtime.v2.PermissionSet"> & {
  * Use `create(PermissionSetSchema)` to create a new message.
  */
 export const PermissionSetSchema: GenMessage<PermissionSet> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 1);
+  messageDesc(file_supertag_runtime_v2_policy, 25);
 
 /**
  * @generated from message supertag.runtime.v2.PolicyContextItem
@@ -145,7 +773,7 @@ export type PolicyContextItem = Message<"supertag.runtime.v2.PolicyContextItem">
  * Use `create(PolicyContextItemSchema)` to create a new message.
  */
 export const PolicyContextItemSchema: GenMessage<PolicyContextItem> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 2);
+  messageDesc(file_supertag_runtime_v2_policy, 26);
 
 /**
  * @generated from message supertag.runtime.v2.ContextSet
@@ -177,7 +805,7 @@ export type ContextSet = Message<"supertag.runtime.v2.ContextSet"> & {
  * Use `create(ContextSetSchema)` to create a new message.
  */
 export const ContextSetSchema: GenMessage<ContextSet> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 3);
+  messageDesc(file_supertag_runtime_v2_policy, 27);
 
 /**
  * @generated from message supertag.runtime.v2.PolicyExecutionSettings
@@ -206,7 +834,7 @@ export type PolicyExecutionSettings = Message<"supertag.runtime.v2.PolicyExecuti
  * Use `create(PolicyExecutionSettingsSchema)` to create a new message.
  */
 export const PolicyExecutionSettingsSchema: GenMessage<PolicyExecutionSettings> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 4);
+  messageDesc(file_supertag_runtime_v2_policy, 28);
 
 /**
  * @generated from message supertag.runtime.v2.Role
@@ -263,7 +891,7 @@ export type Role = Message<"supertag.runtime.v2.Role"> & {
  * Use `create(RoleSchema)` to create a new message.
  */
 export const RoleSchema: GenMessage<Role> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 5);
+  messageDesc(file_supertag_runtime_v2_policy, 29);
 
 /**
  * @generated from message supertag.runtime.v2.RoleAssignment
@@ -300,7 +928,7 @@ export type RoleAssignment = Message<"supertag.runtime.v2.RoleAssignment"> & {
  * Use `create(RoleAssignmentSchema)` to create a new message.
  */
 export const RoleAssignmentSchema: GenMessage<RoleAssignment> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 6);
+  messageDesc(file_supertag_runtime_v2_policy, 30);
 
 /**
  * @generated from message supertag.runtime.v2.PolicyRoleSnapshot
@@ -322,7 +950,7 @@ export type PolicyRoleSnapshot = Message<"supertag.runtime.v2.PolicyRoleSnapshot
  * Use `create(PolicyRoleSnapshotSchema)` to create a new message.
  */
 export const PolicyRoleSnapshotSchema: GenMessage<PolicyRoleSnapshot> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 7);
+  messageDesc(file_supertag_runtime_v2_policy, 31);
 
 /**
  * @generated from message supertag.runtime.v2.TaskPolicySnapshot
@@ -352,6 +980,11 @@ export type TaskPolicySnapshot = Message<"supertag.runtime.v2.TaskPolicySnapshot
    * @generated from field: supertag.runtime.v2.PolicyExecutionSettings execution = 5;
    */
   execution?: PolicyExecutionSettings | undefined;
+
+  /**
+   * @generated from field: supertag.runtime.v2.SurfacePolicyOrigin origin = 6;
+   */
+  origin?: SurfacePolicyOrigin | undefined;
 };
 
 /**
@@ -359,7 +992,7 @@ export type TaskPolicySnapshot = Message<"supertag.runtime.v2.TaskPolicySnapshot
  * Use `create(TaskPolicySnapshotSchema)` to create a new message.
  */
 export const TaskPolicySnapshotSchema: GenMessage<TaskPolicySnapshot> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 8);
+  messageDesc(file_supertag_runtime_v2_policy, 32);
 
 /**
  * @generated from message supertag.runtime.v2.PutPermissionSetRequest
@@ -386,7 +1019,7 @@ export type PutPermissionSetRequest = Message<"supertag.runtime.v2.PutPermission
  * Use `create(PutPermissionSetRequestSchema)` to create a new message.
  */
 export const PutPermissionSetRequestSchema: GenMessage<PutPermissionSetRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 9);
+  messageDesc(file_supertag_runtime_v2_policy, 33);
 
 /**
  * @generated from message supertag.runtime.v2.PutContextSetRequest
@@ -413,7 +1046,7 @@ export type PutContextSetRequest = Message<"supertag.runtime.v2.PutContextSetReq
  * Use `create(PutContextSetRequestSchema)` to create a new message.
  */
 export const PutContextSetRequestSchema: GenMessage<PutContextSetRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 10);
+  messageDesc(file_supertag_runtime_v2_policy, 34);
 
 /**
  * @generated from message supertag.runtime.v2.PutRoleRequest
@@ -440,7 +1073,7 @@ export type PutRoleRequest = Message<"supertag.runtime.v2.PutRoleRequest"> & {
  * Use `create(PutRoleRequestSchema)` to create a new message.
  */
 export const PutRoleRequestSchema: GenMessage<PutRoleRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 11);
+  messageDesc(file_supertag_runtime_v2_policy, 35);
 
 /**
  * @generated from message supertag.runtime.v2.GetPolicyResourceRequest
@@ -457,7 +1090,7 @@ export type GetPolicyResourceRequest = Message<"supertag.runtime.v2.GetPolicyRes
  * Use `create(GetPolicyResourceRequestSchema)` to create a new message.
  */
 export const GetPolicyResourceRequestSchema: GenMessage<GetPolicyResourceRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 12);
+  messageDesc(file_supertag_runtime_v2_policy, 36);
 
 /**
  * @generated from message supertag.runtime.v2.ListPolicyResourcesRequest
@@ -479,7 +1112,7 @@ export type ListPolicyResourcesRequest = Message<"supertag.runtime.v2.ListPolicy
  * Use `create(ListPolicyResourcesRequestSchema)` to create a new message.
  */
 export const ListPolicyResourcesRequestSchema: GenMessage<ListPolicyResourcesRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 13);
+  messageDesc(file_supertag_runtime_v2_policy, 37);
 
 /**
  * @generated from message supertag.runtime.v2.ListPermissionSetsResponse
@@ -501,7 +1134,7 @@ export type ListPermissionSetsResponse = Message<"supertag.runtime.v2.ListPermis
  * Use `create(ListPermissionSetsResponseSchema)` to create a new message.
  */
 export const ListPermissionSetsResponseSchema: GenMessage<ListPermissionSetsResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 14);
+  messageDesc(file_supertag_runtime_v2_policy, 38);
 
 /**
  * @generated from message supertag.runtime.v2.ListContextSetsResponse
@@ -523,7 +1156,7 @@ export type ListContextSetsResponse = Message<"supertag.runtime.v2.ListContextSe
  * Use `create(ListContextSetsResponseSchema)` to create a new message.
  */
 export const ListContextSetsResponseSchema: GenMessage<ListContextSetsResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 15);
+  messageDesc(file_supertag_runtime_v2_policy, 39);
 
 /**
  * @generated from message supertag.runtime.v2.ListRolesResponse
@@ -545,7 +1178,7 @@ export type ListRolesResponse = Message<"supertag.runtime.v2.ListRolesResponse">
  * Use `create(ListRolesResponseSchema)` to create a new message.
  */
 export const ListRolesResponseSchema: GenMessage<ListRolesResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 16);
+  messageDesc(file_supertag_runtime_v2_policy, 40);
 
 /**
  * @generated from message supertag.runtime.v2.DeletePolicyResourceRequest
@@ -572,7 +1205,7 @@ export type DeletePolicyResourceRequest = Message<"supertag.runtime.v2.DeletePol
  * Use `create(DeletePolicyResourceRequestSchema)` to create a new message.
  */
 export const DeletePolicyResourceRequestSchema: GenMessage<DeletePolicyResourceRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 17);
+  messageDesc(file_supertag_runtime_v2_policy, 41);
 
 /**
  * @generated from message supertag.runtime.v2.DeletePolicyResourceResponse
@@ -589,7 +1222,7 @@ export type DeletePolicyResourceResponse = Message<"supertag.runtime.v2.DeletePo
  * Use `create(DeletePolicyResourceResponseSchema)` to create a new message.
  */
 export const DeletePolicyResourceResponseSchema: GenMessage<DeletePolicyResourceResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 18);
+  messageDesc(file_supertag_runtime_v2_policy, 42);
 
 /**
  * @generated from message supertag.runtime.v2.AssignRoleRequest
@@ -616,7 +1249,7 @@ export type AssignRoleRequest = Message<"supertag.runtime.v2.AssignRoleRequest">
  * Use `create(AssignRoleRequestSchema)` to create a new message.
  */
 export const AssignRoleRequestSchema: GenMessage<AssignRoleRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 19);
+  messageDesc(file_supertag_runtime_v2_policy, 43);
 
 /**
  * @generated from message supertag.runtime.v2.ListRoleAssignmentsRequest
@@ -653,7 +1286,7 @@ export type ListRoleAssignmentsRequest = Message<"supertag.runtime.v2.ListRoleAs
  * Use `create(ListRoleAssignmentsRequestSchema)` to create a new message.
  */
 export const ListRoleAssignmentsRequestSchema: GenMessage<ListRoleAssignmentsRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 20);
+  messageDesc(file_supertag_runtime_v2_policy, 44);
 
 /**
  * @generated from message supertag.runtime.v2.ListRoleAssignmentsResponse
@@ -675,7 +1308,7 @@ export type ListRoleAssignmentsResponse = Message<"supertag.runtime.v2.ListRoleA
  * Use `create(ListRoleAssignmentsResponseSchema)` to create a new message.
  */
 export const ListRoleAssignmentsResponseSchema: GenMessage<ListRoleAssignmentsResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 21);
+  messageDesc(file_supertag_runtime_v2_policy, 45);
 
 /**
  * @generated from message supertag.runtime.v2.DeactivateRoleAssignmentRequest
@@ -702,7 +1335,7 @@ export type DeactivateRoleAssignmentRequest = Message<"supertag.runtime.v2.Deact
  * Use `create(DeactivateRoleAssignmentRequestSchema)` to create a new message.
  */
 export const DeactivateRoleAssignmentRequestSchema: GenMessage<DeactivateRoleAssignmentRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_policy, 22);
+  messageDesc(file_supertag_runtime_v2_policy, 46);
 
 /**
  * @generated from enum supertag.runtime.v2.PolicyPermissionTarget
@@ -907,3 +1540,68 @@ export const PolicyCatalog: GenService<{
   },
 }> = /*@__PURE__*/
   serviceDesc(file_supertag_runtime_v2_policy, 0);
+
+/**
+ * Operator-managed policy bindings. Provider credentials stay at the Gateway.
+ *
+ * @generated from service supertag.runtime.v2.SurfacePolicyCatalog
+ */
+export const SurfacePolicyCatalog: GenService<{
+  /**
+   * @generated from rpc supertag.runtime.v2.SurfacePolicyCatalog.PutSurfaceAccount
+   */
+  putSurfaceAccount: {
+    methodKind: "unary";
+    input: typeof PutSurfaceAccountRequestSchema;
+    output: typeof SurfaceAccountSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.SurfacePolicyCatalog.GetSurfaceAccount
+   */
+  getSurfaceAccount: {
+    methodKind: "unary";
+    input: typeof GetSurfaceAccountRequestSchema;
+    output: typeof SurfaceAccountSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.SurfacePolicyCatalog.ListSurfaceAccounts
+   */
+  listSurfaceAccounts: {
+    methodKind: "unary";
+    input: typeof ListSurfaceAccountsRequestSchema;
+    output: typeof ListSurfaceAccountsResponseSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.SurfacePolicyCatalog.PutSurfaceLocation
+   */
+  putSurfaceLocation: {
+    methodKind: "unary";
+    input: typeof PutSurfaceLocationRequestSchema;
+    output: typeof SurfaceLocationSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.SurfacePolicyCatalog.GetSurfaceLocation
+   */
+  getSurfaceLocation: {
+    methodKind: "unary";
+    input: typeof GetSurfaceLocationRequestSchema;
+    output: typeof SurfaceLocationSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.SurfacePolicyCatalog.ListSurfaceLocations
+   */
+  listSurfaceLocations: {
+    methodKind: "unary";
+    input: typeof ListSurfaceLocationsRequestSchema;
+    output: typeof ListSurfaceLocationsResponseSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.SurfacePolicyCatalog.DeleteSurfaceLocation
+   */
+  deleteSurfaceLocation: {
+    methodKind: "unary";
+    input: typeof DeleteSurfaceLocationRequestSchema;
+    output: typeof DeletePolicyResourceResponseSchema;
+  },
+}> = /*@__PURE__*/
+  serviceDesc(file_supertag_runtime_v2_policy, 1);

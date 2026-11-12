@@ -13,6 +13,7 @@ mod policy;
 #[cfg(test)]
 mod readiness_tests;
 pub mod slack;
+mod surface_policy;
 mod teams;
 pub mod transfers;
 mod watch;
@@ -656,6 +657,27 @@ impl HostEnrollment for Gateway {
 
 #[tonic::async_trait]
 impl WorkerHost for Gateway {
+    async fn get_context_pins(
+        &self,
+        request: Request<InspectAttemptRequest>,
+    ) -> Result<Response<ContextResolutionManifest>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel).get_context_pins(request).await
+        })
+        .await
+    }
+
+    async fn commit_context_resolution(
+        &self,
+        request: Request<CommitContextResolutionRequest>,
+    ) -> Result<Response<ContextResolutionManifest>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel)
+                .commit_context_resolution(request)
+                .await
+        })
+        .await
+    }
     async fn report_host(
         &self,
         request: Request<ReportHostRequest>,

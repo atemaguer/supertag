@@ -194,8 +194,7 @@ struct Stream {
     sequence: u64,
     turn_requested: bool,
     resumed: bool,
-    may_ask: bool,
-    full_inventory: bool,
+    inventory: crate::coordination::Inventory,
 }
 
 impl Stream {
@@ -204,8 +203,7 @@ impl Stream {
         thread: String,
         expected_thread: Option<String>,
         baseline: Option<[u64; 3]>,
-        may_ask: bool,
-        full_inventory: bool,
+        inventory: crate::coordination::Inventory,
     ) -> Result<Self> {
         let resumed = expected_thread.is_some();
         let mut native = events::Stream::new(policy, expected_thread);
@@ -224,8 +222,7 @@ impl Stream {
             sequence: 0,
             turn_requested: false,
             resumed,
-            may_ask,
-            full_inventory,
+            inventory,
         })
     }
 
@@ -450,10 +447,10 @@ impl Stream {
                     }
                     Some("dynamicToolCall") => {
                         ensure!(
-                            self.may_ask,
+                            self.inventory != crate::coordination::Inventory::None,
                             "Codex emitted an unregistered coordination tool item"
                         );
-                        crate::coordination::arguments(&item, self.full_inventory)?;
+                        crate::coordination::arguments(&item, self.inventory)?;
                         return Ok(());
                     }
                     Some("webSearch") => item["type"] = json!("web_search"),
@@ -585,6 +582,52 @@ async fn respond_tool(
     Ok(true)
 }
 
+async fn restrict_skills(
+    transport: &mut Transport,
+    cwd: &Value,
+    admitted: &std::collections::BTreeSet<String>,
+    buffered: &mut Vec<Value>,
+) -> Result<()> {
+    let params = json!({"cwds":[cwd], "forceReload":true});
+    let response = transport
+        .call("skills/list", params.clone(), buffered)
+        .await?;
+    let mut found = std::collections::BTreeSet::new();
+    for (path, enabled) in crate::skills::inventory(&response)? {
+        let selected = admitted.contains(&path);
+        if selected {
+            found.insert(path.clone());
+        }
+        if enabled != selected {
+            let receipt = transport
+                .call(
+                    "skills/config/write",
+                    json!({"path":path, "enabled":selected}),
+                    buffered,
+                )
+                .await?;
+            ensure!(
+                receipt["effectiveEnabled"].as_bool() == Some(selected),
+                "Codex did not apply admitted Skill configuration"
+            );
+        }
+    }
+    ensure!(
+        &found == admitted,
+        "Codex did not discover every admitted Skill"
+    );
+    let response = transport.call("skills/list", params, buffered).await?;
+    let enabled: std::collections::BTreeSet<_> = crate::skills::inventory(&response)?
+        .into_iter()
+        .filter_map(|(path, enabled)| enabled.then_some(path))
+        .collect();
+    ensure!(
+        &enabled == admitted,
+        "Codex Skill configuration includes unadmitted packages"
+    );
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute(
     input: ChildStdin,
@@ -593,6 +636,7 @@ pub(crate) async fn execute(
     attempt_id: &str,
     params: Value,
     policy: Policy,
+    admitted_skills: &std::collections::BTreeSet<String>,
     expected_thread: Option<String>,
     baseline: Option<[u64; 3]>,
     harness: &mut HarnessClient<Channel>,
@@ -631,6 +675,13 @@ pub(crate) async fn execute(
             );
         }
     }
+    restrict_skills(
+        &mut transport,
+        &params["cwd"],
+        admitted_skills,
+        &mut buffered,
+    )
+    .await?;
     let mut params = params;
     let method = if let Some(thread) = &expected_thread {
         params["threadId"] = json!(thread);
@@ -654,8 +705,7 @@ pub(crate) async fn execute(
         thread,
         expected_thread,
         baseline,
-        questions.enabled(),
-        questions.full_inventory(),
+        questions.inventory(),
     )?;
     stream.model(&response)?;
     for notification in buffered.drain(..) {
@@ -796,6 +846,64 @@ mod tests {
     use tokio::process::Command;
 
     #[tokio::test]
+    #[ignore = "requires SUPERTAG_TEST_CODEX_BINARY; credential-free native Skill inventory probe"]
+    async fn installed_skill_inventory_excludes_repository_and_system_packages() -> Result<()> {
+        let executable = std::env::var_os("SUPERTAG_TEST_CODEX_BINARY")
+            .context("set SUPERTAG_TEST_CODEX_BINARY")?;
+        let directory = tempfile::tempdir()?;
+        let root = directory.path().canonicalize()?;
+        let workspace = root.join("workspace");
+        let home = root.join("native-home");
+        let selected = home.join("skills/selected");
+        let ambient = workspace.join(".agents/skills/unselected");
+        for (path, name) in [(&selected, "selected"), (&ambient, "unselected")] {
+            std::fs::create_dir_all(path)?;
+            std::fs::write(
+                path.join("SKILL.md"),
+                format!(
+                    "---\nname: {name}\ndescription: Local inventory fixture.\n---\nUse fixture data only.\n"
+                ),
+            )?;
+        }
+        let policy = Policy::from_actions(&["files:read".into()], false)?;
+        let args = crate::config::arguments(&workspace, None, &policy)?;
+        let mut child = Command::new(executable)
+            .args(args)
+            .current_dir(&workspace)
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").context("probe PATH")?)
+            .env("HOME", &home)
+            .env("CODEX_HOME", &home)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()?;
+        let result=async {
+            let mut transport=Transport::new(child.stdin.take().unwrap(),child.stdout.take().unwrap());let mut buffered=vec![];
+            transport.call("initialize",json!({"clientInfo":{"name":"supertag-skill-probe","version":"1"},"capabilities":{"experimentalApi":true}}),&mut buffered).await?;
+            transport.write(json!({"method":"initialized","params":{}})).await?;
+            let before=transport.call("skills/list",json!({"cwds":[workspace],"forceReload":true}),&mut buffered).await?;
+            assert!(crate::skills::inventory(&before)?.iter().any(|(p,enabled)|*enabled&&p==ambient.join("SKILL.md").to_str().unwrap()));
+            let admitted=std::collections::BTreeSet::from([selected.join("SKILL.md").to_str().unwrap().to_owned()]);
+            restrict_skills(&mut transport,&json!(workspace),&admitted,&mut buffered).await?;
+            // A new path is enabled on refresh: production refuses writable
+            // Skill-bearing Tasks until a native scope-wide allowlist is proven.
+            let late=workspace.join(".agents/skills/late");std::fs::create_dir(&late)?;
+            std::fs::write(late.join("SKILL.md"),"---\nname: late\ndescription: Late fixture.\n---\nFixture only.\n")?;
+            let refreshed=transport.call("skills/list",json!({"cwds":[workspace],"forceReload":true}),&mut buffered).await?;
+            assert!(crate::skills::inventory(&refreshed)?.iter().any(|(path,enabled)|*enabled&&path==late.join("SKILL.md").to_str().unwrap()));
+            restrict_skills(&mut transport,&json!(workspace),&std::collections::BTreeSet::new(),&mut buffered).await?;
+            let config=transport.call("config/read",json!({"cwd":workspace,"includeLayers":true}),&mut buffered).await?;
+            assert_eq!(config["config"]["features"]["code_mode_host"],false);
+            Ok::<_,anyhow::Error>(())
+        }.await;
+        child.kill().await?;
+        child.wait().await?;
+        result
+    }
+
+    #[tokio::test]
     #[ignore = "requires SUPERTAG_TEST_CODEX_BINARY pointing at installed Codex 0.163.0 or later"]
     async fn installed_app_server_keeps_owned_policy_and_rejects_steering_an_absent_turn()
     -> Result<()> {
@@ -862,7 +970,8 @@ mod tests {
             &workspace,
             &crate::config::arguments(&workspace, None, &policy)?,
         )?;
-        params["dynamicTools"] = crate::questions::tool_specs(true);
+        params["dynamicTools"] =
+            crate::questions::tool_specs(crate::coordination::Inventory::Direct);
         params["ephemeral"] = json!(false);
         let thread = transport
             .call("thread/start", params, &mut buffered)

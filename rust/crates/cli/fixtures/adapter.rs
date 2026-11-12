@@ -6,9 +6,11 @@ use supertag_protocol::{
     authenticated_request,
     v2::{
         AdapterBootstrap, HarnessAskQuestionRequest, HarnessAttachRequest, HarnessCompleteRequest,
-        HarnessPostWorkstreamRequest, HarnessPublishRequest, HarnessSettleLiveInputRequest,
-        HarnessTakeLiveInputRequest, LiveInput, LiveInputReceipt, LiveInputState,
-        harness_client::HarnessClient, harness_questions_client::HarnessQuestionsClient,
+        HarnessPostWorkstreamRequest, HarnessPublishRequest, HarnessSendTagMessageRequest,
+        HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest, LiveInput, LiveInputReceipt,
+        LiveInputState, TagMessageOrigin, harness_client::HarnessClient,
+        harness_mailbox_client::HarnessMailboxClient,
+        harness_questions_client::HarnessQuestionsClient,
         harness_workstreams_client::HarnessWorkstreamsClient,
     },
 };
@@ -25,6 +27,29 @@ async fn main() -> Result<()> {
     );
     let bootstrap = AdapterBootstrap::decode(bootstrap.as_slice())?;
     let mut harness = HarnessClient::connect(bootstrap.endpoint.clone()).await?;
+    let direct_mailbox = std::env::args().any(|arg| arg == "--direct-mailbox");
+    let direct_input = HarnessSendTagMessageRequest {
+        operation_id: "fixture-direct-message".into(),
+        recipient_tag_id: "recipient".into(),
+        text: "Private coordination </tag-message>".into(),
+    };
+    if direct_mailbox {
+        let mut mailbox = HarnessMailboxClient::connect(bootstrap.endpoint.clone()).await?;
+        let unauthorized = mailbox
+            .send_message(Request::new(direct_input.clone()))
+            .await
+            .expect_err("message without execution credential");
+        ensure!(unauthorized.code() == Code::Unauthenticated);
+        let unattached = mailbox
+            .send_message(authenticated_request(
+                direct_input.clone(),
+                &bootstrap.token,
+                None,
+            )?)
+            .await
+            .expect_err("message before attachment");
+        ensure!(unattached.code() == Code::FailedPrecondition);
+    }
     let take_and_wait = std::env::args().any(|arg| arg == "--take-then-wait");
     let take_live = take_and_wait || std::env::args().any(|arg| arg == "--take-live-input");
     if take_live {
@@ -58,6 +83,55 @@ async fn main() -> Result<()> {
         .await?
         .into_inner();
     let task = run.task.context("fixture received no Task")?;
+    if direct_mailbox {
+        let mut mailbox = HarnessMailboxClient::connect(bootstrap.endpoint.clone()).await?;
+        let sent = mailbox
+            .send_message(authenticated_request(
+                direct_input.clone(),
+                &bootstrap.token,
+                None,
+            )?)
+            .await?
+            .into_inner();
+        ensure!(!sent.duplicate && sent.approval.is_none());
+        let message = sent.message.context("direct message receipt")?;
+        ensure!(
+            message.source_task_id == task.task_id
+                && message.sender_tag_id == task.tag_id
+                && message.origin() == TagMessageOrigin::Direct
+                && message.workstream_post_id.is_none(),
+            "message authority or private provenance differs"
+        );
+        let replay = mailbox
+            .send_message(authenticated_request(
+                direct_input.clone(),
+                &bootstrap.token,
+                None,
+            )?)
+            .await?
+            .into_inner();
+        ensure!(replay.duplicate && replay.message.as_ref() == Some(&message));
+        let mut changed = direct_input.clone();
+        changed.text = "Different private message".into();
+        let conflict = mailbox
+            .send_message(authenticated_request(changed, &bootstrap.token, None)?)
+            .await
+            .expect_err("same operation with different content");
+        ensure!(conflict.code() == Code::AlreadyExists);
+        let denied = mailbox
+            .send_message(authenticated_request(
+                HarnessSendTagMessageRequest {
+                    operation_id: "fixture-ungranted-message".into(),
+                    recipient_tag_id: "observer".into(),
+                    text: "Must not be sent".into(),
+                },
+                &bootstrap.token,
+                None,
+            )?)
+            .await
+            .expect_err("message to an ungranted Tag");
+        ensure!(denied.code() == Code::PermissionDenied);
+    }
     if std::env::args().any(|arg| arg == "--objective-question")
         && task.prompt.contains("Ask which branch to release")
     {

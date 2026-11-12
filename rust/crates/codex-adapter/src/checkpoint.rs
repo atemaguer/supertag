@@ -76,6 +76,8 @@ struct Archive {
     version: u32,
     #[serde(default)]
     tool_manifest: String,
+    #[serde(default)]
+    context_manifest: String,
     tag_id: String,
     session_id: String,
     thread_id: String,
@@ -267,14 +269,25 @@ fn transform(
     Ok(output)
 }
 
-pub(crate) fn has_full_coordination(checkpoint: &SessionCheckpoint) -> bool {
+pub(crate) fn coordination_inventory(
+    checkpoint: &SessionCheckpoint,
+) -> Option<crate::coordination::Inventory> {
     #[derive(Deserialize)]
     struct Manifest {
         tool_manifest: String,
     }
-    checkpoint.payload.len() <= MAX_ENCODED_BYTES
-        && serde_json::from_slice::<Manifest>(&checkpoint.payload)
-            .is_ok_and(|archive| archive.tool_manifest == crate::questions::FULL_COORDINATION)
+    if checkpoint.payload.len() > MAX_ENCODED_BYTES {
+        return None;
+    }
+    match serde_json::from_slice::<Manifest>(&checkpoint.payload)
+        .ok()?
+        .tool_manifest
+        .as_str()
+    {
+        crate::questions::FULL_COORDINATION => Some(crate::coordination::Inventory::Workstream),
+        crate::questions::DIRECT_COORDINATION => Some(crate::coordination::Inventory::Direct),
+        _ => None,
+    }
 }
 
 pub(crate) fn restore(
@@ -366,6 +379,30 @@ pub(crate) fn restore(
             .context("could not restore Codex transcript")?;
     }
     Ok(archive.thread_id)
+}
+
+pub(crate) fn check_context(checkpoint: &SessionCheckpoint, expected: &str) -> Result<()> {
+    let archive: Archive = serde_json::from_slice(&checkpoint.payload)?;
+    ensure!(
+        archive.context_manifest == expected,
+        "Codex checkpoint cannot resume with changed resolved context"
+    );
+    Ok(())
+}
+
+pub(crate) fn bind_context(
+    mut checkpoint: SessionCheckpoint,
+    manifest: &str,
+) -> Result<SessionCheckpoint> {
+    let mut archive: Archive = serde_json::from_slice(&checkpoint.payload)?;
+    archive.context_manifest = manifest.into();
+    checkpoint.payload = serde_json::to_vec(&archive)?;
+    ensure!(
+        checkpoint.payload.len() <= MAX_ENCODED_BYTES,
+        "Codex checkpoint exceeds context archive limit"
+    );
+    checkpoint.sha256 = digest(&checkpoint.payload);
+    Ok(checkpoint)
 }
 
 // Open each component relative to an already-open directory. Native tools cannot
@@ -473,6 +510,7 @@ pub(crate) fn capture(
     let mut archive = Archive {
         version: 2,
         tool_manifest: tool_manifest.into(),
+        context_manifest: String::new(),
         tag_id: task.tag_id.clone(),
         session_id: task.session_id.clone(),
         thread_id,
@@ -670,6 +708,7 @@ mod tests {
         let make_archive = || Archive {
             version: 2,
             tool_manifest: crate::questions::NONE.into(),
+            context_manifest: String::new(),
             tag_id: "tag".into(),
             session_id: "session".into(),
             thread_id: "root".into(),

@@ -1,4 +1,4 @@
-//! Durable addressed Workstream delivery. The receiving Tag's accepted policy
+//! Durable direct messages and addressed Workstream delivery. The receiving Tag's accepted policy
 //! owns the inbox turn; a sender's Objective is provenance, never authority.
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::{MAX_MESSAGE_BYTES, v2::*};
@@ -9,6 +9,8 @@ use crate::{
     ControlPlane, HostAuthority, Store, StoreError,
     store::{MAX_TASK_PROMPT_BYTES, Result, insert_task, invalid, lease_is_live, name, owned},
 };
+
+mod direct;
 
 const MAX_MESSAGE_UTF16: usize = 8_000;
 const MAX_HOPS: i64 = 4;
@@ -99,24 +101,7 @@ pub(crate) async fn deliver_workstream_in(
     if recipients.is_empty() {
         return Ok(());
     }
-    // The approval continuation has no fresh batch of its own. Inherit the
-    // original Mailbox hop limit through any decisions in the same Session.
-    let prior_hops: Option<i64> = sqlx::query_scalar(
-        "WITH RECURSIVE source_tasks(task_id) AS (
-            SELECT CAST($1 AS TEXT)
-            UNION
-            SELECT w.task_id FROM supertag_v2_approval_waits w JOIN source_tasks s ON w.continuation_task_id=s.task_id
-        ) SELECT MAX(m.hops) FROM supertag_v2_mailbox_messages m JOIN source_tasks s ON m.task_id=s.task_id",
-    )
-    .bind(&post.source_task_id)
-    .fetch_one(&mut **tx)
-    .await?;
-    let hops = prior_hops.map_or(0, |hops| hops + 1);
-    if hops > MAX_HOPS {
-        return Err(StoreError::FailedPrecondition(
-            "this message would continue a chain through more than four inboxes".into(),
-        ));
-    }
+    let hops = outgoing_hops_in(tx, &post.source_task_id).await?;
     let objective: Option<String> =
         sqlx::query_scalar("SELECT objective_id FROM supertag_v2_objective_tasks WHERE task_id=$1")
             .bind(&post.source_task_id)
@@ -127,10 +112,32 @@ pub(crate) async fn deliver_workstream_in(
     let text = truncate_utf16(&post.body, MAX_MESSAGE_UTF16);
     for recipient in recipients {
         let order = next_order(tx).await?;
-        sqlx::query("INSERT INTO supertag_v2_mailbox_messages (message_id,sender_tag_id,recipient_tag_id,source_task_id,workstream_post_id,objective_id,text,hops,created_at_ms,delivery_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(workstream_post_id,recipient_tag_id) DO NOTHING")
+        sqlx::query("INSERT INTO supertag_v2_mailbox_messages (message_id,sender_tag_id,recipient_tag_id,source_task_id,origin,workstream_post_id,objective_id,text,hops,created_at_ms,delivery_order) VALUES ($1,$2,$3,$4,2,$5,$6,$7,$8,$9,$10) ON CONFLICT(workstream_post_id,recipient_tag_id) DO NOTHING")
             .bind(Uuid::new_v4().to_string()).bind(&post.author_tag_id).bind(recipient).bind(&post.source_task_id).bind(&post.post_id).bind(&objective).bind(&text).bind(hops).bind(now).bind(order).execute(&mut **tx).await?;
     }
     sweep_in(tx).await
+}
+
+async fn outgoing_hops_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> Result<i64> {
+    // The approval continuation has no fresh batch of its own. Inherit the
+    // original Mailbox hop limit through any decisions in the same Session.
+    let prior_hops: Option<i64> = sqlx::query_scalar(
+        "WITH RECURSIVE source_tasks(task_id) AS (
+            SELECT CAST($1 AS TEXT)
+            UNION
+            SELECT w.task_id FROM supertag_v2_approval_waits w JOIN source_tasks s ON w.continuation_task_id=s.task_id
+        ) SELECT MAX(m.hops) FROM supertag_v2_mailbox_messages m JOIN source_tasks s ON m.task_id=s.task_id",
+    )
+    .bind(task_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    let hops = prior_hops.map_or(0, |hops| hops + 1);
+    if hops > MAX_HOPS {
+        return Err(StoreError::FailedPrecondition(
+            "this message would continue a chain through more than four inboxes".into(),
+        ));
+    }
+    Ok(hops)
 }
 
 /// Keep a single waiting turn per recipient. A running turn keeps its immutable
@@ -195,13 +202,17 @@ pub(crate) async fn started_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> 
         let id: String = row.try_get("message_id")?;
         let sender: String = row.try_get("sender_tag_id")?;
         let text: String = row.try_get("text")?;
-        let source: String = row.try_get("workstream_post_id")?;
+        let source: Option<String> = row.try_get("workstream_post_id")?;
+        let provenance = match source {
+            Some(source) => format!("via=\"workstream post\" post=\"{source}\""),
+            None => "via=\"direct message\"".to_owned(),
+        };
         // Escape markup delimiters in untrusted message data and attributes.
         let from = serde_json::to_string(&sender)?
             .replace('<', "&lt;")
             .replace('>', "&gt;");
         let entry = format!(
-            "<tag-message from={from} id=\"{id}\" via=\"workstream post\" post=\"{source}\">\n{}\n</tag-message>\n",
+            "<tag-message from={from} id=\"{id}\" {provenance}>\n{}\n</tag-message>\n",
             text.replace('&', "&amp;")
                 .replace('<', "&lt;")
                 .replace('>', "&gt;")
@@ -296,6 +307,7 @@ fn message_row(row: &AnyRow) -> Result<TagMessage> {
         task_id: row.try_get("task_id")?,
         state: state as i32,
         created_at_ms: row.try_get("created_at_ms")?,
+        origin: row.try_get::<i64, _>("origin")? as i32,
     })
 }
 
@@ -313,6 +325,29 @@ impl ControlPlane {
 }
 #[tonic::async_trait]
 impl mailbox_server::Mailbox for ControlPlane {
+    async fn change_grant(
+        &self,
+        request: Request<ChangeMailboxGrantRequest>,
+    ) -> std::result::Result<Response<ChangeMailboxGrantResponse>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .change_mailbox_grant(&principal, request.get_ref())
+                .await?,
+        ))
+    }
+    async fn list_grants(
+        &self,
+        request: Request<ListMailboxGrantsRequest>,
+    ) -> std::result::Result<Response<ListMailboxGrantsResponse>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .list_mailbox_grants(&principal, request.get_ref())
+                .await?,
+        ))
+    }
+
     async fn list_messages(
         &self,
         request: Request<ListMailboxMessagesRequest>,
@@ -327,6 +362,18 @@ impl mailbox_server::Mailbox for ControlPlane {
 }
 #[tonic::async_trait]
 impl attempt_mailbox_server::AttemptMailbox for ControlPlane {
+    async fn send_message(
+        &self,
+        request: Request<SendAttemptTagMessageRequest>,
+    ) -> std::result::Result<Response<SendTagMessageResponse>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .send_attempt_tag_message(&host, request.get_ref())
+                .await?,
+        ))
+    }
+
     async fn read_mailbox(
         &self,
         request: Request<ReadMailboxRequest>,

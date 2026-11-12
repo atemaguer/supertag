@@ -2017,12 +2017,34 @@ class MailboxStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesResponse.FromString,
                 _registered_method=True)
+        self.ChangeGrant = channel.unary_unary(
+                '/supertag.runtime.v2.Mailbox/ChangeGrant',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ChangeMailboxGrantRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ChangeMailboxGrantResponse.FromString,
+                _registered_method=True)
+        self.ListGrants = channel.unary_unary(
+                '/supertag.runtime.v2.Mailbox/ListGrants',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxGrantsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxGrantsResponse.FromString,
+                _registered_method=True)
 
 
 class MailboxServicer:
     """Missing associated documentation comment in .proto file."""
 
     def ListMessages(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ChangeGrant(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListGrants(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -2035,6 +2057,16 @@ def add_MailboxServicer_to_server(servicer, server):
                     servicer.ListMessages,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesResponse.SerializeToString,
+            ),
+            'ChangeGrant': grpc.unary_unary_rpc_method_handler(
+                    servicer.ChangeGrant,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ChangeMailboxGrantRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ChangeMailboxGrantResponse.SerializeToString,
+            ),
+            'ListGrants': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListGrants,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxGrantsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxGrantsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -2074,6 +2106,60 @@ class Mailbox:
             metadata,
             _registered_method=True)
 
+    @staticmethod
+    def ChangeGrant(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Mailbox/ChangeGrant',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ChangeMailboxGrantRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ChangeMailboxGrantResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListGrants(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Mailbox/ListGrants',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxGrantsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxGrantsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
 
 class AttemptMailboxStub:
     """Missing associated documentation comment in .proto file."""
@@ -2089,12 +2175,23 @@ class AttemptMailboxStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReadMailboxRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesResponse.FromString,
                 _registered_method=True)
+        self.SendMessage = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptMailbox/SendMessage',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendAttemptTagMessageRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendTagMessageResponse.FromString,
+                _registered_method=True)
 
 
 class AttemptMailboxServicer:
     """Missing associated documentation comment in .proto file."""
 
     def ReadMailbox(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SendMessage(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -2107,6 +2204,11 @@ def add_AttemptMailboxServicer_to_server(servicer, server):
                     servicer.ReadMailbox,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReadMailboxRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesResponse.SerializeToString,
+            ),
+            'SendMessage': grpc.unary_unary_rpc_method_handler(
+                    servicer.SendMessage,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendAttemptTagMessageRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendTagMessageResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -2136,6 +2238,33 @@ class AttemptMailbox:
             '/supertag.runtime.v2.AttemptMailbox/ReadMailbox',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReadMailboxRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SendMessage(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptMailbox/SendMessage',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendAttemptTagMessageRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendTagMessageResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -2185,6 +2314,16 @@ class WorkerHostStub:
                 '/supertag.runtime.v2.WorkerHost/GetAttemptCapabilities',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptCapabilities.FromString,
+                _registered_method=True)
+        self.GetContextPins = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/GetContextPins',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ContextResolutionManifest.FromString,
+                _registered_method=True)
+        self.CommitContextResolution = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/CommitContextResolution',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitContextResolutionRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ContextResolutionManifest.FromString,
                 _registered_method=True)
         self.RenewAttempt = channel.unary_unary(
                 '/supertag.runtime.v2.WorkerHost/RenewAttempt',
@@ -2252,6 +2391,18 @@ class WorkerHostServicer:
         raise NotImplementedError('Method not implemented!')
 
     def GetAttemptCapabilities(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetContextPins(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CommitContextResolution(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -2325,6 +2476,16 @@ def add_WorkerHostServicer_to_server(servicer, server):
                     servicer.GetAttemptCapabilities,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptCapabilities.SerializeToString,
+            ),
+            'GetContextPins': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetContextPins,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ContextResolutionManifest.SerializeToString,
+            ),
+            'CommitContextResolution': grpc.unary_unary_rpc_method_handler(
+                    servicer.CommitContextResolution,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitContextResolutionRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ContextResolutionManifest.SerializeToString,
             ),
             'RenewAttempt': grpc.unary_unary_rpc_method_handler(
                     servicer.RenewAttempt,
@@ -2519,6 +2680,60 @@ class WorkerHost:
             '/supertag.runtime.v2.WorkerHost/GetAttemptCapabilities',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptCapabilities.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetContextPins(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/GetContextPins',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ContextResolutionManifest.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CommitContextResolution(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/CommitContextResolution',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitContextResolutionRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ContextResolutionManifest.FromString,
             options,
             channel_credentials,
             insecure,
@@ -4698,12 +4913,23 @@ class HarnessMailboxStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReadMailboxRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesResponse.FromString,
                 _registered_method=True)
+        self.SendMessage = channel.unary_unary(
+                '/supertag.runtime.v2.HarnessMailbox/SendMessage',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessSendTagMessageRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendTagMessageResponse.FromString,
+                _registered_method=True)
 
 
 class HarnessMailboxServicer:
     """Missing associated documentation comment in .proto file."""
 
     def Read(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SendMessage(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -4716,6 +4942,11 @@ def add_HarnessMailboxServicer_to_server(servicer, server):
                     servicer.Read,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReadMailboxRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesResponse.SerializeToString,
+            ),
+            'SendMessage': grpc.unary_unary_rpc_method_handler(
+                    servicer.SendMessage,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessSendTagMessageRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendTagMessageResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -4745,6 +4976,33 @@ class HarnessMailbox:
             '/supertag.runtime.v2.HarnessMailbox/Read',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReadMailboxRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SendMessage(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HarnessMailbox/SendMessage',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessSendTagMessageRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendTagMessageResponse.FromString,
             options,
             channel_credentials,
             insecure,

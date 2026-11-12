@@ -532,10 +532,10 @@ mod tests {
         // Simulate a crash after deletion but before clearing the Terminal record.
         drop(journal);
         let journal = Journal::open(&state)?;
-        let Some(Entry::Terminal { prepared, .. }) = journal.load()? else {
+        let Some(Entry::Terminal { prepared, attempt }) = journal.load()? else {
             anyhow::bail!("terminal receipt lost")
         };
-        crate::cleanup_terminal(&journal, &recovered, prepared.as_deref())?;
+        crate::cleanup_terminal(&journal, &recovered, &state, &attempt, prepared.as_deref())?;
         assert!(!pending.checkout.path.exists());
         assert!(pending.delivery.bundle_path.exists());
         assert!(pending.delivery.patch_path.exists());

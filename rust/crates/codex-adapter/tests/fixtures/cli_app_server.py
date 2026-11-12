@@ -40,6 +40,8 @@ def finish(message):
     notify("thread/tokenUsage/updated", {"threadId": thread, "turnId": turn, "tokenUsage": {"total": total, "last": total}})
     notify("turn/completed", {"threadId": thread, "turn": {"id": turn, "status": "completed", "items": []}})
 
+disabled_skills = set()
+
 for line in sys.stdin:
     request = json.loads(line)
     method = request.get("method")
@@ -49,6 +51,17 @@ for line in sys.stdin:
         pass
     elif method == "config/read":
         reply(request, {"layers": [], "config": {}, "origins": {}})
+    elif method == "skills/list":
+        roots = [home.joinpath("skills"), Path.cwd().joinpath(".agents/skills")]
+        skills = [{"name": path.parent.name, "path": str(path.resolve()), "enabled": str(path.resolve()) not in disabled_skills} for base in roots if base.exists() for path in sorted(base.glob("*/SKILL.md"))]
+        reply(request, {"data": [{"cwd": str(Path.cwd()), "skills": skills, "errors": []}]})
+    elif method == "skills/config/write":
+        path = request["params"]["path"]
+        if request["params"]["enabled"]:
+            disabled_skills.discard(path)
+        else:
+            disabled_skills.add(path)
+        reply(request, {"effectiveEnabled": path not in disabled_skills})
     elif method in ("thread/start", "thread/resume"):
         assert request["params"]["approvalPolicy"] == "never"
         assert request["params"]["sandbox"] == "read-only"

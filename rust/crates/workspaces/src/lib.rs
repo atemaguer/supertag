@@ -5,6 +5,7 @@
 //! head: the Control Plane chooses a verified delivery's commit as the next pin.
 
 mod git;
+pub mod packages;
 mod paths;
 
 use anyhow::{Context, Result, bail, ensure};

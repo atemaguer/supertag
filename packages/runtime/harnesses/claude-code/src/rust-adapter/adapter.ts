@@ -29,6 +29,7 @@ import {
   LiveInputReceipt,
   TaskState,
 } from "./gen/supertag/runtime/v2/runtime_pb.js";
+import { selectSkills, stageSkills } from "./skills.js";
 
 const ACTIONS: Readonly<Record<string, readonly string[]>> = {
   "files:read": ["Read", "Glob", "Grep"],
@@ -36,6 +37,7 @@ const ACTIONS: Readonly<Record<string, readonly string[]>> = {
   "web:search": ["WebSearch"],
   "web:fetch": ["WebFetch"],
   [WORKSTREAM_POST_ACTION]: [],
+  "mailbox:send": [],
 };
 
 export class UnsupportedPermissionError extends Error {}
@@ -53,13 +55,14 @@ export function admittedTools(actions: readonly string[]): string[] {
   return [...new Set(actions.flatMap((action) => ACTIONS[action] ?? []))];
 }
 
-async function withinWorkspace(cwd: string, path: unknown): Promise<boolean> {
+async function withinRoots(cwd: string, path: unknown, roots: readonly string[]): Promise<boolean> {
   if (typeof path !== "string" || path.includes("\0")) return false;
   const target = resolve(cwd, path);
-  const inside = (value: string) => {
-    const part = relative(cwd, value);
-    return part !== ".." && !part.startsWith("../") && !isAbsolute(part);
-  };
+  const inside = (value: string) =>
+    roots.some((root) => {
+      const part = relative(root, value);
+      return part !== ".." && !part.startsWith("../") && !isAbsolute(part);
+    });
   if (!inside(target)) return false;
   let existing = target;
   for (;;) {
@@ -84,10 +87,21 @@ export function permissionHook(
   tools: readonly string[],
   cwd: string,
   signal: AbortSignal,
+  skills: ReadonlySet<string> = new Set(),
+  skillRoots: readonly string[] = [],
 ): HookCallback {
   return async (hook) => {
     if (hook.hook_event_name !== "PreToolUse") return {};
     let allowed = !signal.aborted && tools.includes(hook.tool_name) && hook.agent_id === undefined;
+    if (allowed && hook.tool_name === "Skill") {
+      const input = hook.tool_input;
+      allowed =
+        input !== null &&
+        typeof input === "object" &&
+        "skill" in input &&
+        typeof input.skill === "string" &&
+        skills.has(input.skill);
+    }
     if (allowed && hook.tool_name.startsWith(COORDINATION_PREFIX)) {
       allowed =
         hook.mcp_server?.source === "sdk" &&
@@ -99,7 +113,8 @@ export function permissionHook(
       const path = ["Read", "Write", "Edit"].includes(hook.tool_name)
         ? input["file_path"]
         : (input["path"] ?? cwd);
-      allowed = await withinWorkspace(cwd, path);
+      const writes = hook.tool_name === "Write" || hook.tool_name === "Edit";
+      allowed = await withinRoots(cwd, path, writes ? [cwd] : [cwd, ...skillRoots]);
       if (allowed && ["Glob", "Grep"].includes(hook.tool_name)) {
         const pattern = input[hook.tool_name === "Glob" ? "pattern" : "glob"];
         if (
@@ -115,7 +130,7 @@ export function permissionHook(
         permissionDecision: allowed ? "allow" : "deny",
         permissionDecisionReason: allowed
           ? "Accepted Task permission"
-          : "Outside the accepted Task permissions or workspace",
+          : "Outside the accepted Task permissions or allowed paths",
       },
     };
   };
@@ -126,6 +141,39 @@ export interface AdapterOptions {
   readonly model?: string;
   readonly timeoutMs?: number;
   readonly environment?: NodeJS.ProcessEnv;
+}
+
+function verifiedSkillQuery(names: ReadonlySet<string>): typeof query {
+  if (!names.size) return query;
+  return ({ prompt, options }) => {
+    if (typeof prompt === "string") throw new Error("Skill verification requires a prompt stream");
+    const gate = Promise.withResolvers<void>();
+    const execution = query({
+      prompt: (async function* () {
+        await gate.promise;
+        yield* prompt;
+      })(),
+      options: { ...options, pluginDelivery: "initialize" },
+    });
+    const refuse = () => {
+      gate.reject(new Error("Claude could not verify the admitted native Skills"));
+      options?.abortController?.abort();
+    };
+    void gate.promise.catch(() => {});
+    void execution.initializationResult().then((result) => {
+      const commands = new Set(result.commands?.map(({ name }) => name));
+      if (
+        result.plugins_applied !== true ||
+        result.hooks_applied === false ||
+        [...names].some((name) => !commands.has(name))
+      ) {
+        refuse();
+        return;
+      }
+      gate.resolve();
+    }, refuse);
+    return execution;
+  };
 }
 
 /** Normal Node application boundary: the native SDK remains the vendor implementation. */
@@ -171,10 +219,14 @@ export async function runAdapter(
   let phase = "configuration";
   const pendingSettlements: Promise<unknown>[] = [];
   try {
-    if (task.policySnapshot?.contextSets.some((set) => set.items.some((item) => item.required)))
+    let selected: ReturnType<typeof selectSkills>;
+    try {
+      selected = selectSkills(task, run.resolvedSkills);
+    } catch {
       throw new SafeAdapterFailure(
-        "Claude has no resolver for a required Context Item. Native execution did not start.",
+        "Claude could not verify a required Context Item or delivered Skill. Native execution did not start.",
       );
+    }
     const tools = admittedTools(task.allowedActions);
     const model = task.policySnapshot?.execution?.models[0] ?? configuration.model;
     const coordination = coordinationTools(harness, run, {
@@ -185,8 +237,15 @@ export async function runAdapter(
       signal: controller.signal,
       active: () => !finalSeen,
     });
-    const allowedTools = [...tools, ...coordination.tools];
     const { env, cwd } = await nativeEnvironment(environment);
+    phase = "Skill preparation";
+    const { plugins, names, roots } = await stageSkills(
+      selected,
+      env["CLAUDE_CONFIG_DIR"] ?? "",
+      controller.signal,
+    );
+    if (names.size > 0) tools.push("Skill");
+    const allowedTools = [...tools, ...coordination.tools];
     phase = "checkpoint validation";
     const restored = restoreCheckpoint(run.checkpoint, task, cwd);
     nativeSessionId = restored?.nativeSessionId;
@@ -205,21 +264,35 @@ export async function runAdapter(
       cwd,
       tools,
       allowedTools,
-      disallowedTools: ["Agent", "Task", "Skill", "TaskOutput", "TaskStop"],
+      disallowedTools: [
+        "Agent",
+        "Task",
+        "TaskOutput",
+        "TaskStop",
+        ...(names.size ? [] : ["Skill"]),
+      ],
       permissionMode: "dontAsk",
       settingSources: [],
-      skills: [],
-      plugins: [],
+      skills: [...names],
+      plugins,
       strictMcpConfig: true,
       mcpServers: coordination.servers,
-      settings: { syncClaudeAiSkills: false, syncClaudeAiPlugins: false },
+      settings: {
+        syncClaudeAiSkills: false,
+        syncClaudeAiPlugins: false,
+        disableSkillShellExecution: true,
+      },
       systemPrompt: task.instructions,
       env,
       stderr: () => {},
       includePartialMessages: true,
       sessionStore: store,
       sessionStoreFlush: "eager",
-      hooks: { PreToolUse: [{ hooks: [permissionHook(allowedTools, cwd, controller.signal)] }] },
+      hooks: {
+        PreToolUse: [
+          { hooks: [permissionHook(allowedTools, cwd, controller.signal, names, roots)] },
+        ],
+      },
       ...(restored ? { resume: restored.nativeSessionId } : {}),
       ...(configuration.executable ? { pathToClaudeCodeExecutable: configuration.executable } : {}),
       ...(model ? { model } : {}),
@@ -297,11 +370,17 @@ export async function runAdapter(
       }
     };
     phase = "native SDK execution";
-    for await (const message of claudeQuery(query, task.prompt, sdkOptions, controller.signal, {
-      input: live,
-      drainMs: 500,
-      exitMs: 5000,
-    })) {
+    for await (const message of claudeQuery(
+      verifiedSkillQuery(names),
+      task.prompt,
+      sdkOptions,
+      controller.signal,
+      {
+        input: live,
+        drainMs: 500,
+        exitMs: 5000,
+      },
+    )) {
       if ("session_id" in message && typeof message.session_id === "string" && message.session_id) {
         if (nativeSessionId && nativeSessionId !== message.session_id)
           throw new Error("Claude changed the approved native Session");

@@ -24,7 +24,8 @@ use supertag_protocol::{
         HarnessCompleteRequest, HarnessCompleteResponse, HarnessPublishRequest, HarnessRun,
         HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest, HarnessUsageRequest,
         InspectAttemptRequest, LiveInput, ObjectiveSignal, ReportAttemptUsageRequest,
-        ReportAttemptUsageResponse, SessionCheckpoint, TakeInputResponse, TaskEvent, TaskState,
+        ReportAttemptUsageResponse, ResolvedSkill, SessionCheckpoint, TakeInputResponse, TaskEvent,
+        TaskState,
         harness_server::{Harness, HarnessServer},
     },
     validate_checkpoint_reference,
@@ -51,6 +52,7 @@ struct Bridge {
     token: String,
     assignment: Assignment,
     checkpoint: Option<SessionCheckpoint>,
+    resolved_skills: Vec<ResolvedSkill>,
     host_token: String,
     host: RegisteredHost,
     coordination: CoordinationClients,
@@ -120,6 +122,7 @@ impl Harness for Bridge {
             checkpoint: self.checkpoint.clone(),
             may_ask_objective_question: capabilities.may_ask_objective_question,
             coordination: Some(capabilities),
+            resolved_skills: self.resolved_skills.clone(),
         }))
     }
 
@@ -257,7 +260,11 @@ impl Harness for Bridge {
 pub(crate) async fn execute(
     options: &HostOptions,
     assignment: Assignment,
-    (checkpoint, workspace): (Option<SessionCheckpoint>, Option<&Path>),
+    (checkpoint, workspace, resolved_skills): (
+        Option<SessionCheckpoint>,
+        Option<&Path>,
+        Vec<ResolvedSkill>,
+    ),
     (host, inputs, coordination): (RegisteredHost, RegisteredInputs, CoordinationClients),
     host_token: &str,
     valid_until: Instant,
@@ -273,6 +280,7 @@ pub(crate) async fn execute(
         token: bootstrap.token.clone(),
         assignment,
         checkpoint,
+        resolved_skills,
         host_token: host_token.to_owned(),
         host,
         coordination,

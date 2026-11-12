@@ -264,6 +264,7 @@ message AttemptCapabilities {
   bool may_ask_objective_question = 1;
   bool may_use_workstream = 2;
   bool may_read_mailbox = 3;
+  bool may_send_tag_message = 4;
 }
 
 service Teams {
@@ -282,10 +283,19 @@ service AttemptWorkstreams {
 
 service Mailbox {
   rpc ListMessages(ListMailboxMessagesRequest) returns (ListMailboxMessagesResponse);
+  rpc ChangeGrant(ChangeMailboxGrantRequest) returns (ChangeMailboxGrantResponse);
+  rpc ListGrants(ListMailboxGrantsRequest) returns (ListMailboxGrantsResponse);
 }
 
 service AttemptMailbox {
   rpc ReadMailbox(ReadMailboxRequest) returns (ListMailboxMessagesResponse);
+  rpc SendMessage(SendAttemptTagMessageRequest) returns (SendTagMessageResponse);
+}
+
+enum TagMessageOrigin {
+  TAG_MESSAGE_ORIGIN_UNSPECIFIED = 0;
+  TAG_MESSAGE_ORIGIN_DIRECT = 1;
+  TAG_MESSAGE_ORIGIN_WORKSTREAM = 2;
 }
 
 enum TagMessageState {
@@ -300,13 +310,54 @@ message TagMessage {
   string sender_tag_id = 2;
   string recipient_tag_id = 3;
   string source_task_id = 4;
-  string workstream_post_id = 5;
+  optional string workstream_post_id = 5;
   optional string objective_id = 6;
   string text = 7;
   uint32 hops = 8;
   optional string task_id = 9;
   TagMessageState state = 10;
   int64 created_at_ms = 11;
+  TagMessageOrigin origin = 12;
+}
+
+message SendAttemptTagMessageRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string recipient_tag_id = 3;
+  string text = 4;
+}
+
+message SendTagMessageResponse {
+  TagMessage message = 1;
+  bool duplicate = 2;
+  Approval approval = 3;
+}
+
+message ChangeMailboxGrantRequest {
+  string operation_id = 1;
+  string sender_tag_id = 2;
+  string recipient_tag_id = 3;
+  bool granted = 4;
+}
+
+message ChangeMailboxGrantResponse { bool changed = 1; }
+
+message ListMailboxGrantsRequest {
+  string tag_id = 1;
+  uint32 limit = 2;
+  string cursor = 3;
+}
+
+message MailboxGrant {
+  string sender_tag_id = 1;
+  string recipient_tag_id = 2;
+  string granted_by = 3;
+  int64 granted_at_ms = 4;
+}
+
+message ListMailboxGrantsResponse {
+  repeated MailboxGrant grants = 1;
+  string next_cursor = 2;
 }
 
 message ListMailboxMessagesRequest {
@@ -333,6 +384,8 @@ service WorkerHost {
   rpc StartTask(StartTaskRequest) returns (Task);
   rpc InspectAttempt(InspectAttemptRequest) returns (Task);
   rpc GetAttemptCapabilities(InspectAttemptRequest) returns (AttemptCapabilities);
+  rpc GetContextPins(InspectAttemptRequest) returns (ContextResolutionManifest);
+  rpc CommitContextResolution(CommitContextResolutionRequest) returns (ContextResolutionManifest);
   rpc RenewAttempt(InspectAttemptRequest) returns (AttemptAuthority);
   rpc GetAttemptResolution(InspectAttemptRequest) returns (GetAttemptResolutionResponse);
   rpc ReportAttemptUsage(ReportAttemptUsageRequest) returns (ReportAttemptUsageResponse);
@@ -513,6 +566,13 @@ message HarnessPostWorkstreamRequest {
 
 service HarnessMailbox {
   rpc Read(HarnessReadMailboxRequest) returns (ListMailboxMessagesResponse);
+  rpc SendMessage(HarnessSendTagMessageRequest) returns (SendTagMessageResponse);
+}
+
+message HarnessSendTagMessageRequest {
+  string operation_id = 1;
+  string recipient_tag_id = 2;
+  string text = 3;
 }
 
 message HarnessReadMailboxRequest {
@@ -789,6 +849,7 @@ message ClaimTaskRequest {
   string operation_id = 1;
   repeated string workspace_ids = 2;
   HarnessKind harness_kind = 3;
+  repeated ContextContract context_contracts = 4;
 }
 
 message ClaimTaskResponse {
@@ -918,6 +979,45 @@ message HarnessRun {
   SessionCheckpoint checkpoint = 3;
   bool may_ask_objective_question = 4;
   AttemptCapabilities coordination = 5;
+  repeated ResolvedSkill resolved_skills = 6;
+}
+
+message ContextContract {
+  string type = 1;
+  uint32 version = 2;
+}
+
+message ContextPin {
+  string set_id = 1;
+  string item_id = 2;
+  string item_key = 3;
+  string reference = 4;
+  string version = 5;
+  string digest = 6;
+}
+
+message OmittedContextItem {
+  string set_id = 1;
+  string item_id = 2;
+  string item_key = 3;
+  string type = 4;
+  uint32 version = 5;
+  string reason = 6;
+}
+
+message ContextResolutionManifest {
+  repeated ContextPin pins = 1;
+  repeated OmittedContextItem omissions = 2;
+}
+
+message ResolvedSkill {
+  ContextPin pin = 1;
+  string local_path = 2;
+}
+
+message CommitContextResolutionRequest {
+  InspectAttemptRequest attempt = 1;
+  ContextResolutionManifest manifest = 2;
 }
 
 message SessionCheckpoint {

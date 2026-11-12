@@ -23,6 +23,8 @@ const _ = connect.IsAtLeastVersion1_13_0
 const (
 	// PolicyCatalogName is the fully-qualified name of the PolicyCatalog service.
 	PolicyCatalogName = "supertag.runtime.v2.PolicyCatalog"
+	// SurfacePolicyCatalogName is the fully-qualified name of the SurfacePolicyCatalog service.
+	SurfacePolicyCatalogName = "supertag.runtime.v2.SurfacePolicyCatalog"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -72,6 +74,27 @@ const (
 	// PolicyCatalogDeactivateRoleAssignmentProcedure is the fully-qualified name of the PolicyCatalog's
 	// DeactivateRoleAssignment RPC.
 	PolicyCatalogDeactivateRoleAssignmentProcedure = "/supertag.runtime.v2.PolicyCatalog/DeactivateRoleAssignment"
+	// SurfacePolicyCatalogPutSurfaceAccountProcedure is the fully-qualified name of the
+	// SurfacePolicyCatalog's PutSurfaceAccount RPC.
+	SurfacePolicyCatalogPutSurfaceAccountProcedure = "/supertag.runtime.v2.SurfacePolicyCatalog/PutSurfaceAccount"
+	// SurfacePolicyCatalogGetSurfaceAccountProcedure is the fully-qualified name of the
+	// SurfacePolicyCatalog's GetSurfaceAccount RPC.
+	SurfacePolicyCatalogGetSurfaceAccountProcedure = "/supertag.runtime.v2.SurfacePolicyCatalog/GetSurfaceAccount"
+	// SurfacePolicyCatalogListSurfaceAccountsProcedure is the fully-qualified name of the
+	// SurfacePolicyCatalog's ListSurfaceAccounts RPC.
+	SurfacePolicyCatalogListSurfaceAccountsProcedure = "/supertag.runtime.v2.SurfacePolicyCatalog/ListSurfaceAccounts"
+	// SurfacePolicyCatalogPutSurfaceLocationProcedure is the fully-qualified name of the
+	// SurfacePolicyCatalog's PutSurfaceLocation RPC.
+	SurfacePolicyCatalogPutSurfaceLocationProcedure = "/supertag.runtime.v2.SurfacePolicyCatalog/PutSurfaceLocation"
+	// SurfacePolicyCatalogGetSurfaceLocationProcedure is the fully-qualified name of the
+	// SurfacePolicyCatalog's GetSurfaceLocation RPC.
+	SurfacePolicyCatalogGetSurfaceLocationProcedure = "/supertag.runtime.v2.SurfacePolicyCatalog/GetSurfaceLocation"
+	// SurfacePolicyCatalogListSurfaceLocationsProcedure is the fully-qualified name of the
+	// SurfacePolicyCatalog's ListSurfaceLocations RPC.
+	SurfacePolicyCatalogListSurfaceLocationsProcedure = "/supertag.runtime.v2.SurfacePolicyCatalog/ListSurfaceLocations"
+	// SurfacePolicyCatalogDeleteSurfaceLocationProcedure is the fully-qualified name of the
+	// SurfacePolicyCatalog's DeleteSurfaceLocation RPC.
+	SurfacePolicyCatalogDeleteSurfaceLocationProcedure = "/supertag.runtime.v2.SurfacePolicyCatalog/DeleteSurfaceLocation"
 )
 
 // PolicyCatalogClient is a client for the supertag.runtime.v2.PolicyCatalog service.
@@ -480,4 +503,231 @@ func (UnimplementedPolicyCatalogHandler) ListRoleAssignments(context.Context, *c
 
 func (UnimplementedPolicyCatalogHandler) DeactivateRoleAssignment(context.Context, *connect.Request[runtimev2.DeactivateRoleAssignmentRequest]) (*connect.Response[runtimev2.RoleAssignment], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.PolicyCatalog.DeactivateRoleAssignment is not implemented"))
+}
+
+// SurfacePolicyCatalogClient is a client for the supertag.runtime.v2.SurfacePolicyCatalog service.
+type SurfacePolicyCatalogClient interface {
+	PutSurfaceAccount(context.Context, *connect.Request[runtimev2.PutSurfaceAccountRequest]) (*connect.Response[runtimev2.SurfaceAccount], error)
+	GetSurfaceAccount(context.Context, *connect.Request[runtimev2.GetSurfaceAccountRequest]) (*connect.Response[runtimev2.SurfaceAccount], error)
+	ListSurfaceAccounts(context.Context, *connect.Request[runtimev2.ListSurfaceAccountsRequest]) (*connect.Response[runtimev2.ListSurfaceAccountsResponse], error)
+	PutSurfaceLocation(context.Context, *connect.Request[runtimev2.PutSurfaceLocationRequest]) (*connect.Response[runtimev2.SurfaceLocation], error)
+	GetSurfaceLocation(context.Context, *connect.Request[runtimev2.GetSurfaceLocationRequest]) (*connect.Response[runtimev2.SurfaceLocation], error)
+	ListSurfaceLocations(context.Context, *connect.Request[runtimev2.ListSurfaceLocationsRequest]) (*connect.Response[runtimev2.ListSurfaceLocationsResponse], error)
+	DeleteSurfaceLocation(context.Context, *connect.Request[runtimev2.DeleteSurfaceLocationRequest]) (*connect.Response[runtimev2.DeletePolicyResourceResponse], error)
+}
+
+// NewSurfacePolicyCatalogClient constructs a client for the
+// supertag.runtime.v2.SurfacePolicyCatalog service. By default, it uses the Connect protocol with
+// the binary Protobuf Codec, asks for gzipped responses, and sends uncompressed requests. To use
+// the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewSurfacePolicyCatalogClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) SurfacePolicyCatalogClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	surfacePolicyCatalogMethods := runtimev2.File_supertag_runtime_v2_policy_proto.Services().ByName("SurfacePolicyCatalog").Methods()
+	return &surfacePolicyCatalogClient{
+		putSurfaceAccount: connect.NewClient[runtimev2.PutSurfaceAccountRequest, runtimev2.SurfaceAccount](
+			httpClient,
+			baseURL+SurfacePolicyCatalogPutSurfaceAccountProcedure,
+			connect.WithSchema(surfacePolicyCatalogMethods.ByName("PutSurfaceAccount")),
+			connect.WithClientOptions(opts...),
+		),
+		getSurfaceAccount: connect.NewClient[runtimev2.GetSurfaceAccountRequest, runtimev2.SurfaceAccount](
+			httpClient,
+			baseURL+SurfacePolicyCatalogGetSurfaceAccountProcedure,
+			connect.WithSchema(surfacePolicyCatalogMethods.ByName("GetSurfaceAccount")),
+			connect.WithClientOptions(opts...),
+		),
+		listSurfaceAccounts: connect.NewClient[runtimev2.ListSurfaceAccountsRequest, runtimev2.ListSurfaceAccountsResponse](
+			httpClient,
+			baseURL+SurfacePolicyCatalogListSurfaceAccountsProcedure,
+			connect.WithSchema(surfacePolicyCatalogMethods.ByName("ListSurfaceAccounts")),
+			connect.WithClientOptions(opts...),
+		),
+		putSurfaceLocation: connect.NewClient[runtimev2.PutSurfaceLocationRequest, runtimev2.SurfaceLocation](
+			httpClient,
+			baseURL+SurfacePolicyCatalogPutSurfaceLocationProcedure,
+			connect.WithSchema(surfacePolicyCatalogMethods.ByName("PutSurfaceLocation")),
+			connect.WithClientOptions(opts...),
+		),
+		getSurfaceLocation: connect.NewClient[runtimev2.GetSurfaceLocationRequest, runtimev2.SurfaceLocation](
+			httpClient,
+			baseURL+SurfacePolicyCatalogGetSurfaceLocationProcedure,
+			connect.WithSchema(surfacePolicyCatalogMethods.ByName("GetSurfaceLocation")),
+			connect.WithClientOptions(opts...),
+		),
+		listSurfaceLocations: connect.NewClient[runtimev2.ListSurfaceLocationsRequest, runtimev2.ListSurfaceLocationsResponse](
+			httpClient,
+			baseURL+SurfacePolicyCatalogListSurfaceLocationsProcedure,
+			connect.WithSchema(surfacePolicyCatalogMethods.ByName("ListSurfaceLocations")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteSurfaceLocation: connect.NewClient[runtimev2.DeleteSurfaceLocationRequest, runtimev2.DeletePolicyResourceResponse](
+			httpClient,
+			baseURL+SurfacePolicyCatalogDeleteSurfaceLocationProcedure,
+			connect.WithSchema(surfacePolicyCatalogMethods.ByName("DeleteSurfaceLocation")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// surfacePolicyCatalogClient implements SurfacePolicyCatalogClient.
+type surfacePolicyCatalogClient struct {
+	putSurfaceAccount     *connect.Client[runtimev2.PutSurfaceAccountRequest, runtimev2.SurfaceAccount]
+	getSurfaceAccount     *connect.Client[runtimev2.GetSurfaceAccountRequest, runtimev2.SurfaceAccount]
+	listSurfaceAccounts   *connect.Client[runtimev2.ListSurfaceAccountsRequest, runtimev2.ListSurfaceAccountsResponse]
+	putSurfaceLocation    *connect.Client[runtimev2.PutSurfaceLocationRequest, runtimev2.SurfaceLocation]
+	getSurfaceLocation    *connect.Client[runtimev2.GetSurfaceLocationRequest, runtimev2.SurfaceLocation]
+	listSurfaceLocations  *connect.Client[runtimev2.ListSurfaceLocationsRequest, runtimev2.ListSurfaceLocationsResponse]
+	deleteSurfaceLocation *connect.Client[runtimev2.DeleteSurfaceLocationRequest, runtimev2.DeletePolicyResourceResponse]
+}
+
+// PutSurfaceAccount calls supertag.runtime.v2.SurfacePolicyCatalog.PutSurfaceAccount.
+func (c *surfacePolicyCatalogClient) PutSurfaceAccount(ctx context.Context, req *connect.Request[runtimev2.PutSurfaceAccountRequest]) (*connect.Response[runtimev2.SurfaceAccount], error) {
+	return c.putSurfaceAccount.CallUnary(ctx, req)
+}
+
+// GetSurfaceAccount calls supertag.runtime.v2.SurfacePolicyCatalog.GetSurfaceAccount.
+func (c *surfacePolicyCatalogClient) GetSurfaceAccount(ctx context.Context, req *connect.Request[runtimev2.GetSurfaceAccountRequest]) (*connect.Response[runtimev2.SurfaceAccount], error) {
+	return c.getSurfaceAccount.CallUnary(ctx, req)
+}
+
+// ListSurfaceAccounts calls supertag.runtime.v2.SurfacePolicyCatalog.ListSurfaceAccounts.
+func (c *surfacePolicyCatalogClient) ListSurfaceAccounts(ctx context.Context, req *connect.Request[runtimev2.ListSurfaceAccountsRequest]) (*connect.Response[runtimev2.ListSurfaceAccountsResponse], error) {
+	return c.listSurfaceAccounts.CallUnary(ctx, req)
+}
+
+// PutSurfaceLocation calls supertag.runtime.v2.SurfacePolicyCatalog.PutSurfaceLocation.
+func (c *surfacePolicyCatalogClient) PutSurfaceLocation(ctx context.Context, req *connect.Request[runtimev2.PutSurfaceLocationRequest]) (*connect.Response[runtimev2.SurfaceLocation], error) {
+	return c.putSurfaceLocation.CallUnary(ctx, req)
+}
+
+// GetSurfaceLocation calls supertag.runtime.v2.SurfacePolicyCatalog.GetSurfaceLocation.
+func (c *surfacePolicyCatalogClient) GetSurfaceLocation(ctx context.Context, req *connect.Request[runtimev2.GetSurfaceLocationRequest]) (*connect.Response[runtimev2.SurfaceLocation], error) {
+	return c.getSurfaceLocation.CallUnary(ctx, req)
+}
+
+// ListSurfaceLocations calls supertag.runtime.v2.SurfacePolicyCatalog.ListSurfaceLocations.
+func (c *surfacePolicyCatalogClient) ListSurfaceLocations(ctx context.Context, req *connect.Request[runtimev2.ListSurfaceLocationsRequest]) (*connect.Response[runtimev2.ListSurfaceLocationsResponse], error) {
+	return c.listSurfaceLocations.CallUnary(ctx, req)
+}
+
+// DeleteSurfaceLocation calls supertag.runtime.v2.SurfacePolicyCatalog.DeleteSurfaceLocation.
+func (c *surfacePolicyCatalogClient) DeleteSurfaceLocation(ctx context.Context, req *connect.Request[runtimev2.DeleteSurfaceLocationRequest]) (*connect.Response[runtimev2.DeletePolicyResourceResponse], error) {
+	return c.deleteSurfaceLocation.CallUnary(ctx, req)
+}
+
+// SurfacePolicyCatalogHandler is an implementation of the supertag.runtime.v2.SurfacePolicyCatalog
+// service.
+type SurfacePolicyCatalogHandler interface {
+	PutSurfaceAccount(context.Context, *connect.Request[runtimev2.PutSurfaceAccountRequest]) (*connect.Response[runtimev2.SurfaceAccount], error)
+	GetSurfaceAccount(context.Context, *connect.Request[runtimev2.GetSurfaceAccountRequest]) (*connect.Response[runtimev2.SurfaceAccount], error)
+	ListSurfaceAccounts(context.Context, *connect.Request[runtimev2.ListSurfaceAccountsRequest]) (*connect.Response[runtimev2.ListSurfaceAccountsResponse], error)
+	PutSurfaceLocation(context.Context, *connect.Request[runtimev2.PutSurfaceLocationRequest]) (*connect.Response[runtimev2.SurfaceLocation], error)
+	GetSurfaceLocation(context.Context, *connect.Request[runtimev2.GetSurfaceLocationRequest]) (*connect.Response[runtimev2.SurfaceLocation], error)
+	ListSurfaceLocations(context.Context, *connect.Request[runtimev2.ListSurfaceLocationsRequest]) (*connect.Response[runtimev2.ListSurfaceLocationsResponse], error)
+	DeleteSurfaceLocation(context.Context, *connect.Request[runtimev2.DeleteSurfaceLocationRequest]) (*connect.Response[runtimev2.DeletePolicyResourceResponse], error)
+}
+
+// NewSurfacePolicyCatalogHandler builds an HTTP handler from the service implementation. It returns
+// the path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewSurfacePolicyCatalogHandler(svc SurfacePolicyCatalogHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	surfacePolicyCatalogMethods := runtimev2.File_supertag_runtime_v2_policy_proto.Services().ByName("SurfacePolicyCatalog").Methods()
+	surfacePolicyCatalogPutSurfaceAccountHandler := connect.NewUnaryHandler(
+		SurfacePolicyCatalogPutSurfaceAccountProcedure,
+		svc.PutSurfaceAccount,
+		connect.WithSchema(surfacePolicyCatalogMethods.ByName("PutSurfaceAccount")),
+		connect.WithHandlerOptions(opts...),
+	)
+	surfacePolicyCatalogGetSurfaceAccountHandler := connect.NewUnaryHandler(
+		SurfacePolicyCatalogGetSurfaceAccountProcedure,
+		svc.GetSurfaceAccount,
+		connect.WithSchema(surfacePolicyCatalogMethods.ByName("GetSurfaceAccount")),
+		connect.WithHandlerOptions(opts...),
+	)
+	surfacePolicyCatalogListSurfaceAccountsHandler := connect.NewUnaryHandler(
+		SurfacePolicyCatalogListSurfaceAccountsProcedure,
+		svc.ListSurfaceAccounts,
+		connect.WithSchema(surfacePolicyCatalogMethods.ByName("ListSurfaceAccounts")),
+		connect.WithHandlerOptions(opts...),
+	)
+	surfacePolicyCatalogPutSurfaceLocationHandler := connect.NewUnaryHandler(
+		SurfacePolicyCatalogPutSurfaceLocationProcedure,
+		svc.PutSurfaceLocation,
+		connect.WithSchema(surfacePolicyCatalogMethods.ByName("PutSurfaceLocation")),
+		connect.WithHandlerOptions(opts...),
+	)
+	surfacePolicyCatalogGetSurfaceLocationHandler := connect.NewUnaryHandler(
+		SurfacePolicyCatalogGetSurfaceLocationProcedure,
+		svc.GetSurfaceLocation,
+		connect.WithSchema(surfacePolicyCatalogMethods.ByName("GetSurfaceLocation")),
+		connect.WithHandlerOptions(opts...),
+	)
+	surfacePolicyCatalogListSurfaceLocationsHandler := connect.NewUnaryHandler(
+		SurfacePolicyCatalogListSurfaceLocationsProcedure,
+		svc.ListSurfaceLocations,
+		connect.WithSchema(surfacePolicyCatalogMethods.ByName("ListSurfaceLocations")),
+		connect.WithHandlerOptions(opts...),
+	)
+	surfacePolicyCatalogDeleteSurfaceLocationHandler := connect.NewUnaryHandler(
+		SurfacePolicyCatalogDeleteSurfaceLocationProcedure,
+		svc.DeleteSurfaceLocation,
+		connect.WithSchema(surfacePolicyCatalogMethods.ByName("DeleteSurfaceLocation")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.SurfacePolicyCatalog/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case SurfacePolicyCatalogPutSurfaceAccountProcedure:
+			surfacePolicyCatalogPutSurfaceAccountHandler.ServeHTTP(w, r)
+		case SurfacePolicyCatalogGetSurfaceAccountProcedure:
+			surfacePolicyCatalogGetSurfaceAccountHandler.ServeHTTP(w, r)
+		case SurfacePolicyCatalogListSurfaceAccountsProcedure:
+			surfacePolicyCatalogListSurfaceAccountsHandler.ServeHTTP(w, r)
+		case SurfacePolicyCatalogPutSurfaceLocationProcedure:
+			surfacePolicyCatalogPutSurfaceLocationHandler.ServeHTTP(w, r)
+		case SurfacePolicyCatalogGetSurfaceLocationProcedure:
+			surfacePolicyCatalogGetSurfaceLocationHandler.ServeHTTP(w, r)
+		case SurfacePolicyCatalogListSurfaceLocationsProcedure:
+			surfacePolicyCatalogListSurfaceLocationsHandler.ServeHTTP(w, r)
+		case SurfacePolicyCatalogDeleteSurfaceLocationProcedure:
+			surfacePolicyCatalogDeleteSurfaceLocationHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedSurfacePolicyCatalogHandler returns CodeUnimplemented from all methods.
+type UnimplementedSurfacePolicyCatalogHandler struct{}
+
+func (UnimplementedSurfacePolicyCatalogHandler) PutSurfaceAccount(context.Context, *connect.Request[runtimev2.PutSurfaceAccountRequest]) (*connect.Response[runtimev2.SurfaceAccount], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.SurfacePolicyCatalog.PutSurfaceAccount is not implemented"))
+}
+
+func (UnimplementedSurfacePolicyCatalogHandler) GetSurfaceAccount(context.Context, *connect.Request[runtimev2.GetSurfaceAccountRequest]) (*connect.Response[runtimev2.SurfaceAccount], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.SurfacePolicyCatalog.GetSurfaceAccount is not implemented"))
+}
+
+func (UnimplementedSurfacePolicyCatalogHandler) ListSurfaceAccounts(context.Context, *connect.Request[runtimev2.ListSurfaceAccountsRequest]) (*connect.Response[runtimev2.ListSurfaceAccountsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.SurfacePolicyCatalog.ListSurfaceAccounts is not implemented"))
+}
+
+func (UnimplementedSurfacePolicyCatalogHandler) PutSurfaceLocation(context.Context, *connect.Request[runtimev2.PutSurfaceLocationRequest]) (*connect.Response[runtimev2.SurfaceLocation], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.SurfacePolicyCatalog.PutSurfaceLocation is not implemented"))
+}
+
+func (UnimplementedSurfacePolicyCatalogHandler) GetSurfaceLocation(context.Context, *connect.Request[runtimev2.GetSurfaceLocationRequest]) (*connect.Response[runtimev2.SurfaceLocation], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.SurfacePolicyCatalog.GetSurfaceLocation is not implemented"))
+}
+
+func (UnimplementedSurfacePolicyCatalogHandler) ListSurfaceLocations(context.Context, *connect.Request[runtimev2.ListSurfaceLocationsRequest]) (*connect.Response[runtimev2.ListSurfaceLocationsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.SurfacePolicyCatalog.ListSurfaceLocations is not implemented"))
+}
+
+func (UnimplementedSurfacePolicyCatalogHandler) DeleteSurfaceLocation(context.Context, *connect.Request[runtimev2.DeleteSurfaceLocationRequest]) (*connect.Response[runtimev2.DeletePolicyResourceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.SurfacePolicyCatalog.DeleteSurfaceLocation is not implemented"))
 }

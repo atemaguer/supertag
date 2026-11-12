@@ -13,11 +13,12 @@ use supertag_protocol::{
 };
 use tonic::{Code, transport::Channel};
 
-use crate::coordination::{self, Arguments};
+use crate::coordination::{self, Arguments, Inventory};
 
 pub(crate) const NONE: &str = "none-v1";
 pub(crate) const OBJECTIVE_ASK: &str = "objective-ask-text-v1";
 pub(crate) const FULL_COORDINATION: &str = "coordination-v1";
+pub(crate) const DIRECT_COORDINATION: &str = "coordination-v2";
 
 pub(crate) struct Bridge {
     client: HarnessQuestionsClient<Channel>,
@@ -26,7 +27,7 @@ pub(crate) struct Bridge {
     tag_id: String,
     attempt_id: String,
     capabilities: AttemptCapabilities,
-    full_inventory: bool,
+    inventory: Inventory,
     coordination: coordination::Client,
     calls: BTreeMap<String, (Arguments, Value)>,
     secrets: Vec<String>,
@@ -39,7 +40,7 @@ impl Bridge {
         task: &supertag_protocol::v2::Task,
         attempt_id: &str,
         capabilities: AttemptCapabilities,
-        full_inventory: bool,
+        inventory: Inventory,
     ) -> Self {
         Self {
             client: HarnessQuestionsClient::new(channel.clone())
@@ -50,7 +51,7 @@ impl Bridge {
             tag_id: task.tag_id.clone(),
             attempt_id: attempt_id.into(),
             capabilities,
-            full_inventory,
+            inventory,
             coordination: coordination::Client::new(channel),
             calls: BTreeMap::new(),
             secrets: vec![],
@@ -58,11 +59,11 @@ impl Bridge {
         }
     }
     pub(crate) fn enabled(&self) -> bool {
-        self.full_inventory || self.capabilities.may_ask_objective_question
+        self.inventory != Inventory::None
     }
 
-    pub(crate) fn full_inventory(&self) -> bool {
-        self.full_inventory
+    pub(crate) fn inventory(&self) -> Inventory {
+        self.inventory
     }
     pub(crate) fn set_secrets(&mut self, secrets: &[String]) {
         self.secrets = secrets.to_vec();
@@ -74,23 +75,22 @@ impl Bridge {
         ids
     }
     pub(crate) fn manifest(&self) -> &'static str {
-        if self.full_inventory {
-            FULL_COORDINATION
-        } else if self.capabilities.may_ask_objective_question {
-            OBJECTIVE_ASK
-        } else {
-            NONE
+        match self.inventory {
+            Inventory::None => NONE,
+            Inventory::Ask => OBJECTIVE_ASK,
+            Inventory::Workstream => FULL_COORDINATION,
+            Inventory::Direct => DIRECT_COORDINATION,
         }
     }
     pub(crate) fn tools(&self) -> Value {
-        tool_specs(self.full_inventory)
+        tool_specs(self.inventory)
     }
     pub(crate) async fn call(&mut self, params: &Value) -> Result<Value> {
         ensure!(
             self.enabled(),
             "Codex coordination tools were not admitted for this Task"
         );
-        let arguments = coordination::arguments(params, self.full_inventory)?;
+        let arguments = coordination::arguments(params, self.inventory)?;
         let call_id = params["callId"]
             .as_str()
             .filter(|id| !id.is_empty() && id.len() <= 256 && !id.chars().any(char::is_control))
@@ -149,6 +149,17 @@ impl Bridge {
             Arguments::ReadMailbox(page) if self.capabilities.may_read_mailbox => {
                 self.coordination
                     .read_mailbox(page, &self.tag_id, &self.token, &self.secrets)
+                    .await?
+            }
+            Arguments::Send(message) if self.capabilities.may_send_tag_message && !self.asked => {
+                self.coordination
+                    .send(
+                        message,
+                        operation_id,
+                        (&self.task_id, &self.attempt_id, &self.tag_id),
+                        &self.token,
+                        &self.secrets,
+                    )
                     .await?
             }
             _ => coordination::refused(),
@@ -212,7 +223,7 @@ impl Bridge {
     }
 }
 
-pub(crate) fn tool_specs(full_inventory: bool) -> Value {
+pub(crate) fn tool_specs(inventory: Inventory) -> Value {
     let mut tools = vec![json!({
         "type":"function", "name":"ask",
         "description":"Ask the operator one question needed to continue this Objective. After this returns, end your turn with a short reply and make no further tool calls. The answer arrives in this Session's next Task.",
@@ -221,8 +232,8 @@ pub(crate) fn tool_specs(full_inventory: bool) -> Value {
             "required":["text"], "additionalProperties":false
         }
     })];
-    if full_inventory {
-        tools.extend(coordination::tool_specs());
+    if inventory >= Inventory::Workstream {
+        tools.extend(coordination::tool_specs(inventory));
     }
     json!([{
         "type":"namespace", "name":"supertag",

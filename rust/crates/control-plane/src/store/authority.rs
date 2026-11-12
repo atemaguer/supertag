@@ -254,6 +254,7 @@ pub(super) async fn claim_candidate(
     all_tags: i64,
     workspace_ids: &[String],
     harness: supertag_protocol::v2::HarnessKind,
+    context_contracts: &[supertag_protocol::v2::ContextContract],
 ) -> Result<Option<String>> {
     let mut after = 0_i64;
     loop {
@@ -270,6 +271,7 @@ pub(super) async fn claim_candidate(
                 .as_ref()
                 .is_none_or(|spec| workspace_ids.binary_search(&spec.workspace_id).is_ok());
             if has_workspace
+                && crate::context::task_supported(&task, context_contracts)
                 && crate::inputs::can_claim_in(
                     transaction,
                     &task,

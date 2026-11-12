@@ -36,6 +36,228 @@ ROLE_ASSIGNMENT_STATUS_UNSPECIFIED: RoleAssignmentStatus
 ROLE_ASSIGNMENT_STATUS_ACTIVE: RoleAssignmentStatus
 ROLE_ASSIGNMENT_STATUS_INACTIVE: RoleAssignmentStatus
 
+class SlackSurfaceIdentity(_message.Message):
+    __slots__ = ("team_id",)
+    TEAM_ID_FIELD_NUMBER: _ClassVar[int]
+    team_id: str
+    def __init__(self, team_id: _Optional[str] = ...) -> None: ...
+
+class GithubSurfaceIdentity(_message.Message):
+    __slots__ = ("external_account_id",)
+    EXTERNAL_ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
+    external_account_id: str
+    def __init__(self, external_account_id: _Optional[str] = ...) -> None: ...
+
+class LinearSurfaceIdentity(_message.Message):
+    __slots__ = ("workspace_id",)
+    WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
+    workspace_id: str
+    def __init__(self, workspace_id: _Optional[str] = ...) -> None: ...
+
+class LarkSurfaceIdentity(_message.Message):
+    __slots__ = ("feishu", "app_id", "tenant_key")
+    FEISHU_FIELD_NUMBER: _ClassVar[int]
+    APP_ID_FIELD_NUMBER: _ClassVar[int]
+    TENANT_KEY_FIELD_NUMBER: _ClassVar[int]
+    feishu: bool
+    app_id: str
+    tenant_key: str
+    def __init__(self, feishu: _Optional[bool] = ..., app_id: _Optional[str] = ..., tenant_key: _Optional[str] = ...) -> None: ...
+
+class MicrosoftTeamsSurfaceIdentity(_message.Message):
+    __slots__ = ("app_id", "tenant_id")
+    APP_ID_FIELD_NUMBER: _ClassVar[int]
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    app_id: str
+    tenant_id: str
+    def __init__(self, app_id: _Optional[str] = ..., tenant_id: _Optional[str] = ...) -> None: ...
+
+class SurfaceAccountIdentity(_message.Message):
+    __slots__ = ("slack", "github", "linear", "lark", "microsoft_teams")
+    SLACK_FIELD_NUMBER: _ClassVar[int]
+    GITHUB_FIELD_NUMBER: _ClassVar[int]
+    LINEAR_FIELD_NUMBER: _ClassVar[int]
+    LARK_FIELD_NUMBER: _ClassVar[int]
+    MICROSOFT_TEAMS_FIELD_NUMBER: _ClassVar[int]
+    slack: SlackSurfaceIdentity
+    github: GithubSurfaceIdentity
+    linear: LinearSurfaceIdentity
+    lark: LarkSurfaceIdentity
+    microsoft_teams: MicrosoftTeamsSurfaceIdentity
+    def __init__(self, slack: _Optional[_Union[SlackSurfaceIdentity, _Mapping]] = ..., github: _Optional[_Union[GithubSurfaceIdentity, _Mapping]] = ..., linear: _Optional[_Union[LinearSurfaceIdentity, _Mapping]] = ..., lark: _Optional[_Union[LarkSurfaceIdentity, _Mapping]] = ..., microsoft_teams: _Optional[_Union[MicrosoftTeamsSurfaceIdentity, _Mapping]] = ...) -> None: ...
+
+class SurfaceAccount(_message.Message):
+    __slots__ = ("account_id", "identity", "enabled", "revision")
+    ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
+    IDENTITY_FIELD_NUMBER: _ClassVar[int]
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    REVISION_FIELD_NUMBER: _ClassVar[int]
+    account_id: str
+    identity: SurfaceAccountIdentity
+    enabled: bool
+    revision: int
+    def __init__(self, account_id: _Optional[str] = ..., identity: _Optional[_Union[SurfaceAccountIdentity, _Mapping]] = ..., enabled: _Optional[bool] = ..., revision: _Optional[int] = ...) -> None: ...
+
+class SlackSurfaceChannel(_message.Message):
+    __slots__ = ("channel_id",)
+    CHANNEL_ID_FIELD_NUMBER: _ClassVar[int]
+    channel_id: str
+    def __init__(self, channel_id: _Optional[str] = ...) -> None: ...
+
+class GithubSurfaceRepository(_message.Message):
+    __slots__ = ("repository_id",)
+    REPOSITORY_ID_FIELD_NUMBER: _ClassVar[int]
+    repository_id: int
+    def __init__(self, repository_id: _Optional[int] = ...) -> None: ...
+
+class LinearSurfaceTeam(_message.Message):
+    __slots__ = ("team_id",)
+    TEAM_ID_FIELD_NUMBER: _ClassVar[int]
+    team_id: str
+    def __init__(self, team_id: _Optional[str] = ...) -> None: ...
+
+class LarkSurfaceChat(_message.Message):
+    __slots__ = ("chat_id",)
+    CHAT_ID_FIELD_NUMBER: _ClassVar[int]
+    chat_id: str
+    def __init__(self, chat_id: _Optional[str] = ...) -> None: ...
+
+class MicrosoftTeamsSurfaceChannel(_message.Message):
+    __slots__ = ("team_id", "channel_id")
+    TEAM_ID_FIELD_NUMBER: _ClassVar[int]
+    CHANNEL_ID_FIELD_NUMBER: _ClassVar[int]
+    team_id: str
+    channel_id: str
+    def __init__(self, team_id: _Optional[str] = ..., channel_id: _Optional[str] = ...) -> None: ...
+
+class SurfaceLocationScope(_message.Message):
+    __slots__ = ("slack", "github", "linear", "lark", "microsoft_teams")
+    SLACK_FIELD_NUMBER: _ClassVar[int]
+    GITHUB_FIELD_NUMBER: _ClassVar[int]
+    LINEAR_FIELD_NUMBER: _ClassVar[int]
+    LARK_FIELD_NUMBER: _ClassVar[int]
+    MICROSOFT_TEAMS_FIELD_NUMBER: _ClassVar[int]
+    slack: SlackSurfaceChannel
+    github: GithubSurfaceRepository
+    linear: LinearSurfaceTeam
+    lark: LarkSurfaceChat
+    microsoft_teams: MicrosoftTeamsSurfaceChannel
+    def __init__(self, slack: _Optional[_Union[SlackSurfaceChannel, _Mapping]] = ..., github: _Optional[_Union[GithubSurfaceRepository, _Mapping]] = ..., linear: _Optional[_Union[LinearSurfaceTeam, _Mapping]] = ..., lark: _Optional[_Union[LarkSurfaceChat, _Mapping]] = ..., microsoft_teams: _Optional[_Union[MicrosoftTeamsSurfaceChannel, _Mapping]] = ...) -> None: ...
+
+class SurfaceLocation(_message.Message):
+    __slots__ = ("location_id", "account_id", "connector_account_id", "scope", "tag_id", "enabled", "revision", "permission_set_ids", "context_set_ids")
+    LOCATION_ID_FIELD_NUMBER: _ClassVar[int]
+    ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
+    CONNECTOR_ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
+    SCOPE_FIELD_NUMBER: _ClassVar[int]
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    REVISION_FIELD_NUMBER: _ClassVar[int]
+    PERMISSION_SET_IDS_FIELD_NUMBER: _ClassVar[int]
+    CONTEXT_SET_IDS_FIELD_NUMBER: _ClassVar[int]
+    location_id: str
+    account_id: str
+    connector_account_id: str
+    scope: SurfaceLocationScope
+    tag_id: str
+    enabled: bool
+    revision: int
+    permission_set_ids: _containers.RepeatedScalarFieldContainer[str]
+    context_set_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, location_id: _Optional[str] = ..., account_id: _Optional[str] = ..., connector_account_id: _Optional[str] = ..., scope: _Optional[_Union[SurfaceLocationScope, _Mapping]] = ..., tag_id: _Optional[str] = ..., enabled: _Optional[bool] = ..., revision: _Optional[int] = ..., permission_set_ids: _Optional[_Iterable[str]] = ..., context_set_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class SurfacePolicyOrigin(_message.Message):
+    __slots__ = ("location_id", "location_revision", "account_id", "connector_account_id", "scope", "origin_actions")
+    LOCATION_ID_FIELD_NUMBER: _ClassVar[int]
+    LOCATION_REVISION_FIELD_NUMBER: _ClassVar[int]
+    ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
+    CONNECTOR_ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
+    SCOPE_FIELD_NUMBER: _ClassVar[int]
+    ORIGIN_ACTIONS_FIELD_NUMBER: _ClassVar[int]
+    location_id: str
+    location_revision: int
+    account_id: str
+    connector_account_id: str
+    scope: SurfaceLocationScope
+    origin_actions: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, location_id: _Optional[str] = ..., location_revision: _Optional[int] = ..., account_id: _Optional[str] = ..., connector_account_id: _Optional[str] = ..., scope: _Optional[_Union[SurfaceLocationScope, _Mapping]] = ..., origin_actions: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class PutSurfaceAccountRequest(_message.Message):
+    __slots__ = ("operation_id", "account", "expected_revision")
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    ACCOUNT_FIELD_NUMBER: _ClassVar[int]
+    EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
+    operation_id: str
+    account: SurfaceAccount
+    expected_revision: int
+    def __init__(self, operation_id: _Optional[str] = ..., account: _Optional[_Union[SurfaceAccount, _Mapping]] = ..., expected_revision: _Optional[int] = ...) -> None: ...
+
+class GetSurfaceAccountRequest(_message.Message):
+    __slots__ = ("account_id",)
+    ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
+    account_id: str
+    def __init__(self, account_id: _Optional[str] = ...) -> None: ...
+
+class ListSurfaceAccountsRequest(_message.Message):
+    __slots__ = ("limit", "cursor")
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    CURSOR_FIELD_NUMBER: _ClassVar[int]
+    limit: int
+    cursor: str
+    def __init__(self, limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+
+class ListSurfaceAccountsResponse(_message.Message):
+    __slots__ = ("accounts", "next_cursor")
+    ACCOUNTS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    accounts: _containers.RepeatedCompositeFieldContainer[SurfaceAccount]
+    next_cursor: str
+    def __init__(self, accounts: _Optional[_Iterable[_Union[SurfaceAccount, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
+
+class PutSurfaceLocationRequest(_message.Message):
+    __slots__ = ("operation_id", "location", "expected_revision")
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    LOCATION_FIELD_NUMBER: _ClassVar[int]
+    EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
+    operation_id: str
+    location: SurfaceLocation
+    expected_revision: int
+    def __init__(self, operation_id: _Optional[str] = ..., location: _Optional[_Union[SurfaceLocation, _Mapping]] = ..., expected_revision: _Optional[int] = ...) -> None: ...
+
+class GetSurfaceLocationRequest(_message.Message):
+    __slots__ = ("location_id",)
+    LOCATION_ID_FIELD_NUMBER: _ClassVar[int]
+    location_id: str
+    def __init__(self, location_id: _Optional[str] = ...) -> None: ...
+
+class ListSurfaceLocationsRequest(_message.Message):
+    __slots__ = ("account_id", "limit", "cursor")
+    ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    CURSOR_FIELD_NUMBER: _ClassVar[int]
+    account_id: str
+    limit: int
+    cursor: str
+    def __init__(self, account_id: _Optional[str] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+
+class ListSurfaceLocationsResponse(_message.Message):
+    __slots__ = ("locations", "next_cursor")
+    LOCATIONS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    locations: _containers.RepeatedCompositeFieldContainer[SurfaceLocation]
+    next_cursor: str
+    def __init__(self, locations: _Optional[_Iterable[_Union[SurfaceLocation, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
+
+class DeleteSurfaceLocationRequest(_message.Message):
+    __slots__ = ("operation_id", "location_id", "expected_revision")
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    LOCATION_ID_FIELD_NUMBER: _ClassVar[int]
+    EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
+    operation_id: str
+    location_id: str
+    expected_revision: int
+    def __init__(self, operation_id: _Optional[str] = ..., location_id: _Optional[str] = ..., expected_revision: _Optional[int] = ...) -> None: ...
+
 class PolicyPermission(_message.Message):
     __slots__ = ("permission_id", "target", "action", "surface_account_id", "scope", "reference", "resource", "approval_required")
     PERMISSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -153,18 +375,20 @@ class PolicyRoleSnapshot(_message.Message):
     def __init__(self, assignment: _Optional[_Union[RoleAssignment, _Mapping]] = ..., role: _Optional[_Union[Role, _Mapping]] = ...) -> None: ...
 
 class TaskPolicySnapshot(_message.Message):
-    __slots__ = ("version", "roles", "permission_sets", "context_sets", "execution")
+    __slots__ = ("version", "roles", "permission_sets", "context_sets", "execution", "origin")
     VERSION_FIELD_NUMBER: _ClassVar[int]
     ROLES_FIELD_NUMBER: _ClassVar[int]
     PERMISSION_SETS_FIELD_NUMBER: _ClassVar[int]
     CONTEXT_SETS_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_FIELD_NUMBER: _ClassVar[int]
+    ORIGIN_FIELD_NUMBER: _ClassVar[int]
     version: int
     roles: _containers.RepeatedCompositeFieldContainer[PolicyRoleSnapshot]
     permission_sets: _containers.RepeatedCompositeFieldContainer[PermissionSet]
     context_sets: _containers.RepeatedCompositeFieldContainer[ContextSet]
     execution: PolicyExecutionSettings
-    def __init__(self, version: _Optional[int] = ..., roles: _Optional[_Iterable[_Union[PolicyRoleSnapshot, _Mapping]]] = ..., permission_sets: _Optional[_Iterable[_Union[PermissionSet, _Mapping]]] = ..., context_sets: _Optional[_Iterable[_Union[ContextSet, _Mapping]]] = ..., execution: _Optional[_Union[PolicyExecutionSettings, _Mapping]] = ...) -> None: ...
+    origin: SurfacePolicyOrigin
+    def __init__(self, version: _Optional[int] = ..., roles: _Optional[_Iterable[_Union[PolicyRoleSnapshot, _Mapping]]] = ..., permission_sets: _Optional[_Iterable[_Union[PermissionSet, _Mapping]]] = ..., context_sets: _Optional[_Iterable[_Union[ContextSet, _Mapping]]] = ..., execution: _Optional[_Union[PolicyExecutionSettings, _Mapping]] = ..., origin: _Optional[_Union[SurfacePolicyOrigin, _Mapping]] = ...) -> None: ...
 
 class PutPermissionSetRequest(_message.Message):
     __slots__ = ("operation_id", "permission_set", "expected_revision")

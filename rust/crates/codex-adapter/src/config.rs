@@ -21,6 +21,7 @@ impl Policy {
                     | "web:search"
                     | "web:fetch"
                     | "workstream:post"
+                    | "mailbox:send"
             )),
             "Codex adapter cannot enforce the requested allowed actions"
         );

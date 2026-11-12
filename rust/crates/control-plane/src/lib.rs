@@ -1,5 +1,6 @@
 mod approvals;
 mod checkpoints;
+mod context;
 mod conversations;
 mod inbox;
 mod inputs;
@@ -8,6 +9,7 @@ pub mod objective_limits;
 mod objectives;
 mod policy;
 mod store;
+mod surface_policy;
 mod teams;
 mod usage;
 mod watch;
@@ -241,6 +243,29 @@ impl operator_server::Operator for ControlPlane {
 
 #[tonic::async_trait]
 impl worker_host_server::WorkerHost for ControlPlane {
+    async fn get_context_pins(
+        &self,
+        request: Request<InspectAttemptRequest>,
+    ) -> Result<Response<ContextResolutionManifest>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .get_context_pins(&host, request.get_ref())
+                .await?,
+        ))
+    }
+
+    async fn commit_context_resolution(
+        &self,
+        request: Request<CommitContextResolutionRequest>,
+    ) -> Result<Response<ContextResolutionManifest>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .commit_context_resolution(&host, request.get_ref())
+                .await?,
+        ))
+    }
     async fn report_host(
         &self,
         request: Request<ReportHostRequest>,
@@ -304,11 +329,12 @@ impl worker_host_server::WorkerHost for ControlPlane {
         Ok(Response::new(ClaimTaskResponse {
             assignment: self
                 .store
-                .claim_task_for_host(
+                .claim_task_with_context(
                     &principal,
                     &input.operation_id,
                     &input.workspace_ids,
                     harness,
+                    &input.context_contracts,
                 )
                 .await?,
         }))
@@ -681,6 +707,7 @@ mod tests {
             harness_kind: 0,
             workspace_ids: vec![],
             operation_id: "claim".into(),
+            context_contracts: vec![],
         };
         assert_eq!(
             cp.claim_task(

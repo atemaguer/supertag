@@ -1,5 +1,6 @@
 //! Durable Linear routes and first-admitted issue/comment identities.
 use super::*;
+use crate::surface_policy::{VerifiedConnectorOrigin, VerifiedScope, admit_connector_task_in};
 use supertag_protocol::v2::{
     AcceptLinearEventRequest, AcceptLinearEventResponse, LinearEventAction, LinearEventKind,
 };
@@ -119,15 +120,26 @@ impl Store {
             "linear:{account}:{}:issue:{}",
             input.workspace_id, input.issue_id
         );
-        crate::objectives::objective_admission_in(
+        let Some(task) = admit_connector_task_in(
             &mut tx,
-            &input.tag_id,
+            order,
+            VerifiedConnectorOrigin {
+                connector_account_id: account,
+                tag_id: &input.tag_id,
+                scope: VerifiedScope::Linear {
+                    workspace_id: &input.workspace_id,
+                    team_id: &input.team_id,
+                },
+            },
             &session,
+            &input.prompt,
             self.execution_now_ms(),
         )
-        .await?;
-        let task = insert_task(&mut tx, order, &input.tag_id, &session, &input.prompt).await?;
-        crate::objectives::objective_link_task_in(&mut tx, &task).await?;
+        .await?
+        else {
+            tx.commit().await?;
+            return Ok(AcceptLinearEventResponse { task: None });
+        };
         if route.is_none() {
             sqlx::query("INSERT INTO supertag_v2_linear_routes (account_id,workspace_id,team_id,tag_id) VALUES ($1,$2,$3,$4)")
                 .bind(account).bind(&input.workspace_id).bind(&input.team_id).bind(&input.tag_id).execute(&mut *tx).await?;
