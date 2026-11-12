@@ -78,14 +78,20 @@ fn canonical_patterns(input: &[String]) -> Result<Vec<String>, Status> {
 pub fn supports(task: &Task, harness: HarnessKind, profile: &HarnessExecutionProfile) -> bool {
     task.output_policy.is_none()
         || (profile.declared_task_outputs
-            && !profile.remote_file_workspace
             && profile.shared_execution.is_none()
-            && matches!(harness, HarnessKind::Codex | HarnessKind::ClaudeCode)
+            && environment_supports_outputs(harness, profile.remote_file_workspace)
             && task.workspace.is_some()
             && task
                 .allowed_actions
                 .iter()
                 .any(|action| action == "files:read"))
+}
+
+pub fn environment_supports_outputs(harness: HarnessKind, remote: bool) -> bool {
+    matches!(
+        (harness, remote),
+        (HarnessKind::Codex | HarnessKind::ClaudeCode, false) | (HarnessKind::Cursor, true)
+    )
 }
 
 pub fn excluded(path: &str) -> bool {

@@ -97,6 +97,13 @@ async function runFixture() {
         "resume",
         "remote-first",
         "remote-resume",
+        "remote-output-auto",
+        "remote-output-declared",
+        "remote-output-empty",
+        "remote-output-missing",
+        "remote-output-readonly",
+        "remote-output-cap",
+        "remote-output-tracked",
         "shared-first",
         "shared-resume",
         "shared-command",
@@ -107,7 +114,9 @@ async function runFixture() {
     );
     const shared = mode.startsWith("shared-");
     const sharedCommand = mode === "shared-command";
+    const output = mode.startsWith("remote-output-");
     const writes = mode === "first" || mode === "remote-first" || mode === "shared-first";
+    const writable = writes || shared || (output && mode !== "remote-output-readonly");
     const resumes = mode === "resume" || mode === "remote-resume" || mode === "shared-resume";
     assert.deepEqual(request.tools, ["mcp"]);
     for (const name of ["read", "edit", "shell", "grep", "glob", "ls", "task"])
@@ -115,8 +124,8 @@ async function runFixture() {
     assert.equal(request.localCommandTool, undefined);
     const toolNames = request.splitTools.map(({ name }) => name);
     assert.ok(toolNames.includes("read"));
-    assert.equal(toolNames.includes("write"), writes || shared);
-    assert.equal(toolNames.includes("edit"), writes && !shared);
+    assert.equal(toolNames.includes("write"), writable);
+    assert.equal(toolNames.includes("edit"), writable && !shared);
     assert.equal(toolNames.includes("command"), mode === "first" || sharedCommand);
     if (shared)
       assert.deepEqual(
@@ -186,11 +195,35 @@ async function runFixture() {
       });
       assert.equal(blocked.isError, true);
     }
-    const write = await call("write", {
-      file_path: "workspace.txt",
-      content: "first-turn-content\n",
-    });
-    assert.equal(write.isError, !(writes || shared));
+    if (output) {
+      const directory = /Task output directory: ([\w/-]+)/u.exec(request.prompt)?.[1];
+      assert.ok(directory, "the remote output path did not reach the model");
+      assert.equal(process.env.SUPERTAG_OUTPUT_DIR, undefined);
+      const writeOutput = async (file_path, content) => {
+        const write = await call("write", { file_path, content });
+        assert.equal(write.isError, !writable);
+      };
+      if (mode === "remote-output-auto") {
+        assert.match(directory, /^outputs\/[0-9a-f]{64}$/u);
+        await writeOutput(`${directory}/report.txt`, "frozen remote output\n");
+        await writeOutput(`${directory}/.env`, "must not become an artifact\n");
+      } else if (mode === "remote-output-declared") {
+        assert.equal(directory, "deliverables");
+        await writeOutput("reports/report.txt", "declared outside the default directory\n");
+        await writeOutput(`${directory}/included.txt`, "declared inside\n");
+        await writeOutput(`${directory}/private/skip.txt`, "excluded\n");
+      } else if (mode === "remote-output-readonly") {
+        await writeOutput(`${directory}/not-permitted.txt`, "denied\n");
+      } else if (mode === "remote-output-cap") {
+        await writeOutput(`${directory}/oversized.txt`, "larger than accepted budget\n");
+      }
+    } else {
+      const write = await call("write", {
+        file_path: "workspace.txt",
+        content: "first-turn-content\n",
+      });
+      assert.equal(write.isError, !writable);
+    }
 
     for (const name of ["agents.ndjson", "runs.ndjson", "run_events.ndjson", "checkpoints.ndjson"])
       await writeFile(

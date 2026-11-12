@@ -9,11 +9,16 @@ use uuid::Uuid;
 const OPERATOR: &str = "operator:output-policy";
 const BASE: &str = "1111111111111111111111111111111111111111";
 
-async fn exercise(url: &str) {
+async fn exercise(url: &str, remote: bool) {
+    let (tag, harness) = if remote {
+        ("remote-reporter", HarnessKind::Cursor)
+    } else {
+        ("reporter", HarnessKind::ClaudeCode)
+    };
     let store = Store::open(url).await.unwrap();
     store
         .put_tag_spec(PutTagRequest {
-            tag_id: "reporter".into(),
+            tag_id: tag.into(),
             instructions: "Preserve the report".into(),
             allowed_actions: vec!["files:read".into()],
             workspace: Some(WorkspaceSpec {
@@ -21,15 +26,15 @@ async fn exercise(url: &str) {
                 base_commit: BASE.into(),
                 github_source: None,
             }),
-            harness_kind: HarnessKind::ClaudeCode.into(),
+            harness_kind: harness.into(),
             ..Default::default()
         })
         .await
         .unwrap();
     let mut request = SubmitTaskRequest {
-        tag_id: "reporter".into(),
+        tag_id: tag.into(),
         session_id: "reports".into(),
-        operation_id: "report".into(),
+        operation_id: format!("report-{tag}"),
         prompt: "Read and preserve the approved report".into(),
         output_policy: Some(TaskOutputPolicy {
             required: vec!["reports/**/*.md".into(), "reports/**/*.md".into()],
@@ -49,37 +54,63 @@ async fn exercise(url: &str) {
         store.submit_task(OPERATOR, &request).await,
         Err(StoreError::Conflict(_))
     ));
-    let host = support::register_host(&store, "local").await;
+    let host = support::register_host(&store, tag).await;
+    let mut profile = HarnessExecutionProfile {
+        remote_file_workspace: remote,
+        ..Default::default()
+    };
     assert!(
         store
             .claim_task_with_profile(
                 &host,
                 "without-policy-capability",
                 &["project".into()],
-                HarnessKind::ClaudeCode,
+                harness,
                 &[],
-                None,
+                Some(&profile),
             )
             .await
             .unwrap()
             .is_none()
     );
+    profile.declared_task_outputs = true;
+    if remote {
+        assert!(
+            store
+                .claim_task_with_profile(
+                    &host,
+                    "local-cursor-cannot-collect",
+                    &["project".into()],
+                    harness,
+                    &[],
+                    Some(&HarnessExecutionProfile {
+                        declared_task_outputs: true,
+                        ..Default::default()
+                    }),
+                )
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
     let assignment = store
         .claim_task_with_profile(
             &host,
             "with-policy-capability",
             &["project".into()],
-            HarnessKind::ClaudeCode,
+            harness,
             &[],
-            Some(&HarnessExecutionProfile {
-                declared_task_outputs: true,
-                ..Default::default()
-            }),
+            Some(&profile),
         )
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(assignment.task.unwrap().output_policy, task.output_policy);
+    let assigned = assignment.task.unwrap();
+    assert_eq!(assigned.output_policy, task.output_policy);
+    assert_eq!(
+        assigned.attempt_execution.unwrap().remote_file_workspace,
+        remote
+    );
     let attempt = InspectAttemptRequest {
         task_id: task.task_id.clone(),
         attempt_id: assignment.attempt_id,
@@ -202,11 +233,12 @@ async fn exercise(url: &str) {
 #[tokio::test]
 async fn sqlite_declared_outputs() {
     let directory = tempfile::tempdir().unwrap();
-    exercise(&format!(
+    let url = format!(
         "sqlite://{}?mode=rwc",
         directory.path().join("outputs.db").display()
-    ))
-    .await;
+    );
+    Box::pin(exercise(&url, false)).await;
+    Box::pin(exercise(&url, true)).await;
 }
 
 #[tokio::test]
@@ -225,7 +257,11 @@ async fn postgres_declared_outputs() {
     url.set_path(&database);
     let result = tokio::task::LocalSet::new()
         .run_until(async move {
-            tokio::task::spawn_local(async move { exercise(url.as_str()).await }).await
+            tokio::task::spawn_local(async move {
+                Box::pin(exercise(url.as_str(), false)).await;
+                Box::pin(exercise(url.as_str(), true)).await;
+            })
+            .await
         })
         .await;
     admin

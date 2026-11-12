@@ -1,3 +1,5 @@
+mod remote;
+
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -70,14 +72,18 @@ impl PendingOutputs {
             supertag_workspaces::create_output_directory(checkout, &directory)?;
             directory
         };
-        Ok(Some(Self {
+        Ok(Some(Self::intent(directory, task)))
+    }
+
+    fn intent(directory: String, task: &Task) -> Self {
+        Self {
             directory,
             operation_id: format!("task-outputs:{}", Uuid::new_v4()),
             paths: Vec::new(),
             artifact_id: None,
             frozen: false,
             declared_policy: task.output_policy.as_ref().map(Message::encode_to_vec),
-        }))
+        }
     }
 
     pub(crate) fn absolute(&self, checkout: &Path) -> PathBuf {

@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::{
     artifacts::{MAX_ARTIFACT_FILES, validate_artifact_path, validate_capture_manifest},
-    output_policy::OutputSelection,
+    output_policy::{OutputSelection, environment_supports_outputs},
     v2::*,
 };
 use tonic::{Request, Response, Status};
@@ -101,15 +101,16 @@ impl Store {
         }
         running(&row, now)?;
         let task = task_row(&row)?;
+        let output_environment = task.workspace.is_some()
+            && task.attempt_execution.as_ref().is_some_and(|execution| {
+                execution.shared_execution.is_none()
+                    && environment_supports_outputs(
+                        execution.harness_kind(),
+                        execution.remote_file_workspace,
+                    )
+            });
         let permitted = if canonical.managed_task_output {
-            task.workspace.is_some()
-                && task.attempt_execution.as_ref().is_some_and(|execution| {
-                    !execution.remote_file_workspace
-                        && matches!(
-                            execution.harness_kind(),
-                            HarnessKind::Codex | HarnessKind::ClaudeCode
-                        )
-                })
+            output_environment
                 && task
                     .allowed_actions
                     .iter()
@@ -131,13 +132,7 @@ impl Store {
                 .workspace
                 .as_ref()
                 .ok_or(StoreError::PermissionDenied)?;
-            if task.attempt_execution.as_ref().is_none_or(|execution| {
-                execution.remote_file_workspace
-                    || !matches!(
-                        execution.harness_kind(),
-                        HarnessKind::Codex | HarnessKind::ClaudeCode
-                    )
-            }) {
+            if !output_environment {
                 return Err(StoreError::PermissionDenied);
             }
             if let Some(snapshot) = canonical

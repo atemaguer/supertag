@@ -442,6 +442,10 @@ pub async fn run(
                     ensure_providers_stopped(&options, &journal, &attempt, &registration),
                 ).await?;
                 if let Some(pending) = outputs.as_ref().filter(|output| succeeded && !output.frozen).cloned() {
+                    if remote_tree.is_some() {
+                        save_finish(&journal, attempt, adapter::failed("Task output files could not be captured safely"))?;
+                        continue;
+                    }
                     let cancellation = shutdown.child_token();
                     let frozen = with_authority(&mut host, &attempt, &token, &shutdown, &cancellation, async {
                         pending.freeze(&workspace, &workspaces, &options.state_directory, &attempt, &cancellation)
@@ -497,6 +501,10 @@ pub async fn run(
                         tokio::task::spawn_blocking(move || artifact_inputs::Inputs::cleanup(&input_state, &input_attempt, &input_checkout))
                             .await.map_err(|_| Status::internal("artifact input cleanup failed"))?
                             .map_err(|_| Status::failed_precondition("artifact input files could not be removed safely"))?;
+                        if let Some(tree) = &remote_tree {
+                            workspaces.restore_remote(&workspace, tree, &cancellation).await
+                                .map_err(|_| Status::invalid_argument("Remote Workspace output could not be restored safely"))?;
+                        }
                         if let Some(directory) = outputs.as_ref().and_then(|outputs| outputs.cleanup_directory()) {
                             let checkout = workspace.checkout.path.clone();
                             let directory = directory.to_owned();
@@ -504,10 +512,6 @@ pub async fn run(
                                 supertag_workspaces::remove_output_directory(&checkout, &directory)
                                     .map_err(|_| Status::failed_precondition("Task output directory could not be removed safely"))
                             }).await.map_err(|_| Status::internal("Task output cleanup failed"))??;
-                        }
-                        if let Some(tree) = &remote_tree {
-                            workspaces.restore_remote(&workspace, tree, &cancellation).await
-                                .map_err(|_| Status::invalid_argument("Remote Workspace output could not be restored safely"))?;
                         }
                         workspaces
                             .finalize(&workspace, &result, succeeded, outputs.as_ref().map(|output| output.directory.as_str()), &cancellation)
@@ -1110,6 +1114,31 @@ async fn run_assignment(
     } else {
         None
     };
+    let pending_outputs = if let Some(workspace) = workspace
+        .as_ref()
+        .filter(|_| options.remote_provider.is_some())
+    {
+        task_outputs::PendingOutputs::prepare_remote(&task, workspace, &attempt)
+    } else {
+        task_outputs::PendingOutputs::prepare(
+            &task,
+            workspace
+                .as_ref()
+                .map(|workspace| workspace.checkout.path.as_path()),
+            &attempt,
+            options.harness,
+        )
+    };
+    let mut outputs = match pending_outputs {
+        Ok(outputs) => outputs.map(Box::new),
+        Err(_) => {
+            return save_finish(
+                journal,
+                attempt,
+                adapter::failed("Task output directory could not be prepared safely"),
+            );
+        }
+    };
     let mut provider = if options.remote_provider.is_some() {
         let workspace = workspace
             .as_ref()
@@ -1206,26 +1235,22 @@ async fn run_assignment(
         .as_ref()
         .filter(|_| remote_workspace.is_none())
         .map(|prepared| prepared.checkout.path.as_path());
-    let outputs = match task_outputs::PendingOutputs::prepare(
-        &task,
-        adapter_workspace,
-        &attempt,
-        options.harness,
-    ) {
-        Ok(outputs) => outputs.map(Box::new),
-        Err(_) => {
-            return save_finish(
-                journal,
-                attempt,
-                adapter::failed("Task output directory could not be prepared safely"),
-            );
-        }
-    };
     let output_directory = outputs
         .as_ref()
         .zip(adapter_workspace)
         .map(|(outputs, checkout)| outputs.absolute(checkout));
-    if let Some(directory) = &output_directory
+    if let Some(output) = outputs.as_ref().filter(|_| provider.is_some()) {
+        task.instructions.push_str(&format!(
+            "\n\nTask output directory: {}\nUse paths relative to the remote Workspace in the admitted file tools. SuperTag preserves selected Task outputs from this Attempt.",
+            output.directory,
+        ));
+        if let Some(policy) = &task.output_policy {
+            task.instructions.push_str(&format!(
+                "\nRequired output paths and patterns, relative to the Workspace: {}.",
+                serde_json::to_string(&policy.required)?,
+            ));
+        }
+    } else if let Some(directory) = &output_directory
         && task
             .allowed_actions
             .iter()
@@ -1271,25 +1296,37 @@ async fn run_assignment(
         let mut outcome = outcome?;
         let remote_tree = if let Some(provider) = provider.as_ref().filter(|_| outcome.succeeded) {
             let cancel = shutdown.child_token();
-            let captured = with_authority(host, &attempt, token, shutdown, &cancel, async {
-                provider
-                    .capture(
-                        &journal.remote_scratch().map_err(|_| {
-                            Status::internal("Remote Workspace state is unavailable")
-                        })?,
-                        &cancel,
-                    )
-                    .await
-                    .map_err(|_| {
-                        Status::failed_precondition("Remote Workspace output could not be captured")
-                    })
-            })
+            let workspace = workspace.as_ref().expect("remote Workspace prepared");
+            let captured = with_authority(
+                host,
+                &attempt,
+                token,
+                shutdown,
+                &cancel,
+                remote::capture(
+                    provider,
+                    journal,
+                    (&attempt, workspace),
+                    outputs.take(),
+                    &options.state_directory,
+                    &cancel,
+                ),
+            )
             .await;
             match captured {
-                Ok((tree, _)) => Some(tree),
-                Err(_) => {
-                    outcome =
-                        adapter::failed("Remote Workspace output could not be captured safely");
+                Ok(((tree, frozen), _)) => {
+                    outputs = frozen;
+                    Some(tree)
+                }
+                Err(error) => {
+                    let message = match error.message() {
+                        supertag_protocol::output_policy::REQUIRED_OUTPUT_MISSING => {
+                            supertag_protocol::output_policy::REQUIRED_OUTPUT_MISSING
+                        }
+                        remote::OUTPUTS_FAILED => remote::OUTPUTS_FAILED,
+                        _ => remote::CAPTURE_FAILED,
+                    };
+                    outcome = adapter::failed(message);
                     None
                 }
             }

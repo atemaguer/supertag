@@ -156,23 +156,40 @@ const implementation = {
     async *capture() {
       assert.ok(staged && !allocation.stopped);
       const checkout = join(directory, "checkout");
-      assert.deepEqual(
-        (await readdir(checkout)).filter((name) => name !== ".git"),
-        ["workspace.txt"],
-      );
       const content = await readFile(join(checkout, "workspace.txt"));
+      const entries = [];
+      async function files(folder, prefix = "") {
+        for (const entry of await readdir(folder, { withFileTypes: true })) {
+          if (entry.name === ".git") continue;
+          const path = prefix + entry.name;
+          const physical = join(folder, entry.name);
+          if (entry.isDirectory()) await files(physical, `${path}/`);
+          else {
+            assert.ok(entry.isFile(), "unsupported fixture capture entry");
+            entries.push({ path, data: await readFile(physical) });
+          }
+        }
+      }
+      await files(checkout);
+      entries.sort((a, b) => Buffer.compare(Buffer.from(a.path), Buffer.from(b.path)));
       const manifest = Buffer.from(
         JSON.stringify({
-          entries: [{ path: "workspace.txt", mode: "100644", size: content.length }],
+          entries: entries.map(({ path, data }) => ({ path, mode: "100644", size: data.length })),
         }),
       );
       const length = Buffer.alloc(4);
       length.writeUInt32BE(manifest.length);
-      const tree = Buffer.concat([Buffer.from("STWTREE1\n"), length, manifest, content]);
+      const tree = Buffer.concat([
+        Buffer.from("STWTREE1\n"),
+        length,
+        manifest,
+        ...entries.map(({ data }) => data),
+      ]);
       await trace({
         type: "capture",
         allocationId: allocation.owner.allocationId,
         content: content.toString(),
+        paths: entries.map(({ path }) => path),
         sha256: hash(tree),
       });
       yield {
@@ -206,14 +223,22 @@ const implementation = {
   workspace: {
     async execute({ operation }) {
       assert.ok(staged && !allocation.stopped);
-      if (operation.value?.path !== "workspace.txt")
+      const requested = operation.value?.path ?? "";
+      if (
+        requested !== "workspace.txt" &&
+        !/^(?:outputs\/[0-9a-f]{64}|deliverables|reports)\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+$/u.test(
+          requested,
+        )
+      )
         return { text: "Fixture path denied", isError: true };
-      const path = join(directory, "checkout", "workspace.txt");
+      assert.ok(requested.split("/").every((component) => component !== "." && component !== ".."));
+      const path = join(directory, "checkout", requested);
       if (operation.case === "read" && actions.includes("files:read")) {
         await trace({ type: "read", allocationId: allocation.owner.allocationId });
         return { text: await readFile(path, "utf8") };
       }
       if (operation.case === "write" && actions.includes("files:write")) {
+        await mkdir(dirname(path), { recursive: true, mode: 0o700 });
         await writeFile(path, operation.value.content);
         await trace({ type: "write", allocationId: allocation.owner.allocationId });
         return { text: "written" };

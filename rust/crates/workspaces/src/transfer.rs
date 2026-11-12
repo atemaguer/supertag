@@ -287,6 +287,46 @@ fn parse_tree(bytes: &[u8]) -> Result<ParsedTree<'_>> {
     Ok(ParsedTree { entries })
 }
 
+/// Copy selected regular files from a verified provider capture to private
+/// scratch. This does not adopt the returned tree as a Workspace.
+pub fn materialize_returned_files(
+    archive: &TransferArtifact,
+    destination: &Path,
+    (max_files, max_file_bytes, max_bytes): (usize, u64, u64),
+    mut select: impl FnMut(&str) -> Result<bool>,
+    cancel: &CancellationToken,
+) -> Result<Vec<String>> {
+    check_cancelled(cancel)?;
+    let bytes = read_artifact(archive)?;
+    let tree = parse_tree(&bytes)?;
+    let mut selected = Vec::new();
+    let mut total = 0;
+    for (entry, body) in tree.entries {
+        check_cancelled(cancel)?;
+        if !select(&entry.path)? {
+            continue;
+        }
+        total += entry.size;
+        ensure!(
+            entry.mode != "120000"
+                && selected.len() < max_files
+                && entry.size <= max_file_bytes
+                && total <= max_bytes,
+            "selected returned files exceed their type, count, or byte limits"
+        );
+        selected.push((entry, body));
+    }
+    let mut paths = Vec::with_capacity(selected.len());
+    for (entry, body) in selected {
+        check_cancelled(cancel)?;
+        let path = destination.join(&entry.path);
+        paths::create_private_root(path.parent().context("returned output has no parent")?)?;
+        write_synced(&path, body)?;
+        paths.push(entry.path);
+    }
+    Ok(paths)
+}
+
 fn materialize(root: &Path, tree: &ParsedTree<'_>, cancel: &CancellationToken) -> Result<()> {
     for (entry, body) in &tree.entries {
         check_cancelled(cancel)?;

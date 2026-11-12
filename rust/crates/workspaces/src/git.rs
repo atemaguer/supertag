@@ -416,6 +416,19 @@ impl Repository {
             .await
     }
 
+    pub(crate) async fn prepared_tracked_outputs(
+        checkout: &crate::Checkout,
+        cancel: &CancellationToken,
+    ) -> Result<BTreeSet<String>> {
+        Ok(
+            Self::output_repository(&checkout.path, checkout.start_commit.len())?
+                .tree(&checkout.start_commit, cancel)
+                .await?
+                .into_keys()
+                .collect(),
+        )
+    }
+
     async fn selected_tracked(
         &self,
         selected: &[String],

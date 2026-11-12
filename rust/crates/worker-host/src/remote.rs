@@ -1,15 +1,24 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, ensure};
-use supertag_protocol::v2::{HostRecord, Task};
+use supertag_protocol::{
+    output_policy::REQUIRED_OUTPUT_MISSING,
+    v2::{HostRecord, Task},
+};
+use supertag_workspaces::TransferArtifact;
 use tokio_util::sync::CancellationToken;
+use tonic::Status;
 
 use crate::{
     HostOptions,
     journal::{Attempt, Journal, RemoteSandboxState},
     remote_provider::RemoteProvider,
+    task_outputs::PendingOutputs,
     workspaces::{PreparedWorkspace, Workspaces},
 };
+
+pub(crate) const CAPTURE_FAILED: &str = "Remote Workspace output could not be captured safely";
+pub(crate) const OUTPUTS_FAILED: &str = "Task output files could not be captured safely";
 
 pub(crate) async fn prepare(
     options: &HostOptions,
@@ -57,6 +66,44 @@ pub(crate) async fn prepare(
         .stage(&export.bundle, &export.checkout.start_commit, cancel)
         .await?;
     Ok(provider)
+}
+
+pub(crate) async fn capture(
+    provider: &RemoteProvider,
+    journal: &Journal,
+    (attempt, workspace): (&Attempt, &PreparedWorkspace),
+    outputs: Option<Box<PendingOutputs>>,
+    state: &std::path::Path,
+    cancel: &CancellationToken,
+) -> Result<(TransferArtifact, Option<Box<PendingOutputs>>), Status> {
+    let directory = journal
+        .remote_scratch()
+        .map_err(|_| Status::internal(CAPTURE_FAILED))?;
+    let tree = provider
+        .capture(&directory, cancel)
+        .await
+        .map_err(|_| Status::failed_precondition(CAPTURE_FAILED))?;
+    let outputs = if let Some(outputs) = outputs {
+        Some(Box::new(
+            outputs
+                .freeze_remote(workspace, tree.clone(), state, attempt, cancel)
+                .await
+                .map_err(|error| {
+                    let message = if error
+                        .downcast_ref::<Status>()
+                        .is_some_and(|status| status.message() == REQUIRED_OUTPUT_MISSING)
+                    {
+                        REQUIRED_OUTPUT_MISSING
+                    } else {
+                        OUTPUTS_FAILED
+                    };
+                    Status::failed_precondition(message)
+                })?,
+        ))
+    } else {
+        None
+    };
+    Ok((tree, outputs))
 }
 
 pub(crate) async fn ensure_stopped(

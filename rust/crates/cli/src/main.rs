@@ -757,6 +757,7 @@ async fn run(command: Command) -> Result<()> {
                     "remote Workspace placement requires Cursor and a named Workspace without unsandboxed commands"
                 );
                 execution_profile.remote_file_workspace = true;
+                execution_profile.declared_task_outputs = true;
             }
             let (adapter, adapter_args) = adapter.launch(attempt_timeout_seconds)?;
             let mcp_catalog = supertag_worker_host::McpCatalog::load(mcp_catalog.as_deref())?;

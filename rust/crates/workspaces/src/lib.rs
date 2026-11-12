@@ -9,7 +9,7 @@ pub mod packages;
 mod paths;
 pub mod source;
 mod transfer;
-pub use transfer::{PreparedExport, TransferArtifact};
+pub use transfer::{PreparedExport, TransferArtifact, materialize_returned_files};
 
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
@@ -110,6 +110,14 @@ pub async fn advertised_output_remote(
     cancel: &CancellationToken,
 ) -> Result<Option<String>> {
     git::advertised_output_remote(source, disposable, commit, cancel).await
+}
+
+/// The pinned commit identifies the tracked paths the provider received at Stage.
+pub async fn prepared_tracked_paths(
+    checkout: &Checkout,
+    cancel: &CancellationToken,
+) -> Result<BTreeSet<String>> {
+    git::Repository::prepared_tracked_outputs(checkout, cancel).await
 }
 
 #[derive(Clone, Debug)]
