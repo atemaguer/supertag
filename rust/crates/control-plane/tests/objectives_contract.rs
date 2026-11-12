@@ -133,6 +133,20 @@ async fn contract(url: String) {
         .put_tag("owner", "Inspect the result", vec!["files:read".into()])
         .await
         .unwrap();
+
+    let store = review_lifecycle(&url, &clock, &host, store).await;
+    let deadline_task = budget_and_deadline(&url, &clock, &host, store).await;
+    let unknown_attempt = idle_and_unstarted_claims(&url, &clock, &host).await;
+    pause_and_recovery(&url, &clock, &host).await;
+    audit_objectives(&url, &clock, &deadline_task, &unknown_attempt).await;
+}
+
+async fn review_lifecycle(
+    url: &str,
+    clock: &Arc<AtomicI64>,
+    host: &HostAuthority,
+    store: Store,
+) -> Store {
     let request = create("finite");
     let (one, two) = tokio::join!(
         store.create_objective(OPERATOR, &request),
@@ -157,7 +171,7 @@ async fn contract(url: String) {
     ));
     store.close().await;
 
-    let store = open(&url, &clock).await;
+    let store = open(url, clock).await;
     assert_eq!(
         store.create_objective(OPERATOR, &request).await.unwrap(),
         objective
@@ -174,7 +188,7 @@ async fn contract(url: String) {
             .unwrap(),
         paused
     );
-    assert_no_claim(&store, &host).await;
+    assert_no_claim(&store, host).await;
     // A paused Objective cannot starve unrelated runnable work.
     let direct = store
         .submit_task(
@@ -189,9 +203,9 @@ async fn contract(url: String) {
         )
         .await
         .unwrap();
-    let direct_attempt = claim_start(&store, &host, &direct.task_id).await;
+    let direct_attempt = claim_start(&store, host, &direct.task_id).await;
     store
-        .finish_task(&host, &finish(&direct_attempt, ObjectiveSignal::Progress))
+        .finish_task(host, &finish(&direct_attempt, ObjectiveSignal::Progress))
         .await
         .unwrap();
     let resumed = store
@@ -206,7 +220,7 @@ async fn contract(url: String) {
             .unwrap(),
         resumed
     );
-    let running = claim_start(&store, &host, &objective.starting_task_id).await;
+    let running = claim_start(&store, host, &objective.starting_task_id).await;
     // Pause during execution leaves this exact Attempt running.
     store
         .pause_objective(OPERATOR, &action("finite", "pause-running"))
@@ -217,7 +231,7 @@ async fn contract(url: String) {
         TaskState::Running as i32
     );
     let ready = finish(&running, ObjectiveSignal::ReadyForReview);
-    store.finish_task(&host, &ready).await.unwrap();
+    store.finish_task(host, &ready).await.unwrap();
     assert_eq!(
         store.get_objective("finite").await.unwrap().status,
         ObjectiveStatus::ReadyForReview as i32
@@ -251,7 +265,7 @@ async fn contract(url: String) {
             .unwrap(),
         cancelled
     );
-    assert_no_claim(&store, &host).await;
+    assert_no_claim(&store, host).await;
     assert!(matches!(
         store
             .submit_task(
@@ -274,10 +288,10 @@ async fn contract(url: String) {
         .create_objective(OPERATOR, &ongoing_input)
         .await
         .unwrap();
-    let identity = claim_start(&store, &host, &ongoing.starting_task_id).await;
+    let identity = claim_start(&store, host, &ongoing.starting_task_id).await;
     assert!(matches!(
         store
-            .finish_task(&host, &finish(&identity, ObjectiveSignal::Completed))
+            .finish_task(host, &finish(&identity, ObjectiveSignal::Completed))
             .await,
         Err(StoreError::InvalidArgument(_))
     ));
@@ -286,7 +300,7 @@ async fn contract(url: String) {
         TaskState::Running as i32
     );
     store
-        .finish_task(&host, &finish(&identity, ObjectiveSignal::ReadyForReview))
+        .finish_task(host, &finish(&identity, ObjectiveSignal::ReadyForReview))
         .await
         .unwrap();
     let approval = ReviewObjectiveRequest {
@@ -306,9 +320,9 @@ async fn contract(url: String) {
         .create_objective(OPERATOR, &create("owner-completion"))
         .await
         .unwrap();
-    let identity = claim_start(&store, &host, &finite.starting_task_id).await;
+    let identity = claim_start(&store, host, &finite.starting_task_id).await;
     let completion = finish(&identity, ObjectiveSignal::Completed);
-    store.finish_task(&host, &completion).await.unwrap();
+    store.finish_task(host, &completion).await.unwrap();
     assert_eq!(
         store
             .get_objective(&finite.objective_id)
@@ -318,10 +332,19 @@ async fn contract(url: String) {
         ObjectiveStatus::Completed as i32
     );
     assert_eq!(
-        store.finish_task(&host, &completion).await.unwrap().state,
+        store.finish_task(host, &completion).await.unwrap().state,
         TaskState::Succeeded as i32
     );
 
+    store
+}
+
+async fn budget_and_deadline(
+    url: &str,
+    clock: &Arc<AtomicI64>,
+    host: &HostAuthority,
+    store: Store,
+) -> String {
     let mut budget_input = create("budget");
     budget_input.ongoing = true;
     budget_input.budget_limit_minor = Some(1_000);
@@ -330,7 +353,7 @@ async fn contract(url: String) {
         .create_objective(OPERATOR, &budget_input)
         .await
         .unwrap();
-    let identity = claim_start(&store, &host, &budget.starting_task_id).await;
+    let identity = claim_start(&store, host, &budget.starting_task_id).await;
     let mut usage = ReportAttemptUsageRequest {
         attempt: Some(identity.clone()),
         sequence: 1,
@@ -339,23 +362,23 @@ async fn contract(url: String) {
         estimated: false,
         native_usage: None,
     };
-    store.report_attempt_usage(&host, &usage).await.unwrap();
-    store.report_attempt_usage(&host, &usage).await.unwrap();
+    store.report_attempt_usage(host, &usage).await.unwrap();
+    store.report_attempt_usage(host, &usage).await.unwrap();
     let mut conflict = usage.clone();
     conflict.amount_minor = Some(501);
     assert!(matches!(
-        store.report_attempt_usage(&host, &conflict).await,
+        store.report_attempt_usage(host, &conflict).await,
         Err(StoreError::Conflict(_))
     ));
     let mut forged = usage.clone();
     forged.attempt.as_mut().unwrap().lease_token = "forged".into();
     assert!(matches!(
-        store.report_attempt_usage(&host, &forged).await,
+        store.report_attempt_usage(host, &forged).await,
         Err(StoreError::PermissionDenied)
     ));
     usage.sequence = 2;
     usage.amount_minor = Some(700);
-    store.report_attempt_usage(&host, &usage).await.unwrap();
+    store.report_attempt_usage(host, &usage).await.unwrap();
     assert_eq!(
         store
             .get_objective("budget")
@@ -366,13 +389,13 @@ async fn contract(url: String) {
     );
     usage.sequence = 3;
     usage.amount_minor = Some(1_200);
-    store.report_attempt_usage(&host, &usage).await.unwrap();
+    store.report_attempt_usage(host, &usage).await.unwrap();
     let exhausted = store.get_objective("budget").await.unwrap();
     assert_eq!(exhausted.reported_spend_minor, Some(1_200));
     assert_eq!(exhausted.status, ObjectiveStatus::Working as i32);
     assert_eq!(
         store
-            .renew_attempt(&host, &identity)
+            .renew_attempt(host, &identity)
             .await
             .unwrap()
             .valid_for_ms,
@@ -399,7 +422,7 @@ async fn contract(url: String) {
         Err(StoreError::FailedPrecondition(_))
     ));
     store
-        .finish_task(&host, &finish(&identity, ObjectiveSignal::Progress))
+        .finish_task(host, &finish(&identity, ObjectiveSignal::Progress))
         .await
         .unwrap();
     assert_eq!(
@@ -408,8 +431,8 @@ async fn contract(url: String) {
     );
     store.close().await;
 
-    let store = open(&url, &clock).await;
-    store.report_attempt_usage(&host, &usage).await.unwrap(); // Exact durable evidence replay after settlement.
+    let store = open(url, clock).await;
+    store.report_attempt_usage(host, &usage).await.unwrap(); // Exact durable evidence replay after settlement.
     let limited = store
         .pause_objective(OPERATOR, &action("budget", "pause-limited"))
         .await
@@ -424,7 +447,7 @@ async fn contract(url: String) {
     let resumed = store.set_objective_limits(OPERATOR, &raise).await.unwrap();
     assert_eq!(resumed.status, ObjectiveStatus::Working as i32);
     assert_eq!(resumed.paused_at_ms, Some(BASE));
-    assert_no_claim(&store, &host).await;
+    assert_no_claim(&store, host).await;
     assert_eq!(
         store.set_objective_limits(OPERATOR, &raise).await.unwrap(),
         resumed
@@ -450,12 +473,12 @@ async fn contract(url: String) {
         .create_objective(OPERATOR, &deadline_input)
         .await
         .unwrap();
-    let identity = claim_start(&store, &host, &deadline.starting_task_id).await;
+    let identity = claim_start(&store, host, &deadline.starting_task_id).await;
     for elapsed in [20_000, 40_000, 60_000, 80_000, 100_000, 120_000] {
         clock.store(BASE + elapsed, Ordering::SeqCst);
         assert!(
             store
-                .renew_attempt(&host, &identity)
+                .renew_attempt(host, &identity)
                 .await
                 .unwrap()
                 .valid_for_ms
@@ -486,7 +509,7 @@ async fn contract(url: String) {
         clock.store(BASE + elapsed, Ordering::SeqCst);
         assert_eq!(
             store
-                .renew_attempt(&host, &identity)
+                .renew_attempt(host, &identity)
                 .await
                 .unwrap()
                 .valid_for_ms,
@@ -497,7 +520,7 @@ async fn contract(url: String) {
     // wins over generic lease uncertainty, and this receipt confirms cleanup.
     clock.store(BASE + 180_000, Ordering::SeqCst);
     let after_cancel = store
-        .finish_task(&host, &finish(&identity, ObjectiveSignal::Progress))
+        .finish_task(host, &finish(&identity, ObjectiveSignal::Progress))
         .await
         .unwrap();
     assert_eq!(after_cancel.state, TaskState::Cancelled as i32);
@@ -507,27 +530,35 @@ async fn contract(url: String) {
         ObjectiveStatus::Limited as i32
     );
     store.sweep_objectives().await.unwrap();
-    assert_no_claim(&store, &host).await;
+    assert_no_claim(&store, host).await;
     store.close().await;
 
-    let store = open(&url, &clock).await;
+    identity.task_id
+}
+
+async fn idle_and_unstarted_claims(
+    url: &str,
+    clock: &Arc<AtomicI64>,
+    host: &HostAuthority,
+) -> String {
+    let store = open(url, clock).await;
     let idle = store
         .create_objective(OPERATOR, &create("idle"))
         .await
         .unwrap();
-    let first_attempt = claim_start(&store, &host, &idle.starting_task_id).await;
+    let first_attempt = claim_start(&store, host, &idle.starting_task_id).await;
     let first_finish = finish(&first_attempt, ObjectiveSignal::Progress);
-    store.finish_task(&host, &first_finish).await.unwrap();
+    store.finish_task(host, &first_finish).await.unwrap();
     assert_eq!(
         store.get_objective("idle").await.unwrap().status,
         ObjectiveStatus::Working as i32
     );
     store.close().await;
-    let store = open(&url, &clock).await;
+    let store = open(url, clock).await;
     // A lost Finish response cannot enqueue a second idle continuation after restart.
-    store.finish_task(&host, &first_finish).await.unwrap();
+    store.finish_task(host, &first_finish).await.unwrap();
     let continuation = store
-        .claim_task(&host, "idle-continuation")
+        .claim_task(host, "idle-continuation")
         .await
         .unwrap()
         .unwrap();
@@ -545,7 +576,7 @@ async fn contract(url: String) {
     };
     store
         .start_task(
-            &host,
+            host,
             &StartTaskRequest {
                 task_id: second_attempt.task_id.clone(),
                 attempt_id: second_attempt.attempt_id.clone(),
@@ -555,14 +586,14 @@ async fn contract(url: String) {
         .await
         .unwrap();
     store
-        .finish_task(&host, &finish(&second_attempt, ObjectiveSignal::Progress))
+        .finish_task(host, &finish(&second_attempt, ObjectiveSignal::Progress))
         .await
         .unwrap();
     assert_eq!(
         store.get_objective("idle").await.unwrap().status,
         ObjectiveStatus::Blocked as i32
     );
-    assert_no_claim(&store, &host).await;
+    assert_no_claim(&store, host).await;
     let directed = store
         .submit_task(
             OPERATOR,
@@ -580,12 +611,9 @@ async fn contract(url: String) {
         store.get_objective("idle").await.unwrap().status,
         ObjectiveStatus::Working as i32
     );
-    let directed_attempt = claim_start(&store, &host, &directed.task_id).await;
+    let directed_attempt = claim_start(&store, host, &directed.task_id).await;
     store
-        .finish_task(
-            &host,
-            &finish(&directed_attempt, ObjectiveSignal::Completed),
-        )
+        .finish_task(host, &finish(&directed_attempt, ObjectiveSignal::Completed))
         .await
         .unwrap();
 
@@ -595,16 +623,16 @@ async fn contract(url: String) {
         .create_objective(OPERATOR, &ongoing_idle_input)
         .await
         .unwrap();
-    let ongoing_attempt = claim_start(&store, &host, &ongoing_idle.starting_task_id).await;
+    let ongoing_attempt = claim_start(&store, host, &ongoing_idle.starting_task_id).await;
     store
-        .finish_task(&host, &finish(&ongoing_attempt, ObjectiveSignal::Progress))
+        .finish_task(host, &finish(&ongoing_attempt, ObjectiveSignal::Progress))
         .await
         .unwrap();
     assert_eq!(
         store.get_objective("ongoing-idle").await.unwrap().status,
         ObjectiveStatus::Working as i32
     );
-    assert_no_claim(&store, &host).await;
+    assert_no_claim(&store, host).await;
     store
         .cancel_objective(OPERATOR, &action("ongoing-idle", "end-ongoing-idle"))
         .await
@@ -615,7 +643,7 @@ async fn contract(url: String) {
         .await
         .unwrap();
     let unstarted_claim = store
-        .claim_task(&host, "never-started-claim")
+        .claim_task(host, "never-started-claim")
         .await
         .unwrap()
         .unwrap();
@@ -635,25 +663,29 @@ async fn contract(url: String) {
         .create_objective(OPERATOR, &unknown_input)
         .await
         .unwrap();
-    let unknown_attempt = claim_start(&store, &host, &unknown.starting_task_id).await;
+    let unknown_attempt = claim_start(&store, host, &unknown.starting_task_id).await;
     store
-        .finish_task(&host, &finish(&unknown_attempt, ObjectiveSignal::Progress))
+        .finish_task(host, &finish(&unknown_attempt, ObjectiveSignal::Progress))
         .await
         .unwrap();
-    assert_no_claim(&store, &host).await;
+    assert_no_claim(&store, host).await;
     store
         .cancel_objective(OPERATOR, &action("unknown-cost", "end-unknown"))
         .await
         .unwrap();
     store.close().await;
 
-    let store = open(&url, &clock).await;
+    unknown_attempt.attempt_id
+}
+
+async fn pause_and_recovery(url: &str, clock: &Arc<AtomicI64>, host: &HostAuthority) {
+    let store = open(url, clock).await;
     let paused_race = store
         .create_objective(OPERATOR, &create("pause-race"))
         .await
         .unwrap();
     let reserved = store
-        .claim_task(&host, "paused-reservation")
+        .claim_task(host, "paused-reservation")
         .await
         .unwrap()
         .unwrap();
@@ -671,7 +703,7 @@ async fn contract(url: String) {
         .await
         .unwrap();
     assert!(matches!(
-        store.start_task(&host, &stale_start).await,
+        store.start_task(host, &stale_start).await,
         Err(StoreError::FailedPrecondition(_))
     ));
     let waiting = store.get_task(&paused_race.starting_task_id).await.unwrap();
@@ -679,7 +711,7 @@ async fn contract(url: String) {
     assert!(waiting.attempt_id.is_none());
     assert!(
         store
-            .claim_task(&host, "paused-reservation")
+            .claim_task(host, "paused-reservation")
             .await
             .unwrap()
             .is_none()
@@ -697,22 +729,22 @@ async fn contract(url: String) {
         )
         .await
         .unwrap();
-    let other_attempt = claim_start(&store, &host, &unrelated.task_id).await;
+    let other_attempt = claim_start(&store, host, &unrelated.task_id).await;
     store
-        .finish_task(&host, &finish(&other_attempt, ObjectiveSignal::Progress))
+        .finish_task(host, &finish(&other_attempt, ObjectiveSignal::Progress))
         .await
         .unwrap();
     // The clock has not advanced: retiring the reservation does not wait for its 30s lease.
     assert_eq!(clock.load(Ordering::SeqCst), BASE + 180_000);
     store.close().await;
-    let store = open(&url, &clock).await;
+    let store = open(url, clock).await;
     assert!(matches!(
-        store.start_task(&host, &stale_start).await,
+        store.start_task(host, &stale_start).await,
         Err(StoreError::PermissionDenied)
     ));
     assert!(
         store
-            .claim_task(&host, "paused-reservation")
+            .claim_task(host, "paused-reservation")
             .await
             .unwrap()
             .is_none()
@@ -721,30 +753,30 @@ async fn contract(url: String) {
         .resume_objective(OPERATOR, &action("pause-race", "resume-reservation"))
         .await
         .unwrap();
-    let replacement = claim_start(&store, &host, &paused_race.starting_task_id).await;
+    let replacement = claim_start(&store, host, &paused_race.starting_task_id).await;
     assert_ne!(replacement.attempt_id, reserved.attempt_id);
     assert!(matches!(
-        store.start_task(&host, &stale_start).await,
+        store.start_task(host, &stale_start).await,
         Err(StoreError::PermissionDenied)
     ));
     store
-        .finish_task(&host, &finish(&replacement, ObjectiveSignal::Completed))
+        .finish_task(host, &finish(&replacement, ObjectiveSignal::Completed))
         .await
         .unwrap();
-    assert_no_claim(&store, &host).await;
+    assert_no_claim(&store, host).await;
     store.close().await;
 
-    let store = open(&url, &clock).await;
+    let store = open(url, clock).await;
     let mut denied_input = create("denied-owner-signal");
     denied_input.ongoing = true;
     let denied = store
         .create_objective(OPERATOR, &denied_input)
         .await
         .unwrap();
-    let denied_attempt = claim_start(&store, &host, &denied.starting_task_id).await;
+    let denied_attempt = claim_start(&store, host, &denied.starting_task_id).await;
     assert!(matches!(
         store
-            .finish_task(&host, &finish(&denied_attempt, ObjectiveSignal::Completed))
+            .finish_task(host, &finish(&denied_attempt, ObjectiveSignal::Completed))
             .await,
         Err(StoreError::InvalidArgument(_))
     ));
@@ -752,7 +784,7 @@ async fn contract(url: String) {
     controlled_failure.succeeded = false;
     assert_eq!(
         store
-            .finish_task(&host, &controlled_failure)
+            .finish_task(host, &controlled_failure)
             .await
             .unwrap()
             .state,
@@ -771,10 +803,10 @@ async fn contract(url: String) {
         )
         .await
         .unwrap();
-    let after_denial_attempt = claim_start(&store, &host, &after_denial.task_id).await;
+    let after_denial_attempt = claim_start(&store, host, &after_denial.task_id).await;
     store
         .finish_task(
-            &host,
+            host,
             &finish(&after_denial_attempt, ObjectiveSignal::Progress),
         )
         .await
@@ -793,11 +825,11 @@ async fn contract(url: String) {
         .create_objective(OPERATOR, &recovery_input)
         .await
         .unwrap();
-    let recovery_attempt = claim_start(&store, &host, &recovery.starting_task_id).await;
+    let recovery_attempt = claim_start(&store, host, &recovery.starting_task_id).await;
     let lost_finish = finish(&recovery_attempt, ObjectiveSignal::Progress);
     clock.store(BASE + 210_000, Ordering::SeqCst);
     assert_eq!(
-        store.finish_task(&host, &lost_finish).await.unwrap().state,
+        store.finish_task(host, &lost_finish).await.unwrap().state,
         TaskState::Uncertain as i32
     );
     let resolve = ResolveAttemptRequest {
@@ -810,14 +842,14 @@ async fn contract(url: String) {
     };
     let receipt = store.resolve_attempt(OPERATOR, &resolve).await.unwrap();
     store.close().await;
-    let store = open(&url, &clock).await;
+    let store = open(url, clock).await;
     assert!(matches!(
-        store.finish_task(&host, &lost_finish).await,
+        store.finish_task(host, &lost_finish).await,
         Err(StoreError::Conflict(_))
     ));
     assert_eq!(
         store
-            .get_attempt_resolution(&host, &recovery_attempt)
+            .get_attempt_resolution(host, &recovery_attempt)
             .await
             .unwrap(),
         Some(receipt.clone())
@@ -839,10 +871,10 @@ async fn contract(url: String) {
         )
         .await
         .unwrap();
-    let after_recovery_attempt = claim_start(&store, &host, &after_recovery.task_id).await;
+    let after_recovery_attempt = claim_start(&store, host, &after_recovery.task_id).await;
     store
         .finish_task(
-            &host,
+            host,
             &finish(&after_recovery_attempt, ObjectiveSignal::Progress),
         )
         .await
@@ -860,14 +892,14 @@ async fn contract(url: String) {
         .create_objective(OPERATOR, &renew_input)
         .await
         .unwrap();
-    let renew_attempt = claim_start(&store, &host, &renew_objective.starting_task_id).await;
+    let renew_attempt = claim_start(&store, host, &renew_objective.starting_task_id).await;
     for elapsed in [
         20_000, 40_000, 60_000, 80_000, 100_000, 120_000, 140_000, 160_000, 170_000,
     ] {
         clock.store(renew_base + elapsed, Ordering::SeqCst);
         assert!(
             store
-                .renew_attempt(&host, &renew_attempt)
+                .renew_attempt(host, &renew_attempt)
                 .await
                 .unwrap()
                 .valid_for_ms
@@ -875,11 +907,11 @@ async fn contract(url: String) {
         );
     }
     store
-        .finish_task(&host, &finish(&renew_attempt, ObjectiveSignal::Progress))
+        .finish_task(host, &finish(&renew_attempt, ObjectiveSignal::Progress))
         .await
         .unwrap();
     let notice = store
-        .claim_task(&host, "late-grace-notice")
+        .claim_task(host, "late-grace-notice")
         .await
         .unwrap()
         .unwrap();
@@ -890,7 +922,7 @@ async fn contract(url: String) {
     };
     store
         .start_task(
-            &host,
+            host,
             &StartTaskRequest {
                 task_id: notice_attempt.task_id.clone(),
                 attempt_id: notice_attempt.attempt_id.clone(),
@@ -899,7 +931,7 @@ async fn contract(url: String) {
         )
         .await
         .unwrap();
-    let mut inspect = sqlx::AnyConnection::connect(&url).await.unwrap();
+    let mut inspect = sqlx::AnyConnection::connect(url).await.unwrap();
     let start_deadline: i64 =
         sqlx::query_scalar("SELECT lease_expires_at_ms FROM supertag_v2_tasks WHERE task_id=$1")
             .bind(&notice_attempt.task_id)
@@ -914,19 +946,19 @@ async fn contract(url: String) {
     inspect.close().await.unwrap();
     assert_eq!(
         store
-            .renew_attempt(&host, &notice_attempt)
+            .renew_attempt(host, &notice_attempt)
             .await
             .unwrap()
             .valid_for_ms,
         10_000
     );
     clock.store(renew_base + 180_000, Ordering::SeqCst);
-    let ended = store.renew_attempt(&host, &notice_attempt).await.unwrap();
+    let ended = store.renew_attempt(host, &notice_attempt).await.unwrap();
     assert_eq!(ended.valid_for_ms, 0);
     assert_eq!(ended.task.unwrap().state, TaskState::Cancelled as i32);
     assert_eq!(
         store
-            .finish_task(&host, &finish(&notice_attempt, ObjectiveSignal::Progress))
+            .finish_task(host, &finish(&notice_attempt, ObjectiveSignal::Progress))
             .await
             .unwrap()
             .state,
@@ -936,11 +968,18 @@ async fn contract(url: String) {
         store.get_objective("renew-grace").await.unwrap().status,
         ObjectiveStatus::Limited as i32
     );
-    assert_no_claim(&store, &host).await;
+    assert_no_claim(&store, host).await;
     store.close().await;
+}
 
+async fn audit_objectives(
+    url: &str,
+    clock: &Arc<AtomicI64>,
+    deadline_task: &str,
+    unknown_attempt: &str,
+) {
     // Notices are distinct Tasks and are accepted once across all repeated sweeps/restarts.
-    let mut connection = sqlx::AnyConnection::connect(&url).await.unwrap();
+    let mut connection = sqlx::AnyConnection::connect(url).await.unwrap();
     let notices = sqlx::query("SELECT task_id,notice_key FROM supertag_v2_objective_notices WHERE objective_id='deadline'").fetch_all(&mut connection).await.unwrap();
     assert_eq!(
         notices.len(),
@@ -954,7 +993,7 @@ async fn contract(url: String) {
     assert!(
         notices
             .iter()
-            .all(|row| row.get::<String, _>("task_id") != identity.task_id)
+            .all(|row| row.get::<String, _>("task_id") != deadline_task)
     );
     let prior: String =
         sqlx::query_scalar("SELECT instructions FROM supertag_v2_tags WHERE tag_id='prior'")
@@ -984,10 +1023,10 @@ async fn contract(url: String) {
         serde_json::from_str(&unknown_state).unwrap();
     assert_eq!(
         state.reported_spend.unwrap().spend.unknown_attempt_ids,
-        [unknown_attempt.attempt_id]
+        [unknown_attempt]
     );
     connection.close().await.unwrap();
-    let store = open(&url, &clock).await;
+    let store = open(url, clock).await;
     let all = store
         .list_objectives(&ListObjectivesRequest {
             limit: 100,
