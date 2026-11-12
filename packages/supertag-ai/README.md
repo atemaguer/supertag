@@ -169,7 +169,7 @@ async iterable and accepts an `AbortSignal`. Resume a watch with its last `resum
 
 In a Rust deployment, a Worker Host is the machine or sandbox that provides execution.
 It launches a harness adapter to run one Task Attempt, which is a single try at completing
-a unit of work. Register an adapter executable with `supertag worker-host --adapter`.
+a unit of work. Pass the executable to the Worker Host through its `--adapter` option.
 The adapter opens the execution connection from standard input.
 
 ```ts

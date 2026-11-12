@@ -87,8 +87,8 @@ Keep each journal across restarts; run only one application per journal.
 
 A Worker Host is the machine or sandbox that provides execution. It launches a harness
 adapter to run one Task Attempt, which is a single try at completing a unit of work. Install
-the SDK with its `runtime` extra. Register the adapter executable with
-`supertag worker-host --adapter`.
+the SDK with its `runtime` extra. Pass the executable to the Worker Host through its
+`--adapter` option.
 
 ```python
 import asyncio
