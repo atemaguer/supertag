@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use supertag_protocol::{
     artifacts::{MAX_ARTIFACT_BYTES, MAX_ARTIFACT_FILES, managed_output_directory},
     authenticated_request,
-    output_policy::OutputSelection,
+    output_policy::{OutputSelection, REQUIRED_OUTPUT_MISSING},
     v2::{
         ArtifactDescription, ArtifactSelection, HarnessCaptureArtifactRequest, HarnessKind,
         OutputGitMode, Task, TaskOutputPolicy,
@@ -121,13 +121,17 @@ impl PendingOutputs {
             Ok::<_, anyhow::Error>((self, policy, paths))
         })
         .await??;
-        if policy
+        if let Some(policy) = policy
             .as_ref()
-            .is_some_and(|policy| policy.git() == OutputGitMode::Ignore)
+            .filter(|policy| policy.git() == OutputGitMode::Ignore)
         {
             let tracked =
                 supertag_workspaces::tracked_output_paths(&workspace.checkout, &paths, cancel)
                     .await?;
+            let rules = OutputSelection::new(policy)?;
+            if tracked.iter().any(|path| rules.requires(path)) {
+                return Err(Status::failed_precondition(REQUIRED_OUTPUT_MISSING).into());
+            }
             paths.retain(|path| !tracked.contains(path));
         }
         let checkout = workspace.checkout.path.clone();

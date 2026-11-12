@@ -755,6 +755,7 @@ async fn declared_output_cases(
             "TASK_STATE_FAILED",
         ),
         ("tracked", "report.txt", "ignore", "TASK_STATE_FAILED"),
+        ("mixed-tracked", "**/*.txt", "ignore", "TASK_STATE_FAILED"),
     ] {
         std::fs::write(
             &policy_file,

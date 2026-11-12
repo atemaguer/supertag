@@ -159,15 +159,21 @@ impl OutputSelection {
     pub fn permits(&self, path: &str) -> bool {
         validate_artifact_path(path).is_ok()
             && !excluded(path)
-            && self
-                .include
-                .iter()
-                .chain(&self.required)
-                .any(|(_, pattern)| pattern.is_match(path))
+            && (self.requires(path)
+                || self
+                    .include
+                    .iter()
+                    .any(|(_, pattern)| pattern.is_match(path)))
             && !self
                 .exclude
                 .iter()
                 .any(|(_, pattern)| pattern.is_match(path))
+    }
+
+    pub fn requires(&self, path: &str) -> bool {
+        self.required
+            .iter()
+            .any(|(_, pattern)| pattern.is_match(path))
     }
 
     pub fn validate(&self, paths: &[String]) -> Result<(), Status> {
