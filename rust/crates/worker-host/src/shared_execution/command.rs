@@ -49,17 +49,16 @@ impl Access {
                 "shared command receipt has a different identity",
             ));
         }
-        let result = if started.cleanup_verified && started.state() == OperationState::Accepted {
-            Ok((started.clone(), Vec::new()))
-        } else {
-            self.watch_command(
+        // An Accepted launch reservation may become Running after a lost start response.
+        // Require a terminal, verified receipt even if the reservation was not armed when read.
+        let result = self
+            .watch_command(
                 process_id,
                 &operation_id,
                 tool_deadline,
                 &mut current_authority,
             )
-            .await
-        };
+            .await;
         let (receipt, output) = match result {
             Ok(result) => result,
             Err(error) => {

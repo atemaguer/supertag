@@ -201,10 +201,10 @@ impl Provider {
             let (lane, read, bytes) = tokio::select! {
                 _ = stop.cancelled(), if lifeline.is_some() => { lifeline.take(); continue; }
                 deadline = next_lease(&mut lease), if lease.is_some() && lifeline.is_some() => {
-                    if let (Some(deadline), Some(writer)) = (deadline, lifeline.as_mut()) {
-                        if matches!(time::timeout(Duration::from_millis(300), writer.write_all(&deadline.to_le_bytes())).await, Ok(Ok(()))) {
-                            continue;
-                        }
+                    if let (Some(deadline), Some(writer)) = (deadline, lifeline.as_mut())
+                        && matches!(time::timeout(Duration::from_millis(300), writer.write_all(&deadline.to_le_bytes())).await, Ok(Ok(())))
+                    {
+                        continue;
                     }
                     lifeline.take();
                     continue;
