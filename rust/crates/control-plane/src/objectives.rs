@@ -9,7 +9,7 @@ use supertag_protocol::v2::*;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
-use crate::store::{Result, insert_task, lease_is_live, name, owned, text};
+use crate::store::{HostAuthority, Result, insert_task, lease_is_live, name, owned, text};
 use crate::{ControlPlane, Store, StoreError, objective_limits as limits};
 
 struct Record {
@@ -975,7 +975,7 @@ pub(crate) async fn objective_sweep_in(tx: &mut Transaction<'_, Any>, now_ms: i6
 impl Store {
     pub async fn report_attempt_usage(
         &self,
-        principal: &str,
+        host: &HostAuthority,
         input: &ReportAttemptUsageRequest,
     ) -> Result<()> {
         let attempt = input
@@ -986,6 +986,14 @@ impl Store {
             i64::try_from(input.sequence).map_err(|_| invalid("usage sequence is too large"))?;
         if sequence < 1 {
             return Err(invalid("usage sequence starts at one"));
+        }
+        if let Some(usage) = &input.native_usage {
+            if input.amount_minor.is_some() || input.currency.is_some() || input.estimated {
+                return Err(invalid("native token usage cannot include cost evidence"));
+            }
+            return self
+                .report_native_usage(host, attempt, sequence, usage)
+                .await;
         }
         if input.amount_minor.is_some() != input.currency.is_some() {
             return Err(invalid("reported cost requires both amount and currency"));
@@ -1004,7 +1012,7 @@ impl Store {
         let now_ms = self.execution_now_ms();
         let task = owned(
             &mut tx,
-            principal,
+            host,
             &attempt.task_id,
             &attempt.attempt_id,
             &attempt.lease_token,

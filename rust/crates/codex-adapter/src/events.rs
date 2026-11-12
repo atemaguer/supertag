@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::Value;
+use supertag_protocol::v2::NativeTokenUsage;
 
 use crate::config::Policy;
 
@@ -9,16 +10,22 @@ pub(crate) struct Stream {
     completed: bool,
     final_response: Option<String>,
     count: usize,
+    expected_thread: Option<String>,
+    observed_model: Option<String>,
+    usage: Option<NativeTokenUsage>,
 }
 
 impl Stream {
-    pub(crate) fn new(policy: Policy) -> Self {
+    pub(crate) fn new(policy: Policy, expected_thread: Option<String>) -> Self {
         Self {
             policy,
             thread: None,
             completed: false,
             final_response: None,
             count: 0,
+            expected_thread,
+            observed_model: None,
+            usage: None,
         }
     }
 
@@ -34,13 +41,32 @@ impl Stream {
             .get("type")
             .and_then(Value::as_str)
             .context("Codex event is missing its type")?;
+        if let Some(model) = event.get("model") {
+            self.observed_model = Some(
+                model
+                    .as_str()
+                    .filter(|model| {
+                        !model.is_empty()
+                            && model.len() <= 256
+                            && !model.chars().any(char::is_control)
+                    })
+                    .context("Codex reported an invalid model")?
+                    .into(),
+            );
+        }
         if kind == "thread.started" {
             ensure!(self.thread.is_none(), "Codex started more than one thread");
             let id = event
                 .get("thread_id")
                 .and_then(Value::as_str)
-                .filter(|id| !id.is_empty() && id.len() <= 256)
+                .filter(|id| crate::checkpoint::thread_identity(id))
                 .context("Codex thread identity is invalid")?;
+            ensure!(
+                self.expected_thread
+                    .as_deref()
+                    .is_none_or(|expected| expected == id),
+                "Codex did not resume the requested Session"
+            );
             self.thread = Some(id.into());
             return Ok(Some("Codex started".into()));
         }
@@ -65,11 +91,17 @@ impl Stream {
                     .get("cached_input_tokens")
                     .and_then(Value::as_u64)
                     .context("Codex completed with invalid usage")?;
-                usage
+                let output = usage
                     .get("output_tokens")
                     .and_then(Value::as_u64)
                     .context("Codex completed with invalid usage")?;
                 ensure!(cached <= input, "Codex completed with invalid usage");
+                self.usage = Some(NativeTokenUsage {
+                    input_tokens: input,
+                    cached_input_tokens: cached,
+                    output_tokens: output,
+                    observed_model: self.observed_model.clone(),
+                });
                 self.completed = true;
                 Ok(None)
             }
@@ -182,7 +214,11 @@ impl Stream {
         Ok(None)
     }
 
-    pub(crate) fn finish(self) -> Result<String> {
+    pub(crate) fn take_usage(&mut self) -> Option<NativeTokenUsage> {
+        self.usage.take()
+    }
+
+    pub(crate) fn finish(self) -> Result<(String, String)> {
         ensure!(
             self.thread.is_some(),
             "Codex completed without a thread identity"
@@ -191,7 +227,11 @@ impl Stream {
             self.completed,
             "Codex process ended without a completed turn"
         );
-        self.final_response
-            .context("Codex completed without a final response")
+        Ok((
+            self.final_response
+                .context("Codex completed without a final response")?,
+            self.thread
+                .context("Codex completed without a thread identity")?,
+        ))
     }
 }

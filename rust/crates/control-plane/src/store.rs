@@ -5,7 +5,9 @@
 //! socket, Tokio mutex, or response acknowledgement never owns durable work.
 
 mod authority;
+mod hosts;
 pub(crate) use authority::lease_is_live;
+pub use hosts::HostAuthority;
 
 use std::{str::FromStr, sync::Arc, time::Duration};
 
@@ -49,7 +51,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 4;
+        const SCHEMA_VERSION: i64 = 6;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -104,6 +106,8 @@ impl Store {
                 include_str!("../migrations/sqlite/0002_connector_outbox.sql"),
                 include_str!("../migrations/sqlite/0003_execution_authority.sql"),
                 include_str!("../migrations/sqlite/0004_objectives.sql"),
+                include_str!("../migrations/sqlite/0005_host_enrollment.sql"),
+                include_str!("../migrations/sqlite/0006_session_checkpoints.sql"),
             ]
         } else {
             [
@@ -111,6 +115,8 @@ impl Store {
                 include_str!("../migrations/postgresql/0002_connector_outbox.sql"),
                 include_str!("../migrations/postgresql/0003_execution_authority.sql"),
                 include_str!("../migrations/postgresql/0004_objectives.sql"),
+                include_str!("../migrations/postgresql/0005_host_enrollment.sql"),
+                include_str!("../migrations/postgresql/0006_session_checkpoints.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -258,17 +264,17 @@ impl Store {
 
     pub async fn claim_task(
         &self,
-        principal: &str,
+        host: &HostAuthority,
         operation_id: &str,
     ) -> Result<Option<Assignment>> {
-        name("principal", principal)?;
         name("operation ID", operation_id)?;
         let (mut transaction, _) = self.write().await?;
+        let all_tags = hosts::current_scope_in(&mut transaction, host).await?;
         let now = self.execution_now_ms();
-        authority::expire_due_attempts(&mut transaction, now).await?;
         crate::objectives::objective_sweep_in(&mut transaction, now).await?;
+        authority::expire_due_attempts(&mut transaction, now).await?;
         let prior = sqlx::query("SELECT task_id, attempt_id, lease_token FROM supertag_v2_claims WHERE principal = $1 AND operation_id = $2")
-            .bind(principal).bind(operation_id).fetch_optional(&mut *transaction).await?;
+            .bind(&host.principal).bind(operation_id).fetch_optional(&mut *transaction).await?;
         if let Some(prior) = prior {
             let id: Option<String> = prior.try_get("task_id")?;
             let assignment = match id {
@@ -292,18 +298,20 @@ impl Store {
             transaction.commit().await?;
             return Ok(assignment);
         }
-        let Some(id) = authority::claim_candidate(&mut transaction, now).await? else {
+        let Some(id) =
+            authority::claim_candidate(&mut transaction, now, host.id(), all_tags).await?
+        else {
             // Commit maintenance transitions. An empty poll retains no claim receipt.
             transaction.commit().await?;
             return Ok(None);
         };
         let attempt = Uuid::new_v4().to_string();
         let lease = Uuid::new_v4().to_string();
-        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, lease_token = $4, lease_expires_at_ms = $5, event_sequence_base = next_sequence - 1 WHERE task_id = $6")
-            .bind(TaskState::Claimed as i64).bind(&attempt).bind(principal).bind(&lease)
+        sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = $2, host_principal = $3, host_generation = $4, lease_token = $5, lease_expires_at_ms = $6, event_sequence_base = next_sequence - 1 WHERE task_id = $7")
+            .bind(TaskState::Claimed as i64).bind(&attempt).bind(&host.principal).bind(host.generation).bind(&lease)
             .bind(authority::lease_deadline(now)).bind(&id).execute(&mut *transaction).await?;
         sqlx::query("INSERT INTO supertag_v2_claims (principal, operation_id, task_id, attempt_id, lease_token) VALUES ($1,$2,$3,$4,$5)")
-            .bind(principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).execute(&mut *transaction).await?;
+            .bind(&host.principal).bind(operation_id).bind(&id).bind(&attempt).bind(&lease).execute(&mut *transaction).await?;
         let task = task_in(&mut transaction, &id).await?;
         transaction.commit().await?;
         Ok(Some(Assignment {
@@ -315,32 +323,25 @@ impl Store {
 
     pub async fn inspect_attempt(
         &self,
-        principal: &str,
+        host: &HostAuthority,
         task_id: &str,
         attempt_id: &str,
         lease_token: &str,
     ) -> Result<Task> {
         let mut transaction = self.pool.begin().await?;
-        let row = owned(
-            &mut transaction,
-            principal,
-            task_id,
-            attempt_id,
-            lease_token,
-        )
-        .await?;
+        let row = owned(&mut transaction, host, task_id, attempt_id, lease_token).await?;
         let task = task_row(&row)?;
         transaction.commit().await?;
         Ok(task)
     }
 
-    pub async fn start_task(&self, principal: &str, input: &StartTaskRequest) -> Result<Task> {
+    pub async fn start_task(&self, host: &HostAuthority, input: &StartTaskRequest) -> Result<Task> {
         let (mut transaction, _) = self.write().await?;
         let now = self.execution_now_ms();
         crate::objectives::objective_sweep_in(&mut transaction, now).await?;
         let row = owned(
             &mut transaction,
-            principal,
+            host,
             &input.task_id,
             &input.attempt_id,
             &input.lease_token,
@@ -370,7 +371,7 @@ impl Store {
                 // immediately so a paused Objective cannot occupy its host until
                 // lease expiry. Its durable claim receipt remains bound to the old
                 // Attempt and cannot acquire the replacement reservation.
-                sqlx::query("UPDATE supertag_v2_tasks SET state=$1, attempt_id=NULL, host_principal=NULL, lease_token=NULL, lease_expires_at_ms=NULL, event_sequence_base=0 WHERE task_id=$2")
+                sqlx::query("UPDATE supertag_v2_tasks SET state=$1, attempt_id=NULL, host_principal=NULL, host_generation=NULL, lease_token=NULL, lease_expires_at_ms=NULL, event_sequence_base=0 WHERE task_id=$2")
                     .bind(TaskState::Queued as i64).bind(&input.task_id)
                     .execute(&mut *transaction).await?;
                 transaction.commit().await?;
@@ -398,7 +399,7 @@ impl Store {
 
     pub async fn append_event(
         &self,
-        principal: &str,
+        host: &HostAuthority,
         input: &AppendEventRequest,
     ) -> Result<TaskEvent> {
         let sequence =
@@ -410,7 +411,7 @@ impl Store {
         let (mut transaction, _) = self.write().await?;
         let row = owned(
             &mut transaction,
-            principal,
+            host,
             &input.task_id,
             &input.attempt_id,
             &input.lease_token,
@@ -469,12 +470,21 @@ impl Store {
         })
     }
 
-    pub async fn finish_task(&self, principal: &str, input: &FinishTaskRequest) -> Result<Task> {
+    pub async fn finish_task(
+        &self,
+        host: &HostAuthority,
+        input: &FinishTaskRequest,
+    ) -> Result<Task> {
         text("result", &input.result, 262_144)?;
+        if !input.succeeded && input.checkpoint_sha256.is_some() {
+            return Err(invalid(
+                "only a successful Attempt can advance a checkpoint",
+            ));
+        }
         let (mut transaction, order) = self.write().await?;
         let row = owned(
             &mut transaction,
-            principal,
+            host,
             &input.task_id,
             &input.attempt_id,
             &input.lease_token,
@@ -515,6 +525,8 @@ impl Store {
                     != Some(input.result.as_str())
                 || row.try_get::<i64, _>("finish_objective_signal")?
                     != i64::from(input.objective_signal)
+                || row.try_get::<Option<String>, _>("finish_checkpoint_sha256")?
+                    != input.checkpoint_sha256
             {
                 return Err(StoreError::Conflict(
                     "Task already has a different outcome".into(),
@@ -524,12 +536,13 @@ impl Store {
             if state != TaskState::Running {
                 return Err(StoreError::FailedPrecondition("Task is not running".into()));
             }
-            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = $2, cleanup_pending = 0, cleanup_observed = 1, finish_objective_signal = $3 WHERE task_id = $4")
-                .bind(desired as i64).bind(&input.result).bind(i64::from(input.objective_signal)).bind(&input.task_id)
+            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = $2, cleanup_pending = 0, cleanup_observed = 1, finish_objective_signal = $3, finish_checkpoint_sha256 = $4 WHERE task_id = $5")
+                .bind(desired as i64).bind(&input.result).bind(i64::from(input.objective_signal)).bind(&input.checkpoint_sha256).bind(&input.task_id)
                 .execute(&mut *transaction).await?;
         }
         let task = task_in(&mut transaction, &input.task_id).await?;
         if state == TaskState::Running && task.state() == TaskState::Succeeded {
+            crate::checkpoints::finish_in(&mut transaction, &task, input).await?;
             crate::objectives::objective_finish_in(
                 &mut transaction,
                 &task,
@@ -811,15 +824,15 @@ pub(crate) async fn task_in(transaction: &mut Transaction<'_, Any>, id: &str) ->
 
 pub(crate) async fn owned(
     transaction: &mut Transaction<'_, Any>,
-    principal: &str,
+    host: &HostAuthority,
     task_id: &str,
     attempt_id: &str,
     lease_token: &str,
 ) -> Result<AnyRow> {
-    name("principal", principal)?;
     name("Task ID", task_id)?;
     name("Task Attempt ID", attempt_id)?;
     name("lease token", lease_token)?;
+    hosts::current_scope_in(transaction, host).await?;
     let row = sqlx::query("SELECT * FROM supertag_v2_tasks WHERE task_id = $1")
         .bind(task_id)
         .fetch_optional(&mut **transaction)
@@ -828,7 +841,8 @@ pub(crate) async fn owned(
     if row
         .try_get::<Option<String>, _>("host_principal")?
         .as_deref()
-        != Some(principal)
+        != Some(host.principal.as_str())
+        || row.try_get::<Option<i64>, _>("host_generation")? != Some(host.generation)
         || row.try_get::<Option<String>, _>("attempt_id")?.as_deref() != Some(attempt_id)
         || row.try_get::<Option<String>, _>("lease_token")?.as_deref() != Some(lease_token)
     {

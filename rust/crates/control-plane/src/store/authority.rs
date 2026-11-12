@@ -9,7 +9,10 @@ use supertag_protocol::v2::{
     ResolveAttemptRequest, TaskState,
 };
 
-use super::{Result, Store, StoreError, invalid, name, owned, task_in, task_row, text};
+use super::{
+    HostAuthority, Result, Store, StoreError, hosts::current_scope_in, invalid, name, owned,
+    task_in, task_row, text,
+};
 
 const LEASE_MS: i64 = 30_000;
 
@@ -39,7 +42,7 @@ impl Store {
 
     pub async fn renew_attempt(
         &self,
-        principal: &str,
+        host: &HostAuthority,
         input: &InspectAttemptRequest,
     ) -> Result<AttemptAuthority> {
         let (mut transaction, _) = self.write().await?;
@@ -49,7 +52,7 @@ impl Store {
         crate::objectives::objective_sweep_in(&mut transaction, now).await?;
         let row = owned(
             &mut transaction,
-            principal,
+            host,
             &input.task_id,
             &input.attempt_id,
             &input.lease_token,
@@ -178,7 +181,7 @@ impl Store {
             .bind(i64::from(input.decision)).bind(&input.evidence).bind(i64::from(input.confirmed_stopped))
             .bind(now).execute(&mut *transaction).await?;
         if decision == AttemptDecision::Retry {
-            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = NULL, attempt_id = NULL, host_principal = NULL, lease_token = NULL, lease_expires_at_ms = NULL, cleanup_pending = 0, cleanup_observed = 0, event_sequence_base = 0, finish_objective_signal = 0 WHERE task_id = $2")
+            sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = NULL, attempt_id = NULL, host_principal = NULL, host_generation = NULL, lease_token = NULL, lease_expires_at_ms = NULL, cleanup_pending = 0, cleanup_observed = 0, event_sequence_base = 0, finish_objective_signal = 0 WHERE task_id = $2")
                 .bind(TaskState::Queued as i64).bind(&input.task_id).execute(&mut *transaction).await?;
         } else {
             let state = if cancelled {
@@ -203,31 +206,34 @@ impl Store {
 
     pub async fn get_attempt_resolution(
         &self,
-        principal: &str,
+        host: &HostAuthority,
         input: &InspectAttemptRequest,
     ) -> Result<Option<AttemptResolution>> {
-        name("principal", principal)?;
         name("Task ID", &input.task_id)?;
         name("Task Attempt ID", &input.attempt_id)?;
         name("lease token", &input.lease_token)?;
+        let mut transaction = self.pool.begin().await?;
+        current_scope_in(&mut transaction, host).await?;
         // The claim retains the original token and principal even after an explicit
         // retry replaces the Task's current owner. This read grants no execution rights.
         let owner: Option<String> = sqlx::query_scalar("SELECT attempt_id FROM supertag_v2_claims WHERE task_id = $1 AND attempt_id = $2 AND principal = $3 AND lease_token = $4")
-            .bind(&input.task_id).bind(&input.attempt_id).bind(principal).bind(&input.lease_token)
-            .fetch_optional(&self.pool).await?;
+            .bind(&input.task_id).bind(&input.attempt_id).bind(&host.principal).bind(&input.lease_token)
+            .fetch_optional(&mut *transaction).await?;
         if owner.is_none() {
             return Err(StoreError::PermissionDenied);
         }
-        sqlx::query(
+        let resolution = sqlx::query(
             "SELECT * FROM supertag_v2_attempt_resolutions WHERE task_id = $1 AND attempt_id = $2",
         )
         .bind(&input.task_id)
         .bind(&input.attempt_id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *transaction)
         .await?
         .as_ref()
         .map(resolution_row)
-        .transpose()
+        .transpose()?;
+        transaction.commit().await?;
+        Ok(resolution)
     }
 }
 
@@ -244,12 +250,14 @@ pub(crate) fn lease_is_live(row: &AnyRow, now: i64) -> Result<bool> {
 pub(super) async fn claim_candidate(
     transaction: &mut Transaction<'_, Any>,
     now: i64,
+    host_id: &str,
+    all_tags: i64,
 ) -> Result<Option<String>> {
     let mut after = 0_i64;
     loop {
-        let candidates = sqlx::query("SELECT pending.task_id, pending.accepted_order FROM supertag_v2_tasks pending WHERE pending.state = $1 AND pending.accepted_order > $2 AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks active WHERE active.tag_id = pending.tag_id AND active.session_id = pending.session_id AND (active.state IN ($3,$4,$5) OR active.cleanup_pending = 1)) ORDER BY pending.accepted_order LIMIT 32")
+        let candidates = sqlx::query("SELECT pending.task_id, pending.accepted_order FROM supertag_v2_tasks pending WHERE pending.state = $1 AND pending.accepted_order > $2 AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks active WHERE active.tag_id = pending.tag_id AND active.session_id = pending.session_id AND (active.state IN ($3,$4,$5) OR active.cleanup_pending = 1)) AND ($6 = 1 OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=$7 AND scope.tag_id=pending.tag_id)) ORDER BY pending.accepted_order LIMIT 32")
             .bind(TaskState::Queued as i64).bind(after).bind(TaskState::Claimed as i64)
-            .bind(TaskState::Running as i64).bind(TaskState::Uncertain as i64)
+            .bind(TaskState::Running as i64).bind(TaskState::Uncertain as i64).bind(all_tags).bind(host_id)
             .fetch_all(&mut **transaction).await?;
         let last_page = candidates.len() < 32;
         for candidate in candidates {
@@ -270,7 +278,7 @@ pub(super) async fn expire_due_attempts(
     transaction: &mut Transaction<'_, Any>,
     now: i64,
 ) -> Result<u64> {
-    let claims = sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = NULL, host_principal = NULL, lease_token = NULL, lease_expires_at_ms = NULL, event_sequence_base = 0 WHERE state = $2 AND lease_expires_at_ms <= $3")
+    let claims = sqlx::query("UPDATE supertag_v2_tasks SET state = $1, attempt_id = NULL, host_principal = NULL, host_generation = NULL, lease_token = NULL, lease_expires_at_ms = NULL, event_sequence_base = 0 WHERE state = $2 AND lease_expires_at_ms <= $3")
         .bind(TaskState::Queued as i64).bind(TaskState::Claimed as i64).bind(now)
         .execute(&mut **transaction).await?.rows_affected();
     let running = sqlx::query("UPDATE supertag_v2_tasks SET state = $1, cleanup_pending = 1 WHERE state = $2 AND lease_expires_at_ms <= $3")

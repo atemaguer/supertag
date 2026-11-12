@@ -16,7 +16,7 @@ use serde_json::Value;
 use sha2::Sha256;
 use sqlx::{ConnectOptions, Connection, Executor, PgConnection, postgres::PgConnectOptions};
 use supertag_protocol::{
-    authenticated_request,
+    HOST_GENERATION_HEADER, authenticated_request,
     v2::{
         AcceptEventRequest, AttemptDecision, CancelTaskRequest, ClaimReplyRequest, GetTaskRequest,
         InspectAttemptRequest, ListEventsRequest, PutTagRequest, ReplyDestination, ReplyState,
@@ -62,8 +62,17 @@ impl Credentials {
             .env("SUPERTAG_GATEWAY_TOKEN", &self.gateway)
             .env("SUPERTAG_OPERATOR_TOKEN", &self.operator)
             .env("SUPERTAG_HOST_TOKEN", &self.host)
+            .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &self.host)
             .stdin(Stdio::null());
         command
+    }
+
+    fn host_request<T>(&self, message: T) -> Result<Request<T>> {
+        let mut request = authenticated_request(message, &self.host, None)?;
+        request
+            .metadata_mut()
+            .insert(HOST_GENERATION_HEADER, "1".parse()?);
+        Ok(request)
     }
 
     fn request<T>(&self, message: T) -> Result<Request<T>> {
@@ -341,8 +350,9 @@ async fn wait_for_state(
         }
         ensure!(
             Instant::now() < deadline,
-            "expected {expected:?}, observed {:?}",
-            observed.state()
+            "expected {expected:?}, observed {:?} with result {:?}",
+            observed.state(),
+            observed.result
         );
         sleep(Duration::from_millis(10)).await;
     }
@@ -1605,7 +1615,7 @@ async fn signed_slack_event_and_reply_receipt_survive_gateway_restart_without_re
 }
 
 #[tokio::test]
-async fn native_codex_launch_runs_the_starting_objective_task_with_private_state() -> Result<()> {
+async fn native_codex_records_usage_and_restores_session_after_services_restart() -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
     let directory = tempfile::tempdir()?;
@@ -1636,23 +1646,40 @@ test -z "${SUPERTAG_CODEX_ATTEMPT_DIRECTORY:-}${SUPERTAG_CODEX_SCRATCH_PARENT:-}
 test -f "$CODEX_HOME/auth.json"
 grep -q fixture-native-sign-in "$CODEX_HOME/auth.json"
 prompt=$(cat)
-case "$prompt" in *"Verify the native harness"*) ;; *) exit 11 ;; esac
+case " $* " in
+*" resume fixture-thread "*)
+  case "$prompt" in *"Resume the native harness"*) ;; *) exit 13 ;; esac
+  grep -q 'fixture history' "$CODEX_HOME/sessions/thread.jsonl"
+  grep -Fq "$(printf '"cwd":"%s"' "$PWD")" "$CODEX_HOME/sessions/thread.jsonl"
+  message='Native adapter resumed'
+  ;;
+*)
+  case "$prompt" in *"Verify the native harness"*) ;; *) exit 11 ;; esac
+  mkdir -p "$CODEX_HOME/sessions"
+  printf '{"type":"session_meta","payload":{"id":"fixture-thread","cwd":"%s"}}\n' "$PWD" > "$CODEX_HOME/sessions/thread.jsonl"
+  printf '%s\n' '{"type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"fixture history"}]}}' >> "$CODEX_HOME/sessions/thread.jsonl"
+  message='Native adapter verified'
+  ;;
+esac
 printf '%s\n' '{"type":"thread.started","thread_id":"fixture-thread"}'
-printf '%s\n' '{"type":"item.completed","item":{"id":"fixture-message","type":"agent_message","text":"Native adapter verified"}}'
+printf '{"type":"item.completed","item":{"id":"fixture-message","type":"agent_message","text":"%s"}}\n' "$message"
 printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":4,"cached_input_tokens":1,"output_tokens":3}}'
 "#,
     )?;
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o700))?;
 
-    let mut command = local_command();
-    command
-        .args(["up", "--state-directory"])
-        .arg(&state)
-        .args(["--harness", "codex", "--codex-path"])
-        .arg(&fake)
-        .args(["--codex-model", "fixture-model"])
-        .env("HOME", &home);
-    let mut supervisor = Process::spawn(command, directory.path(), "native-codex", true)?;
+    let start = || {
+        let mut command = local_command();
+        command
+            .args(["up", "--state-directory"])
+            .arg(&state)
+            .args(["--harness", "codex", "--codex-path"])
+            .arg(&fake)
+            .args(["--codex-model", "fixture-model"])
+            .env("HOME", &home);
+        Process::spawn(command, directory.path(), "native-codex", true)
+    };
+    let mut supervisor = start()?;
     let endpoint = supervisor.endpoint().await?;
     let channel = Channel::from_shared(endpoint)?
         .connect_timeout(Duration::from_secs(3))
@@ -1732,6 +1759,73 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":4,"cached_input_
     .await?;
     assert_eq!(stored["starting_task_id"].as_str(), Some(task_id));
     assert_eq!(stored["status"], "OBJECTIVE_STATUS_WORKING");
+    let usage = cli(
+        local_command(),
+        directory.path(),
+        &[
+            "task-usage",
+            "--state-directory",
+            local,
+            task_id,
+            settled.attempt_id.as_deref().context("missing Attempt")?,
+        ],
+    )
+    .await?;
+    assert_eq!(usage["sequence"], 1);
+    assert_eq!(usage["input_tokens"], 4);
+    assert_eq!(usage["cached_input_tokens"], 1);
+    assert_eq!(usage["output_tokens"], 3);
+    assert!(usage["observed_model"].is_null());
+    let checkpoints: Vec<_> =
+        std::fs::read_dir(state.join("checkpoints"))?.collect::<std::io::Result<_>>()?;
+    assert_eq!(checkpoints.len(), 1);
+    let archive = &checkpoints[0].path();
+    assert_eq!(archive.metadata()?.permissions().mode() & 0o077, 0);
+    let original = std::fs::read(archive)?;
+    assert!(!String::from_utf8_lossy(&original).contains("fixture-native-sign-in"));
+
+    supervisor.terminate()?;
+    supervisor.successful_exit().await?;
+    let mut supervisor = start()?;
+    let endpoint = supervisor.endpoint().await?;
+    let mut operator = OperatorClient::new(Channel::from_shared(endpoint)?.connect().await?);
+    let session_id = stored["session_id"]
+        .as_str()
+        .context("missing Session ID")?;
+    let resume = |operation_id: &str| {
+        credentials.request(SubmitTaskRequest {
+            tag_id: "native-engineer".into(),
+            session_id: session_id.into(),
+            prompt: "Resume the native harness".into(),
+            operation_id: operation_id.into(),
+        })
+    };
+    // Same-size corruption must fail before another adapter receives the bytes.
+    let mut corrupted = original.clone();
+    corrupted[0] ^= 1;
+    std::fs::write(archive, corrupted)?;
+    let bad = operator
+        .submit_task(resume("resume-corrupt")?)
+        .await?
+        .into_inner();
+    let bad = wait_for_state(&mut operator, &credentials, &bad.task_id, TaskState::Failed).await?;
+    assert_eq!(
+        bad.result.as_deref(),
+        Some("Session checkpoint could not be restored")
+    );
+    std::fs::write(archive, original)?;
+    let next = operator
+        .submit_task(resume("resume-clean")?)
+        .await?
+        .into_inner();
+    let next = wait_for_state(
+        &mut operator,
+        &credentials,
+        &next.task_id,
+        TaskState::Succeeded,
+    )
+    .await?;
+    assert_eq!(next.result.as_deref(), Some("Native adapter resumed"));
     assert!(
         std::fs::read_dir(state.join("host"))?
             .collect::<std::io::Result<Vec<_>>>()?
@@ -1963,11 +2057,7 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
         .await?;
     let mut host_client = WorkerHostClient::new(host_channel);
     let receipt = host_client
-        .get_attempt_resolution(authenticated_request(
-            old_attempt.clone(),
-            &credentials.host,
-            None,
-        )?)
+        .get_attempt_resolution(credentials.host_request(old_attempt.clone())?)
         .await?
         .into_inner();
     assert!(receipt.resolution.is_none());
@@ -2004,7 +2094,7 @@ async fn gateway_partition_expires_execution_and_requires_audited_retry_before_r
         resolution
     );
     let receipt = host_client
-        .get_attempt_resolution(authenticated_request(old_attempt, &credentials.host, None)?)
+        .get_attempt_resolution(credentials.host_request(old_attempt)?)
         .await?
         .into_inner();
     assert_eq!(receipt.resolution, Some(resolution));

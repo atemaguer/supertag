@@ -5,9 +5,12 @@ package supertag.runtime.v2;
 // The Gateway exposes these services to operators and enrolled hosts. The
 // Control Plane serves the same messages on a private authenticated listener.
 service Operator {
+  rpc CreateAuthKey(CreateAuthKeyRequest) returns (AuthKey);
+  rpc RevokeHost(RevokeHostRequest) returns (HostRecord);
   rpc PutTag(PutTagRequest) returns (Tag);
   rpc SubmitTask(SubmitTaskRequest) returns (Task);
   rpc GetTask(GetTaskRequest) returns (Task);
+  rpc ListNativeUsage(ListNativeUsageRequest) returns (ListNativeUsageResponse);
   rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
   rpc CancelTask(CancelTaskRequest) returns (Task);
   rpc ResolveAttempt(ResolveAttemptRequest) returns (AttemptResolution);
@@ -25,6 +28,7 @@ service Objectives {
 }
 
 service WorkerHost {
+  rpc RegisterHost(RegisterHostRequest) returns (HostRecord);
   rpc ClaimTask(ClaimTaskRequest) returns (ClaimTaskResponse);
   rpc StartTask(StartTaskRequest) returns (Task);
   rpc InspectAttempt(InspectAttemptRequest) returns (Task);
@@ -35,6 +39,17 @@ service WorkerHost {
   rpc FinishTask(FinishTaskRequest) returns (Task);
 }
 
+// A one-time Auth Key authorizes enrollment for one designated Worker Host.
+service HostEnrollment {
+  rpc EnrollHost(EnrollHostRequest) returns (HostRecord);
+}
+
+// Private Gateway-to-Control-Plane service for enrollment and authentication.
+service HostDirectory {
+  rpc Enroll(PrivateEnrollHostRequest) returns (HostRecord);
+  rpc Authenticate(AuthenticateHostRequest) returns (HostRecord);
+}
+
 // Private Gateway-to-Control-Plane operations. The authenticated connector
 // principal identifies the account. Provider request bodies cannot select it.
 service Connector {
@@ -43,12 +58,71 @@ service Connector {
   rpc SettleReply(SettleReplyRequest) returns (Reply);
 }
 
+// Public, attempt-authorized transfer of native Session checkpoints.
+service Transfers {
+  rpc UploadCheckpoint(stream CheckpointUpload) returns (CheckpointReference);
+  rpc DownloadCheckpoint(InspectAttemptRequest) returns (stream CheckpointDownload);
+}
+
+// Private authorization and commit for bytes stored by the Gateway.
+service CheckpointDirectory {
+  rpc GetCheckpoint(InspectAttemptRequest) returns (GetCheckpointResponse);
+  rpc ReserveCheckpoint(CommitCheckpointRequest) returns (CheckpointReference);
+  rpc CommitCheckpoint(CommitCheckpointRequest) returns (CheckpointReference);
+}
+
 // An adapter connects only to its supervising Worker Host. The launch pipe
 // provides its endpoint and an execution-scoped credential.
 service Harness {
   rpc Attach(HarnessAttachRequest) returns (HarnessRun);
   rpc Publish(HarnessPublishRequest) returns (TaskEvent);
+  rpc ReportUsage(HarnessUsageRequest) returns (ReportAttemptUsageResponse);
   rpc Complete(HarnessCompleteRequest) returns (HarnessCompleteResponse);
+}
+
+message CreateAuthKeyRequest {
+  string host_id = 1;
+  string operation_id = 2;
+  bytes key_digest = 3;
+  uint64 expires_in_ms = 4;
+  repeated string allowed_tag_ids = 5;
+  bool all_tags = 6;
+}
+
+message AuthKey {
+  string host_id = 1;
+  int64 expires_at_ms = 2;
+  repeated string allowed_tag_ids = 3;
+  bool all_tags = 4;
+}
+
+message RevokeHostRequest {
+  string host_id = 1;
+}
+
+message RegisterHostRequest {
+  string incarnation_id = 1;
+}
+
+message HostRecord {
+  string host_id = 1;
+  uint64 generation = 2;
+  bool revoked = 3;
+}
+
+message EnrollHostRequest {
+  string host_id = 1;
+  string operation_id = 2;
+  bytes token_digest = 3;
+}
+
+message PrivateEnrollHostRequest {
+  EnrollHostRequest enrollment = 1;
+  bytes key_digest = 2;
+}
+
+message AuthenticateHostRequest {
+  bytes token_digest = 1;
 }
 
 enum TaskState {
@@ -178,9 +252,33 @@ message ReportAttemptUsageRequest {
   optional uint64 amount_minor = 3;
   optional string currency = 4;
   bool estimated = 5;
+  NativeTokenUsage native_usage = 6;
 }
 
 message ReportAttemptUsageResponse {}
+
+message NativeTokenUsage {
+  uint64 input_tokens = 1;
+  uint64 cached_input_tokens = 2;
+  uint64 output_tokens = 3;
+  optional string observed_model = 4;
+}
+
+message ListNativeUsageRequest {
+  string task_id = 1;
+  string attempt_id = 2;
+  uint64 after_sequence = 3;
+  uint32 limit = 4;
+}
+
+message ListNativeUsageResponse {
+  repeated HarnessUsageRequest reports = 1;
+}
+
+message HarnessUsageRequest {
+  uint64 sequence = 1;
+  NativeTokenUsage native_usage = 2;
+}
 
 message AppendEventRequest {
   string task_id = 1;
@@ -202,6 +300,7 @@ message FinishTaskRequest {
   string result = 4;
   bool succeeded = 5;
   ObjectiveSignal objective_signal = 6;
+  optional string checkpoint_sha256 = 7;
 }
 
 message HarnessAttachRequest {}
@@ -214,6 +313,44 @@ message AdapterBootstrap {
 message HarnessRun {
   Task task = 1;
   string attempt_id = 2;
+  SessionCheckpoint checkpoint = 3;
+}
+
+message SessionCheckpoint {
+  string harness = 1;
+  string format = 2;
+  bytes payload = 3;
+  string sha256 = 4;
+}
+
+message CheckpointReference {
+  string harness = 1;
+  string format = 2;
+  uint64 byte_length = 3;
+  string sha256 = 4;
+}
+
+message GetCheckpointResponse {
+  CheckpointReference reference = 1;
+}
+
+message CommitCheckpointRequest {
+  InspectAttemptRequest attempt = 1;
+  CheckpointReference reference = 2;
+}
+
+message CheckpointUpload {
+  oneof part {
+    CommitCheckpointRequest begin = 1;
+    bytes chunk = 2;
+  }
+}
+
+message CheckpointDownload {
+  oneof part {
+    CheckpointReference reference = 1;
+    bytes chunk = 2;
+  }
 }
 
 message HarnessPublishRequest {
@@ -225,6 +362,7 @@ message HarnessCompleteRequest {
   string result = 1;
   bool succeeded = 2;
   ObjectiveSignal objective_signal = 3;
+  SessionCheckpoint checkpoint = 4;
 }
 
 message HarnessCompleteResponse {}

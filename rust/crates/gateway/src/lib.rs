@@ -1,12 +1,16 @@
 //! Public gRPC ingress for operators and Worker Hosts.
 
 pub mod slack;
+pub mod transfers;
 
 use std::{future::Future, sync::Arc, time::Duration};
 
 use anyhow::{Context, ensure};
+use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use supertag_protocol::v2::{
+    host_directory_client::HostDirectoryClient,
+    host_enrollment_server::{HostEnrollment, HostEnrollmentServer},
     objectives_client::ObjectivesClient,
     objectives_server::{Objectives, ObjectivesServer},
     operator_client::OperatorClient,
@@ -15,8 +19,9 @@ use supertag_protocol::v2::{
     worker_host_server::{WorkerHost, WorkerHostServer},
     *,
 };
+use supertag_protocol::{HOST_GENERATION_HEADER, host_generation};
 use tonic::{
-    Request, Response, Status,
+    Code, Request, Response, Status,
     metadata::{Ascii, MetadataValue},
     transport::Channel,
 };
@@ -36,7 +41,6 @@ pub struct Gateway {
 struct Credentials {
     service: MetadataValue<Ascii>,
     operator: Principal,
-    worker_host: Principal,
 }
 
 struct Principal {
@@ -45,21 +49,17 @@ struct Principal {
 }
 
 impl Gateway {
-    /// Tokens come from the process's private configuration. The principal IDs identify
-    /// the operator and Worker Host on whose behalf this Gateway forwards requests.
+    /// The operator and private service tokens come from process configuration.
+    /// The Control Plane authenticates enrolled Worker Host credentials.
     pub fn new(
         control_plane: Channel,
         gateway_token: String,
         operator_token: String,
         operator_principal: String,
-        host_token: String,
-        host_principal: String,
     ) -> anyhow::Result<Self> {
         ensure!(
-            gateway_token != operator_token
-                && gateway_token != host_token
-                && operator_token != host_token,
-            "Gateway, operator, and Worker Host tokens must be distinct"
+            gateway_token != operator_token,
+            "Gateway and operator tokens must be distinct"
         );
         Ok(Self {
             control_plane,
@@ -67,8 +67,6 @@ impl Gateway {
                 service: bearer(&gateway_token).context("invalid Gateway service credential")?,
                 operator: Principal::new(&operator_token, &operator_principal, "operator:")
                     .context("invalid operator configuration")?,
-                worker_host: Principal::new(&host_token, &host_principal, "host:")
-                    .context("invalid Worker Host configuration")?,
             }),
         })
     }
@@ -81,6 +79,12 @@ impl Gateway {
 
     pub fn worker_host_service(&self) -> WorkerHostServer<Self> {
         WorkerHostServer::new(self.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES)
+    }
+
+    pub fn host_enrollment_service(&self) -> HostEnrollmentServer<Self> {
+        HostEnrollmentServer::new(self.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES)
     }
@@ -105,6 +109,69 @@ impl Gateway {
             .await
             .map_err(|_| Status::deadline_exceeded("Control Plane request timed out"))?
     }
+
+    async fn forward_host<T, R, F>(
+        &self,
+        request: Request<T>,
+        registered: bool,
+        call: impl FnOnce(Channel, Request<T>) -> F,
+    ) -> Result<Response<R>, Status>
+    where
+        F: Future<Output = Result<Response<R>, Status>>,
+    {
+        let token_digest = self.credentials.host_credential_digest(&request)?;
+        let timeout = request_budget(&request)?;
+        let deadline = tokio::time::Instant::now() + timeout;
+        tokio::time::timeout_at(deadline, async {
+            let host = self.authenticate_host(token_digest, timeout).await?;
+            if registered && host_generation(&request)? != host.generation {
+                return Err(Status::permission_denied(
+                    "Worker Host generation is no longer current",
+                ));
+            }
+            let identity = format!("host:{}", host.host_id)
+                .parse()
+                .map_err(|_| Status::internal("invalid enrolled Worker Host identity"))?;
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return Err(Status::deadline_exceeded("Control Plane request timed out"));
+            }
+            let mut upstream = self
+                .credentials
+                .upstream(request.into_inner(), identity, remaining);
+            if registered {
+                upstream
+                    .metadata_mut()
+                    .insert(HOST_GENERATION_HEADER, host.generation.into());
+            }
+            call(self.control_plane.clone(), upstream).await
+        })
+        .await
+        .map_err(|_| Status::deadline_exceeded("Control Plane request timed out"))?
+    }
+
+    async fn authenticate_host(
+        &self,
+        token_digest: Vec<u8>,
+        timeout: Duration,
+    ) -> Result<HostRecord, Status> {
+        let request = self.credentials.upstream(
+            AuthenticateHostRequest { token_digest },
+            MetadataValue::from_static("service:gateway"),
+            timeout,
+        );
+        let host = host_directory_client(self.control_plane.clone())
+            .authenticate(request)
+            .await
+            .map_err(host_authentication_error)?
+            .into_inner();
+        if host.revoked {
+            return Err(Status::unauthenticated(
+                "valid Worker Host credential required",
+            ));
+        }
+        Ok(host)
+    }
 }
 
 impl Credentials {
@@ -126,22 +193,55 @@ impl Credentials {
             return Err(Status::unauthenticated("valid bearer credential required"));
         }
 
-        let timeout = client_timeout(&request)?.min(CALL_TIMEOUT);
-        if timeout.is_zero() {
-            return Err(Status::deadline_exceeded("request deadline elapsed"));
-        }
+        let timeout = request_budget(&request)?;
+        Ok((
+            self.upstream(request.into_inner(), principal.identity.clone(), timeout),
+            timeout,
+        ))
+    }
 
+    fn upstream<T>(
+        &self,
+        message: T,
+        identity: MetadataValue<Ascii>,
+        timeout: Duration,
+    ) -> Request<T> {
         // Rebuild metadata and extensions. The public caller controls neither the
         // private service credential nor the principal used by the Control Plane.
-        let mut upstream = Request::new(request.into_inner());
+        let mut upstream = Request::new(message);
         upstream
             .metadata_mut()
             .insert(AUTHORIZATION, self.service.clone());
-        upstream
-            .metadata_mut()
-            .insert(PRINCIPAL, principal.identity.clone());
+        upstream.metadata_mut().insert(PRINCIPAL, identity);
         upstream.set_timeout(timeout);
-        Ok((upstream, timeout))
+        upstream
+    }
+
+    fn host_credential_digest<T>(&self, request: &Request<T>) -> Result<Vec<u8>, Status> {
+        let mut values = request.metadata().get_all(AUTHORIZATION).iter();
+        let invalid = || Status::unauthenticated("valid bearer credential required");
+        let value = values.next().ok_or_else(invalid)?;
+        if values.next().is_some()
+            || bool::from(
+                value
+                    .as_encoded_bytes()
+                    .ct_eq(self.service.as_encoded_bytes()),
+            )
+            || bool::from(
+                value
+                    .as_encoded_bytes()
+                    .ct_eq(self.operator.authorization.as_encoded_bytes()),
+            )
+        {
+            return Err(invalid());
+        }
+        let token = value
+            .to_str()
+            .ok()
+            .and_then(|value| value.strip_prefix("Bearer "))
+            .filter(|token| valid_bearer_token(token))
+            .ok_or_else(invalid)?;
+        Ok(Sha256::digest(token.as_bytes()).to_vec())
     }
 }
 
@@ -161,20 +261,38 @@ impl Principal {
 }
 
 fn bearer(token: &str) -> anyhow::Result<MetadataValue<Ascii>> {
-    let body = token.trim_end_matches('=');
-    ensure!(
-        !body.is_empty()
-            && token.len() <= 512
-            && body
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"-._~+/".contains(&byte)),
-        "invalid bearer token format"
-    );
+    ensure!(valid_bearer_token(token), "invalid bearer token format");
     let mut value = format!("Bearer {token}")
         .parse::<MetadataValue<Ascii>>()
         .context("invalid bearer metadata")?;
     value.set_sensitive(true);
     Ok(value)
+}
+
+fn valid_bearer_token(token: &str) -> bool {
+    let body = token.trim_end_matches('=');
+    !body.is_empty()
+        && token.len() <= 512
+        && body
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-._~+/".contains(&byte))
+}
+
+fn request_budget<T>(request: &Request<T>) -> Result<Duration, Status> {
+    let timeout = client_timeout(request)?.min(CALL_TIMEOUT);
+    if timeout.is_zero() {
+        return Err(Status::deadline_exceeded("request deadline elapsed"));
+    }
+    Ok(timeout)
+}
+
+fn host_authentication_error(error: Status) -> Status {
+    match error.code() {
+        Code::PermissionDenied | Code::Unauthenticated => {
+            Status::unauthenticated("valid Worker Host credential required")
+        }
+        _ => error,
+    }
 }
 
 fn client_timeout<T>(request: &Request<T>) -> Result<Duration, Status> {
@@ -216,6 +334,12 @@ fn operator_client(channel: Channel) -> OperatorClient<Channel> {
 
 fn worker_host_client(channel: Channel) -> WorkerHostClient<Channel> {
     WorkerHostClient::new(channel)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
+}
+
+fn host_directory_client(channel: Channel) -> HostDirectoryClient<Channel> {
+    HostDirectoryClient::new(channel)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES)
 }
@@ -327,6 +451,30 @@ impl Objectives for Gateway {
 
 #[tonic::async_trait]
 impl Operator for Gateway {
+    async fn create_auth_key(
+        &self,
+        request: Request<CreateAuthKeyRequest>,
+    ) -> Result<Response<AuthKey>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { operator_client(channel).create_auth_key(request).await },
+        )
+        .await
+    }
+
+    async fn revoke_host(
+        &self,
+        request: Request<RevokeHostRequest>,
+    ) -> Result<Response<HostRecord>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { operator_client(channel).revoke_host(request).await },
+        )
+        .await
+    }
+
     async fn put_tag(&self, request: Request<PutTagRequest>) -> Result<Response<Tag>, Status> {
         self.forward(
             request,
@@ -353,6 +501,18 @@ impl Operator for Gateway {
             request,
             &self.credentials.operator,
             |channel, request| async { operator_client(channel).get_task(request).await },
+        )
+        .await
+    }
+
+    async fn list_native_usage(
+        &self,
+        request: Request<ListNativeUsageRequest>,
+    ) -> Result<Response<ListNativeUsageResponse>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { operator_client(channel).list_native_usage(request).await },
         )
         .await
     }
@@ -395,16 +555,50 @@ impl Operator for Gateway {
 }
 
 #[tonic::async_trait]
+impl HostEnrollment for Gateway {
+    async fn enroll_host(
+        &self,
+        request: Request<EnrollHostRequest>,
+    ) -> Result<Response<HostRecord>, Status> {
+        let key_digest = self.credentials.host_credential_digest(&request)?;
+        let timeout = request_budget(&request)?;
+        let upstream = self.credentials.upstream(
+            PrivateEnrollHostRequest {
+                enrollment: Some(request.into_inner()),
+                key_digest,
+            },
+            MetadataValue::from_static("service:gateway"),
+            timeout,
+        );
+        tokio::time::timeout(
+            timeout,
+            host_directory_client(self.control_plane.clone()).enroll(upstream),
+        )
+        .await
+        .map_err(|_| Status::deadline_exceeded("Control Plane request timed out"))?
+        .map_err(host_authentication_error)
+    }
+}
+
+#[tonic::async_trait]
 impl WorkerHost for Gateway {
+    async fn register_host(
+        &self,
+        request: Request<RegisterHostRequest>,
+    ) -> Result<Response<HostRecord>, Status> {
+        self.forward_host(request, false, |channel, request| async {
+            worker_host_client(channel).register_host(request).await
+        })
+        .await
+    }
+
     async fn claim_task(
         &self,
         request: Request<ClaimTaskRequest>,
     ) -> Result<Response<ClaimTaskResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.worker_host,
-            |channel, request| async { worker_host_client(channel).claim_task(request).await },
-        )
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel).claim_task(request).await
+        })
         .await
     }
 
@@ -412,11 +606,9 @@ impl WorkerHost for Gateway {
         &self,
         request: Request<StartTaskRequest>,
     ) -> Result<Response<Task>, Status> {
-        self.forward(
-            request,
-            &self.credentials.worker_host,
-            |channel, request| async { worker_host_client(channel).start_task(request).await },
-        )
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel).start_task(request).await
+        })
         .await
     }
 
@@ -424,11 +616,9 @@ impl WorkerHost for Gateway {
         &self,
         request: Request<InspectAttemptRequest>,
     ) -> Result<Response<Task>, Status> {
-        self.forward(
-            request,
-            &self.credentials.worker_host,
-            |channel, request| async { worker_host_client(channel).inspect_attempt(request).await },
-        )
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel).inspect_attempt(request).await
+        })
         .await
     }
 
@@ -436,11 +626,9 @@ impl WorkerHost for Gateway {
         &self,
         request: Request<InspectAttemptRequest>,
     ) -> Result<Response<AttemptAuthority>, Status> {
-        self.forward(
-            request,
-            &self.credentials.worker_host,
-            |channel, request| async { worker_host_client(channel).renew_attempt(request).await },
-        )
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel).renew_attempt(request).await
+        })
         .await
     }
 
@@ -448,15 +636,11 @@ impl WorkerHost for Gateway {
         &self,
         request: Request<InspectAttemptRequest>,
     ) -> Result<Response<GetAttemptResolutionResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.worker_host,
-            |channel, request| async {
-                worker_host_client(channel)
-                    .get_attempt_resolution(request)
-                    .await
-            },
-        )
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel)
+                .get_attempt_resolution(request)
+                .await
+        })
         .await
     }
 
@@ -464,15 +648,11 @@ impl WorkerHost for Gateway {
         &self,
         request: Request<ReportAttemptUsageRequest>,
     ) -> Result<Response<ReportAttemptUsageResponse>, Status> {
-        self.forward(
-            request,
-            &self.credentials.worker_host,
-            |channel, request| async {
-                worker_host_client(channel)
-                    .report_attempt_usage(request)
-                    .await
-            },
-        )
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel)
+                .report_attempt_usage(request)
+                .await
+        })
         .await
     }
 
@@ -480,11 +660,9 @@ impl WorkerHost for Gateway {
         &self,
         request: Request<AppendEventRequest>,
     ) -> Result<Response<TaskEvent>, Status> {
-        self.forward(
-            request,
-            &self.credentials.worker_host,
-            |channel, request| async { worker_host_client(channel).append_event(request).await },
-        )
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel).append_event(request).await
+        })
         .await
     }
 
@@ -492,11 +670,9 @@ impl WorkerHost for Gateway {
         &self,
         request: Request<FinishTaskRequest>,
     ) -> Result<Response<Task>, Status> {
-        self.forward(
-            request,
-            &self.credentials.worker_host,
-            |channel, request| async { worker_host_client(channel).finish_task(request).await },
-        )
+        self.forward_host(request, true, |channel, request| async {
+            worker_host_client(channel).finish_task(request).await
+        })
         .await
     }
 }

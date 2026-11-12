@@ -132,6 +132,7 @@ impl Children {
         plane
             .args(["--listen", "127.0.0.1:0"])
             .env("SUPERTAG_DATABASE_URL", database_url)
+            .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &credentials.host)
             .env("SUPERTAG_GATEWAY_TOKEN", &credentials.gateway);
         let address = start_child(&mut self.control_plane, &mut plane, "Control Plane").await?;
         let control_plane = format!("http://{}", loopback_address(&address)?);
@@ -144,9 +145,10 @@ impl Children {
                 "--listen",
                 &options.gateway_listen.to_string(),
             ])
+            .arg("--checkpoint-directory")
+            .arg(directory.join("checkpoints"))
             .env("SUPERTAG_GATEWAY_TOKEN", &credentials.gateway)
-            .env("SUPERTAG_OPERATOR_TOKEN", &credentials.operator)
-            .env("SUPERTAG_HOST_TOKEN", &credentials.host);
+            .env("SUPERTAG_OPERATOR_TOKEN", &credentials.operator);
         let address = start_child(&mut self.gateway, &mut gateway, "Gateway").await?;
         let endpoint = format!("http://{}", loopback_address(&address)?);
 

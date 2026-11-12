@@ -78,6 +78,80 @@ REPLY_STATE_DELIVERED: ReplyState
 REPLY_STATE_FAILED: ReplyState
 REPLY_STATE_UNCERTAIN: ReplyState
 
+class CreateAuthKeyRequest(_message.Message):
+    __slots__ = ("host_id", "operation_id", "key_digest", "expires_in_ms", "allowed_tag_ids", "all_tags")
+    HOST_ID_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    KEY_DIGEST_FIELD_NUMBER: _ClassVar[int]
+    EXPIRES_IN_MS_FIELD_NUMBER: _ClassVar[int]
+    ALLOWED_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
+    ALL_TAGS_FIELD_NUMBER: _ClassVar[int]
+    host_id: str
+    operation_id: str
+    key_digest: bytes
+    expires_in_ms: int
+    allowed_tag_ids: _containers.RepeatedScalarFieldContainer[str]
+    all_tags: bool
+    def __init__(self, host_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., key_digest: _Optional[bytes] = ..., expires_in_ms: _Optional[int] = ..., allowed_tag_ids: _Optional[_Iterable[str]] = ..., all_tags: _Optional[bool] = ...) -> None: ...
+
+class AuthKey(_message.Message):
+    __slots__ = ("host_id", "expires_at_ms", "allowed_tag_ids", "all_tags")
+    HOST_ID_FIELD_NUMBER: _ClassVar[int]
+    EXPIRES_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    ALLOWED_TAG_IDS_FIELD_NUMBER: _ClassVar[int]
+    ALL_TAGS_FIELD_NUMBER: _ClassVar[int]
+    host_id: str
+    expires_at_ms: int
+    allowed_tag_ids: _containers.RepeatedScalarFieldContainer[str]
+    all_tags: bool
+    def __init__(self, host_id: _Optional[str] = ..., expires_at_ms: _Optional[int] = ..., allowed_tag_ids: _Optional[_Iterable[str]] = ..., all_tags: _Optional[bool] = ...) -> None: ...
+
+class RevokeHostRequest(_message.Message):
+    __slots__ = ("host_id",)
+    HOST_ID_FIELD_NUMBER: _ClassVar[int]
+    host_id: str
+    def __init__(self, host_id: _Optional[str] = ...) -> None: ...
+
+class RegisterHostRequest(_message.Message):
+    __slots__ = ("incarnation_id",)
+    INCARNATION_ID_FIELD_NUMBER: _ClassVar[int]
+    incarnation_id: str
+    def __init__(self, incarnation_id: _Optional[str] = ...) -> None: ...
+
+class HostRecord(_message.Message):
+    __slots__ = ("host_id", "generation", "revoked")
+    HOST_ID_FIELD_NUMBER: _ClassVar[int]
+    GENERATION_FIELD_NUMBER: _ClassVar[int]
+    REVOKED_FIELD_NUMBER: _ClassVar[int]
+    host_id: str
+    generation: int
+    revoked: bool
+    def __init__(self, host_id: _Optional[str] = ..., generation: _Optional[int] = ..., revoked: _Optional[bool] = ...) -> None: ...
+
+class EnrollHostRequest(_message.Message):
+    __slots__ = ("host_id", "operation_id", "token_digest")
+    HOST_ID_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    TOKEN_DIGEST_FIELD_NUMBER: _ClassVar[int]
+    host_id: str
+    operation_id: str
+    token_digest: bytes
+    def __init__(self, host_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., token_digest: _Optional[bytes] = ...) -> None: ...
+
+class PrivateEnrollHostRequest(_message.Message):
+    __slots__ = ("enrollment", "key_digest")
+    ENROLLMENT_FIELD_NUMBER: _ClassVar[int]
+    KEY_DIGEST_FIELD_NUMBER: _ClassVar[int]
+    enrollment: EnrollHostRequest
+    key_digest: bytes
+    def __init__(self, enrollment: _Optional[_Union[EnrollHostRequest, _Mapping]] = ..., key_digest: _Optional[bytes] = ...) -> None: ...
+
+class AuthenticateHostRequest(_message.Message):
+    __slots__ = ("token_digest",)
+    TOKEN_DIGEST_FIELD_NUMBER: _ClassVar[int]
+    token_digest: bytes
+    def __init__(self, token_digest: _Optional[bytes] = ...) -> None: ...
+
 class PutTagRequest(_message.Message):
     __slots__ = ("tag_id", "instructions", "allowed_actions")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
@@ -253,22 +327,62 @@ class GetAttemptResolutionResponse(_message.Message):
     def __init__(self, resolution: _Optional[_Union[AttemptResolution, _Mapping]] = ...) -> None: ...
 
 class ReportAttemptUsageRequest(_message.Message):
-    __slots__ = ("attempt", "sequence", "amount_minor", "currency", "estimated")
+    __slots__ = ("attempt", "sequence", "amount_minor", "currency", "estimated", "native_usage")
     ATTEMPT_FIELD_NUMBER: _ClassVar[int]
     SEQUENCE_FIELD_NUMBER: _ClassVar[int]
     AMOUNT_MINOR_FIELD_NUMBER: _ClassVar[int]
     CURRENCY_FIELD_NUMBER: _ClassVar[int]
     ESTIMATED_FIELD_NUMBER: _ClassVar[int]
+    NATIVE_USAGE_FIELD_NUMBER: _ClassVar[int]
     attempt: InspectAttemptRequest
     sequence: int
     amount_minor: int
     currency: str
     estimated: bool
-    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., sequence: _Optional[int] = ..., amount_minor: _Optional[int] = ..., currency: _Optional[str] = ..., estimated: _Optional[bool] = ...) -> None: ...
+    native_usage: NativeTokenUsage
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., sequence: _Optional[int] = ..., amount_minor: _Optional[int] = ..., currency: _Optional[str] = ..., estimated: _Optional[bool] = ..., native_usage: _Optional[_Union[NativeTokenUsage, _Mapping]] = ...) -> None: ...
 
 class ReportAttemptUsageResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
+
+class NativeTokenUsage(_message.Message):
+    __slots__ = ("input_tokens", "cached_input_tokens", "output_tokens", "observed_model")
+    INPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    CACHED_INPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    OUTPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    OBSERVED_MODEL_FIELD_NUMBER: _ClassVar[int]
+    input_tokens: int
+    cached_input_tokens: int
+    output_tokens: int
+    observed_model: str
+    def __init__(self, input_tokens: _Optional[int] = ..., cached_input_tokens: _Optional[int] = ..., output_tokens: _Optional[int] = ..., observed_model: _Optional[str] = ...) -> None: ...
+
+class ListNativeUsageRequest(_message.Message):
+    __slots__ = ("task_id", "attempt_id", "after_sequence", "limit")
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    AFTER_SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    task_id: str
+    attempt_id: str
+    after_sequence: int
+    limit: int
+    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., after_sequence: _Optional[int] = ..., limit: _Optional[int] = ...) -> None: ...
+
+class ListNativeUsageResponse(_message.Message):
+    __slots__ = ("reports",)
+    REPORTS_FIELD_NUMBER: _ClassVar[int]
+    reports: _containers.RepeatedCompositeFieldContainer[HarnessUsageRequest]
+    def __init__(self, reports: _Optional[_Iterable[_Union[HarnessUsageRequest, _Mapping]]] = ...) -> None: ...
+
+class HarnessUsageRequest(_message.Message):
+    __slots__ = ("sequence", "native_usage")
+    SEQUENCE_FIELD_NUMBER: _ClassVar[int]
+    NATIVE_USAGE_FIELD_NUMBER: _ClassVar[int]
+    sequence: int
+    native_usage: NativeTokenUsage
+    def __init__(self, sequence: _Optional[int] = ..., native_usage: _Optional[_Union[NativeTokenUsage, _Mapping]] = ...) -> None: ...
 
 class AppendEventRequest(_message.Message):
     __slots__ = ("task_id", "attempt_id", "lease_token", "sequence", "text")
@@ -293,20 +407,22 @@ class TaskEvent(_message.Message):
     def __init__(self, sequence: _Optional[int] = ..., text: _Optional[str] = ...) -> None: ...
 
 class FinishTaskRequest(_message.Message):
-    __slots__ = ("task_id", "attempt_id", "lease_token", "result", "succeeded", "objective_signal")
+    __slots__ = ("task_id", "attempt_id", "lease_token", "result", "succeeded", "objective_signal", "checkpoint_sha256")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
     RESULT_FIELD_NUMBER: _ClassVar[int]
     SUCCEEDED_FIELD_NUMBER: _ClassVar[int]
     OBJECTIVE_SIGNAL_FIELD_NUMBER: _ClassVar[int]
+    CHECKPOINT_SHA256_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     attempt_id: str
     lease_token: str
     result: str
     succeeded: bool
     objective_signal: ObjectiveSignal
-    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., result: _Optional[str] = ..., succeeded: _Optional[bool] = ..., objective_signal: _Optional[_Union[ObjectiveSignal, str]] = ...) -> None: ...
+    checkpoint_sha256: str
+    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., result: _Optional[str] = ..., succeeded: _Optional[bool] = ..., objective_signal: _Optional[_Union[ObjectiveSignal, str]] = ..., checkpoint_sha256: _Optional[str] = ...) -> None: ...
 
 class HarnessAttachRequest(_message.Message):
     __slots__ = ()
@@ -321,12 +437,68 @@ class AdapterBootstrap(_message.Message):
     def __init__(self, endpoint: _Optional[str] = ..., token: _Optional[str] = ...) -> None: ...
 
 class HarnessRun(_message.Message):
-    __slots__ = ("task", "attempt_id")
+    __slots__ = ("task", "attempt_id", "checkpoint")
     TASK_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    CHECKPOINT_FIELD_NUMBER: _ClassVar[int]
     task: Task
     attempt_id: str
-    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ...) -> None: ...
+    checkpoint: SessionCheckpoint
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., checkpoint: _Optional[_Union[SessionCheckpoint, _Mapping]] = ...) -> None: ...
+
+class SessionCheckpoint(_message.Message):
+    __slots__ = ("harness", "format", "payload", "sha256")
+    HARNESS_FIELD_NUMBER: _ClassVar[int]
+    FORMAT_FIELD_NUMBER: _ClassVar[int]
+    PAYLOAD_FIELD_NUMBER: _ClassVar[int]
+    SHA256_FIELD_NUMBER: _ClassVar[int]
+    harness: str
+    format: str
+    payload: bytes
+    sha256: str
+    def __init__(self, harness: _Optional[str] = ..., format: _Optional[str] = ..., payload: _Optional[bytes] = ..., sha256: _Optional[str] = ...) -> None: ...
+
+class CheckpointReference(_message.Message):
+    __slots__ = ("harness", "format", "byte_length", "sha256")
+    HARNESS_FIELD_NUMBER: _ClassVar[int]
+    FORMAT_FIELD_NUMBER: _ClassVar[int]
+    BYTE_LENGTH_FIELD_NUMBER: _ClassVar[int]
+    SHA256_FIELD_NUMBER: _ClassVar[int]
+    harness: str
+    format: str
+    byte_length: int
+    sha256: str
+    def __init__(self, harness: _Optional[str] = ..., format: _Optional[str] = ..., byte_length: _Optional[int] = ..., sha256: _Optional[str] = ...) -> None: ...
+
+class GetCheckpointResponse(_message.Message):
+    __slots__ = ("reference",)
+    REFERENCE_FIELD_NUMBER: _ClassVar[int]
+    reference: CheckpointReference
+    def __init__(self, reference: _Optional[_Union[CheckpointReference, _Mapping]] = ...) -> None: ...
+
+class CommitCheckpointRequest(_message.Message):
+    __slots__ = ("attempt", "reference")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    REFERENCE_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    reference: CheckpointReference
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., reference: _Optional[_Union[CheckpointReference, _Mapping]] = ...) -> None: ...
+
+class CheckpointUpload(_message.Message):
+    __slots__ = ("begin", "chunk")
+    BEGIN_FIELD_NUMBER: _ClassVar[int]
+    CHUNK_FIELD_NUMBER: _ClassVar[int]
+    begin: CommitCheckpointRequest
+    chunk: bytes
+    def __init__(self, begin: _Optional[_Union[CommitCheckpointRequest, _Mapping]] = ..., chunk: _Optional[bytes] = ...) -> None: ...
+
+class CheckpointDownload(_message.Message):
+    __slots__ = ("reference", "chunk")
+    REFERENCE_FIELD_NUMBER: _ClassVar[int]
+    CHUNK_FIELD_NUMBER: _ClassVar[int]
+    reference: CheckpointReference
+    chunk: bytes
+    def __init__(self, reference: _Optional[_Union[CheckpointReference, _Mapping]] = ..., chunk: _Optional[bytes] = ...) -> None: ...
 
 class HarnessPublishRequest(_message.Message):
     __slots__ = ("sequence", "text")
@@ -337,14 +509,16 @@ class HarnessPublishRequest(_message.Message):
     def __init__(self, sequence: _Optional[int] = ..., text: _Optional[str] = ...) -> None: ...
 
 class HarnessCompleteRequest(_message.Message):
-    __slots__ = ("result", "succeeded", "objective_signal")
+    __slots__ = ("result", "succeeded", "objective_signal", "checkpoint")
     RESULT_FIELD_NUMBER: _ClassVar[int]
     SUCCEEDED_FIELD_NUMBER: _ClassVar[int]
     OBJECTIVE_SIGNAL_FIELD_NUMBER: _ClassVar[int]
+    CHECKPOINT_FIELD_NUMBER: _ClassVar[int]
     result: str
     succeeded: bool
     objective_signal: ObjectiveSignal
-    def __init__(self, result: _Optional[str] = ..., succeeded: _Optional[bool] = ..., objective_signal: _Optional[_Union[ObjectiveSignal, str]] = ...) -> None: ...
+    checkpoint: SessionCheckpoint
+    def __init__(self, result: _Optional[str] = ..., succeeded: _Optional[bool] = ..., objective_signal: _Optional[_Union[ObjectiveSignal, str]] = ..., checkpoint: _Optional[_Union[SessionCheckpoint, _Mapping]] = ...) -> None: ...
 
 class HarnessCompleteResponse(_message.Message):
     __slots__ = ()

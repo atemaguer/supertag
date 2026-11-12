@@ -9,14 +9,15 @@ use std::{
 use anyhow::{Context, Result, anyhow, ensure};
 use prost::Message;
 use supertag_protocol::{
-    MAX_MESSAGE_BYTES, authenticated_request, matches_bearer,
+    MAX_CHECKPOINT_BYTES, MAX_MESSAGE_BYTES, authenticated_request, matches_bearer,
     v2::{
         AdapterBootstrap, AppendEventRequest, Assignment, HarnessAttachRequest,
         HarnessCompleteRequest, HarnessCompleteResponse, HarnessPublishRequest, HarnessRun,
-        InspectAttemptRequest, ObjectiveSignal, TaskEvent, TaskState,
+        HarnessUsageRequest, InspectAttemptRequest, ObjectiveSignal, ReportAttemptUsageRequest,
+        ReportAttemptUsageResponse, SessionCheckpoint, TaskEvent, TaskState,
         harness_server::{Harness, HarnessServer},
-        worker_host_client::WorkerHostClient,
     },
+    validate_checkpoint_reference,
 };
 use tokio::{
     io::AsyncWriteExt,
@@ -27,14 +28,11 @@ use tokio::{
 };
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_util::sync::CancellationToken;
-use tonic::{
-    Request, Response, Status,
-    transport::{Channel, Server},
-};
+use tonic::{Request, Response, Status, transport::Server};
 use uuid::Uuid;
 
 use crate::{
-    HostOptions,
+    HostOptions, RegisteredHost,
     guardian::{MAX_BOOTSTRAP_BYTES, monotonic_now_ns},
 };
 
@@ -42,8 +40,9 @@ use crate::{
 struct Bridge {
     token: String,
     assignment: Assignment,
+    checkpoint: Option<SessionCheckpoint>,
     host_token: String,
-    host: WorkerHostClient<Channel>,
+    host: RegisteredHost,
     state: Arc<Mutex<RunState>>,
 }
 
@@ -82,6 +81,7 @@ impl Harness for Bridge {
         Ok(Response::new(HarnessRun {
             task: self.assignment.task.clone(),
             attempt_id: self.assignment.attempt_id.clone(),
+            checkpoint: self.checkpoint.clone(),
         }))
     }
 
@@ -114,6 +114,43 @@ impl Harness for Bridge {
         Ok(event)
     }
 
+    async fn report_usage(
+        &self,
+        request: Request<HarnessUsageRequest>,
+    ) -> Result<Response<ReportAttemptUsageResponse>, Status> {
+        self.authenticate(&request)?;
+        let state = self.state.lock().await;
+        if !state.attached || state.outcome.is_some() {
+            return Err(Status::failed_precondition(
+                "execution is not accepting usage",
+            ));
+        }
+        let usage = request.into_inner();
+        if usage.native_usage.is_none() {
+            return Err(Status::invalid_argument("native token usage required"));
+        }
+        let mut upstream = authenticated_request(
+            ReportAttemptUsageRequest {
+                attempt: Some(InspectAttemptRequest {
+                    task_id: self.task_id().into(),
+                    attempt_id: self.assignment.attempt_id.clone(),
+                    lease_token: self.assignment.lease_token.clone(),
+                }),
+                sequence: usage.sequence,
+                amount_minor: None,
+                currency: None,
+                estimated: false,
+                native_usage: usage.native_usage,
+            },
+            &self.host_token,
+            None,
+        )?;
+        upstream.set_timeout(Duration::from_secs(5));
+        let response = self.host.clone().report_attempt_usage(upstream).await;
+        drop(state);
+        response
+    }
+
     async fn complete(
         &self,
         request: Request<HarnessCompleteRequest>,
@@ -133,6 +170,14 @@ impl Harness for Bridge {
         {
             return Err(Status::invalid_argument("invalid harness outcome"));
         }
+        if let Some(checkpoint) = &outcome.checkpoint {
+            if !outcome.succeeded {
+                return Err(Status::invalid_argument(
+                    "failed execution cannot propose a checkpoint",
+                ));
+            }
+            validate_checkpoint_reference(&checkpoint.reference())?;
+        }
         if let Some(previous) = &state.outcome {
             if previous != &outcome {
                 return Err(Status::already_exists(
@@ -149,7 +194,9 @@ impl Harness for Bridge {
 pub(crate) async fn execute(
     options: &HostOptions,
     assignment: Assignment,
-    host: WorkerHostClient<Channel>,
+    checkpoint: Option<SessionCheckpoint>,
+    host: RegisteredHost,
+    host_token: &str,
     valid_until: Instant,
     shutdown: &CancellationToken,
 ) -> Result<HarnessCompleteRequest> {
@@ -162,7 +209,8 @@ pub(crate) async fn execute(
     let bridge = Bridge {
         token: bootstrap.token.clone(),
         assignment,
-        host_token: options.token.clone(),
+        checkpoint,
+        host_token: host_token.to_owned(),
         host,
         state: Arc::default(),
     };
@@ -171,8 +219,8 @@ pub(crate) async fn execute(
         Server::builder()
             .add_service(
                 HarnessServer::new(bridge.clone())
-                    .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                    .max_encoding_message_size(MAX_MESSAGE_BYTES),
+                    .max_decoding_message_size(MAX_CHECKPOINT_BYTES + MAX_MESSAGE_BYTES)
+                    .max_encoding_message_size(MAX_CHECKPOINT_BYTES + MAX_MESSAGE_BYTES),
             )
             .serve_with_incoming_shutdown(
                 TcpListenerStream::new(listener),
@@ -317,6 +365,7 @@ pub(crate) fn failed(message: &str) -> HarnessCompleteRequest {
         result: message.into(),
         succeeded: false,
         objective_signal: 0,
+        checkpoint: None,
     }
 }
 

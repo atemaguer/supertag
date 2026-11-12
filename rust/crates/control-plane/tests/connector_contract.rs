@@ -1,3 +1,5 @@
+mod support;
+
 use sqlx::{Connection, Executor};
 use supertag_control_plane::{Store, StoreError};
 use supertag_protocol::v2::{
@@ -21,15 +23,16 @@ fn event(account: &str, id: &str) -> AcceptEventRequest {
 }
 
 async fn finish(store: &Store, task_id: &str, succeeded: bool) -> FinishTaskRequest {
+    let host = support::register_host(store, "worker").await;
     let assignment = store
-        .claim_task("host:worker", &format!("claim-{task_id}"))
+        .claim_task(&host, &format!("claim-{task_id}"))
         .await
         .unwrap()
         .unwrap();
     assert_eq!(assignment.task.as_ref().unwrap().task_id, task_id);
     store
         .start_task(
-            "host:worker",
+            &host,
             &StartTaskRequest {
                 task_id: task_id.into(),
                 attempt_id: assignment.attempt_id.clone(),
@@ -45,8 +48,9 @@ async fn finish(store: &Store, task_id: &str, succeeded: bool) -> FinishTaskRequ
         result: "Reviewed".into(),
         succeeded,
         objective_signal: 0,
+        checkpoint_sha256: None,
     };
-    store.finish_task("host:worker", &finish).await.unwrap();
+    store.finish_task(&host, &finish).await.unwrap();
     finish
 }
 
@@ -77,6 +81,7 @@ async fn contract(url: String) {
     // Both dialects upgrade a real v1 database without replacing its accepted work.
     seed_previous_schema(&url).await;
     let store = Store::open(&url).await.unwrap();
+    let host = support::register_host(&store, "worker").await;
     let previous = store.get_task("old-task").await.unwrap();
     assert_eq!(previous.instructions, "Original instructions");
     assert_eq!(previous.allowed_actions, ["files:read"]);
@@ -93,7 +98,7 @@ async fn contract(url: String) {
     ));
     assert!(
         store
-            .claim_task("host:worker", "before-ingress")
+            .claim_task(&host, "before-ingress")
             .await
             .unwrap()
             .is_none()
@@ -130,11 +135,7 @@ async fn contract(url: String) {
     store.close().await;
     let store = Store::open(&url).await.unwrap();
     assert_eq!(
-        store
-            .finish_task("host:worker", &completion)
-            .await
-            .unwrap()
-            .state,
+        store.finish_task(&host, &completion).await.unwrap().state,
         TaskState::Succeeded as i32
     );
     assert!(

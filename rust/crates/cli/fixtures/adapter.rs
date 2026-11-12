@@ -66,6 +66,7 @@ async fn main() -> Result<()> {
                 result,
                 succeeded: true,
                 objective_signal: 0,
+                checkpoint: None,
             },
             &bootstrap.token,
             None,

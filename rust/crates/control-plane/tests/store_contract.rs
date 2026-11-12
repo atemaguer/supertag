@@ -1,3 +1,5 @@
+mod support;
+
 use std::path::Path;
 
 use sqlx::{Connection, Executor};
@@ -17,6 +19,12 @@ fn request(operation: &str) -> SubmitTaskRequest {
 }
 
 async fn contract(store: &Store) {
+    let left_host = support::register_host(store, "left").await;
+    let right_host = support::register_host(store, "right").await;
+    let cleanup_host = support::register_host(store, "cleanup").await;
+    let next_host = support::register_host(store, "next").await;
+    let racer_host = support::register_host(store, "racer").await;
+    let intruder_host = support::register_host(store, "intruder").await;
     let tag = store
         .put_tag("reviewer", "Be precise", vec!["files:read".into()])
         .await
@@ -52,12 +60,12 @@ async fn contract(store: &Store) {
 
     // Competing hosts cannot both own the same accepted Task.
     let (left, right) = tokio::join!(
-        store.claim_task("host:left", "claim-left"),
-        store.claim_task("host:right", "claim-right"),
+        store.claim_task(&left_host, "claim-left"),
+        store.claim_task(&right_host, "claim-right"),
     );
     let (owner, claim_operation, assignment) = match (left.unwrap(), right.unwrap()) {
-        (Some(assignment), None) => ("host:left", "claim-left", assignment),
-        (None, Some(assignment)) => ("host:right", "claim-right", assignment),
+        (Some(assignment), None) => (&left_host, "claim-left", assignment),
+        (None, Some(assignment)) => (&right_host, "claim-right", assignment),
         other => panic!("one claim must win: {other:?}"),
     };
     assert_eq!(assignment.task.as_ref().unwrap().task_id, first.task_id);
@@ -71,7 +79,7 @@ async fn contract(store: &Store) {
         lease_token: assignment.lease_token.clone(),
     };
     assert!(matches!(
-        store.start_task("host:intruder", &start).await,
+        store.start_task(&intruder_host, &start).await,
         Err(StoreError::PermissionDenied)
     ));
     let mut forged = start.clone();
@@ -122,6 +130,7 @@ async fn contract(store: &Store) {
         result: "Review complete".into(),
         succeeded: true,
         objective_signal: 0,
+        checkpoint_sha256: None,
     };
     let completed = store.finish_task(owner, &finish).await.unwrap();
     assert_eq!(completed.state, TaskState::Succeeded as i32);
@@ -142,7 +151,7 @@ async fn contract(store: &Store) {
     assert_eq!(second.instructions, "Changed instructions");
     assert_eq!(second.allowed_actions, ["files:write"]);
     let assignment = store
-        .claim_task("host:left", "next-claim")
+        .claim_task(&left_host, "next-claim")
         .await
         .unwrap()
         .unwrap();
@@ -154,7 +163,7 @@ async fn contract(store: &Store) {
         lease_token: assignment.lease_token,
     };
     assert!(matches!(
-        store.start_task("host:left", &start).await,
+        store.start_task(&left_host, &start).await,
         Err(StoreError::FailedPrecondition(_))
     ));
     assert_eq!(
@@ -168,7 +177,7 @@ async fn contract(store: &Store) {
         .await
         .unwrap();
     let assignment = store
-        .claim_task("host:cleanup", "cleanup-claim")
+        .claim_task(&cleanup_host, "cleanup-claim")
         .await
         .unwrap()
         .unwrap();
@@ -177,7 +186,7 @@ async fn contract(store: &Store) {
         attempt_id: assignment.attempt_id,
         lease_token: assignment.lease_token,
     };
-    store.start_task("host:cleanup", &start).await.unwrap();
+    store.start_task(&cleanup_host, &start).await.unwrap();
     let waiting = store
         .submit_task("operator:alice", &request("cleanup-waiting"))
         .await
@@ -185,7 +194,7 @@ async fn contract(store: &Store) {
     store.cancel_task(&running.task_id).await.unwrap();
     assert!(
         store
-            .claim_task("host:next", "empty-claim")
+            .claim_task(&next_host, "empty-claim")
             .await
             .unwrap()
             .is_none()
@@ -197,17 +206,18 @@ async fn contract(store: &Store) {
         result: "late success".into(),
         succeeded: true,
         objective_signal: 0,
+        checkpoint_sha256: None,
     };
-    let cancelled = store.finish_task("host:cleanup", &finish).await.unwrap();
+    let cancelled = store.finish_task(&cleanup_host, &finish).await.unwrap();
     assert_eq!(cancelled.state, TaskState::Cancelled as i32);
     assert!(cancelled.result.is_none());
     assert_eq!(
-        store.finish_task("host:cleanup", &finish).await.unwrap(),
+        store.finish_task(&cleanup_host, &finish).await.unwrap(),
         cancelled
     );
     // No receipt is retained for an empty poll; the same ID may claim subsequently.
     let next = store
-        .claim_task("host:next", "empty-claim")
+        .claim_task(&next_host, "empty-claim")
         .await
         .unwrap()
         .unwrap();
@@ -221,7 +231,7 @@ async fn contract(store: &Store) {
             .await
             .unwrap();
         let assignment = store
-            .claim_task("host:racer", &format!("claim-race-{n}"))
+            .claim_task(&racer_host, &format!("claim-race-{n}"))
             .await
             .unwrap()
             .unwrap();
@@ -230,7 +240,7 @@ async fn contract(store: &Store) {
             attempt_id: assignment.attempt_id,
             lease_token: assignment.lease_token,
         };
-        store.start_task("host:racer", &start).await.unwrap();
+        store.start_task(&racer_host, &start).await.unwrap();
         let finish = FinishTaskRequest {
             task_id: task.task_id.clone(),
             attempt_id: start.attempt_id,
@@ -238,10 +248,11 @@ async fn contract(store: &Store) {
             result: "done".into(),
             succeeded: true,
             objective_signal: 0,
+            checkpoint_sha256: None,
         };
         let (cancel, complete) = tokio::join!(
             store.cancel_task(&task.task_id),
-            store.finish_task("host:racer", &finish)
+            store.finish_task(&racer_host, &finish)
         );
         let final_task = store.get_task(&task.task_id).await.unwrap();
         assert_eq!(cancel.unwrap().state, final_task.state);

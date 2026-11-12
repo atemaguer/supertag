@@ -1,5 +1,6 @@
 //! Native Codex execution through the supervising Worker Host's private Harness API.
 mod auth;
+mod checkpoint;
 mod config;
 mod events;
 
@@ -7,10 +8,10 @@ use std::{collections::BTreeMap, ffi::OsString, path::PathBuf, process::Stdio, t
 
 use anyhow::{Context, Result, ensure};
 use supertag_protocol::{
-    MAX_MESSAGE_BYTES, authenticated_request,
+    MAX_CHECKPOINT_BYTES, MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
         AdapterBootstrap, HarnessAttachRequest, HarnessCompleteRequest, HarnessPublishRequest,
-        Task, harness_client::HarnessClient,
+        HarnessUsageRequest, SessionCheckpoint, Task, harness_client::HarnessClient,
     },
 };
 use tokio::{
@@ -65,18 +66,25 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         .await
         .context("connect to supervising Worker Host")?;
     let mut harness = HarnessClient::new(channel)
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
+        .max_decoding_message_size(MAX_CHECKPOINT_BYTES + MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_CHECKPOINT_BYTES + MAX_MESSAGE_BYTES);
     let attached = harness
         .attach(request(HarnessAttachRequest {}, &bootstrap.token)?)
         .await
         .context("attach Codex adapter")?
         .into_inner();
     let task = attached.task.context("Worker Host returned no Task")?;
-    let outcome = execute(&options, &task, &mut harness, &bootstrap.token).await;
-    let (result, succeeded) = match outcome {
-        Ok(result) => (result, true),
-        Err(error) => (error.to_string(), false),
+    let outcome = execute(
+        &options,
+        &task,
+        attached.checkpoint.as_ref(),
+        &mut harness,
+        &bootstrap.token,
+    )
+    .await;
+    let (result, succeeded, checkpoint) = match outcome {
+        Ok((result, checkpoint)) => (result, true, Some(checkpoint)),
+        Err(error) => (error.to_string(), false, None),
     };
     harness
         .complete(request(
@@ -84,6 +92,7 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
                 result,
                 succeeded,
                 objective_signal: 0,
+                checkpoint,
             },
             &bootstrap.token,
         )?)
@@ -101,9 +110,10 @@ fn request<T>(message: T, token: &str) -> Result<Request<T>> {
 async fn execute(
     options: &CodexOptions,
     task: &Task,
+    previous_checkpoint: Option<&SessionCheckpoint>,
     harness: &mut HarnessClient<Channel>,
     token: &str,
-) -> Result<String> {
+) -> Result<(String, SessionCheckpoint)> {
     ensure!(
         !options.timeout.is_zero(),
         "Codex execution timeout must be positive"
@@ -115,13 +125,30 @@ async fn execute(
     ensure!(workspace.is_dir(), "Codex workspace must be a directory");
     let policy =
         config::Policy::from_actions(&task.allowed_actions, options.allow_workspace_write)?;
-    let arguments = config::arguments(&workspace, options.model.as_deref(), &policy)?;
+    let mut arguments = config::arguments(&workspace, options.model.as_deref(), &policy)?;
     let authentication = auth::Prepared::new(&options.environment, &options.state_directory)?;
     let mut environment = authentication.environment(&options.environment);
     // Secrets belonging to the transport are never forwarded to the native process.
     environment.remove(&OsString::from("SUPERTAG_HOST_TOKEN"));
     let mut secrets = authentication.secrets();
     secrets.push(token.to_owned());
+    let expected_thread = previous_checkpoint
+        .map(|checkpoint| {
+            checkpoint::restore(
+                checkpoint,
+                task,
+                authentication.home(),
+                &workspace,
+                &secrets,
+            )
+        })
+        .transpose()?;
+    if let Some(thread) = &expected_thread {
+        // Keep sandbox and all current Task configuration before the resume
+        // subcommand; no permission authority is inherited from the transcript.
+        arguments.pop(); // stdin prompt sentinel
+        arguments.extend(["resume".into(), thread.clone(), "-".into()]);
+    }
     verify_version(options, &environment).await?;
 
     let mut command = Command::new(&options.executable);
@@ -163,7 +190,7 @@ async fn execute(
                 .take()
                 .context("Codex event pipe is unavailable")?,
         );
-        let mut state = events::Stream::new(policy);
+        let mut state = events::Stream::new(policy, expected_thread);
         let mut sequence = 0;
         let mut total = 0;
         while let Some(line) = read_line(&mut output).await? {
@@ -176,15 +203,41 @@ async fn execute(
                 let message = auth::redact(message, &secrets);
                 publish(harness, token, &mut sequence, &message).await?;
             }
+            if let Some(mut usage) = state.take_usage() {
+                // Codex exec emits one turn. Its measured counters are the
+                // cumulative totals for this Attempt, independently of whether
+                // process exit or subsequent checkpoint preparation succeeds.
+                if usage
+                    .observed_model
+                    .as_ref()
+                    .is_some_and(|model| auth::redact(model.clone(), &secrets) != *model)
+                {
+                    usage.observed_model = None;
+                }
+                harness
+                    .report_usage(request(
+                        HarnessUsageRequest {
+                            sequence: 1,
+                            native_usage: Some(usage),
+                        },
+                        token,
+                    )?)
+                    .await
+                    .context("could not record Codex token usage")?;
+            }
         }
         let status = child.wait().await.context("could not reap Codex process")?;
         ensure!(status.success(), "Codex process exited unsuccessfully");
-        let result = auth::redact(state.finish()?, &secrets);
+        let (result, thread) = state.finish()?;
+        let result = auth::redact(result, &secrets);
         ensure!(
             result.len() <= MAX_RESULT,
             "Codex final response exceeds its limit"
         );
-        Ok::<_, anyhow::Error>(result)
+        let checkpoint =
+            checkpoint::capture(task, authentication.home(), &workspace, thread, &secrets)
+                .context("could not preserve Codex Session continuity")?;
+        Ok::<_, anyhow::Error>((result, checkpoint))
     })
     .await;
     // On malformed streams, timeouts, or RPC failure, stop and reap the actual

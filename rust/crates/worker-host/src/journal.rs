@@ -1,12 +1,13 @@
 use std::{
     fs::{self, DirBuilder, File, OpenOptions},
     io::Write,
-    os::unix::fs::{DirBuilderExt, OpenOptionsExt},
+    os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
+use supertag_protocol::{MAX_CHECKPOINT_BYTES, v2::SessionCheckpoint};
 use tempfile::NamedTempFile;
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -14,6 +15,14 @@ pub(crate) struct Attempt {
     pub task_id: String,
     pub attempt_id: String,
     pub lease_token: String,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub(crate) struct PendingCheckpoint {
+    pub harness: String,
+    pub format: String,
+    pub sha256: String,
+    pub uploaded: bool,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -37,6 +46,8 @@ pub(crate) enum Entry {
         succeeded: bool,
         #[serde(default)]
         objective_signal: i32,
+        #[serde(default)]
+        checkpoint: Option<PendingCheckpoint>,
     },
 }
 
@@ -52,19 +63,51 @@ impl Journal {
             .recursive(true)
             .create(directory)
             .context("create Worker Host state directory")?;
+        let metadata = directory.symlink_metadata()?;
+        let owner = unsafe { libc::geteuid() };
+        ensure!(
+            metadata.is_dir() && metadata.uid() == owner && metadata.mode() & 0o022 == 0,
+            "Worker Host state directory must be writable only by its owner"
+        );
         let lock = OpenOptions::new()
             .create(true)
             .truncate(false)
             .read(true)
             .write(true)
             .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
             .open(directory.join("host.lock"))?;
+        let metadata = lock.metadata()?;
+        ensure!(
+            metadata.is_file() && metadata.uid() == owner && metadata.mode() & 0o077 == 0,
+            "Worker Host state lock must be private"
+        );
         lock.try_lock()
             .context("another Worker Host owns this state directory")?;
         Ok(Self {
             directory: directory.to_owned(),
             _lock: lock,
         })
+    }
+
+    pub(crate) fn incarnation(&self) -> Result<String> {
+        let path = self.directory.join("incarnation");
+        match fs::read_to_string(&path) {
+            Ok(value) => {
+                uuid::Uuid::parse_str(&value).context("read Worker Host incarnation")?;
+                Ok(value)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let value = uuid::Uuid::new_v4().to_string();
+                self.write(&path, |file| Ok(file.write_all(value.as_bytes())?))?;
+                Ok(value)
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    pub(crate) fn directory(&self) -> &Path {
+        &self.directory
     }
 
     fn entry_path(&self) -> PathBuf {
@@ -82,16 +125,63 @@ impl Journal {
     }
 
     pub(crate) fn save(&self, entry: &Entry) -> Result<()> {
+        self.write(&self.entry_path(), |file| {
+            Ok(serde_json::to_writer(file, entry)?)
+        })
+    }
+
+    pub(crate) fn write(
+        &self,
+        path: &Path,
+        write: impl FnOnce(&mut File) -> Result<()>,
+    ) -> Result<()> {
         let mut staged = NamedTempFile::new_in(&self.directory)?;
-        serde_json::to_writer(staged.as_file_mut(), entry)?;
+        write(staged.as_file_mut())?;
         staged.flush()?;
         staged.as_file().sync_all()?;
-        staged.persist(self.entry_path())?;
+        staged.persist(path)?;
         self.sync_directory()
+    }
+
+    pub(crate) fn stage_checkpoint(
+        &self,
+        checkpoint: SessionCheckpoint,
+    ) -> Result<PendingCheckpoint> {
+        self.write(&self.directory.join("checkpoint.bin"), |file| {
+            Ok(file.write_all(&checkpoint.payload)?)
+        })?;
+        Ok(PendingCheckpoint {
+            harness: checkpoint.harness,
+            format: checkpoint.format,
+            sha256: checkpoint.sha256,
+            uploaded: false,
+        })
+    }
+
+    pub(crate) fn read_checkpoint(
+        &self,
+        checkpoint: &PendingCheckpoint,
+    ) -> Result<SessionCheckpoint> {
+        let path = self.directory.join("checkpoint.bin");
+        anyhow::ensure!(
+            fs::metadata(&path)?.len() <= MAX_CHECKPOINT_BYTES as u64,
+            "staged checkpoint is oversized"
+        );
+        Ok(SessionCheckpoint {
+            harness: checkpoint.harness.clone(),
+            format: checkpoint.format.clone(),
+            sha256: checkpoint.sha256.clone(),
+            payload: fs::read(path)?,
+        })
     }
 
     pub(crate) fn clear(&self) -> Result<()> {
         fs::remove_file(self.entry_path())?;
+        match fs::remove_file(self.directory.join("checkpoint.bin")) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
         self.sync_directory()
     }
 

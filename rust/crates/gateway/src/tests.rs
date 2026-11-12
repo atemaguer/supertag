@@ -1,6 +1,10 @@
 use super::*;
 use std::future;
-use tonic::{Code, transport::Endpoint};
+use supertag_protocol::v2::host_directory_server::{HostDirectory, HostDirectoryServer};
+use tonic::{
+    Code,
+    transport::{Endpoint, Server, server::TcpIncoming},
+};
 
 fn gateway() -> Gateway {
     Gateway::new(
@@ -8,8 +12,6 @@ fn gateway() -> Gateway {
         "gateway-test-token".into(),
         "operator-test-token".into(),
         "operator:alice".into(),
-        "host-test-token".into(),
-        "host:local".into(),
     )
     .unwrap()
 }
@@ -139,4 +141,129 @@ async fn bounds_an_upstream_call_that_never_completes() {
         .await
         .unwrap_err();
     assert_eq!(status.code(), Code::DeadlineExceeded);
+}
+
+struct Directory;
+
+fn assert_private_request<T>(request: &Request<T>) {
+    assert_eq!(
+        request.metadata().get(AUTHORIZATION).unwrap(),
+        "Bearer gateway-test-token"
+    );
+    assert_eq!(
+        request.metadata().get(PRINCIPAL).unwrap(),
+        "service:gateway"
+    );
+    assert!(!request.metadata().contains_key(HOST_GENERATION_HEADER));
+    assert!(!request.metadata().contains_key("x-forged"));
+}
+
+#[tonic::async_trait]
+impl HostDirectory for Directory {
+    async fn authenticate(
+        &self,
+        request: Request<AuthenticateHostRequest>,
+    ) -> Result<Response<HostRecord>, Status> {
+        assert_private_request(&request);
+        if request.into_inner().token_digest != Sha256::digest("enrolled-test-token").to_vec() {
+            return Err(Status::permission_denied("unknown credential"));
+        }
+        Ok(Response::new(HostRecord {
+            host_id: "verified".into(),
+            generation: 3,
+            revoked: false,
+        }))
+    }
+
+    async fn enroll(
+        &self,
+        request: Request<PrivateEnrollHostRequest>,
+    ) -> Result<Response<HostRecord>, Status> {
+        assert_private_request(&request);
+        let body = request.into_inner();
+        assert_eq!(
+            body.key_digest,
+            Sha256::digest("one-time-join-key").to_vec()
+        );
+        assert_eq!(body.enrollment.unwrap().host_id, "join-target");
+        Ok(Response::new(HostRecord {
+            host_id: "join-target".into(),
+            generation: 0,
+            revoked: false,
+        }))
+    }
+}
+
+fn forged_request<T>(body: T, bearer: &'static str, generation: u64) -> Request<T> {
+    let mut request = Request::new(body);
+    let metadata = request.metadata_mut();
+    metadata.insert(AUTHORIZATION, MetadataValue::from_static(bearer));
+    metadata.insert(PRINCIPAL, MetadataValue::from_static("host:forged"));
+    metadata.insert("x-forged", MetadataValue::from_static("true"));
+    metadata.insert(HOST_GENERATION_HEADER, generation.into());
+    request
+}
+
+#[tokio::test]
+async fn routes_only_authenticated_worker_generations_and_hashes_enrollment_keys()
+-> anyhow::Result<()> {
+    let incoming = TcpIncoming::bind("127.0.0.1:0".parse()?)?;
+    let address = incoming.local_addr()?;
+    let server = tokio::spawn(
+        Server::builder()
+            .add_service(HostDirectoryServer::new(Directory))
+            .serve_with_incoming(incoming),
+    );
+    let channel = Endpoint::from_shared(format!("http://{address}"))?.connect_lazy();
+    let gateway = Gateway::new(
+        channel,
+        "gateway-test-token".into(),
+        "operator-test-token".into(),
+        "operator:alice".into(),
+    )?;
+
+    let request = forged_request("payload", "Bearer enrolled-test-token", 3);
+    let result = gateway
+        .forward_host(request, true, |_, request| async move {
+            assert_eq!(
+                request.metadata().get(AUTHORIZATION).unwrap(),
+                "Bearer gateway-test-token"
+            );
+            assert_eq!(request.metadata().get(PRINCIPAL).unwrap(), "host:verified");
+            assert_eq!(host_generation(&request)?, 3);
+            assert!(!request.metadata().contains_key("x-forged"));
+            Ok(Response::new(request.into_inner()))
+        })
+        .await?;
+    assert_eq!(result.into_inner(), "payload");
+
+    let stale = forged_request((), "Bearer enrolled-test-token", 2);
+    let result = gateway
+        .forward_host(stale, true, |_, _| async { Ok(Response::new(())) })
+        .await;
+    assert_eq!(result.unwrap_err().code(), Code::PermissionDenied);
+
+    let mut duplicate = forged_request((), "Bearer enrolled-test-token", 3);
+    duplicate
+        .metadata_mut()
+        .append(HOST_GENERATION_HEADER, 3_u64.into());
+    assert_eq!(
+        host_generation(&duplicate).unwrap_err().code(),
+        Code::PermissionDenied
+    );
+
+    let enrollment = forged_request(
+        EnrollHostRequest {
+            host_id: "join-target".into(),
+            ..Default::default()
+        },
+        "Bearer one-time-join-key",
+        30,
+    );
+    assert_eq!(
+        gateway.enroll_host(enrollment).await?.into_inner().host_id,
+        "join-target"
+    );
+    server.abort();
+    Ok(())
 }

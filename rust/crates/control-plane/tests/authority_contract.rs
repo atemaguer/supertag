@@ -1,3 +1,5 @@
+mod support;
+
 use std::sync::{
     Arc,
     atomic::{AtomicI64, Ordering},
@@ -58,13 +60,14 @@ async fn version_two_inflight_upgrade(url: &str, sqlite: bool) {
     database.close().await.unwrap();
 
     let store = Store::open(url).await.unwrap();
+    let upgrade_host = support::register_host(&store, "upgrade").await;
     let claimed = store.get_task("upgrade-claimed").await.unwrap();
     assert_eq!(claimed.state(), TaskState::Queued);
     assert_eq!(claimed.instructions, "Original instructions");
     assert!(claimed.attempt_id.is_none());
     assert!(
         store
-            .claim_task("host:upgrade", "claimed-operation")
+            .claim_task(&upgrade_host, "claimed-operation")
             .await
             .unwrap()
             .is_none()
@@ -133,12 +136,19 @@ fn finish(identity: &InspectAttemptRequest) -> FinishTaskRequest {
         result: "Native turn completed".into(),
         succeeded: true,
         objective_signal: ObjectiveSignal::Progress.into(),
+        checkpoint_sha256: None,
     }
 }
 
 async fn authority_contract(url: &str) {
     let clock = Arc::new(AtomicI64::new(BASE));
     let store = open(url, &clock).await;
+    let old_host = support::register_host(&store, "old").await;
+    let new_host = support::register_host(&store, "new").await;
+    let other_host = support::register_host(&store, "other").await;
+    let waiting_host = support::register_host(&store, "waiting").await;
+    let intruder_host = support::register_host(&store, "intruder").await;
+
     store
         .put_tag("reviewer", "Check the patch", vec![])
         .await
@@ -149,18 +159,18 @@ async fn authority_contract(url: &str) {
         .await
         .unwrap();
     let old_claim = store
-        .claim_task("host:old", "lost-claim")
+        .claim_task(&old_host, "lost-claim")
         .await
         .unwrap()
         .unwrap();
     assert_eq!(
-        store.claim_task("host:old", "lost-claim").await.unwrap(),
+        store.claim_task(&old_host, "lost-claim").await.unwrap(),
         Some(old_claim.clone())
     );
     clock.store(BASE + LEASE - 1, Ordering::SeqCst);
     assert!(
         store
-            .claim_task("host:new", "new-claim")
+            .claim_task(&new_host, "new-claim")
             .await
             .unwrap()
             .is_none()
@@ -169,7 +179,7 @@ async fn authority_contract(url: &str) {
     clock.store(BASE + LEASE, Ordering::SeqCst);
     let old = inspect(&old_claim);
     assert!(matches!(
-        store.start_task("host:old", &start(&old)).await,
+        store.start_task(&old_host, &start(&old)).await,
         Err(StoreError::FailedPrecondition(_))
     ));
     assert_eq!(store.sweep_expired_attempts().await.unwrap(), 1);
@@ -179,13 +189,13 @@ async fn authority_contract(url: &str) {
     );
     assert!(
         store
-            .claim_task("host:old", "lost-claim")
+            .claim_task(&old_host, "lost-claim")
             .await
             .unwrap()
             .is_none()
     );
     let new_claim = store
-        .claim_task("host:new", "new-claim")
+        .claim_task(&new_host, "new-claim")
         .await
         .unwrap()
         .unwrap();
@@ -194,25 +204,22 @@ async fn authority_contract(url: &str) {
     assert_ne!(current.attempt_id, old.attempt_id);
     assert_ne!(current.lease_token, old.lease_token);
     assert!(matches!(
-        store.start_task("host:old", &start(&old)).await,
+        store.start_task(&old_host, &start(&old)).await,
         Err(StoreError::PermissionDenied)
     ));
 
-    store
-        .start_task("host:new", &start(&current))
-        .await
-        .unwrap();
+    store.start_task(&new_host, &start(&current)).await.unwrap();
     let first = store
-        .append_event("host:new", &event(&current, "First attempt progress"))
+        .append_event(&new_host, &event(&current, "First attempt progress"))
         .await
         .unwrap();
     assert_eq!(first.sequence, 1);
     clock.store(BASE + 2 * LEASE - 1, Ordering::SeqCst);
-    let authority = store.renew_attempt("host:new", &current).await.unwrap();
+    let authority = store.renew_attempt(&new_host, &current).await.unwrap();
     assert_eq!(authority.task.unwrap().state(), TaskState::Running);
     assert_eq!(authority.valid_for_ms, LEASE as u64);
     assert!(matches!(
-        store.renew_attempt("host:intruder", &current).await,
+        store.renew_attempt(&intruder_host, &current).await,
         Err(StoreError::PermissionDenied)
     ));
 
@@ -221,14 +228,11 @@ async fn authority_contract(url: &str) {
         .await
         .unwrap();
     clock.store(BASE + 3 * LEASE - 2, Ordering::SeqCst);
-    store
-        .start_task("host:new", &start(&current))
-        .await
-        .unwrap(); // Replay cannot extend a running lease.
+    store.start_task(&new_host, &start(&current)).await.unwrap(); // Replay cannot extend a running lease.
     clock.store(BASE + 3 * LEASE - 1, Ordering::SeqCst);
     assert!(
         store
-            .claim_task("host:other", "wait-for-cleanup")
+            .claim_task(&other_host, "wait-for-cleanup")
             .await
             .unwrap()
             .is_none()
@@ -240,7 +244,7 @@ async fn authority_contract(url: &str) {
     );
     assert_eq!(
         store
-            .renew_attempt("host:new", &current)
+            .renew_attempt(&new_host, &current)
             .await
             .unwrap()
             .valid_for_ms,
@@ -248,7 +252,7 @@ async fn authority_contract(url: &str) {
     );
     assert_eq!(
         store
-            .append_event("host:new", &event(&current, &first.text))
+            .append_event(&new_host, &event(&current, &first.text))
             .await
             .unwrap(),
         first
@@ -258,7 +262,7 @@ async fn authority_contract(url: &str) {
         ..event(&current, "Expired event")
     };
     assert!(matches!(
-        store.append_event("host:new", &expired_event).await,
+        store.append_event(&new_host, &expired_event).await,
         Err(StoreError::FailedPrecondition(_))
     ));
 
@@ -276,14 +280,14 @@ async fn authority_contract(url: &str) {
     ));
     // An old result can supply verified cleanup, but cannot replace uncertainty or release the Session.
     let late = store
-        .finish_task("host:new", &finish(&current))
+        .finish_task(&new_host, &finish(&current))
         .await
         .unwrap();
     assert_eq!(late.state(), TaskState::Uncertain);
     assert!(late.result.is_none());
     assert!(
         store
-            .claim_task("host:other", "wait-for-cleanup")
+            .claim_task(&other_host, "wait-for-cleanup")
             .await
             .unwrap()
             .is_none()
@@ -293,7 +297,7 @@ async fn authority_contract(url: &str) {
     let store = open(url, &clock).await;
     assert!(
         store
-            .get_attempt_resolution("host:new", &current)
+            .get_attempt_resolution(&new_host, &current)
             .await
             .unwrap()
             .is_none()
@@ -314,14 +318,12 @@ async fn authority_contract(url: &str) {
         Err(StoreError::Conflict(_))
     ));
     assert!(matches!(
-        store
-            .get_attempt_resolution("host:intruder", &current)
-            .await,
+        store.get_attempt_resolution(&intruder_host, &current).await,
         Err(StoreError::PermissionDenied)
     ));
 
     let retried = store
-        .claim_task("host:other", "wait-for-cleanup")
+        .claim_task(&other_host, "wait-for-cleanup")
         .await
         .unwrap()
         .unwrap();
@@ -330,25 +332,25 @@ async fn authority_contract(url: &str) {
     assert_ne!(retried.attempt_id, current.attempt_id);
     assert_eq!(
         store
-            .get_attempt_resolution("host:new", &current)
+            .get_attempt_resolution(&new_host, &current)
             .await
             .unwrap(),
         Some(resolution)
     );
     assert!(matches!(
-        store.finish_task("host:new", &finish(&current)).await,
+        store.finish_task(&new_host, &finish(&current)).await,
         Err(StoreError::PermissionDenied)
     ));
 
     store
-        .start_task("host:other", &start(&retried))
+        .start_task(&other_host, &start(&retried))
         .await
         .unwrap();
     let repeated = event(&retried, "Replacement attempt progress");
-    let accepted = store.append_event("host:other", &repeated).await.unwrap();
+    let accepted = store.append_event(&other_host, &repeated).await.unwrap();
     assert_eq!(accepted.sequence, 1);
     assert_eq!(
-        store.append_event("host:other", &repeated).await.unwrap(),
+        store.append_event(&other_host, &repeated).await.unwrap(),
         accepted
     );
     let events = store.list_events(&task.task_id, 0, 10).await.unwrap();
@@ -364,7 +366,7 @@ async fn authority_contract(url: &str) {
     clock.store(BASE + 4 * LEASE, Ordering::SeqCst);
     assert!(
         store
-            .claim_task("host:waiting", "waiting-claim")
+            .claim_task(&waiting_host, "waiting-claim")
             .await
             .unwrap()
             .is_none()
@@ -396,7 +398,7 @@ async fn authority_contract(url: &str) {
         TaskState::Cancelled
     );
     let next = store
-        .claim_task("host:waiting", "waiting-claim")
+        .claim_task(&waiting_host, "waiting-claim")
         .await
         .unwrap()
         .unwrap();

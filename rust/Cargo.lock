@@ -2250,7 +2250,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "libc",
+ "serde",
  "serde_json",
+ "sha2",
  "supertag-protocol",
  "tempfile",
  "tokio",
@@ -2297,6 +2299,7 @@ dependencies = [
  "supertag-protocol",
  "tempfile",
  "tokio",
+ "tokio-stream",
  "tokio-util",
  "tonic",
  "uuid",
@@ -2323,6 +2326,7 @@ dependencies = [
  "prost",
  "serde",
  "serde_json",
+ "sha2",
  "supertag-protocol",
  "tempfile",
  "tokio",
@@ -2330,6 +2334,21 @@ dependencies = [
  "tokio-util",
  "tonic",
  "uuid",
+]
+
+[[package]]
+name = "supertag-workspaces"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]

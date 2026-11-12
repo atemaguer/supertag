@@ -36,6 +36,16 @@ class OperatorStub:
         Args:
             channel: A grpc.Channel.
         """
+        self.CreateAuthKey = channel.unary_unary(
+                '/supertag.runtime.v2.Operator/CreateAuthKey',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CreateAuthKeyRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthKey.FromString,
+                _registered_method=True)
+        self.RevokeHost = channel.unary_unary(
+                '/supertag.runtime.v2.Operator/RevokeHost',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RevokeHostRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
+                _registered_method=True)
         self.PutTag = channel.unary_unary(
                 '/supertag.runtime.v2.Operator/PutTag',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.PutTagRequest.SerializeToString,
@@ -50,6 +60,11 @@ class OperatorStub:
                 '/supertag.runtime.v2.Operator/GetTask',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetTaskRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
+                _registered_method=True)
+        self.ListNativeUsage = channel.unary_unary(
+                '/supertag.runtime.v2.Operator/ListNativeUsage',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListNativeUsageRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListNativeUsageResponse.FromString,
                 _registered_method=True)
         self.ListEvents = channel.unary_unary(
                 '/supertag.runtime.v2.Operator/ListEvents',
@@ -73,6 +88,18 @@ class OperatorServicer:
     Control Plane serves the same messages on a private authenticated listener.
     """
 
+    def CreateAuthKey(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def RevokeHost(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def PutTag(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -86,6 +113,12 @@ class OperatorServicer:
         raise NotImplementedError('Method not implemented!')
 
     def GetTask(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListNativeUsage(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -112,6 +145,16 @@ class OperatorServicer:
 
 def add_OperatorServicer_to_server(servicer, server):
     rpc_method_handlers = {
+            'CreateAuthKey': grpc.unary_unary_rpc_method_handler(
+                    servicer.CreateAuthKey,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CreateAuthKeyRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthKey.SerializeToString,
+            ),
+            'RevokeHost': grpc.unary_unary_rpc_method_handler(
+                    servicer.RevokeHost,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RevokeHostRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.SerializeToString,
+            ),
             'PutTag': grpc.unary_unary_rpc_method_handler(
                     servicer.PutTag,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.PutTagRequest.FromString,
@@ -126,6 +169,11 @@ def add_OperatorServicer_to_server(servicer, server):
                     servicer.GetTask,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetTaskRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.SerializeToString,
+            ),
+            'ListNativeUsage': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListNativeUsage,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListNativeUsageRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListNativeUsageResponse.SerializeToString,
             ),
             'ListEvents': grpc.unary_unary_rpc_method_handler(
                     servicer.ListEvents,
@@ -154,6 +202,60 @@ class Operator:
     """The Gateway exposes these services to operators and enrolled hosts. The
     Control Plane serves the same messages on a private authenticated listener.
     """
+
+    @staticmethod
+    def CreateAuthKey(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Operator/CreateAuthKey',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CreateAuthKeyRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthKey.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RevokeHost(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Operator/RevokeHost',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RevokeHostRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
 
     @staticmethod
     def PutTag(request,
@@ -226,6 +328,33 @@ class Operator:
             '/supertag.runtime.v2.Operator/GetTask',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetTaskRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.Task.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListNativeUsage(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Operator/ListNativeUsage',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListNativeUsageRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListNativeUsageResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -700,6 +829,11 @@ class WorkerHostStub:
         Args:
             channel: A grpc.Channel.
         """
+        self.RegisterHost = channel.unary_unary(
+                '/supertag.runtime.v2.WorkerHost/RegisterHost',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RegisterHostRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
+                _registered_method=True)
         self.ClaimTask = channel.unary_unary(
                 '/supertag.runtime.v2.WorkerHost/ClaimTask',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ClaimTaskRequest.SerializeToString,
@@ -744,6 +878,12 @@ class WorkerHostStub:
 
 class WorkerHostServicer:
     """Missing associated documentation comment in .proto file."""
+
+    def RegisterHost(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
 
     def ClaimTask(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -796,6 +936,11 @@ class WorkerHostServicer:
 
 def add_WorkerHostServicer_to_server(servicer, server):
     rpc_method_handlers = {
+            'RegisterHost': grpc.unary_unary_rpc_method_handler(
+                    servicer.RegisterHost,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RegisterHostRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.SerializeToString,
+            ),
             'ClaimTask': grpc.unary_unary_rpc_method_handler(
                     servicer.ClaimTask,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ClaimTaskRequest.FromString,
@@ -846,6 +991,33 @@ def add_WorkerHostServicer_to_server(servicer, server):
  # This class is part of an EXPERIMENTAL API.
 class WorkerHost:
     """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def RegisterHost(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkerHost/RegisterHost',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RegisterHostRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
 
     @staticmethod
     def ClaimTask(request,
@@ -1064,6 +1236,199 @@ class WorkerHost:
             _registered_method=True)
 
 
+class HostEnrollmentStub:
+    """A one-time Auth Key authorizes enrollment for one designated Worker Host.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.EnrollHost = channel.unary_unary(
+                '/supertag.runtime.v2.HostEnrollment/EnrollHost',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.EnrollHostRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
+                _registered_method=True)
+
+
+class HostEnrollmentServicer:
+    """A one-time Auth Key authorizes enrollment for one designated Worker Host.
+    """
+
+    def EnrollHost(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_HostEnrollmentServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'EnrollHost': grpc.unary_unary_rpc_method_handler(
+                    servicer.EnrollHost,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.EnrollHostRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.HostEnrollment', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.HostEnrollment', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class HostEnrollment:
+    """A one-time Auth Key authorizes enrollment for one designated Worker Host.
+    """
+
+    @staticmethod
+    def EnrollHost(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HostEnrollment/EnrollHost',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.EnrollHostRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class HostDirectoryStub:
+    """Private Gateway-to-Control-Plane service for enrollment and authentication.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Enroll = channel.unary_unary(
+                '/supertag.runtime.v2.HostDirectory/Enroll',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.PrivateEnrollHostRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
+                _registered_method=True)
+        self.Authenticate = channel.unary_unary(
+                '/supertag.runtime.v2.HostDirectory/Authenticate',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthenticateHostRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
+                _registered_method=True)
+
+
+class HostDirectoryServicer:
+    """Private Gateway-to-Control-Plane service for enrollment and authentication.
+    """
+
+    def Enroll(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Authenticate(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_HostDirectoryServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Enroll': grpc.unary_unary_rpc_method_handler(
+                    servicer.Enroll,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.PrivateEnrollHostRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.SerializeToString,
+            ),
+            'Authenticate': grpc.unary_unary_rpc_method_handler(
+                    servicer.Authenticate,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthenticateHostRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.HostDirectory', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.HostDirectory', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class HostDirectory:
+    """Private Gateway-to-Control-Plane service for enrollment and authentication.
+    """
+
+    @staticmethod
+    def Enroll(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HostDirectory/Enroll',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.PrivateEnrollHostRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Authenticate(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HostDirectory/Authenticate',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AuthenticateHostRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HostRecord.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
 class ConnectorStub:
     """Private Gateway-to-Control-Plane operations. The authenticated connector
     principal identifies the account. Provider request bodies cannot select it.
@@ -1228,6 +1593,285 @@ class Connector:
             _registered_method=True)
 
 
+class TransfersStub:
+    """Public, attempt-authorized transfer of native Session checkpoints.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.UploadCheckpoint = channel.stream_unary(
+                '/supertag.runtime.v2.Transfers/UploadCheckpoint',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointUpload.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.FromString,
+                _registered_method=True)
+        self.DownloadCheckpoint = channel.unary_stream(
+                '/supertag.runtime.v2.Transfers/DownloadCheckpoint',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointDownload.FromString,
+                _registered_method=True)
+
+
+class TransfersServicer:
+    """Public, attempt-authorized transfer of native Session checkpoints.
+    """
+
+    def UploadCheckpoint(self, request_iterator, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DownloadCheckpoint(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_TransfersServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'UploadCheckpoint': grpc.stream_unary_rpc_method_handler(
+                    servicer.UploadCheckpoint,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointUpload.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.SerializeToString,
+            ),
+            'DownloadCheckpoint': grpc.unary_stream_rpc_method_handler(
+                    servicer.DownloadCheckpoint,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointDownload.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.Transfers', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.Transfers', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class Transfers:
+    """Public, attempt-authorized transfer of native Session checkpoints.
+    """
+
+    @staticmethod
+    def UploadCheckpoint(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_unary(
+            request_iterator,
+            target,
+            '/supertag.runtime.v2.Transfers/UploadCheckpoint',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointUpload.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def DownloadCheckpoint(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/supertag.runtime.v2.Transfers/DownloadCheckpoint',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointDownload.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class CheckpointDirectoryStub:
+    """Private authorization and commit for bytes stored by the Gateway.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.GetCheckpoint = channel.unary_unary(
+                '/supertag.runtime.v2.CheckpointDirectory/GetCheckpoint',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetCheckpointResponse.FromString,
+                _registered_method=True)
+        self.ReserveCheckpoint = channel.unary_unary(
+                '/supertag.runtime.v2.CheckpointDirectory/ReserveCheckpoint',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitCheckpointRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.FromString,
+                _registered_method=True)
+        self.CommitCheckpoint = channel.unary_unary(
+                '/supertag.runtime.v2.CheckpointDirectory/CommitCheckpoint',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitCheckpointRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.FromString,
+                _registered_method=True)
+
+
+class CheckpointDirectoryServicer:
+    """Private authorization and commit for bytes stored by the Gateway.
+    """
+
+    def GetCheckpoint(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ReserveCheckpoint(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CommitCheckpoint(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_CheckpointDirectoryServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'GetCheckpoint': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetCheckpoint,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetCheckpointResponse.SerializeToString,
+            ),
+            'ReserveCheckpoint': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReserveCheckpoint,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitCheckpointRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.SerializeToString,
+            ),
+            'CommitCheckpoint': grpc.unary_unary_rpc_method_handler(
+                    servicer.CommitCheckpoint,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitCheckpointRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.CheckpointDirectory', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.CheckpointDirectory', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class CheckpointDirectory:
+    """Private authorization and commit for bytes stored by the Gateway.
+    """
+
+    @staticmethod
+    def GetCheckpoint(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.CheckpointDirectory/GetCheckpoint',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.InspectAttemptRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetCheckpointResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReserveCheckpoint(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.CheckpointDirectory/ReserveCheckpoint',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitCheckpointRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CommitCheckpoint(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.CheckpointDirectory/CommitCheckpoint',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CommitCheckpointRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.CheckpointReference.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
 class HarnessStub:
     """An adapter connects only to its supervising Worker Host. The launch pipe
     provides its endpoint and an execution-scoped credential.
@@ -1248,6 +1892,11 @@ class HarnessStub:
                 '/supertag.runtime.v2.Harness/Publish',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessPublishRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.TaskEvent.FromString,
+                _registered_method=True)
+        self.ReportUsage = channel.unary_unary(
+                '/supertag.runtime.v2.Harness/ReportUsage',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessUsageRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAttemptUsageResponse.FromString,
                 _registered_method=True)
         self.Complete = channel.unary_unary(
                 '/supertag.runtime.v2.Harness/Complete',
@@ -1273,6 +1922,12 @@ class HarnessServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ReportUsage(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def Complete(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -1291,6 +1946,11 @@ def add_HarnessServicer_to_server(servicer, server):
                     servicer.Publish,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessPublishRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.TaskEvent.SerializeToString,
+            ),
+            'ReportUsage': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReportUsage,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessUsageRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAttemptUsageResponse.SerializeToString,
             ),
             'Complete': grpc.unary_unary_rpc_method_handler(
                     servicer.Complete,
@@ -1354,6 +2014,33 @@ class Harness:
             '/supertag.runtime.v2.Harness/Publish',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessPublishRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.TaskEvent.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReportUsage(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Harness/ReportUsage',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessUsageRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReportAttemptUsageResponse.FromString,
             options,
             channel_credentials,
             insecure,

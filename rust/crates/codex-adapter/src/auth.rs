@@ -117,6 +117,10 @@ impl Prepared {
     pub(crate) fn secrets(&self) -> Vec<String> {
         self.secrets.clone()
     }
+
+    pub(crate) fn home(&self) -> &Path {
+        self.directory.path()
+    }
 }
 
 fn variable(source: &BTreeMap<OsString, OsString>, name: &str) -> Result<Option<String>> {

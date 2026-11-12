@@ -1,12 +1,14 @@
+mod checkpoints;
 pub mod objective_limits;
 mod objectives;
 mod store;
+mod usage;
 
-pub use store::{Store, StoreError};
+pub use store::{HostAuthority, Store, StoreError};
 
 use std::sync::Arc;
 
-use supertag_protocol::{incoming_principal, v2::*};
+use supertag_protocol::{host_generation, incoming_principal, v2::*};
 use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
@@ -25,6 +27,16 @@ impl ControlPlane {
             store: Store::open(database_url).await?,
             gateway_token: Arc::new(gateway_token),
         })
+    }
+
+    pub async fn seed_host(&self, host_id: &str, token_digest: &[u8]) -> anyhow::Result<()> {
+        self.store.seed_host(host_id, token_digest).await?;
+        Ok(())
+    }
+
+    fn host_authority<T>(&self, request: &Request<T>) -> Result<HostAuthority, Status> {
+        let principal = self.principal(request, "host:")?;
+        Ok(HostAuthority::new(principal, host_generation(request)?)?)
     }
 
     pub async fn sweep(&self) -> anyhow::Result<()> {
@@ -66,6 +78,30 @@ impl From<StoreError> for Status {
 
 #[tonic::async_trait]
 impl operator_server::Operator for ControlPlane {
+    async fn create_auth_key(
+        &self,
+        request: Request<CreateAuthKeyRequest>,
+    ) -> Result<Response<AuthKey>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .create_auth_key(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn revoke_host(
+        &self,
+        request: Request<RevokeHostRequest>,
+    ) -> Result<Response<HostRecord>, Status> {
+        self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .revoke_host(&request.into_inner().host_id)
+                .await?,
+        ))
+    }
+
     async fn put_tag(&self, request: Request<PutTagRequest>) -> Result<Response<Tag>, Status> {
         self.principal(&request, "operator:")?;
         let input = request.into_inner();
@@ -92,6 +128,16 @@ impl operator_server::Operator for ControlPlane {
         self.principal(&request, "operator:")?;
         Ok(Response::new(
             self.store.get_task(&request.into_inner().task_id).await?,
+        ))
+    }
+
+    async fn list_native_usage(
+        &self,
+        request: Request<ListNativeUsageRequest>,
+    ) -> Result<Response<ListNativeUsageResponse>, Status> {
+        self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store.list_native_usage(&request.into_inner()).await?,
         ))
     }
 
@@ -136,11 +182,27 @@ impl operator_server::Operator for ControlPlane {
 
 #[tonic::async_trait]
 impl worker_host_server::WorkerHost for ControlPlane {
+    async fn register_host(
+        &self,
+        request: Request<RegisterHostRequest>,
+    ) -> Result<Response<HostRecord>, Status> {
+        let principal = self.principal(&request, "host:")?;
+        let host_id = principal
+            .strip_prefix("host:")
+            .expect("checked host principal");
+        let input = request.into_inner();
+        Ok(Response::new(
+            self.store
+                .register_host(host_id, &input.incarnation_id)
+                .await?,
+        ))
+    }
+
     async fn claim_task(
         &self,
         request: Request<ClaimTaskRequest>,
     ) -> Result<Response<ClaimTaskResponse>, Status> {
-        let principal = self.principal(&request, "host:")?;
+        let principal = self.host_authority(&request)?;
         Ok(Response::new(ClaimTaskResponse {
             assignment: self
                 .store
@@ -153,7 +215,7 @@ impl worker_host_server::WorkerHost for ControlPlane {
         &self,
         request: Request<StartTaskRequest>,
     ) -> Result<Response<Task>, Status> {
-        let principal = self.principal(&request, "host:")?;
+        let principal = self.host_authority(&request)?;
         Ok(Response::new(
             self.store
                 .start_task(&principal, &request.into_inner())
@@ -165,7 +227,7 @@ impl worker_host_server::WorkerHost for ControlPlane {
         &self,
         request: Request<InspectAttemptRequest>,
     ) -> Result<Response<Task>, Status> {
-        let principal = self.principal(&request, "host:")?;
+        let principal = self.host_authority(&request)?;
         let input = request.into_inner();
         Ok(Response::new(
             self.store
@@ -183,7 +245,7 @@ impl worker_host_server::WorkerHost for ControlPlane {
         &self,
         request: Request<InspectAttemptRequest>,
     ) -> Result<Response<AttemptAuthority>, Status> {
-        let principal = self.principal(&request, "host:")?;
+        let principal = self.host_authority(&request)?;
         Ok(Response::new(
             self.store
                 .renew_attempt(&principal, &request.into_inner())
@@ -195,7 +257,7 @@ impl worker_host_server::WorkerHost for ControlPlane {
         &self,
         request: Request<InspectAttemptRequest>,
     ) -> Result<Response<GetAttemptResolutionResponse>, Status> {
-        let principal = self.principal(&request, "host:")?;
+        let principal = self.host_authority(&request)?;
         Ok(Response::new(GetAttemptResolutionResponse {
             resolution: self
                 .store
@@ -208,7 +270,7 @@ impl worker_host_server::WorkerHost for ControlPlane {
         &self,
         request: Request<ReportAttemptUsageRequest>,
     ) -> Result<Response<ReportAttemptUsageResponse>, Status> {
-        let principal = self.principal(&request, "host:")?;
+        let principal = self.host_authority(&request)?;
         self.store
             .report_attempt_usage(&principal, &request.into_inner())
             .await?;
@@ -219,7 +281,7 @@ impl worker_host_server::WorkerHost for ControlPlane {
         &self,
         request: Request<AppendEventRequest>,
     ) -> Result<Response<TaskEvent>, Status> {
-        let principal = self.principal(&request, "host:")?;
+        let principal = self.host_authority(&request)?;
         Ok(Response::new(
             self.store
                 .append_event(&principal, &request.into_inner())
@@ -231,10 +293,41 @@ impl worker_host_server::WorkerHost for ControlPlane {
         &self,
         request: Request<FinishTaskRequest>,
     ) -> Result<Response<Task>, Status> {
-        let principal = self.principal(&request, "host:")?;
+        let principal = self.host_authority(&request)?;
         Ok(Response::new(
             self.store
                 .finish_task(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+}
+
+#[tonic::async_trait]
+impl host_directory_server::HostDirectory for ControlPlane {
+    async fn enroll(
+        &self,
+        request: Request<PrivateEnrollHostRequest>,
+    ) -> Result<Response<HostRecord>, Status> {
+        self.principal(&request, "service:")?;
+        let input = request.into_inner();
+        let enrollment = input
+            .enrollment
+            .ok_or_else(|| Status::invalid_argument("enrollment required"))?;
+        Ok(Response::new(
+            self.store
+                .enroll_host(&enrollment, &input.key_digest)
+                .await?,
+        ))
+    }
+
+    async fn authenticate(
+        &self,
+        request: Request<AuthenticateHostRequest>,
+    ) -> Result<Response<HostRecord>, Status> {
+        self.principal(&request, "service:")?;
+        Ok(Response::new(
+            self.store
+                .authenticate_host(&request.into_inner().token_digest)
                 .await?,
         ))
     }

@@ -27,8 +27,16 @@ const (
 	ObjectivesName = "supertag.runtime.v2.Objectives"
 	// WorkerHostName is the fully-qualified name of the WorkerHost service.
 	WorkerHostName = "supertag.runtime.v2.WorkerHost"
+	// HostEnrollmentName is the fully-qualified name of the HostEnrollment service.
+	HostEnrollmentName = "supertag.runtime.v2.HostEnrollment"
+	// HostDirectoryName is the fully-qualified name of the HostDirectory service.
+	HostDirectoryName = "supertag.runtime.v2.HostDirectory"
 	// ConnectorName is the fully-qualified name of the Connector service.
 	ConnectorName = "supertag.runtime.v2.Connector"
+	// TransfersName is the fully-qualified name of the Transfers service.
+	TransfersName = "supertag.runtime.v2.Transfers"
+	// CheckpointDirectoryName is the fully-qualified name of the CheckpointDirectory service.
+	CheckpointDirectoryName = "supertag.runtime.v2.CheckpointDirectory"
 	// HarnessName is the fully-qualified name of the Harness service.
 	HarnessName = "supertag.runtime.v2.Harness"
 )
@@ -41,12 +49,19 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
+	// OperatorCreateAuthKeyProcedure is the fully-qualified name of the Operator's CreateAuthKey RPC.
+	OperatorCreateAuthKeyProcedure = "/supertag.runtime.v2.Operator/CreateAuthKey"
+	// OperatorRevokeHostProcedure is the fully-qualified name of the Operator's RevokeHost RPC.
+	OperatorRevokeHostProcedure = "/supertag.runtime.v2.Operator/RevokeHost"
 	// OperatorPutTagProcedure is the fully-qualified name of the Operator's PutTag RPC.
 	OperatorPutTagProcedure = "/supertag.runtime.v2.Operator/PutTag"
 	// OperatorSubmitTaskProcedure is the fully-qualified name of the Operator's SubmitTask RPC.
 	OperatorSubmitTaskProcedure = "/supertag.runtime.v2.Operator/SubmitTask"
 	// OperatorGetTaskProcedure is the fully-qualified name of the Operator's GetTask RPC.
 	OperatorGetTaskProcedure = "/supertag.runtime.v2.Operator/GetTask"
+	// OperatorListNativeUsageProcedure is the fully-qualified name of the Operator's ListNativeUsage
+	// RPC.
+	OperatorListNativeUsageProcedure = "/supertag.runtime.v2.Operator/ListNativeUsage"
 	// OperatorListEventsProcedure is the fully-qualified name of the Operator's ListEvents RPC.
 	OperatorListEventsProcedure = "/supertag.runtime.v2.Operator/ListEvents"
 	// OperatorCancelTaskProcedure is the fully-qualified name of the Operator's CancelTask RPC.
@@ -75,6 +90,8 @@ const (
 	// ObjectivesReviewObjectiveProcedure is the fully-qualified name of the Objectives's
 	// ReviewObjective RPC.
 	ObjectivesReviewObjectiveProcedure = "/supertag.runtime.v2.Objectives/ReviewObjective"
+	// WorkerHostRegisterHostProcedure is the fully-qualified name of the WorkerHost's RegisterHost RPC.
+	WorkerHostRegisterHostProcedure = "/supertag.runtime.v2.WorkerHost/RegisterHost"
 	// WorkerHostClaimTaskProcedure is the fully-qualified name of the WorkerHost's ClaimTask RPC.
 	WorkerHostClaimTaskProcedure = "/supertag.runtime.v2.WorkerHost/ClaimTask"
 	// WorkerHostStartTaskProcedure is the fully-qualified name of the WorkerHost's StartTask RPC.
@@ -94,25 +111,53 @@ const (
 	WorkerHostAppendEventProcedure = "/supertag.runtime.v2.WorkerHost/AppendEvent"
 	// WorkerHostFinishTaskProcedure is the fully-qualified name of the WorkerHost's FinishTask RPC.
 	WorkerHostFinishTaskProcedure = "/supertag.runtime.v2.WorkerHost/FinishTask"
+	// HostEnrollmentEnrollHostProcedure is the fully-qualified name of the HostEnrollment's EnrollHost
+	// RPC.
+	HostEnrollmentEnrollHostProcedure = "/supertag.runtime.v2.HostEnrollment/EnrollHost"
+	// HostDirectoryEnrollProcedure is the fully-qualified name of the HostDirectory's Enroll RPC.
+	HostDirectoryEnrollProcedure = "/supertag.runtime.v2.HostDirectory/Enroll"
+	// HostDirectoryAuthenticateProcedure is the fully-qualified name of the HostDirectory's
+	// Authenticate RPC.
+	HostDirectoryAuthenticateProcedure = "/supertag.runtime.v2.HostDirectory/Authenticate"
 	// ConnectorAcceptEventProcedure is the fully-qualified name of the Connector's AcceptEvent RPC.
 	ConnectorAcceptEventProcedure = "/supertag.runtime.v2.Connector/AcceptEvent"
 	// ConnectorClaimReplyProcedure is the fully-qualified name of the Connector's ClaimReply RPC.
 	ConnectorClaimReplyProcedure = "/supertag.runtime.v2.Connector/ClaimReply"
 	// ConnectorSettleReplyProcedure is the fully-qualified name of the Connector's SettleReply RPC.
 	ConnectorSettleReplyProcedure = "/supertag.runtime.v2.Connector/SettleReply"
+	// TransfersUploadCheckpointProcedure is the fully-qualified name of the Transfers's
+	// UploadCheckpoint RPC.
+	TransfersUploadCheckpointProcedure = "/supertag.runtime.v2.Transfers/UploadCheckpoint"
+	// TransfersDownloadCheckpointProcedure is the fully-qualified name of the Transfers's
+	// DownloadCheckpoint RPC.
+	TransfersDownloadCheckpointProcedure = "/supertag.runtime.v2.Transfers/DownloadCheckpoint"
+	// CheckpointDirectoryGetCheckpointProcedure is the fully-qualified name of the
+	// CheckpointDirectory's GetCheckpoint RPC.
+	CheckpointDirectoryGetCheckpointProcedure = "/supertag.runtime.v2.CheckpointDirectory/GetCheckpoint"
+	// CheckpointDirectoryReserveCheckpointProcedure is the fully-qualified name of the
+	// CheckpointDirectory's ReserveCheckpoint RPC.
+	CheckpointDirectoryReserveCheckpointProcedure = "/supertag.runtime.v2.CheckpointDirectory/ReserveCheckpoint"
+	// CheckpointDirectoryCommitCheckpointProcedure is the fully-qualified name of the
+	// CheckpointDirectory's CommitCheckpoint RPC.
+	CheckpointDirectoryCommitCheckpointProcedure = "/supertag.runtime.v2.CheckpointDirectory/CommitCheckpoint"
 	// HarnessAttachProcedure is the fully-qualified name of the Harness's Attach RPC.
 	HarnessAttachProcedure = "/supertag.runtime.v2.Harness/Attach"
 	// HarnessPublishProcedure is the fully-qualified name of the Harness's Publish RPC.
 	HarnessPublishProcedure = "/supertag.runtime.v2.Harness/Publish"
+	// HarnessReportUsageProcedure is the fully-qualified name of the Harness's ReportUsage RPC.
+	HarnessReportUsageProcedure = "/supertag.runtime.v2.Harness/ReportUsage"
 	// HarnessCompleteProcedure is the fully-qualified name of the Harness's Complete RPC.
 	HarnessCompleteProcedure = "/supertag.runtime.v2.Harness/Complete"
 )
 
 // OperatorClient is a client for the supertag.runtime.v2.Operator service.
 type OperatorClient interface {
+	CreateAuthKey(context.Context, *connect.Request[runtimev2.CreateAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error)
+	RevokeHost(context.Context, *connect.Request[runtimev2.RevokeHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
 	PutTag(context.Context, *connect.Request[runtimev2.PutTagRequest]) (*connect.Response[runtimev2.Tag], error)
 	SubmitTask(context.Context, *connect.Request[runtimev2.SubmitTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	GetTask(context.Context, *connect.Request[runtimev2.GetTaskRequest]) (*connect.Response[runtimev2.Task], error)
+	ListNativeUsage(context.Context, *connect.Request[runtimev2.ListNativeUsageRequest]) (*connect.Response[runtimev2.ListNativeUsageResponse], error)
 	ListEvents(context.Context, *connect.Request[runtimev2.ListEventsRequest]) (*connect.Response[runtimev2.ListEventsResponse], error)
 	CancelTask(context.Context, *connect.Request[runtimev2.CancelTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	ResolveAttempt(context.Context, *connect.Request[runtimev2.ResolveAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error)
@@ -129,6 +174,18 @@ func NewOperatorClient(httpClient connect.HTTPClient, baseURL string, opts ...co
 	baseURL = strings.TrimRight(baseURL, "/")
 	operatorMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("Operator").Methods()
 	return &operatorClient{
+		createAuthKey: connect.NewClient[runtimev2.CreateAuthKeyRequest, runtimev2.AuthKey](
+			httpClient,
+			baseURL+OperatorCreateAuthKeyProcedure,
+			connect.WithSchema(operatorMethods.ByName("CreateAuthKey")),
+			connect.WithClientOptions(opts...),
+		),
+		revokeHost: connect.NewClient[runtimev2.RevokeHostRequest, runtimev2.HostRecord](
+			httpClient,
+			baseURL+OperatorRevokeHostProcedure,
+			connect.WithSchema(operatorMethods.ByName("RevokeHost")),
+			connect.WithClientOptions(opts...),
+		),
 		putTag: connect.NewClient[runtimev2.PutTagRequest, runtimev2.Tag](
 			httpClient,
 			baseURL+OperatorPutTagProcedure,
@@ -145,6 +202,12 @@ func NewOperatorClient(httpClient connect.HTTPClient, baseURL string, opts ...co
 			httpClient,
 			baseURL+OperatorGetTaskProcedure,
 			connect.WithSchema(operatorMethods.ByName("GetTask")),
+			connect.WithClientOptions(opts...),
+		),
+		listNativeUsage: connect.NewClient[runtimev2.ListNativeUsageRequest, runtimev2.ListNativeUsageResponse](
+			httpClient,
+			baseURL+OperatorListNativeUsageProcedure,
+			connect.WithSchema(operatorMethods.ByName("ListNativeUsage")),
 			connect.WithClientOptions(opts...),
 		),
 		listEvents: connect.NewClient[runtimev2.ListEventsRequest, runtimev2.ListEventsResponse](
@@ -170,12 +233,25 @@ func NewOperatorClient(httpClient connect.HTTPClient, baseURL string, opts ...co
 
 // operatorClient implements OperatorClient.
 type operatorClient struct {
-	putTag         *connect.Client[runtimev2.PutTagRequest, runtimev2.Tag]
-	submitTask     *connect.Client[runtimev2.SubmitTaskRequest, runtimev2.Task]
-	getTask        *connect.Client[runtimev2.GetTaskRequest, runtimev2.Task]
-	listEvents     *connect.Client[runtimev2.ListEventsRequest, runtimev2.ListEventsResponse]
-	cancelTask     *connect.Client[runtimev2.CancelTaskRequest, runtimev2.Task]
-	resolveAttempt *connect.Client[runtimev2.ResolveAttemptRequest, runtimev2.AttemptResolution]
+	createAuthKey   *connect.Client[runtimev2.CreateAuthKeyRequest, runtimev2.AuthKey]
+	revokeHost      *connect.Client[runtimev2.RevokeHostRequest, runtimev2.HostRecord]
+	putTag          *connect.Client[runtimev2.PutTagRequest, runtimev2.Tag]
+	submitTask      *connect.Client[runtimev2.SubmitTaskRequest, runtimev2.Task]
+	getTask         *connect.Client[runtimev2.GetTaskRequest, runtimev2.Task]
+	listNativeUsage *connect.Client[runtimev2.ListNativeUsageRequest, runtimev2.ListNativeUsageResponse]
+	listEvents      *connect.Client[runtimev2.ListEventsRequest, runtimev2.ListEventsResponse]
+	cancelTask      *connect.Client[runtimev2.CancelTaskRequest, runtimev2.Task]
+	resolveAttempt  *connect.Client[runtimev2.ResolveAttemptRequest, runtimev2.AttemptResolution]
+}
+
+// CreateAuthKey calls supertag.runtime.v2.Operator.CreateAuthKey.
+func (c *operatorClient) CreateAuthKey(ctx context.Context, req *connect.Request[runtimev2.CreateAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error) {
+	return c.createAuthKey.CallUnary(ctx, req)
+}
+
+// RevokeHost calls supertag.runtime.v2.Operator.RevokeHost.
+func (c *operatorClient) RevokeHost(ctx context.Context, req *connect.Request[runtimev2.RevokeHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
+	return c.revokeHost.CallUnary(ctx, req)
 }
 
 // PutTag calls supertag.runtime.v2.Operator.PutTag.
@@ -191,6 +267,11 @@ func (c *operatorClient) SubmitTask(ctx context.Context, req *connect.Request[ru
 // GetTask calls supertag.runtime.v2.Operator.GetTask.
 func (c *operatorClient) GetTask(ctx context.Context, req *connect.Request[runtimev2.GetTaskRequest]) (*connect.Response[runtimev2.Task], error) {
 	return c.getTask.CallUnary(ctx, req)
+}
+
+// ListNativeUsage calls supertag.runtime.v2.Operator.ListNativeUsage.
+func (c *operatorClient) ListNativeUsage(ctx context.Context, req *connect.Request[runtimev2.ListNativeUsageRequest]) (*connect.Response[runtimev2.ListNativeUsageResponse], error) {
+	return c.listNativeUsage.CallUnary(ctx, req)
 }
 
 // ListEvents calls supertag.runtime.v2.Operator.ListEvents.
@@ -210,9 +291,12 @@ func (c *operatorClient) ResolveAttempt(ctx context.Context, req *connect.Reques
 
 // OperatorHandler is an implementation of the supertag.runtime.v2.Operator service.
 type OperatorHandler interface {
+	CreateAuthKey(context.Context, *connect.Request[runtimev2.CreateAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error)
+	RevokeHost(context.Context, *connect.Request[runtimev2.RevokeHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
 	PutTag(context.Context, *connect.Request[runtimev2.PutTagRequest]) (*connect.Response[runtimev2.Tag], error)
 	SubmitTask(context.Context, *connect.Request[runtimev2.SubmitTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	GetTask(context.Context, *connect.Request[runtimev2.GetTaskRequest]) (*connect.Response[runtimev2.Task], error)
+	ListNativeUsage(context.Context, *connect.Request[runtimev2.ListNativeUsageRequest]) (*connect.Response[runtimev2.ListNativeUsageResponse], error)
 	ListEvents(context.Context, *connect.Request[runtimev2.ListEventsRequest]) (*connect.Response[runtimev2.ListEventsResponse], error)
 	CancelTask(context.Context, *connect.Request[runtimev2.CancelTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	ResolveAttempt(context.Context, *connect.Request[runtimev2.ResolveAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error)
@@ -225,6 +309,18 @@ type OperatorHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	operatorMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("Operator").Methods()
+	operatorCreateAuthKeyHandler := connect.NewUnaryHandler(
+		OperatorCreateAuthKeyProcedure,
+		svc.CreateAuthKey,
+		connect.WithSchema(operatorMethods.ByName("CreateAuthKey")),
+		connect.WithHandlerOptions(opts...),
+	)
+	operatorRevokeHostHandler := connect.NewUnaryHandler(
+		OperatorRevokeHostProcedure,
+		svc.RevokeHost,
+		connect.WithSchema(operatorMethods.ByName("RevokeHost")),
+		connect.WithHandlerOptions(opts...),
+	)
 	operatorPutTagHandler := connect.NewUnaryHandler(
 		OperatorPutTagProcedure,
 		svc.PutTag,
@@ -241,6 +337,12 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 		OperatorGetTaskProcedure,
 		svc.GetTask,
 		connect.WithSchema(operatorMethods.ByName("GetTask")),
+		connect.WithHandlerOptions(opts...),
+	)
+	operatorListNativeUsageHandler := connect.NewUnaryHandler(
+		OperatorListNativeUsageProcedure,
+		svc.ListNativeUsage,
+		connect.WithSchema(operatorMethods.ByName("ListNativeUsage")),
 		connect.WithHandlerOptions(opts...),
 	)
 	operatorListEventsHandler := connect.NewUnaryHandler(
@@ -263,12 +365,18 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 	)
 	return "/supertag.runtime.v2.Operator/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case OperatorCreateAuthKeyProcedure:
+			operatorCreateAuthKeyHandler.ServeHTTP(w, r)
+		case OperatorRevokeHostProcedure:
+			operatorRevokeHostHandler.ServeHTTP(w, r)
 		case OperatorPutTagProcedure:
 			operatorPutTagHandler.ServeHTTP(w, r)
 		case OperatorSubmitTaskProcedure:
 			operatorSubmitTaskHandler.ServeHTTP(w, r)
 		case OperatorGetTaskProcedure:
 			operatorGetTaskHandler.ServeHTTP(w, r)
+		case OperatorListNativeUsageProcedure:
+			operatorListNativeUsageHandler.ServeHTTP(w, r)
 		case OperatorListEventsProcedure:
 			operatorListEventsHandler.ServeHTTP(w, r)
 		case OperatorCancelTaskProcedure:
@@ -284,6 +392,14 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 // UnimplementedOperatorHandler returns CodeUnimplemented from all methods.
 type UnimplementedOperatorHandler struct{}
 
+func (UnimplementedOperatorHandler) CreateAuthKey(context.Context, *connect.Request[runtimev2.CreateAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.CreateAuthKey is not implemented"))
+}
+
+func (UnimplementedOperatorHandler) RevokeHost(context.Context, *connect.Request[runtimev2.RevokeHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.RevokeHost is not implemented"))
+}
+
 func (UnimplementedOperatorHandler) PutTag(context.Context, *connect.Request[runtimev2.PutTagRequest]) (*connect.Response[runtimev2.Tag], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.PutTag is not implemented"))
 }
@@ -294,6 +410,10 @@ func (UnimplementedOperatorHandler) SubmitTask(context.Context, *connect.Request
 
 func (UnimplementedOperatorHandler) GetTask(context.Context, *connect.Request[runtimev2.GetTaskRequest]) (*connect.Response[runtimev2.Task], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.GetTask is not implemented"))
+}
+
+func (UnimplementedOperatorHandler) ListNativeUsage(context.Context, *connect.Request[runtimev2.ListNativeUsageRequest]) (*connect.Response[runtimev2.ListNativeUsageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.ListNativeUsage is not implemented"))
 }
 
 func (UnimplementedOperatorHandler) ListEvents(context.Context, *connect.Request[runtimev2.ListEventsRequest]) (*connect.Response[runtimev2.ListEventsResponse], error) {
@@ -562,6 +682,7 @@ func (UnimplementedObjectivesHandler) ReviewObjective(context.Context, *connect.
 
 // WorkerHostClient is a client for the supertag.runtime.v2.WorkerHost service.
 type WorkerHostClient interface {
+	RegisterHost(context.Context, *connect.Request[runtimev2.RegisterHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
 	ClaimTask(context.Context, *connect.Request[runtimev2.ClaimTaskRequest]) (*connect.Response[runtimev2.ClaimTaskResponse], error)
 	StartTask(context.Context, *connect.Request[runtimev2.StartTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	InspectAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.Task], error)
@@ -583,6 +704,12 @@ func NewWorkerHostClient(httpClient connect.HTTPClient, baseURL string, opts ...
 	baseURL = strings.TrimRight(baseURL, "/")
 	workerHostMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("WorkerHost").Methods()
 	return &workerHostClient{
+		registerHost: connect.NewClient[runtimev2.RegisterHostRequest, runtimev2.HostRecord](
+			httpClient,
+			baseURL+WorkerHostRegisterHostProcedure,
+			connect.WithSchema(workerHostMethods.ByName("RegisterHost")),
+			connect.WithClientOptions(opts...),
+		),
 		claimTask: connect.NewClient[runtimev2.ClaimTaskRequest, runtimev2.ClaimTaskResponse](
 			httpClient,
 			baseURL+WorkerHostClaimTaskProcedure,
@@ -636,6 +763,7 @@ func NewWorkerHostClient(httpClient connect.HTTPClient, baseURL string, opts ...
 
 // workerHostClient implements WorkerHostClient.
 type workerHostClient struct {
+	registerHost         *connect.Client[runtimev2.RegisterHostRequest, runtimev2.HostRecord]
 	claimTask            *connect.Client[runtimev2.ClaimTaskRequest, runtimev2.ClaimTaskResponse]
 	startTask            *connect.Client[runtimev2.StartTaskRequest, runtimev2.Task]
 	inspectAttempt       *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.Task]
@@ -644,6 +772,11 @@ type workerHostClient struct {
 	reportAttemptUsage   *connect.Client[runtimev2.ReportAttemptUsageRequest, runtimev2.ReportAttemptUsageResponse]
 	appendEvent          *connect.Client[runtimev2.AppendEventRequest, runtimev2.TaskEvent]
 	finishTask           *connect.Client[runtimev2.FinishTaskRequest, runtimev2.Task]
+}
+
+// RegisterHost calls supertag.runtime.v2.WorkerHost.RegisterHost.
+func (c *workerHostClient) RegisterHost(ctx context.Context, req *connect.Request[runtimev2.RegisterHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
+	return c.registerHost.CallUnary(ctx, req)
 }
 
 // ClaimTask calls supertag.runtime.v2.WorkerHost.ClaimTask.
@@ -688,6 +821,7 @@ func (c *workerHostClient) FinishTask(ctx context.Context, req *connect.Request[
 
 // WorkerHostHandler is an implementation of the supertag.runtime.v2.WorkerHost service.
 type WorkerHostHandler interface {
+	RegisterHost(context.Context, *connect.Request[runtimev2.RegisterHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
 	ClaimTask(context.Context, *connect.Request[runtimev2.ClaimTaskRequest]) (*connect.Response[runtimev2.ClaimTaskResponse], error)
 	StartTask(context.Context, *connect.Request[runtimev2.StartTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	InspectAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.Task], error)
@@ -705,6 +839,12 @@ type WorkerHostHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	workerHostMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("WorkerHost").Methods()
+	workerHostRegisterHostHandler := connect.NewUnaryHandler(
+		WorkerHostRegisterHostProcedure,
+		svc.RegisterHost,
+		connect.WithSchema(workerHostMethods.ByName("RegisterHost")),
+		connect.WithHandlerOptions(opts...),
+	)
 	workerHostClaimTaskHandler := connect.NewUnaryHandler(
 		WorkerHostClaimTaskProcedure,
 		svc.ClaimTask,
@@ -755,6 +895,8 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 	)
 	return "/supertag.runtime.v2.WorkerHost/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case WorkerHostRegisterHostProcedure:
+			workerHostRegisterHostHandler.ServeHTTP(w, r)
 		case WorkerHostClaimTaskProcedure:
 			workerHostClaimTaskHandler.ServeHTTP(w, r)
 		case WorkerHostStartTaskProcedure:
@@ -779,6 +921,10 @@ func NewWorkerHostHandler(svc WorkerHostHandler, opts ...connect.HandlerOption) 
 
 // UnimplementedWorkerHostHandler returns CodeUnimplemented from all methods.
 type UnimplementedWorkerHostHandler struct{}
+
+func (UnimplementedWorkerHostHandler) RegisterHost(context.Context, *connect.Request[runtimev2.RegisterHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.RegisterHost is not implemented"))
+}
 
 func (UnimplementedWorkerHostHandler) ClaimTask(context.Context, *connect.Request[runtimev2.ClaimTaskRequest]) (*connect.Response[runtimev2.ClaimTaskResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.ClaimTask is not implemented"))
@@ -810,6 +956,172 @@ func (UnimplementedWorkerHostHandler) AppendEvent(context.Context, *connect.Requ
 
 func (UnimplementedWorkerHostHandler) FinishTask(context.Context, *connect.Request[runtimev2.FinishTaskRequest]) (*connect.Response[runtimev2.Task], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkerHost.FinishTask is not implemented"))
+}
+
+// HostEnrollmentClient is a client for the supertag.runtime.v2.HostEnrollment service.
+type HostEnrollmentClient interface {
+	EnrollHost(context.Context, *connect.Request[runtimev2.EnrollHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
+}
+
+// NewHostEnrollmentClient constructs a client for the supertag.runtime.v2.HostEnrollment service.
+// By default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped
+// responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewHostEnrollmentClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) HostEnrollmentClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	hostEnrollmentMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HostEnrollment").Methods()
+	return &hostEnrollmentClient{
+		enrollHost: connect.NewClient[runtimev2.EnrollHostRequest, runtimev2.HostRecord](
+			httpClient,
+			baseURL+HostEnrollmentEnrollHostProcedure,
+			connect.WithSchema(hostEnrollmentMethods.ByName("EnrollHost")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// hostEnrollmentClient implements HostEnrollmentClient.
+type hostEnrollmentClient struct {
+	enrollHost *connect.Client[runtimev2.EnrollHostRequest, runtimev2.HostRecord]
+}
+
+// EnrollHost calls supertag.runtime.v2.HostEnrollment.EnrollHost.
+func (c *hostEnrollmentClient) EnrollHost(ctx context.Context, req *connect.Request[runtimev2.EnrollHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
+	return c.enrollHost.CallUnary(ctx, req)
+}
+
+// HostEnrollmentHandler is an implementation of the supertag.runtime.v2.HostEnrollment service.
+type HostEnrollmentHandler interface {
+	EnrollHost(context.Context, *connect.Request[runtimev2.EnrollHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
+}
+
+// NewHostEnrollmentHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewHostEnrollmentHandler(svc HostEnrollmentHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	hostEnrollmentMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HostEnrollment").Methods()
+	hostEnrollmentEnrollHostHandler := connect.NewUnaryHandler(
+		HostEnrollmentEnrollHostProcedure,
+		svc.EnrollHost,
+		connect.WithSchema(hostEnrollmentMethods.ByName("EnrollHost")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.HostEnrollment/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case HostEnrollmentEnrollHostProcedure:
+			hostEnrollmentEnrollHostHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedHostEnrollmentHandler returns CodeUnimplemented from all methods.
+type UnimplementedHostEnrollmentHandler struct{}
+
+func (UnimplementedHostEnrollmentHandler) EnrollHost(context.Context, *connect.Request[runtimev2.EnrollHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HostEnrollment.EnrollHost is not implemented"))
+}
+
+// HostDirectoryClient is a client for the supertag.runtime.v2.HostDirectory service.
+type HostDirectoryClient interface {
+	Enroll(context.Context, *connect.Request[runtimev2.PrivateEnrollHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
+	Authenticate(context.Context, *connect.Request[runtimev2.AuthenticateHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
+}
+
+// NewHostDirectoryClient constructs a client for the supertag.runtime.v2.HostDirectory service. By
+// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
+// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewHostDirectoryClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) HostDirectoryClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	hostDirectoryMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HostDirectory").Methods()
+	return &hostDirectoryClient{
+		enroll: connect.NewClient[runtimev2.PrivateEnrollHostRequest, runtimev2.HostRecord](
+			httpClient,
+			baseURL+HostDirectoryEnrollProcedure,
+			connect.WithSchema(hostDirectoryMethods.ByName("Enroll")),
+			connect.WithClientOptions(opts...),
+		),
+		authenticate: connect.NewClient[runtimev2.AuthenticateHostRequest, runtimev2.HostRecord](
+			httpClient,
+			baseURL+HostDirectoryAuthenticateProcedure,
+			connect.WithSchema(hostDirectoryMethods.ByName("Authenticate")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// hostDirectoryClient implements HostDirectoryClient.
+type hostDirectoryClient struct {
+	enroll       *connect.Client[runtimev2.PrivateEnrollHostRequest, runtimev2.HostRecord]
+	authenticate *connect.Client[runtimev2.AuthenticateHostRequest, runtimev2.HostRecord]
+}
+
+// Enroll calls supertag.runtime.v2.HostDirectory.Enroll.
+func (c *hostDirectoryClient) Enroll(ctx context.Context, req *connect.Request[runtimev2.PrivateEnrollHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
+	return c.enroll.CallUnary(ctx, req)
+}
+
+// Authenticate calls supertag.runtime.v2.HostDirectory.Authenticate.
+func (c *hostDirectoryClient) Authenticate(ctx context.Context, req *connect.Request[runtimev2.AuthenticateHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
+	return c.authenticate.CallUnary(ctx, req)
+}
+
+// HostDirectoryHandler is an implementation of the supertag.runtime.v2.HostDirectory service.
+type HostDirectoryHandler interface {
+	Enroll(context.Context, *connect.Request[runtimev2.PrivateEnrollHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
+	Authenticate(context.Context, *connect.Request[runtimev2.AuthenticateHostRequest]) (*connect.Response[runtimev2.HostRecord], error)
+}
+
+// NewHostDirectoryHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewHostDirectoryHandler(svc HostDirectoryHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	hostDirectoryMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HostDirectory").Methods()
+	hostDirectoryEnrollHandler := connect.NewUnaryHandler(
+		HostDirectoryEnrollProcedure,
+		svc.Enroll,
+		connect.WithSchema(hostDirectoryMethods.ByName("Enroll")),
+		connect.WithHandlerOptions(opts...),
+	)
+	hostDirectoryAuthenticateHandler := connect.NewUnaryHandler(
+		HostDirectoryAuthenticateProcedure,
+		svc.Authenticate,
+		connect.WithSchema(hostDirectoryMethods.ByName("Authenticate")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.HostDirectory/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case HostDirectoryEnrollProcedure:
+			hostDirectoryEnrollHandler.ServeHTTP(w, r)
+		case HostDirectoryAuthenticateProcedure:
+			hostDirectoryAuthenticateHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedHostDirectoryHandler returns CodeUnimplemented from all methods.
+type UnimplementedHostDirectoryHandler struct{}
+
+func (UnimplementedHostDirectoryHandler) Enroll(context.Context, *connect.Request[runtimev2.PrivateEnrollHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HostDirectory.Enroll is not implemented"))
+}
+
+func (UnimplementedHostDirectoryHandler) Authenticate(context.Context, *connect.Request[runtimev2.AuthenticateHostRequest]) (*connect.Response[runtimev2.HostRecord], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HostDirectory.Authenticate is not implemented"))
 }
 
 // ConnectorClient is a client for the supertag.runtime.v2.Connector service.
@@ -934,10 +1246,230 @@ func (UnimplementedConnectorHandler) SettleReply(context.Context, *connect.Reque
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.SettleReply is not implemented"))
 }
 
+// TransfersClient is a client for the supertag.runtime.v2.Transfers service.
+type TransfersClient interface {
+	UploadCheckpoint(context.Context) *connect.ClientStreamForClient[runtimev2.CheckpointUpload, runtimev2.CheckpointReference]
+	DownloadCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.CheckpointDownload], error)
+}
+
+// NewTransfersClient constructs a client for the supertag.runtime.v2.Transfers service. By default,
+// it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses, and
+// sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC()
+// or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewTransfersClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) TransfersClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	transfersMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("Transfers").Methods()
+	return &transfersClient{
+		uploadCheckpoint: connect.NewClient[runtimev2.CheckpointUpload, runtimev2.CheckpointReference](
+			httpClient,
+			baseURL+TransfersUploadCheckpointProcedure,
+			connect.WithSchema(transfersMethods.ByName("UploadCheckpoint")),
+			connect.WithClientOptions(opts...),
+		),
+		downloadCheckpoint: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.CheckpointDownload](
+			httpClient,
+			baseURL+TransfersDownloadCheckpointProcedure,
+			connect.WithSchema(transfersMethods.ByName("DownloadCheckpoint")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// transfersClient implements TransfersClient.
+type transfersClient struct {
+	uploadCheckpoint   *connect.Client[runtimev2.CheckpointUpload, runtimev2.CheckpointReference]
+	downloadCheckpoint *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.CheckpointDownload]
+}
+
+// UploadCheckpoint calls supertag.runtime.v2.Transfers.UploadCheckpoint.
+func (c *transfersClient) UploadCheckpoint(ctx context.Context) *connect.ClientStreamForClient[runtimev2.CheckpointUpload, runtimev2.CheckpointReference] {
+	return c.uploadCheckpoint.CallClientStream(ctx)
+}
+
+// DownloadCheckpoint calls supertag.runtime.v2.Transfers.DownloadCheckpoint.
+func (c *transfersClient) DownloadCheckpoint(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.ServerStreamForClient[runtimev2.CheckpointDownload], error) {
+	return c.downloadCheckpoint.CallServerStream(ctx, req)
+}
+
+// TransfersHandler is an implementation of the supertag.runtime.v2.Transfers service.
+type TransfersHandler interface {
+	UploadCheckpoint(context.Context, *connect.ClientStream[runtimev2.CheckpointUpload]) (*connect.Response[runtimev2.CheckpointReference], error)
+	DownloadCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.CheckpointDownload]) error
+}
+
+// NewTransfersHandler builds an HTTP handler from the service implementation. It returns the path
+// on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewTransfersHandler(svc TransfersHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	transfersMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("Transfers").Methods()
+	transfersUploadCheckpointHandler := connect.NewClientStreamHandler(
+		TransfersUploadCheckpointProcedure,
+		svc.UploadCheckpoint,
+		connect.WithSchema(transfersMethods.ByName("UploadCheckpoint")),
+		connect.WithHandlerOptions(opts...),
+	)
+	transfersDownloadCheckpointHandler := connect.NewServerStreamHandler(
+		TransfersDownloadCheckpointProcedure,
+		svc.DownloadCheckpoint,
+		connect.WithSchema(transfersMethods.ByName("DownloadCheckpoint")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.Transfers/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case TransfersUploadCheckpointProcedure:
+			transfersUploadCheckpointHandler.ServeHTTP(w, r)
+		case TransfersDownloadCheckpointProcedure:
+			transfersDownloadCheckpointHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedTransfersHandler returns CodeUnimplemented from all methods.
+type UnimplementedTransfersHandler struct{}
+
+func (UnimplementedTransfersHandler) UploadCheckpoint(context.Context, *connect.ClientStream[runtimev2.CheckpointUpload]) (*connect.Response[runtimev2.CheckpointReference], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.UploadCheckpoint is not implemented"))
+}
+
+func (UnimplementedTransfersHandler) DownloadCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest], *connect.ServerStream[runtimev2.CheckpointDownload]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Transfers.DownloadCheckpoint is not implemented"))
+}
+
+// CheckpointDirectoryClient is a client for the supertag.runtime.v2.CheckpointDirectory service.
+type CheckpointDirectoryClient interface {
+	GetCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetCheckpointResponse], error)
+	ReserveCheckpoint(context.Context, *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error)
+	CommitCheckpoint(context.Context, *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error)
+}
+
+// NewCheckpointDirectoryClient constructs a client for the supertag.runtime.v2.CheckpointDirectory
+// service. By default, it uses the Connect protocol with the binary Protobuf Codec, asks for
+// gzipped responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply
+// the connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewCheckpointDirectoryClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) CheckpointDirectoryClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	checkpointDirectoryMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("CheckpointDirectory").Methods()
+	return &checkpointDirectoryClient{
+		getCheckpoint: connect.NewClient[runtimev2.InspectAttemptRequest, runtimev2.GetCheckpointResponse](
+			httpClient,
+			baseURL+CheckpointDirectoryGetCheckpointProcedure,
+			connect.WithSchema(checkpointDirectoryMethods.ByName("GetCheckpoint")),
+			connect.WithClientOptions(opts...),
+		),
+		reserveCheckpoint: connect.NewClient[runtimev2.CommitCheckpointRequest, runtimev2.CheckpointReference](
+			httpClient,
+			baseURL+CheckpointDirectoryReserveCheckpointProcedure,
+			connect.WithSchema(checkpointDirectoryMethods.ByName("ReserveCheckpoint")),
+			connect.WithClientOptions(opts...),
+		),
+		commitCheckpoint: connect.NewClient[runtimev2.CommitCheckpointRequest, runtimev2.CheckpointReference](
+			httpClient,
+			baseURL+CheckpointDirectoryCommitCheckpointProcedure,
+			connect.WithSchema(checkpointDirectoryMethods.ByName("CommitCheckpoint")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// checkpointDirectoryClient implements CheckpointDirectoryClient.
+type checkpointDirectoryClient struct {
+	getCheckpoint     *connect.Client[runtimev2.InspectAttemptRequest, runtimev2.GetCheckpointResponse]
+	reserveCheckpoint *connect.Client[runtimev2.CommitCheckpointRequest, runtimev2.CheckpointReference]
+	commitCheckpoint  *connect.Client[runtimev2.CommitCheckpointRequest, runtimev2.CheckpointReference]
+}
+
+// GetCheckpoint calls supertag.runtime.v2.CheckpointDirectory.GetCheckpoint.
+func (c *checkpointDirectoryClient) GetCheckpoint(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetCheckpointResponse], error) {
+	return c.getCheckpoint.CallUnary(ctx, req)
+}
+
+// ReserveCheckpoint calls supertag.runtime.v2.CheckpointDirectory.ReserveCheckpoint.
+func (c *checkpointDirectoryClient) ReserveCheckpoint(ctx context.Context, req *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error) {
+	return c.reserveCheckpoint.CallUnary(ctx, req)
+}
+
+// CommitCheckpoint calls supertag.runtime.v2.CheckpointDirectory.CommitCheckpoint.
+func (c *checkpointDirectoryClient) CommitCheckpoint(ctx context.Context, req *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error) {
+	return c.commitCheckpoint.CallUnary(ctx, req)
+}
+
+// CheckpointDirectoryHandler is an implementation of the supertag.runtime.v2.CheckpointDirectory
+// service.
+type CheckpointDirectoryHandler interface {
+	GetCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetCheckpointResponse], error)
+	ReserveCheckpoint(context.Context, *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error)
+	CommitCheckpoint(context.Context, *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error)
+}
+
+// NewCheckpointDirectoryHandler builds an HTTP handler from the service implementation. It returns
+// the path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewCheckpointDirectoryHandler(svc CheckpointDirectoryHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	checkpointDirectoryMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("CheckpointDirectory").Methods()
+	checkpointDirectoryGetCheckpointHandler := connect.NewUnaryHandler(
+		CheckpointDirectoryGetCheckpointProcedure,
+		svc.GetCheckpoint,
+		connect.WithSchema(checkpointDirectoryMethods.ByName("GetCheckpoint")),
+		connect.WithHandlerOptions(opts...),
+	)
+	checkpointDirectoryReserveCheckpointHandler := connect.NewUnaryHandler(
+		CheckpointDirectoryReserveCheckpointProcedure,
+		svc.ReserveCheckpoint,
+		connect.WithSchema(checkpointDirectoryMethods.ByName("ReserveCheckpoint")),
+		connect.WithHandlerOptions(opts...),
+	)
+	checkpointDirectoryCommitCheckpointHandler := connect.NewUnaryHandler(
+		CheckpointDirectoryCommitCheckpointProcedure,
+		svc.CommitCheckpoint,
+		connect.WithSchema(checkpointDirectoryMethods.ByName("CommitCheckpoint")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.CheckpointDirectory/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case CheckpointDirectoryGetCheckpointProcedure:
+			checkpointDirectoryGetCheckpointHandler.ServeHTTP(w, r)
+		case CheckpointDirectoryReserveCheckpointProcedure:
+			checkpointDirectoryReserveCheckpointHandler.ServeHTTP(w, r)
+		case CheckpointDirectoryCommitCheckpointProcedure:
+			checkpointDirectoryCommitCheckpointHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedCheckpointDirectoryHandler returns CodeUnimplemented from all methods.
+type UnimplementedCheckpointDirectoryHandler struct{}
+
+func (UnimplementedCheckpointDirectoryHandler) GetCheckpoint(context.Context, *connect.Request[runtimev2.InspectAttemptRequest]) (*connect.Response[runtimev2.GetCheckpointResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.CheckpointDirectory.GetCheckpoint is not implemented"))
+}
+
+func (UnimplementedCheckpointDirectoryHandler) ReserveCheckpoint(context.Context, *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.CheckpointDirectory.ReserveCheckpoint is not implemented"))
+}
+
+func (UnimplementedCheckpointDirectoryHandler) CommitCheckpoint(context.Context, *connect.Request[runtimev2.CommitCheckpointRequest]) (*connect.Response[runtimev2.CheckpointReference], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.CheckpointDirectory.CommitCheckpoint is not implemented"))
+}
+
 // HarnessClient is a client for the supertag.runtime.v2.Harness service.
 type HarnessClient interface {
 	Attach(context.Context, *connect.Request[runtimev2.HarnessAttachRequest]) (*connect.Response[runtimev2.HarnessRun], error)
 	Publish(context.Context, *connect.Request[runtimev2.HarnessPublishRequest]) (*connect.Response[runtimev2.TaskEvent], error)
+	ReportUsage(context.Context, *connect.Request[runtimev2.HarnessUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error)
 	Complete(context.Context, *connect.Request[runtimev2.HarnessCompleteRequest]) (*connect.Response[runtimev2.HarnessCompleteResponse], error)
 }
 
@@ -964,6 +1496,12 @@ func NewHarnessClient(httpClient connect.HTTPClient, baseURL string, opts ...con
 			connect.WithSchema(harnessMethods.ByName("Publish")),
 			connect.WithClientOptions(opts...),
 		),
+		reportUsage: connect.NewClient[runtimev2.HarnessUsageRequest, runtimev2.ReportAttemptUsageResponse](
+			httpClient,
+			baseURL+HarnessReportUsageProcedure,
+			connect.WithSchema(harnessMethods.ByName("ReportUsage")),
+			connect.WithClientOptions(opts...),
+		),
 		complete: connect.NewClient[runtimev2.HarnessCompleteRequest, runtimev2.HarnessCompleteResponse](
 			httpClient,
 			baseURL+HarnessCompleteProcedure,
@@ -975,9 +1513,10 @@ func NewHarnessClient(httpClient connect.HTTPClient, baseURL string, opts ...con
 
 // harnessClient implements HarnessClient.
 type harnessClient struct {
-	attach   *connect.Client[runtimev2.HarnessAttachRequest, runtimev2.HarnessRun]
-	publish  *connect.Client[runtimev2.HarnessPublishRequest, runtimev2.TaskEvent]
-	complete *connect.Client[runtimev2.HarnessCompleteRequest, runtimev2.HarnessCompleteResponse]
+	attach      *connect.Client[runtimev2.HarnessAttachRequest, runtimev2.HarnessRun]
+	publish     *connect.Client[runtimev2.HarnessPublishRequest, runtimev2.TaskEvent]
+	reportUsage *connect.Client[runtimev2.HarnessUsageRequest, runtimev2.ReportAttemptUsageResponse]
+	complete    *connect.Client[runtimev2.HarnessCompleteRequest, runtimev2.HarnessCompleteResponse]
 }
 
 // Attach calls supertag.runtime.v2.Harness.Attach.
@@ -990,6 +1529,11 @@ func (c *harnessClient) Publish(ctx context.Context, req *connect.Request[runtim
 	return c.publish.CallUnary(ctx, req)
 }
 
+// ReportUsage calls supertag.runtime.v2.Harness.ReportUsage.
+func (c *harnessClient) ReportUsage(ctx context.Context, req *connect.Request[runtimev2.HarnessUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error) {
+	return c.reportUsage.CallUnary(ctx, req)
+}
+
 // Complete calls supertag.runtime.v2.Harness.Complete.
 func (c *harnessClient) Complete(ctx context.Context, req *connect.Request[runtimev2.HarnessCompleteRequest]) (*connect.Response[runtimev2.HarnessCompleteResponse], error) {
 	return c.complete.CallUnary(ctx, req)
@@ -999,6 +1543,7 @@ func (c *harnessClient) Complete(ctx context.Context, req *connect.Request[runti
 type HarnessHandler interface {
 	Attach(context.Context, *connect.Request[runtimev2.HarnessAttachRequest]) (*connect.Response[runtimev2.HarnessRun], error)
 	Publish(context.Context, *connect.Request[runtimev2.HarnessPublishRequest]) (*connect.Response[runtimev2.TaskEvent], error)
+	ReportUsage(context.Context, *connect.Request[runtimev2.HarnessUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error)
 	Complete(context.Context, *connect.Request[runtimev2.HarnessCompleteRequest]) (*connect.Response[runtimev2.HarnessCompleteResponse], error)
 }
 
@@ -1021,6 +1566,12 @@ func NewHarnessHandler(svc HarnessHandler, opts ...connect.HandlerOption) (strin
 		connect.WithSchema(harnessMethods.ByName("Publish")),
 		connect.WithHandlerOptions(opts...),
 	)
+	harnessReportUsageHandler := connect.NewUnaryHandler(
+		HarnessReportUsageProcedure,
+		svc.ReportUsage,
+		connect.WithSchema(harnessMethods.ByName("ReportUsage")),
+		connect.WithHandlerOptions(opts...),
+	)
 	harnessCompleteHandler := connect.NewUnaryHandler(
 		HarnessCompleteProcedure,
 		svc.Complete,
@@ -1033,6 +1584,8 @@ func NewHarnessHandler(svc HarnessHandler, opts ...connect.HandlerOption) (strin
 			harnessAttachHandler.ServeHTTP(w, r)
 		case HarnessPublishProcedure:
 			harnessPublishHandler.ServeHTTP(w, r)
+		case HarnessReportUsageProcedure:
+			harnessReportUsageHandler.ServeHTTP(w, r)
 		case HarnessCompleteProcedure:
 			harnessCompleteHandler.ServeHTTP(w, r)
 		default:
@@ -1050,6 +1603,10 @@ func (UnimplementedHarnessHandler) Attach(context.Context, *connect.Request[runt
 
 func (UnimplementedHarnessHandler) Publish(context.Context, *connect.Request[runtimev2.HarnessPublishRequest]) (*connect.Response[runtimev2.TaskEvent], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Harness.Publish is not implemented"))
+}
+
+func (UnimplementedHarnessHandler) ReportUsage(context.Context, *connect.Request[runtimev2.HarnessUsageRequest]) (*connect.Response[runtimev2.ReportAttemptUsageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Harness.ReportUsage is not implemented"))
 }
 
 func (UnimplementedHarnessHandler) Complete(context.Context, *connect.Request[runtimev2.HarnessCompleteRequest]) (*connect.Response[runtimev2.HarnessCompleteResponse], error) {

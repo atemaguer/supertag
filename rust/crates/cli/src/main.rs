@@ -9,18 +9,24 @@ use anyhow::{Context, Result, ensure};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use harness::{AdapterOptions, CodexAdapterArgs};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use supertag_control_plane::ControlPlane;
 use supertag_gateway::{
     Gateway,
     slack::{Slack, SlackConfig},
+    transfers::CheckpointTransfers,
 };
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
-        AttemptDecision, CancelTaskRequest, GetTaskRequest, ListEventsRequest, PutTagRequest,
-        ResolveAttemptRequest, SubmitTaskRequest, Task, connector_server::ConnectorServer,
+        AttemptDecision, CancelTaskRequest, CreateAuthKeyRequest, GetTaskRequest,
+        ListEventsRequest, ListNativeUsageRequest, PutTagRequest, ResolveAttemptRequest,
+        RevokeHostRequest, SubmitTaskRequest, Task,
+        checkpoint_directory_server::CheckpointDirectoryServer, connector_server::ConnectorServer,
+        host_directory_server::HostDirectoryServer, host_enrollment_server::HostEnrollmentServer,
         objectives_server::ObjectivesServer, operator_client::OperatorClient,
-        operator_server::OperatorServer, worker_host_server::WorkerHostServer,
+        operator_server::OperatorServer, transfers_server::TransfersServer,
+        worker_host_server::WorkerHostServer,
     },
 };
 use supertag_worker_host::HostOptions;
@@ -77,6 +83,8 @@ enum Command {
         listen: SocketAddr,
         #[arg(long)]
         control_plane: String,
+        #[arg(long)]
+        checkpoint_directory: Option<PathBuf>,
         #[arg(long, requires = "slack_state_directory")]
         slack_listen: Option<SocketAddr>,
         #[arg(long, requires = "slack_listen")]
@@ -96,6 +104,39 @@ enum Command {
         once: bool,
         #[arg(long)]
         wait_for_recovery: bool,
+    },
+    /// Create a one-time, scoped Auth Key for a Worker Host.
+    CreateAuthKey {
+        #[command(flatten)]
+        connection: Connection,
+        host_id: String,
+        #[arg(long, default_value_t = 600)]
+        expires_in_seconds: u64,
+        #[arg(
+            long,
+            conflicts_with = "all_tags",
+            required_unless_present = "all_tags"
+        )]
+        tag: Vec<String>,
+        #[arg(long)]
+        all_tags: bool,
+    },
+    /// Enroll this installation with a one-time Auth Key.
+    EnrollHost {
+        #[arg(long)]
+        gateway: String,
+        #[arg(long)]
+        state_directory: PathBuf,
+        host_id: String,
+        /// Auth Key or file:PATH. Also reads SUPERTAG_AUTH_KEY.
+        #[arg(long)]
+        auth_key: Option<String>,
+    },
+    /// Revoke a Worker Host and its execution authority.
+    RevokeHost {
+        #[command(flatten)]
+        connection: Connection,
+        host_id: String,
     },
     #[command(name = "__codex-adapter", hide = true)]
     CodexAdapter(CodexAdapterArgs),
@@ -139,6 +180,15 @@ enum Command {
         #[command(flatten)]
         connection: Connection,
         task_id: String,
+        #[arg(long, default_value_t = 0)]
+        after: u64,
+    },
+    /// Read native token usage recorded for a Task Attempt.
+    TaskUsage {
+        #[command(flatten)]
+        connection: Connection,
+        task_id: String,
+        attempt_id: String,
         #[arg(long, default_value_t = 0)]
         after: u64,
     },
@@ -210,12 +260,14 @@ async fn run(command: Command) -> Result<()> {
         Command::Gateway {
             listen,
             control_plane,
+            checkpoint_directory,
             slack_listen,
             slack_state_directory,
         } => {
             gateway(
                 listen,
                 control_plane,
+                checkpoint_directory,
                 slack_listen.zip(slack_state_directory),
             )
             .await?
@@ -232,7 +284,7 @@ async fn run(command: Command) -> Result<()> {
             let (adapter, adapter_args) = adapter.launch(attempt_timeout_seconds)?;
             let options = HostOptions {
                 gateway: network::endpoint(gateway, false).await?,
-                token: required_env("SUPERTAG_HOST_TOKEN")?,
+                token: std::env::var("SUPERTAG_HOST_TOKEN").ok(),
                 state_directory,
                 adapter_guardian: std::env::current_exe()?,
                 adapter,
@@ -251,6 +303,86 @@ async fn run(command: Command) -> Result<()> {
             let result = supertag_worker_host::run(options, token, || println!("ready")).await;
             signal.abort();
             result?;
+        }
+        Command::CreateAuthKey {
+            connection,
+            host_id,
+            expires_in_seconds,
+            tag,
+            all_tags,
+        } => {
+            let (mut operator, token) = operator(connection).await?;
+            let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+            let key = operator
+                .create_auth_key(request(
+                    CreateAuthKeyRequest {
+                        host_id,
+                        operation_id: Uuid::new_v4().to_string(),
+                        key_digest: Sha256::digest(secret.as_bytes()).to_vec(),
+                        expires_in_ms: expires_in_seconds
+                            .checked_mul(1000)
+                            .context("invalid Auth Key lifetime")?,
+                        allowed_tag_ids: tag,
+                        all_tags,
+                    },
+                    &token,
+                )?)
+                .await?
+                .into_inner();
+            println!(
+                "{}",
+                json!({
+                    "auth_key": secret,
+                    "host_id": key.host_id,
+                    "expires_at_ms": key.expires_at_ms,
+                    "allowed_tag_ids": key.allowed_tag_ids,
+                    "all_tags": key.all_tags,
+                })
+            );
+        }
+        Command::EnrollHost {
+            gateway,
+            state_directory,
+            host_id,
+            auth_key,
+        } => {
+            let gateway = network::endpoint(gateway, false).await?;
+            let auth_key = auth_key.or_else(|| std::env::var("SUPERTAG_AUTH_KEY").ok());
+            let auth_key = match auth_key {
+                Some(key) if key.starts_with("file:") => {
+                    let path = key.strip_prefix("file:").expect("checked prefix");
+                    let contents = tokio::fs::read_to_string(path)
+                        .await
+                        .context("read Auth Key file")?;
+                    Some(contents.trim().to_owned())
+                }
+                other => other,
+            };
+            let record = supertag_worker_host::enroll(
+                gateway,
+                &state_directory,
+                host_id,
+                auth_key.as_deref(),
+            )
+            .await?;
+            println!(
+                "{}",
+                json!({ "host_id": record.host_id, "generation": record.generation })
+            );
+        }
+        Command::RevokeHost {
+            connection,
+            host_id,
+        } => {
+            let (mut operator, token) = operator(connection).await?;
+            let record = operator
+                .revoke_host(request(RevokeHostRequest { host_id }, &token)?)
+                .await?
+                .into_inner();
+            println!(
+                "{}",
+                json!({ "host_id": record.host_id, "revoked": record.revoked })
+            );
         }
         Command::AdapterGuardian { .. } => unreachable!("guardian runs outside Tokio"),
         Command::CodexAdapter(_) => unreachable!("Codex adapter uses a dedicated runtime"),
@@ -334,6 +466,40 @@ async fn run(command: Command) -> Result<()> {
                 );
             }
         }
+        Command::TaskUsage {
+            connection,
+            task_id,
+            attempt_id,
+            after,
+        } => {
+            let (mut operator, token) = operator(connection).await?;
+            let response = operator
+                .list_native_usage(request(
+                    ListNativeUsageRequest {
+                        task_id,
+                        attempt_id,
+                        after_sequence: after,
+                        limit: 100,
+                    },
+                    &token,
+                )?)
+                .await?
+                .into_inner();
+            for report in response.reports {
+                if let Some(usage) = report.native_usage {
+                    println!(
+                        "{}",
+                        json!({
+                            "sequence": report.sequence,
+                            "input_tokens": usage.input_tokens,
+                            "cached_input_tokens": usage.cached_input_tokens,
+                            "output_tokens": usage.output_tokens,
+                            "observed_model": usage.observed_model,
+                        })
+                    );
+                }
+            }
+        }
         Command::Cancel {
             connection,
             task_id,
@@ -397,9 +563,24 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         required_env("SUPERTAG_GATEWAY_TOKEN")?,
     )
     .await?;
+    if let Ok(token) = std::env::var("SUPERTAG_BOOTSTRAP_HOST_TOKEN") {
+        ensure!(
+            token.len() >= 32,
+            "invalid bootstrap Worker Host credential"
+        );
+        plane
+            .seed_host("local", &Sha256::digest(token.as_bytes()))
+            .await?;
+    }
     let (health, health_service) = tonic_health::server::health_reporter();
     health.set_serving::<OperatorServer<ControlPlane>>().await;
     health.set_serving::<WorkerHostServer<ControlPlane>>().await;
+    health
+        .set_serving::<HostDirectoryServer<ControlPlane>>()
+        .await;
+    health
+        .set_serving::<CheckpointDirectoryServer<ControlPlane>>()
+        .await;
     health.set_serving::<ConnectorServer<ControlPlane>>().await;
     health.set_serving::<ObjectivesServer<ControlPlane>>().await;
     let listener = TcpListener::bind(listen).await?;
@@ -428,6 +609,16 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         )
         .add_service(
+            HostDirectoryServer::new(plane.clone())
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        )
+        .add_service(
+            CheckpointDirectoryServer::new(plane.clone())
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        )
+        .add_service(
             ConnectorServer::new(plane.clone())
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
@@ -448,6 +639,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
 async fn gateway(
     listen: SocketAddr,
     control_plane: String,
+    checkpoint_directory: Option<PathBuf>,
     slack_options: Option<(SocketAddr, PathBuf)>,
 ) -> Result<()> {
     let mut builder = network::server(listen, false).await?;
@@ -473,12 +665,15 @@ async fn gateway(
         gateway_token,
         required_env("SUPERTAG_OPERATOR_TOKEN")?,
         std::env::var("SUPERTAG_OPERATOR_PRINCIPAL").unwrap_or_else(|_| "operator:local".into()),
-        required_env("SUPERTAG_HOST_TOKEN")?,
-        std::env::var("SUPERTAG_HOST_PRINCIPAL").unwrap_or_else(|_| "host:local".into()),
     )?;
     let (health, health_service) = tonic_health::server::health_reporter();
     health.set_serving::<OperatorServer<Gateway>>().await;
     health.set_serving::<WorkerHostServer<Gateway>>().await;
+    health.set_serving::<HostEnrollmentServer<Gateway>>().await;
+    health
+        .set_serving::<TransfersServer<CheckpointTransfers>>()
+        .await;
+    let transfers = CheckpointTransfers::new(gateway.clone(), checkpoint_directory)?;
     health.set_serving::<ObjectivesServer<Gateway>>().await;
     let listener = TcpListener::bind(listen).await?;
     println!("{}", listener.local_addr()?);
@@ -490,6 +685,8 @@ async fn gateway(
         .add_service(health_service)
         .add_service(gateway.operator_service())
         .add_service(gateway.worker_host_service())
+        .add_service(gateway.host_enrollment_service())
+        .add_service(transfers.service())
         .add_service(gateway.objectives_service());
     let grpc = async {
         let result = router

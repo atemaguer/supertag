@@ -59,7 +59,6 @@ pub(crate) fn arguments(
         "--skip-git-repo-check".into(),
         "--color".into(),
         "never".into(),
-        "--ephemeral".into(),
     ];
     if let Some(model) = model {
         ensure!(

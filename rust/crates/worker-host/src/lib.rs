@@ -1,7 +1,10 @@
 mod adapter;
+mod checkpoints;
+mod enrollment;
 mod guardian;
 mod journal;
 
+pub use enrollment::enroll;
 pub use guardian::{CODEX_ATTEMPT_DIRECTORY, guard_adapter};
 
 use std::{ffi::OsString, path::PathBuf, time::Duration};
@@ -9,10 +12,10 @@ use std::{ffi::OsString, path::PathBuf, time::Duration};
 use anyhow::{Context, Result, bail, ensure};
 use journal::{Attempt, Entry, Journal};
 use supertag_protocol::{
-    MAX_MESSAGE_BYTES, authenticated_request,
+    HOST_GENERATION_HEADER, MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
         Assignment, ClaimTaskRequest, FinishTaskRequest, HarnessCompleteRequest,
-        InspectAttemptRequest, StartTaskRequest, Task, TaskState,
+        InspectAttemptRequest, RegisterHostRequest, StartTaskRequest, Task, TaskState,
         worker_host_client::WorkerHostClient,
     },
 };
@@ -20,6 +23,8 @@ use tokio::time::{self, Instant};
 use tokio_util::sync::CancellationToken;
 use tonic::{
     Code, Request, Status,
+    metadata::{Ascii, MetadataValue},
+    service::{Interceptor, interceptor::InterceptedService},
     transport::{Channel, Endpoint},
 };
 use uuid::Uuid;
@@ -29,7 +34,7 @@ pub const CODEX_ENVIRONMENT: &[&str] = &["HOME", "CODEX_HOME", "CODEX_API_KEY", 
 
 pub struct HostOptions {
     pub gateway: Endpoint,
-    pub token: String,
+    pub token: Option<String>,
     pub state_directory: PathBuf,
     pub adapter_guardian: PathBuf,
     pub adapter: PathBuf,
@@ -39,6 +44,20 @@ pub struct HostOptions {
     pub wait_for_recovery: bool,
     pub once: bool,
 }
+
+#[derive(Clone)]
+pub(crate) struct HostHeaders(MetadataValue<Ascii>);
+
+impl Interceptor for HostHeaders {
+    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
+        request
+            .metadata_mut()
+            .insert(HOST_GENERATION_HEADER, self.0.clone());
+        Ok(request)
+    }
+}
+
+pub(crate) type RegisteredHost = WorkerHostClient<InterceptedService<Channel, HostHeaders>>;
 
 impl Attempt {
     fn from_assignment(assignment: Assignment) -> Result<Self> {
@@ -68,13 +87,49 @@ pub async fn run(
     shutdown: CancellationToken,
     ready: impl FnOnce(),
 ) -> Result<()> {
-    ensure!(!options.token.is_empty(), "Worker Host credential required");
     ensure!(
         !options.attempt_timeout.is_zero(),
         "attempt timeout must be positive"
     );
     let journal = Journal::open(&options.state_directory)?;
-    let mut host = WorkerHostClient::new(options.gateway.clone().connect_lazy())
+    let token = match &options.token {
+        Some(token) if !token.is_empty() => token.clone(),
+        Some(_) => bail!("Worker Host credential is empty"),
+        None => enrollment::host_token(&journal, &options.gateway)?,
+    };
+    let incarnation_id = journal.incarnation()?;
+    let channel = options.gateway.clone().connect_lazy();
+    let mut registration = WorkerHostClient::new(channel.clone())
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let generation = loop {
+        if shutdown.is_cancelled() {
+            return Ok(());
+        }
+        let response = registration
+            .register_host(request(
+                RegisterHostRequest {
+                    incarnation_id: incarnation_id.clone(),
+                },
+                &token,
+            )?)
+            .await;
+        match response {
+            Ok(response) => {
+                let host = response.into_inner();
+                ensure!(
+                    !host.revoked && host.generation > 0,
+                    "Worker Host registration is inactive"
+                );
+                break host.generation;
+            }
+            Err(error) if retryable(&error) => wait_for_work(&shutdown).await,
+            Err(error) => return Err(error.into()),
+        }
+    };
+    let headers = HostHeaders(generation.to_string().parse()?);
+    let transfers = checkpoints::Transfers::new(channel.clone(), headers.clone());
+    let mut host = WorkerHostClient::with_interceptor(channel, headers)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
     let mut ready = Some(ready);
@@ -92,7 +147,7 @@ pub async fn run(
         match entry {
             Entry::Claim { operation_id } => {
                 let response = host
-                    .claim_task(request(ClaimTaskRequest { operation_id }, &options.token)?)
+                    .claim_task(request(ClaimTaskRequest { operation_id }, &token)?)
                     .await;
                 let assignment = match response {
                     Ok(response) => response.into_inner().assignment,
@@ -118,41 +173,97 @@ pub async fn run(
                 }
             }
             Entry::Starting { attempt } => {
-                run_assignment(&options, &journal, &mut host, attempt, &shutdown, || {
-                    if let Some(ready) = ready.take() {
-                        ready();
-                    }
-                })
-                .await?;
-            }
-            Entry::Executing { attempt } => {
-                match resolved(&mut host, &attempt, &options.token).await {
-                    Ok(true) => journal.clear()?,
-                    Ok(false) if options.wait_for_recovery => {
+                run_assignment(
+                    &options,
+                    &journal,
+                    (&mut host, &transfers, &token),
+                    attempt,
+                    &shutdown,
+                    || {
                         if let Some(ready) = ready.take() {
                             ready();
-                            eprintln!(
-                                "Task {} Attempt {} needs recovery before this host can claim work",
-                                attempt.task_id, attempt.attempt_id
-                            );
                         }
-                        wait_for_work(&shutdown).await;
-                    }
-                    Ok(false) => bail!(
-                        "Task {} Attempt {} needs recovery before this host can claim work",
-                        attempt.task_id,
-                        attempt.attempt_id
-                    ),
-                    Err(error) if retryable(&error) => wait_for_work(&shutdown).await,
-                    Err(error) => return Err(error.into()),
-                }
+                    },
+                )
+                .await?;
             }
+            Entry::Executing { attempt } => match resolved(&mut host, &attempt, &token).await {
+                Ok(true) => journal.clear()?,
+                Ok(false) if options.wait_for_recovery => {
+                    if let Some(ready) = ready.take() {
+                        ready();
+                        eprintln!(
+                            "Task {} Attempt {} needs recovery before this host can claim work",
+                            attempt.task_id, attempt.attempt_id
+                        );
+                    }
+                    wait_for_work(&shutdown).await;
+                }
+                Ok(false) => bail!(
+                    "Task {} Attempt {} needs recovery before this host can claim work",
+                    attempt.task_id,
+                    attempt.attempt_id
+                ),
+                Err(error) if retryable(&error) => wait_for_work(&shutdown).await,
+                Err(error) => return Err(error.into()),
+            },
             Entry::Finish {
                 attempt,
                 result,
                 succeeded,
                 objective_signal,
+                checkpoint,
             } => {
+                if let Some(mut pending) = checkpoint
+                    .as_ref()
+                    .filter(|pending| !pending.uploaded)
+                    .cloned()
+                {
+                    let upload =
+                        async {
+                            // Obtain a fresh budget after the adapter and its descendants stop.
+                            host.renew_attempt(request(attempt.inspect(), &token).map_err(
+                                |_| Status::internal("invalid upload authority request"),
+                            )?)
+                            .await?;
+                            let payload = journal.read_checkpoint(&pending).map_err(|_| {
+                                Status::data_loss("staged checkpoint could not be read")
+                            })?;
+                            transfers.upload(&attempt, &token, payload).await
+                        }
+                        .await;
+                    match upload {
+                        Ok(_) => {
+                            pending.uploaded = true;
+                            journal.save(&Entry::Finish {
+                                attempt,
+                                result,
+                                succeeded,
+                                objective_signal,
+                                checkpoint: Some(pending),
+                            })?;
+                        }
+                        Err(error)
+                            if retryable(&error) || error.code() == Code::ResourceExhausted =>
+                        {
+                            wait_for_work(&shutdown).await;
+                        }
+                        Err(error)
+                            if lost_ownership(&error)
+                                || error.code() == Code::Unauthenticated
+                                || error.code() == Code::InvalidArgument
+                                || error.code() == Code::DataLoss =>
+                        {
+                            save_finish(
+                                &journal,
+                                attempt,
+                                adapter::failed("Session checkpoint could not be committed"),
+                            )?;
+                        }
+                        Err(error) => return Err(error.into()),
+                    }
+                    continue;
+                }
                 let outcome = host
                     .finish_task(request(
                         FinishTaskRequest {
@@ -162,8 +273,9 @@ pub async fn run(
                             result,
                             succeeded,
                             objective_signal,
+                            checkpoint_sha256: checkpoint.map(|pending| pending.sha256),
                         },
-                        &options.token,
+                        &token,
                     )?)
                     .await;
                 match outcome {
@@ -185,7 +297,7 @@ pub async fn run(
                         continue;
                     }
                     Err(error) if lost_ownership(&error) || error.code() == Code::AlreadyExists => {
-                        match resolved(&mut host, &attempt, &options.token).await {
+                        match resolved(&mut host, &attempt, &token).await {
                             Ok(true) => {}
                             Ok(false) => return Err(error.into()),
                             Err(error) if retryable(&error) => {
@@ -211,7 +323,7 @@ pub async fn run(
 }
 
 async fn resolved(
-    host: &mut WorkerHostClient<Channel>,
+    host: &mut RegisteredHost,
     attempt: &Attempt,
     token: &str,
 ) -> Result<bool, Status> {
@@ -238,11 +350,12 @@ async fn resolved(
 async fn run_assignment(
     options: &HostOptions,
     journal: &Journal,
-    host: &mut WorkerHostClient<Channel>,
+    connection: (&mut RegisteredHost, &checkpoints::Transfers, &str),
     attempt: Attempt,
     shutdown: &CancellationToken,
     ready: impl FnOnce(),
 ) -> Result<()> {
+    let (host, transfers, token) = connection;
     // Starting is durable before requesting authority and never records a launch.
     // A lost start response can therefore be retried using this exact Attempt.
     let start = host
@@ -252,7 +365,7 @@ async fn run_assignment(
                 attempt_id: attempt.attempt_id.clone(),
                 lease_token: attempt.lease_token.clone(),
             },
-            &options.token,
+            token,
         )?)
         .await;
     let task = match start {
@@ -263,7 +376,7 @@ async fn run_assignment(
         }
         Err(error) if lost_ownership(&error) => {
             match host
-                .inspect_attempt(request(attempt.inspect(), &options.token)?)
+                .inspect_attempt(request(attempt.inspect(), token)?)
                 .await
             {
                 Ok(response) => response.into_inner(),
@@ -301,9 +414,7 @@ async fn run_assignment(
     );
 
     let sent = Instant::now();
-    let renewed = host
-        .renew_attempt(request(attempt.inspect(), &options.token)?)
-        .await;
+    let renewed = host.renew_attempt(request(attempt.inspect(), token)?).await;
     let authority = match renewed {
         Ok(response) => response.into_inner(),
         Err(error) if retryable(&error) => {
@@ -326,6 +437,29 @@ async fn run_assignment(
             adapter::failed("Execution authority expired before launch"),
         );
     }
+    let checkpoint = match time::timeout_at(valid_until, transfers.download(&attempt, token)).await
+    {
+        Ok(Ok(checkpoint)) => checkpoint,
+        Ok(Err(error)) if retryable(&error) || error.code() == Code::ResourceExhausted => {
+            wait_for_work(shutdown).await;
+            return Ok(());
+        }
+        Ok(Err(error)) if lost_ownership(&error) || error.code() == Code::DataLoss => {
+            return save_finish(
+                journal,
+                attempt,
+                adapter::failed("Session checkpoint could not be restored"),
+            );
+        }
+        Ok(Err(error)) => return Err(error.into()),
+        Err(_) => {
+            return save_finish(
+                journal,
+                attempt,
+                adapter::failed("Execution authority expired during checkpoint transfer"),
+            );
+        }
+    };
     let assignment = Assignment {
         task: Some(task),
         attempt_id: attempt.attempt_id.clone(),
@@ -334,14 +468,22 @@ async fn run_assignment(
     journal.save(&Entry::Executing {
         attempt: attempt.clone(),
     })?;
-    let outcome = adapter::execute(options, assignment, host.clone(), valid_until, shutdown)
-        .await
-        .with_context(|| {
-            format!(
-                "Task {} Attempt {} needs recovery",
-                attempt.task_id, attempt.attempt_id
-            )
-        })?;
+    let outcome = adapter::execute(
+        options,
+        assignment,
+        checkpoint,
+        host.clone(),
+        token,
+        valid_until,
+        shutdown,
+    )
+    .await
+    .with_context(|| {
+        format!(
+            "Task {} Attempt {} needs recovery",
+            attempt.task_id, attempt.attempt_id
+        )
+    })?;
     save_finish(journal, attempt, outcome)
 }
 
@@ -355,11 +497,16 @@ fn ensure_attempt(task: &Task, attempt: &Attempt) -> Result<()> {
 }
 
 fn save_finish(journal: &Journal, attempt: Attempt, outcome: HarnessCompleteRequest) -> Result<()> {
+    let checkpoint = outcome
+        .checkpoint
+        .map(|checkpoint| journal.stage_checkpoint(checkpoint))
+        .transpose()?;
     journal.save(&Entry::Finish {
         attempt,
         result: outcome.result,
         succeeded: outcome.succeeded,
         objective_signal: outcome.objective_signal,
+        checkpoint,
     })
 }
 

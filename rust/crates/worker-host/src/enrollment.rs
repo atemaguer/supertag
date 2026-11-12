@@ -1,0 +1,139 @@
+use std::{
+    fs::OpenOptions,
+    io::{ErrorKind, Read},
+    os::unix::fs::{MetadataExt, OpenOptionsExt},
+    path::Path,
+};
+
+use anyhow::{Context, Result, ensure};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use supertag_protocol::{
+    MAX_MESSAGE_BYTES,
+    v2::{EnrollHostRequest, HostRecord, host_enrollment_client::HostEnrollmentClient},
+};
+use tonic::transport::Endpoint;
+use uuid::Uuid;
+
+use crate::{journal::Journal, request};
+
+#[derive(Deserialize, Serialize)]
+struct Enrollment {
+    gateway: String,
+    host_id: String,
+    operation_id: String,
+    token: String,
+    receipt: Option<Receipt>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct Receipt {
+    generation: u64,
+}
+
+pub async fn enroll(
+    gateway: Endpoint,
+    directory: &Path,
+    host_id: String,
+    auth_key: Option<&str>,
+) -> Result<HostRecord> {
+    let journal = Journal::open(directory)?;
+    let mut state = match read(&journal)? {
+        Some(state) => state,
+        None => Enrollment {
+            gateway: gateway.uri().to_string(),
+            host_id: host_id.clone(),
+            operation_id: Uuid::new_v4().to_string(),
+            token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
+            receipt: None,
+        },
+    };
+    ensure!(
+        state.gateway == gateway.uri().to_string() && state.host_id == host_id,
+        "Worker Host state belongs to another enrollment"
+    );
+    if let Some(receipt) = &state.receipt {
+        return Ok(HostRecord {
+            host_id,
+            generation: receipt.generation,
+            revoked: false,
+        });
+    }
+    let auth_key = auth_key
+        .filter(|key| !key.is_empty())
+        .context("Auth Key required")?;
+
+    // Preserve the operation and candidate credential before contacting the Gateway,
+    // so that a consumed key can replay the enrollment after a lost response.
+    save(&journal, &state)?;
+    let mut enrollment = HostEnrollmentClient::new(gateway.connect_lazy())
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let record = enrollment
+        .enroll_host(request(
+            EnrollHostRequest {
+                host_id: state.host_id.clone(),
+                operation_id: state.operation_id.clone(),
+                token_digest: Sha256::digest(state.token.as_bytes()).to_vec(),
+            },
+            auth_key,
+        )?)
+        .await?
+        .into_inner();
+    ensure!(
+        record.host_id == state.host_id && !record.revoked,
+        "invalid Worker Host enrollment receipt"
+    );
+    state.receipt = Some(Receipt {
+        generation: record.generation,
+    });
+    save(&journal, &state)?;
+    Ok(record)
+}
+
+pub(crate) fn host_token(journal: &Journal, gateway: &Endpoint) -> Result<String> {
+    let state = read(journal)?.context("enroll this Worker Host first")?;
+    ensure!(
+        state.gateway == gateway.uri().to_string(),
+        "Worker Host state belongs to another Gateway endpoint"
+    );
+    ensure!(
+        state.receipt.is_some(),
+        "complete the pending Worker Host enrollment"
+    );
+    Ok(state.token)
+}
+
+fn read(journal: &Journal) -> Result<Option<Enrollment>> {
+    let file = match OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(journal.directory().join("enrollment.json"))
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let metadata = file.metadata()?;
+    ensure!(
+        metadata.is_file()
+            && metadata.mode() & 0o077 == 0
+            && metadata.uid() == unsafe { libc::geteuid() },
+        "Worker Host credential file must be private"
+    );
+    let mut bytes = Vec::new();
+    file.take(8193).read_to_end(&mut bytes)?;
+    ensure!(
+        bytes.len() <= 8192,
+        "Worker Host credential file is oversized"
+    );
+    Ok(Some(
+        serde_json::from_slice(&bytes).context("read Worker Host enrollment")?,
+    ))
+}
+
+fn save(journal: &Journal, enrollment: &Enrollment) -> Result<()> {
+    journal.write(&journal.directory().join("enrollment.json"), |file| {
+        Ok(serde_json::to_writer(file, enrollment)?)
+    })
+}
