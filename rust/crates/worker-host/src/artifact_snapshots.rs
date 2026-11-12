@@ -32,6 +32,13 @@ pub(crate) enum Capture {
     Committed(CapturedArtifact),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SnapshotMode {
+    Explicit,
+    Managed,
+    ReplayManaged,
+}
+
 impl Snapshots {
     pub(crate) fn open(state: &Path, attempt_id: &str) -> Result<Self> {
         let root = state.join(SNAPSHOTS);
@@ -55,8 +62,36 @@ impl Snapshots {
         &self,
         checkout: &Path,
         attempt: InspectAttemptRequest,
-        mut request: HarnessCaptureArtifactRequest,
+        request: HarnessCaptureArtifactRequest,
     ) -> Result<Capture, Status> {
+        self.freeze_with_purpose(checkout, attempt, request, SnapshotMode::Explicit)
+    }
+
+    pub(crate) fn freeze_managed_outputs(
+        &self,
+        checkout: &Path,
+        attempt: InspectAttemptRequest,
+        request: HarnessCaptureArtifactRequest,
+    ) -> Result<Capture, Status> {
+        self.freeze_with_purpose(checkout, attempt, request, SnapshotMode::Managed)
+    }
+
+    pub(crate) fn replay_managed_outputs(
+        &self,
+        attempt: InspectAttemptRequest,
+        request: HarnessCaptureArtifactRequest,
+    ) -> Result<Capture, Status> {
+        self.freeze_with_purpose(Path::new(""), attempt, request, SnapshotMode::ReplayManaged)
+    }
+
+    fn freeze_with_purpose(
+        &self,
+        checkout: &Path,
+        attempt: InspectAttemptRequest,
+        mut request: HarnessCaptureArtifactRequest,
+        mode: SnapshotMode,
+    ) -> Result<Capture, Status> {
+        let managed_task_output = mode != SnapshotMode::Explicit;
         request.paths.sort_unstable();
         let receipt = self.path(&request.operation_id, "receipt");
         if let Some(mut file) = open_private(&receipt).map_err(journal_error)? {
@@ -90,7 +125,10 @@ impl Snapshots {
         if let Some(mut file) = open_private(&path).map_err(journal_error)? {
             let mut manifest: CommitArtifactCaptureRequest =
                 read_record(&mut file).map_err(journal_error)?;
-            if manifest.operation_id != request.operation_id || manifest.attempt.is_some() {
+            if manifest.operation_id != request.operation_id
+                || manifest.attempt.is_some()
+                || manifest.managed_task_output != managed_task_output
+            {
                 return Err(Status::data_loss(
                     "stored artifact request has invalid authority",
                 ));
@@ -122,12 +160,16 @@ impl Snapshots {
             return Ok(Capture::Pending(manifest, bytes));
         }
 
+        if mode == SnapshotMode::ReplayManaged {
+            return Err(Status::data_loss("frozen Task output snapshot is missing"));
+        }
         let mut manifest = CommitArtifactCaptureRequest {
             attempt: Some(attempt),
             operation_id: request.operation_id,
             description: request.description,
             files: Vec::with_capacity(request.paths.len()),
             native_session_id: request.native_session_id,
+            managed_task_output,
         };
         let pending = self.pending_bytes().map_err(journal_error)?;
         let mut remaining = (MAX_PENDING_BYTES.saturating_sub(pending))

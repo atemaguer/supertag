@@ -1718,7 +1718,7 @@ class ExecutionLimits(_message.Message):
     def __init__(self, max_reported_tokens: _Optional[int] = ..., max_reported_cost: _Optional[_Union[ReportedCostLimit, _Mapping]] = ..., max_native_agents: _Optional[int] = ...) -> None: ...
 
 class Task(_message.Message):
-    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits", "execution_selection", "attempt_execution")
+    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits", "execution_selection", "attempt_execution", "artifacts")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -1737,6 +1737,7 @@ class Task(_message.Message):
     EXECUTION_LIMITS_FIELD_NUMBER: _ClassVar[int]
     EXECUTION_SELECTION_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_EXECUTION_FIELD_NUMBER: _ClassVar[int]
+    ARTIFACTS_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     tag_id: str
     session_id: str
@@ -1755,7 +1756,16 @@ class Task(_message.Message):
     execution_limits: ExecutionLimits
     execution_selection: ExecutionSelection
     attempt_execution: AttemptExecutionSelection
-    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ...) -> None: ...
+    artifacts: _containers.RepeatedCompositeFieldContainer[ArtifactSelection]
+    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ...) -> None: ...
+
+class ArtifactSelection(_message.Message):
+    __slots__ = ("artifact_id", "paths")
+    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
+    PATHS_FIELD_NUMBER: _ClassVar[int]
+    artifact_id: str
+    paths: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, artifact_id: _Optional[str] = ..., paths: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ExecutionSelection(_message.Message):
     __slots__ = ("model", "effort")
@@ -2008,7 +2018,7 @@ class TaskEvent(_message.Message):
     def __init__(self, sequence: _Optional[int] = ..., text: _Optional[str] = ...) -> None: ...
 
 class FinishTaskRequest(_message.Message):
-    __slots__ = ("task_id", "attempt_id", "lease_token", "result", "succeeded", "objective_signal", "checkpoint_sha256", "workspace_delivery", "waiting_approval_ids")
+    __slots__ = ("task_id", "attempt_id", "lease_token", "result", "succeeded", "objective_signal", "checkpoint_sha256", "workspace_delivery", "waiting_approval_ids", "artifacts")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
@@ -2018,6 +2028,7 @@ class FinishTaskRequest(_message.Message):
     CHECKPOINT_SHA256_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_DELIVERY_FIELD_NUMBER: _ClassVar[int]
     WAITING_APPROVAL_IDS_FIELD_NUMBER: _ClassVar[int]
+    ARTIFACTS_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     attempt_id: str
     lease_token: str
@@ -2027,7 +2038,8 @@ class FinishTaskRequest(_message.Message):
     checkpoint_sha256: str
     workspace_delivery: WorkspaceDeliveryReference
     waiting_approval_ids: _containers.RepeatedScalarFieldContainer[str]
-    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., result: _Optional[str] = ..., succeeded: _Optional[bool] = ..., objective_signal: _Optional[_Union[ObjectiveSignal, str]] = ..., checkpoint_sha256: _Optional[str] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., waiting_approval_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+    artifacts: _containers.RepeatedCompositeFieldContainer[ArtifactSelection]
+    def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., result: _Optional[str] = ..., succeeded: _Optional[bool] = ..., objective_signal: _Optional[_Union[ObjectiveSignal, str]] = ..., checkpoint_sha256: _Optional[str] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., waiting_approval_ids: _Optional[_Iterable[str]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ...) -> None: ...
 
 class HarnessAttachRequest(_message.Message):
     __slots__ = ()

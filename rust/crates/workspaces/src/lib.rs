@@ -32,6 +32,18 @@ pub fn capture_artifact_file(root: &Path, path: &str, maximum: usize) -> Result<
     paths::read_artifact_file(root, path, maximum)
 }
 
+pub fn create_output_directory(root: &Path, path: &str) -> Result<()> {
+    paths::create_output_directory(root, path)
+}
+
+pub fn list_output_files(root: &Path, path: &str, max_files: usize) -> Result<Vec<String>> {
+    paths::list_output_files(root, path, max_files)
+}
+
+pub fn remove_output_directory(root: &Path, path: &str) -> Result<()> {
+    paths::remove_output_directory(root, path)
+}
+
 #[derive(Clone, Debug)]
 pub struct WorkspaceConfig {
     pub state_dir: PathBuf,

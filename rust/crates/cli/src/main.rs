@@ -1948,6 +1948,10 @@ fn print_task(task: &Task) {
                 "github_source": spec.github_source.as_ref().map(|value| json!({"workspace_id":value.workspace_id,"revision":value.revision,"source":value.source.as_ref().map(|source|json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha}))})),
             })),
             "workspace_delivery": task.workspace_delivery.as_ref().map(artifacts::describe),
+            "artifacts": task.artifacts.iter().map(|selection| json!({
+                "artifact_id": selection.artifact_id,
+                "paths": selection.paths,
+            })).collect::<Vec<_>>(),
             "execution_limits": task.execution_limits.as_ref().map(|limits| json!({
                 "max_reported_tokens": limits.max_reported_tokens,
                 "max_reported_cost": limits.max_reported_cost.as_ref().map(|limit| json!({

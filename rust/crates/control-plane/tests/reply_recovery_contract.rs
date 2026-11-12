@@ -72,6 +72,7 @@ async fn reply_with_result(store: &Store, id: &str, result: &str) -> String {
                 checkpoint_sha256: None,
                 workspace_delivery: None,
                 waiting_approval_ids: vec![],
+                artifacts: vec![],
             },
         )
         .await

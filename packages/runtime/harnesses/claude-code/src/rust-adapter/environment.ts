@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { lstat, mkdir, open, realpath } from "node:fs/promises";
 import { userInfo } from "node:os";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 
 export const CREDENTIAL_KEYS = [
   "ANTHROPIC_API_KEY",
@@ -42,6 +42,12 @@ export async function nativeEnvironment(environment: NodeJS.ProcessEnv) {
     CLAUDE_AGENT_SDK_CLIENT_APP: "supertag/rust-claude-adapter",
     CLAUDE_CODE_ENTRYPOINT: "sdk-ts",
   };
+  if (environment["SUPERTAG_OUTPUT_DIR"]) {
+    const directory = await ownedDirectory(environment["SUPERTAG_OUTPUT_DIR"]);
+    if (!/^outputs\/[a-f0-9]{64}$/u.test(relative(cwd, directory)))
+      throw new Error("Task output directory is outside the current workspace");
+    env["SUPERTAG_OUTPUT_DIR"] = directory;
+  }
   for (const key of CREDENTIAL_KEYS) if (environment[key]) env[key] = environment[key];
   if (!CREDENTIAL_KEYS.some((key) => env[key])) {
     const sourceHome = await ownedDirectory(environment["HOME"] ?? "");

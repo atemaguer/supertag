@@ -96,6 +96,7 @@ fn finish(
 ) -> FinishTaskRequest {
     FinishTaskRequest {
         waiting_approval_ids: vec![],
+        artifacts: vec![],
         workspace_delivery: None,
         task_id: attempt.task_id.clone(),
         attempt_id: attempt.attempt_id.clone(),

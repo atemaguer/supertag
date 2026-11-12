@@ -1,7 +1,10 @@
 use prost::Message;
 use sha2::{Digest, Sha256};
-use sqlx::{Row, any::AnyRow};
-use supertag_protocol::{artifacts::validate_capture_manifest, v2::*};
+use sqlx::{Any, Row, Transaction, any::AnyRow};
+use supertag_protocol::{
+    artifacts::{MAX_ARTIFACT_FILES, validate_artifact_path, validate_capture_manifest},
+    v2::*,
+};
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
@@ -97,11 +100,25 @@ impl Store {
         }
         running(&row, now)?;
         let task = task_row(&row)?;
-        if !task
-            .allowed_actions
-            .iter()
-            .any(|action| action == "files:read")
-        {
+        let permitted = if canonical.managed_task_output {
+            task.workspace.is_some()
+                && task.attempt_execution.as_ref().is_some_and(|execution| {
+                    !execution.remote_file_workspace
+                        && matches!(
+                            execution.harness_kind(),
+                            HarnessKind::Codex | HarnessKind::ClaudeCode
+                        )
+                })
+                && task
+                    .allowed_actions
+                    .iter()
+                    .any(|action| action == "files:write")
+        } else {
+            task.allowed_actions
+                .iter()
+                .any(|action| action == "files:read")
+        };
+        if !permitted {
             return Err(StoreError::PermissionDenied);
         }
         let objective_id = sqlx::query_scalar(
@@ -226,6 +243,84 @@ impl Store {
 
 fn capture_row(row: &AnyRow) -> Result<CapturedArtifact> {
     decode(&row.try_get::<Vec<u8>, _>("payload")?)
+}
+
+#[derive(Message)]
+struct SubmittedArtifacts {
+    #[prost(message, repeated, tag = "1")]
+    selections: Vec<ArtifactSelection>,
+}
+
+pub(crate) fn submitted_from_row(row: &AnyRow) -> Result<Vec<ArtifactSelection>> {
+    let stored: Option<Vec<u8>> = row.try_get("result_artifacts")?;
+    Ok(stored
+        .as_deref()
+        .map(decode::<SubmittedArtifacts>)
+        .transpose()?
+        .map_or_else(Vec::new, |result| result.selections))
+}
+
+pub(crate) fn normalize_submissions(input: &[ArtifactSelection]) -> Result<Vec<ArtifactSelection>> {
+    if input.len() > 100 {
+        return Err(invalid("a Task can submit at most 100 artifacts"));
+    }
+    let mut selections = input.to_vec();
+    selections.sort_unstable_by(|left, right| left.artifact_id.cmp(&right.artifact_id));
+    if selections
+        .windows(2)
+        .any(|pair| pair[0].artifact_id == pair[1].artifact_id)
+    {
+        return Err(invalid("submitted artifacts must be unique"));
+    }
+    for selection in &mut selections {
+        name("artifact ID", &selection.artifact_id)?;
+        if !(1..=MAX_ARTIFACT_FILES).contains(&selection.paths.len()) {
+            return Err(invalid(
+                "submitted artifact must select between 1 and 100 paths",
+            ));
+        }
+        for path in &selection.paths {
+            validate_artifact_path(path).map_err(|error| invalid(error.message()))?;
+        }
+        selection.paths.sort_unstable();
+        if selection.paths.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(invalid("submitted artifact paths must be unique"));
+        }
+    }
+    Ok(selections)
+}
+
+pub(crate) async fn submit_in(
+    tx: &mut Transaction<'_, Any>,
+    input: &FinishTaskRequest,
+) -> Result<()> {
+    let selections = normalize_submissions(&input.artifacts)?;
+    for selection in &selections {
+        let row = sqlx::query(
+            "SELECT payload FROM supertag_v2_artifact_captures
+             WHERE artifact_id=$1 AND task_id=$2 AND attempt_id=$3 AND committed_order IS NOT NULL",
+        )
+        .bind(&selection.artifact_id)
+        .bind(&input.task_id)
+        .bind(&input.attempt_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or_else(|| invalid("submitted artifact must be committed by this Task Attempt"))?;
+        let artifact = capture_row(&row)?;
+        if selection
+            .paths
+            .iter()
+            .any(|path| !artifact.files.iter().any(|entry| &entry.path == path))
+        {
+            return Err(invalid("submitted artifact path does not exist"));
+        }
+    }
+    sqlx::query("UPDATE supertag_v2_tasks SET result_artifacts=$1 WHERE task_id=$2")
+        .bind(SubmittedArtifacts { selections }.encode_to_vec())
+        .bind(&input.task_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
 }
 
 fn running(row: &AnyRow, now: i64) -> Result<()> {

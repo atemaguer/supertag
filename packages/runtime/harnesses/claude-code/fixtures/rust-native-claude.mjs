@@ -651,6 +651,14 @@ async function turn(message) {
   if (prompt === "capture-evidence") {
     try {
       result = await captureArtifact();
+      const outputDirectory = process.env.SUPERTAG_OUTPUT_DIR;
+      if (outputDirectory) {
+        const output = join(outputDirectory, "deliverable.txt");
+        if (!(await hook("Write", { file_path: output })))
+          throw new Error("Accepted file writes did not reach the managed output directory");
+        await writeFile(output, "managed Task output\n");
+        await writeFile(join(outputDirectory, ".env"), "fixture secret\n");
+      }
     } catch (error) {
       result = `Artifact fixture failed: ${error.message}`;
     }

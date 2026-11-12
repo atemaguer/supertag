@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use sha2::{Digest, Sha256};
 use tonic::Status;
 
 use crate::{
@@ -10,6 +11,10 @@ use crate::{
 pub const MAX_ARTIFACT_FILES: usize = 100;
 pub const MAX_ARTIFACT_FILE_BYTES: u64 = 32 * 1024 * 1024;
 pub const MAX_ARTIFACT_BYTES: u64 = 64 * 1024 * 1024;
+
+pub fn managed_output_directory(attempt_id: &str) -> String {
+    format!("outputs/{:x}", Sha256::digest(attempt_id.as_bytes()))
+}
 
 pub fn validate_capture_request(input: &HarnessCaptureArtifactRequest) -> Result<(), Status> {
     validate_metadata(
@@ -26,10 +31,23 @@ pub fn validate_capture_manifest(input: &CommitArtifactCaptureRequest) -> Result
         input.description.as_ref(),
         input.native_session_id.as_deref(),
     )?;
-    if input.attempt.is_none() {
-        return Err(Status::invalid_argument("Attempt authority is required"));
-    }
+    let attempt = input
+        .attempt
+        .as_ref()
+        .ok_or_else(|| Status::invalid_argument("Attempt authority is required"))?;
     validate_paths(input.files.iter().map(|file| file.path.as_str()))?;
+    if input.managed_task_output {
+        let prefix = format!("{}/", managed_output_directory(&attempt.attempt_id));
+        if input
+            .files
+            .iter()
+            .any(|file| !file.path.starts_with(&prefix))
+        {
+            return Err(Status::invalid_argument(
+                "managed output file is outside its Attempt directory",
+            ));
+        }
+    }
     let mut total = 0;
     for file in &input.files {
         let blob = file
@@ -151,6 +169,7 @@ mod tests {
                 })
                 .collect(),
             native_session_id: Some("native-session".into()),
+            managed_task_output: false,
         }
     }
 

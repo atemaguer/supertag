@@ -1191,6 +1191,13 @@ message Task {
   ExecutionLimits execution_limits = 16;
   ExecutionSelection execution_selection = 17;
   AttemptExecutionSelection attempt_execution = 18;
+  repeated ArtifactSelection artifacts = 19;
+}
+
+// Exact files submitted as part of a successful Task result.
+message ArtifactSelection {
+  string artifact_id = 1;
+  repeated string paths = 2;
 }
 
 // A single choice from the accepted Tag and Role execution policy.
@@ -1365,6 +1372,7 @@ message FinishTaskRequest {
   optional string checkpoint_sha256 = 7;
   WorkspaceDeliveryReference workspace_delivery = 8;
   repeated string waiting_approval_ids = 9;
+  repeated ArtifactSelection artifacts = 10;
 }
 
 message HarnessAttachRequest {}

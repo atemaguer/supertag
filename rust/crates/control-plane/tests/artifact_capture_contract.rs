@@ -57,6 +57,7 @@ async fn exercise(url: &str) {
             summary: None,
         }),
         native_session_id: Some("native-release-1".into()),
+        managed_task_output: false,
         files: vec![ArtifactFile {
             path: "evidence.txt".into(),
             blob: Some(BlobReference {
@@ -71,6 +72,20 @@ async fn exercise(url: &str) {
     ));
     assert!(matches!(
         store.reserve_artifact_capture(&intruder, &capture).await,
+        Err(StoreError::PermissionDenied)
+    ));
+    let mut managed = capture.clone();
+    managed.managed_task_output = true;
+    assert!(matches!(
+        store.reserve_artifact_capture(&host, &managed).await,
+        Err(StoreError::InvalidArgument(_))
+    ));
+    managed.files[0].path = format!(
+        "{}/evidence.txt",
+        supertag_protocol::artifacts::managed_output_directory(&assignment.attempt_id)
+    );
+    assert!(matches!(
+        store.reserve_artifact_capture(&host, &managed).await,
         Err(StoreError::PermissionDenied)
     ));
     let (one, two) = tokio::join!(
@@ -162,7 +177,117 @@ async fn exercise(url: &str) {
             .unwrap(),
         reservation
     );
+    submission(&reopened, &host, &summary.artifact_id).await;
     reopened.close().await;
+    let reopened = Store::open(url).await.unwrap();
+    let submitted = reopened
+        .list_messages(
+            PRODUCER,
+            &ListMessagesRequest {
+                tag_id: "release".into(),
+                conversation: "submitted-report".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let result = submitted.messages[0].task.as_ref().unwrap();
+    assert_eq!(result.artifacts.len(), 1);
+    assert_eq!(result.artifacts[0].paths, ["deliverable.txt"]);
+    reopened.close().await;
+}
+
+async fn submission(store: &Store, host: &supertag_control_plane::HostAuthority, other_id: &str) {
+    let task = store
+        .send_message(
+            PRODUCER,
+            &SendMessageRequest {
+                tag_id: "release".into(),
+                conversation: "submitted-report".into(),
+                text: "Submit the verified deliverable".into(),
+                operation_id: "submit-report".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .task
+        .unwrap();
+    let assignment = store
+        .claim_task(host, "submit-claim")
+        .await
+        .unwrap()
+        .unwrap();
+    let attempt = InspectAttemptRequest {
+        task_id: task.task_id,
+        attempt_id: assignment.attempt_id,
+        lease_token: assignment.lease_token,
+    };
+    store
+        .start_task(
+            host,
+            &StartTaskRequest {
+                task_id: attempt.task_id.clone(),
+                attempt_id: attempt.attempt_id.clone(),
+                lease_token: attempt.lease_token.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    let capture = CommitArtifactCaptureRequest {
+        attempt: Some(attempt.clone()),
+        operation_id: "deliverable".into(),
+        description: Some(ArtifactDescription {
+            title: "Release deliverable".into(),
+            kind: "report".into(),
+            summary: None,
+        }),
+        files: vec![ArtifactFile {
+            path: "deliverable.txt".into(),
+            blob: Some(BlobReference {
+                sha256: "a".repeat(64),
+                byte_length: 12,
+            }),
+        }],
+        ..Default::default()
+    };
+    let reserved = store
+        .reserve_artifact_capture(host, &capture)
+        .await
+        .unwrap();
+    let artifact_id = reserved.summary.unwrap().artifact_id;
+    let mut finish = FinishTaskRequest {
+        task_id: attempt.task_id,
+        attempt_id: attempt.attempt_id,
+        lease_token: attempt.lease_token,
+        result: "Verified result".into(),
+        succeeded: true,
+        artifacts: vec![ArtifactSelection {
+            artifact_id: other_id.into(),
+            paths: vec!["evidence.txt".into()],
+        }],
+        ..Default::default()
+    };
+    assert!(store.finish_task(host, &finish).await.is_err());
+    finish.artifacts[0].artifact_id = artifact_id;
+    finish.artifacts[0].paths = vec!["deliverable.txt".into()];
+    assert!(store.finish_task(host, &finish).await.is_err());
+    store.commit_artifact_capture(host, &capture).await.unwrap();
+    finish.artifacts[0].paths = vec!["missing.txt".into()];
+    assert!(store.finish_task(host, &finish).await.is_err());
+    assert_eq!(
+        store.get_task(&finish.task_id).await.unwrap().state(),
+        TaskState::Running
+    );
+    finish.artifacts[0].paths = vec!["deliverable.txt".into()];
+    let result = store.finish_task(host, &finish).await.unwrap();
+    assert_eq!(result.artifacts, finish.artifacts);
+    assert_eq!(store.finish_task(host, &finish).await.unwrap(), result);
+    finish.artifacts.clear();
+    assert!(matches!(
+        store.finish_task(host, &finish).await,
+        Err(StoreError::Conflict(_))
+    ));
 }
 
 #[tokio::test]

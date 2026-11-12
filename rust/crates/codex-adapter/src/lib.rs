@@ -226,6 +226,26 @@ async fn execute(
         checkpoint::check_context(checkpoint, &skills.manifest)?;
     }
     let mut environment = authentication.environment(&options.environment);
+    if let Some(path) = options
+        .environment
+        .get(&OsString::from("SUPERTAG_OUTPUT_DIR"))
+    {
+        let path = PathBuf::from(path).canonicalize()?;
+        let relative = path
+            .strip_prefix(&workspace)?
+            .to_str()
+            .context("invalid Task output path")?;
+        let expected = supertag_protocol::artifacts::managed_output_directory(
+            task.attempt_id
+                .as_deref()
+                .context("Task output directory requires an Attempt")?,
+        );
+        ensure!(
+            relative == expected,
+            "Task output directory is outside this Attempt"
+        );
+        environment.insert("SUPERTAG_OUTPUT_DIR".into(), path.into_os_string());
+    }
     // Secrets belonging to the transport are never forwarded to the native process.
     environment.remove(&OsString::from("SUPERTAG_HOST_TOKEN"));
     let mut secrets = authentication.secrets();

@@ -436,8 +436,10 @@ type CommitArtifactCaptureRequest struct {
 	Description     *ArtifactDescription   `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
 	Files           []*ArtifactFile        `protobuf:"bytes,4,rep,name=files,proto3" json:"files,omitempty"`
 	NativeSessionId *string                `protobuf:"bytes,5,opt,name=native_session_id,json=nativeSessionId,proto3,oneof" json:"native_session_id,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Worker Host collection from the current Attempt's managed output directory.
+	ManagedTaskOutput bool `protobuf:"varint,6,opt,name=managed_task_output,json=managedTaskOutput,proto3" json:"managed_task_output,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *CommitArtifactCaptureRequest) Reset() {
@@ -503,6 +505,13 @@ func (x *CommitArtifactCaptureRequest) GetNativeSessionId() string {
 		return *x.NativeSessionId
 	}
 	return ""
+}
+
+func (x *CommitArtifactCaptureRequest) GetManagedTaskOutput() bool {
+	if x != nil {
+		return x.ManagedTaskOutput
+	}
+	return false
 }
 
 type GetCapturedArtifactRequest struct {
@@ -975,13 +984,14 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"\vdescription\x18\x02 \x01(\v2(.supertag.runtime.v2.ArtifactDescriptionR\vdescription\x12\x14\n" +
 	"\x05paths\x18\x03 \x03(\tR\x05paths\x12/\n" +
 	"\x11native_session_id\x18\x04 \x01(\tH\x00R\x0fnativeSessionId\x88\x01\x01B\x14\n" +
-	"\x12_native_session_id\"\xd3\x02\n" +
+	"\x12_native_session_id\"\x83\x03\n" +
 	"\x1cCommitArtifactCaptureRequest\x12D\n" +
 	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12!\n" +
 	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12J\n" +
 	"\vdescription\x18\x03 \x01(\v2(.supertag.runtime.v2.ArtifactDescriptionR\vdescription\x127\n" +
 	"\x05files\x18\x04 \x03(\v2!.supertag.runtime.v2.ArtifactFileR\x05files\x12/\n" +
-	"\x11native_session_id\x18\x05 \x01(\tH\x00R\x0fnativeSessionId\x88\x01\x01B\x14\n" +
+	"\x11native_session_id\x18\x05 \x01(\tH\x00R\x0fnativeSessionId\x88\x01\x01\x12.\n" +
+	"\x13managed_task_output\x18\x06 \x01(\bR\x11managedTaskOutputB\x14\n" +
 	"\x12_native_session_id\"=\n" +
 	"\x1aGetCapturedArtifactRequest\x12\x1f\n" +
 	"\vartifact_id\x18\x01 \x01(\tR\n" +

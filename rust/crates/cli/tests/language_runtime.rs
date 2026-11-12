@@ -595,6 +595,8 @@ async fn claude_captures_selected_workspace_files_for_the_operator() -> Result<(
             "claude-code",
             "--allow",
             "files:read",
+            "--allow",
+            "files:write",
             "--workspace-id",
             "evidence",
             "--workspace-base",
@@ -640,22 +642,27 @@ async fn claude_captures_selected_workspace_files_for_the_operator() -> Result<(
     let records = page["artifacts"]
         .as_array()
         .context("artifact list missing")?;
-    assert_eq!(records.len(), 1);
-    let artifact_id = records[0]["artifact_id"]
+    assert_eq!(records.len(), 2);
+    let explicit = records
+        .iter()
+        .find(|record| record["description"]["kind"] == "report")
+        .context("explicit artifact missing")?;
+    let managed = records
+        .iter()
+        .find(|record| record["description"]["kind"] == "task-output")
+        .context("managed Task output missing")?;
+    let artifact_id = explicit["artifact_id"]
         .as_str()
         .context("artifact ID missing")?;
     assert_eq!(task["result"], format!("Captured artifact {artifact_id}"));
-    assert_eq!(records[0]["producer"]["tag_id"], "producer");
+    assert_eq!(explicit["producer"]["tag_id"], "producer");
+    assert_eq!(explicit["producer"]["harness"], "HARNESS_KIND_CLAUDE_CODE");
     assert_eq!(
-        records[0]["producer"]["harness"],
-        "HARNESS_KIND_CLAUDE_CODE"
-    );
-    assert_eq!(
-        records[0]["description"]["title"],
+        explicit["description"]["title"],
         "Release evidence [REDACTED]"
     );
     Uuid::parse_str(
-        records[0]["producer"]["native_session_id"]
+        explicit["producer"]["native_session_id"]
             .as_str()
             .context("native Session ID missing")?,
     )?;
@@ -677,6 +684,46 @@ async fn claude_captures_selected_workspace_files_for_the_operator() -> Result<(
     assert_eq!(std::fs::read(&destination)?, report);
     assert!(services.operator(&download).await.is_err());
     assert_eq!(std::fs::read(&destination)?, report);
+    let managed_id = managed["artifact_id"]
+        .as_str()
+        .context("managed artifact ID missing")?;
+    let output_path = format!(
+        "{}/deliverable.txt",
+        supertag_protocol::artifacts::managed_output_directory(
+            task["attempt_id"]
+                .as_str()
+                .context("producing Attempt missing")?
+        )
+    );
+    assert_eq!(
+        task["artifacts"],
+        serde_json::json!([{"artifact_id": managed_id, "paths": [&output_path]}])
+    );
+    let managed_artifact = services.operator(&["artifact", "get", managed_id]).await?;
+    assert_eq!(
+        managed_artifact["files"]
+            .as_array()
+            .context("managed artifact files missing")?
+            .len(),
+        1
+    );
+    assert_eq!(managed_artifact["files"][0]["path"], output_path);
+    let managed_download = directory.path().join("deliverable.txt");
+    services
+        .operator(&[
+            "artifact",
+            "download",
+            managed_id,
+            "--path",
+            &output_path,
+            "--output",
+            managed_download
+                .to_str()
+                .context("fixture path is not UTF-8")?,
+        ])
+        .await?;
+    assert_eq!(std::fs::read(&managed_download)?, b"managed Task output\n");
+    assert_eq!(task["workspace_delivery"]["changed_files"], 0);
     assert!(success(git(&["status", "--porcelain"])).await?.is_empty());
     services.stop().await
 }

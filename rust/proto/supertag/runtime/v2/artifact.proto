@@ -77,6 +77,8 @@ message CommitArtifactCaptureRequest {
   ArtifactDescription description = 3;
   repeated ArtifactFile files = 4;
   optional string native_session_id = 5;
+  // Worker Host collection from the current Attempt's managed output directory.
+  bool managed_task_output = 6;
 }
 
 message GetCapturedArtifactRequest {

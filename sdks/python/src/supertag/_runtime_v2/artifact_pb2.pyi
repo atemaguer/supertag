@@ -80,18 +80,20 @@ class HarnessCaptureArtifactRequest(_message.Message):
     def __init__(self, operation_id: _Optional[str] = ..., description: _Optional[_Union[ArtifactDescription, _Mapping]] = ..., paths: _Optional[_Iterable[str]] = ..., native_session_id: _Optional[str] = ...) -> None: ...
 
 class CommitArtifactCaptureRequest(_message.Message):
-    __slots__ = ("attempt", "operation_id", "description", "files", "native_session_id")
+    __slots__ = ("attempt", "operation_id", "description", "files", "native_session_id", "managed_task_output")
     ATTEMPT_FIELD_NUMBER: _ClassVar[int]
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
     FILES_FIELD_NUMBER: _ClassVar[int]
     NATIVE_SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    MANAGED_TASK_OUTPUT_FIELD_NUMBER: _ClassVar[int]
     attempt: _runtime_pb2.InspectAttemptRequest
     operation_id: str
     description: ArtifactDescription
     files: _containers.RepeatedCompositeFieldContainer[ArtifactFile]
     native_session_id: str
-    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., description: _Optional[_Union[ArtifactDescription, _Mapping]] = ..., files: _Optional[_Iterable[_Union[ArtifactFile, _Mapping]]] = ..., native_session_id: _Optional[str] = ...) -> None: ...
+    managed_task_output: bool
+    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., description: _Optional[_Union[ArtifactDescription, _Mapping]] = ..., files: _Optional[_Iterable[_Union[ArtifactFile, _Mapping]]] = ..., native_session_id: _Optional[str] = ..., managed_task_output: _Optional[bool] = ...) -> None: ...
 
 class GetCapturedArtifactRequest(_message.Message):
     __slots__ = ("artifact_id",)

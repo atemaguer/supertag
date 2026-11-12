@@ -6,6 +6,7 @@ mod questions;
 mod review_artifacts;
 mod work_sessions;
 mod workspace;
+pub(crate) use artifact_capture::upload_records;
 pub(crate) use workspace::RemoteWorkspace;
 mod workstreams;
 
@@ -367,6 +368,7 @@ impl Harness for Bridge {
 pub(crate) struct ExecutionInputs<'a> {
     pub checkpoint: Option<SessionCheckpoint>,
     pub workspace: Option<&'a Path>,
+    pub output_directory: Option<&'a Path>,
     pub resolved_skills: Vec<ResolvedSkill>,
     pub remote_workspace: Option<workspace::RemoteWorkspace>,
     pub mcp: Option<Arc<crate::mcp::AttemptMcp>>,
@@ -378,6 +380,7 @@ pub(crate) async fn execute(
     ExecutionInputs {
         checkpoint,
         workspace,
+        output_directory,
         resolved_skills,
         remote_workspace,
         mcp,
@@ -453,6 +456,7 @@ pub(crate) async fn execute(
         valid_until,
         shutdown,
         workspace,
+        output_directory,
     )
     .await;
     bridge.inputs.close();
@@ -474,6 +478,7 @@ async fn supervise(
     valid_until: Instant,
     shutdown: &CancellationToken,
     workspace: Option<&Path>,
+    output_directory: Option<&Path>,
 ) -> Result<HarnessCompleteRequest> {
     if shutdown.is_cancelled() {
         return Ok(failed("Worker Host is shutting down"));
@@ -513,6 +518,9 @@ async fn supervise(
         command
             .current_dir(workspace)
             .env(crate::WORKSPACE_DIRECTORY, workspace);
+    }
+    if let Some(directory) = output_directory {
+        command.env(crate::task_outputs::OUTPUT_DIRECTORY, directory);
     }
     command.env(
         crate::guardian::ADAPTER_SCRATCH_PARENT,

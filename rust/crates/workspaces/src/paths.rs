@@ -242,6 +242,136 @@ pub(crate) fn read_artifact_file(root: &Path, path: &str, maximum: usize) -> Res
     read_file(open_file_at(&directory, name)?, maximum)
 }
 
+pub(crate) fn create_output_directory(root: &Path, path: &str) -> Result<()> {
+    validate_repo_path(path)?;
+    let (parent, directory) = path.split_once('/').context("output path needs a parent")?;
+    ensure!(
+        !directory.contains('/'),
+        "output path needs one child directory"
+    );
+    let root = open_root(root)?;
+    if let Err(error) = mkdir_at(&root, parent)
+        && error.kind() != std::io::ErrorKind::AlreadyExists
+    {
+        return Err(error.into());
+    }
+    mkdir_at(&open_dir_at(&root, parent)?, directory)?;
+    Ok(())
+}
+
+fn mkdir_at(parent: &File, name: &str) -> std::io::Result<()> {
+    let name = CString::new(name)?;
+    let result = unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), 0o700) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+pub(crate) fn remove_output_directory(root: &Path, path: &str) -> Result<()> {
+    validate_repo_path(path)?;
+    let full = root.join(path);
+    let parent = full.parent().context("output directory needs a parent")?;
+    match open_root(parent) {
+        Ok(_) => {}
+        Err(error) if missing(&error) => return Ok(()),
+        Err(error) => return Err(error),
+    }
+    match fs::remove_dir_all(full) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+pub(crate) fn list_output_files(root: &Path, path: &str, max_files: usize) -> Result<Vec<String>> {
+    fn visit(
+        directory: &File,
+        prefix: &str,
+        depth: usize,
+        remaining: &mut usize,
+        files: &mut Vec<String>,
+        max_files: usize,
+    ) -> Result<()> {
+        ensure!(depth <= 128, "output directory nesting exceeds its limit");
+        for name in bounded_names(directory, *remaining)? {
+            *remaining = remaining
+                .checked_sub(1)
+                .context("output enumeration exceeds its limit")?;
+            if exclude_output_name(&name) {
+                continue;
+            }
+            let path = format!("{prefix}/{name}");
+            ensure!(
+                path.len() <= 1024,
+                "output file path exceeds its length limit"
+            );
+            let mode = metadata_at(directory, &name)?.st_mode & libc::S_IFMT;
+            match mode {
+                libc::S_IFDIR => visit(
+                    &open_dir_at(directory, &name)?,
+                    &path,
+                    depth + 1,
+                    remaining,
+                    files,
+                    max_files,
+                )?,
+                libc::S_IFREG => {
+                    ensure!(
+                        files.len() < max_files,
+                        "output file count exceeds its limit"
+                    );
+                    files.push(path);
+                }
+                _ => bail!("outputs must contain only directories and regular files"),
+            }
+        }
+        Ok(())
+    }
+    validate_repo_path(path)?;
+    let directory = match open_root(&root.join(path)) {
+        Ok(directory) => directory,
+        Err(error) if missing(&error) => return Ok(vec![]),
+        Err(error) => return Err(error),
+    };
+    let mut files = vec![];
+    let mut remaining = max_files.saturating_mul(4).saturating_add(1000);
+    visit(&directory, path, 0, &mut remaining, &mut files, max_files)?;
+    Ok(files)
+}
+
+fn missing(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+}
+
+fn exclude_output_name(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    matches!(
+        name.as_str(),
+        ".git"
+            | "node_modules"
+            | ".venv"
+            | "venv"
+            | "__pycache__"
+            | ".cache"
+            | "inputs"
+            | ".ssh"
+            | ".aws"
+            | ".gnupg"
+            | ".supertag"
+            | ".env"
+    ) || name.starts_with(".env.")
+        || [".pem", ".key", ".p12", ".pfx"]
+            .iter()
+            .any(|suffix| name.ends_with(suffix))
+        || name
+            .strip_prefix("artifact-")
+            .is_some_and(|id| id.len() == 64 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
+}
+
 fn metadata_at(parent: &File, name: &str) -> Result<libc::stat> {
     let name = CString::new(name)?;
     let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
@@ -291,6 +421,10 @@ impl Drop for DirectoryEntries {
 }
 
 fn names(directory: &File) -> Result<Vec<String>> {
+    bounded_names(directory, usize::MAX)
+}
+
+fn bounded_names(directory: &File, maximum: usize) -> Result<Vec<String>> {
     let descriptor = unsafe { libc::dup(directory.as_raw_fd()) };
     if descriptor < 0 {
         return Err(std::io::Error::last_os_error().into());
@@ -321,6 +455,10 @@ fn names(directory: &File) -> Result<Vec<String>> {
             .to_str()
             .context("workspace filename is not UTF-8")?;
         if name != "." && name != ".." {
+            ensure!(
+                names.len() < maximum,
+                "output enumeration exceeds its limit"
+            );
             names.push(name.to_owned());
         }
     }

@@ -10,6 +10,7 @@ mod mcp;
 mod readiness;
 mod remote;
 mod remote_provider;
+mod task_outputs;
 mod workspaces;
 
 pub use credentials::{provider_environment, provider_environment_for, validate_opencode_model};
@@ -398,6 +399,7 @@ pub async fn run(
                 checkpoint,
                 workspace,
                 remote_tree,
+                outputs,
             } => {
                 // This stage is recorded only after the adapter process group was reaped.
                 // Exact finalization can safely resume after a Host restart.
@@ -405,6 +407,40 @@ pub async fn run(
                     &mut host, &attempt, &token, &shutdown,
                     remote::ensure_stopped(&options, &journal, &attempt, &registration),
                 ).await?;
+                if let Some(mut pending) = outputs.as_ref().filter(|output| succeeded && !output.frozen).cloned() {
+                    let checkout = workspace.checkout.path.clone();
+                    let state = options.state_directory.clone();
+                    let identity = attempt.clone();
+                    let cancellation = shutdown.child_token();
+                    let frozen = with_authority(&mut host, &attempt, &token, &shutdown, &cancellation, async {
+                        tokio::task::spawn_blocking(move || {
+                            pending.freeze(&checkout, &state, &identity)
+                                .map_err(|_| Status::failed_precondition("Task output files could not be captured safely"))?;
+                            Ok(pending)
+                        }).await.map_err(|_| Status::internal("Task output snapshot failed"))?
+                    }).await;
+                    match frozen {
+                        Ok((pending, _)) => journal.save(&Entry::Finalizing {
+                            attempt,
+                            result,
+                            succeeded,
+                            objective_signal,
+                            waiting_approval_ids,
+                            checkpoint,
+                            workspace,
+                            remote_tree,
+                            outputs: Some(pending),
+                        })?,
+                        Err(_) if shutdown.is_cancelled() => return Ok(()),
+                        Err(error) if retryable(&error) => wait_for_work(&shutdown).await,
+                        Err(_) => save_finish(
+                            &journal,
+                            attempt,
+                            adapter::failed("Task output files could not be captured safely"),
+                        )?,
+                    }
+                    continue;
+                }
                 let cancellation = shutdown.child_token();
                 let finalization = with_authority(
                     &mut host,
@@ -413,6 +449,14 @@ pub async fn run(
                     &shutdown,
                     &cancellation,
                     async {
+                        if let Some(outputs) = &outputs {
+                            let checkout = workspace.checkout.path.clone();
+                            let directory = outputs.directory.clone();
+                            tokio::task::spawn_blocking(move || {
+                                supertag_workspaces::remove_output_directory(&checkout, &directory)
+                                    .map_err(|_| Status::failed_precondition("Task output directory could not be removed safely"))
+                            }).await.map_err(|_| Status::internal("Task output cleanup failed"))??;
+                        }
                         if let Some(tree) = &remote_tree {
                             workspaces.restore_remote(&workspace, tree, &cancellation).await
                                 .map_err(|_| Status::invalid_argument("Remote Workspace output could not be restored safely"))?;
@@ -438,6 +482,7 @@ pub async fn run(
                         checkpoint,
                         workspace: Some(Box::new(pending)),
                         prepared: Some(workspace),
+                        outputs,
                     })?,
                     Err(_) if shutdown.is_cancelled() => return Ok(()),
                     Err(error) if retryable(&error) => wait_for_work(&shutdown).await,
@@ -457,6 +502,7 @@ pub async fn run(
                 checkpoint,
                 workspace,
                 prepared,
+                outputs,
             } => {
                 with_cleanup_authority(
                     &mut host, &attempt, &token, &shutdown,
@@ -508,6 +554,7 @@ pub async fn run(
                                 checkpoint,
                                 workspace: Some(pending),
                                 prepared,
+                                outputs,
                             })?;
                         }
                         Err(error)
@@ -554,6 +601,7 @@ pub async fn run(
                                 checkpoint: Some(pending),
                                 workspace,
                                 prepared,
+                                outputs,
                             })?;
                         }
                         Err(error)
@@ -577,6 +625,36 @@ pub async fn run(
                     }
                     continue;
                 }
+                if let Some(mut pending) = outputs.as_ref().filter(|output| succeeded && output.pending()).cloned() {
+                    let cancellation = shutdown.child_token();
+                    let upload = with_authority(&mut host, &attempt, &token, &shutdown, &cancellation, async {
+                        tokio::select! {
+                            result = pending.publish(&options.state_directory, &attempt, &coordination, &token) => result,
+                            _ = cancellation.cancelled() => Err(Status::cancelled("Task output transfer cancelled")),
+                        }
+                    }).await;
+                    match upload {
+                        Ok(_) => journal.save(&Entry::Finish {
+                            attempt,
+                            result,
+                            succeeded,
+                            objective_signal,
+                            waiting_approval_ids,
+                            checkpoint,
+                            workspace,
+                            prepared,
+                            outputs: Some(pending),
+                        })?,
+                        Err(error) if retryable(&error) || error.code() == Code::ResourceExhausted => wait_for_work(&shutdown).await,
+                        Err(_) if shutdown.is_cancelled() => return Ok(()),
+                        Err(_) => save_finish(
+                            &journal,
+                            attempt,
+                            adapter::failed("Task output could not be committed"),
+                        )?,
+                    }
+                    continue;
+                }
                 let outcome = host
                     .finish_task(request(
                         FinishTaskRequest {
@@ -587,6 +665,8 @@ pub async fn run(
                             succeeded,
                             objective_signal,
                             waiting_approval_ids: waiting_approval_ids.clone(),
+                            artifacts: outputs.as_ref().filter(|_| succeeded)
+                                .and_then(|outputs| outputs.selection()).into_iter().collect(),
                             checkpoint_sha256: checkpoint.map(|pending| pending.sha256),
                             workspace_delivery: workspace
                                 .as_ref()
@@ -640,6 +720,7 @@ pub async fn run(
                             checkpoint: None,
                             workspace,
                             prepared,
+                            outputs: None,
                         })?;
                         continue;
                     }
@@ -824,7 +905,7 @@ async fn run_assignment(
         Err(error) => return Err(error.into()),
     };
     ready();
-    let task = authority.task.context("execution authority has no Task")?;
+    let mut task = authority.task.context("execution authority has no Task")?;
     ensure_attempt(&task, &attempt)?;
     let valid_until = sent
         .checked_add(Duration::from_millis(authority.valid_for_ms))
@@ -1009,6 +1090,31 @@ async fn run_assignment(
         .as_ref()
         .filter(|_| remote_workspace.is_none())
         .map(|prepared| prepared.checkout.path.as_path());
+    let outputs = match task_outputs::PendingOutputs::prepare(
+        &task,
+        adapter_workspace,
+        &attempt,
+        options.harness,
+    ) {
+        Ok(outputs) => outputs.map(Box::new),
+        Err(_) => {
+            return save_finish(
+                journal,
+                attempt,
+                adapter::failed("Task output directory could not be prepared safely"),
+            );
+        }
+    };
+    let output_directory = outputs
+        .as_ref()
+        .zip(adapter_workspace)
+        .map(|(outputs, checkout)| outputs.absolute(checkout));
+    if let Some(directory) = &output_directory {
+        task.instructions.push_str(&format!(
+            "\n\nSave deliverables in the Task output directory at {}. Use this directory for files you want to return with the Task result.",
+            directory.display(),
+        ));
+    }
     let assignment = Assignment {
         task: Some(task),
         attempt_id: attempt.attempt_id.clone(),
@@ -1020,6 +1126,7 @@ async fn run_assignment(
         adapter::ExecutionInputs {
             checkpoint,
             workspace: adapter_workspace,
+            output_directory: output_directory.as_deref(),
             resolved_skills,
             remote_workspace,
             mcp: mcp.clone(),
@@ -1082,6 +1189,7 @@ async fn run_assignment(
                 checkpoint,
                 workspace: Box::new(workspace),
                 remote_tree,
+                outputs,
             })
         } else {
             save_finish(journal, attempt.clone(), outcome)
@@ -1181,6 +1289,7 @@ fn save_finish(journal: &Journal, attempt: Attempt, outcome: HarnessCompleteRequ
         checkpoint,
         workspace: None,
         prepared,
+        outputs: None,
     })
 }
 

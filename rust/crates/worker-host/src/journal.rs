@@ -112,6 +112,8 @@ pub(crate) enum Entry {
         workspace: Box<PreparedWorkspace>,
         #[serde(default)]
         remote_tree: Option<TransferArtifact>,
+        #[serde(default)]
+        outputs: Option<Box<crate::task_outputs::PendingOutputs>>,
     },
     Finish {
         #[serde(flatten)]
@@ -128,6 +130,8 @@ pub(crate) enum Entry {
         workspace: Option<Box<PendingWorkspace>>,
         #[serde(default)]
         prepared: Option<Box<PreparedWorkspace>>,
+        #[serde(default)]
+        outputs: Option<Box<crate::task_outputs::PendingOutputs>>,
     },
     Terminal {
         #[serde(flatten)]

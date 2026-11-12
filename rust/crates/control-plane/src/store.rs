@@ -60,6 +60,8 @@ pub enum StoreError {
 
 pub(crate) type Result<T> = std::result::Result<T, StoreError>;
 pub(crate) const MAX_TASK_PROMPT_BYTES: usize = 262_144;
+// Reserve framing space for the enclosing conversation and execution messages.
+const MAX_TASK_MESSAGE_BYTES: usize = supertag_protocol::MAX_MESSAGE_BYTES - 4096;
 
 #[derive(Clone)]
 pub struct Store {
@@ -69,7 +71,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 42;
+        const SCHEMA_VERSION: i64 = 43;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -162,6 +164,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0040_github_workspaces.sql"),
                 include_str!("../migrations/sqlite/0041_artifact_captures.sql"),
                 include_str!("../migrations/sqlite/0042_github_publications.sql"),
+                include_str!("../migrations/sqlite/0043_task_result_artifacts.sql"),
             ]
         } else {
             [
@@ -207,6 +210,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0040_github_workspaces.sql"),
                 include_str!("../migrations/postgresql/0041_artifact_captures.sql"),
                 include_str!("../migrations/postgresql/0042_github_publications.sql"),
+                include_str!("../migrations/postgresql/0043_task_result_artifacts.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -877,6 +881,8 @@ impl Store {
                 || row.try_get::<Option<String>, _>("finish_checkpoint_sha256")?
                     != input.checkpoint_sha256
                 || crate::workspaces::delivery_from_row(&row)? != input.workspace_delivery
+                || crate::artifact_captures::submitted_from_row(&row)?
+                    != crate::artifact_captures::normalize_submissions(&input.artifacts)?
             {
                 return Err(StoreError::Conflict(
                     "Task already has a different outcome".into(),
@@ -889,12 +895,20 @@ impl Store {
             }
             if input.succeeded {
                 crate::workspaces::finish_in(&mut transaction, &row, input).await?;
+                if !input.artifacts.is_empty() {
+                    Box::pin(crate::artifact_captures::submit_in(&mut transaction, input)).await?;
+                }
+            } else if !input.artifacts.is_empty() {
+                return Err(invalid("only a successful Task can submit artifacts"));
             }
             sqlx::query("UPDATE supertag_v2_tasks SET state = $1, result = $2, cleanup_pending = 0, cleanup_observed = 1, finish_objective_signal = $3, finish_checkpoint_sha256 = $4 WHERE task_id = $5")
                 .bind(desired as i64).bind(&input.result).bind(i64::from(input.objective_signal)).bind(&input.checkpoint_sha256).bind(&input.task_id)
                 .execute(&mut *transaction).await?;
         }
         let task = task_in(&mut transaction, &input.task_id).await?;
+        if !task.artifacts.is_empty() && task.encoded_len() > MAX_TASK_MESSAGE_BYTES {
+            return Err(invalid("Task result exceeds its message size limit"));
+        }
         if state == TaskState::Running {
             crate::approvals::finish_in(&mut transaction, &task, input, now).await?;
             crate::work_sessions::questions::finish_in(&mut transaction, &task, input, now).await?;
@@ -1446,7 +1460,7 @@ pub(crate) async fn next_order(transaction: &mut Transaction<'_, Any>) -> Result
 
 async fn bounded_task_in(transaction: &mut Transaction<'_, Any>, id: &str) -> Result<Task> {
     let task = task_in(transaction, id).await?;
-    if task.encoded_len() > supertag_protocol::MAX_MESSAGE_BYTES - 4096 {
+    if task.encoded_len() > MAX_TASK_MESSAGE_BYTES {
         return Err(invalid(
             "accepted Task policy and prompt exceed the transport limit",
         ));
@@ -1585,6 +1599,7 @@ pub(crate) fn task_row(row: &AnyRow) -> Result<Task> {
         policy_snapshot,
         execution_selection,
         attempt_execution,
+        artifacts: crate::artifact_captures::submitted_from_row(row)?,
     })
 }
 

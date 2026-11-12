@@ -139,7 +139,7 @@ impl HarnessArtifacts for Bridge {
     }
 }
 
-fn upload_records(
+pub(crate) fn upload_records(
     manifest: CommitArtifactCaptureRequest,
     selected: Vec<Vec<u8>>,
 ) -> impl Iterator<Item = ArtifactUpload> + Send + 'static {

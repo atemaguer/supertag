@@ -126,6 +126,7 @@ async fn contract(store: &Store) {
 
     let finish = FinishTaskRequest {
         waiting_approval_ids: vec![],
+        artifacts: vec![],
         workspace_delivery: None,
         task_id: first.task_id.clone(),
         attempt_id: start.attempt_id.clone(),
@@ -204,6 +205,7 @@ async fn contract(store: &Store) {
     );
     let finish = FinishTaskRequest {
         waiting_approval_ids: vec![],
+        artifacts: vec![],
         workspace_delivery: None,
         task_id: running.task_id.clone(),
         attempt_id: start.attempt_id,
@@ -248,6 +250,7 @@ async fn contract(store: &Store) {
         store.start_task(&racer_host, &start).await.unwrap();
         let finish = FinishTaskRequest {
             waiting_approval_ids: vec![],
+            artifacts: vec![],
             workspace_delivery: None,
             task_id: task.task_id.clone(),
             attempt_id: start.attempt_id,
