@@ -158,12 +158,49 @@ fn response(attempt: &InspectAttemptRequest, request: &str) -> SendAttemptTagMes
     }
 }
 
+// Keep scenario locals in separate async poll frames so both database contracts
+// fit the default test thread stack without changing the assertions or runtime.
+struct DeliveredChildren {
+    child: WorkSession,
+    no_op_child: WorkSession,
+    work: InspectAttemptRequest,
+}
+
+struct AcceptedReviews {
+    first: TagMessage,
+    second: TagMessage,
+    no_op_review: TagMessage,
+    continuation: WorkSession,
+}
+
 async fn contract(url: &str) {
     gated_request_contract(url).await;
     let clock = Arc::new(AtomicI64::new(NOW));
     let store = open(url, &clock).await;
     let pool = sqlx::AnyPool::connect(url).await.unwrap();
     let host = support::register_host(&store, "reviews").await;
+    let delivered = deliver_children(&store, &host).await;
+    let reviews = request_child_reviews(&store, &host, &delivered).await;
+    pending_review_projection(&store, &pool, &reviews).await;
+    let recorded =
+        record_paused_verdict(&store, &host, &pool, &reviews.first, &delivered.work).await;
+    restore_owner_binding(&store).await;
+    store.close().await;
+    let store = open(url, &clock).await;
+    defer_notice_after_restart(&store, &pool, &reviews.first).await;
+    store.close().await;
+    let store = open(url, &clock).await;
+    restore_owner_binding(&store).await;
+    recover_notice(&store, &pool, &clock, &reviews.first, &recorded).await;
+    close_objective_with_pending_review(&store, &host, &pool, &reviews).await;
+    approve_no_op_verdict(&store, &host, &pool, &reviews.no_op_review).await;
+    unrelated_reviewer_authority(&store, &host, &reviews.first, &recorded).await;
+    bounded_review_history(&store, &pool, &reviews.first).await;
+    pool.close().await;
+    store.close().await;
+}
+
+async fn deliver_children(store: &Store, host: &HostAuthority) -> DeliveredChildren {
     store
         .put_tag_with_workspace(
             "owner",
@@ -227,16 +264,16 @@ async fn contract(url: &str) {
         )
         .await
         .unwrap();
-    let owner = start(&store, &host, &objective.starting_task_id).await;
+    let owner = start(store, host, &objective.starting_task_id).await;
     assert!(matches!(
         store
-            .send_attempt_tag_message(&host, &request(&owner, "undelivered", "reviewer", HEAD))
+            .send_attempt_tag_message(host, &request(&owner, "undelivered", "reviewer", HEAD))
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     let child = store
         .start_work_session(
-            &host,
+            host,
             &StartWorkSessionRequest {
                 attempt: Some(owner.clone()),
                 operation_id: "implementation".into(),
@@ -249,7 +286,7 @@ async fn contract(url: &str) {
         .unwrap();
     let no_op_child = store
         .start_work_session(
-            &host,
+            host,
             &StartWorkSessionRequest {
                 attempt: Some(owner.clone()),
                 operation_id: "unchanged".into(),
@@ -260,19 +297,36 @@ async fn contract(url: &str) {
         )
         .await
         .unwrap();
-    finish(&store, &host, &owner, Some(BASE)).await;
-    let work = start(&store, &host, &child.latest_task_id).await;
-    finish(&store, &host, &work, Some(HEAD)).await;
-    let unchanged = start(&store, &host, &no_op_child.latest_task_id).await;
-    finish(&store, &host, &unchanged, Some(BASE)).await;
+    finish(store, host, &owner, Some(BASE)).await;
+    let work = start(store, host, &child.latest_task_id).await;
+    finish(store, host, &work, Some(HEAD)).await;
+    let unchanged = start(store, host, &no_op_child.latest_task_id).await;
+    finish(store, host, &unchanged, Some(BASE)).await;
+    DeliveredChildren {
+        child,
+        no_op_child,
+        work,
+    }
+}
+
+async fn request_child_reviews(
+    store: &Store,
+    host: &HostAuthority,
+    delivered: &DeliveredChildren,
+) -> AcceptedReviews {
+    let DeliveredChildren {
+        child,
+        no_op_child,
+        work,
+    } = delivered;
     let child = store
         .get_work_session(OPERATOR, &child.work_session_id)
         .await
         .unwrap();
-    let report = start(&store, &host, child.report_task_id.as_ref().unwrap()).await;
+    let report = start(store, host, child.report_task_id.as_ref().unwrap()).await;
     assert!(
         store
-            .attempt_capabilities(&host, &report)
+            .attempt_capabilities(host, &report)
             .await
             .unwrap()
             .may_request_commit_review
@@ -281,7 +335,7 @@ async fn contract(url: &str) {
         matches!(
             store
                 .send_attempt_tag_message(
-                    &host,
+                    host,
                     &request(&report, "other-child-commit", "reviewer", BASE)
                 )
                 .await,
@@ -292,7 +346,7 @@ async fn contract(url: &str) {
     assert!(matches!(
         store
             .send_attempt_tag_message(
-                &host,
+                host,
                 &request(&report, "wrong-commit", "reviewer", &"3".repeat(40))
             )
             .await,
@@ -300,8 +354,8 @@ async fn contract(url: &str) {
     ));
     let input = request(&report, "first-review", "reviewer", HEAD);
     let (left, right) = tokio::join!(
-        store.send_attempt_tag_message(&host, &input),
-        store.send_attempt_tag_message(&host, &input)
+        store.send_attempt_tag_message(host, &input),
+        store.send_attempt_tag_message(host, &input)
     );
     let first = left.unwrap().message.unwrap();
     assert_eq!(right.unwrap().message.unwrap(), first);
@@ -312,7 +366,7 @@ async fn contract(url: &str) {
     assert!(matches!(
         store
             .get_review_artifact(
-                &host,
+                host,
                 &GetReviewArtifactRequest {
                     attempt: Some(report.clone()),
                     review_id: first.message_id.clone()
@@ -322,14 +376,14 @@ async fn contract(url: &str) {
         Err(StoreError::PermissionDenied)
     ));
     let second = store
-        .send_attempt_tag_message(&host, &request(&report, "second-review", "second", HEAD))
+        .send_attempt_tag_message(host, &request(&report, "second-review", "second", HEAD))
         .await
         .unwrap()
         .message
         .unwrap();
     let continuation = store
         .continue_work_session(
-            &host,
+            host,
             &ContinueWorkSessionRequest {
                 attempt: Some(report.clone()),
                 operation_id: "obsolete-child".into(),
@@ -341,23 +395,20 @@ async fn contract(url: &str) {
         .unwrap();
     assert!(
         !store
-            .attempt_capabilities(&host, &report)
+            .attempt_capabilities(host, &report)
             .await
             .unwrap()
             .may_request_commit_review
     );
     assert!(matches!(
         store
-            .send_attempt_tag_message(
-                &host,
-                &request(&report, "obsolete-commit", "reviewer", HEAD)
-            )
+            .send_attempt_tag_message(host, &request(&report, "obsolete-commit", "reviewer", HEAD))
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
     assert_eq!(
         store
-            .send_attempt_tag_message(&host, &input)
+            .send_attempt_tag_message(host, &input)
             .await
             .unwrap()
             .message
@@ -365,27 +416,39 @@ async fn contract(url: &str) {
         first,
         "accepted request replay stays stable after the child advances"
     );
-    finish(&store, &host, &report, Some(BASE)).await;
+    finish(store, host, &report, Some(BASE)).await;
     let no_op_child = store
         .get_work_session(OPERATOR, &no_op_child.work_session_id)
         .await
         .unwrap();
-    let no_op_report = start(&store, &host, no_op_child.report_task_id.as_ref().unwrap()).await;
+    let no_op_report = start(store, host, no_op_child.report_task_id.as_ref().unwrap()).await;
     let no_op_review = store
-        .send_attempt_tag_message(
-            &host,
-            &request(&no_op_report, "no-op-review", "gated", BASE),
-        )
+        .send_attempt_tag_message(host, &request(&no_op_report, "no-op-review", "gated", BASE))
         .await
         .unwrap()
         .message
         .unwrap();
-    finish(&store, &host, &no_op_report, Some(BASE)).await;
+    finish(store, host, &no_op_report, Some(BASE)).await;
+    AcceptedReviews {
+        first,
+        second,
+        no_op_review,
+        continuation,
+    }
+}
+
+async fn pending_review_projection(store: &Store, pool: &sqlx::AnyPool, reviews: &AcceptedReviews) {
+    let AcceptedReviews {
+        first,
+        second,
+        no_op_review,
+        ..
+    } = reviews;
     assert_eq!(
         store.get_objective("goal").await.unwrap().status(),
         ObjectiveStatus::Working
     );
-    let idle: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_objective_notices WHERE objective_id='goal' AND notice_key LIKE 'idle:%'").fetch_one(&pool).await.unwrap();
+    let idle: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_objective_notices WHERE objective_id='goal' AND notice_key LIKE 'idle:%'").fetch_one(pool).await.unwrap();
     assert_eq!(
         idle, 0,
         "a pending commit review prevents premature finite-Objective idle continuation"
@@ -419,8 +482,17 @@ async fn contract(url: &str) {
         .unwrap();
     assert_eq!(page3.reviews[0].request_id, first.message_id);
     assert_eq!(page3.next_before_order, 0);
+}
+
+async fn record_paused_verdict(
+    store: &Store,
+    host: &HostAuthority,
+    pool: &sqlx::AnyPool,
+    first: &TagMessage,
+    work: &InspectAttemptRequest,
+) -> CommitReview {
     let assignment = store
-        .claim_task_with_workspaces(&host, "reviewer-first", &["repo".into()])
+        .claim_task_with_workspaces(host, "reviewer-first", &["repo".into()])
         .await
         .unwrap()
         .unwrap();
@@ -435,12 +507,12 @@ async fn contract(url: &str) {
         review_id: first.message_id.clone(),
     };
     assert!(matches!(
-        store.get_review_artifact(&host, &artifact).await,
+        store.get_review_artifact(host, &artifact).await,
         Err(StoreError::FailedPrecondition(_))
     ));
     store
         .start_task(
-            &host,
+            host,
             &StartTaskRequest {
                 task_id: reviewer.task_id.clone(),
                 attempt_id: reviewer.attempt_id.clone(),
@@ -449,7 +521,7 @@ async fn contract(url: &str) {
         )
         .await
         .unwrap();
-    let frozen = store.get_review_artifact(&host, &artifact).await.unwrap();
+    let frozen = store.get_review_artifact(host, &artifact).await.unwrap();
     assert_eq!(
         frozen,
         store
@@ -467,10 +539,10 @@ async fn contract(url: &str) {
         ..artifact.clone()
     };
     assert!(matches!(
-        store.get_review_artifact(&host, &wrong_token).await,
+        store.get_review_artifact(host, &wrong_token).await,
         Err(StoreError::PermissionDenied)
     ));
-    let other_host = support::register_host(&store, "wrong-host").await;
+    let other_host = support::register_host(store, "wrong-host").await;
     assert!(matches!(
         store.get_review_artifact(&other_host, &artifact).await,
         Err(StoreError::PermissionDenied)
@@ -480,7 +552,7 @@ async fn contract(url: &str) {
         .await
         .unwrap();
     assert_eq!(
-        store.get_review_artifact(&host, &artifact).await.unwrap(),
+        store.get_review_artifact(host, &artifact).await.unwrap(),
         frozen
     );
     store
@@ -496,8 +568,8 @@ async fn contract(url: &str) {
         .unwrap();
     let verdict = response(&reviewer, &first.message_id);
     let (left, right) = tokio::join!(
-        store.send_attempt_tag_message(&host, &verdict),
-        store.send_attempt_tag_message(&host, &verdict)
+        store.send_attempt_tag_message(host, &verdict),
+        store.send_attempt_tag_message(host, &verdict)
     );
     let recorded = left.unwrap().review.unwrap();
     assert_eq!(right.unwrap().review.unwrap(), recorded);
@@ -506,26 +578,29 @@ async fn contract(url: &str) {
     conflict.operation_id = "conflicting-verdict".into();
     conflict.text = "Changed opinion".into();
     assert!(matches!(
-        store.send_attempt_tag_message(&host, &conflict).await,
+        store.send_attempt_tag_message(host, &conflict).await,
         Err(StoreError::Conflict(_))
     ));
     store.sweep_commit_reviews().await.unwrap();
     let notices: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM supertag_v2_objective_notices WHERE notice_key LIKE 'review:%'",
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .unwrap();
     assert_eq!(
         notices, 0,
         "paused Objectives retain verdicts without executing notices"
     );
-    finish(&store, &host, &reviewer, None).await;
+    finish(store, host, &reviewer, None).await;
     assert!(matches!(
-        store.get_review_artifact(&host, &artifact).await,
+        store.get_review_artifact(host, &artifact).await,
         Err(StoreError::FailedPrecondition(_))
     ));
-    // Restore the owner binding before the paused Objective is resumed.
+    recorded
+}
+
+async fn restore_owner_binding(store: &Store) {
     store
         .put_tag_with_workspace(
             "owner",
@@ -539,8 +614,9 @@ async fn contract(url: &str) {
         )
         .await
         .unwrap();
-    store.close().await;
-    let store = open(url, &clock).await;
+}
+
+async fn defer_notice_after_restart(store: &Store, pool: &sqlx::AnyPool, first: &TagMessage) {
     store
         .resume_objective(
             OPERATOR,
@@ -563,7 +639,7 @@ async fn contract(url: &str) {
         "SELECT notice_retry_at_ms FROM supertag_v2_commit_reviews WHERE request_id=$1",
     )
     .bind(&first.message_id)
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .unwrap();
     assert_eq!(deferred, NOW + 30_000);
@@ -571,25 +647,19 @@ async fn contract(url: &str) {
         "SELECT COUNT(*) FROM supertag_v2_objective_notices WHERE notice_key=$1",
     )
     .bind(format!("review:{}", first.message_id))
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .unwrap();
     assert_eq!(notices, 0);
-    store.close().await;
-    let store = open(url, &clock).await;
-    store
-        .put_tag_with_workspace(
-            "owner",
-            "Coordinate the review",
-            vec!["files:read".into(), "mailbox:send".into()],
-            Some(WorkspaceSpec {
-                workspace_id: "repo".into(),
-                base_commit: BASE.into(),
-                github_source: None,
-            }),
-        )
-        .await
-        .unwrap();
+}
+
+async fn recover_notice(
+    store: &Store,
+    pool: &sqlx::AnyPool,
+    clock: &Arc<AtomicI64>,
+    first: &TagMessage,
+    recorded: &CommitReview,
+) {
     clock.store(NOW + 30_001, Ordering::SeqCst);
     store.sweep_commit_reviews().await.unwrap();
     store.sweep_commit_reviews().await.unwrap();
@@ -597,7 +667,7 @@ async fn contract(url: &str) {
         "SELECT COUNT(*) FROM supertag_v2_objective_notices WHERE notice_key=$1",
     )
     .bind(format!("review:{}", first.message_id))
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .unwrap();
     assert_eq!(notices, 1);
@@ -612,17 +682,31 @@ async fn contract(url: &str) {
         .into_iter()
         .find(|r| r.request_id == first.message_id)
         .unwrap();
-    assert_eq!(review, recorded);
+    assert_eq!(&review, recorded);
+}
+
+async fn close_objective_with_pending_review(
+    store: &Store,
+    host: &HostAuthority,
+    pool: &sqlx::AnyPool,
+    reviews: &AcceptedReviews,
+) {
+    let AcceptedReviews {
+        first,
+        second,
+        continuation,
+        ..
+    } = reviews;
     let second_id: String = sqlx::query_scalar(
         "SELECT task_id FROM supertag_v2_mailbox_tasks WHERE recipient_tag_id='second'",
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .unwrap();
-    let second_attempt = start(&store, &host, &second_id).await;
+    let second_attempt = start(store, host, &second_id).await;
     assert!(matches!(
         store
-            .send_attempt_tag_message(&host, &response(&second_attempt, &first.message_id))
+            .send_attempt_tag_message(host, &response(&second_attempt, &first.message_id))
             .await,
         Err(StoreError::PermissionDenied) | Err(StoreError::NotFound(_))
     ));
@@ -638,7 +722,7 @@ async fn contract(url: &str) {
         .await
         .unwrap();
     let closed_verdict = store
-        .send_attempt_tag_message(&host, &response(&second_attempt, &second.message_id))
+        .send_attempt_tag_message(host, &response(&second_attempt, &second.message_id))
         .await
         .unwrap()
         .review
@@ -652,7 +736,7 @@ async fn contract(url: &str) {
         "SELECT COUNT(*) FROM supertag_v2_objective_notices WHERE notice_key=$1",
     )
     .bind(format!("review:{}", second.message_id))
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .unwrap();
     assert_eq!(
@@ -667,17 +751,25 @@ async fn contract(url: &str) {
             .state(),
         TaskState::Cancelled
     );
-    finish(&store, &host, &second_attempt, None).await;
+    finish(store, host, &second_attempt, None).await;
+}
+
+async fn approve_no_op_verdict(
+    store: &Store,
+    host: &HostAuthority,
+    pool: &sqlx::AnyPool,
+    no_op_review: &TagMessage,
+) {
     let gated_id: String = sqlx::query_scalar(
         "SELECT task_id FROM supertag_v2_mailbox_tasks WHERE recipient_tag_id='gated'",
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .unwrap();
-    let gated = start(&store, &host, &gated_id).await;
+    let gated = start(store, host, &gated_id).await;
     let patch = store
         .get_review_artifact(
-            &host,
+            host,
             &GetReviewArtifactRequest {
                 attempt: Some(gated.clone()),
                 review_id: no_op_review.message_id.clone(),
@@ -693,7 +785,7 @@ async fn contract(url: &str) {
     );
     let gated_input = response(&gated, &no_op_review.message_id);
     let pending = store
-        .send_attempt_tag_message(&host, &gated_input)
+        .send_attempt_tag_message(host, &gated_input)
         .await
         .unwrap();
     assert!(pending.review.is_none());
@@ -716,7 +808,7 @@ async fn contract(url: &str) {
     );
     store
         .finish_task(
-            &host,
+            host,
             &FinishTaskRequest {
                 task_id: gated.task_id.clone(),
                 attempt_id: gated.attempt_id.clone(),
@@ -743,16 +835,11 @@ async fn contract(url: &str) {
         )
         .await
         .unwrap();
-    let continued = start(
-        &store,
-        &host,
-        decided.continuation_task_id.as_ref().unwrap(),
-    )
-    .await;
+    let continued = start(store, host, decided.continuation_task_id.as_ref().unwrap()).await;
     assert_eq!(
         store
             .get_review_artifact(
-                &host,
+                host,
                 &GetReviewArtifactRequest {
                     attempt: Some(continued.clone()),
                     review_id: no_op_review.message_id.clone()
@@ -764,7 +851,7 @@ async fn contract(url: &str) {
     );
     let gated_input = response(&continued, &no_op_review.message_id);
     let approved = store
-        .send_attempt_tag_message(&host, &gated_input)
+        .send_attempt_tag_message(host, &gated_input)
         .await
         .unwrap()
         .review
@@ -775,7 +862,7 @@ async fn contract(url: &str) {
     );
     let duplicate = store
         .send_attempt_tag_message(
-            &host,
+            host,
             &SendAttemptTagMessageRequest {
                 operation_id: "duplicate-verdict".into(),
                 ..gated_input
@@ -785,7 +872,15 @@ async fn contract(url: &str) {
         .unwrap();
     assert!(duplicate.duplicate);
     assert_eq!(duplicate.review.unwrap(), approved);
-    finish(&store, &host, &continued, None).await;
+    finish(store, host, &continued, None).await;
+}
+
+async fn unrelated_reviewer_authority(
+    store: &Store,
+    host: &HostAuthority,
+    first: &TagMessage,
+    recorded: &CommitReview,
+) {
     let unrelated = store
         .submit_task(
             OPERATOR,
@@ -800,11 +895,11 @@ async fn contract(url: &str) {
         )
         .await
         .unwrap();
-    let unrelated = start(&store, &host, &unrelated.task_id).await;
+    let unrelated = start(store, host, &unrelated.task_id).await;
     assert!(matches!(
         store
             .get_review_artifact(
-                &host,
+                host,
                 &GetReviewArtifactRequest {
                     attempt: Some(unrelated.clone()),
                     review_id: first.message_id.clone()
@@ -814,12 +909,12 @@ async fn contract(url: &str) {
         Err(StoreError::PermissionDenied)
     ));
     let correlated = store
-        .send_attempt_tag_message(&host, &response(&unrelated, &first.message_id))
+        .send_attempt_tag_message(host, &response(&unrelated, &first.message_id))
         .await
         .unwrap();
     assert!(correlated.duplicate);
     assert_eq!(
-        correlated.review.unwrap(),
+        &correlated.review.unwrap(),
         recorded,
         "another authorized reviewer root may repeat the correlated verdict without changing its original attribution"
     );
@@ -827,7 +922,7 @@ async fn contract(url: &str) {
     assert!(matches!(
         store
             .get_review_artifact(
-                &host,
+                host,
                 &GetReviewArtifactRequest {
                     attempt: Some(unrelated),
                     review_id: first.message_id.clone()
@@ -836,6 +931,9 @@ async fn contract(url: &str) {
             .await,
         Err(StoreError::FailedPrecondition(_))
     ));
+}
+
+async fn bounded_review_history(store: &Store, pool: &sqlx::AnyPool, first: &TagMessage) {
     // A history page must fit the transport even when every maximum-length
     // UTF-16 summary uses three-byte UTF-8 characters. Populate audit-only rows
     // after closure to exercise the projection without scheduling fixture work.
@@ -876,14 +974,22 @@ async fn contract(url: &str) {
         }
     }
     assert_eq!(seen.len(), 63);
-    pool.close().await;
-    store.close().await;
 }
-
 async fn gated_request_contract(url: &str) {
     let clock = Arc::new(AtomicI64::new(NOW));
     let store = open(url, &clock).await;
     let host = support::register_host(&store, "scoped-review-host").await;
+    let (child_a, child_b, report) = prepare_gated_reports(&store, &host).await;
+    let (sent, child_continuation) =
+        approve_scoped_request(&store, &host, &child_a, &child_b, &report).await;
+    record_separate_root_verdict(&store, &host, sent, &child_continuation).await;
+    store.close().await;
+}
+
+async fn prepare_gated_reports(
+    store: &Store,
+    host: &HostAuthority,
+) -> (WorkSession, WorkSession, InspectAttemptRequest) {
     store
         .put_tag_spec(PutTagRequest {
             tag_id: "scoped-owner".into(),
@@ -932,13 +1038,13 @@ async fn gated_request_contract(url: &str) {
         )
         .await
         .unwrap();
-    let owner = start(&store, &host, &objective.starting_task_id).await;
+    let owner = start(store, host, &objective.starting_task_id).await;
     let mut children = vec![];
     for id in ["a", "b"] {
         children.push(
             store
                 .start_work_session(
-                    &host,
+                    host,
                     &StartWorkSessionRequest {
                         attempt: Some(owner.clone()),
                         operation_id: format!("scoped-child-{id}"),
@@ -951,12 +1057,12 @@ async fn gated_request_contract(url: &str) {
                 .unwrap(),
         );
     }
-    finish(&store, &host, &owner, Some(BASE)).await;
-    let other_host = support::register_host(&store, "scoped-other-host").await;
-    let child_a_attempt = start(&store, &host, &children[0].latest_task_id).await;
-    let child_b_attempt = start(&store, &other_host, &children[1].latest_task_id).await;
-    finish(&store, &other_host, &child_b_attempt, Some(BASE)).await;
-    finish(&store, &host, &child_a_attempt, Some(HEAD)).await;
+    finish(store, host, &owner, Some(BASE)).await;
+    let other_host = support::register_host(store, "scoped-other-host").await;
+    let child_a_attempt = start(store, host, &children[0].latest_task_id).await;
+    let child_b_attempt = start(store, &other_host, &children[1].latest_task_id).await;
+    finish(store, &other_host, &child_b_attempt, Some(BASE)).await;
+    finish(store, host, &child_a_attempt, Some(HEAD)).await;
     let child_a = store
         .get_work_session(OPERATOR, &children[0].work_session_id)
         .await
@@ -965,23 +1071,33 @@ async fn gated_request_contract(url: &str) {
         .get_work_session(OPERATOR, &children[1].work_session_id)
         .await
         .unwrap();
-    let report_b = start(&store, &host, child_b.report_task_id.as_ref().unwrap()).await;
-    finish(&store, &host, &report_b, Some(BASE)).await;
-    let report = start(&store, &host, child_a.report_task_id.as_ref().unwrap()).await;
+    let report_b = start(store, host, child_b.report_task_id.as_ref().unwrap()).await;
+    finish(store, host, &report_b, Some(BASE)).await;
+    let report = start(store, host, child_a.report_task_id.as_ref().unwrap()).await;
+    (child_a, child_b, report)
+}
+
+async fn approve_scoped_request(
+    store: &Store,
+    host: &HostAuthority,
+    child_a: &WorkSession,
+    child_b: &WorkSession,
+    report: &InspectAttemptRequest,
+) -> (TagMessage, WorkSession) {
     let original_report_task = store.get_task(&report.task_id).await.unwrap();
     let pending = store
         .send_attempt_tag_message(
-            &host,
-            &request(&report, "gated-request", "scoped-reviewer", HEAD),
+            host,
+            &request(report, "gated-request", "scoped-reviewer", HEAD),
         )
         .await
         .unwrap();
     assert!(pending.message.is_none());
     let approval = pending.approval.unwrap();
     finish_waiting(
-        &store,
-        &host,
-        &report,
+        store,
+        host,
+        report,
         Some(BASE),
         vec![approval.approval_id.clone()],
     )
@@ -1019,15 +1135,10 @@ async fn gated_request_contract(url: &str) {
         )
         .await
         .unwrap();
-    let continued = start(
-        &store,
-        &host,
-        approved.continuation_task_id.as_ref().unwrap(),
-    )
-    .await;
+    let continued = start(store, host, approved.continuation_task_id.as_ref().unwrap()).await;
     report_scope::assert_restricted_report_continuation(
-        &store,
-        &host,
+        store,
+        host,
         &continued,
         &original_report_task,
         &child_b.work_session_id,
@@ -1037,7 +1148,7 @@ async fn gated_request_contract(url: &str) {
     assert!(matches!(
         store
             .send_attempt_tag_message(
-                &host,
+                host,
                 &request(&continued, "wrong-inherited-child", "scoped-reviewer", BASE)
             )
             .await,
@@ -1045,7 +1156,7 @@ async fn gated_request_contract(url: &str) {
     ));
     let sent = store
         .send_attempt_tag_message(
-            &host,
+            host,
             &request(
                 &continued,
                 "approved-inherited-child",
@@ -1057,10 +1168,13 @@ async fn gated_request_contract(url: &str) {
         .unwrap()
         .message
         .unwrap();
-    assert_eq!(sent.review.unwrap().source_task_id, child_a.latest_task_id);
+    assert_eq!(
+        sent.review.as_ref().unwrap().source_task_id,
+        child_a.latest_task_id
+    );
     let child_continuation = store
         .continue_work_session(
-            &host,
+            host,
             &ContinueWorkSessionRequest {
                 attempt: Some(continued.clone()),
                 operation_id: "same-child-after-approved-request".into(),
@@ -1071,9 +1185,18 @@ async fn gated_request_contract(url: &str) {
         .await
         .unwrap();
     assert_eq!(child_continuation.work_session_id, child_a.work_session_id);
-    finish(&store, &host, &continued, Some(BASE)).await;
+    finish(store, host, &continued, Some(BASE)).await;
+    (sent, child_continuation)
+}
+
+async fn record_separate_root_verdict(
+    store: &Store,
+    host: &HostAuthority,
+    sent: TagMessage,
+    child_continuation: &WorkSession,
+) {
     let claim = store
-        .claim_task_with_workspaces(&host, "scoped-reviewer", &["repo".into()])
+        .claim_task_with_workspaces(host, "scoped-reviewer", &["repo".into()])
         .await
         .unwrap()
         .unwrap();
@@ -1085,7 +1208,7 @@ async fn gated_request_contract(url: &str) {
     };
     store
         .start_task(
-            &host,
+            host,
             &StartTaskRequest {
                 task_id: reviewer.task_id.clone(),
                 attempt_id: reviewer.attempt_id.clone(),
@@ -1094,7 +1217,7 @@ async fn gated_request_contract(url: &str) {
         )
         .await
         .unwrap();
-    finish(&store, &host, &reviewer, None).await;
+    finish(store, host, &reviewer, None).await;
     store
         .cancel_objective(
             OPERATOR,
@@ -1148,11 +1271,11 @@ async fn gated_request_contract(url: &str) {
         )
         .await
         .unwrap();
-    let root = start(&store, &host, &root.task_id).await;
+    let root = start(store, host, &root.task_id).await;
     assert!(matches!(
         store
             .get_review_artifact(
-                &host,
+                host,
                 &GetReviewArtifactRequest {
                     attempt: Some(root.clone()),
                     review_id: sent.message_id.clone()
@@ -1163,7 +1286,7 @@ async fn gated_request_contract(url: &str) {
     ));
     let verdict = store
         .send_attempt_tag_message(
-            &host,
+            host,
             &SendAttemptTagMessageRequest {
                 attempt: Some(root.clone()),
                 operation_id: "separate-root-verdict".into(),
@@ -1186,10 +1309,8 @@ async fn gated_request_contract(url: &str) {
         verdict.review.unwrap().verdict.unwrap().task_id,
         root.task_id
     );
-    finish(&store, &host, &root, None).await;
-    store.close().await;
+    finish(store, host, &root, None).await;
 }
-
 #[tokio::test]
 async fn sqlite_commit_reviews() {
     let dir = tempfile::tempdir().unwrap();
