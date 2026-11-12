@@ -113,6 +113,7 @@ Each `supertag-ai` import path has its own stability level:
 | `supertag-ai/surfaces` | Beta | Custom collaboration surface contract and Markdown pipeline |
 | `supertag-ai/transport` | Experimental | Persistent remote Worklet connection, protocol, and gRPC adapters |
 | `supertag-ai/coordination` | Experimental | `CoordinationClient`, which lists the operator inbox through `InboxService`, and the inbox messages it returns |
+| `supertag-ai/gateway` | Experimental | `createGatewayClient`, operator service clients, and their `supertag.runtime.v2` protobuf requests, responses, and streams |
 | `supertag-ai/control-plane` | Experimental | Embeddable Control Plane service boundary |
 | `supertag-ai/spec/*` | Experimental | Language-neutral JSON Schemas and fixtures |
 | `supertag-ai/harnesses/codex`, `/claude-code`, `/cursor`, `/opencode` | Experimental | Shipped Codex, Claude Code, Cursor, and OpenCode harnesses |
@@ -137,6 +138,10 @@ The Python SDK's operator API client, `supertag.operator`, installed with the `o
 Experimental: `OperatorClient`, `OperatorClientSync`, `error_detail`, `ErrorDetail`, `Code`,
 `ConnectError`, `OPERATOR_API_VERSION`, and the generated `supertag.operator.v1` modules. They
 follow the operator protos and change with them.
+
+The Python SDK's `supertag.gateway` module, installed with the `runtime` extra, is Experimental.
+`GatewayClient` and `GatewayClientSync` connect to a Rust Gateway over gRPC and expose its
+operator services and matching protobuf messages.
 
 ## Release policy
 

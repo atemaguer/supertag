@@ -31,6 +31,7 @@ operator = ["connect-python>=0.9,<0.10", "protobuf>=7.35.1,<8"]
 runtime = ["grpcio>=1.85.1,<2", "protobuf>=7.36.2,<8"]
 dev = [
   "connect-python>=0.9,<0.10",
+  "grpcio>=1.85.1,<2",
   "grpcio-tools==1.85.1",
   "openai<2.45",
   "openai-agents>=0.8,<0.9",

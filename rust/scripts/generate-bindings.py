@@ -102,10 +102,10 @@ def python_sdk_messages(expected: dict[Path, bytes]) -> dict[Path, bytes]:
     files = {}
     for module in MODULES:
         original = f"'supertag.runtime.v2.{module}_pb2'".encode()
-        for extension in ("py", "pyi"):
-            path = f"{module}_pb2.{extension}"
+        for suffix in ("_pb2.py", "_pb2.pyi", "_pb2_grpc.py"):
+            path = f"{module}{suffix}"
             messages = expected[PYTHON_PROTO / path]
-            if extension == "py":
+            if suffix == "_pb2.py":
                 if messages.count(original) != 1:
                     raise SystemExit(f"Unexpected Python protobuf module name in {path}")
                 messages = messages.replace(original, f"'supertag._runtime_v2.{module}_pb2'".encode())
@@ -132,6 +132,7 @@ def main() -> None:
         **{ADAPTER_PROTO / f"{module}_pb.ts": expected[TYPESCRIPT_PROTO / f"{module}_pb.ts"]
            for module in MODULES},
     }
+    sdk_inventory = set(PYTHON_SDK.glob("*_pb2*"))
     if args.check:
         changed = sorted(
             path for path in expected.keys() | checked_in.keys()
@@ -142,6 +143,7 @@ def main() -> None:
             for path, content in package_bindings.items()
             if not path.is_file() or path.read_bytes() != content
         )
+        changed.extend(path.relative_to(REPO) for path in sorted(sdk_inventory - package_bindings.keys()))
         if changed:
             raise SystemExit(
                 "Stale runtime bindings: " + ", ".join(map(str, changed))
@@ -152,6 +154,8 @@ def main() -> None:
 
     for path in checked_in.keys() - expected.keys():
         (BINDINGS / path).unlink()
+    for path in sdk_inventory - package_bindings.keys():
+        path.unlink()
     for path, content in expected.items():
         target = BINDINGS / path
         target.parent.mkdir(parents=True, exist_ok=True)

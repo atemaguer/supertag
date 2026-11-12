@@ -1,1 +1,1 @@
-"""Private generated messages for the Rust Harness protocol."""
+"""Generated protobuf messages and gRPC stubs for the SuperTag runtime."""

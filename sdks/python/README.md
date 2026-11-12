@@ -92,7 +92,35 @@ responsibilities and permissions. The
 [operator API reference](../../docs/reference/operator-api/README.md) lists
 every RPC.
 
-The `operator` extra installs the client and its dependencies, `connect-python` and `protobuf`.
+### Rust Gateway
+
+Use `supertag.gateway` with a Rust deployment. The `runtime` extra installs gRPC and protobuf.
+This example lists Tags, the persistent AI actors in your organization.
+
+```python
+import os
+
+from supertag.gateway import GatewayClientSync, runtime
+
+with GatewayClientSync(
+    os.environ["SUPERTAG_GATEWAY_URL"], os.environ["SUPERTAG_OPERATOR_TOKEN"]
+) as client:
+    response = client.operator.ListTags(runtime.ListTagsRequest(), timeout=5)
+    for tag in response.tags:
+        print(tag.name)
+```
+
+`GatewayClient` exposes the same services with `async with` and awaitable unary calls.
+The generated gRPC methods use the protobuf RPC names, such as `ListTags` and `Watch`.
+Pass a `timeout` in seconds to bound a call. Watch streams can resume from their last
+`resume_token`. Use HTTPS for a remote Gateway and a loopback IP address for local
+cleartext. Pass a PEM `ca` for private TLS and a PEM certificate chain and key as
+`identity=(cert, key)` if the Gateway requires mutual TLS.
+
+### Connect operator API
+
+The `operator` extra installs the Connect client and its dependencies, `connect-python` and
+`protobuf`.
 
 ```sh
 python -m pip install 'supertag[operator]==0.2.0a9'

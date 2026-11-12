@@ -45,6 +45,10 @@
       "types": "./dist/coordination.d.ts",
       "import": "./dist/coordination.js"
     },
+    "./gateway": {
+      "types": "./dist/gateway.d.ts",
+      "import": "./dist/gateway.js"
+    },
     "./worker": {
       "types": "./dist/worker.d.ts",
       "import": "./dist/worker.js"
