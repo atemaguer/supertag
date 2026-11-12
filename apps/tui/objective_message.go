@@ -17,6 +17,8 @@ type objectiveMessage struct {
 	text, status, tag, reply, waiting string
 	sending                           bool
 	cancel                            context.CancelFunc
+	work                              []string
+	workShown                         map[string]bool
 }
 
 type objectiveSentMsg struct {
@@ -147,18 +149,42 @@ func (m *model) objectiveReplyRead(msg objectiveReplyMsg) tea.Cmd {
 		case client.EventReply:
 			message.waiting = ""
 			message.reply = terminalLines(msg.event.Reply.GetText())
-			done = true
-		case client.EventTurnError, client.EventError:
+			done = !m.client.RuntimeV2()
+		case client.EventTurnError:
 			message.waiting = ""
 			message.status += " Could not show the reply. " + terminalText(msg.event.Text)
+			done = !m.client.RuntimeV2()
+		case client.EventError:
+			message.waiting = ""
+			message.status += " Could not follow the reply. " + terminalText(msg.event.Text)
 			done = true
+		case client.EventWorking, client.EventReport:
+			if !m.client.RuntimeV2() {
+				return waitForObjectiveReply(msg.id, message, msg.events)
+			}
+			if message.workShown == nil {
+				message.workShown = map[string]bool{}
+			}
+			key := client.WorkEventKey(msg.event)
+			if key == "" || !message.workShown[key] {
+				message.workShown[key] = true
+				if msg.event.Kind == client.EventWorking {
+					message.work = append(message.work, "Working: "+terminalText(msg.event.Title))
+				} else {
+					message.work = append(message.work, terminalText(msg.event.Title)+" ("+terminalText(msg.event.Status)+")\n"+terminalLines(msg.event.Text))
+				}
+			}
+		case client.EventStillWorking:
+			message.waiting = terminalText(msg.event.Text)
 		default:
 			return waitForObjectiveReply(msg.id, message, msg.events)
 		}
 	}
 	m.refreshObjectiveMessage(msg.id)
 	if done {
-		message.cancel()
+		if message.cancel != nil {
+			message.cancel()
+		}
 		message.cancel = nil
 		return nil
 	}
@@ -182,6 +208,10 @@ func (m model) objectiveMessageText() string {
 	}
 	if message.reply != "" {
 		lines = append(lines, "", terminalText(message.tag)+" replied", message.reply)
+	}
+	if len(message.work) != 0 {
+		lines = append(lines, "", "Work Sessions")
+		lines = append(lines, message.work...)
 	}
 	return strings.Join(lines, "\n")
 }

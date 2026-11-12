@@ -29,7 +29,9 @@ import {
   type HarnessReadMailboxRequest,
   type HarnessReadWorkstreamRequest,
   type HarnessSendTagMessageRequest,
+  type HarnessStartWorkSessionRequest,
   type HarnessUsageRequest,
+  HarnessWorkSessions,
   HarnessWorkstreams,
   LiveInputReceipt,
   type ResolvedSkill,
@@ -72,7 +74,7 @@ async function invoke({
   mayAskObjectiveQuestion?: boolean;
   lostQuestion?: boolean;
   coordination?: Pick<AttemptCapabilities, "mayUseWorkstream" | "mayReadMailbox"> &
-    Partial<Pick<AttemptCapabilities, "maySendTagMessage">>;
+    Partial<Pick<AttemptCapabilities, "maySendTagMessage" | "mayStartWorkSession">>;
   policySnapshot?: TaskPolicySnapshot;
   model?: string;
   skill?: { markdown: string; tamper?: boolean };
@@ -93,6 +95,8 @@ async function invoke({
   const workstreamReads: HarnessReadWorkstreamRequest[] = [];
   const mailboxReads: HarnessReadMailboxRequest[] = [];
   const mailboxSends: HarnessSendTagMessageRequest[] = [];
+  const workSessionStarts: HarnessStartWorkSessionRequest[] = [];
+  const workSessionIds = new Map<string, string>();
   const resolvedSkills: Array<Omit<ResolvedSkill, "$typeName">> = [];
   if (skill) {
     const localPath = join(state, `skill-${"a".repeat(64)}`);
@@ -252,6 +256,30 @@ async function invoke({
             };
           },
         });
+        router.service(HarnessWorkSessions, {
+          start(request, context) {
+            expect(context.requestHeader.get("authorization")).toBe(`Bearer ${token}`);
+            workSessionStarts.push(request);
+            let session = workSessionIds.get(request.operationId);
+            if (!session) {
+              session = `work/00000000-0000-4000-8000-${String(workSessionIds.size + 1).padStart(12, "0")}`;
+              workSessionIds.set(request.operationId, session);
+            }
+            if (workSessionStarts.length === 1)
+              throw new ConnectError("reply lost", Code.Unavailable);
+            return {
+              workSessionId: session,
+              title: request.title,
+              parentTagId: "actor",
+              parentSessionId: request.title === "Wrong parent" ? "other-session" : "session",
+              starterTaskId: request.title === "Wrong starter" ? "other-task" : "task",
+              tagId: request.title === "Wrong target" ? "other-tag" : "actor",
+              latestTaskId: request.title === "Wrong child" ? "task" : "child-task",
+              latestTaskState: TaskState.QUEUED,
+              createdOrder: 1n,
+            };
+          },
+        });
         router.service(HarnessMailbox, {
           sendMessage(request, context) {
             expect(context.requestHeader.get("authorization")).toBe(`Bearer ${token}`);
@@ -362,6 +390,7 @@ async function invoke({
     workstreamReads,
     mailboxReads,
     mailboxSends,
+    workSessionStarts,
   };
 }
 
@@ -565,13 +594,44 @@ it("sends direct Mailbox messages through the real Claude SDK with a stable retr
   expect(run.posts).toEqual([]);
 }, 30000);
 
+it("starts a Work Session through the real Claude SDK with a scoped replay receipt", async () => {
+  const run = await invoke({
+    prompt: "start-work-session",
+    coordination: { mayUseWorkstream: false, mayReadMailbox: false, mayStartWorkSession: true },
+  });
+  expect(
+    run.completions[0]?.succeeded,
+    await readFile(join(run.workspace, "fixture-error.txt"), "utf8").catch(
+      () => run.completions[0]?.result,
+    ),
+  ).toBe(true);
+  expect(run.completions[0]?.result).toBe("fixture started two Work Sessions");
+  expect(run.workSessionStarts).toHaveLength(7);
+  const [first, retry, second] = run.workSessionStarts;
+  expect(first).toMatchObject({
+    operationId: expect.stringMatching(/^claude-work-session:[0-9a-f-]{36}$/),
+    title: "Investigate release",
+    instruction: "Inspect the pinned checkout [REDACTED]",
+    workspaceId: "release",
+    targetTagId: "actor",
+  });
+  expect(retry).toEqual(first);
+  expect(second?.operationId).not.toBe(first?.operationId);
+}, 30000);
+
+it("omits Start Work Session without the Attempt capability", async () => {
+  const run = await invoke({ prompt: "work-session-disabled" });
+  expect(run.completions[0]?.succeeded).toBe(true);
+  expect(run.workSessionStarts).toEqual([]);
+}, 30000);
+
 it.each(["ask-first", "post-first"])(
   "keeps approval and question waits separate (%s)",
   async (order) => {
     const run = await invoke({
       prompt: `mixed-tools-${order}`,
       actions: ["workstream:post"],
-      coordination: { mayUseWorkstream: true, mayReadMailbox: false },
+      coordination: { mayUseWorkstream: true, mayReadMailbox: false, mayStartWorkSession: true },
       mayAskObjectiveQuestion: true,
     });
     expect(
@@ -582,6 +642,7 @@ it.each(["ask-first", "post-first"])(
     ).toBe(true);
     expect(run.questions).toHaveLength(order === "ask-first" ? 1 : 0);
     expect(run.posts).toHaveLength(order === "ask-first" ? 0 : 2);
+    expect(run.workSessionStarts).toEqual([]);
     expect(run.completions[0]?.waitingApprovalIds).toEqual(
       order === "ask-first" ? [] : ["approval-1"],
     );

@@ -28,6 +28,7 @@ type runtimeClient struct {
 	teams         runtimev2connect.TeamsClient
 	events        runtimev2connect.OperatorEventsClient
 	inbox         runtimev2connect.InboxClient
+	workSessions  runtimev2connect.WorkSessionsClient
 }
 
 // NewRuntimeV2 connects to the public Gateway over binary gRPC and HTTP/2.
@@ -85,6 +86,7 @@ func NewRuntimeV2(target Target, version string) (*Client, error) {
 		teams:         runtimev2connect.NewTeamsClient(httpClient, origin, options...),
 		events:        runtimev2connect.NewOperatorEventsClient(httpClient, origin, options...),
 		inbox:         runtimev2connect.NewInboxClient(httpClient, origin, options...),
+		workSessions:  runtimev2connect.NewWorkSessionsClient(httpClient, origin, options...),
 	}
 	return c, nil
 }
@@ -188,7 +190,11 @@ func (c *runtimeClient) listMessages(ctx context.Context, tag, conversation stri
 		if message.GetTask().GetTagId() != tag || message.GetTask().GetTaskId() == "" || message.GetConversation() != conversation {
 			return nil, "", &APIError{Code: connect.CodeDataLoss, Message: "Gateway returned a different conversation message."}
 		}
-		items = append(items, runtimeMessage(message))
+		item, err := c.projectMessage(ctx, message)
+		if err != nil {
+			return nil, "", err
+		}
+		items = append(items, item)
 	}
 	return items, res.Msg.GetNextCursor(), nil
 }
@@ -208,6 +214,21 @@ func (c *runtimeClient) listConversations(ctx context.Context, tag string) ([]*o
 		for _, conv := range res.Msg.GetConversations() {
 			task := conv.GetLatestTask()
 			preview, author := task.GetPrompt(), operatorv1.ConversationAuthor_CONVERSATION_AUTHOR_OPERATOR
+			if task.GetTaskId() != "" {
+				message, err := c.getMessage(ctx, tag, task.GetTaskId())
+				if err != nil {
+					return nil, err
+				}
+				if message.GetConversation() != conv.GetName() || message.GetTask().GetSessionId() != conv.GetSessionId() {
+					return nil, workSessionDataLoss("Gateway returned a different conversation preview.")
+				}
+				if message.GetWorkSessionReportId() != "" {
+					preview, author = "Work Session report pending.", operatorv1.ConversationAuthor_CONVERSATION_AUTHOR_TAG
+					if reply := runtimeReply(message.GetTask()); reply != nil {
+						preview = reply.GetText()
+					}
+				}
+			}
 			if task.GetState() == v2.TaskState_TASK_STATE_SUCCEEDED && task.GetAttemptId() != "" && task.GetResult() != "" {
 				preview, author = task.GetResult(), operatorv1.ConversationAuthor_CONVERSATION_AUTHOR_TAG
 			}
@@ -233,6 +254,11 @@ func runtimeMessage(message *v2.ConversationMessage) *operatorv1.Message {
 	out := &operatorv1.Message{
 		TaskId: task.GetTaskId(), Tag: task.GetTagId(), Conversation: message.GetConversation(),
 		SessionId: task.GetSessionId(), Text: task.GetPrompt(), Status: operatorv1.ReplyStatus_REPLY_STATUS_WAITING,
+	}
+	if message.GetWorkSessionReportId() != "" {
+		// The prompt instructs the parent to report on child work. It was not
+		// written by the operator and must never appear as their message.
+		out.Text = ""
 	}
 	if input := message.GetLiveInput(); input != nil {
 		switch input.GetState() {

@@ -19,12 +19,14 @@ pub(crate) const NONE: &str = "none-v1";
 pub(crate) const OBJECTIVE_ASK: &str = "objective-ask-text-v1";
 pub(crate) const FULL_COORDINATION: &str = "coordination-v1";
 pub(crate) const DIRECT_COORDINATION: &str = "coordination-v2";
+pub(crate) const WORK_SESSIONS: &str = "coordination-v3";
 
 pub(crate) struct Bridge {
     client: HarnessQuestionsClient<Channel>,
     token: String,
     task_id: String,
     tag_id: String,
+    session_id: String,
     attempt_id: String,
     capabilities: AttemptCapabilities,
     inventory: Inventory,
@@ -49,6 +51,7 @@ impl Bridge {
             token: token.into(),
             task_id: task.task_id.clone(),
             tag_id: task.tag_id.clone(),
+            session_id: task.session_id.clone(),
             attempt_id: attempt_id.into(),
             capabilities,
             inventory,
@@ -80,6 +83,7 @@ impl Bridge {
             Inventory::Ask => OBJECTIVE_ASK,
             Inventory::Workstream => FULL_COORDINATION,
             Inventory::Direct => DIRECT_COORDINATION,
+            Inventory::WorkSessions => WORK_SESSIONS,
         }
     }
     pub(crate) fn tools(&self) -> Value {
@@ -157,6 +161,21 @@ impl Bridge {
                         message,
                         operation_id,
                         (&self.task_id, &self.attempt_id, &self.tag_id),
+                        &self.token,
+                        &self.secrets,
+                    )
+                    .await?
+            }
+            Arguments::Start(start)
+                if self.capabilities.may_start_work_session
+                    && !self.asked
+                    && self.coordination.pending.is_empty() =>
+            {
+                self.coordination
+                    .start_session(
+                        start,
+                        operation_id,
+                        (&self.task_id, &self.tag_id, &self.session_id),
                         &self.token,
                         &self.secrets,
                     )

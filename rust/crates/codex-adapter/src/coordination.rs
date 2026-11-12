@@ -7,8 +7,9 @@ use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
         ApprovalState, HarnessPostWorkstreamRequest, HarnessReadMailboxRequest,
-        HarnessReadWorkstreamRequest, HarnessSendTagMessageRequest, TagMessageOrigin,
-        harness_mailbox_client::HarnessMailboxClient,
+        HarnessReadWorkstreamRequest, HarnessSendTagMessageRequest, HarnessStartWorkSessionRequest,
+        TagMessageOrigin, TaskState, harness_mailbox_client::HarnessMailboxClient,
+        harness_work_sessions_client::HarnessWorkSessionsClient,
         harness_workstreams_client::HarnessWorkstreamsClient,
     },
 };
@@ -24,6 +25,7 @@ pub(crate) enum Arguments {
     ReadWorkstream(WorkstreamPage),
     ReadMailbox(Page),
     Send(DirectMessage),
+    Start(StartSession),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -32,6 +34,41 @@ pub(crate) enum Inventory {
     Ask,
     Workstream,
     Direct,
+    WorkSessions,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct StartSession {
+    title: String,
+    instruction: String,
+    workspace: Option<String>,
+    tag: Option<String>,
+}
+
+impl StartSession {
+    fn normalized_title(&self) -> String {
+        self.title.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    fn validate(&self) -> Result<()> {
+        let title = self.normalized_title();
+        ensure!(
+            !title.is_empty()
+                && title.encode_utf16().count() <= 120
+                && !title.contains('\0')
+                && !self.instruction.trim().is_empty()
+                && self.instruction.encode_utf16().count() <= 8000
+                && !self.instruction.contains('\0')
+                && [&self.workspace, &self.tag]
+                    .into_iter()
+                    .all(|field| field.as_ref().is_none_or(|value| !value.is_empty()
+                        && value.len() <= 256
+                        && !value.chars().any(char::is_control))),
+            "invalid Work Session arguments"
+        );
+        Ok(())
+    }
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -108,7 +145,7 @@ pub(crate) fn arguments(params: &Value, inventory: Inventory) -> Result<Argument
             validate_page(page.limit, &page.cursor)?;
             Ok(Arguments::ReadMailbox(page))
         }
-        Some("send_message") if inventory == Inventory::Direct => {
+        Some("send_message") if inventory >= Inventory::Direct => {
             let mut message: DirectMessage = serde_json::from_value(input.clone())
                 .context("invalid Codex direct message arguments")?;
             message.text = message.text.trim().to_owned();
@@ -122,6 +159,18 @@ pub(crate) fn arguments(params: &Value, inventory: Inventory) -> Result<Argument
                 "invalid Codex direct message"
             );
             Ok(Arguments::Send(message))
+        }
+        Some("start_session") if inventory >= Inventory::WorkSessions => {
+            ensure!(
+                ["workspace", "tag"]
+                    .into_iter()
+                    .all(|key| input.get(key).is_none_or(Value::is_string)),
+                "invalid Codex Work Session arguments"
+            );
+            let start: StartSession = serde_json::from_value(input.clone())
+                .context("invalid Codex Work Session arguments")?;
+            start.validate()?;
+            Ok(Arguments::Start(start))
         }
         _ => bail!("Codex requested an unregistered coordination tool"),
     }
@@ -168,7 +217,7 @@ pub(crate) fn tool_specs(inventory: Inventory) -> Vec<Value> {
             "inputSchema":{"type":"object","properties":properties,"additionalProperties":false}
         }));
     }
-    if inventory == Inventory::Direct {
+    if inventory >= Inventory::Direct {
         tools.push(json!({
             "type":"function", "name":"send_message",
             "description":"Send a private message to another Tag. A pending approval requires ending the turn and waiting for a decision.",
@@ -178,12 +227,25 @@ pub(crate) fn tool_specs(inventory: Inventory) -> Vec<Value> {
             },"required":["to","text"],"additionalProperties":false}
         }));
     }
+    if inventory >= Inventory::WorkSessions {
+        tools.push(json!({
+            "type":"function", "name":"start_session",
+            "description":"Start a Work Session with a short title and self-contained instruction. After it is accepted, acknowledge the work and finish this turn. The Work Session reports to this conversation.",
+            "inputSchema":{"type":"object","properties":{
+                "title":{"type":"string","minLength":1,"maxLength":120},
+                "instruction":{"type":"string","minLength":1,"maxLength":8000},
+                "workspace":{"type":"string","minLength":1,"maxLength":256},
+                "tag":{"type":"string","minLength":1,"maxLength":256}
+            },"required":["title","instruction"],"additionalProperties":false}
+        }));
+    }
     tools
 }
 
 pub(crate) struct Client {
     workstreams: HarnessWorkstreamsClient<Channel>,
     mailbox: HarnessMailboxClient<Channel>,
+    work_sessions: HarnessWorkSessionsClient<Channel>,
     pub(crate) pending: BTreeMap<PendingEffect, String>,
 }
 
@@ -199,11 +261,74 @@ impl Client {
             workstreams: HarnessWorkstreamsClient::new(channel.clone())
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
-            mailbox: HarnessMailboxClient::new(channel)
+            mailbox: HarnessMailboxClient::new(channel.clone())
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+            work_sessions: HarnessWorkSessionsClient::new(channel)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
             pending: BTreeMap::new(),
         }
+    }
+
+    pub(crate) async fn start_session(
+        &mut self,
+        start: &StartSession,
+        operation_id: String,
+        (task_id, tag, session_id): (&str, &str, &str),
+        token: &str,
+        secrets: &[String],
+    ) -> Result<Value> {
+        let start = StartSession {
+            title: crate::auth::redact(start.normalized_title(), secrets),
+            instruction: crate::auth::redact(start.instruction.trim().to_owned(), secrets),
+            workspace: start.workspace.clone(),
+            tag: start.tag.clone(),
+        };
+        if start.validate().is_err() {
+            return Ok(refused());
+        }
+        let title = start.normalized_title();
+        let input = HarnessStartWorkSessionRequest {
+            operation_id,
+            title: title.clone(),
+            instruction: start.instruction,
+            workspace_id: start.workspace,
+            target_tag_id: start.tag,
+        };
+        let receipt = confirm(async || {
+            self.work_sessions
+                .start(
+                    crate::request(input.clone(), token)
+                        .map_err(|_| Status::unauthenticated("invalid execution credential"))?,
+                )
+                .await
+        })
+        .await?;
+        let Some(receipt) = receipt else {
+            return Ok(refused());
+        };
+        ensure!(
+            receipt.parent_tag_id == tag
+                && receipt.parent_session_id == session_id
+                && receipt.starter_task_id == task_id
+                && receipt.title == title
+                && receipt.tag_id == input.target_tag_id.as_deref().unwrap_or(tag)
+                && receipt
+                    .work_session_id
+                    .strip_prefix("work/")
+                    .is_some_and(|id| !id.is_empty())
+                && !receipt.latest_task_id.is_empty()
+                && receipt.latest_task_id != task_id
+                && receipt.created_order > 0
+                && receipt.latest_task_state() != TaskState::Unspecified,
+            "Work Session receipt has mismatched identity or content"
+        );
+        Ok(response(
+            json!({ "sessionId": receipt.work_session_id, "title": title, "status":"accepted" })
+                .to_string(),
+            true,
+        ))
     }
 
     pub(crate) async fn post(

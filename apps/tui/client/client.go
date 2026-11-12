@@ -216,7 +216,10 @@ func retrying[T any](ctx context.Context, call func(context.Context) (T, error))
 func (c *Client) GetMessage(ctx context.Context, tag, taskID string) (*operatorv1.Message, error) {
 	if c.RuntimeV2() {
 		message, err := c.runtime.getMessage(ctx, tag, taskID)
-		return runtimeMessage(message), err
+		if err != nil {
+			return nil, err
+		}
+		return c.runtime.projectMessage(ctx, message)
 	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()

@@ -11,6 +11,7 @@ mod policy;
 mod surface_policy;
 mod teams;
 mod tui;
+mod work_sessions;
 
 use std::{ffi::OsString, net::SocketAddr, path::PathBuf, time::Duration};
 
@@ -36,6 +37,7 @@ use supertag_protocol::{
         HarnessKind, LarkDomain, ListEventsRequest, ListNativeUsageRequest, PutTagRequest,
         ResolveAttemptRequest, RevokeHostRequest, SubmitTaskRequest, Task, WorkspaceSpec,
         attempt_inputs_server::AttemptInputsServer, attempt_mailbox_server::AttemptMailboxServer,
+        attempt_work_sessions_server::AttemptWorkSessionsServer,
         attempt_workstreams_server::AttemptWorkstreamsServer,
         checkpoint_directory_server::CheckpointDirectoryServer, connector_server::ConnectorServer,
         conversations_server::ConversationsServer, host_directory_server::HostDirectoryServer,
@@ -45,8 +47,8 @@ use supertag_protocol::{
         operator_events_server::OperatorEventsServer, operator_server::OperatorServer,
         policy_catalog_server::PolicyCatalogServer,
         surface_policy_catalog_server::SurfacePolicyCatalogServer, teams_server::TeamsServer,
-        transfers_server::TransfersServer, worker_host_server::WorkerHostServer,
-        workspace_directory_server::WorkspaceDirectoryServer,
+        transfers_server::TransfersServer, work_sessions_server::WorkSessionsServer,
+        worker_host_server::WorkerHostServer, workspace_directory_server::WorkspaceDirectoryServer,
     },
 };
 use supertag_worker_host::HostOptions;
@@ -127,6 +129,13 @@ enum Command {
         connection: Connection,
         #[command(subcommand)]
         command: mailbox_grants::MailboxGrantCommand,
+    },
+    /// Read the Work Sessions started by a Tag.
+    WorkSessions {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: work_sessions::WorkSessionCommand,
     },
     /// Manage Teams and read their Workstream posts.
     Team {
@@ -413,6 +422,10 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => mailbox_grants::run(connection, command).await?,
+        Command::WorkSessions {
+            connection,
+            command,
+        } => work_sessions::run(connection, command).await?,
         Command::Mailbox {
             connection,
             tag_id,
@@ -910,6 +923,12 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .set_serving::<SurfacePolicyCatalogServer<ControlPlane>>()
         .await;
     health
+        .set_serving::<WorkSessionsServer<ControlPlane>>()
+        .await;
+    health
+        .set_serving::<AttemptWorkSessionsServer<ControlPlane>>()
+        .await;
+    health
         .set_serving::<AttemptMailboxServer<ControlPlane>>()
         .await;
     health
@@ -982,6 +1001,8 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .add_service(plane.inbox_service())
         .add_service(plane.policy_service())
         .add_service(plane.surface_policy_service())
+        .add_service(plane.work_sessions_service())
+        .add_service(plane.attempt_work_sessions_service())
         .add_service(plane.attempt_mailbox_service())
         .add_service(plane.operator_events_service(watch_shutdown.clone()))
         .add_service(
@@ -1109,6 +1130,10 @@ async fn gateway(
     health
         .set_serving::<SurfacePolicyCatalogServer<Gateway>>()
         .await;
+    health.set_serving::<WorkSessionsServer<Gateway>>().await;
+    health
+        .set_serving::<AttemptWorkSessionsServer<Gateway>>()
+        .await;
     health.set_serving::<AttemptMailboxServer<Gateway>>().await;
     health
         .set_serving::<OperatorEventsServer<GatewayWatch>>()
@@ -1144,6 +1169,8 @@ async fn gateway(
         .add_service(gateway.inbox_service())
         .add_service(gateway.policy_service())
         .add_service(gateway.surface_policy_service())
+        .add_service(gateway.work_sessions_service())
+        .add_service(gateway.attempt_work_sessions_service())
         .add_service(gateway.attempt_mailbox_service())
         .add_service(gateway.operator_events_service(shutdown.clone()));
     let grpc = async {

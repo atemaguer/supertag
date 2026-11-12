@@ -18,9 +18,10 @@ import (
 // a message without interleaving the first turn's reply with it.
 type runtimeTurn struct {
 	transcript
-	following bool
-	settled   bool
-	joined    bool
+	following   bool
+	settled     bool
+	joined      bool
+	needsFollow bool
 }
 
 type runtimeHistory struct {
@@ -33,6 +34,7 @@ type runtimeHistory struct {
 	// messages added by individual local send receipts.
 	head, sessionID string
 	read            bool
+	workShown       map[string]bool
 }
 
 func (m model) reloadShownHistory() tea.Cmd {
@@ -129,10 +131,12 @@ func (m *model) showRuntimeHistory(msg historyMsg) tea.Cmd {
 		c.runtime.read = true
 		if len(msg.items) == 0 {
 			c.runtime.order, c.runtime.turns, c.runtime.head, c.runtime.sessionID = nil, nil, "", ""
+			c.runtime.workShown = nil
 		} else {
 			task := msg.items[len(msg.items)-1].Message
 			if c.runtime.sessionID != "" && c.runtime.sessionID != task.GetSessionId() {
 				c.runtime.order, c.runtime.turns = nil, nil
+				c.runtime.workShown = nil
 			}
 			c.runtime.head, c.runtime.sessionID = task.GetTaskId(), task.GetSessionId()
 		}
@@ -220,13 +224,18 @@ func (m *model) runtimeItem(tag, name string, item client.HistoryItem) tea.Cmd {
 	var cmds []tea.Cmd
 	if turn != nil && (turn.following || !turn.joined || joined) {
 		turn.joined = turn.joined || joined
+		turn.needsFollow = item.Follow
 		// The follower already displays this turn's events. A snapshot can
 		// supply a final reply after a failed follow without repeating it.
-		if !turn.following && !turn.settled {
+		if !turn.following {
 			for _, event := range item.Events {
-				if runtimeFinal(event) {
-					cmds = append(cmds, m.applyRuntimeTurn(turn, event))
+				if runtimeFinal(event) || client.WorkEventKey(event) != "" {
+					cmds = append(cmds, m.applyRuntimeTurn(h, turn, event))
 				}
+			}
+			if item.Follow {
+				turn.following = true
+				cmds = append(cmds, waitForTask(tag, name, id, m.follower.Follow(m.ctx, tag, item.Message, item.Shown)))
 			}
 		}
 		return tea.Batch(cmds...)
@@ -236,11 +245,13 @@ func (m *model) runtimeItem(tag, name string, item client.HistoryItem) tea.Cmd {
 	}
 	// A joined input can be withdrawn and run as its own Task. Replace any
 	// transcript attributed to the earlier source when that delivery clears.
-	turn = &runtimeTurn{joined: joined}
+	turn = &runtimeTurn{joined: joined, needsFollow: item.Follow}
 	h.turns[id] = turn
-	turn.add(entryYou, item.Message.GetText())
+	if item.Message.GetText() != "" {
+		turn.add(entryYou, item.Message.GetText())
+	}
 	for _, event := range item.Events {
-		cmds = append(cmds, m.applyRuntimeTurn(turn, event))
+		cmds = append(cmds, m.applyRuntimeTurn(h, turn, event))
 	}
 	if item.Follow {
 		turn.following = true
@@ -250,11 +261,12 @@ func (m *model) runtimeItem(tag, name string, item client.HistoryItem) tea.Cmd {
 }
 
 func (m *model) runtimeFollow(msg followMsg) tea.Cmd {
-	turn := m.conversation(msg.tag, msg.conversation).runtime.turns[msg.taskID]
+	h := &m.conversation(msg.tag, msg.conversation).runtime
+	turn := h.turns[msg.taskID]
 	if turn == nil {
 		return nil
 	}
-	cmd := m.applyRuntimeTurn(turn, msg.event)
+	cmd := m.applyRuntimeTurn(h, turn, msg.event)
 	if m.showsConversation(msg.tag, msg.conversation) {
 		m.refresh()
 	}
@@ -264,7 +276,7 @@ func (m *model) runtimeFollow(msg followMsg) tea.Cmd {
 func (m *model) runtimeFollowDone(msg followDoneMsg) tea.Cmd {
 	if turn := m.conversation(msg.tag, msg.conversation).runtime.turns[msg.taskID]; turn != nil {
 		turn.following = false
-		if (!turn.settled || turn.joined) && m.showsConversation(msg.tag, msg.conversation) {
+		if (!turn.settled || turn.joined || turn.needsFollow) && m.showsConversation(msg.tag, msg.conversation) {
 			return m.reloadHistory(msg.tag, msg.conversation)
 		}
 	}
@@ -275,7 +287,16 @@ func runtimeFinal(event client.FollowEvent) bool {
 	return event.Kind == client.EventReply || event.Kind == client.EventTurnError
 }
 
-func (m *model) applyRuntimeTurn(turn *runtimeTurn, event client.FollowEvent) tea.Cmd {
+func (m *model) applyRuntimeTurn(history *runtimeHistory, turn *runtimeTurn, event client.FollowEvent) tea.Cmd {
+	if key := client.WorkEventKey(event); key != "" {
+		if history.workShown == nil {
+			history.workShown = map[string]bool{}
+		}
+		if history.workShown[key] {
+			return nil
+		}
+		history.workShown[key] = true
+	}
 	if event.Kind == client.EventJoined {
 		turn.joined = true
 	}

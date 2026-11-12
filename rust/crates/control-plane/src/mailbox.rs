@@ -73,6 +73,12 @@ impl Store {
                 "Mailbox access requires a live running Attempt".into(),
             ));
         }
+        if crate::work_sessions::task_kind_in(&mut tx, &attempt.task_id)
+            .await?
+            .is_some()
+        {
+            return Err(StoreError::PermissionDenied);
+        }
         let tag: String = row.try_get("tag_id")?;
         let page = history_in(&mut tx, &tag, input.limit, &input.cursor).await?;
         tx.rollback().await?;

@@ -38,6 +38,9 @@ impl Store {
             tx.rollback().await?;
             return Ok(input);
         }
+        if !crate::conversations::task_access_in(&mut tx, principal, &request.task_id).await? {
+            return Err(StoreError::NotFound("Task was not found".into()));
+        }
         let task = sqlx::query("SELECT * FROM supertag_v2_tasks WHERE task_id=$1")
             .bind(&request.task_id)
             .fetch_optional(&mut *tx)
@@ -60,6 +63,15 @@ impl Store {
         if crate::conversations::private_session(&session_id) {
             return Err(StoreError::FailedPrecondition(
                 "send messages through the conversation".into(),
+            ));
+        }
+        if crate::work_sessions::reserved_session(&session_id)
+            || crate::work_sessions::task_kind_in(&mut tx, &request.task_id)
+                .await?
+                .is_some()
+        {
+            return Err(StoreError::FailedPrecondition(
+                "Work Session Tasks and reports do not accept live input".into(),
             ));
         }
         objective_admission_in(&mut tx, &tag_id, &session_id, now).await?;

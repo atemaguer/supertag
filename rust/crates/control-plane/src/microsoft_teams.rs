@@ -134,7 +134,7 @@ impl Store {
         }
         name("reply ID", &input.reply_id)?;
         name("lease token", &input.lease_token)?;
-        let row=sqlx::query("SELECT a.service_url,a.conversation_id,a.root_activity_id,c.app_id,c.tenant_id,c.team_id,c.channel_id FROM supertag_v2_replies r JOIN supertag_v2_microsoft_teams_activities a ON a.task_id=r.task_id AND a.account_id=r.account_id JOIN supertag_v2_microsoft_teams_routes c ON c.account_id=a.account_id WHERE r.reply_id=$1 AND r.account_id=$2 AND r.lease_token=$3 AND r.state=$4").bind(&input.reply_id).bind(account).bind(&input.lease_token).bind(i64::from(ReplyState::Claimed as i32)).fetch_optional(&self.pool).await?.ok_or(StoreError::PermissionDenied)?;
+        let row=sqlx::query("SELECT a.service_url,a.conversation_id,a.root_activity_id,c.app_id,c.tenant_id,c.team_id,c.channel_id FROM supertag_v2_replies r JOIN supertag_v2_microsoft_teams_activities a ON a.task_id=COALESCE((SELECT w.starter_task_id FROM supertag_v2_work_session_reports wr JOIN supertag_v2_work_sessions w ON w.work_session_id=wr.work_session_id WHERE wr.report_task_id=r.task_id),r.task_id) AND a.account_id=r.account_id JOIN supertag_v2_microsoft_teams_routes c ON c.account_id=a.account_id WHERE r.reply_id=$1 AND r.account_id=$2 AND r.lease_token=$3 AND r.state=$4").bind(&input.reply_id).bind(account).bind(&input.lease_token).bind(i64::from(ReplyState::Claimed as i32)).fetch_optional(&self.pool).await?.ok_or(StoreError::PermissionDenied)?;
         Ok(MicrosoftTeamsReplyRoute {
             service_url: row.try_get("service_url")?,
             conversation_id: row.try_get("conversation_id")?,

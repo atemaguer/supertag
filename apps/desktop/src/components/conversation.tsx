@@ -13,6 +13,7 @@ import {
 } from "../lib/history";
 import { describe, usePolling } from "../lib/polling";
 import { useWatchRefresh, type WatchFeed } from "../lib/watch";
+import { ConversationEntry } from "./conversation-entry";
 import { TagAvatar } from "./tag-avatar";
 
 const interval = 2_500;
@@ -37,28 +38,6 @@ interface ConversationProps {
 function newOperationId() {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function statusText(taskState: string, inputState?: string) {
-  return (
-    {
-      pending: "Waiting to join Task",
-      dispatching: "Joining Task",
-      accepted: "Joined active Task",
-      unknown: "Delivery uncertain",
-      withdrawn: "Withdrawn",
-    }[inputState ?? ""] ??
-    {
-      queued: "Queued",
-      claimed: "Starting",
-      running: "Working",
-      succeeded: "Completed",
-      failed: "Failed",
-      cancelled: "Cancelled",
-      uncertain: "Needs attention",
-    }[taskState] ??
-    "Pending"
-  );
 }
 
 export function ConversationPane({
@@ -186,6 +165,11 @@ export function ConversationPane({
     }
   }
 
+  function viewActivity(taskId: string, trigger: HTMLButtonElement) {
+    activityTrigger.current = trigger;
+    setActiveTask(taskId);
+  }
+
   const messages = history.messages;
   return (
     <>
@@ -225,42 +209,14 @@ export function ConversationPane({
                   {paging ? "Loading…" : "Load earlier messages"}
                 </Button>
               )}
-              {messages.map(({ task, liveInput }) => {
-                const status = statusText(task.state, liveInput?.state);
-                const joined = liveInput?.state === "accepted";
-                const activityTask = joined ? liveInput.taskId : task.taskId;
-                return (
-                  <article className="exchange" key={task.taskId}>
-                    <div className="user-turn">
-                      <span className="visually-hidden">You</span>
-                      <p className="prompt-text">{task.prompt}</p>
-                    </div>
-                    <div className="tag-turn">
-                      <TagAvatar tagId={tagId} />
-                      <div className="reply-body">
-                        <div className="reply-heading">
-                          <strong>{tagId}</strong>
-                          <Button
-                            variant="outline"
-                            className="task-status"
-                            data-state={task.state}
-                            aria-label={`${status} · View Task activity`}
-                            aria-expanded={activeTask === activityTask}
-                            aria-controls={activeTask ? "activity" : undefined}
-                            onClick={(event) => {
-                              activityTrigger.current = event.currentTarget;
-                              setActiveTask(activityTask);
-                            }}
-                          >
-                            {status}
-                          </Button>
-                        </div>
-                        {task.result && !joined && <p className="result-text">{task.result}</p>}
-                      </div>
-                    </div>
-                  </article>
-                );
-              })}
+              {messages.map((message) => (
+                <ConversationEntry
+                  key={message.task.taskId}
+                  message={message}
+                  activeTask={activeTask}
+                  onActivity={viewActivity}
+                />
+              ))}
             </div>
           </section>
           <form className="composer" onSubmit={(event) => void send(event)}>

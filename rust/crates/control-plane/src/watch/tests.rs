@@ -63,6 +63,7 @@ async fn contract(url: &str) -> anyhow::Result<()> {
     };
     let sent = store.send_message("operator:alice", &input).await?;
     assert_eq!(store.send_message("operator:alice", &input).await?, sent);
+    let parent = sent.task.unwrap();
     let page = store.watch_page(0).await?;
     assert_eq!(page.head, 3);
     assert_eq!(
@@ -175,5 +176,308 @@ async fn contract(url: &str) -> anyhow::Result<()> {
         resynced,
         Some(format!("v1.{}.{}", page.feed_id, page.head + PAGE_SIZE + 2))
     );
+    private_work_sessions(&watch, SECRET, parent).await?;
+    Ok(())
+}
+
+async fn private_work_sessions(
+    watch: &OperatorWatch,
+    secret: &str,
+    parent: Task,
+) -> anyhow::Result<()> {
+    use conversations_server::Conversations;
+    use live_inputs_server::LiveInputs;
+    use operator_server::Operator;
+    use work_sessions_server::WorkSessions;
+
+    const ALICE: &str = "operator:alice";
+    const BOB: &str = "operator:bob";
+    let plane = &watch.plane;
+    let store = &plane.store;
+    let before = store.watch_page(i64::MAX).await?;
+    let work_session_id = "work/private";
+    let (mut tx, order) = store.write().await?;
+    let child = crate::store::insert_task_from_snapshot(
+        &mut tx,
+        order,
+        &parent,
+        work_session_id,
+        "Private child request",
+    )
+    .await?;
+    tx.commit().await?;
+    assert_eq!(store.watch_page(before.head).await?.head, before.head);
+    assert!(matches!(
+        store.ensure_task_access(ALICE, &child.task_id).await,
+        Err(crate::StoreError::NotFound(_))
+    ));
+
+    let (mut tx, _) = store.write().await?;
+    sqlx::query("INSERT INTO supertag_v2_work_sessions (work_session_id,title,parent_tag_id,parent_session_id,starter_task_id,tag_id,latest_task_id,objective_id,created_order) VALUES ($1,'Private work',$2,$3,$4,$2,$5,NULL,$6)")
+        .bind(work_session_id).bind(&parent.tag_id).bind(&parent.session_id)
+        .bind(&parent.task_id).bind(&child.task_id).bind(order).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO supertag_v2_work_session_tasks (task_id,work_session_id,kind) VALUES ($1,$2,1)")
+        .bind(&child.task_id).bind(work_session_id).execute(&mut *tx).await?;
+    sqlx::query("UPDATE supertag_v2_tasks SET state=$1,attempt_id='attempt',lease_expires_at_ms=$2 WHERE task_id=$3")
+        .bind(TaskState::Running as i64).bind(i64::MAX).bind(&child.task_id).execute(&mut *tx).await?;
+    tx.commit().await?;
+
+    let (mut tx, order) = store.write().await?;
+    let report = crate::store::insert_task(
+        &mut tx,
+        order,
+        &parent.tag_id,
+        &parent.session_id,
+        "Internal report input",
+    )
+    .await?;
+    sqlx::query("INSERT INTO supertag_v2_work_session_reports (child_task_id,work_session_id,report_task_id,created_order) VALUES ($1,$2,$3,$4)")
+        .bind(&child.task_id).bind(work_session_id).bind(&report.task_id).bind(order).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO supertag_v2_work_session_tasks (task_id,work_session_id,kind) VALUES ($1,$2,2)")
+        .bind(&report.task_id).bind(work_session_id).execute(&mut *tx).await?;
+    tx.commit().await?;
+
+    for task in [&child, &report] {
+        let read = GetTaskRequest {
+            task_id: task.task_id.clone(),
+        };
+        assert_eq!(
+            plane
+                .get_task(authenticated_request(read.clone(), secret, Some(BOB))?)
+                .await
+                .unwrap_err()
+                .code(),
+            tonic::Code::NotFound
+        );
+        assert_eq!(
+            plane
+                .get_task(authenticated_request(read, secret, Some(ALICE))?)
+                .await?
+                .into_inner()
+                .task_id,
+            task.task_id
+        );
+    }
+    let queue = QueueInputRequest {
+        task_id: child.task_id.clone(),
+        operation_id: "direct-child-input".into(),
+        text: "Do not inject".into(),
+    };
+    assert_eq!(
+        plane
+            .queue_input(authenticated_request(queue.clone(), secret, Some(BOB))?)
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::NotFound
+    );
+    assert_eq!(
+        plane
+            .queue_input(authenticated_request(queue, secret, Some(ALICE))?)
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::FailedPrecondition
+    );
+
+    let get = GetWorkSessionRequest {
+        work_session_id: work_session_id.into(),
+    };
+    assert_eq!(
+        WorkSessions::get(
+            plane,
+            authenticated_request(get.clone(), secret, Some(BOB))?
+        )
+        .await
+        .unwrap_err()
+        .code(),
+        tonic::Code::NotFound
+    );
+    let work = WorkSessions::get(plane, authenticated_request(get, secret, Some(ALICE))?)
+        .await?
+        .into_inner();
+    assert_eq!(
+        work.report_task_id.as_deref(),
+        Some(report.task_id.as_str())
+    );
+    assert_eq!(work.latest_task_id, child.task_id);
+    let list = ListWorkSessionsRequest {
+        parent_tag_id: parent.tag_id.clone(),
+        parent_session_id: parent.session_id.clone(),
+        ..Default::default()
+    };
+    assert!(
+        WorkSessions::list(
+            plane,
+            authenticated_request(list.clone(), secret, Some(BOB))?
+        )
+        .await?
+        .into_inner()
+        .work_sessions
+        .is_empty()
+    );
+    assert_eq!(
+        WorkSessions::list(plane, authenticated_request(list, secret, Some(ALICE))?)
+            .await?
+            .into_inner()
+            .work_sessions,
+        vec![work]
+    );
+
+    let message = GetMessageRequest {
+        tag_id: parent.tag_id.clone(),
+        task_id: report.task_id.clone(),
+    };
+    let response = plane
+        .get_message(authenticated_request(message.clone(), secret, Some(ALICE))?)
+        .await?
+        .into_inner();
+    assert_eq!(
+        response.work_session_report_id.as_deref(),
+        Some(work_session_id)
+    );
+    assert!(response.task.as_ref().unwrap().prompt.is_empty());
+    let summaries = store
+        .list_conversations(
+            ALICE,
+            &ListConversationsRequest {
+                tag_id: parent.tag_id.clone(),
+                ..Default::default()
+            },
+        )
+        .await?;
+    let latest = summaries.conversations[0].latest_task.as_ref().unwrap();
+    assert_eq!(latest.task_id, report.task_id);
+    assert!(latest.prompt.is_empty());
+    assert_eq!(
+        store.get_task(&report.task_id).await?.prompt,
+        "Internal report input"
+    );
+    assert_eq!(
+        plane
+            .get_message(authenticated_request(message, secret, Some(BOB))?)
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::NotFound
+    );
+
+    let history = ListMessagesRequest {
+        tag_id: parent.tag_id.clone(),
+        conversation: "secret".into(),
+        limit: 1,
+        ..Default::default()
+    };
+    let first = store.list_messages(ALICE, &history).await?;
+    assert_eq!(first.messages, vec![response]);
+    let next = store
+        .list_messages(
+            ALICE,
+            &ListMessagesRequest {
+                cursor: first.next_cursor,
+                ..history.clone()
+            },
+        )
+        .await?;
+    assert_eq!(
+        next.messages[0].task.as_ref().unwrap().task_id,
+        parent.task_id
+    );
+    assert_eq!(
+        next.messages[0].task.as_ref().unwrap().prompt,
+        parent.prompt
+    );
+    assert!(next.next_cursor.is_empty());
+    assert!(
+        store
+            .list_messages(BOB, &history)
+            .await?
+            .messages
+            .is_empty()
+    );
+
+    let page = store.watch_page(before.head).await?;
+    assert_eq!(
+        page.notices
+            .iter()
+            .map(|notice| (
+                notice.owner.as_str(),
+                notice.change.kind(),
+                notice.change.id.as_str(),
+                notice.change.conversation.as_str(),
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (ALICE, WatchKind::Task, child.task_id.as_str(), "secret"),
+            (ALICE, WatchKind::Task, child.task_id.as_str(), "secret"),
+            (ALICE, WatchKind::Task, report.task_id.as_str(), "secret"),
+            (
+                ALICE,
+                WatchKind::ConversationMessage,
+                report.task_id.as_str(),
+                "secret"
+            ),
+        ]
+    );
+    let request = |principal| {
+        authenticated_request(
+            WatchRequest {
+                resume_token: format!("v1.{}.{}", before.feed_id, before.head),
+                ..Default::default()
+            },
+            secret,
+            Some(principal),
+        )
+    };
+    let mut hidden = watch.watch(request(BOB)?).await?.into_inner();
+    assert!(matches!(
+        hidden.next().await.transpose()?.unwrap().update,
+        Some(Update::Heartbeat(_))
+    ));
+    let mut visible = watch.watch(request(ALICE)?).await?.into_inner();
+    assert!(matches!(
+        visible.next().await.transpose()?.unwrap().update,
+        Some(Update::Change(change)) if change.id == child.task_id
+    ));
+    let (mut tx, _) = store.write().await?;
+    sqlx::query("UPDATE supertag_v2_tasks SET state=$1,attempt_id='report-attempt',lease_expires_at_ms=$2 WHERE task_id=$3")
+        .bind(TaskState::Running as i64).bind(i64::MAX).bind(&report.task_id).execute(&mut *tx).await?;
+    // Even if a legacy or inconsistent row names private work, another
+    // operator must not obtain the input by guessing its ID.
+    sqlx::query("INSERT INTO supertag_v2_live_inputs (input_id,operator_principal,operation_id,task_id,attempt_id,follower_task_id,state) VALUES ('private-input',$1,'stale-private-input',$2,'attempt',$3,$4)")
+        .bind(ALICE).bind(&child.task_id).bind(&report.task_id).bind(LiveInputState::Accepted as i64)
+        .execute(&mut *tx).await?;
+    tx.commit().await?;
+    let get = GetInputRequest {
+        input_id: "private-input".into(),
+    };
+    assert_eq!(
+        plane
+            .get_input(authenticated_request(get.clone(), secret, Some(BOB))?)
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::NotFound
+    );
+    assert_eq!(
+        plane
+            .get_input(authenticated_request(get, secret, Some(ALICE))?)
+            .await?
+            .into_inner()
+            .task_id,
+        child.task_id
+    );
+    let followup = store
+        .send_message(
+            ALICE,
+            &SendMessageRequest {
+                tag_id: parent.tag_id,
+                conversation: "secret".into(),
+                text: "Keep going separately".into(),
+                operation_id: "report-follow-up".into(),
+            },
+        )
+        .await?;
+    assert!(followup.live_input.is_none());
     Ok(())
 }

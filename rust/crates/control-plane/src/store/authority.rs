@@ -272,6 +272,7 @@ pub(super) async fn claim_candidate(
                 .is_none_or(|spec| workspace_ids.binary_search(&spec.workspace_id).is_ok());
             if has_workspace
                 && crate::context::task_supported(&task, context_contracts)
+                && crate::work_sessions::can_claim_in(transaction, &task).await?
                 && crate::inputs::can_claim_in(
                     transaction,
                     &task,

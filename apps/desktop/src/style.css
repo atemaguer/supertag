@@ -442,6 +442,10 @@ button:disabled {
   font-size: 13px;
   font-weight: 650;
 }
+.report-label {
+  color: var(--muted);
+  font-size: 12px;
+}
 .result-text {
   margin: 5px 0 0;
   color: #e4dfe3;

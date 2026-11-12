@@ -58,6 +58,10 @@ type FollowEvent struct {
 	// WorkSession is the ID of the work Session the event is about: its activity, that it is
 	// working, its report, an approval notice, or why it did not continue. Empty otherwise.
 	WorkSession string
+	// TaskID identifies the child Task for activity/working, or the distinct
+	// parent report Task for a report. Sequence identifies a recorded event.
+	TaskID   string
+	Sequence uint64
 }
 
 // Shown is what has been shown of one message, so a resumed stream, which may send the
@@ -159,7 +163,7 @@ func (s *Shown) workSession(session *operatorv1.WorkSession) []FollowEvent {
 		s.tasks[id] = task
 		// A work Session that had no Task yet is still the same piece of work.
 		if !known || previous != "" {
-			events = append(events, FollowEvent{Kind: EventWorking, Title: session.GetTitle(), WorkSession: id})
+			events = append(events, FollowEvent{Kind: EventWorking, Title: session.GetTitle(), WorkSession: id, TaskID: task})
 		}
 	}
 	for _, approval := range session.GetApprovals() {
@@ -167,12 +171,15 @@ func (s *Shown) workSession(session *operatorv1.WorkSession) []FollowEvent {
 			events = append(events, FollowEvent{Kind: EventApproval, Title: session.GetTitle(), Text: approval.GetText(), WorkSession: id})
 		}
 	}
-	reportKey := "report:" + task
-	if task == "" {
+	reportKey := "report:" + session.GetReportTaskId()
+	if session.GetReportTaskId() == "" {
+		reportKey = "report:" + task
+	}
+	if task == "" && session.GetReportTaskId() == "" {
 		reportKey = "report:" + id
 	}
 	if session.GetReportStatus() == operatorv1.ReplyStatus_REPLY_STATUS_REPLIED && session.GetReport() != nil && s.once(reportKey) {
-		events = append(events, FollowEvent{Kind: EventReport, Title: session.GetTitle(), Status: reportEnding(session), Text: session.GetReport().GetText(), WorkSession: id})
+		events = append(events, FollowEvent{Kind: EventReport, Title: session.GetTitle(), Status: reportEnding(session), Text: session.GetReport().GetText(), WorkSession: id, TaskID: session.GetReportTaskId()})
 	}
 	if session.GetNotContinued() != "" && s.once("stopped:"+task) {
 		events = append(events, FollowEvent{Kind: EventNotContinued, Title: session.GetTitle(), Text: session.GetNotContinued(), WorkSession: id})
@@ -194,9 +201,6 @@ func (s *Shown) message(message *operatorv1.Message) []FollowEvent {
 func (s *Shown) settled() bool {
 	if !s.replied {
 		return false
-	}
-	if s.keys["turn-error"] {
-		return true
 	}
 	for _, session := range s.sessions {
 		if session.GetReportStatus() != operatorv1.ReplyStatus_REPLY_STATUS_REPLIED ||
@@ -246,6 +250,7 @@ func History(tag string, page []*operatorv1.Message, displayedTaskIDs ...string)
 		onPage[message.GetTaskId()] = true
 	}
 	items := make([]HistoryItem, 0, len(page))
+	workEvents := map[string]bool{}
 	for i := len(page) - 1; i >= 0; i-- {
 		message := page[i]
 		shown := newShown(tag, message.GetConversation())
@@ -260,16 +265,50 @@ func History(tag string, page []*operatorv1.Message, displayedTaskIDs ...string)
 				continue
 			}
 		}
-		if message.GetStatus() == operatorv1.ReplyStatus_REPLY_STATUS_REPLIED {
+		if isWorkReport(message) {
+			shown.replied = true
+		} else if message.GetStatus() == operatorv1.ReplyStatus_REPLY_STATUS_REPLIED {
 			item.Events = append(item.Events, shown.reply(message.GetReply())...)
 		} else {
 			item.Events = append(item.Events, shown.wait(message.GetWaitingReason())...)
 		}
 		item.Events = append(item.Events, shown.message(message)...)
+		item.Events = uniqueWorkEvents(item.Events, workEvents)
 		item.Follow = !shown.settled()
 		items = append(items, item)
 	}
 	return items
+}
+
+// WorkEventKey is stable across a root follow, report history and refreshes.
+// Report Task identity allows a later continuation to report independently.
+func WorkEventKey(event FollowEvent) string {
+	if event.WorkSession == "" || event.TaskID == "" {
+		return ""
+	}
+	switch event.Kind {
+	case EventWorking, EventReport:
+		return fmt.Sprintf("%d:%s:%s", event.Kind, event.WorkSession, event.TaskID)
+	case EventActivity:
+		if event.Sequence != 0 {
+			return fmt.Sprintf("%d:%s:%s:%d", event.Kind, event.WorkSession, event.TaskID, event.Sequence)
+		}
+	}
+	return ""
+}
+
+func uniqueWorkEvents(events []FollowEvent, seen map[string]bool) []FollowEvent {
+	result := events[:0]
+	for _, event := range events {
+		if key := WorkEventKey(event); key != "" {
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+		}
+		result = append(result, event)
+	}
+	return result
 }
 
 // Follower streams a Tag's reply and the work Sessions it starts.

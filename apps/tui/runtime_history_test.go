@@ -172,7 +172,13 @@ func TestRuntimeHistoryReplaysPagesToTheLastAuthoritativeMessage(t *testing.T) {
 			return connect.NewResponse(page), nil
 		},
 	)
-	server := httptest.NewUnstartedServer(handler)
+	mux := http.NewServeMux()
+	mux.Handle(rpc.ConversationsListMessagesProcedure, handler)
+	mux.Handle(rpc.WorkSessionsListProcedure, connect.NewUnaryHandler(rpc.WorkSessionsListProcedure,
+		func(_ context.Context, _ *connect.Request[v2.ListWorkSessionsRequest]) (*connect.Response[v2.ListWorkSessionsResponse], error) {
+			return connect.NewResponse(&v2.ListWorkSessionsResponse{}), nil
+		}))
+	server := httptest.NewUnstartedServer(mux)
 	server.Config.Protocols = new(http.Protocols)
 	server.Config.Protocols.SetUnencryptedHTTP2(true)
 	server.Start()
@@ -212,5 +218,59 @@ func TestRuntimeHistoryReplacesAWithdrawnInputsSourceReply(t *testing.T) {
 	got := ansi.Strip(m.renderConversation())
 	if strings.Contains(got, "Previous source reply") || strings.Count(got, "My message") != 1 || strings.Count(got, "Its own reply") != 1 {
 		t.Fatalf("withdrawn input history:\n%s", got)
+	}
+}
+
+func TestRuntimeWorkReportsDeduplicateAcrossFollowHistoryAndLaterContinuation(t *testing.T) {
+	m := runtimeModel(t)
+	root := runtimeHistoryMessage("root", "Check the release", "I started checking")
+	work := &operatorv1.WorkSession{Id: "work/check", Title: "Release checks", TaskId: "child-1", Status: operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_RUNNING, ReportStatus: operatorv1.ReplyStatus_REPLY_STATUS_WAITING}
+	root.WorkSessions = []*operatorv1.WorkSession{work}
+	m = update(t, m, runtimePage(0, root))
+	turn := m.shown().runtime.turns["root"]
+	if !turn.following {
+		t.Fatal("root reply must keep following its unfinished child")
+	}
+	report := client.FollowEvent{Kind: client.EventReport, WorkSession: work.Id, TaskID: "report-1", Title: work.Title, Status: "done", Text: "First child report"}
+	m = update(t, m, followMsg{tag: "lead", conversation: defaultConversation, taskID: "root", event: report})
+	work.Status, work.ReportStatus = operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_COMPLETED, operatorv1.ReplyStatus_REPLY_STATUS_REPLIED
+	work.ReportTaskId, work.Report = "report-1", finalReply(report.Text)
+	row := runtimeHistoryMessage("report-1", "", "")
+	row.Reply, row.WorkSessions = nil, []*operatorv1.WorkSession{work}
+	// The report arrives as a separate page while the old root is still followed.
+	m = update(t, m, runtimePage(0, row))
+	m = update(t, m, followDoneMsg{tag: "lead", conversation: defaultConversation, taskID: "root"})
+	m = update(t, m, runtimePage(0, row, root))
+	got := ansi.Strip(m.renderConversation())
+	if strings.Count(got, "First child report") != 1 || strings.Count(got, "Check the release") != 1 {
+		t.Fatalf("report repeated across root and report row:\n%s", got)
+	}
+	if m.shown().runtime.head != "report-1" || !slices.Contains(m.shown().runtime.order, "report-1") {
+		t.Fatal("rendering a report must preserve its real Task as the pagination head")
+	}
+	// A future continuation of the same Work Session has a distinct report Task.
+	continued := proto.Clone(work).(*operatorv1.WorkSession)
+	continued.TaskId, continued.ReportTaskId, continued.Report = "child-2", "report-2", finalReply("Second child report")
+	row2 := runtimeHistoryMessage("report-2", "", "")
+	row2.Reply, row2.WorkSessions = nil, []*operatorv1.WorkSession{continued}
+	m = update(t, m, runtimePage(0, row2, row))
+	got = ansi.Strip(m.renderConversation())
+	if strings.Count(got, "First child report") != 1 || strings.Count(got, "Second child report") != 1 {
+		t.Fatalf("distinct report Tasks must both appear once:\n%s", got)
+	}
+}
+
+func TestRuntimeWorkHistoryRecoversReportAfterRootFollowEnds(t *testing.T) {
+	m := runtimeModel(t)
+	root := runtimeHistoryMessage("root", "Check it", "Started")
+	root.WorkSessions = []*operatorv1.WorkSession{{Id: "work/check", Title: "Check", TaskId: "child", Status: operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_RUNNING, ReportStatus: operatorv1.ReplyStatus_REPLY_STATUS_WAITING}}
+	m = update(t, m, runtimePage(0, root))
+	m = update(t, m, followDoneMsg{tag: "lead", conversation: defaultConversation, taskID: "root"})
+	root.WorkSessions[0].Status = operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_COMPLETED
+	root.WorkSessions[0].ReportStatus = operatorv1.ReplyStatus_REPLY_STATUS_REPLIED
+	root.WorkSessions[0].ReportTaskId, root.WorkSessions[0].Report = "report", finalReply("Recovered report")
+	m = update(t, m, runtimePage(0, root))
+	if got := ansi.Strip(m.renderConversation()); strings.Count(got, "Recovered report") != 1 {
+		t.Fatalf("root reply must not hide a later report snapshot:\n%s", got)
 	}
 }

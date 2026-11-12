@@ -394,7 +394,8 @@ pub struct Task {
     pub task_id: String,
     pub tag_id: String,
     pub session_id: String,
-    pub prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
     pub state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<String>,
@@ -413,7 +414,7 @@ impl From<v2::Task> for Task {
             task_id: task.task_id,
             tag_id: task.tag_id,
             session_id: task.session_id,
-            prompt: task.prompt,
+            prompt: (!task.prompt.is_empty()).then_some(task.prompt),
             state,
             result: task.result,
             attempt_id: task.attempt_id,
@@ -480,18 +481,29 @@ pub struct Message {
     pub conversation: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live_input: Option<LiveInput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub work_session_report_id: Option<String>,
 }
 
 impl TryFrom<v2::ConversationMessage> for Message {
     type Error = String;
     fn try_from(value: v2::ConversationMessage) -> Result<Self> {
-        Ok(Self {
-            task: value
+        let mut task = Task::from(
+            value
                 .task
-                .ok_or("The Gateway returned an incomplete message.")?
-                .into(),
+                .ok_or("The Gateway returned an incomplete message.")?,
+        );
+        let live_input = if value.work_session_report_id.is_some() {
+            task.prompt = None;
+            None
+        } else {
+            value.live_input.map(LiveInput::from)
+        };
+        Ok(Self {
+            task,
             conversation: value.conversation,
-            live_input: value.live_input.map(LiveInput::from),
+            live_input,
+            work_session_report_id: value.work_session_report_id,
         })
     }
 }

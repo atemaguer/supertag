@@ -178,6 +178,12 @@ impl Store {
                 "direct messaging requires a live running Attempt".into(),
             ));
         }
+        if crate::work_sessions::task_kind_in(&mut tx, &attempt.task_id)
+            .await?
+            .is_some()
+        {
+            return Err(StoreError::PermissionDenied);
+        }
         let sender: String = task.try_get("tag_id")?;
         if sender == input.recipient_tag_id {
             return Err(invalid("a Tag cannot send a message to itself"));

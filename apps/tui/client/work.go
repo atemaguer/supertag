@@ -22,7 +22,7 @@ const maxTeamPages = 10
 // GetSession reads one Session with what its latest delivering Task delivered.
 func (c *Client) GetSession(ctx context.Context, id string) (*operatorv1.Session, error) {
 	if c.RuntimeV2() {
-		return nil, unavailable("Work Session details")
+		return c.runtime.getWorkSessionDetail(ctx, id)
 	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
@@ -47,7 +47,7 @@ type Activity struct {
 // running.
 func (c *Client) TaskActivity(ctx context.Context, taskID string, after int64) ([]Activity, int64, error) {
 	if c.RuntimeV2() {
-		return nil, after, unavailable("Structured Task activity")
+		return c.runtime.taskActivity(ctx, taskID, after)
 	}
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()

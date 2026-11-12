@@ -22,6 +22,10 @@ use supertag_protocol::v2::{
     harness_mailbox_server::{HarnessMailbox, HarnessMailboxServer},
     harness_workstreams_server::{HarnessWorkstreams, HarnessWorkstreamsServer},
 };
+use supertag_protocol::v2::{
+    HarnessStartWorkSessionRequest, WorkSession,
+    harness_work_sessions_server::{HarnessWorkSessions, HarnessWorkSessionsServer},
+};
 use supertag_protocol::{
     MAX_CHECKPOINT_BYTES, MAX_MESSAGE_BYTES, matches_bearer,
     v2::{
@@ -65,6 +69,7 @@ struct Observed {
     workstream_reads: Vec<HarnessReadWorkstreamRequest>,
     mailbox_reads: Vec<HarnessReadMailboxRequest>,
     mailbox_sends: Vec<HarnessSendTagMessageRequest>,
+    work_starts: Vec<HarnessStartWorkSessionRequest>,
     pending_post: bool,
     lose_post_response: bool,
 }
@@ -375,6 +380,37 @@ impl HarnessMailbox for HarnessFixture {
     }
 }
 
+#[tonic::async_trait]
+impl HarnessWorkSessions for HarnessFixture {
+    async fn start(
+        &self,
+        request: Request<HarnessStartWorkSessionRequest>,
+    ) -> Result<Response<WorkSession>, Status> {
+        self.authenticate(&request)?;
+        let mut observed = self.observed.lock().await;
+        let request = request.into_inner();
+        if let Some(previous) = observed.work_starts.first() {
+            assert_eq!(previous, &request);
+        }
+        observed.work_starts.push(request.clone());
+        if observed.work_starts.len() == 1 {
+            return Err(Status::unavailable("synthetic response loss"));
+        }
+        Ok(Response::new(WorkSession {
+            work_session_id: "work/codex-fixture".into(),
+            title: request.title,
+            starter_task_id: self.task.task_id.clone(),
+            parent_session_id: self.task.session_id.clone(),
+            parent_tag_id: self.task.tag_id.clone(),
+            tag_id: self.task.tag_id.clone(),
+            latest_task_id: "child-task".into(),
+            latest_task_state: supertag_protocol::v2::TaskState::Queued as i32,
+            created_order: 10,
+            ..Default::default()
+        }))
+    }
+}
+
 struct HarnessProcess {
     bootstrap: AdapterBootstrap,
     observed: Arc<Mutex<Observed>>,
@@ -450,6 +486,7 @@ impl HarnessProcess {
                 )
                 .add_service(HarnessQuestionsServer::new(fixture.clone()))
                 .add_service(HarnessWorkstreamsServer::new(fixture.clone()))
+                .add_service(HarnessWorkSessionsServer::new(fixture.clone()))
                 .add_service(HarnessMailboxServer::new(fixture))
                 .serve_with_incoming(TcpListenerStream::new(listener)),
         );
@@ -459,6 +496,48 @@ impl HarnessProcess {
             server,
         })
     }
+}
+
+#[tokio::test]
+async fn native_work_session_retries_one_receipt_and_checks_current_authority_on_resume()
+-> Result<()> {
+    let mut checkpoint = None;
+    for allowed in [true, false] {
+        let native = NativeFixture::new(&successful("I started the review"), "exit 0")?;
+        std::fs::write(native.directory.path().join("work-session-mode"), "")?;
+        let server = HarnessProcess::configured_tools(
+            &["files:read"],
+            checkpoint,
+            "Review the release",
+            false,
+            Some(AttemptCapabilities {
+                may_start_work_session: allowed,
+                ..Default::default()
+            }),
+        )
+        .await?;
+        run(native.options(), server.bootstrap.clone()).await?;
+        let observed = server.observed.lock().await;
+        let outcome = observed.outcome.as_ref().context("outcome")?;
+        ensure!(outcome.succeeded, "{}", outcome.result);
+        checkpoint = outcome.checkpoint.clone();
+        assert!(checkpoint.is_some());
+        let requests = native.read("requests.jsonl")?;
+        assert_eq!(observed.work_starts.len(), if allowed { 2 } else { 0 });
+        if allowed {
+            assert!(requests.contains("dynamicTools") && requests.contains("work/codex-fixture"));
+            assert_eq!(observed.work_starts[0].title, "Review release");
+            assert_eq!(
+                observed.work_starts[0].instruction,
+                "Inspect release logs [REDACTED]."
+            );
+            assert!(observed.work_starts[0].operation_id.starts_with("codex-"));
+        } else {
+            assert!(requests.contains("thread/resume") && !requests.contains("dynamicTools"));
+            assert!(!requests.contains("work/codex-fixture"));
+        }
+    }
+    Ok(())
 }
 
 #[tokio::test]

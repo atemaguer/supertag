@@ -612,16 +612,92 @@ class AskQuestionRequest(_message.Message):
     def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
 
 class AttemptCapabilities(_message.Message):
-    __slots__ = ("may_ask_objective_question", "may_use_workstream", "may_read_mailbox", "may_send_tag_message")
+    __slots__ = ("may_ask_objective_question", "may_use_workstream", "may_read_mailbox", "may_send_tag_message", "may_start_work_session")
     MAY_ASK_OBJECTIVE_QUESTION_FIELD_NUMBER: _ClassVar[int]
     MAY_USE_WORKSTREAM_FIELD_NUMBER: _ClassVar[int]
     MAY_READ_MAILBOX_FIELD_NUMBER: _ClassVar[int]
     MAY_SEND_TAG_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    MAY_START_WORK_SESSION_FIELD_NUMBER: _ClassVar[int]
     may_ask_objective_question: bool
     may_use_workstream: bool
     may_read_mailbox: bool
     may_send_tag_message: bool
-    def __init__(self, may_ask_objective_question: _Optional[bool] = ..., may_use_workstream: _Optional[bool] = ..., may_read_mailbox: _Optional[bool] = ..., may_send_tag_message: _Optional[bool] = ...) -> None: ...
+    may_start_work_session: bool
+    def __init__(self, may_ask_objective_question: _Optional[bool] = ..., may_use_workstream: _Optional[bool] = ..., may_read_mailbox: _Optional[bool] = ..., may_send_tag_message: _Optional[bool] = ..., may_start_work_session: _Optional[bool] = ...) -> None: ...
+
+class WorkSession(_message.Message):
+    __slots__ = ("work_session_id", "title", "parent_tag_id", "parent_session_id", "starter_task_id", "tag_id", "latest_task_id", "latest_task_state", "report_task_id", "report_task_state", "objective_id", "workspace_delivery", "created_order")
+    WORK_SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    PARENT_TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    PARENT_SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    STARTER_TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    LATEST_TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    LATEST_TASK_STATE_FIELD_NUMBER: _ClassVar[int]
+    REPORT_TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    REPORT_TASK_STATE_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_DELIVERY_FIELD_NUMBER: _ClassVar[int]
+    CREATED_ORDER_FIELD_NUMBER: _ClassVar[int]
+    work_session_id: str
+    title: str
+    parent_tag_id: str
+    parent_session_id: str
+    starter_task_id: str
+    tag_id: str
+    latest_task_id: str
+    latest_task_state: TaskState
+    report_task_id: str
+    report_task_state: TaskState
+    objective_id: str
+    workspace_delivery: WorkspaceDeliveryReference
+    created_order: int
+    def __init__(self, work_session_id: _Optional[str] = ..., title: _Optional[str] = ..., parent_tag_id: _Optional[str] = ..., parent_session_id: _Optional[str] = ..., starter_task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., latest_task_id: _Optional[str] = ..., latest_task_state: _Optional[_Union[TaskState, str]] = ..., report_task_id: _Optional[str] = ..., report_task_state: _Optional[_Union[TaskState, str]] = ..., objective_id: _Optional[str] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., created_order: _Optional[int] = ...) -> None: ...
+
+class StartWorkSessionRequest(_message.Message):
+    __slots__ = ("attempt", "operation_id", "title", "instruction", "workspace_id", "target_tag_id")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    INSTRUCTION_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
+    TARGET_TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    attempt: InspectAttemptRequest
+    operation_id: str
+    title: str
+    instruction: str
+    workspace_id: str
+    target_tag_id: str
+    def __init__(self, attempt: _Optional[_Union[InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., title: _Optional[str] = ..., instruction: _Optional[str] = ..., workspace_id: _Optional[str] = ..., target_tag_id: _Optional[str] = ...) -> None: ...
+
+class GetWorkSessionRequest(_message.Message):
+    __slots__ = ("work_session_id",)
+    WORK_SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    work_session_id: str
+    def __init__(self, work_session_id: _Optional[str] = ...) -> None: ...
+
+class ListWorkSessionsRequest(_message.Message):
+    __slots__ = ("parent_tag_id", "parent_session_id", "starter_task_id", "limit", "cursor")
+    PARENT_TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    PARENT_SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    STARTER_TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    CURSOR_FIELD_NUMBER: _ClassVar[int]
+    parent_tag_id: str
+    parent_session_id: str
+    starter_task_id: str
+    limit: int
+    cursor: str
+    def __init__(self, parent_tag_id: _Optional[str] = ..., parent_session_id: _Optional[str] = ..., starter_task_id: _Optional[str] = ..., limit: _Optional[int] = ..., cursor: _Optional[str] = ...) -> None: ...
+
+class ListWorkSessionsResponse(_message.Message):
+    __slots__ = ("work_sessions", "next_cursor")
+    WORK_SESSIONS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_CURSOR_FIELD_NUMBER: _ClassVar[int]
+    work_sessions: _containers.RepeatedCompositeFieldContainer[WorkSession]
+    next_cursor: str
+    def __init__(self, work_sessions: _Optional[_Iterable[_Union[WorkSession, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
 
 class TagMessage(_message.Message):
     __slots__ = ("message_id", "sender_tag_id", "recipient_tag_id", "source_task_id", "workstream_post_id", "objective_id", "text", "hops", "task_id", "state", "created_at_ms", "origin")
@@ -856,6 +932,20 @@ class HarnessPostWorkstreamRequest(_message.Message):
     body: str
     to_tag_ids: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, operation_id: _Optional[str] = ..., body: _Optional[str] = ..., to_tag_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class HarnessStartWorkSessionRequest(_message.Message):
+    __slots__ = ("operation_id", "title", "instruction", "workspace_id", "target_tag_id")
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    INSTRUCTION_FIELD_NUMBER: _ClassVar[int]
+    WORKSPACE_ID_FIELD_NUMBER: _ClassVar[int]
+    TARGET_TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    operation_id: str
+    title: str
+    instruction: str
+    workspace_id: str
+    target_tag_id: str
+    def __init__(self, operation_id: _Optional[str] = ..., title: _Optional[str] = ..., instruction: _Optional[str] = ..., workspace_id: _Optional[str] = ..., target_tag_id: _Optional[str] = ...) -> None: ...
 
 class HarnessSendTagMessageRequest(_message.Message):
     __slots__ = ("operation_id", "recipient_tag_id", "text")
@@ -1094,14 +1184,16 @@ class Conversation(_message.Message):
     def __init__(self, tag_id: _Optional[str] = ..., name: _Optional[str] = ..., session_id: _Optional[str] = ..., latest_task: _Optional[_Union[Task, _Mapping]] = ...) -> None: ...
 
 class ConversationMessage(_message.Message):
-    __slots__ = ("task", "conversation", "live_input")
+    __slots__ = ("task", "conversation", "live_input", "work_session_report_id")
     TASK_FIELD_NUMBER: _ClassVar[int]
     CONVERSATION_FIELD_NUMBER: _ClassVar[int]
     LIVE_INPUT_FIELD_NUMBER: _ClassVar[int]
+    WORK_SESSION_REPORT_ID_FIELD_NUMBER: _ClassVar[int]
     task: Task
     conversation: str
     live_input: LiveInput
-    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., conversation: _Optional[str] = ..., live_input: _Optional[_Union[LiveInput, _Mapping]] = ...) -> None: ...
+    work_session_report_id: str
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., conversation: _Optional[str] = ..., live_input: _Optional[_Union[LiveInput, _Mapping]] = ..., work_session_report_id: _Optional[str] = ...) -> None: ...
 
 class ListConversationsRequest(_message.Message):
     __slots__ = ("tag_id", "limit", "cursor")

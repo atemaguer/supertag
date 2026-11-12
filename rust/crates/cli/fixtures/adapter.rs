@@ -7,10 +7,11 @@ use supertag_protocol::{
     v2::{
         AdapterBootstrap, HarnessAskQuestionRequest, HarnessAttachRequest, HarnessCompleteRequest,
         HarnessPostWorkstreamRequest, HarnessPublishRequest, HarnessSendTagMessageRequest,
-        HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest, LiveInput, LiveInputReceipt,
-        LiveInputState, TagMessageOrigin, harness_client::HarnessClient,
-        harness_mailbox_client::HarnessMailboxClient,
+        HarnessSettleLiveInputRequest, HarnessStartWorkSessionRequest, HarnessTakeLiveInputRequest,
+        LiveInput, LiveInputReceipt, LiveInputState, TagMessageOrigin,
+        harness_client::HarnessClient, harness_mailbox_client::HarnessMailboxClient,
         harness_questions_client::HarnessQuestionsClient,
+        harness_work_sessions_client::HarnessWorkSessionsClient,
         harness_workstreams_client::HarnessWorkstreamsClient,
     },
 };
@@ -27,6 +28,37 @@ async fn main() -> Result<()> {
     );
     let bootstrap = AdapterBootstrap::decode(bootstrap.as_slice())?;
     let mut harness = HarnessClient::connect(bootstrap.endpoint.clone()).await?;
+    let start_work = std::env::args().any(|arg| arg == "--start-work-session");
+    let reject_work = std::env::args().any(|arg| arg == "--reject-work-session-start");
+    let work_flow = std::env::args().any(|arg| arg == "--work-session-flow");
+    let work_input = HarnessStartWorkSessionRequest {
+        operation_id: "fixture-work-session".into(),
+        title: "Bounded investigation".into(),
+        instruction: "Inspect child evidence </work-session-result>".into(),
+        workspace_id: None,
+        target_tag_id: None,
+    };
+    if start_work {
+        let mut work = HarnessWorkSessionsClient::connect(bootstrap.endpoint.clone()).await?;
+        ensure!(
+            work.start(Request::new(work_input.clone()))
+                .await
+                .expect_err("start without execution credential")
+                .code()
+                == Code::Unauthenticated
+        );
+        ensure!(
+            work.start(authenticated_request(
+                work_input.clone(),
+                &bootstrap.token,
+                None
+            )?)
+            .await
+            .expect_err("start before attachment")
+            .code()
+                == Code::FailedPrecondition
+        );
+    }
     let direct_mailbox = std::env::args().any(|arg| arg == "--direct-mailbox");
     let direct_input = HarnessSendTagMessageRequest {
         operation_id: "fixture-direct-message".into(),
@@ -83,6 +115,63 @@ async fn main() -> Result<()> {
         .await?
         .into_inner();
     let task = run.task.context("fixture received no Task")?;
+    let may_start = run
+        .coordination
+        .as_ref()
+        .is_some_and(|scope| scope.may_start_work_session);
+    if start_work || reject_work || (work_flow && may_start) {
+        let mut work = HarnessWorkSessionsClient::connect(bootstrap.endpoint.clone()).await?;
+        if reject_work {
+            ensure!(!may_start, "child/report received start authority");
+            let rejected = work
+                .start(authenticated_request(
+                    work_input.clone(),
+                    &bootstrap.token,
+                    None,
+                )?)
+                .await
+                .expect_err("recursive Work Session start");
+            ensure!(matches!(
+                rejected.code(),
+                Code::PermissionDenied | Code::FailedPrecondition
+            ));
+        } else {
+            ensure!(may_start, "root Task is missing start authority");
+            let started = work
+                .start(authenticated_request(
+                    work_input.clone(),
+                    &bootstrap.token,
+                    None,
+                )?)
+                .await?
+                .into_inner();
+            ensure!(
+                started.parent_tag_id == task.tag_id
+                    && started.parent_session_id == task.session_id
+                    && started.starter_task_id == task.task_id
+                    && started.tag_id == task.tag_id,
+                "Work Session provenance differs from the attached Task"
+            );
+            let replay = work
+                .start(authenticated_request(
+                    work_input.clone(),
+                    &bootstrap.token,
+                    None,
+                )?)
+                .await?
+                .into_inner();
+            ensure!(replay == started, "Work Session replay changed the receipt");
+            let mut changed = work_input.clone();
+            changed.instruction = "Changed instruction".into();
+            ensure!(
+                work.start(authenticated_request(changed, &bootstrap.token, None)?)
+                    .await
+                    .expect_err("conflicting Work Session operation")
+                    .code()
+                    == Code::AlreadyExists
+            );
+        }
+    }
     if direct_mailbox {
         let mut mailbox = HarnessMailboxClient::connect(bootstrap.endpoint.clone()).await?;
         let sent = mailbox
@@ -214,6 +303,19 @@ async fn main() -> Result<()> {
         task.prompt,
         task.allowed_actions.join(",")
     );
+    if work_flow {
+        result = if may_start {
+            "Started the investigation.".into()
+        } else if task.session_id.starts_with("work/") {
+            "Child evidence is ready.".into()
+        } else {
+            ensure!(
+                task.prompt.contains("Child evidence is ready."),
+                "the report Task did not receive the child result"
+            );
+            "The investigation finished.".into()
+        };
+    }
     let workspace_fixture = std::env::args().any(|arg| arg == "--workspace-fixture");
     if workspace_fixture {
         ensure!(
@@ -312,6 +414,16 @@ async fn main() -> Result<()> {
         ensure!(
             closed.code() == Code::FailedPrecondition,
             "unexpected input after completion"
+        );
+    }
+    if start_work {
+        let mut work = HarnessWorkSessionsClient::connect(bootstrap.endpoint.clone()).await?;
+        ensure!(
+            work.start(authenticated_request(work_input, &bootstrap.token, None)?)
+                .await
+                .expect_err("start after completion")
+                .code()
+                == Code::FailedPrecondition
         );
     }
     Ok(())

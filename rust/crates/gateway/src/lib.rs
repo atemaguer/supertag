@@ -17,6 +17,7 @@ mod surface_policy;
 mod teams;
 pub mod transfers;
 mod watch;
+mod work_sessions;
 
 pub use watch::GatewayWatch;
 

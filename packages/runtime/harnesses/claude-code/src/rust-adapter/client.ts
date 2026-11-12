@@ -6,6 +6,7 @@ import {
   Harness,
   HarnessMailbox,
   HarnessQuestions,
+  HarnessWorkSessions,
   HarnessWorkstreams,
 } from "./gen/supertag/runtime/v2/runtime_pb.js";
 
@@ -46,8 +47,9 @@ export function harnessClient(endpoint: string, token: string) {
   const questions = createClient(HarnessQuestions, transport);
   const workstreams = createClient(HarnessWorkstreams, transport);
   const mailbox = createClient(HarnessMailbox, transport);
+  const workSessions = createClient(HarnessWorkSessions, transport);
   const options = () => ({ headers: { authorization: `Bearer ${token}` }, timeoutMs: 5000 });
-  return { client, options, questions, workstreams, mailbox };
+  return { client, options, questions, workstreams, mailbox, workSessions };
 }
 
 /** Retry the identical receipt only; callers allocate a sequence before entering this function. */

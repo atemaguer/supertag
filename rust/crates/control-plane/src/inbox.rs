@@ -68,6 +68,11 @@ impl Store {
         let may_ask_objective_question = question_objective_in(&mut tx, &row, &attempt.task_id)
             .await?
             .is_some();
+        let session: String = row.try_get("session_id")?;
+        let is_root = !crate::work_sessions::reserved_session(&session)
+            && crate::work_sessions::task_kind_in(&mut tx, &attempt.task_id)
+                .await?
+                .is_none();
         let tag: String = row.try_get("tag_id")?;
         let may_use_workstream = match crate::teams::workstreams::workstream_for_task_in(
             &mut tx,
@@ -88,8 +93,9 @@ impl Store {
         Ok(AttemptCapabilities {
             may_ask_objective_question,
             may_use_workstream,
-            may_read_mailbox: true,
-            may_send_tag_message: true,
+            may_read_mailbox: is_root,
+            may_send_tag_message: is_root,
+            may_start_work_session: is_root && !crate::mailbox::private_session(&session),
         })
     }
 

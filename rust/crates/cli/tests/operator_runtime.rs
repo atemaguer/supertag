@@ -468,6 +468,83 @@ async fn rust_launcher_and_go_tui_send_a_real_conversation() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
+async fn rust_launcher_and_go_tui_follow_one_work_session_report() -> Result<()> {
+    let binary = std::env::var_os("SUPERTAG_RUST_TEST_TUI")
+        .context("version-matched terminal UI binary required")?;
+    let directory = tempfile::Builder::new()
+        .prefix("work-tui-")
+        .tempdir_in("/tmp")?;
+    let state = directory.path().join("state");
+    let mut up = command(&[
+        "up",
+        "--adapter",
+        ADAPTER,
+        "--adapter-arg=--work-session-flow",
+    ]);
+    up.arg("--state-directory").arg(&state);
+    let (mut runtime, _) = service(up).await?;
+    let mut put = command(&["put-tag", "engineer", "--instructions", "Process requests"]);
+    put.arg("--state-directory").arg(&state);
+    let output = timeout(WAIT, put.output()).await??;
+    ensure!(
+        output.status.success(),
+        "configure fixture Tag: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let tmux = Tmux {
+        socket: directory.path().join("tmux.sock"),
+    };
+    let shell = format!(
+        "env -i PATH=/usr/bin:/bin TERM=xterm-256color HOME={} SUPERTAG_STATE_DIR={} SUPERTAG_TUI_BINARY={} {}",
+        shell_path(directory.path())?,
+        shell_path(&state)?,
+        shell_path(Path::new(&binary))?,
+        shell_path(Path::new(BINARY))?,
+    );
+    tmux.run(&[
+        "new-session",
+        "-d",
+        "-s",
+        "runtime",
+        "-x",
+        "160",
+        "-y",
+        "45",
+        &shell,
+    ])
+    .await?;
+    tmux.wait_for("engineer").await?;
+    tmux.run(&[
+        "send-keys",
+        "-t",
+        "runtime",
+        "-l",
+        "Investigate the release",
+    ])
+    .await?;
+    tmux.run(&["send-keys", "-t", "runtime", "Enter"]).await?;
+    tmux.wait_for("Started the investigation.").await?;
+    tmux.wait_for("The investigation finished.").await?;
+    let pane = tmux.run(&["capture-pane", "-p", "-t", "runtime"]).await?;
+    assert!(pane.contains("Bounded investigation"));
+    assert_eq!(
+        pane.matches("The investigation finished.").count(),
+        1,
+        "{pane}"
+    );
+    assert!(!pane.contains("Inspect child evidence"), "{pane}");
+    tmux.run(&["send-keys", "-t", "runtime", "C-c"]).await?;
+    if let Some(pid) = runtime.id() {
+        // SAFETY: this PID belongs to the disposable runtime started above.
+        unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    }
+    assert!(timeout(WAIT, runtime.wait()).await??.success());
+    Ok(())
+}
+
+#[tokio::test]
 async fn watch_replays_private_conversations_after_services_restart() -> Result<()> {
     use operator_events_client::OperatorEventsClient;
     use watch_event::Update;

@@ -53,9 +53,7 @@ fn eligible(approval: &Approval, id: &str) -> bool {
     approval.operator_ids.is_empty() || approval.operator_ids.iter().any(|operator| operator == id)
 }
 async fn access_in(tx: &mut Transaction<'_, Any>, principal: &str, task_id: &str) -> Result<bool> {
-    let owner: Option<String> = sqlx::query_scalar("SELECT c.principal FROM supertag_v2_tasks t JOIN supertag_v2_conversations c ON c.session_id=t.session_id AND c.tag_id=t.tag_id WHERE t.task_id=$1")
-        .bind(task_id).fetch_optional(&mut **tx).await?;
-    Ok(owner.is_none_or(|owner| owner == principal))
+    crate::conversations::task_access_in(tx, principal, task_id).await
 }
 
 fn effect_request_digest(input: &RequestApprovalRequest) -> Result<String> {
@@ -137,10 +135,11 @@ pub(crate) async fn gate_in(
     let mut operators = rule.operator_ids;
     operators.sort_unstable();
     operators.dedup();
-    let conversation_owner: Option<String> = sqlx::query_scalar("SELECT c.principal FROM supertag_v2_tasks t JOIN supertag_v2_conversations c ON c.session_id=t.session_id AND c.tag_id=t.tag_id WHERE t.task_id=$1")
-        .bind(&attempt.task_id).fetch_optional(&mut **tx).await?;
-    if let Some(owner) = conversation_owner {
-        let owner = operator(&owner)?;
+    let conversation_owner = crate::conversations::task_owner_in(tx, &attempt.task_id)
+        .await?
+        .ok_or(StoreError::PermissionDenied)?;
+    if !conversation_owner.is_empty() {
+        let owner = operator(&conversation_owner)?;
         if !operators.is_empty() && !operators.iter().any(|id| id == owner) {
             return Err(StoreError::PermissionDenied);
         }
@@ -261,7 +260,7 @@ impl Store {
                 .ok_or_else(|| invalid("invalid approval cursor"))?
         };
         let mut tx = self.pool.begin().await?;
-        let rows = sqlx::query(&format!("{VIEW} WHERE a.requested_order>$1 AND ($2='' OR a.objective_id=$2) AND ($3='' OR a.task_id=$3) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks t JOIN supertag_v2_conversations c ON c.session_id=t.session_id AND c.tag_id=t.tag_id WHERE t.task_id=a.task_id AND c.principal<>$4) ORDER BY a.requested_order LIMIT 1001"))
+        let rows = sqlx::query(&format!("{VIEW} WHERE a.requested_order>$1 AND ($2='' OR a.objective_id=$2) AND ($3='' OR a.task_id=$3) AND EXISTS (SELECT 1 FROM supertag_v2_task_audience audience WHERE audience.task_id=a.task_id AND audience.owner IN ('',$4)) ORDER BY a.requested_order LIMIT 1001"))
             .bind(after).bind(&input.objective_id).bind(&input.task_id).bind(principal).fetch_all(&mut *tx).await?;
         let limit = if input.limit == 0 {
             50
@@ -653,7 +652,7 @@ pub(crate) async fn pending_in(
     limit: usize,
 ) -> Result<Vec<InboxItem>> {
     let operator_id = operator(principal)?;
-    let rows=sqlx::query(&format!("{VIEW} WHERE a.state=1 AND c.approval_id IS NULL AND a.requested_at_ms<=$1 AND a.requested_order<=$2 AND ($3='' OR a.objective_id=$3) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks t JOIN supertag_v2_conversations c ON c.session_id=t.session_id AND c.tag_id=t.tag_id WHERE t.task_id=a.task_id AND c.principal<>$4) AND NOT EXISTS (SELECT 1 FROM supertag_v2_objectives o WHERE o.objective_id=a.objective_id AND o.status IN (5,6)) AND EXISTS (SELECT 1 FROM supertag_v2_tasks t WHERE t.task_id=a.task_id AND t.attempt_id=a.attempt_id AND ((t.state=2 AND t.lease_expires_at_ms>$1) OR (t.state=3 AND EXISTS (SELECT 1 FROM supertag_v2_approval_waits w JOIN supertag_v2_approval_wait_requests r ON r.task_id=w.task_id WHERE r.approval_id=a.approval_id AND w.continuation_task_id IS NULL) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order)))) ORDER BY a.requested_order LIMIT $5"))
+    let rows=sqlx::query(&format!("{VIEW} WHERE a.state=1 AND c.approval_id IS NULL AND a.requested_at_ms<=$1 AND a.requested_order<=$2 AND ($3='' OR a.objective_id=$3) AND EXISTS (SELECT 1 FROM supertag_v2_task_audience audience WHERE audience.task_id=a.task_id AND audience.owner IN ('',$4)) AND NOT EXISTS (SELECT 1 FROM supertag_v2_objectives o WHERE o.objective_id=a.objective_id AND o.status IN (5,6)) AND EXISTS (SELECT 1 FROM supertag_v2_tasks t WHERE t.task_id=a.task_id AND t.attempt_id=a.attempt_id AND ((t.state=2 AND t.lease_expires_at_ms>$1) OR (t.state=3 AND EXISTS (SELECT 1 FROM supertag_v2_approval_waits w JOIN supertag_v2_approval_wait_requests r ON r.task_id=w.task_id WHERE r.approval_id=a.approval_id AND w.continuation_task_id IS NULL) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order)))) ORDER BY a.requested_order LIMIT $5"))
         .bind(as_of_ms).bind(upper_order).bind(objective_id).bind(principal).bind(limit.min(1001) as i64).fetch_all(&mut **tx).await?;
     let mut items = vec![];
     for row in rows {

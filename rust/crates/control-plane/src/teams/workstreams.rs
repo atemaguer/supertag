@@ -214,6 +214,12 @@ pub(crate) async fn workstream_for_task_in(
     task_id: &str,
     author: &str,
 ) -> Result<Team> {
+    if crate::work_sessions::task_kind_in(tx, task_id)
+        .await?
+        .is_some()
+    {
+        return Err(StoreError::PermissionDenied);
+    }
     let objective: Option<Option<String>> = sqlx::query_scalar("SELECT o.team_id FROM supertag_v2_objective_tasks link JOIN supertag_v2_objectives o ON o.objective_id=link.objective_id WHERE link.task_id=$1")
         .bind(task_id).fetch_optional(&mut **tx).await?;
     let id = match objective {

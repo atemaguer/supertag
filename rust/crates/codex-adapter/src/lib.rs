@@ -89,7 +89,13 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         && let Some(inventory) = checkpoint::coordination_inventory(previous)
     {
         inventory
-    } else if attached.coordination.is_some() && attached.checkpoint.is_none() {
+    } else if capabilities.may_start_work_session && attached.checkpoint.is_none() {
+        coordination::Inventory::WorkSessions
+    } else if attached.checkpoint.is_none()
+        && (capabilities.may_use_workstream
+            || capabilities.may_read_mailbox
+            || capabilities.may_send_tag_message)
+    {
         coordination::Inventory::Direct
     } else if capabilities.may_ask_objective_question {
         coordination::Inventory::Ask

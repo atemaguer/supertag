@@ -13,6 +13,7 @@ mod surface_policy;
 mod teams;
 mod usage;
 mod watch;
+mod work_sessions;
 mod workspaces;
 
 pub use store::{HostAuthority, Store, StoreError};
@@ -57,6 +58,7 @@ impl ControlPlane {
         self.store.sweep_inputs().await?;
         self.store.sweep_mailbox().await?;
         self.store.sweep_approvals().await?;
+        self.store.sweep_work_sessions().await?;
         self.store.prune_watch().await?;
         Ok(())
     }

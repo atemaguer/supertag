@@ -26,12 +26,17 @@ describe("Watch history refresh", () => {
       nextCursor: "load-one",
     });
     history = receivedMessage(history, message("six"));
+    const report: Message = {
+      conversation: "planning",
+      task: { ...message("five").task, prompt: undefined, state: "running" },
+      workSessionReportId: "work/five",
+    };
     const read = vi.fn(async (cursor?: string) => {
       switch (cursor) {
         case undefined:
           return { messages: [message("six")], nextCursor: "first" };
         case "first":
-          return { messages: [message("five"), message("four")], nextCursor: "second" };
+          return { messages: [report, message("four")], nextCursor: "second" };
         case "second":
           return { messages: [message("three")], nextCursor: "earlier" };
         default:
@@ -50,6 +55,20 @@ describe("Watch history refresh", () => {
     ]);
     expect(history.cursor).toBe("load-one");
     expect(receivedMessage(history, message("six"))).toBe(history);
+
+    const settled = {
+      ...report,
+      task: { ...report.task, state: "succeeded", result: "Work Session complete." },
+    };
+    const refreshed = latestHistory(history, { messages: [message("six"), settled] });
+    expect(refreshed.messages).toEqual([
+      message("two"),
+      message("three"),
+      message("four"),
+      settled,
+      message("six"),
+    ]);
+    expect(refreshed.cursor).toBe("load-one");
   });
 
   it("does not mix Sessions or merge a delayed older page after replacement", async () => {

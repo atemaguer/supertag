@@ -752,6 +752,38 @@ pub(crate) async fn objective_link_task_in(
     Ok(())
 }
 
+/// Internal delegation checks the owner's remaining authority without treating
+/// the model's request as a new operator instruction or resetting idle state.
+pub(crate) async fn work_session_admission_in(
+    tx: &mut Transaction<'_, Any>,
+    parent: &Task,
+    now_ms: i64,
+) -> Result<Option<String>> {
+    let id: Option<String> =
+        sqlx::query_scalar("SELECT objective_id FROM supertag_v2_objective_tasks WHERE task_id=$1")
+            .bind(&parent.task_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    let Some(id) = id else {
+        return Ok(None);
+    };
+    reconcile_in(tx, &id, now_ms).await?;
+    let record = get_in(tx, &id).await?;
+    if record.value.owner_tag_id != parent.tag_id || record.value.session_id != parent.session_id {
+        return Err(StoreError::PermissionDenied);
+    }
+    let mut admitted = record.limits;
+    // Pause controls the start of native turns. Already-running owner work may
+    // queue a child, which remains paused under objective_task_can_start_in.
+    admitted.paused_at = None;
+    if let Some(blocker) = limits::admission_blocker(&admitted, timestamp(now_ms)?) {
+        return Err(refused(&format!(
+            "Objective does not accept delegated work: {blocker:?}"
+        )));
+    }
+    Ok(Some(id))
+}
+
 pub(crate) async fn objective_task_can_start_in(
     tx: &mut Transaction<'_, Any>,
     task: &Task,
@@ -843,11 +875,30 @@ pub(crate) async fn objective_finish_in(
     };
     let mut record = get_in(tx, &id).await?;
     if record.value.owner_tag_id != task.tag_id || record.value.session_id != task.session_id {
+        // A child contributes work and usage to the Objective but never decides
+        // its owner's status. Its durable report is the owner's next opportunity.
+        if crate::work_sessions::task_kind_in(tx, &task.task_id).await?
+            == Some(crate::work_sessions::CHILD)
+        {
+            return if signal == ObjectiveSignal::Progress {
+                Ok(())
+            } else {
+                Err(invalid(
+                    "only the Objective's owner Session can signal its status",
+                ))
+            };
+        }
         return Err(StoreError::PermissionDenied);
     }
     if signal == ObjectiveSignal::Progress {
         if crate::inbox::task_waits_in(tx, &task.task_id).await?
             || crate::approvals::task_waits_in(tx, &task.task_id).await?
+            || crate::work_sessions::reports::parent_has_pending_in(
+                tx,
+                &task.tag_id,
+                &task.session_id,
+            )
+            .await?
         {
             return Ok(());
         }

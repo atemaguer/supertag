@@ -252,6 +252,59 @@ async function coordinationTools(workstream) {
   return "Coordination complete";
 }
 
+async function workSessionTools() {
+  const tools = (await sdkMcp("tools/list", {})).result?.tools;
+  if (
+    tools?.map(({ name }) => name).join() !== "start_session" ||
+    tools[0].inputSchema.additionalProperties !== false
+  )
+    throw new Error("Unexpected Work Session tool or argument schema");
+  const input = {
+    title: "  Investigate   release  ",
+    instruction: ` Inspect the pinned checkout ${process.env.ANTHROPIC_API_KEY} `,
+    workspace: "release",
+    tag: "actor",
+  };
+  const metadata = { mcp_server: { name: "supertag", source: "sdk" } };
+  for (const [arguments_, origin] of [
+    [{ ...input, attemptId: "forged" }, metadata],
+    [{ ...input, title: " " }, metadata],
+    [{ ...input, instruction: "x".repeat(8001) }, metadata],
+    [input, { ...metadata, agent_id: "untrusted-child" }],
+    [input, { mcp_server: { name: "supertag", source: "external" } }],
+  ]) {
+    if (await hook("mcp__supertag__start_session", arguments_, origin))
+      throw new Error("Work Session tool accepted invalid arguments or origin");
+  }
+  const malformed = await sdkMcp("tools/call", {
+    name: "start_session",
+    arguments: { ...input, leaseToken: "forged" },
+  });
+  if (!malformed.error && !malformed.result?.isError)
+    throw new Error("Work Session MCP schema accepted injected authority");
+  const ids = new Set();
+  for (let count = 0; count < 2; count++) {
+    const result = await coordinationCall("start_session", input);
+    const receipt = JSON.parse(result.content[0].text);
+    if (
+      result.isError ||
+      receipt.status !== "accepted" ||
+      !receipt.workSessionId.startsWith("work/") ||
+      receipt.taskId !== "child-task" ||
+      Object.keys(receipt).sort().join() !== "status,taskId,workSessionId"
+    )
+      throw new Error("Work Session returned an invalid provider receipt");
+    ids.add(receipt.workSessionId);
+  }
+  if (ids.size !== 2) throw new Error("Distinct Work Session requests shared a receipt");
+  for (const title of ["Wrong starter", "Wrong parent", "Wrong target", "Wrong child"]) {
+    const result = await coordinationCall("start_session", { ...input, title });
+    if (!result.isError || result.content[0].text.includes("other-"))
+      throw new Error("Work Session tool exposed an unverified receipt");
+  }
+  return "fixture started two Work Sessions";
+}
+
 async function approvalAndQuestion(order) {
   const ask = () => coordinationCall("ask", { text: "Which branch should I use?" });
   const post = () => coordinationCall("post", { text: "Pending post" });
@@ -270,6 +323,11 @@ async function approvalAndQuestion(order) {
     )
       throw new Error("An Objective question was possible while a Workstream approval was pending");
   }
+  const work = await coordinationCall("start_session", {
+    title: "Blocked",
+    instruction: "Should wait for the operator",
+  });
+  if (!work?.isError) throw new Error("Work Session started while operator action was pending");
   return "Coordination kept one wait";
 }
 
@@ -404,6 +462,17 @@ async function turn(message) {
   if (prompt.startsWith("coordination-"))
     result = await coordinationTools(prompt === "coordination-tools");
   if (prompt === "direct-mailbox") result = await directMailbox();
+  if (prompt === "start-work-session") result = await workSessionTools();
+  if (prompt === "work-session-disabled") {
+    if (
+      await hook(
+        "mcp__supertag__start_session",
+        { title: "Disallowed", instruction: "No capability" },
+        { mcp_server: { name: "supertag", source: "sdk" } },
+      )
+    )
+      throw new Error("Work Session capability was not required");
+  }
   if (prompt === "inspect-skill-package") result = await inspectSkillPackage();
   if (message.uuid) result += `; input: ${prompt}`;
   if (prompt.includes("write")) {

@@ -106,3 +106,8 @@ required-features = ["test-fixtures"]
 name = "host_readiness_runtime"
 path = "tests/host_readiness_runtime.rs"
 required-features = ["test-fixtures"]
+
+[[test]]
+name = "work_sessions_runtime"
+path = "tests/work_sessions_runtime.rs"
+required-features = ["test-fixtures"]

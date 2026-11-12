@@ -1601,6 +1601,196 @@ class Inbox:
             _registered_method=True)
 
 
+class WorkSessionsStub:
+    """Operators see the work started in Sessions they can access.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Get = channel.unary_unary(
+                '/supertag.runtime.v2.WorkSessions/Get',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkSessionRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
+                _registered_method=True)
+        self.List = channel.unary_unary(
+                '/supertag.runtime.v2.WorkSessions/List',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListWorkSessionsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListWorkSessionsResponse.FromString,
+                _registered_method=True)
+
+
+class WorkSessionsServicer:
+    """Operators see the work started in Sessions they can access.
+    """
+
+    def Get(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def List(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_WorkSessionsServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Get': grpc.unary_unary_rpc_method_handler(
+                    servicer.Get,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkSessionRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.SerializeToString,
+            ),
+            'List': grpc.unary_unary_rpc_method_handler(
+                    servicer.List,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListWorkSessionsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListWorkSessionsResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.WorkSessions', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.WorkSessions', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class WorkSessions:
+    """Operators see the work started in Sessions they can access.
+    """
+
+    @staticmethod
+    def Get(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkSessions/Get',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetWorkSessionRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def List(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.WorkSessions/List',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListWorkSessionsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListWorkSessionsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class AttemptWorkSessionsStub:
+    """Missing associated documentation comment in .proto file."""
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Start = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptWorkSessions/Start',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.StartWorkSessionRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
+                _registered_method=True)
+
+
+class AttemptWorkSessionsServicer:
+    """Missing associated documentation comment in .proto file."""
+
+    def Start(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_AttemptWorkSessionsServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Start': grpc.unary_unary_rpc_method_handler(
+                    servicer.Start,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.StartWorkSessionRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.AttemptWorkSessions', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.AttemptWorkSessions', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class AttemptWorkSessions:
+    """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def Start(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptWorkSessions/Start',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.StartWorkSessionRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
 class TeamsStub:
     """Missing associated documentation comment in .proto file."""
 
@@ -5003,6 +5193,81 @@ class HarnessMailbox:
             '/supertag.runtime.v2.HarnessMailbox/SendMessage',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessSendTagMessageRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.SendTagMessageResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class HarnessWorkSessionsStub:
+    """The supervising Worker Host supplies the Attempt identity.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Start = channel.unary_unary(
+                '/supertag.runtime.v2.HarnessWorkSessions/Start',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessStartWorkSessionRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
+                _registered_method=True)
+
+
+class HarnessWorkSessionsServicer:
+    """The supervising Worker Host supplies the Attempt identity.
+    """
+
+    def Start(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_HarnessWorkSessionsServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Start': grpc.unary_unary_rpc_method_handler(
+                    servicer.Start,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessStartWorkSessionRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.HarnessWorkSessions', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.HarnessWorkSessions', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class HarnessWorkSessions:
+    """The supervising Worker Host supplies the Attempt identity.
+    """
+
+    @staticmethod
+    def Start(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HarnessWorkSessions/Start',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessStartWorkSessionRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
             options,
             channel_credentials,
             insecure,

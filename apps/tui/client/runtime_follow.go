@@ -22,7 +22,7 @@ func (c *Client) GetObjectiveMessage(ctx context.Context, tag, id string) (*oper
 	if err != nil {
 		return nil, err
 	}
-	return runtimeMessage(message), nil
+	return c.runtime.projectMessage(ctx, message)
 }
 
 func (c *runtimeClient) getObjectiveTask(ctx context.Context, tag, id string) (*v2.ConversationMessage, error) {
@@ -61,10 +61,12 @@ type runtimeFollow struct {
 	after     uint64
 	shown     *Shown
 	objective bool
+	children  map[string]uint64
+	workSince time.Time
 }
 
 func (f *Follower) followRuntime(ctx context.Context, tag, id string, shown *Shown, objective bool, emit func(...FollowEvent)) error {
-	state := runtimeFollow{tag: tag, task: id, delegated: shown.joinedOnPage, shown: shown, objective: objective}
+	state := runtimeFollow{tag: tag, task: id, delegated: shown.joinedOnPage, shown: shown, objective: objective, children: map[string]uint64{}}
 	interval := f.Interval
 	if interval <= 0 {
 		interval = time.Second
@@ -73,6 +75,13 @@ func (f *Follower) followRuntime(ctx context.Context, tag, id string, shown *Sho
 	for ctx.Err() == nil {
 		done, more, err := f.pollRuntime(ctx, &state, emit)
 		if done || ctx.Err() != nil {
+			return nil
+		}
+		if state.shown.replied && state.workSince.IsZero() {
+			state.workSince = time.Now()
+		}
+		if f.WorkTimeout > 0 && !state.workSince.IsZero() && time.Since(state.workSince) >= f.WorkTimeout {
+			emit(FollowEvent{Kind: EventStillWorking, Text: "Work Sessions are still running or waiting for their reports."})
 			return nil
 		}
 		if err == nil {
@@ -117,6 +126,7 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 			return false, false, err
 		}
 		task = original.GetTask()
+		message = original
 		if state.delegated == source || f.following(state.tag, source) {
 			state.delegated = source
 			return runtimeReply(task) != nil, false, nil
@@ -126,32 +136,75 @@ func (f *Follower) pollRuntime(ctx context.Context, state *runtimeFollow, emit f
 	if state.source != source {
 		state.source, state.after = source, 0
 	}
-	if state.shown.replied {
-		return true, false, nil
+	if message.GetWorkSessionReportId() != "" {
+		// The report is rendered through its Work Session, including when its
+		// starter is on an older history page. It is not another operator turn.
+		state.shown.replied = true
 	}
-	events, err := runtime.listMessageEvents(ctx, state.tag, source, state.after, state.objective)
+	if !state.shown.replied {
+		events, err := runtime.listMessageEvents(ctx, state.tag, source, state.after, state.objective)
+		if err != nil {
+			return false, false, err
+		}
+		previous := state.after
+		for _, event := range events {
+			if event.GetSequence() <= state.after {
+				continue
+			}
+			state.after = event.GetSequence()
+			if event.GetText() != "" {
+				emit(FollowEvent{Kind: EventDelta, Text: event.GetText()})
+			}
+		}
+		if len(events) >= runtimeEventPage {
+			if state.after == previous {
+				return false, false, workSessionDataLoss("Gateway event cursor did not advance.")
+			}
+			return false, true, nil
+		}
+		if reply := runtimeReply(task); reply != nil {
+			emit(state.shown.reply(reply)...)
+		}
+	}
+	works, err := runtime.messageWorkSessions(ctx, message)
 	if err != nil {
 		return false, false, err
 	}
-	previous := state.after
-	for _, event := range events {
-		if event.GetSequence() <= state.after {
+	settled := state.shown.replied
+	for _, work := range works {
+		// Show working before activity, but wait until every event page has
+		// been read before showing the final parent report.
+		emit(state.shown.workSession(runtimeWork(work))...)
+		id := work.GetLatestTaskId()
+		after := state.children[id]
+		events, err := runtime.listMessageEvents(ctx, work.GetTagId(), id, after, true)
+		if err != nil {
+			return false, false, err
+		}
+		for _, event := range events {
+			if event.GetSequence() <= state.children[id] {
+				continue
+			}
+			state.children[id] = event.GetSequence()
+			if event.GetText() != "" {
+				emit(FollowEvent{Kind: EventActivity, Text: event.GetText(), Indent: true, WorkSession: work.GetWorkSessionId(), Title: state.shown.title(work.GetWorkSessionId()), TaskID: id, Sequence: event.GetSequence()})
+			}
+		}
+		if len(events) >= runtimeEventPage {
+			if after == state.children[id] {
+				return false, false, workSessionDataLoss("Gateway child event cursor did not advance.")
+			}
+			more, settled = true, false
 			continue
 		}
-		state.after = event.GetSequence()
-		if event.GetText() != "" {
-			emit(FollowEvent{Kind: EventDelta, Text: event.GetText()})
+		view, err := runtime.projectWork(ctx, work, message.GetTask())
+		if err != nil {
+			return false, false, err
+		}
+		emit(state.shown.workSession(view)...)
+		if view.GetReportStatus() != operatorv1.ReplyStatus_REPLY_STATUS_REPLIED {
+			settled = false
 		}
 	}
-	if len(events) >= runtimeEventPage {
-		if state.after == previous {
-			return false, false, &APIError{Code: connect.CodeDataLoss, Message: "Gateway event cursor did not advance."}
-		}
-		return false, true, nil
-	}
-	if reply := runtimeReply(task); reply != nil {
-		emit(state.shown.reply(reply)...)
-		return true, false, nil
-	}
-	return false, false, nil
+	return settled, more, nil
 }

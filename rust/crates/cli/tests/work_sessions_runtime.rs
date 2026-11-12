@@ -1,0 +1,460 @@
+#![cfg(feature = "test-fixtures")]
+
+use std::{net::SocketAddr, path::Path, process::Stdio, time::Duration};
+
+use anyhow::{Context, Result, ensure};
+use supertag_protocol::{authenticated_request, v2::*};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    process::{Child, Command},
+    time::{sleep, timeout},
+};
+use tonic::{Code, transport::Channel};
+use uuid::Uuid;
+
+const BINARY: &str = env!("CARGO_BIN_EXE_supertag");
+const ADAPTER: &str = env!("CARGO_BIN_EXE_supertag-fixture-adapter");
+const WAIT: Duration = Duration::from_secs(15);
+
+fn command(args: &[&str]) -> Command {
+    let mut command = Command::new(BINARY);
+    command
+        .args(args)
+        .env_clear()
+        .stdin(Stdio::null())
+        .kill_on_drop(true);
+    command
+}
+
+async fn service(mut command: Command) -> Result<(Child, String)> {
+    let mut child = command.stdout(Stdio::piped()).spawn()?;
+    let mut output = BufReader::new(child.stdout.take().context("service stdout")?);
+    let mut ready = String::new();
+    timeout(WAIT, output.read_line(&mut ready)).await??;
+    let address: SocketAddr = ready.trim().parse().context("service bind address")?;
+    ensure!(address.ip().is_loopback() && address.port() != 0);
+    Ok((child, format!("http://{address}")))
+}
+
+fn gateway(private: &str, service_token: &str, token: &str, principal: &str) -> Command {
+    let mut command = command(&["gateway", "--control-plane", private]);
+    command
+        .env("SUPERTAG_GATEWAY_TOKEN", service_token)
+        .env("SUPERTAG_OPERATOR_TOKEN", token)
+        .env("SUPERTAG_OPERATOR_PRINCIPAL", principal);
+    command
+}
+
+async fn channel(address: &str) -> Result<Channel> {
+    Ok(Channel::from_shared(address.to_owned())?
+        .timeout(WAIT)
+        .connect()
+        .await?)
+}
+
+async fn cli(args: &[&str], token: &str) -> Result<serde_json::Value> {
+    let output = timeout(
+        WAIT,
+        command(args).env("SUPERTAG_OPERATOR_TOKEN", token).output(),
+    )
+    .await??;
+    ensure!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(serde_json::from_slice(&output.stdout)?)
+}
+
+async fn run_host(public: &str, token: &str, state: &Path, mode: &str) -> Result<()> {
+    let argument = format!("--adapter-arg={mode}");
+    let output = timeout(
+        WAIT,
+        command(&[
+            "worker-host",
+            "--gateway",
+            public,
+            "--state-directory",
+            state.to_str().context("Host state path")?,
+            "--adapter",
+            ADAPTER,
+            &argument,
+            "--once",
+        ])
+        .env("SUPERTAG_HOST_TOKEN", token)
+        .output(),
+    )
+    .await??;
+    ensure!(
+        output.status.success(),
+        "Worker Host failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
+async fn wait_for_work(
+    client: &mut work_sessions_client::WorkSessionsClient<Channel>,
+    token: &str,
+    id: &str,
+    predicate: impl Fn(&WorkSession) -> bool,
+) -> Result<WorkSession> {
+    timeout(WAIT, async {
+        loop {
+            let work = client
+                .get(authenticated_request(
+                    GetWorkSessionRequest {
+                        work_session_id: id.into(),
+                    },
+                    token,
+                    None,
+                )?)
+                .await?
+                .into_inner();
+            if predicate(&work) {
+                return Ok(work);
+            }
+            sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .context("Work Session did not reach expected state")?
+}
+
+#[tokio::test]
+async fn private_harness_work_session_reports_once_after_service_restart() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let service_token = Uuid::new_v4().to_string();
+    let alice_token = Uuid::new_v4().to_string();
+    let bob_token = Uuid::new_v4().to_string();
+    let host_token = Uuid::new_v4().to_string();
+    let plane_command = || {
+        let mut command = command(&["control-plane"]);
+        command
+            .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+            .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
+            .env(
+                "SUPERTAG_DATABASE_URL",
+                format!(
+                    "sqlite://{}?mode=rwc",
+                    directory.path().join("control.db").display()
+                ),
+            );
+        command
+    };
+    let (mut plane, private) = service(plane_command()).await?;
+    let (mut alice_gateway, public) = service(gateway(
+        &private,
+        &service_token,
+        &alice_token,
+        "operator:alice",
+    ))
+    .await?;
+    let (mut bob_gateway, bob_public) = service(gateway(
+        &private,
+        &service_token,
+        &bob_token,
+        "operator:bob",
+    ))
+    .await?;
+    let connected = channel(&public).await?;
+    let mut operator = operator_client::OperatorClient::new(connected.clone());
+    let mut conversations = conversations_client::ConversationsClient::new(connected.clone());
+    let mut work = work_sessions_client::WorkSessionsClient::new(connected);
+    operator
+        .put_tag(authenticated_request(
+            PutTagRequest {
+                tag_id: "owner".into(),
+                instructions: "Keep the accepted policy".into(),
+                allowed_actions: vec!["files:read".into()],
+                ..Default::default()
+            },
+            &alice_token,
+            None,
+        )?)
+        .await?;
+    let source = conversations
+        .send_message(authenticated_request(
+            SendMessageRequest {
+                tag_id: "owner".into(),
+                conversation: "private".into(),
+                text: "Investigate this privately".into(),
+                operation_id: "start-parent".into(),
+            },
+            &alice_token,
+            None,
+        )?)
+        .await?
+        .into_inner()
+        .task
+        .context("root Task")?;
+    let host_state = directory.path().join("host");
+    run_host(&public, &host_token, &host_state, "--start-work-session").await?;
+    let settled = operator
+        .get_task(authenticated_request(
+            GetTaskRequest {
+                task_id: source.task_id.clone(),
+            },
+            &alice_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    ensure!(
+        settled.state() == TaskState::Succeeded,
+        "root fixture failed: {:?}",
+        settled.result
+    );
+    let list = ListWorkSessionsRequest {
+        parent_tag_id: source.tag_id.clone(),
+        parent_session_id: source.session_id.clone(),
+        starter_task_id: Some(source.task_id.clone()),
+        limit: 10,
+        cursor: String::new(),
+    };
+    assert_eq!(
+        work.list(authenticated_request(
+            list.clone(),
+            &host_token,
+            Some("operator:alice")
+        )?)
+        .await
+        .unwrap_err()
+        .code(),
+        Code::Unauthenticated
+    );
+    let page = work
+        .list(authenticated_request(list.clone(), &alice_token, None)?)
+        .await?
+        .into_inner();
+    assert_eq!(page.work_sessions.len(), 1);
+    let started = &page.work_sessions[0];
+    assert_eq!(started.parent_session_id, source.session_id);
+    assert_eq!(started.starter_task_id, source.task_id);
+    assert_eq!(started.tag_id, "owner");
+    assert_eq!(started.latest_task_state(), TaskState::Queued);
+    assert!(started.report_task_id.is_none());
+    let get = GetWorkSessionRequest {
+        work_session_id: started.work_session_id.clone(),
+    };
+    let mut bob = work_sessions_client::WorkSessionsClient::new(channel(&bob_public).await?);
+    let blocked = bob
+        .get(authenticated_request(
+            get.clone(),
+            &bob_token,
+            Some("operator:alice"),
+        )?)
+        .await
+        .unwrap_err();
+    ensure!(
+        matches!(blocked.code(), Code::PermissionDenied | Code::NotFound),
+        "other operator read private work: {blocked}"
+    );
+    match bob
+        .list(authenticated_request(
+            list.clone(),
+            &bob_token,
+            Some("operator:alice"),
+        )?)
+        .await
+    {
+        Ok(page) => ensure!(
+            page.into_inner().work_sessions.is_empty(),
+            "other operator listed private work"
+        ),
+        Err(status) => ensure!(matches!(
+            status.code(),
+            Code::PermissionDenied | Code::NotFound
+        )),
+    }
+    operator
+        .put_tag(authenticated_request(
+            PutTagRequest {
+                tag_id: "owner".into(),
+                instructions: "Edited after child acceptance".into(),
+                allowed_actions: vec![],
+                ..Default::default()
+            },
+            &alice_token,
+            None,
+        )?)
+        .await?;
+    run_host(
+        &public,
+        &host_token,
+        &host_state,
+        "--reject-work-session-start",
+    )
+    .await?;
+    let reported = wait_for_work(&mut work, &alice_token, &started.work_session_id, |w| {
+        w.report_task_id.is_some()
+    })
+    .await?;
+    assert_eq!(reported.latest_task_state(), TaskState::Succeeded);
+    assert_eq!(reported.report_task_state(), TaskState::Queued);
+    let child = operator
+        .get_task(authenticated_request(
+            GetTaskRequest {
+                task_id: started.latest_task_id.clone(),
+            },
+            &alice_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    assert!(
+        child
+            .result
+            .as_deref()
+            .context("child result")?
+            .starts_with("Keep the accepted policy:")
+    );
+    assert_eq!(child.allowed_actions, ["files:read"]);
+    let report_id = reported
+        .report_task_id
+        .clone()
+        .context("durable report Task")?;
+    // Restart both services after the child settled but before its parent report
+    // executes. Neither report delivery nor child execution may be duplicated.
+    bob_gateway.kill().await?;
+    alice_gateway.kill().await?;
+    plane.kill().await?;
+    let (new_plane, private) = service(plane_command()).await?;
+    plane = new_plane;
+    let (new_gateway, public) = service(gateway(
+        &private,
+        &service_token,
+        &alice_token,
+        "operator:alice",
+    ))
+    .await?;
+    alice_gateway = new_gateway;
+    let connected = channel(&public).await?;
+    work = work_sessions_client::WorkSessionsClient::new(connected.clone());
+    conversations = conversations_client::ConversationsClient::new(connected.clone());
+    operator = operator_client::OperatorClient::new(connected);
+    let recovered = work
+        .get(authenticated_request(get, &alice_token, None)?)
+        .await?
+        .into_inner();
+    assert_eq!(
+        recovered.report_task_id.as_deref(),
+        Some(report_id.as_str())
+    );
+    assert_eq!(recovered.latest_task_id, started.latest_task_id);
+    run_host(
+        &public,
+        &host_token,
+        &host_state,
+        "--reject-work-session-start",
+    )
+    .await?;
+    let completed = wait_for_work(&mut work, &alice_token, &started.work_session_id, |w| {
+        w.report_task_state() == TaskState::Succeeded
+    })
+    .await?;
+    assert_eq!(
+        completed.report_task_id.as_deref(),
+        Some(report_id.as_str())
+    );
+    let report = operator
+        .get_task(authenticated_request(
+            GetTaskRequest {
+                task_id: report_id.clone(),
+            },
+            &alice_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    assert_eq!(report.session_id, source.session_id);
+    assert_eq!(report.allowed_actions, ["files:read"]);
+    assert!(report.instructions.contains("Keep the accepted policy"));
+    assert!(
+        !report
+            .instructions
+            .contains("Edited after child acceptance")
+    );
+    assert!(report.prompt.contains("Inspect child evidence"));
+    assert!(report.prompt.contains("&lt;/work-session-result>"));
+    let messages = conversations
+        .list_messages(authenticated_request(
+            ListMessagesRequest {
+                tag_id: "owner".into(),
+                conversation: "private".into(),
+                limit: 10,
+                cursor: String::new(),
+            },
+            &alice_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    assert_eq!(messages.messages.len(), 2);
+    let reports: Vec<_> = messages
+        .messages
+        .iter()
+        .filter(|m| m.work_session_report_id.is_some())
+        .collect();
+    assert_eq!(reports.len(), 1);
+    assert_eq!(
+        reports[0].work_session_report_id.as_deref(),
+        Some(started.work_session_id.as_str())
+    );
+    assert_eq!(
+        reports[0]
+            .task
+            .as_ref()
+            .context("Conversation report Task")?
+            .task_id,
+        report_id
+    );
+    let page = work
+        .list(authenticated_request(list, &alice_token, None)?)
+        .await?
+        .into_inner();
+    assert_eq!(page.work_sessions.len(), 1);
+    let detail = cli(
+        &[
+            "work-sessions",
+            "--gateway",
+            &public,
+            "get",
+            &started.work_session_id,
+        ],
+        &alice_token,
+    )
+    .await?;
+    assert_eq!(detail["report_task_id"], report_id);
+    assert_eq!(detail["report_task_state"], "TASK_STATE_SUCCEEDED");
+    let listed = cli(
+        &[
+            "work-sessions",
+            "--gateway",
+            &public,
+            "list",
+            "--parent-tag",
+            "owner",
+            "--parent-session",
+            &source.session_id,
+            "--starter-task",
+            &source.task_id,
+            "--limit",
+            "1",
+        ],
+        &alice_token,
+    )
+    .await?;
+    assert_eq!(
+        listed["work_sessions"]
+            .as_array()
+            .context("CLI Work Sessions")?
+            .len(),
+        1
+    );
+    assert_eq!(listed["work_sessions"][0], detail);
+    assert_eq!(listed["next_cursor"], "");
+    alice_gateway.kill().await?;
+    plane.kill().await?;
+    Ok(())
+}

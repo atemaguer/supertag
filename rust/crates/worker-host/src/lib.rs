@@ -22,6 +22,7 @@ use supertag_protocol::{
         HarnessCompleteRequest, HarnessKind, InspectAttemptRequest, RegisterHostRequest,
         ResolvedSkill, StartTaskRequest, Task, TaskState,
         attempt_inputs_client::AttemptInputsClient, attempt_mailbox_client::AttemptMailboxClient,
+        attempt_work_sessions_client::AttemptWorkSessionsClient,
         attempt_workstreams_client::AttemptWorkstreamsClient, worker_host_client::WorkerHostClient,
     },
 };
@@ -84,6 +85,7 @@ pub(crate) type RegisteredInputs = AttemptInputsClient<InterceptedService<Channe
 pub(crate) struct CoordinationClients {
     workstreams: AttemptWorkstreamsClient<InterceptedService<Channel, HostHeaders>>,
     mailbox: AttemptMailboxClient<InterceptedService<Channel, HostHeaders>>,
+    work_sessions: AttemptWorkSessionsClient<InterceptedService<Channel, HostHeaders>>,
 }
 
 impl Attempt {
@@ -186,6 +188,12 @@ pub async fn run(
         mailbox: AttemptMailboxClient::with_interceptor(channel.clone(), headers.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        work_sessions: AttemptWorkSessionsClient::with_interceptor(
+            channel.clone(),
+            headers.clone(),
+        )
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES),
     };
     let transfers = checkpoints::Transfers::new(channel.clone(), headers.clone());
     let mut host = WorkerHostClient::with_interceptor(channel, headers)

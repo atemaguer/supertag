@@ -60,6 +60,7 @@ fn messages_keep_structured_live_input_state_and_camel_case_fields() {
         task: Some(v2::Task {
             task_id: "follower".into(),
             tag_id: "engineer".into(),
+            prompt: "Operator message".into(),
             state: v2::TaskState::Queued as i32,
             ..Default::default()
         }),
@@ -72,14 +73,61 @@ fn messages_keep_structured_live_input_state_and_camel_case_fields() {
             order: 4,
             ..Default::default()
         }),
+        work_session_report_id: None,
     })
     .unwrap();
     let json = serde_json::to_value(message).unwrap();
     assert_eq!(json["task"]["taskId"], "follower");
     assert_eq!(json["task"]["state"], "queued");
+    assert_eq!(json["task"]["prompt"], "Operator message");
     assert!(json["task"].get("result").is_none());
+    assert!(json.get("workSessionReportId").is_none());
     assert_eq!(json["liveInput"]["state"], "dispatching");
     assert_eq!(json["liveInput"]["followerTaskId"], "follower");
+}
+
+#[test]
+fn work_session_reports_keep_result_and_identity_but_strip_internal_input() {
+    let report = v2::Task {
+        task_id: "report-task".into(),
+        tag_id: "engineer".into(),
+        session_id: "conversation/planning".into(),
+        state: v2::TaskState::Succeeded as i32,
+        prompt: "Internal report instructions with raw child output".into(),
+        result: Some("The dependency update passed verification.".into()),
+        ..Default::default()
+    };
+    let message = Message::try_from(v2::ConversationMessage {
+        task: Some(report.clone()),
+        conversation: "planning".into(),
+        live_input: Some(v2::LiveInput {
+            text: "Unexpected internal input".into(),
+            ..Default::default()
+        }),
+        work_session_report_id: Some("work/dependency".into()),
+    })
+    .unwrap();
+    let json = serde_json::to_value(message).unwrap();
+    assert_eq!(json["workSessionReportId"], "work/dependency");
+    assert_eq!(json["task"]["taskId"], "report-task");
+    assert_eq!(json["task"]["state"], "succeeded");
+    assert_eq!(
+        json["task"]["result"],
+        "The dependency update passed verification."
+    );
+    assert!(json["task"].get("prompt").is_none());
+    assert!(json.get("liveInput").is_none());
+
+    let summary = Conversation::from(v2::Conversation {
+        latest_task: Some(v2::Task {
+            prompt: String::new(),
+            ..report
+        }),
+        ..Default::default()
+    });
+    let json = serde_json::to_value(summary).unwrap();
+    assert_eq!(json["latestTask"]["taskId"], "report-task");
+    assert!(json["latestTask"].get("prompt").is_none());
 }
 
 #[tokio::test]
@@ -193,10 +241,9 @@ async fn native_client_uses_authenticated_gateway_and_durable_message_operations
     let conversations = client.conversations("engineer".into()).await.unwrap();
     assert_eq!(conversations.len(), 1);
     assert_eq!(conversations[0].name, "planning");
-    assert_eq!(
-        conversations[0].latest_task.as_ref().unwrap().task_id,
-        first.task.task_id
-    );
+    let latest_task = conversations[0].latest_task.as_ref().unwrap();
+    assert_eq!(latest_task.task_id, first.task.task_id);
+    assert_eq!(latest_task.prompt.as_deref(), Some("Explain the change"));
     let page = client
         .messages("engineer".into(), "planning".into(), None)
         .await
@@ -209,8 +256,9 @@ async fn native_client_uses_authenticated_gateway_and_durable_message_operations
             .await
             .unwrap()
             .task
-            .prompt,
-        "Explain the change"
+            .prompt
+            .as_deref(),
+        Some("Explain the change")
     );
     assert!(
         client

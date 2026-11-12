@@ -265,6 +265,59 @@ message AttemptCapabilities {
   bool may_use_workstream = 2;
   bool may_read_mailbox = 3;
   bool may_send_tag_message = 4;
+  bool may_start_work_session = 5;
+}
+
+// Operators see the work started in Sessions they can access.
+service WorkSessions {
+  rpc Get(GetWorkSessionRequest) returns (WorkSession);
+  rpc List(ListWorkSessionsRequest) returns (ListWorkSessionsResponse);
+}
+
+service AttemptWorkSessions {
+  rpc Start(StartWorkSessionRequest) returns (WorkSession);
+}
+
+message WorkSession {
+  string work_session_id = 1;
+  string title = 2;
+  string parent_tag_id = 3;
+  string parent_session_id = 4;
+  string starter_task_id = 5;
+  string tag_id = 6;
+  string latest_task_id = 7;
+  TaskState latest_task_state = 8;
+  optional string report_task_id = 9;
+  TaskState report_task_state = 10;
+  optional string objective_id = 11;
+  WorkspaceDeliveryReference workspace_delivery = 12;
+  uint64 created_order = 13;
+}
+
+message StartWorkSessionRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string title = 3;
+  string instruction = 4;
+  optional string workspace_id = 5;
+  optional string target_tag_id = 6;
+}
+
+message GetWorkSessionRequest {
+  string work_session_id = 1;
+}
+
+message ListWorkSessionsRequest {
+  string parent_tag_id = 1;
+  string parent_session_id = 2;
+  optional string starter_task_id = 3;
+  uint32 limit = 4;
+  string cursor = 5;
+}
+
+message ListWorkSessionsResponse {
+  repeated WorkSession work_sessions = 1;
+  string next_cursor = 2;
 }
 
 service Teams {
@@ -569,6 +622,19 @@ service HarnessMailbox {
   rpc SendMessage(HarnessSendTagMessageRequest) returns (SendTagMessageResponse);
 }
 
+// The supervising Worker Host supplies the Attempt identity.
+service HarnessWorkSessions {
+  rpc Start(HarnessStartWorkSessionRequest) returns (WorkSession);
+}
+
+message HarnessStartWorkSessionRequest {
+  string operation_id = 1;
+  string title = 2;
+  string instruction = 3;
+  optional string workspace_id = 4;
+  optional string target_tag_id = 5;
+}
+
 message HarnessSendTagMessageRequest {
   string operation_id = 1;
   string recipient_tag_id = 2;
@@ -758,6 +824,8 @@ message ConversationMessage {
   Task task = 1;
   string conversation = 2;
   LiveInput live_input = 3;
+  // Set for a report turn in the conversation, which has no operator message.
+  optional string work_session_report_id = 4;
 }
 
 message ListConversationsRequest {

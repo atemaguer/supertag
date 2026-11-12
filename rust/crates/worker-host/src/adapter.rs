@@ -1,5 +1,6 @@
 mod inputs;
 mod questions;
+mod work_sessions;
 mod workstreams;
 
 use std::{
@@ -299,6 +300,7 @@ pub(crate) async fn execute(
             .add_service(bridge.questions_service())
             .add_service(bridge.workstreams_service())
             .add_service(bridge.mailbox_service())
+            .add_service(bridge.work_sessions_service())
             .serve_with_incoming_shutdown(
                 TcpListenerStream::new(listener),
                 stop_server.clone().cancelled_owned(),

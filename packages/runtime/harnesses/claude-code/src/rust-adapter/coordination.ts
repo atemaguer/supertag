@@ -8,6 +8,7 @@ import {
   ApprovalState,
   type HarnessRun,
   TagMessageOrigin,
+  TaskState,
 } from "./gen/supertag/runtime/v2/runtime_pb.js";
 
 export const COORDINATION_SERVER = "supertag";
@@ -16,6 +17,7 @@ export const WORKSTREAM_POST_ACTION = "workstream:post";
 export const MAILBOX_SEND_ACTION = "mailbox:send";
 const QUESTION_OPERATION = "claude-objective-question";
 const MAX_PENDING_APPROVALS = 32;
+const workSessionId = /^work\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u;
 
 function trim(text: string) {
   return text.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, "");
@@ -48,6 +50,12 @@ const afterSequence = z
   .optional();
 const schemas = {
   ask: z.strictObject({ text: nonblankText(16_000) }),
+  start_session: z.strictObject({
+    title: nonblankText(120),
+    instruction: nonblankText(8000),
+    workspace: tagId.optional(),
+    tag: tagId.optional(),
+  }),
   post: z.strictObject({
     text: nonblankText(16_384),
     to: z.array(tagId).min(1).max(20).optional(),
@@ -90,8 +98,8 @@ function untrusted(data: object) {
 }
 
 export function coordinationTools(
-  { questions, workstreams, mailbox, options }: ReturnType<typeof harnessClient>,
-  run: Pick<HarnessRun, "mayAskObjectiveQuestion" | "coordination">,
+  { questions, workstreams, mailbox, workSessions, options }: ReturnType<typeof harnessClient>,
+  run: Pick<HarnessRun, "task" | "mayAskObjectiveQuestion" | "coordination">,
   scope: Scope,
 ) {
   const server = createSdkMcpServer({
@@ -171,6 +179,80 @@ export function coordinationTools(
             }
           }
           return response("The Objective question could not be confirmed.", true);
+        }),
+    );
+  }
+  const parentSession = run.task?.sessionId;
+  if (run.coordination?.mayStartWorkSession && parentSession) {
+    tools.push(`${COORDINATION_PREFIX}start_session`);
+    server.instance.registerTool(
+      "start_session",
+      {
+        description:
+          "Start a separate Work Session for one piece of the current Task. Its result comes back to this Session. Provide a short title and an instruction. You may specify the accepted Workspace ID or your Tag ID.",
+        inputSchema: schemas.start_session,
+        _meta: meta,
+      },
+      ({ title, instruction, workspace, tag }, tool) =>
+        write(async () => {
+          if (asked || pending.size)
+            return response(
+              "Finish this turn and wait for the operator before starting work.",
+              true,
+            );
+          const safeTitle = trim(safeText(title)).replace(/\p{White_Space}+/gu, " ");
+          const safeInstruction = trim(safeText(instruction));
+          if (
+            !schemas.start_session.safeParse({
+              title: safeTitle,
+              instruction: safeInstruction,
+              workspace,
+              tag,
+            }).success ||
+            (workspace !== undefined && safeText(workspace) !== workspace) ||
+            (tag !== undefined && safeText(tag) !== tag)
+          )
+            return response("Provide a valid Work Session request.", true);
+          const operationId = `claude-work-session:${randomUUID()}`;
+          try {
+            const stored = await call(tool.signal, (config) =>
+              workSessions.start(
+                {
+                  operationId,
+                  title: safeTitle,
+                  instruction: safeInstruction,
+                  workspaceId: workspace,
+                  targetTagId: tag,
+                },
+                config,
+              ),
+            );
+            if (
+              stored.starterTaskId === scope.taskId &&
+              stored.parentTagId === scope.tagId &&
+              stored.parentSessionId === parentSession &&
+              stored.tagId === (tag ?? scope.tagId) &&
+              stored.title === safeTitle &&
+              workSessionId.test(stored.workSessionId) &&
+              stored.workSessionId !== parentSession &&
+              stored.latestTaskId !== scope.taskId &&
+              tagId.safeParse(stored.latestTaskId).success &&
+              safeText(stored.latestTaskId) === stored.latestTaskId &&
+              safeText(stored.workSessionId) === stored.workSessionId &&
+              stored.latestTaskState >= TaskState.QUEUED &&
+              stored.latestTaskState <= TaskState.UNCERTAIN &&
+              stored.createdOrder > 0n
+            ) {
+              return response(
+                JSON.stringify({
+                  status: "accepted",
+                  workSessionId: stored.workSessionId,
+                  taskId: stored.latestTaskId,
+                }),
+              );
+            }
+          } catch {}
+          return response("The Work Session start could not be confirmed.", true);
         }),
     );
   }

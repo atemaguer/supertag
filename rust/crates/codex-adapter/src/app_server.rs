@@ -971,7 +971,7 @@ mod tests {
             &crate::config::arguments(&workspace, None, &policy)?,
         )?;
         params["dynamicTools"] =
-            crate::questions::tool_specs(crate::coordination::Inventory::Direct);
+            crate::questions::tool_specs(crate::coordination::Inventory::WorkSessions);
         params["ephemeral"] = json!(false);
         let thread = transport
             .call("thread/start", params, &mut buffered)

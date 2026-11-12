@@ -515,11 +515,14 @@ pub(crate) async fn capacity_in(
     let Some(limit) = limit else {
         return Ok(true);
     };
+    // Closing the Objective does not prove that its native execution stopped.
+    // Keep its slot reserved until the Worker Host confirms cleanup.
     let held: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM supertag_v2_tasks active
         JOIN supertag_v2_objective_tasks link ON link.task_id=active.task_id
         JOIN supertag_v2_objectives objective ON objective.objective_id=link.objective_id
-        WHERE objective.team_id=$1 AND objective.status NOT IN ($2,$3) AND active.task_id<>$4
+        WHERE objective.team_id=$1 AND (objective.status NOT IN ($2,$3) OR active.cleanup_pending=1)
+        AND active.task_id<>$4
         AND (active.state=$5 OR active.cleanup_pending=1
           OR (active.state=$6 AND active.lease_expires_at_ms>$7 AND ($8=0 OR active.accepted_order < (
             SELECT accepted_order FROM supertag_v2_tasks WHERE task_id=$4

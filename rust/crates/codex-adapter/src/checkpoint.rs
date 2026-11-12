@@ -286,6 +286,7 @@ pub(crate) fn coordination_inventory(
     {
         crate::questions::FULL_COORDINATION => Some(crate::coordination::Inventory::Workstream),
         crate::questions::DIRECT_COORDINATION => Some(crate::coordination::Inventory::Direct),
+        crate::questions::WORK_SESSIONS => Some(crate::coordination::Inventory::WorkSessions),
         _ => None,
     }
 }

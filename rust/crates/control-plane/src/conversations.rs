@@ -1,3 +1,7 @@
+mod work_sessions;
+
+pub(crate) use work_sessions::work_session_in;
+
 use prost::Message;
 use sha2::{Digest, Sha256};
 use sqlx::{Any, Row, Transaction};
@@ -85,7 +89,7 @@ impl Store {
                 ));
             }
             let task_id: String = prior.try_get("task_id")?;
-            let message = message_in(&mut tx, &input.conversation, &task_id).await?;
+            let message = message_in(&mut tx, &input.conversation, &task_id, None).await?;
             tx.rollback().await?;
             return Ok(message);
         }
@@ -108,9 +112,9 @@ impl Store {
             .bind(&task.task_id).bind(&session).bind(principal).bind(&input.operation_id).bind(digest)
             .bind(order).execute(&mut *tx).await?;
         let active = if input.text.len() <= crate::inputs::MAX_INPUT_BYTES {
-            sqlx::query("SELECT task_id,attempt_id FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 AND state=$3 AND lease_expires_at_ms>$4 ORDER BY accepted_order LIMIT 1")
+            sqlx::query("SELECT task_id,attempt_id FROM supertag_v2_tasks t WHERE tag_id=$1 AND session_id=$2 AND state=$3 AND lease_expires_at_ms>$4 AND NOT EXISTS (SELECT 1 FROM supertag_v2_work_session_tasks wt WHERE wt.task_id=t.task_id AND wt.kind=$5) ORDER BY accepted_order LIMIT 1")
                 .bind(&input.tag_id).bind(&session).bind(TaskState::Running as i64).bind(now)
-                .fetch_optional(&mut *tx).await?
+                .bind(crate::work_sessions::REPORT).fetch_optional(&mut *tx).await?
         } else {
             None
         };
@@ -130,6 +134,7 @@ impl Store {
             task: Some(task),
             conversation: input.conversation.clone(),
             live_input,
+            work_session_report_id: None,
         })
     }
 
@@ -145,16 +150,26 @@ impl Store {
         let limit = page_size(input.limit);
         let cursor = order_cursor(&input.cursor)?;
         let mut tx = self.pool.begin().await?;
-        let rows = sqlx::query("SELECT c.name,c.tag_id,c.session_id,c.created_order,(SELECT m.task_id FROM supertag_v2_conversation_messages m WHERE m.session_id=c.session_id ORDER BY m.accepted_order DESC LIMIT 1) AS latest_task_id FROM supertag_v2_conversations c WHERE c.principal=$1 AND c.created_order<$2 AND ($3='' OR c.tag_id=$3) ORDER BY c.created_order DESC LIMIT $4")
+        let rows = sqlx::query(
+            "SELECT c.name,c.tag_id,c.session_id,c.created_order,latest.task_id,latest.work_session_report_id
+             FROM supertag_v2_conversations c JOIN supertag_v2_conversation_history latest
+               ON latest.task_id=(SELECT h.task_id FROM supertag_v2_conversation_history h
+                                   WHERE h.session_id=c.session_id ORDER BY h.accepted_order DESC LIMIT 1)
+             WHERE c.principal=$1 AND c.created_order<$2 AND ($3='' OR c.tag_id=$3)
+             ORDER BY c.created_order DESC LIMIT $4",
+        )
             .bind(principal).bind(cursor).bind(&input.tag_id).bind(limit + 1).fetch_all(&mut *tx).await?;
         let mut page = Page::new(limit);
         for row in rows {
-            let latest_id: String = row.try_get("latest_task_id")?;
+            let latest_id: String = row.try_get("task_id")?;
+            let report_id: Option<String> = row.try_get("work_session_report_id")?;
             let conversation = Conversation {
                 tag_id: row.try_get("tag_id")?,
                 name: row.try_get("name")?,
                 session_id: row.try_get("session_id")?,
-                latest_task: Some(task_in(&mut tx, &latest_id).await?),
+                latest_task: Some(
+                    conversation_task_in(&mut tx, &latest_id, report_id.is_some()).await?,
+                ),
             };
             if !page.push(
                 conversation,
@@ -186,11 +201,17 @@ impl Store {
         if let Some(session) =
             session_in(&mut tx, principal, &input.tag_id, &input.conversation).await?
         {
-            let rows = sqlx::query("SELECT task_id,accepted_order FROM supertag_v2_conversation_messages WHERE session_id=$1 AND accepted_order<$2 ORDER BY accepted_order DESC LIMIT $3")
+            let rows = sqlx::query("SELECT task_id,accepted_order,work_session_report_id FROM supertag_v2_conversation_history WHERE session_id=$1 AND accepted_order<$2 ORDER BY accepted_order DESC LIMIT $3")
                 .bind(session).bind(cursor).bind(limit + 1).fetch_all(&mut *tx).await?;
             for row in rows {
                 let task_id: String = row.try_get("task_id")?;
-                let message = message_in(&mut tx, &input.conversation, &task_id).await?;
+                let message = message_in(
+                    &mut tx,
+                    &input.conversation,
+                    &task_id,
+                    row.try_get("work_session_report_id")?,
+                )
+                .await?;
                 if !page.push(
                     message,
                     row.try_get::<i64, _>("accepted_order")?.to_string(),
@@ -217,38 +238,70 @@ impl Store {
         name("Tag ID", tag_id)?;
         name("Task ID", task_id)?;
         let mut tx = self.pool.begin().await?;
-        let conversation: String = sqlx::query_scalar("SELECT c.name FROM supertag_v2_conversation_messages m JOIN supertag_v2_conversations c ON c.session_id=m.session_id WHERE m.task_id=$1 AND c.principal=$2 AND c.tag_id=$3")
+        let entry = sqlx::query("SELECT c.name,h.work_session_report_id FROM supertag_v2_conversation_history h JOIN supertag_v2_conversations c ON c.session_id=h.session_id WHERE h.task_id=$1 AND c.principal=$2 AND c.tag_id=$3")
             .bind(task_id).bind(principal).bind(tag_id).fetch_optional(&mut *tx).await?
             .ok_or_else(|| StoreError::NotFound("Message was not found".into()))?;
-        let message = message_in(&mut tx, &conversation, task_id).await?;
+        let conversation: String = entry.try_get("name")?;
+        let message = message_in(
+            &mut tx,
+            &conversation,
+            task_id,
+            entry.try_get("work_session_report_id")?,
+        )
+        .await?;
         tx.commit().await?;
         Ok(message)
     }
 
     pub(crate) async fn ensure_task_access(&self, principal: &str, task_id: &str) -> Result<()> {
-        let owner: Option<String> = sqlx::query_scalar(
-            "SELECT principal FROM supertag_v2_conversation_messages WHERE task_id=$1",
-        )
-        .bind(task_id)
-        .fetch_optional(&self.pool)
-        .await?;
-        ensure_owner(principal, owner)
+        name("Task ID", task_id)?;
+        let mut tx = self.pool.begin().await?;
+        if !task_access_in(&mut tx, principal, task_id).await? {
+            return Err(StoreError::NotFound("Task was not found".into()));
+        }
+        tx.commit().await?;
+        Ok(())
     }
 
     pub(crate) async fn ensure_input_access(&self, principal: &str, input_id: &str) -> Result<()> {
-        let owner: Option<String> = sqlx::query_scalar("SELECT m.principal FROM supertag_v2_live_inputs i JOIN supertag_v2_conversation_messages m ON m.task_id=i.follower_task_id WHERE i.input_id=$1")
-            .bind(input_id).fetch_optional(&self.pool).await?;
-        ensure_owner(principal, owner)
+        name("live input ID", input_id)?;
+        let allowed: Option<i64> = sqlx::query_scalar(
+            "SELECT CAST(1 AS BIGINT) FROM supertag_v2_live_inputs i
+             JOIN supertag_v2_task_audience source ON source.task_id=i.task_id
+             JOIN supertag_v2_task_audience follower ON follower.task_id=i.follower_task_id
+             WHERE i.input_id=$1 AND source.owner IN ('',$2) AND follower.owner IN ('',$2)",
+        )
+        .bind(input_id)
+        .bind(principal)
+        .fetch_optional(&self.pool)
+        .await?;
+        if allowed.is_none() {
+            return Err(StoreError::NotFound("live input was not found".into()));
+        }
+        Ok(())
     }
 }
 
-fn ensure_owner(principal: &str, owner: Option<String>) -> Result<()> {
-    if owner.is_some_and(|owner| owner != principal) {
-        return Err(StoreError::NotFound(
-            "Conversation work was not found".into(),
-        ));
-    }
-    Ok(())
+pub(crate) async fn task_owner_in(
+    tx: &mut Transaction<'_, Any>,
+    task_id: &str,
+) -> Result<Option<String>> {
+    Ok(
+        sqlx::query_scalar("SELECT owner FROM supertag_v2_task_audience WHERE task_id=$1")
+            .bind(task_id)
+            .fetch_optional(&mut **tx)
+            .await?,
+    )
+}
+
+pub(crate) async fn task_access_in(
+    tx: &mut Transaction<'_, Any>,
+    principal: &str,
+    task_id: &str,
+) -> Result<bool> {
+    Ok(task_owner_in(tx, task_id)
+        .await?
+        .is_some_and(|owner| owner.is_empty() || owner == principal))
 }
 
 async fn session_in(
@@ -265,12 +318,32 @@ async fn message_in(
     tx: &mut Transaction<'_, Any>,
     conversation: &str,
     task_id: &str,
+    work_session_report_id: Option<String>,
 ) -> Result<ConversationMessage> {
+    let is_report = work_session_report_id.is_some();
     Ok(ConversationMessage {
-        task: Some(task_in(tx, task_id).await?),
+        task: Some(conversation_task_in(tx, task_id, is_report).await?),
         conversation: conversation.to_owned(),
-        live_input: input_for_follower_in(tx, task_id).await?,
+        live_input: if is_report {
+            None
+        } else {
+            input_for_follower_in(tx, task_id).await?
+        },
+        work_session_report_id,
     })
+}
+
+async fn conversation_task_in(
+    tx: &mut Transaction<'_, Any>,
+    task_id: &str,
+    report: bool,
+) -> Result<Task> {
+    let mut task = task_in(tx, task_id).await?;
+    if report {
+        // Report input is execution data. The conversation only presents its reply.
+        task.prompt.clear();
+    }
+    Ok(task)
 }
 
 fn operator(principal: &str) -> Result<()> {

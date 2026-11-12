@@ -31,6 +31,10 @@ const (
 	ObjectivesName = "supertag.runtime.v2.Objectives"
 	// InboxName is the fully-qualified name of the Inbox service.
 	InboxName = "supertag.runtime.v2.Inbox"
+	// WorkSessionsName is the fully-qualified name of the WorkSessions service.
+	WorkSessionsName = "supertag.runtime.v2.WorkSessions"
+	// AttemptWorkSessionsName is the fully-qualified name of the AttemptWorkSessions service.
+	AttemptWorkSessionsName = "supertag.runtime.v2.AttemptWorkSessions"
 	// TeamsName is the fully-qualified name of the Teams service.
 	TeamsName = "supertag.runtime.v2.Teams"
 	// AttemptWorkstreamsName is the fully-qualified name of the AttemptWorkstreams service.
@@ -65,6 +69,8 @@ const (
 	HarnessWorkstreamsName = "supertag.runtime.v2.HarnessWorkstreams"
 	// HarnessMailboxName is the fully-qualified name of the HarnessMailbox service.
 	HarnessMailboxName = "supertag.runtime.v2.HarnessMailbox"
+	// HarnessWorkSessionsName is the fully-qualified name of the HarnessWorkSessions service.
+	HarnessWorkSessionsName = "supertag.runtime.v2.HarnessWorkSessions"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -154,6 +160,13 @@ const (
 	InboxListApprovalsProcedure = "/supertag.runtime.v2.Inbox/ListApprovals"
 	// InboxDecideApprovalProcedure is the fully-qualified name of the Inbox's DecideApproval RPC.
 	InboxDecideApprovalProcedure = "/supertag.runtime.v2.Inbox/DecideApproval"
+	// WorkSessionsGetProcedure is the fully-qualified name of the WorkSessions's Get RPC.
+	WorkSessionsGetProcedure = "/supertag.runtime.v2.WorkSessions/Get"
+	// WorkSessionsListProcedure is the fully-qualified name of the WorkSessions's List RPC.
+	WorkSessionsListProcedure = "/supertag.runtime.v2.WorkSessions/List"
+	// AttemptWorkSessionsStartProcedure is the fully-qualified name of the AttemptWorkSessions's Start
+	// RPC.
+	AttemptWorkSessionsStartProcedure = "/supertag.runtime.v2.AttemptWorkSessions/Start"
 	// TeamsCreateTeamProcedure is the fully-qualified name of the Teams's CreateTeam RPC.
 	TeamsCreateTeamProcedure = "/supertag.runtime.v2.Teams/CreateTeam"
 	// TeamsGetTeamProcedure is the fully-qualified name of the Teams's GetTeam RPC.
@@ -322,6 +335,9 @@ const (
 	// HarnessMailboxSendMessageProcedure is the fully-qualified name of the HarnessMailbox's
 	// SendMessage RPC.
 	HarnessMailboxSendMessageProcedure = "/supertag.runtime.v2.HarnessMailbox/SendMessage"
+	// HarnessWorkSessionsStartProcedure is the fully-qualified name of the HarnessWorkSessions's Start
+	// RPC.
+	HarnessWorkSessionsStartProcedure = "/supertag.runtime.v2.HarnessWorkSessions/Start"
 )
 
 // OperatorClient is a client for the supertag.runtime.v2.Operator service.
@@ -1400,6 +1416,173 @@ func (UnimplementedInboxHandler) ListApprovals(context.Context, *connect.Request
 
 func (UnimplementedInboxHandler) DecideApproval(context.Context, *connect.Request[runtimev2.DecideApprovalRequest]) (*connect.Response[runtimev2.Approval], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Inbox.DecideApproval is not implemented"))
+}
+
+// WorkSessionsClient is a client for the supertag.runtime.v2.WorkSessions service.
+type WorkSessionsClient interface {
+	Get(context.Context, *connect.Request[runtimev2.GetWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
+	List(context.Context, *connect.Request[runtimev2.ListWorkSessionsRequest]) (*connect.Response[runtimev2.ListWorkSessionsResponse], error)
+}
+
+// NewWorkSessionsClient constructs a client for the supertag.runtime.v2.WorkSessions service. By
+// default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped responses,
+// and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewWorkSessionsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) WorkSessionsClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	workSessionsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("WorkSessions").Methods()
+	return &workSessionsClient{
+		get: connect.NewClient[runtimev2.GetWorkSessionRequest, runtimev2.WorkSession](
+			httpClient,
+			baseURL+WorkSessionsGetProcedure,
+			connect.WithSchema(workSessionsMethods.ByName("Get")),
+			connect.WithClientOptions(opts...),
+		),
+		list: connect.NewClient[runtimev2.ListWorkSessionsRequest, runtimev2.ListWorkSessionsResponse](
+			httpClient,
+			baseURL+WorkSessionsListProcedure,
+			connect.WithSchema(workSessionsMethods.ByName("List")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// workSessionsClient implements WorkSessionsClient.
+type workSessionsClient struct {
+	get  *connect.Client[runtimev2.GetWorkSessionRequest, runtimev2.WorkSession]
+	list *connect.Client[runtimev2.ListWorkSessionsRequest, runtimev2.ListWorkSessionsResponse]
+}
+
+// Get calls supertag.runtime.v2.WorkSessions.Get.
+func (c *workSessionsClient) Get(ctx context.Context, req *connect.Request[runtimev2.GetWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
+	return c.get.CallUnary(ctx, req)
+}
+
+// List calls supertag.runtime.v2.WorkSessions.List.
+func (c *workSessionsClient) List(ctx context.Context, req *connect.Request[runtimev2.ListWorkSessionsRequest]) (*connect.Response[runtimev2.ListWorkSessionsResponse], error) {
+	return c.list.CallUnary(ctx, req)
+}
+
+// WorkSessionsHandler is an implementation of the supertag.runtime.v2.WorkSessions service.
+type WorkSessionsHandler interface {
+	Get(context.Context, *connect.Request[runtimev2.GetWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
+	List(context.Context, *connect.Request[runtimev2.ListWorkSessionsRequest]) (*connect.Response[runtimev2.ListWorkSessionsResponse], error)
+}
+
+// NewWorkSessionsHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewWorkSessionsHandler(svc WorkSessionsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	workSessionsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("WorkSessions").Methods()
+	workSessionsGetHandler := connect.NewUnaryHandler(
+		WorkSessionsGetProcedure,
+		svc.Get,
+		connect.WithSchema(workSessionsMethods.ByName("Get")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workSessionsListHandler := connect.NewUnaryHandler(
+		WorkSessionsListProcedure,
+		svc.List,
+		connect.WithSchema(workSessionsMethods.ByName("List")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.WorkSessions/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case WorkSessionsGetProcedure:
+			workSessionsGetHandler.ServeHTTP(w, r)
+		case WorkSessionsListProcedure:
+			workSessionsListHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedWorkSessionsHandler returns CodeUnimplemented from all methods.
+type UnimplementedWorkSessionsHandler struct{}
+
+func (UnimplementedWorkSessionsHandler) Get(context.Context, *connect.Request[runtimev2.GetWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkSessions.Get is not implemented"))
+}
+
+func (UnimplementedWorkSessionsHandler) List(context.Context, *connect.Request[runtimev2.ListWorkSessionsRequest]) (*connect.Response[runtimev2.ListWorkSessionsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.WorkSessions.List is not implemented"))
+}
+
+// AttemptWorkSessionsClient is a client for the supertag.runtime.v2.AttemptWorkSessions service.
+type AttemptWorkSessionsClient interface {
+	Start(context.Context, *connect.Request[runtimev2.StartWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
+}
+
+// NewAttemptWorkSessionsClient constructs a client for the supertag.runtime.v2.AttemptWorkSessions
+// service. By default, it uses the Connect protocol with the binary Protobuf Codec, asks for
+// gzipped responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply
+// the connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewAttemptWorkSessionsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) AttemptWorkSessionsClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	attemptWorkSessionsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("AttemptWorkSessions").Methods()
+	return &attemptWorkSessionsClient{
+		start: connect.NewClient[runtimev2.StartWorkSessionRequest, runtimev2.WorkSession](
+			httpClient,
+			baseURL+AttemptWorkSessionsStartProcedure,
+			connect.WithSchema(attemptWorkSessionsMethods.ByName("Start")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// attemptWorkSessionsClient implements AttemptWorkSessionsClient.
+type attemptWorkSessionsClient struct {
+	start *connect.Client[runtimev2.StartWorkSessionRequest, runtimev2.WorkSession]
+}
+
+// Start calls supertag.runtime.v2.AttemptWorkSessions.Start.
+func (c *attemptWorkSessionsClient) Start(ctx context.Context, req *connect.Request[runtimev2.StartWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
+	return c.start.CallUnary(ctx, req)
+}
+
+// AttemptWorkSessionsHandler is an implementation of the supertag.runtime.v2.AttemptWorkSessions
+// service.
+type AttemptWorkSessionsHandler interface {
+	Start(context.Context, *connect.Request[runtimev2.StartWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
+}
+
+// NewAttemptWorkSessionsHandler builds an HTTP handler from the service implementation. It returns
+// the path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewAttemptWorkSessionsHandler(svc AttemptWorkSessionsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	attemptWorkSessionsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("AttemptWorkSessions").Methods()
+	attemptWorkSessionsStartHandler := connect.NewUnaryHandler(
+		AttemptWorkSessionsStartProcedure,
+		svc.Start,
+		connect.WithSchema(attemptWorkSessionsMethods.ByName("Start")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.AttemptWorkSessions/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case AttemptWorkSessionsStartProcedure:
+			attemptWorkSessionsStartHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedAttemptWorkSessionsHandler returns CodeUnimplemented from all methods.
+type UnimplementedAttemptWorkSessionsHandler struct{}
+
+func (UnimplementedAttemptWorkSessionsHandler) Start(context.Context, *connect.Request[runtimev2.StartWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptWorkSessions.Start is not implemented"))
 }
 
 // TeamsClient is a client for the supertag.runtime.v2.Teams service.
@@ -3894,4 +4077,75 @@ func (UnimplementedHarnessMailboxHandler) Read(context.Context, *connect.Request
 
 func (UnimplementedHarnessMailboxHandler) SendMessage(context.Context, *connect.Request[runtimev2.HarnessSendTagMessageRequest]) (*connect.Response[runtimev2.SendTagMessageResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessMailbox.SendMessage is not implemented"))
+}
+
+// HarnessWorkSessionsClient is a client for the supertag.runtime.v2.HarnessWorkSessions service.
+type HarnessWorkSessionsClient interface {
+	Start(context.Context, *connect.Request[runtimev2.HarnessStartWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
+}
+
+// NewHarnessWorkSessionsClient constructs a client for the supertag.runtime.v2.HarnessWorkSessions
+// service. By default, it uses the Connect protocol with the binary Protobuf Codec, asks for
+// gzipped responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply
+// the connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewHarnessWorkSessionsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) HarnessWorkSessionsClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	harnessWorkSessionsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HarnessWorkSessions").Methods()
+	return &harnessWorkSessionsClient{
+		start: connect.NewClient[runtimev2.HarnessStartWorkSessionRequest, runtimev2.WorkSession](
+			httpClient,
+			baseURL+HarnessWorkSessionsStartProcedure,
+			connect.WithSchema(harnessWorkSessionsMethods.ByName("Start")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// harnessWorkSessionsClient implements HarnessWorkSessionsClient.
+type harnessWorkSessionsClient struct {
+	start *connect.Client[runtimev2.HarnessStartWorkSessionRequest, runtimev2.WorkSession]
+}
+
+// Start calls supertag.runtime.v2.HarnessWorkSessions.Start.
+func (c *harnessWorkSessionsClient) Start(ctx context.Context, req *connect.Request[runtimev2.HarnessStartWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
+	return c.start.CallUnary(ctx, req)
+}
+
+// HarnessWorkSessionsHandler is an implementation of the supertag.runtime.v2.HarnessWorkSessions
+// service.
+type HarnessWorkSessionsHandler interface {
+	Start(context.Context, *connect.Request[runtimev2.HarnessStartWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
+}
+
+// NewHarnessWorkSessionsHandler builds an HTTP handler from the service implementation. It returns
+// the path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewHarnessWorkSessionsHandler(svc HarnessWorkSessionsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	harnessWorkSessionsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HarnessWorkSessions").Methods()
+	harnessWorkSessionsStartHandler := connect.NewUnaryHandler(
+		HarnessWorkSessionsStartProcedure,
+		svc.Start,
+		connect.WithSchema(harnessWorkSessionsMethods.ByName("Start")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.HarnessWorkSessions/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case HarnessWorkSessionsStartProcedure:
+			harnessWorkSessionsStartHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedHarnessWorkSessionsHandler returns CodeUnimplemented from all methods.
+type UnimplementedHarnessWorkSessionsHandler struct{}
+
+func (UnimplementedHarnessWorkSessionsHandler) Start(context.Context, *connect.Request[runtimev2.HarnessStartWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessWorkSessions.Start is not implemented"))
 }

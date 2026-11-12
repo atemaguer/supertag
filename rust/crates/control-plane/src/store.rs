@@ -68,7 +68,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 26;
+        const SCHEMA_VERSION: i64 = 27;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -145,6 +145,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0024_direct_mailbox.sql"),
                 include_str!("../migrations/sqlite/0025_surface_policy.sql"),
                 include_str!("../migrations/sqlite/0026_context_resolution.sql"),
+                include_str!("../migrations/sqlite/0027_work_sessions.sql"),
             ]
         } else {
             [
@@ -174,6 +175,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0024_direct_mailbox.sql"),
                 include_str!("../migrations/postgresql/0025_surface_policy.sql"),
                 include_str!("../migrations/postgresql/0026_context_resolution.sql"),
+                include_str!("../migrations/postgresql/0027_work_sessions.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -209,8 +211,7 @@ impl Store {
     pub(crate) async fn write(&self) -> Result<(Transaction<'_, Any>, i64)> {
         let mut transaction = self.pool.begin().await?;
         // PostgreSQL takes a row lock; SQLite takes its write lock before any reads.
-        let order: i64 = sqlx::query_scalar("UPDATE supertag_v2_write_order SET revision = revision + 1 WHERE singleton = 1 RETURNING revision")
-            .fetch_one(&mut *transaction).await?;
+        let order = next_order(&mut transaction).await?;
         Ok((transaction, order))
     }
 
@@ -397,6 +398,8 @@ impl Store {
                 .await?;
         }
         let task = task_in(&mut transaction, task_id).await?;
+        crate::work_sessions::reports::settle_in(&mut transaction, &task, self.execution_now_ms())
+            .await?;
         transaction.commit().await?;
         Ok(task)
     }
@@ -474,6 +477,7 @@ impl Store {
         authority::expire_due_attempts(&mut transaction, now).await?;
         crate::inputs::sweep_in(&mut transaction, now).await?;
         crate::mailbox::sweep_in(&mut transaction).await?;
+        crate::work_sessions::reports::sweep_in(&mut transaction, now).await?;
         let prior = sqlx::query("SELECT task_id, attempt_id, lease_token, workspace_scope, harness_kind, context_scope FROM supertag_v2_claims WHERE principal = $1 AND operation_id = $2")
             .bind(&host.principal).bind(operation_id).fetch_optional(&mut *transaction).await?;
         if let Some(prior) = prior {
@@ -775,6 +779,9 @@ impl Store {
         if state == TaskState::Running && task.state() == TaskState::Succeeded {
             crate::checkpoints::finish_in(&mut transaction, &task, input).await?;
             crate::inbox::finish_in(&mut transaction, &task, input.objective_signal, now).await?;
+        }
+        crate::work_sessions::reports::settle_in(&mut transaction, &task, now).await?;
+        if state == TaskState::Running && task.state() == TaskState::Succeeded {
             crate::objectives::objective_finish_in(
                 &mut transaction,
                 &task,
@@ -991,6 +998,11 @@ pub(crate) async fn insert_task_with_surface(
     prompt: &str,
     surface: Option<&crate::surface_policy::AdmissionSurface>,
 ) -> Result<Task> {
+    if crate::work_sessions::reserved_session(session_id) {
+        return Err(invalid(
+            "Work Session IDs are reserved for internal admission",
+        ));
+    }
     let tag = sqlx::query(
         "SELECT instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules FROM supertag_v2_tags WHERE tag_id = $1",
     )
@@ -1035,7 +1047,38 @@ pub(crate) async fn insert_task_with_surface(
         .bind(policy.snapshot.encode_to_vec())
         .bind(policy.effective_digest)
         .execute(&mut **transaction).await?;
-    let task = task_in(transaction, &id).await?;
+    bounded_task_in(transaction, &id).await
+}
+
+pub(crate) async fn insert_task_from_snapshot(
+    transaction: &mut Transaction<'_, Any>,
+    order: i64,
+    source: &Task,
+    session_id: &str,
+    prompt: &str,
+) -> Result<Task> {
+    text("Task prompt", prompt, MAX_TASK_PROMPT_BYTES)?;
+    let id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO supertag_v2_tasks
+           (task_id,tag_id,session_id,prompt,instructions,allowed_actions,tag_revision,state,accepted_order,
+            workspace_id,workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest)
+         SELECT $1, tag_id, $2, $3, instructions, allowed_actions, tag_revision, $4, $5,
+                workspace_id, workspace_base_commit, harness_kind, approval_rules, policy_snapshot, policy_effective_digest
+         FROM supertag_v2_tasks WHERE task_id=$6",
+    )
+    .bind(&id).bind(session_id).bind(prompt).bind(TaskState::Queued as i64).bind(order)
+    .bind(&source.task_id).execute(&mut **transaction).await?;
+    bounded_task_in(transaction, &id).await
+}
+
+pub(crate) async fn next_order(transaction: &mut Transaction<'_, Any>) -> Result<i64> {
+    Ok(sqlx::query_scalar("UPDATE supertag_v2_write_order SET revision = revision + 1 WHERE singleton = 1 RETURNING revision")
+        .fetch_one(&mut **transaction).await?)
+}
+
+async fn bounded_task_in(transaction: &mut Transaction<'_, Any>, id: &str) -> Result<Task> {
+    let task = task_in(transaction, id).await?;
     if task.encoded_len() > supertag_protocol::MAX_MESSAGE_BYTES - 4096 {
         return Err(invalid(
             "accepted Task policy and prompt exceed the transport limit",
@@ -1140,7 +1183,7 @@ pub(crate) async fn owned(
     Ok(row)
 }
 
-fn task_row(row: &AnyRow) -> Result<Task> {
+pub(crate) fn task_row(row: &AnyRow) -> Result<Task> {
     Ok(Task {
         task_id: row.try_get("task_id")?,
         tag_id: row.try_get("tag_id")?,

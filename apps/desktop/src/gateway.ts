@@ -12,7 +12,7 @@ export interface Task {
   taskId: string;
   tagId: string;
   sessionId: string;
-  prompt: string;
+  prompt?: string;
   state: string;
   result?: string;
 }
@@ -21,6 +21,7 @@ export interface Message {
   task: Task;
   conversation: string;
   liveInput?: { taskId: string; state: string };
+  workSessionReportId?: string;
 }
 
 export interface Conversation {
