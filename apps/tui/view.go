@@ -121,7 +121,10 @@ func (m model) renderConversation() string {
 	width := m.paneWidth()
 	conversation := m.currentConversation(tag)
 	c := m.conversations[convKey(tag, conversation)]
-	if c != nil && m.client.RuntimeV2() {
+	if m.client.RuntimeV2() {
+		if c == nil || !c.loaded {
+			return faint.Render(wrap.Render("Reading the conversation…"))
+		}
 		if text := m.renderRuntimeHistory(c, name, width); text != "" {
 			return text
 		}

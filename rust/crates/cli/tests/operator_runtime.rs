@@ -413,7 +413,7 @@ async fn rust_launcher_and_go_tui_send_a_real_conversation() -> Result<()> {
         &shell,
     ])
     .await?;
-    tmux.wait_for("engineer").await?;
+    tmux.wait_for("Say something to engineer.").await?;
     tmux.run(&["send-keys", "-t", "runtime", "-l", "Rust UI round trip"])
         .await?;
     tmux.run(&["send-keys", "-t", "runtime", "Enter"]).await?;
@@ -517,7 +517,7 @@ async fn rust_launcher_and_go_tui_follow_one_work_session_report() -> Result<()>
         &shell,
     ])
     .await?;
-    tmux.wait_for("engineer").await?;
+    tmux.wait_for("Say something to engineer.").await?;
     tmux.run(&[
         "send-keys",
         "-t",
@@ -594,7 +594,7 @@ async fn rust_launcher_and_go_tui_continue_a_questioned_work_session() -> Result
         &shell,
     ])
     .await?;
-    tmux.wait_for("engineer").await?;
+    tmux.wait_for("Say something to engineer.").await?;
     tmux.run(&[
         "send-keys",
         "-t",
