@@ -35,6 +35,8 @@ const WAIT: Duration = Duration::from_secs(45);
 struct Fixture {
     root: PathBuf,
     commit: String,
+    source_head: Arc<Mutex<String>>,
+    source_lookups: Arc<AtomicUsize>,
     calls: Arc<AtomicUsize>,
     publication: Option<Arc<Mutex<Option<Value>>>>,
     creates: Arc<AtomicUsize>,
@@ -89,9 +91,19 @@ async fn api_handler(State(fixture): State<Fixture>, request: Request<Body>) -> 
         return publication_api(fixture, request).await;
     }
     let value = if request.uri().path() == "/repositories/123" {
-        serde_json::json!({"id":123,"full_name":"acme/project"})
+        serde_json::json!({"id":123,"full_name":"acme/project","default_branch":"main"})
+    } else if request.uri().path() == "/repos/acme/project/commits/main" {
+        fixture.source_lookups.fetch_add(1, Ordering::SeqCst);
+        serde_json::json!({"sha":fixture.source_head.lock().unwrap().clone()})
     } else if request.uri().path() == format!("/repos/acme/project/commits/{}", fixture.commit) {
         serde_json::json!({"sha":fixture.commit})
+    } else if request.uri().path()
+        == format!(
+            "/repos/acme/project/commits/{}",
+            fixture.source_head.lock().unwrap()
+        )
+    {
+        serde_json::json!({"sha":fixture.source_head.lock().unwrap().clone()})
     } else {
         return Response::builder()
             .status(StatusCode::NOT_FOUND)
@@ -222,14 +234,18 @@ fn field<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn source_and_continuation_cross_hosts_without_provider_credentials() -> Result<()> {
-    scenario(false).await
+    scenario(false, false).await
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn publication_approval_then_replacement_proves_lost_create_without_reposting() -> Result<()>
 {
-    scenario(true).await
+    scenario(true, false).await
 }
-async fn scenario(publication: bool) -> Result<()> {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn moving_ref_pins_session_before_execution_and_survives_gateway_restart() -> Result<()> {
+    scenario(false, true).await
+}
+async fn scenario(publication: bool, moving: bool) -> Result<()> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
     let repository = root.join("input");
@@ -264,8 +280,12 @@ async fn scenario(publication: bool) -> Result<()> {
     let creates = Arc::new(AtomicUsize::new(0));
     let updates = Arc::new(AtomicUsize::new(0));
     let pushes = Arc::new(AtomicUsize::new(0));
+    let source_head = Arc::new(Mutex::new(commit.clone()));
+    let source_lookups = Arc::new(AtomicUsize::new(0));
     let fixture = Fixture {
-        root: exported,
+        root: exported.clone(),
+        source_head: source_head.clone(),
+        source_lookups: source_lookups.clone(),
         commit: commit.clone(),
         calls: calls.clone(),
         publication: publication.then(|| Arc::new(Mutex::new(None))),
@@ -345,16 +365,20 @@ async fn scenario(publication: bool) -> Result<()> {
         "123",
         "--repository",
         "acme/project",
-        "--commit",
-        &commit,
         "--operation-id",
         "source",
     ]);
+    if !moving {
+        create_source.args(["--commit", &commit]);
+    }
     if publication {
         create_source.args(["--pull-request-base", "main"]);
     }
     let source = json(create_source).await?;
-    assert_eq!(source["source"]["commit_sha"], commit);
+    assert_eq!(
+        source["source"]["commit_sha"],
+        if moving { "" } else { &commit }
+    );
     assert_eq!(
         json(cli(&["github-workspace", "list"])).await?["workspaces"]
             .as_array()
@@ -362,7 +386,7 @@ async fn scenario(publication: bool) -> Result<()> {
             .len(),
         1
     );
-    json(cli(&[
+    let mut put_tag = cli(&[
         "put-tag",
         "builder",
         "--instructions",
@@ -373,10 +397,11 @@ async fn scenario(publication: bool) -> Result<()> {
         "files:write",
         "--workspace-id",
         "project",
-        "--workspace-base",
-        &commit,
-    ]))
-    .await?;
+    ]);
+    if !moving {
+        put_tag.args(["--workspace-base", &commit]);
+    }
+    json(put_tag).await?;
     assert!(
         !output(cli(&[
             "submit",
@@ -446,7 +471,13 @@ async fn scenario(publication: bool) -> Result<()> {
         json(cli(&["get-task", first_id])).await?["state"],
         "TASK_STATE_QUEUED"
     );
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    if !moving {
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+    if moving {
+        wait_source_pin(&cli, first_id, &commit).await?;
+        assert_eq!(source_lookups.load(Ordering::SeqCst), 1);
+    }
     success(worker("host-one", true)).await?;
     let first = json(cli(&["get-task", first_id])).await?;
     assert_eq!(first["state"], "TASK_STATE_SUCCEEDED", "{first}");
@@ -509,6 +540,30 @@ async fn scenario(publication: bool) -> Result<()> {
             "replacement must not repeat ambiguous push"
         );
     }
+    let next_commit = if moving {
+        let upstream = root.join("upstream");
+        git(
+            root,
+            &[
+                "clone",
+                "--quiet",
+                exported.join("acme/project.git").to_str().unwrap(),
+                upstream.to_str().unwrap(),
+            ],
+        );
+        fs::write(upstream.join("workspace.txt"), "new upstream\n")?;
+        git(&upstream, &["add", "."]);
+        git(
+            &upstream,
+            &["commit", "--quiet", "-m", "Advance source branch"],
+        );
+        git(&upstream, &["push", "--quiet", "origin", "HEAD:main"]);
+        let head = git(&upstream, &["rev-parse", "HEAD"]);
+        *source_head.lock().unwrap() = head.clone();
+        Some(head)
+    } else {
+        None
+    };
     let second = json(cli(&[
         "submit",
         "--tag",
@@ -540,6 +595,34 @@ async fn scenario(publication: bool) -> Result<()> {
         second["result"],
         "Change: second\nWorkspace before:\nbase\nfirst\n"
     );
+    if let Some(next_commit) = next_commit {
+        assert_eq!(
+            source_lookups.load(Ordering::SeqCst),
+            1,
+            "later Session turns must not re-resolve a moving ref"
+        );
+        assert_eq!(second["workspace"]["base_commit"], commit);
+        let fresh = json(cli(&[
+            "submit",
+            "--tag",
+            "builder",
+            "--session",
+            "new-source",
+            "new session",
+        ]))
+        .await?;
+        let fresh_id = field(&fresh, "task_id")?;
+        wait_source_pin(&cli, fresh_id, &next_commit).await?;
+        success(worker("host-new-session", true)).await?;
+        let fresh = json(cli(&["get-task", fresh_id])).await?;
+        assert_eq!(fresh["state"], "TASK_STATE_SUCCEEDED", "{fresh}");
+        assert_eq!(
+            fresh["result"],
+            "Change: new session\nWorkspace before:\nnew upstream\n"
+        );
+        assert_eq!(fresh["workspace"]["base_commit"], next_commit);
+        assert_eq!(source_lookups.load(Ordering::SeqCst), 2);
+    }
     assert_eq!(
         fs::read_to_string(repository.join("workspace.txt"))?,
         "uncommitted operator work\n"
@@ -657,6 +740,23 @@ async fn scenario(publication: bool) -> Result<()> {
         timeout(WAIT, local_process.wait()).await??.success(),
         "local services did not stop cleanly"
     );
+    Ok(())
+}
+
+async fn wait_source_pin<F>(cli: &F, task: &str, commit: &str) -> Result<()>
+where
+    F: Fn(&[&str]) -> Command,
+{
+    timeout(WAIT, async {
+        loop {
+            let value = json(cli(&["get-task", task])).await?;
+            if value["workspace"]["base_commit"] == commit {
+                return Ok::<_, anyhow::Error>(());
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await??;
     Ok(())
 }
 

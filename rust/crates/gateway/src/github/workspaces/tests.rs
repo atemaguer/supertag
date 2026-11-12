@@ -62,8 +62,12 @@ async fn api(State(fixture): State<Fixture>, request: Request<Body>) -> Response
         "Bearer fixture-source-token"
     );
     let value = if request.uri().path() == "/repositories/123" {
-        serde_json::json!({"id":123,"full_name":"acme/project"})
-    } else if request.uri().path() == format!("/repos/acme/project/commits/{}", fixture.commit) {
+        serde_json::json!({"id":123,"full_name":"acme/project","default_branch":"main"})
+    } else if matches!(
+        request.uri().path(),
+        "/repos/acme/project/commits/main" | "/repos/acme/project/commits/release%2Fstable"
+    ) || request.uri().path() == format!("/repos/acme/project/commits/{}", fixture.commit)
+    {
         serde_json::json!({"sha":fixture.commit})
     } else {
         return Response::builder()
@@ -220,6 +224,7 @@ async fn loopback_source_fetch_keeps_credentials_at_gateway_and_imports_exact_co
             repository_id: 123,
             repository: "acme/project".into(),
             commit_sha: commit.clone(),
+            ..Default::default()
         }),
     };
     let mut forbidden = request.clone();
@@ -333,6 +338,7 @@ async fn source_metadata_redirect_and_mismatch_fail_before_git() -> Result<()> {
             repository_id: 123,
             repository: "acme/project".into(),
             commit_sha: "1".repeat(40),
+            ..Default::default()
         }),
     };
     assert!(
@@ -354,5 +360,66 @@ async fn source_metadata_redirect_and_mismatch_fail_before_git() -> Result<()> {
     cancelled.cancel();
     assert!(sources.fetch(&workspace, &cancelled).await.is_err());
     assert_eq!(fs::read_dir(directory.path())?.count(), 0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn moving_source_refs_are_encoded_and_bound_to_numeric_repository() -> Result<()> {
+    let temporary = tempfile::tempdir()?;
+    fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o700))?;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let commit = "a".repeat(40);
+    let fixture = Fixture {
+        root: temporary.path().to_owned(),
+        commit: commit.clone(),
+        calls: calls.clone(),
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let address = listener.local_addr()?;
+    let router = Router::new().fallback(api).with_state(fixture);
+    let _server = Server(tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap()
+    }));
+    let source = GithubWorkspaceSources::new(
+        GithubWorkspaceAccount {
+            account_id: "account".into(),
+            repository_id: 123,
+            repository: "acme/project".into(),
+            authentication: GithubAuthentication::Token("fixture-source-token".into()),
+        },
+        temporary.path(),
+    )?
+    .with_test_endpoints(
+        format!("http://{address}/").parse()?,
+        format!("http://{address}/git/").parse()?,
+    )?;
+    let mut selected = GithubWorkspace {
+        workspace_id: "project".into(),
+        source: Some(GithubWorkspaceSource {
+            account_id: "account".into(),
+            repository_id: 123,
+            repository: "acme/project".into(),
+            revision: Some("release/stable".into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    assert_eq!(
+        source.resolve_selector(&selected).await?,
+        ("release/stable".into(), commit.clone())
+    );
+    selected.source.as_mut().unwrap().revision = None;
+    assert_eq!(
+        source.resolve_selector(&selected).await?,
+        ("main".into(), commit)
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
+    selected.source.as_mut().unwrap().repository_id = 124;
+    assert!(source.resolve_selector(&selected).await.is_err());
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        4,
+        "wrong account/repository must fail before provider access"
+    );
     Ok(())
 }

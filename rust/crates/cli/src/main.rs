@@ -342,10 +342,10 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         /// Bare operator ID eligible to approve a direct message.
         #[arg(long, requires = "require_mailbox_approval")]
         mailbox_approver: Vec<String>,
-        /// Host-local logical repository binding.
-        #[arg(long, requires = "workspace_base")]
+        /// Logical local or configured GitHub repository binding.
+        #[arg(long)]
         workspace_id: Option<String>,
-        /// Full Git object ID from which new Sessions start.
+        /// Full local Git base commit. Omit for a configured GitHub source.
         #[arg(long, requires = "workspace_id")]
         workspace_base: Option<String>,
         /// Required harness for Tasks accepted from this Tag.
@@ -863,13 +863,11 @@ async fn run(command: Command) -> Result<()> {
             models,
             efforts,
         } => {
-            let workspace = workspace_id
-                .zip(workspace_base)
-                .map(|(workspace_id, base_commit)| WorkspaceSpec {
-                    workspace_id,
-                    base_commit,
-                    github_source: None,
-                });
+            let workspace = workspace_id.map(|workspace_id| WorkspaceSpec {
+                workspace_id,
+                base_commit: workspace_base.unwrap_or_default(),
+                github_source: None,
+            });
             let mut approval_rules = Vec::new();
             for (required, action, operator_ids) in [
                 (
@@ -1295,6 +1293,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .add_service(plane.mailbox_service())
         .add_service(plane.inbox_service())
         .add_service(plane.github_workspaces_service())
+        .add_service(plane.github_source_resolver_service())
         .add_service(plane.github_publications_service())
         .add_service(plane.github_publisher_service())
         .add_service(plane.policy_service())
@@ -1418,8 +1417,15 @@ async fn gateway(
         .set_serving::<TransfersServer<GatewayTransfers>>()
         .await;
     let mut transfers = GatewayTransfers::new(gateway.clone(), checkpoint_directory.clone())?;
+    let mut source_reader = None;
     let publication = if let Some(directory) = connectors.github_workspace {
-        transfers = transfers.with_github_sources(github_workspace_sources(directory.clone())?);
+        let sources = github_workspace_sources(directory.clone())?;
+        transfers = transfers.with_github_sources(sources.clone());
+        source_reader = Some((
+            sources,
+            publication_channel.clone(),
+            publication_token.clone(),
+        ));
         let blobs = checkpoint_directory
             .as_ref()
             .context("GitHub Workspace publication requires Gateway artifact storage")?;
@@ -1562,15 +1568,26 @@ async fn gateway(
             Ok(())
         }
     };
+    let source_loop = async {
+        if let Some((sources, channel, token)) = source_reader {
+            let result = sources.run_resolver(channel, token, shutdown.clone()).await;
+            shutdown.cancel();
+            result
+        } else {
+            shutdown.cancelled().await;
+            Ok(())
+        }
+    };
     let services = async {
-        let (grpc, slack, github, linear, lark, teams, publication) = tokio::join!(
+        let (grpc, slack, github, linear, lark, teams, publication, source) = tokio::join!(
             grpc,
             webhook,
             github_webhook,
             linear_webhook,
             lark_connection,
             microsoft_teams_webhook,
-            publication_loop
+            publication_loop,
+            source_loop
         );
         grpc?;
         slack?;
@@ -1578,7 +1595,8 @@ async fn gateway(
         linear?;
         lark?;
         teams?;
-        publication
+        publication?;
+        source
     };
     tokio::pin!(services);
     tokio::select! {
@@ -1945,7 +1963,7 @@ fn print_task(task: &Task) {
             "harness": task.harness_kind().as_str_name(),
             "workspace": task.workspace.as_ref().map(|spec| json!({
                 "workspace_id": spec.workspace_id, "base_commit": spec.base_commit,
-                "github_source": spec.github_source.as_ref().map(|value| json!({"workspace_id":value.workspace_id,"revision":value.revision,"source":value.source.as_ref().map(|source|json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha}))})),
+                "github_source": spec.github_source.as_ref().map(|value| json!({"workspace_id":value.workspace_id,"revision":value.revision,"source":value.source.as_ref().map(|source|json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha,"revision":source.revision,"resolved_revision":source.resolved_revision}))})),
             })),
             "workspace_delivery": task.workspace_delivery.as_ref().map(artifacts::describe),
             "artifacts": task.artifacts.iter().map(|selection| json!({

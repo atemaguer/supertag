@@ -317,14 +317,19 @@ pub(super) async fn claim_candidate(
             let id: String = candidate.try_get("task_id")?;
             let task = task_in(transaction, &id).await?;
             let has_workspace = task.workspace.as_ref().is_none_or(|spec| {
-                workspace_ids.binary_search(&spec.workspace_id).is_ok()
-                    || (spec.github_source.is_some()
-                        && gateway_workspace_ids
-                            .binary_search(&spec.workspace_id)
-                            .is_ok())
+                let sources = if spec.github_source.is_some() {
+                    gateway_workspace_ids
+                } else {
+                    workspace_ids
+                };
+                sources.binary_search(&spec.workspace_id).is_ok()
             });
             if let Some(attempt_execution) = execution::resolve_attempt(&task, harness, profile)
                 && has_workspace
+                && task
+                    .workspace
+                    .as_ref()
+                    .is_none_or(|spec| supertag_protocol::valid_git_commit(&spec.base_commit))
                 && supports_execution_limits(harness, &task)
                 && supports_runtime_actions(harness, &task)
                 && crate::context::task_supported(&task, context_contracts)

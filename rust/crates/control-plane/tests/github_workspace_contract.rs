@@ -19,6 +19,7 @@ fn catalog() -> PutGithubWorkspaceRequest {
                 repository_id: 123,
                 repository: "acme/project".into(),
                 commit_sha: BASE.into(),
+                ..Default::default()
             }),
             revision: 0,
         }),

@@ -23,6 +23,8 @@ const _ = connect.IsAtLeastVersion1_13_0
 const (
 	// GithubWorkspacesName is the fully-qualified name of the GithubWorkspaces service.
 	GithubWorkspacesName = "supertag.runtime.v2.GithubWorkspaces"
+	// GithubSourceResolverName is the fully-qualified name of the GithubSourceResolver service.
+	GithubSourceResolverName = "supertag.runtime.v2.GithubSourceResolver"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -41,6 +43,12 @@ const (
 	GithubWorkspacesListProcedure = "/supertag.runtime.v2.GithubWorkspaces/List"
 	// GithubWorkspacesDeleteProcedure is the fully-qualified name of the GithubWorkspaces's Delete RPC.
 	GithubWorkspacesDeleteProcedure = "/supertag.runtime.v2.GithubWorkspaces/Delete"
+	// GithubSourceResolverListPendingProcedure is the fully-qualified name of the
+	// GithubSourceResolver's ListPending RPC.
+	GithubSourceResolverListPendingProcedure = "/supertag.runtime.v2.GithubSourceResolver/ListPending"
+	// GithubSourceResolverPinProcedure is the fully-qualified name of the GithubSourceResolver's Pin
+	// RPC.
+	GithubSourceResolverPinProcedure = "/supertag.runtime.v2.GithubSourceResolver/Pin"
 )
 
 // GithubWorkspacesClient is a client for the supertag.runtime.v2.GithubWorkspaces service.
@@ -189,4 +197,101 @@ func (UnimplementedGithubWorkspacesHandler) List(context.Context, *connect.Reque
 
 func (UnimplementedGithubWorkspacesHandler) Delete(context.Context, *connect.Request[runtimev2.DeleteGithubWorkspaceRequest]) (*connect.Response[runtimev2.DeleteGithubWorkspaceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.GithubWorkspaces.Delete is not implemented"))
+}
+
+// GithubSourceResolverClient is a client for the supertag.runtime.v2.GithubSourceResolver service.
+type GithubSourceResolverClient interface {
+	ListPending(context.Context, *connect.Request[runtimev2.ListPendingGithubSourcesRequest]) (*connect.Response[runtimev2.ListPendingGithubSourcesResponse], error)
+	Pin(context.Context, *connect.Request[runtimev2.PinGithubSourceRequest]) (*connect.Response[runtimev2.GithubSourcePin], error)
+}
+
+// NewGithubSourceResolverClient constructs a client for the
+// supertag.runtime.v2.GithubSourceResolver service. By default, it uses the Connect protocol with
+// the binary Protobuf Codec, asks for gzipped responses, and sends uncompressed requests. To use
+// the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewGithubSourceResolverClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) GithubSourceResolverClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	githubSourceResolverMethods := runtimev2.File_supertag_runtime_v2_github_workspaces_proto.Services().ByName("GithubSourceResolver").Methods()
+	return &githubSourceResolverClient{
+		listPending: connect.NewClient[runtimev2.ListPendingGithubSourcesRequest, runtimev2.ListPendingGithubSourcesResponse](
+			httpClient,
+			baseURL+GithubSourceResolverListPendingProcedure,
+			connect.WithSchema(githubSourceResolverMethods.ByName("ListPending")),
+			connect.WithClientOptions(opts...),
+		),
+		pin: connect.NewClient[runtimev2.PinGithubSourceRequest, runtimev2.GithubSourcePin](
+			httpClient,
+			baseURL+GithubSourceResolverPinProcedure,
+			connect.WithSchema(githubSourceResolverMethods.ByName("Pin")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// githubSourceResolverClient implements GithubSourceResolverClient.
+type githubSourceResolverClient struct {
+	listPending *connect.Client[runtimev2.ListPendingGithubSourcesRequest, runtimev2.ListPendingGithubSourcesResponse]
+	pin         *connect.Client[runtimev2.PinGithubSourceRequest, runtimev2.GithubSourcePin]
+}
+
+// ListPending calls supertag.runtime.v2.GithubSourceResolver.ListPending.
+func (c *githubSourceResolverClient) ListPending(ctx context.Context, req *connect.Request[runtimev2.ListPendingGithubSourcesRequest]) (*connect.Response[runtimev2.ListPendingGithubSourcesResponse], error) {
+	return c.listPending.CallUnary(ctx, req)
+}
+
+// Pin calls supertag.runtime.v2.GithubSourceResolver.Pin.
+func (c *githubSourceResolverClient) Pin(ctx context.Context, req *connect.Request[runtimev2.PinGithubSourceRequest]) (*connect.Response[runtimev2.GithubSourcePin], error) {
+	return c.pin.CallUnary(ctx, req)
+}
+
+// GithubSourceResolverHandler is an implementation of the supertag.runtime.v2.GithubSourceResolver
+// service.
+type GithubSourceResolverHandler interface {
+	ListPending(context.Context, *connect.Request[runtimev2.ListPendingGithubSourcesRequest]) (*connect.Response[runtimev2.ListPendingGithubSourcesResponse], error)
+	Pin(context.Context, *connect.Request[runtimev2.PinGithubSourceRequest]) (*connect.Response[runtimev2.GithubSourcePin], error)
+}
+
+// NewGithubSourceResolverHandler builds an HTTP handler from the service implementation. It returns
+// the path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewGithubSourceResolverHandler(svc GithubSourceResolverHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	githubSourceResolverMethods := runtimev2.File_supertag_runtime_v2_github_workspaces_proto.Services().ByName("GithubSourceResolver").Methods()
+	githubSourceResolverListPendingHandler := connect.NewUnaryHandler(
+		GithubSourceResolverListPendingProcedure,
+		svc.ListPending,
+		connect.WithSchema(githubSourceResolverMethods.ByName("ListPending")),
+		connect.WithHandlerOptions(opts...),
+	)
+	githubSourceResolverPinHandler := connect.NewUnaryHandler(
+		GithubSourceResolverPinProcedure,
+		svc.Pin,
+		connect.WithSchema(githubSourceResolverMethods.ByName("Pin")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.GithubSourceResolver/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case GithubSourceResolverListPendingProcedure:
+			githubSourceResolverListPendingHandler.ServeHTTP(w, r)
+		case GithubSourceResolverPinProcedure:
+			githubSourceResolverPinHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedGithubSourceResolverHandler returns CodeUnimplemented from all methods.
+type UnimplementedGithubSourceResolverHandler struct{}
+
+func (UnimplementedGithubSourceResolverHandler) ListPending(context.Context, *connect.Request[runtimev2.ListPendingGithubSourcesRequest]) (*connect.Response[runtimev2.ListPendingGithubSourcesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.GithubSourceResolver.ListPending is not implemented"))
+}
+
+func (UnimplementedGithubSourceResolverHandler) Pin(context.Context, *connect.Request[runtimev2.PinGithubSourceRequest]) (*connect.Response[runtimev2.GithubSourcePin], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.GithubSourceResolver.Pin is not implemented"))
 }

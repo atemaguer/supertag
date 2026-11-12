@@ -71,7 +71,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 43;
+        const SCHEMA_VERSION: i64 = 44;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -165,6 +165,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0041_artifact_captures.sql"),
                 include_str!("../migrations/sqlite/0042_github_publications.sql"),
                 include_str!("../migrations/sqlite/0043_task_result_artifacts.sql"),
+                include_str!("../migrations/sqlite/0044_github_source_pins.sql"),
             ]
         } else {
             [
@@ -211,6 +212,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0041_artifact_captures.sql"),
                 include_str!("../migrations/postgresql/0042_github_publications.sql"),
                 include_str!("../migrations/postgresql/0043_task_result_artifacts.sql"),
+                include_str!("../migrations/postgresql/0044_github_source_pins.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -320,7 +322,7 @@ impl Store {
         }
         if let Some(spec) = &workspace
             && (!valid_workspace_id(&spec.workspace_id)
-                || !valid_git_commit(&spec.base_commit)
+                || (!spec.base_commit.is_empty() && !valid_git_commit(&spec.base_commit))
                 || spec.github_source.is_some())
         {
             return Err(invalid("workspace ID and full Git base commit required"));
@@ -338,6 +340,7 @@ impl Store {
         let approval_rules = normalize_approval_rules(approval_rules, &allowed_actions)?;
         let stored_rules = stored_approval_rules(&approval_rules)?;
         let (mut transaction, _) = self.write().await?;
+        crate::github_workspaces::validate_tag_in(&mut transaction, workspace.as_ref()).await?;
         let display_name =
             crate::tags::active_name_in(&mut transaction, tag_id, display_name.as_deref()).await?;
         let revision: i64 = sqlx::query_scalar("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules, execution, name) VALUES ($1,$2,$3,1,$4,$5,$6,$7,$8,$9) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules, execution = excluded.execution, name = excluded.name RETURNING revision")
@@ -1151,6 +1154,13 @@ async fn insert_task_options(
             serde_json::from_str(&objective.try_get::<String, _>("runtime_actions")?)?,
         )?;
     }
+    crate::github_workspaces::refs::bind_in(
+        transaction,
+        tag_id,
+        session_id,
+        &mut accepted.workspace,
+    )
+    .await?;
     let harness = i64::from(accepted.policy.harness_kind);
     if let Some(previous) = sqlx::query("SELECT workspace_id,workspace_base_commit,workspace_github_source,harness_kind FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 ORDER BY accepted_order LIMIT 1")
         .bind(tag_id).bind(session_id).fetch_optional(&mut **transaction).await?
@@ -1330,6 +1340,7 @@ pub(crate) async fn current_work_policy_in(
             accepted.workspace = starter.workspace.clone();
         }
     }
+    crate::github_workspaces::refs::inherit(&mut accepted.workspace, &source.workspace);
     let mut result = source.clone();
     result.instructions = accepted.policy.instructions;
     result.allowed_actions = accepted.policy.allowed_actions;

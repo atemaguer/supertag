@@ -9,6 +9,8 @@ use crate::{
     store::{HostAuthority, Result, invalid, lease_is_live, name, owned, task_row},
 };
 
+pub(crate) mod refs;
+
 const RESOURCE: &str = "github-workspace";
 
 async fn catalog_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Option<GithubWorkspace>> {
@@ -53,15 +55,31 @@ fn validate(value: &mut GithubWorkspace) -> Result<()> {
         validate_base_branch(&delivery.base_branch)?;
     }
     source.repository.make_ascii_lowercase();
-    if source.commit_sha.len() != 40
-        || !source
-            .commit_sha
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    if source.resolved_revision.is_some()
+        || (!source.commit_sha.is_empty()
+            && (!supertag_protocol::valid_git_commit(&source.commit_sha)
+                || source.revision.is_some()))
     {
         return Err(invalid(
-            "GitHub source requires a full lowercase commit SHA",
+            "select a full lowercase commit SHA or a Git revision",
         ));
+    }
+    if let Some(revision) = &source.revision {
+        validate_source_revision(revision)?;
+    }
+    Ok(())
+}
+
+fn validate_source_revision(revision: &str) -> Result<()> {
+    // This value is one encoded REST path segment, never a Git command argument.
+    // Keep Unicode and slash-bearing refs accepted without interpreting revisions.
+    if revision.is_empty()
+        || revision.len() > 1024
+        || revision.trim() != revision
+        || matches!(revision, "." | "..")
+        || revision.chars().any(char::is_control)
+    {
+        return Err(invalid("GitHub source revision must contain 1–1024 bytes"));
     }
     Ok(())
 }
@@ -149,6 +167,19 @@ fn require_read(snapshot: &TaskPolicySnapshot, source: &GithubWorkspaceSource) -
     Ok(())
 }
 
+pub(crate) async fn validate_tag_in(
+    tx: &mut Transaction<'_, Any>,
+    workspace: Option<&WorkspaceSpec>,
+) -> Result<()> {
+    if let Some(spec) = workspace
+        && spec.base_commit.is_empty()
+        && catalog_in(tx, &spec.workspace_id).await?.is_none()
+    {
+        return Err(invalid("local Workspace requires a full Git base commit"));
+    }
+    Ok(())
+}
+
 pub(crate) async fn admission_in(
     tx: &mut Transaction<'_, Any>,
     workspace: &mut Option<WorkspaceSpec>,
@@ -164,7 +195,7 @@ pub(crate) async fn admission_in(
         .source
         .as_ref()
         .ok_or_else(|| invalid("stored GitHub source is incomplete"))?;
-    if source.commit_sha != spec.base_commit {
+    if !spec.base_commit.is_empty() && source.commit_sha != spec.base_commit {
         return Err(StoreError::FailedPrecondition(
             "Workspace base does not match its configured GitHub source".into(),
         ));
@@ -179,6 +210,7 @@ pub(crate) async fn admission_in(
             "pull-requests:create",
         )?;
     }
+    spec.base_commit = source.commit_sha.clone();
     spec.github_source = Some(value);
     Ok(())
 }

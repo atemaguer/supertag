@@ -227,3 +227,121 @@ class GithubWorkspaces:
             timeout,
             metadata,
             _registered_method=True)
+
+
+class GithubSourceResolverStub:
+    """Private Control Plane API used only by configured Gateway source readers.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.ListPending = channel.unary_unary(
+                '/supertag.runtime.v2.GithubSourceResolver/ListPending',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_github__workspaces__pb2.ListPendingGithubSourcesRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_github__workspaces__pb2.ListPendingGithubSourcesResponse.FromString,
+                _registered_method=True)
+        self.Pin = channel.unary_unary(
+                '/supertag.runtime.v2.GithubSourceResolver/Pin',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_github__workspaces__pb2.PinGithubSourceRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_github__workspaces__pb2.GithubSourcePin.FromString,
+                _registered_method=True)
+
+
+class GithubSourceResolverServicer:
+    """Private Control Plane API used only by configured Gateway source readers.
+    """
+
+    def ListPending(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Pin(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_GithubSourceResolverServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'ListPending': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListPending,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_github__workspaces__pb2.ListPendingGithubSourcesRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_github__workspaces__pb2.ListPendingGithubSourcesResponse.SerializeToString,
+            ),
+            'Pin': grpc.unary_unary_rpc_method_handler(
+                    servicer.Pin,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_github__workspaces__pb2.PinGithubSourceRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_github__workspaces__pb2.GithubSourcePin.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.GithubSourceResolver', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.GithubSourceResolver', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class GithubSourceResolver:
+    """Private Control Plane API used only by configured Gateway source readers.
+    """
+
+    @staticmethod
+    def ListPending(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.GithubSourceResolver/ListPending',
+            supertag_dot_runtime_dot_v2_dot_github__workspaces__pb2.ListPendingGithubSourcesRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_github__workspaces__pb2.ListPendingGithubSourcesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Pin(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.GithubSourceResolver/Pin',
+            supertag_dot_runtime_dot_v2_dot_github__workspaces__pb2.PinGithubSourceRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_github__workspaces__pb2.GithubSourcePin.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)

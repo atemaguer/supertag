@@ -13,8 +13,12 @@ message GithubWorkspaceSource {
   string account_id = 1;
   uint64 repository_id = 2;
   string repository = 3;
-  // A full immutable SHA-1 Git commit, never a branch or tag.
+  // A full immutable SHA-1 Git commit. Empty selects revision/default branch.
   string commit_sha = 4;
+  // Requested Git branch or tag. Omit with empty commit_sha for the default branch.
+  optional string revision = 5;
+  // Resolved branch/tag used to choose commit_sha. Set only by the trusted resolver.
+  optional string resolved_revision = 6;
 }
 message GithubWorkspace {
   string workspace_id = 1;
@@ -41,3 +45,32 @@ message DeleteGithubWorkspaceRequest {
   uint64 expected_revision = 3;
 }
 message DeleteGithubWorkspaceResponse {}
+
+// Private Control Plane API used only by configured Gateway source readers.
+service GithubSourceResolver {
+  rpc ListPending(ListPendingGithubSourcesRequest) returns (ListPendingGithubSourcesResponse);
+  rpc Pin(PinGithubSourceRequest) returns (GithubSourcePin);
+}
+message GithubSourcePin {
+  string pin_id = 1;
+  string tag_id = 2;
+  string session_id = 3;
+  GithubWorkspace selector = 4;
+  string selector_digest = 5;
+  GithubWorkspace resolved = 6;
+  uint64 created_order = 7;
+}
+message ListPendingGithubSourcesRequest {
+  uint64 after_order = 1;
+  uint32 limit = 2;
+}
+message ListPendingGithubSourcesResponse {
+  repeated GithubSourcePin pins = 1;
+  uint64 next_after_order = 2;
+}
+message PinGithubSourceRequest {
+  string pin_id = 1;
+  string selector_digest = 2;
+  string resolved_revision = 3;
+  string commit_sha = 4;
+}

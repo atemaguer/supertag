@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/github_workspaces.proto.
  */
 export const file_supertag_runtime_v2_github_workspaces: GenFile = /*@__PURE__*/
-  fileDesc("CitzdXBlcnRhZy9ydW50aW1lL3YyL2dpdGh1Yl93b3Jrc3BhY2VzLnByb3RvEhNzdXBlcnRhZy5ydW50aW1lLnYyImoKFUdpdGh1YldvcmtzcGFjZVNvdXJjZRISCgphY2NvdW50X2lkGAEgASgJEhUKDXJlcG9zaXRvcnlfaWQYAiABKAQSEgoKcmVwb3NpdG9yeRgDIAEoCRISCgpjb21taXRfc2hhGAQgASgJIrsBCg9HaXRodWJXb3Jrc3BhY2USFAoMd29ya3NwYWNlX2lkGAEgASgJEjoKBnNvdXJjZRgCIAEoCzIqLnN1cGVydGFnLnJ1bnRpbWUudjIuR2l0aHViV29ya3NwYWNlU291cmNlEhAKCHJldmlzaW9uGAMgASgEEkQKDHB1bGxfcmVxdWVzdBgEIAEoCzIuLnN1cGVydGFnLnJ1bnRpbWUudjIuR2l0aHViUHVsbFJlcXVlc3REZWxpdmVyeSIwChlHaXRodWJQdWxsUmVxdWVzdERlbGl2ZXJ5EhMKC2Jhc2VfYnJhbmNoGAEgASgJIqABChlQdXRHaXRodWJXb3Jrc3BhY2VSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRI3Cgl3b3Jrc3BhY2UYAiABKAsyJC5zdXBlcnRhZy5ydW50aW1lLnYyLkdpdGh1YldvcmtzcGFjZRIeChFleHBlY3RlZF9yZXZpc2lvbhgDIAEoBEgAiAEBQhQKEl9leHBlY3RlZF9yZXZpc2lvbiIxChlHZXRHaXRodWJXb3Jrc3BhY2VSZXF1ZXN0EhQKDHdvcmtzcGFjZV9pZBgBIAEoCSI+ChtMaXN0R2l0aHViV29ya3NwYWNlc1JlcXVlc3QSEAoIYWZ0ZXJfaWQYASABKAkSDQoFbGltaXQYAiABKA0ibQocTGlzdEdpdGh1YldvcmtzcGFjZXNSZXNwb25zZRI4Cgp3b3Jrc3BhY2VzGAEgAygLMiQuc3VwZXJ0YWcucnVudGltZS52Mi5HaXRodWJXb3Jrc3BhY2USEwoLbmV4dF9jdXJzb3IYAiABKAkiZQocRGVsZXRlR2l0aHViV29ya3NwYWNlUmVxdWVzdBIUCgxvcGVyYXRpb25faWQYASABKAkSFAoMd29ya3NwYWNlX2lkGAIgASgJEhkKEWV4cGVjdGVkX3JldmlzaW9uGAMgASgEIh8KHURlbGV0ZUdpdGh1YldvcmtzcGFjZVJlc3BvbnNlMqoDChBHaXRodWJXb3Jrc3BhY2VzElsKA1B1dBIuLnN1cGVydGFnLnJ1bnRpbWUudjIuUHV0R2l0aHViV29ya3NwYWNlUmVxdWVzdBokLnN1cGVydGFnLnJ1bnRpbWUudjIuR2l0aHViV29ya3NwYWNlElsKA0dldBIuLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0R2l0aHViV29ya3NwYWNlUmVxdWVzdBokLnN1cGVydGFnLnJ1bnRpbWUudjIuR2l0aHViV29ya3NwYWNlEmsKBExpc3QSMC5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RHaXRodWJXb3Jrc3BhY2VzUmVxdWVzdBoxLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdEdpdGh1YldvcmtzcGFjZXNSZXNwb25zZRJvCgZEZWxldGUSMS5zdXBlcnRhZy5ydW50aW1lLnYyLkRlbGV0ZUdpdGh1YldvcmtzcGFjZVJlcXVlc3QaMi5zdXBlcnRhZy5ydW50aW1lLnYyLkRlbGV0ZUdpdGh1YldvcmtzcGFjZVJlc3BvbnNlYgZwcm90bzM");
+  fileDesc("CitzdXBlcnRhZy9ydW50aW1lL3YyL2dpdGh1Yl93b3Jrc3BhY2VzLnByb3RvEhNzdXBlcnRhZy5ydW50aW1lLnYyIsQBChVHaXRodWJXb3Jrc3BhY2VTb3VyY2USEgoKYWNjb3VudF9pZBgBIAEoCRIVCg1yZXBvc2l0b3J5X2lkGAIgASgEEhIKCnJlcG9zaXRvcnkYAyABKAkSEgoKY29tbWl0X3NoYRgEIAEoCRIVCghyZXZpc2lvbhgFIAEoCUgAiAEBEh4KEXJlc29sdmVkX3JldmlzaW9uGAYgASgJSAGIAQFCCwoJX3JldmlzaW9uQhQKEl9yZXNvbHZlZF9yZXZpc2lvbiK7AQoPR2l0aHViV29ya3NwYWNlEhQKDHdvcmtzcGFjZV9pZBgBIAEoCRI6CgZzb3VyY2UYAiABKAsyKi5zdXBlcnRhZy5ydW50aW1lLnYyLkdpdGh1YldvcmtzcGFjZVNvdXJjZRIQCghyZXZpc2lvbhgDIAEoBBJECgxwdWxsX3JlcXVlc3QYBCABKAsyLi5zdXBlcnRhZy5ydW50aW1lLnYyLkdpdGh1YlB1bGxSZXF1ZXN0RGVsaXZlcnkiMAoZR2l0aHViUHVsbFJlcXVlc3REZWxpdmVyeRITCgtiYXNlX2JyYW5jaBgBIAEoCSKgAQoZUHV0R2l0aHViV29ya3NwYWNlUmVxdWVzdBIUCgxvcGVyYXRpb25faWQYASABKAkSNwoJd29ya3NwYWNlGAIgASgLMiQuc3VwZXJ0YWcucnVudGltZS52Mi5HaXRodWJXb3Jrc3BhY2USHgoRZXhwZWN0ZWRfcmV2aXNpb24YAyABKARIAIgBAUIUChJfZXhwZWN0ZWRfcmV2aXNpb24iMQoZR2V0R2l0aHViV29ya3NwYWNlUmVxdWVzdBIUCgx3b3Jrc3BhY2VfaWQYASABKAkiPgobTGlzdEdpdGh1YldvcmtzcGFjZXNSZXF1ZXN0EhAKCGFmdGVyX2lkGAEgASgJEg0KBWxpbWl0GAIgASgNIm0KHExpc3RHaXRodWJXb3Jrc3BhY2VzUmVzcG9uc2USOAoKd29ya3NwYWNlcxgBIAMoCzIkLnN1cGVydGFnLnJ1bnRpbWUudjIuR2l0aHViV29ya3NwYWNlEhMKC25leHRfY3Vyc29yGAIgASgJImUKHERlbGV0ZUdpdGh1YldvcmtzcGFjZVJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAEgASgJEhQKDHdvcmtzcGFjZV9pZBgCIAEoCRIZChFleHBlY3RlZF9yZXZpc2lvbhgDIAEoBCIfCh1EZWxldGVHaXRodWJXb3Jrc3BhY2VSZXNwb25zZSLlAQoPR2l0aHViU291cmNlUGluEg4KBnBpbl9pZBgBIAEoCRIOCgZ0YWdfaWQYAiABKAkSEgoKc2Vzc2lvbl9pZBgDIAEoCRI2CghzZWxlY3RvchgEIAEoCzIkLnN1cGVydGFnLnJ1bnRpbWUudjIuR2l0aHViV29ya3NwYWNlEhcKD3NlbGVjdG9yX2RpZ2VzdBgFIAEoCRI2CghyZXNvbHZlZBgGIAEoCzIkLnN1cGVydGFnLnJ1bnRpbWUudjIuR2l0aHViV29ya3NwYWNlEhUKDWNyZWF0ZWRfb3JkZXIYByABKAQiRQofTGlzdFBlbmRpbmdHaXRodWJTb3VyY2VzUmVxdWVzdBITCgthZnRlcl9vcmRlchgBIAEoBBINCgVsaW1pdBgCIAEoDSJwCiBMaXN0UGVuZGluZ0dpdGh1YlNvdXJjZXNSZXNwb25zZRIyCgRwaW5zGAEgAygLMiQuc3VwZXJ0YWcucnVudGltZS52Mi5HaXRodWJTb3VyY2VQaW4SGAoQbmV4dF9hZnRlcl9vcmRlchgCIAEoBCJwChZQaW5HaXRodWJTb3VyY2VSZXF1ZXN0Eg4KBnBpbl9pZBgBIAEoCRIXCg9zZWxlY3Rvcl9kaWdlc3QYAiABKAkSGQoRcmVzb2x2ZWRfcmV2aXNpb24YAyABKAkSEgoKY29tbWl0X3NoYRgEIAEoCTKqAwoQR2l0aHViV29ya3NwYWNlcxJbCgNQdXQSLi5zdXBlcnRhZy5ydW50aW1lLnYyLlB1dEdpdGh1YldvcmtzcGFjZVJlcXVlc3QaJC5zdXBlcnRhZy5ydW50aW1lLnYyLkdpdGh1YldvcmtzcGFjZRJbCgNHZXQSLi5zdXBlcnRhZy5ydW50aW1lLnYyLkdldEdpdGh1YldvcmtzcGFjZVJlcXVlc3QaJC5zdXBlcnRhZy5ydW50aW1lLnYyLkdpdGh1YldvcmtzcGFjZRJrCgRMaXN0EjAuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0R2l0aHViV29ya3NwYWNlc1JlcXVlc3QaMS5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RHaXRodWJXb3Jrc3BhY2VzUmVzcG9uc2USbwoGRGVsZXRlEjEuc3VwZXJ0YWcucnVudGltZS52Mi5EZWxldGVHaXRodWJXb3Jrc3BhY2VSZXF1ZXN0GjIuc3VwZXJ0YWcucnVudGltZS52Mi5EZWxldGVHaXRodWJXb3Jrc3BhY2VSZXNwb25zZTLsAQoUR2l0aHViU291cmNlUmVzb2x2ZXISegoLTGlzdFBlbmRpbmcSNC5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RQZW5kaW5nR2l0aHViU291cmNlc1JlcXVlc3QaNS5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RQZW5kaW5nR2l0aHViU291cmNlc1Jlc3BvbnNlElgKA1BpbhIrLnN1cGVydGFnLnJ1bnRpbWUudjIuUGluR2l0aHViU291cmNlUmVxdWVzdBokLnN1cGVydGFnLnJ1bnRpbWUudjIuR2l0aHViU291cmNlUGluYgZwcm90bzM");
 
 /**
  * @generated from message supertag.runtime.v2.GithubWorkspaceSource
@@ -32,11 +32,25 @@ export type GithubWorkspaceSource = Message<"supertag.runtime.v2.GithubWorkspace
   repository: string;
 
   /**
-   * A full immutable SHA-1 Git commit, never a branch or tag.
+   * A full immutable SHA-1 Git commit. Empty selects revision/default branch.
    *
    * @generated from field: string commit_sha = 4;
    */
   commitSha: string;
+
+  /**
+   * Requested Git branch or tag. Omit with empty commit_sha for the default branch.
+   *
+   * @generated from field: optional string revision = 5;
+   */
+  revision?: string | undefined;
+
+  /**
+   * Resolved branch/tag used to choose commit_sha. Set only by the trusted resolver.
+   *
+   * @generated from field: optional string resolved_revision = 6;
+   */
+  resolvedRevision?: string | undefined;
 };
 
 /**
@@ -226,6 +240,129 @@ export const DeleteGithubWorkspaceResponseSchema: GenMessage<DeleteGithubWorkspa
   messageDesc(file_supertag_runtime_v2_github_workspaces, 8);
 
 /**
+ * @generated from message supertag.runtime.v2.GithubSourcePin
+ */
+export type GithubSourcePin = Message<"supertag.runtime.v2.GithubSourcePin"> & {
+  /**
+   * @generated from field: string pin_id = 1;
+   */
+  pinId: string;
+
+  /**
+   * @generated from field: string tag_id = 2;
+   */
+  tagId: string;
+
+  /**
+   * @generated from field: string session_id = 3;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: supertag.runtime.v2.GithubWorkspace selector = 4;
+   */
+  selector?: GithubWorkspace | undefined;
+
+  /**
+   * @generated from field: string selector_digest = 5;
+   */
+  selectorDigest: string;
+
+  /**
+   * @generated from field: supertag.runtime.v2.GithubWorkspace resolved = 6;
+   */
+  resolved?: GithubWorkspace | undefined;
+
+  /**
+   * @generated from field: uint64 created_order = 7;
+   */
+  createdOrder: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.GithubSourcePin.
+ * Use `create(GithubSourcePinSchema)` to create a new message.
+ */
+export const GithubSourcePinSchema: GenMessage<GithubSourcePin> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_github_workspaces, 9);
+
+/**
+ * @generated from message supertag.runtime.v2.ListPendingGithubSourcesRequest
+ */
+export type ListPendingGithubSourcesRequest = Message<"supertag.runtime.v2.ListPendingGithubSourcesRequest"> & {
+  /**
+   * @generated from field: uint64 after_order = 1;
+   */
+  afterOrder: bigint;
+
+  /**
+   * @generated from field: uint32 limit = 2;
+   */
+  limit: number;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ListPendingGithubSourcesRequest.
+ * Use `create(ListPendingGithubSourcesRequestSchema)` to create a new message.
+ */
+export const ListPendingGithubSourcesRequestSchema: GenMessage<ListPendingGithubSourcesRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_github_workspaces, 10);
+
+/**
+ * @generated from message supertag.runtime.v2.ListPendingGithubSourcesResponse
+ */
+export type ListPendingGithubSourcesResponse = Message<"supertag.runtime.v2.ListPendingGithubSourcesResponse"> & {
+  /**
+   * @generated from field: repeated supertag.runtime.v2.GithubSourcePin pins = 1;
+   */
+  pins: GithubSourcePin[];
+
+  /**
+   * @generated from field: uint64 next_after_order = 2;
+   */
+  nextAfterOrder: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ListPendingGithubSourcesResponse.
+ * Use `create(ListPendingGithubSourcesResponseSchema)` to create a new message.
+ */
+export const ListPendingGithubSourcesResponseSchema: GenMessage<ListPendingGithubSourcesResponse> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_github_workspaces, 11);
+
+/**
+ * @generated from message supertag.runtime.v2.PinGithubSourceRequest
+ */
+export type PinGithubSourceRequest = Message<"supertag.runtime.v2.PinGithubSourceRequest"> & {
+  /**
+   * @generated from field: string pin_id = 1;
+   */
+  pinId: string;
+
+  /**
+   * @generated from field: string selector_digest = 2;
+   */
+  selectorDigest: string;
+
+  /**
+   * @generated from field: string resolved_revision = 3;
+   */
+  resolvedRevision: string;
+
+  /**
+   * @generated from field: string commit_sha = 4;
+   */
+  commitSha: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.PinGithubSourceRequest.
+ * Use `create(PinGithubSourceRequestSchema)` to create a new message.
+ */
+export const PinGithubSourceRequestSchema: GenMessage<PinGithubSourceRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_github_workspaces, 12);
+
+/**
  * Credential-free repository configuration. A Task receives an immutable copy.
  *
  * @generated from service supertag.runtime.v2.GithubWorkspaces
@@ -265,3 +402,28 @@ export const GithubWorkspaces: GenService<{
   },
 }> = /*@__PURE__*/
   serviceDesc(file_supertag_runtime_v2_github_workspaces, 0);
+
+/**
+ * Private Control Plane API used only by configured Gateway source readers.
+ *
+ * @generated from service supertag.runtime.v2.GithubSourceResolver
+ */
+export const GithubSourceResolver: GenService<{
+  /**
+   * @generated from rpc supertag.runtime.v2.GithubSourceResolver.ListPending
+   */
+  listPending: {
+    methodKind: "unary";
+    input: typeof ListPendingGithubSourcesRequestSchema;
+    output: typeof ListPendingGithubSourcesResponseSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.GithubSourceResolver.Pin
+   */
+  pin: {
+    methodKind: "unary";
+    input: typeof PinGithubSourceRequestSchema;
+    output: typeof GithubSourcePinSchema;
+  },
+}> = /*@__PURE__*/
+  serviceDesc(file_supertag_runtime_v2_github_workspaces, 1);

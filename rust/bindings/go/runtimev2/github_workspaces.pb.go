@@ -26,10 +26,14 @@ type GithubWorkspaceSource struct {
 	AccountId    string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	RepositoryId uint64                 `protobuf:"varint,2,opt,name=repository_id,json=repositoryId,proto3" json:"repository_id,omitempty"`
 	Repository   string                 `protobuf:"bytes,3,opt,name=repository,proto3" json:"repository,omitempty"`
-	// A full immutable SHA-1 Git commit, never a branch or tag.
-	CommitSha     string `protobuf:"bytes,4,opt,name=commit_sha,json=commitSha,proto3" json:"commit_sha,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// A full immutable SHA-1 Git commit. Empty selects revision/default branch.
+	CommitSha string `protobuf:"bytes,4,opt,name=commit_sha,json=commitSha,proto3" json:"commit_sha,omitempty"`
+	// Requested Git branch or tag. Omit with empty commit_sha for the default branch.
+	Revision *string `protobuf:"bytes,5,opt,name=revision,proto3,oneof" json:"revision,omitempty"`
+	// Resolved branch/tag used to choose commit_sha. Set only by the trusted resolver.
+	ResolvedRevision *string `protobuf:"bytes,6,opt,name=resolved_revision,json=resolvedRevision,proto3,oneof" json:"resolved_revision,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *GithubWorkspaceSource) Reset() {
@@ -86,6 +90,20 @@ func (x *GithubWorkspaceSource) GetRepository() string {
 func (x *GithubWorkspaceSource) GetCommitSha() string {
 	if x != nil {
 		return x.CommitSha
+	}
+	return ""
+}
+
+func (x *GithubWorkspaceSource) GetRevision() string {
+	if x != nil && x.Revision != nil {
+		return *x.Revision
+	}
+	return ""
+}
+
+func (x *GithubWorkspaceSource) GetResolvedRevision() string {
+	if x != nil && x.ResolvedRevision != nil {
+		return *x.ResolvedRevision
 	}
 	return ""
 }
@@ -507,11 +525,275 @@ func (*DeleteGithubWorkspaceResponse) Descriptor() ([]byte, []int) {
 	return file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP(), []int{8}
 }
 
+type GithubSourcePin struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	PinId          string                 `protobuf:"bytes,1,opt,name=pin_id,json=pinId,proto3" json:"pin_id,omitempty"`
+	TagId          string                 `protobuf:"bytes,2,opt,name=tag_id,json=tagId,proto3" json:"tag_id,omitempty"`
+	SessionId      string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Selector       *GithubWorkspace       `protobuf:"bytes,4,opt,name=selector,proto3" json:"selector,omitempty"`
+	SelectorDigest string                 `protobuf:"bytes,5,opt,name=selector_digest,json=selectorDigest,proto3" json:"selector_digest,omitempty"`
+	Resolved       *GithubWorkspace       `protobuf:"bytes,6,opt,name=resolved,proto3" json:"resolved,omitempty"`
+	CreatedOrder   uint64                 `protobuf:"varint,7,opt,name=created_order,json=createdOrder,proto3" json:"created_order,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *GithubSourcePin) Reset() {
+	*x = GithubSourcePin{}
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GithubSourcePin) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GithubSourcePin) ProtoMessage() {}
+
+func (x *GithubSourcePin) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GithubSourcePin.ProtoReflect.Descriptor instead.
+func (*GithubSourcePin) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *GithubSourcePin) GetPinId() string {
+	if x != nil {
+		return x.PinId
+	}
+	return ""
+}
+
+func (x *GithubSourcePin) GetTagId() string {
+	if x != nil {
+		return x.TagId
+	}
+	return ""
+}
+
+func (x *GithubSourcePin) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *GithubSourcePin) GetSelector() *GithubWorkspace {
+	if x != nil {
+		return x.Selector
+	}
+	return nil
+}
+
+func (x *GithubSourcePin) GetSelectorDigest() string {
+	if x != nil {
+		return x.SelectorDigest
+	}
+	return ""
+}
+
+func (x *GithubSourcePin) GetResolved() *GithubWorkspace {
+	if x != nil {
+		return x.Resolved
+	}
+	return nil
+}
+
+func (x *GithubSourcePin) GetCreatedOrder() uint64 {
+	if x != nil {
+		return x.CreatedOrder
+	}
+	return 0
+}
+
+type ListPendingGithubSourcesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AfterOrder    uint64                 `protobuf:"varint,1,opt,name=after_order,json=afterOrder,proto3" json:"after_order,omitempty"`
+	Limit         uint32                 `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListPendingGithubSourcesRequest) Reset() {
+	*x = ListPendingGithubSourcesRequest{}
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListPendingGithubSourcesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListPendingGithubSourcesRequest) ProtoMessage() {}
+
+func (x *ListPendingGithubSourcesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListPendingGithubSourcesRequest.ProtoReflect.Descriptor instead.
+func (*ListPendingGithubSourcesRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ListPendingGithubSourcesRequest) GetAfterOrder() uint64 {
+	if x != nil {
+		return x.AfterOrder
+	}
+	return 0
+}
+
+func (x *ListPendingGithubSourcesRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type ListPendingGithubSourcesResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Pins           []*GithubSourcePin     `protobuf:"bytes,1,rep,name=pins,proto3" json:"pins,omitempty"`
+	NextAfterOrder uint64                 `protobuf:"varint,2,opt,name=next_after_order,json=nextAfterOrder,proto3" json:"next_after_order,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ListPendingGithubSourcesResponse) Reset() {
+	*x = ListPendingGithubSourcesResponse{}
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListPendingGithubSourcesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListPendingGithubSourcesResponse) ProtoMessage() {}
+
+func (x *ListPendingGithubSourcesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListPendingGithubSourcesResponse.ProtoReflect.Descriptor instead.
+func (*ListPendingGithubSourcesResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ListPendingGithubSourcesResponse) GetPins() []*GithubSourcePin {
+	if x != nil {
+		return x.Pins
+	}
+	return nil
+}
+
+func (x *ListPendingGithubSourcesResponse) GetNextAfterOrder() uint64 {
+	if x != nil {
+		return x.NextAfterOrder
+	}
+	return 0
+}
+
+type PinGithubSourceRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	PinId            string                 `protobuf:"bytes,1,opt,name=pin_id,json=pinId,proto3" json:"pin_id,omitempty"`
+	SelectorDigest   string                 `protobuf:"bytes,2,opt,name=selector_digest,json=selectorDigest,proto3" json:"selector_digest,omitempty"`
+	ResolvedRevision string                 `protobuf:"bytes,3,opt,name=resolved_revision,json=resolvedRevision,proto3" json:"resolved_revision,omitempty"`
+	CommitSha        string                 `protobuf:"bytes,4,opt,name=commit_sha,json=commitSha,proto3" json:"commit_sha,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *PinGithubSourceRequest) Reset() {
+	*x = PinGithubSourceRequest{}
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PinGithubSourceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PinGithubSourceRequest) ProtoMessage() {}
+
+func (x *PinGithubSourceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_github_workspaces_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PinGithubSourceRequest.ProtoReflect.Descriptor instead.
+func (*PinGithubSourceRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *PinGithubSourceRequest) GetPinId() string {
+	if x != nil {
+		return x.PinId
+	}
+	return ""
+}
+
+func (x *PinGithubSourceRequest) GetSelectorDigest() string {
+	if x != nil {
+		return x.SelectorDigest
+	}
+	return ""
+}
+
+func (x *PinGithubSourceRequest) GetResolvedRevision() string {
+	if x != nil {
+		return x.ResolvedRevision
+	}
+	return ""
+}
+
+func (x *PinGithubSourceRequest) GetCommitSha() string {
+	if x != nil {
+		return x.CommitSha
+	}
+	return ""
+}
+
 var File_supertag_runtime_v2_github_workspaces_proto protoreflect.FileDescriptor
 
 const file_supertag_runtime_v2_github_workspaces_proto_rawDesc = "" +
 	"\n" +
-	"+supertag/runtime/v2/github_workspaces.proto\x12\x13supertag.runtime.v2\"\x9a\x01\n" +
+	"+supertag/runtime/v2/github_workspaces.proto\x12\x13supertag.runtime.v2\"\x90\x02\n" +
 	"\x15GithubWorkspaceSource\x12\x1d\n" +
 	"\n" +
 	"account_id\x18\x01 \x01(\tR\taccountId\x12#\n" +
@@ -520,7 +802,11 @@ const file_supertag_runtime_v2_github_workspaces_proto_rawDesc = "" +
 	"repository\x18\x03 \x01(\tR\n" +
 	"repository\x12\x1d\n" +
 	"\n" +
-	"commit_sha\x18\x04 \x01(\tR\tcommitSha\"\xe7\x01\n" +
+	"commit_sha\x18\x04 \x01(\tR\tcommitSha\x12\x1f\n" +
+	"\brevision\x18\x05 \x01(\tH\x00R\brevision\x88\x01\x01\x120\n" +
+	"\x11resolved_revision\x18\x06 \x01(\tH\x01R\x10resolvedRevision\x88\x01\x01B\v\n" +
+	"\t_revisionB\x14\n" +
+	"\x12_resolved_revision\"\xe7\x01\n" +
 	"\x0fGithubWorkspace\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12B\n" +
 	"\x06source\x18\x02 \x01(\v2*.supertag.runtime.v2.GithubWorkspaceSourceR\x06source\x12\x1a\n" +
@@ -549,12 +835,37 @@ const file_supertag_runtime_v2_github_workspaces_proto_rawDesc = "" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12+\n" +
 	"\x11expected_revision\x18\x03 \x01(\x04R\x10expectedRevision\"\x1f\n" +
-	"\x1dDeleteGithubWorkspaceResponse2\xaa\x03\n" +
+	"\x1dDeleteGithubWorkspaceResponse\"\xb0\x02\n" +
+	"\x0fGithubSourcePin\x12\x15\n" +
+	"\x06pin_id\x18\x01 \x01(\tR\x05pinId\x12\x15\n" +
+	"\x06tag_id\x18\x02 \x01(\tR\x05tagId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\x12@\n" +
+	"\bselector\x18\x04 \x01(\v2$.supertag.runtime.v2.GithubWorkspaceR\bselector\x12'\n" +
+	"\x0fselector_digest\x18\x05 \x01(\tR\x0eselectorDigest\x12@\n" +
+	"\bresolved\x18\x06 \x01(\v2$.supertag.runtime.v2.GithubWorkspaceR\bresolved\x12#\n" +
+	"\rcreated_order\x18\a \x01(\x04R\fcreatedOrder\"X\n" +
+	"\x1fListPendingGithubSourcesRequest\x12\x1f\n" +
+	"\vafter_order\x18\x01 \x01(\x04R\n" +
+	"afterOrder\x12\x14\n" +
+	"\x05limit\x18\x02 \x01(\rR\x05limit\"\x86\x01\n" +
+	" ListPendingGithubSourcesResponse\x128\n" +
+	"\x04pins\x18\x01 \x03(\v2$.supertag.runtime.v2.GithubSourcePinR\x04pins\x12(\n" +
+	"\x10next_after_order\x18\x02 \x01(\x04R\x0enextAfterOrder\"\xa4\x01\n" +
+	"\x16PinGithubSourceRequest\x12\x15\n" +
+	"\x06pin_id\x18\x01 \x01(\tR\x05pinId\x12'\n" +
+	"\x0fselector_digest\x18\x02 \x01(\tR\x0eselectorDigest\x12+\n" +
+	"\x11resolved_revision\x18\x03 \x01(\tR\x10resolvedRevision\x12\x1d\n" +
+	"\n" +
+	"commit_sha\x18\x04 \x01(\tR\tcommitSha2\xaa\x03\n" +
 	"\x10GithubWorkspaces\x12[\n" +
 	"\x03Put\x12..supertag.runtime.v2.PutGithubWorkspaceRequest\x1a$.supertag.runtime.v2.GithubWorkspace\x12[\n" +
 	"\x03Get\x12..supertag.runtime.v2.GetGithubWorkspaceRequest\x1a$.supertag.runtime.v2.GithubWorkspace\x12k\n" +
 	"\x04List\x120.supertag.runtime.v2.ListGithubWorkspacesRequest\x1a1.supertag.runtime.v2.ListGithubWorkspacesResponse\x12o\n" +
-	"\x06Delete\x121.supertag.runtime.v2.DeleteGithubWorkspaceRequest\x1a2.supertag.runtime.v2.DeleteGithubWorkspaceResponseb\x06proto3"
+	"\x06Delete\x121.supertag.runtime.v2.DeleteGithubWorkspaceRequest\x1a2.supertag.runtime.v2.DeleteGithubWorkspaceResponse2\xec\x01\n" +
+	"\x14GithubSourceResolver\x12z\n" +
+	"\vListPending\x124.supertag.runtime.v2.ListPendingGithubSourcesRequest\x1a5.supertag.runtime.v2.ListPendingGithubSourcesResponse\x12X\n" +
+	"\x03Pin\x12+.supertag.runtime.v2.PinGithubSourceRequest\x1a$.supertag.runtime.v2.GithubSourcePinb\x06proto3"
 
 var (
 	file_supertag_runtime_v2_github_workspaces_proto_rawDescOnce sync.Once
@@ -568,36 +879,47 @@ func file_supertag_runtime_v2_github_workspaces_proto_rawDescGZIP() []byte {
 	return file_supertag_runtime_v2_github_workspaces_proto_rawDescData
 }
 
-var file_supertag_runtime_v2_github_workspaces_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_supertag_runtime_v2_github_workspaces_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_supertag_runtime_v2_github_workspaces_proto_goTypes = []any{
-	(*GithubWorkspaceSource)(nil),         // 0: supertag.runtime.v2.GithubWorkspaceSource
-	(*GithubWorkspace)(nil),               // 1: supertag.runtime.v2.GithubWorkspace
-	(*GithubPullRequestDelivery)(nil),     // 2: supertag.runtime.v2.GithubPullRequestDelivery
-	(*PutGithubWorkspaceRequest)(nil),     // 3: supertag.runtime.v2.PutGithubWorkspaceRequest
-	(*GetGithubWorkspaceRequest)(nil),     // 4: supertag.runtime.v2.GetGithubWorkspaceRequest
-	(*ListGithubWorkspacesRequest)(nil),   // 5: supertag.runtime.v2.ListGithubWorkspacesRequest
-	(*ListGithubWorkspacesResponse)(nil),  // 6: supertag.runtime.v2.ListGithubWorkspacesResponse
-	(*DeleteGithubWorkspaceRequest)(nil),  // 7: supertag.runtime.v2.DeleteGithubWorkspaceRequest
-	(*DeleteGithubWorkspaceResponse)(nil), // 8: supertag.runtime.v2.DeleteGithubWorkspaceResponse
+	(*GithubWorkspaceSource)(nil),            // 0: supertag.runtime.v2.GithubWorkspaceSource
+	(*GithubWorkspace)(nil),                  // 1: supertag.runtime.v2.GithubWorkspace
+	(*GithubPullRequestDelivery)(nil),        // 2: supertag.runtime.v2.GithubPullRequestDelivery
+	(*PutGithubWorkspaceRequest)(nil),        // 3: supertag.runtime.v2.PutGithubWorkspaceRequest
+	(*GetGithubWorkspaceRequest)(nil),        // 4: supertag.runtime.v2.GetGithubWorkspaceRequest
+	(*ListGithubWorkspacesRequest)(nil),      // 5: supertag.runtime.v2.ListGithubWorkspacesRequest
+	(*ListGithubWorkspacesResponse)(nil),     // 6: supertag.runtime.v2.ListGithubWorkspacesResponse
+	(*DeleteGithubWorkspaceRequest)(nil),     // 7: supertag.runtime.v2.DeleteGithubWorkspaceRequest
+	(*DeleteGithubWorkspaceResponse)(nil),    // 8: supertag.runtime.v2.DeleteGithubWorkspaceResponse
+	(*GithubSourcePin)(nil),                  // 9: supertag.runtime.v2.GithubSourcePin
+	(*ListPendingGithubSourcesRequest)(nil),  // 10: supertag.runtime.v2.ListPendingGithubSourcesRequest
+	(*ListPendingGithubSourcesResponse)(nil), // 11: supertag.runtime.v2.ListPendingGithubSourcesResponse
+	(*PinGithubSourceRequest)(nil),           // 12: supertag.runtime.v2.PinGithubSourceRequest
 }
 var file_supertag_runtime_v2_github_workspaces_proto_depIdxs = []int32{
-	0, // 0: supertag.runtime.v2.GithubWorkspace.source:type_name -> supertag.runtime.v2.GithubWorkspaceSource
-	2, // 1: supertag.runtime.v2.GithubWorkspace.pull_request:type_name -> supertag.runtime.v2.GithubPullRequestDelivery
-	1, // 2: supertag.runtime.v2.PutGithubWorkspaceRequest.workspace:type_name -> supertag.runtime.v2.GithubWorkspace
-	1, // 3: supertag.runtime.v2.ListGithubWorkspacesResponse.workspaces:type_name -> supertag.runtime.v2.GithubWorkspace
-	3, // 4: supertag.runtime.v2.GithubWorkspaces.Put:input_type -> supertag.runtime.v2.PutGithubWorkspaceRequest
-	4, // 5: supertag.runtime.v2.GithubWorkspaces.Get:input_type -> supertag.runtime.v2.GetGithubWorkspaceRequest
-	5, // 6: supertag.runtime.v2.GithubWorkspaces.List:input_type -> supertag.runtime.v2.ListGithubWorkspacesRequest
-	7, // 7: supertag.runtime.v2.GithubWorkspaces.Delete:input_type -> supertag.runtime.v2.DeleteGithubWorkspaceRequest
-	1, // 8: supertag.runtime.v2.GithubWorkspaces.Put:output_type -> supertag.runtime.v2.GithubWorkspace
-	1, // 9: supertag.runtime.v2.GithubWorkspaces.Get:output_type -> supertag.runtime.v2.GithubWorkspace
-	6, // 10: supertag.runtime.v2.GithubWorkspaces.List:output_type -> supertag.runtime.v2.ListGithubWorkspacesResponse
-	8, // 11: supertag.runtime.v2.GithubWorkspaces.Delete:output_type -> supertag.runtime.v2.DeleteGithubWorkspaceResponse
-	8, // [8:12] is the sub-list for method output_type
-	4, // [4:8] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	0,  // 0: supertag.runtime.v2.GithubWorkspace.source:type_name -> supertag.runtime.v2.GithubWorkspaceSource
+	2,  // 1: supertag.runtime.v2.GithubWorkspace.pull_request:type_name -> supertag.runtime.v2.GithubPullRequestDelivery
+	1,  // 2: supertag.runtime.v2.PutGithubWorkspaceRequest.workspace:type_name -> supertag.runtime.v2.GithubWorkspace
+	1,  // 3: supertag.runtime.v2.ListGithubWorkspacesResponse.workspaces:type_name -> supertag.runtime.v2.GithubWorkspace
+	1,  // 4: supertag.runtime.v2.GithubSourcePin.selector:type_name -> supertag.runtime.v2.GithubWorkspace
+	1,  // 5: supertag.runtime.v2.GithubSourcePin.resolved:type_name -> supertag.runtime.v2.GithubWorkspace
+	9,  // 6: supertag.runtime.v2.ListPendingGithubSourcesResponse.pins:type_name -> supertag.runtime.v2.GithubSourcePin
+	3,  // 7: supertag.runtime.v2.GithubWorkspaces.Put:input_type -> supertag.runtime.v2.PutGithubWorkspaceRequest
+	4,  // 8: supertag.runtime.v2.GithubWorkspaces.Get:input_type -> supertag.runtime.v2.GetGithubWorkspaceRequest
+	5,  // 9: supertag.runtime.v2.GithubWorkspaces.List:input_type -> supertag.runtime.v2.ListGithubWorkspacesRequest
+	7,  // 10: supertag.runtime.v2.GithubWorkspaces.Delete:input_type -> supertag.runtime.v2.DeleteGithubWorkspaceRequest
+	10, // 11: supertag.runtime.v2.GithubSourceResolver.ListPending:input_type -> supertag.runtime.v2.ListPendingGithubSourcesRequest
+	12, // 12: supertag.runtime.v2.GithubSourceResolver.Pin:input_type -> supertag.runtime.v2.PinGithubSourceRequest
+	1,  // 13: supertag.runtime.v2.GithubWorkspaces.Put:output_type -> supertag.runtime.v2.GithubWorkspace
+	1,  // 14: supertag.runtime.v2.GithubWorkspaces.Get:output_type -> supertag.runtime.v2.GithubWorkspace
+	6,  // 15: supertag.runtime.v2.GithubWorkspaces.List:output_type -> supertag.runtime.v2.ListGithubWorkspacesResponse
+	8,  // 16: supertag.runtime.v2.GithubWorkspaces.Delete:output_type -> supertag.runtime.v2.DeleteGithubWorkspaceResponse
+	11, // 17: supertag.runtime.v2.GithubSourceResolver.ListPending:output_type -> supertag.runtime.v2.ListPendingGithubSourcesResponse
+	9,  // 18: supertag.runtime.v2.GithubSourceResolver.Pin:output_type -> supertag.runtime.v2.GithubSourcePin
+	13, // [13:19] is the sub-list for method output_type
+	7,  // [7:13] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_github_workspaces_proto_init() }
@@ -605,6 +927,7 @@ func file_supertag_runtime_v2_github_workspaces_proto_init() {
 	if File_supertag_runtime_v2_github_workspaces_proto != nil {
 		return
 	}
+	file_supertag_runtime_v2_github_workspaces_proto_msgTypes[0].OneofWrappers = []any{}
 	file_supertag_runtime_v2_github_workspaces_proto_msgTypes[3].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -612,9 +935,9 @@ func file_supertag_runtime_v2_github_workspaces_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_github_workspaces_proto_rawDesc), len(file_supertag_runtime_v2_github_workspaces_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   13,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   2,
 		},
 		GoTypes:           file_supertag_runtime_v2_github_workspaces_proto_goTypes,
 		DependencyIndexes: file_supertag_runtime_v2_github_workspaces_proto_depIdxs,

@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::{GithubAuthentication, auth::Authentication, valid_id, valid_repository};
 
+mod refs;
 #[cfg(test)]
 mod tests;
 
@@ -218,10 +219,14 @@ impl GithubWorkspaceSources {
     }
 
     async fn json(&self, path: &str, token: &str) -> Result<Value> {
+        self.json_url(self.0.api.join(path)?, token).await
+    }
+
+    async fn json_url(&self, url: Url, token: &str) -> Result<Value> {
         let mut response = self
             .0
             .http
-            .get(self.0.api.join(path)?)
+            .get(url)
             .bearer_auth(token)
             .header("accept", "application/vnd.github+json")
             .header("user-agent", "supertag-gateway")

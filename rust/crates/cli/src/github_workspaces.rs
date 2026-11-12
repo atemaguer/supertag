@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 #[derive(Subcommand)]
 pub enum GithubWorkspaceCommand {
-    /// Register or update an immutable GitHub source. Credentials stay on the Gateway.
+    /// Select a GitHub source. Moving revisions are pinned once per Session. Credentials stay on the Gateway.
     Put {
         workspace_id: String,
         #[arg(long)]
@@ -16,8 +16,11 @@ pub enum GithubWorkspaceCommand {
         repository_id: u64,
         #[arg(long)]
         repository: String,
-        #[arg(long)]
-        commit: String,
+        #[arg(long, conflicts_with = "reference")]
+        commit: Option<String>,
+        /// Select a branch or tag. Omit commit and ref to use the default branch.
+        #[arg(long = "ref")]
+        reference: Option<String>,
         /// Publish verified results as a draft pull request into this branch.
         #[arg(long)]
         pull_request_base: Option<String>,
@@ -56,6 +59,7 @@ pub async fn run(connection: Connection, command: GithubWorkspaceCommand) -> Res
             repository_id,
             repository,
             commit,
+            reference,
             pull_request_base,
             expected_revision,
             operation_id,
@@ -75,7 +79,9 @@ pub async fn run(connection: Connection, command: GithubWorkspaceCommand) -> Res
                                 account_id: account,
                                 repository_id,
                                 repository,
-                                commit_sha: commit,
+                                commit_sha: commit.unwrap_or_default(),
+                                revision: reference,
+                                resolved_revision: None,
                             }),
                         }),
                     },
@@ -128,5 +134,5 @@ pub async fn run(connection: Connection, command: GithubWorkspaceCommand) -> Res
 
 fn describe(value: GithubWorkspace) -> Value {
     json!({"workspace_id": value.workspace_id, "revision": value.revision, "pull_request": value.pull_request.map(|delivery| json!({"base_branch":delivery.base_branch})), "source": value.source.map(|source|
-        json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha}))})
+        json!({"account_id":source.account_id,"repository_id":source.repository_id,"repository":source.repository,"commit_sha":source.commit_sha,"revision":source.revision,"resolved_revision":source.resolved_revision}))})
 }

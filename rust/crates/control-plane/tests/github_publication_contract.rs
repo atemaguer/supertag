@@ -50,6 +50,7 @@ async fn setup(store: &Store) {
                         repository_id: 123,
                         repository: "acme/project".into(),
                         commit_sha: BASE.into(),
+                        ..Default::default()
                     }),
                     pull_request: Some(GithubPullRequestDelivery {
                         base_branch: "main".into(),
