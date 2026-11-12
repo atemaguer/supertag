@@ -69,7 +69,7 @@ it("exposes only admitted tools to the authenticated Attempt and redacts both cr
         operationId: "opencode-work-session-question",
         text: "Which provider? [REDACTED] [REDACTED]",
       },
-      expect.objectContaining({ headers: { authorization: `Bearer ${grpcToken}` } }),
+      expect.objectContaining({ timeoutMs: 5000 }),
     );
     expect(await service.waitingApprovalIds()).toEqual([]);
     active = false;
@@ -145,10 +145,7 @@ it("exposes scoped artifact reads and attachment only with their accepted capabi
     expect(JSON.stringify(result)).toContain("selected evidence [REDACTED]");
     expect(read).toHaveBeenCalledExactlyOnceWith(
       { artifactId: "prior", path: "evidence.txt", operationId: "read-one", offset: 0n, limit: 0 },
-      expect.objectContaining({
-        headers: { authorization: `Bearer ${grpcToken}` },
-        timeoutMs: 120000,
-      }),
+      expect.objectContaining({ timeoutMs: 120000 }),
     );
     expect(
       (

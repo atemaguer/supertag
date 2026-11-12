@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import selectors
 import subprocess
+import sys
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -13,6 +14,7 @@ import pytest
 from supertag.gateway import GatewayClient, GatewayClientSync, artifacts, runtime
 
 TOKEN = "fixture-operator-token"
+HOST_TOKEN = "fixture-worker-host-credential-12345"
 
 
 @pytest.mark.parametrize(
@@ -67,6 +69,7 @@ def gateway_url(tmp_path: Path):
         "SUPERTAG_GATEWAY_TOKEN": "fixture-private-gateway-token",
         "SUPERTAG_OPERATOR_TOKEN": TOKEN,
         "SUPERTAG_DATABASE_URL": f"sqlite://{tmp_path / 'control.sqlite'}?mode=rwc",
+        "SUPERTAG_BOOTSTRAP_HOST_TOKEN": HOST_TOKEN,
     }
     with ExitStack() as services:
         private = services.enter_context(service(binary, ["control-plane"], env))
@@ -121,3 +124,71 @@ async def test_gateway_clients_replay_task_and_stream_events(gateway_url):
         with pytest.raises(grpc.aio.AioRpcError) as rejected:
             await missing.read()
         assert rejected.value.code() == grpc.StatusCode.NOT_FOUND
+
+
+def test_installed_harness_runs_one_task_and_replays_event(gateway_url, tmp_path):
+    adapter = tmp_path / "adapter.py"
+    adapter.write_text(
+        """import asyncio
+import os
+import sys
+from supertag.harness_adapter import open_harness, runtime
+
+async def run():
+    assert "SUPERTAG_HOST_TOKEN" not in os.environ
+    async with open_harness(sys.stdin.buffer) as harness:
+        attached = await harness.client.Attach(runtime.HarnessAttachRequest(), timeout=5)
+        result = "Installed Python harness for " + attached.task.tag_id
+        event = runtime.HarnessPublishRequest(sequence=1, text=result)
+        await harness.client.Publish(event, timeout=5)
+        await harness.client.Publish(event, timeout=5)
+        await harness.client.Complete(
+            runtime.HarnessCompleteRequest(result=result, succeeded=True), timeout=5
+        )
+
+asyncio.run(run())
+""",
+        encoding="utf-8",
+    )
+    with GatewayClientSync(gateway_url, TOKEN) as client:
+        tag = client.operator.PutTag(
+            runtime.PutTagRequest(tag_id="python-harness", instructions="Verify SDK."),
+            timeout=3,
+        )
+        task = client.operator.SubmitTask(
+            runtime.SubmitTaskRequest(
+                tag_id=tag.tag_id,
+                session_id="fixture",
+                operation_id="sdk-harness-test",
+                prompt="Run one Task.",
+            ),
+            timeout=3,
+        )
+        output = subprocess.run(
+            [
+                os.environ["SUPERTAG_RUST_TEST_CLI"],
+                "worker-host",
+                "--gateway",
+                gateway_url,
+                "--state-directory",
+                str(tmp_path / "host"),
+                "--adapter",
+                sys.executable,
+                "--adapter-arg",
+                str(adapter),
+                "--once",
+            ],
+            env={"SUPERTAG_HOST_TOKEN": HOST_TOKEN, "PATH": "/usr/bin:/bin"},
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert output.returncode == 0, output.stderr
+        final = client.operator.GetTask(runtime.GetTaskRequest(task_id=task.task_id), timeout=3)
+        assert final.state == runtime.TASK_STATE_SUCCEEDED, (final.result, output.stderr)
+        assert final.result == "Installed Python harness for python-harness"
+        events = client.operator.ListEvents(
+            runtime.ListEventsRequest(task_id=task.task_id), timeout=3
+        )
+        assert sum(event.text == final.result for event in events.events) == 1

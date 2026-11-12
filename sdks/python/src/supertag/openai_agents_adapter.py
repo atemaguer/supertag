@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
-import ipaddress
 import json
 import math
 import os
@@ -15,8 +14,8 @@ import sys
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
+from .harness_adapter import MAX_BOOTSTRAP_BYTES, MAX_HARNESS_MESSAGE_BYTES, bootstrap_target
 from .openai_agents import (
     OpenAIAgentsRunner,
     OpenAIAgentsUsage,
@@ -26,9 +25,7 @@ from .openai_agents import (
 
 HARNESS = "openai-agents"
 CHECKPOINT_FORMAT = "session-items-v1"
-MAX_BOOTSTRAP_BYTES = 4_096
 MAX_CHECKPOINT_BYTES = 16 * 1024 * 1024
-MAX_MESSAGE_BYTES = MAX_CHECKPOINT_BYTES + 1024 * 1024
 MAX_OUTPUT_BYTES = 262_144
 MAX_EVENT_CHARACTERS = 4_096  # A Unicode scalar occupies at most four UTF-8 bytes.
 RPC_TIMEOUT_SECONDS = 5
@@ -125,25 +122,9 @@ class _Redactor:
 
 def _bootstrap_target(bootstrap: Any) -> str:
     try:
-        endpoint = urlsplit(bootstrap.endpoint)
-        host = ipaddress.ip_address(endpoint.hostname or "")
-        port = endpoint.port
+        return bootstrap_target(bootstrap)
     except ValueError as error:
-        raise _AdapterFailure("invalid Worklet bootstrap endpoint") from error
-    if (
-        endpoint.scheme != "http"
-        or not host.is_loopback
-        or port is None
-        or port == 0
-        or endpoint.username is not None
-        or endpoint.password is not None
-        or endpoint.path not in ("", "/")
-        or endpoint.query
-        or endpoint.fragment
-        or not re.fullmatch(r"[A-Za-z0-9._~-]{1,512}", bootstrap.token)
-    ):
-        raise _AdapterFailure("invalid Worklet bootstrap identity")
-    return endpoint.netloc
+        raise _AdapterFailure(str(error)) from error
 
 
 def _scope(task: Any) -> dict[str, Any]:
@@ -328,8 +309,8 @@ async def run_adapter(
     ).resolve()
     options = (
         ("grpc.enable_http_proxy", 0),
-        ("grpc.max_receive_message_length", MAX_MESSAGE_BYTES),
-        ("grpc.max_send_message_length", MAX_MESSAGE_BYTES),
+        ("grpc.max_receive_message_length", MAX_HARNESS_MESSAGE_BYTES),
+        ("grpc.max_send_message_length", MAX_HARNESS_MESSAGE_BYTES),
     )
     async with grpc.aio.insecure_channel(target, options=options) as channel:
         harness = _Harness(channel, pb, bootstrap.token)

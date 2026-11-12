@@ -83,6 +83,37 @@ The examples store their journals in `<state directory>/python-worklets/<worklet
 state directory is `SUPERTAG_STATE_DIR` when set, otherwise `~/.supertag`.
 Keep each journal across restarts; run only one application per journal.
 
+## Run a Python harness adapter with the Rust Worker Host
+
+A Worker Host is the machine or sandbox that provides execution. It launches a harness
+adapter to run one Task Attempt, which is a single try at completing a unit of work. Install
+the SDK with its `runtime` extra. Register the adapter executable with
+`supertag worker-host --adapter`.
+
+```python
+import asyncio
+import sys
+
+from supertag.harness_adapter import open_harness, runtime
+
+async def main():
+    async with open_harness(sys.stdin.buffer) as harness:
+        run = await harness.client.Attach(runtime.HarnessAttachRequest(), timeout=5)
+        result = f"Received work for {run.task.tag_id}"
+        await harness.client.Publish(
+            runtime.HarnessPublishRequest(sequence=1, text=result), timeout=5
+        )
+        await harness.client.Complete(
+            runtime.HarnessCompleteRequest(succeeded=True, result=result), timeout=5
+        )
+
+asyncio.run(main())
+```
+
+The Worker Host supplies a private execution connection on standard input. It records the
+outcome after the adapter exits successfully. Reuse the same sequence number and request
+body when retrying an event.
+
 ## Call the operator API
 
 The operator API is how the CLI and other tools manage a Control Plane: send a Tag a message,

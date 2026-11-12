@@ -1,6 +1,6 @@
 import { fromBinary } from "@bufbuild/protobuf";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
-import { createGrpcTransport } from "@connectrpc/connect-node";
+import { createGrpcTransport, Http2SessionManager } from "@connectrpc/connect-node";
 import { HarnessArtifacts } from "./gen/supertag/runtime/v2/artifact_pb.js";
 import { HarnessMcp } from "./gen/supertag/runtime/v2/mcp_pb.js";
 import {
@@ -23,28 +23,38 @@ export async function readBootstrap(input: AsyncIterable<Uint8Array>) {
     chunks.push(chunk);
   }
   const bootstrap = fromBinary(AdapterBootstrapSchema, Buffer.concat(chunks));
-  const url = new URL(bootstrap.endpoint);
-  if (
-    url.protocol !== "http:" ||
-    !["127.0.0.1", "[::1]"].includes(url.hostname) ||
-    !url.port ||
-    url.username ||
-    url.password ||
-    url.pathname !== "/" ||
-    url.search ||
-    url.hash ||
-    !/^[\x21-\x7e]{16,1024}$/.test(bootstrap.token)
-  )
-    throw new Error("Invalid private Harness bootstrap");
+  validatedBootstrap(bootstrap.endpoint, bootstrap.token);
   return bootstrap;
 }
 
+function validatedBootstrap(endpoint: string, token: string) {
+  if (!/^http:\/\/(?:127\.0\.0\.1|\[::1\]):[0-9]{1,5}\/?$/u.test(endpoint) || /\s/u.test(endpoint))
+    throw new Error("Invalid private Harness bootstrap");
+  const url = URL.parse(endpoint);
+  if (!url || url.port === "0" || !/^[A-Za-z0-9._~-]{16,512}$/u.test(token) || /\s/u.test(token))
+    throw new Error("Invalid private Harness bootstrap");
+  return url;
+}
+
+/** Connect to the execution-scoped service on the supervising Worker Host. */
 export function harnessClient(endpoint: string, token: string) {
+  const url = validatedBootstrap(endpoint, token);
+  const session = new Http2SessionManager(url, { idleConnectionTimeoutMs: 100 });
+  const authorization = `Bearer ${token}`;
+  let closed = false;
   const transport = createGrpcTransport({
-    baseUrl: endpoint,
+    baseUrl: url.origin,
+    sessionManager: session,
     readMaxBytes: 17 * 1024 * 1024,
     writeMaxBytes: 17 * 1024 * 1024,
-    idleConnectionTimeoutMs: 100,
+    defaultTimeoutMs: 5_000,
+    interceptors: [
+      (next) => (request) => {
+        if (closed) throw new Error("Harness client is closed");
+        request.header.set("authorization", authorization);
+        return next(request);
+      },
+    ],
   });
   const client = createClient(Harness, transport);
   const questions = createClient(HarnessQuestions, transport);
@@ -54,7 +64,7 @@ export function harnessClient(endpoint: string, token: string) {
   const workspace = createClient(HarnessWorkspace, transport);
   const artifacts = createClient(HarnessArtifacts, transport);
   const mcp = createClient(HarnessMcp, transport);
-  const options = () => ({ headers: { authorization: `Bearer ${token}` }, timeoutMs: 5000 });
+  const options = () => ({ timeoutMs: 5000 });
   return {
     client,
     options,
@@ -65,6 +75,10 @@ export function harnessClient(endpoint: string, token: string) {
     workspace,
     artifacts,
     mcp,
+    close() {
+      closed = true;
+      session.abort();
+    },
   };
 }
 

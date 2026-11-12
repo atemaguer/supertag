@@ -130,6 +130,7 @@ Use explicit entry points for integrations and lower-level contracts:
 | `supertag-ai/messaging` | Tag messaging, Team channels, and custom Worker consumers |
 | `supertag-ai/coordination` | Typed client for the operator inbox |
 | `supertag-ai/gateway` | Node.js gRPC client for the Rust Gateway |
+| `supertag-ai/harness` | Connect a Node.js harness adapter to its Worker Host |
 | `supertag-ai/testing` | Extension conformance probes |
 | `supertag-ai/surfaces` | Custom collaboration surfaces |
 | `supertag-ai/control-plane` | Embedding the Control Plane |
@@ -165,6 +166,29 @@ Use an HTTPS origin for a remote Gateway. Local cleartext connections use a loop
 address. Pass `ca` for private TLS and `identity` when the Gateway requires a client certificate.
 Each service exposes typed protobuf requests and responses. `client.events.watch` returns an
 async iterable and accepts an `AbortSignal`. Resume a watch with its last `resumeToken`.
+
+In a Rust deployment, a Worker Host is the machine or sandbox that provides execution.
+It launches a harness adapter to run one Task Attempt, which is a single try at completing
+a unit of work. Register an adapter executable with `supertag worker-host --adapter`.
+The adapter opens the execution connection from standard input.
+
+```ts
+import { openHarness, receipt } from "supertag-ai/harness";
+
+const harness = await openHarness(process.stdin);
+try {
+  const run = await receipt(() => harness.client.attach({}));
+  const result = `Received work for ${run.task?.tagId}`;
+  await receipt(() => harness.client.publish({ sequence: 1n, text: result }));
+  await receipt(() => harness.client.complete({ succeeded: true, result }));
+} finally {
+  harness.close();
+}
+```
+
+Reuse the same sequence number and request body when retrying an event. The Worker Host
+records the outcome after the adapter exits successfully. Keep process output and native
+provider calls inside the adapter's execution scope.
 
 See the [entry-point stability table](https://github.com/atemaguer/supertag/blob/main/docs/reference/api-stability.md#package-entry-points)
 before selecting an extension boundary. The

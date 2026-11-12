@@ -336,7 +336,7 @@ impl AdapterOptions {
             "--allow-unsandboxed-commands requires --harness opencode or cursor"
         );
         if let Some(path) = self.adapter {
-            return Ok((executable_path(path)?, self.adapter_arg));
+            return Ok((interpreter_path(path)?, self.adapter_arg));
         }
         match self.harness.context("select a harness or an adapter")? {
             Harness::Codex => {
@@ -558,8 +558,8 @@ fn executable_path(path: PathBuf) -> Result<PathBuf> {
     }
 }
 
-// Retain the executable leaf for Python virtual environments. Resolving the
-// symlink would select the system interpreter and bypass the venv packages.
+// Retain the executable leaf for adapter runtimes and Python virtual environments.
+// Resolving the symlink would select the system interpreter and bypass the venv packages.
 fn interpreter_path(path: PathBuf) -> Result<PathBuf> {
     if path.components().count() > 1 || path.is_absolute() || path.exists() {
         ensure!(path.is_file(), "adapter interpreter is unavailable");

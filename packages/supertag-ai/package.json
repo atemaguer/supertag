@@ -49,6 +49,10 @@
       "types": "./dist/gateway.d.ts",
       "import": "./dist/gateway.js"
     },
+    "./harness": {
+      "types": "./dist/harness.d.ts",
+      "import": "./dist/harness.js"
+    },
     "./worker": {
       "types": "./dist/worker.d.ts",
       "import": "./dist/worker.js"

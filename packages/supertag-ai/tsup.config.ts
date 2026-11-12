@@ -39,6 +39,7 @@ export default defineConfig({
     core: "src/core.ts",
     coordination: "src/coordination.ts",
     gateway: "src/gateway.ts",
+    harness: "src/harness.ts",
     worker: "src/worker.ts",
     transport: "src/transport.ts",
     testing: "src/testing.ts",
