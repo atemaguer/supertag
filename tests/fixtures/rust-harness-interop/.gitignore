@@ -1,0 +1,5 @@
+/target/
+/.venv/
+/generated/
+/node_modules/
+__pycache__/
