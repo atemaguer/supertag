@@ -545,6 +545,160 @@ async fn rust_launcher_and_go_tui_follow_one_work_session_report() -> Result<()>
 }
 
 #[tokio::test]
+#[ignore = "requires tmux and SUPERTAG_RUST_TEST_TUI pointing to a version-matched Go terminal UI"]
+async fn rust_launcher_and_go_tui_continue_a_questioned_work_session() -> Result<()> {
+    let binary = std::env::var_os("SUPERTAG_RUST_TEST_TUI")
+        .context("version-matched terminal UI binary required")?;
+    let directory = tempfile::Builder::new()
+        .prefix("work-question-tui-")
+        .tempdir_in("/tmp")?;
+    let state = directory.path().join("state");
+    let marker = directory.path().join("fixture-work.json");
+    let mut up = command(&["up", "--adapter", ADAPTER]);
+    up.arg(format!(
+        "--adapter-arg=--work-session-question-flow={}",
+        marker.display()
+    ))
+    .arg("--state-directory")
+    .arg(&state);
+    let (mut runtime, endpoint) = service(up).await?;
+    let mut put = command(&["put-tag", "engineer", "--instructions", "Process requests"]);
+    put.arg("--state-directory").arg(&state);
+    let output = timeout(WAIT, put.output()).await??;
+    ensure!(
+        output.status.success(),
+        "configure fixture Tag: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let tmux = Tmux {
+        socket: directory.path().join("tmux.sock"),
+    };
+    let shell = format!(
+        "env -i PATH=/usr/bin:/bin TERM=xterm-256color HOME={} SUPERTAG_STATE_DIR={} SUPERTAG_TUI_BINARY={} {}",
+        shell_path(directory.path())?,
+        shell_path(&state)?,
+        shell_path(Path::new(&binary))?,
+        shell_path(Path::new(BINARY))?,
+    );
+    tmux.run(&[
+        "new-session",
+        "-d",
+        "-s",
+        "runtime",
+        "-x",
+        "160",
+        "-y",
+        "80",
+        &shell,
+    ])
+    .await?;
+    tmux.wait_for("engineer").await?;
+    tmux.run(&[
+        "send-keys",
+        "-t",
+        "runtime",
+        "-l",
+        "Investigate the release region",
+    ])
+    .await?;
+    tmux.run(&["send-keys", "-t", "runtime", "Enter"]).await?;
+    tmux.wait_for("Which region should I inspect?").await?;
+    let waiting = tmux.run(&["capture-pane", "-p", "-t", "runtime"]).await?;
+    ensure!(
+        waiting.contains("waiting on you"),
+        "child question did not show waiting state:\n{waiting}"
+    );
+    ensure!(
+        waiting.matches("Which region should I inspect?").count() == 1,
+        "first report repeated:\n{waiting}"
+    );
+    tmux.run(&["send-keys", "-t", "runtime", "-l", "Use us-east-1"])
+        .await?;
+    tmux.run(&["send-keys", "-t", "runtime", "Enter"]).await?;
+    tmux.wait_for("Continuing the investigation.").await?;
+    tmux.wait_for("Region us-east-1 is verified.").await?;
+    let check_reports = |pane: &str| -> Result<()> {
+        ensure!(
+            pane.matches("Which region should I inspect?").count() == 1,
+            "first report disappeared or repeated:\n{pane}"
+        );
+        ensure!(
+            pane.matches("Region us-east-1 is verified.").count() == 1,
+            "second report disappeared or repeated:\n{pane}"
+        );
+        ensure!(
+            !pane.contains("Inspect child evidence") && !pane.contains("work-session-question>"),
+            "internal report prompt was displayed:\n{pane}"
+        );
+        Ok(())
+    };
+    check_reports(&tmux.run(&["capture-pane", "-p", "-t", "runtime"]).await?)?;
+
+    let credentials: Value =
+        serde_json::from_slice(&std::fs::read(state.join("credentials.json"))?)?;
+    let token = credentials["operator_token"]
+        .as_str()
+        .context("test operator credential")?;
+    let original: Value = serde_json::from_slice(&std::fs::read(&marker)?)?;
+    let id = original["work_session_id"]
+        .as_str()
+        .context("original Work Session")?;
+    let mut work = work_sessions_client::WorkSessionsClient::new(channel(&endpoint).await?);
+    let latest = work
+        .get(authenticated_request(
+            GetWorkSessionRequest {
+                work_session_id: id.into(),
+                report_task_id: None,
+            },
+            token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    ensure!(
+        latest.latest_task_state() == TaskState::Succeeded
+            && latest.report_task_state() == TaskState::Succeeded
+    );
+    ensure!(
+        Some(latest.latest_task_id.as_str()) != original["child_task_id"].as_str(),
+        "answer did not create a new child turn"
+    );
+    let page = work
+        .list(authenticated_request(
+            ListWorkSessionsRequest {
+                parent_tag_id: latest.parent_tag_id.clone(),
+                parent_session_id: latest.parent_session_id.clone(),
+                starter_task_id: None,
+                limit: 4,
+                cursor: String::new(),
+            },
+            token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    ensure!(
+        page.work_sessions.len() == 1 && page.work_sessions[0].work_session_id == id,
+        "answer started a different Work Session"
+    );
+
+    // A fresh TUI must reconstruct both historical reports, not just preserve
+    // text already rendered by the earlier live follows.
+    tmux.run(&["respawn-pane", "-k", "-t", "runtime", &shell])
+        .await?;
+    tmux.wait_for("Which region should I inspect?").await?;
+    tmux.wait_for("Region us-east-1 is verified.").await?;
+    check_reports(&tmux.run(&["capture-pane", "-p", "-t", "runtime"]).await?)?;
+    tmux.run(&["send-keys", "-t", "runtime", "C-c"]).await?;
+    if let Some(pid) = runtime.id() {
+        // SAFETY: this PID belongs to the disposable runtime started above.
+        unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    }
+    ensure!(timeout(WAIT, runtime.wait()).await??.success());
+    Ok(())
+}
+
+#[tokio::test]
 async fn watch_replays_private_conversations_after_services_restart() -> Result<()> {
     use operator_events_client::OperatorEventsClient;
     use watch_event::Update;

@@ -14,7 +14,12 @@ use crate::{Connection, connect_operator, request};
 #[derive(Subcommand)]
 pub enum WorkSessionCommand {
     /// Show one Work Session, its latest Task, and its report.
-    Get { work_session_id: String },
+    Get {
+        work_session_id: String,
+        /// Show the child Task associated with this report.
+        #[arg(long)]
+        report_task: Option<String>,
+    },
     /// List the Work Sessions started from a parent Session.
     List {
         #[arg(long)]
@@ -36,9 +41,18 @@ pub async fn run(connection: Connection, command: WorkSessionCommand) -> Result<
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
     let output = match command {
-        WorkSessionCommand::Get { work_session_id } => view(
+        WorkSessionCommand::Get {
+            work_session_id,
+            report_task,
+        } => view(
             &client
-                .get(request(GetWorkSessionRequest { work_session_id }, &token)?)
+                .get(request(
+                    GetWorkSessionRequest {
+                        work_session_id,
+                        report_task_id: report_task,
+                    },
+                    &token,
+                )?)
                 .await?
                 .into_inner(),
         ),
@@ -85,6 +99,13 @@ fn view(session: &WorkSession) -> Value {
         "report_task_id": session.report_task_id,
         "report_task_state": session.report_task_state().as_str_name(),
         "objective_id": session.objective_id,
+        "question": session.question.as_ref().map(|question| json!({
+            "text": question.text,
+            "task_id": question.task_id,
+            "asked_at_ms": question.asked_at_ms,
+            "published_at_ms": question.published_at_ms,
+            "answer_task_id": question.answer_task_id,
+        })),
         "workspace_delivery": session.workspace_delivery.as_ref().map(|delivery| json!({
             "workspace_id": delivery.workspace_id,
             "delivery_id": delivery.delivery_id,

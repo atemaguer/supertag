@@ -89,6 +89,10 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         && let Some(inventory) = checkpoint::coordination_inventory(previous)
     {
         inventory
+    } else if capabilities.may_ask_work_session_question && attached.checkpoint.is_none() {
+        coordination::Inventory::ChildQuestions
+    } else if capabilities.may_continue_work_session && attached.checkpoint.is_none() {
+        coordination::Inventory::WorkSessionLifecycle
     } else if capabilities.may_start_work_session && attached.checkpoint.is_none() {
         coordination::Inventory::WorkSessions
     } else if attached.checkpoint.is_none()

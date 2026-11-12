@@ -1,6 +1,6 @@
 mod work_sessions;
 
-pub(crate) use work_sessions::work_session_in;
+pub(crate) use work_sessions::{work_session_child_in, work_session_in};
 
 use prost::Message;
 use sha2::{Digest, Sha256};

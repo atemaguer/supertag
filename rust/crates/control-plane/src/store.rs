@@ -68,7 +68,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 27;
+        const SCHEMA_VERSION: i64 = 28;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -146,6 +146,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0025_surface_policy.sql"),
                 include_str!("../migrations/sqlite/0026_context_resolution.sql"),
                 include_str!("../migrations/sqlite/0027_work_sessions.sql"),
+                include_str!("../migrations/sqlite/0028_work_session_lifecycle.sql"),
             ]
         } else {
             [
@@ -176,6 +177,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0025_surface_policy.sql"),
                 include_str!("../migrations/postgresql/0026_context_resolution.sql"),
                 include_str!("../migrations/postgresql/0027_work_sessions.sql"),
+                include_str!("../migrations/postgresql/0028_work_session_lifecycle.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -775,6 +777,7 @@ impl Store {
         let task = task_in(&mut transaction, &input.task_id).await?;
         if state == TaskState::Running {
             crate::approvals::finish_in(&mut transaction, &task, input, now).await?;
+            crate::work_sessions::questions::finish_in(&mut transaction, &task, input, now).await?;
         }
         if state == TaskState::Running && task.state() == TaskState::Succeeded {
             crate::checkpoints::finish_in(&mut transaction, &task, input).await?;

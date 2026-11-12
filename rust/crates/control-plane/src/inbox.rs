@@ -69,10 +69,13 @@ impl Store {
             .await?
             .is_some();
         let session: String = row.try_get("session_id")?;
-        let is_root = !crate::work_sessions::reserved_session(&session)
-            && crate::work_sessions::task_kind_in(&mut tx, &attempt.task_id)
-                .await?
-                .is_none();
+        let kind = crate::work_sessions::task_kind_in(&mut tx, &attempt.task_id).await?;
+        let is_root = !crate::work_sessions::reserved_session(&session) && kind.is_none();
+        let may_continue_work_session = crate::work_sessions::continuation::may_continue_in(
+            &mut tx,
+            &crate::store::task_row(&row)?,
+        )
+        .await?;
         let tag: String = row.try_get("tag_id")?;
         let may_use_workstream = match crate::teams::workstreams::workstream_for_task_in(
             &mut tx,
@@ -96,6 +99,8 @@ impl Store {
             may_read_mailbox: is_root,
             may_send_tag_message: is_root,
             may_start_work_session: is_root && !crate::mailbox::private_session(&session),
+            may_continue_work_session,
+            may_ask_work_session_question: kind == Some(crate::work_sessions::CHILD),
         })
     }
 

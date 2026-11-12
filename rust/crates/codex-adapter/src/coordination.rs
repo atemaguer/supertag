@@ -6,9 +6,10 @@ use serde_json::{Value, json};
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
     v2::{
-        ApprovalState, HarnessPostWorkstreamRequest, HarnessReadMailboxRequest,
-        HarnessReadWorkstreamRequest, HarnessSendTagMessageRequest, HarnessStartWorkSessionRequest,
-        TagMessageOrigin, TaskState, harness_mailbox_client::HarnessMailboxClient,
+        ApprovalState, HarnessAskWorkSessionQuestionRequest, HarnessContinueWorkSessionRequest,
+        HarnessPostWorkstreamRequest, HarnessReadMailboxRequest, HarnessReadWorkstreamRequest,
+        HarnessSendTagMessageRequest, HarnessStartWorkSessionRequest, TagMessageOrigin, TaskState,
+        harness_mailbox_client::HarnessMailboxClient,
         harness_work_sessions_client::HarnessWorkSessionsClient,
         harness_workstreams_client::HarnessWorkstreamsClient,
     },
@@ -26,15 +27,29 @@ pub(crate) enum Arguments {
     ReadMailbox(Page),
     Send(DirectMessage),
     Start(StartSession),
+    Continue(ContinueSession),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Inventory {
     None,
     Ask,
+    ChildQuestions,
     Workstream,
     Direct,
     WorkSessions,
+    WorkSessionLifecycle,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(crate) struct ContinueSession {
+    session_id: String,
+    message: String,
+}
+
+fn bounded_text(text: &str, maximum: usize) -> bool {
+    !text.trim().is_empty() && text.encode_utf16().count() <= maximum && !text.contains('\0')
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -172,6 +187,24 @@ pub(crate) fn arguments(params: &Value, inventory: Inventory) -> Result<Argument
             start.validate()?;
             Ok(Arguments::Start(start))
         }
+        Some("continue_session") if inventory >= Inventory::WorkSessionLifecycle => {
+            let continuation: ContinueSession = serde_json::from_value(input.clone())
+                .context("invalid Codex Work Session continuation arguments")?;
+            ensure!(
+                continuation
+                    .session_id
+                    .strip_prefix("work/")
+                    .is_some_and(|id| !id.is_empty())
+                    && continuation.session_id.len() <= 256
+                    && !continuation
+                        .session_id
+                        .chars()
+                        .any(|c| c.is_control() || c.is_whitespace())
+                    && bounded_text(&continuation.message, 8000),
+                "invalid Work Session continuation"
+            );
+            Ok(Arguments::Continue(continuation))
+        }
         _ => bail!("Codex requested an unregistered coordination tool"),
     }
 }
@@ -237,6 +270,16 @@ pub(crate) fn tool_specs(inventory: Inventory) -> Vec<Value> {
                 "workspace":{"type":"string","minLength":1,"maxLength":256},
                 "tag":{"type":"string","minLength":1,"maxLength":256}
             },"required":["title","instruction"],"additionalProperties":false}
+        }));
+    }
+    if inventory >= Inventory::WorkSessionLifecycle {
+        tools.push(json!({
+            "type":"function", "name":"continue_session",
+            "description":"Relay an answer or follow-up instruction to a Work Session after its report. The Work Session resumes its existing history.",
+            "inputSchema":{"type":"object","properties":{
+                "sessionId":{"type":"string","minLength":1,"maxLength":256},
+                "message":{"type":"string","minLength":1,"maxLength":8000}
+            },"required":["sessionId","message"],"additionalProperties":false}
         }));
     }
     tools
@@ -327,6 +370,92 @@ impl Client {
         Ok(response(
             json!({ "sessionId": receipt.work_session_id, "title": title, "status":"accepted" })
                 .to_string(),
+            true,
+        ))
+    }
+
+    pub(crate) async fn continue_session(
+        &mut self,
+        continuation: &ContinueSession,
+        operation_id: String,
+        (task_id, tag, parent_session_id): (&str, &str, &str),
+        token: &str,
+        secrets: &[String],
+    ) -> Result<Value> {
+        let message = crate::auth::redact(continuation.message.trim().to_owned(), secrets);
+        if !bounded_text(&message, 8000)
+            || crate::auth::redact(continuation.session_id.clone(), secrets)
+                != continuation.session_id
+        {
+            return Ok(refused());
+        }
+        let input = HarnessContinueWorkSessionRequest {
+            operation_id,
+            work_session_id: continuation.session_id.clone(),
+            message,
+        };
+        let result = confirm(async || {
+            self.work_sessions
+                .r#continue(
+                    crate::request(input.clone(), token)
+                        .map_err(|_| Status::unauthenticated("invalid execution credential"))?,
+                )
+                .await
+        })
+        .await?;
+        let Some(receipt) = result else {
+            return Ok(refused());
+        };
+        ensure!(
+            receipt.work_session_id == input.work_session_id
+                && receipt.parent_tag_id == tag
+                && receipt.parent_session_id == parent_session_id
+                && receipt.starter_task_id == task_id
+                && receipt.tag_id == tag
+                && !receipt.latest_task_id.is_empty()
+                && receipt.latest_task_id != task_id
+                && receipt.latest_task_state() == TaskState::Queued
+                && receipt.created_order > 0,
+            "Work Session continuation receipt has mismatched identity"
+        );
+        Ok(response(
+            json!({ "sessionId": receipt.work_session_id, "status": "accepted" }).to_string(),
+            true,
+        ))
+    }
+
+    pub(crate) async fn ask_work_session(
+        &mut self,
+        operation_id: String,
+        text: String,
+        (task_id, attempt_id, session_id): (&str, &str, &str),
+        token: &str,
+    ) -> Result<Value> {
+        if !bounded_text(&text, 2000) {
+            return Ok(refused());
+        }
+        let input = HarnessAskWorkSessionQuestionRequest { operation_id, text };
+        let result = confirm(async || {
+            self.work_sessions
+                .ask(
+                    crate::request(input.clone(), token)
+                        .map_err(|_| Status::unauthenticated("invalid execution credential"))?,
+                )
+                .await
+        })
+        .await?;
+        let Some(receipt) = result else {
+            return Ok(refused());
+        };
+        ensure!(
+            receipt.task_id == task_id
+                && receipt.attempt_id == attempt_id
+                && receipt.work_session_id == session_id
+                && receipt.text == input.text,
+            "Work Session question receipt has mismatched identity"
+        );
+        Ok(response(
+            "Work Session question recorded. Finish this turn so the parent Session can receive it.",
             true,
         ))
     }

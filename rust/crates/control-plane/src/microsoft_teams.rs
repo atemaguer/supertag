@@ -134,7 +134,35 @@ impl Store {
         }
         name("reply ID", &input.reply_id)?;
         name("lease token", &input.lease_token)?;
-        let row=sqlx::query("SELECT a.service_url,a.conversation_id,a.root_activity_id,c.app_id,c.tenant_id,c.team_id,c.channel_id FROM supertag_v2_replies r JOIN supertag_v2_microsoft_teams_activities a ON a.task_id=COALESCE((SELECT w.starter_task_id FROM supertag_v2_work_session_reports wr JOIN supertag_v2_work_sessions w ON w.work_session_id=wr.work_session_id WHERE wr.report_task_id=r.task_id),r.task_id) AND a.account_id=r.account_id JOIN supertag_v2_microsoft_teams_routes c ON c.account_id=a.account_id WHERE r.reply_id=$1 AND r.account_id=$2 AND r.lease_token=$3 AND r.state=$4").bind(&input.reply_id).bind(account).bind(&input.lease_token).bind(i64::from(ReplyState::Claimed as i32)).fetch_optional(&self.pool).await?.ok_or(StoreError::PermissionDenied)?;
+        // A continued Work Session reports through the Task that continued it.
+        // An Objective report can itself start a continuation, so follow older
+        // starter Tasks until reaching the original authenticated activity.
+        let row = sqlx::query(
+            "WITH RECURSIVE ancestry(task_id, accepted_order) AS (
+                SELECT r.task_id,t.accepted_order FROM supertag_v2_replies r
+                JOIN supertag_v2_tasks t ON t.task_id=r.task_id
+                WHERE r.reply_id=$1 AND r.account_id=$2 AND r.lease_token=$3 AND r.state=$4
+                UNION ALL
+                SELECT starter.task_id,starter.accepted_order FROM ancestry
+                JOIN supertag_v2_work_session_reports wr ON wr.report_task_id=ancestry.task_id
+                JOIN supertag_v2_work_sessions ws ON ws.work_session_id=wr.work_session_id
+                JOIN supertag_v2_work_session_tasks child ON child.task_id=wr.child_task_id
+                    AND child.work_session_id=ws.work_session_id AND child.kind=1
+                JOIN supertag_v2_tasks starter ON starter.task_id=COALESCE(child.starter_task_id,ws.starter_task_id)
+                    AND starter.accepted_order<ancestry.accepted_order
+            )
+            SELECT a.service_url,a.conversation_id,a.root_activity_id,c.app_id,c.tenant_id,c.team_id,c.channel_id
+            FROM ancestry JOIN supertag_v2_microsoft_teams_activities a ON a.task_id=ancestry.task_id
+            JOIN supertag_v2_microsoft_teams_routes c ON c.account_id=a.account_id
+            WHERE a.account_id=$2 ORDER BY ancestry.accepted_order DESC LIMIT 1",
+        )
+        .bind(&input.reply_id)
+        .bind(account)
+        .bind(&input.lease_token)
+        .bind(i64::from(ReplyState::Claimed as i32))
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(StoreError::PermissionDenied)?;
         Ok(MicrosoftTeamsReplyRoute {
             service_url: row.try_get("service_url")?,
             conversation_id: row.try_get("conversation_id")?,

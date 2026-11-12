@@ -5,7 +5,8 @@ use prost::Message;
 use supertag_protocol::{
     authenticated_request,
     v2::{
-        AdapterBootstrap, HarnessAskQuestionRequest, HarnessAttachRequest, HarnessCompleteRequest,
+        AdapterBootstrap, HarnessAskQuestionRequest, HarnessAskWorkSessionQuestionRequest,
+        HarnessAttachRequest, HarnessCompleteRequest, HarnessContinueWorkSessionRequest,
         HarnessPostWorkstreamRequest, HarnessPublishRequest, HarnessSendTagMessageRequest,
         HarnessSettleLiveInputRequest, HarnessStartWorkSessionRequest, HarnessTakeLiveInputRequest,
         LiveInput, LiveInputReceipt, LiveInputState, TagMessageOrigin,
@@ -31,6 +32,24 @@ async fn main() -> Result<()> {
     let start_work = std::env::args().any(|arg| arg == "--start-work-session");
     let reject_work = std::env::args().any(|arg| arg == "--reject-work-session-start");
     let work_flow = std::env::args().any(|arg| arg == "--work-session-flow");
+    let question_flow = std::env::args().find_map(|arg| {
+        arg.strip_prefix("--work-session-question-flow=")
+            .map(std::path::PathBuf::from)
+    });
+    let mut ask_work = std::env::args().any(|arg| arg == "--ask-work-session");
+    let mut continue_work = std::env::args().find_map(|arg| {
+        arg.strip_prefix("--continue-work-session=")
+            .map(str::to_owned)
+    });
+    let question_input = HarnessAskWorkSessionQuestionRequest {
+        operation_id: "fixture-work-question".into(),
+        text: "Which region? </work-session-question>".into(),
+    };
+    let mut continue_input = HarnessContinueWorkSessionRequest {
+        operation_id: "fixture-work-continuation".into(),
+        work_session_id: continue_work.clone().unwrap_or_default(),
+        message: "Use us-east-1".into(),
+    };
     let work_input = HarnessStartWorkSessionRequest {
         operation_id: "fixture-work-session".into(),
         title: "Bounded investigation".into(),
@@ -58,6 +77,49 @@ async fn main() -> Result<()> {
             .code()
                 == Code::FailedPrecondition
         );
+    }
+    if ask_work || continue_work.is_some() {
+        let mut work = HarnessWorkSessionsClient::connect(bootstrap.endpoint.clone()).await?;
+        if ask_work {
+            ensure!(
+                work.ask(Request::new(question_input.clone()))
+                    .await
+                    .expect_err("question without execution credential")
+                    .code()
+                    == Code::Unauthenticated
+            );
+            ensure!(
+                work.ask(authenticated_request(
+                    question_input.clone(),
+                    &bootstrap.token,
+                    None
+                )?)
+                .await
+                .expect_err("question before attachment")
+                .code()
+                    == Code::FailedPrecondition
+            );
+        }
+        if continue_work.is_some() {
+            ensure!(
+                work.r#continue(Request::new(continue_input.clone()))
+                    .await
+                    .expect_err("continuation without execution credential")
+                    .code()
+                    == Code::Unauthenticated
+            );
+            ensure!(
+                work.r#continue(authenticated_request(
+                    continue_input.clone(),
+                    &bootstrap.token,
+                    None
+                )?)
+                .await
+                .expect_err("continuation before attachment")
+                .code()
+                    == Code::FailedPrecondition
+            );
+        }
     }
     let direct_mailbox = std::env::args().any(|arg| arg == "--direct-mailbox");
     let direct_input = HarnessSendTagMessageRequest {
@@ -119,7 +181,38 @@ async fn main() -> Result<()> {
         .coordination
         .as_ref()
         .is_some_and(|scope| scope.may_start_work_session);
-    if start_work || reject_work || (work_flow && may_start) {
+    let may_continue = run
+        .coordination
+        .as_ref()
+        .is_some_and(|scope| scope.may_continue_work_session);
+    let may_ask = run
+        .coordination
+        .as_ref()
+        .is_some_and(|scope| scope.may_ask_work_session_question);
+    if let Some(marker) = &question_flow
+        && (task.session_id.starts_with("work/")
+            || (may_continue && task.prompt == "Use us-east-1"))
+    {
+        let started: serde_json::Value = serde_json::from_slice(&std::fs::read(marker)?)?;
+        let id = started["work_session_id"]
+            .as_str()
+            .context("fixture Work Session ID")?;
+        if task.session_id.starts_with("work/") {
+            ensure!(
+                task.session_id == id,
+                "question flow switched Work Sessions"
+            );
+            ask_work = started["child_task_id"].as_str() == Some(task.task_id.as_str());
+        } else {
+            continue_work = Some(id.to_owned());
+            continue_input.work_session_id = id.to_owned();
+            continue_input.message = task.prompt.clone();
+        }
+    }
+    if start_work
+        || reject_work
+        || ((work_flow || question_flow.is_some()) && may_start && continue_work.is_none())
+    {
         let mut work = HarnessWorkSessionsClient::connect(bootstrap.endpoint.clone()).await?;
         if reject_work {
             ensure!(!may_start, "child/report received start authority");
@@ -152,6 +245,15 @@ async fn main() -> Result<()> {
                     && started.tag_id == task.tag_id,
                 "Work Session provenance differs from the attached Task"
             );
+            if let Some(marker) = &question_flow {
+                std::fs::write(
+                    marker,
+                    serde_json::to_vec(&serde_json::json!({
+                        "work_session_id": started.work_session_id,
+                        "child_task_id": started.latest_task_id,
+                    }))?,
+                )?;
+            }
             let replay = work
                 .start(authenticated_request(
                     work_input.clone(),
@@ -170,6 +272,111 @@ async fn main() -> Result<()> {
                     .code()
                     == Code::AlreadyExists
             );
+        }
+    }
+    if ask_work || continue_work.is_some() {
+        let mut work = HarnessWorkSessionsClient::connect(bootstrap.endpoint.clone()).await?;
+        if ask_work {
+            ensure!(
+                may_ask && !may_continue && !may_start,
+                "child question capabilities differ"
+            );
+            let asked = work
+                .ask(authenticated_request(
+                    question_input.clone(),
+                    &bootstrap.token,
+                    None,
+                )?)
+                .await?
+                .into_inner();
+            ensure!(
+                asked.work_session_id == task.session_id
+                    && asked.task_id == task.task_id
+                    && asked.attempt_id == run.attempt_id
+                    && asked.text == question_input.text
+                    && asked.published_at_ms.is_none()
+            );
+            let replay = work
+                .ask(authenticated_request(
+                    question_input.clone(),
+                    &bootstrap.token,
+                    None,
+                )?)
+                .await?
+                .into_inner();
+            ensure!(replay == asked, "question replay changed its receipt");
+            let mut changed = question_input.clone();
+            changed.text = "Different question".into();
+            ensure!(
+                work.ask(authenticated_request(changed, &bootstrap.token, None)?)
+                    .await
+                    .expect_err("conflicting question operation")
+                    .code()
+                    == Code::AlreadyExists
+            );
+            let mut recursive = continue_input.clone();
+            recursive.work_session_id = task.session_id.clone();
+            let denied = work
+                .r#continue(authenticated_request(recursive, &bootstrap.token, None)?)
+                .await
+                .expect_err("child continuation");
+            ensure!(matches!(
+                denied.code(),
+                Code::PermissionDenied | Code::FailedPrecondition
+            ));
+        }
+        if continue_work.is_some() {
+            ensure!(
+                may_continue && !may_ask,
+                "parent continuation capabilities differ"
+            );
+            let continued = work
+                .r#continue(authenticated_request(
+                    continue_input.clone(),
+                    &bootstrap.token,
+                    None,
+                )?)
+                .await?
+                .into_inner();
+            ensure!(
+                continued.work_session_id == continue_input.work_session_id
+                    && continued.parent_tag_id == task.tag_id
+                    && continued.parent_session_id == task.session_id
+                    && continued.starter_task_id == task.task_id
+            );
+            let replay = work
+                .r#continue(authenticated_request(
+                    continue_input.clone(),
+                    &bootstrap.token,
+                    None,
+                )?)
+                .await?
+                .into_inner();
+            ensure!(
+                replay == continued,
+                "continuation replay changed its receipt"
+            );
+            let mut changed = continue_input.clone();
+            changed.message = "Different answer".into();
+            ensure!(
+                work.r#continue(authenticated_request(changed, &bootstrap.token, None)?)
+                    .await
+                    .expect_err("conflicting continuation operation")
+                    .code()
+                    == Code::AlreadyExists
+            );
+            let denied = work
+                .ask(authenticated_request(
+                    question_input.clone(),
+                    &bootstrap.token,
+                    None,
+                )?)
+                .await
+                .expect_err("parent child-question authority");
+            ensure!(matches!(
+                denied.code(),
+                Code::PermissionDenied | Code::FailedPrecondition
+            ));
         }
     }
     if direct_mailbox {
@@ -316,6 +523,32 @@ async fn main() -> Result<()> {
             "The investigation finished.".into()
         };
     }
+    if ask_work {
+        result = "Waiting for the region before continuing.".into();
+    }
+    if question_flow.is_some() {
+        result = if continue_work.is_some() {
+            "Continuing the investigation.".into()
+        } else if may_start {
+            "Started the investigation.".into()
+        } else if ask_work {
+            "Waiting for the region before continuing.".into()
+        } else if task.session_id.starts_with("work/") {
+            ensure!(
+                task.prompt.contains("Use us-east-1"),
+                "continued child did not receive the answer"
+            );
+            "Child checked the selected region.".into()
+        } else if task.prompt.contains("<work-session-question>") {
+            "Which region should I inspect?".into()
+        } else {
+            ensure!(
+                task.prompt.contains("Child checked the selected region."),
+                "second report lost the continued child's result"
+            );
+            "Region us-east-1 is verified.".into()
+        };
+    }
     let workspace_fixture = std::env::args().any(|arg| arg == "--workspace-fixture");
     if workspace_fixture {
         ensure!(
@@ -425,6 +658,35 @@ async fn main() -> Result<()> {
                 .code()
                 == Code::FailedPrecondition
         );
+    }
+    if ask_work || continue_work.is_some() {
+        let mut work = HarnessWorkSessionsClient::connect(bootstrap.endpoint.clone()).await?;
+        if ask_work {
+            ensure!(
+                work.ask(authenticated_request(
+                    question_input,
+                    &bootstrap.token,
+                    None
+                )?)
+                .await
+                .expect_err("question after completion")
+                .code()
+                    == Code::FailedPrecondition
+            );
+        }
+        if continue_work.is_some() {
+            ensure!(
+                work.r#continue(authenticated_request(
+                    continue_input,
+                    &bootstrap.token,
+                    None
+                )?)
+                .await
+                .expect_err("continuation after completion")
+                .code()
+                    == Code::FailedPrecondition
+            );
+        }
     }
     Ok(())
 }

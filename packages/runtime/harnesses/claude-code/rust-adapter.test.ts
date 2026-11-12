@@ -22,7 +22,9 @@ import {
   ContextPinSchema,
   Harness,
   type HarnessAskQuestionRequest,
+  type HarnessAskWorkSessionQuestionRequest,
   type HarnessCompleteRequest,
+  type HarnessContinueWorkSessionRequest,
   HarnessMailbox,
   type HarnessPostWorkstreamRequest,
   HarnessQuestions,
@@ -46,6 +48,7 @@ const native = join(here, "fixtures/rust-native-claude.mjs");
 const entry = join(here, "dist/rust-adapter/entry.js");
 const token = "execution-token-private-fixture-123";
 const providerSecret = "provider-secret-private-fixture-123";
+const childSession = "work/00000000-0000-4000-8000-000000000001";
 const cleanups: Array<() => Promise<unknown>> = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
@@ -64,6 +67,7 @@ async function invoke({
   policySnapshot,
   model,
   skill,
+  sessionId = "session",
 }: {
   prompt?: string;
   checkpoint?: SessionCheckpoint;
@@ -74,10 +78,19 @@ async function invoke({
   mayAskObjectiveQuestion?: boolean;
   lostQuestion?: boolean;
   coordination?: Pick<AttemptCapabilities, "mayUseWorkstream" | "mayReadMailbox"> &
-    Partial<Pick<AttemptCapabilities, "maySendTagMessage" | "mayStartWorkSession">>;
+    Partial<
+      Pick<
+        AttemptCapabilities,
+        | "maySendTagMessage"
+        | "mayStartWorkSession"
+        | "mayContinueWorkSession"
+        | "mayAskWorkSessionQuestion"
+      >
+    >;
   policySnapshot?: TaskPolicySnapshot;
   model?: string;
   skill?: { markdown: string; tamper?: boolean };
+  sessionId?: string;
 } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "supertag-rust-claude-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
@@ -96,6 +109,8 @@ async function invoke({
   const mailboxReads: HarnessReadMailboxRequest[] = [];
   const mailboxSends: HarnessSendTagMessageRequest[] = [];
   const workSessionStarts: HarnessStartWorkSessionRequest[] = [];
+  const workSessionContinuations: HarnessContinueWorkSessionRequest[] = [];
+  const workSessionQuestions: HarnessAskWorkSessionQuestionRequest[] = [];
   const workSessionIds = new Map<string, string>();
   const resolvedSkills: Array<Omit<ResolvedSkill, "$typeName">> = [];
   if (skill) {
@@ -124,7 +139,7 @@ async function invoke({
   const task = create(TaskSchema, {
     taskId: "task",
     tagId: "actor",
-    sessionId: "session",
+    sessionId,
     attemptId: "attempt",
     state: TaskState.RUNNING,
     prompt,
@@ -257,6 +272,35 @@ async function invoke({
           },
         });
         router.service(HarnessWorkSessions, {
+          continue(request, context) {
+            expect(context.requestHeader.get("authorization")).toBe(`Bearer ${token}`);
+            workSessionContinuations.push(request);
+            if (workSessionContinuations.length === 1)
+              throw new ConnectError("reply lost", Code.Unavailable);
+            return {
+              workSessionId: request.workSessionId,
+              parentTagId: "actor",
+              parentSessionId: sessionId,
+              starterTaskId: "task",
+              tagId: "actor",
+              latestTaskId: "next-child-task",
+              latestTaskState: TaskState.QUEUED,
+              createdOrder: 2n,
+            };
+          },
+          ask(request, context) {
+            expect(context.requestHeader.get("authorization")).toBe(`Bearer ${token}`);
+            workSessionQuestions.push(request);
+            if (workSessionQuestions.length === 1)
+              throw new ConnectError("reply lost", Code.Unavailable);
+            return {
+              workSessionId: sessionId,
+              taskId: "task",
+              attemptId: "attempt",
+              text: request.text,
+              askedAtMs: 1n,
+            };
+          },
           start(request, context) {
             expect(context.requestHeader.get("authorization")).toBe(`Bearer ${token}`);
             workSessionStarts.push(request);
@@ -391,6 +435,8 @@ async function invoke({
     mailboxReads,
     mailboxSends,
     workSessionStarts,
+    workSessionContinuations,
+    workSessionQuestions,
   };
 }
 
@@ -623,6 +669,40 @@ it("omits Start Work Session without the Attempt capability", async () => {
   const run = await invoke({ prompt: "work-session-disabled" });
   expect(run.completions[0]?.succeeded).toBe(true);
   expect(run.workSessionStarts).toEqual([]);
+}, 30000);
+
+it("records a child question and relays an answer through scoped Claude SDK tools", async () => {
+  const child = await invoke({
+    prompt: "ask-work-session",
+    sessionId: childSession,
+    coordination: {
+      mayUseWorkstream: false,
+      mayReadMailbox: false,
+      mayAskWorkSessionQuestion: true,
+    },
+  });
+  const parent = await invoke({
+    prompt: "continue-work-session",
+    coordination: { mayUseWorkstream: false, mayReadMailbox: false, mayContinueWorkSession: true },
+  });
+  for (const run of [child, parent]) {
+    expect(
+      run.completions[0]?.succeeded,
+      await readFile(join(run.workspace, "fixture-error.txt"), "utf8").catch(
+        () => run.completions[0]?.result,
+      ),
+    ).toBe(true);
+    expect(run.questions).toEqual([]);
+  }
+  expect(child.workSessionQuestions).toHaveLength(2);
+  expect(child.workSessionQuestions[0]).toEqual(child.workSessionQuestions[1]);
+  expect(child.workSessionQuestions[0]?.text).toBe("Which branch? [REDACTED]");
+  expect(parent.workSessionContinuations).toHaveLength(2);
+  expect(parent.workSessionContinuations[0]).toEqual(parent.workSessionContinuations[1]);
+  expect(parent.workSessionContinuations[0]).toMatchObject({
+    workSessionId: childSession,
+    message: "Use staging [REDACTED]",
+  });
 }, 30000);
 
 it.each(["ask-first", "post-first"])(

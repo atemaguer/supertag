@@ -60,6 +60,34 @@ impl work_sessions_server::WorkSessions for Gateway {
 
 #[tonic::async_trait]
 impl attempt_work_sessions_server::AttemptWorkSessions for Gateway {
+    async fn r#continue(
+        &self,
+        request: Request<ContinueWorkSessionRequest>,
+    ) -> Result<Response<WorkSession>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            attempt_work_sessions_client::AttemptWorkSessionsClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                .r#continue(request)
+                .await
+        })
+        .await
+    }
+
+    async fn ask(
+        &self,
+        request: Request<AskWorkSessionQuestionRequest>,
+    ) -> Result<Response<WorkSessionQuestion>, Status> {
+        self.forward_host(request, true, |channel, request| async {
+            attempt_work_sessions_client::AttemptWorkSessionsClient::new(channel)
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES)
+                .ask(request)
+                .await
+        })
+        .await
+    }
+
     async fn start(
         &self,
         request: Request<StartWorkSessionRequest>,

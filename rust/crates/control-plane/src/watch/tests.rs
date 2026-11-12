@@ -282,6 +282,7 @@ async fn private_work_sessions(
 
     let get = GetWorkSessionRequest {
         work_session_id: work_session_id.into(),
+        report_task_id: None,
     };
     assert_eq!(
         WorkSessions::get(

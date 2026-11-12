@@ -287,6 +287,10 @@ pub(crate) fn coordination_inventory(
         crate::questions::FULL_COORDINATION => Some(crate::coordination::Inventory::Workstream),
         crate::questions::DIRECT_COORDINATION => Some(crate::coordination::Inventory::Direct),
         crate::questions::WORK_SESSIONS => Some(crate::coordination::Inventory::WorkSessions),
+        crate::questions::WORK_SESSION_LIFECYCLE => {
+            Some(crate::coordination::Inventory::WorkSessionLifecycle)
+        }
+        crate::questions::CHILD_QUESTIONS => Some(crate::coordination::Inventory::ChildQuestions),
         _ => None,
     }
 }

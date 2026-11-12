@@ -19,9 +19,17 @@ func workSessionDataLoss(message string) error {
 }
 
 func (c *runtimeClient) getWorkSession(ctx context.Context, id string) (*v2.WorkSession, error) {
+	return c.getWorkSessionAtReport(ctx, id, "")
+}
+
+func (c *runtimeClient) getWorkSessionAtReport(ctx context.Context, id, reportTask string) (*v2.WorkSession, error) {
 	ctx, cancel := context.WithTimeout(ctx, unaryTimeout)
 	defer cancel()
-	res, err := c.workSessions.Get(ctx, connect.NewRequest(&v2.GetWorkSessionRequest{WorkSessionId: id}))
+	request := &v2.GetWorkSessionRequest{WorkSessionId: id}
+	if reportTask != "" {
+		request.ReportTaskId = &reportTask
+	}
+	res, err := c.workSessions.Get(ctx, connect.NewRequest(request))
 	if err != nil {
 		return nil, apiError(err)
 	}
@@ -29,7 +37,18 @@ func (c *runtimeClient) getWorkSession(ctx context.Context, id string) (*v2.Work
 	if work.GetWorkSessionId() != id || work.GetLatestTaskId() == "" || work.GetTagId() == "" || work.GetStarterTaskId() == "" || work.GetParentSessionId() == "" || work.GetParentTagId() == "" {
 		return nil, workSessionDataLoss("Gateway returned a different or incomplete Work Session.")
 	}
+	if reportTask != "" && work.GetReportTaskId() != reportTask {
+		return nil, workSessionDataLoss("Gateway returned a different historical Work Session report.")
+	}
+	if !workQuestionMatches(work) {
+		return nil, workSessionDataLoss("Gateway returned a question outside this child Task.")
+	}
 	return work, nil
+}
+
+func workQuestionMatches(work *v2.WorkSession) bool {
+	question := work.GetQuestion()
+	return question == nil || (question.GetWorkSessionId() == work.GetWorkSessionId() && question.GetTaskId() == work.GetLatestTaskId())
 }
 
 // messageWorkSessions keeps the exact parent Tag, Session and starter Task in
@@ -37,7 +56,7 @@ func (c *runtimeClient) getWorkSession(ctx context.Context, id string) (*v2.Work
 func (c *runtimeClient) messageWorkSessions(ctx context.Context, message *v2.ConversationMessage) ([]*v2.WorkSession, error) {
 	task := message.GetTask()
 	if id := message.GetWorkSessionReportId(); id != "" {
-		work, err := c.getWorkSession(ctx, id)
+		work, err := c.getWorkSessionAtReport(ctx, id, task.GetTaskId())
 		if err != nil {
 			return nil, err
 		}
@@ -71,7 +90,7 @@ func (c *runtimeClient) messageWorkSessions(ctx context.Context, message *v2.Con
 			return nil, apiError(err)
 		}
 		for _, work := range res.Msg.GetWorkSessions() {
-			if work.GetWorkSessionId() == "" || ids[work.GetWorkSessionId()] || work.GetLatestTaskId() == "" || work.GetTagId() == "" || work.GetParentTagId() != task.GetTagId() || work.GetParentSessionId() != task.GetSessionId() || work.GetStarterTaskId() != task.GetTaskId() {
+			if work.GetWorkSessionId() == "" || ids[work.GetWorkSessionId()] || work.GetLatestTaskId() == "" || work.GetTagId() == "" || work.GetParentTagId() != task.GetTagId() || work.GetParentSessionId() != task.GetSessionId() || work.GetStarterTaskId() != task.GetTaskId() || !workQuestionMatches(work) {
 				return nil, workSessionDataLoss("Gateway returned a Work Session outside this message's scope.")
 			}
 			ids[work.GetWorkSessionId()] = true
@@ -105,6 +124,12 @@ func runtimeWork(work *v2.WorkSession) *operatorv1.WorkSession {
 		out.Status = operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_FAILED
 	case v2.TaskState_TASK_STATE_CANCELLED:
 		out.Status = operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_CANCELLED
+	}
+	if question := work.GetQuestion(); question != nil && question.PublishedAtMs != nil {
+		out.Question = question.GetText()
+		if question.GetAnswerTaskId() == "" && work.GetLatestTaskState() == v2.TaskState_TASK_STATE_SUCCEEDED {
+			out.Status = operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_WAITING
+		}
 	}
 	return out
 }

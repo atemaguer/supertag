@@ -46,6 +46,8 @@ if root.joinpath("direct-mode").exists():
     coordination_tools.append(("send_message", {"to": "reviewer", "text": "Private rollout note."}))
 if root.joinpath("work-session-mode").exists():
     coordination_tools.append(("start_session", {"title": "  Review   release ", "instruction": "Inspect release logs synthetic-codex-provider-secret."}))
+if root.joinpath("continue-session-mode").exists():
+    coordination_tools.append(("continue_session", {"sessionId": "work/codex-child", "message": "Use staging synthetic-codex-provider-secret."}))
 
 def emit(value):
     print(json.dumps(value), flush=True)

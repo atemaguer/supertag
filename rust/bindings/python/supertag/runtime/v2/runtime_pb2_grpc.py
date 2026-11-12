@@ -1733,12 +1733,34 @@ class AttemptWorkSessionsStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.StartWorkSessionRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
                 _registered_method=True)
+        self.Continue = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptWorkSessions/Continue',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ContinueWorkSessionRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
+                _registered_method=True)
+        self.Ask = channel.unary_unary(
+                '/supertag.runtime.v2.AttemptWorkSessions/Ask',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskWorkSessionQuestionRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSessionQuestion.FromString,
+                _registered_method=True)
 
 
 class AttemptWorkSessionsServicer:
     """Missing associated documentation comment in .proto file."""
 
     def Start(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Continue(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Ask(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -1751,6 +1773,16 @@ def add_AttemptWorkSessionsServicer_to_server(servicer, server):
                     servicer.Start,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.StartWorkSessionRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.SerializeToString,
+            ),
+            'Continue': grpc.unary_unary_rpc_method_handler(
+                    servicer.Continue,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ContinueWorkSessionRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.SerializeToString,
+            ),
+            'Ask': grpc.unary_unary_rpc_method_handler(
+                    servicer.Ask,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskWorkSessionQuestionRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSessionQuestion.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -1780,6 +1812,60 @@ class AttemptWorkSessions:
             '/supertag.runtime.v2.AttemptWorkSessions/Start',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.StartWorkSessionRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Continue(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptWorkSessions/Continue',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ContinueWorkSessionRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Ask(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.AttemptWorkSessions/Ask',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AskWorkSessionQuestionRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSessionQuestion.FromString,
             options,
             channel_credentials,
             insecure,
@@ -5219,6 +5305,16 @@ class HarnessWorkSessionsStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessStartWorkSessionRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
                 _registered_method=True)
+        self.Continue = channel.unary_unary(
+                '/supertag.runtime.v2.HarnessWorkSessions/Continue',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessContinueWorkSessionRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
+                _registered_method=True)
+        self.Ask = channel.unary_unary(
+                '/supertag.runtime.v2.HarnessWorkSessions/Ask',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAskWorkSessionQuestionRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSessionQuestion.FromString,
+                _registered_method=True)
 
 
 class HarnessWorkSessionsServicer:
@@ -5231,6 +5327,18 @@ class HarnessWorkSessionsServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Continue(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Ask(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_HarnessWorkSessionsServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -5238,6 +5346,16 @@ def add_HarnessWorkSessionsServicer_to_server(servicer, server):
                     servicer.Start,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessStartWorkSessionRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.SerializeToString,
+            ),
+            'Continue': grpc.unary_unary_rpc_method_handler(
+                    servicer.Continue,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessContinueWorkSessionRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.SerializeToString,
+            ),
+            'Ask': grpc.unary_unary_rpc_method_handler(
+                    servicer.Ask,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAskWorkSessionQuestionRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSessionQuestion.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -5268,6 +5386,60 @@ class HarnessWorkSessions:
             '/supertag.runtime.v2.HarnessWorkSessions/Start',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessStartWorkSessionRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Continue(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HarnessWorkSessions/Continue',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessContinueWorkSessionRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSession.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Ask(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HarnessWorkSessions/Ask',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAskWorkSessionQuestionRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.WorkSessionQuestion.FromString,
             options,
             channel_credentials,
             insecure,

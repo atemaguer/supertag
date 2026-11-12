@@ -20,6 +20,8 @@ pub(crate) const OBJECTIVE_ASK: &str = "objective-ask-text-v1";
 pub(crate) const FULL_COORDINATION: &str = "coordination-v1";
 pub(crate) const DIRECT_COORDINATION: &str = "coordination-v2";
 pub(crate) const WORK_SESSIONS: &str = "coordination-v3";
+pub(crate) const WORK_SESSION_LIFECYCLE: &str = "coordination-v4";
+pub(crate) const CHILD_QUESTIONS: &str = "work-session-ask-v1";
 
 pub(crate) struct Bridge {
     client: HarnessQuestionsClient<Channel>,
@@ -81,9 +83,11 @@ impl Bridge {
         match self.inventory {
             Inventory::None => NONE,
             Inventory::Ask => OBJECTIVE_ASK,
+            Inventory::ChildQuestions => CHILD_QUESTIONS,
             Inventory::Workstream => FULL_COORDINATION,
             Inventory::Direct => DIRECT_COORDINATION,
             Inventory::WorkSessions => WORK_SESSIONS,
+            Inventory::WorkSessionLifecycle => WORK_SESSION_LIFECYCLE,
         }
     }
     pub(crate) fn tools(&self) -> Value {
@@ -120,6 +124,23 @@ impl Bridge {
             ))?)
         );
         let result = match &arguments {
+            Arguments::Ask(text)
+                if self.inventory == Inventory::ChildQuestions
+                    && self.capabilities.may_ask_work_session_question
+                    && self.coordination.pending.is_empty() =>
+            {
+                let reply = self
+                    .coordination
+                    .ask_work_session(
+                        operation_id,
+                        crate::auth::redact(text.clone(), &self.secrets),
+                        (&self.task_id, &self.attempt_id, &self.session_id),
+                        &self.token,
+                    )
+                    .await?;
+                self.asked |= reply["success"] == true;
+                reply
+            }
             Arguments::Ask(text)
                 if self.capabilities.may_ask_objective_question
                     && self.coordination.pending.is_empty() =>
@@ -174,6 +195,21 @@ impl Bridge {
                 self.coordination
                     .start_session(
                         start,
+                        operation_id,
+                        (&self.task_id, &self.tag_id, &self.session_id),
+                        &self.token,
+                        &self.secrets,
+                    )
+                    .await?
+            }
+            Arguments::Continue(continuation)
+                if self.capabilities.may_continue_work_session
+                    && !self.asked
+                    && self.coordination.pending.is_empty() =>
+            {
+                self.coordination
+                    .continue_session(
+                        continuation,
                         operation_id,
                         (&self.task_id, &self.tag_id, &self.session_id),
                         &self.token,
@@ -243,11 +279,22 @@ impl Bridge {
 }
 
 pub(crate) fn tool_specs(inventory: Inventory) -> Value {
+    let (description, max) = if inventory == Inventory::ChildQuestions {
+        (
+            "Record one question for the parent Session. Finish this turn so the parent can receive it and relay an answer.",
+            2000,
+        )
+    } else {
+        (
+            "Ask the operator one question needed to continue this Objective. After this returns, end your turn with a short reply and make no further tool calls. The answer arrives in this Session's next Task.",
+            16000,
+        )
+    };
     let mut tools = vec![json!({
         "type":"function", "name":"ask",
-        "description":"Ask the operator one question needed to continue this Objective. After this returns, end your turn with a short reply and make no further tool calls. The answer arrives in this Session's next Task.",
+        "description":description,
         "inputSchema":{
-            "type":"object", "properties":{"text":{"type":"string","minLength":1,"maxLength":16000}},
+            "type":"object", "properties":{"text":{"type":"string","minLength":1,"maxLength":max}},
             "required":["text"], "additionalProperties":false
         }
     })];

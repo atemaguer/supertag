@@ -167,6 +167,11 @@ const (
 	// AttemptWorkSessionsStartProcedure is the fully-qualified name of the AttemptWorkSessions's Start
 	// RPC.
 	AttemptWorkSessionsStartProcedure = "/supertag.runtime.v2.AttemptWorkSessions/Start"
+	// AttemptWorkSessionsContinueProcedure is the fully-qualified name of the AttemptWorkSessions's
+	// Continue RPC.
+	AttemptWorkSessionsContinueProcedure = "/supertag.runtime.v2.AttemptWorkSessions/Continue"
+	// AttemptWorkSessionsAskProcedure is the fully-qualified name of the AttemptWorkSessions's Ask RPC.
+	AttemptWorkSessionsAskProcedure = "/supertag.runtime.v2.AttemptWorkSessions/Ask"
 	// TeamsCreateTeamProcedure is the fully-qualified name of the Teams's CreateTeam RPC.
 	TeamsCreateTeamProcedure = "/supertag.runtime.v2.Teams/CreateTeam"
 	// TeamsGetTeamProcedure is the fully-qualified name of the Teams's GetTeam RPC.
@@ -338,6 +343,11 @@ const (
 	// HarnessWorkSessionsStartProcedure is the fully-qualified name of the HarnessWorkSessions's Start
 	// RPC.
 	HarnessWorkSessionsStartProcedure = "/supertag.runtime.v2.HarnessWorkSessions/Start"
+	// HarnessWorkSessionsContinueProcedure is the fully-qualified name of the HarnessWorkSessions's
+	// Continue RPC.
+	HarnessWorkSessionsContinueProcedure = "/supertag.runtime.v2.HarnessWorkSessions/Continue"
+	// HarnessWorkSessionsAskProcedure is the fully-qualified name of the HarnessWorkSessions's Ask RPC.
+	HarnessWorkSessionsAskProcedure = "/supertag.runtime.v2.HarnessWorkSessions/Ask"
 )
 
 // OperatorClient is a client for the supertag.runtime.v2.Operator service.
@@ -1517,6 +1527,8 @@ func (UnimplementedWorkSessionsHandler) List(context.Context, *connect.Request[r
 // AttemptWorkSessionsClient is a client for the supertag.runtime.v2.AttemptWorkSessions service.
 type AttemptWorkSessionsClient interface {
 	Start(context.Context, *connect.Request[runtimev2.StartWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
+	Continue(context.Context, *connect.Request[runtimev2.ContinueWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
+	Ask(context.Context, *connect.Request[runtimev2.AskWorkSessionQuestionRequest]) (*connect.Response[runtimev2.WorkSessionQuestion], error)
 }
 
 // NewAttemptWorkSessionsClient constructs a client for the supertag.runtime.v2.AttemptWorkSessions
@@ -1536,12 +1548,26 @@ func NewAttemptWorkSessionsClient(httpClient connect.HTTPClient, baseURL string,
 			connect.WithSchema(attemptWorkSessionsMethods.ByName("Start")),
 			connect.WithClientOptions(opts...),
 		),
+		_continue: connect.NewClient[runtimev2.ContinueWorkSessionRequest, runtimev2.WorkSession](
+			httpClient,
+			baseURL+AttemptWorkSessionsContinueProcedure,
+			connect.WithSchema(attemptWorkSessionsMethods.ByName("Continue")),
+			connect.WithClientOptions(opts...),
+		),
+		ask: connect.NewClient[runtimev2.AskWorkSessionQuestionRequest, runtimev2.WorkSessionQuestion](
+			httpClient,
+			baseURL+AttemptWorkSessionsAskProcedure,
+			connect.WithSchema(attemptWorkSessionsMethods.ByName("Ask")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // attemptWorkSessionsClient implements AttemptWorkSessionsClient.
 type attemptWorkSessionsClient struct {
-	start *connect.Client[runtimev2.StartWorkSessionRequest, runtimev2.WorkSession]
+	start     *connect.Client[runtimev2.StartWorkSessionRequest, runtimev2.WorkSession]
+	_continue *connect.Client[runtimev2.ContinueWorkSessionRequest, runtimev2.WorkSession]
+	ask       *connect.Client[runtimev2.AskWorkSessionQuestionRequest, runtimev2.WorkSessionQuestion]
 }
 
 // Start calls supertag.runtime.v2.AttemptWorkSessions.Start.
@@ -1549,10 +1575,22 @@ func (c *attemptWorkSessionsClient) Start(ctx context.Context, req *connect.Requ
 	return c.start.CallUnary(ctx, req)
 }
 
+// Continue calls supertag.runtime.v2.AttemptWorkSessions.Continue.
+func (c *attemptWorkSessionsClient) Continue(ctx context.Context, req *connect.Request[runtimev2.ContinueWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
+	return c._continue.CallUnary(ctx, req)
+}
+
+// Ask calls supertag.runtime.v2.AttemptWorkSessions.Ask.
+func (c *attemptWorkSessionsClient) Ask(ctx context.Context, req *connect.Request[runtimev2.AskWorkSessionQuestionRequest]) (*connect.Response[runtimev2.WorkSessionQuestion], error) {
+	return c.ask.CallUnary(ctx, req)
+}
+
 // AttemptWorkSessionsHandler is an implementation of the supertag.runtime.v2.AttemptWorkSessions
 // service.
 type AttemptWorkSessionsHandler interface {
 	Start(context.Context, *connect.Request[runtimev2.StartWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
+	Continue(context.Context, *connect.Request[runtimev2.ContinueWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
+	Ask(context.Context, *connect.Request[runtimev2.AskWorkSessionQuestionRequest]) (*connect.Response[runtimev2.WorkSessionQuestion], error)
 }
 
 // NewAttemptWorkSessionsHandler builds an HTTP handler from the service implementation. It returns
@@ -1568,10 +1606,26 @@ func NewAttemptWorkSessionsHandler(svc AttemptWorkSessionsHandler, opts ...conne
 		connect.WithSchema(attemptWorkSessionsMethods.ByName("Start")),
 		connect.WithHandlerOptions(opts...),
 	)
+	attemptWorkSessionsContinueHandler := connect.NewUnaryHandler(
+		AttemptWorkSessionsContinueProcedure,
+		svc.Continue,
+		connect.WithSchema(attemptWorkSessionsMethods.ByName("Continue")),
+		connect.WithHandlerOptions(opts...),
+	)
+	attemptWorkSessionsAskHandler := connect.NewUnaryHandler(
+		AttemptWorkSessionsAskProcedure,
+		svc.Ask,
+		connect.WithSchema(attemptWorkSessionsMethods.ByName("Ask")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.AttemptWorkSessions/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AttemptWorkSessionsStartProcedure:
 			attemptWorkSessionsStartHandler.ServeHTTP(w, r)
+		case AttemptWorkSessionsContinueProcedure:
+			attemptWorkSessionsContinueHandler.ServeHTTP(w, r)
+		case AttemptWorkSessionsAskProcedure:
+			attemptWorkSessionsAskHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1583,6 +1637,14 @@ type UnimplementedAttemptWorkSessionsHandler struct{}
 
 func (UnimplementedAttemptWorkSessionsHandler) Start(context.Context, *connect.Request[runtimev2.StartWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptWorkSessions.Start is not implemented"))
+}
+
+func (UnimplementedAttemptWorkSessionsHandler) Continue(context.Context, *connect.Request[runtimev2.ContinueWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptWorkSessions.Continue is not implemented"))
+}
+
+func (UnimplementedAttemptWorkSessionsHandler) Ask(context.Context, *connect.Request[runtimev2.AskWorkSessionQuestionRequest]) (*connect.Response[runtimev2.WorkSessionQuestion], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptWorkSessions.Ask is not implemented"))
 }
 
 // TeamsClient is a client for the supertag.runtime.v2.Teams service.
@@ -4082,6 +4144,8 @@ func (UnimplementedHarnessMailboxHandler) SendMessage(context.Context, *connect.
 // HarnessWorkSessionsClient is a client for the supertag.runtime.v2.HarnessWorkSessions service.
 type HarnessWorkSessionsClient interface {
 	Start(context.Context, *connect.Request[runtimev2.HarnessStartWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
+	Continue(context.Context, *connect.Request[runtimev2.HarnessContinueWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
+	Ask(context.Context, *connect.Request[runtimev2.HarnessAskWorkSessionQuestionRequest]) (*connect.Response[runtimev2.WorkSessionQuestion], error)
 }
 
 // NewHarnessWorkSessionsClient constructs a client for the supertag.runtime.v2.HarnessWorkSessions
@@ -4101,12 +4165,26 @@ func NewHarnessWorkSessionsClient(httpClient connect.HTTPClient, baseURL string,
 			connect.WithSchema(harnessWorkSessionsMethods.ByName("Start")),
 			connect.WithClientOptions(opts...),
 		),
+		_continue: connect.NewClient[runtimev2.HarnessContinueWorkSessionRequest, runtimev2.WorkSession](
+			httpClient,
+			baseURL+HarnessWorkSessionsContinueProcedure,
+			connect.WithSchema(harnessWorkSessionsMethods.ByName("Continue")),
+			connect.WithClientOptions(opts...),
+		),
+		ask: connect.NewClient[runtimev2.HarnessAskWorkSessionQuestionRequest, runtimev2.WorkSessionQuestion](
+			httpClient,
+			baseURL+HarnessWorkSessionsAskProcedure,
+			connect.WithSchema(harnessWorkSessionsMethods.ByName("Ask")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // harnessWorkSessionsClient implements HarnessWorkSessionsClient.
 type harnessWorkSessionsClient struct {
-	start *connect.Client[runtimev2.HarnessStartWorkSessionRequest, runtimev2.WorkSession]
+	start     *connect.Client[runtimev2.HarnessStartWorkSessionRequest, runtimev2.WorkSession]
+	_continue *connect.Client[runtimev2.HarnessContinueWorkSessionRequest, runtimev2.WorkSession]
+	ask       *connect.Client[runtimev2.HarnessAskWorkSessionQuestionRequest, runtimev2.WorkSessionQuestion]
 }
 
 // Start calls supertag.runtime.v2.HarnessWorkSessions.Start.
@@ -4114,10 +4192,22 @@ func (c *harnessWorkSessionsClient) Start(ctx context.Context, req *connect.Requ
 	return c.start.CallUnary(ctx, req)
 }
 
+// Continue calls supertag.runtime.v2.HarnessWorkSessions.Continue.
+func (c *harnessWorkSessionsClient) Continue(ctx context.Context, req *connect.Request[runtimev2.HarnessContinueWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
+	return c._continue.CallUnary(ctx, req)
+}
+
+// Ask calls supertag.runtime.v2.HarnessWorkSessions.Ask.
+func (c *harnessWorkSessionsClient) Ask(ctx context.Context, req *connect.Request[runtimev2.HarnessAskWorkSessionQuestionRequest]) (*connect.Response[runtimev2.WorkSessionQuestion], error) {
+	return c.ask.CallUnary(ctx, req)
+}
+
 // HarnessWorkSessionsHandler is an implementation of the supertag.runtime.v2.HarnessWorkSessions
 // service.
 type HarnessWorkSessionsHandler interface {
 	Start(context.Context, *connect.Request[runtimev2.HarnessStartWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
+	Continue(context.Context, *connect.Request[runtimev2.HarnessContinueWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error)
+	Ask(context.Context, *connect.Request[runtimev2.HarnessAskWorkSessionQuestionRequest]) (*connect.Response[runtimev2.WorkSessionQuestion], error)
 }
 
 // NewHarnessWorkSessionsHandler builds an HTTP handler from the service implementation. It returns
@@ -4133,10 +4223,26 @@ func NewHarnessWorkSessionsHandler(svc HarnessWorkSessionsHandler, opts ...conne
 		connect.WithSchema(harnessWorkSessionsMethods.ByName("Start")),
 		connect.WithHandlerOptions(opts...),
 	)
+	harnessWorkSessionsContinueHandler := connect.NewUnaryHandler(
+		HarnessWorkSessionsContinueProcedure,
+		svc.Continue,
+		connect.WithSchema(harnessWorkSessionsMethods.ByName("Continue")),
+		connect.WithHandlerOptions(opts...),
+	)
+	harnessWorkSessionsAskHandler := connect.NewUnaryHandler(
+		HarnessWorkSessionsAskProcedure,
+		svc.Ask,
+		connect.WithSchema(harnessWorkSessionsMethods.ByName("Ask")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.HarnessWorkSessions/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case HarnessWorkSessionsStartProcedure:
 			harnessWorkSessionsStartHandler.ServeHTTP(w, r)
+		case HarnessWorkSessionsContinueProcedure:
+			harnessWorkSessionsContinueHandler.ServeHTTP(w, r)
+		case HarnessWorkSessionsAskProcedure:
+			harnessWorkSessionsAskHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -4148,4 +4254,12 @@ type UnimplementedHarnessWorkSessionsHandler struct{}
 
 func (UnimplementedHarnessWorkSessionsHandler) Start(context.Context, *connect.Request[runtimev2.HarnessStartWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessWorkSessions.Start is not implemented"))
+}
+
+func (UnimplementedHarnessWorkSessionsHandler) Continue(context.Context, *connect.Request[runtimev2.HarnessContinueWorkSessionRequest]) (*connect.Response[runtimev2.WorkSession], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessWorkSessions.Continue is not implemented"))
+}
+
+func (UnimplementedHarnessWorkSessionsHandler) Ask(context.Context, *connect.Request[runtimev2.HarnessAskWorkSessionQuestionRequest]) (*connect.Response[runtimev2.WorkSessionQuestion], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessWorkSessions.Ask is not implemented"))
 }

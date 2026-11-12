@@ -266,6 +266,8 @@ message AttemptCapabilities {
   bool may_read_mailbox = 3;
   bool may_send_tag_message = 4;
   bool may_start_work_session = 5;
+  bool may_continue_work_session = 6;
+  bool may_ask_work_session_question = 7;
 }
 
 // Operators see the work started in Sessions they can access.
@@ -276,6 +278,8 @@ service WorkSessions {
 
 service AttemptWorkSessions {
   rpc Start(StartWorkSessionRequest) returns (WorkSession);
+  rpc Continue(ContinueWorkSessionRequest) returns (WorkSession);
+  rpc Ask(AskWorkSessionQuestionRequest) returns (WorkSessionQuestion);
 }
 
 message WorkSession {
@@ -292,6 +296,17 @@ message WorkSession {
   optional string objective_id = 11;
   WorkspaceDeliveryReference workspace_delivery = 12;
   uint64 created_order = 13;
+  WorkSessionQuestion question = 14;
+}
+
+message WorkSessionQuestion {
+  string work_session_id = 1;
+  string task_id = 2;
+  string attempt_id = 3;
+  string text = 4;
+  int64 asked_at_ms = 5;
+  optional int64 published_at_ms = 6;
+  optional string answer_task_id = 7;
 }
 
 message StartWorkSessionRequest {
@@ -305,6 +320,21 @@ message StartWorkSessionRequest {
 
 message GetWorkSessionRequest {
   string work_session_id = 1;
+  // Select the child Task and report from this turn of the Work Session.
+  optional string report_task_id = 2;
+}
+
+message ContinueWorkSessionRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string work_session_id = 3;
+  string message = 4;
+}
+
+message AskWorkSessionQuestionRequest {
+  InspectAttemptRequest attempt = 1;
+  string operation_id = 2;
+  string text = 3;
 }
 
 message ListWorkSessionsRequest {
@@ -625,6 +655,19 @@ service HarnessMailbox {
 // The supervising Worker Host supplies the Attempt identity.
 service HarnessWorkSessions {
   rpc Start(HarnessStartWorkSessionRequest) returns (WorkSession);
+  rpc Continue(HarnessContinueWorkSessionRequest) returns (WorkSession);
+  rpc Ask(HarnessAskWorkSessionQuestionRequest) returns (WorkSessionQuestion);
+}
+
+message HarnessContinueWorkSessionRequest {
+  string operation_id = 1;
+  string work_session_id = 2;
+  string message = 3;
+}
+
+message HarnessAskWorkSessionQuestionRequest {
+  string operation_id = 1;
+  string text = 2;
 }
 
 message HarnessStartWorkSessionRequest {

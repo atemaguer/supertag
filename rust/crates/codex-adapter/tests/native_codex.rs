@@ -23,7 +23,8 @@ use supertag_protocol::v2::{
     harness_workstreams_server::{HarnessWorkstreams, HarnessWorkstreamsServer},
 };
 use supertag_protocol::v2::{
-    HarnessStartWorkSessionRequest, WorkSession,
+    HarnessAskWorkSessionQuestionRequest, HarnessContinueWorkSessionRequest,
+    HarnessStartWorkSessionRequest, WorkSession, WorkSessionQuestion,
     harness_work_sessions_server::{HarnessWorkSessions, HarnessWorkSessionsServer},
 };
 use supertag_protocol::{
@@ -70,6 +71,8 @@ struct Observed {
     mailbox_reads: Vec<HarnessReadMailboxRequest>,
     mailbox_sends: Vec<HarnessSendTagMessageRequest>,
     work_starts: Vec<HarnessStartWorkSessionRequest>,
+    work_continuations: Vec<HarnessContinueWorkSessionRequest>,
+    work_questions: Vec<HarnessAskWorkSessionQuestionRequest>,
     pending_post: bool,
     lose_post_response: bool,
 }
@@ -409,6 +412,50 @@ impl HarnessWorkSessions for HarnessFixture {
             ..Default::default()
         }))
     }
+
+    async fn r#continue(
+        &self,
+        request: Request<HarnessContinueWorkSessionRequest>,
+    ) -> Result<Response<WorkSession>, Status> {
+        self.authenticate(&request)?;
+        let mut observed = self.observed.lock().await;
+        let request = request.into_inner();
+        observed.work_continuations.push(request.clone());
+        if observed.work_continuations.len() == 1 {
+            return Err(Status::unavailable("synthetic continuation response loss"));
+        }
+        Ok(Response::new(WorkSession {
+            work_session_id: request.work_session_id,
+            starter_task_id: self.task.task_id.clone(),
+            parent_session_id: self.task.session_id.clone(),
+            parent_tag_id: self.task.tag_id.clone(),
+            tag_id: self.task.tag_id.clone(),
+            latest_task_id: "continued-child-task".into(),
+            latest_task_state: supertag_protocol::v2::TaskState::Queued as i32,
+            created_order: 11,
+            ..Default::default()
+        }))
+    }
+
+    async fn ask(
+        &self,
+        request: Request<HarnessAskWorkSessionQuestionRequest>,
+    ) -> Result<Response<WorkSessionQuestion>, Status> {
+        self.authenticate(&request)?;
+        let mut observed = self.observed.lock().await;
+        let request = request.into_inner();
+        observed.work_questions.push(request.clone());
+        if observed.work_questions.len() == 1 {
+            return Err(Status::unavailable("synthetic question response loss"));
+        }
+        Ok(Response::new(WorkSessionQuestion {
+            work_session_id: self.task.session_id.clone(),
+            task_id: self.task.task_id.clone(),
+            attempt_id: "native-attempt".into(),
+            text: request.text,
+            ..Default::default()
+        }))
+    }
 }
 
 struct HarnessProcess {
@@ -466,7 +513,12 @@ impl HarnessProcess {
                 workspace_delivery: None,
                 task_id: "native-task".into(),
                 tag_id: "native-tag".into(),
-                session_id: "native-session".into(),
+                session_id: if coordination.is_some_and(|scope| scope.may_ask_work_session_question)
+                {
+                    "work/codex-child".into()
+                } else {
+                    "native-session".into()
+                },
                 instructions: "Review carefully".into(),
                 prompt: prompt.into(),
                 allowed_actions: actions.iter().map(|value| (*value).into()).collect(),
@@ -537,6 +589,84 @@ async fn native_work_session_retries_one_receipt_and_checks_current_authority_on
             assert!(!requests.contains("work/codex-fixture"));
         }
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_work_session_asks_continues_and_resumes_the_child_checkpoint() -> Result<()> {
+    let child_capabilities = Some(AttemptCapabilities {
+        may_ask_work_session_question: true,
+        ..Default::default()
+    });
+    let native = NativeFixture::new(&successful("Waiting for staging choice"), "exit 0")?;
+    std::fs::write(native.directory.path().join("question-mode"), "duplicate")?;
+    let child = HarnessProcess::configured_tools(
+        &["files:read"],
+        None,
+        "Inspect the release",
+        false,
+        child_capabilities,
+    )
+    .await?;
+    run(native.options(), child.bootstrap.clone()).await?;
+    let checkpoint = {
+        let observed = child.observed.lock().await;
+        let outcome = observed.outcome.as_ref().context("child outcome")?;
+        ensure!(outcome.succeeded, "{}", outcome.result);
+        assert!(observed.questions.is_empty());
+        assert_eq!(observed.work_questions.len(), 2);
+        assert_eq!(observed.work_questions[0], observed.work_questions[1]);
+        assert_eq!(observed.work_questions[0].text, "May I use staging?");
+        outcome.checkpoint.clone().context("child checkpoint")?
+    };
+
+    let native = NativeFixture::new(&successful("Relayed staging choice"), "exit 0")?;
+    std::fs::write(native.directory.path().join("continue-session-mode"), "")?;
+    let parent = HarnessProcess::configured_tools(
+        &["files:read"],
+        None,
+        "Use staging",
+        false,
+        Some(AttemptCapabilities {
+            may_continue_work_session: true,
+            ..Default::default()
+        }),
+    )
+    .await?;
+    run(native.options(), parent.bootstrap.clone()).await?;
+    let observed = parent.observed.lock().await;
+    let outcome = observed.outcome.as_ref().context("parent outcome")?;
+    ensure!(outcome.succeeded, "{}", outcome.result);
+    assert_eq!(observed.work_continuations.len(), 2);
+    assert_eq!(
+        observed.work_continuations[0],
+        observed.work_continuations[1]
+    );
+    assert_eq!(
+        observed.work_continuations[0].work_session_id,
+        "work/codex-child"
+    );
+    assert_eq!(
+        observed.work_continuations[0].message,
+        "Use staging [REDACTED]."
+    );
+    drop(observed);
+
+    let native = NativeFixture::new(&successful("Resumed child work"), "exit 0")?;
+    let resumed = HarnessProcess::configured_tools(
+        &["files:read"],
+        Some(checkpoint),
+        "Use staging",
+        false,
+        child_capabilities,
+    )
+    .await?;
+    run(native.options(), resumed.bootstrap.clone()).await?;
+    let observed = resumed.observed.lock().await;
+    let outcome = observed.outcome.as_ref().context("resumed outcome")?;
+    ensure!(outcome.succeeded, "{}", outcome.result);
+    assert!(native.read("requests.jsonl")?.contains("thread/resume"));
+    assert!(observed.work_questions.is_empty());
     Ok(())
 }
 

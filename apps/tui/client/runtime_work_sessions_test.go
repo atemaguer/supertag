@@ -47,7 +47,7 @@ func TestRuntimeWorkSessionHistoryKeepsReportTaskAndCursorWithoutInternalPrompt(
 		return &v2.ListWorkSessionsResponse{WorkSessions: []*v2.WorkSession{work}}, nil
 	})
 	testRPC(mux, rpc.WorkSessionsGetProcedure, func(_ context.Context, req *v2.GetWorkSessionRequest) (*v2.WorkSession, error) {
-		if req.GetWorkSessionId() != work.WorkSessionId {
+		if req.GetWorkSessionId() != work.WorkSessionId || req.GetReportTaskId() != "report" {
 			t.Errorf("Get scope: %v", req)
 		}
 		return work, nil
@@ -81,6 +81,105 @@ func TestRuntimeWorkSessionHistoryKeepsReportTaskAndCursorWithoutInternalPrompt(
 	isolated := History("lead", page[:1])
 	if isolated[0].Message.GetTaskId() != "report" || !strings.Contains(describe(isolated[0].Events), "Tests passed") {
 		t.Fatalf("isolated report: %v", isolated)
+	}
+}
+
+func TestRuntimeWorkSessionHistoryUsesExactChildTurnAfterContinuation(t *testing.T) {
+	mux := http.NewServeMux()
+	first := runtimeWorkSession()
+	first.LatestTaskState, first.ReportTaskId, first.ReportTaskState = v2.TaskState_TASK_STATE_SUCCEEDED, proto.String("report-first"), v2.TaskState_TASK_STATE_SUCCEEDED
+	first.Question = &v2.WorkSessionQuestion{WorkSessionId: first.WorkSessionId, TaskId: first.LatestTaskId, AttemptId: "attempt-first", Text: "Which region?", AskedAtMs: 10, PublishedAtMs: proto.Int64(11), AnswerTaskId: proto.String("child-second")}
+	second := proto.Clone(first).(*v2.WorkSession)
+	second.StarterTaskId, second.LatestTaskId, second.ReportTaskId, second.Question = "continue-parent", "child-second", proto.String("report-second"), nil
+	message := func(id string) *v2.ConversationMessage {
+		out := runtimeParentMessage(id)
+		if strings.HasPrefix(id, "report-") {
+			out.WorkSessionReportId = proto.String(first.WorkSessionId)
+		}
+		if id == "report-first" {
+			out.Task.Result = proto.String("Which region should I use?")
+		}
+		if id == "report-second" {
+			out.Task.Result = proto.String("Region verified")
+		}
+		return out
+	}
+	testRPC(mux, rpc.ConversationsListMessagesProcedure, func(_ context.Context, _ *v2.ListMessagesRequest) (*v2.ListMessagesResponse, error) {
+		return &v2.ListMessagesResponse{Messages: []*v2.ConversationMessage{message("report-second"), message("continue-parent"), message("report-first"), message("root")}, NextCursor: "historical-page"}, nil
+	})
+	testRPC(mux, rpc.WorkSessionsListProcedure, func(_ context.Context, req *v2.ListWorkSessionsRequest) (*v2.ListWorkSessionsResponse, error) {
+		if req.GetParentTagId() != "lead" || req.GetParentSessionId() != "parent" {
+			t.Errorf("parent scope: %v", req)
+		}
+		switch req.GetStarterTaskId() {
+		case "root":
+			return &v2.ListWorkSessionsResponse{WorkSessions: []*v2.WorkSession{first}}, nil
+		case "continue-parent":
+			return &v2.ListWorkSessionsResponse{WorkSessions: []*v2.WorkSession{second}}, nil
+		default:
+			return nil, fmt.Errorf("unexpected parent %q", req.GetStarterTaskId())
+		}
+	})
+	testRPC(mux, rpc.WorkSessionsGetProcedure, func(_ context.Context, req *v2.GetWorkSessionRequest) (*v2.WorkSession, error) {
+		if req.GetWorkSessionId() != first.WorkSessionId {
+			t.Errorf("Work Session scope: %v", req)
+		}
+		switch req.GetReportTaskId() {
+		case "report-first":
+			return first, nil
+		case "report-second":
+			return second, nil
+		default:
+			return nil, fmt.Errorf("report history must select its exact Task: %v", req)
+		}
+	})
+	testRPC(mux, rpc.OperatorGetTaskProcedure, func(_ context.Context, req *v2.GetTaskRequest) (*v2.Task, error) {
+		return message(req.GetTaskId()).Task, nil
+	})
+	c := testRuntime(t, mux, false)
+	page, cursor, err := c.ListMessages(t.Context(), "lead", "default", 10, "")
+	if err != nil || len(page) != 4 || cursor != "historical-page" {
+		t.Fatalf("history = %v, %q, %v", page, cursor, err)
+	}
+	if page[3].WorkSessions[0].TaskId != "child" || page[1].WorkSessions[0].TaskId != "child-second" {
+		t.Fatal("a continuation replaced the original child projection")
+	}
+	if page[2].WorkSessions[0].Question != "Which region?" || page[2].WorkSessions[0].Status != operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_COMPLETED {
+		t.Fatalf("question state = %v", page[2].WorkSessions[0])
+	}
+	var events []FollowEvent
+	for _, item := range History("lead", page) {
+		if item.Follow {
+			t.Fatal("a published, reported question waits for the operator, not another running follow")
+		}
+		events = append(events, item.Events...)
+	}
+	got := describe(events)
+	if strings.Count(got, "report [Check tests] (done) Which region should I use?") != 1 || strings.Count(got, "report [Check tests] (done) Region verified") != 1 {
+		t.Fatalf("reports:\n%s", got)
+	}
+}
+
+func TestRuntimeWorkSessionQuestionAppearsOnlyAfterPublicationAndClearsWaitingAfterAnswer(t *testing.T) {
+	work := runtimeWorkSession()
+	work.LatestTaskState = v2.TaskState_TASK_STATE_SUCCEEDED
+	work.Question = &v2.WorkSessionQuestion{WorkSessionId: work.WorkSessionId, TaskId: work.LatestTaskId, Text: "Which region?", AskedAtMs: 10}
+	if view := runtimeWork(work); view.Question != "" || view.Status == operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_WAITING {
+		t.Fatalf("unpublished question became operator wait: %v", view)
+	}
+	work.Question.PublishedAtMs = proto.Int64(11)
+	if view := runtimeWork(work); view.Question != "Which region?" || view.Status != operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_WAITING {
+		t.Fatalf("published question = %v", view)
+	}
+	waiting := runtimeWork(work)
+	waiting.ReportStatus, waiting.Report = operatorv1.ReplyStatus_REPLY_STATUS_REPLIED, &operatorv1.Reply{Text: "Which region?"}
+	history := History("lead", []*operatorv1.Message{{TaskId: "root", Tag: "lead", Status: operatorv1.ReplyStatus_REPLY_STATUS_REPLIED, Reply: &operatorv1.Reply{Text: "Started"}, WorkSessions: []*operatorv1.WorkSession{waiting}}})
+	if history[0].Follow || !strings.Contains(describe(history[0].Events), "(waiting on you) Which region?") {
+		t.Fatalf("reported question should wait for the operator: %s", describe(history[0].Events))
+	}
+	work.Question.AnswerTaskId = proto.String("child-answer")
+	if view := runtimeWork(work); view.Question != "Which region?" || view.Status != operatorv1.WorkSessionStatus_WORK_SESSION_STATUS_COMPLETED {
+		t.Fatalf("answered question still blocks work: %v", view)
 	}
 }
 
@@ -163,7 +262,7 @@ func TestRuntimeWorkSessionFollowDrainsChildPagesAndWaitsForParentReport(t *test
 }
 
 func TestRuntimeWorkSessionListChecksScopeAndPagination(t *testing.T) {
-	for _, wrong := range []string{"", "parent", "starter", "tag", "repeat-cursor"} {
+	for _, wrong := range []string{"", "parent", "starter", "tag", "question", "repeat-cursor"} {
 		t.Run(wrong, func(t *testing.T) {
 			mux := http.NewServeMux()
 			var cursors []string
@@ -178,6 +277,9 @@ func TestRuntimeWorkSessionListChecksScopeAndPagination(t *testing.T) {
 				}
 				if wrong == "tag" {
 					work.ParentTagId = "other"
+				}
+				if wrong == "question" {
+					work.Question = &v2.WorkSessionQuestion{WorkSessionId: work.WorkSessionId, TaskId: "private-child", Text: "Must not appear"}
 				}
 				if req.GetCursor() == "" {
 					return &v2.ListWorkSessionsResponse{WorkSessions: []*v2.WorkSession{work}, NextCursor: "next"}, nil

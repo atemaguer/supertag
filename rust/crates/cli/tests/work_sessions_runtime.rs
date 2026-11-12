@@ -105,6 +105,7 @@ async fn wait_for_work(
                 .get(authenticated_request(
                     GetWorkSessionRequest {
                         work_session_id: id.into(),
+                        report_task_id: None,
                     },
                     token,
                     None,
@@ -236,6 +237,7 @@ async fn private_harness_work_session_reports_once_after_service_restart() -> Re
     assert!(started.report_task_id.is_none());
     let get = GetWorkSessionRequest {
         work_session_id: started.work_session_id.clone(),
+        report_task_id: None,
     };
     let mut bob = work_sessions_client::WorkSessionsClient::new(channel(&bob_public).await?);
     let blocked = bob
@@ -455,6 +457,372 @@ async fn private_harness_work_session_reports_once_after_service_restart() -> Re
     assert_eq!(listed["work_sessions"][0], detail);
     assert_eq!(listed["next_cursor"], "");
     alice_gateway.kill().await?;
+    plane.kill().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn private_child_question_continues_once_and_keeps_both_parent_reports() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let service_token = Uuid::new_v4().to_string();
+    let operator_token = Uuid::new_v4().to_string();
+    let host_token = Uuid::new_v4().to_string();
+    let plane_command = || {
+        let mut command = command(&["control-plane"]);
+        command
+            .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+            .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
+            .env(
+                "SUPERTAG_DATABASE_URL",
+                format!(
+                    "sqlite://{}?mode=rwc",
+                    directory.path().join("control.db").display()
+                ),
+            );
+        command
+    };
+    let (mut plane, private) = service(plane_command()).await?;
+    let (mut gateway_process, public) = service(gateway(
+        &private,
+        &service_token,
+        &operator_token,
+        "operator:alice",
+    ))
+    .await?;
+    let connected = channel(&public).await?;
+    let mut operator = operator_client::OperatorClient::new(connected.clone());
+    let mut conversations = conversations_client::ConversationsClient::new(connected.clone());
+    let mut attempts =
+        attempt_work_sessions_client::AttemptWorkSessionsClient::new(connected.clone());
+    assert_eq!(
+        attempts
+            .ask(authenticated_request(
+                AskWorkSessionQuestionRequest {
+                    attempt: None,
+                    operation_id: "operator-cannot-ask-as-child".into(),
+                    text: "Unbound question".into(),
+                },
+                &operator_token,
+                None
+            )?)
+            .await
+            .expect_err("operator credential used as a Host")
+            .code(),
+        Code::Unauthenticated
+    );
+    assert_eq!(
+        attempts
+            .r#continue(authenticated_request(
+                ContinueWorkSessionRequest {
+                    attempt: None,
+                    operation_id: "operator-cannot-continue-as-parent".into(),
+                    work_session_id: "work/none".into(),
+                    message: "Unbound continuation".into(),
+                },
+                &operator_token,
+                None
+            )?)
+            .await
+            .expect_err("operator credential used as a Host")
+            .code(),
+        Code::Unauthenticated
+    );
+    let mut work = work_sessions_client::WorkSessionsClient::new(connected);
+    operator
+        .put_tag(authenticated_request(
+            PutTagRequest {
+                tag_id: "owner".into(),
+                instructions: "Inspect the requested region".into(),
+                ..Default::default()
+            },
+            &operator_token,
+            None,
+        )?)
+        .await?;
+    let first_parent = conversations
+        .send_message(authenticated_request(
+            SendMessageRequest {
+                tag_id: "owner".into(),
+                conversation: "private".into(),
+                text: "Inspect the region".into(),
+                operation_id: "initial-parent".into(),
+            },
+            &operator_token,
+            None,
+        )?)
+        .await?
+        .into_inner()
+        .task
+        .context("initial parent")?;
+    let host_state = directory.path().join("host");
+    run_host(&public, &host_token, &host_state, "--start-work-session").await?;
+    let list_request = |parent: &Task| ListWorkSessionsRequest {
+        parent_tag_id: parent.tag_id.clone(),
+        parent_session_id: parent.session_id.clone(),
+        starter_task_id: Some(parent.task_id.clone()),
+        limit: 4,
+        cursor: String::new(),
+    };
+    let first_page = work
+        .list(authenticated_request(
+            list_request(&first_parent),
+            &operator_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    ensure!(first_page.work_sessions.len() == 1, "initial child missing");
+    let initial = first_page.work_sessions[0].clone();
+    run_host(&public, &host_token, &host_state, "--ask-work-session").await?;
+    let asked = wait_for_work(&mut work, &operator_token, &initial.work_session_id, |w| {
+        w.report_task_id.is_some()
+    })
+    .await?;
+    ensure!(
+        asked.latest_task_state() == TaskState::Succeeded,
+        "child question failed: {asked:?}"
+    );
+    let question = asked
+        .question
+        .as_ref()
+        .context("published child question")?;
+    ensure!(
+        question.task_id == initial.latest_task_id
+            && question.published_at_ms.is_some()
+            && question.answer_task_id.is_none()
+    );
+    let first_report_id = asked.report_task_id.clone().context("first report")?;
+    let first_report = operator
+        .get_task(authenticated_request(
+            GetTaskRequest {
+                task_id: first_report_id.clone(),
+            },
+            &operator_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    ensure!(
+        first_report.prompt.contains("Which region?")
+            && first_report.prompt.contains("&lt;/work-session-question>"),
+        "question was missing or not escaped in report"
+    );
+    run_host(
+        &public,
+        &host_token,
+        &host_state,
+        "--reject-work-session-start",
+    )
+    .await?;
+    wait_for_work(&mut work, &operator_token, &initial.work_session_id, |w| {
+        w.report_task_state() == TaskState::Succeeded
+    })
+    .await?;
+
+    // A later real parent Task owns the continuation. The first parent report
+    // is already complete, so this cannot race it for the parent Session.
+    let next_parent = conversations
+        .send_message(authenticated_request(
+            SendMessageRequest {
+                tag_id: "owner".into(),
+                conversation: "private".into(),
+                text: "Use us-east-1".into(),
+                operation_id: "answer-parent".into(),
+            },
+            &operator_token,
+            None,
+        )?)
+        .await?
+        .into_inner()
+        .task
+        .context("answer parent")?;
+    let mode = format!("--continue-work-session={}", initial.work_session_id);
+    run_host(&public, &host_token, &host_state, &mode).await?;
+    let continued_page = work
+        .list(authenticated_request(
+            list_request(&next_parent),
+            &operator_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    ensure!(
+        continued_page.work_sessions.len() == 1,
+        "continuation missing: {continued_page:?}"
+    );
+    let continued = &continued_page.work_sessions[0];
+    ensure!(
+        continued.work_session_id == initial.work_session_id
+            && continued.latest_task_id != initial.latest_task_id
+            && continued.starter_task_id == next_parent.task_id
+            && continued.report_task_id.is_none()
+    );
+    let second_child_id = continued.latest_task_id.clone();
+    let first_history = work
+        .get(authenticated_request(
+            GetWorkSessionRequest {
+                work_session_id: initial.work_session_id.clone(),
+                report_task_id: Some(first_report_id.clone()),
+            },
+            &operator_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    ensure!(
+        first_history.latest_task_id == initial.latest_task_id
+            && first_history.starter_task_id == first_parent.task_id
+            && first_history.report_task_id.as_deref() == Some(first_report_id.as_str())
+    );
+    ensure!(
+        first_history
+            .question
+            .as_ref()
+            .and_then(|q| q.answer_task_id.as_deref())
+            == Some(second_child_id.as_str())
+    );
+    run_host(
+        &public,
+        &host_token,
+        &host_state,
+        "--reject-work-session-start",
+    )
+    .await?;
+    let second_report = wait_for_work(&mut work, &operator_token, &initial.work_session_id, |w| {
+        w.report_task_id.is_some() && w.latest_task_id == second_child_id
+    })
+    .await?;
+    let second_report_id = second_report
+        .report_task_id
+        .clone()
+        .context("second report")?;
+    ensure!(second_report_id != first_report_id);
+
+    gateway_process.kill().await?;
+    plane.kill().await?;
+    let (restarted, private) = service(plane_command()).await?;
+    plane = restarted;
+    let (restarted, public) = service(gateway(
+        &private,
+        &service_token,
+        &operator_token,
+        "operator:alice",
+    ))
+    .await?;
+    gateway_process = restarted;
+    let connected = channel(&public).await?;
+    work = work_sessions_client::WorkSessionsClient::new(connected.clone());
+    conversations = conversations_client::ConversationsClient::new(connected.clone());
+    operator = operator_client::OperatorClient::new(connected);
+    run_host(
+        &public,
+        &host_token,
+        &host_state,
+        "--reject-work-session-start",
+    )
+    .await?;
+    wait_for_work(&mut work, &operator_token, &initial.work_session_id, |w| {
+        w.report_task_state() == TaskState::Succeeded
+    })
+    .await?;
+    let second_child = operator
+        .get_task(authenticated_request(
+            GetTaskRequest {
+                task_id: second_child_id.clone(),
+            },
+            &operator_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    ensure!(
+        second_child.state() == TaskState::Succeeded
+            && second_child
+                .result
+                .as_deref()
+                .is_some_and(|text| text.contains("Use us-east-1"))
+    );
+    for (parent, child_id, report_id) in [
+        (&first_parent, &initial.latest_task_id, &first_report_id),
+        (&next_parent, &second_child_id, &second_report_id),
+    ] {
+        let historical = work
+            .get(authenticated_request(
+                GetWorkSessionRequest {
+                    work_session_id: initial.work_session_id.clone(),
+                    report_task_id: Some(report_id.clone()),
+                },
+                &operator_token,
+                None,
+            )?)
+            .await?
+            .into_inner();
+        ensure!(
+            historical.latest_task_id == *child_id
+                && historical.starter_task_id == parent.task_id
+                && historical.report_task_id.as_ref() == Some(report_id)
+                && historical.report_task_state() == TaskState::Succeeded
+        );
+        let scoped = work
+            .list(authenticated_request(
+                list_request(parent),
+                &operator_token,
+                None,
+            )?)
+            .await?
+            .into_inner();
+        ensure!(
+            scoped.work_sessions.len() == 1 && scoped.work_sessions[0] == historical,
+            "parent history changed after continuation"
+        );
+    }
+    let unrelated = work
+        .get(authenticated_request(
+            GetWorkSessionRequest {
+                work_session_id: initial.work_session_id.clone(),
+                report_task_id: Some(next_parent.task_id.clone()),
+            },
+            &operator_token,
+            None,
+        )?)
+        .await
+        .expect_err("non-report historical selector");
+    ensure!(matches!(
+        unrelated.code(),
+        Code::NotFound | Code::InvalidArgument
+    ));
+    let messages = conversations
+        .list_messages(authenticated_request(
+            ListMessagesRequest {
+                tag_id: "owner".into(),
+                conversation: "private".into(),
+                limit: 10,
+                cursor: String::new(),
+            },
+            &operator_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    ensure!(messages.messages.len() == 4);
+    let mut report_ids: Vec<_> = messages
+        .messages
+        .iter()
+        .filter(|m| m.work_session_report_id.as_deref() == Some(initial.work_session_id.as_str()))
+        .map(|m| {
+            let task = m.task.as_ref().expect("report Task");
+            assert!(
+                task.prompt.is_empty(),
+                "internal report prompt leaked into conversation"
+            );
+            task.task_id.clone()
+        })
+        .collect();
+    report_ids.sort();
+    let mut expected = vec![first_report_id, second_report_id];
+    expected.sort();
+    ensure!(report_ids == expected, "reports were lost or duplicated");
+    gateway_process.kill().await?;
     plane.kill().await?;
     Ok(())
 }

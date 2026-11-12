@@ -90,6 +90,29 @@ async function directMailbox() {
   return "fixture sent a direct message";
 }
 
+async function workSessionLifecycle(child) {
+  const tool = child ? "ask" : "continue_session";
+  const tools = (await sdkMcp("tools/list", {})).result?.tools;
+  if (tools?.map(({ name }) => name).join() !== tool)
+    throw new Error("Unexpected Work Session tool inventory");
+  const sessionId = "work/00000000-0000-4000-8000-000000000001";
+  const result = await coordinationCall(
+    tool,
+    child
+      ? { text: ` Which branch? ${process.env.ANTHROPIC_API_KEY} ` }
+      : { sessionId, message: ` Use staging ${process.env.ANTHROPIC_API_KEY} ` },
+  );
+  const text = result.content[0].text;
+  if (
+    result.isError ||
+    (child
+      ? text !== "Work Session question recorded."
+      : JSON.parse(text).workSessionId !== sessionId)
+  )
+    throw new Error("Work Session receipt missing");
+  return child ? "fixture asked its parent" : "fixture continued the child";
+}
+
 async function inspectSkillPackage() {
   const plugin = initialized.plugins?.[0];
   const root = plugin?.path ?? arg("--plugin-dir-no-mcp");
@@ -463,6 +486,8 @@ async function turn(message) {
     result = await coordinationTools(prompt === "coordination-tools");
   if (prompt === "direct-mailbox") result = await directMailbox();
   if (prompt === "start-work-session") result = await workSessionTools();
+  if (prompt === "ask-work-session" || prompt === "continue-work-session")
+    result = await workSessionLifecycle(prompt === "ask-work-session");
   if (prompt === "work-session-disabled") {
     if (
       await hook(
