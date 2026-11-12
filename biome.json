@@ -33,6 +33,14 @@
       "allowTrailingCommas": false
     }
   },
+  "overrides": [
+    {
+      "includes": ["apps/desktop/src/shadcn.css"],
+      "css": {
+        "parser": { "tailwindDirectives": true }
+      }
+    }
+  ],
   "files": {
     "includes": [
       "**",
