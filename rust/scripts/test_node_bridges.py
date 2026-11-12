@@ -1,10 +1,11 @@
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 
 from native_archive import ArchiveError
-from node_bridges import relocate_self_alias, verify_deploy_lock, verify_relocatable_tree
+from node_bridges import prepare_workspace, relocate_self_alias, verify_deploy_lock, verify_relocatable_tree
 
 
 class NodeBridgeContracts(unittest.TestCase):
@@ -57,6 +58,24 @@ class NodeBridgeContracts(unittest.TestCase):
         link.symlink_to("missing")
         with self.assertRaisesRegex(ArchiveError, "unresolved staged link"):
             verify_relocatable_tree(stage)
+
+    def test_staging_uses_committed_source_in_a_separate_workspace(self):
+        repo = self.root / "checkout"
+        repo.mkdir()
+        scratch = self.root / "scratch"
+        scratch.mkdir()
+        subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
+        (repo / "manifest").write_text("committed")
+        subprocess.run(["git", "add", "manifest"], cwd=repo, check=True)
+        subprocess.run(["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
+                        "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Source"], cwd=repo, check=True)
+        (repo / "manifest").write_text("working copy")
+        (repo / "node_modules").mkdir()
+        (repo / "node_modules/state").write_text("development")
+        source = prepare_workspace(repo, scratch)
+        self.assertEqual((source / "manifest").read_text(), "committed")
+        self.assertFalse((source / "node_modules").exists())
+        self.assertEqual((repo / "node_modules/state").read_text(), "development")
 
 
 if __name__ == "__main__":

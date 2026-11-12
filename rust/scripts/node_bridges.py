@@ -2,15 +2,17 @@
 # requires-python = ">=3.13"
 # dependencies = ["PyYAML==6.0.3"]
 # ///
-"""Stage version-matched Node helpers beside an installed Rust CLI."""
+"""Stage version-matched Node helpers from a committed release or source snapshot."""
 
 import argparse
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import stat
 import subprocess
+import tarfile
 import tempfile
 
 import yaml
@@ -119,7 +121,31 @@ def smoke_entry(node, kind, package):
                 f"packaged {kind} entry did not reach its bootstrap check")
 
 
+def prepare_workspace(repo, scratch):
+    source = scratch / "source"
+    if (repo / ".git").exists():
+        archive = scratch / "source.tar"
+        subprocess.run(["git", "archive", "--format=tar", "-o", archive, "HEAD"], cwd=repo, check=True)
+        with tarfile.open(archive) as contents:
+            contents.extractall(source, filter="data")
+        archive.unlink()
+    else:
+        shutil.copytree(
+            repo, source, symlinks=True,
+            ignore=shutil.ignore_patterns(".git", "node_modules", "dist", "target", ".pnpm-store", ".venv", "*.tsbuildinfo"),
+        )
+    return source
+
+
 def stage(output, kinds, repo=REPO):
+    # Legacy pnpm deploy changes workspace dependency state. Keep installs,
+    # generated files, and the legacy deploy lock inside a disposable source tree.
+    with tempfile.TemporaryDirectory(prefix="supertag-bridge-source-") as temporary:
+        source = prepare_workspace(repo, Path(temporary))
+        return stage_workspace(output, kinds, source)
+
+
+def stage_workspace(output, kinds, repo):
     output = Path(output).resolve()
     require(not output.exists(), "Node bridge output already exists")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -127,7 +153,14 @@ def stage(output, kinds, repo=REPO):
     manager = subprocess.check_output(["pnpm", "--version"], cwd=repo, text=True).strip()
     require(root_package["packageManager"] == f"pnpm@{manager}", "workspace pnpm version differs from its pin")
     source_lock = lockfile(repo / "pnpm-lock.yaml")
-    node = Path(subprocess.check_output(["pnpm", "exec", "node", "-p", "process.execPath"], cwd=repo, text=True).strip())
+    subprocess.run(["pnpm", "install", "--frozen-lockfile", "--prefer-offline", "--prod=false"],
+                   cwd=repo, env={**os.environ, "CI": "true"}, check=True)
+    probe = subprocess.check_output(
+        ["pnpm", "--silent", "exec", "node", "-p", "process.execPath"], cwd=repo, text=True,
+    ).splitlines()
+    require(bool(probe), "workspace Node interpreter is unavailable")
+    node = Path(probe[-1].strip())
+    require(node.is_absolute() and node.is_file(), "workspace Node interpreter is unavailable")
     verify_node(node)
     selected = sorted(set(kinds))
     command = ["pnpm"]
@@ -143,8 +176,8 @@ def stage(output, kinds, repo=REPO):
             source_package = (repo / "packages/runtime/harnesses" / kind).resolve()
             target = staging / "node_modules" / package
             target.parent.mkdir(parents=True, exist_ok=True)
-            subprocess.run(["pnpm", "--filter", package, "--prod", "deploy", "--legacy", "--offline",
-                            "--frozen-lockfile", "--ignore-scripts", target], cwd=repo, check=True)
+            subprocess.run(["pnpm", "--filter", package, "--prod", "deploy", "--legacy",
+                            "--prefer-offline", "--ignore-scripts", target], cwd=repo, check=True)
             verify_deploy_lock(source_lock, lockfile(target / "node_modules/.pnpm/lock.yaml"), repo)
             relocate_self_alias(target, package, source_package)
             verify_relocatable_tree(target)
