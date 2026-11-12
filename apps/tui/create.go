@@ -75,7 +75,7 @@ func (m *model) openObjectiveForm(outcome string) tea.Cmd {
 	f := &objectiveForm{owner: owner}
 	placeholders := [formFields]string{
 		"The result, how success is verified, what must not change, when to ask a person",
-		"A Team's name, or empty for " + terminalText(owner) + " to work alone",
+		"A Team's name, or empty for " + terminalText(m.tagLabel(owner)) + " to work alone",
 		"Such as 300 USD or $12.50; empty for no budget",
 	}
 	for i := range f.fields {
@@ -222,9 +222,10 @@ func (m *model) showObjective(id string) tea.Cmd {
 func (m model) renderObjectiveForm() string {
 	f := m.form
 	wrap := lipgloss.NewStyle().Width(m.paneWidth())
-	owner := terminalText(f.owner)
+	ownerName := m.tagLabel(f.owner)
+	owner := terminalText(ownerName)
 	if f.created != nil {
-		text := wrap.Render(createdLines(f.owner, f.created))
+		text := wrap.Render(createdLines(ownerName, f.created))
 		if m.client.RuntimeV2() {
 			text = wrap.Render("Created Objective " + terminalText(f.created.GetObjective().GetId()) +
 				".\n" + owner + "'s first Task is " + terminalText(f.created.GetStartedTaskId()) + ".")

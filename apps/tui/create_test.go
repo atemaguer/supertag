@@ -18,7 +18,7 @@ func TestRuntimeV2ObjectiveFormKeepsTeamSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(m.client.Close)
-	m.tags, m.teams, m.selected = tagList("lead"), []*operatorv1.Team{billingTeam()}, 0
+	m.tags, m.teams, m.selected = runtimeTestTags(), []*operatorv1.Team{billingTeam()}, 0
 	m = update(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
 	m.openObjectiveForm("")
 	m.form.fields[fieldOutcome].SetValue("Verify SSO")

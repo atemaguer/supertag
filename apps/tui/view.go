@@ -362,7 +362,7 @@ func (m model) paneTitle() string {
 		}
 		return "Team · " + terminalText(name)
 	case paneNewObjective:
-		return "New Objective · owned by " + terminalText(m.form.owner)
+		return "New Objective · owned by " + terminalText(m.tagLabel(m.form.owner))
 	}
 	tag := m.selectedTag()
 	if tag == "" {

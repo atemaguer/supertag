@@ -33,8 +33,15 @@ func runtimeModelAt(t *testing.T, endpoint string) model {
 		t.Fatal(err)
 	}
 	t.Cleanup(m.client.Close)
-	m.tags, m.selected = tagList("lead"), 0
+	m.tags, m.selected = runtimeTestTags(), 0
 	return update(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+}
+
+func runtimeTestTags() []*operatorv1.Tag {
+	return []*operatorv1.Tag{{
+		Metadata: &operatorv1.Metadata{Id: "lead", Name: "Engineering Lead"},
+		Status:   &operatorv1.TagStatus{Phase: operatorv1.TagPhase_TAG_PHASE_ACTIVE},
+	}}
 }
 
 func runtimeHistoryMessage(id, text, reply string) *operatorv1.Message {
