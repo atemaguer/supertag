@@ -1,3 +1,4 @@
+mod artifact_publications;
 mod artifacts;
 mod github_publications;
 mod github_workspaces;
@@ -50,6 +51,7 @@ use supertag_protocol::{
         ReportedCostLimit, ResolveAttemptRequest, RetireTagRequest, RevokeHostRequest,
         SubmitTaskRequest, Tag, Task, WorkspaceSpec,
         artifact_directory_server::ArtifactDirectoryServer,
+        artifact_publications_server::ArtifactPublicationsServer,
         artifact_volume_directory_server::ArtifactVolumeDirectoryServer,
         attempt_inputs_server::AttemptInputsServer, attempt_mailbox_server::AttemptMailboxServer,
         attempt_work_sessions_server::AttemptWorkSessionsServer,
@@ -440,6 +442,9 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         /// Include one submitted artifact file from the same Objective. Repeat for more files.
         #[arg(long = "artifact-input", value_name = "ARTIFACT_ID:PATH")]
         artifact_inputs: Vec<String>,
+        /// Bind selected artifact inputs to this explicit publication approval.
+        #[arg(long, requires = "artifact_inputs")]
+        artifact_publication: Option<String>,
         prompt: String,
     },
     /// Read a Task.
@@ -447,6 +452,13 @@ Catalog entries expose tools only when the Task's accepted Permission Sets grant
         #[command(flatten)]
         connection: Connection,
         task_id: String,
+    },
+    /// Approve and withdraw explicit cross-Objective artifact reuse.
+    ArtifactPublication {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: artifact_publications::PublicationCommand,
     },
     /// Register Volumes and copy immutable artifact files into explicitly mapped storage.
     Volume {
@@ -1068,6 +1080,7 @@ async fn run(command: Command) -> Result<()> {
             max_native_agents,
             outputs,
             artifact_inputs,
+            artifact_publication,
             prompt,
         } => {
             let (mut operator, token) = operator(connection).await?;
@@ -1086,7 +1099,8 @@ async fn run(command: Command) -> Result<()> {
                 max_native_agents,
             });
             let output_policy = outputs.as_deref().map(output_policy::read).transpose()?;
-            let input_artifacts = task_artifact_inputs::parse(artifact_inputs)?;
+            let input_artifacts =
+                task_artifact_inputs::parse(artifact_inputs, artifact_publication)?;
             let task = operator
                 .submit_task(request(
                     SubmitTaskRequest {
@@ -1123,6 +1137,10 @@ async fn run(command: Command) -> Result<()> {
         } => {
             artifacts::download(connection, task_id, kind, &output).await?;
         }
+        Command::ArtifactPublication {
+            connection,
+            command,
+        } => artifact_publications::run(connection, command).await?,
         Command::Volume {
             connection,
             command,
@@ -1292,6 +1310,9 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .await;
     health.set_serving::<ConnectorServer<ControlPlane>>().await;
     health.set_serving::<ObjectivesServer<ControlPlane>>().await;
+    health
+        .set_serving::<ArtifactPublicationsServer<ControlPlane>>()
+        .await;
     health.set_serving::<TeamsServer<ControlPlane>>().await;
     health
         .set_serving::<AttemptWorkstreamsServer<ControlPlane>>()
@@ -1395,6 +1416,11 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .add_service(plane.github_source_resolver_service())
         .add_service(plane.github_publications_service())
         .add_service(plane.github_publisher_service())
+        .add_service(
+            ArtifactPublicationsServer::new(plane.clone())
+                .max_decoding_message_size(MAX_MESSAGE_BYTES)
+                .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        )
         .add_service(plane.policy_service())
         .add_service(plane.surface_policy_service())
         .add_service(plane.work_sessions_service())
@@ -1549,6 +1575,9 @@ async fn gateway(
         .await;
     health.set_serving::<MailboxServer<Gateway>>().await;
     health.set_serving::<InboxServer<Gateway>>().await;
+    health
+        .set_serving::<ArtifactPublicationsServer<Gateway>>()
+        .await;
     health.set_serving::<PolicyCatalogServer<Gateway>>().await;
     health
         .set_serving::<SurfacePolicyCatalogServer<Gateway>>()
@@ -1596,6 +1625,7 @@ async fn gateway(
         .add_service(gateway.inbox_service())
         .add_service(gateway.github_workspaces_service())
         .add_service(gateway.github_publications_service())
+        .add_service(gateway.artifact_publications_service())
         .add_service(gateway.policy_service())
         .add_service(gateway.surface_policy_service())
         .add_service(gateway.work_sessions_service())
@@ -2081,6 +2111,7 @@ fn print_task(task: &Task) {
                 "artifact_id": input.artifact_id,
                 "source_task_id": input.source_task_id,
                 "source_attempt_id": input.source_attempt_id,
+                "publication": input.publication.as_ref().map(|p|json!({"publication_id":p.publication_id,"publication_revision":p.publication_revision,"consumption_id":p.consumption_id,"consumption_revision":p.consumption_revision,"source_objective_id":p.source_objective_id,"destination_objective_id":p.destination_objective_id})),
                 "files": input.files.iter().map(|file| json!({
                     "path": file.path,
                     "blob": file.blob.as_ref().map(|blob| json!({

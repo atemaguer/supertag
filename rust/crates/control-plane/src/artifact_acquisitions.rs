@@ -43,6 +43,11 @@ pub(crate) async fn visible_in(
     consumer: &str,
     id: &str,
 ) -> Result<CapturedArtifact> {
+    if let Some(capture) =
+        crate::artifact_publications::accepted_capture_in(tx, consumer, id).await?
+    {
+        return Ok(capture);
+    }
     let row=sqlx::query("SELECT c.payload FROM supertag_v2_artifact_captures c JOIN supertag_v2_task_audience source ON source.task_id=c.task_id JOIN supertag_v2_task_audience current ON current.task_id=$1 WHERE c.artifact_id=$2 AND c.committed_order IS NOT NULL AND (source.owner='' OR source.owner=current.owner) AND ((source.tag_id=current.tag_id AND source.session_id=current.session_id) OR (current.objective_id<>'' AND source.objective_id=current.objective_id))")
         .bind(consumer).bind(id).fetch_optional(&mut **tx).await?.ok_or_else(missing)?;
     decode(&row.try_get::<Vec<u8>, _>("payload")?)

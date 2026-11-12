@@ -774,6 +774,14 @@ impl Store {
         if record.value.status != ObjectiveStatus::ReadyForReview as i32 {
             return Err(refused("the Objective must be ready for review"));
         }
+        crate::artifact_publications::review_in(
+            &mut tx,
+            &record.value,
+            principal,
+            input.approved,
+            now_ms,
+        )
+        .await?;
         if input.approved {
             record.change_status(ObjectiveStatus::Completed, now_ms);
             if !input.feedback.trim().is_empty() {

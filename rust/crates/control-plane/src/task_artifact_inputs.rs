@@ -36,6 +36,9 @@ pub(crate) fn normalize(
     }
     for input in &mut result {
         name("artifact ID", &input.artifact_id)?;
+        if let Some(id) = &input.publication_approval_id {
+            name("publication ID", id)?;
+        }
         if input.paths.is_empty() {
             return Err(invalid("Task artifact input requires selected file paths"));
         }
@@ -112,49 +115,56 @@ pub(crate) async fn accept_in(
     let mut total = 0_u64;
     let mut inputs = Vec::with_capacity(selections.len());
     for selection in selections {
-        let artifact = visible_in(tx, &task.task_id, &selection.artifact_id)
-            .await
-            .map_err(|error| match error {
-                StoreError::NotFound(_) => unavailable(),
-                other => other,
-            })?;
+        let (artifact, publication) = if let Some(publication) = &selection.publication_approval_id
+        {
+            let (capture, pin) = crate::artifact_publications::resolve_selection_in(
+                tx,
+                &objective,
+                publication,
+                &selection.artifact_id,
+                &selection.paths,
+            )
+            .await?;
+            (capture, Some(pin))
+        } else {
+            let artifact = visible_in(tx, &task.task_id, &selection.artifact_id).await?;
+            let producer = artifact
+                .summary
+                .as_ref()
+                .and_then(|s| s.producer.as_ref())
+                .ok_or_else(unavailable)?;
+            if producer.objective_id.as_deref() != Some(objective.as_str())
+                || !task_access_in(tx, principal, &producer.task_id).await?
+            {
+                return Err(unavailable());
+            }
+            let source=sqlx::query("SELECT result_artifacts FROM supertag_v2_tasks WHERE task_id=$1 AND attempt_id=$2 AND state=$3 AND cleanup_pending=0").bind(&producer.task_id).bind(&producer.attempt_id).bind(TaskState::Succeeded as i64).fetch_optional(&mut **tx).await?.ok_or_else(unavailable)?;
+            let submitted = submitted_from_row(&source)?;
+            if !submitted.iter().any(|s| {
+                s.artifact_id == selection.artifact_id
+                    && selection.paths.iter().all(|p| s.paths.contains(p))
+            }) {
+                return Err(unavailable());
+            }
+            if selection.require_accepted
+                && !crate::artifact_publications::accepted_in(
+                    tx,
+                    &selection.artifact_id,
+                    &selection.paths,
+                )
+                .await?
+            {
+                return Err(StoreError::FailedPrecondition(
+                    "exact artifact review evidence is unavailable".into(),
+                ));
+            }
+            (artifact, None)
+        };
         let producer = artifact
             .summary
             .as_ref()
-            .and_then(|summary| summary.producer.as_ref())
+            .and_then(|s| s.producer.as_ref())
             .ok_or_else(unavailable)?;
-        if producer.objective_id.as_deref() != Some(objective.as_str())
-            || !task_access_in(tx, principal, &producer.task_id).await?
-        {
-            return Err(unavailable());
-        }
-        let source = sqlx::query(
-            "SELECT result_artifacts FROM supertag_v2_tasks
-             WHERE task_id=$1 AND attempt_id=$2 AND state=$3 AND cleanup_pending=0",
-        )
-        .bind(&producer.task_id)
-        .bind(&producer.attempt_id)
-        .bind(TaskState::Succeeded as i64)
-        .fetch_optional(&mut **tx)
-        .await?
-        .ok_or_else(unavailable)?;
-        let submitted = submitted_from_row(&source)?;
-        let submitted = submitted
-            .iter()
-            .find(|item| item.artifact_id == selection.artifact_id)
-            .ok_or_else(unavailable)?;
-        if selection
-            .paths
-            .iter()
-            .any(|path| !submitted.paths.contains(path))
-        {
-            return Err(unavailable());
-        }
-        if selection.require_accepted {
-            return Err(StoreError::FailedPrecondition(
-                "exact artifact review evidence is unavailable".into(),
-            ));
-        }
         let mut files = Vec::with_capacity(selection.paths.len());
         for path in &selection.paths {
             let file = artifact
@@ -178,6 +188,7 @@ pub(crate) async fn accept_in(
             artifact_id: selection.artifact_id.clone(),
             source_task_id: producer.task_id.clone(),
             source_attempt_id: producer.attempt_id.clone(),
+            publication,
             files,
         });
     }

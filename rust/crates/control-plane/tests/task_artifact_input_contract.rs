@@ -177,6 +177,7 @@ async fn exercise(url: &str) {
             artifact_id: submitted_id.clone(),
             paths: vec!["other.txt".into()],
             require_accepted: false,
+            publication_approval_id: None,
         }],
         ..Default::default()
     };
@@ -256,6 +257,7 @@ async fn exercise(url: &str) {
         artifact_id: pinned.artifact_id.clone(),
         paths: vec!["report.txt".into()],
         require_accepted: false,
+        publication_approval_id: None,
     }];
     assert!(store.submit_task(OPERATOR, &request).await.is_err());
 }

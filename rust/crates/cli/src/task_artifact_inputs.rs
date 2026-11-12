@@ -1,7 +1,10 @@
 use anyhow::{Result, ensure};
 use supertag_protocol::{artifacts::validate_artifact_path, v2::TaskArtifactInputSelection};
 
-pub(crate) fn parse(arguments: Vec<String>) -> Result<Vec<TaskArtifactInputSelection>> {
+pub(crate) fn parse(
+    arguments: Vec<String>,
+    publication: Option<String>,
+) -> Result<Vec<TaskArtifactInputSelection>> {
     let mut selections = std::collections::BTreeMap::<String, Vec<String>>::new();
     for argument in arguments {
         let (id, path) = argument
@@ -20,6 +23,7 @@ pub(crate) fn parse(arguments: Vec<String>) -> Result<Vec<TaskArtifactInputSelec
             artifact_id,
             paths,
             require_accepted: false,
+            publication_approval_id: publication.clone(),
         })
         .collect())
 }

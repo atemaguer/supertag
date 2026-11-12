@@ -313,3 +313,82 @@ message CommitArtifactVolumeCopyRequest { string copy_id = 1; BlobReference veri
 message GetArtifactVolumeCopyRequest { string copy_id = 1; }
 message ListArtifactVolumeCopiesRequest { string volume_id = 1; uint32 limit = 2; uint64 before_order = 3; }
 message ListArtifactVolumeCopiesResponse { repeated ArtifactVolumeCopy copies = 1; uint64 next_before_order = 2; }
+
+// Operator approvals expose only selected immutable entries to named Objectives.
+service ArtifactPublications {
+  rpc Publish(PublishArtifactRequest) returns (ArtifactPublication);
+  rpc Consume(ConsumeArtifactPublicationRequest) returns (ArtifactConsumptionApproval);
+  rpc WithdrawPublication(WithdrawArtifactApprovalRequest) returns (ArtifactPublication);
+  rpc WithdrawConsumption(WithdrawArtifactApprovalRequest) returns (ArtifactConsumptionApproval);
+  rpc GetPublication(GetArtifactApprovalRequest) returns (ArtifactPublication);
+  rpc GetConsumption(GetArtifactApprovalRequest) returns (ArtifactConsumptionApproval);
+  rpc ListPublications(ListObjectiveArtifactApprovalsRequest) returns (ListArtifactPublicationsResponse);
+  rpc ListConsumptions(ListObjectiveArtifactApprovalsRequest) returns (ListArtifactConsumptionsResponse);
+  rpc ListAudit(ListArtifactApprovalAuditRequest) returns (ListArtifactApprovalAuditResponse);
+}
+enum ArtifactApprovalStatus {
+  ARTIFACT_APPROVAL_STATUS_UNSPECIFIED = 0;
+  ARTIFACT_APPROVAL_STATUS_AVAILABLE = 1;
+  ARTIFACT_APPROVAL_STATUS_WITHDRAWN = 2;
+}
+message ArtifactPublication {
+  string publication_id = 1;
+  string source_objective_id = 2;
+  ArtifactProducer producer = 3;
+  string artifact_id = 4;
+  repeated ArtifactFile files = 5;
+  repeated string audience_objective_ids = 6;
+  string source_owner_tag_id = 7;
+  string assessment = 8;
+  string approved_by = 9;
+  int64 approved_at_ms = 10;
+  optional string supersedes_publication_id = 11;
+  ArtifactApprovalStatus status = 12;
+  uint64 revision = 13;
+  optional string withdrawn_by = 14;
+  optional int64 withdrawn_at_ms = 15;
+}
+// Audience projection deliberately excludes source Task, actor and assessment.
+message ArtifactPublicationView {
+  string publication_id = 1;
+  string source_objective_id = 2;
+  string artifact_id = 3;
+  repeated ArtifactFile files = 4;
+  optional string supersedes_publication_id = 5;
+  ArtifactApprovalStatus status = 6;
+  uint64 revision = 7;
+}
+message ArtifactConsumptionApproval {
+  string consumption_id = 1;
+  string publication_id = 2;
+  string objective_id = 3;
+  string approved_by = 4;
+  int64 approved_at_ms = 5;
+  ArtifactApprovalStatus status = 6;
+  uint64 revision = 7;
+  optional string withdrawn_by = 8;
+  optional int64 withdrawn_at_ms = 9;
+}
+message PublishArtifactRequest {
+  string publication_id = 1;
+  string artifact_id = 2;
+  repeated string paths = 3;
+  repeated string audience_objective_ids = 4;
+  optional string supersedes_publication_id = 5;
+}
+message ConsumeArtifactPublicationRequest {
+  string consumption_id = 1;
+  string publication_id = 2;
+  string objective_id = 3;
+}
+message WithdrawArtifactApprovalRequest { string approval_id = 1; uint64 expected_revision = 2; }
+message GetArtifactApprovalRequest { string approval_id = 1; }
+message ListObjectiveArtifactApprovalsRequest { string objective_id = 1; uint32 limit = 2; uint64 before_order = 3; }
+message ListArtifactPublicationsResponse { repeated ArtifactPublicationView publications = 1; uint64 next_before_order = 2; }
+message ListArtifactConsumptionsResponse { repeated ArtifactConsumptionApproval consumptions = 1; uint64 next_before_order = 2; }
+message ArtifactApprovalAuditEvent {
+  string approval_type = 1; string approval_id = 2; string objective_id = 3;
+  uint64 revision = 4; string action = 5; string actor = 6; int64 recorded_at_ms = 7;
+}
+message ListArtifactApprovalAuditRequest { string approval_type = 1; string approval_id = 2; }
+message ListArtifactApprovalAuditResponse { repeated ArtifactApprovalAuditEvent events = 1; }

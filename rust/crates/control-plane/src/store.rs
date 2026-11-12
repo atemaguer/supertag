@@ -71,7 +71,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 49;
+        const SCHEMA_VERSION: i64 = 50;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -171,6 +171,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0047_mcp_effects.sql"),
                 include_str!("../migrations/sqlite/0048_artifact_volumes.sql"),
                 include_str!("../migrations/sqlite/0049_task_artifact_inputs.sql"),
+                include_str!("../migrations/sqlite/0050_artifact_publications.sql"),
             ]
         } else {
             [
@@ -223,6 +224,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0047_mcp_effects.sql"),
                 include_str!("../migrations/postgresql/0048_artifact_volumes.sql"),
                 include_str!("../migrations/postgresql/0049_task_artifact_inputs.sql"),
+                include_str!("../migrations/postgresql/0050_artifact_publications.sql"),
             ]
         };
         if version < SCHEMA_VERSION {

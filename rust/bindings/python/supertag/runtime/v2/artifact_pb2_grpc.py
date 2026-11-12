@@ -1927,3 +1927,422 @@ class ArtifactVolumeDirectory:
             timeout,
             metadata,
             _registered_method=True)
+
+
+class ArtifactPublicationsStub:
+    """Operator approvals expose only selected immutable entries to named Objectives.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Publish = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactPublications/Publish',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.PublishArtifactRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactPublication.FromString,
+                _registered_method=True)
+        self.Consume = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactPublications/Consume',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ConsumeArtifactPublicationRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactConsumptionApproval.FromString,
+                _registered_method=True)
+        self.WithdrawPublication = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactPublications/WithdrawPublication',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.WithdrawArtifactApprovalRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactPublication.FromString,
+                _registered_method=True)
+        self.WithdrawConsumption = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactPublications/WithdrawConsumption',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.WithdrawArtifactApprovalRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactConsumptionApproval.FromString,
+                _registered_method=True)
+        self.GetPublication = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactPublications/GetPublication',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactApprovalRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactPublication.FromString,
+                _registered_method=True)
+        self.GetConsumption = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactPublications/GetConsumption',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactApprovalRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactConsumptionApproval.FromString,
+                _registered_method=True)
+        self.ListPublications = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactPublications/ListPublications',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListObjectiveArtifactApprovalsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactPublicationsResponse.FromString,
+                _registered_method=True)
+        self.ListConsumptions = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactPublications/ListConsumptions',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListObjectiveArtifactApprovalsRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactConsumptionsResponse.FromString,
+                _registered_method=True)
+        self.ListAudit = channel.unary_unary(
+                '/supertag.runtime.v2.ArtifactPublications/ListAudit',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactApprovalAuditRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactApprovalAuditResponse.FromString,
+                _registered_method=True)
+
+
+class ArtifactPublicationsServicer:
+    """Operator approvals expose only selected immutable entries to named Objectives.
+    """
+
+    def Publish(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Consume(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def WithdrawPublication(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def WithdrawConsumption(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetPublication(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetConsumption(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListPublications(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListConsumptions(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListAudit(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_ArtifactPublicationsServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Publish': grpc.unary_unary_rpc_method_handler(
+                    servicer.Publish,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.PublishArtifactRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactPublication.SerializeToString,
+            ),
+            'Consume': grpc.unary_unary_rpc_method_handler(
+                    servicer.Consume,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ConsumeArtifactPublicationRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactConsumptionApproval.SerializeToString,
+            ),
+            'WithdrawPublication': grpc.unary_unary_rpc_method_handler(
+                    servicer.WithdrawPublication,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.WithdrawArtifactApprovalRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactPublication.SerializeToString,
+            ),
+            'WithdrawConsumption': grpc.unary_unary_rpc_method_handler(
+                    servicer.WithdrawConsumption,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.WithdrawArtifactApprovalRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactConsumptionApproval.SerializeToString,
+            ),
+            'GetPublication': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetPublication,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactApprovalRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactPublication.SerializeToString,
+            ),
+            'GetConsumption': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetConsumption,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactApprovalRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactConsumptionApproval.SerializeToString,
+            ),
+            'ListPublications': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListPublications,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListObjectiveArtifactApprovalsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactPublicationsResponse.SerializeToString,
+            ),
+            'ListConsumptions': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListConsumptions,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListObjectiveArtifactApprovalsRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactConsumptionsResponse.SerializeToString,
+            ),
+            'ListAudit': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListAudit,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactApprovalAuditRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactApprovalAuditResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.ArtifactPublications', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.ArtifactPublications', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class ArtifactPublications:
+    """Operator approvals expose only selected immutable entries to named Objectives.
+    """
+
+    @staticmethod
+    def Publish(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactPublications/Publish',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.PublishArtifactRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactPublication.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Consume(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactPublications/Consume',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ConsumeArtifactPublicationRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactConsumptionApproval.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def WithdrawPublication(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactPublications/WithdrawPublication',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.WithdrawArtifactApprovalRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactPublication.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def WithdrawConsumption(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactPublications/WithdrawConsumption',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.WithdrawArtifactApprovalRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactConsumptionApproval.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetPublication(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactPublications/GetPublication',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactApprovalRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactPublication.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetConsumption(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactPublications/GetConsumption',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.GetArtifactApprovalRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ArtifactConsumptionApproval.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListPublications(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactPublications/ListPublications',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListObjectiveArtifactApprovalsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactPublicationsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListConsumptions(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactPublications/ListConsumptions',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListObjectiveArtifactApprovalsRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactConsumptionsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListAudit(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.ArtifactPublications/ListAudit',
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactApprovalAuditRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_artifact__pb2.ListArtifactApprovalAuditResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)

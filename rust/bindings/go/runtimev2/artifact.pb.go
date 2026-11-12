@@ -174,6 +174,55 @@ func (ArtifactVolumeCopyState) EnumDescriptor() ([]byte, []int) {
 	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{2}
 }
 
+type ArtifactApprovalStatus int32
+
+const (
+	ArtifactApprovalStatus_ARTIFACT_APPROVAL_STATUS_UNSPECIFIED ArtifactApprovalStatus = 0
+	ArtifactApprovalStatus_ARTIFACT_APPROVAL_STATUS_AVAILABLE   ArtifactApprovalStatus = 1
+	ArtifactApprovalStatus_ARTIFACT_APPROVAL_STATUS_WITHDRAWN   ArtifactApprovalStatus = 2
+)
+
+// Enum value maps for ArtifactApprovalStatus.
+var (
+	ArtifactApprovalStatus_name = map[int32]string{
+		0: "ARTIFACT_APPROVAL_STATUS_UNSPECIFIED",
+		1: "ARTIFACT_APPROVAL_STATUS_AVAILABLE",
+		2: "ARTIFACT_APPROVAL_STATUS_WITHDRAWN",
+	}
+	ArtifactApprovalStatus_value = map[string]int32{
+		"ARTIFACT_APPROVAL_STATUS_UNSPECIFIED": 0,
+		"ARTIFACT_APPROVAL_STATUS_AVAILABLE":   1,
+		"ARTIFACT_APPROVAL_STATUS_WITHDRAWN":   2,
+	}
+)
+
+func (x ArtifactApprovalStatus) Enum() *ArtifactApprovalStatus {
+	p := new(ArtifactApprovalStatus)
+	*p = x
+	return p
+}
+
+func (x ArtifactApprovalStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ArtifactApprovalStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_supertag_runtime_v2_artifact_proto_enumTypes[3].Descriptor()
+}
+
+func (ArtifactApprovalStatus) Type() protoreflect.EnumType {
+	return &file_supertag_runtime_v2_artifact_proto_enumTypes[3]
+}
+
+func (x ArtifactApprovalStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ArtifactApprovalStatus.Descriptor instead.
+func (ArtifactApprovalStatus) EnumDescriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{3}
+}
+
 type ArtifactDescription struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Title         string                 `protobuf:"bytes,1,opt,name=title,proto3" json:"title,omitempty"`
@@ -2807,6 +2856,947 @@ func (x *ListArtifactVolumeCopiesResponse) GetNextBeforeOrder() uint64 {
 	return 0
 }
 
+type ArtifactPublication struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	PublicationId           string                 `protobuf:"bytes,1,opt,name=publication_id,json=publicationId,proto3" json:"publication_id,omitempty"`
+	SourceObjectiveId       string                 `protobuf:"bytes,2,opt,name=source_objective_id,json=sourceObjectiveId,proto3" json:"source_objective_id,omitempty"`
+	Producer                *ArtifactProducer      `protobuf:"bytes,3,opt,name=producer,proto3" json:"producer,omitempty"`
+	ArtifactId              string                 `protobuf:"bytes,4,opt,name=artifact_id,json=artifactId,proto3" json:"artifact_id,omitempty"`
+	Files                   []*ArtifactFile        `protobuf:"bytes,5,rep,name=files,proto3" json:"files,omitempty"`
+	AudienceObjectiveIds    []string               `protobuf:"bytes,6,rep,name=audience_objective_ids,json=audienceObjectiveIds,proto3" json:"audience_objective_ids,omitempty"`
+	SourceOwnerTagId        string                 `protobuf:"bytes,7,opt,name=source_owner_tag_id,json=sourceOwnerTagId,proto3" json:"source_owner_tag_id,omitempty"`
+	Assessment              string                 `protobuf:"bytes,8,opt,name=assessment,proto3" json:"assessment,omitempty"`
+	ApprovedBy              string                 `protobuf:"bytes,9,opt,name=approved_by,json=approvedBy,proto3" json:"approved_by,omitempty"`
+	ApprovedAtMs            int64                  `protobuf:"varint,10,opt,name=approved_at_ms,json=approvedAtMs,proto3" json:"approved_at_ms,omitempty"`
+	SupersedesPublicationId *string                `protobuf:"bytes,11,opt,name=supersedes_publication_id,json=supersedesPublicationId,proto3,oneof" json:"supersedes_publication_id,omitempty"`
+	Status                  ArtifactApprovalStatus `protobuf:"varint,12,opt,name=status,proto3,enum=supertag.runtime.v2.ArtifactApprovalStatus" json:"status,omitempty"`
+	Revision                uint64                 `protobuf:"varint,13,opt,name=revision,proto3" json:"revision,omitempty"`
+	WithdrawnBy             *string                `protobuf:"bytes,14,opt,name=withdrawn_by,json=withdrawnBy,proto3,oneof" json:"withdrawn_by,omitempty"`
+	WithdrawnAtMs           *int64                 `protobuf:"varint,15,opt,name=withdrawn_at_ms,json=withdrawnAtMs,proto3,oneof" json:"withdrawn_at_ms,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *ArtifactPublication) Reset() {
+	*x = ArtifactPublication{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactPublication) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactPublication) ProtoMessage() {}
+
+func (x *ArtifactPublication) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactPublication.ProtoReflect.Descriptor instead.
+func (*ArtifactPublication) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *ArtifactPublication) GetPublicationId() string {
+	if x != nil {
+		return x.PublicationId
+	}
+	return ""
+}
+
+func (x *ArtifactPublication) GetSourceObjectiveId() string {
+	if x != nil {
+		return x.SourceObjectiveId
+	}
+	return ""
+}
+
+func (x *ArtifactPublication) GetProducer() *ArtifactProducer {
+	if x != nil {
+		return x.Producer
+	}
+	return nil
+}
+
+func (x *ArtifactPublication) GetArtifactId() string {
+	if x != nil {
+		return x.ArtifactId
+	}
+	return ""
+}
+
+func (x *ArtifactPublication) GetFiles() []*ArtifactFile {
+	if x != nil {
+		return x.Files
+	}
+	return nil
+}
+
+func (x *ArtifactPublication) GetAudienceObjectiveIds() []string {
+	if x != nil {
+		return x.AudienceObjectiveIds
+	}
+	return nil
+}
+
+func (x *ArtifactPublication) GetSourceOwnerTagId() string {
+	if x != nil {
+		return x.SourceOwnerTagId
+	}
+	return ""
+}
+
+func (x *ArtifactPublication) GetAssessment() string {
+	if x != nil {
+		return x.Assessment
+	}
+	return ""
+}
+
+func (x *ArtifactPublication) GetApprovedBy() string {
+	if x != nil {
+		return x.ApprovedBy
+	}
+	return ""
+}
+
+func (x *ArtifactPublication) GetApprovedAtMs() int64 {
+	if x != nil {
+		return x.ApprovedAtMs
+	}
+	return 0
+}
+
+func (x *ArtifactPublication) GetSupersedesPublicationId() string {
+	if x != nil && x.SupersedesPublicationId != nil {
+		return *x.SupersedesPublicationId
+	}
+	return ""
+}
+
+func (x *ArtifactPublication) GetStatus() ArtifactApprovalStatus {
+	if x != nil {
+		return x.Status
+	}
+	return ArtifactApprovalStatus_ARTIFACT_APPROVAL_STATUS_UNSPECIFIED
+}
+
+func (x *ArtifactPublication) GetRevision() uint64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+func (x *ArtifactPublication) GetWithdrawnBy() string {
+	if x != nil && x.WithdrawnBy != nil {
+		return *x.WithdrawnBy
+	}
+	return ""
+}
+
+func (x *ArtifactPublication) GetWithdrawnAtMs() int64 {
+	if x != nil && x.WithdrawnAtMs != nil {
+		return *x.WithdrawnAtMs
+	}
+	return 0
+}
+
+// Audience projection deliberately excludes source Task, actor and assessment.
+type ArtifactPublicationView struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	PublicationId           string                 `protobuf:"bytes,1,opt,name=publication_id,json=publicationId,proto3" json:"publication_id,omitempty"`
+	SourceObjectiveId       string                 `protobuf:"bytes,2,opt,name=source_objective_id,json=sourceObjectiveId,proto3" json:"source_objective_id,omitempty"`
+	ArtifactId              string                 `protobuf:"bytes,3,opt,name=artifact_id,json=artifactId,proto3" json:"artifact_id,omitempty"`
+	Files                   []*ArtifactFile        `protobuf:"bytes,4,rep,name=files,proto3" json:"files,omitempty"`
+	SupersedesPublicationId *string                `protobuf:"bytes,5,opt,name=supersedes_publication_id,json=supersedesPublicationId,proto3,oneof" json:"supersedes_publication_id,omitempty"`
+	Status                  ArtifactApprovalStatus `protobuf:"varint,6,opt,name=status,proto3,enum=supertag.runtime.v2.ArtifactApprovalStatus" json:"status,omitempty"`
+	Revision                uint64                 `protobuf:"varint,7,opt,name=revision,proto3" json:"revision,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *ArtifactPublicationView) Reset() {
+	*x = ArtifactPublicationView{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactPublicationView) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactPublicationView) ProtoMessage() {}
+
+func (x *ArtifactPublicationView) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactPublicationView.ProtoReflect.Descriptor instead.
+func (*ArtifactPublicationView) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *ArtifactPublicationView) GetPublicationId() string {
+	if x != nil {
+		return x.PublicationId
+	}
+	return ""
+}
+
+func (x *ArtifactPublicationView) GetSourceObjectiveId() string {
+	if x != nil {
+		return x.SourceObjectiveId
+	}
+	return ""
+}
+
+func (x *ArtifactPublicationView) GetArtifactId() string {
+	if x != nil {
+		return x.ArtifactId
+	}
+	return ""
+}
+
+func (x *ArtifactPublicationView) GetFiles() []*ArtifactFile {
+	if x != nil {
+		return x.Files
+	}
+	return nil
+}
+
+func (x *ArtifactPublicationView) GetSupersedesPublicationId() string {
+	if x != nil && x.SupersedesPublicationId != nil {
+		return *x.SupersedesPublicationId
+	}
+	return ""
+}
+
+func (x *ArtifactPublicationView) GetStatus() ArtifactApprovalStatus {
+	if x != nil {
+		return x.Status
+	}
+	return ArtifactApprovalStatus_ARTIFACT_APPROVAL_STATUS_UNSPECIFIED
+}
+
+func (x *ArtifactPublicationView) GetRevision() uint64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+type ArtifactConsumptionApproval struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ConsumptionId string                 `protobuf:"bytes,1,opt,name=consumption_id,json=consumptionId,proto3" json:"consumption_id,omitempty"`
+	PublicationId string                 `protobuf:"bytes,2,opt,name=publication_id,json=publicationId,proto3" json:"publication_id,omitempty"`
+	ObjectiveId   string                 `protobuf:"bytes,3,opt,name=objective_id,json=objectiveId,proto3" json:"objective_id,omitempty"`
+	ApprovedBy    string                 `protobuf:"bytes,4,opt,name=approved_by,json=approvedBy,proto3" json:"approved_by,omitempty"`
+	ApprovedAtMs  int64                  `protobuf:"varint,5,opt,name=approved_at_ms,json=approvedAtMs,proto3" json:"approved_at_ms,omitempty"`
+	Status        ArtifactApprovalStatus `protobuf:"varint,6,opt,name=status,proto3,enum=supertag.runtime.v2.ArtifactApprovalStatus" json:"status,omitempty"`
+	Revision      uint64                 `protobuf:"varint,7,opt,name=revision,proto3" json:"revision,omitempty"`
+	WithdrawnBy   *string                `protobuf:"bytes,8,opt,name=withdrawn_by,json=withdrawnBy,proto3,oneof" json:"withdrawn_by,omitempty"`
+	WithdrawnAtMs *int64                 `protobuf:"varint,9,opt,name=withdrawn_at_ms,json=withdrawnAtMs,proto3,oneof" json:"withdrawn_at_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtifactConsumptionApproval) Reset() {
+	*x = ArtifactConsumptionApproval{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactConsumptionApproval) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactConsumptionApproval) ProtoMessage() {}
+
+func (x *ArtifactConsumptionApproval) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactConsumptionApproval.ProtoReflect.Descriptor instead.
+func (*ArtifactConsumptionApproval) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *ArtifactConsumptionApproval) GetConsumptionId() string {
+	if x != nil {
+		return x.ConsumptionId
+	}
+	return ""
+}
+
+func (x *ArtifactConsumptionApproval) GetPublicationId() string {
+	if x != nil {
+		return x.PublicationId
+	}
+	return ""
+}
+
+func (x *ArtifactConsumptionApproval) GetObjectiveId() string {
+	if x != nil {
+		return x.ObjectiveId
+	}
+	return ""
+}
+
+func (x *ArtifactConsumptionApproval) GetApprovedBy() string {
+	if x != nil {
+		return x.ApprovedBy
+	}
+	return ""
+}
+
+func (x *ArtifactConsumptionApproval) GetApprovedAtMs() int64 {
+	if x != nil {
+		return x.ApprovedAtMs
+	}
+	return 0
+}
+
+func (x *ArtifactConsumptionApproval) GetStatus() ArtifactApprovalStatus {
+	if x != nil {
+		return x.Status
+	}
+	return ArtifactApprovalStatus_ARTIFACT_APPROVAL_STATUS_UNSPECIFIED
+}
+
+func (x *ArtifactConsumptionApproval) GetRevision() uint64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+func (x *ArtifactConsumptionApproval) GetWithdrawnBy() string {
+	if x != nil && x.WithdrawnBy != nil {
+		return *x.WithdrawnBy
+	}
+	return ""
+}
+
+func (x *ArtifactConsumptionApproval) GetWithdrawnAtMs() int64 {
+	if x != nil && x.WithdrawnAtMs != nil {
+		return *x.WithdrawnAtMs
+	}
+	return 0
+}
+
+type PublishArtifactRequest struct {
+	state                   protoimpl.MessageState `protogen:"open.v1"`
+	PublicationId           string                 `protobuf:"bytes,1,opt,name=publication_id,json=publicationId,proto3" json:"publication_id,omitempty"`
+	ArtifactId              string                 `protobuf:"bytes,2,opt,name=artifact_id,json=artifactId,proto3" json:"artifact_id,omitempty"`
+	Paths                   []string               `protobuf:"bytes,3,rep,name=paths,proto3" json:"paths,omitempty"`
+	AudienceObjectiveIds    []string               `protobuf:"bytes,4,rep,name=audience_objective_ids,json=audienceObjectiveIds,proto3" json:"audience_objective_ids,omitempty"`
+	SupersedesPublicationId *string                `protobuf:"bytes,5,opt,name=supersedes_publication_id,json=supersedesPublicationId,proto3,oneof" json:"supersedes_publication_id,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
+}
+
+func (x *PublishArtifactRequest) Reset() {
+	*x = PublishArtifactRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PublishArtifactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PublishArtifactRequest) ProtoMessage() {}
+
+func (x *PublishArtifactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PublishArtifactRequest.ProtoReflect.Descriptor instead.
+func (*PublishArtifactRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *PublishArtifactRequest) GetPublicationId() string {
+	if x != nil {
+		return x.PublicationId
+	}
+	return ""
+}
+
+func (x *PublishArtifactRequest) GetArtifactId() string {
+	if x != nil {
+		return x.ArtifactId
+	}
+	return ""
+}
+
+func (x *PublishArtifactRequest) GetPaths() []string {
+	if x != nil {
+		return x.Paths
+	}
+	return nil
+}
+
+func (x *PublishArtifactRequest) GetAudienceObjectiveIds() []string {
+	if x != nil {
+		return x.AudienceObjectiveIds
+	}
+	return nil
+}
+
+func (x *PublishArtifactRequest) GetSupersedesPublicationId() string {
+	if x != nil && x.SupersedesPublicationId != nil {
+		return *x.SupersedesPublicationId
+	}
+	return ""
+}
+
+type ConsumeArtifactPublicationRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ConsumptionId string                 `protobuf:"bytes,1,opt,name=consumption_id,json=consumptionId,proto3" json:"consumption_id,omitempty"`
+	PublicationId string                 `protobuf:"bytes,2,opt,name=publication_id,json=publicationId,proto3" json:"publication_id,omitempty"`
+	ObjectiveId   string                 `protobuf:"bytes,3,opt,name=objective_id,json=objectiveId,proto3" json:"objective_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConsumeArtifactPublicationRequest) Reset() {
+	*x = ConsumeArtifactPublicationRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConsumeArtifactPublicationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConsumeArtifactPublicationRequest) ProtoMessage() {}
+
+func (x *ConsumeArtifactPublicationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConsumeArtifactPublicationRequest.ProtoReflect.Descriptor instead.
+func (*ConsumeArtifactPublicationRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *ConsumeArtifactPublicationRequest) GetConsumptionId() string {
+	if x != nil {
+		return x.ConsumptionId
+	}
+	return ""
+}
+
+func (x *ConsumeArtifactPublicationRequest) GetPublicationId() string {
+	if x != nil {
+		return x.PublicationId
+	}
+	return ""
+}
+
+func (x *ConsumeArtifactPublicationRequest) GetObjectiveId() string {
+	if x != nil {
+		return x.ObjectiveId
+	}
+	return ""
+}
+
+type WithdrawArtifactApprovalRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	ApprovalId       string                 `protobuf:"bytes,1,opt,name=approval_id,json=approvalId,proto3" json:"approval_id,omitempty"`
+	ExpectedRevision uint64                 `protobuf:"varint,2,opt,name=expected_revision,json=expectedRevision,proto3" json:"expected_revision,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *WithdrawArtifactApprovalRequest) Reset() {
+	*x = WithdrawArtifactApprovalRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WithdrawArtifactApprovalRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WithdrawArtifactApprovalRequest) ProtoMessage() {}
+
+func (x *WithdrawArtifactApprovalRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WithdrawArtifactApprovalRequest.ProtoReflect.Descriptor instead.
+func (*WithdrawArtifactApprovalRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *WithdrawArtifactApprovalRequest) GetApprovalId() string {
+	if x != nil {
+		return x.ApprovalId
+	}
+	return ""
+}
+
+func (x *WithdrawArtifactApprovalRequest) GetExpectedRevision() uint64 {
+	if x != nil {
+		return x.ExpectedRevision
+	}
+	return 0
+}
+
+type GetArtifactApprovalRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ApprovalId    string                 `protobuf:"bytes,1,opt,name=approval_id,json=approvalId,proto3" json:"approval_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetArtifactApprovalRequest) Reset() {
+	*x = GetArtifactApprovalRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetArtifactApprovalRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetArtifactApprovalRequest) ProtoMessage() {}
+
+func (x *GetArtifactApprovalRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetArtifactApprovalRequest.ProtoReflect.Descriptor instead.
+func (*GetArtifactApprovalRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *GetArtifactApprovalRequest) GetApprovalId() string {
+	if x != nil {
+		return x.ApprovalId
+	}
+	return ""
+}
+
+type ListObjectiveArtifactApprovalsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ObjectiveId   string                 `protobuf:"bytes,1,opt,name=objective_id,json=objectiveId,proto3" json:"objective_id,omitempty"`
+	Limit         uint32                 `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
+	BeforeOrder   uint64                 `protobuf:"varint,3,opt,name=before_order,json=beforeOrder,proto3" json:"before_order,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListObjectiveArtifactApprovalsRequest) Reset() {
+	*x = ListObjectiveArtifactApprovalsRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListObjectiveArtifactApprovalsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListObjectiveArtifactApprovalsRequest) ProtoMessage() {}
+
+func (x *ListObjectiveArtifactApprovalsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListObjectiveArtifactApprovalsRequest.ProtoReflect.Descriptor instead.
+func (*ListObjectiveArtifactApprovalsRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *ListObjectiveArtifactApprovalsRequest) GetObjectiveId() string {
+	if x != nil {
+		return x.ObjectiveId
+	}
+	return ""
+}
+
+func (x *ListObjectiveArtifactApprovalsRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListObjectiveArtifactApprovalsRequest) GetBeforeOrder() uint64 {
+	if x != nil {
+		return x.BeforeOrder
+	}
+	return 0
+}
+
+type ListArtifactPublicationsResponse struct {
+	state           protoimpl.MessageState     `protogen:"open.v1"`
+	Publications    []*ArtifactPublicationView `protobuf:"bytes,1,rep,name=publications,proto3" json:"publications,omitempty"`
+	NextBeforeOrder uint64                     `protobuf:"varint,2,opt,name=next_before_order,json=nextBeforeOrder,proto3" json:"next_before_order,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ListArtifactPublicationsResponse) Reset() {
+	*x = ListArtifactPublicationsResponse{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListArtifactPublicationsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListArtifactPublicationsResponse) ProtoMessage() {}
+
+func (x *ListArtifactPublicationsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListArtifactPublicationsResponse.ProtoReflect.Descriptor instead.
+func (*ListArtifactPublicationsResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *ListArtifactPublicationsResponse) GetPublications() []*ArtifactPublicationView {
+	if x != nil {
+		return x.Publications
+	}
+	return nil
+}
+
+func (x *ListArtifactPublicationsResponse) GetNextBeforeOrder() uint64 {
+	if x != nil {
+		return x.NextBeforeOrder
+	}
+	return 0
+}
+
+type ListArtifactConsumptionsResponse struct {
+	state           protoimpl.MessageState         `protogen:"open.v1"`
+	Consumptions    []*ArtifactConsumptionApproval `protobuf:"bytes,1,rep,name=consumptions,proto3" json:"consumptions,omitempty"`
+	NextBeforeOrder uint64                         `protobuf:"varint,2,opt,name=next_before_order,json=nextBeforeOrder,proto3" json:"next_before_order,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ListArtifactConsumptionsResponse) Reset() {
+	*x = ListArtifactConsumptionsResponse{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListArtifactConsumptionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListArtifactConsumptionsResponse) ProtoMessage() {}
+
+func (x *ListArtifactConsumptionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListArtifactConsumptionsResponse.ProtoReflect.Descriptor instead.
+func (*ListArtifactConsumptionsResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *ListArtifactConsumptionsResponse) GetConsumptions() []*ArtifactConsumptionApproval {
+	if x != nil {
+		return x.Consumptions
+	}
+	return nil
+}
+
+func (x *ListArtifactConsumptionsResponse) GetNextBeforeOrder() uint64 {
+	if x != nil {
+		return x.NextBeforeOrder
+	}
+	return 0
+}
+
+type ArtifactApprovalAuditEvent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ApprovalType  string                 `protobuf:"bytes,1,opt,name=approval_type,json=approvalType,proto3" json:"approval_type,omitempty"`
+	ApprovalId    string                 `protobuf:"bytes,2,opt,name=approval_id,json=approvalId,proto3" json:"approval_id,omitempty"`
+	ObjectiveId   string                 `protobuf:"bytes,3,opt,name=objective_id,json=objectiveId,proto3" json:"objective_id,omitempty"`
+	Revision      uint64                 `protobuf:"varint,4,opt,name=revision,proto3" json:"revision,omitempty"`
+	Action        string                 `protobuf:"bytes,5,opt,name=action,proto3" json:"action,omitempty"`
+	Actor         string                 `protobuf:"bytes,6,opt,name=actor,proto3" json:"actor,omitempty"`
+	RecordedAtMs  int64                  `protobuf:"varint,7,opt,name=recorded_at_ms,json=recordedAtMs,proto3" json:"recorded_at_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtifactApprovalAuditEvent) Reset() {
+	*x = ArtifactApprovalAuditEvent{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactApprovalAuditEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactApprovalAuditEvent) ProtoMessage() {}
+
+func (x *ArtifactApprovalAuditEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactApprovalAuditEvent.ProtoReflect.Descriptor instead.
+func (*ArtifactApprovalAuditEvent) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *ArtifactApprovalAuditEvent) GetApprovalType() string {
+	if x != nil {
+		return x.ApprovalType
+	}
+	return ""
+}
+
+func (x *ArtifactApprovalAuditEvent) GetApprovalId() string {
+	if x != nil {
+		return x.ApprovalId
+	}
+	return ""
+}
+
+func (x *ArtifactApprovalAuditEvent) GetObjectiveId() string {
+	if x != nil {
+		return x.ObjectiveId
+	}
+	return ""
+}
+
+func (x *ArtifactApprovalAuditEvent) GetRevision() uint64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+func (x *ArtifactApprovalAuditEvent) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *ArtifactApprovalAuditEvent) GetActor() string {
+	if x != nil {
+		return x.Actor
+	}
+	return ""
+}
+
+func (x *ArtifactApprovalAuditEvent) GetRecordedAtMs() int64 {
+	if x != nil {
+		return x.RecordedAtMs
+	}
+	return 0
+}
+
+type ListArtifactApprovalAuditRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ApprovalType  string                 `protobuf:"bytes,1,opt,name=approval_type,json=approvalType,proto3" json:"approval_type,omitempty"`
+	ApprovalId    string                 `protobuf:"bytes,2,opt,name=approval_id,json=approvalId,proto3" json:"approval_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListArtifactApprovalAuditRequest) Reset() {
+	*x = ListArtifactApprovalAuditRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListArtifactApprovalAuditRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListArtifactApprovalAuditRequest) ProtoMessage() {}
+
+func (x *ListArtifactApprovalAuditRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListArtifactApprovalAuditRequest.ProtoReflect.Descriptor instead.
+func (*ListArtifactApprovalAuditRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *ListArtifactApprovalAuditRequest) GetApprovalType() string {
+	if x != nil {
+		return x.ApprovalType
+	}
+	return ""
+}
+
+func (x *ListArtifactApprovalAuditRequest) GetApprovalId() string {
+	if x != nil {
+		return x.ApprovalId
+	}
+	return ""
+}
+
+type ListArtifactApprovalAuditResponse struct {
+	state         protoimpl.MessageState        `protogen:"open.v1"`
+	Events        []*ArtifactApprovalAuditEvent `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListArtifactApprovalAuditResponse) Reset() {
+	*x = ListArtifactApprovalAuditResponse{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListArtifactApprovalAuditResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListArtifactApprovalAuditResponse) ProtoMessage() {}
+
+func (x *ListArtifactApprovalAuditResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListArtifactApprovalAuditResponse.ProtoReflect.Descriptor instead.
+func (*ListArtifactApprovalAuditResponse) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *ListArtifactApprovalAuditResponse) GetEvents() []*ArtifactApprovalAuditEvent {
+	if x != nil {
+		return x.Events
+	}
+	return nil
+}
+
 var File_supertag_runtime_v2_artifact_proto protoreflect.FileDescriptor
 
 const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
@@ -3029,7 +4019,98 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"\fbefore_order\x18\x03 \x01(\x04R\vbeforeOrder\"\x8f\x01\n" +
 	" ListArtifactVolumeCopiesResponse\x12?\n" +
 	"\x06copies\x18\x01 \x03(\v2'.supertag.runtime.v2.ArtifactVolumeCopyR\x06copies\x12*\n" +
-	"\x11next_before_order\x18\x02 \x01(\x04R\x0fnextBeforeOrder*t\n" +
+	"\x11next_before_order\x18\x02 \x01(\x04R\x0fnextBeforeOrder\"\x8f\x06\n" +
+	"\x13ArtifactPublication\x12%\n" +
+	"\x0epublication_id\x18\x01 \x01(\tR\rpublicationId\x12.\n" +
+	"\x13source_objective_id\x18\x02 \x01(\tR\x11sourceObjectiveId\x12A\n" +
+	"\bproducer\x18\x03 \x01(\v2%.supertag.runtime.v2.ArtifactProducerR\bproducer\x12\x1f\n" +
+	"\vartifact_id\x18\x04 \x01(\tR\n" +
+	"artifactId\x127\n" +
+	"\x05files\x18\x05 \x03(\v2!.supertag.runtime.v2.ArtifactFileR\x05files\x124\n" +
+	"\x16audience_objective_ids\x18\x06 \x03(\tR\x14audienceObjectiveIds\x12-\n" +
+	"\x13source_owner_tag_id\x18\a \x01(\tR\x10sourceOwnerTagId\x12\x1e\n" +
+	"\n" +
+	"assessment\x18\b \x01(\tR\n" +
+	"assessment\x12\x1f\n" +
+	"\vapproved_by\x18\t \x01(\tR\n" +
+	"approvedBy\x12$\n" +
+	"\x0eapproved_at_ms\x18\n" +
+	" \x01(\x03R\fapprovedAtMs\x12?\n" +
+	"\x19supersedes_publication_id\x18\v \x01(\tH\x00R\x17supersedesPublicationId\x88\x01\x01\x12C\n" +
+	"\x06status\x18\f \x01(\x0e2+.supertag.runtime.v2.ArtifactApprovalStatusR\x06status\x12\x1a\n" +
+	"\brevision\x18\r \x01(\x04R\brevision\x12&\n" +
+	"\fwithdrawn_by\x18\x0e \x01(\tH\x01R\vwithdrawnBy\x88\x01\x01\x12+\n" +
+	"\x0fwithdrawn_at_ms\x18\x0f \x01(\x03H\x02R\rwithdrawnAtMs\x88\x01\x01B\x1c\n" +
+	"\x1a_supersedes_publication_idB\x0f\n" +
+	"\r_withdrawn_byB\x12\n" +
+	"\x10_withdrawn_at_ms\"\x8a\x03\n" +
+	"\x17ArtifactPublicationView\x12%\n" +
+	"\x0epublication_id\x18\x01 \x01(\tR\rpublicationId\x12.\n" +
+	"\x13source_objective_id\x18\x02 \x01(\tR\x11sourceObjectiveId\x12\x1f\n" +
+	"\vartifact_id\x18\x03 \x01(\tR\n" +
+	"artifactId\x127\n" +
+	"\x05files\x18\x04 \x03(\v2!.supertag.runtime.v2.ArtifactFileR\x05files\x12?\n" +
+	"\x19supersedes_publication_id\x18\x05 \x01(\tH\x00R\x17supersedesPublicationId\x88\x01\x01\x12C\n" +
+	"\x06status\x18\x06 \x01(\x0e2+.supertag.runtime.v2.ArtifactApprovalStatusR\x06status\x12\x1a\n" +
+	"\brevision\x18\a \x01(\x04R\brevisionB\x1c\n" +
+	"\x1a_supersedes_publication_id\"\xb0\x03\n" +
+	"\x1bArtifactConsumptionApproval\x12%\n" +
+	"\x0econsumption_id\x18\x01 \x01(\tR\rconsumptionId\x12%\n" +
+	"\x0epublication_id\x18\x02 \x01(\tR\rpublicationId\x12!\n" +
+	"\fobjective_id\x18\x03 \x01(\tR\vobjectiveId\x12\x1f\n" +
+	"\vapproved_by\x18\x04 \x01(\tR\n" +
+	"approvedBy\x12$\n" +
+	"\x0eapproved_at_ms\x18\x05 \x01(\x03R\fapprovedAtMs\x12C\n" +
+	"\x06status\x18\x06 \x01(\x0e2+.supertag.runtime.v2.ArtifactApprovalStatusR\x06status\x12\x1a\n" +
+	"\brevision\x18\a \x01(\x04R\brevision\x12&\n" +
+	"\fwithdrawn_by\x18\b \x01(\tH\x00R\vwithdrawnBy\x88\x01\x01\x12+\n" +
+	"\x0fwithdrawn_at_ms\x18\t \x01(\x03H\x01R\rwithdrawnAtMs\x88\x01\x01B\x0f\n" +
+	"\r_withdrawn_byB\x12\n" +
+	"\x10_withdrawn_at_ms\"\x8b\x02\n" +
+	"\x16PublishArtifactRequest\x12%\n" +
+	"\x0epublication_id\x18\x01 \x01(\tR\rpublicationId\x12\x1f\n" +
+	"\vartifact_id\x18\x02 \x01(\tR\n" +
+	"artifactId\x12\x14\n" +
+	"\x05paths\x18\x03 \x03(\tR\x05paths\x124\n" +
+	"\x16audience_objective_ids\x18\x04 \x03(\tR\x14audienceObjectiveIds\x12?\n" +
+	"\x19supersedes_publication_id\x18\x05 \x01(\tH\x00R\x17supersedesPublicationId\x88\x01\x01B\x1c\n" +
+	"\x1a_supersedes_publication_id\"\x94\x01\n" +
+	"!ConsumeArtifactPublicationRequest\x12%\n" +
+	"\x0econsumption_id\x18\x01 \x01(\tR\rconsumptionId\x12%\n" +
+	"\x0epublication_id\x18\x02 \x01(\tR\rpublicationId\x12!\n" +
+	"\fobjective_id\x18\x03 \x01(\tR\vobjectiveId\"o\n" +
+	"\x1fWithdrawArtifactApprovalRequest\x12\x1f\n" +
+	"\vapproval_id\x18\x01 \x01(\tR\n" +
+	"approvalId\x12+\n" +
+	"\x11expected_revision\x18\x02 \x01(\x04R\x10expectedRevision\"=\n" +
+	"\x1aGetArtifactApprovalRequest\x12\x1f\n" +
+	"\vapproval_id\x18\x01 \x01(\tR\n" +
+	"approvalId\"\x83\x01\n" +
+	"%ListObjectiveArtifactApprovalsRequest\x12!\n" +
+	"\fobjective_id\x18\x01 \x01(\tR\vobjectiveId\x12\x14\n" +
+	"\x05limit\x18\x02 \x01(\rR\x05limit\x12!\n" +
+	"\fbefore_order\x18\x03 \x01(\x04R\vbeforeOrder\"\xa0\x01\n" +
+	" ListArtifactPublicationsResponse\x12P\n" +
+	"\fpublications\x18\x01 \x03(\v2,.supertag.runtime.v2.ArtifactPublicationViewR\fpublications\x12*\n" +
+	"\x11next_before_order\x18\x02 \x01(\x04R\x0fnextBeforeOrder\"\xa4\x01\n" +
+	" ListArtifactConsumptionsResponse\x12T\n" +
+	"\fconsumptions\x18\x01 \x03(\v20.supertag.runtime.v2.ArtifactConsumptionApprovalR\fconsumptions\x12*\n" +
+	"\x11next_before_order\x18\x02 \x01(\x04R\x0fnextBeforeOrder\"\xf5\x01\n" +
+	"\x1aArtifactApprovalAuditEvent\x12#\n" +
+	"\rapproval_type\x18\x01 \x01(\tR\fapprovalType\x12\x1f\n" +
+	"\vapproval_id\x18\x02 \x01(\tR\n" +
+	"approvalId\x12!\n" +
+	"\fobjective_id\x18\x03 \x01(\tR\vobjectiveId\x12\x1a\n" +
+	"\brevision\x18\x04 \x01(\x04R\brevision\x12\x16\n" +
+	"\x06action\x18\x05 \x01(\tR\x06action\x12\x14\n" +
+	"\x05actor\x18\x06 \x01(\tR\x05actor\x12$\n" +
+	"\x0erecorded_at_ms\x18\a \x01(\x03R\frecordedAtMs\"h\n" +
+	" ListArtifactApprovalAuditRequest\x12#\n" +
+	"\rapproval_type\x18\x01 \x01(\tR\fapprovalType\x12\x1f\n" +
+	"\vapproval_id\x18\x02 \x01(\tR\n" +
+	"approvalId\"l\n" +
+	"!ListArtifactApprovalAuditResponse\x12G\n" +
+	"\x06events\x18\x01 \x03(\v2/.supertag.runtime.v2.ArtifactApprovalAuditEventR\x06events*t\n" +
 	"\x10ArtifactDelivery\x12!\n" +
 	"\x1dARTIFACT_DELIVERY_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16ARTIFACT_DELIVERY_READ\x10\x01\x12!\n" +
@@ -3043,7 +4124,11 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"\x17ArtifactVolumeCopyState\x12*\n" +
 	"&ARTIFACT_VOLUME_COPY_STATE_UNSPECIFIED\x10\x00\x12'\n" +
 	"#ARTIFACT_VOLUME_COPY_STATE_RESERVED\x10\x01\x12'\n" +
-	"#ARTIFACT_VOLUME_COPY_STATE_VERIFIED\x10\x022\xdf\x01\n" +
+	"#ARTIFACT_VOLUME_COPY_STATE_VERIFIED\x10\x02*\x92\x01\n" +
+	"\x16ArtifactApprovalStatus\x12(\n" +
+	"$ARTIFACT_APPROVAL_STATUS_UNSPECIFIED\x10\x00\x12&\n" +
+	"\"ARTIFACT_APPROVAL_STATUS_AVAILABLE\x10\x01\x12&\n" +
+	"\"ARTIFACT_APPROVAL_STATUS_WITHDRAWN\x10\x022\xdf\x01\n" +
 	"\x0fArtifactCatalog\x12]\n" +
 	"\x03Get\x12/.supertag.runtime.v2.GetCapturedArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12m\n" +
 	"\x04List\x121.supertag.runtime.v2.ListCapturedArtifactsRequest\x1a2.supertag.runtime.v2.ListCapturedArtifactsResponse2\xd4\a\n" +
@@ -3092,7 +4177,17 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"CommitCopy\x124.supertag.runtime.v2.CommitArtifactVolumeCopyRequest\x1a'.supertag.runtime.v2.ArtifactVolumeCopy\x12e\n" +
 	"\aGetCopy\x121.supertag.runtime.v2.GetArtifactVolumeCopyRequest\x1a'.supertag.runtime.v2.ArtifactVolumeCopy\x12y\n" +
 	"\n" +
-	"ListCopies\x124.supertag.runtime.v2.ListArtifactVolumeCopiesRequest\x1a5.supertag.runtime.v2.ListArtifactVolumeCopiesResponseb\x06proto3"
+	"ListCopies\x124.supertag.runtime.v2.ListArtifactVolumeCopiesRequest\x1a5.supertag.runtime.v2.ListArtifactVolumeCopiesResponse2\xd1\b\n" +
+	"\x14ArtifactPublications\x12`\n" +
+	"\aPublish\x12+.supertag.runtime.v2.PublishArtifactRequest\x1a(.supertag.runtime.v2.ArtifactPublication\x12s\n" +
+	"\aConsume\x126.supertag.runtime.v2.ConsumeArtifactPublicationRequest\x1a0.supertag.runtime.v2.ArtifactConsumptionApproval\x12u\n" +
+	"\x13WithdrawPublication\x124.supertag.runtime.v2.WithdrawArtifactApprovalRequest\x1a(.supertag.runtime.v2.ArtifactPublication\x12}\n" +
+	"\x13WithdrawConsumption\x124.supertag.runtime.v2.WithdrawArtifactApprovalRequest\x1a0.supertag.runtime.v2.ArtifactConsumptionApproval\x12k\n" +
+	"\x0eGetPublication\x12/.supertag.runtime.v2.GetArtifactApprovalRequest\x1a(.supertag.runtime.v2.ArtifactPublication\x12s\n" +
+	"\x0eGetConsumption\x12/.supertag.runtime.v2.GetArtifactApprovalRequest\x1a0.supertag.runtime.v2.ArtifactConsumptionApproval\x12\x85\x01\n" +
+	"\x10ListPublications\x12:.supertag.runtime.v2.ListObjectiveArtifactApprovalsRequest\x1a5.supertag.runtime.v2.ListArtifactPublicationsResponse\x12\x85\x01\n" +
+	"\x10ListConsumptions\x12:.supertag.runtime.v2.ListObjectiveArtifactApprovalsRequest\x1a5.supertag.runtime.v2.ListArtifactConsumptionsResponse\x12z\n" +
+	"\tListAudit\x125.supertag.runtime.v2.ListArtifactApprovalAuditRequest\x1a6.supertag.runtime.v2.ListArtifactApprovalAuditResponseb\x06proto3"
 
 var (
 	file_supertag_runtime_v2_artifact_proto_rawDescOnce sync.Once
@@ -3106,175 +4201,216 @@ func file_supertag_runtime_v2_artifact_proto_rawDescGZIP() []byte {
 	return file_supertag_runtime_v2_artifact_proto_rawDescData
 }
 
-var file_supertag_runtime_v2_artifact_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_supertag_runtime_v2_artifact_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
+var file_supertag_runtime_v2_artifact_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_supertag_runtime_v2_artifact_proto_msgTypes = make([]protoimpl.MessageInfo, 52)
 var file_supertag_runtime_v2_artifact_proto_goTypes = []any{
-	(ArtifactDelivery)(0),                    // 0: supertag.runtime.v2.ArtifactDelivery
-	(ArtifactAcquisitionState)(0),            // 1: supertag.runtime.v2.ArtifactAcquisitionState
-	(ArtifactVolumeCopyState)(0),             // 2: supertag.runtime.v2.ArtifactVolumeCopyState
-	(*ArtifactDescription)(nil),              // 3: supertag.runtime.v2.ArtifactDescription
-	(*ArtifactFile)(nil),                     // 4: supertag.runtime.v2.ArtifactFile
-	(*GitOutputSnapshot)(nil),                // 5: supertag.runtime.v2.GitOutputSnapshot
-	(*ArtifactProducer)(nil),                 // 6: supertag.runtime.v2.ArtifactProducer
-	(*ArtifactSummary)(nil),                  // 7: supertag.runtime.v2.ArtifactSummary
-	(*CapturedArtifact)(nil),                 // 8: supertag.runtime.v2.CapturedArtifact
-	(*ArtifactAcquisition)(nil),              // 9: supertag.runtime.v2.ArtifactAcquisition
-	(*FindAttemptArtifactsRequest)(nil),      // 10: supertag.runtime.v2.FindAttemptArtifactsRequest
-	(*InspectAttemptArtifactRequest)(nil),    // 11: supertag.runtime.v2.InspectAttemptArtifactRequest
-	(*AcquireArtifactRequest)(nil),           // 12: supertag.runtime.v2.AcquireArtifactRequest
-	(*SettleArtifactAcquisitionRequest)(nil), // 13: supertag.runtime.v2.SettleArtifactAcquisitionRequest
-	(*GetAcquiredArtifactFileRequest)(nil),   // 14: supertag.runtime.v2.GetAcquiredArtifactFileRequest
-	(*HarnessFindArtifactsRequest)(nil),      // 15: supertag.runtime.v2.HarnessFindArtifactsRequest
-	(*HarnessReadArtifactRequest)(nil),       // 16: supertag.runtime.v2.HarnessReadArtifactRequest
-	(*HarnessArtifactPage)(nil),              // 17: supertag.runtime.v2.HarnessArtifactPage
-	(*HarnessAttachArtifactRequest)(nil),     // 18: supertag.runtime.v2.HarnessAttachArtifactRequest
-	(*HarnessAttachedArtifact)(nil),          // 19: supertag.runtime.v2.HarnessAttachedArtifact
-	(*HarnessCaptureArtifactRequest)(nil),    // 20: supertag.runtime.v2.HarnessCaptureArtifactRequest
-	(*CommitArtifactCaptureRequest)(nil),     // 21: supertag.runtime.v2.CommitArtifactCaptureRequest
-	(*GetCapturedArtifactRequest)(nil),       // 22: supertag.runtime.v2.GetCapturedArtifactRequest
-	(*ListCapturedArtifactsRequest)(nil),     // 23: supertag.runtime.v2.ListCapturedArtifactsRequest
-	(*ListCapturedArtifactsResponse)(nil),    // 24: supertag.runtime.v2.ListCapturedArtifactsResponse
-	(*ArtifactUpload)(nil),                   // 25: supertag.runtime.v2.ArtifactUpload
-	(*ArtifactChunk)(nil),                    // 26: supertag.runtime.v2.ArtifactChunk
-	(*DownloadArtifactFileRequest)(nil),      // 27: supertag.runtime.v2.DownloadArtifactFileRequest
-	(*ArtifactDownload)(nil),                 // 28: supertag.runtime.v2.ArtifactDownload
-	(*ArtifactVolume)(nil),                   // 29: supertag.runtime.v2.ArtifactVolume
-	(*PutArtifactVolumeRequest)(nil),         // 30: supertag.runtime.v2.PutArtifactVolumeRequest
-	(*GetArtifactVolumeRequest)(nil),         // 31: supertag.runtime.v2.GetArtifactVolumeRequest
-	(*ListArtifactVolumesRequest)(nil),       // 32: supertag.runtime.v2.ListArtifactVolumesRequest
-	(*ListArtifactVolumesResponse)(nil),      // 33: supertag.runtime.v2.ListArtifactVolumesResponse
-	(*DeleteArtifactVolumeRequest)(nil),      // 34: supertag.runtime.v2.DeleteArtifactVolumeRequest
-	(*DeleteArtifactVolumeResponse)(nil),     // 35: supertag.runtime.v2.DeleteArtifactVolumeResponse
-	(*CopyArtifactToVolumeRequest)(nil),      // 36: supertag.runtime.v2.CopyArtifactToVolumeRequest
-	(*ArtifactVolumeCopy)(nil),               // 37: supertag.runtime.v2.ArtifactVolumeCopy
-	(*CommitArtifactVolumeCopyRequest)(nil),  // 38: supertag.runtime.v2.CommitArtifactVolumeCopyRequest
-	(*GetArtifactVolumeCopyRequest)(nil),     // 39: supertag.runtime.v2.GetArtifactVolumeCopyRequest
-	(*ListArtifactVolumeCopiesRequest)(nil),  // 40: supertag.runtime.v2.ListArtifactVolumeCopiesRequest
-	(*ListArtifactVolumeCopiesResponse)(nil), // 41: supertag.runtime.v2.ListArtifactVolumeCopiesResponse
-	(*BlobReference)(nil),                    // 42: supertag.runtime.v2.BlobReference
-	(HarnessKind)(0),                         // 43: supertag.runtime.v2.HarnessKind
-	(*ArtifactSelection)(nil),                // 44: supertag.runtime.v2.ArtifactSelection
-	(*InspectAttemptRequest)(nil),            // 45: supertag.runtime.v2.InspectAttemptRequest
+	(ArtifactDelivery)(0),                         // 0: supertag.runtime.v2.ArtifactDelivery
+	(ArtifactAcquisitionState)(0),                 // 1: supertag.runtime.v2.ArtifactAcquisitionState
+	(ArtifactVolumeCopyState)(0),                  // 2: supertag.runtime.v2.ArtifactVolumeCopyState
+	(ArtifactApprovalStatus)(0),                   // 3: supertag.runtime.v2.ArtifactApprovalStatus
+	(*ArtifactDescription)(nil),                   // 4: supertag.runtime.v2.ArtifactDescription
+	(*ArtifactFile)(nil),                          // 5: supertag.runtime.v2.ArtifactFile
+	(*GitOutputSnapshot)(nil),                     // 6: supertag.runtime.v2.GitOutputSnapshot
+	(*ArtifactProducer)(nil),                      // 7: supertag.runtime.v2.ArtifactProducer
+	(*ArtifactSummary)(nil),                       // 8: supertag.runtime.v2.ArtifactSummary
+	(*CapturedArtifact)(nil),                      // 9: supertag.runtime.v2.CapturedArtifact
+	(*ArtifactAcquisition)(nil),                   // 10: supertag.runtime.v2.ArtifactAcquisition
+	(*FindAttemptArtifactsRequest)(nil),           // 11: supertag.runtime.v2.FindAttemptArtifactsRequest
+	(*InspectAttemptArtifactRequest)(nil),         // 12: supertag.runtime.v2.InspectAttemptArtifactRequest
+	(*AcquireArtifactRequest)(nil),                // 13: supertag.runtime.v2.AcquireArtifactRequest
+	(*SettleArtifactAcquisitionRequest)(nil),      // 14: supertag.runtime.v2.SettleArtifactAcquisitionRequest
+	(*GetAcquiredArtifactFileRequest)(nil),        // 15: supertag.runtime.v2.GetAcquiredArtifactFileRequest
+	(*HarnessFindArtifactsRequest)(nil),           // 16: supertag.runtime.v2.HarnessFindArtifactsRequest
+	(*HarnessReadArtifactRequest)(nil),            // 17: supertag.runtime.v2.HarnessReadArtifactRequest
+	(*HarnessArtifactPage)(nil),                   // 18: supertag.runtime.v2.HarnessArtifactPage
+	(*HarnessAttachArtifactRequest)(nil),          // 19: supertag.runtime.v2.HarnessAttachArtifactRequest
+	(*HarnessAttachedArtifact)(nil),               // 20: supertag.runtime.v2.HarnessAttachedArtifact
+	(*HarnessCaptureArtifactRequest)(nil),         // 21: supertag.runtime.v2.HarnessCaptureArtifactRequest
+	(*CommitArtifactCaptureRequest)(nil),          // 22: supertag.runtime.v2.CommitArtifactCaptureRequest
+	(*GetCapturedArtifactRequest)(nil),            // 23: supertag.runtime.v2.GetCapturedArtifactRequest
+	(*ListCapturedArtifactsRequest)(nil),          // 24: supertag.runtime.v2.ListCapturedArtifactsRequest
+	(*ListCapturedArtifactsResponse)(nil),         // 25: supertag.runtime.v2.ListCapturedArtifactsResponse
+	(*ArtifactUpload)(nil),                        // 26: supertag.runtime.v2.ArtifactUpload
+	(*ArtifactChunk)(nil),                         // 27: supertag.runtime.v2.ArtifactChunk
+	(*DownloadArtifactFileRequest)(nil),           // 28: supertag.runtime.v2.DownloadArtifactFileRequest
+	(*ArtifactDownload)(nil),                      // 29: supertag.runtime.v2.ArtifactDownload
+	(*ArtifactVolume)(nil),                        // 30: supertag.runtime.v2.ArtifactVolume
+	(*PutArtifactVolumeRequest)(nil),              // 31: supertag.runtime.v2.PutArtifactVolumeRequest
+	(*GetArtifactVolumeRequest)(nil),              // 32: supertag.runtime.v2.GetArtifactVolumeRequest
+	(*ListArtifactVolumesRequest)(nil),            // 33: supertag.runtime.v2.ListArtifactVolumesRequest
+	(*ListArtifactVolumesResponse)(nil),           // 34: supertag.runtime.v2.ListArtifactVolumesResponse
+	(*DeleteArtifactVolumeRequest)(nil),           // 35: supertag.runtime.v2.DeleteArtifactVolumeRequest
+	(*DeleteArtifactVolumeResponse)(nil),          // 36: supertag.runtime.v2.DeleteArtifactVolumeResponse
+	(*CopyArtifactToVolumeRequest)(nil),           // 37: supertag.runtime.v2.CopyArtifactToVolumeRequest
+	(*ArtifactVolumeCopy)(nil),                    // 38: supertag.runtime.v2.ArtifactVolumeCopy
+	(*CommitArtifactVolumeCopyRequest)(nil),       // 39: supertag.runtime.v2.CommitArtifactVolumeCopyRequest
+	(*GetArtifactVolumeCopyRequest)(nil),          // 40: supertag.runtime.v2.GetArtifactVolumeCopyRequest
+	(*ListArtifactVolumeCopiesRequest)(nil),       // 41: supertag.runtime.v2.ListArtifactVolumeCopiesRequest
+	(*ListArtifactVolumeCopiesResponse)(nil),      // 42: supertag.runtime.v2.ListArtifactVolumeCopiesResponse
+	(*ArtifactPublication)(nil),                   // 43: supertag.runtime.v2.ArtifactPublication
+	(*ArtifactPublicationView)(nil),               // 44: supertag.runtime.v2.ArtifactPublicationView
+	(*ArtifactConsumptionApproval)(nil),           // 45: supertag.runtime.v2.ArtifactConsumptionApproval
+	(*PublishArtifactRequest)(nil),                // 46: supertag.runtime.v2.PublishArtifactRequest
+	(*ConsumeArtifactPublicationRequest)(nil),     // 47: supertag.runtime.v2.ConsumeArtifactPublicationRequest
+	(*WithdrawArtifactApprovalRequest)(nil),       // 48: supertag.runtime.v2.WithdrawArtifactApprovalRequest
+	(*GetArtifactApprovalRequest)(nil),            // 49: supertag.runtime.v2.GetArtifactApprovalRequest
+	(*ListObjectiveArtifactApprovalsRequest)(nil), // 50: supertag.runtime.v2.ListObjectiveArtifactApprovalsRequest
+	(*ListArtifactPublicationsResponse)(nil),      // 51: supertag.runtime.v2.ListArtifactPublicationsResponse
+	(*ListArtifactConsumptionsResponse)(nil),      // 52: supertag.runtime.v2.ListArtifactConsumptionsResponse
+	(*ArtifactApprovalAuditEvent)(nil),            // 53: supertag.runtime.v2.ArtifactApprovalAuditEvent
+	(*ListArtifactApprovalAuditRequest)(nil),      // 54: supertag.runtime.v2.ListArtifactApprovalAuditRequest
+	(*ListArtifactApprovalAuditResponse)(nil),     // 55: supertag.runtime.v2.ListArtifactApprovalAuditResponse
+	(*BlobReference)(nil),                         // 56: supertag.runtime.v2.BlobReference
+	(HarnessKind)(0),                              // 57: supertag.runtime.v2.HarnessKind
+	(*ArtifactSelection)(nil),                     // 58: supertag.runtime.v2.ArtifactSelection
+	(*InspectAttemptRequest)(nil),                 // 59: supertag.runtime.v2.InspectAttemptRequest
 }
 var file_supertag_runtime_v2_artifact_proto_depIdxs = []int32{
-	42, // 0: supertag.runtime.v2.ArtifactFile.blob:type_name -> supertag.runtime.v2.BlobReference
-	5,  // 1: supertag.runtime.v2.ArtifactFile.git_output:type_name -> supertag.runtime.v2.GitOutputSnapshot
-	43, // 2: supertag.runtime.v2.ArtifactProducer.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
-	3,  // 3: supertag.runtime.v2.ArtifactSummary.description:type_name -> supertag.runtime.v2.ArtifactDescription
-	6,  // 4: supertag.runtime.v2.ArtifactSummary.producer:type_name -> supertag.runtime.v2.ArtifactProducer
-	7,  // 5: supertag.runtime.v2.CapturedArtifact.summary:type_name -> supertag.runtime.v2.ArtifactSummary
-	4,  // 6: supertag.runtime.v2.CapturedArtifact.files:type_name -> supertag.runtime.v2.ArtifactFile
-	44, // 7: supertag.runtime.v2.CapturedArtifact.inputs:type_name -> supertag.runtime.v2.ArtifactSelection
-	4,  // 8: supertag.runtime.v2.ArtifactAcquisition.files:type_name -> supertag.runtime.v2.ArtifactFile
+	56, // 0: supertag.runtime.v2.ArtifactFile.blob:type_name -> supertag.runtime.v2.BlobReference
+	6,  // 1: supertag.runtime.v2.ArtifactFile.git_output:type_name -> supertag.runtime.v2.GitOutputSnapshot
+	57, // 2: supertag.runtime.v2.ArtifactProducer.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
+	4,  // 3: supertag.runtime.v2.ArtifactSummary.description:type_name -> supertag.runtime.v2.ArtifactDescription
+	7,  // 4: supertag.runtime.v2.ArtifactSummary.producer:type_name -> supertag.runtime.v2.ArtifactProducer
+	8,  // 5: supertag.runtime.v2.CapturedArtifact.summary:type_name -> supertag.runtime.v2.ArtifactSummary
+	5,  // 6: supertag.runtime.v2.CapturedArtifact.files:type_name -> supertag.runtime.v2.ArtifactFile
+	58, // 7: supertag.runtime.v2.CapturedArtifact.inputs:type_name -> supertag.runtime.v2.ArtifactSelection
+	5,  // 8: supertag.runtime.v2.ArtifactAcquisition.files:type_name -> supertag.runtime.v2.ArtifactFile
 	0,  // 9: supertag.runtime.v2.ArtifactAcquisition.delivery:type_name -> supertag.runtime.v2.ArtifactDelivery
 	1,  // 10: supertag.runtime.v2.ArtifactAcquisition.state:type_name -> supertag.runtime.v2.ArtifactAcquisitionState
-	45, // 11: supertag.runtime.v2.FindAttemptArtifactsRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	45, // 12: supertag.runtime.v2.InspectAttemptArtifactRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	45, // 13: supertag.runtime.v2.AcquireArtifactRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	59, // 11: supertag.runtime.v2.FindAttemptArtifactsRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	59, // 12: supertag.runtime.v2.InspectAttemptArtifactRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	59, // 13: supertag.runtime.v2.AcquireArtifactRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
 	0,  // 14: supertag.runtime.v2.AcquireArtifactRequest.delivery:type_name -> supertag.runtime.v2.ArtifactDelivery
-	45, // 15: supertag.runtime.v2.SettleArtifactAcquisitionRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	59, // 15: supertag.runtime.v2.SettleArtifactAcquisitionRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
 	1,  // 16: supertag.runtime.v2.SettleArtifactAcquisitionRequest.state:type_name -> supertag.runtime.v2.ArtifactAcquisitionState
-	45, // 17: supertag.runtime.v2.GetAcquiredArtifactFileRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	9,  // 18: supertag.runtime.v2.HarnessArtifactPage.acquisition:type_name -> supertag.runtime.v2.ArtifactAcquisition
-	9,  // 19: supertag.runtime.v2.HarnessAttachedArtifact.acquisition:type_name -> supertag.runtime.v2.ArtifactAcquisition
-	3,  // 20: supertag.runtime.v2.HarnessCaptureArtifactRequest.description:type_name -> supertag.runtime.v2.ArtifactDescription
-	45, // 21: supertag.runtime.v2.CommitArtifactCaptureRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	3,  // 22: supertag.runtime.v2.CommitArtifactCaptureRequest.description:type_name -> supertag.runtime.v2.ArtifactDescription
-	4,  // 23: supertag.runtime.v2.CommitArtifactCaptureRequest.files:type_name -> supertag.runtime.v2.ArtifactFile
-	7,  // 24: supertag.runtime.v2.ListCapturedArtifactsResponse.artifacts:type_name -> supertag.runtime.v2.ArtifactSummary
-	21, // 25: supertag.runtime.v2.ArtifactUpload.begin:type_name -> supertag.runtime.v2.CommitArtifactCaptureRequest
-	26, // 26: supertag.runtime.v2.ArtifactUpload.chunk:type_name -> supertag.runtime.v2.ArtifactChunk
-	4,  // 27: supertag.runtime.v2.ArtifactDownload.file:type_name -> supertag.runtime.v2.ArtifactFile
-	29, // 28: supertag.runtime.v2.ListArtifactVolumesResponse.volumes:type_name -> supertag.runtime.v2.ArtifactVolume
-	42, // 29: supertag.runtime.v2.CopyArtifactToVolumeRequest.expected_blob:type_name -> supertag.runtime.v2.BlobReference
-	29, // 30: supertag.runtime.v2.ArtifactVolumeCopy.volume:type_name -> supertag.runtime.v2.ArtifactVolume
-	4,  // 31: supertag.runtime.v2.ArtifactVolumeCopy.file:type_name -> supertag.runtime.v2.ArtifactFile
+	59, // 17: supertag.runtime.v2.GetAcquiredArtifactFileRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	10, // 18: supertag.runtime.v2.HarnessArtifactPage.acquisition:type_name -> supertag.runtime.v2.ArtifactAcquisition
+	10, // 19: supertag.runtime.v2.HarnessAttachedArtifact.acquisition:type_name -> supertag.runtime.v2.ArtifactAcquisition
+	4,  // 20: supertag.runtime.v2.HarnessCaptureArtifactRequest.description:type_name -> supertag.runtime.v2.ArtifactDescription
+	59, // 21: supertag.runtime.v2.CommitArtifactCaptureRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	4,  // 22: supertag.runtime.v2.CommitArtifactCaptureRequest.description:type_name -> supertag.runtime.v2.ArtifactDescription
+	5,  // 23: supertag.runtime.v2.CommitArtifactCaptureRequest.files:type_name -> supertag.runtime.v2.ArtifactFile
+	8,  // 24: supertag.runtime.v2.ListCapturedArtifactsResponse.artifacts:type_name -> supertag.runtime.v2.ArtifactSummary
+	22, // 25: supertag.runtime.v2.ArtifactUpload.begin:type_name -> supertag.runtime.v2.CommitArtifactCaptureRequest
+	27, // 26: supertag.runtime.v2.ArtifactUpload.chunk:type_name -> supertag.runtime.v2.ArtifactChunk
+	5,  // 27: supertag.runtime.v2.ArtifactDownload.file:type_name -> supertag.runtime.v2.ArtifactFile
+	30, // 28: supertag.runtime.v2.ListArtifactVolumesResponse.volumes:type_name -> supertag.runtime.v2.ArtifactVolume
+	56, // 29: supertag.runtime.v2.CopyArtifactToVolumeRequest.expected_blob:type_name -> supertag.runtime.v2.BlobReference
+	30, // 30: supertag.runtime.v2.ArtifactVolumeCopy.volume:type_name -> supertag.runtime.v2.ArtifactVolume
+	5,  // 31: supertag.runtime.v2.ArtifactVolumeCopy.file:type_name -> supertag.runtime.v2.ArtifactFile
 	2,  // 32: supertag.runtime.v2.ArtifactVolumeCopy.state:type_name -> supertag.runtime.v2.ArtifactVolumeCopyState
-	42, // 33: supertag.runtime.v2.CommitArtifactVolumeCopyRequest.verified_blob:type_name -> supertag.runtime.v2.BlobReference
-	37, // 34: supertag.runtime.v2.ListArtifactVolumeCopiesResponse.copies:type_name -> supertag.runtime.v2.ArtifactVolumeCopy
-	22, // 35: supertag.runtime.v2.ArtifactCatalog.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
-	23, // 36: supertag.runtime.v2.ArtifactCatalog.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
-	21, // 37: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
-	21, // 38: supertag.runtime.v2.ArtifactDirectory.CommitCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
-	22, // 39: supertag.runtime.v2.ArtifactDirectory.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
-	23, // 40: supertag.runtime.v2.ArtifactDirectory.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
-	10, // 41: supertag.runtime.v2.ArtifactDirectory.FindForAttempt:input_type -> supertag.runtime.v2.FindAttemptArtifactsRequest
-	11, // 42: supertag.runtime.v2.ArtifactDirectory.GetForAttempt:input_type -> supertag.runtime.v2.InspectAttemptArtifactRequest
-	12, // 43: supertag.runtime.v2.ArtifactDirectory.Acquire:input_type -> supertag.runtime.v2.AcquireArtifactRequest
-	13, // 44: supertag.runtime.v2.ArtifactDirectory.Settle:input_type -> supertag.runtime.v2.SettleArtifactAcquisitionRequest
-	14, // 45: supertag.runtime.v2.ArtifactDirectory.GetAcquiredFile:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
-	10, // 46: supertag.runtime.v2.AttemptArtifacts.Find:input_type -> supertag.runtime.v2.FindAttemptArtifactsRequest
-	11, // 47: supertag.runtime.v2.AttemptArtifacts.Inspect:input_type -> supertag.runtime.v2.InspectAttemptArtifactRequest
-	12, // 48: supertag.runtime.v2.AttemptArtifacts.Acquire:input_type -> supertag.runtime.v2.AcquireArtifactRequest
-	13, // 49: supertag.runtime.v2.AttemptArtifacts.Settle:input_type -> supertag.runtime.v2.SettleArtifactAcquisitionRequest
-	25, // 50: supertag.runtime.v2.ArtifactTransfers.UploadCapture:input_type -> supertag.runtime.v2.ArtifactUpload
-	27, // 51: supertag.runtime.v2.ArtifactTransfers.DownloadFile:input_type -> supertag.runtime.v2.DownloadArtifactFileRequest
-	14, // 52: supertag.runtime.v2.ArtifactTransfers.DownloadAcquiredFile:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
-	20, // 53: supertag.runtime.v2.HarnessArtifacts.Capture:input_type -> supertag.runtime.v2.HarnessCaptureArtifactRequest
-	15, // 54: supertag.runtime.v2.HarnessArtifacts.Find:input_type -> supertag.runtime.v2.HarnessFindArtifactsRequest
-	22, // 55: supertag.runtime.v2.HarnessArtifacts.Inspect:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
-	16, // 56: supertag.runtime.v2.HarnessArtifacts.Read:input_type -> supertag.runtime.v2.HarnessReadArtifactRequest
-	18, // 57: supertag.runtime.v2.HarnessArtifacts.Attach:input_type -> supertag.runtime.v2.HarnessAttachArtifactRequest
-	30, // 58: supertag.runtime.v2.ArtifactVolumes.Put:input_type -> supertag.runtime.v2.PutArtifactVolumeRequest
-	31, // 59: supertag.runtime.v2.ArtifactVolumes.Get:input_type -> supertag.runtime.v2.GetArtifactVolumeRequest
-	32, // 60: supertag.runtime.v2.ArtifactVolumes.List:input_type -> supertag.runtime.v2.ListArtifactVolumesRequest
-	34, // 61: supertag.runtime.v2.ArtifactVolumes.Delete:input_type -> supertag.runtime.v2.DeleteArtifactVolumeRequest
-	36, // 62: supertag.runtime.v2.ArtifactVolumes.Copy:input_type -> supertag.runtime.v2.CopyArtifactToVolumeRequest
-	39, // 63: supertag.runtime.v2.ArtifactVolumes.GetCopy:input_type -> supertag.runtime.v2.GetArtifactVolumeCopyRequest
-	39, // 64: supertag.runtime.v2.ArtifactVolumes.DownloadCopy:input_type -> supertag.runtime.v2.GetArtifactVolumeCopyRequest
-	40, // 65: supertag.runtime.v2.ArtifactVolumes.ListCopies:input_type -> supertag.runtime.v2.ListArtifactVolumeCopiesRequest
-	30, // 66: supertag.runtime.v2.ArtifactVolumeDirectory.Put:input_type -> supertag.runtime.v2.PutArtifactVolumeRequest
-	31, // 67: supertag.runtime.v2.ArtifactVolumeDirectory.Get:input_type -> supertag.runtime.v2.GetArtifactVolumeRequest
-	32, // 68: supertag.runtime.v2.ArtifactVolumeDirectory.List:input_type -> supertag.runtime.v2.ListArtifactVolumesRequest
-	34, // 69: supertag.runtime.v2.ArtifactVolumeDirectory.Delete:input_type -> supertag.runtime.v2.DeleteArtifactVolumeRequest
-	36, // 70: supertag.runtime.v2.ArtifactVolumeDirectory.ReserveCopy:input_type -> supertag.runtime.v2.CopyArtifactToVolumeRequest
-	38, // 71: supertag.runtime.v2.ArtifactVolumeDirectory.CommitCopy:input_type -> supertag.runtime.v2.CommitArtifactVolumeCopyRequest
-	39, // 72: supertag.runtime.v2.ArtifactVolumeDirectory.GetCopy:input_type -> supertag.runtime.v2.GetArtifactVolumeCopyRequest
-	40, // 73: supertag.runtime.v2.ArtifactVolumeDirectory.ListCopies:input_type -> supertag.runtime.v2.ListArtifactVolumeCopiesRequest
-	8,  // 74: supertag.runtime.v2.ArtifactCatalog.Get:output_type -> supertag.runtime.v2.CapturedArtifact
-	24, // 75: supertag.runtime.v2.ArtifactCatalog.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	8,  // 76: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:output_type -> supertag.runtime.v2.CapturedArtifact
-	8,  // 77: supertag.runtime.v2.ArtifactDirectory.CommitCapture:output_type -> supertag.runtime.v2.CapturedArtifact
-	8,  // 78: supertag.runtime.v2.ArtifactDirectory.Get:output_type -> supertag.runtime.v2.CapturedArtifact
-	24, // 79: supertag.runtime.v2.ArtifactDirectory.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	24, // 80: supertag.runtime.v2.ArtifactDirectory.FindForAttempt:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	8,  // 81: supertag.runtime.v2.ArtifactDirectory.GetForAttempt:output_type -> supertag.runtime.v2.CapturedArtifact
-	9,  // 82: supertag.runtime.v2.ArtifactDirectory.Acquire:output_type -> supertag.runtime.v2.ArtifactAcquisition
-	9,  // 83: supertag.runtime.v2.ArtifactDirectory.Settle:output_type -> supertag.runtime.v2.ArtifactAcquisition
-	4,  // 84: supertag.runtime.v2.ArtifactDirectory.GetAcquiredFile:output_type -> supertag.runtime.v2.ArtifactFile
-	24, // 85: supertag.runtime.v2.AttemptArtifacts.Find:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	8,  // 86: supertag.runtime.v2.AttemptArtifacts.Inspect:output_type -> supertag.runtime.v2.CapturedArtifact
-	9,  // 87: supertag.runtime.v2.AttemptArtifacts.Acquire:output_type -> supertag.runtime.v2.ArtifactAcquisition
-	9,  // 88: supertag.runtime.v2.AttemptArtifacts.Settle:output_type -> supertag.runtime.v2.ArtifactAcquisition
-	8,  // 89: supertag.runtime.v2.ArtifactTransfers.UploadCapture:output_type -> supertag.runtime.v2.CapturedArtifact
-	28, // 90: supertag.runtime.v2.ArtifactTransfers.DownloadFile:output_type -> supertag.runtime.v2.ArtifactDownload
-	28, // 91: supertag.runtime.v2.ArtifactTransfers.DownloadAcquiredFile:output_type -> supertag.runtime.v2.ArtifactDownload
-	8,  // 92: supertag.runtime.v2.HarnessArtifacts.Capture:output_type -> supertag.runtime.v2.CapturedArtifact
-	24, // 93: supertag.runtime.v2.HarnessArtifacts.Find:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	8,  // 94: supertag.runtime.v2.HarnessArtifacts.Inspect:output_type -> supertag.runtime.v2.CapturedArtifact
-	17, // 95: supertag.runtime.v2.HarnessArtifacts.Read:output_type -> supertag.runtime.v2.HarnessArtifactPage
-	19, // 96: supertag.runtime.v2.HarnessArtifacts.Attach:output_type -> supertag.runtime.v2.HarnessAttachedArtifact
-	29, // 97: supertag.runtime.v2.ArtifactVolumes.Put:output_type -> supertag.runtime.v2.ArtifactVolume
-	29, // 98: supertag.runtime.v2.ArtifactVolumes.Get:output_type -> supertag.runtime.v2.ArtifactVolume
-	33, // 99: supertag.runtime.v2.ArtifactVolumes.List:output_type -> supertag.runtime.v2.ListArtifactVolumesResponse
-	35, // 100: supertag.runtime.v2.ArtifactVolumes.Delete:output_type -> supertag.runtime.v2.DeleteArtifactVolumeResponse
-	37, // 101: supertag.runtime.v2.ArtifactVolumes.Copy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
-	37, // 102: supertag.runtime.v2.ArtifactVolumes.GetCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
-	28, // 103: supertag.runtime.v2.ArtifactVolumes.DownloadCopy:output_type -> supertag.runtime.v2.ArtifactDownload
-	41, // 104: supertag.runtime.v2.ArtifactVolumes.ListCopies:output_type -> supertag.runtime.v2.ListArtifactVolumeCopiesResponse
-	29, // 105: supertag.runtime.v2.ArtifactVolumeDirectory.Put:output_type -> supertag.runtime.v2.ArtifactVolume
-	29, // 106: supertag.runtime.v2.ArtifactVolumeDirectory.Get:output_type -> supertag.runtime.v2.ArtifactVolume
-	33, // 107: supertag.runtime.v2.ArtifactVolumeDirectory.List:output_type -> supertag.runtime.v2.ListArtifactVolumesResponse
-	35, // 108: supertag.runtime.v2.ArtifactVolumeDirectory.Delete:output_type -> supertag.runtime.v2.DeleteArtifactVolumeResponse
-	37, // 109: supertag.runtime.v2.ArtifactVolumeDirectory.ReserveCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
-	37, // 110: supertag.runtime.v2.ArtifactVolumeDirectory.CommitCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
-	37, // 111: supertag.runtime.v2.ArtifactVolumeDirectory.GetCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
-	41, // 112: supertag.runtime.v2.ArtifactVolumeDirectory.ListCopies:output_type -> supertag.runtime.v2.ListArtifactVolumeCopiesResponse
-	74, // [74:113] is the sub-list for method output_type
-	35, // [35:74] is the sub-list for method input_type
-	35, // [35:35] is the sub-list for extension type_name
-	35, // [35:35] is the sub-list for extension extendee
-	0,  // [0:35] is the sub-list for field type_name
+	56, // 33: supertag.runtime.v2.CommitArtifactVolumeCopyRequest.verified_blob:type_name -> supertag.runtime.v2.BlobReference
+	38, // 34: supertag.runtime.v2.ListArtifactVolumeCopiesResponse.copies:type_name -> supertag.runtime.v2.ArtifactVolumeCopy
+	7,  // 35: supertag.runtime.v2.ArtifactPublication.producer:type_name -> supertag.runtime.v2.ArtifactProducer
+	5,  // 36: supertag.runtime.v2.ArtifactPublication.files:type_name -> supertag.runtime.v2.ArtifactFile
+	3,  // 37: supertag.runtime.v2.ArtifactPublication.status:type_name -> supertag.runtime.v2.ArtifactApprovalStatus
+	5,  // 38: supertag.runtime.v2.ArtifactPublicationView.files:type_name -> supertag.runtime.v2.ArtifactFile
+	3,  // 39: supertag.runtime.v2.ArtifactPublicationView.status:type_name -> supertag.runtime.v2.ArtifactApprovalStatus
+	3,  // 40: supertag.runtime.v2.ArtifactConsumptionApproval.status:type_name -> supertag.runtime.v2.ArtifactApprovalStatus
+	44, // 41: supertag.runtime.v2.ListArtifactPublicationsResponse.publications:type_name -> supertag.runtime.v2.ArtifactPublicationView
+	45, // 42: supertag.runtime.v2.ListArtifactConsumptionsResponse.consumptions:type_name -> supertag.runtime.v2.ArtifactConsumptionApproval
+	53, // 43: supertag.runtime.v2.ListArtifactApprovalAuditResponse.events:type_name -> supertag.runtime.v2.ArtifactApprovalAuditEvent
+	23, // 44: supertag.runtime.v2.ArtifactCatalog.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
+	24, // 45: supertag.runtime.v2.ArtifactCatalog.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
+	22, // 46: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
+	22, // 47: supertag.runtime.v2.ArtifactDirectory.CommitCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
+	23, // 48: supertag.runtime.v2.ArtifactDirectory.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
+	24, // 49: supertag.runtime.v2.ArtifactDirectory.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
+	11, // 50: supertag.runtime.v2.ArtifactDirectory.FindForAttempt:input_type -> supertag.runtime.v2.FindAttemptArtifactsRequest
+	12, // 51: supertag.runtime.v2.ArtifactDirectory.GetForAttempt:input_type -> supertag.runtime.v2.InspectAttemptArtifactRequest
+	13, // 52: supertag.runtime.v2.ArtifactDirectory.Acquire:input_type -> supertag.runtime.v2.AcquireArtifactRequest
+	14, // 53: supertag.runtime.v2.ArtifactDirectory.Settle:input_type -> supertag.runtime.v2.SettleArtifactAcquisitionRequest
+	15, // 54: supertag.runtime.v2.ArtifactDirectory.GetAcquiredFile:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
+	11, // 55: supertag.runtime.v2.AttemptArtifacts.Find:input_type -> supertag.runtime.v2.FindAttemptArtifactsRequest
+	12, // 56: supertag.runtime.v2.AttemptArtifacts.Inspect:input_type -> supertag.runtime.v2.InspectAttemptArtifactRequest
+	13, // 57: supertag.runtime.v2.AttemptArtifacts.Acquire:input_type -> supertag.runtime.v2.AcquireArtifactRequest
+	14, // 58: supertag.runtime.v2.AttemptArtifacts.Settle:input_type -> supertag.runtime.v2.SettleArtifactAcquisitionRequest
+	26, // 59: supertag.runtime.v2.ArtifactTransfers.UploadCapture:input_type -> supertag.runtime.v2.ArtifactUpload
+	28, // 60: supertag.runtime.v2.ArtifactTransfers.DownloadFile:input_type -> supertag.runtime.v2.DownloadArtifactFileRequest
+	15, // 61: supertag.runtime.v2.ArtifactTransfers.DownloadAcquiredFile:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
+	21, // 62: supertag.runtime.v2.HarnessArtifacts.Capture:input_type -> supertag.runtime.v2.HarnessCaptureArtifactRequest
+	16, // 63: supertag.runtime.v2.HarnessArtifacts.Find:input_type -> supertag.runtime.v2.HarnessFindArtifactsRequest
+	23, // 64: supertag.runtime.v2.HarnessArtifacts.Inspect:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
+	17, // 65: supertag.runtime.v2.HarnessArtifacts.Read:input_type -> supertag.runtime.v2.HarnessReadArtifactRequest
+	19, // 66: supertag.runtime.v2.HarnessArtifacts.Attach:input_type -> supertag.runtime.v2.HarnessAttachArtifactRequest
+	31, // 67: supertag.runtime.v2.ArtifactVolumes.Put:input_type -> supertag.runtime.v2.PutArtifactVolumeRequest
+	32, // 68: supertag.runtime.v2.ArtifactVolumes.Get:input_type -> supertag.runtime.v2.GetArtifactVolumeRequest
+	33, // 69: supertag.runtime.v2.ArtifactVolumes.List:input_type -> supertag.runtime.v2.ListArtifactVolumesRequest
+	35, // 70: supertag.runtime.v2.ArtifactVolumes.Delete:input_type -> supertag.runtime.v2.DeleteArtifactVolumeRequest
+	37, // 71: supertag.runtime.v2.ArtifactVolumes.Copy:input_type -> supertag.runtime.v2.CopyArtifactToVolumeRequest
+	40, // 72: supertag.runtime.v2.ArtifactVolumes.GetCopy:input_type -> supertag.runtime.v2.GetArtifactVolumeCopyRequest
+	40, // 73: supertag.runtime.v2.ArtifactVolumes.DownloadCopy:input_type -> supertag.runtime.v2.GetArtifactVolumeCopyRequest
+	41, // 74: supertag.runtime.v2.ArtifactVolumes.ListCopies:input_type -> supertag.runtime.v2.ListArtifactVolumeCopiesRequest
+	31, // 75: supertag.runtime.v2.ArtifactVolumeDirectory.Put:input_type -> supertag.runtime.v2.PutArtifactVolumeRequest
+	32, // 76: supertag.runtime.v2.ArtifactVolumeDirectory.Get:input_type -> supertag.runtime.v2.GetArtifactVolumeRequest
+	33, // 77: supertag.runtime.v2.ArtifactVolumeDirectory.List:input_type -> supertag.runtime.v2.ListArtifactVolumesRequest
+	35, // 78: supertag.runtime.v2.ArtifactVolumeDirectory.Delete:input_type -> supertag.runtime.v2.DeleteArtifactVolumeRequest
+	37, // 79: supertag.runtime.v2.ArtifactVolumeDirectory.ReserveCopy:input_type -> supertag.runtime.v2.CopyArtifactToVolumeRequest
+	39, // 80: supertag.runtime.v2.ArtifactVolumeDirectory.CommitCopy:input_type -> supertag.runtime.v2.CommitArtifactVolumeCopyRequest
+	40, // 81: supertag.runtime.v2.ArtifactVolumeDirectory.GetCopy:input_type -> supertag.runtime.v2.GetArtifactVolumeCopyRequest
+	41, // 82: supertag.runtime.v2.ArtifactVolumeDirectory.ListCopies:input_type -> supertag.runtime.v2.ListArtifactVolumeCopiesRequest
+	46, // 83: supertag.runtime.v2.ArtifactPublications.Publish:input_type -> supertag.runtime.v2.PublishArtifactRequest
+	47, // 84: supertag.runtime.v2.ArtifactPublications.Consume:input_type -> supertag.runtime.v2.ConsumeArtifactPublicationRequest
+	48, // 85: supertag.runtime.v2.ArtifactPublications.WithdrawPublication:input_type -> supertag.runtime.v2.WithdrawArtifactApprovalRequest
+	48, // 86: supertag.runtime.v2.ArtifactPublications.WithdrawConsumption:input_type -> supertag.runtime.v2.WithdrawArtifactApprovalRequest
+	49, // 87: supertag.runtime.v2.ArtifactPublications.GetPublication:input_type -> supertag.runtime.v2.GetArtifactApprovalRequest
+	49, // 88: supertag.runtime.v2.ArtifactPublications.GetConsumption:input_type -> supertag.runtime.v2.GetArtifactApprovalRequest
+	50, // 89: supertag.runtime.v2.ArtifactPublications.ListPublications:input_type -> supertag.runtime.v2.ListObjectiveArtifactApprovalsRequest
+	50, // 90: supertag.runtime.v2.ArtifactPublications.ListConsumptions:input_type -> supertag.runtime.v2.ListObjectiveArtifactApprovalsRequest
+	54, // 91: supertag.runtime.v2.ArtifactPublications.ListAudit:input_type -> supertag.runtime.v2.ListArtifactApprovalAuditRequest
+	9,  // 92: supertag.runtime.v2.ArtifactCatalog.Get:output_type -> supertag.runtime.v2.CapturedArtifact
+	25, // 93: supertag.runtime.v2.ArtifactCatalog.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	9,  // 94: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:output_type -> supertag.runtime.v2.CapturedArtifact
+	9,  // 95: supertag.runtime.v2.ArtifactDirectory.CommitCapture:output_type -> supertag.runtime.v2.CapturedArtifact
+	9,  // 96: supertag.runtime.v2.ArtifactDirectory.Get:output_type -> supertag.runtime.v2.CapturedArtifact
+	25, // 97: supertag.runtime.v2.ArtifactDirectory.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	25, // 98: supertag.runtime.v2.ArtifactDirectory.FindForAttempt:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	9,  // 99: supertag.runtime.v2.ArtifactDirectory.GetForAttempt:output_type -> supertag.runtime.v2.CapturedArtifact
+	10, // 100: supertag.runtime.v2.ArtifactDirectory.Acquire:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	10, // 101: supertag.runtime.v2.ArtifactDirectory.Settle:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	5,  // 102: supertag.runtime.v2.ArtifactDirectory.GetAcquiredFile:output_type -> supertag.runtime.v2.ArtifactFile
+	25, // 103: supertag.runtime.v2.AttemptArtifacts.Find:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	9,  // 104: supertag.runtime.v2.AttemptArtifacts.Inspect:output_type -> supertag.runtime.v2.CapturedArtifact
+	10, // 105: supertag.runtime.v2.AttemptArtifacts.Acquire:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	10, // 106: supertag.runtime.v2.AttemptArtifacts.Settle:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	9,  // 107: supertag.runtime.v2.ArtifactTransfers.UploadCapture:output_type -> supertag.runtime.v2.CapturedArtifact
+	29, // 108: supertag.runtime.v2.ArtifactTransfers.DownloadFile:output_type -> supertag.runtime.v2.ArtifactDownload
+	29, // 109: supertag.runtime.v2.ArtifactTransfers.DownloadAcquiredFile:output_type -> supertag.runtime.v2.ArtifactDownload
+	9,  // 110: supertag.runtime.v2.HarnessArtifacts.Capture:output_type -> supertag.runtime.v2.CapturedArtifact
+	25, // 111: supertag.runtime.v2.HarnessArtifacts.Find:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	9,  // 112: supertag.runtime.v2.HarnessArtifacts.Inspect:output_type -> supertag.runtime.v2.CapturedArtifact
+	18, // 113: supertag.runtime.v2.HarnessArtifacts.Read:output_type -> supertag.runtime.v2.HarnessArtifactPage
+	20, // 114: supertag.runtime.v2.HarnessArtifacts.Attach:output_type -> supertag.runtime.v2.HarnessAttachedArtifact
+	30, // 115: supertag.runtime.v2.ArtifactVolumes.Put:output_type -> supertag.runtime.v2.ArtifactVolume
+	30, // 116: supertag.runtime.v2.ArtifactVolumes.Get:output_type -> supertag.runtime.v2.ArtifactVolume
+	34, // 117: supertag.runtime.v2.ArtifactVolumes.List:output_type -> supertag.runtime.v2.ListArtifactVolumesResponse
+	36, // 118: supertag.runtime.v2.ArtifactVolumes.Delete:output_type -> supertag.runtime.v2.DeleteArtifactVolumeResponse
+	38, // 119: supertag.runtime.v2.ArtifactVolumes.Copy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
+	38, // 120: supertag.runtime.v2.ArtifactVolumes.GetCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
+	29, // 121: supertag.runtime.v2.ArtifactVolumes.DownloadCopy:output_type -> supertag.runtime.v2.ArtifactDownload
+	42, // 122: supertag.runtime.v2.ArtifactVolumes.ListCopies:output_type -> supertag.runtime.v2.ListArtifactVolumeCopiesResponse
+	30, // 123: supertag.runtime.v2.ArtifactVolumeDirectory.Put:output_type -> supertag.runtime.v2.ArtifactVolume
+	30, // 124: supertag.runtime.v2.ArtifactVolumeDirectory.Get:output_type -> supertag.runtime.v2.ArtifactVolume
+	34, // 125: supertag.runtime.v2.ArtifactVolumeDirectory.List:output_type -> supertag.runtime.v2.ListArtifactVolumesResponse
+	36, // 126: supertag.runtime.v2.ArtifactVolumeDirectory.Delete:output_type -> supertag.runtime.v2.DeleteArtifactVolumeResponse
+	38, // 127: supertag.runtime.v2.ArtifactVolumeDirectory.ReserveCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
+	38, // 128: supertag.runtime.v2.ArtifactVolumeDirectory.CommitCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
+	38, // 129: supertag.runtime.v2.ArtifactVolumeDirectory.GetCopy:output_type -> supertag.runtime.v2.ArtifactVolumeCopy
+	42, // 130: supertag.runtime.v2.ArtifactVolumeDirectory.ListCopies:output_type -> supertag.runtime.v2.ListArtifactVolumeCopiesResponse
+	43, // 131: supertag.runtime.v2.ArtifactPublications.Publish:output_type -> supertag.runtime.v2.ArtifactPublication
+	45, // 132: supertag.runtime.v2.ArtifactPublications.Consume:output_type -> supertag.runtime.v2.ArtifactConsumptionApproval
+	43, // 133: supertag.runtime.v2.ArtifactPublications.WithdrawPublication:output_type -> supertag.runtime.v2.ArtifactPublication
+	45, // 134: supertag.runtime.v2.ArtifactPublications.WithdrawConsumption:output_type -> supertag.runtime.v2.ArtifactConsumptionApproval
+	43, // 135: supertag.runtime.v2.ArtifactPublications.GetPublication:output_type -> supertag.runtime.v2.ArtifactPublication
+	45, // 136: supertag.runtime.v2.ArtifactPublications.GetConsumption:output_type -> supertag.runtime.v2.ArtifactConsumptionApproval
+	51, // 137: supertag.runtime.v2.ArtifactPublications.ListPublications:output_type -> supertag.runtime.v2.ListArtifactPublicationsResponse
+	52, // 138: supertag.runtime.v2.ArtifactPublications.ListConsumptions:output_type -> supertag.runtime.v2.ListArtifactConsumptionsResponse
+	55, // 139: supertag.runtime.v2.ArtifactPublications.ListAudit:output_type -> supertag.runtime.v2.ListArtifactApprovalAuditResponse
+	92, // [92:140] is the sub-list for method output_type
+	44, // [44:92] is the sub-list for method input_type
+	44, // [44:44] is the sub-list for extension type_name
+	44, // [44:44] is the sub-list for extension extendee
+	0,  // [0:44] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_artifact_proto_init() }
@@ -3299,15 +4435,19 @@ func file_supertag_runtime_v2_artifact_proto_init() {
 		(*ArtifactDownload_Chunk)(nil),
 	}
 	file_supertag_runtime_v2_artifact_proto_msgTypes[34].OneofWrappers = []any{}
+	file_supertag_runtime_v2_artifact_proto_msgTypes[39].OneofWrappers = []any{}
+	file_supertag_runtime_v2_artifact_proto_msgTypes[40].OneofWrappers = []any{}
+	file_supertag_runtime_v2_artifact_proto_msgTypes[41].OneofWrappers = []any{}
+	file_supertag_runtime_v2_artifact_proto_msgTypes[42].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_artifact_proto_rawDesc), len(file_supertag_runtime_v2_artifact_proto_rawDesc)),
-			NumEnums:      3,
-			NumMessages:   39,
+			NumEnums:      4,
+			NumMessages:   52,
 			NumExtensions: 0,
-			NumServices:   7,
+			NumServices:   8,
 		},
 		GoTypes:           file_supertag_runtime_v2_artifact_proto_goTypes,
 		DependencyIndexes: file_supertag_runtime_v2_artifact_proto_depIdxs,

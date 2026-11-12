@@ -1792,26 +1792,30 @@ class Task(_message.Message):
     def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., execution_selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., attempt_execution: _Optional[_Union[AttemptExecutionSelection, _Mapping]] = ..., artifacts: _Optional[_Iterable[_Union[ArtifactSelection, _Mapping]]] = ..., output_policy: _Optional[_Union[TaskOutputPolicy, _Mapping]] = ..., input_artifacts: _Optional[_Iterable[_Union[AcceptedTaskArtifactInput, _Mapping]]] = ...) -> None: ...
 
 class TaskArtifactInputSelection(_message.Message):
-    __slots__ = ("artifact_id", "paths", "require_accepted")
+    __slots__ = ("artifact_id", "paths", "require_accepted", "publication_approval_id")
     ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
     PATHS_FIELD_NUMBER: _ClassVar[int]
     REQUIRE_ACCEPTED_FIELD_NUMBER: _ClassVar[int]
+    PUBLICATION_APPROVAL_ID_FIELD_NUMBER: _ClassVar[int]
     artifact_id: str
     paths: _containers.RepeatedScalarFieldContainer[str]
     require_accepted: bool
-    def __init__(self, artifact_id: _Optional[str] = ..., paths: _Optional[_Iterable[str]] = ..., require_accepted: _Optional[bool] = ...) -> None: ...
+    publication_approval_id: str
+    def __init__(self, artifact_id: _Optional[str] = ..., paths: _Optional[_Iterable[str]] = ..., require_accepted: _Optional[bool] = ..., publication_approval_id: _Optional[str] = ...) -> None: ...
 
 class AcceptedTaskArtifactInput(_message.Message):
-    __slots__ = ("artifact_id", "source_task_id", "source_attempt_id", "files")
+    __slots__ = ("artifact_id", "source_task_id", "source_attempt_id", "files", "publication")
     ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
     SOURCE_TASK_ID_FIELD_NUMBER: _ClassVar[int]
     SOURCE_ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     FILES_FIELD_NUMBER: _ClassVar[int]
+    PUBLICATION_FIELD_NUMBER: _ClassVar[int]
     artifact_id: str
     source_task_id: str
     source_attempt_id: str
     files: _containers.RepeatedCompositeFieldContainer[ArtifactInputFile]
-    def __init__(self, artifact_id: _Optional[str] = ..., source_task_id: _Optional[str] = ..., source_attempt_id: _Optional[str] = ..., files: _Optional[_Iterable[_Union[ArtifactInputFile, _Mapping]]] = ...) -> None: ...
+    publication: ArtifactPublicationPin
+    def __init__(self, artifact_id: _Optional[str] = ..., source_task_id: _Optional[str] = ..., source_attempt_id: _Optional[str] = ..., files: _Optional[_Iterable[_Union[ArtifactInputFile, _Mapping]]] = ..., publication: _Optional[_Union[ArtifactPublicationPin, _Mapping]] = ...) -> None: ...
 
 class ArtifactInputFile(_message.Message):
     __slots__ = ("path", "blob")
@@ -3204,3 +3208,19 @@ class ResolveReplyRequest(_message.Message):
     provider_receipt: str
     evidence: str
     def __init__(self, reply_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., state: _Optional[_Union[ReplyState, str]] = ..., provider_receipt: _Optional[str] = ..., evidence: _Optional[str] = ...) -> None: ...
+
+class ArtifactPublicationPin(_message.Message):
+    __slots__ = ("publication_id", "publication_revision", "consumption_id", "consumption_revision", "source_objective_id", "destination_objective_id")
+    PUBLICATION_ID_FIELD_NUMBER: _ClassVar[int]
+    PUBLICATION_REVISION_FIELD_NUMBER: _ClassVar[int]
+    CONSUMPTION_ID_FIELD_NUMBER: _ClassVar[int]
+    CONSUMPTION_REVISION_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    DESTINATION_OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    publication_id: str
+    publication_revision: int
+    consumption_id: str
+    consumption_revision: int
+    source_objective_id: str
+    destination_objective_id: str
+    def __init__(self, publication_id: _Optional[str] = ..., publication_revision: _Optional[int] = ..., consumption_id: _Optional[str] = ..., consumption_revision: _Optional[int] = ..., source_objective_id: _Optional[str] = ..., destination_objective_id: _Optional[str] = ...) -> None: ...

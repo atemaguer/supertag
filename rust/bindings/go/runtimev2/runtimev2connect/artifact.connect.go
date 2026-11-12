@@ -35,6 +35,8 @@ const (
 	ArtifactVolumesName = "supertag.runtime.v2.ArtifactVolumes"
 	// ArtifactVolumeDirectoryName is the fully-qualified name of the ArtifactVolumeDirectory service.
 	ArtifactVolumeDirectoryName = "supertag.runtime.v2.ArtifactVolumeDirectory"
+	// ArtifactPublicationsName is the fully-qualified name of the ArtifactPublications service.
+	ArtifactPublicationsName = "supertag.runtime.v2.ArtifactPublications"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -147,6 +149,33 @@ const (
 	// ArtifactVolumeDirectoryListCopiesProcedure is the fully-qualified name of the
 	// ArtifactVolumeDirectory's ListCopies RPC.
 	ArtifactVolumeDirectoryListCopiesProcedure = "/supertag.runtime.v2.ArtifactVolumeDirectory/ListCopies"
+	// ArtifactPublicationsPublishProcedure is the fully-qualified name of the ArtifactPublications's
+	// Publish RPC.
+	ArtifactPublicationsPublishProcedure = "/supertag.runtime.v2.ArtifactPublications/Publish"
+	// ArtifactPublicationsConsumeProcedure is the fully-qualified name of the ArtifactPublications's
+	// Consume RPC.
+	ArtifactPublicationsConsumeProcedure = "/supertag.runtime.v2.ArtifactPublications/Consume"
+	// ArtifactPublicationsWithdrawPublicationProcedure is the fully-qualified name of the
+	// ArtifactPublications's WithdrawPublication RPC.
+	ArtifactPublicationsWithdrawPublicationProcedure = "/supertag.runtime.v2.ArtifactPublications/WithdrawPublication"
+	// ArtifactPublicationsWithdrawConsumptionProcedure is the fully-qualified name of the
+	// ArtifactPublications's WithdrawConsumption RPC.
+	ArtifactPublicationsWithdrawConsumptionProcedure = "/supertag.runtime.v2.ArtifactPublications/WithdrawConsumption"
+	// ArtifactPublicationsGetPublicationProcedure is the fully-qualified name of the
+	// ArtifactPublications's GetPublication RPC.
+	ArtifactPublicationsGetPublicationProcedure = "/supertag.runtime.v2.ArtifactPublications/GetPublication"
+	// ArtifactPublicationsGetConsumptionProcedure is the fully-qualified name of the
+	// ArtifactPublications's GetConsumption RPC.
+	ArtifactPublicationsGetConsumptionProcedure = "/supertag.runtime.v2.ArtifactPublications/GetConsumption"
+	// ArtifactPublicationsListPublicationsProcedure is the fully-qualified name of the
+	// ArtifactPublications's ListPublications RPC.
+	ArtifactPublicationsListPublicationsProcedure = "/supertag.runtime.v2.ArtifactPublications/ListPublications"
+	// ArtifactPublicationsListConsumptionsProcedure is the fully-qualified name of the
+	// ArtifactPublications's ListConsumptions RPC.
+	ArtifactPublicationsListConsumptionsProcedure = "/supertag.runtime.v2.ArtifactPublications/ListConsumptions"
+	// ArtifactPublicationsListAuditProcedure is the fully-qualified name of the ArtifactPublications's
+	// ListAudit RPC.
+	ArtifactPublicationsListAuditProcedure = "/supertag.runtime.v2.ArtifactPublications/ListAudit"
 )
 
 // ArtifactCatalogClient is a client for the supertag.runtime.v2.ArtifactCatalog service.
@@ -1474,4 +1503,283 @@ func (UnimplementedArtifactVolumeDirectoryHandler) GetCopy(context.Context, *con
 
 func (UnimplementedArtifactVolumeDirectoryHandler) ListCopies(context.Context, *connect.Request[runtimev2.ListArtifactVolumeCopiesRequest]) (*connect.Response[runtimev2.ListArtifactVolumeCopiesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactVolumeDirectory.ListCopies is not implemented"))
+}
+
+// ArtifactPublicationsClient is a client for the supertag.runtime.v2.ArtifactPublications service.
+type ArtifactPublicationsClient interface {
+	Publish(context.Context, *connect.Request[runtimev2.PublishArtifactRequest]) (*connect.Response[runtimev2.ArtifactPublication], error)
+	Consume(context.Context, *connect.Request[runtimev2.ConsumeArtifactPublicationRequest]) (*connect.Response[runtimev2.ArtifactConsumptionApproval], error)
+	WithdrawPublication(context.Context, *connect.Request[runtimev2.WithdrawArtifactApprovalRequest]) (*connect.Response[runtimev2.ArtifactPublication], error)
+	WithdrawConsumption(context.Context, *connect.Request[runtimev2.WithdrawArtifactApprovalRequest]) (*connect.Response[runtimev2.ArtifactConsumptionApproval], error)
+	GetPublication(context.Context, *connect.Request[runtimev2.GetArtifactApprovalRequest]) (*connect.Response[runtimev2.ArtifactPublication], error)
+	GetConsumption(context.Context, *connect.Request[runtimev2.GetArtifactApprovalRequest]) (*connect.Response[runtimev2.ArtifactConsumptionApproval], error)
+	ListPublications(context.Context, *connect.Request[runtimev2.ListObjectiveArtifactApprovalsRequest]) (*connect.Response[runtimev2.ListArtifactPublicationsResponse], error)
+	ListConsumptions(context.Context, *connect.Request[runtimev2.ListObjectiveArtifactApprovalsRequest]) (*connect.Response[runtimev2.ListArtifactConsumptionsResponse], error)
+	ListAudit(context.Context, *connect.Request[runtimev2.ListArtifactApprovalAuditRequest]) (*connect.Response[runtimev2.ListArtifactApprovalAuditResponse], error)
+}
+
+// NewArtifactPublicationsClient constructs a client for the
+// supertag.runtime.v2.ArtifactPublications service. By default, it uses the Connect protocol with
+// the binary Protobuf Codec, asks for gzipped responses, and sends uncompressed requests. To use
+// the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewArtifactPublicationsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) ArtifactPublicationsClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	artifactPublicationsMethods := runtimev2.File_supertag_runtime_v2_artifact_proto.Services().ByName("ArtifactPublications").Methods()
+	return &artifactPublicationsClient{
+		publish: connect.NewClient[runtimev2.PublishArtifactRequest, runtimev2.ArtifactPublication](
+			httpClient,
+			baseURL+ArtifactPublicationsPublishProcedure,
+			connect.WithSchema(artifactPublicationsMethods.ByName("Publish")),
+			connect.WithClientOptions(opts...),
+		),
+		consume: connect.NewClient[runtimev2.ConsumeArtifactPublicationRequest, runtimev2.ArtifactConsumptionApproval](
+			httpClient,
+			baseURL+ArtifactPublicationsConsumeProcedure,
+			connect.WithSchema(artifactPublicationsMethods.ByName("Consume")),
+			connect.WithClientOptions(opts...),
+		),
+		withdrawPublication: connect.NewClient[runtimev2.WithdrawArtifactApprovalRequest, runtimev2.ArtifactPublication](
+			httpClient,
+			baseURL+ArtifactPublicationsWithdrawPublicationProcedure,
+			connect.WithSchema(artifactPublicationsMethods.ByName("WithdrawPublication")),
+			connect.WithClientOptions(opts...),
+		),
+		withdrawConsumption: connect.NewClient[runtimev2.WithdrawArtifactApprovalRequest, runtimev2.ArtifactConsumptionApproval](
+			httpClient,
+			baseURL+ArtifactPublicationsWithdrawConsumptionProcedure,
+			connect.WithSchema(artifactPublicationsMethods.ByName("WithdrawConsumption")),
+			connect.WithClientOptions(opts...),
+		),
+		getPublication: connect.NewClient[runtimev2.GetArtifactApprovalRequest, runtimev2.ArtifactPublication](
+			httpClient,
+			baseURL+ArtifactPublicationsGetPublicationProcedure,
+			connect.WithSchema(artifactPublicationsMethods.ByName("GetPublication")),
+			connect.WithClientOptions(opts...),
+		),
+		getConsumption: connect.NewClient[runtimev2.GetArtifactApprovalRequest, runtimev2.ArtifactConsumptionApproval](
+			httpClient,
+			baseURL+ArtifactPublicationsGetConsumptionProcedure,
+			connect.WithSchema(artifactPublicationsMethods.ByName("GetConsumption")),
+			connect.WithClientOptions(opts...),
+		),
+		listPublications: connect.NewClient[runtimev2.ListObjectiveArtifactApprovalsRequest, runtimev2.ListArtifactPublicationsResponse](
+			httpClient,
+			baseURL+ArtifactPublicationsListPublicationsProcedure,
+			connect.WithSchema(artifactPublicationsMethods.ByName("ListPublications")),
+			connect.WithClientOptions(opts...),
+		),
+		listConsumptions: connect.NewClient[runtimev2.ListObjectiveArtifactApprovalsRequest, runtimev2.ListArtifactConsumptionsResponse](
+			httpClient,
+			baseURL+ArtifactPublicationsListConsumptionsProcedure,
+			connect.WithSchema(artifactPublicationsMethods.ByName("ListConsumptions")),
+			connect.WithClientOptions(opts...),
+		),
+		listAudit: connect.NewClient[runtimev2.ListArtifactApprovalAuditRequest, runtimev2.ListArtifactApprovalAuditResponse](
+			httpClient,
+			baseURL+ArtifactPublicationsListAuditProcedure,
+			connect.WithSchema(artifactPublicationsMethods.ByName("ListAudit")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// artifactPublicationsClient implements ArtifactPublicationsClient.
+type artifactPublicationsClient struct {
+	publish             *connect.Client[runtimev2.PublishArtifactRequest, runtimev2.ArtifactPublication]
+	consume             *connect.Client[runtimev2.ConsumeArtifactPublicationRequest, runtimev2.ArtifactConsumptionApproval]
+	withdrawPublication *connect.Client[runtimev2.WithdrawArtifactApprovalRequest, runtimev2.ArtifactPublication]
+	withdrawConsumption *connect.Client[runtimev2.WithdrawArtifactApprovalRequest, runtimev2.ArtifactConsumptionApproval]
+	getPublication      *connect.Client[runtimev2.GetArtifactApprovalRequest, runtimev2.ArtifactPublication]
+	getConsumption      *connect.Client[runtimev2.GetArtifactApprovalRequest, runtimev2.ArtifactConsumptionApproval]
+	listPublications    *connect.Client[runtimev2.ListObjectiveArtifactApprovalsRequest, runtimev2.ListArtifactPublicationsResponse]
+	listConsumptions    *connect.Client[runtimev2.ListObjectiveArtifactApprovalsRequest, runtimev2.ListArtifactConsumptionsResponse]
+	listAudit           *connect.Client[runtimev2.ListArtifactApprovalAuditRequest, runtimev2.ListArtifactApprovalAuditResponse]
+}
+
+// Publish calls supertag.runtime.v2.ArtifactPublications.Publish.
+func (c *artifactPublicationsClient) Publish(ctx context.Context, req *connect.Request[runtimev2.PublishArtifactRequest]) (*connect.Response[runtimev2.ArtifactPublication], error) {
+	return c.publish.CallUnary(ctx, req)
+}
+
+// Consume calls supertag.runtime.v2.ArtifactPublications.Consume.
+func (c *artifactPublicationsClient) Consume(ctx context.Context, req *connect.Request[runtimev2.ConsumeArtifactPublicationRequest]) (*connect.Response[runtimev2.ArtifactConsumptionApproval], error) {
+	return c.consume.CallUnary(ctx, req)
+}
+
+// WithdrawPublication calls supertag.runtime.v2.ArtifactPublications.WithdrawPublication.
+func (c *artifactPublicationsClient) WithdrawPublication(ctx context.Context, req *connect.Request[runtimev2.WithdrawArtifactApprovalRequest]) (*connect.Response[runtimev2.ArtifactPublication], error) {
+	return c.withdrawPublication.CallUnary(ctx, req)
+}
+
+// WithdrawConsumption calls supertag.runtime.v2.ArtifactPublications.WithdrawConsumption.
+func (c *artifactPublicationsClient) WithdrawConsumption(ctx context.Context, req *connect.Request[runtimev2.WithdrawArtifactApprovalRequest]) (*connect.Response[runtimev2.ArtifactConsumptionApproval], error) {
+	return c.withdrawConsumption.CallUnary(ctx, req)
+}
+
+// GetPublication calls supertag.runtime.v2.ArtifactPublications.GetPublication.
+func (c *artifactPublicationsClient) GetPublication(ctx context.Context, req *connect.Request[runtimev2.GetArtifactApprovalRequest]) (*connect.Response[runtimev2.ArtifactPublication], error) {
+	return c.getPublication.CallUnary(ctx, req)
+}
+
+// GetConsumption calls supertag.runtime.v2.ArtifactPublications.GetConsumption.
+func (c *artifactPublicationsClient) GetConsumption(ctx context.Context, req *connect.Request[runtimev2.GetArtifactApprovalRequest]) (*connect.Response[runtimev2.ArtifactConsumptionApproval], error) {
+	return c.getConsumption.CallUnary(ctx, req)
+}
+
+// ListPublications calls supertag.runtime.v2.ArtifactPublications.ListPublications.
+func (c *artifactPublicationsClient) ListPublications(ctx context.Context, req *connect.Request[runtimev2.ListObjectiveArtifactApprovalsRequest]) (*connect.Response[runtimev2.ListArtifactPublicationsResponse], error) {
+	return c.listPublications.CallUnary(ctx, req)
+}
+
+// ListConsumptions calls supertag.runtime.v2.ArtifactPublications.ListConsumptions.
+func (c *artifactPublicationsClient) ListConsumptions(ctx context.Context, req *connect.Request[runtimev2.ListObjectiveArtifactApprovalsRequest]) (*connect.Response[runtimev2.ListArtifactConsumptionsResponse], error) {
+	return c.listConsumptions.CallUnary(ctx, req)
+}
+
+// ListAudit calls supertag.runtime.v2.ArtifactPublications.ListAudit.
+func (c *artifactPublicationsClient) ListAudit(ctx context.Context, req *connect.Request[runtimev2.ListArtifactApprovalAuditRequest]) (*connect.Response[runtimev2.ListArtifactApprovalAuditResponse], error) {
+	return c.listAudit.CallUnary(ctx, req)
+}
+
+// ArtifactPublicationsHandler is an implementation of the supertag.runtime.v2.ArtifactPublications
+// service.
+type ArtifactPublicationsHandler interface {
+	Publish(context.Context, *connect.Request[runtimev2.PublishArtifactRequest]) (*connect.Response[runtimev2.ArtifactPublication], error)
+	Consume(context.Context, *connect.Request[runtimev2.ConsumeArtifactPublicationRequest]) (*connect.Response[runtimev2.ArtifactConsumptionApproval], error)
+	WithdrawPublication(context.Context, *connect.Request[runtimev2.WithdrawArtifactApprovalRequest]) (*connect.Response[runtimev2.ArtifactPublication], error)
+	WithdrawConsumption(context.Context, *connect.Request[runtimev2.WithdrawArtifactApprovalRequest]) (*connect.Response[runtimev2.ArtifactConsumptionApproval], error)
+	GetPublication(context.Context, *connect.Request[runtimev2.GetArtifactApprovalRequest]) (*connect.Response[runtimev2.ArtifactPublication], error)
+	GetConsumption(context.Context, *connect.Request[runtimev2.GetArtifactApprovalRequest]) (*connect.Response[runtimev2.ArtifactConsumptionApproval], error)
+	ListPublications(context.Context, *connect.Request[runtimev2.ListObjectiveArtifactApprovalsRequest]) (*connect.Response[runtimev2.ListArtifactPublicationsResponse], error)
+	ListConsumptions(context.Context, *connect.Request[runtimev2.ListObjectiveArtifactApprovalsRequest]) (*connect.Response[runtimev2.ListArtifactConsumptionsResponse], error)
+	ListAudit(context.Context, *connect.Request[runtimev2.ListArtifactApprovalAuditRequest]) (*connect.Response[runtimev2.ListArtifactApprovalAuditResponse], error)
+}
+
+// NewArtifactPublicationsHandler builds an HTTP handler from the service implementation. It returns
+// the path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewArtifactPublicationsHandler(svc ArtifactPublicationsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	artifactPublicationsMethods := runtimev2.File_supertag_runtime_v2_artifact_proto.Services().ByName("ArtifactPublications").Methods()
+	artifactPublicationsPublishHandler := connect.NewUnaryHandler(
+		ArtifactPublicationsPublishProcedure,
+		svc.Publish,
+		connect.WithSchema(artifactPublicationsMethods.ByName("Publish")),
+		connect.WithHandlerOptions(opts...),
+	)
+	artifactPublicationsConsumeHandler := connect.NewUnaryHandler(
+		ArtifactPublicationsConsumeProcedure,
+		svc.Consume,
+		connect.WithSchema(artifactPublicationsMethods.ByName("Consume")),
+		connect.WithHandlerOptions(opts...),
+	)
+	artifactPublicationsWithdrawPublicationHandler := connect.NewUnaryHandler(
+		ArtifactPublicationsWithdrawPublicationProcedure,
+		svc.WithdrawPublication,
+		connect.WithSchema(artifactPublicationsMethods.ByName("WithdrawPublication")),
+		connect.WithHandlerOptions(opts...),
+	)
+	artifactPublicationsWithdrawConsumptionHandler := connect.NewUnaryHandler(
+		ArtifactPublicationsWithdrawConsumptionProcedure,
+		svc.WithdrawConsumption,
+		connect.WithSchema(artifactPublicationsMethods.ByName("WithdrawConsumption")),
+		connect.WithHandlerOptions(opts...),
+	)
+	artifactPublicationsGetPublicationHandler := connect.NewUnaryHandler(
+		ArtifactPublicationsGetPublicationProcedure,
+		svc.GetPublication,
+		connect.WithSchema(artifactPublicationsMethods.ByName("GetPublication")),
+		connect.WithHandlerOptions(opts...),
+	)
+	artifactPublicationsGetConsumptionHandler := connect.NewUnaryHandler(
+		ArtifactPublicationsGetConsumptionProcedure,
+		svc.GetConsumption,
+		connect.WithSchema(artifactPublicationsMethods.ByName("GetConsumption")),
+		connect.WithHandlerOptions(opts...),
+	)
+	artifactPublicationsListPublicationsHandler := connect.NewUnaryHandler(
+		ArtifactPublicationsListPublicationsProcedure,
+		svc.ListPublications,
+		connect.WithSchema(artifactPublicationsMethods.ByName("ListPublications")),
+		connect.WithHandlerOptions(opts...),
+	)
+	artifactPublicationsListConsumptionsHandler := connect.NewUnaryHandler(
+		ArtifactPublicationsListConsumptionsProcedure,
+		svc.ListConsumptions,
+		connect.WithSchema(artifactPublicationsMethods.ByName("ListConsumptions")),
+		connect.WithHandlerOptions(opts...),
+	)
+	artifactPublicationsListAuditHandler := connect.NewUnaryHandler(
+		ArtifactPublicationsListAuditProcedure,
+		svc.ListAudit,
+		connect.WithSchema(artifactPublicationsMethods.ByName("ListAudit")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.ArtifactPublications/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case ArtifactPublicationsPublishProcedure:
+			artifactPublicationsPublishHandler.ServeHTTP(w, r)
+		case ArtifactPublicationsConsumeProcedure:
+			artifactPublicationsConsumeHandler.ServeHTTP(w, r)
+		case ArtifactPublicationsWithdrawPublicationProcedure:
+			artifactPublicationsWithdrawPublicationHandler.ServeHTTP(w, r)
+		case ArtifactPublicationsWithdrawConsumptionProcedure:
+			artifactPublicationsWithdrawConsumptionHandler.ServeHTTP(w, r)
+		case ArtifactPublicationsGetPublicationProcedure:
+			artifactPublicationsGetPublicationHandler.ServeHTTP(w, r)
+		case ArtifactPublicationsGetConsumptionProcedure:
+			artifactPublicationsGetConsumptionHandler.ServeHTTP(w, r)
+		case ArtifactPublicationsListPublicationsProcedure:
+			artifactPublicationsListPublicationsHandler.ServeHTTP(w, r)
+		case ArtifactPublicationsListConsumptionsProcedure:
+			artifactPublicationsListConsumptionsHandler.ServeHTTP(w, r)
+		case ArtifactPublicationsListAuditProcedure:
+			artifactPublicationsListAuditHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedArtifactPublicationsHandler returns CodeUnimplemented from all methods.
+type UnimplementedArtifactPublicationsHandler struct{}
+
+func (UnimplementedArtifactPublicationsHandler) Publish(context.Context, *connect.Request[runtimev2.PublishArtifactRequest]) (*connect.Response[runtimev2.ArtifactPublication], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactPublications.Publish is not implemented"))
+}
+
+func (UnimplementedArtifactPublicationsHandler) Consume(context.Context, *connect.Request[runtimev2.ConsumeArtifactPublicationRequest]) (*connect.Response[runtimev2.ArtifactConsumptionApproval], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactPublications.Consume is not implemented"))
+}
+
+func (UnimplementedArtifactPublicationsHandler) WithdrawPublication(context.Context, *connect.Request[runtimev2.WithdrawArtifactApprovalRequest]) (*connect.Response[runtimev2.ArtifactPublication], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactPublications.WithdrawPublication is not implemented"))
+}
+
+func (UnimplementedArtifactPublicationsHandler) WithdrawConsumption(context.Context, *connect.Request[runtimev2.WithdrawArtifactApprovalRequest]) (*connect.Response[runtimev2.ArtifactConsumptionApproval], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactPublications.WithdrawConsumption is not implemented"))
+}
+
+func (UnimplementedArtifactPublicationsHandler) GetPublication(context.Context, *connect.Request[runtimev2.GetArtifactApprovalRequest]) (*connect.Response[runtimev2.ArtifactPublication], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactPublications.GetPublication is not implemented"))
+}
+
+func (UnimplementedArtifactPublicationsHandler) GetConsumption(context.Context, *connect.Request[runtimev2.GetArtifactApprovalRequest]) (*connect.Response[runtimev2.ArtifactConsumptionApproval], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactPublications.GetConsumption is not implemented"))
+}
+
+func (UnimplementedArtifactPublicationsHandler) ListPublications(context.Context, *connect.Request[runtimev2.ListObjectiveArtifactApprovalsRequest]) (*connect.Response[runtimev2.ListArtifactPublicationsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactPublications.ListPublications is not implemented"))
+}
+
+func (UnimplementedArtifactPublicationsHandler) ListConsumptions(context.Context, *connect.Request[runtimev2.ListObjectiveArtifactApprovalsRequest]) (*connect.Response[runtimev2.ListArtifactConsumptionsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactPublications.ListConsumptions is not implemented"))
+}
+
+func (UnimplementedArtifactPublicationsHandler) ListAudit(context.Context, *connect.Request[runtimev2.ListArtifactApprovalAuditRequest]) (*connect.Response[runtimev2.ListArtifactApprovalAuditResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactPublications.ListAudit is not implemented"))
 }

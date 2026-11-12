@@ -1205,6 +1205,7 @@ message TaskArtifactInputSelection {
   string artifact_id = 1;
   repeated string paths = 2;
   bool require_accepted = 3;
+  optional string publication_approval_id = 4;
 }
 
 message AcceptedTaskArtifactInput {
@@ -1212,6 +1213,7 @@ message AcceptedTaskArtifactInput {
   string source_task_id = 2;
   string source_attempt_id = 3;
   repeated ArtifactInputFile files = 4;
+  ArtifactPublicationPin publication = 5;
 }
 
 // Immutable byte identity for a file selected at admission.
@@ -2138,4 +2140,14 @@ message ResolveReplyRequest {
   ReplyState state = 3;
   optional string provider_receipt = 4;
   string evidence = 5;
+}
+
+// Exact, revocable cross-Objective approval provenance on an accepted input.
+message ArtifactPublicationPin {
+  string publication_id = 1;
+  uint64 publication_revision = 2;
+  string consumption_id = 3;
+  uint64 consumption_revision = 4;
+  string source_objective_id = 5;
+  string destination_objective_id = 6;
 }

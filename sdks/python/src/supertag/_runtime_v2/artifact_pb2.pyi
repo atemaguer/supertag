@@ -27,6 +27,12 @@ class ArtifactVolumeCopyState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper)
     ARTIFACT_VOLUME_COPY_STATE_UNSPECIFIED: _ClassVar[ArtifactVolumeCopyState]
     ARTIFACT_VOLUME_COPY_STATE_RESERVED: _ClassVar[ArtifactVolumeCopyState]
     ARTIFACT_VOLUME_COPY_STATE_VERIFIED: _ClassVar[ArtifactVolumeCopyState]
+
+class ArtifactApprovalStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    ARTIFACT_APPROVAL_STATUS_UNSPECIFIED: _ClassVar[ArtifactApprovalStatus]
+    ARTIFACT_APPROVAL_STATUS_AVAILABLE: _ClassVar[ArtifactApprovalStatus]
+    ARTIFACT_APPROVAL_STATUS_WITHDRAWN: _ClassVar[ArtifactApprovalStatus]
 ARTIFACT_DELIVERY_UNSPECIFIED: ArtifactDelivery
 ARTIFACT_DELIVERY_READ: ArtifactDelivery
 ARTIFACT_DELIVERY_MATERIALIZE: ArtifactDelivery
@@ -38,6 +44,9 @@ ARTIFACT_ACQUISITION_STATE_UNCERTAIN: ArtifactAcquisitionState
 ARTIFACT_VOLUME_COPY_STATE_UNSPECIFIED: ArtifactVolumeCopyState
 ARTIFACT_VOLUME_COPY_STATE_RESERVED: ArtifactVolumeCopyState
 ARTIFACT_VOLUME_COPY_STATE_VERIFIED: ArtifactVolumeCopyState
+ARTIFACT_APPROVAL_STATUS_UNSPECIFIED: ArtifactApprovalStatus
+ARTIFACT_APPROVAL_STATUS_AVAILABLE: ArtifactApprovalStatus
+ARTIFACT_APPROVAL_STATUS_WITHDRAWN: ArtifactApprovalStatus
 
 class ArtifactDescription(_message.Message):
     __slots__ = ("title", "kind", "summary")
@@ -484,3 +493,173 @@ class ListArtifactVolumeCopiesResponse(_message.Message):
     copies: _containers.RepeatedCompositeFieldContainer[ArtifactVolumeCopy]
     next_before_order: int
     def __init__(self, copies: _Optional[_Iterable[_Union[ArtifactVolumeCopy, _Mapping]]] = ..., next_before_order: _Optional[int] = ...) -> None: ...
+
+class ArtifactPublication(_message.Message):
+    __slots__ = ("publication_id", "source_objective_id", "producer", "artifact_id", "files", "audience_objective_ids", "source_owner_tag_id", "assessment", "approved_by", "approved_at_ms", "supersedes_publication_id", "status", "revision", "withdrawn_by", "withdrawn_at_ms")
+    PUBLICATION_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    PRODUCER_FIELD_NUMBER: _ClassVar[int]
+    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
+    FILES_FIELD_NUMBER: _ClassVar[int]
+    AUDIENCE_OBJECTIVE_IDS_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_OWNER_TAG_ID_FIELD_NUMBER: _ClassVar[int]
+    ASSESSMENT_FIELD_NUMBER: _ClassVar[int]
+    APPROVED_BY_FIELD_NUMBER: _ClassVar[int]
+    APPROVED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    SUPERSEDES_PUBLICATION_ID_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    REVISION_FIELD_NUMBER: _ClassVar[int]
+    WITHDRAWN_BY_FIELD_NUMBER: _ClassVar[int]
+    WITHDRAWN_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    publication_id: str
+    source_objective_id: str
+    producer: ArtifactProducer
+    artifact_id: str
+    files: _containers.RepeatedCompositeFieldContainer[ArtifactFile]
+    audience_objective_ids: _containers.RepeatedScalarFieldContainer[str]
+    source_owner_tag_id: str
+    assessment: str
+    approved_by: str
+    approved_at_ms: int
+    supersedes_publication_id: str
+    status: ArtifactApprovalStatus
+    revision: int
+    withdrawn_by: str
+    withdrawn_at_ms: int
+    def __init__(self, publication_id: _Optional[str] = ..., source_objective_id: _Optional[str] = ..., producer: _Optional[_Union[ArtifactProducer, _Mapping]] = ..., artifact_id: _Optional[str] = ..., files: _Optional[_Iterable[_Union[ArtifactFile, _Mapping]]] = ..., audience_objective_ids: _Optional[_Iterable[str]] = ..., source_owner_tag_id: _Optional[str] = ..., assessment: _Optional[str] = ..., approved_by: _Optional[str] = ..., approved_at_ms: _Optional[int] = ..., supersedes_publication_id: _Optional[str] = ..., status: _Optional[_Union[ArtifactApprovalStatus, str]] = ..., revision: _Optional[int] = ..., withdrawn_by: _Optional[str] = ..., withdrawn_at_ms: _Optional[int] = ...) -> None: ...
+
+class ArtifactPublicationView(_message.Message):
+    __slots__ = ("publication_id", "source_objective_id", "artifact_id", "files", "supersedes_publication_id", "status", "revision")
+    PUBLICATION_ID_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
+    FILES_FIELD_NUMBER: _ClassVar[int]
+    SUPERSEDES_PUBLICATION_ID_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    REVISION_FIELD_NUMBER: _ClassVar[int]
+    publication_id: str
+    source_objective_id: str
+    artifact_id: str
+    files: _containers.RepeatedCompositeFieldContainer[ArtifactFile]
+    supersedes_publication_id: str
+    status: ArtifactApprovalStatus
+    revision: int
+    def __init__(self, publication_id: _Optional[str] = ..., source_objective_id: _Optional[str] = ..., artifact_id: _Optional[str] = ..., files: _Optional[_Iterable[_Union[ArtifactFile, _Mapping]]] = ..., supersedes_publication_id: _Optional[str] = ..., status: _Optional[_Union[ArtifactApprovalStatus, str]] = ..., revision: _Optional[int] = ...) -> None: ...
+
+class ArtifactConsumptionApproval(_message.Message):
+    __slots__ = ("consumption_id", "publication_id", "objective_id", "approved_by", "approved_at_ms", "status", "revision", "withdrawn_by", "withdrawn_at_ms")
+    CONSUMPTION_ID_FIELD_NUMBER: _ClassVar[int]
+    PUBLICATION_ID_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    APPROVED_BY_FIELD_NUMBER: _ClassVar[int]
+    APPROVED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    REVISION_FIELD_NUMBER: _ClassVar[int]
+    WITHDRAWN_BY_FIELD_NUMBER: _ClassVar[int]
+    WITHDRAWN_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    consumption_id: str
+    publication_id: str
+    objective_id: str
+    approved_by: str
+    approved_at_ms: int
+    status: ArtifactApprovalStatus
+    revision: int
+    withdrawn_by: str
+    withdrawn_at_ms: int
+    def __init__(self, consumption_id: _Optional[str] = ..., publication_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., approved_by: _Optional[str] = ..., approved_at_ms: _Optional[int] = ..., status: _Optional[_Union[ArtifactApprovalStatus, str]] = ..., revision: _Optional[int] = ..., withdrawn_by: _Optional[str] = ..., withdrawn_at_ms: _Optional[int] = ...) -> None: ...
+
+class PublishArtifactRequest(_message.Message):
+    __slots__ = ("publication_id", "artifact_id", "paths", "audience_objective_ids", "supersedes_publication_id")
+    PUBLICATION_ID_FIELD_NUMBER: _ClassVar[int]
+    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
+    PATHS_FIELD_NUMBER: _ClassVar[int]
+    AUDIENCE_OBJECTIVE_IDS_FIELD_NUMBER: _ClassVar[int]
+    SUPERSEDES_PUBLICATION_ID_FIELD_NUMBER: _ClassVar[int]
+    publication_id: str
+    artifact_id: str
+    paths: _containers.RepeatedScalarFieldContainer[str]
+    audience_objective_ids: _containers.RepeatedScalarFieldContainer[str]
+    supersedes_publication_id: str
+    def __init__(self, publication_id: _Optional[str] = ..., artifact_id: _Optional[str] = ..., paths: _Optional[_Iterable[str]] = ..., audience_objective_ids: _Optional[_Iterable[str]] = ..., supersedes_publication_id: _Optional[str] = ...) -> None: ...
+
+class ConsumeArtifactPublicationRequest(_message.Message):
+    __slots__ = ("consumption_id", "publication_id", "objective_id")
+    CONSUMPTION_ID_FIELD_NUMBER: _ClassVar[int]
+    PUBLICATION_ID_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    consumption_id: str
+    publication_id: str
+    objective_id: str
+    def __init__(self, consumption_id: _Optional[str] = ..., publication_id: _Optional[str] = ..., objective_id: _Optional[str] = ...) -> None: ...
+
+class WithdrawArtifactApprovalRequest(_message.Message):
+    __slots__ = ("approval_id", "expected_revision")
+    APPROVAL_ID_FIELD_NUMBER: _ClassVar[int]
+    EXPECTED_REVISION_FIELD_NUMBER: _ClassVar[int]
+    approval_id: str
+    expected_revision: int
+    def __init__(self, approval_id: _Optional[str] = ..., expected_revision: _Optional[int] = ...) -> None: ...
+
+class GetArtifactApprovalRequest(_message.Message):
+    __slots__ = ("approval_id",)
+    APPROVAL_ID_FIELD_NUMBER: _ClassVar[int]
+    approval_id: str
+    def __init__(self, approval_id: _Optional[str] = ...) -> None: ...
+
+class ListObjectiveArtifactApprovalsRequest(_message.Message):
+    __slots__ = ("objective_id", "limit", "before_order")
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    BEFORE_ORDER_FIELD_NUMBER: _ClassVar[int]
+    objective_id: str
+    limit: int
+    before_order: int
+    def __init__(self, objective_id: _Optional[str] = ..., limit: _Optional[int] = ..., before_order: _Optional[int] = ...) -> None: ...
+
+class ListArtifactPublicationsResponse(_message.Message):
+    __slots__ = ("publications", "next_before_order")
+    PUBLICATIONS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_BEFORE_ORDER_FIELD_NUMBER: _ClassVar[int]
+    publications: _containers.RepeatedCompositeFieldContainer[ArtifactPublicationView]
+    next_before_order: int
+    def __init__(self, publications: _Optional[_Iterable[_Union[ArtifactPublicationView, _Mapping]]] = ..., next_before_order: _Optional[int] = ...) -> None: ...
+
+class ListArtifactConsumptionsResponse(_message.Message):
+    __slots__ = ("consumptions", "next_before_order")
+    CONSUMPTIONS_FIELD_NUMBER: _ClassVar[int]
+    NEXT_BEFORE_ORDER_FIELD_NUMBER: _ClassVar[int]
+    consumptions: _containers.RepeatedCompositeFieldContainer[ArtifactConsumptionApproval]
+    next_before_order: int
+    def __init__(self, consumptions: _Optional[_Iterable[_Union[ArtifactConsumptionApproval, _Mapping]]] = ..., next_before_order: _Optional[int] = ...) -> None: ...
+
+class ArtifactApprovalAuditEvent(_message.Message):
+    __slots__ = ("approval_type", "approval_id", "objective_id", "revision", "action", "actor", "recorded_at_ms")
+    APPROVAL_TYPE_FIELD_NUMBER: _ClassVar[int]
+    APPROVAL_ID_FIELD_NUMBER: _ClassVar[int]
+    OBJECTIVE_ID_FIELD_NUMBER: _ClassVar[int]
+    REVISION_FIELD_NUMBER: _ClassVar[int]
+    ACTION_FIELD_NUMBER: _ClassVar[int]
+    ACTOR_FIELD_NUMBER: _ClassVar[int]
+    RECORDED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    approval_type: str
+    approval_id: str
+    objective_id: str
+    revision: int
+    action: str
+    actor: str
+    recorded_at_ms: int
+    def __init__(self, approval_type: _Optional[str] = ..., approval_id: _Optional[str] = ..., objective_id: _Optional[str] = ..., revision: _Optional[int] = ..., action: _Optional[str] = ..., actor: _Optional[str] = ..., recorded_at_ms: _Optional[int] = ...) -> None: ...
+
+class ListArtifactApprovalAuditRequest(_message.Message):
+    __slots__ = ("approval_type", "approval_id")
+    APPROVAL_TYPE_FIELD_NUMBER: _ClassVar[int]
+    APPROVAL_ID_FIELD_NUMBER: _ClassVar[int]
+    approval_type: str
+    approval_id: str
+    def __init__(self, approval_type: _Optional[str] = ..., approval_id: _Optional[str] = ...) -> None: ...
+
+class ListArtifactApprovalAuditResponse(_message.Message):
+    __slots__ = ("events",)
+    EVENTS_FIELD_NUMBER: _ClassVar[int]
+    events: _containers.RepeatedCompositeFieldContainer[ArtifactApprovalAuditEvent]
+    def __init__(self, events: _Optional[_Iterable[_Union[ArtifactApprovalAuditEvent, _Mapping]]] = ...) -> None: ...
