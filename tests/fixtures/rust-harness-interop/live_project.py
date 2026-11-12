@@ -201,7 +201,8 @@ def verify(workspace: Path, base: str, commit: str) -> dict:
             "npm_config_globalconfig": str(Path(directory) / "global-npmrc"),
             "npm_config_offline": "true",
         }
-        tests = run(workspace, env, "npm", "test")
+        # Node's default reporter varies by version and terminal. Parse a fixed format.
+        tests = run(workspace, env, "npm", "test", "--", "--test-reporter=tap")
         counts = {
             name: int(count)
             for name, count in re.findall(r"^# (tests|pass|fail) (\d+)$", tests, re.MULTILINE)

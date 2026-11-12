@@ -48,6 +48,7 @@ class VerifyLiveProjectTest(unittest.TestCase):
         self.assertTrue(result["committedTreeVerified"])
         self.assertEqual(result["commit"], commit)
         self.assertEqual(result["checks"]["test"]["passed"], 3)
+        self.assertIn("TAP version 13\n", result["checks"]["test"]["stdout"])
         self.assertEqual(result["checks"]["external"]["passed"], EXTERNAL_CHECK_COUNT)
 
     def test_rejects_good_working_bytes_hidden_over_a_broken_commit(self):
