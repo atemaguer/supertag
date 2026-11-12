@@ -9,8 +9,13 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+use supertag_protocol::{
+    authenticated_request,
+    v2::{RenewReplyRequest, connector_client::ConnectorClient},
+};
 use tempfile::NamedTempFile;
 use tokio::time;
+use tonic::transport::Channel;
 const REPLY_FILE: &str = "reply.json";
 const DELIVERY_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Clone, Deserialize, Serialize)]
@@ -168,3 +173,125 @@ pub(crate) async fn private_call<T>(
         Err(_) => Ok(None),
     }
 }
+
+/// A conflicting settlement is durably audited by the Control Plane. Retire the
+/// local receipt, retaining the authoritative outcome, so it cannot poison later replies.
+pub(crate) async fn settle_call(
+    call: impl Future<Output = Result<tonic::Response<supertag_protocol::v2::Reply>, tonic::Status>>,
+    operation: &str,
+) -> Result<bool> {
+    match time::timeout(DELIVERY_TIMEOUT, call).await {
+        Ok(Ok(_)) => Ok(true),
+        Ok(Err(error)) if error.code() == tonic::Code::AlreadyExists => Ok(true),
+        Ok(Err(error))
+            if matches!(
+                error.code(),
+                tonic::Code::Unavailable | tonic::Code::DeadlineExceeded | tonic::Code::Cancelled
+            ) =>
+        {
+            Ok(false)
+        }
+        Err(_) => Ok(false),
+        Ok(Err(error)) => anyhow::bail!("{operation} rejected by Control Plane ({})", error.code()),
+    }
+}
+
+enum Renewal {
+    Granted(time::Instant),
+    Transient,
+    Revoked,
+}
+
+async fn renew_claim(
+    client: &mut ConnectorClient<Channel>,
+    gateway_token: &str,
+    principal: &str,
+    target: &Claim,
+) -> Result<Renewal> {
+    let requested_at = time::Instant::now();
+    let mut request = authenticated_request(
+        RenewReplyRequest {
+            reply_id: target.reply_id.clone(),
+            lease_token: target.lease_token.clone(),
+        },
+        gateway_token,
+        Some(principal),
+    )?;
+    request.set_timeout(DELIVERY_TIMEOUT);
+    match time::timeout(DELIVERY_TIMEOUT, client.renew_reply(request)).await {
+        Ok(Ok(response)) => {
+            let duration = response.into_inner().valid_for_ms;
+            Ok(if (10_000..=60_000).contains(&duration) {
+                Renewal::Granted(requested_at + Duration::from_millis(duration))
+            } else {
+                Renewal::Revoked
+            })
+        }
+        Ok(Err(error)) if error.code() == tonic::Code::FailedPrecondition => Ok(Renewal::Revoked),
+        Ok(Err(error))
+            if matches!(
+                error.code(),
+                tonic::Code::Unavailable | tonic::Code::DeadlineExceeded | tonic::Code::Cancelled
+            ) =>
+        {
+            Ok(Renewal::Transient)
+        }
+        Err(_) => Ok(Renewal::Transient),
+        Ok(Err(error)) => {
+            anyhow::bail!("renew reply rejected by Control Plane ({})", error.code())
+        }
+    }
+}
+
+/// This future stays pending while ownership is valid. Its deadline also bounds
+/// an in-flight renewal, and only a successful renewal can extend that deadline.
+async fn maintain_claim_lease(
+    client: &mut ConnectorClient<Channel>,
+    gateway_token: &str,
+    principal: &str,
+    target: &Claim,
+    mut valid_until: time::Instant,
+) -> Result<()> {
+    loop {
+        tokio::select! {
+            biased;
+            _ = time::sleep_until(valid_until) => return Ok(()),
+            _ = time::sleep(Duration::from_secs(2)) => {},
+        }
+        let renewal = tokio::select! {
+            biased;
+            _ = time::sleep_until(valid_until) => return Ok(()),
+            result = renew_claim(client, gateway_token, principal, target) => result?,
+        };
+        match renewal {
+            Renewal::Granted(deadline) => valid_until = deadline,
+            Renewal::Transient => {}
+            Renewal::Revoked => return Ok(()),
+        }
+    }
+}
+
+/// Prove ownership before credential preparation or provider I/O, then poll lease
+/// maintenance alongside that work. Transient renewal failures retain the last
+/// proven deadline; expiry or explicit revocation drops the possibly sent request.
+pub(crate) async fn with_claim_lease<T>(
+    mut client: ConnectorClient<Channel>,
+    gateway_token: &str,
+    principal: &str,
+    target: &Claim,
+    work: impl Future<Output = Result<T>>,
+) -> Result<Option<T>> {
+    let Renewal::Granted(valid_until) =
+        renew_claim(&mut client, gateway_token, principal, target).await?
+    else {
+        return Ok(None);
+    };
+    tokio::select! {
+        biased;
+        result = maintain_claim_lease(&mut client, gateway_token, principal, target, valid_until) => result.map(|()| None),
+        result = work => result.map(Some),
+    }
+}
+
+#[cfg(test)]
+mod tests;

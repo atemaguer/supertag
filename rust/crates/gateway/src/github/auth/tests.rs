@@ -273,6 +273,7 @@ fn config(directory: &Path) -> GithubConfig {
 #[tokio::test]
 async fn acquires_before_sending_and_never_persists_installation_credentials() -> Result<()> {
     let temporary = tempfile::tempdir()?;
+    let (lease_channel, lease_server) = lease_fixture().await?;
     let configuration = config(temporary.path());
     let journal = configuration.state_directory.join("reply.json");
     let api = Arc::new(FakeApi {
@@ -282,7 +283,7 @@ async fn acquires_before_sending_and_never_persists_installation_credentials() -
     let (base, task) = serve(api.clone()).await?;
     let connector = Github::new(
         configuration,
-        Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        lease_channel.clone(),
         "private-gateway-token".into(),
     )?
     .with_test_api_url(base.as_str())?;
@@ -321,7 +322,7 @@ async fn acquires_before_sending_and_never_persists_installation_credentials() -
     api.reject.store(false, Ordering::SeqCst);
     let connector = Github::new(
         config(temporary.path()),
-        Endpoint::from_static("http://127.0.0.1:1").connect_lazy(),
+        lease_channel.clone(),
         "private-gateway-token".into(),
     )?
     .with_test_api_url(base.as_str())?;
@@ -366,6 +367,7 @@ async fn acquires_before_sending_and_never_persists_installation_credentials() -
     assert!(connector.0.send_claimed_reply(&reply, target).await?);
     assert_eq!(api.mints.load(Ordering::SeqCst), 2);
     task.abort();
+    lease_server.abort();
     Ok(())
 }
 
@@ -443,4 +445,105 @@ fn rejects_invalid_credentials_and_requires_matching_webhook_installation() -> R
         .is_pull_request
     );
     Ok(())
+}
+
+struct LeaseFixture;
+#[tonic::async_trait]
+impl supertag_protocol::v2::connector_server::Connector for LeaseFixture {
+    async fn accept_event(
+        &self,
+        _request: tonic::Request<supertag_protocol::v2::AcceptEventRequest>,
+    ) -> Result<tonic::Response<supertag_protocol::v2::Task>, tonic::Status> {
+        Err(tonic::Status::unimplemented("lease fixture only"))
+    }
+    async fn accept_slack_event(
+        &self,
+        _request: tonic::Request<supertag_protocol::v2::AcceptSlackEventRequest>,
+    ) -> Result<tonic::Response<supertag_protocol::v2::AcceptSlackEventResponse>, tonic::Status>
+    {
+        Err(tonic::Status::unimplemented("lease fixture only"))
+    }
+    async fn accept_github_event(
+        &self,
+        _request: tonic::Request<supertag_protocol::v2::AcceptGithubEventRequest>,
+    ) -> Result<tonic::Response<supertag_protocol::v2::AcceptGithubEventResponse>, tonic::Status>
+    {
+        Err(tonic::Status::unimplemented("lease fixture only"))
+    }
+    async fn accept_linear_event(
+        &self,
+        _request: tonic::Request<supertag_protocol::v2::AcceptLinearEventRequest>,
+    ) -> Result<tonic::Response<supertag_protocol::v2::AcceptLinearEventResponse>, tonic::Status>
+    {
+        Err(tonic::Status::unimplemented("lease fixture only"))
+    }
+    async fn accept_lark_event(
+        &self,
+        _request: tonic::Request<supertag_protocol::v2::AcceptLarkEventRequest>,
+    ) -> Result<tonic::Response<supertag_protocol::v2::AcceptLarkEventResponse>, tonic::Status>
+    {
+        Err(tonic::Status::unimplemented("lease fixture only"))
+    }
+    async fn accept_microsoft_teams_activity(
+        &self,
+        _request: tonic::Request<supertag_protocol::v2::AcceptMicrosoftTeamsActivityRequest>,
+    ) -> Result<
+        tonic::Response<supertag_protocol::v2::AcceptMicrosoftTeamsActivityResponse>,
+        tonic::Status,
+    > {
+        Err(tonic::Status::unimplemented("lease fixture only"))
+    }
+    async fn get_microsoft_teams_reply_route(
+        &self,
+        _request: tonic::Request<supertag_protocol::v2::GetMicrosoftTeamsReplyRouteRequest>,
+    ) -> Result<tonic::Response<supertag_protocol::v2::MicrosoftTeamsReplyRoute>, tonic::Status>
+    {
+        Err(tonic::Status::unimplemented("lease fixture only"))
+    }
+    async fn claim_reply(
+        &self,
+        _request: tonic::Request<supertag_protocol::v2::ClaimReplyRequest>,
+    ) -> Result<tonic::Response<supertag_protocol::v2::ClaimReplyResponse>, tonic::Status> {
+        Err(tonic::Status::unimplemented("lease fixture only"))
+    }
+    async fn renew_reply(
+        &self,
+        request: tonic::Request<supertag_protocol::v2::RenewReplyRequest>,
+    ) -> Result<tonic::Response<supertag_protocol::v2::ReplyLease>, tonic::Status> {
+        assert_eq!(
+            request.metadata().get("authorization").unwrap(),
+            "Bearer private-gateway-token"
+        );
+        assert_eq!(request.get_ref().reply_id, "reply");
+        assert_eq!(request.get_ref().lease_token, "lease");
+        Ok(tonic::Response::new(supertag_protocol::v2::ReplyLease {
+            valid_for_ms: 30_000,
+        }))
+    }
+    async fn settle_reply(
+        &self,
+        _request: tonic::Request<supertag_protocol::v2::SettleReplyRequest>,
+    ) -> Result<tonic::Response<supertag_protocol::v2::Reply>, tonic::Status> {
+        Err(tonic::Status::unimplemented("lease fixture only"))
+    }
+}
+
+async fn lease_fixture() -> Result<(tonic::transport::Channel, tokio::task::JoinHandle<()>)> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let address = listener.local_addr()?;
+    let server = tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(
+                supertag_protocol::v2::connector_server::ConnectorServer::new(LeaseFixture),
+            )
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+            .await
+            .unwrap();
+    });
+    Ok((
+        Endpoint::from_shared(format!("http://{address}"))?
+            .connect()
+            .await?,
+        server,
+    ))
 }

@@ -671,3 +671,225 @@ async fn linear_post_interrupted_after_provider_acceptance_stays_uncertain_after
     cp.stop().await?;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn replacement_gateway_exposes_expired_reply_without_reposting_and_accepts_audit()
+-> Result<()> {
+    use supertag_protocol::v2::{
+        GetReplyDeliveryRequest, ListReplyDeliveriesRequest, ResolveReplyRequest,
+    };
+    let directory = tempfile::tempdir()?;
+    let database = format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("replacement.db").display()
+    );
+    let credentials = Credentials::new();
+    let mock = MockLinear::start().await?;
+    let (mut cp, private) = control(&credentials, directory.path(), &database, None).await?;
+    let (mut first, public, http) = gateway(
+        &credentials,
+        directory.path(),
+        &private,
+        "lost-journal",
+        &mock,
+    )
+    .await?;
+    put_tag(&public, &credentials).await?;
+    let input = payload();
+    assert_eq!(
+        signed(&http, "replacement", &input).await?,
+        reqwest::StatusCode::OK
+    );
+    let task = receipt(&private, &credentials, "replacement", &input).await?;
+    execute(&credentials, directory.path(), &public, &task).await?;
+    mock.wait_for(1).await?;
+    saved_stage(directory.path(), &["lost-journal"], "sending").await?;
+    let mut operator = OperatorClient::connect(public.clone()).await?;
+    let page = operator
+        .list_reply_deliveries(credentials.operator(ListReplyDeliveriesRequest {
+            account_id: format!("linear/{ACCOUNT}"),
+            state: 0,
+            limit: 10,
+            before_order: 0,
+        })?)
+        .await?
+        .into_inner();
+    assert_eq!(page.deliveries.len(), 1);
+    let first_delivery = &page.deliveries[0];
+    let id = first_delivery.reply.as_ref().unwrap().reply_id.clone();
+    // A held provider response must not expire a healthy Gateway's claim.
+    let deadline = Instant::now() + Duration::from_secs(12);
+    loop {
+        let live = operator
+            .get_reply_delivery(credentials.operator(GetReplyDeliveryRequest {
+                reply_id: id.clone(),
+            })?)
+            .await?
+            .into_inner();
+        assert_eq!(live.reply.unwrap().state(), ReplyState::Claimed);
+        if live.lease_expires_at_ms.unwrap() > first_delivery.lease_expires_at_ms.unwrap() + 1000 {
+            break;
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "Gateway did not renew the live provider call"
+        );
+        sleep(Duration::from_millis(50)).await;
+    }
+    first.crash()?;
+    // The replacement has a different, empty local state directory.
+    let (mut replacement, public, _) = gateway(
+        &credentials,
+        directory.path(),
+        &private,
+        "fresh-journal",
+        &mock,
+    )
+    .await?;
+    let mut operator = OperatorClient::connect(public.clone()).await?;
+    // Advance only this disposable fixture's claim clock boundary. Domain tests
+    // independently exercise exact real-clock arithmetic and upgrade behavior.
+    let mut sql = sqlx::SqliteConnection::connect(&database).await?;
+    sqlx::query("UPDATE supertag_v2_replies SET lease_expires_at_ms=0 WHERE reply_id=?")
+        .bind(&id)
+        .execute(&mut sql)
+        .await?;
+    sql.close().await?;
+    let expired = operator
+        .get_reply_delivery(credentials.operator(GetReplyDeliveryRequest {
+            reply_id: id.clone(),
+        })?)
+        .await?
+        .into_inner();
+    assert_eq!(expired.reply.unwrap().state(), ReplyState::Uncertain);
+    assert_eq!(expired.audit[0].kind, "claim-expired");
+    let list = operator_cli(
+        &credentials,
+        &[
+            "replies",
+            "--gateway",
+            &public,
+            "list",
+            "--account",
+            &format!("linear/{ACCOUNT}"),
+            "--state",
+            "uncertain",
+            "--limit",
+            "1",
+        ],
+    )
+    .await?;
+    assert_eq!(list["deliveries"][0]["reply_id"], id);
+    assert_eq!(list["deliveries"][0]["state"], "REPLY_STATE_UNCERTAIN");
+    assert_eq!(list["next_before_order"], 0);
+    let inspected =
+        operator_cli(&credentials, &["replies", "--gateway", &public, "get", &id]).await?;
+    assert_eq!(inspected["audit"][0]["kind"], "claim-expired");
+    mock.responses.add_permits(1);
+    let decision = ResolveReplyRequest {
+        reply_id: id.clone(),
+        operation_id: "provider-audit".into(),
+        state: ReplyState::Delivered.into(),
+        provider_receipt: Some(REPLY.into()),
+        evidence: "Loopback provider journal confirms this exact comment was accepted.".into(),
+    };
+    let cli_resolved = operator_cli(
+        &credentials,
+        &[
+            "replies",
+            "--gateway",
+            &public,
+            "resolve",
+            &id,
+            "--decision",
+            "delivered",
+            "--provider-receipt",
+            REPLY,
+            "--evidence",
+            &decision.evidence,
+            "--operation-id",
+            &decision.operation_id,
+        ],
+    )
+    .await?;
+    assert_eq!(cli_resolved["state"], "REPLY_STATE_DELIVERED");
+    assert_eq!(cli_resolved["provider_receipt"], REPLY);
+    assert_eq!(cli_resolved["operation_id"], decision.operation_id);
+    let resolved = operator
+        .resolve_reply(credentials.operator(decision.clone())?)
+        .await?
+        .into_inner();
+    assert_eq!(
+        resolved.reply.as_ref().unwrap().state(),
+        ReplyState::Delivered
+    );
+    assert_eq!(
+        resolved,
+        operator
+            .resolve_reply(credentials.operator(decision)?)
+            .await?
+            .into_inner()
+    );
+    // Returning original disk state cannot undo the audited resolution or starve
+    // the connector behind its old Sending record.
+    let (mut recovered_original, _, _) = gateway(
+        &credentials,
+        directory.path(),
+        &private,
+        "lost-journal",
+        &mock,
+    )
+    .await?;
+    let deadline = Instant::now() + WAIT;
+    loop {
+        ensure!(
+            recovered_original.child.try_wait()?.is_none(),
+            "returning Gateway exited: {}",
+            recovered_original.logs()
+        );
+        let journal = directory.path().join("lost-journal/reply.json");
+        let retired = match std::fs::read(journal) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+            Ok(bytes) => serde_json::from_slice::<Value>(&bytes)?["entry"]["stage"] == "claim",
+            Err(error) => return Err(error.into()),
+        };
+        if retired {
+            break;
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "returning Gateway did not retire its audited old receipt"
+        );
+        sleep(Duration::from_millis(10)).await;
+    }
+    let reconciled = operator
+        .get_reply_delivery(credentials.operator(GetReplyDeliveryRequest { reply_id: id })?)
+        .await?
+        .into_inner();
+    assert_eq!(reconciled.reply.unwrap().state(), ReplyState::Delivered);
+    assert_eq!(
+        reconciled.audit.last().unwrap().kind,
+        "conflicting-settlement"
+    );
+    sleep(Duration::from_millis(1100)).await;
+    assert_eq!(
+        mock.requests.lock().await.len(),
+        1,
+        "a replacement must never repeat the ambiguous write"
+    );
+    replacement.stop().await?;
+    recovered_original.stop().await?;
+    cp.stop().await?;
+    Ok(())
+}
+
+async fn operator_cli(credentials: &Credentials, args: &[&str]) -> Result<Value> {
+    let mut command = credentials.command(args);
+    let output = tokio::task::spawn_blocking(move || command.output()).await??;
+    ensure!(
+        output.status.success(),
+        "operator CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(serde_json::from_slice(&output.stdout)?)
+}

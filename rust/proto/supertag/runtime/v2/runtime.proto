@@ -20,6 +20,9 @@ service Operator {
   rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
   rpc CancelTask(CancelTaskRequest) returns (Task);
   rpc ResolveAttempt(ResolveAttemptRequest) returns (AttemptResolution);
+  rpc GetReplyDelivery(GetReplyDeliveryRequest) returns (ReplyDelivery);
+  rpc ListReplyDeliveries(ListReplyDeliveriesRequest) returns (ListReplyDeliveriesResponse);
+  rpc ResolveReply(ResolveReplyRequest) returns (ReplyDelivery);
 }
 
 // An operator reads and sends messages in their personal conversations.
@@ -629,6 +632,7 @@ service Connector {
   rpc AcceptMicrosoftTeamsActivity(AcceptMicrosoftTeamsActivityRequest) returns (AcceptMicrosoftTeamsActivityResponse);
   rpc GetMicrosoftTeamsReplyRoute(GetMicrosoftTeamsReplyRouteRequest) returns (MicrosoftTeamsReplyRoute);
   rpc ClaimReply(ClaimReplyRequest) returns (ClaimReplyResponse);
+  rpc RenewReply(RenewReplyRequest) returns (ReplyLease);
   rpc SettleReply(SettleReplyRequest) returns (Reply);
 }
 
@@ -1921,4 +1925,40 @@ message SettleReplyRequest {
   string lease_token = 2;
   ReplyState state = 3;
   optional string provider_receipt = 4;
+}
+
+// A claim is never automatically reassigned. Expiry exposes an uncertain delivery.
+message RenewReplyRequest { string reply_id = 1; string lease_token = 2; }
+message ReplyLease { uint64 valid_for_ms = 1; }
+message GetReplyDeliveryRequest { string reply_id = 1; }
+message ReplyDeliveryAudit {
+  string kind = 1;
+  string principal = 2;
+  string evidence = 3;
+  int64 recorded_at_ms = 4;
+  ReplyState state = 5;
+  optional string provider_receipt = 6;
+}
+message ReplyDelivery {
+  Reply reply = 1;
+  optional int64 lease_expires_at_ms = 2;
+  repeated ReplyDeliveryAudit audit = 3;
+}
+message ListReplyDeliveriesRequest {
+  string account_id = 1;
+  ReplyState state = 2;
+  uint32 limit = 3;
+  int64 before_order = 4;
+}
+message ListReplyDeliveriesResponse {
+  repeated ReplyDelivery deliveries = 1;
+  int64 next_before_order = 2;
+}
+// Evidence-backed reconciliation only. Pending/Claimed/Uncertain are not decisions.
+message ResolveReplyRequest {
+  string reply_id = 1;
+  string operation_id = 2;
+  ReplyState state = 3;
+  optional string provider_receipt = 4;
+  string evidence = 5;
 }

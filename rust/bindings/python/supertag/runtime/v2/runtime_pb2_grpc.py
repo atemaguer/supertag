@@ -101,6 +101,21 @@ class OperatorStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveAttemptRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptResolution.FromString,
                 _registered_method=True)
+        self.GetReplyDelivery = channel.unary_unary(
+                '/supertag.runtime.v2.Operator/GetReplyDelivery',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReplyDeliveryRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReplyDelivery.FromString,
+                _registered_method=True)
+        self.ListReplyDeliveries = channel.unary_unary(
+                '/supertag.runtime.v2.Operator/ListReplyDeliveries',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListReplyDeliveriesRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListReplyDeliveriesResponse.FromString,
+                _registered_method=True)
+        self.ResolveReply = channel.unary_unary(
+                '/supertag.runtime.v2.Operator/ResolveReply',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveReplyRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReplyDelivery.FromString,
+                _registered_method=True)
 
 
 class OperatorServicer:
@@ -186,6 +201,24 @@ class OperatorServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetReplyDelivery(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListReplyDeliveries(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ResolveReply(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_OperatorServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -253,6 +286,21 @@ def add_OperatorServicer_to_server(servicer, server):
                     servicer.ResolveAttempt,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveAttemptRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptResolution.SerializeToString,
+            ),
+            'GetReplyDelivery': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetReplyDelivery,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReplyDeliveryRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReplyDelivery.SerializeToString,
+            ),
+            'ListReplyDeliveries': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListReplyDeliveries,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListReplyDeliveriesRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListReplyDeliveriesResponse.SerializeToString,
+            ),
+            'ResolveReply': grpc.unary_unary_rpc_method_handler(
+                    servicer.ResolveReply,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveReplyRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReplyDelivery.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -608,6 +656,87 @@ class Operator:
             '/supertag.runtime.v2.Operator/ResolveAttempt',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveAttemptRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.AttemptResolution.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetReplyDelivery(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Operator/GetReplyDelivery',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.GetReplyDeliveryRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReplyDelivery.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ListReplyDeliveries(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Operator/ListReplyDeliveries',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListReplyDeliveriesRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListReplyDeliveriesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ResolveReply(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Operator/ResolveReply',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ResolveReplyRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReplyDelivery.FromString,
             options,
             channel_credentials,
             insecure,
@@ -3835,6 +3964,11 @@ class ConnectorStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ClaimReplyRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ClaimReplyResponse.FromString,
                 _registered_method=True)
+        self.RenewReply = channel.unary_unary(
+                '/supertag.runtime.v2.Connector/RenewReply',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RenewReplyRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReplyLease.FromString,
+                _registered_method=True)
         self.SettleReply = channel.unary_unary(
                 '/supertag.runtime.v2.Connector/SettleReply',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.SettleReplyRequest.SerializeToString,
@@ -3895,6 +4029,12 @@ class ConnectorServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RenewReply(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def SettleReply(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -3943,6 +4083,11 @@ def add_ConnectorServicer_to_server(servicer, server):
                     servicer.ClaimReply,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ClaimReplyRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ClaimReplyResponse.SerializeToString,
+            ),
+            'RenewReply': grpc.unary_unary_rpc_method_handler(
+                    servicer.RenewReply,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RenewReplyRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReplyLease.SerializeToString,
             ),
             'SettleReply': grpc.unary_unary_rpc_method_handler(
                     servicer.SettleReply,
@@ -4168,6 +4313,33 @@ class Connector:
             '/supertag.runtime.v2.Connector/ClaimReply',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ClaimReplyRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.ClaimReplyResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RenewReply(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Connector/RenewReply',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RenewReplyRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReplyLease.FromString,
             options,
             channel_credentials,
             insecure,

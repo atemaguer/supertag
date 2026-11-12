@@ -11,6 +11,7 @@ mod mailbox;
 pub mod objective_limits;
 mod objectives;
 mod policy;
+mod replies;
 mod review_artifacts;
 mod store;
 mod surface_policy;
@@ -64,6 +65,7 @@ impl ControlPlane {
         self.store.sweep_approvals().await?;
         self.store.sweep_work_sessions().await?;
         self.store.sweep_commit_reviews().await?;
+        self.store.sweep_replies().await?;
         self.store.prune_watch().await?;
         Ok(())
     }
@@ -101,6 +103,42 @@ impl From<StoreError> for Status {
 
 #[tonic::async_trait]
 impl operator_server::Operator for ControlPlane {
+    async fn get_reply_delivery(
+        &self,
+        request: Request<GetReplyDeliveryRequest>,
+    ) -> Result<Response<ReplyDelivery>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .get_reply_delivery(&principal, &request.into_inner().reply_id)
+                .await?,
+        ))
+    }
+
+    async fn list_reply_deliveries(
+        &self,
+        request: Request<ListReplyDeliveriesRequest>,
+    ) -> Result<Response<ListReplyDeliveriesResponse>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .list_reply_deliveries(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
+    async fn resolve_reply(
+        &self,
+        request: Request<ResolveReplyRequest>,
+    ) -> Result<Response<ReplyDelivery>, Status> {
+        let principal = self.principal(&request, "operator:")?;
+        Ok(Response::new(
+            self.store
+                .resolve_reply(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
     async fn list_hosts(
         &self,
         request: Request<ListHostsRequest>,
@@ -484,6 +522,18 @@ impl host_directory_server::HostDirectory for ControlPlane {
 
 #[tonic::async_trait]
 impl connector_server::Connector for ControlPlane {
+    async fn renew_reply(
+        &self,
+        request: Request<RenewReplyRequest>,
+    ) -> Result<Response<ReplyLease>, Status> {
+        let principal = self.principal(&request, "connector:")?;
+        Ok(Response::new(
+            self.store
+                .renew_reply(&principal, &request.into_inner())
+                .await?,
+        ))
+    }
+
     async fn accept_event(
         &self,
         request: Request<AcceptEventRequest>,

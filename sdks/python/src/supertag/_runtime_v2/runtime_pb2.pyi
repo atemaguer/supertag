@@ -2854,3 +2854,83 @@ class SettleReplyRequest(_message.Message):
     state: ReplyState
     provider_receipt: str
     def __init__(self, reply_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., state: _Optional[_Union[ReplyState, str]] = ..., provider_receipt: _Optional[str] = ...) -> None: ...
+
+class RenewReplyRequest(_message.Message):
+    __slots__ = ("reply_id", "lease_token")
+    REPLY_ID_FIELD_NUMBER: _ClassVar[int]
+    LEASE_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    reply_id: str
+    lease_token: str
+    def __init__(self, reply_id: _Optional[str] = ..., lease_token: _Optional[str] = ...) -> None: ...
+
+class ReplyLease(_message.Message):
+    __slots__ = ("valid_for_ms",)
+    VALID_FOR_MS_FIELD_NUMBER: _ClassVar[int]
+    valid_for_ms: int
+    def __init__(self, valid_for_ms: _Optional[int] = ...) -> None: ...
+
+class GetReplyDeliveryRequest(_message.Message):
+    __slots__ = ("reply_id",)
+    REPLY_ID_FIELD_NUMBER: _ClassVar[int]
+    reply_id: str
+    def __init__(self, reply_id: _Optional[str] = ...) -> None: ...
+
+class ReplyDeliveryAudit(_message.Message):
+    __slots__ = ("kind", "principal", "evidence", "recorded_at_ms", "state", "provider_receipt")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    PRINCIPAL_FIELD_NUMBER: _ClassVar[int]
+    EVIDENCE_FIELD_NUMBER: _ClassVar[int]
+    RECORDED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    PROVIDER_RECEIPT_FIELD_NUMBER: _ClassVar[int]
+    kind: str
+    principal: str
+    evidence: str
+    recorded_at_ms: int
+    state: ReplyState
+    provider_receipt: str
+    def __init__(self, kind: _Optional[str] = ..., principal: _Optional[str] = ..., evidence: _Optional[str] = ..., recorded_at_ms: _Optional[int] = ..., state: _Optional[_Union[ReplyState, str]] = ..., provider_receipt: _Optional[str] = ...) -> None: ...
+
+class ReplyDelivery(_message.Message):
+    __slots__ = ("reply", "lease_expires_at_ms", "audit")
+    REPLY_FIELD_NUMBER: _ClassVar[int]
+    LEASE_EXPIRES_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    AUDIT_FIELD_NUMBER: _ClassVar[int]
+    reply: Reply
+    lease_expires_at_ms: int
+    audit: _containers.RepeatedCompositeFieldContainer[ReplyDeliveryAudit]
+    def __init__(self, reply: _Optional[_Union[Reply, _Mapping]] = ..., lease_expires_at_ms: _Optional[int] = ..., audit: _Optional[_Iterable[_Union[ReplyDeliveryAudit, _Mapping]]] = ...) -> None: ...
+
+class ListReplyDeliveriesRequest(_message.Message):
+    __slots__ = ("account_id", "state", "limit", "before_order")
+    ACCOUNT_ID_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    BEFORE_ORDER_FIELD_NUMBER: _ClassVar[int]
+    account_id: str
+    state: ReplyState
+    limit: int
+    before_order: int
+    def __init__(self, account_id: _Optional[str] = ..., state: _Optional[_Union[ReplyState, str]] = ..., limit: _Optional[int] = ..., before_order: _Optional[int] = ...) -> None: ...
+
+class ListReplyDeliveriesResponse(_message.Message):
+    __slots__ = ("deliveries", "next_before_order")
+    DELIVERIES_FIELD_NUMBER: _ClassVar[int]
+    NEXT_BEFORE_ORDER_FIELD_NUMBER: _ClassVar[int]
+    deliveries: _containers.RepeatedCompositeFieldContainer[ReplyDelivery]
+    next_before_order: int
+    def __init__(self, deliveries: _Optional[_Iterable[_Union[ReplyDelivery, _Mapping]]] = ..., next_before_order: _Optional[int] = ...) -> None: ...
+
+class ResolveReplyRequest(_message.Message):
+    __slots__ = ("reply_id", "operation_id", "state", "provider_receipt", "evidence")
+    REPLY_ID_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    PROVIDER_RECEIPT_FIELD_NUMBER: _ClassVar[int]
+    EVIDENCE_FIELD_NUMBER: _ClassVar[int]
+    reply_id: str
+    operation_id: str
+    state: ReplyState
+    provider_receipt: str
+    evidence: str
+    def __init__(self, reply_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., state: _Optional[_Union[ReplyState, str]] = ..., provider_receipt: _Optional[str] = ..., evidence: _Optional[str] = ...) -> None: ...

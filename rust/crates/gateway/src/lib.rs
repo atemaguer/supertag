@@ -511,6 +511,46 @@ impl Objectives for Gateway {
 
 #[tonic::async_trait]
 impl Operator for Gateway {
+    async fn get_reply_delivery(
+        &self,
+        request: Request<GetReplyDeliveryRequest>,
+    ) -> Result<Response<ReplyDelivery>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { operator_client(channel).get_reply_delivery(request).await },
+        )
+        .await
+    }
+
+    async fn list_reply_deliveries(
+        &self,
+        request: Request<ListReplyDeliveriesRequest>,
+    ) -> Result<Response<ListReplyDeliveriesResponse>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async {
+                operator_client(channel)
+                    .list_reply_deliveries(request)
+                    .await
+            },
+        )
+        .await
+    }
+
+    async fn resolve_reply(
+        &self,
+        request: Request<ResolveReplyRequest>,
+    ) -> Result<Response<ReplyDelivery>, Status> {
+        self.forward(
+            request,
+            &self.credentials.operator,
+            |channel, request| async { operator_client(channel).resolve_reply(request).await },
+        )
+        .await
+    }
+
     async fn list_hosts(
         &self,
         request: Request<ListHostsRequest>,

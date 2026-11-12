@@ -1,6 +1,6 @@
 use super::{Connector, DELIVERY_TIMEOUT, slack_ts};
 pub(super) use crate::delivery_journal::Journal;
-use crate::delivery_journal::{Claim, Entry, Outcome, private_call};
+use crate::delivery_journal::{Claim, Entry, Outcome, private_call, settle_call, with_claim_lease};
 use anyhow::{Result, ensure};
 use serde::Deserialize;
 use serde_json::json;
@@ -60,17 +60,41 @@ impl Connector {
                     !reply.reply_id.is_empty() && !claim.lease_token.is_empty(),
                     "invalid Slack reply claim"
                 );
+                if reply.state() != ReplyState::Claimed {
+                    self.journal.clear()?;
+                    return Ok(false);
+                }
                 let target = Claim {
                     reply_id: reply.reply_id.clone(),
                     lease_token: claim.lease_token,
                 };
-                // Persist the last pre-effect state. A restart in this state cannot prove
-                // that Slack did not receive the request and must not send it again.
-                self.journal.save(&Entry::Sending {
-                    target: target.clone(),
+                let result = with_claim_lease(
+                    self.control_plane.clone(),
+                    &self.gateway_token,
+                    &self.principal,
+                    &target,
+                    async {
+                        // Persist the last pre-effect state. A restart in this state cannot prove
+                        // that Slack did not receive the request and must not send it again.
+                        self.journal.save(&Entry::Sending {
+                            target: target.clone(),
+                        })?;
+                        let outcome = self.post(&reply).await;
+                        self.journal.save(&Entry::Settle {
+                            target: target.clone(),
+                            outcome,
+                        })?;
+                        Ok(true)
+                    },
+                )
+                .await?;
+                if let Some(result) = result {
+                    return Ok(result);
+                }
+                self.journal.save(&Entry::Settle {
+                    target,
+                    outcome: Outcome::Uncertain,
                 })?;
-                let outcome = self.post(&reply).await;
-                self.journal.save(&Entry::Settle { target, outcome })?;
             }
             Entry::Sending { target } => {
                 self.journal.save(&Entry::Settle {
@@ -95,12 +119,11 @@ impl Connector {
                     },
                     DELIVERY_TIMEOUT,
                 )?;
-                if private_call(
+                if !settle_call(
                     self.control_plane.clone().settle_reply(request),
                     "settle Slack reply",
                 )
                 .await?
-                .is_none()
                 {
                     return Ok(false);
                 }

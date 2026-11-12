@@ -1,5 +1,5 @@
 use super::{Connector, DELIVERY_TIMEOUT, bounded_json, numeric_id, service_url};
-use crate::delivery_journal::{Claim, Entry, Outcome, private_call};
+use crate::delivery_journal::{Claim, Entry, Outcome, private_call, settle_call, with_claim_lease};
 use anyhow::{Result, ensure};
 use serde_json::json;
 use std::time::Duration;
@@ -59,39 +59,63 @@ impl Connector {
                     !reply.reply_id.is_empty() && !claim.lease_token.is_empty(),
                     "invalid Microsoft Teams reply claim"
                 );
+                if reply.state() != ReplyState::Claimed {
+                    self.journal.clear()?;
+                    return Ok(false);
+                }
                 let target = Claim {
                     reply_id: reply.reply_id.clone(),
                     lease_token: claim.lease_token,
                 };
-                // Persist the last pre-effect state. A restart in this state cannot prove
-                // that Microsoft Teams did not receive the request and must not send it again.
-                let token = match self.access_token().await {
-                    Ok(token) => token,
-                    Err(_) => return Ok(false),
-                };
-                let request = self.request(
-                    GetMicrosoftTeamsReplyRouteRequest {
-                        reply_id: target.reply_id.clone(),
-                        lease_token: target.lease_token.clone(),
+                let result = with_claim_lease(
+                    self.control_plane.clone(),
+                    &self.gateway_token,
+                    &self.principal,
+                    &target,
+                    async {
+                        // Persist the last pre-effect state. A restart in this state cannot prove
+                        // that Microsoft Teams did not receive the request and must not send it again.
+                        let token = match self.access_token().await {
+                            Ok(token) => token,
+                            Err(_) => return Ok(false),
+                        };
+                        let request = self.request(
+                            GetMicrosoftTeamsReplyRouteRequest {
+                                reply_id: target.reply_id.clone(),
+                                lease_token: target.lease_token.clone(),
+                            },
+                            DELIVERY_TIMEOUT,
+                        )?;
+                        let Some(route) = private_call(
+                            self.control_plane
+                                .clone()
+                                .get_microsoft_teams_reply_route(request),
+                            "load Microsoft Teams reply route",
+                        )
+                        .await?
+                        else {
+                            return Ok(false);
+                        };
+                        let route = route.into_inner();
+                        self.journal.save(&Entry::Sending {
+                            target: target.clone(),
+                        })?;
+                        let outcome = self.post(&reply, &route, &token).await;
+                        self.journal.save(&Entry::Settle {
+                            target: target.clone(),
+                            outcome,
+                        })?;
+                        Ok(true)
                     },
-                    DELIVERY_TIMEOUT,
-                )?;
-                let Some(route) = private_call(
-                    self.control_plane
-                        .clone()
-                        .get_microsoft_teams_reply_route(request),
-                    "load Microsoft Teams reply route",
                 )
-                .await?
-                else {
-                    return Ok(false);
-                };
-                let route = route.into_inner();
-                self.journal.save(&Entry::Sending {
-                    target: target.clone(),
+                .await?;
+                if let Some(result) = result {
+                    return Ok(result);
+                }
+                self.journal.save(&Entry::Settle {
+                    target,
+                    outcome: Outcome::Uncertain,
                 })?;
-                let outcome = self.post(&reply, &route, &token).await;
-                self.journal.save(&Entry::Settle { target, outcome })?;
             }
             Entry::Sending { target } => {
                 self.journal.save(&Entry::Settle {
@@ -116,12 +140,11 @@ impl Connector {
                     },
                     DELIVERY_TIMEOUT,
                 )?;
-                if private_call(
+                if !settle_call(
                     self.control_plane.clone().settle_reply(request),
                     "settle Microsoft Teams reply",
                 )
                 .await?
-                .is_none()
                 {
                     return Ok(false);
                 }

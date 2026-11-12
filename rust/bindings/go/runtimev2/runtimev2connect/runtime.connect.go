@@ -113,6 +113,14 @@ const (
 	OperatorCancelTaskProcedure = "/supertag.runtime.v2.Operator/CancelTask"
 	// OperatorResolveAttemptProcedure is the fully-qualified name of the Operator's ResolveAttempt RPC.
 	OperatorResolveAttemptProcedure = "/supertag.runtime.v2.Operator/ResolveAttempt"
+	// OperatorGetReplyDeliveryProcedure is the fully-qualified name of the Operator's GetReplyDelivery
+	// RPC.
+	OperatorGetReplyDeliveryProcedure = "/supertag.runtime.v2.Operator/GetReplyDelivery"
+	// OperatorListReplyDeliveriesProcedure is the fully-qualified name of the Operator's
+	// ListReplyDeliveries RPC.
+	OperatorListReplyDeliveriesProcedure = "/supertag.runtime.v2.Operator/ListReplyDeliveries"
+	// OperatorResolveReplyProcedure is the fully-qualified name of the Operator's ResolveReply RPC.
+	OperatorResolveReplyProcedure = "/supertag.runtime.v2.Operator/ResolveReply"
 	// ConversationsListConversationsProcedure is the fully-qualified name of the Conversations's
 	// ListConversations RPC.
 	ConversationsListConversationsProcedure = "/supertag.runtime.v2.Conversations/ListConversations"
@@ -291,6 +299,8 @@ const (
 	ConnectorGetMicrosoftTeamsReplyRouteProcedure = "/supertag.runtime.v2.Connector/GetMicrosoftTeamsReplyRoute"
 	// ConnectorClaimReplyProcedure is the fully-qualified name of the Connector's ClaimReply RPC.
 	ConnectorClaimReplyProcedure = "/supertag.runtime.v2.Connector/ClaimReply"
+	// ConnectorRenewReplyProcedure is the fully-qualified name of the Connector's RenewReply RPC.
+	ConnectorRenewReplyProcedure = "/supertag.runtime.v2.Connector/RenewReply"
 	// ConnectorSettleReplyProcedure is the fully-qualified name of the Connector's SettleReply RPC.
 	ConnectorSettleReplyProcedure = "/supertag.runtime.v2.Connector/SettleReply"
 	// TransfersUploadCheckpointProcedure is the fully-qualified name of the Transfers's
@@ -405,6 +415,9 @@ type OperatorClient interface {
 	ListEvents(context.Context, *connect.Request[runtimev2.ListEventsRequest]) (*connect.Response[runtimev2.ListEventsResponse], error)
 	CancelTask(context.Context, *connect.Request[runtimev2.CancelTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	ResolveAttempt(context.Context, *connect.Request[runtimev2.ResolveAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error)
+	GetReplyDelivery(context.Context, *connect.Request[runtimev2.GetReplyDeliveryRequest]) (*connect.Response[runtimev2.ReplyDelivery], error)
+	ListReplyDeliveries(context.Context, *connect.Request[runtimev2.ListReplyDeliveriesRequest]) (*connect.Response[runtimev2.ListReplyDeliveriesResponse], error)
+	ResolveReply(context.Context, *connect.Request[runtimev2.ResolveReplyRequest]) (*connect.Response[runtimev2.ReplyDelivery], error)
 }
 
 // NewOperatorClient constructs a client for the supertag.runtime.v2.Operator service. By default,
@@ -496,24 +509,45 @@ func NewOperatorClient(httpClient connect.HTTPClient, baseURL string, opts ...co
 			connect.WithSchema(operatorMethods.ByName("ResolveAttempt")),
 			connect.WithClientOptions(opts...),
 		),
+		getReplyDelivery: connect.NewClient[runtimev2.GetReplyDeliveryRequest, runtimev2.ReplyDelivery](
+			httpClient,
+			baseURL+OperatorGetReplyDeliveryProcedure,
+			connect.WithSchema(operatorMethods.ByName("GetReplyDelivery")),
+			connect.WithClientOptions(opts...),
+		),
+		listReplyDeliveries: connect.NewClient[runtimev2.ListReplyDeliveriesRequest, runtimev2.ListReplyDeliveriesResponse](
+			httpClient,
+			baseURL+OperatorListReplyDeliveriesProcedure,
+			connect.WithSchema(operatorMethods.ByName("ListReplyDeliveries")),
+			connect.WithClientOptions(opts...),
+		),
+		resolveReply: connect.NewClient[runtimev2.ResolveReplyRequest, runtimev2.ReplyDelivery](
+			httpClient,
+			baseURL+OperatorResolveReplyProcedure,
+			connect.WithSchema(operatorMethods.ByName("ResolveReply")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // operatorClient implements OperatorClient.
 type operatorClient struct {
-	createAuthKey   *connect.Client[runtimev2.CreateAuthKeyRequest, runtimev2.AuthKey]
-	revokeHost      *connect.Client[runtimev2.RevokeHostRequest, runtimev2.HostRecord]
-	listHosts       *connect.Client[runtimev2.ListHostsRequest, runtimev2.ListHostsResponse]
-	getHost         *connect.Client[runtimev2.GetHostRequest, runtimev2.WorkerHostStatus]
-	setHostDraining *connect.Client[runtimev2.SetHostDrainingRequest, runtimev2.WorkerHostStatus]
-	putTag          *connect.Client[runtimev2.PutTagRequest, runtimev2.Tag]
-	listTags        *connect.Client[runtimev2.ListTagsRequest, runtimev2.ListTagsResponse]
-	submitTask      *connect.Client[runtimev2.SubmitTaskRequest, runtimev2.Task]
-	getTask         *connect.Client[runtimev2.GetTaskRequest, runtimev2.Task]
-	listNativeUsage *connect.Client[runtimev2.ListNativeUsageRequest, runtimev2.ListNativeUsageResponse]
-	listEvents      *connect.Client[runtimev2.ListEventsRequest, runtimev2.ListEventsResponse]
-	cancelTask      *connect.Client[runtimev2.CancelTaskRequest, runtimev2.Task]
-	resolveAttempt  *connect.Client[runtimev2.ResolveAttemptRequest, runtimev2.AttemptResolution]
+	createAuthKey       *connect.Client[runtimev2.CreateAuthKeyRequest, runtimev2.AuthKey]
+	revokeHost          *connect.Client[runtimev2.RevokeHostRequest, runtimev2.HostRecord]
+	listHosts           *connect.Client[runtimev2.ListHostsRequest, runtimev2.ListHostsResponse]
+	getHost             *connect.Client[runtimev2.GetHostRequest, runtimev2.WorkerHostStatus]
+	setHostDraining     *connect.Client[runtimev2.SetHostDrainingRequest, runtimev2.WorkerHostStatus]
+	putTag              *connect.Client[runtimev2.PutTagRequest, runtimev2.Tag]
+	listTags            *connect.Client[runtimev2.ListTagsRequest, runtimev2.ListTagsResponse]
+	submitTask          *connect.Client[runtimev2.SubmitTaskRequest, runtimev2.Task]
+	getTask             *connect.Client[runtimev2.GetTaskRequest, runtimev2.Task]
+	listNativeUsage     *connect.Client[runtimev2.ListNativeUsageRequest, runtimev2.ListNativeUsageResponse]
+	listEvents          *connect.Client[runtimev2.ListEventsRequest, runtimev2.ListEventsResponse]
+	cancelTask          *connect.Client[runtimev2.CancelTaskRequest, runtimev2.Task]
+	resolveAttempt      *connect.Client[runtimev2.ResolveAttemptRequest, runtimev2.AttemptResolution]
+	getReplyDelivery    *connect.Client[runtimev2.GetReplyDeliveryRequest, runtimev2.ReplyDelivery]
+	listReplyDeliveries *connect.Client[runtimev2.ListReplyDeliveriesRequest, runtimev2.ListReplyDeliveriesResponse]
+	resolveReply        *connect.Client[runtimev2.ResolveReplyRequest, runtimev2.ReplyDelivery]
 }
 
 // CreateAuthKey calls supertag.runtime.v2.Operator.CreateAuthKey.
@@ -581,6 +615,21 @@ func (c *operatorClient) ResolveAttempt(ctx context.Context, req *connect.Reques
 	return c.resolveAttempt.CallUnary(ctx, req)
 }
 
+// GetReplyDelivery calls supertag.runtime.v2.Operator.GetReplyDelivery.
+func (c *operatorClient) GetReplyDelivery(ctx context.Context, req *connect.Request[runtimev2.GetReplyDeliveryRequest]) (*connect.Response[runtimev2.ReplyDelivery], error) {
+	return c.getReplyDelivery.CallUnary(ctx, req)
+}
+
+// ListReplyDeliveries calls supertag.runtime.v2.Operator.ListReplyDeliveries.
+func (c *operatorClient) ListReplyDeliveries(ctx context.Context, req *connect.Request[runtimev2.ListReplyDeliveriesRequest]) (*connect.Response[runtimev2.ListReplyDeliveriesResponse], error) {
+	return c.listReplyDeliveries.CallUnary(ctx, req)
+}
+
+// ResolveReply calls supertag.runtime.v2.Operator.ResolveReply.
+func (c *operatorClient) ResolveReply(ctx context.Context, req *connect.Request[runtimev2.ResolveReplyRequest]) (*connect.Response[runtimev2.ReplyDelivery], error) {
+	return c.resolveReply.CallUnary(ctx, req)
+}
+
 // OperatorHandler is an implementation of the supertag.runtime.v2.Operator service.
 type OperatorHandler interface {
 	CreateAuthKey(context.Context, *connect.Request[runtimev2.CreateAuthKeyRequest]) (*connect.Response[runtimev2.AuthKey], error)
@@ -596,6 +645,9 @@ type OperatorHandler interface {
 	ListEvents(context.Context, *connect.Request[runtimev2.ListEventsRequest]) (*connect.Response[runtimev2.ListEventsResponse], error)
 	CancelTask(context.Context, *connect.Request[runtimev2.CancelTaskRequest]) (*connect.Response[runtimev2.Task], error)
 	ResolveAttempt(context.Context, *connect.Request[runtimev2.ResolveAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error)
+	GetReplyDelivery(context.Context, *connect.Request[runtimev2.GetReplyDeliveryRequest]) (*connect.Response[runtimev2.ReplyDelivery], error)
+	ListReplyDeliveries(context.Context, *connect.Request[runtimev2.ListReplyDeliveriesRequest]) (*connect.Response[runtimev2.ListReplyDeliveriesResponse], error)
+	ResolveReply(context.Context, *connect.Request[runtimev2.ResolveReplyRequest]) (*connect.Response[runtimev2.ReplyDelivery], error)
 }
 
 // NewOperatorHandler builds an HTTP handler from the service implementation. It returns the path on
@@ -683,6 +735,24 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 		connect.WithSchema(operatorMethods.ByName("ResolveAttempt")),
 		connect.WithHandlerOptions(opts...),
 	)
+	operatorGetReplyDeliveryHandler := connect.NewUnaryHandler(
+		OperatorGetReplyDeliveryProcedure,
+		svc.GetReplyDelivery,
+		connect.WithSchema(operatorMethods.ByName("GetReplyDelivery")),
+		connect.WithHandlerOptions(opts...),
+	)
+	operatorListReplyDeliveriesHandler := connect.NewUnaryHandler(
+		OperatorListReplyDeliveriesProcedure,
+		svc.ListReplyDeliveries,
+		connect.WithSchema(operatorMethods.ByName("ListReplyDeliveries")),
+		connect.WithHandlerOptions(opts...),
+	)
+	operatorResolveReplyHandler := connect.NewUnaryHandler(
+		OperatorResolveReplyProcedure,
+		svc.ResolveReply,
+		connect.WithSchema(operatorMethods.ByName("ResolveReply")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.Operator/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case OperatorCreateAuthKeyProcedure:
@@ -711,6 +781,12 @@ func NewOperatorHandler(svc OperatorHandler, opts ...connect.HandlerOption) (str
 			operatorCancelTaskHandler.ServeHTTP(w, r)
 		case OperatorResolveAttemptProcedure:
 			operatorResolveAttemptHandler.ServeHTTP(w, r)
+		case OperatorGetReplyDeliveryProcedure:
+			operatorGetReplyDeliveryHandler.ServeHTTP(w, r)
+		case OperatorListReplyDeliveriesProcedure:
+			operatorListReplyDeliveriesHandler.ServeHTTP(w, r)
+		case OperatorResolveReplyProcedure:
+			operatorResolveReplyHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -770,6 +846,18 @@ func (UnimplementedOperatorHandler) CancelTask(context.Context, *connect.Request
 
 func (UnimplementedOperatorHandler) ResolveAttempt(context.Context, *connect.Request[runtimev2.ResolveAttemptRequest]) (*connect.Response[runtimev2.AttemptResolution], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.ResolveAttempt is not implemented"))
+}
+
+func (UnimplementedOperatorHandler) GetReplyDelivery(context.Context, *connect.Request[runtimev2.GetReplyDeliveryRequest]) (*connect.Response[runtimev2.ReplyDelivery], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.GetReplyDelivery is not implemented"))
+}
+
+func (UnimplementedOperatorHandler) ListReplyDeliveries(context.Context, *connect.Request[runtimev2.ListReplyDeliveriesRequest]) (*connect.Response[runtimev2.ListReplyDeliveriesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.ListReplyDeliveries is not implemented"))
+}
+
+func (UnimplementedOperatorHandler) ResolveReply(context.Context, *connect.Request[runtimev2.ResolveReplyRequest]) (*connect.Response[runtimev2.ReplyDelivery], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Operator.ResolveReply is not implemented"))
 }
 
 // ConversationsClient is a client for the supertag.runtime.v2.Conversations service.
@@ -3082,6 +3170,7 @@ type ConnectorClient interface {
 	AcceptMicrosoftTeamsActivity(context.Context, *connect.Request[runtimev2.AcceptMicrosoftTeamsActivityRequest]) (*connect.Response[runtimev2.AcceptMicrosoftTeamsActivityResponse], error)
 	GetMicrosoftTeamsReplyRoute(context.Context, *connect.Request[runtimev2.GetMicrosoftTeamsReplyRouteRequest]) (*connect.Response[runtimev2.MicrosoftTeamsReplyRoute], error)
 	ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error)
+	RenewReply(context.Context, *connect.Request[runtimev2.RenewReplyRequest]) (*connect.Response[runtimev2.ReplyLease], error)
 	SettleReply(context.Context, *connect.Request[runtimev2.SettleReplyRequest]) (*connect.Response[runtimev2.Reply], error)
 }
 
@@ -3144,6 +3233,12 @@ func NewConnectorClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(connectorMethods.ByName("ClaimReply")),
 			connect.WithClientOptions(opts...),
 		),
+		renewReply: connect.NewClient[runtimev2.RenewReplyRequest, runtimev2.ReplyLease](
+			httpClient,
+			baseURL+ConnectorRenewReplyProcedure,
+			connect.WithSchema(connectorMethods.ByName("RenewReply")),
+			connect.WithClientOptions(opts...),
+		),
 		settleReply: connect.NewClient[runtimev2.SettleReplyRequest, runtimev2.Reply](
 			httpClient,
 			baseURL+ConnectorSettleReplyProcedure,
@@ -3163,6 +3258,7 @@ type connectorClient struct {
 	acceptMicrosoftTeamsActivity *connect.Client[runtimev2.AcceptMicrosoftTeamsActivityRequest, runtimev2.AcceptMicrosoftTeamsActivityResponse]
 	getMicrosoftTeamsReplyRoute  *connect.Client[runtimev2.GetMicrosoftTeamsReplyRouteRequest, runtimev2.MicrosoftTeamsReplyRoute]
 	claimReply                   *connect.Client[runtimev2.ClaimReplyRequest, runtimev2.ClaimReplyResponse]
+	renewReply                   *connect.Client[runtimev2.RenewReplyRequest, runtimev2.ReplyLease]
 	settleReply                  *connect.Client[runtimev2.SettleReplyRequest, runtimev2.Reply]
 }
 
@@ -3206,6 +3302,11 @@ func (c *connectorClient) ClaimReply(ctx context.Context, req *connect.Request[r
 	return c.claimReply.CallUnary(ctx, req)
 }
 
+// RenewReply calls supertag.runtime.v2.Connector.RenewReply.
+func (c *connectorClient) RenewReply(ctx context.Context, req *connect.Request[runtimev2.RenewReplyRequest]) (*connect.Response[runtimev2.ReplyLease], error) {
+	return c.renewReply.CallUnary(ctx, req)
+}
+
 // SettleReply calls supertag.runtime.v2.Connector.SettleReply.
 func (c *connectorClient) SettleReply(ctx context.Context, req *connect.Request[runtimev2.SettleReplyRequest]) (*connect.Response[runtimev2.Reply], error) {
 	return c.settleReply.CallUnary(ctx, req)
@@ -3221,6 +3322,7 @@ type ConnectorHandler interface {
 	AcceptMicrosoftTeamsActivity(context.Context, *connect.Request[runtimev2.AcceptMicrosoftTeamsActivityRequest]) (*connect.Response[runtimev2.AcceptMicrosoftTeamsActivityResponse], error)
 	GetMicrosoftTeamsReplyRoute(context.Context, *connect.Request[runtimev2.GetMicrosoftTeamsReplyRouteRequest]) (*connect.Response[runtimev2.MicrosoftTeamsReplyRoute], error)
 	ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error)
+	RenewReply(context.Context, *connect.Request[runtimev2.RenewReplyRequest]) (*connect.Response[runtimev2.ReplyLease], error)
 	SettleReply(context.Context, *connect.Request[runtimev2.SettleReplyRequest]) (*connect.Response[runtimev2.Reply], error)
 }
 
@@ -3279,6 +3381,12 @@ func NewConnectorHandler(svc ConnectorHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(connectorMethods.ByName("ClaimReply")),
 		connect.WithHandlerOptions(opts...),
 	)
+	connectorRenewReplyHandler := connect.NewUnaryHandler(
+		ConnectorRenewReplyProcedure,
+		svc.RenewReply,
+		connect.WithSchema(connectorMethods.ByName("RenewReply")),
+		connect.WithHandlerOptions(opts...),
+	)
 	connectorSettleReplyHandler := connect.NewUnaryHandler(
 		ConnectorSettleReplyProcedure,
 		svc.SettleReply,
@@ -3303,6 +3411,8 @@ func NewConnectorHandler(svc ConnectorHandler, opts ...connect.HandlerOption) (s
 			connectorGetMicrosoftTeamsReplyRouteHandler.ServeHTTP(w, r)
 		case ConnectorClaimReplyProcedure:
 			connectorClaimReplyHandler.ServeHTTP(w, r)
+		case ConnectorRenewReplyProcedure:
+			connectorRenewReplyHandler.ServeHTTP(w, r)
 		case ConnectorSettleReplyProcedure:
 			connectorSettleReplyHandler.ServeHTTP(w, r)
 		default:
@@ -3344,6 +3454,10 @@ func (UnimplementedConnectorHandler) GetMicrosoftTeamsReplyRoute(context.Context
 
 func (UnimplementedConnectorHandler) ClaimReply(context.Context, *connect.Request[runtimev2.ClaimReplyRequest]) (*connect.Response[runtimev2.ClaimReplyResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.ClaimReply is not implemented"))
+}
+
+func (UnimplementedConnectorHandler) RenewReply(context.Context, *connect.Request[runtimev2.RenewReplyRequest]) (*connect.Response[runtimev2.ReplyLease], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Connector.RenewReply is not implemented"))
 }
 
 func (UnimplementedConnectorHandler) SettleReply(context.Context, *connect.Request[runtimev2.SettleReplyRequest]) (*connect.Response[runtimev2.Reply], error) {

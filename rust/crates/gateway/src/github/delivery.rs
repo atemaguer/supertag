@@ -1,5 +1,5 @@
 use super::{Connector, DELIVERY_TIMEOUT, valid_id};
-use crate::delivery_journal::{Claim, Entry, Outcome, private_call};
+use crate::delivery_journal::{Claim, Entry, Outcome, private_call, settle_call, with_claim_lease};
 use anyhow::{Result, ensure};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -57,6 +57,10 @@ impl Connector {
                     !reply.reply_id.is_empty() && !claim.lease_token.is_empty(),
                     "invalid GitHub reply claim"
                 );
+                if reply.state() != ReplyState::Claimed {
+                    self.journal.clear()?;
+                    return Ok(false);
+                }
                 let target = Claim {
                     reply_id: reply.reply_id.clone(),
                     lease_token: claim.lease_token,
@@ -86,12 +90,11 @@ impl Connector {
                     },
                     DELIVERY_TIMEOUT,
                 )?;
-                if private_call(
+                if !settle_call(
                     self.control_plane.clone().settle_reply(request),
                     "settle GitHub reply",
                 )
                 .await?
-                .is_none()
                 {
                     return Ok(false);
                 }
@@ -108,22 +111,42 @@ impl Connector {
         reply: &Reply,
         target: Claim,
     ) -> Result<bool> {
-        // Credential minting cannot publish a comment. Keep the durable claim receipt
-        // until it succeeds so auth failures/restarts do not become ambiguous sends.
-        let Ok(token) = self
-            .authentication
-            .access_token(&self.http, &self.api_base)
-            .await
-        else {
-            return Ok(false);
-        };
-        // Persist the last pre-effect state. A restart in this state cannot prove
-        // that GitHub did not receive the request and must not send it again.
-        self.journal.save(&Entry::Sending {
-            target: target.clone(),
+        let result = with_claim_lease(
+            self.control_plane.clone(),
+            &self.gateway_token,
+            &self.principal,
+            &target,
+            async {
+                // Credential minting cannot publish a comment. Keep the durable claim receipt
+                // until it succeeds so auth failures/restarts do not become ambiguous sends.
+                let Ok(token) = self
+                    .authentication
+                    .access_token(&self.http, &self.api_base)
+                    .await
+                else {
+                    return Ok(false);
+                };
+                // Persist the last pre-effect state. A restart in this state cannot prove
+                // that GitHub did not receive the request and must not send it again.
+                self.journal.save(&Entry::Sending {
+                    target: target.clone(),
+                })?;
+                let outcome = self.post(reply, &token).await;
+                self.journal.save(&Entry::Settle {
+                    target: target.clone(),
+                    outcome,
+                })?;
+                Ok(true)
+            },
+        )
+        .await?;
+        if let Some(result) = result {
+            return Ok(result);
+        }
+        self.journal.save(&Entry::Settle {
+            target,
+            outcome: Outcome::Uncertain,
         })?;
-        let outcome = self.post(reply, &token).await;
-        self.journal.save(&Entry::Settle { target, outcome })?;
         Ok(true)
     }
 

@@ -31,11 +31,10 @@ use sqlx::{
 };
 use supertag_protocol::{
     v2::{
-        AcceptEventRequest, AppendEventRequest, ApprovalRule, Assignment, ClaimReplyResponse,
-        ContextContract, ExecutionLimits, ExecutionSelection, FinishTaskRequest,
-        HarnessExecutionProfile, HarnessKind, PolicyExecutionSettings, PutTagRequest, Reply,
-        ReplyDestination, ReplyState, SettleReplyRequest, StartTaskRequest, SubmitTaskRequest, Tag,
-        Task, TaskEvent, TaskState, WorkspaceSpec,
+        AcceptEventRequest, AppendEventRequest, ApprovalRule, Assignment, ContextContract,
+        ExecutionLimits, ExecutionSelection, FinishTaskRequest, HarnessExecutionProfile,
+        HarnessKind, PolicyExecutionSettings, PutTagRequest, Reply, ReplyDestination, ReplyState,
+        StartTaskRequest, SubmitTaskRequest, Tag, Task, TaskEvent, TaskState, WorkspaceSpec,
     },
     valid_git_commit, valid_workspace_id,
 };
@@ -70,7 +69,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 37;
+        const SCHEMA_VERSION: i64 = 38;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -158,6 +157,7 @@ impl Store {
                 include_str!("../migrations/sqlite/0035_execution_selection.sql"),
                 include_str!("../migrations/sqlite/0036_tag_execution.sql"),
                 include_str!("../migrations/sqlite/0037_accepted_execution.sql"),
+                include_str!("../migrations/sqlite/0038_reply_recovery.sql"),
             ]
         } else {
             [
@@ -198,6 +198,7 @@ impl Store {
                 include_str!("../migrations/postgresql/0035_execution_selection.sql"),
                 include_str!("../migrations/postgresql/0036_tag_execution.sql"),
                 include_str!("../migrations/postgresql/0037_accepted_execution.sql"),
+                include_str!("../migrations/postgresql/0038_reply_recovery.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -947,100 +948,6 @@ impl Store {
         Ok(task)
     }
 
-    pub async fn claim_reply(
-        &self,
-        principal: &str,
-        operation_id: &str,
-    ) -> Result<ClaimReplyResponse> {
-        let account = connector_account(principal)?;
-        name("operation ID", operation_id)?;
-        let (mut transaction, _) = self.write().await?;
-        let prior = sqlx::query("SELECT reply_id, lease_token FROM supertag_v2_reply_claims WHERE account_id = $1 AND operation_id = $2")
-            .bind(account).bind(operation_id).fetch_optional(&mut *transaction).await?;
-        if let Some(prior) = prior {
-            let reply = reply_in(
-                &mut transaction,
-                account,
-                &prior.try_get::<String, _>("reply_id")?,
-            )
-            .await?;
-            let response = ClaimReplyResponse {
-                reply: Some(reply_row(&reply)?),
-                lease_token: prior.try_get("lease_token")?,
-            };
-            transaction.commit().await?;
-            return Ok(response);
-        }
-        let id: Option<String> = sqlx::query_scalar("SELECT reply_id FROM supertag_v2_replies WHERE account_id = $1 AND state = $2 ORDER BY ready_order LIMIT 1")
-            .bind(account).bind(ReplyState::Pending as i64).fetch_optional(&mut *transaction).await?;
-        let Some(id) = id else {
-            transaction.rollback().await?;
-            return Ok(ClaimReplyResponse {
-                reply: None,
-                lease_token: String::new(),
-            });
-        };
-        let lease = Uuid::new_v4().to_string();
-        sqlx::query(
-            "UPDATE supertag_v2_replies SET state = $1, lease_token = $2 WHERE reply_id = $3",
-        )
-        .bind(ReplyState::Claimed as i64)
-        .bind(&lease)
-        .bind(&id)
-        .execute(&mut *transaction)
-        .await?;
-        sqlx::query("INSERT INTO supertag_v2_reply_claims (account_id, operation_id, reply_id, lease_token) VALUES ($1,$2,$3,$4)")
-            .bind(account).bind(operation_id).bind(&id).bind(&lease).execute(&mut *transaction).await?;
-        let row = reply_in(&mut transaction, account, &id).await?;
-        let reply = reply_row(&row)?;
-        transaction.commit().await?;
-        Ok(ClaimReplyResponse {
-            reply: Some(reply),
-            lease_token: lease,
-        })
-    }
-
-    pub async fn settle_reply(&self, principal: &str, input: &SettleReplyRequest) -> Result<Reply> {
-        let account = connector_account(principal)?;
-        name("reply ID", &input.reply_id)?;
-        name("lease token", &input.lease_token)?;
-        if ![
-            ReplyState::Delivered as i32,
-            ReplyState::Failed as i32,
-            ReplyState::Uncertain as i32,
-        ]
-        .contains(&input.state)
-        {
-            return Err(invalid(
-                "reply settlement must be delivered, failed, or uncertain",
-            ));
-        }
-        if let Some(receipt) = &input.provider_receipt {
-            text("provider receipt", receipt, 4_096)?;
-        }
-        let (mut transaction, _) = self.write().await?;
-        let row = reply_in(&mut transaction, account, &input.reply_id).await?;
-        if row.try_get::<Option<String>, _>("lease_token")?.as_deref()
-            != Some(input.lease_token.as_str())
-        {
-            return Err(StoreError::PermissionDenied);
-        }
-        let state: i64 = row.try_get("state")?;
-        if state == ReplyState::Claimed as i64 {
-            sqlx::query("UPDATE supertag_v2_replies SET state = $1, provider_receipt = $2 WHERE reply_id = $3")
-                .bind(input.state as i64).bind(&input.provider_receipt).bind(&input.reply_id).execute(&mut *transaction).await?;
-        } else if state != input.state as i64
-            || row.try_get::<Option<String>, _>("provider_receipt")? != input.provider_receipt
-        {
-            return Err(StoreError::Conflict(
-                "reply already has a different settlement".into(),
-            ));
-        }
-        let reply = reply_row(&reply_in(&mut transaction, account, &input.reply_id).await?)?;
-        transaction.commit().await?;
-        Ok(reply)
-    }
-
     pub async fn list_events(
         &self,
         task_id: &str,
@@ -1513,7 +1420,7 @@ async fn enqueue_reply(
     Ok(())
 }
 
-fn connector_account(principal: &str) -> Result<&str> {
+pub(crate) fn connector_account(principal: &str) -> Result<&str> {
     name("principal", principal)?;
     let account = principal
         .strip_prefix("connector:")
@@ -1522,7 +1429,7 @@ fn connector_account(principal: &str) -> Result<&str> {
     Ok(account)
 }
 
-async fn reply_in(
+pub(crate) async fn reply_in(
     transaction: &mut Transaction<'_, Any>,
     account: &str,
     reply_id: &str,
@@ -1535,7 +1442,7 @@ async fn reply_in(
         .ok_or_else(|| StoreError::NotFound("reply was not found".into()))
 }
 
-fn reply_row(row: &AnyRow) -> Result<Reply> {
+pub(crate) fn reply_row(row: &AnyRow) -> Result<Reply> {
     Ok(Reply {
         reply_id: row.try_get("reply_id")?,
         task_id: row.try_get("task_id")?,

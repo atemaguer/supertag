@@ -9,6 +9,7 @@ mod network;
 mod node_bridges;
 mod objectives;
 mod policy;
+mod replies;
 mod surface_policy;
 mod teams;
 mod tui;
@@ -87,6 +88,13 @@ enum RecoveryDecision {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Inspect connector deliveries and resolve uncertain replies from provider evidence.
+    Replies {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: replies::ReplyCommand,
+    },
     /// Manage reusable Permission Sets, Context Sets, and Roles.
     Policy {
         #[command(flatten)]
@@ -450,6 +458,10 @@ async fn run(command: Command) -> Result<()> {
             connection,
             command,
         } => host_status::run(connection, command).await?,
+        Command::Replies {
+            connection,
+            command,
+        } => replies::run(connection, command).await?,
         Command::Inbox {
             connection,
             command,
