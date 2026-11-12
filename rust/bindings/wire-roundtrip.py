@@ -19,6 +19,7 @@ def main() -> None:
     sys.path.insert(0, str(BINDINGS / "python"))
     wire = importlib.import_module("supertag.runtime.v2.runtime_pb2")
     importlib.import_module("supertag.runtime.v2.runtime_pb2_grpc")
+    importlib.import_module("supertag.runtime.v2.policy_pb2_grpc")
 
     task = wire.Task(
         task_id="first-task",
@@ -29,6 +30,11 @@ def main() -> None:
         tag_revision=9007199254740993,
         state=wire.TASK_STATE_RUNNING,
         result="",
+        policy_snapshot={
+            "version": 1,
+            "permission_sets": [{"set_id": "release", "name": "Release", "revision": 3}],
+            "execution": {"harness": "codex", "models": ["fixture-model"]},
+        },
     )
     go_bytes = subprocess.run(
         ["go", "-C", str(BINDINGS / "go"), "run", "./conformance"],
@@ -51,7 +57,7 @@ def main() -> None:
     actual = wire.Task.FromString(typescript_bytes)
     if actual != task:
         raise AssertionError(f"protobuf Task changed unexpectedly: {actual}")
-    print("Python, Go, and TypeScript preserved the Task and its optional fields and uint64.")
+    print("Python, Go, and TypeScript preserved the Task, policy snapshot, optional fields, and uint64.")
 
 
 if __name__ == "__main__":

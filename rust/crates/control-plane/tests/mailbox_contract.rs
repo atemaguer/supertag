@@ -9,7 +9,7 @@ const OPERATOR: &str = "operator:mailbox-test";
 
 async fn claim(store: &Store, host: &HostAuthority) -> InspectAttemptRequest {
     let assignment = store
-        .claim_task(host, &Uuid::new_v4().to_string())
+        .claim_task_for_host(host, &Uuid::new_v4().to_string(), &[], HarnessKind::Codex)
         .await
         .unwrap()
         .expect("queued task");
@@ -127,6 +127,38 @@ async fn ordinary(store: &Store, tag: &str) -> Task {
 async fn durable_delivery(url: &str) {
     let store = Store::open(url).await.unwrap();
     seed(&store).await;
+    store
+        .put_role(
+            OPERATOR,
+            &PutRoleRequest {
+                operation_id: "mailbox-role".into(),
+                role: Some(Role {
+                    role_id: "mail-reader".into(),
+                    name: "Mail reader".into(),
+                    purpose: "Review Mailbox messages".into(),
+                    status: RoleStatus::Active.into(),
+                    execution: Some(PolicyExecutionSettings {
+                        harness: Some("codex".into()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .assign_role(
+            OPERATOR,
+            &AssignRoleRequest {
+                operation_id: "assign-mail-reader".into(),
+                role: "mail-reader".into(),
+                tag_id: "recipient".into(),
+            },
+        )
+        .await
+        .unwrap();
     let sender = support::register_host(&store, "sender-host").await;
     let recipient = support::register_host(&store, "recipient-host").await;
     let other = support::register_host(&store, "other-host").await;
@@ -237,7 +269,8 @@ async fn durable_delivery(url: &str) {
     .await;
     let running = start(&store, &recipient, &first).await;
     assert_eq!(running.session_id, "inbox:recipient");
-    assert_eq!(running.instructions, "Identity recipient");
+    assert!(running.instructions.starts_with("Identity recipient"));
+    assert_eq!(running.harness_kind(), HarnessKind::Codex);
     assert_eq!(running.allowed_actions, ["files:read"]);
     assert!(running.prompt.contains("via=\"workstream post\""));
     assert!(running.prompt.contains("Arrived after claim before start"));
@@ -357,7 +390,8 @@ async fn durable_delivery(url: &str) {
     );
     let next = claim(&store, &recipient).await;
     let task = start(&store, &recipient, &next).await;
-    assert_eq!(task.instructions, "Changed after acceptance");
+    assert!(task.instructions.starts_with("Changed after acceptance"));
+    assert_eq!(task.harness_kind(), HarnessKind::Codex);
     assert!(task.prompt.contains("Next turn"));
     assert!(!task.prompt.contains("Please inspect"));
     finish(&store, &recipient, &next, false).await;
@@ -409,7 +443,7 @@ async fn durable_delivery(url: &str) {
             "Changed harness",
             vec![],
             None,
-            HarnessKind::Codex,
+            HarnessKind::ClaudeCode,
         )
         .await
         .unwrap();

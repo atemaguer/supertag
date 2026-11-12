@@ -195,6 +195,7 @@ struct Stream {
     turn_requested: bool,
     resumed: bool,
     may_ask: bool,
+    full_inventory: bool,
 }
 
 impl Stream {
@@ -204,6 +205,7 @@ impl Stream {
         expected_thread: Option<String>,
         baseline: Option<[u64; 3]>,
         may_ask: bool,
+        full_inventory: bool,
     ) -> Result<Self> {
         let resumed = expected_thread.is_some();
         let mut native = events::Stream::new(policy, expected_thread);
@@ -223,6 +225,7 @@ impl Stream {
             turn_requested: false,
             resumed,
             may_ask,
+            full_inventory,
         })
     }
 
@@ -450,7 +453,7 @@ impl Stream {
                             self.may_ask,
                             "Codex emitted an unregistered coordination tool item"
                         );
-                        crate::questions::validate_tool(&item)?;
+                        crate::coordination::arguments(&item, self.full_inventory)?;
                         return Ok(());
                     }
                     Some("webSearch") => item["type"] = json!("web_search"),
@@ -652,6 +655,7 @@ pub(crate) async fn execute(
         expected_thread,
         baseline,
         questions.enabled(),
+        questions.full_inventory(),
     )?;
     stream.model(&response)?;
     for notification in buffered.drain(..) {
@@ -858,7 +862,7 @@ mod tests {
             &workspace,
             &crate::config::arguments(&workspace, None, &policy)?,
         )?;
-        params["dynamicTools"] = crate::questions::tool_specs();
+        params["dynamicTools"] = crate::questions::tool_specs(true);
         params["ephemeral"] = json!(false);
         let thread = transport
             .call("thread/start", params, &mut buffered)

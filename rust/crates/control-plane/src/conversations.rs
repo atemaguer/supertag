@@ -118,12 +118,10 @@ impl Store {
             let source: String = active.try_get("task_id")?;
             let attempt: String = active.try_get("attempt_id")?;
             let operation = format!("conversation/{}", task.task_id);
-            Some(
-                record_live_input_in(
-                    &mut tx, principal, &operation, &source, &attempt, &task, order,
-                )
-                .await?,
+            record_live_input_in(
+                &mut tx, principal, &operation, &source, &attempt, &task, order,
             )
+            .await?
         } else {
             None
         };

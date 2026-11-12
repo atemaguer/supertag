@@ -274,6 +274,8 @@ fn approval_json(approval: Approval) -> Value {
         "valid_until_ms": approval.valid_until_ms,
         "consumed_at_ms": approval.consumed_at_ms,
         "continuation_task_id": approval.continuation_task_id,
+        "grant_approval_id": approval.grant_approval_id,
+        "covered_at_ms": approval.covered_at_ms,
     })
 }
 

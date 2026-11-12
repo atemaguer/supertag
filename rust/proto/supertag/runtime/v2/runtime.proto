@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package supertag.runtime.v2;
 
+import "supertag/runtime/v2/policy.proto";
+
 // The Gateway exposes these services to operators and enrolled hosts. The
 // Control Plane serves the same messages on a private authenticated listener.
 service Operator {
@@ -186,6 +188,8 @@ message Approval {
   optional string continuation_task_id = 19;
   string resource = 20;
   string canonical_arguments_json = 21;
+  optional string grant_approval_id = 22;
+  optional int64 covered_at_ms = 23;
 }
 
 message GetApprovalRequest { string approval_id = 1; }
@@ -258,6 +262,8 @@ message AskQuestionRequest {
 
 message AttemptCapabilities {
   bool may_ask_objective_question = 1;
+  bool may_use_workstream = 2;
+  bool may_read_mailbox = 3;
 }
 
 service Teams {
@@ -487,15 +493,31 @@ message HarnessAskQuestionRequest {
   string text = 2;
 }
 
-// The supervising Worker Host supplies the Attempt identity for each post.
+// The supervising Worker Host supplies the Attempt identity.
 service HarnessWorkstreams {
+  rpc Read(HarnessReadWorkstreamRequest) returns (ReadAttemptWorkstreamResponse);
   rpc Post(HarnessPostWorkstreamRequest) returns (PostAttemptWorkstreamResponse);
+}
+
+message HarnessReadWorkstreamRequest {
+  optional uint64 after_sequence = 1;
+  uint32 limit = 2;
+  string cursor = 3;
 }
 
 message HarnessPostWorkstreamRequest {
   string operation_id = 1;
   string body = 2;
   repeated string to_tag_ids = 3;
+}
+
+service HarnessMailbox {
+  rpc Read(HarnessReadMailboxRequest) returns (ListMailboxMessagesResponse);
+}
+
+message HarnessReadMailboxRequest {
+  uint32 limit = 1;
+  string cursor = 2;
 }
 
 enum LiveInputState {
@@ -742,6 +764,7 @@ message Task {
   WorkspaceDeliveryReference workspace_delivery = 12;
   HarnessKind harness_kind = 13;
   repeated ApprovalRule approval_rules = 14;
+  TaskPolicySnapshot policy_snapshot = 15;
 }
 
 message GetTaskRequest {
@@ -894,6 +917,7 @@ message HarnessRun {
   string attempt_id = 2;
   SessionCheckpoint checkpoint = 3;
   bool may_ask_objective_question = 4;
+  AttemptCapabilities coordination = 5;
 }
 
 message SessionCheckpoint {

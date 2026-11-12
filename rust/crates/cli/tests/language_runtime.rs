@@ -47,10 +47,9 @@ async fn success(mut command: Command) -> Result<Vec<u8>> {
 }
 
 async fn operator(args: &[&str], gateway: &str, token: &str) -> Result<Value> {
-    let mut command = command(args);
-    command
-        .args(["--gateway", gateway])
-        .env("SUPERTAG_OPERATOR_TOKEN", token);
+    let (subcommand, args) = args.split_first().context("operator subcommand required")?;
+    let mut command = command(&[subcommand, "--gateway", gateway]);
+    command.args(args).env("SUPERTAG_OPERATOR_TOKEN", token);
     Ok(serde_json::from_slice(&success(command).await?)?)
 }
 
@@ -282,6 +281,16 @@ fn repo_path(relative: &str) -> Result<std::path::PathBuf> {
         .canonicalize()?)
 }
 
+fn claude_fixture(directory: &Path) -> Result<std::path::PathBuf> {
+    let native = directory.join("claude-fixture.mjs");
+    std::fs::copy(
+        repo_path("packages/runtime/harnesses/claude-code/fixtures/rust-native-claude.mjs")?,
+        &native,
+    )?;
+    std::fs::set_permissions(&native, std::fs::Permissions::from_mode(0o700))?;
+    Ok(native)
+}
+
 async fn last_usage(services: &LanguageServices, task: &Value) -> Result<Value> {
     let mut command = command(&[
         "task-usage",
@@ -364,12 +373,7 @@ async fn claude_code_sdk_restores_session_on_a_fresh_host() -> Result<()> {
         std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
     let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
     let directory = tempfile::tempdir()?;
-    let native = directory.path().join("claude-fixture.mjs");
-    std::fs::copy(
-        repo_path("packages/runtime/harnesses/claude-code/fixtures/rust-native-claude.mjs")?,
-        &native,
-    )?;
-    std::fs::set_permissions(&native, std::fs::Permissions::from_mode(0o700))?;
+    let native = claude_fixture(directory.path())?;
     let services = LanguageServices::start(directory.path()).await?;
     services
         .operator(&[
@@ -417,5 +421,165 @@ async fn claude_code_sdk_restores_session_on_a_fresh_host() -> Result<()> {
         assert_eq!(usage["cached_input_tokens"], 3);
         assert_eq!(usage["output_tokens"], 4);
     }
+    services.stop().await
+}
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn() -> Result<()> {
+    let interpreter =
+        std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
+    let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let directory = tempfile::tempdir()?;
+    let native = claude_fixture(directory.path())?;
+    let services = LanguageServices::start(directory.path()).await?;
+    let worker = |state: &str| {
+        let mut host = services.worker(
+            "claude-code",
+            &directory.path().join(state),
+            Path::new(&interpreter),
+            &entry,
+        );
+        host.arg("--claude-path")
+            .arg(&native)
+            .env("ANTHROPIC_API_KEY", "fixture-provider-key");
+        host
+    };
+    services
+        .operator(&[
+            "put-tag",
+            "claude",
+            "--harness",
+            "claude-code",
+            "--instructions",
+            "Coordinate the release.",
+            "--require-workstream-approval",
+        ])
+        .await?;
+    services
+        .operator(&[
+            "put-tag",
+            "recipient",
+            "--harness",
+            "claude-code",
+            "--instructions",
+            "Read the addressed update.",
+        ])
+        .await?;
+    services
+        .operator(&[
+            "team",
+            "create",
+            "release",
+            "--member",
+            "claude",
+            "--member",
+            "recipient",
+        ])
+        .await?;
+    let source = services
+        .operator(&[
+            "submit",
+            "--tag",
+            "claude",
+            "--session",
+            "release-session",
+            "Process fixture Workstream approval",
+        ])
+        .await?;
+    let source_id = source["task_id"].as_str().context("source Task ID")?;
+    success(worker("first-host")).await?;
+    let first = services.operator(&["get-task", source_id]).await?;
+    assert_eq!(first["state"], "TASK_STATE_SUCCEEDED", "{first}");
+    assert_eq!(
+        first["result"],
+        "fixture first turn awaiting Workstream approval"
+    );
+    let waiting = services
+        .operator(&["inbox", "list", "--kind", "approval"])
+        .await?;
+    assert_eq!(
+        waiting["items"].as_array().context("approval items")?.len(),
+        1
+    );
+    let item = &waiting["items"][0];
+    assert_eq!(item["task_id"], source_id);
+    assert_eq!(item["approval"]["action"], "workstream:post");
+    assert_eq!(item["approval"]["resource"], "release");
+    let approval_id = item["approval"]["approval_id"]
+        .as_str()
+        .context("approval ID")?;
+    assert_eq!(
+        services.operator(&["team", "posts", "release"]).await?["posts"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        services.operator(&["mailbox", "recipient"]).await?["messages"],
+        serde_json::json!([])
+    );
+    let exact = services
+        .operator(&["inbox", "approval", approval_id])
+        .await?;
+    let body = "The SDK fixture verified the release.";
+    assert_eq!(exact["arguments"]["body"], body);
+    assert_eq!(
+        exact["arguments"]["to_tag_ids"],
+        serde_json::json!(["recipient"])
+    );
+
+    let approve = [
+        "inbox",
+        "approve",
+        approval_id,
+        "--operation-id",
+        "operator-once",
+    ];
+    let decision = services.operator(&approve).await?;
+    assert_eq!(decision["scope"], "once");
+    assert_eq!(services.operator(&approve).await?, decision);
+    let continued_id = decision["continuation_task_id"]
+        .as_str()
+        .context("continuation Task ID")?;
+    assert_ne!(source_id, continued_id);
+    success(worker("second-host")).await?;
+    let continued = services.operator(&["get-task", continued_id]).await?;
+    assert_eq!(continued["state"], "TASK_STATE_SUCCEEDED", "{continued}");
+    assert_eq!(continued["session_id"], first["session_id"]);
+    assert_eq!(continued["result"], "fixture resumed and posted one update");
+    let workstream = services.operator(&["team", "posts", "release"]).await?;
+    assert_eq!(
+        workstream["posts"]
+            .as_array()
+            .context("Workstream posts")?
+            .len(),
+        1
+    );
+    let post = &workstream["posts"][0];
+    assert_eq!(post["source_task_id"], continued_id);
+    assert_eq!(post["body"], body);
+    let approval = services
+        .operator(&["inbox", "approval", approval_id])
+        .await?;
+    assert!(approval["consumed_at_ms"].is_i64());
+
+    success(worker("recipient-host")).await?;
+    let mailbox = services.operator(&["mailbox", "recipient"]).await?;
+    assert_eq!(
+        mailbox["messages"]
+            .as_array()
+            .context("Mailbox messages")?
+            .len(),
+        1
+    );
+    let message = &mailbox["messages"][0];
+    assert_eq!(message["workstream_post_id"], post["post_id"]);
+    assert_eq!(message["sender_tag_id"], "claude");
+    assert_eq!(message["recipient_tag_id"], "recipient");
+    assert_eq!(message["state"], "TAG_MESSAGE_STATE_HANDLED");
+    let mail_task = message["task_id"].as_str().context("Mailbox Task ID")?;
+    let mail = services.operator(&["get-task", mail_task]).await?;
+    assert_eq!(mail["state"], "TASK_STATE_SUCCEEDED", "{mail}");
+    assert_eq!(mail["session_id"], "inbox:recipient");
+    assert_eq!(mail["result"], "SDK fixture handled the addressed post");
     services.stop().await
 }

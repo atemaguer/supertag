@@ -69,6 +69,13 @@ async function sdkMcp(method, params) {
   return response.response.mcp_response;
 }
 
+async function coordinationCall(tool, input) {
+  const metadata = { mcp_server: { name: "supertag", source: "sdk" } };
+  if (!(await hook(`mcp__supertag__${tool}`, input, metadata)))
+    throw new Error(`Admitted ${tool} denied`);
+  return (await sdkMcp("tools/call", { name: tool, arguments: input })).result;
+}
+
 async function objectiveQuestion(allowed) {
   const name = "mcp__supertag__ask";
   const metadata = { mcp_server: { name: "supertag", source: "sdk" } };
@@ -120,6 +127,163 @@ async function objectiveQuestion(allowed) {
     throw new Error("Objective question conflict was not returned safely");
   return first.content[0].text;
 }
+
+async function coordinationTools(workstream) {
+  const metadata = { mcp_server: { name: "supertag", source: "sdk" } };
+  const list = (await sdkMcp("tools/list", {})).result?.tools;
+  const expected = workstream ? ["post", "read_mailbox", "read_workstream"] : ["read_mailbox"];
+  if (
+    sdkServers.join() !== "supertag" ||
+    list
+      ?.map(({ name }) => name)
+      .sort()
+      .join() !== expected.join() ||
+    list.some(({ inputSchema }) => inputSchema.additionalProperties !== false)
+  )
+    throw new Error("Wrong coordination tool allowlist");
+  const call = coordinationCall;
+  const secret = process.env.ANTHROPIC_API_KEY;
+  const mailbox = await call(
+    "read_mailbox",
+    workstream ? { limit: 3, cursor: "previous-mail" } : {},
+  );
+  const mailText = mailbox?.content?.[0]?.text ?? "";
+  if (
+    mailbox?.isError ||
+    JSON.parse(mailText).trust !== "untrusted" ||
+    !mailText.includes("Untrusted Mailbox text [REDACTED]") ||
+    mailText.includes(secret)
+  )
+    throw new Error("Mailbox read was not safely presented");
+  if (!workstream) {
+    if (await hook("mcp__supertag__post", { text: "unexpected" }, metadata))
+      throw new Error("Workstream tool was allowed without its capability");
+    return "Mailbox only";
+  }
+  for (const [name, input, provenance] of [
+    ["Bash", { command: "echo unwanted" }, {}],
+    ["mcp__supertag__post", { text: "arbitrary Team", team_id: "elsewhere" }, metadata],
+    ["mcp__supertag__post", { text: "child" }, { ...metadata, agent_id: "child" }],
+    [
+      "mcp__supertag__post",
+      { text: "forged" },
+      { mcp_server: { name: "supertag", source: "user" } },
+    ],
+    ["mcp__supertag__read_mailbox", { limit: 1, tag: "somebody-else" }, metadata],
+  ]) {
+    if (await hook(name, input, provenance)) throw new Error("Out-of-scope coordination allowed");
+  }
+  const timeline = await call("read_workstream", { limit: 2, afterSequence: "5" });
+  const timelineText = timeline?.content?.[0]?.text ?? "";
+  if (
+    timeline?.isError ||
+    JSON.parse(timelineText).trust !== "untrusted" ||
+    !timelineText.includes("Untrusted Workstream text [REDACTED]") ||
+    timelineText.includes(secret)
+  )
+    throw new Error("Workstream read was not safely presented");
+  for (const [tool, cursor] of [
+    ["read_workstream", "s7"],
+    ["read_mailbox", "wrong-audience"],
+  ]) {
+    const invalid = await call(tool, { cursor });
+    if (!invalid?.isError || invalid.content[0].text.includes("Untrusted"))
+      throw new Error("A read returned a record from the wrong audience");
+  }
+  const text = `Pending post ${secret}`;
+  for (const to of [
+    ["lead", "builder", "lead"],
+    ["builder", "lead"],
+  ]) {
+    const result = await call("post", { text: ` ${text} `, to });
+    if (result?.isError || JSON.parse(result.content[0].text).status !== "pending")
+      throw new Error("Workstream post did not ask for approval");
+  }
+  if (!(await call("post", { text: "Denied post" }))?.isError)
+    throw new Error("Denied approval appeared to succeed");
+  if (!(await call("post", { text: "Wrong receipt" }))?.isError)
+    throw new Error("An approval for another Attempt appeared to succeed");
+  const pending = await call("post", { text: "Confirmed post" });
+  if (pending?.isError || JSON.parse(pending.content[0].text).status !== "pending")
+    throw new Error("Expected a pending receipt before the post");
+  const posted = await call("post", { text: "Confirmed post" });
+  if (posted?.isError || JSON.parse(posted.content[0].text).status !== "posted")
+    throw new Error("Workstream post receipt missing");
+  return "Coordination complete";
+}
+
+async function approvalAndQuestion(order) {
+  const ask = () => coordinationCall("ask", { text: "Which branch should I use?" });
+  const post = () => coordinationCall("post", { text: "Pending post" });
+  if (order === "ask-first") {
+    if (
+      (await ask())?.content?.[0]?.text !== "Objective question recorded." ||
+      !(await post())?.isError
+    )
+      throw new Error("A Workstream approval was possible after asking an Objective question");
+  } else {
+    const first = await post();
+    if (
+      first?.isError ||
+      JSON.parse(first.content[0].text).status !== "pending" ||
+      !(await ask())?.isError
+    )
+      throw new Error("An Objective question was possible while a Workstream approval was pending");
+  }
+  return "Coordination kept one wait";
+}
+
+async function processCoordination(prompt) {
+  const body = "The SDK fixture verified the release.";
+  if (prompt.startsWith("This is this Tag's inbox.")) {
+    const result = await coordinationCall("read_mailbox", {});
+    const page = JSON.parse(result.content[0].text);
+    if (
+      result.isError ||
+      page.trust !== "untrusted" ||
+      page.messages.length !== 1 ||
+      page.messages[0].from !== "claude" ||
+      page.messages[0].text !== body ||
+      !prompt.includes(body)
+    )
+      throw new Error("Addressed Workstream post did not arrive in the Mailbox");
+    return "SDK fixture handled the addressed post";
+  }
+  const timeline = await coordinationCall("read_workstream", { afterSequence: 0 });
+  const page = JSON.parse(timeline.content[0].text);
+  if (
+    timeline.isError ||
+    page.trust !== "untrusted" ||
+    page.team.id !== "release" ||
+    page.posts.length !== 0
+  )
+    throw new Error("Initial Workstream scope was not the empty release Team");
+  const post = () => coordinationCall("post", { text: body, to: ["recipient"] });
+  const first = await post();
+  const receipt = JSON.parse(first.content[0].text);
+  if (prompt === "Process fixture Workstream approval") {
+    if (resumed || first.isError || receipt.status !== "pending" || !receipt.approvalId)
+      throw new Error("A post was visible before approval");
+    return "fixture first turn awaiting Workstream approval";
+  }
+  if (!resumed || first.isError || receipt.status !== "posted" || receipt.duplicate)
+    throw new Error("Approved post did not apply from the continued native Session");
+  const again = await post();
+  const duplicate = JSON.parse(again.content[0].text);
+  if (again.isError || !duplicate.duplicate || duplicate.postId !== receipt.postId)
+    throw new Error("Exact Workstream replay added another post");
+  const refreshed = await coordinationCall("read_workstream", { afterSequence: 0 });
+  const history = JSON.parse(refreshed.content[0].text);
+  if (
+    refreshed.isError ||
+    history.posts.length !== 1 ||
+    history.posts[0].id !== receipt.postId ||
+    history.posts[0].text !== body
+  )
+    throw new Error("Workstream read did not show the single approved post");
+  return "fixture resumed and posted one update";
+}
+
 async function histories(path) {
   const files = [];
   for (const entry of await readdir(path, { withFileTypes: true }).catch(() => [])) {
@@ -197,6 +361,8 @@ async function turn(message) {
   let result = resumed ? "fixture resumed turn" : "fixture first turn";
   if (prompt.startsWith("objective-question"))
     result = await objectiveQuestion(prompt === "objective-question");
+  if (prompt.startsWith("coordination-"))
+    result = await coordinationTools(prompt === "coordination-tools");
   if (message.uuid) result += `; input: ${prompt}`;
   if (prompt.includes("write")) {
     if (!(await hook("Write", { file_path: join(cwd, "answer.txt"), content: result })))
@@ -211,6 +377,17 @@ async function turn(message) {
     result += "; unadmitted tools denied";
   }
   if (prompt.includes("secret")) result += ` ${process.env.ANTHROPIC_API_KEY}`;
+  if (prompt === "required-context-fixture")
+    await writeFile(join(cwd, "native-started"), "started");
+  if (prompt === "model-policy-fixture") result = `fixture model ${arg("--model")}`;
+  if (prompt.startsWith("mixed-tools-"))
+    result = await approvalAndQuestion(prompt.slice("mixed-tools-".length));
+  if (
+    prompt === "Process fixture Workstream approval" ||
+    prompt.startsWith("The operator decided the approval requests") ||
+    prompt.startsWith("This is this Tag's inbox.")
+  )
+    result = await processCoordination(prompt);
   const entry = {
     type: "assistant",
     uuid: randomUUID(),

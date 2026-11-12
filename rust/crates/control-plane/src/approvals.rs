@@ -19,7 +19,7 @@ use crate::{
     },
 };
 
-const VIEW: &str = "SELECT a.*,(SELECT w.continuation_task_id FROM supertag_v2_approval_waits w WHERE w.task_id=a.task_id) AS continuation_task_id FROM supertag_v2_approvals a";
+const VIEW: &str = "SELECT a.*,c.grant_approval_id,c.covered_at_ms,g.state AS grant_state,g.scope AS grant_scope,g.decided_at_ms AS grant_decided_at_ms,g.decided_by AS grant_decided_by,g.reason AS grant_reason,g.valid_until_ms AS grant_valid_until_ms,(SELECT w.continuation_task_id FROM supertag_v2_approval_waits w WHERE w.task_id=a.task_id) AS continuation_task_id FROM supertag_v2_approvals a LEFT JOIN supertag_v2_approval_coverage c ON c.approval_id=a.approval_id LEFT JOIN supertag_v2_approvals g ON g.approval_id=c.grant_approval_id";
 const ARGUMENT_LIMIT: usize = 131_072;
 
 fn operator(principal: &str) -> Result<&str> {
@@ -56,6 +56,37 @@ async fn access_in(tx: &mut Transaction<'_, Any>, principal: &str, task_id: &str
     let owner: Option<String> = sqlx::query_scalar("SELECT c.principal FROM supertag_v2_tasks t JOIN supertag_v2_conversations c ON c.session_id=t.session_id AND c.tag_id=t.tag_id WHERE t.task_id=$1")
         .bind(task_id).fetch_optional(&mut **tx).await?;
     Ok(owner.is_none_or(|owner| owner == principal))
+}
+
+fn effect_request_digest(input: &RequestApprovalRequest) -> Result<String> {
+    let canonical = canonical_arguments(&input.arguments_json)?;
+    let arguments_digest = format!("sha256:{:x}", Sha256::digest(canonical.as_bytes()));
+    digest(&(
+        &input.action,
+        &input.resource,
+        &arguments_digest,
+        &summary(&input.summary, 500)?,
+    ))
+}
+
+/// A duplicate effect may skip consuming new authority, but cannot repurpose an
+/// operation that already requested approval for a different normalized effect.
+/// Compare the operation's own digest, not the original grant's arguments.
+pub(crate) async fn ensure_operation_matches_in(
+    tx: &mut Transaction<'_, Any>,
+    attempt_id: &str,
+    input: &RequestApprovalRequest,
+) -> Result<()> {
+    let prior: Option<String> = sqlx::query_scalar("SELECT request_digest FROM supertag_v2_approval_operations WHERE attempt_id=$1 AND operation_id=$2")
+        .bind(attempt_id).bind(&input.operation_id).fetch_optional(&mut **tx).await?;
+    if let Some(prior) = prior
+        && prior != effect_request_digest(input)?
+    {
+        return Err(StoreError::Conflict(
+            "approval operation used different arguments".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Called in the same transaction as the actual effect, after its resource scope
@@ -115,7 +146,7 @@ pub(crate) async fn gate_in(
         }
     }
     let rule_digest = digest(&(&rule.action, &operators))?;
-    let request_digest = digest(&(&input.action, &input.resource, &arguments_digest, &summary))?;
+    let request_digest = effect_request_digest(input)?;
     let tag: String = task.try_get("tag_id")?;
     let session: String = task.try_get("session_id")?;
     let objective: Option<String> =
@@ -142,19 +173,21 @@ pub(crate) async fn gate_in(
         }
         value
     } else {
-        let scoped: Option<String> = if let Some(objective) = &objective {
-            sqlx::query_scalar("SELECT approval_id FROM supertag_v2_approvals WHERE objective_id=$1 AND tag_id=$2 AND action=$3 AND resource=$4 AND rule_digest=$5 AND state=2 AND scope=2 AND (valid_until_ms IS NULL OR valid_until_ms>$6) ORDER BY requested_order LIMIT 1")
-                .bind(objective).bind(&tag).bind(&input.action).bind(&input.resource).bind(&rule_digest).bind(now).fetch_optional(&mut **tx).await?
+        // Existing decisions on these exact arguments take precedence over a
+        // broad grant. In particular, a new operation ID cannot bypass a denial.
+        let exact: Option<String> = sqlx::query_scalar("SELECT a.approval_id FROM supertag_v2_approvals a LEFT JOIN supertag_v2_approval_coverage c ON c.approval_id=a.approval_id LEFT JOIN supertag_v2_approvals g ON g.approval_id=c.grant_approval_id WHERE a.tag_id=$1 AND a.session_id=$2 AND a.action=$3 AND a.resource=$4 AND a.arguments_digest=$5 AND a.rule_digest=$6 AND a.state IN (1,2,3) AND (c.approval_id IS NULL OR (g.state=2 AND (g.valid_until_ms IS NULL OR g.valid_until_ms>$7))) AND (a.valid_until_ms IS NULL OR a.valid_until_ms>$7) AND (a.consumed_at_ms IS NULL OR a.state<>2 OR a.scope=2) AND ((a.task_id=$8 AND a.attempt_id=$9) OR EXISTS (SELECT 1 FROM supertag_v2_approval_waits w JOIN supertag_v2_approval_wait_requests r ON r.task_id=w.task_id WHERE r.approval_id=a.approval_id AND w.continuation_task_id=$8)) ORDER BY a.requested_order LIMIT 1")
+            .bind(&tag).bind(&session).bind(&input.action).bind(&input.resource).bind(&arguments_digest).bind(&rule_digest).bind(now).bind(&attempt.task_id).bind(&attempt.attempt_id).fetch_optional(&mut **tx).await?;
+        let scoped: Option<String> = if exact.is_none() {
+            if let Some(objective) = &objective {
+                sqlx::query_scalar("SELECT approval_id FROM supertag_v2_approvals WHERE objective_id=$1 AND tag_id=$2 AND action=$3 AND resource=$4 AND rule_digest=$5 AND state=2 AND scope=2 AND (valid_until_ms IS NULL OR valid_until_ms>$6) ORDER BY requested_order LIMIT 1")
+                    .bind(objective).bind(&tag).bind(&input.action).bind(&input.resource).bind(&rule_digest).bind(now).fetch_optional(&mut **tx).await?
+            } else {
+                None
+            }
         } else {
             None
         };
-        let exact: Option<String> = if scoped.is_none() {
-            sqlx::query_scalar("SELECT a.approval_id FROM supertag_v2_approvals a WHERE a.tag_id=$1 AND a.session_id=$2 AND a.action=$3 AND a.resource=$4 AND a.arguments_digest=$5 AND a.rule_digest=$6 AND a.state IN (1,2,3) AND (a.valid_until_ms IS NULL OR a.valid_until_ms>$7) AND (a.consumed_at_ms IS NULL OR a.state<>2 OR a.scope=2) AND ((a.task_id=$8 AND a.attempt_id=$9) OR EXISTS (SELECT 1 FROM supertag_v2_approval_waits w JOIN supertag_v2_approval_wait_requests r ON r.task_id=w.task_id WHERE r.approval_id=a.approval_id AND w.continuation_task_id=$8)) ORDER BY a.requested_order LIMIT 1")
-                .bind(&tag).bind(&session).bind(&input.action).bind(&input.resource).bind(&arguments_digest).bind(&rule_digest).bind(now).bind(&attempt.task_id).bind(&attempt.attempt_id).fetch_optional(&mut **tx).await?
-        } else {
-            None
-        };
-        let id = match scoped.or(exact) {
+        let id = match exact.or(scoped) {
             Some(id) => id,
             None => {
                 let id = Uuid::new_v4().to_string();
@@ -352,6 +385,9 @@ impl Store {
             .bind(state as i64).bind(scope as i64).bind(now).bind(id).bind(reason).bind(input.valid_until_ms).bind(&value.approval_id).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO supertag_v2_approval_decisions (principal,operation_id,request_digest,approval_id) VALUES ($1,$2,$3,$4)")
             .bind(principal).bind(&input.operation_id).bind(request_digest).bind(&value.approval_id).execute(&mut *tx).await?;
+        if state == ApprovalState::Approved && scope == ApprovalScope::Objective {
+            cover_pending_in(&mut tx, &value.approval_id, now).await?;
+        }
         continue_in(&mut tx, &value.task_id, now).await?;
         value = load_in(&mut tx, &value.approval_id).await?;
         tx.commit().await?;
@@ -499,6 +535,46 @@ pub(crate) async fn finish_in(
     continue_in(tx, &task.task_id, now).await
 }
 
+/// Resolve all existing matching requests atomically with the original decision.
+/// A link is authority attribution, not another operator decision. Denied,
+/// expired, already covered, or stale requests can never acquire one.
+async fn cover_pending_in(tx: &mut Transaction<'_, Any>, grant: &str, now: i64) -> Result<()> {
+    sqlx::query("INSERT INTO supertag_v2_approval_coverage (approval_id,grant_approval_id,covered_at_ms) SELECT a.approval_id,g.approval_id,$2 FROM supertag_v2_approvals a JOIN supertag_v2_approvals g ON g.approval_id=$1 WHERE g.state=2 AND g.scope=2 AND a.state=1 AND a.objective_id=g.objective_id AND a.tag_id=g.tag_id AND a.action=g.action AND a.resource=g.resource AND a.rule_digest=g.rule_digest AND (a.valid_until_ms IS NULL OR a.valid_until_ms>$2) AND NOT EXISTS (SELECT 1 FROM supertag_v2_approval_coverage c WHERE c.approval_id=a.approval_id) AND NOT EXISTS (SELECT 1 FROM supertag_v2_objectives o WHERE o.objective_id=a.objective_id AND o.status IN (5,6)) AND EXISTS (SELECT 1 FROM supertag_v2_tasks t WHERE t.task_id=a.task_id AND t.attempt_id=a.attempt_id AND ((t.state=2 AND t.lease_expires_at_ms>$2) OR (t.state=3 AND EXISTS (SELECT 1 FROM supertag_v2_approval_waits w JOIN supertag_v2_approval_wait_requests r ON r.task_id=w.task_id WHERE r.approval_id=a.approval_id AND w.continuation_task_id IS NULL) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order))))")
+        .bind(grant).bind(now).execute(&mut **tx).await?;
+    let tasks: Vec<String> = sqlx::query_scalar("SELECT DISTINCT a.task_id FROM supertag_v2_approval_coverage c JOIN supertag_v2_approvals a ON a.approval_id=c.approval_id WHERE c.grant_approval_id=$1 ORDER BY a.task_id")
+        .bind(grant).fetch_all(&mut **tx).await?;
+    for task in tasks {
+        continue_in(tx, &task, now).await?;
+    }
+    Ok(())
+}
+
+/// Called after clearing and storing an Objective's pause in this transaction.
+/// Keeping the latest valid wait prevents a generic resume turn from expiring
+/// its exact continuation authority. Resolved waits reconcile immediately.
+pub(crate) async fn resume_wait_in(
+    tx: &mut Transaction<'_, Any>,
+    objective: &str,
+    now: i64,
+) -> Result<bool> {
+    let task: Option<String> = sqlx::query_scalar("SELECT w.task_id FROM supertag_v2_approval_waits w JOIN supertag_v2_tasks t ON t.task_id=w.task_id AND t.attempt_id=w.attempt_id JOIN supertag_v2_objective_tasks link ON link.task_id=t.task_id LEFT JOIN supertag_v2_tasks continuation ON continuation.task_id=w.continuation_task_id WHERE link.objective_id=$1 AND t.state=3 AND ((w.continuation_task_id IS NULL AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order)) OR (continuation.state IN (1,2,6) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=continuation.tag_id AND newer.session_id=continuation.session_id AND newer.accepted_order>continuation.accepted_order))) ORDER BY t.accepted_order DESC LIMIT 1")
+        .bind(objective).fetch_optional(&mut **tx).await?;
+    let Some(task) = task else {
+        return Ok(false);
+    };
+    let ids: Vec<String> = sqlx::query_scalar("SELECT approval_id FROM supertag_v2_approval_wait_requests WHERE task_id=$1 ORDER BY approval_id")
+        .bind(&task).fetch_all(&mut **tx).await?;
+    let mut valid = false;
+    for id in ids {
+        let value = load_in(tx, &id).await?;
+        valid |= effective_state(tx, &value, now).await? != ApprovalState::Expired;
+    }
+    if valid {
+        continue_in(tx, &task, now).await?;
+    }
+    Ok(valid)
+}
+
 pub(crate) async fn task_waits_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> Result<bool> {
     let count:i64=sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_approval_waits w JOIN supertag_v2_tasks t ON t.task_id=w.task_id AND t.attempt_id=w.attempt_id WHERE w.task_id=$1 AND w.continuation_task_id IS NULL AND t.state=3 AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order) AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks link JOIN supertag_v2_objectives o ON o.objective_id=link.objective_id WHERE link.task_id=t.task_id AND o.status IN (5,6))")
         .bind(task_id).fetch_one(&mut **tx).await?;
@@ -577,7 +653,7 @@ pub(crate) async fn pending_in(
     limit: usize,
 ) -> Result<Vec<InboxItem>> {
     let operator_id = operator(principal)?;
-    let rows=sqlx::query(&format!("{VIEW} WHERE a.state=1 AND a.requested_at_ms<=$1 AND a.requested_order<=$2 AND ($3='' OR a.objective_id=$3) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks t JOIN supertag_v2_conversations c ON c.session_id=t.session_id AND c.tag_id=t.tag_id WHERE t.task_id=a.task_id AND c.principal<>$4) AND NOT EXISTS (SELECT 1 FROM supertag_v2_objectives o WHERE o.objective_id=a.objective_id AND o.status IN (5,6)) AND EXISTS (SELECT 1 FROM supertag_v2_tasks t WHERE t.task_id=a.task_id AND t.attempt_id=a.attempt_id AND ((t.state=2 AND t.lease_expires_at_ms>$1) OR (t.state=3 AND EXISTS (SELECT 1 FROM supertag_v2_approval_waits w JOIN supertag_v2_approval_wait_requests r ON r.task_id=w.task_id WHERE r.approval_id=a.approval_id AND w.continuation_task_id IS NULL) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order)))) ORDER BY a.requested_order LIMIT $5"))
+    let rows=sqlx::query(&format!("{VIEW} WHERE a.state=1 AND c.approval_id IS NULL AND a.requested_at_ms<=$1 AND a.requested_order<=$2 AND ($3='' OR a.objective_id=$3) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks t JOIN supertag_v2_conversations c ON c.session_id=t.session_id AND c.tag_id=t.tag_id WHERE t.task_id=a.task_id AND c.principal<>$4) AND NOT EXISTS (SELECT 1 FROM supertag_v2_objectives o WHERE o.objective_id=a.objective_id AND o.status IN (5,6)) AND EXISTS (SELECT 1 FROM supertag_v2_tasks t WHERE t.task_id=a.task_id AND t.attempt_id=a.attempt_id AND ((t.state=2 AND t.lease_expires_at_ms>$1) OR (t.state=3 AND EXISTS (SELECT 1 FROM supertag_v2_approval_waits w JOIN supertag_v2_approval_wait_requests r ON r.task_id=w.task_id WHERE r.approval_id=a.approval_id AND w.continuation_task_id IS NULL) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order)))) ORDER BY a.requested_order LIMIT $5"))
         .bind(as_of_ms).bind(upper_order).bind(objective_id).bind(principal).bind(limit.min(1001) as i64).fetch_all(&mut **tx).await?;
     let mut items = vec![];
     for row in rows {
@@ -617,6 +693,9 @@ async fn load_in(tx: &mut Transaction<'_, Any>, id: &str) -> Result<Approval> {
     approval_row(&row)
 }
 fn approval_row(row: &AnyRow) -> Result<Approval> {
+    let grant_approval_id: Option<String> = row.try_get("grant_approval_id")?;
+    let covered = grant_approval_id.is_some();
+    let stored_state: i64 = row.try_get("state")?;
     Ok(Approval {
         approval_id: row.try_get("approval_id")?,
         task_id: row.try_get("task_id")?,
@@ -630,15 +709,33 @@ fn approval_row(row: &AnyRow) -> Result<Approval> {
         arguments_digest: row.try_get("arguments_digest")?,
         summary: row.try_get("summary")?,
         operator_ids: serde_json::from_str(&row.try_get::<String, _>("operator_ids")?)?,
-        state: row.try_get::<i64, _>("state")? as i32,
-        scope: row.try_get::<i64, _>("scope")? as i32,
+        state: if covered && stored_state == ApprovalState::Pending as i64 {
+            row.try_get::<i64, _>("grant_state")? as i32
+        } else {
+            stored_state as i32
+        },
+        scope: row.try_get::<i64, _>(if covered { "grant_scope" } else { "scope" })? as i32,
         requested_at_ms: row.try_get("requested_at_ms")?,
-        decided_at_ms: row.try_get("decided_at_ms")?,
-        decided_by: row.try_get("decided_by")?,
-        reason: row.try_get("reason")?,
-        valid_until_ms: row.try_get("valid_until_ms")?,
+        decided_at_ms: row.try_get(if covered {
+            "grant_decided_at_ms"
+        } else {
+            "decided_at_ms"
+        })?,
+        decided_by: row.try_get(if covered {
+            "grant_decided_by"
+        } else {
+            "decided_by"
+        })?,
+        reason: row.try_get(if covered { "grant_reason" } else { "reason" })?,
+        valid_until_ms: row.try_get(if covered {
+            "grant_valid_until_ms"
+        } else {
+            "valid_until_ms"
+        })?,
         consumed_at_ms: row.try_get("consumed_at_ms")?,
         continuation_task_id: row.try_get("continuation_task_id")?,
+        grant_approval_id,
+        covered_at_ms: row.try_get("covered_at_ms")?,
     })
 }
 async fn effective_state(

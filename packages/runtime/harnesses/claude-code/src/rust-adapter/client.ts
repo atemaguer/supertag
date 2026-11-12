@@ -4,7 +4,9 @@ import { createGrpcTransport } from "@connectrpc/connect-node";
 import {
   AdapterBootstrapSchema,
   Harness,
+  HarnessMailbox,
   HarnessQuestions,
+  HarnessWorkstreams,
 } from "./gen/supertag/runtime/v2/runtime_pb.js";
 
 /** This is a Worker-owned, execution-scoped transport, never a public control-plane client. */
@@ -42,8 +44,10 @@ export function harnessClient(endpoint: string, token: string) {
   });
   const client = createClient(Harness, transport);
   const questions = createClient(HarnessQuestions, transport);
+  const workstreams = createClient(HarnessWorkstreams, transport);
+  const mailbox = createClient(HarnessMailbox, transport);
   const options = () => ({ headers: { authorization: `Bearer ${token}` }, timeoutMs: 5000 });
-  return { client, options, questions };
+  return { client, options, questions, workstreams, mailbox };
 }
 
 /** Retry the identical receipt only; callers allocate a sequence before entering this function. */

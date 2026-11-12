@@ -11,12 +11,23 @@ import { connectNodeAdapter } from "@connectrpc/connect-node";
 import { afterEach, expect, it } from "vitest";
 import { permissionHook } from "./src/rust-adapter/adapter.js";
 import {
+  type TaskPolicySnapshot,
+  TaskPolicySnapshotSchema,
+} from "./src/rust-adapter/gen/supertag/runtime/v2/policy_pb.js";
+import {
   AdapterBootstrapSchema,
+  ApprovalState,
+  type AttemptCapabilities,
   Harness,
   type HarnessAskQuestionRequest,
   type HarnessCompleteRequest,
+  HarnessMailbox,
+  type HarnessPostWorkstreamRequest,
   HarnessQuestions,
+  type HarnessReadMailboxRequest,
+  type HarnessReadWorkstreamRequest,
   type HarnessUsageRequest,
+  HarnessWorkstreams,
   LiveInputReceipt,
   type SessionCheckpoint,
   TaskSchema,
@@ -42,6 +53,9 @@ async function invoke({
   liveInput,
   mayAskObjectiveQuestion = false,
   lostQuestion = false,
+  coordination,
+  policySnapshot,
+  model,
 }: {
   prompt?: string;
   checkpoint?: SessionCheckpoint;
@@ -51,6 +65,9 @@ async function invoke({
   liveInput?: string;
   mayAskObjectiveQuestion?: boolean;
   lostQuestion?: boolean;
+  coordination?: Pick<AttemptCapabilities, "mayUseWorkstream" | "mayReadMailbox">;
+  policySnapshot?: TaskPolicySnapshot;
+  model?: string;
 } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "supertag-rust-claude-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
@@ -64,6 +81,9 @@ async function invoke({
   const usage: HarnessUsageRequest[] = [];
   const settlements: LiveInputReceipt[] = [];
   const questions: HarnessAskQuestionRequest[] = [];
+  const posts: HarnessPostWorkstreamRequest[] = [];
+  const workstreamReads: HarnessReadWorkstreamRequest[] = [];
+  const mailboxReads: HarnessReadMailboxRequest[] = [];
   let question: HarnessAskQuestionRequest | undefined;
   let taken = false;
   const sessions = new Set<ServerHttp2Session>();
@@ -76,6 +96,7 @@ async function invoke({
     prompt,
     instructions: "Work on the accepted Task.",
     allowedActions: actions,
+    ...(policySnapshot ? { policySnapshot } : {}),
   });
   let cancelAdapter = () => {};
   const server = createServer(
@@ -88,6 +109,9 @@ async function invoke({
               task,
               attemptId: "attempt",
               mayAskObjectiveQuestion,
+              ...(coordination
+                ? { coordination: { ...coordination, mayAskObjectiveQuestion } }
+                : {}),
               ...(checkpoint ? { checkpoint } : {}),
             };
           },
@@ -139,6 +163,81 @@ async function invoke({
             };
           },
         });
+        router.service(HarnessWorkstreams, {
+          read(request, context) {
+            expect(context.requestHeader.get("authorization")).toBe(`Bearer ${token}`);
+            workstreamReads.push(request);
+            return {
+              team: { teamId: "engineering", name: "Engineering", memberTagIds: ["actor", "lead"] },
+              page: {
+                posts: [
+                  {
+                    postId: "post-6",
+                    teamId: request.cursor === "s7" ? "other-team" : "engineering",
+                    authorTagId: "lead",
+                    sequence: 6n,
+                    body: `Untrusted Workstream text ${providerSecret}`,
+                  },
+                ],
+                nextCursor: "s6",
+              },
+            };
+          },
+          post(request, context) {
+            expect(context.requestHeader.get("authorization")).toBe(`Bearer ${token}`);
+            posts.push(request);
+            if (posts.length === 1) throw new ConnectError("reply lost", Code.Unavailable);
+            if (
+              request.body === "Confirmed post" &&
+              posts.filter(({ operationId }) => operationId === request.operationId).length > 1
+            ) {
+              return {
+                post: {
+                  postId: "post-7",
+                  teamId: "engineering",
+                  authorTagId: "actor",
+                  sequence: 7n,
+                  sourceTaskId: "task",
+                  body: request.body,
+                  toTagIds: request.toTagIds,
+                },
+              };
+            }
+            return {
+              approval: {
+                approvalId:
+                  {
+                    "Denied post": "denied",
+                    "Confirmed post": "approval-confirmed",
+                    "Wrong receipt": "wrong",
+                  }[request.body] ?? "approval-1",
+                taskId: "task",
+                attemptId: request.body === "Wrong receipt" ? "other-attempt" : "attempt",
+                tagId: "actor",
+                action: "workstream:post",
+                state:
+                  request.body === "Denied post" ? ApprovalState.DENIED : ApprovalState.PENDING,
+              },
+            };
+          },
+        });
+        router.service(HarnessMailbox, {
+          read(request, context) {
+            expect(context.requestHeader.get("authorization")).toBe(`Bearer ${token}`);
+            mailboxReads.push(request);
+            return {
+              messages: [
+                {
+                  messageId: "mail",
+                  senderTagId: "lead",
+                  recipientTagId: request.cursor === "wrong-audience" ? "other-tag" : "actor",
+                  text: `Untrusted Mailbox text ${providerSecret}`,
+                },
+              ],
+              nextCursor: "next-mail",
+            };
+          },
+        });
       },
     }),
   );
@@ -160,7 +259,14 @@ async function invoke({
   });
   const child = spawn(
     process.execPath,
-    [entry, "--executable", native, "--timeout-seconds", "12"],
+    [
+      entry,
+      "--executable",
+      native,
+      "--timeout-seconds",
+      "12",
+      ...(model ? ["--model", model] : []),
+    ],
     {
       env: {
         ...process.env,
@@ -196,7 +302,19 @@ async function invoke({
     stderr: "",
     stdout: "",
   });
-  return { directory, workspace, state, completions, events, usage, settlements, questions };
+  return {
+    directory,
+    workspace,
+    state,
+    completions,
+    events,
+    usage,
+    settlements,
+    questions,
+    posts,
+    workstreamReads,
+    mailboxReads,
+  };
 }
 
 it("runs the real Node SDK, denies unadmitted tools, mirrors a bounded checkpoint, and retries the same receipt", async () => {
@@ -334,4 +452,109 @@ it("does not register or admit the Objective question without the attached capab
   expect(run.completions[0]?.result).toContain("Objective question unavailable");
   expect(run.completions[0]?.succeeded).toBe(true);
   expect(run.questions).toEqual([]);
+}, 30000);
+
+it("runs scoped Workstream and Mailbox tools in the real SDK and stages only the pending approval", async () => {
+  const run = await invoke({
+    prompt: "coordination-tools",
+    actions: ["workstream:post"],
+    coordination: { mayUseWorkstream: true, mayReadMailbox: true },
+    lostComplete: true,
+  });
+  expect(
+    run.completions[0]?.succeeded,
+    await readFile(join(run.workspace, "fixture-error.txt"), "utf8").catch(
+      () => run.completions[0]?.result,
+    ),
+  ).toBe(true);
+  expect(run.workstreamReads).toMatchObject([{ afterSequence: 5n, limit: 2 }, { cursor: "s7" }]);
+  expect(run.mailboxReads).toMatchObject([
+    { limit: 3, cursor: "previous-mail" },
+    { cursor: "wrong-audience" },
+  ]);
+  expect(run.posts).toHaveLength(7);
+  for (const request of run.posts.slice(0, 3)) {
+    expect(request.operationId).toBeTruthy();
+    expect(request).toEqual(run.posts[0]);
+    expect(request.body).toBe("Pending post [REDACTED]");
+    expect(request.toTagIds).toEqual(["builder", "lead"]);
+  }
+  expect(run.completions).toHaveLength(2);
+  expect(run.completions[0]).toEqual(run.completions[1]);
+  expect(run.completions[0]?.waitingApprovalIds).toEqual(["approval-1"]);
+}, 30000);
+
+it("does not allow Workstream tools from a Task action alone", async () => {
+  const run = await invoke({
+    prompt: "coordination-mailbox-only",
+    actions: ["workstream:post"],
+    coordination: { mayUseWorkstream: false, mayReadMailbox: true },
+  });
+  expect(run.completions[0]?.succeeded).toBe(true);
+  expect(run.posts).toEqual([]);
+  expect(run.workstreamReads).toEqual([]);
+  expect(run.mailboxReads).toHaveLength(1);
+}, 30000);
+
+it.each(["ask-first", "post-first"])(
+  "keeps approval and question waits separate (%s)",
+  async (order) => {
+    const run = await invoke({
+      prompt: `mixed-tools-${order}`,
+      actions: ["workstream:post"],
+      coordination: { mayUseWorkstream: true, mayReadMailbox: false },
+      mayAskObjectiveQuestion: true,
+    });
+    expect(
+      run.completions[0]?.succeeded,
+      await readFile(join(run.workspace, "fixture-error.txt"), "utf8").catch(
+        () => run.completions[0]?.result,
+      ),
+    ).toBe(true);
+    expect(run.questions).toHaveLength(order === "ask-first" ? 1 : 0);
+    expect(run.posts).toHaveLength(order === "ask-first" ? 0 : 2);
+    expect(run.completions[0]?.waitingApprovalIds).toEqual(
+      order === "ask-first" ? [] : ["approval-1"],
+    );
+  },
+  30000,
+);
+
+it("fails before native launch when a required Context Item has no resolver", async () => {
+  const policySnapshot = create(TaskPolicySnapshotSchema, {
+    version: 1,
+    contextSets: [
+      {
+        setId: "context",
+        items: [
+          {
+            itemId: "runbook",
+            itemKey: "runbook",
+            type: "fixture/runbook",
+            version: 1,
+            required: true,
+            configJson: "{}",
+          },
+        ],
+      },
+    ],
+  });
+  const run = await invoke({ prompt: "required-context-fixture", policySnapshot });
+  expect(run.completions).toHaveLength(1);
+  expect(run.completions[0]?.result).toContain("required Context Item");
+  expect(run.completions[0]?.succeeded).toBe(false);
+  expect(run.completions[0]?.checkpoint).toBeUndefined();
+  await expect(readFile(join(run.workspace, "native-started"))).rejects.toThrow();
+}, 30000);
+
+it("uses the first accepted model and falls back to the host model without one", async () => {
+  const policySnapshot = create(TaskPolicySnapshotSchema, {
+    version: 1,
+    execution: { models: ["accepted-model", "another-model"] },
+  });
+  const prompt = "model-policy-fixture";
+  const accepted = await invoke({ prompt, model: "host-model", policySnapshot });
+  expect(accepted.completions[0]?.result).toBe("fixture model accepted-model");
+  const fallback = await invoke({ prompt, model: "host-model" });
+  expect(fallback.completions[0]?.result).toBe("fixture model host-model");
 }, 30000);

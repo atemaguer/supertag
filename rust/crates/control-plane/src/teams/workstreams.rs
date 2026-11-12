@@ -86,9 +86,6 @@ impl Store {
         let (mut tx, order) = self.write().await?;
         let now = self.execution_now_ms();
         let (team, author) = attempt_team(&mut tx, host, attempt, now).await?;
-        if !team.member_tag_ids.contains(&author) {
-            return Err(StoreError::PermissionDenied);
-        }
         let digest = format!(
             "{:x}",
             Sha256::digest(serde_json::to_vec(&(&team.team_id, &recipients, body))?)
@@ -118,41 +115,31 @@ impl Store {
         }
         let prior = sqlx::query("SELECT * FROM supertag_v2_workstream_posts WHERE team_id=$1 AND source_task_id=$2 AND effect_digest=$3")
             .bind(&team.team_id).bind(&attempt.task_id).bind(&digest).fetch_optional(&mut *tx).await?;
-        let arguments = serde_json::json!({ "body": body, "to_tag_ids": recipients });
+        let approval_request = RequestApprovalRequest {
+            attempt: Some(attempt.clone()),
+            operation_id: input.operation_id.clone(),
+            action: WORKSTREAM_POST_ACTION.into(),
+            resource: team.team_id.clone(),
+            arguments_json: serde_json::to_string(&serde_json::json!({
+                "body": body, "to_tag_ids": recipients,
+            }))?,
+            summary: format!(
+                "Post to the Team Workstream with {} addressed Tags.",
+                recipients.len()
+            ),
+        };
         if prior.is_some() {
             // A duplicate effect adds no post. An operation with a pending
             // approval still cannot be reused for a different effect.
-            let previous = sqlx::query("SELECT a.resource,a.canonical_arguments_json FROM supertag_v2_approval_operations op JOIN supertag_v2_approvals a ON a.approval_id=op.approval_id WHERE op.attempt_id=$1 AND op.operation_id=$2")
-                .bind(&attempt.attempt_id).bind(&input.operation_id).fetch_optional(&mut *tx).await?;
-            if let Some(previous) = previous
-                && (previous.try_get::<String, _>("resource")? != team.team_id
-                    || serde_json::from_str::<serde_json::Value>(
-                        &previous.try_get::<String, _>("canonical_arguments_json")?,
-                    )? != arguments)
-            {
-                return Err(StoreError::Conflict(
-                    "operation ID was used with a different Workstream post".into(),
-                ));
-            }
-        } else {
-            let authorization = crate::approvals::gate_in(
+            crate::approvals::ensure_operation_matches_in(
                 &mut tx,
-                host,
-                &RequestApprovalRequest {
-                    attempt: Some(attempt.clone()),
-                    operation_id: input.operation_id.clone(),
-                    action: WORKSTREAM_POST_ACTION.into(),
-                    resource: team.team_id.clone(),
-                    arguments_json: serde_json::to_string(&arguments)?,
-                    summary: format!(
-                        "Post to the Team Workstream with {} addressed Tags.",
-                        recipients.len()
-                    ),
-                },
-                now,
-                order,
+                &attempt.attempt_id,
+                &approval_request,
             )
             .await?;
+        } else {
+            let authorization =
+                crate::approvals::gate_in(&mut tx, host, &approval_request, now, order).await?;
             if !authorization.granted {
                 tx.commit().await?;
                 return Ok(PostAttemptWorkstreamResponse {
@@ -218,15 +205,24 @@ async fn attempt_team(
         ));
     }
     let author: String = row.try_get("tag_id")?;
+    let team = workstream_for_task_in(tx, &attempt.task_id, &author).await?;
+    Ok((team, author))
+}
+
+pub(crate) async fn workstream_for_task_in(
+    tx: &mut Transaction<'_, Any>,
+    task_id: &str,
+    author: &str,
+) -> Result<Team> {
     let objective: Option<Option<String>> = sqlx::query_scalar("SELECT o.team_id FROM supertag_v2_objective_tasks link JOIN supertag_v2_objectives o ON o.objective_id=link.objective_id WHERE link.task_id=$1")
-        .bind(&attempt.task_id).fetch_optional(&mut **tx).await?;
+        .bind(task_id).fetch_optional(&mut **tx).await?;
     let id = match objective {
         Some(id) => {
             id.ok_or_else(|| StoreError::FailedPrecondition("this Objective has no Team".into()))?
         }
         None => {
             let teams: Vec<String> = sqlx::query_scalar("SELECT team_id FROM supertag_v2_team_members WHERE tag_id=$1 ORDER BY team_id LIMIT 2")
-                .bind(&author).fetch_all(&mut **tx).await?;
+                .bind(author).fetch_all(&mut **tx).await?;
             match teams.as_slice() {
                 [only] => only.clone(),
                 [] => {
@@ -246,7 +242,10 @@ async fn attempt_team(
     let team = team_by_id_in(tx, &id)
         .await?
         .ok_or_else(|| StoreError::NotFound("Team was not found".into()))?;
-    Ok((team, author))
+    if !team.member_tag_ids.iter().any(|id| id == author) {
+        return Err(StoreError::PermissionDenied);
+    }
+    Ok(team)
 }
 
 fn recipients(values: &[String]) -> Result<Vec<String>> {

@@ -1,6 +1,6 @@
 //! Team definitions and scheduling policy. Mutations share the Control Plane write order.
 
-mod workstreams;
+pub(crate) mod workstreams;
 
 use prost::Message;
 use sha2::{Digest, Sha256};

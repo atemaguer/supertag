@@ -6,6 +6,7 @@ mod inputs;
 mod local;
 mod network;
 mod objectives;
+mod policy;
 mod teams;
 mod tui;
 
@@ -40,8 +41,9 @@ use supertag_protocol::{
         live_inputs_server::LiveInputsServer, mailbox_server::MailboxServer,
         objectives_server::ObjectivesServer, operator_client::OperatorClient,
         operator_events_server::OperatorEventsServer, operator_server::OperatorServer,
-        teams_server::TeamsServer, transfers_server::TransfersServer,
-        worker_host_server::WorkerHostServer, workspace_directory_server::WorkspaceDirectoryServer,
+        policy_catalog_server::PolicyCatalogServer, teams_server::TeamsServer,
+        transfers_server::TransfersServer, worker_host_server::WorkerHostServer,
+        workspace_directory_server::WorkspaceDirectoryServer,
     },
 };
 use supertag_worker_host::HostOptions;
@@ -78,6 +80,13 @@ enum RecoveryDecision {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Manage reusable Permission Sets, Context Sets, and Roles.
+    Policy {
+        #[command(flatten)]
+        connection: Connection,
+        #[command(subcommand)]
+        command: policy::PolicyCommand,
+    },
     /// Read Worker Host readiness and manage draining.
     Host {
         #[command(flatten)]
@@ -351,6 +360,10 @@ fn main() -> Result<()> {
 
 async fn run(command: Command) -> Result<()> {
     match command {
+        Command::Policy {
+            connection,
+            command,
+        } => policy::run(connection, command).await?,
         Command::Host {
             connection,
             command,
@@ -827,6 +840,9 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
     health.set_serving::<MailboxServer<ControlPlane>>().await;
     health.set_serving::<InboxServer<ControlPlane>>().await;
     health
+        .set_serving::<PolicyCatalogServer<ControlPlane>>()
+        .await;
+    health
         .set_serving::<AttemptMailboxServer<ControlPlane>>()
         .await;
     health
@@ -897,6 +913,7 @@ async fn control_plane(listen: SocketAddr) -> Result<()> {
         .add_service(plane.attempt_workstreams_service())
         .add_service(plane.mailbox_service())
         .add_service(plane.inbox_service())
+        .add_service(plane.policy_service())
         .add_service(plane.attempt_mailbox_service())
         .add_service(plane.operator_events_service(watch_shutdown.clone()))
         .add_service(
@@ -1020,6 +1037,7 @@ async fn gateway(
         .await;
     health.set_serving::<MailboxServer<Gateway>>().await;
     health.set_serving::<InboxServer<Gateway>>().await;
+    health.set_serving::<PolicyCatalogServer<Gateway>>().await;
     health.set_serving::<AttemptMailboxServer<Gateway>>().await;
     health
         .set_serving::<OperatorEventsServer<GatewayWatch>>()
@@ -1053,6 +1071,7 @@ async fn gateway(
         .add_service(gateway.attempt_workstreams_service())
         .add_service(gateway.mailbox_service())
         .add_service(gateway.inbox_service())
+        .add_service(gateway.policy_service())
         .add_service(gateway.attempt_mailbox_service())
         .add_service(gateway.operator_events_service(shutdown.clone()));
     let grpc = async {

@@ -488,7 +488,166 @@ async fn contract(url: &str) {
     let host = support::register_host(&store, "input-host").await;
     let other = support::register_host(&store, "another-input-host").await;
     ordered_receipts(&store, &host, &other).await;
+    policy_fence(url, &store, &host).await;
     uncertain_delivery(url, store, &clock, &host).await;
+}
+
+async fn policy_fence(url: &str, store: &Store, host: &HostAuthority) {
+    let policy = PutTagRequest {
+        tag_id: "reviewer".into(),
+        instructions: "Review requests".into(),
+        allowed_actions: vec![
+            "files:read".into(),
+            "files:write".into(),
+            "workstream:post".into(),
+        ],
+        approval_rules: vec![ApprovalRule {
+            action: "workstream:post".into(),
+            operator_ids: vec!["alice".into(), "bob".into()],
+        }],
+        ..Default::default()
+    };
+    store.put_tag_spec(policy.clone()).await.unwrap();
+    let active = submit(store, "reviewer", "policy-fence", "active-policy").await;
+    let attempt = claim_start(store, host, &active.task_id).await;
+    let request = queue(&active, "identical-policy");
+    let mut narrower = policy.clone();
+    narrower
+        .allowed_actions
+        .retain(|action| action != "files:write");
+
+    let mut reordered = policy.clone();
+    reordered.allowed_actions.reverse();
+    reordered.allowed_actions.push("files:read".into());
+    reordered.approval_rules[0].operator_ids.reverse();
+    assert!(store.put_tag_spec(reordered).await.unwrap().revision > active.tag_revision);
+    let input = store.queue_input(OPERATOR, &request).await.unwrap();
+    // A subsequent edit does not rewrite either Task's accepted policy.
+    store.put_tag_spec(narrower.clone()).await.unwrap();
+    assert_eq!(
+        store
+            .take_input(host, &take(&attempt))
+            .await
+            .unwrap()
+            .unwrap()
+            .input_id,
+        input.input_id
+    );
+    let accepted = store
+        .settle_input(host, &settle(&attempt, &input, LiveInputReceipt::Accepted))
+        .await
+        .unwrap();
+
+    let mut instruction = policy.clone();
+    instruction.instructions = "Ask before writing".into();
+    let mut approver = policy.clone();
+    approver.approval_rules[0].operator_ids = vec!["alice".into()];
+    for (operation, changed) in [
+        ("narrower-actions", narrower.clone()),
+        ("changed-instructions", instruction),
+        ("changed-approver", approver),
+    ] {
+        store.put_tag_spec(changed).await.unwrap();
+        assert!(matches!(
+            store.queue_input(OPERATOR, &queue(&active, operation)).await,
+            Err(StoreError::FailedPrecondition(message)) if message.contains("policy changed")
+        ));
+        assert_eq!(
+            store.queue_input(OPERATOR, &request).await.unwrap(),
+            accepted
+        );
+        assert!(
+            store
+                .take_input(host, &take(&attempt))
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    // Simulate an old persisted Pending row created before the admission fence.
+    let legacy = submit(store, "reviewer", "policy-fence", "legacy-queued-policy").await;
+    let input_id = Uuid::new_v4().to_string();
+    let mut db = sqlx::AnyConnection::connect(url).await.unwrap();
+    sqlx::query("INSERT INTO supertag_v2_live_inputs (input_id,operator_principal,operation_id,task_id,attempt_id,follower_task_id,state) VALUES ($1,$2,$3,$4,$5,$6,$7)")
+        .bind(&input_id).bind(OPERATOR).bind("legacy-policy")
+        .bind(&active.task_id).bind(&attempt.attempt_id).bind(&legacy.task_id)
+        .bind(LiveInputState::Pending as i64).execute(&mut db).await.unwrap();
+    db.close().await.unwrap();
+    assert!(
+        store
+            .take_input(host, &take(&attempt))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        store.get_input(&input_id).await.unwrap().state(),
+        LiveInputState::Rejected
+    );
+    finish(store, host, &attempt).await;
+    let attempt = claim_start(store, host, &legacy.task_id).await;
+    finish(store, host, &attempt).await;
+    assert!(
+        store
+            .claim_task(host, "no-rolled-back-inputs")
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    store.put_tag_spec(policy.clone()).await.unwrap();
+    let mut send = SendMessageRequest {
+        tag_id: "reviewer".into(),
+        conversation: "policy-fence".into(),
+        operation_id: "private-active".into(),
+        text: "Review and edit".into(),
+    };
+    let first = store
+        .send_message(OPERATOR, &send)
+        .await
+        .unwrap()
+        .task
+        .unwrap();
+    let attempt = claim_start(store, host, &first.task_id).await;
+    store.put_tag_spec(narrower).await.unwrap();
+    send.operation_id = "private-follower".into();
+    send.text = "Review without editing".into();
+    let queued = store.send_message(OPERATOR, &send).await.unwrap();
+    assert!(queued.live_input.is_none());
+    assert_eq!(queued.task.as_ref().unwrap().state(), TaskState::Queued);
+    assert!(
+        store
+            .take_input(host, &take(&attempt))
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    // Even when the live Attempt's old policy is current again, the replay
+    // returns the original Task and never turns it into live input.
+    store.put_tag_spec(policy).await.unwrap();
+    assert_eq!(store.send_message(OPERATOR, &send).await.unwrap(), queued);
+    finish(store, host, &attempt).await;
+    let task_id = queued.task.unwrap().task_id;
+    let attempt = claim_start(store, host, &task_id).await;
+    let admitted = store
+        .get_message(OPERATOR, "reviewer", &task_id)
+        .await
+        .unwrap()
+        .task
+        .unwrap();
+    assert!(
+        !admitted
+            .allowed_actions
+            .iter()
+            .any(|action| action == "files:write")
+    );
+    finish(store, host, &attempt).await;
+    store
+        .put_tag("reviewer", "Review requests", vec![])
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

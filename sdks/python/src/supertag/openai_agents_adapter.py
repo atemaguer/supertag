@@ -224,8 +224,14 @@ async def _execute(
         or not task.session_id
     ):
         raise _AdapterFailure("Worklet returned an invalid running Attempt")
+    if task.HasField("policy_snapshot"):
+        snapshot = task.policy_snapshot
+        if any(item.required for context_set in snapshot.context_sets for item in context_set.items):
+            raise _AdapterFailure("a required Context Item has no OpenAI Agents resolver")
+        if snapshot.HasField("execution") and snapshot.execution.models:
+            model = snapshot.execution.models[0]
     actions = set(task.allowed_actions)
-    if actions - {"files:read"}:
+    if actions - {"files:read", "workstream:post"}:
         raise _AdapterFailure("OpenAI Agents cannot enforce the Task's allowed actions")
     if not workspace.is_dir():
         raise _AdapterFailure("OpenAI Agents workspace is unavailable")

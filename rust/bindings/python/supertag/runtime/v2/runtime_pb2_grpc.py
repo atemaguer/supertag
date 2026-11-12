@@ -4567,7 +4567,7 @@ class HarnessQuestions:
 
 
 class HarnessWorkstreamsStub:
-    """The supervising Worker Host supplies the Attempt identity for each post.
+    """The supervising Worker Host supplies the Attempt identity.
     """
 
     def __init__(self, channel):
@@ -4576,6 +4576,11 @@ class HarnessWorkstreamsStub:
         Args:
             channel: A grpc.Channel.
         """
+        self.Read = channel.unary_unary(
+                '/supertag.runtime.v2.HarnessWorkstreams/Read',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReadWorkstreamRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReadAttemptWorkstreamResponse.FromString,
+                _registered_method=True)
         self.Post = channel.unary_unary(
                 '/supertag.runtime.v2.HarnessWorkstreams/Post',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessPostWorkstreamRequest.SerializeToString,
@@ -4584,8 +4589,14 @@ class HarnessWorkstreamsStub:
 
 
 class HarnessWorkstreamsServicer:
-    """The supervising Worker Host supplies the Attempt identity for each post.
+    """The supervising Worker Host supplies the Attempt identity.
     """
+
+    def Read(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
 
     def Post(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -4596,6 +4607,11 @@ class HarnessWorkstreamsServicer:
 
 def add_HarnessWorkstreamsServicer_to_server(servicer, server):
     rpc_method_handlers = {
+            'Read': grpc.unary_unary_rpc_method_handler(
+                    servicer.Read,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReadWorkstreamRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReadAttemptWorkstreamResponse.SerializeToString,
+            ),
             'Post': grpc.unary_unary_rpc_method_handler(
                     servicer.Post,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessPostWorkstreamRequest.FromString,
@@ -4610,8 +4626,35 @@ def add_HarnessWorkstreamsServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class HarnessWorkstreams:
-    """The supervising Worker Host supplies the Attempt identity for each post.
+    """The supervising Worker Host supplies the Attempt identity.
     """
+
+    @staticmethod
+    def Read(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HarnessWorkstreams/Read',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReadWorkstreamRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ReadAttemptWorkstreamResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
 
     @staticmethod
     def Post(request,
@@ -4630,6 +4673,78 @@ class HarnessWorkstreams:
             '/supertag.runtime.v2.HarnessWorkstreams/Post',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessPostWorkstreamRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.PostAttemptWorkstreamResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class HarnessMailboxStub:
+    """Missing associated documentation comment in .proto file."""
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Read = channel.unary_unary(
+                '/supertag.runtime.v2.HarnessMailbox/Read',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReadMailboxRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesResponse.FromString,
+                _registered_method=True)
+
+
+class HarnessMailboxServicer:
+    """Missing associated documentation comment in .proto file."""
+
+    def Read(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_HarnessMailboxServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Read': grpc.unary_unary_rpc_method_handler(
+                    servicer.Read,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReadMailboxRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.HarnessMailbox', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.HarnessMailbox', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class HarnessMailbox:
+    """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def Read(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HarnessMailbox/Read',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessReadMailboxRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ListMailboxMessagesResponse.FromString,
             options,
             channel_credentials,
             insecure,

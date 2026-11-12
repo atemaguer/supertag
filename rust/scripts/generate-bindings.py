@@ -20,14 +20,15 @@ from tempfile import TemporaryDirectory
 RUST = Path(__file__).resolve().parents[1]
 REPO = RUST.parent
 PROTO_ROOT = RUST / "proto"
-PROTO_FILE = "supertag/runtime/v2/runtime.proto"
+MODULES = ("runtime", "policy")
+PROTO_FILES = tuple(f"supertag/runtime/v2/{module}.proto" for module in MODULES)
 BINDINGS = RUST / "bindings"
 PYTHON_SDK = REPO / "sdks" / "python" / "src" / "supertag" / "_runtime_v2"
 PYTHON_PROTO = Path("python/supertag/runtime/v2")
-TYPESCRIPT_PROTO = Path("typescript/supertag/runtime/v2/runtime_pb.ts")
-CLAUDE_DESCRIPTOR = (
+TYPESCRIPT_PROTO = Path("typescript/supertag/runtime/v2")
+CLAUDE_PROTO = (
     REPO / "packages/runtime/harnesses/claude-code/src/rust-adapter/gen"
-    / "supertag/runtime/v2/runtime_pb.ts"
+    / "supertag/runtime/v2"
 )
 GO_MODULE = "github.com/atemaguer/supertag/rust/bindings/go"
 GO_TOOLS = REPO / "packages" / "operator-api" / "go"
@@ -39,7 +40,7 @@ OUTPUTS = (
 
 
 def generate(output: Path) -> None:
-    go_options = [f"M{PROTO_FILE}={GO_MODULE}/runtimev2", f"module={GO_MODULE}"]
+    go_options = [*(f"M{file}={GO_MODULE}/runtimev2" for file in PROTO_FILES), f"module={GO_MODULE}"]
     template = {
         "version": "v2",
         "plugins": [
@@ -61,7 +62,8 @@ def generate(output: Path) -> None:
     subprocess.run(
         [
             "pnpm", "exec", "buf", "generate", str(PROTO_ROOT),
-            "--path", str(PROTO_ROOT / PROTO_FILE), "--template", json.dumps(template),
+            *(value for file in PROTO_FILES for value in ("--path", str(PROTO_ROOT / file))),
+            "--template", json.dumps(template),
         ],
         cwd=REPO,
         check=True,
@@ -80,7 +82,7 @@ def generate(output: Path) -> None:
             f"--python_out={python_output}",
             f"--pyi_out={python_output}",
             f"--grpc_python_out={python_output}",
-            PROTO_FILE,
+            *PROTO_FILES,
         ],
         cwd=PROTO_ROOT,
         check=True,
@@ -97,16 +99,20 @@ def inventory(root: Path) -> dict[Path, bytes]:
 
 
 def python_sdk_messages(expected: dict[Path, bytes]) -> dict[Path, bytes]:
-    messages = expected[PYTHON_PROTO / "runtime_pb2.py"]
-    original = b"'supertag.runtime.v2.runtime_pb2'"
-    if messages.count(original) != 1:
-        raise SystemExit("Unexpected Python protobuf module name in generated runtime bindings")
-    return {
-        PYTHON_SDK / "runtime_pb2.py": messages.replace(
-            original, b"'supertag._runtime_v2.runtime_pb2'"
-        ),
-        PYTHON_SDK / "runtime_pb2.pyi": expected[PYTHON_PROTO / "runtime_pb2.pyi"],
-    }
+    files = {}
+    for module in MODULES:
+        original = f"'supertag.runtime.v2.{module}_pb2'".encode()
+        for extension in ("py", "pyi"):
+            path = f"{module}_pb2.{extension}"
+            messages = expected[PYTHON_PROTO / path]
+            if extension == "py":
+                if messages.count(original) != 1:
+                    raise SystemExit(f"Unexpected Python protobuf module name in {path}")
+                messages = messages.replace(original, f"'supertag._runtime_v2.{module}_pb2'".encode())
+            files[PYTHON_SDK / path] = messages.replace(
+                b"from supertag.runtime.v2 import ", b"from . import "
+            )
+    return files
 
 
 def main() -> None:
@@ -118,12 +124,13 @@ def main() -> None:
         output = Path(temporary)
         generate(output)
         expected = inventory(output)
-    if len(expected) != 6:
-        raise SystemExit(f"expected six generated files, got {len(expected)}")
+    if len(expected) != 6 * len(MODULES):
+        raise SystemExit(f"unexpected generated file count: {len(expected)}")
     checked_in = inventory(BINDINGS)
     package_bindings = {
         **python_sdk_messages(expected),
-        CLAUDE_DESCRIPTOR: expected[TYPESCRIPT_PROTO],
+        **{CLAUDE_PROTO / f"{module}_pb.ts": expected[TYPESCRIPT_PROTO / f"{module}_pb.ts"]
+           for module in MODULES},
     }
     if args.check:
         changed = sorted(

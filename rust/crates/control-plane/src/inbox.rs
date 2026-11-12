@@ -68,9 +68,27 @@ impl Store {
         let may_ask_objective_question = question_objective_in(&mut tx, &row, &attempt.task_id)
             .await?
             .is_some();
+        let tag: String = row.try_get("tag_id")?;
+        let may_use_workstream = match crate::teams::workstreams::workstream_for_task_in(
+            &mut tx,
+            &attempt.task_id,
+            &tag,
+        )
+        .await
+        {
+            Ok(_) => true,
+            Err(
+                StoreError::FailedPrecondition(_)
+                | StoreError::NotFound(_)
+                | StoreError::PermissionDenied,
+            ) => false,
+            Err(error) => return Err(error),
+        };
         tx.commit().await?;
         Ok(AttemptCapabilities {
             may_ask_objective_question,
+            may_use_workstream,
+            may_read_mailbox: true,
         })
     }
 

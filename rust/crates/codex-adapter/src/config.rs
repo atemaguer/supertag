@@ -15,7 +15,12 @@ impl Policy {
         ensure!(
             actions.iter().all(|action| matches!(
                 action.as_str(),
-                "files:read" | "files:write" | "commands:execute" | "web:search" | "web:fetch"
+                "files:read"
+                    | "files:write"
+                    | "commands:execute"
+                    | "web:search"
+                    | "web:fetch"
+                    | "workstream:post"
             )),
             "Codex adapter cannot enforce the requested allowed actions"
         );

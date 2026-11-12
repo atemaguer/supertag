@@ -110,11 +110,12 @@ async def test_real_sdk_tool_usage_redaction_and_portable_session(
     model = FixtureModel(secret=API_KEY, read_path="evidence.txt")
     provider = FixtureProvider(model)
     first = Harness(attach(actions=["files:read"]))
+    first.attached.task.policy_snapshot.execution.models.append("accepted-role-model")
     async with first.serve() as bootstrap:
         await run_adapter(
             bootstrap, workspace=tmp_path, model="requested-model", model_provider=provider
         )
-    assert provider.requested_models == ["requested-model", "requested-model"]
+    assert provider.requested_models == ["accepted-role-model", "accepted-role-model"]
     assert [tool.name for tool in model.requests[0]["tools"]] == ["read_workspace_file"]
     assert "repository evidence" in json.dumps(model.requests[1]["input"])
     assert len(first.completions) == 1
@@ -158,8 +159,13 @@ async def test_real_sdk_tool_usage_redaction_and_portable_session(
 
 async def test_adapter_refuses_unsupported_actions_and_invalid_checkpoint(tmp_path: Path) -> None:
     provider = FixtureProvider()
+    requires_context = attach(actions=["files:read"])
+    requires_context.task.policy_snapshot.context_sets.add(set_id="project-knowledge").items.add(
+        item_key="runbook", type="example/runbook", version=1, required=True, config_json="{}"
+    )
     for attached, expected in (
         (attach(actions=["commands:execute"]), "allowed actions"),
+        (requires_context, "required Context Item"),
         (
             attach(
                 checkpoint=pb.SessionCheckpoint(

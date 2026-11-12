@@ -267,6 +267,16 @@ fn transform(
     Ok(output)
 }
 
+pub(crate) fn has_full_coordination(checkpoint: &SessionCheckpoint) -> bool {
+    #[derive(Deserialize)]
+    struct Manifest {
+        tool_manifest: String,
+    }
+    checkpoint.payload.len() <= MAX_ENCODED_BYTES
+        && serde_json::from_slice::<Manifest>(&checkpoint.payload)
+            .is_ok_and(|archive| archive.tool_manifest == crate::questions::FULL_COORDINATION)
+}
+
 pub(crate) fn restore(
     checkpoint: &SessionCheckpoint,
     task: &Task,

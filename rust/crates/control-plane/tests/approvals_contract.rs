@@ -772,3 +772,591 @@ async fn postgres_approval_authority_and_single_continuation() {
     admin.close().await.unwrap();
     result.expect("PostgreSQL approval contract failed");
 }
+
+async fn approval_inbox(store: &Store, objective: &str) -> Vec<InboxItem> {
+    store
+        .list_inbox_items(
+            ALICE,
+            &ListInboxItemsRequest {
+                kind: InboxItemKind::Approval as i32,
+                objective_id: objective.into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .items
+}
+fn objective_action(objective: &str, operation: &str) -> ObjectiveActionRequest {
+    ObjectiveActionRequest {
+        objective_id: objective.into(),
+        operation_id: operation.into(),
+        reason: String::new(),
+    }
+}
+async fn coverage_contract(url: &str) {
+    let clock = Arc::new(AtomicI64::new(NOW));
+    let now = clock.clone();
+    let mut store = Store::open(url)
+        .await
+        .unwrap()
+        .with_execution_clock(move || now.load(Ordering::SeqCst));
+    tag(&store, "alice").await;
+    store
+        .create_team(
+            ALICE,
+            &CreateTeamRequest {
+                operation_id: "team".into(),
+                team_id: "engineering".into(),
+                name: "Engineering".into(),
+                member_tag_ids: vec!["owner".into()],
+                max_concurrency: None,
+            },
+        )
+        .await
+        .unwrap();
+    let host = support::register_host(&store, "host").await;
+
+    // Coverage must agree for requests already pending in an executing turn,
+    // explicit Finish waits, operator views, and effect retries after restart.
+    let objective = store
+        .create_objective(
+            ALICE,
+            &CreateObjectiveRequest {
+                operation_id: "covered".into(),
+                objective_id: "covered".into(),
+                owner_tag_id: "owner".into(),
+                outcome: "Publish approved updates".into(),
+                team_id: Some("engineering".into()),
+                ongoing: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let attempt = claim(&store, &host, &objective.starting_task_id).await;
+    start(&store, &host, &attempt).await;
+    let first = store
+        .post_attempt_workstream(&host, &post(&attempt, "first", "First update"))
+        .await
+        .unwrap()
+        .approval
+        .unwrap();
+    let sibling = store
+        .post_attempt_workstream(&host, &post(&attempt, "sibling", "Second update"))
+        .await
+        .unwrap()
+        .approval
+        .unwrap();
+    let later = store
+        .post_attempt_workstream(&host, &post(&attempt, "later", "Later update"))
+        .await
+        .unwrap()
+        .approval
+        .unwrap();
+    let denied = store
+        .post_attempt_workstream(&host, &post(&attempt, "denied", "Do not publish"))
+        .await
+        .unwrap()
+        .approval
+        .unwrap();
+    store
+        .decide_approval(
+            ALICE,
+            &decision(
+                &denied.approval_id,
+                "deny",
+                false,
+                ApprovalScope::Unspecified,
+            ),
+        )
+        .await
+        .unwrap();
+    let mut grant = decision(
+        &first.approval_id,
+        "objective-grant",
+        true,
+        ApprovalScope::Objective,
+    );
+    grant.valid_until_ms = Some(NOW + 20_000);
+    let decided = store.decide_approval(ALICE, &grant).await.unwrap();
+    let covered = store
+        .get_approval(ALICE, &sibling.approval_id)
+        .await
+        .unwrap();
+    assert_eq!(covered.state(), ApprovalState::Approved);
+    assert_eq!(
+        covered.grant_approval_id.as_deref(),
+        Some(first.approval_id.as_str())
+    );
+    assert_eq!(covered.covered_at_ms, Some(NOW));
+    assert_eq!(
+        covered.canonical_arguments_json,
+        sibling.canonical_arguments_json
+    );
+    assert_eq!(covered.arguments_digest, sibling.arguments_digest);
+    assert_eq!(covered.decided_by, decided.decided_by);
+    assert_eq!(covered.decided_at_ms, decided.decided_at_ms);
+    assert_eq!(covered.valid_until_ms, grant.valid_until_ms);
+    assert_eq!(covered.scope(), ApprovalScope::Objective);
+    assert!(approval_inbox(&store, "covered").await.is_empty());
+    // Reuse the original pending operation, not a newly requested effect.
+    assert!(
+        store
+            .post_attempt_workstream(&host, &post(&attempt, "sibling", "Second update"))
+            .await
+            .unwrap()
+            .post
+            .is_some()
+    );
+    let listed = store
+        .list_approvals(
+            ALICE,
+            &ListApprovalsRequest {
+                objective_id: "covered".into(),
+                state: ApprovalState::Approved as i32,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(listed.approvals.len(), 3);
+    assert_eq!(
+        listed
+            .approvals
+            .iter()
+            .find(|a| a.approval_id == sibling.approval_id)
+            .unwrap()
+            .grant_approval_id
+            .as_deref(),
+        Some(first.approval_id.as_str())
+    );
+
+    let still_denied = store
+        .get_approval(ALICE, &denied.approval_id)
+        .await
+        .unwrap();
+    assert_eq!(still_denied.state(), ApprovalState::Denied);
+    assert!(still_denied.grant_approval_id.is_none());
+    assert!(matches!(
+        store
+            .decide_approval(
+                ALICE,
+                &decision(
+                    &sibling.approval_id,
+                    "conflicting-decision",
+                    false,
+                    ApprovalScope::Unspecified
+                )
+            )
+            .await,
+        Err(StoreError::FailedPrecondition(_))
+    ));
+    // A new operation ID cannot evade an existing denial via a broader grant.
+    let denied_retry = store
+        .post_attempt_workstream(&host, &post(&attempt, "denied-again", "Do not publish"))
+        .await
+        .unwrap();
+    assert!(denied_retry.post.is_none());
+    assert_eq!(
+        denied_retry.approval.unwrap().state(),
+        ApprovalState::Denied
+    );
+    finish(
+        &store,
+        &host,
+        &attempt,
+        vec![
+            first.approval_id.clone(),
+            sibling.approval_id.clone(),
+            later.approval_id.clone(),
+            denied.approval_id.clone(),
+        ],
+    )
+    .await;
+    let continuation = store
+        .get_approval(ALICE, &sibling.approval_id)
+        .await
+        .unwrap()
+        .continuation_task_id
+        .unwrap();
+    assert_eq!(
+        store
+            .get_approval(ALICE, &first.approval_id)
+            .await
+            .unwrap()
+            .continuation_task_id
+            .as_deref(),
+        Some(continuation.as_str())
+    );
+    store.close().await;
+    let now = clock.clone();
+    store = Store::open(url)
+        .await
+        .unwrap()
+        .with_execution_clock(move || now.load(Ordering::SeqCst));
+    assert_eq!(
+        store
+            .get_approval(ALICE, &sibling.approval_id)
+            .await
+            .unwrap()
+            .grant_approval_id
+            .as_deref(),
+        Some(first.approval_id.as_str())
+    );
+    let next = claim(&store, &host, &continuation).await;
+    start(&store, &host, &next).await;
+    let effect = post(&next, "retry-sibling", "Second update");
+    let sent = store.post_attempt_workstream(&host, &effect).await.unwrap();
+    assert!(sent.post.is_some());
+    assert_eq!(
+        store
+            .post_attempt_workstream(&host, &effect)
+            .await
+            .unwrap()
+            .post,
+        sent.post
+    );
+    assert!(
+        store
+            .claim_task(&host, "only-one-continuation")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    clock.store(NOW + 20_000, Ordering::SeqCst);
+    // Expired derived authority remains expired. A new operation can request a
+    // new decision, without overwriting or silently reviving the covered row.
+    let retry = store
+        .post_attempt_workstream(&host, &post(&next, "after-expiry", "Later update"))
+        .await
+        .unwrap();
+    assert!(retry.post.is_none());
+    let renewed = retry.approval.unwrap();
+    assert_eq!(renewed.state(), ApprovalState::Pending);
+    assert_ne!(renewed.approval_id, later.approval_id);
+    assert!(renewed.grant_approval_id.is_none());
+    assert_eq!(
+        store
+            .get_approval(ALICE, &later.approval_id)
+            .await
+            .unwrap()
+            .state(),
+        ApprovalState::Expired
+    );
+    finish(&store, &host, &next, vec![]).await;
+    assert_eq!(
+        store
+            .get_approval(ALICE, &sibling.approval_id)
+            .await
+            .unwrap()
+            .state(),
+        ApprovalState::Expired
+    );
+    store.sweep_approvals().await.unwrap();
+    assert_eq!(
+        store
+            .get_approval(ALICE, &denied.approval_id)
+            .await
+            .unwrap()
+            .state(),
+        ApprovalState::Denied
+    );
+
+    // Pause never replaces the latest approval wait with a generic resume Task.
+    // Exercise both resolved-while-paused and still-pending-at-resume paths.
+    for resolved_while_paused in [true, false] {
+        let key = if resolved_while_paused {
+            "paused-resolved"
+        } else {
+            "paused-pending"
+        };
+        let objective = store
+            .create_objective(
+                ALICE,
+                &CreateObjectiveRequest {
+                    operation_id: key.into(),
+                    objective_id: key.into(),
+                    owner_tag_id: "owner".into(),
+                    outcome: "Wait for approval".into(),
+                    team_id: Some("engineering".into()),
+                    ongoing: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let attempt = claim(&store, &host, &objective.starting_task_id).await;
+        start(&store, &host, &attempt).await;
+        let first = store
+            .post_attempt_workstream(&host, &post(&attempt, "one", "One"))
+            .await
+            .unwrap()
+            .approval
+            .unwrap();
+        let second = store
+            .post_attempt_workstream(&host, &post(&attempt, "two", "Two"))
+            .await
+            .unwrap()
+            .approval
+            .unwrap();
+        finish(
+            &store,
+            &host,
+            &attempt,
+            vec![first.approval_id.clone(), second.approval_id.clone()],
+        )
+        .await;
+        store
+            .pause_objective(ALICE, &objective_action(key, &format!("{key}-pause")))
+            .await
+            .unwrap();
+        let grant = decision(
+            &first.approval_id,
+            &format!("{key}-grant"),
+            true,
+            ApprovalScope::Objective,
+        );
+        if resolved_while_paused {
+            store.decide_approval(ALICE, &grant).await.unwrap();
+            assert!(
+                store
+                    .get_approval(ALICE, &first.approval_id)
+                    .await
+                    .unwrap()
+                    .continuation_task_id
+                    .is_none()
+            );
+        }
+        let resume = objective_action(key, &format!("{key}-resume"));
+        store.resume_objective(ALICE, &resume).await.unwrap();
+        store.resume_objective(ALICE, &resume).await.unwrap();
+        if !resolved_while_paused {
+            assert!(
+                store
+                    .claim_task(&host, &format!("{key}-still-waiting"))
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            assert_eq!(approval_inbox(&store, key).await.len(), 2);
+            store.decide_approval(ALICE, &grant).await.unwrap();
+        }
+        assert!(approval_inbox(&store, key).await.is_empty());
+        let one = store.get_approval(ALICE, &first.approval_id).await.unwrap();
+        let two = store
+            .get_approval(ALICE, &second.approval_id)
+            .await
+            .unwrap();
+        assert_eq!(one.continuation_task_id, two.continuation_task_id);
+        let continuation = one.continuation_task_id.unwrap();
+        let next = claim(&store, &host, &continuation).await;
+        start(&store, &host, &next).await;
+        assert!(
+            store
+                .post_attempt_workstream(&host, &post(&next, "retry", "Two"))
+                .await
+                .unwrap()
+                .post
+                .is_some()
+        );
+        assert!(
+            store
+                .claim_task(&host, &format!("{key}-no-generic-resume"))
+                .await
+                .unwrap()
+                .is_none()
+        );
+        finish(&store, &host, &next, vec![]).await;
+        store
+            .cancel_objective(ALICE, &objective_action(key, &format!("{key}-cancel")))
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .get_approval(ALICE, &second.approval_id)
+                .await
+                .unwrap()
+                .state(),
+            ApprovalState::Expired
+        );
+    }
+
+    // A continuation queued just before pause is also preserved; Once authority
+    // remains bound to that exact Task, with no additional generic resume turn.
+    let objective = store
+        .create_objective(
+            ALICE,
+            &CreateObjectiveRequest {
+                operation_id: "queued-once".into(),
+                objective_id: "queued-once".into(),
+                owner_tag_id: "owner".into(),
+                outcome: "Resume the exact approved turn".into(),
+                team_id: Some("engineering".into()),
+                ongoing: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let attempt = claim(&store, &host, &objective.starting_task_id).await;
+    start(&store, &host, &attempt).await;
+    let pending = store
+        .post_attempt_workstream(&host, &post(&attempt, "once", "Approved once"))
+        .await
+        .unwrap()
+        .approval
+        .unwrap();
+    finish(&store, &host, &attempt, vec![pending.approval_id.clone()]).await;
+    let approved = store
+        .decide_approval(
+            ALICE,
+            &decision(
+                &pending.approval_id,
+                "grant-once",
+                true,
+                ApprovalScope::Once,
+            ),
+        )
+        .await
+        .unwrap();
+    let expected = approved.continuation_task_id.unwrap();
+    store
+        .pause_objective(ALICE, &objective_action("queued-once", "pause-queued"))
+        .await
+        .unwrap();
+    store
+        .resume_objective(ALICE, &objective_action("queued-once", "resume-queued"))
+        .await
+        .unwrap();
+    let next = claim(&store, &host, &expected).await;
+    start(&store, &host, &next).await;
+    assert!(
+        store
+            .post_attempt_workstream(&host, &post(&next, "retry-once", "Approved once"))
+            .await
+            .unwrap()
+            .post
+            .is_some()
+    );
+    finish(&store, &host, &next, vec![]).await;
+    assert!(
+        store
+            .claim_task(&host, "queued-once-no-extra-turn")
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    // New Task policy is frozen independently. An old Objective grant cannot
+    // override a changed named-operator rule in the continuation's snapshot.
+    let objective = store
+        .create_objective(
+            ALICE,
+            &CreateObjectiveRequest {
+                operation_id: "changed-rule".into(),
+                objective_id: "changed-rule".into(),
+                owner_tag_id: "owner".into(),
+                outcome: "Honor each Task policy".into(),
+                team_id: Some("engineering".into()),
+                ongoing: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let attempt = claim(&store, &host, &objective.starting_task_id).await;
+    start(&store, &host, &attempt).await;
+    let pending = store
+        .post_attempt_workstream(&host, &post(&attempt, "old-rule", "Policy-bound action"))
+        .await
+        .unwrap()
+        .approval
+        .unwrap();
+    store
+        .decide_approval(
+            ALICE,
+            &decision(
+                &pending.approval_id,
+                "old-rule-grant",
+                true,
+                ApprovalScope::Objective,
+            ),
+        )
+        .await
+        .unwrap();
+    tag(&store, "bob").await;
+    finish(&store, &host, &attempt, vec![pending.approval_id.clone()]).await;
+    let continuation = store
+        .get_approval(ALICE, &pending.approval_id)
+        .await
+        .unwrap()
+        .continuation_task_id
+        .unwrap();
+    let next = claim(&store, &host, &continuation).await;
+    start(&store, &host, &next).await;
+    let effect = post(&next, "new-rule", "Policy-bound action");
+    let refused = store.post_attempt_workstream(&host, &effect).await.unwrap();
+    assert!(refused.post.is_none());
+    let pending = refused.approval.unwrap();
+    assert_eq!(pending.state(), ApprovalState::Pending);
+    assert_eq!(pending.operator_ids, vec!["bob"]);
+    assert!(pending.grant_approval_id.is_none());
+    let grant = decision(
+        &pending.approval_id,
+        "new-rule-grant",
+        true,
+        ApprovalScope::Once,
+    );
+    assert!(matches!(
+        store.decide_approval(ALICE, &grant).await,
+        Err(StoreError::PermissionDenied)
+    ));
+    store.decide_approval("operator:bob", &grant).await.unwrap();
+    assert!(
+        store
+            .post_attempt_workstream(&host, &effect)
+            .await
+            .unwrap()
+            .post
+            .is_some()
+    );
+    finish(&store, &host, &next, vec![]).await;
+    store.close().await;
+}
+
+#[tokio::test]
+async fn sqlite_objective_coverage_and_paused_approval_waits() {
+    let directory = tempfile::tempdir().unwrap();
+    coverage_contract(&format!(
+        "sqlite://{}?mode=rwc",
+        directory.path().join("coverage.db").display()
+    ))
+    .await;
+}
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_POSTGRES_URL_FILE for a dedicated PostgreSQL server"]
+async fn postgres_objective_coverage_and_paused_approval_waits() {
+    let path = std::env::var_os("SUPERTAG_RUST_TEST_POSTGRES_URL_FILE")
+        .expect("PostgreSQL test URL file required");
+    let admin_url = std::fs::read_to_string(path).unwrap();
+    let name = format!("supertag_approval_coverage_{}", Uuid::new_v4().simple());
+    let mut admin = sqlx::PgConnection::connect(admin_url.trim()).await.unwrap();
+    admin
+        .execute(format!("CREATE DATABASE {name}").as_str())
+        .await
+        .unwrap();
+    let mut url = url::Url::parse(admin_url.trim()).unwrap();
+    url.set_path(&name);
+    let result = tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(async move { coverage_contract(url.as_str()).await }).await
+        })
+        .await;
+    admin
+        .execute(format!("DROP DATABASE {name} WITH (FORCE)").as_str())
+        .await
+        .unwrap();
+    admin.close().await.unwrap();
+    result.expect("PostgreSQL coverage contract failed");
+}

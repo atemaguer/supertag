@@ -16,19 +16,26 @@ import { ClaudeSessionStore, readClaudeTranscripts } from "../session-store.js";
 import { claudeUsageTracker } from "../usage.js";
 import { captureCheckpoint, redact, restoreCheckpoint } from "./checkpoint.js";
 import { harnessClient, receipt } from "./client.js";
+import {
+  COORDINATION_PREFIX,
+  COORDINATION_SERVER,
+  coordinationTools,
+  validCoordinationArguments,
+  WORKSTREAM_POST_ACTION,
+} from "./coordination.js";
 import { CREDENTIAL_KEYS, nativeEnvironment } from "./environment.js";
 import {
   type AdapterBootstrap,
   LiveInputReceipt,
   TaskState,
 } from "./gen/supertag/runtime/v2/runtime_pb.js";
-import { QUESTION_SERVER, QUESTION_TOOL, questionArguments, questionServer } from "./question.js";
 
 const ACTIONS: Readonly<Record<string, readonly string[]>> = {
   "files:read": ["Read", "Glob", "Grep"],
   "files:write": ["Write", "Edit"],
   "web:search": ["WebSearch"],
   "web:fetch": ["WebFetch"],
+  [WORKSTREAM_POST_ACTION]: [],
 };
 
 export class UnsupportedPermissionError extends Error {}
@@ -80,12 +87,12 @@ export function permissionHook(
 ): HookCallback {
   return async (hook) => {
     if (hook.hook_event_name !== "PreToolUse") return {};
-    let allowed = !signal.aborted && tools.includes(hook.tool_name) && !hook.agent_id;
-    if (allowed && hook.tool_name === QUESTION_TOOL) {
+    let allowed = !signal.aborted && tools.includes(hook.tool_name) && hook.agent_id === undefined;
+    if (allowed && hook.tool_name.startsWith(COORDINATION_PREFIX)) {
       allowed =
         hook.mcp_server?.source === "sdk" &&
-        hook.mcp_server.name === QUESTION_SERVER &&
-        questionArguments.safeParse(hook.tool_input).success;
+        hook.mcp_server.name === COORDINATION_SERVER &&
+        validCoordinationArguments(hook.tool_name, hook.tool_input);
     }
     if (allowed && ["Read", "Write", "Edit", "Glob", "Grep"].includes(hook.tool_name)) {
       const input = hook.tool_input as Record<string, unknown>;
@@ -164,8 +171,21 @@ export async function runAdapter(
   let phase = "configuration";
   const pendingSettlements: Promise<unknown>[] = [];
   try {
+    if (task.policySnapshot?.contextSets.some((set) => set.items.some((item) => item.required)))
+      throw new SafeAdapterFailure(
+        "Claude has no resolver for a required Context Item. Native execution did not start.",
+      );
     const tools = admittedTools(task.allowedActions);
-    const allowedTools = run.mayAskObjectiveQuestion ? [...tools, QUESTION_TOOL] : tools;
+    const model = task.policySnapshot?.execution?.models[0] ?? configuration.model;
+    const coordination = coordinationTools(harness, run, {
+      taskId: task.taskId,
+      tagId: task.tagId,
+      attemptId: run.attemptId,
+      secrets,
+      signal: controller.signal,
+      active: () => !finalSeen,
+    });
+    const allowedTools = [...tools, ...coordination.tools];
     const { env, cwd } = await nativeEnvironment(environment);
     phase = "checkpoint validation";
     const restored = restoreCheckpoint(run.checkpoint, task, cwd);
@@ -191,17 +211,7 @@ export async function runAdapter(
       skills: [],
       plugins: [],
       strictMcpConfig: true,
-      mcpServers: run.mayAskObjectiveQuestion
-        ? {
-            [QUESTION_SERVER]: questionServer(harness, {
-              taskId: task.taskId,
-              attemptId: run.attemptId,
-              secrets,
-              signal: controller.signal,
-              active: () => !finalSeen,
-            }),
-          }
-        : {},
+      mcpServers: coordination.servers,
       settings: { syncClaudeAiSkills: false, syncClaudeAiPlugins: false },
       systemPrompt: task.instructions,
       env,
@@ -212,7 +222,7 @@ export async function runAdapter(
       hooks: { PreToolUse: [{ hooks: [permissionHook(allowedTools, cwd, controller.signal)] }] },
       ...(restored ? { resume: restored.nativeSessionId } : {}),
       ...(configuration.executable ? { pathToClaudeCodeExecutable: configuration.executable } : {}),
-      ...(configuration.model ? { model: configuration.model } : {}),
+      ...(model ? { model } : {}),
       spawnClaudeCodeProcess: (spawnOptions) => {
         // Keep the native leader in the Rust Guardian's process group. SDK env may contain
         // ambient process.env, so discard it and forward only our selected provider config.
@@ -353,7 +363,12 @@ export async function runAdapter(
     if (Buffer.byteLength(result) > 262144) throw new Error("Claude result exceeds its limit");
     phase = "checkpoint capture";
     const checkpoint = captureCheckpoint(task, nativeSessionId, store.snapshot(), secrets);
-    const outcome = { result, succeeded: true, checkpoint };
+    const outcome = {
+      result,
+      succeeded: true,
+      checkpoint,
+      waitingApprovalIds: await coordination.waitingApprovalIds(),
+    };
     completionProposed = true;
     await receipt(() => client.complete(outcome, options()));
   } catch (error) {

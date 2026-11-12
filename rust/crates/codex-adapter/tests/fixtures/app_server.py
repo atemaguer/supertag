@@ -37,6 +37,11 @@ mode = root.joinpath("steering-mode").read_text() if root.joinpath("steering-mod
 total = {"inputTokens": 0, "cachedInputTokens": 0, "outputTokens": 0, "reasoningOutputTokens": 0, "totalTokens": 0}
 late_baseline = None
 question_mode = root.joinpath("question-mode").read_text() if root.joinpath("question-mode").exists() else ""
+coordination_tools = [
+    ("read_workstream", {"afterSequence": 1, "limit": 2}),
+    ("read_mailbox", {"limit": 2}),
+    ("post", {"text": "Release is ready.", "to": ["reviewer"]}),
+] if root.joinpath("coordination-mode").exists() else []
 
 def emit(value):
     print(json.dumps(value), flush=True)
@@ -55,6 +60,14 @@ def ask_native(rpc="question-rpc"):
     if question_mode == "changed-replay" and rpc == "duplicate-rpc": params["arguments"]["text"] = "Use production instead?"
     if question_mode == "extra": params["arguments"]["objective_id"] = "foreign-objective"
     emit({"id": rpc, "method": "item/tool/call", "params": params})
+
+def coordination_call(index):
+    tool, arguments = coordination_tools[index]
+    emit({
+        "id": f"coordination-{index}", "method": "item/tool/call",
+        "params": {"threadId": thread, "turnId": turn, "namespace": "supertag",
+                   "tool": tool, "callId": f"coordination-call-{index}", "arguments": arguments},
+    })
 
 def prepare_history():
     home.joinpath("sessions").mkdir(exist_ok=True)
@@ -145,6 +158,8 @@ for line in sys.stdin:
             if question_mode == "moderation": notify("turn/moderationMetadata", {"threadId": thread, "turnId": turn, "metadata": {}})
             if question_mode == "late": finish_events()
             if question_mode != "early": ask_native()
+        elif coordination_tools:
+            coordination_call(0)
         elif mode:
             notify("turn/started", {"threadId": thread, "turn": {"id": turn, "status": "inProgress", "items": []}})
         else:
@@ -156,6 +171,17 @@ for line in sys.stdin:
         else:
             notify("item/completed", {"threadId": thread, "turnId": turn, "item": {"id": "question-call", "type": "dynamicToolCall", "namespace": "supertag", "tool": "ask", "arguments": {"text": "May I use staging?"}, "status": "completed", "success": request["result"]["success"]}})
             finish_events()
+    elif method is None and str(request.get("id", "")).startswith("coordination-"):
+        index = int(request["id"].split("-")[-1])
+        tool, arguments = coordination_tools[index]
+        notify("item/completed", {"threadId": thread, "turnId": turn, "item": {
+            "id": f"coordination-call-{index}", "type": "dynamicToolCall", "namespace": "supertag",
+            "tool": tool, "arguments": arguments, "status": "completed", "success": request["result"]["success"],
+        }})
+        if index + 1 == len(coordination_tools):
+            finish_events()
+        else:
+            coordination_call(index + 1)
     elif method == "turn/steer":
         assert request["params"]["threadId"] == thread
         assert request["params"]["expectedTurnId"] == turn

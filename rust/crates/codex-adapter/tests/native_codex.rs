@@ -13,6 +13,14 @@ use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use supertag_codex_adapter::{CodexOptions, run};
+use supertag_protocol::v2::{
+    Approval, ApprovalState, AttemptCapabilities, HarnessPostWorkstreamRequest,
+    HarnessReadMailboxRequest, HarnessReadWorkstreamRequest, ListMailboxMessagesResponse,
+    ListWorkstreamPostsResponse, PostAttemptWorkstreamResponse, ReadAttemptWorkstreamResponse,
+    TagMessage, Team, WorkstreamPost,
+    harness_mailbox_server::{HarnessMailbox, HarnessMailboxServer},
+    harness_workstreams_server::{HarnessWorkstreams, HarnessWorkstreamsServer},
+};
 use supertag_protocol::{
     MAX_CHECKPOINT_BYTES, MAX_MESSAGE_BYTES, matches_bearer,
     v2::{
@@ -50,6 +58,11 @@ struct Observed {
     unknown_question: bool,
     bad_question_receipt: bool,
     slow_question: bool,
+    posts: Vec<HarnessPostWorkstreamRequest>,
+    workstream_reads: Vec<HarnessReadWorkstreamRequest>,
+    mailbox_reads: Vec<HarnessReadMailboxRequest>,
+    pending_post: bool,
+    lose_post_response: bool,
 }
 
 #[derive(Clone)]
@@ -58,6 +71,7 @@ struct HarnessFixture {
     observed: Arc<Mutex<Observed>>,
     checkpoint: Option<SessionCheckpoint>,
     may_ask: bool,
+    coordination: Option<AttemptCapabilities>,
 }
 
 impl HarnessFixture {
@@ -81,6 +95,7 @@ impl Harness for HarnessFixture {
             attempt_id: "native-attempt".into(),
             checkpoint: self.checkpoint.clone(),
             may_ask_objective_question: self.may_ask,
+            coordination: self.coordination,
         }))
     }
     async fn take_live_input(
@@ -220,6 +235,107 @@ impl HarnessQuestions for HarnessFixture {
     }
 }
 
+#[tonic::async_trait]
+impl HarnessWorkstreams for HarnessFixture {
+    async fn read(
+        &self,
+        request: Request<HarnessReadWorkstreamRequest>,
+    ) -> Result<Response<ReadAttemptWorkstreamResponse>, Status> {
+        self.authenticate(&request)?;
+        self.observed
+            .lock()
+            .await
+            .workstream_reads
+            .push(request.into_inner());
+        Ok(Response::new(ReadAttemptWorkstreamResponse {
+            team: Some(Team {
+                team_id: "release".into(),
+                ..Default::default()
+            }),
+            page: Some(ListWorkstreamPostsResponse {
+                posts: vec![WorkstreamPost {
+                    post_id: "existing".into(),
+                    body: "Prior Workstream data.".into(),
+                    team_id: "release".into(),
+                    ..Default::default()
+                }],
+                next_cursor: "workstream-next".into(),
+            }),
+        }))
+    }
+
+    async fn post(
+        &self,
+        request: Request<HarnessPostWorkstreamRequest>,
+    ) -> Result<Response<PostAttemptWorkstreamResponse>, Status> {
+        self.authenticate(&request)?;
+        let input = request.into_inner();
+        let mut observed = self.observed.lock().await;
+        if let Some(prior) = observed.posts.first() {
+            assert_eq!(prior, &input);
+        }
+        observed.posts.push(input.clone());
+        if std::mem::take(&mut observed.lose_post_response) {
+            return Err(Status::unavailable("lost post reply"));
+        }
+        let (post, approval) = if observed.pending_post {
+            (
+                None,
+                Some(Approval {
+                    approval_id: "approve-post".into(),
+                    task_id: "native-task".into(),
+                    attempt_id: "native-attempt".into(),
+                    action: "workstream:post".into(),
+                    state: ApprovalState::Pending.into(),
+                    ..Default::default()
+                }),
+            )
+        } else {
+            (
+                Some(WorkstreamPost {
+                    post_id: "accepted-post".into(),
+                    source_task_id: "native-task".into(),
+                    body: input.body,
+                    to_tag_ids: input.to_tag_ids,
+                    sequence: 7,
+                    ..Default::default()
+                }),
+                None,
+            )
+        };
+        Ok(Response::new(PostAttemptWorkstreamResponse {
+            post,
+            approval,
+            duplicate: false,
+        }))
+    }
+}
+
+#[tonic::async_trait]
+impl HarnessMailbox for HarnessFixture {
+    async fn read(
+        &self,
+        request: Request<HarnessReadMailboxRequest>,
+    ) -> Result<Response<ListMailboxMessagesResponse>, Status> {
+        self.authenticate(&request)?;
+        self.observed
+            .lock()
+            .await
+            .mailbox_reads
+            .push(request.into_inner());
+        Ok(Response::new(ListMailboxMessagesResponse {
+            messages: vec![TagMessage {
+                message_id: "release-mail".into(),
+                sender_tag_id: "reviewer".into(),
+                recipient_tag_id: "native-tag".into(),
+                text: "Prior Mailbox data.".into(),
+                ..Default::default()
+            }],
+            next_cursor: "mailbox-next".into(),
+        }))
+    }
+}
+
 struct HarnessProcess {
     bootstrap: AdapterBootstrap,
     observed: Arc<Mutex<Observed>>,
@@ -252,6 +368,16 @@ impl HarnessProcess {
         prompt: &str,
         may_ask: bool,
     ) -> Result<Self> {
+        Self::configured_tools(actions, checkpoint, prompt, may_ask, None).await
+    }
+
+    async fn configured_tools(
+        actions: &[&str],
+        checkpoint: Option<SessionCheckpoint>,
+        prompt: &str,
+        may_ask: bool,
+        coordination: Option<AttemptCapabilities>,
+    ) -> Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let bootstrap = AdapterBootstrap {
             endpoint: format!("http://{}", listener.local_addr()?),
@@ -274,6 +400,7 @@ impl HarnessProcess {
             observed: observed.clone(),
             checkpoint,
             may_ask,
+            coordination,
         };
         let server = tokio::spawn(
             Server::builder()
@@ -282,7 +409,9 @@ impl HarnessProcess {
                         .max_decoding_message_size(MAX_CHECKPOINT_BYTES + MAX_MESSAGE_BYTES)
                         .max_encoding_message_size(MAX_CHECKPOINT_BYTES + MAX_MESSAGE_BYTES),
                 )
-                .add_service(HarnessQuestionsServer::new(fixture))
+                .add_service(HarnessQuestionsServer::new(fixture.clone()))
+                .add_service(HarnessWorkstreamsServer::new(fixture.clone()))
+                .add_service(HarnessMailboxServer::new(fixture))
                 .serve_with_incoming(TcpListenerStream::new(listener)),
         );
         Ok(Self {
@@ -291,6 +420,55 @@ impl HarnessProcess {
             server,
         })
     }
+}
+
+#[tokio::test]
+async fn native_coordination_pins_tools_and_stages_only_verified_workstream_approval() -> Result<()>
+{
+    let mut checkpoint = None;
+    for (index, workstream_allowed) in [true, true, false].into_iter().enumerate() {
+        let native = NativeFixture::new(&successful("Reviewed the release"), "exit 0")?;
+        std::fs::write(native.directory.path().join("coordination-mode"), "")?;
+        let server = HarnessProcess::configured_tools(
+            &["files:read", "workstream:post"],
+            checkpoint,
+            "Inspect the release",
+            false,
+            Some(AttemptCapabilities {
+                may_use_workstream: workstream_allowed,
+                may_read_mailbox: true,
+                ..Default::default()
+            }),
+        )
+        .await?;
+        {
+            let mut observed = server.observed.lock().await;
+            observed.pending_post = index == 0;
+            observed.lose_post_response = index == 0;
+        }
+        run(native.options(), server.bootstrap.clone()).await?;
+        let observed = server.observed.lock().await;
+        let outcome = observed.outcome.as_ref().context("outcome")?;
+        ensure!(outcome.succeeded, "{}", outcome.result);
+        checkpoint = outcome.checkpoint.clone();
+        assert!(checkpoint.is_some());
+        assert_eq!(observed.mailbox_reads.len(), 1);
+        assert_eq!(
+            observed.workstream_reads.len(),
+            usize::from(workstream_allowed)
+        );
+        assert_eq!(observed.posts.len(), [2, 1, 0][index]);
+        let logs = native.read("requests.jsonl")?;
+        assert!(logs.contains("Untrusted coordination history"));
+        if index == 0 {
+            assert_eq!(outcome.waiting_approval_ids, ["approve-post"]);
+            assert!(logs.contains("read_workstream") && logs.contains("read_mailbox"));
+        } else {
+            assert!(outcome.waiting_approval_ids.is_empty());
+            assert!(logs.contains("thread/resume") && !logs.contains("dynamicTools"));
+        }
+    }
+    Ok(())
 }
 
 impl Drop for HarnessProcess {

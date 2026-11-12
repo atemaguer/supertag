@@ -63,6 +63,8 @@ const (
 	HarnessQuestionsName = "supertag.runtime.v2.HarnessQuestions"
 	// HarnessWorkstreamsName is the fully-qualified name of the HarnessWorkstreams service.
 	HarnessWorkstreamsName = "supertag.runtime.v2.HarnessWorkstreams"
+	// HarnessMailboxName is the fully-qualified name of the HarnessMailbox service.
+	HarnessMailboxName = "supertag.runtime.v2.HarnessMailbox"
 )
 
 // These constants are the fully-qualified names of the RPCs defined in this package. They're
@@ -298,8 +300,12 @@ const (
 	// HarnessQuestionsAskQuestionProcedure is the fully-qualified name of the HarnessQuestions's
 	// AskQuestion RPC.
 	HarnessQuestionsAskQuestionProcedure = "/supertag.runtime.v2.HarnessQuestions/AskQuestion"
+	// HarnessWorkstreamsReadProcedure is the fully-qualified name of the HarnessWorkstreams's Read RPC.
+	HarnessWorkstreamsReadProcedure = "/supertag.runtime.v2.HarnessWorkstreams/Read"
 	// HarnessWorkstreamsPostProcedure is the fully-qualified name of the HarnessWorkstreams's Post RPC.
 	HarnessWorkstreamsPostProcedure = "/supertag.runtime.v2.HarnessWorkstreams/Post"
+	// HarnessMailboxReadProcedure is the fully-qualified name of the HarnessMailbox's Read RPC.
+	HarnessMailboxReadProcedure = "/supertag.runtime.v2.HarnessMailbox/Read"
 )
 
 // OperatorClient is a client for the supertag.runtime.v2.Operator service.
@@ -3553,6 +3559,7 @@ func (UnimplementedHarnessQuestionsHandler) AskQuestion(context.Context, *connec
 
 // HarnessWorkstreamsClient is a client for the supertag.runtime.v2.HarnessWorkstreams service.
 type HarnessWorkstreamsClient interface {
+	Read(context.Context, *connect.Request[runtimev2.HarnessReadWorkstreamRequest]) (*connect.Response[runtimev2.ReadAttemptWorkstreamResponse], error)
 	Post(context.Context, *connect.Request[runtimev2.HarnessPostWorkstreamRequest]) (*connect.Response[runtimev2.PostAttemptWorkstreamResponse], error)
 }
 
@@ -3567,6 +3574,12 @@ func NewHarnessWorkstreamsClient(httpClient connect.HTTPClient, baseURL string, 
 	baseURL = strings.TrimRight(baseURL, "/")
 	harnessWorkstreamsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HarnessWorkstreams").Methods()
 	return &harnessWorkstreamsClient{
+		read: connect.NewClient[runtimev2.HarnessReadWorkstreamRequest, runtimev2.ReadAttemptWorkstreamResponse](
+			httpClient,
+			baseURL+HarnessWorkstreamsReadProcedure,
+			connect.WithSchema(harnessWorkstreamsMethods.ByName("Read")),
+			connect.WithClientOptions(opts...),
+		),
 		post: connect.NewClient[runtimev2.HarnessPostWorkstreamRequest, runtimev2.PostAttemptWorkstreamResponse](
 			httpClient,
 			baseURL+HarnessWorkstreamsPostProcedure,
@@ -3578,7 +3591,13 @@ func NewHarnessWorkstreamsClient(httpClient connect.HTTPClient, baseURL string, 
 
 // harnessWorkstreamsClient implements HarnessWorkstreamsClient.
 type harnessWorkstreamsClient struct {
+	read *connect.Client[runtimev2.HarnessReadWorkstreamRequest, runtimev2.ReadAttemptWorkstreamResponse]
 	post *connect.Client[runtimev2.HarnessPostWorkstreamRequest, runtimev2.PostAttemptWorkstreamResponse]
+}
+
+// Read calls supertag.runtime.v2.HarnessWorkstreams.Read.
+func (c *harnessWorkstreamsClient) Read(ctx context.Context, req *connect.Request[runtimev2.HarnessReadWorkstreamRequest]) (*connect.Response[runtimev2.ReadAttemptWorkstreamResponse], error) {
+	return c.read.CallUnary(ctx, req)
 }
 
 // Post calls supertag.runtime.v2.HarnessWorkstreams.Post.
@@ -3589,6 +3608,7 @@ func (c *harnessWorkstreamsClient) Post(ctx context.Context, req *connect.Reques
 // HarnessWorkstreamsHandler is an implementation of the supertag.runtime.v2.HarnessWorkstreams
 // service.
 type HarnessWorkstreamsHandler interface {
+	Read(context.Context, *connect.Request[runtimev2.HarnessReadWorkstreamRequest]) (*connect.Response[runtimev2.ReadAttemptWorkstreamResponse], error)
 	Post(context.Context, *connect.Request[runtimev2.HarnessPostWorkstreamRequest]) (*connect.Response[runtimev2.PostAttemptWorkstreamResponse], error)
 }
 
@@ -3599,6 +3619,12 @@ type HarnessWorkstreamsHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewHarnessWorkstreamsHandler(svc HarnessWorkstreamsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	harnessWorkstreamsMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HarnessWorkstreams").Methods()
+	harnessWorkstreamsReadHandler := connect.NewUnaryHandler(
+		HarnessWorkstreamsReadProcedure,
+		svc.Read,
+		connect.WithSchema(harnessWorkstreamsMethods.ByName("Read")),
+		connect.WithHandlerOptions(opts...),
+	)
 	harnessWorkstreamsPostHandler := connect.NewUnaryHandler(
 		HarnessWorkstreamsPostProcedure,
 		svc.Post,
@@ -3607,6 +3633,8 @@ func NewHarnessWorkstreamsHandler(svc HarnessWorkstreamsHandler, opts ...connect
 	)
 	return "/supertag.runtime.v2.HarnessWorkstreams/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case HarnessWorkstreamsReadProcedure:
+			harnessWorkstreamsReadHandler.ServeHTTP(w, r)
 		case HarnessWorkstreamsPostProcedure:
 			harnessWorkstreamsPostHandler.ServeHTTP(w, r)
 		default:
@@ -3618,6 +3646,80 @@ func NewHarnessWorkstreamsHandler(svc HarnessWorkstreamsHandler, opts ...connect
 // UnimplementedHarnessWorkstreamsHandler returns CodeUnimplemented from all methods.
 type UnimplementedHarnessWorkstreamsHandler struct{}
 
+func (UnimplementedHarnessWorkstreamsHandler) Read(context.Context, *connect.Request[runtimev2.HarnessReadWorkstreamRequest]) (*connect.Response[runtimev2.ReadAttemptWorkstreamResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessWorkstreams.Read is not implemented"))
+}
+
 func (UnimplementedHarnessWorkstreamsHandler) Post(context.Context, *connect.Request[runtimev2.HarnessPostWorkstreamRequest]) (*connect.Response[runtimev2.PostAttemptWorkstreamResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessWorkstreams.Post is not implemented"))
+}
+
+// HarnessMailboxClient is a client for the supertag.runtime.v2.HarnessMailbox service.
+type HarnessMailboxClient interface {
+	Read(context.Context, *connect.Request[runtimev2.HarnessReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error)
+}
+
+// NewHarnessMailboxClient constructs a client for the supertag.runtime.v2.HarnessMailbox service.
+// By default, it uses the Connect protocol with the binary Protobuf Codec, asks for gzipped
+// responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply the
+// connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewHarnessMailboxClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) HarnessMailboxClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	harnessMailboxMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HarnessMailbox").Methods()
+	return &harnessMailboxClient{
+		read: connect.NewClient[runtimev2.HarnessReadMailboxRequest, runtimev2.ListMailboxMessagesResponse](
+			httpClient,
+			baseURL+HarnessMailboxReadProcedure,
+			connect.WithSchema(harnessMailboxMethods.ByName("Read")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// harnessMailboxClient implements HarnessMailboxClient.
+type harnessMailboxClient struct {
+	read *connect.Client[runtimev2.HarnessReadMailboxRequest, runtimev2.ListMailboxMessagesResponse]
+}
+
+// Read calls supertag.runtime.v2.HarnessMailbox.Read.
+func (c *harnessMailboxClient) Read(ctx context.Context, req *connect.Request[runtimev2.HarnessReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error) {
+	return c.read.CallUnary(ctx, req)
+}
+
+// HarnessMailboxHandler is an implementation of the supertag.runtime.v2.HarnessMailbox service.
+type HarnessMailboxHandler interface {
+	Read(context.Context, *connect.Request[runtimev2.HarnessReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error)
+}
+
+// NewHarnessMailboxHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewHarnessMailboxHandler(svc HarnessMailboxHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	harnessMailboxMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HarnessMailbox").Methods()
+	harnessMailboxReadHandler := connect.NewUnaryHandler(
+		HarnessMailboxReadProcedure,
+		svc.Read,
+		connect.WithSchema(harnessMailboxMethods.ByName("Read")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.HarnessMailbox/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case HarnessMailboxReadProcedure:
+			harnessMailboxReadHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedHarnessMailboxHandler returns CodeUnimplemented from all methods.
+type UnimplementedHarnessMailboxHandler struct{}
+
+func (UnimplementedHarnessMailboxHandler) Read(context.Context, *connect.Request[runtimev2.HarnessReadMailboxRequest]) (*connect.Response[runtimev2.ListMailboxMessagesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessMailbox.Read is not implemented"))
 }

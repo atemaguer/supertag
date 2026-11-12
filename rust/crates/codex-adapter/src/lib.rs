@@ -3,6 +3,7 @@ mod app_server;
 mod auth;
 mod checkpoint;
 mod config;
+mod coordination;
 mod events;
 mod questions;
 
@@ -76,12 +77,23 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         .context("attach Codex adapter")?
         .into_inner();
     let task = attached.task.context("Worker Host returned no Task")?;
+    let full_inventory = attached.coordination.is_some()
+        && attached
+            .checkpoint
+            .as_ref()
+            .is_none_or(checkpoint::has_full_coordination);
     let mut questions = questions::Bridge::new(
         channel,
         &bootstrap.token,
-        &task.task_id,
+        &task,
         &attached.attempt_id,
-        attached.may_ask_objective_question,
+        attached
+            .coordination
+            .unwrap_or_else(|| supertag_protocol::v2::AttemptCapabilities {
+                may_ask_objective_question: attached.may_ask_objective_question,
+                ..Default::default()
+            }),
+        full_inventory,
     );
     let outcome = execute(
         &options,
@@ -104,7 +116,11 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
                 succeeded,
                 objective_signal: 0,
                 checkpoint,
-                waiting_approval_ids: vec![],
+                waiting_approval_ids: if succeeded {
+                    questions.waiting_approvals()
+                } else {
+                    vec![]
+                },
             },
             &bootstrap.token,
         )?)
@@ -137,9 +153,29 @@ async fn execute(
         .canonicalize()
         .context("Codex workspace is unavailable")?;
     ensure!(workspace.is_dir(), "Codex workspace must be a directory");
+    ensure!(
+        !task
+            .policy_snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot
+                .context_sets
+                .iter()
+                .any(|set| set.items.iter().any(|item| item.required))),
+        "a required Context Item has no Codex resolver"
+    );
+    let accepted_model = task
+        .policy_snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.execution.as_ref())
+        .and_then(|execution| execution.models.first())
+        .map(String::as_str);
     let policy =
         config::Policy::from_actions(&task.allowed_actions, options.allow_workspace_write)?;
-    let arguments = config::arguments(&workspace, options.model.as_deref(), &policy)?;
+    let arguments = config::arguments(
+        &workspace,
+        accepted_model.or(options.model.as_deref()),
+        &policy,
+    )?;
     let thread_parameters = config::thread_parameters(&workspace, &arguments)?;
     let authentication = auth::Prepared::new(&options.environment, &options.state_directory)?;
     let mut environment = authentication.environment(&options.environment);
@@ -147,6 +183,7 @@ async fn execute(
     environment.remove(&OsString::from("SUPERTAG_HOST_TOKEN"));
     let mut secrets = authentication.secrets();
     secrets.push(token.to_owned());
+    questions.set_secrets(&secrets);
     let expected_thread = previous_checkpoint
         .map(|checkpoint| {
             checkpoint::restore(

@@ -22,6 +22,7 @@ pub use hosts::HostAuthority;
 
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
+use prost::Message;
 use sha2::{Digest, Sha256};
 use sqlx::{
     Any, AnyPool, Row, Transaction,
@@ -67,7 +68,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 21;
+        const SCHEMA_VERSION: i64 = 23;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -139,6 +140,8 @@ impl Store {
                 include_str!("../migrations/sqlite/0019_host_readiness.sql"),
                 include_str!("../migrations/sqlite/0020_objective_inbox.sql"),
                 include_str!("../migrations/sqlite/0021_approvals.sql"),
+                include_str!("../migrations/sqlite/0022_approval_coverage.sql"),
+                include_str!("../migrations/sqlite/0023_policy.sql"),
             ]
         } else {
             [
@@ -163,6 +166,8 @@ impl Store {
                 include_str!("../migrations/postgresql/0019_host_readiness.sql"),
                 include_str!("../migrations/postgresql/0020_objective_inbox.sql"),
                 include_str!("../migrations/postgresql/0021_approvals.sql"),
+                include_str!("../migrations/postgresql/0022_approval_coverage.sql"),
+                include_str!("../migrations/postgresql/0023_policy.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -279,15 +284,7 @@ impl Store {
         allowed_actions.dedup();
         let actions = serde_json::to_string(&allowed_actions)?;
         let approval_rules = normalize_approval_rules(approval_rules, &allowed_actions)?;
-        let stored_rules = serde_json::to_string(
-            &approval_rules
-                .iter()
-                .map(|rule| StoredApprovalRule {
-                    action: rule.action.clone(),
-                    operator_ids: rule.operator_ids.clone(),
-                })
-                .collect::<Vec<_>>(),
-        )?;
+        let stored_rules = stored_approval_rules(&approval_rules)?;
         let (mut transaction, _) = self.write().await?;
         let revision: i64 = sqlx::query_scalar("INSERT INTO supertag_v2_tags (tag_id, instructions, allowed_actions, revision, workspace_id, workspace_base_commit, harness_kind, approval_rules) VALUES ($1,$2,$3,1,$4,$5,$6,$7) ON CONFLICT(tag_id) DO UPDATE SET instructions = excluded.instructions, allowed_actions = excluded.allowed_actions, revision = supertag_v2_tags.revision + 1, workspace_id = excluded.workspace_id, workspace_base_commit = excluded.workspace_base_commit, harness_kind = excluded.harness_kind, approval_rules = excluded.approval_rules RETURNING revision")
             .bind(tag_id).bind(instructions).bind(actions)
@@ -950,7 +947,23 @@ pub(crate) async fn insert_task(
     .await?
     .ok_or_else(|| StoreError::NotFound("Tag was not found".into()))?;
     let workspace = crate::workspaces::workspace_from_row(&tag)?;
-    let harness: i64 = tag.try_get("harness_kind")?;
+    let instructions: String = tag.try_get("instructions")?;
+    let allowed_actions: Vec<String> =
+        serde_json::from_str(&tag.try_get::<String, _>("allowed_actions")?)?;
+    let approval_rules = approval_rules_from_row(&tag)?;
+    let base_harness: i64 = tag.try_get("harness_kind")?;
+    let policy = crate::policy::admission_in(
+        transaction,
+        tag_id,
+        crate::policy::AdmissionBase {
+            instructions: &instructions,
+            allowed_actions: &allowed_actions,
+            harness_kind: base_harness as i32,
+            approval_rules: &approval_rules,
+        },
+    )
+    .await?;
+    let harness = i64::from(policy.harness_kind);
     if let Some(previous) = sqlx::query("SELECT workspace_id,workspace_base_commit,harness_kind FROM supertag_v2_tasks WHERE tag_id=$1 AND session_id=$2 ORDER BY accepted_order LIMIT 1")
         .bind(tag_id).bind(session_id).fetch_optional(&mut **transaction).await?
         && (crate::workspaces::workspace_from_row(&previous)? != workspace || previous.try_get::<i64,_>("harness_kind")? != harness)
@@ -958,16 +971,24 @@ pub(crate) async fn insert_task(
         return Err(StoreError::FailedPrecondition("workspace or harness changed; start a new Session".into()));
     }
     let id = Uuid::new_v4().to_string();
-    sqlx::query("INSERT INTO supertag_v2_tasks (task_id, tag_id, session_id, prompt, instructions, allowed_actions, tag_revision, state, accepted_order, workspace_id, workspace_base_commit,harness_kind,approval_rules) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
+    sqlx::query("INSERT INTO supertag_v2_tasks (task_id, tag_id, session_id, prompt, instructions, allowed_actions, tag_revision, state, accepted_order, workspace_id, workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)")
         .bind(&id).bind(tag_id).bind(session_id).bind(prompt)
-        .bind(tag.try_get::<String, _>("instructions")?).bind(tag.try_get::<String, _>("allowed_actions")?)
+        .bind(policy.instructions).bind(serde_json::to_string(&policy.allowed_actions)?)
         .bind(tag.try_get::<i64, _>("revision")?).bind(TaskState::Queued as i64).bind(order)
         .bind(workspace.as_ref().map(|spec| &spec.workspace_id))
         .bind(workspace.as_ref().map(|spec| &spec.base_commit))
         .bind(harness)
-        .bind(tag.try_get::<String, _>("approval_rules")?)
+        .bind(stored_approval_rules(&policy.approval_rules)?)
+        .bind(policy.snapshot.encode_to_vec())
+        .bind(policy.effective_digest)
         .execute(&mut **transaction).await?;
-    task_in(transaction, &id).await
+    let task = task_in(transaction, &id).await?;
+    if task.encoded_len() > supertag_protocol::MAX_MESSAGE_BYTES - 4096 {
+        return Err(invalid(
+            "accepted Task policy and prompt exceed the transport limit",
+        ));
+    }
+    Ok(task)
 }
 
 async fn enqueue_reply(
@@ -1082,6 +1103,7 @@ fn task_row(row: &AnyRow) -> Result<Task> {
         workspace_delivery: crate::workspaces::delivery_from_row(row)?,
         harness_kind: row.try_get::<i64, _>("harness_kind")? as i32,
         approval_rules: approval_rules_from_row(row)?,
+        policy_snapshot: crate::policy::snapshot_from_row(row)?,
     })
 }
 
@@ -1091,6 +1113,18 @@ pub(crate) const WORKSTREAM_POST_ACTION: &str = "workstream:post";
 struct StoredApprovalRule {
     action: String,
     operator_ids: Vec<String>,
+}
+
+fn stored_approval_rules(rules: &[ApprovalRule]) -> Result<String> {
+    Ok(serde_json::to_string(
+        &rules
+            .iter()
+            .map(|rule| StoredApprovalRule {
+                action: rule.action.clone(),
+                operator_ids: rule.operator_ids.clone(),
+            })
+            .collect::<Vec<_>>(),
+    )?)
 }
 
 pub(crate) fn approval_rules_from_row(row: &AnyRow) -> Result<Vec<ApprovalRule>> {

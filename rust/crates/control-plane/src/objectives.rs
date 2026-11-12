@@ -584,29 +584,40 @@ impl Store {
                 if let Some(paused_at) = record.value.paused_at_ms.take() {
                     record.limits.paused_at = None;
                     record.changed(now_ms);
-                    let counts = sqlx::query("SELECT t.state, COUNT(*) AS total FROM supertag_v2_tasks t JOIN supertag_v2_objective_tasks ot ON ot.task_id=t.task_id WHERE ot.objective_id=$1 GROUP BY t.state").bind(&input.objective_id).fetch_all(&mut *tx).await?;
-                    let mut summary = format!(
-                        "An operator resumed the Objective after its pause at {}. Recorded Task states at resume:",
-                        timestamp(paused_at)?
-                    );
-                    for count in counts {
-                        let state = TaskState::try_from(count.try_get::<i64, _>("state")? as i32)
-                            .map_err(|_| refused("stored Task state is invalid"))?;
-                        summary.push_str(&format!(
-                            " {:?}: {}.",
-                            state,
-                            count.try_get::<i64, _>("total")?
-                        ));
+                    // Admission must observe the cleared pause. A valid approval
+                    // wait owns the next continuation and must not be displaced
+                    // by the generic resume turn.
+                    save_in(&mut tx, &record).await?;
+                    if crate::approvals::resume_wait_in(&mut tx, &input.objective_id, now_ms)
+                        .await?
+                    {
+                        record = get_in(&mut tx, &input.objective_id).await?;
+                    } else {
+                        let counts = sqlx::query("SELECT t.state, COUNT(*) AS total FROM supertag_v2_tasks t JOIN supertag_v2_objective_tasks ot ON ot.task_id=t.task_id WHERE ot.objective_id=$1 GROUP BY t.state").bind(&input.objective_id).fetch_all(&mut *tx).await?;
+                        let mut summary = format!(
+                            "An operator resumed the Objective after its pause at {}. Recorded Task states at resume:",
+                            timestamp(paused_at)?
+                        );
+                        for count in counts {
+                            let state =
+                                TaskState::try_from(count.try_get::<i64, _>("state")? as i32)
+                                    .map_err(|_| refused("stored Task state is invalid"))?;
+                            summary.push_str(&format!(
+                                " {:?}: {}.",
+                                state,
+                                count.try_get::<i64, _>("total")?
+                            ));
+                        }
+                        internal_turn_in(
+                            &mut tx,
+                            &record,
+                            &format!("resumed:{paused_at}"),
+                            &summary,
+                            "resume",
+                            now_ms,
+                        )
+                        .await?;
                     }
-                    internal_turn_in(
-                        &mut tx,
-                        &record,
-                        &format!("resumed:{paused_at}"),
-                        &summary,
-                        "resume",
-                        now_ms,
-                    )
-                    .await?;
                 }
             }
             "cancel" => {

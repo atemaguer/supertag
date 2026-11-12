@@ -19,7 +19,7 @@ use supertag_protocol::{
     v2::{
         Assignment, ClaimTaskRequest, FinishTaskRequest, HarnessCompleteRequest, HarnessKind,
         InspectAttemptRequest, RegisterHostRequest, StartTaskRequest, Task, TaskState,
-        attempt_inputs_client::AttemptInputsClient,
+        attempt_inputs_client::AttemptInputsClient, attempt_mailbox_client::AttemptMailboxClient,
         attempt_workstreams_client::AttemptWorkstreamsClient, worker_host_client::WorkerHostClient,
     },
 };
@@ -77,8 +77,11 @@ impl Interceptor for HostHeaders {
 
 pub(crate) type RegisteredHost = WorkerHostClient<InterceptedService<Channel, HostHeaders>>;
 pub(crate) type RegisteredInputs = AttemptInputsClient<InterceptedService<Channel, HostHeaders>>;
-pub(crate) type RegisteredWorkstreams =
-    AttemptWorkstreamsClient<InterceptedService<Channel, HostHeaders>>;
+#[derive(Clone)]
+pub(crate) struct CoordinationClients {
+    workstreams: AttemptWorkstreamsClient<InterceptedService<Channel, HostHeaders>>,
+    mailbox: AttemptMailboxClient<InterceptedService<Channel, HostHeaders>>,
+}
 
 impl Attempt {
     fn from_assignment(assignment: Assignment) -> Result<Self> {
@@ -167,10 +170,14 @@ pub async fn run(
     )
     .max_decoding_message_size(MAX_MESSAGE_BYTES)
     .max_encoding_message_size(MAX_MESSAGE_BYTES);
-    let workstream_client =
-        AttemptWorkstreamsClient::with_interceptor(channel.clone(), headers.clone())
+    let coordination = CoordinationClients {
+        workstreams: AttemptWorkstreamsClient::with_interceptor(channel.clone(), headers.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
-            .max_encoding_message_size(MAX_MESSAGE_BYTES);
+            .max_encoding_message_size(MAX_MESSAGE_BYTES),
+        mailbox: AttemptMailboxClient::with_interceptor(channel.clone(), headers.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES),
+    };
     let transfers = checkpoints::Transfers::new(channel.clone(), headers.clone());
     let mut host = WorkerHostClient::with_interceptor(channel, headers)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -241,7 +248,7 @@ pub async fn run(
                     &options,
                     &journal,
                     &workspaces,
-                    (&mut host, &inputs, &workstream_client, &transfers, &token),
+                    (&mut host, &inputs, &coordination, &transfers, &token),
                     attempt,
                     &shutdown,
                     || {
@@ -590,7 +597,7 @@ async fn run_assignment(
     connection: (
         &mut RegisteredHost,
         &RegisteredInputs,
-        &RegisteredWorkstreams,
+        &CoordinationClients,
         &checkpoints::Transfers,
         &str,
     ),
@@ -598,7 +605,7 @@ async fn run_assignment(
     shutdown: &CancellationToken,
     ready: impl FnOnce(),
 ) -> Result<()> {
-    let (host, inputs, workstream_client, transfers, token) = connection;
+    let (host, inputs, coordination, transfers, token) = connection;
     // Starting is durable before requesting authority and never records a launch.
     // A lost start response can therefore be retried using this exact Attempt.
     let start = host
@@ -749,7 +756,7 @@ async fn run_assignment(
                 .as_ref()
                 .map(|prepared| prepared.checkout.path.as_path()),
         ),
-        (host.clone(), inputs.clone(), workstream_client.clone()),
+        (host.clone(), inputs.clone(), coordination.clone()),
         token,
         valid_until,
         shutdown,

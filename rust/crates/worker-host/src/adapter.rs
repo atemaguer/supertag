@@ -42,7 +42,7 @@ use tonic::{Request, Response, Status, transport::Server};
 use uuid::Uuid;
 
 use crate::{
-    HostOptions, RegisteredHost, RegisteredInputs, RegisteredWorkstreams,
+    CoordinationClients, HostOptions, RegisteredHost, RegisteredInputs,
     guardian::{MAX_BOOTSTRAP_BYTES, monotonic_now_ns},
 };
 
@@ -53,7 +53,7 @@ struct Bridge {
     checkpoint: Option<SessionCheckpoint>,
     host_token: String,
     host: RegisteredHost,
-    workstreams: RegisteredWorkstreams,
+    coordination: CoordinationClients,
     state: Arc<Mutex<RunState>>,
     attached: Arc<AtomicBool>,
     inputs: inputs::InputLane,
@@ -119,6 +119,7 @@ impl Harness for Bridge {
             attempt_id: self.assignment.attempt_id.clone(),
             checkpoint: self.checkpoint.clone(),
             may_ask_objective_question: capabilities.may_ask_objective_question,
+            coordination: Some(capabilities),
         }))
     }
 
@@ -257,7 +258,7 @@ pub(crate) async fn execute(
     options: &HostOptions,
     assignment: Assignment,
     (checkpoint, workspace): (Option<SessionCheckpoint>, Option<&Path>),
-    (host, inputs, workstreams): (RegisteredHost, RegisteredInputs, RegisteredWorkstreams),
+    (host, inputs, coordination): (RegisteredHost, RegisteredInputs, CoordinationClients),
     host_token: &str,
     valid_until: Instant,
     shutdown: &CancellationToken,
@@ -274,7 +275,7 @@ pub(crate) async fn execute(
         checkpoint,
         host_token: host_token.to_owned(),
         host,
-        workstreams,
+        coordination,
         state: Arc::default(),
         attached: Arc::default(),
         inputs: inputs::InputLane::new(inputs, valid_until, shutdown),
@@ -289,6 +290,7 @@ pub(crate) async fn execute(
             )
             .add_service(bridge.questions_service())
             .add_service(bridge.workstreams_service())
+            .add_service(bridge.mailbox_service())
             .serve_with_incoming_shutdown(
                 TcpListenerStream::new(listener),
                 stop_server.clone().cancelled_owned(),

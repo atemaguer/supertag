@@ -1,0 +1,165 @@
+syntax = "proto3";
+package supertag.runtime.v2;
+
+// Operator-managed reusable policy. Admission freezes resolved copies on each Task.
+service PolicyCatalog {
+  rpc PutPermissionSet(PutPermissionSetRequest) returns (PermissionSet);
+  rpc GetPermissionSet(GetPolicyResourceRequest) returns (PermissionSet);
+  rpc ListPermissionSets(ListPolicyResourcesRequest) returns (ListPermissionSetsResponse);
+  rpc DeletePermissionSet(DeletePolicyResourceRequest) returns (DeletePolicyResourceResponse);
+  rpc PutContextSet(PutContextSetRequest) returns (ContextSet);
+  rpc GetContextSet(GetPolicyResourceRequest) returns (ContextSet);
+  rpc ListContextSets(ListPolicyResourcesRequest) returns (ListContextSetsResponse);
+  rpc DeleteContextSet(DeletePolicyResourceRequest) returns (DeletePolicyResourceResponse);
+  rpc PutRole(PutRoleRequest) returns (Role);
+  rpc GetRole(GetPolicyResourceRequest) returns (Role);
+  rpc ListRoles(ListPolicyResourcesRequest) returns (ListRolesResponse);
+  rpc AssignRole(AssignRoleRequest) returns (RoleAssignment);
+  rpc ListRoleAssignments(ListRoleAssignmentsRequest) returns (ListRoleAssignmentsResponse);
+  rpc DeactivateRoleAssignment(DeactivateRoleAssignmentRequest) returns (RoleAssignment);
+}
+
+enum PolicyPermissionTarget {
+  POLICY_PERMISSION_TARGET_UNSPECIFIED = 0;
+  POLICY_PERMISSION_TARGET_RUNTIME = 1;
+  POLICY_PERMISSION_TARGET_SURFACE = 2;
+  POLICY_PERMISSION_TARGET_MCP = 3;
+}
+message PolicyPermission {
+  // Assigned by the catalog; a replacement preserves the identity of the same grant.
+  string permission_id = 1;
+  PolicyPermissionTarget target = 2;
+  string action = 3;
+  string surface_account_id = 4;
+  string scope = 5;
+  string reference = 6;
+  string resource = 7;
+  bool approval_required = 8;
+}
+message PermissionSet {
+  string set_id = 1;
+  string name = 2;
+  uint64 revision = 3;
+  repeated string approvers = 4;
+  repeated PolicyPermission permissions = 5;
+}
+message PolicyContextItem {
+  string item_id = 1;
+  string item_key = 2;
+  string type = 3;
+  uint32 version = 4;
+  bool required = 5;
+  // A JSON object interpreted by the named, versioned context resolver. Never a secret.
+  string config_json = 6;
+}
+message ContextSet {
+  string set_id = 1;
+  string name = 2;
+  uint64 revision = 3;
+  repeated PolicyContextItem items = 4;
+}
+message PolicyExecutionSettings {
+  optional string harness = 1;
+  // Order matters: the first entry is the default. Empty means unset.
+  repeated string models = 2;
+  repeated string efforts = 3;
+}
+enum RoleStatus {
+  ROLE_STATUS_UNSPECIFIED = 0;
+  ROLE_STATUS_ACTIVE = 1;
+  ROLE_STATUS_RETIRED = 2;
+}
+message Role {
+  string role_id = 1;
+  string name = 2;
+  string purpose = 3;
+  string instructions = 4;
+  repeated string permission_set_ids = 5;
+  repeated string context_set_ids = 6;
+  RoleStatus status = 7;
+  uint64 revision = 8;
+  PolicyExecutionSettings execution = 9;
+}
+enum RoleAssignmentStatus {
+  ROLE_ASSIGNMENT_STATUS_UNSPECIFIED = 0;
+  ROLE_ASSIGNMENT_STATUS_ACTIVE = 1;
+  ROLE_ASSIGNMENT_STATUS_INACTIVE = 2;
+}
+message RoleAssignment {
+  string assignment_id = 1;
+  string role_id = 2;
+  string tag_id = 3;
+  RoleAssignmentStatus status = 4;
+  uint64 revision = 5;
+}
+message PolicyRoleSnapshot {
+  RoleAssignment assignment = 1;
+  Role role = 2;
+}
+message TaskPolicySnapshot {
+  uint32 version = 1;
+  repeated PolicyRoleSnapshot roles = 2;
+  repeated PermissionSet permission_sets = 3;
+  repeated ContextSet context_sets = 4;
+  PolicyExecutionSettings execution = 5;
+}
+
+message PutPermissionSetRequest {
+  string operation_id = 1;
+  PermissionSet permission_set = 2;
+  optional uint64 expected_revision = 3;
+}
+message PutContextSetRequest {
+  string operation_id = 1;
+  ContextSet context_set = 2;
+  optional uint64 expected_revision = 3;
+}
+message PutRoleRequest {
+  string operation_id = 1;
+  Role role = 2;
+  optional uint64 expected_revision = 3;
+}
+message GetPolicyResourceRequest { string reference = 1; }
+message ListPolicyResourcesRequest {
+  uint32 limit = 1;
+  string cursor = 2;
+}
+message ListPermissionSetsResponse {
+  repeated PermissionSet permission_sets = 1;
+  string next_cursor = 2;
+}
+message ListContextSetsResponse {
+  repeated ContextSet context_sets = 1;
+  string next_cursor = 2;
+}
+message ListRolesResponse {
+  repeated Role roles = 1;
+  string next_cursor = 2;
+}
+message DeletePolicyResourceRequest {
+  string operation_id = 1;
+  string reference = 2;
+  uint64 expected_revision = 3;
+}
+message DeletePolicyResourceResponse { bool deleted = 1; }
+message AssignRoleRequest {
+  string operation_id = 1;
+  string role = 2;
+  string tag_id = 3;
+}
+message ListRoleAssignmentsRequest {
+  string role = 1;
+  string tag_id = 2;
+  RoleAssignmentStatus status = 3;
+  uint32 limit = 4;
+  string cursor = 5;
+}
+message ListRoleAssignmentsResponse {
+  repeated RoleAssignment assignments = 1;
+  string next_cursor = 2;
+}
+message DeactivateRoleAssignmentRequest {
+  string operation_id = 1;
+  string assignment_id = 2;
+  uint64 expected_revision = 3;
+}

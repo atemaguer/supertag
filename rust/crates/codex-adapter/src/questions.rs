@@ -6,62 +6,98 @@ use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, time::Duration};
 use supertag_protocol::{
     MAX_MESSAGE_BYTES,
-    v2::{HarnessAskQuestionRequest, harness_questions_client::HarnessQuestionsClient},
+    v2::{
+        AttemptCapabilities, HarnessAskQuestionRequest,
+        harness_questions_client::HarnessQuestionsClient,
+    },
 };
 use tonic::{Code, transport::Channel};
 
+use crate::coordination::{self, Arguments};
+
 pub(crate) const NONE: &str = "none-v1";
 pub(crate) const OBJECTIVE_ASK: &str = "objective-ask-text-v1";
+pub(crate) const FULL_COORDINATION: &str = "coordination-v1";
 
 pub(crate) struct Bridge {
     client: HarnessQuestionsClient<Channel>,
     token: String,
     task_id: String,
+    tag_id: String,
     attempt_id: String,
-    enabled: bool,
-    calls: BTreeMap<String, (String, Value)>,
+    capabilities: AttemptCapabilities,
+    full_inventory: bool,
+    coordination: coordination::Client,
+    calls: BTreeMap<String, (Arguments, Value)>,
+    secrets: Vec<String>,
+    asked: bool,
 }
 impl Bridge {
     pub(crate) fn new(
         channel: Channel,
         token: &str,
-        task_id: &str,
+        task: &supertag_protocol::v2::Task,
         attempt_id: &str,
-        enabled: bool,
+        capabilities: AttemptCapabilities,
+        full_inventory: bool,
     ) -> Self {
         Self {
-            client: HarnessQuestionsClient::new(channel)
+            client: HarnessQuestionsClient::new(channel.clone())
                 .max_encoding_message_size(MAX_MESSAGE_BYTES)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES),
             token: token.into(),
-            task_id: task_id.into(),
+            task_id: task.task_id.clone(),
+            tag_id: task.tag_id.clone(),
             attempt_id: attempt_id.into(),
-            enabled,
+            capabilities,
+            full_inventory,
+            coordination: coordination::Client::new(channel),
             calls: BTreeMap::new(),
+            secrets: vec![],
+            asked: false,
         }
     }
     pub(crate) fn enabled(&self) -> bool {
-        self.enabled
+        self.full_inventory || self.capabilities.may_ask_objective_question
+    }
+
+    pub(crate) fn full_inventory(&self) -> bool {
+        self.full_inventory
+    }
+    pub(crate) fn set_secrets(&mut self, secrets: &[String]) {
+        self.secrets = secrets.to_vec();
+    }
+    pub(crate) fn waiting_approvals(&self) -> Vec<String> {
+        let mut ids: Vec<_> = self.coordination.pending.values().cloned().collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
     }
     pub(crate) fn manifest(&self) -> &'static str {
-        if self.enabled { OBJECTIVE_ASK } else { NONE }
+        if self.full_inventory {
+            FULL_COORDINATION
+        } else if self.capabilities.may_ask_objective_question {
+            OBJECTIVE_ASK
+        } else {
+            NONE
+        }
     }
     pub(crate) fn tools(&self) -> Value {
-        tool_specs()
+        tool_specs(self.full_inventory)
     }
     pub(crate) async fn call(&mut self, params: &Value) -> Result<Value> {
         ensure!(
-            self.enabled,
-            "Codex question tool was not admitted for this Task"
+            self.enabled(),
+            "Codex coordination tools were not admitted for this Task"
         );
-        let text = validate_tool(params)?;
+        let arguments = coordination::arguments(params, self.full_inventory)?;
         let call_id = params["callId"]
             .as_str()
             .filter(|id| !id.is_empty() && id.len() <= 256 && !id.chars().any(char::is_control))
             .context("Codex tool call identity is invalid")?;
         if let Some((previous, result)) = self.calls.get(call_id) {
             ensure!(
-                previous == &text,
+                previous == &arguments,
                 "Codex reused a tool call identity with different arguments"
             );
             return Ok(result.clone());
@@ -71,13 +107,58 @@ impl Bridge {
             "Codex exceeded its coordination tool call limit"
         );
         let operation_id = format!(
-            "codex-ask-{:x}",
+            "codex-{:x}",
             Sha256::digest(serde_json::to_vec(&(
                 params["threadId"].as_str(),
                 params["turnId"].as_str(),
+                params["tool"].as_str(),
                 call_id
             ))?)
         );
+        let result = match &arguments {
+            Arguments::Ask(text)
+                if self.capabilities.may_ask_objective_question
+                    && self.coordination.pending.is_empty() =>
+            {
+                let reply = self
+                    .ask(
+                        operation_id,
+                        crate::auth::redact(text.clone(), &self.secrets),
+                    )
+                    .await?;
+                self.asked |= reply["success"] == true;
+                reply
+            }
+            Arguments::Post(post) if self.capabilities.may_use_workstream && !self.asked => {
+                self.coordination
+                    .post(
+                        post,
+                        operation_id,
+                        &self.task_id,
+                        &self.attempt_id,
+                        &self.token,
+                        &self.secrets,
+                    )
+                    .await?
+            }
+            Arguments::ReadWorkstream(page) if self.capabilities.may_use_workstream => {
+                self.coordination
+                    .read_workstream(page, &self.token, &self.secrets)
+                    .await?
+            }
+            Arguments::ReadMailbox(page) if self.capabilities.may_read_mailbox => {
+                self.coordination
+                    .read_mailbox(page, &self.tag_id, &self.token, &self.secrets)
+                    .await?
+            }
+            _ => coordination::refused(),
+        };
+        self.calls
+            .insert(call_id.into(), (arguments, result.clone()));
+        Ok(result)
+    }
+
+    async fn ask(&mut self, operation_id: String, text: String) -> Result<Value> {
         let input = HarnessAskQuestionRequest {
             operation_id,
             text: text.clone(),
@@ -127,14 +208,27 @@ impl Bridge {
                 Err(_) => bail!("could not confirm the Objective question receipt"),
             }
         }
-        let result = result.context("could not confirm the Objective question receipt")?;
-        self.calls.insert(call_id.into(), (text, result.clone()));
-        Ok(result)
+        result.context("could not confirm the Objective question receipt")
     }
 }
 
-pub(crate) fn tool_specs() -> Value {
-    json!([{"type":"namespace","name":"supertag","description":"Objective coordination through this Task's supervised execution.","tools":[{"type":"function","name":"ask","description":"Ask the operator one question needed to continue this Objective. After this returns, end your turn with a short reply and make no further tool calls. The answer arrives in this Session's next Task.","inputSchema":{"type":"object","properties":{"text":{"type":"string","minLength":1,"maxLength":16000}},"required":["text"],"additionalProperties":false}}]}])
+pub(crate) fn tool_specs(full_inventory: bool) -> Value {
+    let mut tools = vec![json!({
+        "type":"function", "name":"ask",
+        "description":"Ask the operator one question needed to continue this Objective. After this returns, end your turn with a short reply and make no further tool calls. The answer arrives in this Session's next Task.",
+        "inputSchema":{
+            "type":"object", "properties":{"text":{"type":"string","minLength":1,"maxLength":16000}},
+            "required":["text"], "additionalProperties":false
+        }
+    })];
+    if full_inventory {
+        tools.extend(coordination::tool_specs());
+    }
+    json!([{
+        "type":"namespace", "name":"supertag",
+        "description":"Coordination through this Task's supervised execution.",
+        "tools":tools
+    }])
 }
 
 pub(crate) fn validate_tool(params: &Value) -> Result<String> {

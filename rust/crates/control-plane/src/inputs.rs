@@ -74,7 +74,12 @@ impl Store {
             &follower,
             order,
         )
-        .await?;
+        .await?
+        .ok_or_else(|| {
+            StoreError::FailedPrecondition(
+                "Task policy changed; submit a new Task to continue this Session".into(),
+            )
+        })?;
         tx.commit().await?;
         Ok(input)
     }
@@ -123,22 +128,30 @@ impl Store {
         .bind(tag_id).bind(session_id).bind(TaskState::Queued as i64)
         .bind(LiveInputState::Dispatching as i64).bind(LiveInputState::Unknown as i64)
         .fetch_optional(&mut *tx).await?;
-        let response = if let Some(id) = id {
-            let lease_end: i64 = task.try_get("lease_expires_at_ms")?;
-            let valid_for_ms = lease_end.saturating_sub(now).min(ACKNOWLEDGEMENT_MS) as u64;
-            sqlx::query("UPDATE supertag_v2_live_inputs SET state=$1,acknowledgement_deadline_ms=$2 WHERE input_id=$3")
-                .bind(LiveInputState::Dispatching as i64).bind(now.saturating_add(ACKNOWLEDGEMENT_MS))
-                .bind(&id).execute(&mut *tx).await?;
-            TakeInputResponse {
-                input: Some(input_in(&mut tx, &id).await?.0),
-                valid_for_ms,
-            }
-        } else {
-            TakeInputResponse::default()
+        let Some(id) = id else {
+            tx.commit().await?;
+            return Ok(TakeInputResponse::default());
         };
+        let (mut input, _) = input_in(&mut tx, &id).await?;
+        // A Pending row created before policy was checked at admission may be
+        // left on disk. Leave its follower queued for ordinary execution.
+        if !compatible_policy_in(&mut tx, &attempt.task_id, &input.follower_task_id).await? {
+            set_state(&mut tx, &mut input, LiveInputState::Rejected).await?;
+            tx.commit().await?;
+            return Ok(TakeInputResponse::default());
+        }
+        let lease_end: i64 = task.try_get("lease_expires_at_ms")?;
+        let valid_for_ms = lease_end.saturating_sub(now).min(ACKNOWLEDGEMENT_MS) as u64;
+        sqlx::query("UPDATE supertag_v2_live_inputs SET state=$1,acknowledgement_deadline_ms=$2 WHERE input_id=$3")
+            .bind(LiveInputState::Dispatching as i64).bind(now.saturating_add(ACKNOWLEDGEMENT_MS))
+            .bind(&id).execute(&mut *tx).await?;
+        input.state = LiveInputState::Dispatching.into();
         // A lost response is uncertain. No later take returns this text again.
         tx.commit().await?;
-        Ok(response)
+        Ok(TakeInputResponse {
+            input: Some(input),
+            valid_for_ms,
+        })
     }
 
     pub async fn settle_input(
@@ -327,7 +340,10 @@ pub(crate) async fn record_live_input_in(
     attempt_id: &str,
     follower: &Task,
     order: i64,
-) -> Result<LiveInput> {
+) -> Result<Option<LiveInput>> {
+    if !compatible_policy_in(tx, task_id, &follower.task_id).await? {
+        return Ok(None);
+    }
     let input = LiveInput {
         input_id: Uuid::new_v4().to_string(),
         task_id: task_id.to_owned(),
@@ -341,7 +357,33 @@ pub(crate) async fn record_live_input_in(
         .bind(&input.input_id).bind(principal).bind(operation).bind(&input.task_id)
         .bind(&input.attempt_id).bind(&input.follower_task_id).bind(i64::from(input.state))
         .execute(&mut **tx).await?;
-    Ok(input)
+    Ok(Some(input))
+}
+
+async fn compatible_policy_in(
+    tx: &mut Transaction<'_, Any>,
+    task_id: &str,
+    follower_id: &str,
+) -> Result<bool> {
+    // Compare accepted Task values. Actions and approval rules are normalized
+    // at admission, so a Tag revision with the same policy is immaterial.
+    let matches: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM supertag_v2_tasks active JOIN supertag_v2_tasks follower
+           ON follower.tag_id=active.tag_id AND follower.session_id=active.session_id
+         WHERE active.task_id=$1 AND follower.task_id=$2
+           AND active.instructions=follower.instructions
+           AND active.allowed_actions=follower.allowed_actions
+           AND active.approval_rules=follower.approval_rules
+           AND active.policy_effective_digest=follower.policy_effective_digest
+           AND active.harness_kind=follower.harness_kind
+           AND active.workspace_id IS NOT DISTINCT FROM follower.workspace_id
+           AND active.workspace_base_commit IS NOT DISTINCT FROM follower.workspace_base_commit",
+    )
+    .bind(task_id)
+    .bind(follower_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(matches != 0)
 }
 
 pub(crate) async fn input_for_follower_in(

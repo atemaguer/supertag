@@ -61,6 +61,163 @@ fn host_request<T>(input: T, token: &str, generation: u64) -> Result<Request<T>>
     Ok(request)
 }
 
+#[tokio::test]
+async fn cli_policy_catalog_freezes_accepted_roles_and_sets_across_the_gateway() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let gateway_token = Uuid::new_v4().to_string();
+    let operator_token = Uuid::new_v4().to_string();
+    let host_token = Uuid::new_v4().to_string();
+    let mut plane = command(&["control-plane"]);
+    plane
+        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+        .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
+        .env(
+            "SUPERTAG_DATABASE_URL",
+            format!(
+                "sqlite://{}?mode=rwc",
+                directory.path().join("control.db").display()
+            ),
+        );
+    let (_plane, private) = service(plane).await?;
+    let mut gateway = command(&["gateway", "--control-plane", &private]);
+    gateway
+        .env("SUPERTAG_GATEWAY_TOKEN", &gateway_token)
+        .env("SUPERTAG_OPERATOR_TOKEN", &operator_token);
+    let (_gateway, public) = service(gateway).await?;
+    cli(
+        &[
+            "put-tag",
+            "--gateway",
+            &public,
+            "engineer",
+            "--instructions",
+            "Review changes",
+            "--allow",
+            "files:read",
+        ],
+        &operator_token,
+    )
+    .await?;
+    let permission = directory.path().join("permission.json");
+    let context = directory.path().join("context.json");
+    let role = directory.path().join("role.json");
+    std::fs::write(
+        &permission,
+        r#"{"set_id":"edit","name":"edit","permissions":[{"target":"runtime","action":"files:write"}]}"#,
+    )?;
+    std::fs::write(
+        &context,
+        r#"{"set_id":"notes","name":"notes","items":[{"item_key":"policy","type":"example/notes","version":1,"config":{"text":"Review the diff"}}]}"#,
+    )?;
+    std::fs::write(
+        &role,
+        r#"{"role_id":"review","name":"review","purpose":"Review changes","instructions":"Keep the evidence.","permission_set_ids":["edit"],"context_set_ids":["notes"]}"#,
+    )?;
+    for (kind, file) in [
+        ("permission-set", &permission),
+        ("context-set", &context),
+        ("role", &role),
+    ] {
+        let value = cli(
+            &[
+                "policy",
+                "--gateway",
+                &public,
+                "put",
+                kind,
+                file.to_str().context("policy fixture path")?,
+            ],
+            &operator_token,
+        )
+        .await?;
+        assert_eq!(value["revision"], 1);
+    }
+    let assignment = cli(
+        &[
+            "policy",
+            "--gateway",
+            &public,
+            "assign",
+            "review",
+            "engineer",
+            "--operation-id",
+            "assign-once",
+        ],
+        &operator_token,
+    )
+    .await?;
+    assert_eq!(assignment["status"], "active");
+    let channel = Channel::from_shared(public.clone())?
+        .timeout(WAIT)
+        .connect()
+        .await?;
+    let mut catalog = policy_catalog_client::PolicyCatalogClient::new(channel.clone());
+    let mut operator = operator_client::OperatorClient::new(channel);
+    assert_eq!(
+        catalog
+            .list_roles(authenticated_request(
+                ListPolicyResourcesRequest::default(),
+                &host_token,
+                Some("operator:local")
+            )?)
+            .await
+            .unwrap_err()
+            .code(),
+        Code::Unauthenticated
+    );
+    let task = |operation: &str| SubmitTaskRequest {
+        tag_id: "engineer".into(),
+        session_id: "reviews".into(),
+        operation_id: operation.into(),
+        prompt: "Review the diff".into(),
+    };
+    let before = operator
+        .submit_task(authenticated_request(
+            task("before"),
+            &operator_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    let snapshot = before.policy_snapshot.as_ref().context("frozen policy")?;
+    assert_eq!(before.allowed_actions, ["files:read", "files:write"]);
+    assert!(before.instructions.contains("Keep the evidence."));
+    assert_eq!(snapshot.context_sets[0].items[0].item_key, "policy");
+    let id = assignment["assignment_id"]
+        .as_str()
+        .context("assignment ID")?;
+    let inactive = cli(
+        &[
+            "policy",
+            "--gateway",
+            &public,
+            "deactivate",
+            id,
+            "--expected-revision",
+            "1",
+        ],
+        &operator_token,
+    )
+    .await?;
+    assert_eq!(inactive["status"], "inactive");
+    let after = operator
+        .submit_task(authenticated_request(task("after"), &operator_token, None)?)
+        .await?
+        .into_inner();
+    assert_eq!(after.allowed_actions, ["files:read"]);
+    assert!(!after.instructions.contains("Keep the evidence."));
+    let replay = operator
+        .submit_task(authenticated_request(
+            task("before"),
+            &operator_token,
+            None,
+        )?)
+        .await?
+        .into_inner();
+    assert_eq!(replay, before);
+    Ok(())
+}
+
 #[cfg(feature = "test-fixtures")]
 #[tokio::test]
 async fn workstream_approval_reaches_the_same_session_and_is_consumed_by_the_write() -> Result<()> {
