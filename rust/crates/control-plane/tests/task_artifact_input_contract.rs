@@ -276,6 +276,142 @@ async fn exercise(url: &str) {
         publication_approval_id: None,
     }];
     assert!(store.submit_task(OPERATOR, &request).await.is_err());
+    Box::pin(withdrawal_blocks_delivery(
+        &store,
+        &host,
+        &request,
+        &foreign.objective_id,
+        false,
+    ))
+    .await;
+    let later = objective(&store, "later-objective").await;
+    request.operation_id = "later-consumer".into();
+    request.session_id = later.session_id;
+    Box::pin(withdrawal_blocks_delivery(
+        &store,
+        &host,
+        &request,
+        &later.objective_id,
+        true,
+    ))
+    .await;
+}
+
+async fn withdrawal_blocks_delivery(
+    store: &Store,
+    host: &HostAuthority,
+    request: &SubmitTaskRequest,
+    objective: &str,
+    response_lost: bool,
+) {
+    let artifact_id = &request.input_artifacts[0].artifact_id;
+    let publication_id = format!("published-{objective}");
+    let consumption_id = format!("consumption-{objective}");
+    let publication = store
+        .publish_artifact(
+            OPERATOR,
+            &PublishArtifactRequest {
+                publication_id: publication_id.clone(),
+                artifact_id: artifact_id.clone(),
+                paths: vec!["report.txt".into()],
+                audience_objective_ids: vec![objective.into()],
+                supersedes_publication_id: None,
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .consume_artifact_publication(
+            OPERATOR,
+            &ConsumeArtifactPublicationRequest {
+                consumption_id: consumption_id.clone(),
+                publication_id: publication.publication_id,
+                objective_id: objective.into(),
+            },
+        )
+        .await
+        .unwrap();
+    let mut request = request.clone();
+    request.input_artifacts[0].publication_approval_id = Some(publication_id);
+    let consumer = store.submit_task(OPERATOR, &request).await.unwrap();
+    let opening = start(store, host, &format!("open-{objective}")).await;
+    store
+        .finish_task(
+            host,
+            &FinishTaskRequest {
+                task_id: opening.task_id,
+                attempt_id: opening.attempt_id,
+                lease_token: opening.lease_token,
+                result: "Review pending".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let attempt = start(store, host, &format!("input-{objective}")).await;
+    assert_eq!(attempt.task_id, consumer.task_id);
+    let operation_id = supertag_protocol::task_artifact_inputs::operation_id(artifact_id);
+    let acquisition = store
+        .acquire_artifact(
+            host,
+            &AcquireArtifactRequest {
+                attempt: Some(attempt.clone()),
+                destination: Some(
+                    supertag_protocol::artifacts::materialized_artifact_directory(
+                        &attempt.attempt_id,
+                        &operation_id,
+                    ),
+                ),
+                operation_id,
+                artifact_id: artifact_id.clone(),
+                paths: vec!["report.txt".into()],
+                delivery: ArtifactDelivery::Materialize.into(),
+            },
+        )
+        .await
+        .unwrap();
+    let file = GetAcquiredArtifactFileRequest {
+        attempt: Some(attempt.clone()),
+        acquisition_id: acquisition.acquisition_id.clone(),
+        path: "report.txt".into(),
+    };
+    assert_eq!(
+        store.get_acquired_artifact_file(host, &file).await.unwrap(),
+        acquisition.files[0]
+    );
+    let settlement = SettleArtifactAcquisitionRequest {
+        attempt: Some(attempt),
+        acquisition_id: acquisition.acquisition_id,
+        state: ArtifactAcquisitionState::Delivered.into(),
+    };
+    if response_lost {
+        let acknowledged = store
+            .settle_artifact_acquisition(host, &settlement)
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .settle_artifact_acquisition(host, &settlement)
+                .await
+                .unwrap(),
+            acknowledged
+        );
+    }
+    store
+        .withdraw_artifact_consumption(
+            OPERATOR,
+            &WithdrawArtifactApprovalRequest {
+                approval_id: consumption_id,
+                expected_revision: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(store.get_acquired_artifact_file(host, &file).await.is_err());
+    assert!(matches!(
+        store.settle_artifact_acquisition(host, &settlement).await,
+        Err(StoreError::NotFound(_))
+    ));
 }
 
 #[tokio::test]

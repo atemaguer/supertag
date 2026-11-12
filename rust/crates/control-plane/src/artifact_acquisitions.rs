@@ -316,6 +316,23 @@ impl Store {
         let row=sqlx::query("SELECT payload FROM supertag_v2_artifact_acquisitions WHERE acquisition_id=$1 AND attempt_id=$2 AND task_id=$3")
             .bind(&input.acquisition_id).bind(&identity.attempt_id).bind(&identity.task_id).fetch_optional(&mut *tx).await?.ok_or_else(missing)?;
         let mut acquisition = receipt(&row)?;
+        let preparing_input = input.state() == ArtifactAcquisitionState::Delivered
+            && acquisition
+                .operation_id
+                .starts_with(supertag_protocol::task_artifact_inputs::OPERATION_PREFIX);
+        let now = self.execution_now_ms();
+        if preparing_input {
+            // The Host may have buffered these bytes while preparing an exclusive
+            // Workspace. Recheck the accepted publication before launch, even
+            // when an earlier Delivered response was lost.
+            crate::artifact_captures::running(&owned, now)?;
+            crate::artifact_publications::accepted_capture_in(
+                &mut tx,
+                &identity.task_id,
+                &acquisition.artifact_id,
+            )
+            .await?;
+        }
         if acquisition.state == input.state {
             return Ok(acquisition);
         }
@@ -327,8 +344,9 @@ impl Store {
                 "artifact acquisition is already terminal".into(),
             ));
         }
-        let now = self.execution_now_ms();
-        crate::artifact_captures::running(&owned, now)?;
+        if !preparing_input {
+            crate::artifact_captures::running(&owned, now)?;
+        }
         acquisition.state = input.state;
         acquisition.updated_at_ms = now;
         sqlx::query("UPDATE supertag_v2_artifact_acquisitions SET state=$1,payload=$2 WHERE acquisition_id=$3").bind(input.state as i64).bind(acquisition.encode_to_vec()).bind(&input.acquisition_id).execute(&mut *tx).await?;
