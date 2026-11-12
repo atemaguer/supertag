@@ -33,11 +33,13 @@ use supertag_protocol::v2::{
 use supertag_protocol::{
     MAX_CHECKPOINT_BYTES, MAX_MESSAGE_BYTES, matches_bearer,
     v2::{
-        AdapterBootstrap, HarnessAskQuestionRequest, HarnessAttachRequest, HarnessCompleteRequest,
-        HarnessCompleteResponse, HarnessPublishRequest, HarnessRun, HarnessSettleLiveInputRequest,
+        AdapterBootstrap, AppliedExecutionLimits, ConfirmExecutionLimitsResponse,
+        ExecutionLimitEnforcement, ExecutionLimits, HarnessAskQuestionRequest,
+        HarnessAttachRequest, HarnessCompleteRequest, HarnessCompleteResponse,
+        HarnessPublishRequest, HarnessRun, HarnessSettleLiveInputRequest,
         HarnessTakeLiveInputRequest, HarnessUsageRequest, LiveInput, LiveInputReceipt,
-        LiveInputState, ObjectiveQuestion, ReportAttemptUsageResponse, SessionCheckpoint,
-        TakeInputResponse, Task, TaskEvent,
+        LiveInputState, ObjectiveQuestion, ReportAttemptUsageResponse, ReportedCostLimit,
+        SessionCheckpoint, TakeInputResponse, Task, TaskEvent,
         harness_questions_server::{HarnessQuestions, HarnessQuestionsServer},
         harness_server::{Harness, HarnessServer},
     },
@@ -57,6 +59,9 @@ struct Observed {
     events: Vec<HarnessPublishRequest>,
     outcome: Option<HarnessCompleteRequest>,
     usage: Vec<HarnessUsageRequest>,
+    execution_limits: Option<ExecutionLimits>,
+    applied_limits: Vec<AppliedExecutionLimits>,
+    lose_usage_receipt: bool,
     input: Option<LiveInput>,
     dispatched: Option<LiveInput>,
     receipts: Vec<HarnessSettleLiveInputRequest>,
@@ -111,6 +116,7 @@ impl Harness for HarnessFixture {
         if let Some(snapshot) = &observed.policy_snapshot {
             task.policy_snapshot = Some(snapshot.clone());
         }
+        task.execution_limits = observed.execution_limits.clone();
         Ok(Response::new(HarnessRun {
             task: Some(task),
             attempt_id: "native-attempt".into(),
@@ -119,6 +125,16 @@ impl Harness for HarnessFixture {
             coordination: self.coordination,
             resolved_skills: observed.resolved_skills.clone(),
         }))
+    }
+    async fn confirm_execution_limits(
+        &self,
+        request: Request<AppliedExecutionLimits>,
+    ) -> Result<Response<ConfirmExecutionLimitsResponse>, Status> {
+        self.authenticate(&request)?;
+        let mut observed = self.observed.lock().await;
+        assert!(observed.events.is_empty() && observed.usage.is_empty());
+        observed.applied_limits.push(request.into_inner());
+        Ok(Response::new(ConfirmExecutionLimitsResponse {}))
     }
     async fn take_live_input(
         &self,
@@ -206,8 +222,20 @@ impl Harness for HarnessFixture {
             observed.outcome.is_none(),
             "usage is recorded before terminal outcome"
         );
-        assert_eq!(request.get_ref().sequence, observed.usage.len() as u64 + 1);
-        observed.usage.push(request.into_inner());
+        let request = request.into_inner();
+        if let Some(prior) = observed
+            .usage
+            .last()
+            .filter(|prior| prior.sequence == request.sequence)
+        {
+            assert_eq!(prior, &request);
+            return Ok(Response::new(ReportAttemptUsageResponse {}));
+        }
+        assert_eq!(request.sequence, observed.usage.len() as u64 + 1);
+        observed.usage.push(request);
+        if std::mem::take(&mut observed.lose_usage_receipt) {
+            return Err(Status::unavailable("synthetic usage response loss"));
+        }
         Ok(Response::new(ReportAttemptUsageResponse {}))
     }
 }
@@ -1762,6 +1790,198 @@ async fn measured_usage_is_independent_of_model_selection_exit_and_checkpoint_su
         assert_eq!(
             usage.observed_model.as_deref(),
             model.filter(|model| *model != KEY)
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn reported_token_ceiling_interrupts_exact_resumed_turn_after_usage_receipt() -> Result<()> {
+    let first = NativeFixture::new(&successful("first turn"), "exit 0")?;
+    let first_server = HarnessProcess::start(&["files:read"]).await?;
+    run(first.options(), first_server.bootstrap.clone()).await?;
+    let checkpoint = first_server
+        .observed
+        .lock()
+        .await
+        .outcome
+        .as_ref()
+        .unwrap()
+        .checkpoint
+        .clone();
+    ensure!(checkpoint.is_some(), "missing first checkpoint");
+
+    let native = NativeFixture::new(&successful("no second result"), "exit 0")?;
+    std::fs::write(
+        native.directory.path().join("budget-mode"),
+        "stop-on-report",
+    )?;
+    let server = HarnessProcess::with_checkpoint(&["files:read"], checkpoint).await?;
+    let limits = ExecutionLimits {
+        max_reported_tokens: Some(7),
+        max_native_agents: Some(0),
+        ..Default::default()
+    };
+    {
+        let mut state = server.observed.lock().await;
+        state.execution_limits = Some(limits.clone());
+        state.lose_usage_receipt = true;
+    }
+    run(native.options(), server.bootstrap.clone()).await?;
+    let state = server.observed.lock().await;
+    let outcome = state.outcome.as_ref().context("outcome")?;
+    assert!(!outcome.succeeded && outcome.checkpoint.is_none());
+    assert!(
+        outcome
+            .result
+            .contains("Codex reported token budget exceeded")
+    );
+    assert_eq!(native.read("budget-interrupted")?, "native-turn");
+    assert_eq!(state.applied_limits.len(), 1);
+    let applied = &state.applied_limits[0];
+    assert_eq!(applied.limits.as_ref(), Some(&limits));
+    assert_eq!(
+        applied.native_agents(),
+        ExecutionLimitEnforcement::HarnessGuard
+    );
+    assert_eq!(
+        applied.reported_tokens(),
+        ExecutionLimitEnforcement::InterruptOnReport
+    );
+    assert_eq!(state.usage.len(), 1);
+    assert_eq!(
+        state.usage[0].native_usage.as_ref().unwrap().total_tokens,
+        Some(7)
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn token_budget_advisory_is_once_and_nonblocking_with_enough_headroom() -> Result<()> {
+    for (mode, limit, advisories) in [
+        ("advisory", 100_000, 1),
+        ("advisory-rejected", 100_000, 1),
+        ("advisory-low-headroom", 10_000, 0),
+    ] {
+        let native = NativeFixture::new(&successful("Provider output"), "exit 0")?;
+        std::fs::write(native.directory.path().join("budget-mode"), mode)?;
+        let server = HarnessProcess::start(&["files:read"]).await?;
+        server.observed.lock().await.execution_limits = Some(ExecutionLimits {
+            max_reported_tokens: Some(limit),
+            ..Default::default()
+        });
+        run(native.options(), server.bootstrap.clone()).await?;
+        let state = server.observed.lock().await;
+        let outcome = state.outcome.as_ref().context("outcome")?;
+        assert!(outcome.succeeded, "{}", outcome.result);
+        let requests: Vec<Value> = native
+            .read("requests.jsonl")?
+            .lines()
+            .map(serde_json::from_str)
+            .collect::<std::result::Result<_, _>>()?;
+        let advisory: Vec<_> = requests
+            .iter()
+            .filter(|request| request["method"] == "turn/steer")
+            .collect();
+        assert_eq!(advisory.len(), advisories);
+        if let Some(advisory) = advisory.first() {
+            assert_eq!(advisory["params"]["expectedTurnId"], "native-turn");
+            let message = advisory["params"]["input"][0]["text"].as_str().unwrap();
+            assert!(
+                message.contains("80000 of 100000 reported tokens")
+                    && message.contains("20000 remain")
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn bounded_codex_completion_requires_provider_usage_and_refuses_unsupported_limits()
+-> Result<()> {
+    for (limits, result, launched) in [
+        (
+            ExecutionLimits {
+                max_reported_tokens: Some(8),
+                ..Default::default()
+            },
+            "Provider output",
+            true,
+        ),
+        (
+            ExecutionLimits {
+                max_reported_tokens: Some(2_000_000),
+                ..Default::default()
+            },
+            "Provider output",
+            true,
+        ),
+        (
+            ExecutionLimits {
+                max_reported_tokens: Some(8),
+                ..Default::default()
+            },
+            "without valid usage",
+            true,
+        ),
+        (
+            ExecutionLimits {
+                max_reported_cost: Some(ReportedCostLimit {
+                    currency: "USD".into(),
+                    amount_minor: 50,
+                }),
+                ..Default::default()
+            },
+            "does not support a reported cost limit",
+            false,
+        ),
+        (
+            ExecutionLimits {
+                max_native_agents: Some(1),
+                ..Default::default()
+            },
+            "native subagents are disabled",
+            false,
+        ),
+    ] {
+        let mut output = successful("Provider output");
+        if result == "without valid usage" {
+            let mut events: Vec<Value> = output
+                .lines()
+                .map(serde_json::from_str)
+                .collect::<std::result::Result<_, _>>()?;
+            events
+                .last_mut()
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove("usage");
+            output = event_lines(&events);
+        }
+        let native = NativeFixture::new(&output, "exit 0")?;
+        let server = HarnessProcess::start(&["files:read"]).await?;
+        let accepted_token_limit = limits.max_reported_tokens;
+        server.observed.lock().await.execution_limits = Some(limits);
+        run(native.options(), server.bootstrap.clone()).await?;
+        let state = server.observed.lock().await;
+        let outcome = state.outcome.as_ref().context("outcome")?;
+        assert_eq!(
+            outcome.succeeded,
+            result == "Provider output",
+            "{}",
+            outcome.result
+        );
+        assert!(outcome.result.contains(result), "{}", outcome.result);
+        assert_eq!(state.applied_limits.len(), usize::from(launched));
+        if let Some(applied) = state.applied_limits.first() {
+            assert_eq!(
+                applied.limits.as_ref().unwrap().max_reported_tokens,
+                accepted_token_limit.map(|value| value.min(1_000_000))
+            );
+        }
+        assert_eq!(
+            native.directory.path().join("requests.jsonl").exists(),
+            launched
         );
     }
     Ok(())

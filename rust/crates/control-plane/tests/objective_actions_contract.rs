@@ -27,6 +27,7 @@ async fn turn(store: &Store, objective: &Objective, operation: &str) -> Task {
         .submit_task(
             OP,
             &SubmitTaskRequest {
+                execution_limits: None,
                 tag_id: objective.owner_tag_id.clone(),
                 session_id: objective.session_id.clone(),
                 operation_id: operation.into(),
@@ -384,6 +385,7 @@ async fn contract(url: String) {
             .submit_task(
                 OP,
                 &SubmitTaskRequest {
+                    execution_limits: None,
                     tag_id: "owner".into(),
                     session_id: paused.session_id,
                     operation_id: "paused-after-action-change".into(),

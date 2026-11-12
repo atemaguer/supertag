@@ -17,10 +17,14 @@ import {
 } from "./src/rust-adapter/gen/supertag/runtime/v2/policy_pb.js";
 import {
   AdapterBootstrapSchema,
+  type AppliedExecutionLimits,
   ApprovalState,
   type AttemptCapabilities,
   CommitReviewDecision,
   ContextPinSchema,
+  ExecutionLimitEnforcement,
+  type ExecutionLimits,
+  ExecutionLimitsSchema,
   Harness,
   type HarnessAskQuestionRequest,
   type HarnessAskWorkSessionQuestionRequest,
@@ -80,6 +84,7 @@ async function invoke({
   lostQuestion = false,
   coordination,
   policySnapshot,
+  executionLimits,
   model,
   skill,
   sessionId = "session",
@@ -103,6 +108,7 @@ async function invoke({
       >
     >;
   policySnapshot?: TaskPolicySnapshot;
+  executionLimits?: ExecutionLimits;
   model?: string;
   skill?: { markdown: string; tamper?: boolean };
   sessionId?: string;
@@ -117,6 +123,7 @@ async function invoke({
   const completions: HarnessCompleteRequest[] = [];
   const events: string[] = [];
   const usage: HarnessUsageRequest[] = [];
+  const appliedLimits: AppliedExecutionLimits[] = [];
   const settlements: LiveInputReceipt[] = [];
   const questions: HarnessAskQuestionRequest[] = [];
   const posts: HarnessPostWorkstreamRequest[] = [];
@@ -162,12 +169,19 @@ async function invoke({
     instructions: "Work on the accepted Task.",
     allowedActions: actions,
     ...(policySnapshot ? { policySnapshot } : {}),
+    ...(executionLimits ? { executionLimits } : {}),
   });
   let cancelAdapter = () => {};
   const server = createServer(
     connectNodeAdapter({
       routes(router) {
         router.service(Harness, {
+          confirmExecutionLimits(request, context) {
+            expect(context.requestHeader.get("authorization")).toBe(`Bearer ${token}`);
+            expect(usage).toHaveLength(0);
+            appliedLimits.push(request);
+            return {};
+          },
           attach(_request, context) {
             expect(context.requestHeader.get("authorization")).toBe(`Bearer ${token}`);
             return {
@@ -198,6 +212,7 @@ async function invoke({
             return request;
           },
           reportUsage(request) {
+            expect(completions).toHaveLength(0);
             usage.push(request);
             return {};
           },
@@ -497,6 +512,7 @@ async function invoke({
     completions,
     events,
     usage,
+    appliedLimits,
     settlements,
     questions,
     posts,
@@ -509,6 +525,99 @@ async function invoke({
     workSessionQuestions,
   };
 }
+
+const budgetUsd = create(ExecutionLimitsSchema, {
+  maxReportedCost: { amountMinor: 50n, currency: "USD" },
+});
+
+it("passes the accepted USD budget to the real Claude SDK and retains cost on budget stop", async () => {
+  const run = await invoke({ prompt: "budget-overrun", executionLimits: budgetUsd });
+  expect(run.appliedLimits).toMatchObject([
+    { limits: budgetUsd, reportedCost: ExecutionLimitEnforcement.PROVIDER_BUDGET },
+  ]);
+  expect(await readFile(join(run.workspace, "native-budget-usd"), "utf8")).toBe("0.5");
+  expect(run.usage.at(-1)).toMatchObject({
+    amountMinor: 51n,
+    currency: "USD",
+    estimated: false,
+    nativeUsage: { totalTokens: 19n },
+  });
+  expect(run.completions[0]).toMatchObject({
+    succeeded: false,
+    result: "Claude reported USD budget exceeded.",
+  });
+  expect(run.completions[0]?.checkpoint).toBeUndefined();
+  const pid = Number(await readFile(join(run.workspace, "native-child.pid"), "utf8"));
+  expect(() => process.kill(pid, 0)).toThrow();
+}, 30000);
+
+it.each([
+  ["budget-success", true, 49n],
+  ["budget-rounded-overrun", false, 50n],
+  ["budget-no-cost", false, undefined],
+] as const)(
+  "checks raw cost and requires evidence before reporting bounded Claude success: %s",
+  async (prompt, succeeded, amount) => {
+    const run = await invoke({ prompt, executionLimits: budgetUsd });
+    expect(run.completions[0]?.succeeded).toBe(succeeded);
+    expect(run.usage.at(-1)?.amountMinor).toBe(amount);
+    expect(Boolean(run.completions[0]?.checkpoint)).toBe(succeeded);
+  },
+  30000,
+);
+
+it("sequences cost-only and combined native usage on independent receipt lanes", async () => {
+  const run = await invoke({ prompt: "budget-mixed-usage", executionLimits: budgetUsd });
+  expect(run.completions[0]?.succeeded, run.completions[0]?.result).toBe(true);
+  expect(
+    run.usage.map(({ sequence, amountMinor, nativeUsage }) => [
+      sequence,
+      amountMinor,
+      nativeUsage?.totalTokens,
+    ]),
+  ).toEqual([
+    [1n, 20n, undefined],
+    [1n, undefined, 19n],
+    [2n, 49n, 19n],
+  ]);
+}, 30000);
+
+it("attributes only this Claude Attempt's cost when restored native totals are cumulative or reset", async () => {
+  for (const firstPrompt of ["budget-lifetime-start", "write"]) {
+    const first = await invoke({ prompt: firstPrompt });
+    const checkpoint = first.completions[0]?.checkpoint;
+    expect(checkpoint).toBeDefined();
+    const resumed = await invoke({
+      prompt: firstPrompt === "budget-lifetime-start" ? "budget-lifetime-resume" : "budget-success",
+      checkpoint,
+      executionLimits: budgetUsd,
+    });
+    expect(resumed.completions[0]?.succeeded, resumed.completions[0]?.result).toBe(true);
+    expect(resumed.usage.at(-1)?.amountMinor).toBe(49n);
+  }
+}, 30000);
+
+it.each([
+  [{ maxReportedCost: { currency: "USD", amountMinor: 0n } }, "budget is zero"],
+  [{ maxReportedCost: { currency: "EUR", amountMinor: 50n } }, "requires an accepted USD budget"],
+  [{ maxReportedTokens: 100n }, "does not support the accepted token or native agent limit"],
+] as const)(
+  "refuses incompatible Claude limits before native execution",
+  async (limits, reason) => {
+    const run = await invoke({
+      prompt: "budget-success",
+      executionLimits: create(ExecutionLimitsSchema, limits),
+    });
+    expect(run.completions[0]?.succeeded).toBe(false);
+    expect(run.completions[0]?.result).toContain(reason);
+    expect(run.appliedLimits).toEqual([]);
+    expect(run.usage).toEqual([]);
+    await expect(readFile(join(run.workspace, "native-budget-usd"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  },
+  30000,
+);
 
 it("runs the real Node SDK, denies unadmitted tools, mirrors a bounded checkpoint, and retries the same receipt", async () => {
   const run = await invoke({ lostComplete: true });

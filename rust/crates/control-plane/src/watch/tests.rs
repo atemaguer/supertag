@@ -56,6 +56,7 @@ async fn contract(url: &str) -> anyhow::Result<()> {
 
     store.put_tag("engineer", "Watch changes", vec![]).await?;
     let input = SendMessageRequest {
+        execution_limits: None,
         tag_id: "engineer".into(),
         conversation: "secret".into(),
         text: "Hello".into(),
@@ -472,6 +473,7 @@ async fn private_work_sessions(
         .send_message(
             ALICE,
             &SendMessageRequest {
+                execution_limits: None,
                 tag_id: parent.tag_id,
                 conversation: "secret".into(),
                 text: "Keep going separately".into(),

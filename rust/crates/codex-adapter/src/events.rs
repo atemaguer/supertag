@@ -97,6 +97,7 @@ impl Stream {
                     .context("Codex completed with invalid usage")?;
                 ensure!(cached <= input, "Codex completed with invalid usage");
                 self.usage = Some(NativeTokenUsage {
+                    total_tokens: None,
                     input_tokens: input,
                     cached_input_tokens: cached,
                     output_tokens: output,

@@ -44,6 +44,7 @@ async fn ordinary(store: &Store, tag: &str) -> Task {
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                execution_limits: None,
                 tag_id: tag.into(),
                 session_id: "ordinary".into(),
                 operation_id: Uuid::new_v4().to_string(),

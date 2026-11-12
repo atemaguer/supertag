@@ -14,6 +14,7 @@ async fn submit(store: &Store, session: &str) -> Task {
         .submit_task(
             OP,
             &SubmitTaskRequest {
+                execution_limits: None,
                 tag_id: "lead".into(),
                 session_id: session.into(),
                 operation_id: Uuid::new_v4().to_string(),
@@ -364,12 +365,15 @@ async fn objective_report_continuation(url: &str) {
         continued.objective_id.as_deref(),
         Some(objective.objective_id.as_str())
     );
-    assert!(matches!(
+    // A direct owner Objective report can start additional work under the
+    // current pool and capacity. Derived approval-report turns stay scoped.
+    assert!(
         store
-            .start_work_session(&host, &start(&first_report, "recursive-report"))
-            .await,
-        Err(StoreError::PermissionDenied)
-    ));
+            .attempt_capabilities(&host, &first_report)
+            .await
+            .unwrap()
+            .may_start_work_session
+    );
     finish(&store, &host, &first_report, None).await;
     let second_report = run(
         &store,

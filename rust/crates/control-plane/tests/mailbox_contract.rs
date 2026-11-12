@@ -114,6 +114,7 @@ async fn ordinary(store: &Store, tag: &str) -> Task {
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                execution_limits: None,
                 tag_id: tag.into(),
                 session_id: "ordinary".into(),
                 operation_id: Uuid::new_v4().to_string(),
@@ -368,6 +369,7 @@ async fn durable_delivery(url: &str) {
             .submit_task(
                 OPERATOR,
                 &SubmitTaskRequest {
+                    execution_limits: None,
                     tag_id: "recipient".into(),
                     session_id: "inbox:recipient".into(),
                     operation_id: "spoof-inbox".into(),

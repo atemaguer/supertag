@@ -112,6 +112,7 @@ async fn conversation_scope_survives_gateway_forwards_and_task_reads() -> Result
         .into_inner();
     assert_eq!(tags.tags[0].tag_id, "engineer");
     let alice_message = SendMessageRequest {
+        execution_limits: None,
         tag_id: "engineer".into(),
         conversation: "personal".into(),
         text: "Alice's private message".into(),
@@ -442,6 +443,7 @@ async fn rust_launcher_and_go_tui_send_a_real_conversation() -> Result<()> {
     messages
         .send_message(authenticated_request(
             SendMessageRequest {
+                execution_limits: None,
                 tag_id: "engineer".into(),
                 conversation: thread.name.clone(),
                 operation_id: "external-client".into(),
@@ -807,6 +809,7 @@ async fn watch_replays_private_conversations_after_services_restart() -> Result<
     tags.put_tag(authenticated_request(put("engineer"), &alice_token, None)?)
         .await?;
     let send = |text: &str| SendMessageRequest {
+        execution_limits: None,
         tag_id: "engineer".into(),
         conversation: "private".into(),
         operation_id: "send-once".into(),

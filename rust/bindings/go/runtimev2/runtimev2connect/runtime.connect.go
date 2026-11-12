@@ -330,6 +330,9 @@ const (
 	WorkspaceDirectoryGetReviewArtifactProcedure = "/supertag.runtime.v2.WorkspaceDirectory/GetReviewArtifact"
 	// HarnessAttachProcedure is the fully-qualified name of the Harness's Attach RPC.
 	HarnessAttachProcedure = "/supertag.runtime.v2.Harness/Attach"
+	// HarnessConfirmExecutionLimitsProcedure is the fully-qualified name of the Harness's
+	// ConfirmExecutionLimits RPC.
+	HarnessConfirmExecutionLimitsProcedure = "/supertag.runtime.v2.Harness/ConfirmExecutionLimits"
 	// HarnessTakeLiveInputProcedure is the fully-qualified name of the Harness's TakeLiveInput RPC.
 	HarnessTakeLiveInputProcedure = "/supertag.runtime.v2.Harness/TakeLiveInput"
 	// HarnessSettleLiveInputProcedure is the fully-qualified name of the Harness's SettleLiveInput RPC.
@@ -3800,6 +3803,7 @@ func (UnimplementedWorkspaceDirectoryHandler) GetReviewArtifact(context.Context,
 // HarnessClient is a client for the supertag.runtime.v2.Harness service.
 type HarnessClient interface {
 	Attach(context.Context, *connect.Request[runtimev2.HarnessAttachRequest]) (*connect.Response[runtimev2.HarnessRun], error)
+	ConfirmExecutionLimits(context.Context, *connect.Request[runtimev2.AppliedExecutionLimits]) (*connect.Response[runtimev2.ConfirmExecutionLimitsResponse], error)
 	TakeLiveInput(context.Context, *connect.Request[runtimev2.HarnessTakeLiveInputRequest]) (*connect.Response[runtimev2.TakeInputResponse], error)
 	SettleLiveInput(context.Context, *connect.Request[runtimev2.HarnessSettleLiveInputRequest]) (*connect.Response[runtimev2.LiveInput], error)
 	Publish(context.Context, *connect.Request[runtimev2.HarnessPublishRequest]) (*connect.Response[runtimev2.TaskEvent], error)
@@ -3822,6 +3826,12 @@ func NewHarnessClient(httpClient connect.HTTPClient, baseURL string, opts ...con
 			httpClient,
 			baseURL+HarnessAttachProcedure,
 			connect.WithSchema(harnessMethods.ByName("Attach")),
+			connect.WithClientOptions(opts...),
+		),
+		confirmExecutionLimits: connect.NewClient[runtimev2.AppliedExecutionLimits, runtimev2.ConfirmExecutionLimitsResponse](
+			httpClient,
+			baseURL+HarnessConfirmExecutionLimitsProcedure,
+			connect.WithSchema(harnessMethods.ByName("ConfirmExecutionLimits")),
 			connect.WithClientOptions(opts...),
 		),
 		takeLiveInput: connect.NewClient[runtimev2.HarnessTakeLiveInputRequest, runtimev2.TakeInputResponse](
@@ -3859,17 +3869,23 @@ func NewHarnessClient(httpClient connect.HTTPClient, baseURL string, opts ...con
 
 // harnessClient implements HarnessClient.
 type harnessClient struct {
-	attach          *connect.Client[runtimev2.HarnessAttachRequest, runtimev2.HarnessRun]
-	takeLiveInput   *connect.Client[runtimev2.HarnessTakeLiveInputRequest, runtimev2.TakeInputResponse]
-	settleLiveInput *connect.Client[runtimev2.HarnessSettleLiveInputRequest, runtimev2.LiveInput]
-	publish         *connect.Client[runtimev2.HarnessPublishRequest, runtimev2.TaskEvent]
-	reportUsage     *connect.Client[runtimev2.HarnessUsageRequest, runtimev2.ReportAttemptUsageResponse]
-	complete        *connect.Client[runtimev2.HarnessCompleteRequest, runtimev2.HarnessCompleteResponse]
+	attach                 *connect.Client[runtimev2.HarnessAttachRequest, runtimev2.HarnessRun]
+	confirmExecutionLimits *connect.Client[runtimev2.AppliedExecutionLimits, runtimev2.ConfirmExecutionLimitsResponse]
+	takeLiveInput          *connect.Client[runtimev2.HarnessTakeLiveInputRequest, runtimev2.TakeInputResponse]
+	settleLiveInput        *connect.Client[runtimev2.HarnessSettleLiveInputRequest, runtimev2.LiveInput]
+	publish                *connect.Client[runtimev2.HarnessPublishRequest, runtimev2.TaskEvent]
+	reportUsage            *connect.Client[runtimev2.HarnessUsageRequest, runtimev2.ReportAttemptUsageResponse]
+	complete               *connect.Client[runtimev2.HarnessCompleteRequest, runtimev2.HarnessCompleteResponse]
 }
 
 // Attach calls supertag.runtime.v2.Harness.Attach.
 func (c *harnessClient) Attach(ctx context.Context, req *connect.Request[runtimev2.HarnessAttachRequest]) (*connect.Response[runtimev2.HarnessRun], error) {
 	return c.attach.CallUnary(ctx, req)
+}
+
+// ConfirmExecutionLimits calls supertag.runtime.v2.Harness.ConfirmExecutionLimits.
+func (c *harnessClient) ConfirmExecutionLimits(ctx context.Context, req *connect.Request[runtimev2.AppliedExecutionLimits]) (*connect.Response[runtimev2.ConfirmExecutionLimitsResponse], error) {
+	return c.confirmExecutionLimits.CallUnary(ctx, req)
 }
 
 // TakeLiveInput calls supertag.runtime.v2.Harness.TakeLiveInput.
@@ -3900,6 +3916,7 @@ func (c *harnessClient) Complete(ctx context.Context, req *connect.Request[runti
 // HarnessHandler is an implementation of the supertag.runtime.v2.Harness service.
 type HarnessHandler interface {
 	Attach(context.Context, *connect.Request[runtimev2.HarnessAttachRequest]) (*connect.Response[runtimev2.HarnessRun], error)
+	ConfirmExecutionLimits(context.Context, *connect.Request[runtimev2.AppliedExecutionLimits]) (*connect.Response[runtimev2.ConfirmExecutionLimitsResponse], error)
 	TakeLiveInput(context.Context, *connect.Request[runtimev2.HarnessTakeLiveInputRequest]) (*connect.Response[runtimev2.TakeInputResponse], error)
 	SettleLiveInput(context.Context, *connect.Request[runtimev2.HarnessSettleLiveInputRequest]) (*connect.Response[runtimev2.LiveInput], error)
 	Publish(context.Context, *connect.Request[runtimev2.HarnessPublishRequest]) (*connect.Response[runtimev2.TaskEvent], error)
@@ -3918,6 +3935,12 @@ func NewHarnessHandler(svc HarnessHandler, opts ...connect.HandlerOption) (strin
 		HarnessAttachProcedure,
 		svc.Attach,
 		connect.WithSchema(harnessMethods.ByName("Attach")),
+		connect.WithHandlerOptions(opts...),
+	)
+	harnessConfirmExecutionLimitsHandler := connect.NewUnaryHandler(
+		HarnessConfirmExecutionLimitsProcedure,
+		svc.ConfirmExecutionLimits,
+		connect.WithSchema(harnessMethods.ByName("ConfirmExecutionLimits")),
 		connect.WithHandlerOptions(opts...),
 	)
 	harnessTakeLiveInputHandler := connect.NewUnaryHandler(
@@ -3954,6 +3977,8 @@ func NewHarnessHandler(svc HarnessHandler, opts ...connect.HandlerOption) (strin
 		switch r.URL.Path {
 		case HarnessAttachProcedure:
 			harnessAttachHandler.ServeHTTP(w, r)
+		case HarnessConfirmExecutionLimitsProcedure:
+			harnessConfirmExecutionLimitsHandler.ServeHTTP(w, r)
 		case HarnessTakeLiveInputProcedure:
 			harnessTakeLiveInputHandler.ServeHTTP(w, r)
 		case HarnessSettleLiveInputProcedure:
@@ -3975,6 +4000,10 @@ type UnimplementedHarnessHandler struct{}
 
 func (UnimplementedHarnessHandler) Attach(context.Context, *connect.Request[runtimev2.HarnessAttachRequest]) (*connect.Response[runtimev2.HarnessRun], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Harness.Attach is not implemented"))
+}
+
+func (UnimplementedHarnessHandler) ConfirmExecutionLimits(context.Context, *connect.Request[runtimev2.AppliedExecutionLimits]) (*connect.Response[runtimev2.ConfirmExecutionLimitsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Harness.ConfirmExecutionLimits is not implemented"))
 }
 
 func (UnimplementedHarnessHandler) TakeLiveInput(context.Context, *connect.Request[runtimev2.HarnessTakeLiveInputRequest]) (*connect.Response[runtimev2.TakeInputResponse], error) {

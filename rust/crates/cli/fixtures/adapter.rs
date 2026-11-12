@@ -1,3 +1,4 @@
+mod budget;
 mod commit_reviews;
 
 use std::{io::Read, time::Duration};
@@ -185,11 +186,15 @@ async fn main() -> Result<()> {
         .await?
         .into_inner();
     let task = run.task.context("fixture received no Task")?;
+    budget::exercise(&bootstrap, &task, &mut harness).await?;
     commit_reviews::exercise(&bootstrap, &task, run.coordination.as_ref()).await?;
     let may_start = run
         .coordination
         .as_ref()
         .is_some_and(|scope| scope.may_start_work_session);
+    if std::env::args().any(|arg| arg == "--expect-work-session-start-capability") {
+        ensure!(may_start, "Task is missing Work Session start capability");
+    }
     let may_continue = run
         .coordination
         .as_ref()

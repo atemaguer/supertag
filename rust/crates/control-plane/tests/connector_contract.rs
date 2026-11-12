@@ -286,6 +286,7 @@ async fn contract(url: String) {
         .submit_task(
             "operator:alice",
             &SubmitTaskRequest {
+                execution_limits: None,
                 tag_id: "reviewer".into(),
                 session_id: "direct".into(),
                 operation_id: "direct".into(),

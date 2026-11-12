@@ -37,6 +37,7 @@ mode = root.joinpath("steering-mode").read_text() if root.joinpath("steering-mod
 total = {"inputTokens": 0, "cachedInputTokens": 0, "outputTokens": 0, "reasoningOutputTokens": 0, "totalTokens": 0}
 late_baseline = None
 question_mode = root.joinpath("question-mode").read_text() if root.joinpath("question-mode").exists() else ""
+budget_mode = root.joinpath("budget-mode").read_text() if root.joinpath("budget-mode").exists() else ""
 coordination_tools = [
     ("read_workstream", {"afterSequence": 1, "limit": 2}),
     ("read_mailbox", {"limit": 2}),
@@ -119,7 +120,7 @@ def finish_events():
                 total["totalTokens"] = total["inputTokens"] + total["outputTokens"]
                 notify("thread/tokenUsage/updated", {"threadId": thread, "turnId": turn, "tokenUsage": {"total": total, "last": total}})
                 with home.joinpath("sessions/thread.jsonl").open("a") as stream:
-                    stream.write(json.dumps({"type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": total["inputTokens"], "cached_input_tokens": total["cachedInputTokens"], "output_tokens": total["outputTokens"]}}}}) + "\n")
+                    stream.write(json.dumps({"type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": total["inputTokens"], "cached_input_tokens": total["cachedInputTokens"], "output_tokens": total["outputTokens"], "total_tokens": total["totalTokens"]}}}}) + "\n")
             notify("turn/completed", {"threadId": thread, "turn": {"id": turn, "status": "completed", "items": []}})
             completed = True
         elif kind in ("turn.failed", "error"):
@@ -187,6 +188,15 @@ for line in sys.stdin:
             if question_mode != "early": ask_native()
         elif coordination_tools:
             coordination_call(0)
+        elif budget_mode:
+            input_count = {"stop-on-report": 4, "advisory-low-headroom": 7997}.get(budget_mode, 79997)
+            total["inputTokens"] += input_count
+            total["cachedInputTokens"] += 1
+            total["outputTokens"] += 3
+            total["totalTokens"] += input_count + 3
+            notify("thread/tokenUsage/updated", {"threadId": thread, "turnId": turn, "tokenUsage": {"total": total}})
+            if budget_mode == "advisory-low-headroom":
+                finish_events()
         elif mode:
             notify("turn/started", {"threadId": thread, "turn": {"id": turn, "status": "inProgress", "items": []}})
         else:
@@ -212,7 +222,13 @@ for line in sys.stdin:
     elif method == "turn/steer":
         assert request["params"]["threadId"] == thread
         assert request["params"]["expectedTurnId"] == turn
-        if mode == "reject":
+        if budget_mode in ("advisory", "advisory-rejected"):
+            if budget_mode == "advisory-rejected":
+                emit({"id": request["id"], "error": {"code": -32602, "message": "advisory rejected"}})
+            else:
+                reply(request, {"turnId": turn})
+            finish_events()
+        elif mode == "reject":
             emit({"id": request["id"], "error": {"code": -32602, "message": "expected turn is not active"}})
         elif mode == "lost":
             sys.exit(0)
@@ -223,6 +239,8 @@ for line in sys.stdin:
             reply(request, {"turnId": "other-turn" if mode == "wrong-turn" else turn})
             finish_events()
     elif method == "turn/interrupt":
+        if budget_mode == "stop-on-report":
+            root.joinpath("budget-interrupted").write_text(request["params"]["turnId"])
         reply(request, {})
     else:
         raise AssertionError("unexpected request " + str(method))

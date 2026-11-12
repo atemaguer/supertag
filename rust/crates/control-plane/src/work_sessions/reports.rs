@@ -138,7 +138,13 @@ pub(crate) async fn settle_in(
         ));
     }
     let order = next_order(tx).await?;
-    let report = insert_task_from_snapshot(tx, order, &starter, &parent, &prompt).await?;
+    let mut report = insert_task_from_snapshot(tx, order, &starter, &parent, &prompt).await?;
+    if let Some(id) = objective.as_deref() {
+        let allocation =
+            crate::budget_pool::objective_in(tx, id, starter.execution_limits.as_ref(), true)
+                .await?;
+        crate::budget_pool::set_in(tx, &mut report, allocation).await?;
+    }
     sqlx::query("INSERT INTO supertag_v2_work_session_tasks (task_id,work_session_id,kind) VALUES ($1,$2,2)")
         .bind(&report.task_id).bind(&session).execute(&mut **tx).await?;
     sqlx::query("INSERT INTO supertag_v2_work_session_reports (child_task_id,work_session_id,report_task_id,created_order) VALUES ($1,$2,$3,$4)")

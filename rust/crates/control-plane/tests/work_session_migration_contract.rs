@@ -114,6 +114,7 @@ async fn contract(url: String) {
         .submit_task(
             OP,
             &SubmitTaskRequest {
+                execution_limits: None,
                 tag_id: "lead".into(),
                 session_id: "legacy-parent".into(),
                 operation_id: "later-parent".into(),

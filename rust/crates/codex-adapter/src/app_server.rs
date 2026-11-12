@@ -16,9 +16,12 @@ use tokio::{
     task::JoinHandle,
     time::{self, Instant},
 };
-use tonic::transport::Channel;
+use tonic::{Code, transport::Channel};
 
-use crate::{MAX_STREAM, RPC_TIMEOUT, auth, config::Policy, events, publish, read_line, request};
+use crate::{
+    MAX_STREAM, RPC_TIMEOUT, auth, checkpoint::UsageCounters, config::Policy, events, publish,
+    read_line, request,
+};
 
 type Take = Pin<Box<dyn Future<Output = (Instant, Result<TakeInputResponse>)> + Send>>;
 
@@ -187,9 +190,12 @@ struct Stream {
     thread: String,
     turn: Option<String>,
     completed: bool,
-    baseline: Option<[u64; 3]>,
-    total: Option<[u64; 3]>,
+    baseline: Option<UsageCounters>,
+    total: Option<UsageCounters>,
+    max_reported_tokens: Option<u64>,
+    budget_reached: bool,
     observed_model: Option<String>,
+    configured_model: Option<String>,
     usage_sequence: u64,
     sequence: u64,
     turn_requested: bool,
@@ -202,8 +208,10 @@ impl Stream {
         policy: Policy,
         thread: String,
         expected_thread: Option<String>,
-        baseline: Option<[u64; 3]>,
+        baseline: Option<UsageCounters>,
         inventory: crate::coordination::Inventory,
+        max_reported_tokens: Option<u64>,
+        configured_model: Option<String>,
     ) -> Result<Self> {
         let resumed = expected_thread.is_some();
         let mut native = events::Stream::new(policy, expected_thread);
@@ -217,7 +225,10 @@ impl Stream {
             completed: false,
             baseline,
             total: None,
+            max_reported_tokens,
+            budget_reached: false,
             observed_model: None,
+            configured_model,
             usage_sequence: 0,
             sequence: 0,
             turn_requested: false,
@@ -331,6 +342,10 @@ impl Stream {
                 );
             }
             "thread/tokenUsage/updated" => {
+                ensure!(
+                    params["threadId"].as_str() == Some(&self.thread),
+                    "Codex usage has no owned thread identity"
+                );
                 let usage = &params["tokenUsage"]["total"];
                 let read = |key| {
                     usage
@@ -343,27 +358,36 @@ impl Stream {
                     read("cachedInputTokens")?,
                     read("outputTokens")?,
                 ];
+                let reported = usage
+                    .get("totalTokens")
+                    .map(|_| read("totalTokens"))
+                    .transpose()?;
                 if self.turn_requested && params["turnId"].as_str() != self.turn.as_deref() {
                     // Resume can acknowledge before publishing the old turn's
                     // final total. It is only a baseline, never current work.
                     ensure!(
-                        self.resumed && self.baseline == Some(total),
+                        self.resumed
+                            && self
+                                .baseline
+                                .is_some_and(|(previous, reported_before)| previous == total
+                                    && reported_before.is_none_or(|count| Some(count) == reported)),
                         "Codex usage belongs to a different active turn"
                     );
                     return Ok(());
                 }
                 ensure!(total[1] <= total[0], "Codex completed with invalid usage");
                 if !self.turn_requested {
-                    if let Some(baseline) = self.baseline {
+                    if let Some((baseline, reported_before)) = self.baseline {
                         ensure!(
-                            baseline == total,
+                            baseline == total
+                                && reported_before.is_none_or(|count| Some(count) == reported),
                             "Codex resume usage does not match its checkpoint"
                         );
                     }
-                    self.baseline = Some(total);
+                    self.baseline = Some((total, reported));
                     return Ok(());
                 }
-                let baseline = self
+                let (baseline, reported_before) = self
                     .baseline
                     .context("Codex resume usage baseline is unavailable")?;
                 ensure!(
@@ -373,19 +397,33 @@ impl Stream {
                         .all(|(current, previous)| *current >= previous),
                     "Codex cumulative usage precedes its baseline"
                 );
-                if let Some(previous) = self.total {
+                if let Some((previous, previous_reported)) = self.total {
                     ensure!(
                         total
                             .iter()
                             .zip(previous)
-                            .all(|(current, previous)| *current >= previous),
+                            .all(|(current, previous)| *current >= previous)
+                            && previous_reported
+                                .is_none_or(|count| reported.is_some_and(|next| next >= count)),
                         "Codex cumulative usage decreased"
                     );
                 }
-                if self.total == Some(total) {
+                if self.total == Some((total, reported)) {
                     return Ok(());
                 }
-                self.total = Some(total);
+                let total_tokens = reported
+                    .zip(reported_before)
+                    .map(|(total, before)| {
+                        total
+                            .checked_sub(before)
+                            .context("Codex reported total tokens precede the baseline")
+                    })
+                    .transpose()?;
+                self.budget_reached = self
+                    .max_reported_tokens
+                    .zip(total_tokens)
+                    .is_some_and(|(limit, measured)| measured >= limit);
+                self.total = Some((total, reported));
                 self.usage_sequence += 1;
                 let observed_model = self
                     .observed_model
@@ -396,21 +434,50 @@ impl Stream {
                     cached_input_tokens: total[1] - baseline[1],
                     output_tokens: total[2] - baseline[2],
                     observed_model,
+                    total_tokens,
                 };
                 ensure!(
-                    usage.cached_input_tokens <= usage.input_tokens,
+                    usage.cached_input_tokens <= usage.input_tokens
+                        && usage
+                            .input_tokens
+                            .checked_add(usage.output_tokens)
+                            .is_some_and(|count| {
+                                usage.total_tokens.is_none_or(|total| total >= count)
+                            }),
                     "Codex completed with invalid usage"
                 );
-                harness
-                    .report_usage(request(
-                        HarnessUsageRequest {
-                            sequence: self.usage_sequence,
-                            native_usage: Some(usage),
-                        },
-                        token,
-                    )?)
-                    .await
-                    .context("could not record Codex token usage")?;
+                let amount_minor = crate::pricing::estimated_cost_minor(
+                    self.observed_model
+                        .as_deref()
+                        .or(self.configured_model.as_deref()),
+                    &usage,
+                );
+                let recording = report_usage(
+                    harness,
+                    token,
+                    HarnessUsageRequest {
+                        sequence: self.usage_sequence,
+                        native_usage: Some(usage),
+                        amount_minor,
+                        currency: amount_minor.map(|_| "USD".to_owned()),
+                        estimated: amount_minor.is_some(),
+                    },
+                );
+                if self.budget_reached {
+                    // A lost usage acknowledgement cannot leave the native
+                    // turn running indefinitely beyond its reported ceiling.
+                    time::timeout(Duration::from_secs(1), recording)
+                        .await
+                        .context(
+                            "Codex token ceiling reached without a confirmed usage receipt",
+                        )??;
+                    bail!("Codex reported token budget exceeded");
+                }
+                recording.await?;
+                ensure!(
+                    self.max_reported_tokens.is_none() || total_tokens.is_some(),
+                    "Codex token budget cannot be verified without valid usage"
+                );
             }
             "item/started" | "item/completed" => {
                 ensure!(
@@ -498,14 +565,45 @@ impl Stream {
             self.completed,
             "Codex process ended without a completed turn"
         );
-        let total = self.total.context("Codex completed without valid usage")?;
-        let baseline = self
+        let (total, _) = self.total.context("Codex completed without valid usage")?;
+        let (baseline, _) = self
             .baseline
             .context("Codex resume usage baseline is unavailable")?;
         self.native.accept(&serde_json::to_vec(&json!({"type":"turn.completed","usage":{"input_tokens":total[0]-baseline[0],"cached_input_tokens":total[1]-baseline[1],"output_tokens":total[2]-baseline[2]}}))?)?;
         let _ = self.native.take_usage();
         self.native.finish()
     }
+
+    fn budget_advisory(&self) -> Option<String> {
+        let ceiling = self.max_reported_tokens?;
+        let (_, current) = self.total?;
+        let (_, baseline) = self.baseline?;
+        let measured = current?.checked_sub(baseline?)?;
+        let remaining = ceiling.checked_sub(measured)?;
+        (measured * 5 >= ceiling * 4 && remaining >= 4096).then(|| format!(
+            "SuperTag budget: {measured} of {ceiling} reported tokens; {remaining} remain. Prioritize required verification and completion using existing evidence. The limit remains in effect and usage reports can arrive late."
+        ))
+    }
+}
+
+async fn report_usage(
+    harness: &mut HarnessClient<Channel>,
+    token: &str,
+    usage: HarnessUsageRequest,
+) -> Result<()> {
+    for retry in 0..3 {
+        match harness.report_usage(request(usage.clone(), token)?).await {
+            Ok(_) => return Ok(()),
+            Err(status)
+                if retry < 2
+                    && matches!(status.code(), Code::Unavailable | Code::DeadlineExceeded) =>
+            {
+                time::sleep(Duration::from_millis(50)).await;
+            }
+            Err(_) => bail!("could not record Codex token usage"),
+        }
+    }
+    unreachable!()
 }
 
 async fn settle(
@@ -638,7 +736,8 @@ pub(crate) async fn execute(
     policy: Policy,
     admitted_skills: &std::collections::BTreeSet<String>,
     expected_thread: Option<String>,
-    baseline: Option<[u64; 3]>,
+    baseline: Option<UsageCounters>,
+    max_reported_tokens: Option<u64>,
     harness: &mut HarnessClient<Channel>,
     questions: &mut crate::questions::Bridge,
     token: &str,
@@ -694,6 +793,7 @@ pub(crate) async fn execute(
         }
         "thread/start"
     };
+    let configured_model = params["model"].as_str().map(str::to_owned);
     let response = transport.call(method, params, &mut buffered).await?;
     let thread = response["thread"]["id"]
         .as_str()
@@ -706,6 +806,8 @@ pub(crate) async fn execute(
         expected_thread,
         baseline,
         questions.inventory(),
+        max_reported_tokens,
+        configured_model,
     )?;
     stream.model(&response)?;
     for notification in buffered.drain(..) {
@@ -720,6 +822,11 @@ pub(crate) async fn execute(
     ensure!(
         stream.baseline.is_some(),
         "Codex resume usage baseline is unavailable"
+    );
+    ensure!(
+        stream.max_reported_tokens.is_none()
+            || stream.baseline.is_some_and(|(_, total)| total.is_some()),
+        "Codex token budget requires a verified reported-token baseline"
     );
     stream.turn_requested = true;
     let prompt = format!(
@@ -738,25 +845,32 @@ pub(crate) async fn execute(
             .as_str()
             .context("Codex turn identity is invalid")?,
     )?;
-    for notification in buffered.drain(..) {
-        if respond_tool(&mut transport, &stream, questions, &notification).await? {
-            continue;
-        }
-        stream
-            .notification(notification, harness, token, secrets)
-            .await?;
-    }
-
     let mut taking: Option<Take> = None;
     let mut pending: Option<(u64, LiveInput, Instant)> = None;
     let mut poll = time::interval(Duration::from_millis(100));
     poll.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
     let mut finished_at = None;
+    let mut advisory_sent = false;
+    let mut advisory_id = None;
     let outcome=async {
+        for notification in buffered.drain(..) {
+            if !respond_tool(&mut transport, &stream, questions, &notification).await? {
+                stream.notification(notification, harness, token, secrets).await?;
+            }
+        }
         loop {
             if stream.completed && finished_at.is_none() {finished_at=Some(Instant::now()+Duration::from_millis(250));}
             if let Some((_,_,deadline))=&pending {ensure!(*deadline>Instant::now(),"Codex live input acknowledgement timed out");}
             if stream.completed && taking.is_none() && finished_at.is_some_and(|deadline|Instant::now()>=deadline) {break;}
+            if !advisory_sent && !stream.completed && taking.is_none() && pending.is_none()
+                && let Some(advisory) = stream.budget_advisory()
+            {
+                advisory_sent = true;
+                advisory_id = transport.send("turn/steer", json!({
+                    "threadId":stream.thread, "expectedTurnId":stream.turn,
+                    "input":[{"type":"text","text":advisory}]
+                })).await.ok();
+            }
             tokio::select! {
                 biased;
                 value=transport.output.recv()=>{
@@ -768,6 +882,10 @@ pub(crate) async fn execute(
                         stream.notification(value,harness,token,secrets).await?;
                         ensure!(!stream.completed || pending.is_none(),"Codex turn completed before steering was acknowledged");
                     } else {
+                        if advisory_id.is_some() && value["id"].as_u64() == advisory_id {
+                            advisory_id = None;
+                            continue;
+                        }
                         let (id,input,_)=pending.as_ref().context("Codex returned an unexpected response identity")?;
                         ensure!(value["id"].as_u64()==Some(*id),"Codex returned an unexpected response identity");
                         if value.get("error").is_some() {
@@ -815,6 +933,10 @@ pub(crate) async fn execute(
         time::timeout(RPC_TIMEOUT,async {
             while let Some(value)=transport.output.recv().await {
                 let value=value?;
+                if advisory_id.is_some() && value["id"].as_u64() == advisory_id {
+                    advisory_id = None;
+                    continue;
+                }
                 ensure!(value.get("id").is_none(),"Codex returned an unexpected response identity");
                 stream.notification(value,harness,token,secrets).await?;
             }
@@ -823,16 +945,31 @@ pub(crate) async fn execute(
         Ok::<_,anyhow::Error>(())
     }.await;
     if outcome.is_err() {
-        if let Some((_, input, _)) = &pending {
-            let _ = settle(harness, token, input, LiveInputReceipt::Unknown).await;
-        }
-        if let Some(turn) = &stream.turn {
-            let _ = transport
+        if let Some(turn) = &stream.turn
+            && let Ok(id) = transport
                 .send(
                     "turn/interrupt",
                     json!({"threadId":stream.thread,"turnId":turn}),
                 )
-                .await;
+                .await
+            && stream.budget_reached
+        {
+            // Give the owned native turn a brief opportunity to acknowledge
+            // the interrupt. The caller still reaps a hung process.
+            let _ = time::timeout(Duration::from_millis(500), async {
+                while let Some(Ok(value)) = transport.output.recv().await {
+                    if value["id"].as_u64() == Some(id) {
+                        break;
+                    }
+                    if transport.deny_request(&value).await.is_err() {
+                        break;
+                    }
+                }
+            })
+            .await;
+        }
+        if let Some((_, input, _)) = &pending {
+            let _ = settle(harness, token, input, LiveInputReceipt::Unknown).await;
         }
     }
     outcome?;

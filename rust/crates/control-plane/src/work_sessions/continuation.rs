@@ -70,7 +70,11 @@ fn has_typed_runtime(task: &Task) -> bool {
         .is_some_and(|snapshot| snapshot.runtime_authority.is_some())
 }
 
-fn require_unchanged_authority(previous: &Task, next: &Task, delegated: bool) -> Result<()> {
+pub(super) fn require_unchanged_authority(
+    previous: &Task,
+    next: &Task,
+    delegated: bool,
+) -> Result<()> {
     if !same_permissions(previous, next)
         || previous.harness_kind != next.harness_kind
         || previous.workspace != next.workspace
@@ -119,10 +123,18 @@ pub(super) async fn budget_in(tx: &mut Transaction<'_, Any>, parent: &Task) -> R
         "SELECT (SELECT COUNT(*) FROM supertag_v2_work_session_starts WHERE starter_task_id=$1)
               + (SELECT COUNT(*) FROM supertag_v2_work_session_continuations WHERE starter_task_id=$1)",
     ).bind(&parent.task_id).fetch_one(&mut **tx).await?;
-    if count >= MAX_PER_TURN {
-        return Err(StoreError::FailedPrecondition(
-            "this Task already started four Work Session Tasks".into(),
-        ));
+    let per_turn = parent
+        .execution_limits
+        .as_ref()
+        .and_then(|limits| limits.max_native_agents)
+        .unwrap_or(MAX_PER_TURN as u64)
+        .min(MAX_PER_TURN as u64);
+    if count as u64 >= per_turn {
+        return Err(StoreError::FailedPrecondition(if per_turn == 4 {
+            "this Task already started four Work Session Tasks".into()
+        } else {
+            format!("this Task permits at most {per_turn} Work Session Tasks")
+        }));
     }
     let open: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM supertag_v2_work_sessions s
@@ -275,7 +287,7 @@ impl Store {
             serde_json::to_string(&input.work_session_id)?,
             serde_json::json!({"message": message})
         );
-        let next = insert_child_in(
+        let mut next = insert_child_in(
             &mut tx,
             order,
             &parent,
@@ -288,6 +300,14 @@ impl Store {
         if target != parent.tag_id {
             require_unchanged_authority(&child, &next, true)?;
         }
+        let base = if target == parent.tag_id {
+            parent.execution_limits.as_ref()
+        } else {
+            child.execution_limits.as_ref()
+        };
+        let allocation =
+            crate::budget_pool::child_in(&mut tx, &parent, objective_id.as_deref(), base).await?;
+        crate::budget_pool::set_in(&mut tx, &mut next, allocation).await?;
         sqlx::query("INSERT INTO supertag_v2_work_session_tasks (task_id,work_session_id,kind,starter_task_id) VALUES ($1,$2,$3,$4)")
             .bind(&next.task_id).bind(&input.work_session_id).bind(CHILD).bind(&parent.task_id).execute(&mut *tx).await?;
         if let Some(id) = objective_id {

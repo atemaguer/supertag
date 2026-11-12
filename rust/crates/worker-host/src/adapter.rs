@@ -1,4 +1,5 @@
 mod inputs;
+mod limits;
 mod questions;
 mod review_artifacts;
 mod work_sessions;
@@ -22,12 +23,13 @@ use prost::Message;
 use supertag_protocol::{
     MAX_CHECKPOINT_BYTES, MAX_MESSAGE_BYTES, authenticated_request, matches_bearer,
     v2::{
-        AdapterBootstrap, AppendEventRequest, Assignment, HarnessAttachRequest,
-        HarnessCompleteRequest, HarnessCompleteResponse, HarnessPublishRequest, HarnessRun,
-        HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest, HarnessUsageRequest,
-        InspectAttemptRequest, LiveInput, ObjectiveSignal, ReportAttemptUsageRequest,
-        ReportAttemptUsageResponse, ResolvedSkill, SessionCheckpoint, TakeInputResponse, TaskEvent,
-        TaskState,
+        AdapterBootstrap, AppendEventRequest, AppliedExecutionLimits, Assignment,
+        ConfirmExecutionLimitsResponse, ExecutionLimits, HarnessAttachRequest,
+        HarnessCompleteRequest, HarnessCompleteResponse, HarnessKind, HarnessPublishRequest,
+        HarnessRun, HarnessSettleLiveInputRequest, HarnessTakeLiveInputRequest,
+        HarnessUsageRequest, InspectAttemptRequest, LiveInput, ObjectiveSignal,
+        ReportAttemptUsageRequest, ReportAttemptUsageResponse, ReportedCostLimit, ResolvedSkill,
+        SessionCheckpoint, TakeInputResponse, TaskEvent, TaskState,
         harness_server::{Harness, HarnessServer},
     },
     validate_checkpoint_reference,
@@ -57,6 +59,7 @@ struct Bridge {
     resolved_skills: Vec<ResolvedSkill>,
     host_token: String,
     host: RegisteredHost,
+    harness: HarnessKind,
     coordination: CoordinationClients,
     state: Arc<Mutex<RunState>>,
     attached: Arc<AtomicBool>,
@@ -67,6 +70,10 @@ struct Bridge {
 struct RunState {
     outcome: Option<HarnessCompleteRequest>,
     observed_approvals: HashSet<String>,
+    applied_limits: Option<AppliedExecutionLimits>,
+    native_usage_sequence: u64,
+    reported_tokens: Option<u64>,
+    measured_cost: Option<ReportedCostLimit>,
 }
 
 impl Bridge {
@@ -100,6 +107,10 @@ impl Bridge {
         }
         Ok(())
     }
+
+    fn execution_limits(&self) -> Option<&ExecutionLimits> {
+        self.assignment.task.as_ref()?.execution_limits.as_ref()
+    }
 }
 
 #[tonic::async_trait]
@@ -126,6 +137,30 @@ impl Harness for Bridge {
             coordination: Some(capabilities),
             resolved_skills: self.resolved_skills.clone(),
         }))
+    }
+
+    async fn confirm_execution_limits(
+        &self,
+        request: Request<AppliedExecutionLimits>,
+    ) -> Result<Response<ConfirmExecutionLimitsResponse>, Status> {
+        self.authenticate(&request)?;
+        self.require_attached()?;
+        let mut state = self.state.lock().await;
+        let applied = request.into_inner();
+        if let Some(previous) = &state.applied_limits {
+            if previous != &applied {
+                return Err(Status::already_exists(
+                    "adapter already confirmed different execution limits",
+                ));
+            }
+        } else {
+            if state.outcome.is_some() {
+                return Err(Status::failed_precondition("execution is complete"));
+            }
+            limits::verify_confirmation(self.harness, self.execution_limits(), &applied)?;
+            state.applied_limits = Some(applied);
+        }
+        Ok(Response::new(ConfirmExecutionLimitsResponse {}))
     }
 
     async fn publish(
@@ -162,32 +197,64 @@ impl Harness for Bridge {
         request: Request<HarnessUsageRequest>,
     ) -> Result<Response<ReportAttemptUsageResponse>, Status> {
         self.authenticate(&request)?;
-        let state = self.state.lock().await;
+        let mut state = self.state.lock().await;
         if !self.attached.load(Ordering::Acquire) || state.outcome.is_some() {
             return Err(Status::failed_precondition(
                 "execution is not accepting usage",
             ));
         }
         let usage = request.into_inner();
-        if usage.native_usage.is_none() {
-            return Err(Status::invalid_argument("native token usage required"));
+        if usage.amount_minor.is_some() != usage.currency.is_some()
+            || (usage.native_usage.is_none() && usage.amount_minor.is_none())
+        {
+            return Err(Status::invalid_argument(
+                "native token usage or a reported cost is required",
+            ));
         }
+        let native_receipt = usage
+            .native_usage
+            .as_ref()
+            .map(|native| (usage.sequence, native.total_tokens));
+        let measured_cost = if usage.estimated {
+            None
+        } else {
+            usage
+                .amount_minor
+                .zip(usage.currency.clone())
+                .map(|(amount_minor, currency)| ReportedCostLimit {
+                    currency,
+                    amount_minor,
+                })
+        };
         let mut upstream = authenticated_request(
             ReportAttemptUsageRequest {
                 attempt: Some(self.attempt()),
                 sequence: usage.sequence,
-                amount_minor: None,
-                currency: None,
-                estimated: false,
+                amount_minor: usage.amount_minor,
+                currency: usage.currency,
+                estimated: usage.estimated,
                 native_usage: usage.native_usage,
             },
             &self.host_token,
             None,
         )?;
         upstream.set_timeout(Duration::from_secs(5));
-        let response = self.host.clone().report_attempt_usage(upstream).await;
-        drop(state);
-        response
+        let response = self.host.clone().report_attempt_usage(upstream).await?;
+        if let Some((sequence, tokens)) = native_receipt
+            && sequence >= state.native_usage_sequence
+        {
+            state.native_usage_sequence = sequence;
+            state.reported_tokens = tokens;
+        }
+        if let Some(cost) = measured_cost
+            && state
+                .measured_cost
+                .as_ref()
+                .is_none_or(|prior| cost.amount_minor >= prior.amount_minor)
+        {
+            state.measured_cost = Some(cost);
+        }
+        Ok(response)
     }
 
     async fn complete(
@@ -232,6 +299,14 @@ impl Harness for Bridge {
                 ));
             }
         } else {
+            if outcome.succeeded {
+                limits::verify_success(
+                    self.execution_limits(),
+                    state.applied_limits.as_ref(),
+                    state.reported_tokens,
+                    state.measured_cost.as_ref(),
+                )?;
+            }
             state.outcome = Some(outcome);
             self.inputs.close();
         }
@@ -285,6 +360,7 @@ pub(crate) async fn execute(
         resolved_skills,
         host_token: host_token.to_owned(),
         host,
+        harness: options.harness,
         coordination,
         state: Arc::default(),
         attached: Arc::default(),

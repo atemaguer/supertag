@@ -35,7 +35,9 @@ const MAX_ENCODED_BYTES: usize = 15 * 1024 * 1024;
 
 /// A resumed thread reports lifetime totals. Only subtract a persisted native
 /// counter, never the first new response of the current Attempt.
-pub(crate) fn usage_baseline(checkpoint: &SessionCheckpoint) -> Result<Option<[u64; 3]>> {
+pub(crate) type UsageCounters = ([u64; 3], Option<u64>);
+
+pub(crate) fn usage_baseline(checkpoint: &SessionCheckpoint) -> Result<Option<UsageCounters>> {
     let archive: Archive =
         serde_json::from_slice(&checkpoint.payload).context("invalid Codex checkpoint usage")?;
     let mut found = None;
@@ -64,7 +66,11 @@ pub(crate) fn usage_baseline(checkpoint: &SessionCheckpoint) -> Result<Option<[u
                 read("output_tokens")?,
             ];
             ensure!(value[1] <= value[0], "invalid Codex checkpoint usage");
-            found = Some(value);
+            let reported = total
+                .get("total_tokens")
+                .map(|_| read("total_tokens"))
+                .transpose()?;
+            found = Some((value, reported));
         }
     }
     Ok(found)

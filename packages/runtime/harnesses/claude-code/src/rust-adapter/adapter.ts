@@ -14,7 +14,13 @@ import { ClaudeProcessTree } from "../process-tree.js";
 import { ClaudeLiveInput, claudeQuery, isClaudeFinalResult } from "../query.js";
 import { ClaudeSessionStore, readClaudeTranscripts } from "../session-store.js";
 import { claudeUsageTracker } from "../usage.js";
-import { captureCheckpoint, redact, restoreCheckpoint } from "./checkpoint.js";
+import {
+  captureCheckpoint,
+  redact,
+  restoreCheckpoint,
+  resumedCostUsd,
+  validUsd,
+} from "./checkpoint.js";
 import { harnessClient, receipt } from "./client.js";
 import {
   COORDINATION_PREFIX,
@@ -26,6 +32,8 @@ import {
 import { CREDENTIAL_KEYS, nativeEnvironment } from "./environment.js";
 import {
   type AdapterBootstrap,
+  ExecutionLimitEnforcement,
+  type ExecutionLimits,
   LiveInputReceipt,
   TaskState,
 } from "./gen/supertag/runtime/v2/runtime_pb.js";
@@ -42,6 +50,24 @@ const ACTIONS: Readonly<Record<string, readonly string[]>> = {
 
 export class UnsupportedPermissionError extends Error {}
 class SafeAdapterFailure extends Error {}
+
+function acceptedBudgetUsd(limits: ExecutionLimits | undefined): number | undefined {
+  if (limits?.maxReportedTokens !== undefined || limits?.maxNativeAgents !== undefined)
+    throw new SafeAdapterFailure(
+      "Claude does not support the accepted token or native agent limit. Native execution did not start.",
+    );
+  const cost = limits?.maxReportedCost;
+  if (!cost) return undefined;
+  if (cost.currency !== "USD" || cost.amountMinor > BigInt(Number.MAX_SAFE_INTEGER))
+    throw new SafeAdapterFailure(
+      "Claude requires an accepted USD budget in its supported range. Native execution did not start.",
+    );
+  if (cost.amountMinor === 0n)
+    throw new SafeAdapterFailure(
+      "Claude reported USD budget is zero. Native execution did not start.",
+    );
+  return Number(cost.amountMinor) / 100;
+}
 
 export function admittedTools(actions: readonly string[]): string[] {
   if (actions.includes("commands:execute"))
@@ -210,7 +236,10 @@ export async function runAdapter(
   let nativeSessionId: string | undefined;
   let mirrorFailed = false;
   let eventSequence = 0n;
-  let usageSequence = 0n;
+  let nativeUsageSequence = 0n;
+  let costOnlySequence = 0n;
+  let lastTotalCostUsd: number | undefined;
+  let observedNativeUsage = false;
   const live = new ClaudeLiveInput();
   let polling: Promise<void> | undefined;
   let stopPolling = false;
@@ -219,6 +248,7 @@ export async function runAdapter(
   let phase = "configuration";
   const pendingSettlements: Promise<unknown>[] = [];
   try {
+    const maxBudgetUsd = acceptedBudgetUsd(task.executionLimits);
     let selected: ReturnType<typeof selectSkills>;
     try {
       selected = selectSkills(task, run.resolvedSkills);
@@ -249,6 +279,15 @@ export async function runAdapter(
     phase = "checkpoint validation";
     const restored = restoreCheckpoint(run.checkpoint, task, cwd);
     nativeSessionId = restored?.nativeSessionId;
+    let costBaseline: number | undefined;
+    try {
+      costBaseline = resumedCostUsd(restored);
+    } catch {
+      if (maxBudgetUsd !== undefined)
+        throw new SafeAdapterFailure(
+          "Claude budget could not verify the resumed cost baseline. Native execution did not start.",
+        );
+    }
     const store = new ClaudeSessionStore(
       async (_session, transcripts) => {
         readClaudeTranscripts(transcripts);
@@ -257,6 +296,17 @@ export async function runAdapter(
       [],
     );
     const usage = claudeUsageTracker();
+    if (maxBudgetUsd !== undefined) {
+      await receipt(() =>
+        client.confirmExecutionLimits(
+          {
+            limits: task.executionLimits,
+            reportedCost: ExecutionLimitEnforcement.PROVIDER_BUDGET,
+          },
+          options(),
+        ),
+      );
+    }
     phase = "process supervision";
     tree = await ClaudeProcessTree.prepare();
     const ownedTree = tree;
@@ -296,6 +346,7 @@ export async function runAdapter(
       ...(restored ? { resume: restored.nativeSessionId } : {}),
       ...(configuration.executable ? { pathToClaudeCodeExecutable: configuration.executable } : {}),
       ...(model ? { model } : {}),
+      ...(maxBudgetUsd !== undefined ? { maxBudgetUsd } : {}),
       spawnClaudeCodeProcess: (spawnOptions) => {
         // Keep the native leader in the Rust Guardian's process group. SDK env may contain
         // ambient process.env, so discard it and forward only our selected provider config.
@@ -394,15 +445,49 @@ export async function runAdapter(
         });
       if (message.type === "system" && message.subtype === "mirror_error") mirrorFailed = true;
       const totals = usage(message);
-      if (totals) {
-        const sequence = ++usageSequence;
-        const nativeUsage = {
-          inputTokens: BigInt(totals.inputTokens + (totals.cachedInputTokens ?? 0)),
-          cachedInputTokens: BigInt(totals.cachedInputTokens ?? 0),
-          outputTokens: BigInt(totals.outputTokens),
-          ...(observedModel(message) ? { observedModel: observedModel(message) } : {}),
-        };
-        await receipt(() => client.reportUsage({ sequence, nativeUsage }, options()));
+      const rawCost = message.type === "result" ? message.total_cost_usd : undefined;
+      const currentCostUsd =
+        validUsd(rawCost) && costBaseline !== undefined && rawCost >= costBaseline
+          ? rawCost - costBaseline
+          : undefined;
+      if (currentCostUsd !== undefined) lastTotalCostUsd = rawCost;
+      const hasNativeUsage: boolean =
+        totals !== undefined &&
+        (observedNativeUsage ||
+          message.type === "assistant" ||
+          (message.type === "result" && message.usage !== undefined));
+      observedNativeUsage ||= hasNativeUsage;
+      if (hasNativeUsage || currentCostUsd !== undefined) {
+        const sequence = hasNativeUsage ? ++nativeUsageSequence : ++costOnlySequence;
+        const nativeUsage =
+          hasNativeUsage && totals
+            ? {
+                inputTokens: BigInt(totals.inputTokens + (totals.cachedInputTokens ?? 0)),
+                cachedInputTokens: BigInt(totals.cachedInputTokens ?? 0),
+                outputTokens: BigInt(totals.outputTokens),
+                totalTokens: BigInt(totals.totalTokens),
+                ...(observedModel(message) ? { observedModel: observedModel(message) } : {}),
+              }
+            : undefined;
+        await receipt(() =>
+          client.reportUsage(
+            {
+              sequence,
+              nativeUsage,
+              ...(currentCostUsd !== undefined
+                ? { amountMinor: BigInt(Math.round(currentCostUsd * 100)), currency: "USD" }
+                : {}),
+            },
+            options(),
+          ),
+        );
+      }
+      if (maxBudgetUsd !== undefined && currentCostUsd !== undefined) {
+        // Subtract native lifetime totals before rounding to minor units.
+        // Permit only floating-point subtraction noise at the exact boundary.
+        const roundingNoise = Math.min(1e-9, Number.EPSILON * Math.max(1, Math.abs(rawCost ?? 0)));
+        if (currentCostUsd - maxBudgetUsd > roundingNoise)
+          throw new SafeAdapterFailure("Claude reported USD budget exceeded.");
       }
       if (message.type === "assistant") {
         const text = message.message.content
@@ -418,8 +503,12 @@ export async function runAdapter(
       }
       if (isClaudeFinalResult(message) && message.type === "result") {
         finalSeen = true;
+        if (message.subtype === "error_max_budget_usd")
+          throw new SafeAdapterFailure("Claude reported USD budget exceeded.");
         if (message.subtype !== "success" || message.is_error)
           throw new SafeAdapterFailure(nativeFailure(message));
+        if (maxBudgetUsd !== undefined && currentCostUsd === undefined)
+          throw new SafeAdapterFailure("Claude budget could not verify reported USD usage.");
         result = redact(message.result, secrets).replaceAll("\0", "");
       }
     }
@@ -441,7 +530,13 @@ export async function runAdapter(
       throw new SafeAdapterFailure("Claude ended without a native Session identity.");
     if (Buffer.byteLength(result) > 262144) throw new Error("Claude result exceeds its limit");
     phase = "checkpoint capture";
-    const checkpoint = captureCheckpoint(task, nativeSessionId, store.snapshot(), secrets);
+    const checkpoint = captureCheckpoint(
+      task,
+      nativeSessionId,
+      store.snapshot(),
+      secrets,
+      lastTotalCostUsd,
+    );
     const outcome = {
       result,
       succeeded: true,

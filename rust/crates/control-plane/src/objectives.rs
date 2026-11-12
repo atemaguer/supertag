@@ -9,7 +9,7 @@ use supertag_protocol::v2::*;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
-use crate::store::{HostAuthority, Result, insert_task, lease_is_live, name, owned, text};
+use crate::store::{Result, insert_task, name, text};
 use crate::{ControlPlane, Store, StoreError, objective_limits as limits};
 
 struct Record {
@@ -255,14 +255,25 @@ async fn internal_turn_in(
     let order = next_order(tx).await?;
     // Policy composition carries a large future. Keep it off the controller's
     // stack, which also holds the Objective reconciliation state.
-    let task = Box::pin(insert_task(
-        tx,
-        order,
-        &record.value.owner_tag_id,
-        &record.value.session_id,
-        prompt,
-    ))
-    .await?;
+    let task = if kind == "notice" {
+        Box::pin(crate::store::insert_owed_task(
+            tx,
+            order,
+            &record.value.owner_tag_id,
+            &record.value.session_id,
+            prompt,
+        ))
+        .await?
+    } else {
+        Box::pin(insert_task(
+            tx,
+            order,
+            &record.value.owner_tag_id,
+            &record.value.session_id,
+            prompt,
+        ))
+        .await?
+    };
     // Limit notices communicate exhausted authority; they never grant a fresh work budget.
     if kind == "notice" && limits::admission_blocker(&record.limits, timestamp(now_ms)?).is_some() {
         // Keep frozen approval restrictions even when the notice loses its actions.
@@ -903,7 +914,9 @@ pub(crate) async fn objective_task_can_start_in(
     if record.closed() || record.value.paused_at_ms.is_some() {
         return Ok(false);
     }
-    let eligible = if parent.try_get::<String, _>("kind")? == "notice" {
+    let owed_report = crate::work_sessions::task_kind_in(tx, &task.task_id).await?
+        == Some(crate::work_sessions::REPORT);
+    let eligible = if parent.try_get::<String, _>("kind")? == "notice" || owed_report {
         !limits::deadline_stops_running(&record.limits, timestamp(now_ms)?, None)
     } else {
         limits::admission_blocker(&record.limits, timestamp(now_ms)?).is_none()
@@ -923,7 +936,7 @@ pub(crate) async fn objective_started_in(tx: &mut Transaction<'_, Any>, task: &T
     let Some(attempt) = &task.attempt_id else {
         return Err(refused("started Task has no Attempt"));
     };
-    sqlx::query("INSERT INTO supertag_v2_objective_usage (attempt_id,task_id,objective_id) SELECT $1,$2,objective_id FROM supertag_v2_objective_tasks WHERE task_id=$2 ON CONFLICT(attempt_id) DO NOTHING")
+    sqlx::query("INSERT INTO supertag_v2_attempt_usage (attempt_id,task_id) VALUES ($1,$2) ON CONFLICT(attempt_id) DO NOTHING")
         .bind(attempt).bind(&task.task_id).execute(&mut **tx).await?;
     Ok(())
 }
@@ -1012,6 +1025,11 @@ pub(crate) async fn objective_finish_in(
             let open: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_tasks t JOIN supertag_v2_objective_tasks ot ON ot.task_id=t.task_id WHERE ot.objective_id=$1 AND t.task_id<>$2 AND (t.state IN ($3,$4,$5,$6) OR t.cleanup_pending=1)")
                 .bind(&id).bind(&task.task_id).bind(TaskState::Queued as i64).bind(TaskState::Claimed as i64).bind(TaskState::Running as i64).bind(TaskState::Uncertain as i64).fetch_one(&mut **tx).await?;
             if open == 0 {
+                match crate::budget_pool::objective_in(tx, &id, None, false).await {
+                    Ok(_) => {}
+                    Err(StoreError::FailedPrecondition(_)) => return Ok(()),
+                    Err(error) => return Err(error),
+                }
                 if record.idle_wake_count == 0 {
                     record.idle_wake_count = 1;
                     internal_turn_in(tx, &record, &format!("idle:{}", task.task_id), "Your last turn ended with nothing running and nothing asked, while the Objective is still working. Continue the work, report a blocker, or finish the Objective. If this turn also ends that way, the Objective becomes blocked.", "idle", now_ms).await?;
@@ -1090,16 +1108,15 @@ async fn reported_in(
     tx: &mut Transaction<'_, Any>,
     record: &Record,
 ) -> Result<Option<limits::ReportedSpend>> {
-    let rows = sqlx::query("SELECT attempt_id, amount_minor, currency, estimated FROM supertag_v2_objective_usage WHERE objective_id=$1 ORDER BY attempt_id").bind(&record.value.objective_id).fetch_all(&mut **tx).await?;
+    let rows = sqlx::query("SELECT u.attempt_id, u.amount_minor, u.currency, u.estimated FROM supertag_v2_attempt_usage u JOIN supertag_v2_objective_tasks ot ON ot.task_id=u.task_id WHERE ot.objective_id=$1 ORDER BY u.attempt_id").bind(&record.value.objective_id).fetch_all(&mut **tx).await?;
     let mut amounts = BTreeMap::<String, u64>::new();
     let mut attempts = vec![];
     for row in rows {
         let amount: Option<i64> = row.try_get("amount_minor")?;
         if let (Some(value), Some(unit)) = (amount, row.try_get::<Option<String>, _>("currency")?) {
             let total = amounts.entry(unit).or_default();
-            *total = total
-                .checked_add(value as u64)
-                .ok_or_else(|| refused("Objective reported spend overflowed"))?;
+            // Exhaustion cannot wrap or reject a valid per-Attempt receipt.
+            *total = total.saturating_add(value as u64);
         }
         attempts.push(limits::AttemptCostEvidence {
             attempt_id: row.try_get("attempt_id")?,
@@ -1114,7 +1131,7 @@ async fn reported_in(
     Ok(limits::reported_spend(&record.limits, &amounts, &attempts))
 }
 
-async fn reconcile_in(
+pub(crate) async fn reconcile_in(
     tx: &mut Transaction<'_, Any>,
     objective_id: &str,
     now_ms: i64,
@@ -1186,97 +1203,6 @@ pub(crate) async fn objective_sweep_in(tx: &mut Transaction<'_, Any>, now_ms: i6
         reconcile_in(tx, &id, now_ms).await?;
     }
     Ok(())
-}
-
-impl Store {
-    pub async fn report_attempt_usage(
-        &self,
-        host: &HostAuthority,
-        input: &ReportAttemptUsageRequest,
-    ) -> Result<()> {
-        let attempt = input
-            .attempt
-            .as_ref()
-            .ok_or_else(|| invalid("Attempt identity is required"))?;
-        let sequence =
-            i64::try_from(input.sequence).map_err(|_| invalid("usage sequence is too large"))?;
-        if sequence < 1 {
-            return Err(invalid("usage sequence starts at one"));
-        }
-        if let Some(usage) = &input.native_usage {
-            if input.amount_minor.is_some() || input.currency.is_some() || input.estimated {
-                return Err(invalid("native token usage cannot include cost evidence"));
-            }
-            return self
-                .report_native_usage(host, attempt, sequence, usage)
-                .await;
-        }
-        if input.amount_minor.is_some() != input.currency.is_some() {
-            return Err(invalid("reported cost requires both amount and currency"));
-        }
-        if let Some(value) = input.amount_minor {
-            amount(value)?;
-        }
-        if let Some(value) = &input.currency {
-            currency(value)?;
-        }
-        if input.estimated && input.amount_minor.is_none() {
-            return Err(invalid("an estimated cost requires an amount"));
-        }
-        let fingerprint = digest("usage", input);
-        let (mut tx, _) = self.write().await?;
-        let now_ms = self.execution_now_ms();
-        let task = owned(
-            &mut tx,
-            host,
-            &attempt.task_id,
-            &attempt.attempt_id,
-            &attempt.lease_token,
-        )
-        .await?;
-        let id: Option<String> = sqlx::query_scalar(
-            "SELECT objective_id FROM supertag_v2_objective_tasks WHERE task_id=$1",
-        )
-        .bind(&attempt.task_id)
-        .fetch_optional(&mut *tx)
-        .await?;
-        let Some(id) = id else {
-            return Err(refused(
-                "usage reporting currently requires an Objective Task",
-            ));
-        };
-        let prior: Option<String> = sqlx::query_scalar("SELECT request_digest FROM supertag_v2_objective_usage_events WHERE attempt_id=$1 AND sequence=$2").bind(&attempt.attempt_id).bind(sequence).fetch_optional(&mut *tx).await?;
-        if let Some(prior) = prior {
-            if prior != fingerprint {
-                return Err(StoreError::Conflict(
-                    "usage sequence was used with different evidence".into(),
-                ));
-            }
-            tx.commit().await?;
-            return Ok(());
-        }
-        if task.try_get::<i64, _>("state")? != TaskState::Running as i64
-            || !lease_is_live(&task, now_ms)?
-        {
-            return Err(refused("Task is not running"));
-        }
-        sqlx::query("INSERT INTO supertag_v2_objective_usage (attempt_id,task_id,objective_id) VALUES ($1,$2,$3) ON CONFLICT(attempt_id) DO NOTHING").bind(&attempt.attempt_id).bind(&attempt.task_id).bind(&id).execute(&mut *tx).await?;
-        let previous: i64 = sqlx::query_scalar(
-            "SELECT sequence FROM supertag_v2_objective_usage WHERE attempt_id=$1",
-        )
-        .bind(&attempt.attempt_id)
-        .fetch_one(&mut *tx)
-        .await?;
-        if sequence != previous + 1 {
-            return Err(refused("usage sequence has a gap"));
-        }
-        sqlx::query("UPDATE supertag_v2_objective_usage SET sequence=$1, amount_minor=$2, currency=$3, estimated=$4 WHERE attempt_id=$5")
-            .bind(sequence).bind(input.amount_minor.map(|value| value as i64)).bind(&input.currency).bind(i64::from(input.estimated)).bind(&attempt.attempt_id).execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO supertag_v2_objective_usage_events (attempt_id,sequence,request_digest) VALUES ($1,$2,$3)").bind(&attempt.attempt_id).bind(sequence).bind(fingerprint).execute(&mut *tx).await?;
-        reconcile_in(&mut tx, &id, now_ms).await?;
-        tx.commit().await?;
-        Ok(())
-    }
 }
 
 #[tonic::async_trait]

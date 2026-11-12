@@ -1,4 +1,5 @@
 mod approvals;
+mod budget_pool;
 mod checkpoints;
 mod commit_reviews;
 mod context;

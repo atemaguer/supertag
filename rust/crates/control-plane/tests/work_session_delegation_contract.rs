@@ -208,6 +208,7 @@ async fn assert_delegated_gates(store: &Store, objective: &Objective, host: &Hos
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                execution_limits: None,
                 tag_id: objective.owner_tag_id.clone(),
                 session_id: objective.session_id.clone(),
                 operation_id: "delegate-gated-write".into(),
@@ -305,6 +306,7 @@ async fn contract(url: &str) {
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                execution_limits: None,
                 tag_id: "owner".into(),
                 session_id: "ordinary".into(),
                 operation_id: "ordinary-turn".into(),

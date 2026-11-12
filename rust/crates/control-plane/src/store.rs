@@ -31,9 +31,9 @@ use sqlx::{
 use supertag_protocol::{
     v2::{
         AcceptEventRequest, AppendEventRequest, ApprovalRule, Assignment, ClaimReplyResponse,
-        ContextContract, FinishTaskRequest, HarnessKind, PutTagRequest, Reply, ReplyDestination,
-        ReplyState, SettleReplyRequest, StartTaskRequest, SubmitTaskRequest, Tag, Task, TaskEvent,
-        TaskState, WorkspaceSpec,
+        ContextContract, ExecutionLimits, FinishTaskRequest, HarnessKind, PutTagRequest, Reply,
+        ReplyDestination, ReplyState, SettleReplyRequest, StartTaskRequest, SubmitTaskRequest, Tag,
+        Task, TaskEvent, TaskState, WorkspaceSpec,
     },
     valid_git_commit, valid_workspace_id,
 };
@@ -68,7 +68,7 @@ pub struct Store {
 
 impl Store {
     pub async fn open(url: &str) -> anyhow::Result<Self> {
-        const SCHEMA_VERSION: i64 = 30;
+        const SCHEMA_VERSION: i64 = 32;
         sqlx::any::install_default_drivers();
         let sqlite = url.starts_with("sqlite:");
         anyhow::ensure!(
@@ -149,6 +149,8 @@ impl Store {
                 include_str!("../migrations/sqlite/0028_work_session_lifecycle.sql"),
                 include_str!("../migrations/sqlite/0029_objective_runtime_actions.sql"),
                 include_str!("../migrations/sqlite/0030_commit_reviews.sql"),
+                include_str!("../migrations/sqlite/0031_execution_limits.sql"),
+                include_str!("../migrations/sqlite/0032_attempt_usage.sql"),
             ]
         } else {
             [
@@ -182,6 +184,8 @@ impl Store {
                 include_str!("../migrations/postgresql/0028_work_session_lifecycle.sql"),
                 include_str!("../migrations/postgresql/0029_objective_runtime_actions.sql"),
                 include_str!("../migrations/postgresql/0030_commit_reviews.sql"),
+                include_str!("../migrations/postgresql/0031_execution_limits.sql"),
+                include_str!("../migrations/postgresql/0032_attempt_usage.sql"),
             ]
         };
         if version < SCHEMA_VERSION {
@@ -319,6 +323,7 @@ impl Store {
     }
 
     pub async fn submit_task(&self, principal: &str, input: &SubmitTaskRequest) -> Result<Task> {
+        let execution_limits = crate::budget_pool::normalize(input.execution_limits.as_ref())?;
         name("principal", principal)?;
         name("operation ID", &input.operation_id)?;
         name("Tag ID", &input.tag_id)?;
@@ -332,7 +337,7 @@ impl Store {
             return Err(invalid("Mailbox Sessions are reserved for delivery"));
         }
         text("prompt", &input.prompt, MAX_TASK_PROMPT_BYTES)?;
-        let digest = format!(
+        let mut digest = format!(
             "{:x}",
             Sha256::digest(serde_json::to_vec(&(
                 &input.tag_id,
@@ -340,6 +345,12 @@ impl Store {
                 &input.prompt
             ))?)
         );
+        if let Some(limits) = &execution_limits {
+            digest = format!(
+                "{:x}",
+                Sha256::digest(serde_json::to_vec(&(&digest, limits.encode_to_vec()))?)
+            );
+        }
         let (mut transaction, order) = self.write().await?;
         let prior = sqlx::query("SELECT request_digest, task_id FROM supertag_v2_admissions WHERE principal = $1 AND operation_id = $2")
             .bind(principal).bind(&input.operation_id).fetch_optional(&mut *transaction).await?;
@@ -360,12 +371,13 @@ impl Store {
             self.execution_now_ms(),
         )
         .await?;
-        let task = insert_task(
+        let task = insert_task_with_limits(
             &mut transaction,
             order,
             &input.tag_id,
             &input.session_id,
             &input.prompt,
+            execution_limits.as_ref(),
         )
         .await?;
         crate::objectives::objective_link_task_in(&mut transaction, &task).await?;
@@ -1005,6 +1017,79 @@ pub(crate) async fn insert_task_with_surface(
     prompt: &str,
     surface: Option<&crate::surface_policy::AdmissionSurface>,
 ) -> Result<Task> {
+    Box::pin(insert_task_options(
+        transaction,
+        order,
+        tag_id,
+        session_id,
+        prompt,
+        TaskAdmission {
+            surface,
+            ..Default::default()
+        },
+    ))
+    .await
+}
+
+pub(crate) async fn insert_task_with_limits(
+    transaction: &mut Transaction<'_, Any>,
+    order: i64,
+    tag_id: &str,
+    session_id: &str,
+    prompt: &str,
+    execution_limits: Option<&ExecutionLimits>,
+) -> Result<Task> {
+    Box::pin(insert_task_options(
+        transaction,
+        order,
+        tag_id,
+        session_id,
+        prompt,
+        TaskAdmission {
+            execution_limits,
+            ..Default::default()
+        },
+    ))
+    .await
+}
+
+pub(crate) async fn insert_owed_task(
+    transaction: &mut Transaction<'_, Any>,
+    order: i64,
+    tag_id: &str,
+    session_id: &str,
+    prompt: &str,
+) -> Result<Task> {
+    Box::pin(insert_task_options(
+        transaction,
+        order,
+        tag_id,
+        session_id,
+        prompt,
+        TaskAdmission {
+            owed: true,
+            ..Default::default()
+        },
+    ))
+    .await
+}
+
+#[derive(Default)]
+struct TaskAdmission<'a> {
+    surface: Option<&'a crate::surface_policy::AdmissionSurface>,
+    execution_limits: Option<&'a ExecutionLimits>,
+    owed: bool,
+}
+
+async fn insert_task_options(
+    transaction: &mut Transaction<'_, Any>,
+    order: i64,
+    tag_id: &str,
+    session_id: &str,
+    prompt: &str,
+    options: TaskAdmission<'_>,
+) -> Result<Task> {
+    let surface = options.surface;
     if crate::work_sessions::reserved_session(session_id) {
         return Err(invalid(
             "Work Session IDs are reserved for internal admission",
@@ -1040,7 +1125,18 @@ pub(crate) async fn insert_task_with_surface(
     {
         return Err(StoreError::FailedPrecondition("workspace or harness changed; start a new Session".into()));
     }
-    insert_accepted_task(transaction, order, tag_id, session_id, prompt, accepted).await
+    let limits = crate::budget_pool::root_in(
+        transaction,
+        tag_id,
+        session_id,
+        options.execution_limits,
+        options.owed,
+    )
+    .await?;
+    let mut task =
+        insert_accepted_task(transaction, order, tag_id, session_id, prompt, accepted).await?;
+    crate::budget_pool::set_in(transaction, &mut task, limits).await?;
+    Ok(task)
 }
 
 struct AcceptedTag {
@@ -1097,6 +1193,102 @@ pub(crate) async fn owner_runtime_actions_in(
         .runtime_authority
         .unwrap_or_default()
         .actions)
+}
+
+/// Resolve current authority for an approval-driven child continuation without
+/// inserting a Task. The original surface must still exist and accept this Tag.
+pub(crate) async fn current_work_policy_in(
+    tx: &mut Transaction<'_, Any>,
+    source: &Task,
+    starter: &Task,
+    objective: Option<&str>,
+) -> Result<Task> {
+    use supertag_protocol::v2::{SurfaceAccount, SurfaceLocation, SurfacePolicyOrigin};
+    let mut surface = None;
+    if let Some(origin) = source
+        .policy_snapshot
+        .as_ref()
+        .and_then(|s| s.origin.as_ref())
+    {
+        let row=sqlx::query("SELECT l.payload AS location,a.payload AS account FROM supertag_v2_surface_locations l JOIN supertag_v2_surface_accounts a ON a.account_id=l.account_id WHERE l.location_id=$1")
+            .bind(&origin.location_id).fetch_optional(&mut **tx).await?.ok_or(StoreError::PermissionDenied)?;
+        let location: SurfaceLocation =
+            crate::policy::decode(&row.try_get::<Vec<u8>, _>("location")?)?;
+        let account: SurfaceAccount =
+            crate::policy::decode(&row.try_get::<Vec<u8>, _>("account")?)?;
+        if !account.enabled
+            || !location.enabled
+            || location.tag_id != source.tag_id
+            || location.account_id != origin.account_id
+            || location.scope != origin.scope
+        {
+            return Err(StoreError::PermissionDenied);
+        }
+        surface = Some(crate::surface_policy::AdmissionSurface {
+            origin: SurfacePolicyOrigin {
+                location_id: location.location_id,
+                location_revision: location.revision,
+                account_id: location.account_id,
+                connector_account_id: location.connector_account_id,
+                scope: location.scope,
+                origin_actions: origin.origin_actions.clone(),
+            },
+            permission_set_ids: if objective.is_some() {
+                vec![]
+            } else {
+                location.permission_set_ids
+            },
+            context_set_ids: if objective.is_some() {
+                vec![]
+            } else {
+                location.context_set_ids
+            },
+        });
+    }
+    if source.tag_id != starter.tag_id {
+        let id = objective.ok_or(StoreError::PermissionDenied)?;
+        let eligible:i64=sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_objectives o JOIN supertag_v2_team_members m ON m.team_id=o.team_id AND m.tag_id=$2 WHERE o.objective_id=$1 AND EXISTS (SELECT 1 FROM supertag_v2_hosts h WHERE h.generation>0 AND h.revoked_at_ms IS NULL AND (h.all_tags=1 OR EXISTS (SELECT 1 FROM supertag_v2_host_tags scope WHERE scope.host_id=h.host_id AND scope.tag_id=$2)))")
+            .bind(id).bind(&source.tag_id).fetch_one(&mut **tx).await?;
+        if eligible == 0 {
+            return Err(StoreError::PermissionDenied);
+        }
+    }
+    let mut accepted = tag_policy_in(tx, &source.tag_id, surface.as_ref()).await?;
+    if let Some(id) = objective {
+        let row = sqlx::query(
+            "SELECT revision,runtime_actions FROM supertag_v2_objectives WHERE objective_id=$1",
+        )
+        .bind(id)
+        .fetch_one(&mut **tx)
+        .await?;
+        let actions = serde_json::from_str(&row.try_get::<String, _>("runtime_actions")?)?;
+        if source.tag_id == starter.tag_id {
+            crate::policy::apply_objective_runtime(
+                &mut accepted.policy,
+                id,
+                row.try_get::<i64, _>("revision")? as u64,
+                actions,
+            )?;
+        } else {
+            crate::policy::apply_delegated_runtime(
+                &mut accepted.policy,
+                starter,
+                id,
+                row.try_get::<i64, _>("revision")? as u64,
+                &actions,
+            )?;
+            accepted.workspace = starter.workspace.clone();
+        }
+    }
+    let mut result = source.clone();
+    result.instructions = accepted.policy.instructions;
+    result.allowed_actions = accepted.policy.allowed_actions;
+    result.approval_rules = accepted.policy.approval_rules;
+    result.harness_kind = accepted.policy.harness_kind;
+    result.policy_snapshot = Some(accepted.policy.snapshot);
+    result.workspace = accepted.workspace;
+    result.tag_revision = accepted.revision as u64;
+    Ok(result)
 }
 
 pub(crate) async fn insert_delegated_task_in(
@@ -1169,9 +1361,9 @@ pub(crate) async fn insert_task_from_snapshot(
     sqlx::query(
         "INSERT INTO supertag_v2_tasks
            (task_id,tag_id,session_id,prompt,instructions,allowed_actions,tag_revision,state,accepted_order,
-            workspace_id,workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest)
+            workspace_id,workspace_base_commit,harness_kind,approval_rules,policy_snapshot,policy_effective_digest,execution_limits)
          SELECT $1, tag_id, $2, $3, instructions, allowed_actions, tag_revision, $4, $5,
-                workspace_id, workspace_base_commit, harness_kind, approval_rules, policy_snapshot, policy_effective_digest
+                workspace_id, workspace_base_commit, harness_kind, approval_rules, policy_snapshot, policy_effective_digest,execution_limits
          FROM supertag_v2_tasks WHERE task_id=$6",
     )
     .bind(&id).bind(session_id).bind(prompt).bind(TaskState::Queued as i64).bind(order)
@@ -1292,6 +1484,7 @@ pub(crate) async fn owned(
 
 pub(crate) fn task_row(row: &AnyRow) -> Result<Task> {
     Ok(Task {
+        execution_limits: crate::budget_pool::from_row(row)?,
         task_id: row.try_get("task_id")?,
         tag_id: row.try_get("tag_id")?,
         session_id: row.try_get("session_id")?,

@@ -8,8 +8,9 @@ use std::sync::{
 use sqlx::{Connection, Executor};
 use supertag_control_plane::{Store, StoreError};
 use supertag_protocol::v2::{
-    AppendEventRequest, Assignment, AttemptDecision, FinishTaskRequest, InspectAttemptRequest,
-    ObjectiveSignal, ResolveAttemptRequest, StartTaskRequest, SubmitTaskRequest, TaskState,
+    AppendEventRequest, Assignment, AttemptDecision, ExecutionLimits, FinishTaskRequest,
+    HarnessKind, InspectAttemptRequest, ObjectiveSignal, ReportedCostLimit, ResolveAttemptRequest,
+    StartTaskRequest, SubmitTaskRequest, TaskState,
 };
 use uuid::Uuid;
 
@@ -95,6 +96,7 @@ async fn version_two_inflight_upgrade(url: &str, sqlite: bool) {
 
 fn turn(operation_id: &str, session_id: &str) -> SubmitTaskRequest {
     SubmitTaskRequest {
+        execution_limits: None,
         tag_id: "reviewer".into(),
         session_id: session_id.into(),
         operation_id: operation_id.into(),
@@ -142,6 +144,89 @@ fn finish(identity: &InspectAttemptRequest) -> FinishTaskRequest {
     }
 }
 
+async fn route_execution_limits(store: &Store) {
+    let host = support::register_host(store, "bounded-work").await;
+    let cost_request = SubmitTaskRequest {
+        execution_limits: Some(ExecutionLimits {
+            max_reported_cost: Some(ReportedCostLimit {
+                amount_minor: 200,
+                currency: "USD".into(),
+            }),
+            ..Default::default()
+        }),
+        ..turn("cost-limit", "cost")
+    };
+    let cost = store
+        .submit_task("operator:alice", &cost_request)
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .submit_task("operator:alice", &cost_request)
+            .await
+            .unwrap(),
+        cost
+    );
+    assert!(matches!(
+        store
+            .submit_task("operator:alice", &turn("cost-limit", "cost"))
+            .await,
+        Err(StoreError::Conflict(_))
+    ));
+    assert!(
+        store
+            .claim_task_for_host(&host, "cost-codex", &[], HarnessKind::Codex)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        store.get_task(&cost.task_id).await.unwrap().state(),
+        TaskState::Queued
+    );
+    let claim = store
+        .claim_task_for_host(&host, "cost-claude", &[], HarnessKind::ClaudeCode)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(claim.task.unwrap().task_id, cost.task_id);
+
+    let tokens = store
+        .submit_task(
+            "operator:alice",
+            &SubmitTaskRequest {
+                execution_limits: Some(ExecutionLimits {
+                    max_reported_tokens: Some(2_000_000),
+                    max_native_agents: Some(0),
+                    ..Default::default()
+                }),
+                ..turn("token-limit", "tokens")
+            },
+        )
+        .await
+        .unwrap();
+    for (operation, harness) in [
+        ("tokens-claude", HarnessKind::ClaudeCode),
+        ("tokens-agents", HarnessKind::OpenaiAgents),
+    ] {
+        assert!(
+            store
+                .claim_task_for_host(&host, operation, &[], harness)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+    let claim = store
+        .claim_task_for_host(&host, "tokens-codex", &[], HarnessKind::Codex)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(claim.task.unwrap().task_id, tokens.task_id);
+    store.cancel_task(&cost.task_id).await.unwrap();
+    store.cancel_task(&tokens.task_id).await.unwrap();
+}
+
 async fn authority_contract(url: &str) {
     let clock = Arc::new(AtomicI64::new(BASE));
     let store = open(url, &clock).await;
@@ -155,6 +240,7 @@ async fn authority_contract(url: &str) {
         .put_tag("reviewer", "Check the patch", vec![])
         .await
         .unwrap();
+    route_execution_limits(&store).await;
 
     let task = store
         .submit_task("operator:alice", &turn("first", "review"))

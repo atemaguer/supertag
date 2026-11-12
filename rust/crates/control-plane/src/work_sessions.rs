@@ -1,4 +1,5 @@
 //! Work started by an owned Attempt and kept in a separate Session.
+pub(crate) mod automatic;
 pub(crate) mod continuation;
 pub(crate) mod questions;
 pub(crate) mod reports;
@@ -42,6 +43,21 @@ pub(crate) async fn task_scope_in(
     tx: &mut Transaction<'_, Any>,
     task_id: &str,
 ) -> Result<Option<WorkSessionTaskScope>> {
+    // A continued child has its own immutable starter, so its direct relation
+    // takes precedence over the prior child in its approval ancestry.
+    if let Some(row) = sqlx::query(
+        "SELECT kind,task_id,work_session_id FROM supertag_v2_work_session_tasks WHERE task_id=$1",
+    )
+    .bind(task_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    {
+        return Ok(Some(WorkSessionTaskScope {
+            kind: row.try_get("kind")?,
+            task_id: row.try_get("task_id")?,
+            work_session_id: row.try_get("work_session_id")?,
+        }));
+    }
     let rows = sqlx::query(
         "WITH RECURSIVE lineage(task_id) AS (
              SELECT CAST($1 AS TEXT)
@@ -149,6 +165,23 @@ async fn insert_child_in(
     .await
 }
 
+/// Direct owner Objective reports may start follow-up work. An approval
+/// continuation remains scoped to its original report and cannot gain this right.
+pub(crate) async fn may_start_in(tx: &mut Transaction<'_, Any>, parent: &Task) -> Result<bool> {
+    if crate::mailbox::private_session(&parent.session_id) {
+        return Ok(false);
+    }
+    match task_scope_in(tx, &parent.task_id).await? {
+        None => Ok(!reserved_session(&parent.session_id)),
+        Some(scope) if scope.kind == REPORT && scope.task_id == parent.task_id => {
+            let count:i64=sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_work_sessions w JOIN supertag_v2_objectives o ON o.objective_id=w.objective_id WHERE w.work_session_id=$1 AND o.owner_tag_id=$2 AND o.session_id=$3 AND o.status NOT IN (5,6) AND EXISTS (SELECT 1 FROM supertag_v2_work_session_reports r WHERE r.work_session_id=w.work_session_id AND r.report_task_id=$4)")
+                .bind(scope.work_session_id).bind(&parent.tag_id).bind(&parent.session_id).bind(&parent.task_id).fetch_one(&mut **tx).await?;
+            Ok(count == 1)
+        }
+        _ => Ok(false),
+    }
+}
+
 impl Store {
     pub async fn start_work_session(
         &self,
@@ -183,10 +216,7 @@ impl Store {
         )
         .await?;
         let parent = task_row(&row)?;
-        if reserved_session(&parent.session_id)
-            || crate::mailbox::private_session(&parent.session_id)
-            || task_kind_in(&mut tx, &parent.task_id).await?.is_some()
-        {
+        if !may_start_in(&mut tx, &parent).await? {
             return Err(StoreError::PermissionDenied);
         }
         let target = input.target_tag_id.as_deref().unwrap_or(&parent.tag_id);
@@ -249,7 +279,7 @@ impl Store {
             "Complete the following Work Session assignment. Return the result for the parent Session. If you need an answer to proceed, call ask with a text argument containing one question, then end this turn.\n\n{}",
             serde_json::json!({ "title": title, "instruction": instruction }),
         );
-        let child = insert_child_in(
+        let mut child = insert_child_in(
             &mut tx,
             order,
             &parent,
@@ -259,6 +289,14 @@ impl Store {
             &prompt,
         )
         .await?;
+        let allocation = crate::budget_pool::child_in(
+            &mut tx,
+            &parent,
+            objective_id.as_deref(),
+            child.execution_limits.as_ref(),
+        )
+        .await?;
+        crate::budget_pool::set_in(&mut tx, &mut child, allocation).await?;
         sqlx::query("INSERT INTO supertag_v2_work_sessions (work_session_id,title,parent_tag_id,parent_session_id,starter_task_id,tag_id,latest_task_id,objective_id,created_order) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)")
             .bind(&id).bind(&title).bind(&parent.tag_id).bind(&parent.session_id)
             .bind(&parent.task_id).bind(&child.tag_id).bind(&child.task_id).bind(&objective_id)

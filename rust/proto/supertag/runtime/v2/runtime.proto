@@ -659,6 +659,7 @@ service WorkspaceDirectory {
 // provides its endpoint and an execution-scoped credential.
 service Harness {
   rpc Attach(HarnessAttachRequest) returns (HarnessRun);
+  rpc ConfirmExecutionLimits(AppliedExecutionLimits) returns (ConfirmExecutionLimitsResponse);
   rpc TakeLiveInput(HarnessTakeLiveInputRequest) returns (TakeInputResponse);
   rpc SettleLiveInput(HarnessSettleLiveInputRequest) returns (LiveInput);
   rpc Publish(HarnessPublishRequest) returns (TaskEvent);
@@ -961,6 +962,7 @@ message SendMessageRequest {
   string conversation = 2;
   string text = 3;
   string operation_id = 4;
+  ExecutionLimits execution_limits = 5;
 }
 
 message GetMessageRequest {
@@ -980,6 +982,18 @@ message SubmitTaskRequest {
   string session_id = 2;
   string operation_id = 3;
   string prompt = 4;
+  ExecutionLimits execution_limits = 5;
+}
+
+message ReportedCostLimit {
+  string currency = 1;
+  uint64 amount_minor = 2;
+}
+
+message ExecutionLimits {
+  optional uint64 max_reported_tokens = 1;
+  ReportedCostLimit max_reported_cost = 2;
+  optional uint64 max_native_agents = 3;
 }
 
 message Task {
@@ -998,6 +1012,8 @@ message Task {
   HarnessKind harness_kind = 13;
   repeated ApprovalRule approval_rules = 14;
   TaskPolicySnapshot policy_snapshot = 15;
+  // Accepted once when work is queued. Subsequent usage changes later allocations.
+  ExecutionLimits execution_limits = 16;
 }
 
 message GetTaskRequest {
@@ -1096,6 +1112,7 @@ message NativeTokenUsage {
   uint64 cached_input_tokens = 2;
   uint64 output_tokens = 3;
   optional string observed_model = 4;
+  optional uint64 total_tokens = 5;
 }
 
 message ListNativeUsageRequest {
@@ -1112,6 +1129,9 @@ message ListNativeUsageResponse {
 message HarnessUsageRequest {
   uint64 sequence = 1;
   NativeTokenUsage native_usage = 2;
+  optional uint64 amount_minor = 3;
+  optional string currency = 4;
+  bool estimated = 5;
 }
 
 message AppendEventRequest {
@@ -1140,6 +1160,22 @@ message FinishTaskRequest {
 }
 
 message HarnessAttachRequest {}
+
+enum ExecutionLimitEnforcement {
+  EXECUTION_LIMIT_ENFORCEMENT_UNSPECIFIED = 0;
+  EXECUTION_LIMIT_ENFORCEMENT_HARNESS_GUARD = 1;
+  EXECUTION_LIMIT_ENFORCEMENT_INTERRUPT_ON_REPORT = 2;
+  EXECUTION_LIMIT_ENFORCEMENT_PROVIDER_BUDGET = 3;
+}
+
+message AppliedExecutionLimits {
+  ExecutionLimits limits = 1;
+  ExecutionLimitEnforcement native_agents = 2;
+  ExecutionLimitEnforcement reported_tokens = 3;
+  ExecutionLimitEnforcement reported_cost = 4;
+}
+
+message ConfirmExecutionLimitsResponse {}
 
 message AdapterBootstrap {
   string endpoint = 1;

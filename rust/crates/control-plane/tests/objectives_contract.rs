@@ -180,6 +180,7 @@ async fn contract(url: String) {
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                execution_limits: None,
                 tag_id: "owner".into(),
                 session_id: "direct".into(),
                 operation_id: "direct".into(),
@@ -256,6 +257,7 @@ async fn contract(url: String) {
             .submit_task(
                 OPERATOR,
                 &SubmitTaskRequest {
+                    execution_limits: None,
                     tag_id: "owner".into(),
                     session_id: objective.session_id,
                     operation_id: "closed-bypass".into(),
@@ -386,6 +388,7 @@ async fn contract(url: String) {
             .submit_task(
                 OPERATOR,
                 &SubmitTaskRequest {
+                    execution_limits: None,
                     tag_id: "owner".into(),
                     session_id: budget.session_id.clone(),
                     operation_id: "over-budget".into(),
@@ -469,6 +472,7 @@ async fn contract(url: String) {
             .submit_task(
                 OPERATOR,
                 &SubmitTaskRequest {
+                    execution_limits: None,
                     tag_id: "owner".into(),
                     session_id: deadline.session_id.clone(),
                     operation_id: "past-deadline".into(),
@@ -563,6 +567,7 @@ async fn contract(url: String) {
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                execution_limits: None,
                 tag_id: "owner".into(),
                 session_id: idle.session_id,
                 operation_id: "direct-idle-owner".into(),
@@ -683,6 +688,7 @@ async fn contract(url: String) {
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                execution_limits: None,
                 tag_id: "owner".into(),
                 session_id: "pause-race-unrelated".into(),
                 operation_id: "pause-race-unrelated".into(),
@@ -756,6 +762,7 @@ async fn contract(url: String) {
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                execution_limits: None,
                 tag_id: "owner".into(),
                 session_id: denied.session_id,
                 operation_id: "after-denied-signal".into(),
@@ -823,6 +830,7 @@ async fn contract(url: String) {
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                execution_limits: None,
                 tag_id: "owner".into(),
                 session_id: recovery.session_id,
                 operation_id: "after-failed-recovery".into(),
@@ -957,7 +965,7 @@ async fn contract(url: String) {
     let idle_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_objective_notices WHERE objective_id='idle' AND notice_key LIKE 'idle:%'").fetch_one(&mut connection).await.unwrap();
     assert_eq!(idle_count, 1);
     let unstarted_costs: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM supertag_v2_objective_usage WHERE objective_id='never-started'",
+        "SELECT COUNT(*) FROM supertag_v2_attempt_usage u JOIN supertag_v2_objective_tasks ot ON ot.task_id=u.task_id WHERE ot.objective_id='never-started'",
     )
     .fetch_one(&mut connection)
     .await

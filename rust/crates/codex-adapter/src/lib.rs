@@ -5,6 +5,7 @@ mod checkpoint;
 mod config;
 mod coordination;
 mod events;
+mod pricing;
 mod questions;
 mod skills;
 
@@ -14,8 +15,9 @@ use anyhow::{Context, Result, ensure};
 use supertag_protocol::{
     MAX_CHECKPOINT_BYTES, MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
-        AdapterBootstrap, HarnessAttachRequest, HarnessCompleteRequest, HarnessPublishRequest,
-        SessionCheckpoint, Task, harness_client::HarnessClient,
+        AdapterBootstrap, AppliedExecutionLimits, ExecutionLimitEnforcement, ExecutionLimits,
+        HarnessAttachRequest, HarnessCompleteRequest, HarnessPublishRequest, SessionCheckpoint,
+        Task, harness_client::HarnessClient,
     },
 };
 use tokio::{
@@ -165,6 +167,11 @@ async fn execute(
     token: &str,
 ) -> Result<(String, SessionCheckpoint)> {
     let (task, resolved_skills) = task_and_skills;
+    let applied_limits = execution_limits(task.execution_limits.as_ref())?;
+    let max_reported_tokens = applied_limits
+        .as_ref()
+        .and_then(|applied| applied.limits.as_ref())
+        .and_then(|limits| limits.max_reported_tokens);
     ensure!(
         resolved_skills.is_empty()
             || !task
@@ -221,9 +228,15 @@ async fn execute(
         .transpose()?;
     let baseline = match previous_checkpoint {
         Some(checkpoint) => checkpoint::usage_baseline(checkpoint)?,
-        None => Some([0, 0, 0]),
+        None => Some(([0, 0, 0], Some(0))),
     };
     verify_version(options, &environment).await?;
+    if let Some(applied) = applied_limits {
+        harness
+            .confirm_execution_limits(request(applied, token)?)
+            .await
+            .context("could not confirm Codex execution limits")?;
+    }
 
     let mut command = Command::new(&options.executable);
     command
@@ -259,6 +272,7 @@ async fn execute(
             &skills.paths,
             expected_thread,
             baseline,
+            max_reported_tokens,
             harness,
             questions,
             token,
@@ -298,6 +312,41 @@ async fn execute(
     }
     child.wait().await.context("could not reap Codex process")?;
     outcome.context("Codex execution timed out")?
+}
+
+fn execution_limits(limits: Option<&ExecutionLimits>) -> Result<Option<AppliedExecutionLimits>> {
+    let Some(limits) = limits else {
+        return Ok(None);
+    };
+    ensure!(
+        limits.max_reported_cost.is_none(),
+        "Codex does not support a reported cost limit"
+    );
+    ensure!(
+        limits.max_native_agents.is_none_or(|limit| limit == 0),
+        "Codex native subagents are disabled"
+    );
+    ensure!(
+        limits.max_reported_tokens != Some(0),
+        "Codex reported token limit must be positive"
+    );
+    if limits.max_reported_tokens.is_none() && limits.max_native_agents.is_none() {
+        return Ok(None);
+    }
+    let mut effective = limits.clone();
+    effective.max_reported_tokens = effective
+        .max_reported_tokens
+        .map(|limit| limit.min(1_000_000));
+    Ok(Some(AppliedExecutionLimits {
+        limits: Some(effective),
+        native_agents: limits
+            .max_native_agents
+            .map_or(0, |_| ExecutionLimitEnforcement::HarnessGuard as i32),
+        reported_tokens: limits
+            .max_reported_tokens
+            .map_or(0, |_| ExecutionLimitEnforcement::InterruptOnReport as i32),
+        reported_cost: 0,
+    }))
 }
 
 async fn publish(

@@ -95,6 +95,7 @@ async fn contract(url: &str) {
         .submit_task(
             "operator:alice",
             &SubmitTaskRequest {
+                execution_limits: None,
                 tag_id: "engineering".into(),
                 session_id: "session".into(),
                 operation_id: "turn".into(),

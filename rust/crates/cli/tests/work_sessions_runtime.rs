@@ -177,6 +177,7 @@ async fn private_harness_work_session_reports_once_after_service_restart() -> Re
     let source = conversations
         .send_message(authenticated_request(
             SendMessageRequest {
+                execution_limits: None,
                 tag_id: "owner".into(),
                 conversation: "private".into(),
                 text: "Investigate this privately".into(),
@@ -542,6 +543,7 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports() -
     let first_parent = conversations
         .send_message(authenticated_request(
             SendMessageRequest {
+                execution_limits: None,
                 tag_id: "owner".into(),
                 conversation: "private".into(),
                 text: "Inspect the region".into(),
@@ -624,6 +626,7 @@ async fn private_child_question_continues_once_and_keeps_both_parent_reports() -
     let next_parent = conversations
         .send_message(authenticated_request(
             SendMessageRequest {
+                execution_limits: None,
                 tag_id: "owner".into(),
                 conversation: "private".into(),
                 text: "Use us-east-1".into(),
@@ -1009,7 +1012,8 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling() -> R
     let child_done = wait_for_work(&mut work, &operator_token, &started.work_session_id, |w| {
         w.report_task_id.is_some()
     })
-    .await?;
+    .await
+    .context("delegated child's report was not delivered")?;
     ensure!(child_done.latest_task_state() == TaskState::Succeeded);
     let report_id = child_done.report_task_id.clone().context("owner report")?;
     let report = operator
@@ -1034,13 +1038,14 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling() -> R
         &public,
         &host_token,
         &host_state,
-        "--reject-work-session-start",
+        "--expect-work-session-start-capability",
     )
     .await?;
     wait_for_work(&mut work, &operator_token, &started.work_session_id, |w| {
         w.report_task_state() == TaskState::Succeeded
     })
-    .await?;
+    .await
+    .context("Objective owner's report did not succeed")?;
     let child = operator
         .get_task(authenticated_request(
             GetTaskRequest {
@@ -1183,6 +1188,226 @@ async fn objective_owner_delegates_to_team_tag_with_frozen_action_ceiling() -> R
     )
     .await?;
     assert_eq!(empty["runtime_actions"], serde_json::json!([]));
+    gateway_process.kill().await?;
+    plane.kill().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn objective_pool_allocates_real_attempt_reports_and_reopens_when_raised() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let service_token = Uuid::new_v4().to_string();
+    let operator_token = Uuid::new_v4().to_string();
+    let host_token = Uuid::new_v4().to_string();
+    let mut plane = command(&["control-plane"]);
+    plane
+        .env("SUPERTAG_GATEWAY_TOKEN", &service_token)
+        .env("SUPERTAG_BOOTSTRAP_HOST_TOKEN", &host_token)
+        .env(
+            "SUPERTAG_DATABASE_URL",
+            format!(
+                "sqlite://{}?mode=rwc",
+                directory.path().join("control.db").display()
+            ),
+        );
+    let (mut plane, private) = service(plane).await?;
+    let (mut gateway_process, public) = service(gateway(
+        &private,
+        &service_token,
+        &operator_token,
+        "operator:alice",
+    ))
+    .await?;
+    cli(
+        &[
+            "put-tag",
+            "--gateway",
+            &public,
+            "planner",
+            "--instructions",
+            "Budget fixture",
+        ],
+        &operator_token,
+    )
+    .await?;
+    let created = cli(
+        &[
+            "objective",
+            "--gateway",
+            &public,
+            "create",
+            "budgeted",
+            "--owner",
+            "planner",
+            "--ongoing",
+            "--budget-minor",
+            "1000",
+            "--currency",
+            "USD",
+            "Measure the checkout",
+        ],
+        &operator_token,
+    )
+    .await?;
+    let session = created["session_id"]
+        .as_str()
+        .context("Objective Session ID")?;
+    let start = created["starting_task_id"]
+        .as_str()
+        .context("Objective starting Task ID")?;
+    let list = [
+        "work-sessions",
+        "--gateway",
+        &public,
+        "list",
+        "--parent-tag",
+        "planner",
+        "--parent-session",
+        session,
+    ];
+    let expected_cost = |minor| serde_json::json!({"currency":"USD","amount_minor":minor});
+    for phase in [
+        "owner",
+        "first",
+        "first-report",
+        "second",
+        "warning",
+        "second-report",
+    ] {
+        run_host(
+            &public,
+            &host_token,
+            &directory.path().join(phase),
+            &format!("--budget-phase={phase}"),
+        )
+        .await?;
+    }
+    let history = cli(&list, &operator_token).await?;
+    let sessions = history["work_sessions"]
+        .as_array()
+        .context("Work Session list")?;
+    assert_eq!(
+        sessions.len(),
+        2,
+        "the below-floor Start did not admit work"
+    );
+    let first = sessions
+        .iter()
+        .find(|work| work["title"] == "first")
+        .context("first Work Session")?;
+    let second = sessions
+        .iter()
+        .find(|work| work["title"] == "second")
+        .context("second Work Session")?;
+    for (id, minor) in [
+        (start, 1000),
+        (
+            first["latest_task_id"].as_str().context("first Task ID")?,
+            1000,
+        ),
+        (
+            first["report_task_id"]
+                .as_str()
+                .context("first report ID")?,
+            400,
+        ),
+        (
+            second["latest_task_id"]
+                .as_str()
+                .context("second Task ID")?,
+            400,
+        ),
+        (
+            second["report_task_id"]
+                .as_str()
+                .context("second report ID")?,
+            20,
+        ),
+    ] {
+        let task = cli(&["get-task", "--gateway", &public, id], &operator_token).await?;
+        assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+        assert_eq!(
+            task["execution_limits"]["max_reported_cost"],
+            expected_cost(minor)
+        );
+        if minor == 1000 && id != start {
+            let attempt = task["attempt_id"]
+                .as_str()
+                .context("first child Attempt ID")?;
+            let usage = cli(
+                &["task-usage", "--gateway", &public, id, attempt],
+                &operator_token,
+            )
+            .await?;
+            assert_eq!(usage["total_tokens"], 30);
+            assert_eq!(
+                usage["reported_cost"],
+                serde_json::json!({"currency":"USD","amount_minor":600,"estimated":false})
+            );
+        }
+    }
+    let before = cli(
+        &["objective", "--gateway", &public, "get", "budgeted"],
+        &operator_token,
+    )
+    .await?;
+    assert_eq!(before["reported_spend_minor"], 980);
+    let submit = [
+        "submit",
+        "--gateway",
+        &public,
+        "--tag",
+        "planner",
+        "--session",
+        session,
+        "Keep going",
+    ];
+    let denied = cli(&submit, &operator_token)
+        .await
+        .expect_err("owner Task admission below the floor");
+    assert!(format!("{denied:#}").contains("budget"), "{denied:#}");
+    cli(
+        &[
+            "objective",
+            "--gateway",
+            &public,
+            "set-limits",
+            "budgeted",
+            "--budget-minor",
+            "4000",
+            "--currency",
+            "USD",
+        ],
+        &operator_token,
+    )
+    .await?;
+    let reopened = cli(&submit, &operator_token).await?;
+    assert_eq!(
+        reopened["execution_limits"]["max_reported_cost"],
+        expected_cost(3020)
+    );
+    let smaller = cli(
+        &[
+            "submit",
+            "--gateway",
+            &public,
+            "--tag",
+            "planner",
+            "--session",
+            session,
+            "--max-reported-cost-minor",
+            "250",
+            "--reported-cost-currency",
+            "USD",
+            "Use a smaller cap",
+        ],
+        &operator_token,
+    )
+    .await?;
+    assert_eq!(
+        smaller["execution_limits"]["max_reported_cost"],
+        expected_cost(250)
+    );
     gateway_process.kill().await?;
     plane.kill().await?;
     Ok(())

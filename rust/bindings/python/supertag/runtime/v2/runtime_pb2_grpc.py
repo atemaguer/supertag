@@ -4877,6 +4877,11 @@ class HarnessStub:
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAttachRequest.SerializeToString,
                 response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessRun.FromString,
                 _registered_method=True)
+        self.ConfirmExecutionLimits = channel.unary_unary(
+                '/supertag.runtime.v2.Harness/ConfirmExecutionLimits',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AppliedExecutionLimits.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ConfirmExecutionLimitsResponse.FromString,
+                _registered_method=True)
         self.TakeLiveInput = channel.unary_unary(
                 '/supertag.runtime.v2.Harness/TakeLiveInput',
                 request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessTakeLiveInputRequest.SerializeToString,
@@ -4910,6 +4915,12 @@ class HarnessServicer:
     """
 
     def Attach(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ConfirmExecutionLimits(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -4952,6 +4963,11 @@ def add_HarnessServicer_to_server(servicer, server):
                     servicer.Attach,
                     request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAttachRequest.FromString,
                     response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessRun.SerializeToString,
+            ),
+            'ConfirmExecutionLimits': grpc.unary_unary_rpc_method_handler(
+                    servicer.ConfirmExecutionLimits,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.AppliedExecutionLimits.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.ConfirmExecutionLimitsResponse.SerializeToString,
             ),
             'TakeLiveInput': grpc.unary_unary_rpc_method_handler(
                     servicer.TakeLiveInput,
@@ -5008,6 +5024,33 @@ class Harness:
             '/supertag.runtime.v2.Harness/Attach',
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessAttachRequest.SerializeToString,
             supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessRun.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ConfirmExecutionLimits(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.Harness/ConfirmExecutionLimits',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.AppliedExecutionLimits.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.ConfirmExecutionLimitsResponse.FromString,
             options,
             channel_credentials,
             insecure,

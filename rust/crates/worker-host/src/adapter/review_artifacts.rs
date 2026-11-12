@@ -133,6 +133,7 @@ mod tests {
         Bridge {
             token: "execution-token".into(),
             host_token: "host-token".into(),
+            harness: supertag_protocol::v2::HarnessKind::Unspecified,
             assignment: Assignment {
                 task: Some(Task {
                     task_id: "review-task".into(),

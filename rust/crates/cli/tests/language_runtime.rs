@@ -583,3 +583,74 @@ async fn claude_sdk_approves_one_workstream_post_and_delivers_one_mailbox_turn()
     assert_eq!(mail["result"], "SDK fixture handled the addressed post");
     services.stop().await
 }
+
+#[tokio::test]
+#[ignore = "requires SUPERTAG_RUST_TEST_NODE and a built Claude Code language adapter"]
+async fn claude_sdk_applies_accepted_usd_budget_and_records_the_stop_usage() -> Result<()> {
+    let interpreter =
+        std::env::var_os("SUPERTAG_RUST_TEST_NODE").context("Node test executable required")?;
+    let entry = repo_path("packages/runtime/harnesses/claude-code/dist/rust-adapter/entry.js")?;
+    let directory = tempfile::tempdir()?;
+    let native = claude_fixture(directory.path())?;
+    let services = LanguageServices::start(directory.path()).await?;
+    services
+        .operator(&[
+            "put-tag",
+            "claude",
+            "--instructions",
+            "Budgeted native work",
+            "--harness",
+            "claude-code",
+            "--allow",
+            "files:read",
+        ])
+        .await?;
+    let accepted = services
+        .operator(&[
+            "submit",
+            "--tag",
+            "claude",
+            "--session",
+            "budgeted-turn",
+            "--max-reported-cost-minor",
+            "50",
+            "--reported-cost-currency",
+            "USD",
+            "budget-overrun",
+        ])
+        .await?;
+    let id = accepted["task_id"].as_str().context("accepted Task ID")?;
+    assert_eq!(
+        accepted["execution_limits"]["max_reported_cost"],
+        serde_json::json!({"currency":"USD","amount_minor":50})
+    );
+    let mut host = services.worker(
+        "claude-code",
+        &directory.path().join("budget-host"),
+        Path::new(&interpreter),
+        &entry,
+    );
+    host.arg("--claude-path")
+        .arg(&native)
+        .env("ANTHROPIC_API_KEY", "fixture-provider-key");
+    success(host).await?;
+    let stopped = services.operator(&["get-task", id]).await?;
+    assert_eq!(stopped["state"], "TASK_STATE_FAILED", "{stopped}");
+    assert!(
+        stopped["result"]
+            .as_str()
+            .is_some_and(|reason| reason.to_lowercase().contains("budget")),
+        "{stopped}"
+    );
+    let usage = last_usage(&services, &stopped).await?;
+    assert_eq!(
+        usage["reported_cost"],
+        serde_json::json!({"currency":"USD","amount_minor":51,"estimated":false})
+    );
+    assert!(
+        usage["total_tokens"]
+            .as_u64()
+            .is_some_and(|total| total > 0)
+    );
+    services.stop().await
+}

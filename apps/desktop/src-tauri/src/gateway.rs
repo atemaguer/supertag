@@ -233,6 +233,7 @@ impl GatewayState {
                 conversation,
                 text,
                 operation_id,
+                execution_limits: None,
             }))
             .await
             .map_err(rpc_error)?

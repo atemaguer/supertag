@@ -159,12 +159,15 @@ async def test_real_sdk_tool_usage_redaction_and_portable_session(
 
 async def test_adapter_refuses_unsupported_actions_and_invalid_checkpoint(tmp_path: Path) -> None:
     provider = FixtureProvider()
+    budgeted = attach()
+    budgeted.task.execution_limits.max_reported_tokens = 100
     requires_context = attach(actions=["files:read"])
     requires_context.task.policy_snapshot.context_sets.add(set_id="project-knowledge").items.add(
         item_key="runbook", type="example/runbook", version=1, required=True, config_json="{}"
     )
     for attached, expected in (
         (attach(actions=["commands:execute"]), "allowed actions"),
+        (budgeted, "execution limits"),
         (requires_context, "required Context Item"),
         (
             attach(

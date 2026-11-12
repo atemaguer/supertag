@@ -387,6 +387,7 @@ async fn compatible_policy_in(
            AND active.allowed_actions=follower.allowed_actions
            AND active.approval_rules=follower.approval_rules
            AND active.policy_effective_digest=follower.policy_effective_digest
+           AND active.execution_limits=follower.execution_limits
            AND active.harness_kind=follower.harness_kind
            AND active.workspace_id IS NOT DISTINCT FROM follower.workspace_id
            AND active.workspace_base_commit IS NOT DISTINCT FROM follower.workspace_base_commit",

@@ -224,6 +224,8 @@ async def _execute(
         or not task.session_id
     ):
         raise _AdapterFailure("Worklet returned an invalid running Attempt")
+    if task.HasField("execution_limits"):
+        raise _AdapterFailure("OpenAI Agents cannot enforce the Task's execution limits")
     if task.HasField("policy_snapshot"):
         snapshot = task.policy_snapshot
         if any(item.required for context_set in snapshot.context_sets for item in context_set.items):

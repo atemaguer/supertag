@@ -16,6 +16,7 @@ interface Archive {
   sessionId: string;
   nativeSessionId: string;
   transcripts: ClaudeTranscript[];
+  totalCostUsd?: number;
 }
 
 export function redact(value: string, secrets: readonly string[]): string {
@@ -37,7 +38,8 @@ function archive(value: unknown, binding: Binding): Archive {
     item.tagId !== binding.tagId ||
     item.sessionId !== binding.sessionId ||
     typeof item.nativeSessionId !== "string" ||
-    !/^[a-zA-Z0-9-]{1,100}$/.test(item.nativeSessionId)
+    !/^[a-zA-Z0-9-]{1,100}$/.test(item.nativeSessionId) ||
+    (item.totalCostUsd !== undefined && !validUsd(item.totalCostUsd))
   )
     throw new Error("Claude checkpoint belongs to another Session or format");
   const transcripts = readClaudeTranscripts(item.transcripts);
@@ -56,7 +58,36 @@ function archive(value: unknown, binding: Binding): Archive {
     sessionId: binding.sessionId,
     nativeSessionId: item.nativeSessionId,
     transcripts,
+    ...(item.totalCostUsd !== undefined ? { totalCostUsd: item.totalCostUsd } : {}),
   };
+}
+
+export function validUsd(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    Number.isSafeInteger(Math.round(value * 100))
+  );
+}
+
+export function resumedCostUsd(checkpoint: Archive | undefined) {
+  // Claude restores the most recent native cost-state for this Session. Its
+  // result totals reset when the transcript carries no such record.
+  const root = checkpoint?.transcripts.find(
+    (entry) => entry.sessionId === checkpoint.nativeSessionId && entry.subpath === undefined,
+  );
+  const saved = root?.entries.findLast(
+    (entry) => entry.type === "cost-state" && entry["sessionId"] === checkpoint?.nativeSessionId,
+  );
+  if (!saved) return 0;
+  const baseline = saved["totalCostUSD"];
+  if (
+    !validUsd(baseline) ||
+    (checkpoint?.totalCostUsd !== undefined && baseline > checkpoint.totalCostUsd)
+  )
+    throw new Error("Claude checkpoint has unverifiable native cost state");
+  return baseline;
 }
 
 export function restoreCheckpoint(
@@ -85,9 +116,17 @@ export function captureCheckpoint(
   nativeSessionId: string,
   transcripts: readonly ClaudeTranscript[],
   secrets: readonly string[],
+  totalCostUsd?: number,
 ) {
   const data = archive(
-    { version: 1, tagId: task.tagId, sessionId: task.sessionId, nativeSessionId, transcripts },
+    {
+      version: 1,
+      tagId: task.tagId,
+      sessionId: task.sessionId,
+      nativeSessionId,
+      transcripts,
+      totalCostUsd,
+    },
     task,
   );
   // Redact string values through JSON traversal, so quotes in a secret cannot corrupt the archive.

@@ -614,6 +614,26 @@ async function turn(message) {
   const projectKey = cwd.replace(/[^a-zA-Z0-9]/g, "-");
   const project = join(config, "projects", projectKey);
   await mkdir(project, { recursive: true });
+  const mixedBudgetUsage = prompt === "budget-mixed-usage";
+  if (mixedBudgetUsage) {
+    send({
+      type: "system",
+      subtype: "background_tasks_changed",
+      session_id: sessionId,
+      tasks: [
+        { task_id: "fixture-background", description: "Fixture pending task", ambient: false },
+      ],
+    });
+    send({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "Interim cost only",
+      session_id: sessionId,
+      uuid: randomUUID(),
+      total_cost_usd: 0.2,
+    });
+  }
   send({
     type: "transcript_mirror",
     filePath: join(project, `${sessionId}.jsonl`),
@@ -634,6 +654,9 @@ async function turn(message) {
       usage,
     },
   });
+  if (mixedBudgetUsage) {
+    send({ type: "system", subtype: "background_tasks_changed", session_id: sessionId, tasks: [] });
+  }
   if (prompt.includes("mirror-failure"))
     send({
       type: "system",
@@ -641,17 +664,51 @@ async function turn(message) {
       session_id: sessionId,
       error: "fixture mirror failed",
     });
+  const overBudget = prompt === "budget-overrun";
+  const costUsd = overBudget
+    ? 0.51
+    : prompt === "budget-lifetime-start"
+      ? 1.23
+      : prompt === "budget-lifetime-resume"
+        ? 1.72
+        : prompt === "budget-success" || mixedBudgetUsage
+          ? 0.49
+          : prompt === "budget-rounded-overrun"
+            ? 0.504
+            : 0.01;
+  if (prompt.startsWith("budget-") && prompt !== "budget-lifetime-start") {
+    const budget = arg("--max-budget-usd");
+    if (budget !== "0.5")
+      throw new Error("Accepted Claude budget did not reach the native process");
+    await writeFile(join(cwd, "native-budget-usd"), budget);
+  }
+  if (prompt === "budget-lifetime-start") {
+    send({
+      type: "transcript_mirror",
+      filePath: join(project, `${sessionId}.jsonl`),
+      entries: [{ type: "cost-state", sessionId, totalCostUSD: costUsd }],
+    });
+  }
+  if (overBudget) {
+    nativeChild = spawn(process.execPath, ["-e", "setInterval(()=>{}, 1000)"], {
+      detached: true,
+      stdio: "ignore",
+      env: process.env,
+    });
+    nativeChild.unref();
+    await writeFile(join(cwd, "native-child.pid"), `${nativeChild.pid}`);
+  }
   send({
     type: "result",
-    subtype: "success",
-    result,
-    is_error: false,
+    subtype: overBudget ? "error_max_budget_usd" : "success",
+    ...(overBudget ? { errors: ["Maximum budget reached"] } : { result }),
+    is_error: overBudget,
     session_id: sessionId,
     uuid: randomUUID(),
     duration_ms: 1,
     duration_api_ms: 1,
     num_turns: 1,
-    total_cost_usd: 0.01,
+    ...(prompt === "budget-no-cost" ? {} : { total_cost_usd: costUsd }),
     usage,
     modelUsage: {},
     permission_denials: [],

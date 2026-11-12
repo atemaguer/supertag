@@ -59,6 +59,7 @@ async fn turn(
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                execution_limits: None,
                 tag_id: tag.into(),
                 session_id: session.into(),
                 operation_id: Uuid::new_v4().to_string(),
@@ -328,6 +329,7 @@ fn native(attempt: &InspectAttemptRequest, sequence: u64, input: u64) -> ReportA
         attempt: Some(attempt.clone()),
         sequence,
         native_usage: Some(NativeTokenUsage {
+            total_tokens: None,
             input_tokens: input,
             cached_input_tokens: 2,
             output_tokens: 3,
@@ -390,14 +392,6 @@ async fn native_usage_contract(store: &Store, host: &HostAuthority, intruder: &H
         store.report_attempt_usage(host, &impossible).await,
         Err(StoreError::InvalidArgument(_))
     ));
-    let mut mixed = native(&attempt, 2, 20);
-    mixed.amount_minor = Some(50);
-    mixed.currency = Some("USD".into());
-    assert!(matches!(
-        store.report_attempt_usage(host, &mixed).await,
-        Err(StoreError::InvalidArgument(_))
-    ));
-
     // Cost sequence one is separate from native sequence one. Measured tokens
     // alone never invent monetary spend or an observed provider model.
     let objective = store.get_objective("usage").await.unwrap();
@@ -412,6 +406,8 @@ async fn native_usage_contract(store: &Store, host: &HostAuthority, intruder: &H
     };
     store.report_attempt_usage(host, &cost).await.unwrap();
     let mut second = native(&attempt, 2, 20);
+    second.amount_minor = Some(50);
+    second.currency = Some("USD".into());
     second.native_usage.as_mut().unwrap().observed_model = Some("gpt-observed".into());
     store.report_attempt_usage(host, &second).await.unwrap();
     assert_eq!(

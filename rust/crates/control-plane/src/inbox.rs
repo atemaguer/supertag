@@ -78,6 +78,7 @@ impl Store {
         let may_continue_work_session =
             crate::work_sessions::continuation::may_continue_in(&mut tx, &task, scope.as_ref())
                 .await?;
+        let may_start_work_session = crate::work_sessions::may_start_in(&mut tx, &task).await?;
         let tag: String = row.try_get("tag_id")?;
         let may_use_workstream = match crate::teams::workstreams::workstream_for_task_in(
             &mut tx,
@@ -100,7 +101,7 @@ impl Store {
             may_use_workstream,
             may_read_mailbox: is_root,
             may_send_tag_message: is_root,
-            may_start_work_session: is_root && !crate::mailbox::private_session(&session),
+            may_start_work_session,
             may_continue_work_session,
             may_ask_work_session_question: kind == Some(crate::work_sessions::CHILD),
             may_request_commit_review,
@@ -210,8 +211,8 @@ impl Store {
             self.execution_now_ms(),
         )
         .await?;
-        // Admission may create a limit notice. Recheck the latest-turn condition
-        // after it, under the same write lock, before accepting an answer.
+        // Recheck under the same write lock after admission. Administrative limit
+        // notices do not replace a question; newer work still supersedes it.
         if !task_waits_in(&mut tx, &input.task_id).await? {
             return Err(StoreError::FailedPrecondition(
                 "question no longer waits for an answer".into(),
@@ -275,7 +276,7 @@ impl Store {
         let mut items = vec![];
         let mut truncated = vec![];
         if wants(&cursor, InboxItemKind::Question) {
-            let rows = sqlx::query("SELECT q.*,o.owner_tag_id FROM supertag_v2_objective_questions q JOIN supertag_v2_tasks t ON t.task_id=q.task_id AND t.attempt_id=q.attempt_id JOIN supertag_v2_objectives o ON o.objective_id=q.objective_id WHERE q.published_at_ms IS NOT NULL AND q.published_at_ms<=$1 AND q.published_order<=$2 AND q.answer_task_id IS NULL AND t.state=$3 AND o.status NOT IN ($4,$5) AND t.tag_id=o.owner_tag_id AND t.session_id=o.session_id AND ($6='' OR q.objective_id=$6) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order) ORDER BY q.published_at_ms,q.task_id LIMIT $7")
+            let rows = sqlx::query("SELECT q.*,o.owner_tag_id FROM supertag_v2_objective_questions q JOIN supertag_v2_tasks t ON t.task_id=q.task_id AND t.attempt_id=q.attempt_id JOIN supertag_v2_objectives o ON o.objective_id=q.objective_id WHERE q.published_at_ms IS NOT NULL AND q.published_at_ms<=$1 AND q.published_order<=$2 AND q.answer_task_id IS NULL AND t.state=$3 AND o.status NOT IN ($4,$5) AND t.tag_id=o.owner_tag_id AND t.session_id=o.session_id AND ($6='' OR q.objective_id=$6) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice')) ORDER BY q.published_at_ms,q.task_id LIMIT $7")
                 .bind(cursor.as_of_ms).bind(cursor.upper_order).bind(TaskState::Succeeded as i64).bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).bind(&cursor.objective_id).bind((SCAN + 1) as i64).fetch_all(&mut *tx).await?;
             if rows.len() > SCAN {
                 truncated.push(InboxItemKind::Question as i32);
@@ -306,7 +307,7 @@ impl Store {
         if wants(&cursor, InboxItemKind::ObjectiveBudget)
             || wants(&cursor, InboxItemKind::ObjectiveLimit)
         {
-            let rows = sqlx::query("SELECT * FROM supertag_v2_objectives WHERE status NOT IN ($1,$2) AND created_at_ms<=$3 AND ($4='' OR objective_id=$4) AND EXISTS (SELECT 1 FROM supertag_v2_objective_usage usage WHERE usage.objective_id=supertag_v2_objectives.objective_id) ORDER BY created_at_ms,objective_id LIMIT $5")
+            let rows = sqlx::query("SELECT * FROM supertag_v2_objectives WHERE status NOT IN ($1,$2) AND created_at_ms<=$3 AND ($4='' OR objective_id=$4) AND EXISTS (SELECT 1 FROM supertag_v2_attempt_usage usage JOIN supertag_v2_objective_tasks ot ON ot.task_id=usage.task_id WHERE ot.objective_id=supertag_v2_objectives.objective_id) ORDER BY created_at_ms,objective_id LIMIT $5")
                 .bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).bind(cursor.as_of_ms).bind(&cursor.objective_id).bind((SCAN + 1) as i64).fetch_all(&mut *tx).await?;
             if rows.len() > SCAN {
                 for kind in [
@@ -475,7 +476,7 @@ async fn question_in(
     question_row(&row)
 }
 pub(crate) async fn task_waits_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> Result<bool> {
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_objective_questions q JOIN supertag_v2_tasks t ON t.task_id=q.task_id AND t.attempt_id=q.attempt_id JOIN supertag_v2_objectives o ON o.objective_id=q.objective_id WHERE q.task_id=$1 AND q.published_at_ms IS NOT NULL AND q.answer_task_id IS NULL AND t.state=$2 AND o.status NOT IN ($3,$4) AND t.tag_id=o.owner_tag_id AND t.session_id=o.session_id AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order)")
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_objective_questions q JOIN supertag_v2_tasks t ON t.task_id=q.task_id AND t.attempt_id=q.attempt_id JOIN supertag_v2_objectives o ON o.objective_id=q.objective_id WHERE q.task_id=$1 AND q.published_at_ms IS NOT NULL AND q.answer_task_id IS NULL AND t.state=$2 AND o.status NOT IN ($3,$4) AND t.tag_id=o.owner_tag_id AND t.session_id=o.session_id AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice'))")
         .bind(task_id).bind(TaskState::Succeeded as i64).bind(ObjectiveStatus::Completed as i64).bind(ObjectiveStatus::Cancelled as i64).fetch_one(&mut **tx).await?;
     Ok(count != 0)
 }

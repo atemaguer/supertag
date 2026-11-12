@@ -16,6 +16,7 @@ async fn submit(store: &Store, session_id: &str) -> Result<Task, StoreError> {
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                execution_limits: None,
                 tag_id: "engineer".into(),
                 session_id: session_id.into(),
                 operation_id: Uuid::new_v4().to_string(),

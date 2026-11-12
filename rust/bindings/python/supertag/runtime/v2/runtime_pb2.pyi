@@ -142,6 +142,13 @@ class AttemptDecision(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     ATTEMPT_DECISION_FAILED: _ClassVar[AttemptDecision]
     ATTEMPT_DECISION_RETRY: _ClassVar[AttemptDecision]
 
+class ExecutionLimitEnforcement(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    EXECUTION_LIMIT_ENFORCEMENT_UNSPECIFIED: _ClassVar[ExecutionLimitEnforcement]
+    EXECUTION_LIMIT_ENFORCEMENT_HARNESS_GUARD: _ClassVar[ExecutionLimitEnforcement]
+    EXECUTION_LIMIT_ENFORCEMENT_INTERRUPT_ON_REPORT: _ClassVar[ExecutionLimitEnforcement]
+    EXECUTION_LIMIT_ENFORCEMENT_PROVIDER_BUDGET: _ClassVar[ExecutionLimitEnforcement]
+
 class WorkspaceArtifactKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     WORKSPACE_ARTIFACT_KIND_UNSPECIFIED: _ClassVar[WorkspaceArtifactKind]
@@ -288,6 +295,10 @@ HARNESS_KIND_OPENAI_AGENTS: HarnessKind
 ATTEMPT_DECISION_UNSPECIFIED: AttemptDecision
 ATTEMPT_DECISION_FAILED: AttemptDecision
 ATTEMPT_DECISION_RETRY: AttemptDecision
+EXECUTION_LIMIT_ENFORCEMENT_UNSPECIFIED: ExecutionLimitEnforcement
+EXECUTION_LIMIT_ENFORCEMENT_HARNESS_GUARD: ExecutionLimitEnforcement
+EXECUTION_LIMIT_ENFORCEMENT_INTERRUPT_ON_REPORT: ExecutionLimitEnforcement
+EXECUTION_LIMIT_ENFORCEMENT_PROVIDER_BUDGET: ExecutionLimitEnforcement
 WORKSPACE_ARTIFACT_KIND_UNSPECIFIED: WorkspaceArtifactKind
 WORKSPACE_ARTIFACT_KIND_PATCH: WorkspaceArtifactKind
 WORKSPACE_ARTIFACT_KIND_BUNDLE: WorkspaceArtifactKind
@@ -1391,16 +1402,18 @@ class ListMessagesResponse(_message.Message):
     def __init__(self, messages: _Optional[_Iterable[_Union[ConversationMessage, _Mapping]]] = ..., next_cursor: _Optional[str] = ...) -> None: ...
 
 class SendMessageRequest(_message.Message):
-    __slots__ = ("tag_id", "conversation", "text", "operation_id")
+    __slots__ = ("tag_id", "conversation", "text", "operation_id", "execution_limits")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     CONVERSATION_FIELD_NUMBER: _ClassVar[int]
     TEXT_FIELD_NUMBER: _ClassVar[int]
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    EXECUTION_LIMITS_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     conversation: str
     text: str
     operation_id: str
-    def __init__(self, tag_id: _Optional[str] = ..., conversation: _Optional[str] = ..., text: _Optional[str] = ..., operation_id: _Optional[str] = ...) -> None: ...
+    execution_limits: ExecutionLimits
+    def __init__(self, tag_id: _Optional[str] = ..., conversation: _Optional[str] = ..., text: _Optional[str] = ..., operation_id: _Optional[str] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ...) -> None: ...
 
 class GetMessageRequest(_message.Message):
     __slots__ = ("tag_id", "task_id")
@@ -1423,19 +1436,39 @@ class ListMessageEventsRequest(_message.Message):
     def __init__(self, tag_id: _Optional[str] = ..., task_id: _Optional[str] = ..., after_sequence: _Optional[int] = ..., limit: _Optional[int] = ...) -> None: ...
 
 class SubmitTaskRequest(_message.Message):
-    __slots__ = ("tag_id", "session_id", "operation_id", "prompt")
+    __slots__ = ("tag_id", "session_id", "operation_id", "prompt", "execution_limits")
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
+    EXECUTION_LIMITS_FIELD_NUMBER: _ClassVar[int]
     tag_id: str
     session_id: str
     operation_id: str
     prompt: str
-    def __init__(self, tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., prompt: _Optional[str] = ...) -> None: ...
+    execution_limits: ExecutionLimits
+    def __init__(self, tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., prompt: _Optional[str] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ...) -> None: ...
+
+class ReportedCostLimit(_message.Message):
+    __slots__ = ("currency", "amount_minor")
+    CURRENCY_FIELD_NUMBER: _ClassVar[int]
+    AMOUNT_MINOR_FIELD_NUMBER: _ClassVar[int]
+    currency: str
+    amount_minor: int
+    def __init__(self, currency: _Optional[str] = ..., amount_minor: _Optional[int] = ...) -> None: ...
+
+class ExecutionLimits(_message.Message):
+    __slots__ = ("max_reported_tokens", "max_reported_cost", "max_native_agents")
+    MAX_REPORTED_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    MAX_REPORTED_COST_FIELD_NUMBER: _ClassVar[int]
+    MAX_NATIVE_AGENTS_FIELD_NUMBER: _ClassVar[int]
+    max_reported_tokens: int
+    max_reported_cost: ReportedCostLimit
+    max_native_agents: int
+    def __init__(self, max_reported_tokens: _Optional[int] = ..., max_reported_cost: _Optional[_Union[ReportedCostLimit, _Mapping]] = ..., max_native_agents: _Optional[int] = ...) -> None: ...
 
 class Task(_message.Message):
-    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot")
+    __slots__ = ("task_id", "tag_id", "session_id", "prompt", "instructions", "allowed_actions", "tag_revision", "state", "result", "attempt_id", "workspace", "workspace_delivery", "harness_kind", "approval_rules", "policy_snapshot", "execution_limits")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     TAG_ID_FIELD_NUMBER: _ClassVar[int]
     SESSION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -1451,6 +1484,7 @@ class Task(_message.Message):
     HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
     APPROVAL_RULES_FIELD_NUMBER: _ClassVar[int]
     POLICY_SNAPSHOT_FIELD_NUMBER: _ClassVar[int]
+    EXECUTION_LIMITS_FIELD_NUMBER: _ClassVar[int]
     task_id: str
     tag_id: str
     session_id: str
@@ -1466,7 +1500,8 @@ class Task(_message.Message):
     harness_kind: HarnessKind
     approval_rules: _containers.RepeatedCompositeFieldContainer[ApprovalRule]
     policy_snapshot: _policy_pb2.TaskPolicySnapshot
-    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ...) -> None: ...
+    execution_limits: ExecutionLimits
+    def __init__(self, task_id: _Optional[str] = ..., tag_id: _Optional[str] = ..., session_id: _Optional[str] = ..., prompt: _Optional[str] = ..., instructions: _Optional[str] = ..., allowed_actions: _Optional[_Iterable[str]] = ..., tag_revision: _Optional[int] = ..., state: _Optional[_Union[TaskState, str]] = ..., result: _Optional[str] = ..., attempt_id: _Optional[str] = ..., workspace: _Optional[_Union[WorkspaceSpec, _Mapping]] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., approval_rules: _Optional[_Iterable[_Union[ApprovalRule, _Mapping]]] = ..., policy_snapshot: _Optional[_Union[_policy_pb2.TaskPolicySnapshot, _Mapping]] = ..., execution_limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ...) -> None: ...
 
 class GetTaskRequest(_message.Message):
     __slots__ = ("task_id",)
@@ -1611,16 +1646,18 @@ class ReportAttemptUsageResponse(_message.Message):
     def __init__(self) -> None: ...
 
 class NativeTokenUsage(_message.Message):
-    __slots__ = ("input_tokens", "cached_input_tokens", "output_tokens", "observed_model")
+    __slots__ = ("input_tokens", "cached_input_tokens", "output_tokens", "observed_model", "total_tokens")
     INPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
     CACHED_INPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
     OUTPUT_TOKENS_FIELD_NUMBER: _ClassVar[int]
     OBSERVED_MODEL_FIELD_NUMBER: _ClassVar[int]
+    TOTAL_TOKENS_FIELD_NUMBER: _ClassVar[int]
     input_tokens: int
     cached_input_tokens: int
     output_tokens: int
     observed_model: str
-    def __init__(self, input_tokens: _Optional[int] = ..., cached_input_tokens: _Optional[int] = ..., output_tokens: _Optional[int] = ..., observed_model: _Optional[str] = ...) -> None: ...
+    total_tokens: int
+    def __init__(self, input_tokens: _Optional[int] = ..., cached_input_tokens: _Optional[int] = ..., output_tokens: _Optional[int] = ..., observed_model: _Optional[str] = ..., total_tokens: _Optional[int] = ...) -> None: ...
 
 class ListNativeUsageRequest(_message.Message):
     __slots__ = ("task_id", "attempt_id", "after_sequence", "limit")
@@ -1641,12 +1678,18 @@ class ListNativeUsageResponse(_message.Message):
     def __init__(self, reports: _Optional[_Iterable[_Union[HarnessUsageRequest, _Mapping]]] = ...) -> None: ...
 
 class HarnessUsageRequest(_message.Message):
-    __slots__ = ("sequence", "native_usage")
+    __slots__ = ("sequence", "native_usage", "amount_minor", "currency", "estimated")
     SEQUENCE_FIELD_NUMBER: _ClassVar[int]
     NATIVE_USAGE_FIELD_NUMBER: _ClassVar[int]
+    AMOUNT_MINOR_FIELD_NUMBER: _ClassVar[int]
+    CURRENCY_FIELD_NUMBER: _ClassVar[int]
+    ESTIMATED_FIELD_NUMBER: _ClassVar[int]
     sequence: int
     native_usage: NativeTokenUsage
-    def __init__(self, sequence: _Optional[int] = ..., native_usage: _Optional[_Union[NativeTokenUsage, _Mapping]] = ...) -> None: ...
+    amount_minor: int
+    currency: str
+    estimated: bool
+    def __init__(self, sequence: _Optional[int] = ..., native_usage: _Optional[_Union[NativeTokenUsage, _Mapping]] = ..., amount_minor: _Optional[int] = ..., currency: _Optional[str] = ..., estimated: _Optional[bool] = ...) -> None: ...
 
 class AppendEventRequest(_message.Message):
     __slots__ = ("task_id", "attempt_id", "lease_token", "sequence", "text")
@@ -1693,6 +1736,22 @@ class FinishTaskRequest(_message.Message):
     def __init__(self, task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., lease_token: _Optional[str] = ..., result: _Optional[str] = ..., succeeded: _Optional[bool] = ..., objective_signal: _Optional[_Union[ObjectiveSignal, str]] = ..., checkpoint_sha256: _Optional[str] = ..., workspace_delivery: _Optional[_Union[WorkspaceDeliveryReference, _Mapping]] = ..., waiting_approval_ids: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class HarnessAttachRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class AppliedExecutionLimits(_message.Message):
+    __slots__ = ("limits", "native_agents", "reported_tokens", "reported_cost")
+    LIMITS_FIELD_NUMBER: _ClassVar[int]
+    NATIVE_AGENTS_FIELD_NUMBER: _ClassVar[int]
+    REPORTED_TOKENS_FIELD_NUMBER: _ClassVar[int]
+    REPORTED_COST_FIELD_NUMBER: _ClassVar[int]
+    limits: ExecutionLimits
+    native_agents: ExecutionLimitEnforcement
+    reported_tokens: ExecutionLimitEnforcement
+    reported_cost: ExecutionLimitEnforcement
+    def __init__(self, limits: _Optional[_Union[ExecutionLimits, _Mapping]] = ..., native_agents: _Optional[_Union[ExecutionLimitEnforcement, str]] = ..., reported_tokens: _Optional[_Union[ExecutionLimitEnforcement, str]] = ..., reported_cost: _Optional[_Union[ExecutionLimitEnforcement, str]] = ...) -> None: ...
+
+class ConfirmExecutionLimitsResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 

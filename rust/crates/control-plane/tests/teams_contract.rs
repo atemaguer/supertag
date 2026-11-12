@@ -225,6 +225,7 @@ async fn team_work(store: &Store, clock: &AtomicI64) {
         .submit_task(
             OPERATOR,
             &SubmitTaskRequest {
+                execution_limits: None,
                 operation_id: "outside-op".into(),
                 tag_id: "outsider".into(),
                 session_id: "ordinary".into(),

@@ -15,8 +15,8 @@ use crate::{
     HostAuthority, Store, StoreError,
     objectives::{objective_admission_in, objective_link_task_in},
     store::{
-        Result, approval_rules_from_row, insert_task, insert_task_from_snapshot, invalid,
-        lease_is_live, name, owned, task_in,
+        Result, approval_rules_from_row, insert_task_from_snapshot, invalid, lease_is_live, name,
+        owned, task_in,
     },
 };
 
@@ -539,7 +539,7 @@ pub(crate) async fn finish_in(
 /// A link is authority attribution, not another operator decision. Denied,
 /// expired, already covered, or stale requests can never acquire one.
 async fn cover_pending_in(tx: &mut Transaction<'_, Any>, grant: &str, now: i64) -> Result<()> {
-    sqlx::query("INSERT INTO supertag_v2_approval_coverage (approval_id,grant_approval_id,covered_at_ms) SELECT a.approval_id,g.approval_id,$2 FROM supertag_v2_approvals a JOIN supertag_v2_approvals g ON g.approval_id=$1 WHERE g.state=2 AND g.scope=2 AND a.state=1 AND a.objective_id=g.objective_id AND a.tag_id=g.tag_id AND a.action=g.action AND a.resource=g.resource AND a.rule_digest=g.rule_digest AND (a.valid_until_ms IS NULL OR a.valid_until_ms>$2) AND NOT EXISTS (SELECT 1 FROM supertag_v2_approval_coverage c WHERE c.approval_id=a.approval_id) AND NOT EXISTS (SELECT 1 FROM supertag_v2_objectives o WHERE o.objective_id=a.objective_id AND o.status IN (5,6)) AND EXISTS (SELECT 1 FROM supertag_v2_tasks t WHERE t.task_id=a.task_id AND t.attempt_id=a.attempt_id AND ((t.state=2 AND t.lease_expires_at_ms>$2) OR (t.state=3 AND EXISTS (SELECT 1 FROM supertag_v2_approval_waits w JOIN supertag_v2_approval_wait_requests r ON r.task_id=w.task_id WHERE r.approval_id=a.approval_id AND w.continuation_task_id IS NULL) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order))))")
+    sqlx::query("INSERT INTO supertag_v2_approval_coverage (approval_id,grant_approval_id,covered_at_ms) SELECT a.approval_id,g.approval_id,$2 FROM supertag_v2_approvals a JOIN supertag_v2_approvals g ON g.approval_id=$1 WHERE g.state=2 AND g.scope=2 AND a.state=1 AND a.objective_id=g.objective_id AND a.tag_id=g.tag_id AND a.action=g.action AND a.resource=g.resource AND a.rule_digest=g.rule_digest AND (a.valid_until_ms IS NULL OR a.valid_until_ms>$2) AND NOT EXISTS (SELECT 1 FROM supertag_v2_approval_coverage c WHERE c.approval_id=a.approval_id) AND NOT EXISTS (SELECT 1 FROM supertag_v2_objectives o WHERE o.objective_id=a.objective_id AND o.status IN (5,6)) AND EXISTS (SELECT 1 FROM supertag_v2_tasks t WHERE t.task_id=a.task_id AND t.attempt_id=a.attempt_id AND ((t.state=2 AND t.lease_expires_at_ms>$2) OR (t.state=3 AND EXISTS (SELECT 1 FROM supertag_v2_approval_waits w JOIN supertag_v2_approval_wait_requests r ON r.task_id=w.task_id WHERE r.approval_id=a.approval_id AND w.continuation_task_id IS NULL) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice')))))")
         .bind(grant).bind(now).execute(&mut **tx).await?;
     let tasks: Vec<String> = sqlx::query_scalar("SELECT DISTINCT a.task_id FROM supertag_v2_approval_coverage c JOIN supertag_v2_approvals a ON a.approval_id=c.approval_id WHERE c.grant_approval_id=$1 ORDER BY a.task_id")
         .bind(grant).fetch_all(&mut **tx).await?;
@@ -557,7 +557,7 @@ pub(crate) async fn resume_wait_in(
     objective: &str,
     now: i64,
 ) -> Result<bool> {
-    let task: Option<String> = sqlx::query_scalar("SELECT w.task_id FROM supertag_v2_approval_waits w JOIN supertag_v2_tasks t ON t.task_id=w.task_id AND t.attempt_id=w.attempt_id JOIN supertag_v2_objective_tasks link ON link.task_id=t.task_id LEFT JOIN supertag_v2_tasks continuation ON continuation.task_id=w.continuation_task_id WHERE link.objective_id=$1 AND t.state=3 AND ((w.continuation_task_id IS NULL AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order)) OR (continuation.state IN (1,2,6) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=continuation.tag_id AND newer.session_id=continuation.session_id AND newer.accepted_order>continuation.accepted_order))) ORDER BY t.accepted_order DESC LIMIT 1")
+    let task: Option<String> = sqlx::query_scalar("SELECT w.task_id FROM supertag_v2_approval_waits w JOIN supertag_v2_tasks t ON t.task_id=w.task_id AND t.attempt_id=w.attempt_id JOIN supertag_v2_objective_tasks link ON link.task_id=t.task_id LEFT JOIN supertag_v2_tasks continuation ON continuation.task_id=w.continuation_task_id WHERE link.objective_id=$1 AND t.state=3 AND NOT EXISTS (SELECT 1 FROM supertag_v2_approval_continuation_stops stopped WHERE stopped.task_id=w.task_id) AND ((w.continuation_task_id IS NULL AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice'))) OR (continuation.state IN (1,2,6) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=continuation.tag_id AND newer.session_id=continuation.session_id AND newer.accepted_order>continuation.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice')))) ORDER BY t.accepted_order DESC LIMIT 1")
         .bind(objective).fetch_optional(&mut **tx).await?;
     let Some(task) = task else {
         return Ok(false);
@@ -576,7 +576,7 @@ pub(crate) async fn resume_wait_in(
 }
 
 pub(crate) async fn task_waits_in(tx: &mut Transaction<'_, Any>, task_id: &str) -> Result<bool> {
-    let count:i64=sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_approval_waits w JOIN supertag_v2_tasks t ON t.task_id=w.task_id AND t.attempt_id=w.attempt_id WHERE w.task_id=$1 AND w.continuation_task_id IS NULL AND t.state=3 AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order) AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks link JOIN supertag_v2_objectives o ON o.objective_id=link.objective_id WHERE link.task_id=t.task_id AND o.status IN (5,6))")
+    let count:i64=sqlx::query_scalar("SELECT COUNT(*) FROM supertag_v2_approval_waits w JOIN supertag_v2_tasks t ON t.task_id=w.task_id AND t.attempt_id=w.attempt_id WHERE w.task_id=$1 AND w.continuation_task_id IS NULL AND NOT EXISTS (SELECT 1 FROM supertag_v2_approval_continuation_stops stopped WHERE stopped.task_id=w.task_id) AND t.state=3 AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice')) AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks link JOIN supertag_v2_objectives o ON o.objective_id=link.objective_id WHERE link.task_id=t.task_id AND o.status IN (5,6))")
         .bind(task_id).fetch_one(&mut **tx).await?;
     Ok(count > 0)
 }
@@ -599,6 +599,34 @@ async fn continue_in(tx: &mut Transaction<'_, Any>, task_id: &str, now: i64) -> 
         return Ok(());
     }
     let source = task_in(tx, task_id).await?;
+    let scope = crate::work_sessions::task_scope_in(tx, task_id).await?;
+    let is_child = scope
+        .as_ref()
+        .is_some_and(|scope| scope.kind == crate::work_sessions::CHILD);
+    let allocation = if is_child {
+        None
+    } else {
+        let objective: Option<String> = sqlx::query_scalar(
+            "SELECT objective_id FROM supertag_v2_objective_tasks WHERE task_id=$1",
+        )
+        .bind(&source.task_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+        match crate::budget_pool::child_in(
+            tx,
+            &source,
+            objective.as_deref(),
+            source.execution_limits.as_ref(),
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(StoreError::FailedPrecondition(_)) => {
+                return budget_stop_in(tx, &source, scope.as_ref()).await;
+            }
+            Err(error) => return Err(error),
+        }
+    };
     match objective_admission_in(tx, &source.tag_id, &source.session_id, now).await {
         Ok(()) => {}
         Err(StoreError::FailedPrecondition(_)) => return Ok(()),
@@ -624,29 +652,46 @@ async fn continue_in(tx: &mut Transaction<'_, Any>, task_id: &str, now: i64) -> 
             .collect::<Vec<_>>()
             .join("\n")
     );
-    let order:i64=sqlx::query_scalar("UPDATE supertag_v2_write_order SET revision=revision+1 WHERE singleton=1 RETURNING revision").fetch_one(&mut **tx).await?;
-    let scope = crate::work_sessions::task_scope_in(tx, task_id).await?;
-    let task = if let Some(scope) = scope.filter(|scope| scope.kind == crate::work_sessions::REPORT)
+    if scope
+        .as_ref()
+        .is_some_and(|scope| scope.kind == crate::work_sessions::CHILD)
     {
-        let report = if scope.task_id == source.task_id {
-            source.clone()
-        } else {
-            task_in(tx, &scope.task_id).await?
-        };
-        if report.tag_id != source.tag_id || report.session_id != source.session_id {
-            return Err(StoreError::PermissionDenied);
-        }
-        Box::pin(insert_task_from_snapshot(
-            tx,
-            order,
-            &report,
-            &source.session_id,
-            &prompt,
+        return Box::pin(crate::work_sessions::automatic::continue_in(
+            tx, &source, &prompt, now,
         ))
-        .await?
-    } else {
-        insert_task(tx, order, &source.tag_id, &source.session_id, &prompt).await?
-    };
+        .await;
+    }
+    let order:i64=sqlx::query_scalar("UPDATE supertag_v2_write_order SET revision=revision+1 WHERE singleton=1 RETURNING revision").fetch_one(&mut **tx).await?;
+    let mut task =
+        if let Some(scope) = scope.filter(|scope| scope.kind == crate::work_sessions::REPORT) {
+            let report = if scope.task_id == source.task_id {
+                source.clone()
+            } else {
+                task_in(tx, &scope.task_id).await?
+            };
+            if report.tag_id != source.tag_id || report.session_id != source.session_id {
+                return Err(StoreError::PermissionDenied);
+            }
+            Box::pin(insert_task_from_snapshot(
+                tx,
+                order,
+                &report,
+                &source.session_id,
+                &prompt,
+            ))
+            .await?
+        } else {
+            crate::store::insert_task_with_limits(
+                tx,
+                order,
+                &source.tag_id,
+                &source.session_id,
+                &prompt,
+                allocation.as_ref(),
+            )
+            .await?
+        };
+    crate::budget_pool::set_in(tx, &mut task, allocation).await?;
     objective_link_task_in(tx, &task).await?;
     // A continuation of a private Conversation remains private and visible in
     // that owner's conversation history, regardless of the decision transport.
@@ -665,6 +710,48 @@ async fn continue_in(tx: &mut Transaction<'_, Any>, task_id: &str, now: i64) -> 
     Ok(())
 }
 
+/// A verified operator decision remains durable even when its next owner turn
+/// cannot fit the pool. The notice owes no new execution authority.
+async fn budget_stop_in(
+    tx: &mut Transaction<'_, Any>,
+    source: &supertag_protocol::v2::Task,
+    scope: Option<&crate::work_sessions::WorkSessionTaskScope>,
+) -> Result<()> {
+    let order = crate::store::next_order(tx).await?;
+    let prompt = "This Session was not continued after the operator's approval decision because too little of its reported budget remains. Report this limit and wait for a new allowance from the operator.";
+    let mut notice =
+        insert_task_from_snapshot(tx, order, source, &source.session_id, prompt).await?;
+    let objective: Option<String> =
+        sqlx::query_scalar("SELECT objective_id FROM supertag_v2_objective_tasks WHERE task_id=$1")
+            .bind(&source.task_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    let allocation = crate::budget_pool::owed_in(
+        tx,
+        source,
+        objective.as_deref(),
+        source.execution_limits.as_ref(),
+    )
+    .await?;
+    crate::budget_pool::set_in(tx, &mut notice, allocation).await?;
+    sqlx::query("UPDATE supertag_v2_tasks SET allowed_actions='[]' WHERE task_id=$1")
+        .bind(&notice.task_id)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query("INSERT INTO supertag_v2_objective_tasks (task_id,objective_id,kind) SELECT $1,objective_id,'notice' FROM supertag_v2_objective_tasks WHERE task_id=$2").bind(&notice.task_id).bind(&source.task_id).execute(&mut **tx).await?;
+    if let Some(scope) = scope {
+        sqlx::query("INSERT INTO supertag_v2_work_session_tasks (task_id,work_session_id,kind) VALUES ($1,$2,2)").bind(&notice.task_id).bind(&scope.work_session_id).execute(&mut **tx).await?;
+    }
+    let event = format!("approval-budget-stop:{}", source.task_id);
+    let route_digest = format!("{:x}", Sha256::digest(event.as_bytes()));
+    sqlx::query("INSERT INTO supertag_v2_inbound_events (account_id,event_id,request_digest,task_id,conversation_id,thread_id) SELECT account_id,$1,$2,$3,conversation_id,thread_id FROM supertag_v2_inbound_events WHERE task_id=$4").bind(&event).bind(&route_digest).bind(&notice.task_id).bind(&source.task_id).execute(&mut **tx).await?;
+    if scope.is_none() {
+        sqlx::query("INSERT INTO supertag_v2_conversation_messages (task_id,session_id,principal,operation_id,request_digest,accepted_order) SELECT $1,session_id,principal,$2,$3,$4 FROM supertag_v2_conversations WHERE session_id=$5 AND tag_id=$6").bind(&notice.task_id).bind(event).bind(route_digest).bind(order).bind(&source.session_id).bind(&source.tag_id).execute(&mut **tx).await?;
+    }
+    sqlx::query("INSERT INTO supertag_v2_approval_continuation_stops (task_id,reason,notice_task_id) VALUES ($1,'budget',$2)").bind(&source.task_id).bind(&notice.task_id).execute(&mut **tx).await?;
+    Ok(())
+}
+
 pub(crate) async fn pending_in(
     tx: &mut Transaction<'_, Any>,
     principal: &str,
@@ -674,7 +761,7 @@ pub(crate) async fn pending_in(
     limit: usize,
 ) -> Result<Vec<InboxItem>> {
     let operator_id = operator(principal)?;
-    let rows=sqlx::query(&format!("{VIEW} WHERE a.state=1 AND c.approval_id IS NULL AND a.requested_at_ms<=$1 AND a.requested_order<=$2 AND ($3='' OR a.objective_id=$3) AND EXISTS (SELECT 1 FROM supertag_v2_task_audience audience WHERE audience.task_id=a.task_id AND audience.owner IN ('',$4)) AND NOT EXISTS (SELECT 1 FROM supertag_v2_objectives o WHERE o.objective_id=a.objective_id AND o.status IN (5,6)) AND EXISTS (SELECT 1 FROM supertag_v2_tasks t WHERE t.task_id=a.task_id AND t.attempt_id=a.attempt_id AND ((t.state=2 AND t.lease_expires_at_ms>$1) OR (t.state=3 AND EXISTS (SELECT 1 FROM supertag_v2_approval_waits w JOIN supertag_v2_approval_wait_requests r ON r.task_id=w.task_id WHERE r.approval_id=a.approval_id AND w.continuation_task_id IS NULL) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order)))) ORDER BY a.requested_order LIMIT $5"))
+    let rows=sqlx::query(&format!("{VIEW} WHERE a.state=1 AND c.approval_id IS NULL AND a.requested_at_ms<=$1 AND a.requested_order<=$2 AND ($3='' OR a.objective_id=$3) AND EXISTS (SELECT 1 FROM supertag_v2_task_audience audience WHERE audience.task_id=a.task_id AND audience.owner IN ('',$4)) AND NOT EXISTS (SELECT 1 FROM supertag_v2_objectives o WHERE o.objective_id=a.objective_id AND o.status IN (5,6)) AND EXISTS (SELECT 1 FROM supertag_v2_tasks t WHERE t.task_id=a.task_id AND t.attempt_id=a.attempt_id AND ((t.state=2 AND t.lease_expires_at_ms>$1) OR (t.state=3 AND EXISTS (SELECT 1 FROM supertag_v2_approval_waits w JOIN supertag_v2_approval_wait_requests r ON r.task_id=w.task_id WHERE r.approval_id=a.approval_id AND w.continuation_task_id IS NULL) AND NOT EXISTS (SELECT 1 FROM supertag_v2_tasks newer WHERE newer.tag_id=t.tag_id AND newer.session_id=t.session_id AND newer.accepted_order>t.accepted_order AND NOT EXISTS (SELECT 1 FROM supertag_v2_objective_tasks administrative WHERE administrative.task_id=newer.task_id AND administrative.kind='notice'))))) ORDER BY a.requested_order LIMIT $5"))
         .bind(as_of_ms).bind(upper_order).bind(objective_id).bind(principal).bind(limit.min(1001) as i64).fetch_all(&mut **tx).await?;
     let mut items = vec![];
     for row in rows {
@@ -920,3 +1007,7 @@ mod tests {
         assert!(canonical_arguments(&format!("{}0{}", "[".repeat(200), "]".repeat(200))).is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "approvals/budget_tests.rs"]
+mod budget_tests;

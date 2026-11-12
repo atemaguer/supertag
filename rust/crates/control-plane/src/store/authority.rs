@@ -5,8 +5,8 @@ use std::{
 
 use sqlx::{Any, Row, Transaction, any::AnyRow};
 use supertag_protocol::v2::{
-    AttemptAuthority, AttemptDecision, AttemptResolution, InspectAttemptRequest,
-    ResolveAttemptRequest, TaskState,
+    AttemptAuthority, AttemptDecision, AttemptResolution, HarnessKind, InspectAttemptRequest,
+    ResolveAttemptRequest, Task, TaskState,
 };
 
 use super::{
@@ -247,13 +247,36 @@ pub(crate) fn lease_is_live(row: &AnyRow, now: i64) -> Result<bool> {
         .is_some_and(|deadline| now < deadline))
 }
 
+fn supports_execution_limits(harness: HarnessKind, task: &Task) -> bool {
+    let Some(limits) = &task.execution_limits else {
+        return true;
+    };
+    match harness {
+        // Custom Harnesses confirm the applied limits on the local bridge before running.
+        HarnessKind::Unspecified => true,
+        HarnessKind::Codex => {
+            limits.max_reported_cost.is_none()
+                && limits.max_native_agents.is_none_or(|limit| limit == 0)
+        }
+        HarnessKind::ClaudeCode => {
+            limits.max_reported_tokens.is_none()
+                && limits.max_native_agents.is_none()
+                && limits
+                    .max_reported_cost
+                    .as_ref()
+                    .is_none_or(|limit| limit.currency == "USD")
+        }
+        HarnessKind::OpenaiAgents => false,
+    }
+}
+
 pub(super) async fn claim_candidate(
     transaction: &mut Transaction<'_, Any>,
     now: i64,
     host_id: &str,
     all_tags: i64,
     workspace_ids: &[String],
-    harness: supertag_protocol::v2::HarnessKind,
+    harness: HarnessKind,
     context_contracts: &[supertag_protocol::v2::ContextContract],
 ) -> Result<Option<String>> {
     let mut after = 0_i64;
@@ -271,6 +294,7 @@ pub(super) async fn claim_candidate(
                 .as_ref()
                 .is_none_or(|spec| workspace_ids.binary_search(&spec.workspace_id).is_ok());
             if has_workspace
+                && supports_execution_limits(harness, &task)
                 && crate::context::task_supported(&task, context_contracts)
                 && crate::work_sessions::can_claim_in(transaction, &task).await?
                 && crate::inputs::can_claim_in(

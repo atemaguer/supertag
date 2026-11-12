@@ -33,10 +33,11 @@ use supertag_gateway::{
 use supertag_protocol::{
     MAX_MESSAGE_BYTES, authenticated_request,
     v2::{
-        ApprovalRule, AttemptDecision, CancelTaskRequest, CreateAuthKeyRequest, GetTaskRequest,
-        HarnessKind, LarkDomain, ListEventsRequest, ListNativeUsageRequest, PutTagRequest,
-        ResolveAttemptRequest, RevokeHostRequest, SubmitTaskRequest, Task, WorkspaceSpec,
-        attempt_inputs_server::AttemptInputsServer, attempt_mailbox_server::AttemptMailboxServer,
+        ApprovalRule, AttemptDecision, CancelTaskRequest, CreateAuthKeyRequest, ExecutionLimits,
+        GetTaskRequest, HarnessKind, LarkDomain, ListEventsRequest, ListNativeUsageRequest,
+        PutTagRequest, ReportedCostLimit, ResolveAttemptRequest, RevokeHostRequest,
+        SubmitTaskRequest, Task, WorkspaceSpec, attempt_inputs_server::AttemptInputsServer,
+        attempt_mailbox_server::AttemptMailboxServer,
         attempt_work_sessions_server::AttemptWorkSessionsServer,
         attempt_workstreams_server::AttemptWorkstreamsServer,
         checkpoint_directory_server::CheckpointDirectoryServer, connector_server::ConnectorServer,
@@ -299,6 +300,18 @@ enum Command {
         session: String,
         #[arg(long)]
         operation_id: Option<String>,
+        /// Stop the turn when its reported token count reaches this limit.
+        #[arg(long)]
+        max_reported_tokens: Option<u64>,
+        /// Apply a provider-reported spending limit in minor currency units.
+        #[arg(long, requires = "reported_cost_currency")]
+        max_reported_cost_minor: Option<u64>,
+        /// Three-letter currency for the reported cost limit.
+        #[arg(long, requires = "max_reported_cost_minor")]
+        reported_cost_currency: Option<String>,
+        /// Limit native agents and Work Sessions started by this turn.
+        #[arg(long)]
+        max_native_agents: Option<u64>,
         prompt: String,
     },
     /// Read a Task.
@@ -719,9 +732,27 @@ async fn run(command: Command) -> Result<()> {
             tag,
             session,
             operation_id,
+            max_reported_tokens,
+            max_reported_cost_minor,
+            reported_cost_currency,
+            max_native_agents,
             prompt,
         } => {
             let (mut operator, token) = operator(connection).await?;
+            let max_reported_cost = max_reported_cost_minor.zip(reported_cost_currency).map(
+                |(amount_minor, currency)| ReportedCostLimit {
+                    amount_minor,
+                    currency,
+                },
+            );
+            let execution_limits = (max_reported_tokens.is_some()
+                || max_reported_cost.is_some()
+                || max_native_agents.is_some())
+            .then_some(ExecutionLimits {
+                max_reported_tokens,
+                max_reported_cost,
+                max_native_agents,
+            });
             let task = operator
                 .submit_task(request(
                     SubmitTaskRequest {
@@ -729,6 +760,7 @@ async fn run(command: Command) -> Result<()> {
                         session_id: session,
                         prompt,
                         operation_id: operation_id.unwrap_or_else(|| Uuid::new_v4().to_string()),
+                        execution_limits,
                     },
                     &token,
                 )?)
@@ -807,7 +839,11 @@ async fn run(command: Command) -> Result<()> {
                             "input_tokens": usage.input_tokens,
                             "cached_input_tokens": usage.cached_input_tokens,
                             "output_tokens": usage.output_tokens,
+                            "total_tokens": usage.total_tokens,
                             "observed_model": usage.observed_model,
+                            "reported_cost": report.amount_minor.zip(report.currency).map(|(amount_minor, currency)| json!({
+                                "amount_minor": amount_minor, "currency": currency, "estimated": report.estimated,
+                            })),
                         })
                     );
                 }
@@ -1553,6 +1589,13 @@ fn print_task(task: &Task) {
                 "workspace_id": spec.workspace_id, "base_commit": spec.base_commit,
             })),
             "workspace_delivery": task.workspace_delivery.as_ref().map(artifacts::describe),
+            "execution_limits": task.execution_limits.as_ref().map(|limits| json!({
+                "max_reported_tokens": limits.max_reported_tokens,
+                "max_reported_cost": limits.max_reported_cost.as_ref().map(|limit| json!({
+                    "amount_minor": limit.amount_minor, "currency": limit.currency,
+                })),
+                "max_native_agents": limits.max_native_agents,
+            })),
         })
     );
 }
