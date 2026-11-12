@@ -122,6 +122,30 @@ async fn expired_command_lease_reaps_detached_work_while_provider_is_stopped() -
     .await;
     assert_eq!(unsafe { libc::kill(owner, libc::SIGCONT) }, 0);
     removed.context("detached command survived authority expiry while provider was stopped")?;
+    let process_id = started.process_id.context("lease-bound process identity")?;
+    let mut output = running
+        .client
+        .watch_process(request(
+            WatchProcessRequest {
+                process_id: process_id.clone(),
+                after_sequence: 0,
+            },
+            token,
+        ))
+        .await?
+        .into_inner();
+    let receipt = loop {
+        let page = output
+            .message()
+            .await?
+            .context("lease-bound process ended before cleanup proof")?;
+        if let Some(receipt) = page.terminal {
+            break receipt;
+        }
+    };
+    assert_eq!(receipt.process_id.as_deref(), Some(process_id.as_str()));
+    assert!(receipt.cleanup_verified);
+    assert_eq!(receipt.state(), OperationState::Failed);
     let revoked = running
         .client
         .revoke_access(request(
@@ -133,14 +157,15 @@ async fn expired_command_lease_reaps_detached_work_while_provider_is_stopped() -
         .await?
         .into_inner();
     assert!(revoked.cleanup_verified);
-    let receipt = running
-        .client
-        .inspect_operation(inspect("lease-process", token))
-        .await?
-        .into_inner();
-    assert_eq!(receipt.process_id, started.process_id);
-    assert!(receipt.cleanup_verified);
-    assert_eq!(receipt.state(), OperationState::Failed);
+    assert_eq!(
+        running
+            .client
+            .inspect_operation(inspect("lease-process", token))
+            .await
+            .unwrap_err()
+            .code(),
+        Code::Unauthenticated
+    );
     running.child.kill().await?;
     Ok(())
 }
