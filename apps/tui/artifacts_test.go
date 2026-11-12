@@ -68,12 +68,23 @@ func taskFilesApp(t *testing.T) *app {
 	return a
 }
 
+// File actions return a bounded Gateway command. Deliver its result directly so
+// the fixture never drops a completed RPC while simulating unrelated timers.
+func completeTaskFilesAction(t *testing.T, a *app) {
+	t.Helper()
+	_, command := a.Update(key(tea.KeyEnter))
+	if command == nil {
+		t.Fatal("Task file action did not start")
+	}
+	a.Update(command())
+}
+
 func TestTaskFilesPaletteSavesSelectedResultWithoutChangingDraft(t *testing.T) {
 	a := taskFilesApp(t)
 	a.inner.input.SetValue("unfinished operator message")
 	pressApp(t, a, ctrlK)
 	typeApp(t, a, "Task files")
-	pressApp(t, a, key(tea.KeyEnter))
+	completeTaskFilesAction(t, a)
 	if s := appScreen(a); !strings.Contains(s, "reports/summary.txt") || !strings.Contains(s, "Report") {
 		t.Fatalf("files not shown:\n%s", s)
 	}
@@ -81,7 +92,7 @@ func TestTaskFilesPaletteSavesSelectedResultWithoutChangingDraft(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "download.txt")
 	a.files.input.SetValue("")
 	a.Update(tea.PasteMsg{Content: output})
-	pressApp(t, a, key(tea.KeyEnter))
+	completeTaskFilesAction(t, a)
 	if s := appScreen(a); !strings.Contains(s, "Saved ") {
 		t.Fatalf("download result not shown:\n%s", s)
 	}
@@ -130,13 +141,13 @@ func TestTaskFilesManualTaskAndObjectivePrefill(t *testing.T) {
 	a.inner.shown().runtime.head = ""
 	a.openTaskFiles()
 	typeApp(t, a, "private-task")
-	pressApp(t, a, key(tea.KeyEnter))
+	completeTaskFilesAction(t, a)
 	if s := appScreen(a); !strings.Contains(s, "private Task") {
 		t.Fatalf("access failure hidden: %s", s)
 	}
 	pressApp(t, a, letter('t'))
 	a.files.input.SetValue("task-files")
-	pressApp(t, a, key(tea.KeyEnter))
+	completeTaskFilesAction(t, a)
 	if len(a.files.files) != 1 {
 		t.Fatal("manual Task lookup failed")
 	}
