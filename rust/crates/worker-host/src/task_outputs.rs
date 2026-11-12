@@ -1,18 +1,22 @@
 use std::{
+    collections::BTreeMap,
     path::{Path, PathBuf},
     time::Duration,
 };
 
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use supertag_protocol::{
-    artifacts::{MAX_ARTIFACT_BYTES, MAX_ARTIFACT_FILES, managed_output_directory},
+    artifacts::{
+        MAX_ARTIFACT_BYTES, MAX_ARTIFACT_FILE_BYTES, MAX_ARTIFACT_FILES, managed_output_directory,
+    },
     authenticated_request,
+    git_outputs::{self, MANIFEST_PATH},
     output_policy::{OutputSelection, REQUIRED_OUTPUT_MISSING},
     v2::{
-        ArtifactDescription, ArtifactSelection, HarnessCaptureArtifactRequest, HarnessKind,
-        OutputGitMode, Task, TaskOutputPolicy,
+        ArtifactDescription, ArtifactSelection, GitOutputSnapshot, HarnessCaptureArtifactRequest,
+        HarnessKind, OutputGitMode, Task, TaskOutputPolicy,
     },
 };
 use tokio_util::sync::CancellationToken;
@@ -22,8 +26,8 @@ use uuid::Uuid;
 use crate::{
     Attempt, CoordinationClients,
     adapter::upload_records,
-    artifact_snapshots::{Capture, Snapshots},
-    workspaces::PreparedWorkspace,
+    artifact_snapshots::{Capture, CollectedOutput, Snapshots},
+    workspaces::{PreparedWorkspace, Workspaces},
 };
 
 pub(crate) const OUTPUT_DIRECTORY: &str = "SUPERTAG_OUTPUT_DIR";
@@ -110,17 +114,89 @@ impl PendingOutputs {
     pub(crate) async fn freeze(
         self,
         workspace: &PreparedWorkspace,
+        workspaces: &Workspaces,
         state: &Path,
         attempt: &Attempt,
         cancel: &CancellationToken,
     ) -> Result<Self> {
         let checkout = workspace.checkout.path.clone();
+        let state = state.to_owned();
+        let recovery_state = state.clone();
+        let attempt = attempt.clone();
+        let recovery_attempt = attempt.clone();
         let (mut output, policy, mut paths) = tokio::task::spawn_blocking(move || {
-            let policy = self.policy()?;
-            let paths = self.select(&checkout, policy.as_ref())?;
-            Ok::<_, anyhow::Error>((self, policy, paths))
+            let mut output = self;
+            let policy = output.policy()?;
+            let maximum = policy
+                .as_ref()
+                .and_then(|policy| policy.max_bytes)
+                .unwrap_or(MAX_ARTIFACT_BYTES);
+            let snapshots = Snapshots::open(&recovery_state, &recovery_attempt.attempt_id)?;
+            if let Some(paths) = snapshots.staged_output_paths(
+                &output.operation_id,
+                recovery_attempt.inspect(),
+                policy.is_some(),
+                maximum,
+            )? {
+                output.paths = paths;
+                output.frozen = true;
+                return Ok::<_, anyhow::Error>((output, policy, Vec::new()));
+            }
+            let paths = output.select(&checkout, policy.as_ref())?;
+            Ok((output, policy, paths))
         })
         .await??;
+        if output.frozen {
+            return Ok(output);
+        }
+        if let Some(policy) = policy
+            .as_ref()
+            .filter(|policy| policy.git() != OutputGitMode::Ignore)
+        {
+            let rules = OutputSelection::new(policy)?;
+            rules.validate(&paths)?;
+            let limit = policy.max_files.unwrap_or(MAX_ARTIFACT_FILES as u32) as usize;
+            let git = supertag_workspaces::git_output_files(
+                &workspace.checkout,
+                &paths,
+                |path| rules.permits(path),
+                limit,
+                cancel,
+            )
+            .await?;
+            if !git.tracked.is_empty() || !git.deleted.is_empty() {
+                let remote = if policy.git() == OutputGitMode::Reference && !git.tracked.is_empty()
+                {
+                    workspaces
+                        .output_remote(workspace, &git.head_commit, cancel)
+                        .await
+                } else {
+                    None
+                };
+                if cancel.is_cancelled() {
+                    return Err(Status::cancelled("Task output capture cancelled").into());
+                }
+                let checkout = workspace.checkout.clone();
+                let maximum = policy.max_bytes.unwrap_or(MAX_ARTIFACT_BYTES);
+                return tokio::task::spawn_blocking(move || {
+                    let files = collect_git_outputs(&checkout, paths, git, remote, maximum)?;
+                    ensure!(
+                        files.len() <= limit,
+                        "Task output including Git manifest exceeds its file limit"
+                    );
+                    output.paths = files.keys().cloned().collect();
+                    Snapshots::open(&state, &attempt.attempt_id)?.freeze_collected_outputs(
+                        files,
+                        attempt.inspect(),
+                        output.request(),
+                        maximum,
+                    )?;
+                    output.frozen = true;
+                    Ok(output)
+                })
+                .await?;
+            }
+        }
         if let Some(policy) = policy
             .as_ref()
             .filter(|policy| policy.git() == OutputGitMode::Ignore)
@@ -135,8 +211,6 @@ impl PendingOutputs {
             paths.retain(|path| !tracked.contains(path));
         }
         let checkout = workspace.checkout.path.clone();
-        let state = state.to_owned();
-        let attempt = attempt.clone();
         tokio::task::spawn_blocking(move || {
             output.freeze_files(&checkout, &state, &attempt, policy.as_ref(), paths)?;
             Ok(output)
@@ -274,6 +348,59 @@ impl PendingOutputs {
     }
 }
 
+fn collect_git_outputs(
+    checkout: &supertag_workspaces::Checkout,
+    paths: Vec<String>,
+    git: supertag_workspaces::GitOutputFiles,
+    remote: Option<String>,
+    maximum: u64,
+) -> Result<BTreeMap<String, CollectedOutput>> {
+    ensure!(
+        !paths.iter().any(|path| path == MANIFEST_PATH),
+        "Task output collides with the generated Git manifest"
+    );
+    let mut files = BTreeMap::new();
+    let mut referenced_paths = Vec::new();
+    let mut remaining = maximum;
+    for path in paths {
+        let bytes = supertag_workspaces::capture_artifact_file(
+            &checkout.path,
+            &path,
+            remaining.min(MAX_ARTIFACT_FILE_BYTES) as usize,
+        )?;
+        remaining -= bytes.len() as u64;
+        if remote.is_some() && git.matches_commit(&path, &bytes) {
+            referenced_paths.push(path);
+        } else {
+            files.insert(
+                path,
+                CollectedOutput {
+                    bytes,
+                    git_output: None,
+                },
+            );
+        }
+    }
+    referenced_paths.sort_unstable();
+    let snapshot = GitOutputSnapshot {
+        start_commit: checkout.start_commit.clone(),
+        head_commit: git.head_commit,
+        remote,
+        tracked_paths: git.tracked,
+        deleted_paths: git.deleted,
+        referenced_paths,
+    };
+    let bytes = git_outputs::render(&snapshot)?;
+    files.insert(
+        MANIFEST_PATH.into(),
+        CollectedOutput {
+            bytes,
+            git_output: Some(snapshot),
+        },
+    );
+    Ok(files)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{fs, os::unix::fs::symlink};
@@ -315,6 +442,15 @@ mod tests {
 
         let recovered: PendingOutputs = serde_json::from_slice(&saved)?;
         let snapshots = Snapshots::open(state.path(), &attempt.attempt_id)?;
+        assert_eq!(
+            snapshots.staged_output_paths(
+                &recovered.operation_id,
+                attempt.inspect(),
+                false,
+                MAX_ARTIFACT_BYTES,
+            )?,
+            Some(recovered.paths.clone()),
+        );
         let Capture::Pending(manifest, bytes) = snapshots.replay_outputs(
             attempt.inspect(),
             recovered.request(),

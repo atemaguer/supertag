@@ -146,6 +146,7 @@ async fn exercise(url: &str) {
             summary: None,
         }),
         files: vec![ArtifactFile {
+            git_output: None,
             path: "reports/private/report.md".into(),
             blob: Some(blob(b"report")),
         }],
@@ -155,6 +156,26 @@ async fn exercise(url: &str) {
     assert!(matches!(
         store.reserve_artifact_capture(&host, &capture).await,
         Err(StoreError::InvalidArgument(_))
+    ));
+    let forged_snapshot = GitOutputSnapshot {
+        start_commit: "2".repeat(40),
+        head_commit: BASE.into(),
+        remote: Some("https://example.invalid/reports.git".into()),
+        tracked_paths: vec!["reports/report.md".into()],
+        deleted_paths: vec![],
+        referenced_paths: vec!["reports/report.md".into()],
+    };
+    let manifest = supertag_protocol::git_outputs::render(&forged_snapshot).unwrap();
+    let mut forged_capture = capture.clone();
+    forged_capture.operation_id = "forged-output".into();
+    forged_capture.files = vec![ArtifactFile {
+        path: supertag_protocol::git_outputs::MANIFEST_PATH.into(),
+        blob: Some(blob(&manifest)),
+        git_output: Some(forged_snapshot),
+    }];
+    assert!(matches!(
+        store.reserve_artifact_capture(&host, &forged_capture).await,
+        Err(StoreError::FailedPrecondition(error)) if error.contains("accepted Workspace start")
     ));
     capture.files[0].path = "reports/report.md".into();
     store

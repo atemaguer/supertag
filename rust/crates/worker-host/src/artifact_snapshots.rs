@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fs::{self, DirBuilder, File, OpenOptions},
     io::{Read, Write},
     os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
@@ -13,7 +14,8 @@ use supertag_protocol::{
     artifacts::{MAX_ARTIFACT_BYTES, MAX_ARTIFACT_FILE_BYTES, validate_capture_manifest},
     v2::{
         ArtifactDescription, ArtifactFile, BlobReference, CapturedArtifact,
-        CommitArtifactCaptureRequest, HarnessCaptureArtifactRequest, InspectAttemptRequest,
+        CommitArtifactCaptureRequest, GitOutputSnapshot, HarnessCaptureArtifactRequest,
+        InspectAttemptRequest,
     },
 };
 use tempfile::NamedTempFile;
@@ -32,13 +34,20 @@ pub(crate) enum Capture {
     Committed(CapturedArtifact),
 }
 
+pub(crate) struct CollectedOutput {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) git_output: Option<GitOutputSnapshot>,
+}
+
+enum SnapshotSource<'a> {
+    Checkout(&'a Path),
+    Collected(BTreeMap<String, CollectedOutput>),
+    Replay,
+}
+
 enum SnapshotMode {
     Explicit,
-    Output {
-        declared: bool,
-        max_bytes: u64,
-        replay: bool,
-    },
+    Output { declared: bool, max_bytes: u64 },
 }
 
 impl Snapshots {
@@ -66,7 +75,12 @@ impl Snapshots {
         attempt: InspectAttemptRequest,
         request: HarnessCaptureArtifactRequest,
     ) -> Result<Capture, Status> {
-        self.freeze_with_purpose(checkout, attempt, request, SnapshotMode::Explicit)
+        self.freeze_with_purpose(
+            SnapshotSource::Checkout(checkout),
+            attempt,
+            request,
+            SnapshotMode::Explicit,
+        )
     }
 
     pub(crate) fn freeze_outputs(
@@ -78,15 +92,66 @@ impl Snapshots {
         max_bytes: u64,
     ) -> Result<Capture, Status> {
         self.freeze_with_purpose(
-            checkout,
+            SnapshotSource::Checkout(checkout),
             attempt,
             request,
             SnapshotMode::Output {
                 declared,
                 max_bytes,
-                replay: false,
             },
         )
+    }
+
+    pub(crate) fn freeze_collected_outputs(
+        &self,
+        files: BTreeMap<String, CollectedOutput>,
+        attempt: InspectAttemptRequest,
+        request: HarnessCaptureArtifactRequest,
+        max_bytes: u64,
+    ) -> Result<Capture, Status> {
+        self.freeze_with_purpose(
+            SnapshotSource::Collected(files),
+            attempt,
+            request,
+            SnapshotMode::Output {
+                declared: true,
+                max_bytes,
+            },
+        )
+    }
+
+    pub(crate) fn staged_output_paths(
+        &self,
+        operation: &str,
+        attempt: InspectAttemptRequest,
+        declared: bool,
+        max_bytes: u64,
+    ) -> Result<Option<Vec<String>>, Status> {
+        let Some(mut file) =
+            open_private(&self.path(operation, "pending")).map_err(journal_error)?
+        else {
+            return Ok(None);
+        };
+        let mut manifest: CommitArtifactCaptureRequest =
+            read_record(&mut file).map_err(journal_error)?;
+        if manifest.operation_id != operation
+            || manifest.attempt.is_some()
+            || manifest.declared_task_output != declared
+            || manifest.managed_task_output == declared
+        {
+            return Err(Status::data_loss(
+                "stored Task output has invalid authority",
+            ));
+        }
+        manifest.attempt = Some(attempt);
+        if validate_capture_manifest(&manifest)? > max_bytes {
+            return Err(Status::data_loss(
+                "stored artifact exceeds its accepted byte limit",
+            ));
+        }
+        Ok(Some(
+            manifest.files.into_iter().map(|file| file.path).collect(),
+        ))
     }
 
     pub(crate) fn replay_outputs(
@@ -97,31 +162,29 @@ impl Snapshots {
         max_bytes: u64,
     ) -> Result<Capture, Status> {
         self.freeze_with_purpose(
-            Path::new(""),
+            SnapshotSource::Replay,
             attempt,
             request,
             SnapshotMode::Output {
                 declared,
                 max_bytes,
-                replay: true,
             },
         )
     }
 
     fn freeze_with_purpose(
         &self,
-        checkout: &Path,
+        mut source: SnapshotSource<'_>,
         attempt: InspectAttemptRequest,
         mut request: HarnessCaptureArtifactRequest,
         mode: SnapshotMode,
     ) -> Result<Capture, Status> {
-        let (managed_task_output, declared_task_output, max_bytes, replay) = match mode {
-            SnapshotMode::Explicit => (false, false, MAX_ARTIFACT_BYTES, false),
+        let (managed_task_output, declared_task_output, max_bytes) = match mode {
+            SnapshotMode::Explicit => (false, false, MAX_ARTIFACT_BYTES),
             SnapshotMode::Output {
                 declared,
                 max_bytes,
-                replay,
-            } => (!declared, declared, max_bytes, replay),
+            } => (!declared, declared, max_bytes),
         };
         request.paths.sort_unstable();
         let receipt = self.path(&request.operation_id, "receipt");
@@ -203,7 +266,7 @@ impl Snapshots {
             return Ok(Capture::Pending(manifest, bytes));
         }
 
-        if replay {
+        if matches!(&source, SnapshotSource::Replay) {
             return Err(Status::data_loss("frozen Task output snapshot is missing"));
         }
         let mut manifest = CommitArtifactCaptureRequest {
@@ -227,10 +290,29 @@ impl Snapshots {
         let mut bytes = Vec::with_capacity(request.paths.len());
         for path in request.paths {
             let limit = remaining.min(MAX_ARTIFACT_FILE_BYTES) as usize;
-            let content = supertag_workspaces::capture_artifact_file(checkout, &path, limit)
-                .map_err(|_| {
-                    Status::failed_precondition("cannot capture the selected workspace file")
-                })?;
+            let CollectedOutput {
+                bytes: content,
+                git_output,
+            } = match &mut source {
+                SnapshotSource::Checkout(checkout) => CollectedOutput {
+                    bytes: supertag_workspaces::capture_artifact_file(checkout, &path, limit)
+                        .map_err(|_| {
+                            Status::failed_precondition(
+                                "cannot capture the selected workspace file",
+                            )
+                        })?,
+                    git_output: None,
+                },
+                SnapshotSource::Collected(files) => files
+                    .remove(&path)
+                    .ok_or_else(|| Status::internal("selected output file was not collected"))?,
+                SnapshotSource::Replay => unreachable!("replay has no new output files"),
+            };
+            if content.len() > limit {
+                return Err(Status::resource_exhausted(
+                    "Task output exceeds its byte limit",
+                ));
+            }
             let byte_length = content.len() as u64;
             remaining -= byte_length;
             manifest.files.push(ArtifactFile {
@@ -239,6 +321,7 @@ impl Snapshots {
                     sha256: digest(&content),
                     byte_length,
                 }),
+                git_output,
             });
             bytes.push(content);
         }

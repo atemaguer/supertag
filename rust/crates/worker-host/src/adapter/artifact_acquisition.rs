@@ -364,6 +364,7 @@ mod tests {
     use super::*;
     fn file() -> ArtifactFile {
         ArtifactFile {
+            git_output: None,
             path: "one.txt".into(),
             blob: Some(BlobReference {
                 sha256: format!("{:x}", Sha256::digest(b"hello")),

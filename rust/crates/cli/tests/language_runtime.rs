@@ -650,7 +650,11 @@ async fn claude_captures_selected_workspace_files_for_the_operator() -> Result<(
     let report = b"durable engineering evidence from the source checkout\n";
     std::fs::write(source.join("report.txt"), report)?;
     std::fs::write(source.join("empty.txt"), [])?;
-    success(git(&["add", "report.txt", "empty.txt"])).await?;
+    std::fs::write(
+        source.join("removed.txt"),
+        b"will be removed by the harness",
+    )?;
+    success(git(&["add", "report.txt", "empty.txt", "removed.txt"])).await?;
     success(git(&["commit", "--quiet", "-m", "Fixture source"])).await?;
     let base = String::from_utf8(success(git(&["rev-parse", "HEAD"])).await?)?;
     let services = LanguageServices::start(directory.path()).await?;
@@ -797,8 +801,115 @@ async fn claude_captures_selected_workspace_files_for_the_operator() -> Result<(
     assert_eq!(std::fs::read(&managed_download)?, b"managed Task output\n");
     assert_eq!(task["workspace_delivery"]["changed_files"], 0);
     assert!(success(git(&["status", "--porcelain"])).await?.is_empty());
-    declared_output_cases(&services, directory.path(), worker).await?;
+    declared_output_cases(&services, directory.path(), &worker).await?;
+    let remote = directory.path().join("verified-remote.git");
+    let remote_path = remote.to_str().context("Git fixture path is not UTF-8")?;
+    success(git(&["init", "--bare", "--quiet", remote_path])).await?;
+    success(git(&["remote", "add", "origin", remote_path])).await?;
+    success(git(&[
+        "push",
+        "--quiet",
+        "origin",
+        "HEAD:refs/heads/advertised",
+    ]))
+    .await?;
+    verify_git_output_case(&services, directory.path(), &worker, "reference", true).await?;
+    verify_git_output_case(&services, directory.path(), &worker, "capture", false).await?;
+    success(git(&["remote", "remove", "origin"])).await?;
+    verify_git_output_case(&services, directory.path(), &worker, "reference", false).await?;
     services.stop().await
+}
+
+async fn verify_git_output_case(
+    services: &LanguageServices,
+    directory: &Path,
+    worker: &impl Fn() -> Command,
+    mode: &str,
+    advertised: bool,
+) -> Result<()> {
+    let policy = directory.join("git-output-policy.json");
+    std::fs::write(
+        &policy,
+        serde_json::to_vec(&serde_json::json!({
+            "include": ["*.txt"],
+            "required": ["empty.txt", "report.txt"],
+            "git": mode,
+        }))?,
+    )?;
+    let session = format!("git-output-{mode}-{advertised}");
+    let submitted = services
+        .operator(&[
+            "submit",
+            "--tag",
+            "producer",
+            "--session",
+            &session,
+            "--outputs",
+            policy.to_str().context("policy path is not UTF-8")?,
+            "git-output-fixture",
+        ])
+        .await?;
+    let task_id = submitted["task_id"].as_str().context("Task ID missing")?;
+    success(worker()).await?;
+    let task = services.operator(&["get-task", task_id]).await?;
+    assert_eq!(task["state"], "TASK_STATE_SUCCEEDED", "{task}");
+    let selection = &task["artifacts"][0];
+    let expected = if advertised {
+        serde_json::json!(["report.txt", "supertag-git-output.json"])
+    } else {
+        serde_json::json!(["empty.txt", "report.txt", "supertag-git-output.json"])
+    };
+    assert_eq!(selection["paths"], expected);
+    let artifact = selection["artifact_id"]
+        .as_str()
+        .context("artifact ID missing")?;
+    let download = |path: &str| directory.join(format!("{session}-{path}"));
+    for path in ["report.txt", "supertag-git-output.json"] {
+        services
+            .operator(&[
+                "artifact",
+                "download",
+                artifact,
+                "--path",
+                path,
+                "--output",
+                download(path)
+                    .to_str()
+                    .context("download path is not UTF-8")?,
+            ])
+            .await?;
+    }
+    assert_eq!(
+        std::fs::read(download("report.txt"))?,
+        b"dirty tracked output\n"
+    );
+    let snapshot: Value =
+        serde_json::from_slice(&std::fs::read(download("supertag-git-output.json"))?)?;
+    assert_eq!(snapshot["kind"], "selected-git-snapshot");
+    assert_eq!(snapshot["deleted"], serde_json::json!(["removed.txt"]));
+    assert_eq!(
+        snapshot["paths"],
+        serde_json::json!(["empty.txt", "report.txt"])
+    );
+    assert_eq!(snapshot["head"], task["workspace_delivery"]["start_commit"]);
+    assert_eq!(snapshot["head"], snapshot["baseCommit"]);
+    assert_eq!(snapshot["partial"], true);
+    assert_eq!(snapshot["remoteDurable"], advertised);
+    if advertised {
+        assert_eq!(
+            snapshot["referencedPaths"],
+            serde_json::json!(["empty.txt"])
+        );
+        assert!(
+            snapshot["remote"]
+                .as_str()
+                .is_some_and(|remote| remote.starts_with("file://"))
+        );
+    } else {
+        assert_eq!(snapshot["referencedPaths"], serde_json::json!([]));
+        assert!(snapshot["remote"].is_null());
+    }
+    Ok(())
 }
 
 async fn declared_output_cases(

@@ -72,6 +72,7 @@ fn capture(attempt: &InspectAttemptRequest, operation: &str) -> CommitArtifactCa
         }),
         files: vec![
             ArtifactFile {
+                git_output: None,
                 path: "readme.txt".into(),
                 blob: Some(BlobReference {
                     sha256: "a".repeat(64),
@@ -79,6 +80,7 @@ fn capture(attempt: &InspectAttemptRequest, operation: &str) -> CommitArtifactCa
                 }),
             },
             ArtifactFile {
+                git_output: None,
                 path: "private.txt".into(),
                 blob: Some(BlobReference {
                     sha256: "b".repeat(64),

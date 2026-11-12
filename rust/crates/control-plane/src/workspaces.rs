@@ -188,7 +188,7 @@ pub(crate) async fn finish_in(
     Ok(())
 }
 
-async fn continuation_in(
+pub(crate) async fn continuation_in(
     tx: &mut Transaction<'_, Any>,
     task: &AnyRow,
 ) -> Result<Option<WorkspaceDeliveryReference>> {

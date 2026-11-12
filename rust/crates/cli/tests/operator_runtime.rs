@@ -249,6 +249,7 @@ async fn captured_artifact_round_trip(tui: Option<&Path>) -> Result<()> {
         }),
         files: vec![
             ArtifactFile {
+                git_output: None,
                 path: "report.txt".into(),
                 blob: Some(BlobReference {
                     sha256: digest.clone(),
@@ -256,6 +257,7 @@ async fn captured_artifact_round_trip(tui: Option<&Path>) -> Result<()> {
                 }),
             },
             ArtifactFile {
+                git_output: None,
                 path: "empty".into(),
                 blob: Some(BlobReference {
                     sha256: format!("{:x}", Sha256::digest([])),

@@ -127,23 +127,35 @@ impl Store {
                 .output_policy
                 .as_ref()
                 .ok_or(StoreError::PermissionDenied)?;
-            if task.workspace.is_none()
-                || task.attempt_execution.as_ref().is_none_or(|execution| {
-                    execution.remote_file_workspace
-                        || !matches!(
-                            execution.harness_kind(),
-                            HarnessKind::Codex | HarnessKind::ClaudeCode
-                        )
-                })
-            {
+            let workspace = task
+                .workspace
+                .as_ref()
+                .ok_or(StoreError::PermissionDenied)?;
+            if task.attempt_execution.as_ref().is_none_or(|execution| {
+                execution.remote_file_workspace
+                    || !matches!(
+                        execution.harness_kind(),
+                        HarnessKind::Codex | HarnessKind::ClaudeCode
+                    )
+            }) {
                 return Err(StoreError::PermissionDenied);
             }
-            let paths = canonical
+            if let Some(snapshot) = canonical
                 .files
                 .iter()
-                .map(|file| file.path.clone())
-                .collect::<Vec<_>>();
-            validate_declared_outputs(policy, &paths, byte_length)?;
+                .find_map(|file| file.git_output.as_ref())
+            {
+                let previous = crate::workspaces::continuation_in(&mut tx, &row).await?;
+                let accepted_start = previous
+                    .as_ref()
+                    .map_or(&workspace.base_commit, |delivery| &delivery.head_commit);
+                if &snapshot.start_commit != accepted_start {
+                    return Err(StoreError::FailedPrecondition(
+                        "Git output snapshot does not match the accepted Workspace start".into(),
+                    ));
+                }
+            }
+            validate_declared_outputs(policy, &canonical.files)?;
         }
         let objective_id = sqlx::query_scalar(
             "SELECT objective_id FROM supertag_v2_task_audience WHERE task_id=$1 AND objective_id<>''",
@@ -329,8 +341,7 @@ pub(crate) async fn submit_in(
     output_policy: Option<&TaskOutputPolicy>,
 ) -> Result<()> {
     let selections = normalize_submissions(&input.artifacts)?;
-    let mut declared_paths = Vec::new();
-    let mut declared_bytes = 0_u64;
+    let mut declared_files = Vec::new();
     for selection in &selections {
         let row = sqlx::query(
             "SELECT payload FROM supertag_v2_artifact_captures
@@ -354,17 +365,12 @@ pub(crate) async fn submit_in(
                 .as_ref()
                 .is_some_and(|summary| summary.declared_task_output)
             {
-                declared_paths.push(path.clone());
-                declared_bytes += entry
-                    .blob
-                    .as_ref()
-                    .ok_or_else(|| invalid("submitted artifact path has no byte receipt"))?
-                    .byte_length;
+                declared_files.push(entry.clone());
             }
         }
     }
     if let Some(policy) = output_policy {
-        validate_declared_outputs(policy, &declared_paths, declared_bytes)?;
+        validate_declared_outputs(policy, &declared_files)?;
     }
     if selections.is_empty() {
         return Ok(());
@@ -377,12 +383,39 @@ pub(crate) async fn submit_in(
     Ok(())
 }
 
-fn validate_declared_outputs(
-    policy: &TaskOutputPolicy,
-    paths: &[String],
-    bytes: u64,
-) -> Result<()> {
-    if paths.len() > policy.max_files.unwrap_or(MAX_ARTIFACT_FILES as u32) as usize
+fn validate_declared_outputs(policy: &TaskOutputPolicy, files: &[ArtifactFile]) -> Result<()> {
+    let rules = OutputSelection::new(policy).map_err(|error| invalid(error.message()))?;
+    let mut selected = std::collections::BTreeSet::new();
+    let mut bytes = 0_u64;
+    for file in files {
+        bytes += file
+            .blob
+            .as_ref()
+            .ok_or_else(|| invalid("declared output has no byte receipt"))?
+            .byte_length;
+        let paths = if let Some(snapshot) = &file.git_output {
+            if policy.git() == OutputGitMode::Ignore
+                || policy.git() == OutputGitMode::Capture && snapshot.remote.is_some()
+                || snapshot
+                    .tracked_paths
+                    .iter()
+                    .chain(&snapshot.deleted_paths)
+                    .any(|path| !rules.permits(path))
+            {
+                return Err(invalid("Git output snapshot exceeds its accepted policy"));
+            }
+            snapshot.referenced_paths.as_slice()
+        } else {
+            std::slice::from_ref(&file.path)
+        };
+        for path in paths {
+            if !selected.insert(path.clone()) {
+                return Err(invalid("declared Task output paths must be unique"));
+            }
+        }
+    }
+    if files.len().max(selected.len())
+        > policy.max_files.unwrap_or(MAX_ARTIFACT_FILES as u32) as usize
         || bytes
             > policy
                 .max_bytes
@@ -390,8 +423,8 @@ fn validate_declared_outputs(
     {
         return Err(invalid("declared Task output exceeds its accepted limits"));
     }
-    OutputSelection::new(policy)
-        .and_then(|rules| rules.validate(paths))
+    rules
+        .validate(&selected.into_iter().collect::<Vec<_>>())
         .map_err(|error| invalid(error.message()))
 }
 

@@ -2409,12 +2409,14 @@ dependencies = [
  "prost",
  "protoc-bin-vendored",
  "regex",
+ "serde",
  "serde_json",
  "sha2",
  "subtle",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+ "url",
  "uuid",
 ]
 
@@ -2478,6 +2480,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "url",
 ]
 
 [[package]]

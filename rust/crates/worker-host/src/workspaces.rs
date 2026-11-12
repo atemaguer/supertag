@@ -240,6 +240,25 @@ impl Workspaces {
         }))
     }
 
+    pub(crate) async fn output_remote(
+        &self,
+        workspace: &PreparedWorkspace,
+        commit: &str,
+        cancel: &CancellationToken,
+    ) -> Option<String> {
+        let mapping = self
+            .mapping
+            .as_ref()
+            .filter(|mapping| mapping.workspace_id == workspace.workspace_id)?;
+        let WorkspaceSource::Local(source) = &mapping.source else {
+            return None;
+        };
+        supertag_workspaces::advertised_output_remote(source, &self.directory, commit, cancel)
+            .await
+            .ok()
+            .flatten()
+    }
+
     pub async fn finalize(
         &self,
         prepared: &PreparedWorkspace,

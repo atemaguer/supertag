@@ -60,6 +60,7 @@ async fn exercise(url: &str) {
         native_session_id: Some("native-release-1".into()),
         managed_task_output: false,
         files: vec![ArtifactFile {
+            git_output: None,
             path: "evidence.txt".into(),
             blob: Some(BlobReference {
                 sha256: "a".repeat(64),
@@ -244,6 +245,7 @@ async fn submission(store: &Store, host: &supertag_control_plane::HostAuthority,
             summary: None,
         }),
         files: vec![ArtifactFile {
+            git_output: None,
             path: "deliverable.txt".into(),
             blob: Some(BlobReference {
                 sha256: "a".repeat(64),

@@ -78,6 +78,40 @@ pub async fn tracked_output_paths(
     .await
 }
 
+pub struct GitOutputFiles {
+    pub head_commit: String,
+    pub tracked: Vec<String>,
+    pub deleted: Vec<String>,
+    committed: BTreeMap<String, String>,
+}
+
+impl GitOutputFiles {
+    pub fn matches_commit(&self, path: &str, content: &[u8]) -> bool {
+        self.committed
+            .get(path)
+            .is_some_and(|oid| git::blob_oid(content, oid.len()) == *oid)
+    }
+}
+
+pub async fn git_output_files(
+    checkout: &Checkout,
+    selected: &[String],
+    permits: impl Fn(&str) -> bool,
+    maximum: usize,
+    cancel: &CancellationToken,
+) -> Result<GitOutputFiles> {
+    git::Repository::output_files(checkout, selected, permits, maximum, cancel).await
+}
+
+pub async fn advertised_output_remote(
+    source: &Path,
+    disposable: &Path,
+    commit: &str,
+    cancel: &CancellationToken,
+) -> Result<Option<String>> {
+    git::advertised_output_remote(source, disposable, commit, cancel).await
+}
+
 #[derive(Clone, Debug)]
 pub struct WorkspaceConfig {
     pub state_dir: PathBuf,

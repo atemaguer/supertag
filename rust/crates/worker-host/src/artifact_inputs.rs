@@ -279,6 +279,7 @@ mod tests {
             operation_id: "op".into(),
             destination: Some(materialized_artifact_directory("attempt", "op")),
             files: vec![ArtifactFile {
+                git_output: None,
                 path: "nested/read.txt".into(),
                 blob: Some(BlobReference {
                     sha256: format!("{:x}", Sha256::digest(b"hello")),

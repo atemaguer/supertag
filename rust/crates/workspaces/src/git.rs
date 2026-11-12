@@ -15,7 +15,10 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{check_cancelled, paths};
+use crate::{GitOutputFiles, check_cancelled, paths};
+
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
+const REMOTE_TIMEOUT: Duration = Duration::from_secs(15);
 
 const MAX_OUTPUT: usize = 268_435_456;
 
@@ -178,7 +181,7 @@ impl Repository {
             command.env(name, value);
         }
         command.args(args);
-        run(command, input, cancel, MAX_OUTPUT).await
+        run(command, input, cancel, MAX_OUTPUT, COMMAND_TIMEOUT).await
     }
 
     pub(crate) async fn verify_commit(&self, oid: &str, cancel: &CancellationToken) -> Result<()> {
@@ -390,12 +393,7 @@ impl Repository {
         Ok(ignored)
     }
 
-    pub(crate) async fn tracked_outputs(
-        checkout: &Path,
-        oid_length: usize,
-        selected: &[String],
-        cancel: &CancellationToken,
-    ) -> Result<BTreeSet<String>> {
+    fn output_repository(checkout: &Path, oid_length: usize) -> Result<Self> {
         let repository = Self {
             root: checkout.to_owned(),
             git_dir: checkout.join(".git"),
@@ -404,6 +402,28 @@ impl Repository {
         };
         paths::read_regular(&repository.git_dir.join("HEAD"), 1024)?;
         paths::read_regular(&repository.git_dir.join("index"), 32 * 1024 * 1024)?;
+        Ok(repository)
+    }
+
+    pub(crate) async fn tracked_outputs(
+        checkout: &Path,
+        oid_length: usize,
+        selected: &[String],
+        cancel: &CancellationToken,
+    ) -> Result<BTreeSet<String>> {
+        Self::output_repository(checkout, oid_length)?
+            .selected_tracked(selected, cancel)
+            .await
+    }
+
+    async fn selected_tracked(
+        &self,
+        selected: &[String],
+        cancel: &CancellationToken,
+    ) -> Result<BTreeSet<String>> {
+        if selected.is_empty() {
+            return Ok(BTreeSet::new());
+        }
         let mut index = vec!["--literal-pathspecs", "ls-files", "-z", "--cached", "--"];
         let mut tree = vec![
             "--literal-pathspecs",
@@ -417,7 +437,7 @@ impl Repository {
         tree.extend(selected.iter().map(String::as_str));
         let mut tracked = BTreeSet::new();
         for arguments in [index, tree] {
-            let bytes = repository.command(&arguments, &[], &[], cancel).await?;
+            let bytes = self.command(&arguments, &[], &[], cancel).await?;
             for path in bytes
                 .split(|byte| *byte == 0)
                 .filter(|path| !path.is_empty())
@@ -426,6 +446,64 @@ impl Repository {
             }
         }
         Ok(tracked)
+    }
+
+    pub(crate) async fn output_files(
+        checkout: &crate::Checkout,
+        selected: &[String],
+        permits: impl Fn(&str) -> bool,
+        maximum: usize,
+        cancel: &CancellationToken,
+    ) -> Result<GitOutputFiles> {
+        let repository = Self::output_repository(&checkout.path, checkout.start_commit.len())?;
+        let head_commit = output_oid(
+            repository
+                .command(
+                    &["rev-parse", "--verify", "HEAD^{commit}"],
+                    &[],
+                    &[],
+                    cancel,
+                )
+                .await?,
+        )?;
+        let head = repository.tree(&head_commit, cancel).await?;
+        let base = if checkout.start_commit == head_commit {
+            None
+        } else {
+            Some(repository.tree(&checkout.start_commit, cancel).await?)
+        };
+        let base = base.as_ref().unwrap_or(&head);
+        let mut tracked = repository.selected_tracked(selected, cancel).await?;
+        let selected: BTreeSet<&str> = selected.iter().map(String::as_str).collect();
+        let deleted: Vec<_> = base
+            .values()
+            .filter(|entry| {
+                entry.mode != "120000"
+                    && !selected.contains(entry.path.as_str())
+                    && permits(&entry.path)
+            })
+            .take(maximum + 1)
+            .map(|entry| entry.path.clone())
+            .collect();
+        ensure!(deleted.len() <= maximum, "too many selected Git deletions");
+        tracked.extend(
+            selected
+                .iter()
+                .filter(|path| base.contains_key(**path))
+                .map(|path| path.to_string()),
+        );
+        tracked.retain(|path| selected.contains(path.as_str()));
+        let committed = head
+            .into_values()
+            .filter(|entry| entry.mode != "120000" && tracked.contains(&entry.path))
+            .map(|entry| (entry.path, entry.oid))
+            .collect();
+        Ok(GitOutputFiles {
+            head_commit,
+            tracked: tracked.into_iter().collect(),
+            deleted,
+            committed,
+        })
     }
 
     pub(crate) async fn write_blob(
@@ -622,7 +700,7 @@ pub(crate) fn blob_oid(bytes: &[u8], length: usize) -> String {
     }
 }
 
-fn source_objects(source: &Path) -> Result<PathBuf> {
+fn source_git_directory(source: &Path) -> Result<PathBuf> {
     let git = source.join(".git");
     let mut directory = if fs::symlink_metadata(&git).is_ok_and(|metadata| metadata.is_dir()) {
         paths::verify_directory(&git)?;
@@ -660,9 +738,107 @@ fn source_objects(source: &Path) -> Result<PathBuf> {
         .canonicalize()?;
         paths::verify_directory(&directory)?;
     }
-    let objects = directory.join("objects");
+    Ok(directory)
+}
+
+fn source_objects(source: &Path) -> Result<PathBuf> {
+    let objects = source_git_directory(source)?.join("objects");
     paths::verify_directory(&objects)?;
     Ok(objects)
+}
+
+pub(crate) async fn advertised_output_remote(
+    source: &Path,
+    disposable: &Path,
+    commit: &str,
+    cancel: &CancellationToken,
+) -> Result<Option<String>> {
+    validate_oid(commit)?;
+    let config = paths::read_regular(&source_git_directory(source)?.join("config"), 65_536)?;
+    let mut read = isolated_remote_command();
+    read.args([
+        "config",
+        "--file",
+        "-",
+        "--no-includes",
+        "--null",
+        "--get-regexp",
+        r"^remote\..*\.url$",
+    ]);
+    let configured = run(read, &config, cancel, 65_536, REMOTE_TIMEOUT).await?;
+    let Some((_, value)) = std::str::from_utf8(&configured)?
+        .split('\0')
+        .filter_map(|row| row.split_once('\n'))
+        .min_by(|left, right| left.0.cmp(right.0))
+    else {
+        return Ok(None);
+    };
+    let Some(remote) = output_remote_url(source, disposable, value) else {
+        return Ok(None);
+    };
+    let mut lookup = isolated_remote_command();
+    lookup
+        .args(["-c", "protocol.allow=never", "-c"])
+        .arg(format!("protocol.{}.allow=always", remote.scheme()))
+        .args(["-c", "http.followRedirects=false", "ls-remote", "--"])
+        .arg(remote.as_str());
+    let advertised = run(lookup, &[], cancel, 1024 * 1024, REMOTE_TIMEOUT).await?;
+    Ok(std::str::from_utf8(&advertised)?
+        .lines()
+        .any(|line| line.split_once('\t').is_some_and(|(oid, _)| oid == commit))
+        .then(|| remote.into()))
+}
+
+fn isolated_remote_command() -> Command {
+    let mut command = Command::new("/usr/bin/git");
+    command
+        .current_dir("/")
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+        .env("LC_ALL", "C")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_TERMINAL_PROMPT", "0");
+    command
+}
+
+fn output_remote_url(source: &Path, disposable: &Path, value: &str) -> Option<url::Url> {
+    if value.is_empty()
+        || value.len() > 1024
+        || value.chars().any(char::is_control)
+        || value.starts_with('-')
+    {
+        return None;
+    }
+    let local = match url::Url::parse(value) {
+        Ok(url) => match url.scheme() {
+            "https"
+                if url.host_str().is_some()
+                    && url.username().is_empty()
+                    && url.password().is_none()
+                    && url.query().is_none()
+                    && url.fragment().is_none()
+                    && url.path() != "/" =>
+            {
+                return Some(url);
+            }
+            "file"
+                if url.host_str().is_none()
+                    && url.query().is_none()
+                    && url.fragment().is_none() =>
+            {
+                url.to_file_path().ok()?
+            }
+            _ => return None,
+        },
+        Err(_) if !value.contains(':') => source.join(value),
+        Err(_) => return None,
+    };
+    let remote = local.canonicalize().ok()?;
+    if remote.starts_with(disposable.canonicalize().ok()?) || remote == Path::new("/") {
+        return None;
+    }
+    url::Url::from_file_path(remote).ok()
 }
 
 fn reject_object_links(directory: &Path) -> Result<()> {
@@ -722,6 +898,7 @@ async fn run(
     input: &[u8],
     cancel: &CancellationToken,
     maximum: usize,
+    timeout: Duration,
 ) -> Result<Vec<u8>> {
     check_cancelled(cancel)?;
     command
@@ -738,7 +915,7 @@ async fn run(
     let result = tokio::select! {
         biased;
         _ = cancel.cancelled() => Err(anyhow::anyhow!("workspace operation cancelled")),
-        _ = tokio::time::sleep(Duration::from_secs(120)) => Err(anyhow::anyhow!("Git command exceeded its deadline")),
+        _ = tokio::time::sleep(timeout) => Err(anyhow::anyhow!("Git command exceeded its deadline")),
         result = async {
             let ((), stdout, stderr, status) = tokio::try_join!(async { stdin.write_all(input).await?; stdin.shutdown().await?; drop(stdin); Ok::<_, anyhow::Error>(()) }, limited(stdout, maximum), limited(stderr, 65_536), async { Ok::<_, anyhow::Error>(child.wait().await?) })?;
             if !status.success() { return Err(GitExit { code: status.code(), stderr: String::from_utf8_lossy(&stderr).trim().into() }.into()); }
@@ -768,7 +945,10 @@ mod tests {
             .arg(&started);
         let token = CancellationToken::new();
         let task_token = token.clone();
-        let task = tokio::spawn(async move { run(command, &[], &task_token, 1024).await });
+        let task =
+            tokio::spawn(
+                async move { run(command, &[], &task_token, 1024, COMMAND_TIMEOUT).await },
+            );
         tokio::time::timeout(Duration::from_secs(5), async {
             while !started.exists() {
                 tokio::time::sleep(Duration::from_millis(10)).await;

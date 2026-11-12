@@ -342,6 +342,7 @@ async fn artifact_save_checks_authority_and_bytes_and_keeps_existing_files() {
             let frames = vec![
                 Ok(ArtifactDownload {
                     part: Some(Part::File(ArtifactFile {
+                        git_output: None,
                         path: input.path,
                         blob: Some(BlobReference {
                             sha256: format!("{digest:x}"),

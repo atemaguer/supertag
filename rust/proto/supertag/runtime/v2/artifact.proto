@@ -56,6 +56,18 @@ message ArtifactDescription {
 message ArtifactFile {
   string path = 1;
   BlobReference blob = 2;
+  // Present on the generated JSON file for a selected Git output snapshot.
+  GitOutputSnapshot git_output = 3;
+}
+
+message GitOutputSnapshot {
+  string start_commit = 1;
+  string head_commit = 2;
+  optional string remote = 3;
+  repeated string tracked_paths = 4;
+  repeated string deleted_paths = 5;
+  // Clean selected paths whose exact bytes are available at the advertised commit.
+  repeated string referenced_paths = 6;
 }
 
 message ArtifactProducer {

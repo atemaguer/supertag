@@ -41,12 +41,30 @@ class ArtifactDescription(_message.Message):
     def __init__(self, title: _Optional[str] = ..., kind: _Optional[str] = ..., summary: _Optional[str] = ...) -> None: ...
 
 class ArtifactFile(_message.Message):
-    __slots__ = ("path", "blob")
+    __slots__ = ("path", "blob", "git_output")
     PATH_FIELD_NUMBER: _ClassVar[int]
     BLOB_FIELD_NUMBER: _ClassVar[int]
+    GIT_OUTPUT_FIELD_NUMBER: _ClassVar[int]
     path: str
     blob: _runtime_pb2.BlobReference
-    def __init__(self, path: _Optional[str] = ..., blob: _Optional[_Union[_runtime_pb2.BlobReference, _Mapping]] = ...) -> None: ...
+    git_output: GitOutputSnapshot
+    def __init__(self, path: _Optional[str] = ..., blob: _Optional[_Union[_runtime_pb2.BlobReference, _Mapping]] = ..., git_output: _Optional[_Union[GitOutputSnapshot, _Mapping]] = ...) -> None: ...
+
+class GitOutputSnapshot(_message.Message):
+    __slots__ = ("start_commit", "head_commit", "remote", "tracked_paths", "deleted_paths", "referenced_paths")
+    START_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    HEAD_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    REMOTE_FIELD_NUMBER: _ClassVar[int]
+    TRACKED_PATHS_FIELD_NUMBER: _ClassVar[int]
+    DELETED_PATHS_FIELD_NUMBER: _ClassVar[int]
+    REFERENCED_PATHS_FIELD_NUMBER: _ClassVar[int]
+    start_commit: str
+    head_commit: str
+    remote: str
+    tracked_paths: _containers.RepeatedScalarFieldContainer[str]
+    deleted_paths: _containers.RepeatedScalarFieldContainer[str]
+    referenced_paths: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, start_commit: _Optional[str] = ..., head_commit: _Optional[str] = ..., remote: _Optional[str] = ..., tracked_paths: _Optional[_Iterable[str]] = ..., deleted_paths: _Optional[_Iterable[str]] = ..., referenced_paths: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class ArtifactProducer(_message.Message):
     __slots__ = ("task_id", "attempt_id", "tag_id", "session_id", "objective_id", "harness_kind", "native_session_id")

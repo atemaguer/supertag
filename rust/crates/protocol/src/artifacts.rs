@@ -63,6 +63,7 @@ pub fn validate_capture_manifest(input: &CommitArtifactCaptureRequest) -> Result
     }
     let mut total = 0;
     for file in &input.files {
+        crate::git_outputs::validate_file(file, &input.files, input.declared_task_output)?;
         let blob = file
             .blob
             .as_ref()
@@ -174,6 +175,7 @@ mod tests {
             files: paths
                 .iter()
                 .map(|path| ArtifactFile {
+                    git_output: None,
                     path: (*path).into(),
                     blob: Some(BlobReference {
                         sha256: "a".repeat(64),

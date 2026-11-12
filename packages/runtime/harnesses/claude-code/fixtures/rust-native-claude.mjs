@@ -2,7 +2,7 @@
 // Protocol fixture for the REAL Anthropic Agent SDK. No model or provider is contacted.
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
@@ -679,6 +679,14 @@ async function turn(message) {
     } catch (error) {
       result = `Artifact fixture failed: ${error.message}`;
     }
+  }
+  if (prompt === "git-output-fixture") {
+    for (const path of [join(cwd, "report.txt"), join(cwd, "removed.txt")]) {
+      if (!(await hook("Write", { file_path: path }))) throw new Error("Workspace write denied");
+    }
+    await writeFile(join(cwd, "report.txt"), "dirty tracked output\n");
+    await unlink(join(cwd, "removed.txt"));
+    result = "Git outputs prepared";
   }
   if (prompt === "commit-review-request") result = await commitReview("request");
   if (prompt === "commit-review-verdict") result = await commitReview("verdict");
