@@ -32,6 +32,10 @@ pub fn capture_artifact_file(root: &Path, path: &str, maximum: usize) -> Result<
     paths::read_artifact_file(root, path, maximum)
 }
 
+pub fn write_acquired_files(root: &Path, path: &str, files: &[(String, Vec<u8>)]) -> Result<()> {
+    paths::write_acquired_files(root, path, files)
+}
+
 pub fn create_output_directory(root: &Path, path: &str) -> Result<()> {
     paths::create_output_directory(root, path)
 }

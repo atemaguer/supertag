@@ -1,3 +1,4 @@
+mod artifact_acquisition;
 mod budget;
 mod commit_reviews;
 
@@ -185,7 +186,7 @@ async fn main() -> Result<()> {
         )?)
         .await?
         .into_inner();
-    let task = run.task.context("fixture received no Task")?;
+    let task = run.task.clone().context("fixture received no Task")?;
     budget::exercise(&bootstrap, &task, &mut harness).await?;
     commit_reviews::exercise(&bootstrap, &task, run.coordination.as_ref()).await?;
     let may_start = run
@@ -564,6 +565,21 @@ async fn main() -> Result<()> {
             );
             "Region us-east-1 is verified.".into()
         };
+    }
+    if std::env::args().any(|arg| arg == "--artifact-acquisition-fixture") {
+        result = artifact_acquisition::exercise(&bootstrap, &run).await?;
+        if std::env::args().any(|arg| arg == "--wait-for-cancel") {
+            harness
+                .publish(authenticated_request(
+                    HarnessPublishRequest {
+                        sequence: 2,
+                        text: "artifact attached".into(),
+                    },
+                    &bootstrap.token,
+                    None,
+                )?)
+                .await?;
+        }
     }
     let workspace_fixture = std::env::args().any(|arg| arg == "--workspace-fixture");
     if workspace_fixture {

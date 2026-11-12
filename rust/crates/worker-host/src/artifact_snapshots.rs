@@ -460,6 +460,7 @@ mod tests {
         assert_eq!(error.code(), Code::AlreadyExists);
 
         let receipt = CapturedArtifact {
+            inputs: vec![],
             files: replay.files,
             summary: Some(ArtifactSummary {
                 artifact_id: "immutable-artifact".into(),

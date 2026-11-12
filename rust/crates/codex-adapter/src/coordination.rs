@@ -25,6 +25,7 @@ const DEFAULT_LIMIT: u32 = 8;
 #[derive(Debug, PartialEq)]
 pub(crate) enum Arguments {
     Capture(crate::artifact::Capture),
+    Acquire(crate::artifact::Acquisition),
     Ask(String),
     Post(Post),
     ReadWorkstream(WorkstreamPage),

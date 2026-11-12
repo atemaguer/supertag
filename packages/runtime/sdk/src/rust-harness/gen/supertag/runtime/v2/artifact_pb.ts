@@ -2,9 +2,9 @@
 // @generated from file supertag/runtime/v2/artifact.proto (package supertag.runtime.v2, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { BlobReference, HarnessKind, InspectAttemptRequest } from "./runtime_pb.js";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { ArtifactSelection, BlobReference, HarnessKind, InspectAttemptRequest } from "./runtime_pb.js";
 import { file_supertag_runtime_v2_runtime } from "./runtime_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file supertag/runtime/v2/artifact.proto.
  */
 export const file_supertag_runtime_v2_artifact: GenFile = /*@__PURE__*/
-  fileDesc("CiJzdXBlcnRhZy9ydW50aW1lL3YyL2FydGlmYWN0LnByb3RvEhNzdXBlcnRhZy5ydW50aW1lLnYyIlQKE0FydGlmYWN0RGVzY3JpcHRpb24SDQoFdGl0bGUYASABKAkSDAoEa2luZBgCIAEoCRIUCgdzdW1tYXJ5GAMgASgJSACIAQFCCgoIX3N1bW1hcnkiTgoMQXJ0aWZhY3RGaWxlEgwKBHBhdGgYASABKAkSMAoEYmxvYhgCIAEoCzIiLnN1cGVydGFnLnJ1bnRpbWUudjIuQmxvYlJlZmVyZW5jZSL1AQoQQXJ0aWZhY3RQcm9kdWNlchIPCgd0YXNrX2lkGAEgASgJEhIKCmF0dGVtcHRfaWQYAiABKAkSDgoGdGFnX2lkGAMgASgJEhIKCnNlc3Npb25faWQYBCABKAkSGQoMb2JqZWN0aXZlX2lkGAUgASgJSACIAQESNgoMaGFybmVzc19raW5kGAYgASgOMiAuc3VwZXJ0YWcucnVudGltZS52Mi5IYXJuZXNzS2luZBIeChFuYXRpdmVfc2Vzc2lvbl9pZBgHIAEoCUgBiAEBQg8KDV9vYmplY3RpdmVfaWRCFAoSX25hdGl2ZV9zZXNzaW9uX2lkIv0BCg9BcnRpZmFjdFN1bW1hcnkSEwoLYXJ0aWZhY3RfaWQYASABKAkSPQoLZGVzY3JpcHRpb24YAiABKAsyKC5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0RGVzY3JpcHRpb24SNwoIcHJvZHVjZXIYAyABKAsyJS5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0UHJvZHVjZXISEgoKZmlsZV9jb3VudBgEIAEoDRITCgtieXRlX2xlbmd0aBgFIAEoBBIWCg5jYXB0dXJlZF9hdF9tcxgGIAEoAxIcChRkZWNsYXJlZF90YXNrX291dHB1dBgHIAEoCCJ7ChBDYXB0dXJlZEFydGlmYWN0EjUKB3N1bW1hcnkYASABKAsyJC5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0U3VtbWFyeRIwCgVmaWxlcxgCIAMoCzIhLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RGaWxlIrkBCh1IYXJuZXNzQ2FwdHVyZUFydGlmYWN0UmVxdWVzdBIUCgxvcGVyYXRpb25faWQYASABKAkSPQoLZGVzY3JpcHRpb24YAiABKAsyKC5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0RGVzY3JpcHRpb24SDQoFcGF0aHMYAyADKAkSHgoRbmF0aXZlX3Nlc3Npb25faWQYBCABKAlIAIgBAUIUChJfbmF0aXZlX3Nlc3Npb25faWQi0wIKHENvbW1pdEFydGlmYWN0Q2FwdHVyZVJlcXVlc3QSOwoHYXR0ZW1wdBgBIAEoCzIqLnN1cGVydGFnLnJ1bnRpbWUudjIuSW5zcGVjdEF0dGVtcHRSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgCIAEoCRI9CgtkZXNjcmlwdGlvbhgDIAEoCzIoLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3REZXNjcmlwdGlvbhIwCgVmaWxlcxgEIAMoCzIhLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RGaWxlEh4KEW5hdGl2ZV9zZXNzaW9uX2lkGAUgASgJSACIAQESGwoTbWFuYWdlZF90YXNrX291dHB1dBgGIAEoCBIcChRkZWNsYXJlZF90YXNrX291dHB1dBgHIAEoCEIUChJfbmF0aXZlX3Nlc3Npb25faWQiMQoaR2V0Q2FwdHVyZWRBcnRpZmFjdFJlcXVlc3QSEwoLYXJ0aWZhY3RfaWQYASABKAkiVAocTGlzdENhcHR1cmVkQXJ0aWZhY3RzUmVxdWVzdBIPCgd0YXNrX2lkGAEgASgJEg0KBWxpbWl0GAIgASgNEhQKDGJlZm9yZV9vcmRlchgDIAEoBCJzCh1MaXN0Q2FwdHVyZWRBcnRpZmFjdHNSZXNwb25zZRI3CglhcnRpZmFjdHMYASADKAsyJC5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0U3VtbWFyeRIZChFuZXh0X2JlZm9yZV9vcmRlchgCIAEoBCKRAQoOQXJ0aWZhY3RVcGxvYWQSQgoFYmVnaW4YASABKAsyMS5zdXBlcnRhZy5ydW50aW1lLnYyLkNvbW1pdEFydGlmYWN0Q2FwdHVyZVJlcXVlc3RIABIzCgVjaHVuaxgCIAEoCzIiLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RDaHVua0gAQgYKBHBhcnQiMQoNQXJ0aWZhY3RDaHVuaxISCgpmaWxlX2luZGV4GAEgASgNEgwKBGRhdGEYAiABKAwiQAobRG93bmxvYWRBcnRpZmFjdEZpbGVSZXF1ZXN0EhMKC2FydGlmYWN0X2lkGAEgASgJEgwKBHBhdGgYAiABKAkiXgoQQXJ0aWZhY3REb3dubG9hZBIxCgRmaWxlGAEgASgLMiEuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdEZpbGVIABIPCgVjaHVuaxgCIAEoDEgAQgYKBHBhcnQy3wEKD0FydGlmYWN0Q2F0YWxvZxJdCgNHZXQSLy5zdXBlcnRhZy5ydW50aW1lLnYyLkdldENhcHR1cmVkQXJ0aWZhY3RSZXF1ZXN0GiUuc3VwZXJ0YWcucnVudGltZS52Mi5DYXB0dXJlZEFydGlmYWN0Em0KBExpc3QSMS5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RDYXB0dXJlZEFydGlmYWN0c1JlcXVlc3QaMi5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RDYXB0dXJlZEFydGlmYWN0c1Jlc3BvbnNlMrgDChFBcnRpZmFjdERpcmVjdG9yeRJqCg5SZXNlcnZlQ2FwdHVyZRIxLnN1cGVydGFnLnJ1bnRpbWUudjIuQ29tbWl0QXJ0aWZhY3RDYXB0dXJlUmVxdWVzdBolLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2FwdHVyZWRBcnRpZmFjdBJpCg1Db21taXRDYXB0dXJlEjEuc3VwZXJ0YWcucnVudGltZS52Mi5Db21taXRBcnRpZmFjdENhcHR1cmVSZXF1ZXN0GiUuc3VwZXJ0YWcucnVudGltZS52Mi5DYXB0dXJlZEFydGlmYWN0El0KA0dldBIvLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0Q2FwdHVyZWRBcnRpZmFjdFJlcXVlc3QaJS5zdXBlcnRhZy5ydW50aW1lLnYyLkNhcHR1cmVkQXJ0aWZhY3QSbQoETGlzdBIxLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdENhcHR1cmVkQXJ0aWZhY3RzUmVxdWVzdBoyLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdENhcHR1cmVkQXJ0aWZhY3RzUmVzcG9uc2Uy3QEKEUFydGlmYWN0VHJhbnNmZXJzEl0KDVVwbG9hZENhcHR1cmUSIy5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0VXBsb2FkGiUuc3VwZXJ0YWcucnVudGltZS52Mi5DYXB0dXJlZEFydGlmYWN0KAESaQoMRG93bmxvYWRGaWxlEjAuc3VwZXJ0YWcucnVudGltZS52Mi5Eb3dubG9hZEFydGlmYWN0RmlsZVJlcXVlc3QaJS5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0RG93bmxvYWQwATJ4ChBIYXJuZXNzQXJ0aWZhY3RzEmQKB0NhcHR1cmUSMi5zdXBlcnRhZy5ydW50aW1lLnYyLkhhcm5lc3NDYXB0dXJlQXJ0aWZhY3RSZXF1ZXN0GiUuc3VwZXJ0YWcucnVudGltZS52Mi5DYXB0dXJlZEFydGlmYWN0YgZwcm90bzM", [file_supertag_runtime_v2_runtime]);
+  fileDesc("CiJzdXBlcnRhZy9ydW50aW1lL3YyL2FydGlmYWN0LnByb3RvEhNzdXBlcnRhZy5ydW50aW1lLnYyIlQKE0FydGlmYWN0RGVzY3JpcHRpb24SDQoFdGl0bGUYASABKAkSDAoEa2luZBgCIAEoCRIUCgdzdW1tYXJ5GAMgASgJSACIAQFCCgoIX3N1bW1hcnkiTgoMQXJ0aWZhY3RGaWxlEgwKBHBhdGgYASABKAkSMAoEYmxvYhgCIAEoCzIiLnN1cGVydGFnLnJ1bnRpbWUudjIuQmxvYlJlZmVyZW5jZSL1AQoQQXJ0aWZhY3RQcm9kdWNlchIPCgd0YXNrX2lkGAEgASgJEhIKCmF0dGVtcHRfaWQYAiABKAkSDgoGdGFnX2lkGAMgASgJEhIKCnNlc3Npb25faWQYBCABKAkSGQoMb2JqZWN0aXZlX2lkGAUgASgJSACIAQESNgoMaGFybmVzc19raW5kGAYgASgOMiAuc3VwZXJ0YWcucnVudGltZS52Mi5IYXJuZXNzS2luZBIeChFuYXRpdmVfc2Vzc2lvbl9pZBgHIAEoCUgBiAEBQg8KDV9vYmplY3RpdmVfaWRCFAoSX25hdGl2ZV9zZXNzaW9uX2lkIv0BCg9BcnRpZmFjdFN1bW1hcnkSEwoLYXJ0aWZhY3RfaWQYASABKAkSPQoLZGVzY3JpcHRpb24YAiABKAsyKC5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0RGVzY3JpcHRpb24SNwoIcHJvZHVjZXIYAyABKAsyJS5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0UHJvZHVjZXISEgoKZmlsZV9jb3VudBgEIAEoDRITCgtieXRlX2xlbmd0aBgFIAEoBBIWCg5jYXB0dXJlZF9hdF9tcxgGIAEoAxIcChRkZWNsYXJlZF90YXNrX291dHB1dBgHIAEoCCKzAQoQQ2FwdHVyZWRBcnRpZmFjdBI1CgdzdW1tYXJ5GAEgASgLMiQuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdFN1bW1hcnkSMAoFZmlsZXMYAiADKAsyIS5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0RmlsZRI2CgZpbnB1dHMYAyADKAsyJi5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0U2VsZWN0aW9uIv4CChNBcnRpZmFjdEFjcXVpc2l0aW9uEhYKDmFjcXVpc2l0aW9uX2lkGAEgASgJEhQKDG9wZXJhdGlvbl9pZBgCIAEoCRIPCgd0YXNrX2lkGAMgASgJEhIKCmF0dGVtcHRfaWQYBCABKAkSEwoLYXJ0aWZhY3RfaWQYBSABKAkSMAoFZmlsZXMYBiADKAsyIS5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0RmlsZRI3CghkZWxpdmVyeRgHIAEoDjIlLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3REZWxpdmVyeRIYCgtkZXN0aW5hdGlvbhgIIAEoCUgAiAEBEjwKBXN0YXRlGAkgASgOMi0uc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdEFjcXVpc2l0aW9uU3RhdGUSFQoNY3JlYXRlZF9hdF9tcxgKIAEoAxIVCg11cGRhdGVkX2F0X21zGAsgASgDQg4KDF9kZXN0aW5hdGlvbiKtAQobRmluZEF0dGVtcHRBcnRpZmFjdHNSZXF1ZXN0EjsKB2F0dGVtcHQYASABKAsyKi5zdXBlcnRhZy5ydW50aW1lLnYyLkluc3BlY3RBdHRlbXB0UmVxdWVzdBINCgVxdWVyeRgCIAEoCRIMCgRraW5kGAMgASgJEg8KB3Rhc2tfaWQYBCABKAkSDQoFbGltaXQYBSABKA0SFAoMYmVmb3JlX29yZGVyGAYgASgEInEKHUluc3BlY3RBdHRlbXB0QXJ0aWZhY3RSZXF1ZXN0EjsKB2F0dGVtcHQYASABKAsyKi5zdXBlcnRhZy5ydW50aW1lLnYyLkluc3BlY3RBdHRlbXB0UmVxdWVzdBITCgthcnRpZmFjdF9pZBgCIAEoCSLyAQoWQWNxdWlyZUFydGlmYWN0UmVxdWVzdBI7CgdhdHRlbXB0GAEgASgLMiouc3VwZXJ0YWcucnVudGltZS52Mi5JbnNwZWN0QXR0ZW1wdFJlcXVlc3QSFAoMb3BlcmF0aW9uX2lkGAIgASgJEhMKC2FydGlmYWN0X2lkGAMgASgJEg0KBXBhdGhzGAQgAygJEjcKCGRlbGl2ZXJ5GAUgASgOMiUuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdERlbGl2ZXJ5EhgKC2Rlc3RpbmF0aW9uGAYgASgJSACIAQFCDgoMX2Rlc3RpbmF0aW9uIrUBCiBTZXR0bGVBcnRpZmFjdEFjcXVpc2l0aW9uUmVxdWVzdBI7CgdhdHRlbXB0GAEgASgLMiouc3VwZXJ0YWcucnVudGltZS52Mi5JbnNwZWN0QXR0ZW1wdFJlcXVlc3QSFgoOYWNxdWlzaXRpb25faWQYAiABKAkSPAoFc3RhdGUYAyABKA4yLS5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0QWNxdWlzaXRpb25TdGF0ZSKDAQoeR2V0QWNxdWlyZWRBcnRpZmFjdEZpbGVSZXF1ZXN0EjsKB2F0dGVtcHQYASABKAsyKi5zdXBlcnRhZy5ydW50aW1lLnYyLkluc3BlY3RBdHRlbXB0UmVxdWVzdBIWCg5hY3F1aXNpdGlvbl9pZBgCIAEoCRIMCgRwYXRoGAMgASgJInAKG0hhcm5lc3NGaW5kQXJ0aWZhY3RzUmVxdWVzdBINCgVxdWVyeRgBIAEoCRIMCgRraW5kGAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSDQoFbGltaXQYBCABKA0SFAoMYmVmb3JlX29yZGVyGAUgASgEInQKGkhhcm5lc3NSZWFkQXJ0aWZhY3RSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRITCgthcnRpZmFjdF9pZBgCIAEoCRIMCgRwYXRoGAMgASgJEg4KBm9mZnNldBgEIAEoBBINCgVsaW1pdBgFIAEoDSKoAQoTSGFybmVzc0FydGlmYWN0UGFnZRI9CgthY3F1aXNpdGlvbhgBIAEoCzIoLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RBY3F1aXNpdGlvbhIMCgRwYXRoGAIgASgJEgwKBHRleHQYAyABKAkSDgoGb2Zmc2V0GAQgASgEEhMKC25leHRfb2Zmc2V0GAUgASgEEhEKCXRydW5jYXRlZBgGIAEoCCJYChxIYXJuZXNzQXR0YWNoQXJ0aWZhY3RSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgBIAEoCRITCgthcnRpZmFjdF9pZBgCIAEoCRINCgVwYXRocxgDIAMoCSJsChdIYXJuZXNzQXR0YWNoZWRBcnRpZmFjdBI9CgthY3F1aXNpdGlvbhgBIAEoCzIoLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RBY3F1aXNpdGlvbhISCgpsb2NhbF9wYXRoGAIgASgJIrkBCh1IYXJuZXNzQ2FwdHVyZUFydGlmYWN0UmVxdWVzdBIUCgxvcGVyYXRpb25faWQYASABKAkSPQoLZGVzY3JpcHRpb24YAiABKAsyKC5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0RGVzY3JpcHRpb24SDQoFcGF0aHMYAyADKAkSHgoRbmF0aXZlX3Nlc3Npb25faWQYBCABKAlIAIgBAUIUChJfbmF0aXZlX3Nlc3Npb25faWQi0wIKHENvbW1pdEFydGlmYWN0Q2FwdHVyZVJlcXVlc3QSOwoHYXR0ZW1wdBgBIAEoCzIqLnN1cGVydGFnLnJ1bnRpbWUudjIuSW5zcGVjdEF0dGVtcHRSZXF1ZXN0EhQKDG9wZXJhdGlvbl9pZBgCIAEoCRI9CgtkZXNjcmlwdGlvbhgDIAEoCzIoLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3REZXNjcmlwdGlvbhIwCgVmaWxlcxgEIAMoCzIhLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RGaWxlEh4KEW5hdGl2ZV9zZXNzaW9uX2lkGAUgASgJSACIAQESGwoTbWFuYWdlZF90YXNrX291dHB1dBgGIAEoCBIcChRkZWNsYXJlZF90YXNrX291dHB1dBgHIAEoCEIUChJfbmF0aXZlX3Nlc3Npb25faWQiMQoaR2V0Q2FwdHVyZWRBcnRpZmFjdFJlcXVlc3QSEwoLYXJ0aWZhY3RfaWQYASABKAkiVAocTGlzdENhcHR1cmVkQXJ0aWZhY3RzUmVxdWVzdBIPCgd0YXNrX2lkGAEgASgJEg0KBWxpbWl0GAIgASgNEhQKDGJlZm9yZV9vcmRlchgDIAEoBCJzCh1MaXN0Q2FwdHVyZWRBcnRpZmFjdHNSZXNwb25zZRI3CglhcnRpZmFjdHMYASADKAsyJC5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0U3VtbWFyeRIZChFuZXh0X2JlZm9yZV9vcmRlchgCIAEoBCKRAQoOQXJ0aWZhY3RVcGxvYWQSQgoFYmVnaW4YASABKAsyMS5zdXBlcnRhZy5ydW50aW1lLnYyLkNvbW1pdEFydGlmYWN0Q2FwdHVyZVJlcXVlc3RIABIzCgVjaHVuaxgCIAEoCzIiLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RDaHVua0gAQgYKBHBhcnQiMQoNQXJ0aWZhY3RDaHVuaxISCgpmaWxlX2luZGV4GAEgASgNEgwKBGRhdGEYAiABKAwiQAobRG93bmxvYWRBcnRpZmFjdEZpbGVSZXF1ZXN0EhMKC2FydGlmYWN0X2lkGAEgASgJEgwKBHBhdGgYAiABKAkiXgoQQXJ0aWZhY3REb3dubG9hZBIxCgRmaWxlGAEgASgLMiEuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdEZpbGVIABIPCgVjaHVuaxgCIAEoDEgAQgYKBHBhcnQqdAoQQXJ0aWZhY3REZWxpdmVyeRIhCh1BUlRJRkFDVF9ERUxJVkVSWV9VTlNQRUNJRklFRBAAEhoKFkFSVElGQUNUX0RFTElWRVJZX1JFQUQQARIhCh1BUlRJRkFDVF9ERUxJVkVSWV9NQVRFUklBTElaRRACKuwBChhBcnRpZmFjdEFjcXVpc2l0aW9uU3RhdGUSKgomQVJUSUZBQ1RfQUNRVUlTSVRJT05fU1RBVEVfVU5TUEVDSUZJRUQQABIpCiVBUlRJRkFDVF9BQ1FVSVNJVElPTl9TVEFURV9BVVRIT1JJWkVEEAESKAokQVJUSUZBQ1RfQUNRVUlTSVRJT05fU1RBVEVfREVMSVZFUkVEEAISJQohQVJUSUZBQ1RfQUNRVUlTSVRJT05fU1RBVEVfRkFJTEVEEAMSKAokQVJUSUZBQ1RfQUNRVUlTSVRJT05fU1RBVEVfVU5DRVJUQUlOEAQy3wEKD0FydGlmYWN0Q2F0YWxvZxJdCgNHZXQSLy5zdXBlcnRhZy5ydW50aW1lLnYyLkdldENhcHR1cmVkQXJ0aWZhY3RSZXF1ZXN0GiUuc3VwZXJ0YWcucnVudGltZS52Mi5DYXB0dXJlZEFydGlmYWN0Em0KBExpc3QSMS5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RDYXB0dXJlZEFydGlmYWN0c1JlcXVlc3QaMi5zdXBlcnRhZy5ydW50aW1lLnYyLkxpc3RDYXB0dXJlZEFydGlmYWN0c1Jlc3BvbnNlMtQHChFBcnRpZmFjdERpcmVjdG9yeRJqCg5SZXNlcnZlQ2FwdHVyZRIxLnN1cGVydGFnLnJ1bnRpbWUudjIuQ29tbWl0QXJ0aWZhY3RDYXB0dXJlUmVxdWVzdBolLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2FwdHVyZWRBcnRpZmFjdBJpCg1Db21taXRDYXB0dXJlEjEuc3VwZXJ0YWcucnVudGltZS52Mi5Db21taXRBcnRpZmFjdENhcHR1cmVSZXF1ZXN0GiUuc3VwZXJ0YWcucnVudGltZS52Mi5DYXB0dXJlZEFydGlmYWN0El0KA0dldBIvLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0Q2FwdHVyZWRBcnRpZmFjdFJlcXVlc3QaJS5zdXBlcnRhZy5ydW50aW1lLnYyLkNhcHR1cmVkQXJ0aWZhY3QSbQoETGlzdBIxLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdENhcHR1cmVkQXJ0aWZhY3RzUmVxdWVzdBoyLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdENhcHR1cmVkQXJ0aWZhY3RzUmVzcG9uc2USdgoORmluZEZvckF0dGVtcHQSMC5zdXBlcnRhZy5ydW50aW1lLnYyLkZpbmRBdHRlbXB0QXJ0aWZhY3RzUmVxdWVzdBoyLnN1cGVydGFnLnJ1bnRpbWUudjIuTGlzdENhcHR1cmVkQXJ0aWZhY3RzUmVzcG9uc2USagoNR2V0Rm9yQXR0ZW1wdBIyLnN1cGVydGFnLnJ1bnRpbWUudjIuSW5zcGVjdEF0dGVtcHRBcnRpZmFjdFJlcXVlc3QaJS5zdXBlcnRhZy5ydW50aW1lLnYyLkNhcHR1cmVkQXJ0aWZhY3QSYAoHQWNxdWlyZRIrLnN1cGVydGFnLnJ1bnRpbWUudjIuQWNxdWlyZUFydGlmYWN0UmVxdWVzdBooLnN1cGVydGFnLnJ1bnRpbWUudjIuQXJ0aWZhY3RBY3F1aXNpdGlvbhJpCgZTZXR0bGUSNS5zdXBlcnRhZy5ydW50aW1lLnYyLlNldHRsZUFydGlmYWN0QWNxdWlzaXRpb25SZXF1ZXN0Giguc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdEFjcXVpc2l0aW9uEmkKD0dldEFjcXVpcmVkRmlsZRIzLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0QWNxdWlyZWRBcnRpZmFjdEZpbGVSZXF1ZXN0GiEuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdEZpbGUyswMKEEF0dGVtcHRBcnRpZmFjdHMSbAoERmluZBIwLnN1cGVydGFnLnJ1bnRpbWUudjIuRmluZEF0dGVtcHRBcnRpZmFjdHNSZXF1ZXN0GjIuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0Q2FwdHVyZWRBcnRpZmFjdHNSZXNwb25zZRJkCgdJbnNwZWN0EjIuc3VwZXJ0YWcucnVudGltZS52Mi5JbnNwZWN0QXR0ZW1wdEFydGlmYWN0UmVxdWVzdBolLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2FwdHVyZWRBcnRpZmFjdBJgCgdBY3F1aXJlEisuc3VwZXJ0YWcucnVudGltZS52Mi5BY3F1aXJlQXJ0aWZhY3RSZXF1ZXN0Giguc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdEFjcXVpc2l0aW9uEmkKBlNldHRsZRI1LnN1cGVydGFnLnJ1bnRpbWUudjIuU2V0dGxlQXJ0aWZhY3RBY3F1aXNpdGlvblJlcXVlc3QaKC5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0QWNxdWlzaXRpb24y0wIKEUFydGlmYWN0VHJhbnNmZXJzEl0KDVVwbG9hZENhcHR1cmUSIy5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0VXBsb2FkGiUuc3VwZXJ0YWcucnVudGltZS52Mi5DYXB0dXJlZEFydGlmYWN0KAESaQoMRG93bmxvYWRGaWxlEjAuc3VwZXJ0YWcucnVudGltZS52Mi5Eb3dubG9hZEFydGlmYWN0RmlsZVJlcXVlc3QaJS5zdXBlcnRhZy5ydW50aW1lLnYyLkFydGlmYWN0RG93bmxvYWQwARJ0ChREb3dubG9hZEFjcXVpcmVkRmlsZRIzLnN1cGVydGFnLnJ1bnRpbWUudjIuR2V0QWNxdWlyZWRBcnRpZmFjdEZpbGVSZXF1ZXN0GiUuc3VwZXJ0YWcucnVudGltZS52Mi5BcnRpZmFjdERvd25sb2FkMAEylwQKEEhhcm5lc3NBcnRpZmFjdHMSZAoHQ2FwdHVyZRIyLnN1cGVydGFnLnJ1bnRpbWUudjIuSGFybmVzc0NhcHR1cmVBcnRpZmFjdFJlcXVlc3QaJS5zdXBlcnRhZy5ydW50aW1lLnYyLkNhcHR1cmVkQXJ0aWZhY3QSbAoERmluZBIwLnN1cGVydGFnLnJ1bnRpbWUudjIuSGFybmVzc0ZpbmRBcnRpZmFjdHNSZXF1ZXN0GjIuc3VwZXJ0YWcucnVudGltZS52Mi5MaXN0Q2FwdHVyZWRBcnRpZmFjdHNSZXNwb25zZRJhCgdJbnNwZWN0Ei8uc3VwZXJ0YWcucnVudGltZS52Mi5HZXRDYXB0dXJlZEFydGlmYWN0UmVxdWVzdBolLnN1cGVydGFnLnJ1bnRpbWUudjIuQ2FwdHVyZWRBcnRpZmFjdBJhCgRSZWFkEi8uc3VwZXJ0YWcucnVudGltZS52Mi5IYXJuZXNzUmVhZEFydGlmYWN0UmVxdWVzdBooLnN1cGVydGFnLnJ1bnRpbWUudjIuSGFybmVzc0FydGlmYWN0UGFnZRJpCgZBdHRhY2gSMS5zdXBlcnRhZy5ydW50aW1lLnYyLkhhcm5lc3NBdHRhY2hBcnRpZmFjdFJlcXVlc3QaLC5zdXBlcnRhZy5ydW50aW1lLnYyLkhhcm5lc3NBdHRhY2hlZEFydGlmYWN0YgZwcm90bzM", [file_supertag_runtime_v2_runtime]);
 
 /**
  * @generated from message supertag.runtime.v2.ArtifactDescription
@@ -170,6 +170,13 @@ export type CapturedArtifact = Message<"supertag.runtime.v2.CapturedArtifact"> &
    * @generated from field: repeated supertag.runtime.v2.ArtifactFile files = 2;
    */
   files: ArtifactFile[];
+
+  /**
+   * Inputs confirmed delivered to this producing Attempt, frozen at capture reservation.
+   *
+   * @generated from field: repeated supertag.runtime.v2.ArtifactSelection inputs = 3;
+   */
+  inputs: ArtifactSelection[];
 };
 
 /**
@@ -178,6 +185,400 @@ export type CapturedArtifact = Message<"supertag.runtime.v2.CapturedArtifact"> &
  */
 export const CapturedArtifactSchema: GenMessage<CapturedArtifact> = /*@__PURE__*/
   messageDesc(file_supertag_runtime_v2_artifact, 4);
+
+/**
+ * @generated from message supertag.runtime.v2.ArtifactAcquisition
+ */
+export type ArtifactAcquisition = Message<"supertag.runtime.v2.ArtifactAcquisition"> & {
+  /**
+   * @generated from field: string acquisition_id = 1;
+   */
+  acquisitionId: string;
+
+  /**
+   * @generated from field: string operation_id = 2;
+   */
+  operationId: string;
+
+  /**
+   * @generated from field: string task_id = 3;
+   */
+  taskId: string;
+
+  /**
+   * @generated from field: string attempt_id = 4;
+   */
+  attemptId: string;
+
+  /**
+   * @generated from field: string artifact_id = 5;
+   */
+  artifactId: string;
+
+  /**
+   * @generated from field: repeated supertag.runtime.v2.ArtifactFile files = 6;
+   */
+  files: ArtifactFile[];
+
+  /**
+   * @generated from field: supertag.runtime.v2.ArtifactDelivery delivery = 7;
+   */
+  delivery: ArtifactDelivery;
+
+  /**
+   * @generated from field: optional string destination = 8;
+   */
+  destination?: string | undefined;
+
+  /**
+   * @generated from field: supertag.runtime.v2.ArtifactAcquisitionState state = 9;
+   */
+  state: ArtifactAcquisitionState;
+
+  /**
+   * @generated from field: int64 created_at_ms = 10;
+   */
+  createdAtMs: bigint;
+
+  /**
+   * @generated from field: int64 updated_at_ms = 11;
+   */
+  updatedAtMs: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.ArtifactAcquisition.
+ * Use `create(ArtifactAcquisitionSchema)` to create a new message.
+ */
+export const ArtifactAcquisitionSchema: GenMessage<ArtifactAcquisition> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 5);
+
+/**
+ * @generated from message supertag.runtime.v2.FindAttemptArtifactsRequest
+ */
+export type FindAttemptArtifactsRequest = Message<"supertag.runtime.v2.FindAttemptArtifactsRequest"> & {
+  /**
+   * @generated from field: supertag.runtime.v2.InspectAttemptRequest attempt = 1;
+   */
+  attempt?: InspectAttemptRequest | undefined;
+
+  /**
+   * @generated from field: string query = 2;
+   */
+  query: string;
+
+  /**
+   * @generated from field: string kind = 3;
+   */
+  kind: string;
+
+  /**
+   * @generated from field: string task_id = 4;
+   */
+  taskId: string;
+
+  /**
+   * @generated from field: uint32 limit = 5;
+   */
+  limit: number;
+
+  /**
+   * @generated from field: uint64 before_order = 6;
+   */
+  beforeOrder: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.FindAttemptArtifactsRequest.
+ * Use `create(FindAttemptArtifactsRequestSchema)` to create a new message.
+ */
+export const FindAttemptArtifactsRequestSchema: GenMessage<FindAttemptArtifactsRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 6);
+
+/**
+ * @generated from message supertag.runtime.v2.InspectAttemptArtifactRequest
+ */
+export type InspectAttemptArtifactRequest = Message<"supertag.runtime.v2.InspectAttemptArtifactRequest"> & {
+  /**
+   * @generated from field: supertag.runtime.v2.InspectAttemptRequest attempt = 1;
+   */
+  attempt?: InspectAttemptRequest | undefined;
+
+  /**
+   * @generated from field: string artifact_id = 2;
+   */
+  artifactId: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.InspectAttemptArtifactRequest.
+ * Use `create(InspectAttemptArtifactRequestSchema)` to create a new message.
+ */
+export const InspectAttemptArtifactRequestSchema: GenMessage<InspectAttemptArtifactRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 7);
+
+/**
+ * @generated from message supertag.runtime.v2.AcquireArtifactRequest
+ */
+export type AcquireArtifactRequest = Message<"supertag.runtime.v2.AcquireArtifactRequest"> & {
+  /**
+   * @generated from field: supertag.runtime.v2.InspectAttemptRequest attempt = 1;
+   */
+  attempt?: InspectAttemptRequest | undefined;
+
+  /**
+   * @generated from field: string operation_id = 2;
+   */
+  operationId: string;
+
+  /**
+   * @generated from field: string artifact_id = 3;
+   */
+  artifactId: string;
+
+  /**
+   * @generated from field: repeated string paths = 4;
+   */
+  paths: string[];
+
+  /**
+   * @generated from field: supertag.runtime.v2.ArtifactDelivery delivery = 5;
+   */
+  delivery: ArtifactDelivery;
+
+  /**
+   * Generated by the Worker Host and checked against the Attempt and operation.
+   *
+   * @generated from field: optional string destination = 6;
+   */
+  destination?: string | undefined;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.AcquireArtifactRequest.
+ * Use `create(AcquireArtifactRequestSchema)` to create a new message.
+ */
+export const AcquireArtifactRequestSchema: GenMessage<AcquireArtifactRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 8);
+
+/**
+ * @generated from message supertag.runtime.v2.SettleArtifactAcquisitionRequest
+ */
+export type SettleArtifactAcquisitionRequest = Message<"supertag.runtime.v2.SettleArtifactAcquisitionRequest"> & {
+  /**
+   * @generated from field: supertag.runtime.v2.InspectAttemptRequest attempt = 1;
+   */
+  attempt?: InspectAttemptRequest | undefined;
+
+  /**
+   * @generated from field: string acquisition_id = 2;
+   */
+  acquisitionId: string;
+
+  /**
+   * @generated from field: supertag.runtime.v2.ArtifactAcquisitionState state = 3;
+   */
+  state: ArtifactAcquisitionState;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.SettleArtifactAcquisitionRequest.
+ * Use `create(SettleArtifactAcquisitionRequestSchema)` to create a new message.
+ */
+export const SettleArtifactAcquisitionRequestSchema: GenMessage<SettleArtifactAcquisitionRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 9);
+
+/**
+ * @generated from message supertag.runtime.v2.GetAcquiredArtifactFileRequest
+ */
+export type GetAcquiredArtifactFileRequest = Message<"supertag.runtime.v2.GetAcquiredArtifactFileRequest"> & {
+  /**
+   * @generated from field: supertag.runtime.v2.InspectAttemptRequest attempt = 1;
+   */
+  attempt?: InspectAttemptRequest | undefined;
+
+  /**
+   * @generated from field: string acquisition_id = 2;
+   */
+  acquisitionId: string;
+
+  /**
+   * @generated from field: string path = 3;
+   */
+  path: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.GetAcquiredArtifactFileRequest.
+ * Use `create(GetAcquiredArtifactFileRequestSchema)` to create a new message.
+ */
+export const GetAcquiredArtifactFileRequestSchema: GenMessage<GetAcquiredArtifactFileRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 10);
+
+/**
+ * @generated from message supertag.runtime.v2.HarnessFindArtifactsRequest
+ */
+export type HarnessFindArtifactsRequest = Message<"supertag.runtime.v2.HarnessFindArtifactsRequest"> & {
+  /**
+   * @generated from field: string query = 1;
+   */
+  query: string;
+
+  /**
+   * @generated from field: string kind = 2;
+   */
+  kind: string;
+
+  /**
+   * @generated from field: string task_id = 3;
+   */
+  taskId: string;
+
+  /**
+   * @generated from field: uint32 limit = 4;
+   */
+  limit: number;
+
+  /**
+   * @generated from field: uint64 before_order = 5;
+   */
+  beforeOrder: bigint;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.HarnessFindArtifactsRequest.
+ * Use `create(HarnessFindArtifactsRequestSchema)` to create a new message.
+ */
+export const HarnessFindArtifactsRequestSchema: GenMessage<HarnessFindArtifactsRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 11);
+
+/**
+ * @generated from message supertag.runtime.v2.HarnessReadArtifactRequest
+ */
+export type HarnessReadArtifactRequest = Message<"supertag.runtime.v2.HarnessReadArtifactRequest"> & {
+  /**
+   * @generated from field: string operation_id = 1;
+   */
+  operationId: string;
+
+  /**
+   * @generated from field: string artifact_id = 2;
+   */
+  artifactId: string;
+
+  /**
+   * @generated from field: string path = 3;
+   */
+  path: string;
+
+  /**
+   * @generated from field: uint64 offset = 4;
+   */
+  offset: bigint;
+
+  /**
+   * @generated from field: uint32 limit = 5;
+   */
+  limit: number;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.HarnessReadArtifactRequest.
+ * Use `create(HarnessReadArtifactRequestSchema)` to create a new message.
+ */
+export const HarnessReadArtifactRequestSchema: GenMessage<HarnessReadArtifactRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 12);
+
+/**
+ * @generated from message supertag.runtime.v2.HarnessArtifactPage
+ */
+export type HarnessArtifactPage = Message<"supertag.runtime.v2.HarnessArtifactPage"> & {
+  /**
+   * @generated from field: supertag.runtime.v2.ArtifactAcquisition acquisition = 1;
+   */
+  acquisition?: ArtifactAcquisition | undefined;
+
+  /**
+   * @generated from field: string path = 2;
+   */
+  path: string;
+
+  /**
+   * @generated from field: string text = 3;
+   */
+  text: string;
+
+  /**
+   * @generated from field: uint64 offset = 4;
+   */
+  offset: bigint;
+
+  /**
+   * @generated from field: uint64 next_offset = 5;
+   */
+  nextOffset: bigint;
+
+  /**
+   * @generated from field: bool truncated = 6;
+   */
+  truncated: boolean;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.HarnessArtifactPage.
+ * Use `create(HarnessArtifactPageSchema)` to create a new message.
+ */
+export const HarnessArtifactPageSchema: GenMessage<HarnessArtifactPage> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 13);
+
+/**
+ * @generated from message supertag.runtime.v2.HarnessAttachArtifactRequest
+ */
+export type HarnessAttachArtifactRequest = Message<"supertag.runtime.v2.HarnessAttachArtifactRequest"> & {
+  /**
+   * @generated from field: string operation_id = 1;
+   */
+  operationId: string;
+
+  /**
+   * @generated from field: string artifact_id = 2;
+   */
+  artifactId: string;
+
+  /**
+   * @generated from field: repeated string paths = 3;
+   */
+  paths: string[];
+};
+
+/**
+ * Describes the message supertag.runtime.v2.HarnessAttachArtifactRequest.
+ * Use `create(HarnessAttachArtifactRequestSchema)` to create a new message.
+ */
+export const HarnessAttachArtifactRequestSchema: GenMessage<HarnessAttachArtifactRequest> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 14);
+
+/**
+ * @generated from message supertag.runtime.v2.HarnessAttachedArtifact
+ */
+export type HarnessAttachedArtifact = Message<"supertag.runtime.v2.HarnessAttachedArtifact"> & {
+  /**
+   * @generated from field: supertag.runtime.v2.ArtifactAcquisition acquisition = 1;
+   */
+  acquisition?: ArtifactAcquisition | undefined;
+
+  /**
+   * @generated from field: string local_path = 2;
+   */
+  localPath: string;
+};
+
+/**
+ * Describes the message supertag.runtime.v2.HarnessAttachedArtifact.
+ * Use `create(HarnessAttachedArtifactSchema)` to create a new message.
+ */
+export const HarnessAttachedArtifactSchema: GenMessage<HarnessAttachedArtifact> = /*@__PURE__*/
+  messageDesc(file_supertag_runtime_v2_artifact, 15);
 
 /**
  * @generated from message supertag.runtime.v2.HarnessCaptureArtifactRequest
@@ -209,7 +610,7 @@ export type HarnessCaptureArtifactRequest = Message<"supertag.runtime.v2.Harness
  * Use `create(HarnessCaptureArtifactRequestSchema)` to create a new message.
  */
 export const HarnessCaptureArtifactRequestSchema: GenMessage<HarnessCaptureArtifactRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_artifact, 5);
+  messageDesc(file_supertag_runtime_v2_artifact, 16);
 
 /**
  * @generated from message supertag.runtime.v2.CommitArtifactCaptureRequest
@@ -260,7 +661,7 @@ export type CommitArtifactCaptureRequest = Message<"supertag.runtime.v2.CommitAr
  * Use `create(CommitArtifactCaptureRequestSchema)` to create a new message.
  */
 export const CommitArtifactCaptureRequestSchema: GenMessage<CommitArtifactCaptureRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_artifact, 6);
+  messageDesc(file_supertag_runtime_v2_artifact, 17);
 
 /**
  * @generated from message supertag.runtime.v2.GetCapturedArtifactRequest
@@ -277,7 +678,7 @@ export type GetCapturedArtifactRequest = Message<"supertag.runtime.v2.GetCapture
  * Use `create(GetCapturedArtifactRequestSchema)` to create a new message.
  */
 export const GetCapturedArtifactRequestSchema: GenMessage<GetCapturedArtifactRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_artifact, 7);
+  messageDesc(file_supertag_runtime_v2_artifact, 18);
 
 /**
  * @generated from message supertag.runtime.v2.ListCapturedArtifactsRequest
@@ -304,7 +705,7 @@ export type ListCapturedArtifactsRequest = Message<"supertag.runtime.v2.ListCapt
  * Use `create(ListCapturedArtifactsRequestSchema)` to create a new message.
  */
 export const ListCapturedArtifactsRequestSchema: GenMessage<ListCapturedArtifactsRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_artifact, 8);
+  messageDesc(file_supertag_runtime_v2_artifact, 19);
 
 /**
  * @generated from message supertag.runtime.v2.ListCapturedArtifactsResponse
@@ -326,7 +727,7 @@ export type ListCapturedArtifactsResponse = Message<"supertag.runtime.v2.ListCap
  * Use `create(ListCapturedArtifactsResponseSchema)` to create a new message.
  */
 export const ListCapturedArtifactsResponseSchema: GenMessage<ListCapturedArtifactsResponse> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_artifact, 9);
+  messageDesc(file_supertag_runtime_v2_artifact, 20);
 
 /**
  * @generated from message supertag.runtime.v2.ArtifactUpload
@@ -355,7 +756,7 @@ export type ArtifactUpload = Message<"supertag.runtime.v2.ArtifactUpload"> & {
  * Use `create(ArtifactUploadSchema)` to create a new message.
  */
 export const ArtifactUploadSchema: GenMessage<ArtifactUpload> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_artifact, 10);
+  messageDesc(file_supertag_runtime_v2_artifact, 21);
 
 /**
  * Chunks for each file are consecutive, in the order of the opening manifest.
@@ -380,7 +781,7 @@ export type ArtifactChunk = Message<"supertag.runtime.v2.ArtifactChunk"> & {
  * Use `create(ArtifactChunkSchema)` to create a new message.
  */
 export const ArtifactChunkSchema: GenMessage<ArtifactChunk> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_artifact, 11);
+  messageDesc(file_supertag_runtime_v2_artifact, 22);
 
 /**
  * @generated from message supertag.runtime.v2.DownloadArtifactFileRequest
@@ -402,7 +803,7 @@ export type DownloadArtifactFileRequest = Message<"supertag.runtime.v2.DownloadA
  * Use `create(DownloadArtifactFileRequestSchema)` to create a new message.
  */
 export const DownloadArtifactFileRequestSchema: GenMessage<DownloadArtifactFileRequest> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_artifact, 12);
+  messageDesc(file_supertag_runtime_v2_artifact, 23);
 
 /**
  * @generated from message supertag.runtime.v2.ArtifactDownload
@@ -431,7 +832,69 @@ export type ArtifactDownload = Message<"supertag.runtime.v2.ArtifactDownload"> &
  * Use `create(ArtifactDownloadSchema)` to create a new message.
  */
 export const ArtifactDownloadSchema: GenMessage<ArtifactDownload> = /*@__PURE__*/
-  messageDesc(file_supertag_runtime_v2_artifact, 13);
+  messageDesc(file_supertag_runtime_v2_artifact, 24);
+
+/**
+ * @generated from enum supertag.runtime.v2.ArtifactDelivery
+ */
+export enum ArtifactDelivery {
+  /**
+   * @generated from enum value: ARTIFACT_DELIVERY_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: ARTIFACT_DELIVERY_READ = 1;
+   */
+  READ = 1,
+
+  /**
+   * @generated from enum value: ARTIFACT_DELIVERY_MATERIALIZE = 2;
+   */
+  MATERIALIZE = 2,
+}
+
+/**
+ * Describes the enum supertag.runtime.v2.ArtifactDelivery.
+ */
+export const ArtifactDeliverySchema: GenEnum<ArtifactDelivery> = /*@__PURE__*/
+  enumDesc(file_supertag_runtime_v2_artifact, 0);
+
+/**
+ * @generated from enum supertag.runtime.v2.ArtifactAcquisitionState
+ */
+export enum ArtifactAcquisitionState {
+  /**
+   * @generated from enum value: ARTIFACT_ACQUISITION_STATE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: ARTIFACT_ACQUISITION_STATE_AUTHORIZED = 1;
+   */
+  AUTHORIZED = 1,
+
+  /**
+   * @generated from enum value: ARTIFACT_ACQUISITION_STATE_DELIVERED = 2;
+   */
+  DELIVERED = 2,
+
+  /**
+   * @generated from enum value: ARTIFACT_ACQUISITION_STATE_FAILED = 3;
+   */
+  FAILED = 3,
+
+  /**
+   * @generated from enum value: ARTIFACT_ACQUISITION_STATE_UNCERTAIN = 4;
+   */
+  UNCERTAIN = 4,
+}
+
+/**
+ * Describes the enum supertag.runtime.v2.ArtifactAcquisitionState.
+ */
+export const ArtifactAcquisitionStateSchema: GenEnum<ArtifactAcquisitionState> = /*@__PURE__*/
+  enumDesc(file_supertag_runtime_v2_artifact, 1);
 
 /**
  * Operator catalog reads are scoped to the producing Task's audience.
@@ -497,8 +960,89 @@ export const ArtifactDirectory: GenService<{
     input: typeof ListCapturedArtifactsRequestSchema;
     output: typeof ListCapturedArtifactsResponseSchema;
   },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactDirectory.FindForAttempt
+   */
+  findForAttempt: {
+    methodKind: "unary";
+    input: typeof FindAttemptArtifactsRequestSchema;
+    output: typeof ListCapturedArtifactsResponseSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactDirectory.GetForAttempt
+   */
+  getForAttempt: {
+    methodKind: "unary";
+    input: typeof InspectAttemptArtifactRequestSchema;
+    output: typeof CapturedArtifactSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactDirectory.Acquire
+   */
+  acquire: {
+    methodKind: "unary";
+    input: typeof AcquireArtifactRequestSchema;
+    output: typeof ArtifactAcquisitionSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactDirectory.Settle
+   */
+  settle: {
+    methodKind: "unary";
+    input: typeof SettleArtifactAcquisitionRequestSchema;
+    output: typeof ArtifactAcquisitionSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactDirectory.GetAcquiredFile
+   */
+  getAcquiredFile: {
+    methodKind: "unary";
+    input: typeof GetAcquiredArtifactFileRequestSchema;
+    output: typeof ArtifactFileSchema;
+  },
 }> = /*@__PURE__*/
   serviceDesc(file_supertag_runtime_v2_artifact, 1);
+
+/**
+ * Gateway facade. Identity and generation come from the authenticated Worker Host.
+ *
+ * @generated from service supertag.runtime.v2.AttemptArtifacts
+ */
+export const AttemptArtifacts: GenService<{
+  /**
+   * @generated from rpc supertag.runtime.v2.AttemptArtifacts.Find
+   */
+  find: {
+    methodKind: "unary";
+    input: typeof FindAttemptArtifactsRequestSchema;
+    output: typeof ListCapturedArtifactsResponseSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.AttemptArtifacts.Inspect
+   */
+  inspect: {
+    methodKind: "unary";
+    input: typeof InspectAttemptArtifactRequestSchema;
+    output: typeof CapturedArtifactSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.AttemptArtifacts.Acquire
+   */
+  acquire: {
+    methodKind: "unary";
+    input: typeof AcquireArtifactRequestSchema;
+    output: typeof ArtifactAcquisitionSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.AttemptArtifacts.Settle
+   */
+  settle: {
+    methodKind: "unary";
+    input: typeof SettleArtifactAcquisitionRequestSchema;
+    output: typeof ArtifactAcquisitionSchema;
+  },
+}> = /*@__PURE__*/
+  serviceDesc(file_supertag_runtime_v2_artifact, 2);
 
 /**
  * @generated from service supertag.runtime.v2.ArtifactTransfers
@@ -520,8 +1064,16 @@ export const ArtifactTransfers: GenService<{
     input: typeof DownloadArtifactFileRequestSchema;
     output: typeof ArtifactDownloadSchema;
   },
+  /**
+   * @generated from rpc supertag.runtime.v2.ArtifactTransfers.DownloadAcquiredFile
+   */
+  downloadAcquiredFile: {
+    methodKind: "server_streaming";
+    input: typeof GetAcquiredArtifactFileRequestSchema;
+    output: typeof ArtifactDownloadSchema;
+  },
 }> = /*@__PURE__*/
-  serviceDesc(file_supertag_runtime_v2_artifact, 2);
+  serviceDesc(file_supertag_runtime_v2_artifact, 3);
 
 /**
  * The local Worker Host binds the request to its running Attempt and workspace.
@@ -537,5 +1089,37 @@ export const HarnessArtifacts: GenService<{
     input: typeof HarnessCaptureArtifactRequestSchema;
     output: typeof CapturedArtifactSchema;
   },
+  /**
+   * @generated from rpc supertag.runtime.v2.HarnessArtifacts.Find
+   */
+  find: {
+    methodKind: "unary";
+    input: typeof HarnessFindArtifactsRequestSchema;
+    output: typeof ListCapturedArtifactsResponseSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.HarnessArtifacts.Inspect
+   */
+  inspect: {
+    methodKind: "unary";
+    input: typeof GetCapturedArtifactRequestSchema;
+    output: typeof CapturedArtifactSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.HarnessArtifacts.Read
+   */
+  read: {
+    methodKind: "unary";
+    input: typeof HarnessReadArtifactRequestSchema;
+    output: typeof HarnessArtifactPageSchema;
+  },
+  /**
+   * @generated from rpc supertag.runtime.v2.HarnessArtifacts.Attach
+   */
+  attach: {
+    methodKind: "unary";
+    input: typeof HarnessAttachArtifactRequestSchema;
+    output: typeof HarnessAttachedArtifactSchema;
+  },
 }> = /*@__PURE__*/
-  serviceDesc(file_supertag_runtime_v2_artifact, 3);
+  serviceDesc(file_supertag_runtime_v2_artifact, 4);

@@ -25,6 +25,8 @@ const (
 	ArtifactCatalogName = "supertag.runtime.v2.ArtifactCatalog"
 	// ArtifactDirectoryName is the fully-qualified name of the ArtifactDirectory service.
 	ArtifactDirectoryName = "supertag.runtime.v2.ArtifactDirectory"
+	// AttemptArtifactsName is the fully-qualified name of the AttemptArtifacts service.
+	AttemptArtifactsName = "supertag.runtime.v2.AttemptArtifacts"
 	// ArtifactTransfersName is the fully-qualified name of the ArtifactTransfers service.
 	ArtifactTransfersName = "supertag.runtime.v2.ArtifactTransfers"
 	// HarnessArtifactsName is the fully-qualified name of the HarnessArtifacts service.
@@ -53,15 +55,52 @@ const (
 	ArtifactDirectoryGetProcedure = "/supertag.runtime.v2.ArtifactDirectory/Get"
 	// ArtifactDirectoryListProcedure is the fully-qualified name of the ArtifactDirectory's List RPC.
 	ArtifactDirectoryListProcedure = "/supertag.runtime.v2.ArtifactDirectory/List"
+	// ArtifactDirectoryFindForAttemptProcedure is the fully-qualified name of the ArtifactDirectory's
+	// FindForAttempt RPC.
+	ArtifactDirectoryFindForAttemptProcedure = "/supertag.runtime.v2.ArtifactDirectory/FindForAttempt"
+	// ArtifactDirectoryGetForAttemptProcedure is the fully-qualified name of the ArtifactDirectory's
+	// GetForAttempt RPC.
+	ArtifactDirectoryGetForAttemptProcedure = "/supertag.runtime.v2.ArtifactDirectory/GetForAttempt"
+	// ArtifactDirectoryAcquireProcedure is the fully-qualified name of the ArtifactDirectory's Acquire
+	// RPC.
+	ArtifactDirectoryAcquireProcedure = "/supertag.runtime.v2.ArtifactDirectory/Acquire"
+	// ArtifactDirectorySettleProcedure is the fully-qualified name of the ArtifactDirectory's Settle
+	// RPC.
+	ArtifactDirectorySettleProcedure = "/supertag.runtime.v2.ArtifactDirectory/Settle"
+	// ArtifactDirectoryGetAcquiredFileProcedure is the fully-qualified name of the ArtifactDirectory's
+	// GetAcquiredFile RPC.
+	ArtifactDirectoryGetAcquiredFileProcedure = "/supertag.runtime.v2.ArtifactDirectory/GetAcquiredFile"
+	// AttemptArtifactsFindProcedure is the fully-qualified name of the AttemptArtifacts's Find RPC.
+	AttemptArtifactsFindProcedure = "/supertag.runtime.v2.AttemptArtifacts/Find"
+	// AttemptArtifactsInspectProcedure is the fully-qualified name of the AttemptArtifacts's Inspect
+	// RPC.
+	AttemptArtifactsInspectProcedure = "/supertag.runtime.v2.AttemptArtifacts/Inspect"
+	// AttemptArtifactsAcquireProcedure is the fully-qualified name of the AttemptArtifacts's Acquire
+	// RPC.
+	AttemptArtifactsAcquireProcedure = "/supertag.runtime.v2.AttemptArtifacts/Acquire"
+	// AttemptArtifactsSettleProcedure is the fully-qualified name of the AttemptArtifacts's Settle RPC.
+	AttemptArtifactsSettleProcedure = "/supertag.runtime.v2.AttemptArtifacts/Settle"
 	// ArtifactTransfersUploadCaptureProcedure is the fully-qualified name of the ArtifactTransfers's
 	// UploadCapture RPC.
 	ArtifactTransfersUploadCaptureProcedure = "/supertag.runtime.v2.ArtifactTransfers/UploadCapture"
 	// ArtifactTransfersDownloadFileProcedure is the fully-qualified name of the ArtifactTransfers's
 	// DownloadFile RPC.
 	ArtifactTransfersDownloadFileProcedure = "/supertag.runtime.v2.ArtifactTransfers/DownloadFile"
+	// ArtifactTransfersDownloadAcquiredFileProcedure is the fully-qualified name of the
+	// ArtifactTransfers's DownloadAcquiredFile RPC.
+	ArtifactTransfersDownloadAcquiredFileProcedure = "/supertag.runtime.v2.ArtifactTransfers/DownloadAcquiredFile"
 	// HarnessArtifactsCaptureProcedure is the fully-qualified name of the HarnessArtifacts's Capture
 	// RPC.
 	HarnessArtifactsCaptureProcedure = "/supertag.runtime.v2.HarnessArtifacts/Capture"
+	// HarnessArtifactsFindProcedure is the fully-qualified name of the HarnessArtifacts's Find RPC.
+	HarnessArtifactsFindProcedure = "/supertag.runtime.v2.HarnessArtifacts/Find"
+	// HarnessArtifactsInspectProcedure is the fully-qualified name of the HarnessArtifacts's Inspect
+	// RPC.
+	HarnessArtifactsInspectProcedure = "/supertag.runtime.v2.HarnessArtifacts/Inspect"
+	// HarnessArtifactsReadProcedure is the fully-qualified name of the HarnessArtifacts's Read RPC.
+	HarnessArtifactsReadProcedure = "/supertag.runtime.v2.HarnessArtifacts/Read"
+	// HarnessArtifactsAttachProcedure is the fully-qualified name of the HarnessArtifacts's Attach RPC.
+	HarnessArtifactsAttachProcedure = "/supertag.runtime.v2.HarnessArtifacts/Attach"
 )
 
 // ArtifactCatalogClient is a client for the supertag.runtime.v2.ArtifactCatalog service.
@@ -166,6 +205,11 @@ type ArtifactDirectoryClient interface {
 	CommitCapture(context.Context, *connect.Request[runtimev2.CommitArtifactCaptureRequest]) (*connect.Response[runtimev2.CapturedArtifact], error)
 	Get(context.Context, *connect.Request[runtimev2.GetCapturedArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error)
 	List(context.Context, *connect.Request[runtimev2.ListCapturedArtifactsRequest]) (*connect.Response[runtimev2.ListCapturedArtifactsResponse], error)
+	FindForAttempt(context.Context, *connect.Request[runtimev2.FindAttemptArtifactsRequest]) (*connect.Response[runtimev2.ListCapturedArtifactsResponse], error)
+	GetForAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error)
+	Acquire(context.Context, *connect.Request[runtimev2.AcquireArtifactRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error)
+	Settle(context.Context, *connect.Request[runtimev2.SettleArtifactAcquisitionRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error)
+	GetAcquiredFile(context.Context, *connect.Request[runtimev2.GetAcquiredArtifactFileRequest]) (*connect.Response[runtimev2.ArtifactFile], error)
 }
 
 // NewArtifactDirectoryClient constructs a client for the supertag.runtime.v2.ArtifactDirectory
@@ -203,15 +247,50 @@ func NewArtifactDirectoryClient(httpClient connect.HTTPClient, baseURL string, o
 			connect.WithSchema(artifactDirectoryMethods.ByName("List")),
 			connect.WithClientOptions(opts...),
 		),
+		findForAttempt: connect.NewClient[runtimev2.FindAttemptArtifactsRequest, runtimev2.ListCapturedArtifactsResponse](
+			httpClient,
+			baseURL+ArtifactDirectoryFindForAttemptProcedure,
+			connect.WithSchema(artifactDirectoryMethods.ByName("FindForAttempt")),
+			connect.WithClientOptions(opts...),
+		),
+		getForAttempt: connect.NewClient[runtimev2.InspectAttemptArtifactRequest, runtimev2.CapturedArtifact](
+			httpClient,
+			baseURL+ArtifactDirectoryGetForAttemptProcedure,
+			connect.WithSchema(artifactDirectoryMethods.ByName("GetForAttempt")),
+			connect.WithClientOptions(opts...),
+		),
+		acquire: connect.NewClient[runtimev2.AcquireArtifactRequest, runtimev2.ArtifactAcquisition](
+			httpClient,
+			baseURL+ArtifactDirectoryAcquireProcedure,
+			connect.WithSchema(artifactDirectoryMethods.ByName("Acquire")),
+			connect.WithClientOptions(opts...),
+		),
+		settle: connect.NewClient[runtimev2.SettleArtifactAcquisitionRequest, runtimev2.ArtifactAcquisition](
+			httpClient,
+			baseURL+ArtifactDirectorySettleProcedure,
+			connect.WithSchema(artifactDirectoryMethods.ByName("Settle")),
+			connect.WithClientOptions(opts...),
+		),
+		getAcquiredFile: connect.NewClient[runtimev2.GetAcquiredArtifactFileRequest, runtimev2.ArtifactFile](
+			httpClient,
+			baseURL+ArtifactDirectoryGetAcquiredFileProcedure,
+			connect.WithSchema(artifactDirectoryMethods.ByName("GetAcquiredFile")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // artifactDirectoryClient implements ArtifactDirectoryClient.
 type artifactDirectoryClient struct {
-	reserveCapture *connect.Client[runtimev2.CommitArtifactCaptureRequest, runtimev2.CapturedArtifact]
-	commitCapture  *connect.Client[runtimev2.CommitArtifactCaptureRequest, runtimev2.CapturedArtifact]
-	get            *connect.Client[runtimev2.GetCapturedArtifactRequest, runtimev2.CapturedArtifact]
-	list           *connect.Client[runtimev2.ListCapturedArtifactsRequest, runtimev2.ListCapturedArtifactsResponse]
+	reserveCapture  *connect.Client[runtimev2.CommitArtifactCaptureRequest, runtimev2.CapturedArtifact]
+	commitCapture   *connect.Client[runtimev2.CommitArtifactCaptureRequest, runtimev2.CapturedArtifact]
+	get             *connect.Client[runtimev2.GetCapturedArtifactRequest, runtimev2.CapturedArtifact]
+	list            *connect.Client[runtimev2.ListCapturedArtifactsRequest, runtimev2.ListCapturedArtifactsResponse]
+	findForAttempt  *connect.Client[runtimev2.FindAttemptArtifactsRequest, runtimev2.ListCapturedArtifactsResponse]
+	getForAttempt   *connect.Client[runtimev2.InspectAttemptArtifactRequest, runtimev2.CapturedArtifact]
+	acquire         *connect.Client[runtimev2.AcquireArtifactRequest, runtimev2.ArtifactAcquisition]
+	settle          *connect.Client[runtimev2.SettleArtifactAcquisitionRequest, runtimev2.ArtifactAcquisition]
+	getAcquiredFile *connect.Client[runtimev2.GetAcquiredArtifactFileRequest, runtimev2.ArtifactFile]
 }
 
 // ReserveCapture calls supertag.runtime.v2.ArtifactDirectory.ReserveCapture.
@@ -234,6 +313,31 @@ func (c *artifactDirectoryClient) List(ctx context.Context, req *connect.Request
 	return c.list.CallUnary(ctx, req)
 }
 
+// FindForAttempt calls supertag.runtime.v2.ArtifactDirectory.FindForAttempt.
+func (c *artifactDirectoryClient) FindForAttempt(ctx context.Context, req *connect.Request[runtimev2.FindAttemptArtifactsRequest]) (*connect.Response[runtimev2.ListCapturedArtifactsResponse], error) {
+	return c.findForAttempt.CallUnary(ctx, req)
+}
+
+// GetForAttempt calls supertag.runtime.v2.ArtifactDirectory.GetForAttempt.
+func (c *artifactDirectoryClient) GetForAttempt(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error) {
+	return c.getForAttempt.CallUnary(ctx, req)
+}
+
+// Acquire calls supertag.runtime.v2.ArtifactDirectory.Acquire.
+func (c *artifactDirectoryClient) Acquire(ctx context.Context, req *connect.Request[runtimev2.AcquireArtifactRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error) {
+	return c.acquire.CallUnary(ctx, req)
+}
+
+// Settle calls supertag.runtime.v2.ArtifactDirectory.Settle.
+func (c *artifactDirectoryClient) Settle(ctx context.Context, req *connect.Request[runtimev2.SettleArtifactAcquisitionRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error) {
+	return c.settle.CallUnary(ctx, req)
+}
+
+// GetAcquiredFile calls supertag.runtime.v2.ArtifactDirectory.GetAcquiredFile.
+func (c *artifactDirectoryClient) GetAcquiredFile(ctx context.Context, req *connect.Request[runtimev2.GetAcquiredArtifactFileRequest]) (*connect.Response[runtimev2.ArtifactFile], error) {
+	return c.getAcquiredFile.CallUnary(ctx, req)
+}
+
 // ArtifactDirectoryHandler is an implementation of the supertag.runtime.v2.ArtifactDirectory
 // service.
 type ArtifactDirectoryHandler interface {
@@ -241,6 +345,11 @@ type ArtifactDirectoryHandler interface {
 	CommitCapture(context.Context, *connect.Request[runtimev2.CommitArtifactCaptureRequest]) (*connect.Response[runtimev2.CapturedArtifact], error)
 	Get(context.Context, *connect.Request[runtimev2.GetCapturedArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error)
 	List(context.Context, *connect.Request[runtimev2.ListCapturedArtifactsRequest]) (*connect.Response[runtimev2.ListCapturedArtifactsResponse], error)
+	FindForAttempt(context.Context, *connect.Request[runtimev2.FindAttemptArtifactsRequest]) (*connect.Response[runtimev2.ListCapturedArtifactsResponse], error)
+	GetForAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error)
+	Acquire(context.Context, *connect.Request[runtimev2.AcquireArtifactRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error)
+	Settle(context.Context, *connect.Request[runtimev2.SettleArtifactAcquisitionRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error)
+	GetAcquiredFile(context.Context, *connect.Request[runtimev2.GetAcquiredArtifactFileRequest]) (*connect.Response[runtimev2.ArtifactFile], error)
 }
 
 // NewArtifactDirectoryHandler builds an HTTP handler from the service implementation. It returns
@@ -274,6 +383,36 @@ func NewArtifactDirectoryHandler(svc ArtifactDirectoryHandler, opts ...connect.H
 		connect.WithSchema(artifactDirectoryMethods.ByName("List")),
 		connect.WithHandlerOptions(opts...),
 	)
+	artifactDirectoryFindForAttemptHandler := connect.NewUnaryHandler(
+		ArtifactDirectoryFindForAttemptProcedure,
+		svc.FindForAttempt,
+		connect.WithSchema(artifactDirectoryMethods.ByName("FindForAttempt")),
+		connect.WithHandlerOptions(opts...),
+	)
+	artifactDirectoryGetForAttemptHandler := connect.NewUnaryHandler(
+		ArtifactDirectoryGetForAttemptProcedure,
+		svc.GetForAttempt,
+		connect.WithSchema(artifactDirectoryMethods.ByName("GetForAttempt")),
+		connect.WithHandlerOptions(opts...),
+	)
+	artifactDirectoryAcquireHandler := connect.NewUnaryHandler(
+		ArtifactDirectoryAcquireProcedure,
+		svc.Acquire,
+		connect.WithSchema(artifactDirectoryMethods.ByName("Acquire")),
+		connect.WithHandlerOptions(opts...),
+	)
+	artifactDirectorySettleHandler := connect.NewUnaryHandler(
+		ArtifactDirectorySettleProcedure,
+		svc.Settle,
+		connect.WithSchema(artifactDirectoryMethods.ByName("Settle")),
+		connect.WithHandlerOptions(opts...),
+	)
+	artifactDirectoryGetAcquiredFileHandler := connect.NewUnaryHandler(
+		ArtifactDirectoryGetAcquiredFileProcedure,
+		svc.GetAcquiredFile,
+		connect.WithSchema(artifactDirectoryMethods.ByName("GetAcquiredFile")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.ArtifactDirectory/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ArtifactDirectoryReserveCaptureProcedure:
@@ -284,6 +423,16 @@ func NewArtifactDirectoryHandler(svc ArtifactDirectoryHandler, opts ...connect.H
 			artifactDirectoryGetHandler.ServeHTTP(w, r)
 		case ArtifactDirectoryListProcedure:
 			artifactDirectoryListHandler.ServeHTTP(w, r)
+		case ArtifactDirectoryFindForAttemptProcedure:
+			artifactDirectoryFindForAttemptHandler.ServeHTTP(w, r)
+		case ArtifactDirectoryGetForAttemptProcedure:
+			artifactDirectoryGetForAttemptHandler.ServeHTTP(w, r)
+		case ArtifactDirectoryAcquireProcedure:
+			artifactDirectoryAcquireHandler.ServeHTTP(w, r)
+		case ArtifactDirectorySettleProcedure:
+			artifactDirectorySettleHandler.ServeHTTP(w, r)
+		case ArtifactDirectoryGetAcquiredFileProcedure:
+			artifactDirectoryGetAcquiredFileHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -309,10 +458,179 @@ func (UnimplementedArtifactDirectoryHandler) List(context.Context, *connect.Requ
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactDirectory.List is not implemented"))
 }
 
+func (UnimplementedArtifactDirectoryHandler) FindForAttempt(context.Context, *connect.Request[runtimev2.FindAttemptArtifactsRequest]) (*connect.Response[runtimev2.ListCapturedArtifactsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactDirectory.FindForAttempt is not implemented"))
+}
+
+func (UnimplementedArtifactDirectoryHandler) GetForAttempt(context.Context, *connect.Request[runtimev2.InspectAttemptArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactDirectory.GetForAttempt is not implemented"))
+}
+
+func (UnimplementedArtifactDirectoryHandler) Acquire(context.Context, *connect.Request[runtimev2.AcquireArtifactRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactDirectory.Acquire is not implemented"))
+}
+
+func (UnimplementedArtifactDirectoryHandler) Settle(context.Context, *connect.Request[runtimev2.SettleArtifactAcquisitionRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactDirectory.Settle is not implemented"))
+}
+
+func (UnimplementedArtifactDirectoryHandler) GetAcquiredFile(context.Context, *connect.Request[runtimev2.GetAcquiredArtifactFileRequest]) (*connect.Response[runtimev2.ArtifactFile], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactDirectory.GetAcquiredFile is not implemented"))
+}
+
+// AttemptArtifactsClient is a client for the supertag.runtime.v2.AttemptArtifacts service.
+type AttemptArtifactsClient interface {
+	Find(context.Context, *connect.Request[runtimev2.FindAttemptArtifactsRequest]) (*connect.Response[runtimev2.ListCapturedArtifactsResponse], error)
+	Inspect(context.Context, *connect.Request[runtimev2.InspectAttemptArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error)
+	Acquire(context.Context, *connect.Request[runtimev2.AcquireArtifactRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error)
+	Settle(context.Context, *connect.Request[runtimev2.SettleArtifactAcquisitionRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error)
+}
+
+// NewAttemptArtifactsClient constructs a client for the supertag.runtime.v2.AttemptArtifacts
+// service. By default, it uses the Connect protocol with the binary Protobuf Codec, asks for
+// gzipped responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply
+// the connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewAttemptArtifactsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) AttemptArtifactsClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	attemptArtifactsMethods := runtimev2.File_supertag_runtime_v2_artifact_proto.Services().ByName("AttemptArtifacts").Methods()
+	return &attemptArtifactsClient{
+		find: connect.NewClient[runtimev2.FindAttemptArtifactsRequest, runtimev2.ListCapturedArtifactsResponse](
+			httpClient,
+			baseURL+AttemptArtifactsFindProcedure,
+			connect.WithSchema(attemptArtifactsMethods.ByName("Find")),
+			connect.WithClientOptions(opts...),
+		),
+		inspect: connect.NewClient[runtimev2.InspectAttemptArtifactRequest, runtimev2.CapturedArtifact](
+			httpClient,
+			baseURL+AttemptArtifactsInspectProcedure,
+			connect.WithSchema(attemptArtifactsMethods.ByName("Inspect")),
+			connect.WithClientOptions(opts...),
+		),
+		acquire: connect.NewClient[runtimev2.AcquireArtifactRequest, runtimev2.ArtifactAcquisition](
+			httpClient,
+			baseURL+AttemptArtifactsAcquireProcedure,
+			connect.WithSchema(attemptArtifactsMethods.ByName("Acquire")),
+			connect.WithClientOptions(opts...),
+		),
+		settle: connect.NewClient[runtimev2.SettleArtifactAcquisitionRequest, runtimev2.ArtifactAcquisition](
+			httpClient,
+			baseURL+AttemptArtifactsSettleProcedure,
+			connect.WithSchema(attemptArtifactsMethods.ByName("Settle")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// attemptArtifactsClient implements AttemptArtifactsClient.
+type attemptArtifactsClient struct {
+	find    *connect.Client[runtimev2.FindAttemptArtifactsRequest, runtimev2.ListCapturedArtifactsResponse]
+	inspect *connect.Client[runtimev2.InspectAttemptArtifactRequest, runtimev2.CapturedArtifact]
+	acquire *connect.Client[runtimev2.AcquireArtifactRequest, runtimev2.ArtifactAcquisition]
+	settle  *connect.Client[runtimev2.SettleArtifactAcquisitionRequest, runtimev2.ArtifactAcquisition]
+}
+
+// Find calls supertag.runtime.v2.AttemptArtifacts.Find.
+func (c *attemptArtifactsClient) Find(ctx context.Context, req *connect.Request[runtimev2.FindAttemptArtifactsRequest]) (*connect.Response[runtimev2.ListCapturedArtifactsResponse], error) {
+	return c.find.CallUnary(ctx, req)
+}
+
+// Inspect calls supertag.runtime.v2.AttemptArtifacts.Inspect.
+func (c *attemptArtifactsClient) Inspect(ctx context.Context, req *connect.Request[runtimev2.InspectAttemptArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error) {
+	return c.inspect.CallUnary(ctx, req)
+}
+
+// Acquire calls supertag.runtime.v2.AttemptArtifacts.Acquire.
+func (c *attemptArtifactsClient) Acquire(ctx context.Context, req *connect.Request[runtimev2.AcquireArtifactRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error) {
+	return c.acquire.CallUnary(ctx, req)
+}
+
+// Settle calls supertag.runtime.v2.AttemptArtifacts.Settle.
+func (c *attemptArtifactsClient) Settle(ctx context.Context, req *connect.Request[runtimev2.SettleArtifactAcquisitionRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error) {
+	return c.settle.CallUnary(ctx, req)
+}
+
+// AttemptArtifactsHandler is an implementation of the supertag.runtime.v2.AttemptArtifacts service.
+type AttemptArtifactsHandler interface {
+	Find(context.Context, *connect.Request[runtimev2.FindAttemptArtifactsRequest]) (*connect.Response[runtimev2.ListCapturedArtifactsResponse], error)
+	Inspect(context.Context, *connect.Request[runtimev2.InspectAttemptArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error)
+	Acquire(context.Context, *connect.Request[runtimev2.AcquireArtifactRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error)
+	Settle(context.Context, *connect.Request[runtimev2.SettleArtifactAcquisitionRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error)
+}
+
+// NewAttemptArtifactsHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewAttemptArtifactsHandler(svc AttemptArtifactsHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	attemptArtifactsMethods := runtimev2.File_supertag_runtime_v2_artifact_proto.Services().ByName("AttemptArtifacts").Methods()
+	attemptArtifactsFindHandler := connect.NewUnaryHandler(
+		AttemptArtifactsFindProcedure,
+		svc.Find,
+		connect.WithSchema(attemptArtifactsMethods.ByName("Find")),
+		connect.WithHandlerOptions(opts...),
+	)
+	attemptArtifactsInspectHandler := connect.NewUnaryHandler(
+		AttemptArtifactsInspectProcedure,
+		svc.Inspect,
+		connect.WithSchema(attemptArtifactsMethods.ByName("Inspect")),
+		connect.WithHandlerOptions(opts...),
+	)
+	attemptArtifactsAcquireHandler := connect.NewUnaryHandler(
+		AttemptArtifactsAcquireProcedure,
+		svc.Acquire,
+		connect.WithSchema(attemptArtifactsMethods.ByName("Acquire")),
+		connect.WithHandlerOptions(opts...),
+	)
+	attemptArtifactsSettleHandler := connect.NewUnaryHandler(
+		AttemptArtifactsSettleProcedure,
+		svc.Settle,
+		connect.WithSchema(attemptArtifactsMethods.ByName("Settle")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.AttemptArtifacts/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case AttemptArtifactsFindProcedure:
+			attemptArtifactsFindHandler.ServeHTTP(w, r)
+		case AttemptArtifactsInspectProcedure:
+			attemptArtifactsInspectHandler.ServeHTTP(w, r)
+		case AttemptArtifactsAcquireProcedure:
+			attemptArtifactsAcquireHandler.ServeHTTP(w, r)
+		case AttemptArtifactsSettleProcedure:
+			attemptArtifactsSettleHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedAttemptArtifactsHandler returns CodeUnimplemented from all methods.
+type UnimplementedAttemptArtifactsHandler struct{}
+
+func (UnimplementedAttemptArtifactsHandler) Find(context.Context, *connect.Request[runtimev2.FindAttemptArtifactsRequest]) (*connect.Response[runtimev2.ListCapturedArtifactsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptArtifacts.Find is not implemented"))
+}
+
+func (UnimplementedAttemptArtifactsHandler) Inspect(context.Context, *connect.Request[runtimev2.InspectAttemptArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptArtifacts.Inspect is not implemented"))
+}
+
+func (UnimplementedAttemptArtifactsHandler) Acquire(context.Context, *connect.Request[runtimev2.AcquireArtifactRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptArtifacts.Acquire is not implemented"))
+}
+
+func (UnimplementedAttemptArtifactsHandler) Settle(context.Context, *connect.Request[runtimev2.SettleArtifactAcquisitionRequest]) (*connect.Response[runtimev2.ArtifactAcquisition], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.AttemptArtifacts.Settle is not implemented"))
+}
+
 // ArtifactTransfersClient is a client for the supertag.runtime.v2.ArtifactTransfers service.
 type ArtifactTransfersClient interface {
 	UploadCapture(context.Context) *connect.ClientStreamForClient[runtimev2.ArtifactUpload, runtimev2.CapturedArtifact]
 	DownloadFile(context.Context, *connect.Request[runtimev2.DownloadArtifactFileRequest]) (*connect.ServerStreamForClient[runtimev2.ArtifactDownload], error)
+	DownloadAcquiredFile(context.Context, *connect.Request[runtimev2.GetAcquiredArtifactFileRequest]) (*connect.ServerStreamForClient[runtimev2.ArtifactDownload], error)
 }
 
 // NewArtifactTransfersClient constructs a client for the supertag.runtime.v2.ArtifactTransfers
@@ -338,13 +656,20 @@ func NewArtifactTransfersClient(httpClient connect.HTTPClient, baseURL string, o
 			connect.WithSchema(artifactTransfersMethods.ByName("DownloadFile")),
 			connect.WithClientOptions(opts...),
 		),
+		downloadAcquiredFile: connect.NewClient[runtimev2.GetAcquiredArtifactFileRequest, runtimev2.ArtifactDownload](
+			httpClient,
+			baseURL+ArtifactTransfersDownloadAcquiredFileProcedure,
+			connect.WithSchema(artifactTransfersMethods.ByName("DownloadAcquiredFile")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // artifactTransfersClient implements ArtifactTransfersClient.
 type artifactTransfersClient struct {
-	uploadCapture *connect.Client[runtimev2.ArtifactUpload, runtimev2.CapturedArtifact]
-	downloadFile  *connect.Client[runtimev2.DownloadArtifactFileRequest, runtimev2.ArtifactDownload]
+	uploadCapture        *connect.Client[runtimev2.ArtifactUpload, runtimev2.CapturedArtifact]
+	downloadFile         *connect.Client[runtimev2.DownloadArtifactFileRequest, runtimev2.ArtifactDownload]
+	downloadAcquiredFile *connect.Client[runtimev2.GetAcquiredArtifactFileRequest, runtimev2.ArtifactDownload]
 }
 
 // UploadCapture calls supertag.runtime.v2.ArtifactTransfers.UploadCapture.
@@ -357,11 +682,17 @@ func (c *artifactTransfersClient) DownloadFile(ctx context.Context, req *connect
 	return c.downloadFile.CallServerStream(ctx, req)
 }
 
+// DownloadAcquiredFile calls supertag.runtime.v2.ArtifactTransfers.DownloadAcquiredFile.
+func (c *artifactTransfersClient) DownloadAcquiredFile(ctx context.Context, req *connect.Request[runtimev2.GetAcquiredArtifactFileRequest]) (*connect.ServerStreamForClient[runtimev2.ArtifactDownload], error) {
+	return c.downloadAcquiredFile.CallServerStream(ctx, req)
+}
+
 // ArtifactTransfersHandler is an implementation of the supertag.runtime.v2.ArtifactTransfers
 // service.
 type ArtifactTransfersHandler interface {
 	UploadCapture(context.Context, *connect.ClientStream[runtimev2.ArtifactUpload]) (*connect.Response[runtimev2.CapturedArtifact], error)
 	DownloadFile(context.Context, *connect.Request[runtimev2.DownloadArtifactFileRequest], *connect.ServerStream[runtimev2.ArtifactDownload]) error
+	DownloadAcquiredFile(context.Context, *connect.Request[runtimev2.GetAcquiredArtifactFileRequest], *connect.ServerStream[runtimev2.ArtifactDownload]) error
 }
 
 // NewArtifactTransfersHandler builds an HTTP handler from the service implementation. It returns
@@ -383,12 +714,20 @@ func NewArtifactTransfersHandler(svc ArtifactTransfersHandler, opts ...connect.H
 		connect.WithSchema(artifactTransfersMethods.ByName("DownloadFile")),
 		connect.WithHandlerOptions(opts...),
 	)
+	artifactTransfersDownloadAcquiredFileHandler := connect.NewServerStreamHandler(
+		ArtifactTransfersDownloadAcquiredFileProcedure,
+		svc.DownloadAcquiredFile,
+		connect.WithSchema(artifactTransfersMethods.ByName("DownloadAcquiredFile")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.ArtifactTransfers/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ArtifactTransfersUploadCaptureProcedure:
 			artifactTransfersUploadCaptureHandler.ServeHTTP(w, r)
 		case ArtifactTransfersDownloadFileProcedure:
 			artifactTransfersDownloadFileHandler.ServeHTTP(w, r)
+		case ArtifactTransfersDownloadAcquiredFileProcedure:
+			artifactTransfersDownloadAcquiredFileHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -406,9 +745,17 @@ func (UnimplementedArtifactTransfersHandler) DownloadFile(context.Context, *conn
 	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactTransfers.DownloadFile is not implemented"))
 }
 
+func (UnimplementedArtifactTransfersHandler) DownloadAcquiredFile(context.Context, *connect.Request[runtimev2.GetAcquiredArtifactFileRequest], *connect.ServerStream[runtimev2.ArtifactDownload]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.ArtifactTransfers.DownloadAcquiredFile is not implemented"))
+}
+
 // HarnessArtifactsClient is a client for the supertag.runtime.v2.HarnessArtifacts service.
 type HarnessArtifactsClient interface {
 	Capture(context.Context, *connect.Request[runtimev2.HarnessCaptureArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error)
+	Find(context.Context, *connect.Request[runtimev2.HarnessFindArtifactsRequest]) (*connect.Response[runtimev2.ListCapturedArtifactsResponse], error)
+	Inspect(context.Context, *connect.Request[runtimev2.GetCapturedArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error)
+	Read(context.Context, *connect.Request[runtimev2.HarnessReadArtifactRequest]) (*connect.Response[runtimev2.HarnessArtifactPage], error)
+	Attach(context.Context, *connect.Request[runtimev2.HarnessAttachArtifactRequest]) (*connect.Response[runtimev2.HarnessAttachedArtifact], error)
 }
 
 // NewHarnessArtifactsClient constructs a client for the supertag.runtime.v2.HarnessArtifacts
@@ -428,12 +775,40 @@ func NewHarnessArtifactsClient(httpClient connect.HTTPClient, baseURL string, op
 			connect.WithSchema(harnessArtifactsMethods.ByName("Capture")),
 			connect.WithClientOptions(opts...),
 		),
+		find: connect.NewClient[runtimev2.HarnessFindArtifactsRequest, runtimev2.ListCapturedArtifactsResponse](
+			httpClient,
+			baseURL+HarnessArtifactsFindProcedure,
+			connect.WithSchema(harnessArtifactsMethods.ByName("Find")),
+			connect.WithClientOptions(opts...),
+		),
+		inspect: connect.NewClient[runtimev2.GetCapturedArtifactRequest, runtimev2.CapturedArtifact](
+			httpClient,
+			baseURL+HarnessArtifactsInspectProcedure,
+			connect.WithSchema(harnessArtifactsMethods.ByName("Inspect")),
+			connect.WithClientOptions(opts...),
+		),
+		read: connect.NewClient[runtimev2.HarnessReadArtifactRequest, runtimev2.HarnessArtifactPage](
+			httpClient,
+			baseURL+HarnessArtifactsReadProcedure,
+			connect.WithSchema(harnessArtifactsMethods.ByName("Read")),
+			connect.WithClientOptions(opts...),
+		),
+		attach: connect.NewClient[runtimev2.HarnessAttachArtifactRequest, runtimev2.HarnessAttachedArtifact](
+			httpClient,
+			baseURL+HarnessArtifactsAttachProcedure,
+			connect.WithSchema(harnessArtifactsMethods.ByName("Attach")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // harnessArtifactsClient implements HarnessArtifactsClient.
 type harnessArtifactsClient struct {
 	capture *connect.Client[runtimev2.HarnessCaptureArtifactRequest, runtimev2.CapturedArtifact]
+	find    *connect.Client[runtimev2.HarnessFindArtifactsRequest, runtimev2.ListCapturedArtifactsResponse]
+	inspect *connect.Client[runtimev2.GetCapturedArtifactRequest, runtimev2.CapturedArtifact]
+	read    *connect.Client[runtimev2.HarnessReadArtifactRequest, runtimev2.HarnessArtifactPage]
+	attach  *connect.Client[runtimev2.HarnessAttachArtifactRequest, runtimev2.HarnessAttachedArtifact]
 }
 
 // Capture calls supertag.runtime.v2.HarnessArtifacts.Capture.
@@ -441,9 +816,33 @@ func (c *harnessArtifactsClient) Capture(ctx context.Context, req *connect.Reque
 	return c.capture.CallUnary(ctx, req)
 }
 
+// Find calls supertag.runtime.v2.HarnessArtifacts.Find.
+func (c *harnessArtifactsClient) Find(ctx context.Context, req *connect.Request[runtimev2.HarnessFindArtifactsRequest]) (*connect.Response[runtimev2.ListCapturedArtifactsResponse], error) {
+	return c.find.CallUnary(ctx, req)
+}
+
+// Inspect calls supertag.runtime.v2.HarnessArtifacts.Inspect.
+func (c *harnessArtifactsClient) Inspect(ctx context.Context, req *connect.Request[runtimev2.GetCapturedArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error) {
+	return c.inspect.CallUnary(ctx, req)
+}
+
+// Read calls supertag.runtime.v2.HarnessArtifacts.Read.
+func (c *harnessArtifactsClient) Read(ctx context.Context, req *connect.Request[runtimev2.HarnessReadArtifactRequest]) (*connect.Response[runtimev2.HarnessArtifactPage], error) {
+	return c.read.CallUnary(ctx, req)
+}
+
+// Attach calls supertag.runtime.v2.HarnessArtifacts.Attach.
+func (c *harnessArtifactsClient) Attach(ctx context.Context, req *connect.Request[runtimev2.HarnessAttachArtifactRequest]) (*connect.Response[runtimev2.HarnessAttachedArtifact], error) {
+	return c.attach.CallUnary(ctx, req)
+}
+
 // HarnessArtifactsHandler is an implementation of the supertag.runtime.v2.HarnessArtifacts service.
 type HarnessArtifactsHandler interface {
 	Capture(context.Context, *connect.Request[runtimev2.HarnessCaptureArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error)
+	Find(context.Context, *connect.Request[runtimev2.HarnessFindArtifactsRequest]) (*connect.Response[runtimev2.ListCapturedArtifactsResponse], error)
+	Inspect(context.Context, *connect.Request[runtimev2.GetCapturedArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error)
+	Read(context.Context, *connect.Request[runtimev2.HarnessReadArtifactRequest]) (*connect.Response[runtimev2.HarnessArtifactPage], error)
+	Attach(context.Context, *connect.Request[runtimev2.HarnessAttachArtifactRequest]) (*connect.Response[runtimev2.HarnessAttachedArtifact], error)
 }
 
 // NewHarnessArtifactsHandler builds an HTTP handler from the service implementation. It returns the
@@ -459,10 +858,42 @@ func NewHarnessArtifactsHandler(svc HarnessArtifactsHandler, opts ...connect.Han
 		connect.WithSchema(harnessArtifactsMethods.ByName("Capture")),
 		connect.WithHandlerOptions(opts...),
 	)
+	harnessArtifactsFindHandler := connect.NewUnaryHandler(
+		HarnessArtifactsFindProcedure,
+		svc.Find,
+		connect.WithSchema(harnessArtifactsMethods.ByName("Find")),
+		connect.WithHandlerOptions(opts...),
+	)
+	harnessArtifactsInspectHandler := connect.NewUnaryHandler(
+		HarnessArtifactsInspectProcedure,
+		svc.Inspect,
+		connect.WithSchema(harnessArtifactsMethods.ByName("Inspect")),
+		connect.WithHandlerOptions(opts...),
+	)
+	harnessArtifactsReadHandler := connect.NewUnaryHandler(
+		HarnessArtifactsReadProcedure,
+		svc.Read,
+		connect.WithSchema(harnessArtifactsMethods.ByName("Read")),
+		connect.WithHandlerOptions(opts...),
+	)
+	harnessArtifactsAttachHandler := connect.NewUnaryHandler(
+		HarnessArtifactsAttachProcedure,
+		svc.Attach,
+		connect.WithSchema(harnessArtifactsMethods.ByName("Attach")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/supertag.runtime.v2.HarnessArtifacts/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case HarnessArtifactsCaptureProcedure:
 			harnessArtifactsCaptureHandler.ServeHTTP(w, r)
+		case HarnessArtifactsFindProcedure:
+			harnessArtifactsFindHandler.ServeHTTP(w, r)
+		case HarnessArtifactsInspectProcedure:
+			harnessArtifactsInspectHandler.ServeHTTP(w, r)
+		case HarnessArtifactsReadProcedure:
+			harnessArtifactsReadHandler.ServeHTTP(w, r)
+		case HarnessArtifactsAttachProcedure:
+			harnessArtifactsAttachHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -474,4 +905,20 @@ type UnimplementedHarnessArtifactsHandler struct{}
 
 func (UnimplementedHarnessArtifactsHandler) Capture(context.Context, *connect.Request[runtimev2.HarnessCaptureArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessArtifacts.Capture is not implemented"))
+}
+
+func (UnimplementedHarnessArtifactsHandler) Find(context.Context, *connect.Request[runtimev2.HarnessFindArtifactsRequest]) (*connect.Response[runtimev2.ListCapturedArtifactsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessArtifacts.Find is not implemented"))
+}
+
+func (UnimplementedHarnessArtifactsHandler) Inspect(context.Context, *connect.Request[runtimev2.GetCapturedArtifactRequest]) (*connect.Response[runtimev2.CapturedArtifact], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessArtifacts.Inspect is not implemented"))
+}
+
+func (UnimplementedHarnessArtifactsHandler) Read(context.Context, *connect.Request[runtimev2.HarnessReadArtifactRequest]) (*connect.Response[runtimev2.HarnessArtifactPage], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessArtifacts.Read is not implemented"))
+}
+
+func (UnimplementedHarnessArtifactsHandler) Attach(context.Context, *connect.Request[runtimev2.HarnessAttachArtifactRequest]) (*connect.Response[runtimev2.HarnessAttachedArtifact], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessArtifacts.Attach is not implemented"))
 }

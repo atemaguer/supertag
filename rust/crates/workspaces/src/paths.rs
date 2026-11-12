@@ -5,7 +5,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::{CStr, CString, OsStr},
     fs::{self, DirBuilder, File, OpenOptions},
-    io::Read,
+    io::{Read, Write},
     os::{
         fd::{AsRawFd, FromRawFd},
         unix::{
@@ -267,6 +267,59 @@ fn mkdir_at(parent: &File, name: &str) -> std::io::Result<()> {
     } else {
         Err(std::io::Error::last_os_error())
     }
+}
+
+/// Create an exclusive subtree without following any component, then write each
+/// selected regular file with exclusive creation. Partial failure is not replayable.
+pub(crate) fn write_acquired_files(
+    root: &Path,
+    path: &str,
+    files: &[(String, Vec<u8>)],
+) -> Result<()> {
+    validate_repo_path(path)?;
+    let parent = checkout_parent(root, path)?;
+    let leaf = path.rsplit('/').next().context("missing input directory")?;
+    mkdir_at(&parent, leaf)?;
+    let destination = open_dir_at(&parent, leaf)?;
+    for (path, bytes) in files {
+        validate_repo_path(path)?;
+        let mut directory = destination.try_clone()?;
+        let mut parts = path.split('/').peekable();
+        while let Some(part) = parts.next() {
+            if parts.peek().is_some() {
+                if let Err(error) = mkdir_at(&directory, part)
+                    && error.kind() != std::io::ErrorKind::AlreadyExists
+                {
+                    return Err(error.into());
+                }
+                directory = open_dir_at(&directory, part)?;
+            } else {
+                let name = CString::new(part)?;
+                let descriptor = unsafe {
+                    libc::openat(
+                        directory.as_raw_fd(),
+                        name.as_ptr(),
+                        libc::O_WRONLY
+                            | libc::O_CREAT
+                            | libc::O_EXCL
+                            | libc::O_NOFOLLOW
+                            | libc::O_CLOEXEC,
+                        0o600,
+                    )
+                };
+                if descriptor < 0 {
+                    return Err(std::io::Error::last_os_error().into());
+                }
+                let mut file = unsafe { File::from_raw_fd(descriptor) };
+                file.write_all(bytes)?;
+                file.sync_all()?;
+            }
+            directory.sync_all()?;
+        }
+    }
+    destination.sync_all()?;
+    parent.sync_all()?;
+    Ok(())
 }
 
 pub(crate) fn remove_output_directory(root: &Path, path: &str) -> Result<()> {

@@ -8,6 +8,11 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use supertag_protocol::v2::{
+    ArtifactAcquisition, ArtifactAcquisitionState, GetCapturedArtifactRequest, HarnessArtifactPage,
+    HarnessAttachArtifactRequest, HarnessAttachedArtifact, HarnessFindArtifactsRequest,
+    HarnessReadArtifactRequest, ListCapturedArtifactsResponse,
+};
 
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
@@ -86,6 +91,8 @@ struct Observed {
     pending_post: bool,
     lose_post_response: bool,
     may_capture_artifacts: bool,
+    may_acquire_artifacts: bool,
+    artifact_reads: Vec<HarnessReadArtifactRequest>,
     captures: Vec<HarnessCaptureArtifactRequest>,
 }
 
@@ -109,6 +116,49 @@ impl HarnessFixture {
 
 #[tonic::async_trait]
 impl HarnessArtifacts for HarnessFixture {
+    async fn find(
+        &self,
+        _: Request<HarnessFindArtifactsRequest>,
+    ) -> Result<Response<ListCapturedArtifactsResponse>, Status> {
+        Err(Status::unimplemented("fixture"))
+    }
+    async fn inspect(
+        &self,
+        _: Request<GetCapturedArtifactRequest>,
+    ) -> Result<Response<CapturedArtifact>, Status> {
+        Err(Status::unimplemented("fixture"))
+    }
+    async fn read(
+        &self,
+        request: Request<HarnessReadArtifactRequest>,
+    ) -> Result<Response<HarnessArtifactPage>, Status> {
+        self.authenticate(&request)?;
+        let mut observed = self.observed.lock().await;
+        if !observed.may_acquire_artifacts {
+            return Err(Status::permission_denied("read was not admitted"));
+        }
+        let input = request.into_inner();
+        observed.artifact_reads.push(input.clone());
+        Ok(Response::new(HarnessArtifactPage {
+            acquisition: Some(ArtifactAcquisition {
+                artifact_id: input.artifact_id.clone(),
+                state: ArtifactAcquisitionState::Delivered as i32,
+                ..Default::default()
+            }),
+            path: input.path,
+            text: "verified artifact evidence".into(),
+            offset: input.offset,
+            next_offset: 26,
+            truncated: false,
+        }))
+    }
+    async fn attach(
+        &self,
+        _: Request<HarnessAttachArtifactRequest>,
+    ) -> Result<Response<HarnessAttachedArtifact>, Status> {
+        Err(Status::unimplemented("fixture"))
+    }
+
     async fn capture(
         &self,
         request: Request<HarnessCaptureArtifactRequest>,
@@ -159,6 +209,8 @@ impl Harness for HarnessFixture {
             history: vec![],
             remote_workspace: false,
             may_capture_artifacts: observed.may_capture_artifacts,
+            may_acquire_artifacts: observed.may_acquire_artifacts,
+            may_materialize_artifacts: false,
             shared_execution: None,
         }))
     }
@@ -712,6 +764,37 @@ impl HarnessProcess {
             server,
         })
     }
+}
+
+#[tokio::test]
+async fn native_artifact_acquisition_pins_inventory_and_rechecks_current_authority() -> Result<()> {
+    let mut checkpoint = None;
+    for allowed in [true, false] {
+        let native = NativeFixture::new(&successful("Read evidence"), "exit 0")?;
+        std::fs::write(native.directory.path().join("artifact-read-mode"), "")?;
+        let server = HarnessProcess::configured(
+            &["files:read"],
+            checkpoint,
+            "Read the captured evidence",
+            false,
+        )
+        .await?;
+        server.observed.lock().await.may_acquire_artifacts = allowed;
+        run(native.options(), server.bootstrap.clone()).await?;
+        let observed = server.observed.lock().await;
+        let outcome = observed.outcome.as_ref().context("outcome missing")?;
+        ensure!(outcome.succeeded, "{}", outcome.result);
+        let saved = outcome.checkpoint.clone().context("checkpoint missing")?;
+        assert!(String::from_utf8_lossy(&saved.payload).contains("none-v1+artifact-acquire-v1"));
+        checkpoint = Some(saved);
+        assert_eq!(observed.artifact_reads.len(), usize::from(allowed));
+        let requests = native.read("requests.jsonl")?;
+        assert_eq!(requests.contains("verified artifact evidence"), allowed);
+        if !allowed {
+            assert!(!requests.contains("dynamicTools"));
+        }
+    }
+    Ok(())
 }
 
 #[tokio::test]

@@ -1,3 +1,4 @@
+mod artifact_acquisition;
 mod artifact_capture;
 mod inputs;
 mod limits;
@@ -74,6 +75,7 @@ struct Bridge {
     mcp: Option<Arc<crate::mcp::AttemptMcp>>,
     mcp_lane: Arc<Mutex<()>>,
     artifact_checkout: Option<(PathBuf, Snapshots)>,
+    artifact_inputs: Option<crate::artifact_inputs::Inputs>,
     artifact_capacity: Arc<Semaphore>,
 }
 
@@ -162,6 +164,8 @@ impl Harness for Bridge {
             history,
             remote_workspace: self.workspace.is_some(),
             may_capture_artifacts: self.artifact_checkout.is_some(),
+            may_acquire_artifacts: true,
+            may_materialize_artifacts: self.artifact_inputs.is_some(),
             shared_execution: self
                 .workspace
                 .as_ref()
@@ -415,6 +419,18 @@ pub(crate) async fn execute(
             ))
         })
         .transpose()?;
+    let artifact_inputs = artifact_checkout
+        .as_ref()
+        .filter(|_| remote_workspace.is_none())
+        .map(|(path, _)| {
+            crate::artifact_inputs::Inputs::prepare_optional(
+                &options.state_directory,
+                &assignment.attempt_id,
+                path,
+            )
+        })
+        .transpose()?
+        .flatten();
     let bridge = Bridge {
         token: bootstrap.token.clone(),
         assignment,
@@ -431,6 +447,7 @@ pub(crate) async fn execute(
         mcp,
         mcp_lane: Arc::default(),
         artifact_checkout,
+        artifact_inputs,
         artifact_capacity: Arc::new(Semaphore::new(1)),
     };
     let stop_server = CancellationToken::new();
@@ -472,6 +489,12 @@ pub(crate) async fn execute(
         server.abort();
         let _ = server.await;
     }
+    // A cancelled RPC can leave a blocking filesystem operation finishing in the
+    // Host. Never finalize or discard its checkout until that operation stopped.
+    let _artifact_idle = time::timeout(Duration::from_secs(5), bridge.artifact_capacity.acquire())
+        .await
+        .context("artifact filesystem operation did not stop")?
+        .context("artifact filesystem lane is closed")?;
     result
 }
 

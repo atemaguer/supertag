@@ -21,6 +21,110 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type ArtifactDelivery int32
+
+const (
+	ArtifactDelivery_ARTIFACT_DELIVERY_UNSPECIFIED ArtifactDelivery = 0
+	ArtifactDelivery_ARTIFACT_DELIVERY_READ        ArtifactDelivery = 1
+	ArtifactDelivery_ARTIFACT_DELIVERY_MATERIALIZE ArtifactDelivery = 2
+)
+
+// Enum value maps for ArtifactDelivery.
+var (
+	ArtifactDelivery_name = map[int32]string{
+		0: "ARTIFACT_DELIVERY_UNSPECIFIED",
+		1: "ARTIFACT_DELIVERY_READ",
+		2: "ARTIFACT_DELIVERY_MATERIALIZE",
+	}
+	ArtifactDelivery_value = map[string]int32{
+		"ARTIFACT_DELIVERY_UNSPECIFIED": 0,
+		"ARTIFACT_DELIVERY_READ":        1,
+		"ARTIFACT_DELIVERY_MATERIALIZE": 2,
+	}
+)
+
+func (x ArtifactDelivery) Enum() *ArtifactDelivery {
+	p := new(ArtifactDelivery)
+	*p = x
+	return p
+}
+
+func (x ArtifactDelivery) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ArtifactDelivery) Descriptor() protoreflect.EnumDescriptor {
+	return file_supertag_runtime_v2_artifact_proto_enumTypes[0].Descriptor()
+}
+
+func (ArtifactDelivery) Type() protoreflect.EnumType {
+	return &file_supertag_runtime_v2_artifact_proto_enumTypes[0]
+}
+
+func (x ArtifactDelivery) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ArtifactDelivery.Descriptor instead.
+func (ArtifactDelivery) EnumDescriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{0}
+}
+
+type ArtifactAcquisitionState int32
+
+const (
+	ArtifactAcquisitionState_ARTIFACT_ACQUISITION_STATE_UNSPECIFIED ArtifactAcquisitionState = 0
+	ArtifactAcquisitionState_ARTIFACT_ACQUISITION_STATE_AUTHORIZED  ArtifactAcquisitionState = 1
+	ArtifactAcquisitionState_ARTIFACT_ACQUISITION_STATE_DELIVERED   ArtifactAcquisitionState = 2
+	ArtifactAcquisitionState_ARTIFACT_ACQUISITION_STATE_FAILED      ArtifactAcquisitionState = 3
+	ArtifactAcquisitionState_ARTIFACT_ACQUISITION_STATE_UNCERTAIN   ArtifactAcquisitionState = 4
+)
+
+// Enum value maps for ArtifactAcquisitionState.
+var (
+	ArtifactAcquisitionState_name = map[int32]string{
+		0: "ARTIFACT_ACQUISITION_STATE_UNSPECIFIED",
+		1: "ARTIFACT_ACQUISITION_STATE_AUTHORIZED",
+		2: "ARTIFACT_ACQUISITION_STATE_DELIVERED",
+		3: "ARTIFACT_ACQUISITION_STATE_FAILED",
+		4: "ARTIFACT_ACQUISITION_STATE_UNCERTAIN",
+	}
+	ArtifactAcquisitionState_value = map[string]int32{
+		"ARTIFACT_ACQUISITION_STATE_UNSPECIFIED": 0,
+		"ARTIFACT_ACQUISITION_STATE_AUTHORIZED":  1,
+		"ARTIFACT_ACQUISITION_STATE_DELIVERED":   2,
+		"ARTIFACT_ACQUISITION_STATE_FAILED":      3,
+		"ARTIFACT_ACQUISITION_STATE_UNCERTAIN":   4,
+	}
+)
+
+func (x ArtifactAcquisitionState) Enum() *ArtifactAcquisitionState {
+	p := new(ArtifactAcquisitionState)
+	*p = x
+	return p
+}
+
+func (x ArtifactAcquisitionState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ArtifactAcquisitionState) Descriptor() protoreflect.EnumDescriptor {
+	return file_supertag_runtime_v2_artifact_proto_enumTypes[1].Descriptor()
+}
+
+func (ArtifactAcquisitionState) Type() protoreflect.EnumType {
+	return &file_supertag_runtime_v2_artifact_proto_enumTypes[1]
+}
+
+func (x ArtifactAcquisitionState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ArtifactAcquisitionState.Descriptor instead.
+func (ArtifactAcquisitionState) EnumDescriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{1}
+}
+
 type ArtifactDescription struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Title         string                 `protobuf:"bytes,1,opt,name=title,proto3" json:"title,omitempty"`
@@ -318,9 +422,11 @@ func (x *ArtifactSummary) GetDeclaredTaskOutput() bool {
 }
 
 type CapturedArtifact struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Summary       *ArtifactSummary       `protobuf:"bytes,1,opt,name=summary,proto3" json:"summary,omitempty"`
-	Files         []*ArtifactFile        `protobuf:"bytes,2,rep,name=files,proto3" json:"files,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Summary *ArtifactSummary       `protobuf:"bytes,1,opt,name=summary,proto3" json:"summary,omitempty"`
+	Files   []*ArtifactFile        `protobuf:"bytes,2,rep,name=files,proto3" json:"files,omitempty"`
+	// Inputs confirmed delivered to this producing Attempt, frozen at capture reservation.
+	Inputs        []*ArtifactSelection `protobuf:"bytes,3,rep,name=inputs,proto3" json:"inputs,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -369,6 +475,826 @@ func (x *CapturedArtifact) GetFiles() []*ArtifactFile {
 	return nil
 }
 
+func (x *CapturedArtifact) GetInputs() []*ArtifactSelection {
+	if x != nil {
+		return x.Inputs
+	}
+	return nil
+}
+
+type ArtifactAcquisition struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	AcquisitionId string                   `protobuf:"bytes,1,opt,name=acquisition_id,json=acquisitionId,proto3" json:"acquisition_id,omitempty"`
+	OperationId   string                   `protobuf:"bytes,2,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	TaskId        string                   `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	AttemptId     string                   `protobuf:"bytes,4,opt,name=attempt_id,json=attemptId,proto3" json:"attempt_id,omitempty"`
+	ArtifactId    string                   `protobuf:"bytes,5,opt,name=artifact_id,json=artifactId,proto3" json:"artifact_id,omitempty"`
+	Files         []*ArtifactFile          `protobuf:"bytes,6,rep,name=files,proto3" json:"files,omitempty"`
+	Delivery      ArtifactDelivery         `protobuf:"varint,7,opt,name=delivery,proto3,enum=supertag.runtime.v2.ArtifactDelivery" json:"delivery,omitempty"`
+	Destination   *string                  `protobuf:"bytes,8,opt,name=destination,proto3,oneof" json:"destination,omitempty"`
+	State         ArtifactAcquisitionState `protobuf:"varint,9,opt,name=state,proto3,enum=supertag.runtime.v2.ArtifactAcquisitionState" json:"state,omitempty"`
+	CreatedAtMs   int64                    `protobuf:"varint,10,opt,name=created_at_ms,json=createdAtMs,proto3" json:"created_at_ms,omitempty"`
+	UpdatedAtMs   int64                    `protobuf:"varint,11,opt,name=updated_at_ms,json=updatedAtMs,proto3" json:"updated_at_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ArtifactAcquisition) Reset() {
+	*x = ArtifactAcquisition{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ArtifactAcquisition) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ArtifactAcquisition) ProtoMessage() {}
+
+func (x *ArtifactAcquisition) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ArtifactAcquisition.ProtoReflect.Descriptor instead.
+func (*ArtifactAcquisition) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ArtifactAcquisition) GetAcquisitionId() string {
+	if x != nil {
+		return x.AcquisitionId
+	}
+	return ""
+}
+
+func (x *ArtifactAcquisition) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *ArtifactAcquisition) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *ArtifactAcquisition) GetAttemptId() string {
+	if x != nil {
+		return x.AttemptId
+	}
+	return ""
+}
+
+func (x *ArtifactAcquisition) GetArtifactId() string {
+	if x != nil {
+		return x.ArtifactId
+	}
+	return ""
+}
+
+func (x *ArtifactAcquisition) GetFiles() []*ArtifactFile {
+	if x != nil {
+		return x.Files
+	}
+	return nil
+}
+
+func (x *ArtifactAcquisition) GetDelivery() ArtifactDelivery {
+	if x != nil {
+		return x.Delivery
+	}
+	return ArtifactDelivery_ARTIFACT_DELIVERY_UNSPECIFIED
+}
+
+func (x *ArtifactAcquisition) GetDestination() string {
+	if x != nil && x.Destination != nil {
+		return *x.Destination
+	}
+	return ""
+}
+
+func (x *ArtifactAcquisition) GetState() ArtifactAcquisitionState {
+	if x != nil {
+		return x.State
+	}
+	return ArtifactAcquisitionState_ARTIFACT_ACQUISITION_STATE_UNSPECIFIED
+}
+
+func (x *ArtifactAcquisition) GetCreatedAtMs() int64 {
+	if x != nil {
+		return x.CreatedAtMs
+	}
+	return 0
+}
+
+func (x *ArtifactAcquisition) GetUpdatedAtMs() int64 {
+	if x != nil {
+		return x.UpdatedAtMs
+	}
+	return 0
+}
+
+type FindAttemptArtifactsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Attempt       *InspectAttemptRequest `protobuf:"bytes,1,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	Query         string                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
+	Kind          string                 `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`
+	TaskId        string                 `protobuf:"bytes,4,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Limit         uint32                 `protobuf:"varint,5,opt,name=limit,proto3" json:"limit,omitempty"`
+	BeforeOrder   uint64                 `protobuf:"varint,6,opt,name=before_order,json=beforeOrder,proto3" json:"before_order,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FindAttemptArtifactsRequest) Reset() {
+	*x = FindAttemptArtifactsRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FindAttemptArtifactsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FindAttemptArtifactsRequest) ProtoMessage() {}
+
+func (x *FindAttemptArtifactsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FindAttemptArtifactsRequest.ProtoReflect.Descriptor instead.
+func (*FindAttemptArtifactsRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *FindAttemptArtifactsRequest) GetAttempt() *InspectAttemptRequest {
+	if x != nil {
+		return x.Attempt
+	}
+	return nil
+}
+
+func (x *FindAttemptArtifactsRequest) GetQuery() string {
+	if x != nil {
+		return x.Query
+	}
+	return ""
+}
+
+func (x *FindAttemptArtifactsRequest) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *FindAttemptArtifactsRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *FindAttemptArtifactsRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *FindAttemptArtifactsRequest) GetBeforeOrder() uint64 {
+	if x != nil {
+		return x.BeforeOrder
+	}
+	return 0
+}
+
+type InspectAttemptArtifactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Attempt       *InspectAttemptRequest `protobuf:"bytes,1,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	ArtifactId    string                 `protobuf:"bytes,2,opt,name=artifact_id,json=artifactId,proto3" json:"artifact_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InspectAttemptArtifactRequest) Reset() {
+	*x = InspectAttemptArtifactRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InspectAttemptArtifactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InspectAttemptArtifactRequest) ProtoMessage() {}
+
+func (x *InspectAttemptArtifactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InspectAttemptArtifactRequest.ProtoReflect.Descriptor instead.
+func (*InspectAttemptArtifactRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *InspectAttemptArtifactRequest) GetAttempt() *InspectAttemptRequest {
+	if x != nil {
+		return x.Attempt
+	}
+	return nil
+}
+
+func (x *InspectAttemptArtifactRequest) GetArtifactId() string {
+	if x != nil {
+		return x.ArtifactId
+	}
+	return ""
+}
+
+type AcquireArtifactRequest struct {
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Attempt     *InspectAttemptRequest `protobuf:"bytes,1,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	OperationId string                 `protobuf:"bytes,2,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	ArtifactId  string                 `protobuf:"bytes,3,opt,name=artifact_id,json=artifactId,proto3" json:"artifact_id,omitempty"`
+	Paths       []string               `protobuf:"bytes,4,rep,name=paths,proto3" json:"paths,omitempty"`
+	Delivery    ArtifactDelivery       `protobuf:"varint,5,opt,name=delivery,proto3,enum=supertag.runtime.v2.ArtifactDelivery" json:"delivery,omitempty"`
+	// Generated by the Worker Host and checked against the Attempt and operation.
+	Destination   *string `protobuf:"bytes,6,opt,name=destination,proto3,oneof" json:"destination,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcquireArtifactRequest) Reset() {
+	*x = AcquireArtifactRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcquireArtifactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcquireArtifactRequest) ProtoMessage() {}
+
+func (x *AcquireArtifactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcquireArtifactRequest.ProtoReflect.Descriptor instead.
+func (*AcquireArtifactRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *AcquireArtifactRequest) GetAttempt() *InspectAttemptRequest {
+	if x != nil {
+		return x.Attempt
+	}
+	return nil
+}
+
+func (x *AcquireArtifactRequest) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *AcquireArtifactRequest) GetArtifactId() string {
+	if x != nil {
+		return x.ArtifactId
+	}
+	return ""
+}
+
+func (x *AcquireArtifactRequest) GetPaths() []string {
+	if x != nil {
+		return x.Paths
+	}
+	return nil
+}
+
+func (x *AcquireArtifactRequest) GetDelivery() ArtifactDelivery {
+	if x != nil {
+		return x.Delivery
+	}
+	return ArtifactDelivery_ARTIFACT_DELIVERY_UNSPECIFIED
+}
+
+func (x *AcquireArtifactRequest) GetDestination() string {
+	if x != nil && x.Destination != nil {
+		return *x.Destination
+	}
+	return ""
+}
+
+type SettleArtifactAcquisitionRequest struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	Attempt       *InspectAttemptRequest   `protobuf:"bytes,1,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	AcquisitionId string                   `protobuf:"bytes,2,opt,name=acquisition_id,json=acquisitionId,proto3" json:"acquisition_id,omitempty"`
+	State         ArtifactAcquisitionState `protobuf:"varint,3,opt,name=state,proto3,enum=supertag.runtime.v2.ArtifactAcquisitionState" json:"state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SettleArtifactAcquisitionRequest) Reset() {
+	*x = SettleArtifactAcquisitionRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SettleArtifactAcquisitionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SettleArtifactAcquisitionRequest) ProtoMessage() {}
+
+func (x *SettleArtifactAcquisitionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SettleArtifactAcquisitionRequest.ProtoReflect.Descriptor instead.
+func (*SettleArtifactAcquisitionRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *SettleArtifactAcquisitionRequest) GetAttempt() *InspectAttemptRequest {
+	if x != nil {
+		return x.Attempt
+	}
+	return nil
+}
+
+func (x *SettleArtifactAcquisitionRequest) GetAcquisitionId() string {
+	if x != nil {
+		return x.AcquisitionId
+	}
+	return ""
+}
+
+func (x *SettleArtifactAcquisitionRequest) GetState() ArtifactAcquisitionState {
+	if x != nil {
+		return x.State
+	}
+	return ArtifactAcquisitionState_ARTIFACT_ACQUISITION_STATE_UNSPECIFIED
+}
+
+type GetAcquiredArtifactFileRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Attempt       *InspectAttemptRequest `protobuf:"bytes,1,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	AcquisitionId string                 `protobuf:"bytes,2,opt,name=acquisition_id,json=acquisitionId,proto3" json:"acquisition_id,omitempty"`
+	Path          string                 `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAcquiredArtifactFileRequest) Reset() {
+	*x = GetAcquiredArtifactFileRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAcquiredArtifactFileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAcquiredArtifactFileRequest) ProtoMessage() {}
+
+func (x *GetAcquiredArtifactFileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAcquiredArtifactFileRequest.ProtoReflect.Descriptor instead.
+func (*GetAcquiredArtifactFileRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *GetAcquiredArtifactFileRequest) GetAttempt() *InspectAttemptRequest {
+	if x != nil {
+		return x.Attempt
+	}
+	return nil
+}
+
+func (x *GetAcquiredArtifactFileRequest) GetAcquisitionId() string {
+	if x != nil {
+		return x.AcquisitionId
+	}
+	return ""
+}
+
+func (x *GetAcquiredArtifactFileRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+type HarnessFindArtifactsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Query         string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
+	Kind          string                 `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
+	TaskId        string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Limit         uint32                 `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
+	BeforeOrder   uint64                 `protobuf:"varint,5,opt,name=before_order,json=beforeOrder,proto3" json:"before_order,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HarnessFindArtifactsRequest) Reset() {
+	*x = HarnessFindArtifactsRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HarnessFindArtifactsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HarnessFindArtifactsRequest) ProtoMessage() {}
+
+func (x *HarnessFindArtifactsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HarnessFindArtifactsRequest.ProtoReflect.Descriptor instead.
+func (*HarnessFindArtifactsRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *HarnessFindArtifactsRequest) GetQuery() string {
+	if x != nil {
+		return x.Query
+	}
+	return ""
+}
+
+func (x *HarnessFindArtifactsRequest) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *HarnessFindArtifactsRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *HarnessFindArtifactsRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *HarnessFindArtifactsRequest) GetBeforeOrder() uint64 {
+	if x != nil {
+		return x.BeforeOrder
+	}
+	return 0
+}
+
+type HarnessReadArtifactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OperationId   string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	ArtifactId    string                 `protobuf:"bytes,2,opt,name=artifact_id,json=artifactId,proto3" json:"artifact_id,omitempty"`
+	Path          string                 `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`
+	Offset        uint64                 `protobuf:"varint,4,opt,name=offset,proto3" json:"offset,omitempty"`
+	Limit         uint32                 `protobuf:"varint,5,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HarnessReadArtifactRequest) Reset() {
+	*x = HarnessReadArtifactRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HarnessReadArtifactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HarnessReadArtifactRequest) ProtoMessage() {}
+
+func (x *HarnessReadArtifactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HarnessReadArtifactRequest.ProtoReflect.Descriptor instead.
+func (*HarnessReadArtifactRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *HarnessReadArtifactRequest) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *HarnessReadArtifactRequest) GetArtifactId() string {
+	if x != nil {
+		return x.ArtifactId
+	}
+	return ""
+}
+
+func (x *HarnessReadArtifactRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *HarnessReadArtifactRequest) GetOffset() uint64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *HarnessReadArtifactRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type HarnessArtifactPage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Acquisition   *ArtifactAcquisition   `protobuf:"bytes,1,opt,name=acquisition,proto3" json:"acquisition,omitempty"`
+	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	Text          string                 `protobuf:"bytes,3,opt,name=text,proto3" json:"text,omitempty"`
+	Offset        uint64                 `protobuf:"varint,4,opt,name=offset,proto3" json:"offset,omitempty"`
+	NextOffset    uint64                 `protobuf:"varint,5,opt,name=next_offset,json=nextOffset,proto3" json:"next_offset,omitempty"`
+	Truncated     bool                   `protobuf:"varint,6,opt,name=truncated,proto3" json:"truncated,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HarnessArtifactPage) Reset() {
+	*x = HarnessArtifactPage{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HarnessArtifactPage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HarnessArtifactPage) ProtoMessage() {}
+
+func (x *HarnessArtifactPage) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HarnessArtifactPage.ProtoReflect.Descriptor instead.
+func (*HarnessArtifactPage) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *HarnessArtifactPage) GetAcquisition() *ArtifactAcquisition {
+	if x != nil {
+		return x.Acquisition
+	}
+	return nil
+}
+
+func (x *HarnessArtifactPage) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *HarnessArtifactPage) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *HarnessArtifactPage) GetOffset() uint64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *HarnessArtifactPage) GetNextOffset() uint64 {
+	if x != nil {
+		return x.NextOffset
+	}
+	return 0
+}
+
+func (x *HarnessArtifactPage) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
+}
+
+type HarnessAttachArtifactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OperationId   string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	ArtifactId    string                 `protobuf:"bytes,2,opt,name=artifact_id,json=artifactId,proto3" json:"artifact_id,omitempty"`
+	Paths         []string               `protobuf:"bytes,3,rep,name=paths,proto3" json:"paths,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HarnessAttachArtifactRequest) Reset() {
+	*x = HarnessAttachArtifactRequest{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HarnessAttachArtifactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HarnessAttachArtifactRequest) ProtoMessage() {}
+
+func (x *HarnessAttachArtifactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HarnessAttachArtifactRequest.ProtoReflect.Descriptor instead.
+func (*HarnessAttachArtifactRequest) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *HarnessAttachArtifactRequest) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *HarnessAttachArtifactRequest) GetArtifactId() string {
+	if x != nil {
+		return x.ArtifactId
+	}
+	return ""
+}
+
+func (x *HarnessAttachArtifactRequest) GetPaths() []string {
+	if x != nil {
+		return x.Paths
+	}
+	return nil
+}
+
+type HarnessAttachedArtifact struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Acquisition   *ArtifactAcquisition   `protobuf:"bytes,1,opt,name=acquisition,proto3" json:"acquisition,omitempty"`
+	LocalPath     string                 `protobuf:"bytes,2,opt,name=local_path,json=localPath,proto3" json:"local_path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HarnessAttachedArtifact) Reset() {
+	*x = HarnessAttachedArtifact{}
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HarnessAttachedArtifact) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HarnessAttachedArtifact) ProtoMessage() {}
+
+func (x *HarnessAttachedArtifact) ProtoReflect() protoreflect.Message {
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HarnessAttachedArtifact.ProtoReflect.Descriptor instead.
+func (*HarnessAttachedArtifact) Descriptor() ([]byte, []int) {
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *HarnessAttachedArtifact) GetAcquisition() *ArtifactAcquisition {
+	if x != nil {
+		return x.Acquisition
+	}
+	return nil
+}
+
+func (x *HarnessAttachedArtifact) GetLocalPath() string {
+	if x != nil {
+		return x.LocalPath
+	}
+	return ""
+}
+
 type HarnessCaptureArtifactRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	OperationId     string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
@@ -381,7 +1307,7 @@ type HarnessCaptureArtifactRequest struct {
 
 func (x *HarnessCaptureArtifactRequest) Reset() {
 	*x = HarnessCaptureArtifactRequest{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[5]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -393,7 +1319,7 @@ func (x *HarnessCaptureArtifactRequest) String() string {
 func (*HarnessCaptureArtifactRequest) ProtoMessage() {}
 
 func (x *HarnessCaptureArtifactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[5]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -406,7 +1332,7 @@ func (x *HarnessCaptureArtifactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HarnessCaptureArtifactRequest.ProtoReflect.Descriptor instead.
 func (*HarnessCaptureArtifactRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{5}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *HarnessCaptureArtifactRequest) GetOperationId() string {
@@ -454,7 +1380,7 @@ type CommitArtifactCaptureRequest struct {
 
 func (x *CommitArtifactCaptureRequest) Reset() {
 	*x = CommitArtifactCaptureRequest{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[6]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -466,7 +1392,7 @@ func (x *CommitArtifactCaptureRequest) String() string {
 func (*CommitArtifactCaptureRequest) ProtoMessage() {}
 
 func (x *CommitArtifactCaptureRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[6]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -479,7 +1405,7 @@ func (x *CommitArtifactCaptureRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommitArtifactCaptureRequest.ProtoReflect.Descriptor instead.
 func (*CommitArtifactCaptureRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{6}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *CommitArtifactCaptureRequest) GetAttempt() *InspectAttemptRequest {
@@ -540,7 +1466,7 @@ type GetCapturedArtifactRequest struct {
 
 func (x *GetCapturedArtifactRequest) Reset() {
 	*x = GetCapturedArtifactRequest{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[7]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -552,7 +1478,7 @@ func (x *GetCapturedArtifactRequest) String() string {
 func (*GetCapturedArtifactRequest) ProtoMessage() {}
 
 func (x *GetCapturedArtifactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[7]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -565,7 +1491,7 @@ func (x *GetCapturedArtifactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCapturedArtifactRequest.ProtoReflect.Descriptor instead.
 func (*GetCapturedArtifactRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{7}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *GetCapturedArtifactRequest) GetArtifactId() string {
@@ -586,7 +1512,7 @@ type ListCapturedArtifactsRequest struct {
 
 func (x *ListCapturedArtifactsRequest) Reset() {
 	*x = ListCapturedArtifactsRequest{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[8]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -598,7 +1524,7 @@ func (x *ListCapturedArtifactsRequest) String() string {
 func (*ListCapturedArtifactsRequest) ProtoMessage() {}
 
 func (x *ListCapturedArtifactsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[8]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -611,7 +1537,7 @@ func (x *ListCapturedArtifactsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCapturedArtifactsRequest.ProtoReflect.Descriptor instead.
 func (*ListCapturedArtifactsRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{8}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ListCapturedArtifactsRequest) GetTaskId() string {
@@ -645,7 +1571,7 @@ type ListCapturedArtifactsResponse struct {
 
 func (x *ListCapturedArtifactsResponse) Reset() {
 	*x = ListCapturedArtifactsResponse{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[9]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -657,7 +1583,7 @@ func (x *ListCapturedArtifactsResponse) String() string {
 func (*ListCapturedArtifactsResponse) ProtoMessage() {}
 
 func (x *ListCapturedArtifactsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[9]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -670,7 +1596,7 @@ func (x *ListCapturedArtifactsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCapturedArtifactsResponse.ProtoReflect.Descriptor instead.
 func (*ListCapturedArtifactsResponse) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{9}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ListCapturedArtifactsResponse) GetArtifacts() []*ArtifactSummary {
@@ -700,7 +1626,7 @@ type ArtifactUpload struct {
 
 func (x *ArtifactUpload) Reset() {
 	*x = ArtifactUpload{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[10]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -712,7 +1638,7 @@ func (x *ArtifactUpload) String() string {
 func (*ArtifactUpload) ProtoMessage() {}
 
 func (x *ArtifactUpload) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[10]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -725,7 +1651,7 @@ func (x *ArtifactUpload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactUpload.ProtoReflect.Descriptor instead.
 func (*ArtifactUpload) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{10}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ArtifactUpload) GetPart() isArtifactUpload_Part {
@@ -781,7 +1707,7 @@ type ArtifactChunk struct {
 
 func (x *ArtifactChunk) Reset() {
 	*x = ArtifactChunk{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[11]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -793,7 +1719,7 @@ func (x *ArtifactChunk) String() string {
 func (*ArtifactChunk) ProtoMessage() {}
 
 func (x *ArtifactChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[11]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -806,7 +1732,7 @@ func (x *ArtifactChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactChunk.ProtoReflect.Descriptor instead.
 func (*ArtifactChunk) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{11}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ArtifactChunk) GetFileIndex() uint32 {
@@ -833,7 +1759,7 @@ type DownloadArtifactFileRequest struct {
 
 func (x *DownloadArtifactFileRequest) Reset() {
 	*x = DownloadArtifactFileRequest{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[12]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -845,7 +1771,7 @@ func (x *DownloadArtifactFileRequest) String() string {
 func (*DownloadArtifactFileRequest) ProtoMessage() {}
 
 func (x *DownloadArtifactFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[12]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -858,7 +1784,7 @@ func (x *DownloadArtifactFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DownloadArtifactFileRequest.ProtoReflect.Descriptor instead.
 func (*DownloadArtifactFileRequest) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{12}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *DownloadArtifactFileRequest) GetArtifactId() string {
@@ -888,7 +1814,7 @@ type ArtifactDownload struct {
 
 func (x *ArtifactDownload) Reset() {
 	*x = ArtifactDownload{}
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[13]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -900,7 +1826,7 @@ func (x *ArtifactDownload) String() string {
 func (*ArtifactDownload) ProtoMessage() {}
 
 func (x *ArtifactDownload) ProtoReflect() protoreflect.Message {
-	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[13]
+	mi := &file_supertag_runtime_v2_artifact_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -913,7 +1839,7 @@ func (x *ArtifactDownload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactDownload.ProtoReflect.Descriptor instead.
 func (*ArtifactDownload) Descriptor() ([]byte, []int) {
-	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{13}
+	return file_supertag_runtime_v2_artifact_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ArtifactDownload) GetPart() isArtifactDownload_Part {
@@ -993,10 +1919,85 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"\vbyte_length\x18\x05 \x01(\x04R\n" +
 	"byteLength\x12$\n" +
 	"\x0ecaptured_at_ms\x18\x06 \x01(\x03R\fcapturedAtMs\x120\n" +
-	"\x14declared_task_output\x18\a \x01(\bR\x12declaredTaskOutput\"\x8b\x01\n" +
+	"\x14declared_task_output\x18\a \x01(\bR\x12declaredTaskOutput\"\xcb\x01\n" +
 	"\x10CapturedArtifact\x12>\n" +
 	"\asummary\x18\x01 \x01(\v2$.supertag.runtime.v2.ArtifactSummaryR\asummary\x127\n" +
-	"\x05files\x18\x02 \x03(\v2!.supertag.runtime.v2.ArtifactFileR\x05files\"\xeb\x01\n" +
+	"\x05files\x18\x02 \x03(\v2!.supertag.runtime.v2.ArtifactFileR\x05files\x12>\n" +
+	"\x06inputs\x18\x03 \x03(\v2&.supertag.runtime.v2.ArtifactSelectionR\x06inputs\"\xf8\x03\n" +
+	"\x13ArtifactAcquisition\x12%\n" +
+	"\x0eacquisition_id\x18\x01 \x01(\tR\racquisitionId\x12!\n" +
+	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12\x1d\n" +
+	"\n" +
+	"attempt_id\x18\x04 \x01(\tR\tattemptId\x12\x1f\n" +
+	"\vartifact_id\x18\x05 \x01(\tR\n" +
+	"artifactId\x127\n" +
+	"\x05files\x18\x06 \x03(\v2!.supertag.runtime.v2.ArtifactFileR\x05files\x12A\n" +
+	"\bdelivery\x18\a \x01(\x0e2%.supertag.runtime.v2.ArtifactDeliveryR\bdelivery\x12%\n" +
+	"\vdestination\x18\b \x01(\tH\x00R\vdestination\x88\x01\x01\x12C\n" +
+	"\x05state\x18\t \x01(\x0e2-.supertag.runtime.v2.ArtifactAcquisitionStateR\x05state\x12\"\n" +
+	"\rcreated_at_ms\x18\n" +
+	" \x01(\x03R\vcreatedAtMs\x12\"\n" +
+	"\rupdated_at_ms\x18\v \x01(\x03R\vupdatedAtMsB\x0e\n" +
+	"\f_destination\"\xdf\x01\n" +
+	"\x1bFindAttemptArtifactsRequest\x12D\n" +
+	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12\x14\n" +
+	"\x05query\x18\x02 \x01(\tR\x05query\x12\x12\n" +
+	"\x04kind\x18\x03 \x01(\tR\x04kind\x12\x17\n" +
+	"\atask_id\x18\x04 \x01(\tR\x06taskId\x12\x14\n" +
+	"\x05limit\x18\x05 \x01(\rR\x05limit\x12!\n" +
+	"\fbefore_order\x18\x06 \x01(\x04R\vbeforeOrder\"\x86\x01\n" +
+	"\x1dInspectAttemptArtifactRequest\x12D\n" +
+	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12\x1f\n" +
+	"\vartifact_id\x18\x02 \x01(\tR\n" +
+	"artifactId\"\xb2\x02\n" +
+	"\x16AcquireArtifactRequest\x12D\n" +
+	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12!\n" +
+	"\foperation_id\x18\x02 \x01(\tR\voperationId\x12\x1f\n" +
+	"\vartifact_id\x18\x03 \x01(\tR\n" +
+	"artifactId\x12\x14\n" +
+	"\x05paths\x18\x04 \x03(\tR\x05paths\x12A\n" +
+	"\bdelivery\x18\x05 \x01(\x0e2%.supertag.runtime.v2.ArtifactDeliveryR\bdelivery\x12%\n" +
+	"\vdestination\x18\x06 \x01(\tH\x00R\vdestination\x88\x01\x01B\x0e\n" +
+	"\f_destination\"\xd4\x01\n" +
+	" SettleArtifactAcquisitionRequest\x12D\n" +
+	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12%\n" +
+	"\x0eacquisition_id\x18\x02 \x01(\tR\racquisitionId\x12C\n" +
+	"\x05state\x18\x03 \x01(\x0e2-.supertag.runtime.v2.ArtifactAcquisitionStateR\x05state\"\xa1\x01\n" +
+	"\x1eGetAcquiredArtifactFileRequest\x12D\n" +
+	"\aattempt\x18\x01 \x01(\v2*.supertag.runtime.v2.InspectAttemptRequestR\aattempt\x12%\n" +
+	"\x0eacquisition_id\x18\x02 \x01(\tR\racquisitionId\x12\x12\n" +
+	"\x04path\x18\x03 \x01(\tR\x04path\"\x99\x01\n" +
+	"\x1bHarnessFindArtifactsRequest\x12\x14\n" +
+	"\x05query\x18\x01 \x01(\tR\x05query\x12\x12\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12\x14\n" +
+	"\x05limit\x18\x04 \x01(\rR\x05limit\x12!\n" +
+	"\fbefore_order\x18\x05 \x01(\x04R\vbeforeOrder\"\xa2\x01\n" +
+	"\x1aHarnessReadArtifactRequest\x12!\n" +
+	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x1f\n" +
+	"\vartifact_id\x18\x02 \x01(\tR\n" +
+	"artifactId\x12\x12\n" +
+	"\x04path\x18\x03 \x01(\tR\x04path\x12\x16\n" +
+	"\x06offset\x18\x04 \x01(\x04R\x06offset\x12\x14\n" +
+	"\x05limit\x18\x05 \x01(\rR\x05limit\"\xe0\x01\n" +
+	"\x13HarnessArtifactPage\x12J\n" +
+	"\vacquisition\x18\x01 \x01(\v2(.supertag.runtime.v2.ArtifactAcquisitionR\vacquisition\x12\x12\n" +
+	"\x04path\x18\x02 \x01(\tR\x04path\x12\x12\n" +
+	"\x04text\x18\x03 \x01(\tR\x04text\x12\x16\n" +
+	"\x06offset\x18\x04 \x01(\x04R\x06offset\x12\x1f\n" +
+	"\vnext_offset\x18\x05 \x01(\x04R\n" +
+	"nextOffset\x12\x1c\n" +
+	"\ttruncated\x18\x06 \x01(\bR\ttruncated\"x\n" +
+	"\x1cHarnessAttachArtifactRequest\x12!\n" +
+	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12\x1f\n" +
+	"\vartifact_id\x18\x02 \x01(\tR\n" +
+	"artifactId\x12\x14\n" +
+	"\x05paths\x18\x03 \x03(\tR\x05paths\"\x84\x01\n" +
+	"\x17HarnessAttachedArtifact\x12J\n" +
+	"\vacquisition\x18\x01 \x01(\v2(.supertag.runtime.v2.ArtifactAcquisitionR\vacquisition\x12\x1d\n" +
+	"\n" +
+	"local_path\x18\x02 \x01(\tR\tlocalPath\"\xeb\x01\n" +
 	"\x1dHarnessCaptureArtifactRequest\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12J\n" +
 	"\vdescription\x18\x02 \x01(\v2(.supertag.runtime.v2.ArtifactDescriptionR\vdescription\x12\x14\n" +
@@ -1037,20 +2038,45 @@ const file_supertag_runtime_v2_artifact_proto_rawDesc = "" +
 	"\x10ArtifactDownload\x127\n" +
 	"\x04file\x18\x01 \x01(\v2!.supertag.runtime.v2.ArtifactFileH\x00R\x04file\x12\x16\n" +
 	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x06\n" +
-	"\x04part2\xdf\x01\n" +
+	"\x04part*t\n" +
+	"\x10ArtifactDelivery\x12!\n" +
+	"\x1dARTIFACT_DELIVERY_UNSPECIFIED\x10\x00\x12\x1a\n" +
+	"\x16ARTIFACT_DELIVERY_READ\x10\x01\x12!\n" +
+	"\x1dARTIFACT_DELIVERY_MATERIALIZE\x10\x02*\xec\x01\n" +
+	"\x18ArtifactAcquisitionState\x12*\n" +
+	"&ARTIFACT_ACQUISITION_STATE_UNSPECIFIED\x10\x00\x12)\n" +
+	"%ARTIFACT_ACQUISITION_STATE_AUTHORIZED\x10\x01\x12(\n" +
+	"$ARTIFACT_ACQUISITION_STATE_DELIVERED\x10\x02\x12%\n" +
+	"!ARTIFACT_ACQUISITION_STATE_FAILED\x10\x03\x12(\n" +
+	"$ARTIFACT_ACQUISITION_STATE_UNCERTAIN\x10\x042\xdf\x01\n" +
 	"\x0fArtifactCatalog\x12]\n" +
 	"\x03Get\x12/.supertag.runtime.v2.GetCapturedArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12m\n" +
-	"\x04List\x121.supertag.runtime.v2.ListCapturedArtifactsRequest\x1a2.supertag.runtime.v2.ListCapturedArtifactsResponse2\xb8\x03\n" +
+	"\x04List\x121.supertag.runtime.v2.ListCapturedArtifactsRequest\x1a2.supertag.runtime.v2.ListCapturedArtifactsResponse2\xd4\a\n" +
 	"\x11ArtifactDirectory\x12j\n" +
 	"\x0eReserveCapture\x121.supertag.runtime.v2.CommitArtifactCaptureRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12i\n" +
 	"\rCommitCapture\x121.supertag.runtime.v2.CommitArtifactCaptureRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12]\n" +
 	"\x03Get\x12/.supertag.runtime.v2.GetCapturedArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12m\n" +
-	"\x04List\x121.supertag.runtime.v2.ListCapturedArtifactsRequest\x1a2.supertag.runtime.v2.ListCapturedArtifactsResponse2\xdd\x01\n" +
+	"\x04List\x121.supertag.runtime.v2.ListCapturedArtifactsRequest\x1a2.supertag.runtime.v2.ListCapturedArtifactsResponse\x12v\n" +
+	"\x0eFindForAttempt\x120.supertag.runtime.v2.FindAttemptArtifactsRequest\x1a2.supertag.runtime.v2.ListCapturedArtifactsResponse\x12j\n" +
+	"\rGetForAttempt\x122.supertag.runtime.v2.InspectAttemptArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12`\n" +
+	"\aAcquire\x12+.supertag.runtime.v2.AcquireArtifactRequest\x1a(.supertag.runtime.v2.ArtifactAcquisition\x12i\n" +
+	"\x06Settle\x125.supertag.runtime.v2.SettleArtifactAcquisitionRequest\x1a(.supertag.runtime.v2.ArtifactAcquisition\x12i\n" +
+	"\x0fGetAcquiredFile\x123.supertag.runtime.v2.GetAcquiredArtifactFileRequest\x1a!.supertag.runtime.v2.ArtifactFile2\xb3\x03\n" +
+	"\x10AttemptArtifacts\x12l\n" +
+	"\x04Find\x120.supertag.runtime.v2.FindAttemptArtifactsRequest\x1a2.supertag.runtime.v2.ListCapturedArtifactsResponse\x12d\n" +
+	"\aInspect\x122.supertag.runtime.v2.InspectAttemptArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12`\n" +
+	"\aAcquire\x12+.supertag.runtime.v2.AcquireArtifactRequest\x1a(.supertag.runtime.v2.ArtifactAcquisition\x12i\n" +
+	"\x06Settle\x125.supertag.runtime.v2.SettleArtifactAcquisitionRequest\x1a(.supertag.runtime.v2.ArtifactAcquisition2\xd3\x02\n" +
 	"\x11ArtifactTransfers\x12]\n" +
 	"\rUploadCapture\x12#.supertag.runtime.v2.ArtifactUpload\x1a%.supertag.runtime.v2.CapturedArtifact(\x01\x12i\n" +
-	"\fDownloadFile\x120.supertag.runtime.v2.DownloadArtifactFileRequest\x1a%.supertag.runtime.v2.ArtifactDownload0\x012x\n" +
+	"\fDownloadFile\x120.supertag.runtime.v2.DownloadArtifactFileRequest\x1a%.supertag.runtime.v2.ArtifactDownload0\x01\x12t\n" +
+	"\x14DownloadAcquiredFile\x123.supertag.runtime.v2.GetAcquiredArtifactFileRequest\x1a%.supertag.runtime.v2.ArtifactDownload0\x012\x97\x04\n" +
 	"\x10HarnessArtifacts\x12d\n" +
-	"\aCapture\x122.supertag.runtime.v2.HarnessCaptureArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifactb\x06proto3"
+	"\aCapture\x122.supertag.runtime.v2.HarnessCaptureArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12l\n" +
+	"\x04Find\x120.supertag.runtime.v2.HarnessFindArtifactsRequest\x1a2.supertag.runtime.v2.ListCapturedArtifactsResponse\x12a\n" +
+	"\aInspect\x12/.supertag.runtime.v2.GetCapturedArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12a\n" +
+	"\x04Read\x12/.supertag.runtime.v2.HarnessReadArtifactRequest\x1a(.supertag.runtime.v2.HarnessArtifactPage\x12i\n" +
+	"\x06Attach\x121.supertag.runtime.v2.HarnessAttachArtifactRequest\x1a,.supertag.runtime.v2.HarnessAttachedArtifactb\x06proto3"
 
 var (
 	file_supertag_runtime_v2_artifact_proto_rawDescOnce sync.Once
@@ -1064,64 +2090,120 @@ func file_supertag_runtime_v2_artifact_proto_rawDescGZIP() []byte {
 	return file_supertag_runtime_v2_artifact_proto_rawDescData
 }
 
-var file_supertag_runtime_v2_artifact_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_supertag_runtime_v2_artifact_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_supertag_runtime_v2_artifact_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_supertag_runtime_v2_artifact_proto_goTypes = []any{
-	(*ArtifactDescription)(nil),           // 0: supertag.runtime.v2.ArtifactDescription
-	(*ArtifactFile)(nil),                  // 1: supertag.runtime.v2.ArtifactFile
-	(*ArtifactProducer)(nil),              // 2: supertag.runtime.v2.ArtifactProducer
-	(*ArtifactSummary)(nil),               // 3: supertag.runtime.v2.ArtifactSummary
-	(*CapturedArtifact)(nil),              // 4: supertag.runtime.v2.CapturedArtifact
-	(*HarnessCaptureArtifactRequest)(nil), // 5: supertag.runtime.v2.HarnessCaptureArtifactRequest
-	(*CommitArtifactCaptureRequest)(nil),  // 6: supertag.runtime.v2.CommitArtifactCaptureRequest
-	(*GetCapturedArtifactRequest)(nil),    // 7: supertag.runtime.v2.GetCapturedArtifactRequest
-	(*ListCapturedArtifactsRequest)(nil),  // 8: supertag.runtime.v2.ListCapturedArtifactsRequest
-	(*ListCapturedArtifactsResponse)(nil), // 9: supertag.runtime.v2.ListCapturedArtifactsResponse
-	(*ArtifactUpload)(nil),                // 10: supertag.runtime.v2.ArtifactUpload
-	(*ArtifactChunk)(nil),                 // 11: supertag.runtime.v2.ArtifactChunk
-	(*DownloadArtifactFileRequest)(nil),   // 12: supertag.runtime.v2.DownloadArtifactFileRequest
-	(*ArtifactDownload)(nil),              // 13: supertag.runtime.v2.ArtifactDownload
-	(*BlobReference)(nil),                 // 14: supertag.runtime.v2.BlobReference
-	(HarnessKind)(0),                      // 15: supertag.runtime.v2.HarnessKind
-	(*InspectAttemptRequest)(nil),         // 16: supertag.runtime.v2.InspectAttemptRequest
+	(ArtifactDelivery)(0),                    // 0: supertag.runtime.v2.ArtifactDelivery
+	(ArtifactAcquisitionState)(0),            // 1: supertag.runtime.v2.ArtifactAcquisitionState
+	(*ArtifactDescription)(nil),              // 2: supertag.runtime.v2.ArtifactDescription
+	(*ArtifactFile)(nil),                     // 3: supertag.runtime.v2.ArtifactFile
+	(*ArtifactProducer)(nil),                 // 4: supertag.runtime.v2.ArtifactProducer
+	(*ArtifactSummary)(nil),                  // 5: supertag.runtime.v2.ArtifactSummary
+	(*CapturedArtifact)(nil),                 // 6: supertag.runtime.v2.CapturedArtifact
+	(*ArtifactAcquisition)(nil),              // 7: supertag.runtime.v2.ArtifactAcquisition
+	(*FindAttemptArtifactsRequest)(nil),      // 8: supertag.runtime.v2.FindAttemptArtifactsRequest
+	(*InspectAttemptArtifactRequest)(nil),    // 9: supertag.runtime.v2.InspectAttemptArtifactRequest
+	(*AcquireArtifactRequest)(nil),           // 10: supertag.runtime.v2.AcquireArtifactRequest
+	(*SettleArtifactAcquisitionRequest)(nil), // 11: supertag.runtime.v2.SettleArtifactAcquisitionRequest
+	(*GetAcquiredArtifactFileRequest)(nil),   // 12: supertag.runtime.v2.GetAcquiredArtifactFileRequest
+	(*HarnessFindArtifactsRequest)(nil),      // 13: supertag.runtime.v2.HarnessFindArtifactsRequest
+	(*HarnessReadArtifactRequest)(nil),       // 14: supertag.runtime.v2.HarnessReadArtifactRequest
+	(*HarnessArtifactPage)(nil),              // 15: supertag.runtime.v2.HarnessArtifactPage
+	(*HarnessAttachArtifactRequest)(nil),     // 16: supertag.runtime.v2.HarnessAttachArtifactRequest
+	(*HarnessAttachedArtifact)(nil),          // 17: supertag.runtime.v2.HarnessAttachedArtifact
+	(*HarnessCaptureArtifactRequest)(nil),    // 18: supertag.runtime.v2.HarnessCaptureArtifactRequest
+	(*CommitArtifactCaptureRequest)(nil),     // 19: supertag.runtime.v2.CommitArtifactCaptureRequest
+	(*GetCapturedArtifactRequest)(nil),       // 20: supertag.runtime.v2.GetCapturedArtifactRequest
+	(*ListCapturedArtifactsRequest)(nil),     // 21: supertag.runtime.v2.ListCapturedArtifactsRequest
+	(*ListCapturedArtifactsResponse)(nil),    // 22: supertag.runtime.v2.ListCapturedArtifactsResponse
+	(*ArtifactUpload)(nil),                   // 23: supertag.runtime.v2.ArtifactUpload
+	(*ArtifactChunk)(nil),                    // 24: supertag.runtime.v2.ArtifactChunk
+	(*DownloadArtifactFileRequest)(nil),      // 25: supertag.runtime.v2.DownloadArtifactFileRequest
+	(*ArtifactDownload)(nil),                 // 26: supertag.runtime.v2.ArtifactDownload
+	(*BlobReference)(nil),                    // 27: supertag.runtime.v2.BlobReference
+	(HarnessKind)(0),                         // 28: supertag.runtime.v2.HarnessKind
+	(*ArtifactSelection)(nil),                // 29: supertag.runtime.v2.ArtifactSelection
+	(*InspectAttemptRequest)(nil),            // 30: supertag.runtime.v2.InspectAttemptRequest
 }
 var file_supertag_runtime_v2_artifact_proto_depIdxs = []int32{
-	14, // 0: supertag.runtime.v2.ArtifactFile.blob:type_name -> supertag.runtime.v2.BlobReference
-	15, // 1: supertag.runtime.v2.ArtifactProducer.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
-	0,  // 2: supertag.runtime.v2.ArtifactSummary.description:type_name -> supertag.runtime.v2.ArtifactDescription
-	2,  // 3: supertag.runtime.v2.ArtifactSummary.producer:type_name -> supertag.runtime.v2.ArtifactProducer
-	3,  // 4: supertag.runtime.v2.CapturedArtifact.summary:type_name -> supertag.runtime.v2.ArtifactSummary
-	1,  // 5: supertag.runtime.v2.CapturedArtifact.files:type_name -> supertag.runtime.v2.ArtifactFile
-	0,  // 6: supertag.runtime.v2.HarnessCaptureArtifactRequest.description:type_name -> supertag.runtime.v2.ArtifactDescription
-	16, // 7: supertag.runtime.v2.CommitArtifactCaptureRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
-	0,  // 8: supertag.runtime.v2.CommitArtifactCaptureRequest.description:type_name -> supertag.runtime.v2.ArtifactDescription
-	1,  // 9: supertag.runtime.v2.CommitArtifactCaptureRequest.files:type_name -> supertag.runtime.v2.ArtifactFile
-	3,  // 10: supertag.runtime.v2.ListCapturedArtifactsResponse.artifacts:type_name -> supertag.runtime.v2.ArtifactSummary
-	6,  // 11: supertag.runtime.v2.ArtifactUpload.begin:type_name -> supertag.runtime.v2.CommitArtifactCaptureRequest
-	11, // 12: supertag.runtime.v2.ArtifactUpload.chunk:type_name -> supertag.runtime.v2.ArtifactChunk
-	1,  // 13: supertag.runtime.v2.ArtifactDownload.file:type_name -> supertag.runtime.v2.ArtifactFile
-	7,  // 14: supertag.runtime.v2.ArtifactCatalog.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
-	8,  // 15: supertag.runtime.v2.ArtifactCatalog.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
-	6,  // 16: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
-	6,  // 17: supertag.runtime.v2.ArtifactDirectory.CommitCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
-	7,  // 18: supertag.runtime.v2.ArtifactDirectory.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
-	8,  // 19: supertag.runtime.v2.ArtifactDirectory.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
-	10, // 20: supertag.runtime.v2.ArtifactTransfers.UploadCapture:input_type -> supertag.runtime.v2.ArtifactUpload
-	12, // 21: supertag.runtime.v2.ArtifactTransfers.DownloadFile:input_type -> supertag.runtime.v2.DownloadArtifactFileRequest
-	5,  // 22: supertag.runtime.v2.HarnessArtifacts.Capture:input_type -> supertag.runtime.v2.HarnessCaptureArtifactRequest
-	4,  // 23: supertag.runtime.v2.ArtifactCatalog.Get:output_type -> supertag.runtime.v2.CapturedArtifact
-	9,  // 24: supertag.runtime.v2.ArtifactCatalog.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	4,  // 25: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:output_type -> supertag.runtime.v2.CapturedArtifact
-	4,  // 26: supertag.runtime.v2.ArtifactDirectory.CommitCapture:output_type -> supertag.runtime.v2.CapturedArtifact
-	4,  // 27: supertag.runtime.v2.ArtifactDirectory.Get:output_type -> supertag.runtime.v2.CapturedArtifact
-	9,  // 28: supertag.runtime.v2.ArtifactDirectory.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
-	4,  // 29: supertag.runtime.v2.ArtifactTransfers.UploadCapture:output_type -> supertag.runtime.v2.CapturedArtifact
-	13, // 30: supertag.runtime.v2.ArtifactTransfers.DownloadFile:output_type -> supertag.runtime.v2.ArtifactDownload
-	4,  // 31: supertag.runtime.v2.HarnessArtifacts.Capture:output_type -> supertag.runtime.v2.CapturedArtifact
-	23, // [23:32] is the sub-list for method output_type
-	14, // [14:23] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	27, // 0: supertag.runtime.v2.ArtifactFile.blob:type_name -> supertag.runtime.v2.BlobReference
+	28, // 1: supertag.runtime.v2.ArtifactProducer.harness_kind:type_name -> supertag.runtime.v2.HarnessKind
+	2,  // 2: supertag.runtime.v2.ArtifactSummary.description:type_name -> supertag.runtime.v2.ArtifactDescription
+	4,  // 3: supertag.runtime.v2.ArtifactSummary.producer:type_name -> supertag.runtime.v2.ArtifactProducer
+	5,  // 4: supertag.runtime.v2.CapturedArtifact.summary:type_name -> supertag.runtime.v2.ArtifactSummary
+	3,  // 5: supertag.runtime.v2.CapturedArtifact.files:type_name -> supertag.runtime.v2.ArtifactFile
+	29, // 6: supertag.runtime.v2.CapturedArtifact.inputs:type_name -> supertag.runtime.v2.ArtifactSelection
+	3,  // 7: supertag.runtime.v2.ArtifactAcquisition.files:type_name -> supertag.runtime.v2.ArtifactFile
+	0,  // 8: supertag.runtime.v2.ArtifactAcquisition.delivery:type_name -> supertag.runtime.v2.ArtifactDelivery
+	1,  // 9: supertag.runtime.v2.ArtifactAcquisition.state:type_name -> supertag.runtime.v2.ArtifactAcquisitionState
+	30, // 10: supertag.runtime.v2.FindAttemptArtifactsRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	30, // 11: supertag.runtime.v2.InspectAttemptArtifactRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	30, // 12: supertag.runtime.v2.AcquireArtifactRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	0,  // 13: supertag.runtime.v2.AcquireArtifactRequest.delivery:type_name -> supertag.runtime.v2.ArtifactDelivery
+	30, // 14: supertag.runtime.v2.SettleArtifactAcquisitionRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	1,  // 15: supertag.runtime.v2.SettleArtifactAcquisitionRequest.state:type_name -> supertag.runtime.v2.ArtifactAcquisitionState
+	30, // 16: supertag.runtime.v2.GetAcquiredArtifactFileRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	7,  // 17: supertag.runtime.v2.HarnessArtifactPage.acquisition:type_name -> supertag.runtime.v2.ArtifactAcquisition
+	7,  // 18: supertag.runtime.v2.HarnessAttachedArtifact.acquisition:type_name -> supertag.runtime.v2.ArtifactAcquisition
+	2,  // 19: supertag.runtime.v2.HarnessCaptureArtifactRequest.description:type_name -> supertag.runtime.v2.ArtifactDescription
+	30, // 20: supertag.runtime.v2.CommitArtifactCaptureRequest.attempt:type_name -> supertag.runtime.v2.InspectAttemptRequest
+	2,  // 21: supertag.runtime.v2.CommitArtifactCaptureRequest.description:type_name -> supertag.runtime.v2.ArtifactDescription
+	3,  // 22: supertag.runtime.v2.CommitArtifactCaptureRequest.files:type_name -> supertag.runtime.v2.ArtifactFile
+	5,  // 23: supertag.runtime.v2.ListCapturedArtifactsResponse.artifacts:type_name -> supertag.runtime.v2.ArtifactSummary
+	19, // 24: supertag.runtime.v2.ArtifactUpload.begin:type_name -> supertag.runtime.v2.CommitArtifactCaptureRequest
+	24, // 25: supertag.runtime.v2.ArtifactUpload.chunk:type_name -> supertag.runtime.v2.ArtifactChunk
+	3,  // 26: supertag.runtime.v2.ArtifactDownload.file:type_name -> supertag.runtime.v2.ArtifactFile
+	20, // 27: supertag.runtime.v2.ArtifactCatalog.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
+	21, // 28: supertag.runtime.v2.ArtifactCatalog.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
+	19, // 29: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
+	19, // 30: supertag.runtime.v2.ArtifactDirectory.CommitCapture:input_type -> supertag.runtime.v2.CommitArtifactCaptureRequest
+	20, // 31: supertag.runtime.v2.ArtifactDirectory.Get:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
+	21, // 32: supertag.runtime.v2.ArtifactDirectory.List:input_type -> supertag.runtime.v2.ListCapturedArtifactsRequest
+	8,  // 33: supertag.runtime.v2.ArtifactDirectory.FindForAttempt:input_type -> supertag.runtime.v2.FindAttemptArtifactsRequest
+	9,  // 34: supertag.runtime.v2.ArtifactDirectory.GetForAttempt:input_type -> supertag.runtime.v2.InspectAttemptArtifactRequest
+	10, // 35: supertag.runtime.v2.ArtifactDirectory.Acquire:input_type -> supertag.runtime.v2.AcquireArtifactRequest
+	11, // 36: supertag.runtime.v2.ArtifactDirectory.Settle:input_type -> supertag.runtime.v2.SettleArtifactAcquisitionRequest
+	12, // 37: supertag.runtime.v2.ArtifactDirectory.GetAcquiredFile:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
+	8,  // 38: supertag.runtime.v2.AttemptArtifacts.Find:input_type -> supertag.runtime.v2.FindAttemptArtifactsRequest
+	9,  // 39: supertag.runtime.v2.AttemptArtifacts.Inspect:input_type -> supertag.runtime.v2.InspectAttemptArtifactRequest
+	10, // 40: supertag.runtime.v2.AttemptArtifacts.Acquire:input_type -> supertag.runtime.v2.AcquireArtifactRequest
+	11, // 41: supertag.runtime.v2.AttemptArtifacts.Settle:input_type -> supertag.runtime.v2.SettleArtifactAcquisitionRequest
+	23, // 42: supertag.runtime.v2.ArtifactTransfers.UploadCapture:input_type -> supertag.runtime.v2.ArtifactUpload
+	25, // 43: supertag.runtime.v2.ArtifactTransfers.DownloadFile:input_type -> supertag.runtime.v2.DownloadArtifactFileRequest
+	12, // 44: supertag.runtime.v2.ArtifactTransfers.DownloadAcquiredFile:input_type -> supertag.runtime.v2.GetAcquiredArtifactFileRequest
+	18, // 45: supertag.runtime.v2.HarnessArtifacts.Capture:input_type -> supertag.runtime.v2.HarnessCaptureArtifactRequest
+	13, // 46: supertag.runtime.v2.HarnessArtifacts.Find:input_type -> supertag.runtime.v2.HarnessFindArtifactsRequest
+	20, // 47: supertag.runtime.v2.HarnessArtifacts.Inspect:input_type -> supertag.runtime.v2.GetCapturedArtifactRequest
+	14, // 48: supertag.runtime.v2.HarnessArtifacts.Read:input_type -> supertag.runtime.v2.HarnessReadArtifactRequest
+	16, // 49: supertag.runtime.v2.HarnessArtifacts.Attach:input_type -> supertag.runtime.v2.HarnessAttachArtifactRequest
+	6,  // 50: supertag.runtime.v2.ArtifactCatalog.Get:output_type -> supertag.runtime.v2.CapturedArtifact
+	22, // 51: supertag.runtime.v2.ArtifactCatalog.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	6,  // 52: supertag.runtime.v2.ArtifactDirectory.ReserveCapture:output_type -> supertag.runtime.v2.CapturedArtifact
+	6,  // 53: supertag.runtime.v2.ArtifactDirectory.CommitCapture:output_type -> supertag.runtime.v2.CapturedArtifact
+	6,  // 54: supertag.runtime.v2.ArtifactDirectory.Get:output_type -> supertag.runtime.v2.CapturedArtifact
+	22, // 55: supertag.runtime.v2.ArtifactDirectory.List:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	22, // 56: supertag.runtime.v2.ArtifactDirectory.FindForAttempt:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	6,  // 57: supertag.runtime.v2.ArtifactDirectory.GetForAttempt:output_type -> supertag.runtime.v2.CapturedArtifact
+	7,  // 58: supertag.runtime.v2.ArtifactDirectory.Acquire:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	7,  // 59: supertag.runtime.v2.ArtifactDirectory.Settle:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	3,  // 60: supertag.runtime.v2.ArtifactDirectory.GetAcquiredFile:output_type -> supertag.runtime.v2.ArtifactFile
+	22, // 61: supertag.runtime.v2.AttemptArtifacts.Find:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	6,  // 62: supertag.runtime.v2.AttemptArtifacts.Inspect:output_type -> supertag.runtime.v2.CapturedArtifact
+	7,  // 63: supertag.runtime.v2.AttemptArtifacts.Acquire:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	7,  // 64: supertag.runtime.v2.AttemptArtifacts.Settle:output_type -> supertag.runtime.v2.ArtifactAcquisition
+	6,  // 65: supertag.runtime.v2.ArtifactTransfers.UploadCapture:output_type -> supertag.runtime.v2.CapturedArtifact
+	26, // 66: supertag.runtime.v2.ArtifactTransfers.DownloadFile:output_type -> supertag.runtime.v2.ArtifactDownload
+	26, // 67: supertag.runtime.v2.ArtifactTransfers.DownloadAcquiredFile:output_type -> supertag.runtime.v2.ArtifactDownload
+	6,  // 68: supertag.runtime.v2.HarnessArtifacts.Capture:output_type -> supertag.runtime.v2.CapturedArtifact
+	22, // 69: supertag.runtime.v2.HarnessArtifacts.Find:output_type -> supertag.runtime.v2.ListCapturedArtifactsResponse
+	6,  // 70: supertag.runtime.v2.HarnessArtifacts.Inspect:output_type -> supertag.runtime.v2.CapturedArtifact
+	15, // 71: supertag.runtime.v2.HarnessArtifacts.Read:output_type -> supertag.runtime.v2.HarnessArtifactPage
+	17, // 72: supertag.runtime.v2.HarnessArtifacts.Attach:output_type -> supertag.runtime.v2.HarnessAttachedArtifact
+	50, // [50:73] is the sub-list for method output_type
+	27, // [27:50] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_supertag_runtime_v2_artifact_proto_init() }
@@ -1133,12 +2215,14 @@ func file_supertag_runtime_v2_artifact_proto_init() {
 	file_supertag_runtime_v2_artifact_proto_msgTypes[0].OneofWrappers = []any{}
 	file_supertag_runtime_v2_artifact_proto_msgTypes[2].OneofWrappers = []any{}
 	file_supertag_runtime_v2_artifact_proto_msgTypes[5].OneofWrappers = []any{}
-	file_supertag_runtime_v2_artifact_proto_msgTypes[6].OneofWrappers = []any{}
-	file_supertag_runtime_v2_artifact_proto_msgTypes[10].OneofWrappers = []any{
+	file_supertag_runtime_v2_artifact_proto_msgTypes[8].OneofWrappers = []any{}
+	file_supertag_runtime_v2_artifact_proto_msgTypes[16].OneofWrappers = []any{}
+	file_supertag_runtime_v2_artifact_proto_msgTypes[17].OneofWrappers = []any{}
+	file_supertag_runtime_v2_artifact_proto_msgTypes[21].OneofWrappers = []any{
 		(*ArtifactUpload_Begin)(nil),
 		(*ArtifactUpload_Chunk)(nil),
 	}
-	file_supertag_runtime_v2_artifact_proto_msgTypes[13].OneofWrappers = []any{
+	file_supertag_runtime_v2_artifact_proto_msgTypes[24].OneofWrappers = []any{
 		(*ArtifactDownload_File)(nil),
 		(*ArtifactDownload_Chunk)(nil),
 	}
@@ -1147,13 +2231,14 @@ func file_supertag_runtime_v2_artifact_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_supertag_runtime_v2_artifact_proto_rawDesc), len(file_supertag_runtime_v2_artifact_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   14,
+			NumEnums:      2,
+			NumMessages:   25,
 			NumExtensions: 0,
-			NumServices:   4,
+			NumServices:   5,
 		},
 		GoTypes:           file_supertag_runtime_v2_artifact_proto_goTypes,
 		DependencyIndexes: file_supertag_runtime_v2_artifact_proto_depIdxs,
+		EnumInfos:         file_supertag_runtime_v2_artifact_proto_enumTypes,
 		MessageInfos:      file_supertag_runtime_v2_artifact_proto_msgTypes,
 	}.Build()
 	File_supertag_runtime_v2_artifact_proto = out.File

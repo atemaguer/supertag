@@ -2162,7 +2162,7 @@ class AttemptHistory(_message.Message):
     def __init__(self, entries: _Optional[_Iterable[_Union[AttemptHistoryEntry, _Mapping]]] = ...) -> None: ...
 
 class HarnessRun(_message.Message):
-    __slots__ = ("task", "attempt_id", "checkpoint", "may_ask_objective_question", "coordination", "resolved_skills", "history", "remote_workspace", "may_capture_artifacts", "shared_execution")
+    __slots__ = ("task", "attempt_id", "checkpoint", "may_ask_objective_question", "coordination", "resolved_skills", "history", "remote_workspace", "may_capture_artifacts", "shared_execution", "may_acquire_artifacts", "may_materialize_artifacts")
     TASK_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     CHECKPOINT_FIELD_NUMBER: _ClassVar[int]
@@ -2173,6 +2173,8 @@ class HarnessRun(_message.Message):
     REMOTE_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     MAY_CAPTURE_ARTIFACTS_FIELD_NUMBER: _ClassVar[int]
     SHARED_EXECUTION_FIELD_NUMBER: _ClassVar[int]
+    MAY_ACQUIRE_ARTIFACTS_FIELD_NUMBER: _ClassVar[int]
+    MAY_MATERIALIZE_ARTIFACTS_FIELD_NUMBER: _ClassVar[int]
     task: Task
     attempt_id: str
     checkpoint: SessionCheckpoint
@@ -2183,7 +2185,9 @@ class HarnessRun(_message.Message):
     remote_workspace: bool
     may_capture_artifacts: bool
     shared_execution: SharedExecutionAccessSummary
-    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., checkpoint: _Optional[_Union[SessionCheckpoint, _Mapping]] = ..., may_ask_objective_question: _Optional[bool] = ..., coordination: _Optional[_Union[AttemptCapabilities, _Mapping]] = ..., resolved_skills: _Optional[_Iterable[_Union[ResolvedSkill, _Mapping]]] = ..., history: _Optional[_Iterable[_Union[AttemptHistoryEntry, _Mapping]]] = ..., remote_workspace: _Optional[bool] = ..., may_capture_artifacts: _Optional[bool] = ..., shared_execution: _Optional[_Union[SharedExecutionAccessSummary, _Mapping]] = ...) -> None: ...
+    may_acquire_artifacts: bool
+    may_materialize_artifacts: bool
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., checkpoint: _Optional[_Union[SessionCheckpoint, _Mapping]] = ..., may_ask_objective_question: _Optional[bool] = ..., coordination: _Optional[_Union[AttemptCapabilities, _Mapping]] = ..., resolved_skills: _Optional[_Iterable[_Union[ResolvedSkill, _Mapping]]] = ..., history: _Optional[_Iterable[_Union[AttemptHistoryEntry, _Mapping]]] = ..., remote_workspace: _Optional[bool] = ..., may_capture_artifacts: _Optional[bool] = ..., shared_execution: _Optional[_Union[SharedExecutionAccessSummary, _Mapping]] = ..., may_acquire_artifacts: _Optional[bool] = ..., may_materialize_artifacts: _Optional[bool] = ...) -> None: ...
 
 class ContextContract(_message.Message):
     __slots__ = ("type", "version")

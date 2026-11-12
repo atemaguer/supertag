@@ -1,11 +1,34 @@
 from supertag.runtime.v2 import runtime_pb2 as _runtime_pb2
 from google.protobuf.internal import containers as _containers
+from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from collections.abc import Iterable as _Iterable, Mapping as _Mapping
 from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
+
+class ArtifactDelivery(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    ARTIFACT_DELIVERY_UNSPECIFIED: _ClassVar[ArtifactDelivery]
+    ARTIFACT_DELIVERY_READ: _ClassVar[ArtifactDelivery]
+    ARTIFACT_DELIVERY_MATERIALIZE: _ClassVar[ArtifactDelivery]
+
+class ArtifactAcquisitionState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    ARTIFACT_ACQUISITION_STATE_UNSPECIFIED: _ClassVar[ArtifactAcquisitionState]
+    ARTIFACT_ACQUISITION_STATE_AUTHORIZED: _ClassVar[ArtifactAcquisitionState]
+    ARTIFACT_ACQUISITION_STATE_DELIVERED: _ClassVar[ArtifactAcquisitionState]
+    ARTIFACT_ACQUISITION_STATE_FAILED: _ClassVar[ArtifactAcquisitionState]
+    ARTIFACT_ACQUISITION_STATE_UNCERTAIN: _ClassVar[ArtifactAcquisitionState]
+ARTIFACT_DELIVERY_UNSPECIFIED: ArtifactDelivery
+ARTIFACT_DELIVERY_READ: ArtifactDelivery
+ARTIFACT_DELIVERY_MATERIALIZE: ArtifactDelivery
+ARTIFACT_ACQUISITION_STATE_UNSPECIFIED: ArtifactAcquisitionState
+ARTIFACT_ACQUISITION_STATE_AUTHORIZED: ArtifactAcquisitionState
+ARTIFACT_ACQUISITION_STATE_DELIVERED: ArtifactAcquisitionState
+ARTIFACT_ACQUISITION_STATE_FAILED: ArtifactAcquisitionState
+ARTIFACT_ACQUISITION_STATE_UNCERTAIN: ArtifactAcquisitionState
 
 class ArtifactDescription(_message.Message):
     __slots__ = ("title", "kind", "summary")
@@ -62,12 +85,162 @@ class ArtifactSummary(_message.Message):
     def __init__(self, artifact_id: _Optional[str] = ..., description: _Optional[_Union[ArtifactDescription, _Mapping]] = ..., producer: _Optional[_Union[ArtifactProducer, _Mapping]] = ..., file_count: _Optional[int] = ..., byte_length: _Optional[int] = ..., captured_at_ms: _Optional[int] = ..., declared_task_output: _Optional[bool] = ...) -> None: ...
 
 class CapturedArtifact(_message.Message):
-    __slots__ = ("summary", "files")
+    __slots__ = ("summary", "files", "inputs")
     SUMMARY_FIELD_NUMBER: _ClassVar[int]
     FILES_FIELD_NUMBER: _ClassVar[int]
+    INPUTS_FIELD_NUMBER: _ClassVar[int]
     summary: ArtifactSummary
     files: _containers.RepeatedCompositeFieldContainer[ArtifactFile]
-    def __init__(self, summary: _Optional[_Union[ArtifactSummary, _Mapping]] = ..., files: _Optional[_Iterable[_Union[ArtifactFile, _Mapping]]] = ...) -> None: ...
+    inputs: _containers.RepeatedCompositeFieldContainer[_runtime_pb2.ArtifactSelection]
+    def __init__(self, summary: _Optional[_Union[ArtifactSummary, _Mapping]] = ..., files: _Optional[_Iterable[_Union[ArtifactFile, _Mapping]]] = ..., inputs: _Optional[_Iterable[_Union[_runtime_pb2.ArtifactSelection, _Mapping]]] = ...) -> None: ...
+
+class ArtifactAcquisition(_message.Message):
+    __slots__ = ("acquisition_id", "operation_id", "task_id", "attempt_id", "artifact_id", "files", "delivery", "destination", "state", "created_at_ms", "updated_at_ms")
+    ACQUISITION_ID_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
+    FILES_FIELD_NUMBER: _ClassVar[int]
+    DELIVERY_FIELD_NUMBER: _ClassVar[int]
+    DESTINATION_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    UPDATED_AT_MS_FIELD_NUMBER: _ClassVar[int]
+    acquisition_id: str
+    operation_id: str
+    task_id: str
+    attempt_id: str
+    artifact_id: str
+    files: _containers.RepeatedCompositeFieldContainer[ArtifactFile]
+    delivery: ArtifactDelivery
+    destination: str
+    state: ArtifactAcquisitionState
+    created_at_ms: int
+    updated_at_ms: int
+    def __init__(self, acquisition_id: _Optional[str] = ..., operation_id: _Optional[str] = ..., task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., artifact_id: _Optional[str] = ..., files: _Optional[_Iterable[_Union[ArtifactFile, _Mapping]]] = ..., delivery: _Optional[_Union[ArtifactDelivery, str]] = ..., destination: _Optional[str] = ..., state: _Optional[_Union[ArtifactAcquisitionState, str]] = ..., created_at_ms: _Optional[int] = ..., updated_at_ms: _Optional[int] = ...) -> None: ...
+
+class FindAttemptArtifactsRequest(_message.Message):
+    __slots__ = ("attempt", "query", "kind", "task_id", "limit", "before_order")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    QUERY_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    BEFORE_ORDER_FIELD_NUMBER: _ClassVar[int]
+    attempt: _runtime_pb2.InspectAttemptRequest
+    query: str
+    kind: str
+    task_id: str
+    limit: int
+    before_order: int
+    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., query: _Optional[str] = ..., kind: _Optional[str] = ..., task_id: _Optional[str] = ..., limit: _Optional[int] = ..., before_order: _Optional[int] = ...) -> None: ...
+
+class InspectAttemptArtifactRequest(_message.Message):
+    __slots__ = ("attempt", "artifact_id")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
+    attempt: _runtime_pb2.InspectAttemptRequest
+    artifact_id: str
+    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., artifact_id: _Optional[str] = ...) -> None: ...
+
+class AcquireArtifactRequest(_message.Message):
+    __slots__ = ("attempt", "operation_id", "artifact_id", "paths", "delivery", "destination")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
+    PATHS_FIELD_NUMBER: _ClassVar[int]
+    DELIVERY_FIELD_NUMBER: _ClassVar[int]
+    DESTINATION_FIELD_NUMBER: _ClassVar[int]
+    attempt: _runtime_pb2.InspectAttemptRequest
+    operation_id: str
+    artifact_id: str
+    paths: _containers.RepeatedScalarFieldContainer[str]
+    delivery: ArtifactDelivery
+    destination: str
+    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., operation_id: _Optional[str] = ..., artifact_id: _Optional[str] = ..., paths: _Optional[_Iterable[str]] = ..., delivery: _Optional[_Union[ArtifactDelivery, str]] = ..., destination: _Optional[str] = ...) -> None: ...
+
+class SettleArtifactAcquisitionRequest(_message.Message):
+    __slots__ = ("attempt", "acquisition_id", "state")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    ACQUISITION_ID_FIELD_NUMBER: _ClassVar[int]
+    STATE_FIELD_NUMBER: _ClassVar[int]
+    attempt: _runtime_pb2.InspectAttemptRequest
+    acquisition_id: str
+    state: ArtifactAcquisitionState
+    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., acquisition_id: _Optional[str] = ..., state: _Optional[_Union[ArtifactAcquisitionState, str]] = ...) -> None: ...
+
+class GetAcquiredArtifactFileRequest(_message.Message):
+    __slots__ = ("attempt", "acquisition_id", "path")
+    ATTEMPT_FIELD_NUMBER: _ClassVar[int]
+    ACQUISITION_ID_FIELD_NUMBER: _ClassVar[int]
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    attempt: _runtime_pb2.InspectAttemptRequest
+    acquisition_id: str
+    path: str
+    def __init__(self, attempt: _Optional[_Union[_runtime_pb2.InspectAttemptRequest, _Mapping]] = ..., acquisition_id: _Optional[str] = ..., path: _Optional[str] = ...) -> None: ...
+
+class HarnessFindArtifactsRequest(_message.Message):
+    __slots__ = ("query", "kind", "task_id", "limit", "before_order")
+    QUERY_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    BEFORE_ORDER_FIELD_NUMBER: _ClassVar[int]
+    query: str
+    kind: str
+    task_id: str
+    limit: int
+    before_order: int
+    def __init__(self, query: _Optional[str] = ..., kind: _Optional[str] = ..., task_id: _Optional[str] = ..., limit: _Optional[int] = ..., before_order: _Optional[int] = ...) -> None: ...
+
+class HarnessReadArtifactRequest(_message.Message):
+    __slots__ = ("operation_id", "artifact_id", "path", "offset", "limit")
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    OFFSET_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    operation_id: str
+    artifact_id: str
+    path: str
+    offset: int
+    limit: int
+    def __init__(self, operation_id: _Optional[str] = ..., artifact_id: _Optional[str] = ..., path: _Optional[str] = ..., offset: _Optional[int] = ..., limit: _Optional[int] = ...) -> None: ...
+
+class HarnessArtifactPage(_message.Message):
+    __slots__ = ("acquisition", "path", "text", "offset", "next_offset", "truncated")
+    ACQUISITION_FIELD_NUMBER: _ClassVar[int]
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    OFFSET_FIELD_NUMBER: _ClassVar[int]
+    NEXT_OFFSET_FIELD_NUMBER: _ClassVar[int]
+    TRUNCATED_FIELD_NUMBER: _ClassVar[int]
+    acquisition: ArtifactAcquisition
+    path: str
+    text: str
+    offset: int
+    next_offset: int
+    truncated: bool
+    def __init__(self, acquisition: _Optional[_Union[ArtifactAcquisition, _Mapping]] = ..., path: _Optional[str] = ..., text: _Optional[str] = ..., offset: _Optional[int] = ..., next_offset: _Optional[int] = ..., truncated: _Optional[bool] = ...) -> None: ...
+
+class HarnessAttachArtifactRequest(_message.Message):
+    __slots__ = ("operation_id", "artifact_id", "paths")
+    OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
+    ARTIFACT_ID_FIELD_NUMBER: _ClassVar[int]
+    PATHS_FIELD_NUMBER: _ClassVar[int]
+    operation_id: str
+    artifact_id: str
+    paths: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, operation_id: _Optional[str] = ..., artifact_id: _Optional[str] = ..., paths: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class HarnessAttachedArtifact(_message.Message):
+    __slots__ = ("acquisition", "local_path")
+    ACQUISITION_FIELD_NUMBER: _ClassVar[int]
+    LOCAL_PATH_FIELD_NUMBER: _ClassVar[int]
+    acquisition: ArtifactAcquisition
+    local_path: str
+    def __init__(self, acquisition: _Optional[_Union[ArtifactAcquisition, _Mapping]] = ..., local_path: _Optional[str] = ...) -> None: ...
 
 class HarnessCaptureArtifactRequest(_message.Message):
     __slots__ = ("operation_id", "description", "paths", "native_session_id")

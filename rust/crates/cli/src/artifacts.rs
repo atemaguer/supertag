@@ -86,6 +86,7 @@ pub async fn run_capture(connection: Connection, command: CaptureCommand) -> Res
                 .into_inner();
             json!({
                 "summary": capture.summary.as_ref().map(capture_summary),
+                "inputs": capture.inputs.iter().map(|input| json!({"artifact_id":input.artifact_id,"paths":input.paths})).collect::<Vec<_>>(),
                 "files": capture.files.iter().map(|file| json!({
                     "path": file.path,
                     "blob": file.blob.as_ref().map(describe_blob),

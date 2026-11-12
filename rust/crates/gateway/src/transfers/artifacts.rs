@@ -6,6 +6,30 @@ use supertag_protocol::artifacts::{
 const ARTIFACT_TRANSFER_TIMEOUT: Duration = Duration::from_secs(60);
 
 impl GatewayTransfers {
+    pub fn attempt_artifacts_service(
+        &self,
+    ) -> attempt_artifacts_server::AttemptArtifactsServer<Self> {
+        attempt_artifacts_server::AttemptArtifactsServer::new(self.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES)
+    }
+
+    async fn acquired_file(
+        &self,
+        metadata: tonic::metadata::MetadataMap,
+        input: GetAcquiredArtifactFileRequest,
+    ) -> Result<ArtifactFile, Status> {
+        let mut request = Request::new(input);
+        *request.metadata_mut() = metadata;
+        Ok(self
+            .gateway
+            .forward_host(request, true, |channel, request| async move {
+                artifact_client(channel).get_acquired_file(request).await
+            })
+            .await?
+            .into_inner())
+    }
+
     pub fn artifact_catalog_service(&self) -> artifact_catalog_server::ArtifactCatalogServer<Self> {
         artifact_catalog_server::ArtifactCatalogServer::new(self.clone())
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
@@ -118,7 +142,100 @@ impl artifact_catalog_server::ArtifactCatalog for GatewayTransfers {
 }
 
 #[tonic::async_trait]
+impl attempt_artifacts_server::AttemptArtifacts for GatewayTransfers {
+    async fn find(
+        &self,
+        request: Request<FindAttemptArtifactsRequest>,
+    ) -> Result<Response<ListCapturedArtifactsResponse>, Status> {
+        self.gateway
+            .forward_host(request, true, |channel, request| async move {
+                artifact_client(channel).find_for_attempt(request).await
+            })
+            .await
+    }
+    async fn inspect(
+        &self,
+        request: Request<InspectAttemptArtifactRequest>,
+    ) -> Result<Response<CapturedArtifact>, Status> {
+        self.gateway
+            .forward_host(request, true, |channel, request| async move {
+                artifact_client(channel).get_for_attempt(request).await
+            })
+            .await
+    }
+    async fn acquire(
+        &self,
+        request: Request<AcquireArtifactRequest>,
+    ) -> Result<Response<ArtifactAcquisition>, Status> {
+        self.gateway
+            .forward_host(request, true, |channel, request| async move {
+                artifact_client(channel).acquire(request).await
+            })
+            .await
+    }
+    async fn settle(
+        &self,
+        request: Request<SettleArtifactAcquisitionRequest>,
+    ) -> Result<Response<ArtifactAcquisition>, Status> {
+        self.gateway
+            .forward_host(request, true, |channel, request| async move {
+                artifact_client(channel).settle(request).await
+            })
+            .await
+    }
+}
+
+#[tonic::async_trait]
 impl artifact_transfers_server::ArtifactTransfers for GatewayTransfers {
+    type DownloadAcquiredFileStream = ReceiverStream<Result<ArtifactDownload, Status>>;
+
+    async fn download_acquired_file(
+        &self,
+        request: Request<GetAcquiredArtifactFileRequest>,
+    ) -> Result<Response<Self::DownloadAcquiredFileStream>, Status> {
+        let (metadata, _, input) = request.into_parts();
+        validate_artifact_path(&input.path)?;
+        let entry = self.acquired_file(metadata.clone(), input.clone()).await?;
+        let blob = entry
+            .blob
+            .clone()
+            .filter(|blob| {
+                supertag_protocol::valid_sha256(&blob.sha256)
+                    && blob.byte_length <= MAX_ARTIFACT_FILE_BYTES
+            })
+            .ok_or_else(|| Status::data_loss("artifact selection has an invalid blob reference"))?;
+        let permit = self.acquire()?;
+        let file = open_blob(&self.directory()?.join(&blob.sha256)).await?;
+        let expected = entry.clone();
+        let transfer = self.clone();
+        Ok(Response::new(download_stream(
+            file,
+            permit,
+            blob,
+            ArtifactDownload {
+                part: Some(artifact_download::Part::File(entry)),
+            },
+            |data| ArtifactDownload {
+                part: Some(artifact_download::Part::Chunk(data)),
+            },
+            move || {
+                let transfer = transfer.clone();
+                let metadata = metadata.clone();
+                let input = input.clone();
+                let expected = expected.clone();
+                async move {
+                    if transfer.acquired_file(metadata, input).await? != expected {
+                        return Err(Status::data_loss(
+                            "artifact selection changed during transfer",
+                        ));
+                    }
+                    Ok(())
+                }
+            },
+            ARTIFACT_TRANSFER_TIMEOUT,
+        )))
+    }
+
     async fn upload_capture(
         &self,
         request: Request<Streaming<ArtifactUpload>>,

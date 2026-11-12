@@ -25,13 +25,17 @@ _sym_db = _symbol_database.Default()
 from . import runtime_pb2 as supertag_dot_runtime_dot_v2_dot_runtime__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\"supertag/runtime/v2/artifact.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"T\n\x13\x41rtifactDescription\x12\r\n\x05title\x18\x01 \x01(\t\x12\x0c\n\x04kind\x18\x02 \x01(\t\x12\x14\n\x07summary\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\n\n\x08_summary\"N\n\x0c\x41rtifactFile\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x30\n\x04\x62lob\x18\x02 \x01(\x0b\x32\".supertag.runtime.v2.BlobReference\"\xf5\x01\n\x10\x41rtifactProducer\x12\x0f\n\x07task_id\x18\x01 \x01(\t\x12\x12\n\nattempt_id\x18\x02 \x01(\t\x12\x0e\n\x06tag_id\x18\x03 \x01(\t\x12\x12\n\nsession_id\x18\x04 \x01(\t\x12\x19\n\x0cobjective_id\x18\x05 \x01(\tH\x00\x88\x01\x01\x12\x36\n\x0charness_kind\x18\x06 \x01(\x0e\x32 .supertag.runtime.v2.HarnessKind\x12\x1e\n\x11native_session_id\x18\x07 \x01(\tH\x01\x88\x01\x01\x42\x0f\n\r_objective_idB\x14\n\x12_native_session_id\"\xfd\x01\n\x0f\x41rtifactSummary\x12\x13\n\x0b\x61rtifact_id\x18\x01 \x01(\t\x12=\n\x0b\x64\x65scription\x18\x02 \x01(\x0b\x32(.supertag.runtime.v2.ArtifactDescription\x12\x37\n\x08producer\x18\x03 \x01(\x0b\x32%.supertag.runtime.v2.ArtifactProducer\x12\x12\n\nfile_count\x18\x04 \x01(\r\x12\x13\n\x0b\x62yte_length\x18\x05 \x01(\x04\x12\x16\n\x0e\x63\x61ptured_at_ms\x18\x06 \x01(\x03\x12\x1c\n\x14\x64\x65\x63lared_task_output\x18\x07 \x01(\x08\"{\n\x10\x43\x61pturedArtifact\x12\x35\n\x07summary\x18\x01 \x01(\x0b\x32$.supertag.runtime.v2.ArtifactSummary\x12\x30\n\x05\x66iles\x18\x02 \x03(\x0b\x32!.supertag.runtime.v2.ArtifactFile\"\xb9\x01\n\x1dHarnessCaptureArtifactRequest\x12\x14\n\x0coperation_id\x18\x01 \x01(\t\x12=\n\x0b\x64\x65scription\x18\x02 \x01(\x0b\x32(.supertag.runtime.v2.ArtifactDescription\x12\r\n\x05paths\x18\x03 \x03(\t\x12\x1e\n\x11native_session_id\x18\x04 \x01(\tH\x00\x88\x01\x01\x42\x14\n\x12_native_session_id\"\xd3\x02\n\x1c\x43ommitArtifactCaptureRequest\x12;\n\x07\x61ttempt\x18\x01 \x01(\x0b\x32*.supertag.runtime.v2.InspectAttemptRequest\x12\x14\n\x0coperation_id\x18\x02 \x01(\t\x12=\n\x0b\x64\x65scription\x18\x03 \x01(\x0b\x32(.supertag.runtime.v2.ArtifactDescription\x12\x30\n\x05\x66iles\x18\x04 \x03(\x0b\x32!.supertag.runtime.v2.ArtifactFile\x12\x1e\n\x11native_session_id\x18\x05 \x01(\tH\x00\x88\x01\x01\x12\x1b\n\x13managed_task_output\x18\x06 \x01(\x08\x12\x1c\n\x14\x64\x65\x63lared_task_output\x18\x07 \x01(\x08\x42\x14\n\x12_native_session_id\"1\n\x1aGetCapturedArtifactRequest\x12\x13\n\x0b\x61rtifact_id\x18\x01 \x01(\t\"T\n\x1cListCapturedArtifactsRequest\x12\x0f\n\x07task_id\x18\x01 \x01(\t\x12\r\n\x05limit\x18\x02 \x01(\r\x12\x14\n\x0c\x62\x65\x66ore_order\x18\x03 \x01(\x04\"s\n\x1dListCapturedArtifactsResponse\x12\x37\n\tartifacts\x18\x01 \x03(\x0b\x32$.supertag.runtime.v2.ArtifactSummary\x12\x19\n\x11next_before_order\x18\x02 \x01(\x04\"\x91\x01\n\x0e\x41rtifactUpload\x12\x42\n\x05\x62\x65gin\x18\x01 \x01(\x0b\x32\x31.supertag.runtime.v2.CommitArtifactCaptureRequestH\x00\x12\x33\n\x05\x63hunk\x18\x02 \x01(\x0b\x32\".supertag.runtime.v2.ArtifactChunkH\x00\x42\x06\n\x04part\"1\n\rArtifactChunk\x12\x12\n\nfile_index\x18\x01 \x01(\r\x12\x0c\n\x04\x64\x61ta\x18\x02 \x01(\x0c\"@\n\x1b\x44ownloadArtifactFileRequest\x12\x13\n\x0b\x61rtifact_id\x18\x01 \x01(\t\x12\x0c\n\x04path\x18\x02 \x01(\t\"^\n\x10\x41rtifactDownload\x12\x31\n\x04\x66ile\x18\x01 \x01(\x0b\x32!.supertag.runtime.v2.ArtifactFileH\x00\x12\x0f\n\x05\x63hunk\x18\x02 \x01(\x0cH\x00\x42\x06\n\x04part2\xdf\x01\n\x0f\x41rtifactCatalog\x12]\n\x03Get\x12/.supertag.runtime.v2.GetCapturedArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12m\n\x04List\x12\x31.supertag.runtime.v2.ListCapturedArtifactsRequest\x1a\x32.supertag.runtime.v2.ListCapturedArtifactsResponse2\xb8\x03\n\x11\x41rtifactDirectory\x12j\n\x0eReserveCapture\x12\x31.supertag.runtime.v2.CommitArtifactCaptureRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12i\n\rCommitCapture\x12\x31.supertag.runtime.v2.CommitArtifactCaptureRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12]\n\x03Get\x12/.supertag.runtime.v2.GetCapturedArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12m\n\x04List\x12\x31.supertag.runtime.v2.ListCapturedArtifactsRequest\x1a\x32.supertag.runtime.v2.ListCapturedArtifactsResponse2\xdd\x01\n\x11\x41rtifactTransfers\x12]\n\rUploadCapture\x12#.supertag.runtime.v2.ArtifactUpload\x1a%.supertag.runtime.v2.CapturedArtifact(\x01\x12i\n\x0c\x44ownloadFile\x12\x30.supertag.runtime.v2.DownloadArtifactFileRequest\x1a%.supertag.runtime.v2.ArtifactDownload0\x01\x32x\n\x10HarnessArtifacts\x12\x64\n\x07\x43\x61pture\x12\x32.supertag.runtime.v2.HarnessCaptureArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifactb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\"supertag/runtime/v2/artifact.proto\x12\x13supertag.runtime.v2\x1a!supertag/runtime/v2/runtime.proto\"T\n\x13\x41rtifactDescription\x12\r\n\x05title\x18\x01 \x01(\t\x12\x0c\n\x04kind\x18\x02 \x01(\t\x12\x14\n\x07summary\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\n\n\x08_summary\"N\n\x0c\x41rtifactFile\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x30\n\x04\x62lob\x18\x02 \x01(\x0b\x32\".supertag.runtime.v2.BlobReference\"\xf5\x01\n\x10\x41rtifactProducer\x12\x0f\n\x07task_id\x18\x01 \x01(\t\x12\x12\n\nattempt_id\x18\x02 \x01(\t\x12\x0e\n\x06tag_id\x18\x03 \x01(\t\x12\x12\n\nsession_id\x18\x04 \x01(\t\x12\x19\n\x0cobjective_id\x18\x05 \x01(\tH\x00\x88\x01\x01\x12\x36\n\x0charness_kind\x18\x06 \x01(\x0e\x32 .supertag.runtime.v2.HarnessKind\x12\x1e\n\x11native_session_id\x18\x07 \x01(\tH\x01\x88\x01\x01\x42\x0f\n\r_objective_idB\x14\n\x12_native_session_id\"\xfd\x01\n\x0f\x41rtifactSummary\x12\x13\n\x0b\x61rtifact_id\x18\x01 \x01(\t\x12=\n\x0b\x64\x65scription\x18\x02 \x01(\x0b\x32(.supertag.runtime.v2.ArtifactDescription\x12\x37\n\x08producer\x18\x03 \x01(\x0b\x32%.supertag.runtime.v2.ArtifactProducer\x12\x12\n\nfile_count\x18\x04 \x01(\r\x12\x13\n\x0b\x62yte_length\x18\x05 \x01(\x04\x12\x16\n\x0e\x63\x61ptured_at_ms\x18\x06 \x01(\x03\x12\x1c\n\x14\x64\x65\x63lared_task_output\x18\x07 \x01(\x08\"\xb3\x01\n\x10\x43\x61pturedArtifact\x12\x35\n\x07summary\x18\x01 \x01(\x0b\x32$.supertag.runtime.v2.ArtifactSummary\x12\x30\n\x05\x66iles\x18\x02 \x03(\x0b\x32!.supertag.runtime.v2.ArtifactFile\x12\x36\n\x06inputs\x18\x03 \x03(\x0b\x32&.supertag.runtime.v2.ArtifactSelection\"\xfe\x02\n\x13\x41rtifactAcquisition\x12\x16\n\x0e\x61\x63quisition_id\x18\x01 \x01(\t\x12\x14\n\x0coperation_id\x18\x02 \x01(\t\x12\x0f\n\x07task_id\x18\x03 \x01(\t\x12\x12\n\nattempt_id\x18\x04 \x01(\t\x12\x13\n\x0b\x61rtifact_id\x18\x05 \x01(\t\x12\x30\n\x05\x66iles\x18\x06 \x03(\x0b\x32!.supertag.runtime.v2.ArtifactFile\x12\x37\n\x08\x64\x65livery\x18\x07 \x01(\x0e\x32%.supertag.runtime.v2.ArtifactDelivery\x12\x18\n\x0b\x64\x65stination\x18\x08 \x01(\tH\x00\x88\x01\x01\x12<\n\x05state\x18\t \x01(\x0e\x32-.supertag.runtime.v2.ArtifactAcquisitionState\x12\x15\n\rcreated_at_ms\x18\n \x01(\x03\x12\x15\n\rupdated_at_ms\x18\x0b \x01(\x03\x42\x0e\n\x0c_destination\"\xad\x01\n\x1b\x46indAttemptArtifactsRequest\x12;\n\x07\x61ttempt\x18\x01 \x01(\x0b\x32*.supertag.runtime.v2.InspectAttemptRequest\x12\r\n\x05query\x18\x02 \x01(\t\x12\x0c\n\x04kind\x18\x03 \x01(\t\x12\x0f\n\x07task_id\x18\x04 \x01(\t\x12\r\n\x05limit\x18\x05 \x01(\r\x12\x14\n\x0c\x62\x65\x66ore_order\x18\x06 \x01(\x04\"q\n\x1dInspectAttemptArtifactRequest\x12;\n\x07\x61ttempt\x18\x01 \x01(\x0b\x32*.supertag.runtime.v2.InspectAttemptRequest\x12\x13\n\x0b\x61rtifact_id\x18\x02 \x01(\t\"\xf2\x01\n\x16\x41\x63quireArtifactRequest\x12;\n\x07\x61ttempt\x18\x01 \x01(\x0b\x32*.supertag.runtime.v2.InspectAttemptRequest\x12\x14\n\x0coperation_id\x18\x02 \x01(\t\x12\x13\n\x0b\x61rtifact_id\x18\x03 \x01(\t\x12\r\n\x05paths\x18\x04 \x03(\t\x12\x37\n\x08\x64\x65livery\x18\x05 \x01(\x0e\x32%.supertag.runtime.v2.ArtifactDelivery\x12\x18\n\x0b\x64\x65stination\x18\x06 \x01(\tH\x00\x88\x01\x01\x42\x0e\n\x0c_destination\"\xb5\x01\n SettleArtifactAcquisitionRequest\x12;\n\x07\x61ttempt\x18\x01 \x01(\x0b\x32*.supertag.runtime.v2.InspectAttemptRequest\x12\x16\n\x0e\x61\x63quisition_id\x18\x02 \x01(\t\x12<\n\x05state\x18\x03 \x01(\x0e\x32-.supertag.runtime.v2.ArtifactAcquisitionState\"\x83\x01\n\x1eGetAcquiredArtifactFileRequest\x12;\n\x07\x61ttempt\x18\x01 \x01(\x0b\x32*.supertag.runtime.v2.InspectAttemptRequest\x12\x16\n\x0e\x61\x63quisition_id\x18\x02 \x01(\t\x12\x0c\n\x04path\x18\x03 \x01(\t\"p\n\x1bHarnessFindArtifactsRequest\x12\r\n\x05query\x18\x01 \x01(\t\x12\x0c\n\x04kind\x18\x02 \x01(\t\x12\x0f\n\x07task_id\x18\x03 \x01(\t\x12\r\n\x05limit\x18\x04 \x01(\r\x12\x14\n\x0c\x62\x65\x66ore_order\x18\x05 \x01(\x04\"t\n\x1aHarnessReadArtifactRequest\x12\x14\n\x0coperation_id\x18\x01 \x01(\t\x12\x13\n\x0b\x61rtifact_id\x18\x02 \x01(\t\x12\x0c\n\x04path\x18\x03 \x01(\t\x12\x0e\n\x06offset\x18\x04 \x01(\x04\x12\r\n\x05limit\x18\x05 \x01(\r\"\xa8\x01\n\x13HarnessArtifactPage\x12=\n\x0b\x61\x63quisition\x18\x01 \x01(\x0b\x32(.supertag.runtime.v2.ArtifactAcquisition\x12\x0c\n\x04path\x18\x02 \x01(\t\x12\x0c\n\x04text\x18\x03 \x01(\t\x12\x0e\n\x06offset\x18\x04 \x01(\x04\x12\x13\n\x0bnext_offset\x18\x05 \x01(\x04\x12\x11\n\ttruncated\x18\x06 \x01(\x08\"X\n\x1cHarnessAttachArtifactRequest\x12\x14\n\x0coperation_id\x18\x01 \x01(\t\x12\x13\n\x0b\x61rtifact_id\x18\x02 \x01(\t\x12\r\n\x05paths\x18\x03 \x03(\t\"l\n\x17HarnessAttachedArtifact\x12=\n\x0b\x61\x63quisition\x18\x01 \x01(\x0b\x32(.supertag.runtime.v2.ArtifactAcquisition\x12\x12\n\nlocal_path\x18\x02 \x01(\t\"\xb9\x01\n\x1dHarnessCaptureArtifactRequest\x12\x14\n\x0coperation_id\x18\x01 \x01(\t\x12=\n\x0b\x64\x65scription\x18\x02 \x01(\x0b\x32(.supertag.runtime.v2.ArtifactDescription\x12\r\n\x05paths\x18\x03 \x03(\t\x12\x1e\n\x11native_session_id\x18\x04 \x01(\tH\x00\x88\x01\x01\x42\x14\n\x12_native_session_id\"\xd3\x02\n\x1c\x43ommitArtifactCaptureRequest\x12;\n\x07\x61ttempt\x18\x01 \x01(\x0b\x32*.supertag.runtime.v2.InspectAttemptRequest\x12\x14\n\x0coperation_id\x18\x02 \x01(\t\x12=\n\x0b\x64\x65scription\x18\x03 \x01(\x0b\x32(.supertag.runtime.v2.ArtifactDescription\x12\x30\n\x05\x66iles\x18\x04 \x03(\x0b\x32!.supertag.runtime.v2.ArtifactFile\x12\x1e\n\x11native_session_id\x18\x05 \x01(\tH\x00\x88\x01\x01\x12\x1b\n\x13managed_task_output\x18\x06 \x01(\x08\x12\x1c\n\x14\x64\x65\x63lared_task_output\x18\x07 \x01(\x08\x42\x14\n\x12_native_session_id\"1\n\x1aGetCapturedArtifactRequest\x12\x13\n\x0b\x61rtifact_id\x18\x01 \x01(\t\"T\n\x1cListCapturedArtifactsRequest\x12\x0f\n\x07task_id\x18\x01 \x01(\t\x12\r\n\x05limit\x18\x02 \x01(\r\x12\x14\n\x0c\x62\x65\x66ore_order\x18\x03 \x01(\x04\"s\n\x1dListCapturedArtifactsResponse\x12\x37\n\tartifacts\x18\x01 \x03(\x0b\x32$.supertag.runtime.v2.ArtifactSummary\x12\x19\n\x11next_before_order\x18\x02 \x01(\x04\"\x91\x01\n\x0e\x41rtifactUpload\x12\x42\n\x05\x62\x65gin\x18\x01 \x01(\x0b\x32\x31.supertag.runtime.v2.CommitArtifactCaptureRequestH\x00\x12\x33\n\x05\x63hunk\x18\x02 \x01(\x0b\x32\".supertag.runtime.v2.ArtifactChunkH\x00\x42\x06\n\x04part\"1\n\rArtifactChunk\x12\x12\n\nfile_index\x18\x01 \x01(\r\x12\x0c\n\x04\x64\x61ta\x18\x02 \x01(\x0c\"@\n\x1b\x44ownloadArtifactFileRequest\x12\x13\n\x0b\x61rtifact_id\x18\x01 \x01(\t\x12\x0c\n\x04path\x18\x02 \x01(\t\"^\n\x10\x41rtifactDownload\x12\x31\n\x04\x66ile\x18\x01 \x01(\x0b\x32!.supertag.runtime.v2.ArtifactFileH\x00\x12\x0f\n\x05\x63hunk\x18\x02 \x01(\x0cH\x00\x42\x06\n\x04part*t\n\x10\x41rtifactDelivery\x12!\n\x1d\x41RTIFACT_DELIVERY_UNSPECIFIED\x10\x00\x12\x1a\n\x16\x41RTIFACT_DELIVERY_READ\x10\x01\x12!\n\x1d\x41RTIFACT_DELIVERY_MATERIALIZE\x10\x02*\xec\x01\n\x18\x41rtifactAcquisitionState\x12*\n&ARTIFACT_ACQUISITION_STATE_UNSPECIFIED\x10\x00\x12)\n%ARTIFACT_ACQUISITION_STATE_AUTHORIZED\x10\x01\x12(\n$ARTIFACT_ACQUISITION_STATE_DELIVERED\x10\x02\x12%\n!ARTIFACT_ACQUISITION_STATE_FAILED\x10\x03\x12(\n$ARTIFACT_ACQUISITION_STATE_UNCERTAIN\x10\x04\x32\xdf\x01\n\x0f\x41rtifactCatalog\x12]\n\x03Get\x12/.supertag.runtime.v2.GetCapturedArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12m\n\x04List\x12\x31.supertag.runtime.v2.ListCapturedArtifactsRequest\x1a\x32.supertag.runtime.v2.ListCapturedArtifactsResponse2\xd4\x07\n\x11\x41rtifactDirectory\x12j\n\x0eReserveCapture\x12\x31.supertag.runtime.v2.CommitArtifactCaptureRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12i\n\rCommitCapture\x12\x31.supertag.runtime.v2.CommitArtifactCaptureRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12]\n\x03Get\x12/.supertag.runtime.v2.GetCapturedArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12m\n\x04List\x12\x31.supertag.runtime.v2.ListCapturedArtifactsRequest\x1a\x32.supertag.runtime.v2.ListCapturedArtifactsResponse\x12v\n\x0e\x46indForAttempt\x12\x30.supertag.runtime.v2.FindAttemptArtifactsRequest\x1a\x32.supertag.runtime.v2.ListCapturedArtifactsResponse\x12j\n\rGetForAttempt\x12\x32.supertag.runtime.v2.InspectAttemptArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12`\n\x07\x41\x63quire\x12+.supertag.runtime.v2.AcquireArtifactRequest\x1a(.supertag.runtime.v2.ArtifactAcquisition\x12i\n\x06Settle\x12\x35.supertag.runtime.v2.SettleArtifactAcquisitionRequest\x1a(.supertag.runtime.v2.ArtifactAcquisition\x12i\n\x0fGetAcquiredFile\x12\x33.supertag.runtime.v2.GetAcquiredArtifactFileRequest\x1a!.supertag.runtime.v2.ArtifactFile2\xb3\x03\n\x10\x41ttemptArtifacts\x12l\n\x04\x46ind\x12\x30.supertag.runtime.v2.FindAttemptArtifactsRequest\x1a\x32.supertag.runtime.v2.ListCapturedArtifactsResponse\x12\x64\n\x07Inspect\x12\x32.supertag.runtime.v2.InspectAttemptArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12`\n\x07\x41\x63quire\x12+.supertag.runtime.v2.AcquireArtifactRequest\x1a(.supertag.runtime.v2.ArtifactAcquisition\x12i\n\x06Settle\x12\x35.supertag.runtime.v2.SettleArtifactAcquisitionRequest\x1a(.supertag.runtime.v2.ArtifactAcquisition2\xd3\x02\n\x11\x41rtifactTransfers\x12]\n\rUploadCapture\x12#.supertag.runtime.v2.ArtifactUpload\x1a%.supertag.runtime.v2.CapturedArtifact(\x01\x12i\n\x0c\x44ownloadFile\x12\x30.supertag.runtime.v2.DownloadArtifactFileRequest\x1a%.supertag.runtime.v2.ArtifactDownload0\x01\x12t\n\x14\x44ownloadAcquiredFile\x12\x33.supertag.runtime.v2.GetAcquiredArtifactFileRequest\x1a%.supertag.runtime.v2.ArtifactDownload0\x01\x32\x97\x04\n\x10HarnessArtifacts\x12\x64\n\x07\x43\x61pture\x12\x32.supertag.runtime.v2.HarnessCaptureArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12l\n\x04\x46ind\x12\x30.supertag.runtime.v2.HarnessFindArtifactsRequest\x1a\x32.supertag.runtime.v2.ListCapturedArtifactsResponse\x12\x61\n\x07Inspect\x12/.supertag.runtime.v2.GetCapturedArtifactRequest\x1a%.supertag.runtime.v2.CapturedArtifact\x12\x61\n\x04Read\x12/.supertag.runtime.v2.HarnessReadArtifactRequest\x1a(.supertag.runtime.v2.HarnessArtifactPage\x12i\n\x06\x41ttach\x12\x31.supertag.runtime.v2.HarnessAttachArtifactRequest\x1a,.supertag.runtime.v2.HarnessAttachedArtifactb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'supertag._runtime_v2.artifact_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
+  _globals['_ARTIFACTDELIVERY']._serialized_start=3933
+  _globals['_ARTIFACTDELIVERY']._serialized_end=4049
+  _globals['_ARTIFACTACQUISITIONSTATE']._serialized_start=4052
+  _globals['_ARTIFACTACQUISITIONSTATE']._serialized_end=4288
   _globals['_ARTIFACTDESCRIPTION']._serialized_start=94
   _globals['_ARTIFACTDESCRIPTION']._serialized_end=178
   _globals['_ARTIFACTFILE']._serialized_start=180
@@ -40,32 +44,56 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_ARTIFACTPRODUCER']._serialized_end=506
   _globals['_ARTIFACTSUMMARY']._serialized_start=509
   _globals['_ARTIFACTSUMMARY']._serialized_end=762
-  _globals['_CAPTUREDARTIFACT']._serialized_start=764
-  _globals['_CAPTUREDARTIFACT']._serialized_end=887
-  _globals['_HARNESSCAPTUREARTIFACTREQUEST']._serialized_start=890
-  _globals['_HARNESSCAPTUREARTIFACTREQUEST']._serialized_end=1075
-  _globals['_COMMITARTIFACTCAPTUREREQUEST']._serialized_start=1078
-  _globals['_COMMITARTIFACTCAPTUREREQUEST']._serialized_end=1417
-  _globals['_GETCAPTUREDARTIFACTREQUEST']._serialized_start=1419
-  _globals['_GETCAPTUREDARTIFACTREQUEST']._serialized_end=1468
-  _globals['_LISTCAPTUREDARTIFACTSREQUEST']._serialized_start=1470
-  _globals['_LISTCAPTUREDARTIFACTSREQUEST']._serialized_end=1554
-  _globals['_LISTCAPTUREDARTIFACTSRESPONSE']._serialized_start=1556
-  _globals['_LISTCAPTUREDARTIFACTSRESPONSE']._serialized_end=1671
-  _globals['_ARTIFACTUPLOAD']._serialized_start=1674
-  _globals['_ARTIFACTUPLOAD']._serialized_end=1819
-  _globals['_ARTIFACTCHUNK']._serialized_start=1821
-  _globals['_ARTIFACTCHUNK']._serialized_end=1870
-  _globals['_DOWNLOADARTIFACTFILEREQUEST']._serialized_start=1872
-  _globals['_DOWNLOADARTIFACTFILEREQUEST']._serialized_end=1936
-  _globals['_ARTIFACTDOWNLOAD']._serialized_start=1938
-  _globals['_ARTIFACTDOWNLOAD']._serialized_end=2032
-  _globals['_ARTIFACTCATALOG']._serialized_start=2035
-  _globals['_ARTIFACTCATALOG']._serialized_end=2258
-  _globals['_ARTIFACTDIRECTORY']._serialized_start=2261
-  _globals['_ARTIFACTDIRECTORY']._serialized_end=2701
-  _globals['_ARTIFACTTRANSFERS']._serialized_start=2704
-  _globals['_ARTIFACTTRANSFERS']._serialized_end=2925
-  _globals['_HARNESSARTIFACTS']._serialized_start=2927
-  _globals['_HARNESSARTIFACTS']._serialized_end=3047
+  _globals['_CAPTUREDARTIFACT']._serialized_start=765
+  _globals['_CAPTUREDARTIFACT']._serialized_end=944
+  _globals['_ARTIFACTACQUISITION']._serialized_start=947
+  _globals['_ARTIFACTACQUISITION']._serialized_end=1329
+  _globals['_FINDATTEMPTARTIFACTSREQUEST']._serialized_start=1332
+  _globals['_FINDATTEMPTARTIFACTSREQUEST']._serialized_end=1505
+  _globals['_INSPECTATTEMPTARTIFACTREQUEST']._serialized_start=1507
+  _globals['_INSPECTATTEMPTARTIFACTREQUEST']._serialized_end=1620
+  _globals['_ACQUIREARTIFACTREQUEST']._serialized_start=1623
+  _globals['_ACQUIREARTIFACTREQUEST']._serialized_end=1865
+  _globals['_SETTLEARTIFACTACQUISITIONREQUEST']._serialized_start=1868
+  _globals['_SETTLEARTIFACTACQUISITIONREQUEST']._serialized_end=2049
+  _globals['_GETACQUIREDARTIFACTFILEREQUEST']._serialized_start=2052
+  _globals['_GETACQUIREDARTIFACTFILEREQUEST']._serialized_end=2183
+  _globals['_HARNESSFINDARTIFACTSREQUEST']._serialized_start=2185
+  _globals['_HARNESSFINDARTIFACTSREQUEST']._serialized_end=2297
+  _globals['_HARNESSREADARTIFACTREQUEST']._serialized_start=2299
+  _globals['_HARNESSREADARTIFACTREQUEST']._serialized_end=2415
+  _globals['_HARNESSARTIFACTPAGE']._serialized_start=2418
+  _globals['_HARNESSARTIFACTPAGE']._serialized_end=2586
+  _globals['_HARNESSATTACHARTIFACTREQUEST']._serialized_start=2588
+  _globals['_HARNESSATTACHARTIFACTREQUEST']._serialized_end=2676
+  _globals['_HARNESSATTACHEDARTIFACT']._serialized_start=2678
+  _globals['_HARNESSATTACHEDARTIFACT']._serialized_end=2786
+  _globals['_HARNESSCAPTUREARTIFACTREQUEST']._serialized_start=2789
+  _globals['_HARNESSCAPTUREARTIFACTREQUEST']._serialized_end=2974
+  _globals['_COMMITARTIFACTCAPTUREREQUEST']._serialized_start=2977
+  _globals['_COMMITARTIFACTCAPTUREREQUEST']._serialized_end=3316
+  _globals['_GETCAPTUREDARTIFACTREQUEST']._serialized_start=3318
+  _globals['_GETCAPTUREDARTIFACTREQUEST']._serialized_end=3367
+  _globals['_LISTCAPTUREDARTIFACTSREQUEST']._serialized_start=3369
+  _globals['_LISTCAPTUREDARTIFACTSREQUEST']._serialized_end=3453
+  _globals['_LISTCAPTUREDARTIFACTSRESPONSE']._serialized_start=3455
+  _globals['_LISTCAPTUREDARTIFACTSRESPONSE']._serialized_end=3570
+  _globals['_ARTIFACTUPLOAD']._serialized_start=3573
+  _globals['_ARTIFACTUPLOAD']._serialized_end=3718
+  _globals['_ARTIFACTCHUNK']._serialized_start=3720
+  _globals['_ARTIFACTCHUNK']._serialized_end=3769
+  _globals['_DOWNLOADARTIFACTFILEREQUEST']._serialized_start=3771
+  _globals['_DOWNLOADARTIFACTFILEREQUEST']._serialized_end=3835
+  _globals['_ARTIFACTDOWNLOAD']._serialized_start=3837
+  _globals['_ARTIFACTDOWNLOAD']._serialized_end=3931
+  _globals['_ARTIFACTCATALOG']._serialized_start=4291
+  _globals['_ARTIFACTCATALOG']._serialized_end=4514
+  _globals['_ARTIFACTDIRECTORY']._serialized_start=4517
+  _globals['_ARTIFACTDIRECTORY']._serialized_end=5497
+  _globals['_ATTEMPTARTIFACTS']._serialized_start=5500
+  _globals['_ATTEMPTARTIFACTS']._serialized_end=5935
+  _globals['_ARTIFACTTRANSFERS']._serialized_start=5938
+  _globals['_ARTIFACTTRANSFERS']._serialized_end=6277
+  _globals['_HARNESSARTIFACTS']._serialized_start=6280
+  _globals['_HARNESSARTIFACTS']._serialized_end=6815
 # @@protoc_insertion_point(module_scope)

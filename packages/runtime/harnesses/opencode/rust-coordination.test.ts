@@ -80,3 +80,87 @@ it("exposes only admitted tools to the authenticated Attempt and redacts both cr
     await service.close();
   }
 });
+
+it("exposes scoped artifact reads and attachment only with their accepted capabilities", async () => {
+  const bridge = harnessClient("http://127.0.0.1:1", grpcToken);
+  const read = vi.spyOn(bridge.artifacts, "read").mockImplementation(async (input) => ({
+    $typeName: "supertag.runtime.v2.HarnessArtifactPage" as const,
+    acquisition: {
+      $typeName: "supertag.runtime.v2.ArtifactAcquisition" as const,
+      acquisitionId: "acq",
+      operationId: input.operationId ?? "",
+      taskId,
+      attemptId,
+      artifactId: input.artifactId ?? "",
+      files: [],
+      delivery: 1,
+      state: 2,
+      createdAtMs: 1n,
+      updatedAtMs: 1n,
+    },
+    path: input.path ?? "",
+    text: `selected evidence ${grpcToken}`,
+    offset: 0n,
+    nextOffset: 17n,
+    truncated: false,
+  }));
+  const attach = vi.spyOn(bridge.artifacts, "attach");
+  const abort = new AbortController();
+  const service = await startCoordination(
+    bridge,
+    create(HarnessRunSchema, {
+      task: { taskId, tagId, sessionId },
+      attemptId,
+      mayAcquireArtifacts: true,
+      mayMaterializeArtifacts: false,
+    }),
+    {
+      taskId,
+      tagId,
+      attemptId,
+      secrets: [grpcToken],
+      signal: abort.signal,
+      active: () => !abort.signal.aborted,
+    },
+  );
+  const client = new Client({ name: "artifact-reader", version: "1" });
+  try {
+    const tool = service.tools[0];
+    if (!tool) throw new Error("missing private artifact tools");
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(tool.url), {
+        requestInit: { headers: tool.headers },
+      }),
+    );
+    expect((await client.listTools()).tools.map(({ name }) => name)).toEqual([
+      "find_artifacts",
+      "inspect_artifact",
+      "read_artifact",
+    ]);
+    const result = await client.callTool({
+      name: "read_artifact",
+      arguments: { artifactId: "prior", path: "evidence.txt", operationId: "read-one" },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(JSON.stringify(result)).toContain("selected evidence [REDACTED]");
+    expect(read).toHaveBeenCalledExactlyOnceWith(
+      { artifactId: "prior", path: "evidence.txt", operationId: "read-one", offset: 0n, limit: 0 },
+      expect.objectContaining({
+        headers: { authorization: `Bearer ${grpcToken}` },
+        timeoutMs: 120000,
+      }),
+    );
+    expect(
+      (
+        await client.callTool({
+          name: "attach_artifact",
+          arguments: { artifactId: "prior", paths: ["evidence.txt"] },
+        })
+      ).isError,
+    ).toBe(true);
+    expect(attach).not.toHaveBeenCalled();
+  } finally {
+    await client.close();
+    await service.close();
+  }
+});

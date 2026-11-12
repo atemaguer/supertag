@@ -26,22 +26,36 @@ pub(crate) const DIRECT_REVIEW: &str = "coordination-v2-review-v1";
 pub(crate) const WORK_SESSIONS_REVIEW: &str = "coordination-v3-review-v1";
 pub(crate) const WORK_SESSION_LIFECYCLE_REVIEW: &str = "coordination-v4-review-v1";
 pub(crate) const CHILD_QUESTIONS: &str = "work-session-ask-v1";
+pub(crate) const ARTIFACT_ACQUIRE_SUFFIX: &str = "+artifact-acquire-v1";
+pub(crate) const ARTIFACT_ATTACH_SUFFIX: &str = "+artifact-attach-v1";
 pub(crate) const ARTIFACT_CAPTURE_SUFFIX: &str = "+artifact-capture-v1";
 
 #[derive(Clone, Copy)]
 pub(crate) struct Tools {
     pub(crate) coordination: Inventory,
     pub(crate) capture_artifact: bool,
+    pub(crate) acquire_artifacts: bool,
+    pub(crate) attach_artifacts: bool,
 }
 
 impl Tools {
     pub(crate) fn enabled(self) -> bool {
-        self.coordination != Inventory::None || self.capture_artifact
+        self.coordination != Inventory::None || self.capture_artifact || self.acquire_artifacts
     }
 
     pub(crate) fn arguments(self, params: &Value) -> Result<Arguments> {
         if params["tool"] == "capture_artifact" && self.capture_artifact {
             return Ok(Arguments::Capture(crate::artifact::Capture::parse(params)?));
+        }
+        if (matches!(
+            params["tool"].as_str(),
+            Some("find_artifacts" | "inspect_artifact" | "read_artifact")
+        ) && self.acquire_artifacts)
+            || (params["tool"] == "attach_artifact" && self.attach_artifacts)
+        {
+            return Ok(Arguments::Acquire(crate::artifact::Acquisition::parse(
+                params,
+            )?));
         }
         coordination::arguments(params, self.coordination)
     }
@@ -57,7 +71,7 @@ pub(crate) struct Bridge {
     attempt_id: String,
     capabilities: AttemptCapabilities,
     tools: Tools,
-    may_capture_artifacts: bool,
+    current: Tools,
     coordination: coordination::Client,
     calls: BTreeMap<String, (Arguments, Value)>,
     secrets: Vec<String>,
@@ -71,7 +85,7 @@ impl Bridge {
         attempt_id: &str,
         capabilities: AttemptCapabilities,
         tools: Tools,
-        may_capture_artifacts: bool,
+        current: Tools,
     ) -> Self {
         Self {
             client: HarnessQuestionsClient::new(channel.clone())
@@ -87,7 +101,7 @@ impl Bridge {
             attempt_id: attempt_id.into(),
             capabilities,
             tools,
-            may_capture_artifacts,
+            current,
             coordination: coordination::Client::new(channel),
             calls: BTreeMap::new(),
             secrets: vec![],
@@ -123,11 +137,17 @@ impl Bridge {
             Inventory::WorkSessionLifecycle => WORK_SESSION_LIFECYCLE,
             Inventory::WorkSessionLifecycleReview => WORK_SESSION_LIFECYCLE_REVIEW,
         };
+        let mut manifest = base.to_owned();
         if self.tools.capture_artifact {
-            format!("{base}{ARTIFACT_CAPTURE_SUFFIX}")
-        } else {
-            base.into()
+            manifest.push_str(ARTIFACT_CAPTURE_SUFFIX);
         }
+        if self.tools.acquire_artifacts {
+            manifest.push_str(ARTIFACT_ACQUIRE_SUFFIX);
+        }
+        if self.tools.attach_artifacts {
+            manifest.push_str(ARTIFACT_ATTACH_SUFFIX);
+        }
+        manifest
     }
     pub(crate) fn tools(&self) -> Value {
         let mut specs = tool_specs(self.tools.coordination);
@@ -136,6 +156,14 @@ impl Bridge {
                 .as_array_mut()
                 .expect("tool specifications")
                 .push(crate::artifact::spec());
+        }
+        if self.tools.acquire_artifacts {
+            specs[0]["tools"]
+                .as_array_mut()
+                .expect("tool specifications")
+                .extend(crate::artifact::acquisition_specs(
+                    self.tools.attach_artifacts,
+                ));
         }
         specs
     }
@@ -170,7 +198,21 @@ impl Bridge {
             ))?)
         );
         let result = match &arguments {
-            Arguments::Capture(capture) if self.may_capture_artifacts && !self.asked => {
+            Arguments::Acquire(acquisition)
+                if self.current.acquire_artifacts
+                    && (!acquisition.materializes() || self.current.attach_artifacts)
+                    && !self.asked =>
+            {
+                acquisition
+                    .invoke(
+                        &mut self.artifacts,
+                        operation_id,
+                        &self.token,
+                        &self.secrets,
+                    )
+                    .await?
+            }
+            Arguments::Capture(capture) if self.current.capture_artifact && !self.asked => {
                 capture
                     .invoke(
                         &mut self.artifacts,

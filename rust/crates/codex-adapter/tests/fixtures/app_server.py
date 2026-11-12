@@ -64,6 +64,9 @@ if root.joinpath("artifact-mode").exists():
         "paths": ["report.txt"],
     }))
 
+if root.joinpath("artifact-read-mode").exists():
+    coordination_tools.append(("read_artifact", {"artifactId": "artifact-prior", "path": "evidence.txt"}))
+
 def emit(value):
     print(json.dumps(value), flush=True)
 

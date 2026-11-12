@@ -149,6 +149,7 @@ mod tests {
                 headers.clone(),
             ),
             coordination: crate::CoordinationClients {
+                acquisitions: attempt_artifacts_client::AttemptArtifactsClient::with_interceptor(channel.clone(), headers.clone()),
                 transfers: crate::checkpoints::Transfers::new(channel.clone(), headers.clone()),
                 artifacts: supertag_protocol::v2::artifact_transfers_client::ArtifactTransfersClient::with_interceptor(
                     channel.clone(),
@@ -179,6 +180,7 @@ mod tests {
             mcp: None,
             mcp_lane: Default::default(),
             artifact_checkout: None,
+            artifact_inputs: None,
             artifact_capacity: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
         }
     }

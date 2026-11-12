@@ -28,6 +28,31 @@ impl Bridge {
 
 #[tonic::async_trait]
 impl HarnessArtifacts for Bridge {
+    async fn find(
+        &self,
+        request: Request<supertag_protocol::v2::HarnessFindArtifactsRequest>,
+    ) -> Result<Response<supertag_protocol::v2::ListCapturedArtifactsResponse>, Status> {
+        self.find_artifacts(request).await
+    }
+    async fn inspect(
+        &self,
+        request: Request<supertag_protocol::v2::GetCapturedArtifactRequest>,
+    ) -> Result<Response<CapturedArtifact>, Status> {
+        self.inspect_artifact(request).await
+    }
+    async fn read(
+        &self,
+        request: Request<supertag_protocol::v2::HarnessReadArtifactRequest>,
+    ) -> Result<Response<supertag_protocol::v2::HarnessArtifactPage>, Status> {
+        self.read_artifact(request).await
+    }
+    async fn attach(
+        &self,
+        request: Request<supertag_protocol::v2::HarnessAttachArtifactRequest>,
+    ) -> Result<Response<supertag_protocol::v2::HarnessAttachedArtifact>, Status> {
+        self.attach_artifact(request).await
+    }
+
     async fn capture(
         &self,
         request: Request<HarnessCaptureArtifactRequest>,

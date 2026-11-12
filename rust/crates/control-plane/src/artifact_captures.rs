@@ -173,7 +173,13 @@ impl Store {
                 declared_task_output: canonical.declared_task_output,
             }),
             files: canonical.files,
+            inputs: crate::artifact_acquisitions::lineage_in(&mut tx, &attempt.attempt_id).await?,
         };
+        if artifact.encoded_len() > supertag_protocol::MAX_MESSAGE_BYTES - 4096 {
+            return Err(invalid(
+                "artifact manifest and input lineage exceed the transport limit",
+            ));
+        }
         sqlx::query(
             "INSERT INTO supertag_v2_artifact_captures
                (artifact_id,task_id,attempt_id,operation_id,request_digest,payload)
@@ -211,7 +217,9 @@ impl Store {
         if !task_access_in(&mut tx, principal, &row.try_get::<String, _>("task_id")?).await? {
             return Err(missing());
         }
-        let artifact = capture_row(&row)?;
+        let mut artifact = capture_row(&row)?;
+        crate::artifact_acquisitions::operator_lineage_in(&mut tx, principal, &mut artifact)
+            .await?;
         tx.commit().await?;
         Ok(artifact)
     }
@@ -387,7 +395,7 @@ fn validate_declared_outputs(
         .map_err(|error| invalid(error.message()))
 }
 
-fn running(row: &AnyRow, now: i64) -> Result<()> {
+pub(crate) fn running(row: &AnyRow, now: i64) -> Result<()> {
     if row.try_get::<i64, _>("state")? != TaskState::Running as i64 || !lease_is_live(row, now)? {
         return Err(StoreError::FailedPrecondition(
             "artifact capture requires a running Attempt with current authority".into(),
@@ -398,6 +406,66 @@ fn running(row: &AnyRow, now: i64) -> Result<()> {
 
 #[tonic::async_trait]
 impl artifact_directory_server::ArtifactDirectory for ControlPlane {
+    async fn find_for_attempt(
+        &self,
+        request: Request<FindAttemptArtifactsRequest>,
+    ) -> std::result::Result<Response<ListCapturedArtifactsResponse>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .find_attempt_artifacts(&host, request.get_ref())
+                .await?,
+        ))
+    }
+
+    async fn get_for_attempt(
+        &self,
+        request: Request<InspectAttemptArtifactRequest>,
+    ) -> std::result::Result<Response<CapturedArtifact>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .inspect_attempt_artifact(&host, request.get_ref())
+                .await?,
+        ))
+    }
+
+    async fn acquire(
+        &self,
+        request: Request<AcquireArtifactRequest>,
+    ) -> std::result::Result<Response<ArtifactAcquisition>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .acquire_artifact(&host, request.get_ref())
+                .await?,
+        ))
+    }
+
+    async fn settle(
+        &self,
+        request: Request<SettleArtifactAcquisitionRequest>,
+    ) -> std::result::Result<Response<ArtifactAcquisition>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .settle_artifact_acquisition(&host, request.get_ref())
+                .await?,
+        ))
+    }
+
+    async fn get_acquired_file(
+        &self,
+        request: Request<GetAcquiredArtifactFileRequest>,
+    ) -> std::result::Result<Response<ArtifactFile>, Status> {
+        let host = self.host_authority(&request)?;
+        Ok(Response::new(
+            self.store
+                .get_acquired_artifact_file(&host, request.get_ref())
+                .await?,
+        ))
+    }
+
     async fn reserve_capture(
         &self,
         request: Request<CommitArtifactCaptureRequest>,

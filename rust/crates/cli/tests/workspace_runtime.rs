@@ -586,3 +586,171 @@ async fn postgres_workspace_delivery_and_cross_host_continuation_survive_gateway
     cleanup?;
     result.context("workspace process test panicked")?
 }
+
+#[tokio::test]
+async fn artifact_inputs_survive_gateway_restart_and_do_not_enter_workspace_delivery() -> Result<()>
+{
+    let temporary = tempfile::tempdir()?;
+    let root = temporary.path();
+    let source = root.join("source");
+    std::fs::create_dir(&source)?;
+    git(&source, &["init", "--quiet"]).await?;
+    std::fs::write(source.join("workspace.txt"), "base\n")?;
+    git(&source, &["add", "workspace.txt"]).await?;
+    git(&source, &["commit", "--quiet", "-m", "base"]).await?;
+    let base = git(&source, &["rev-parse", "HEAD"]).await?;
+    let credentials = Credentials::new();
+    let mut command = credentials.command(&["control-plane"]);
+    command.env(
+        "SUPERTAG_DATABASE_URL",
+        format!("sqlite://{}?mode=rwc", root.join("state.sqlite").display()),
+    );
+    let (mut plane, private) = service(command).await?;
+    let gateway_command = |listen: Option<&str>| {
+        let mut command = credentials.command(&["gateway", "--control-plane", &private]);
+        command
+            .arg("--checkpoint-directory")
+            .arg(root.join("artifacts"));
+        if let Some(listen) = listen {
+            command.args(["--listen", listen]);
+        }
+        command
+    };
+    let (mut gateway, public) = service(gateway_command(None)).await?;
+    json(credentials.operator(
+        &[
+            "put-tag",
+            "builder",
+            "--instructions",
+            "Use bounded evidence",
+            "--allow",
+            "files:read",
+            "--allow",
+            "files:write",
+            "--workspace-id",
+            "project",
+            "--workspace-base",
+            &base,
+        ],
+        &public,
+    ))
+    .await?;
+    for prompt in ["produce", "consume"] {
+        let task = json(credentials.operator(
+            &[
+                "submit",
+                "--tag",
+                "builder",
+                "--session",
+                "evidence",
+                prompt,
+            ],
+            &public,
+        ))
+        .await?;
+        success(credentials.worker_with_mode(
+            &public,
+            &root.join(format!("host-{prompt}")),
+            Some(&source),
+            "--artifact-acquisition-fixture",
+        ))
+        .await?;
+        let result =
+            json(credentials.operator(&["get-task", field(&task, "task_id")?], &public)).await?;
+        assert_eq!(result["state"], "TASK_STATE_SUCCEEDED", "{result}");
+        if prompt == "produce" {
+            assert!(field(&result, "result")?.starts_with("artifact:"));
+            gateway.kill().await?;
+            gateway.wait().await?;
+            gateway = service(gateway_command(Some(
+                public.strip_prefix("http://").unwrap(),
+            )))
+            .await?
+            .0;
+        } else {
+            let derived = field(&result, "result")?
+                .strip_prefix("derived:")
+                .context("missing derived artifact")?;
+            let metadata =
+                json(credentials.command(&["artifact", "--gateway", &public, "get", derived]))
+                    .await?;
+            assert_eq!(metadata["inputs"].as_array().unwrap().len(), 1);
+            assert_eq!(
+                metadata["inputs"][0]["paths"],
+                serde_json::json!(["evidence.txt"])
+            );
+            let mut command = credentials.operator(
+                &[
+                    "workspace-artifact",
+                    field(&task, "task_id")?,
+                    "--kind",
+                    "patch",
+                ],
+                &public,
+            );
+            let patch = root.join("patch.diff");
+            command.arg("--output").arg(&patch);
+            success(command).await?;
+            let patch = std::fs::read_to_string(patch)?;
+            assert!(patch.contains("derived.txt"));
+            assert!(!patch.contains("inputs/") && !patch.contains("artifact-"));
+        }
+    }
+    assert_eq!(
+        std::fs::read_to_string(source.join("workspace.txt"))?,
+        "base\n"
+    );
+    let cancelled = json(credentials.operator(
+        &[
+            "submit",
+            "--tag",
+            "builder",
+            "--session",
+            "evidence",
+            "cancel",
+        ],
+        &public,
+    ))
+    .await?;
+    let cancelled_id = field(&cancelled, "task_id")?;
+    let cancel_state = root.join("host-cancel");
+    let mut worker = credentials.worker_with_mode(
+        &public,
+        &cancel_state,
+        Some(&source),
+        "--artifact-acquisition-fixture",
+    );
+    worker
+        .arg("--adapter-arg=--wait-for-cancel")
+        .stdout(Stdio::null());
+    let mut worker = worker.spawn()?;
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let events = success(credentials.operator(&["task-events", cancelled_id], &public)).await?;
+        if String::from_utf8_lossy(&events.stdout).contains("artifact attached") {
+            break;
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "artifact attachment never completed"
+        );
+        sleep(Duration::from_millis(20)).await;
+    }
+    let executing: Value =
+        serde_json::from_slice(&std::fs::read(cancel_state.join("attempt.json"))?)?;
+    let checkout = std::path::PathBuf::from(field(&executing["prepared"]["checkout"], "path")?);
+    assert!(checkout.join("inputs").exists());
+    json(credentials.operator(&["cancel", cancelled_id], &public)).await?;
+    ensure!(
+        timeout(WAIT, worker.wait()).await??.success(),
+        "cancelled artifact consumer did not settle"
+    );
+    assert!(!checkout.exists() && !cancel_state.join("artifact-inputs").exists());
+    let cancelled = json(credentials.operator(&["get-task", cancelled_id], &public)).await?;
+    assert_eq!(cancelled["state"], "TASK_STATE_CANCELLED");
+    assert!(cancelled["workspace_delivery"].is_null());
+    assert!(!source.join("evidence.txt").exists() && !source.join("inputs").exists());
+    gateway.kill().await?;
+    plane.kill().await?;
+    Ok(())
+}

@@ -1,4 +1,5 @@
 mod adapter;
+mod artifact_inputs;
 mod artifact_snapshots;
 mod checkpoints;
 pub mod context;
@@ -34,6 +35,7 @@ use supertag_protocol::{
         FinishTaskRequest, HarnessCompleteRequest, HarnessExecutionProfile, HarnessKind,
         HostRecord, InspectAttemptRequest, RegisterHostRequest, ResolvedSkill, StartTaskRequest,
         Task, TaskState, artifact_transfers_client::ArtifactTransfersClient,
+        attempt_artifacts_client::AttemptArtifactsClient,
         attempt_inputs_client::AttemptInputsClient, attempt_mailbox_client::AttemptMailboxClient,
         attempt_work_sessions_client::AttemptWorkSessionsClient,
         attempt_workstreams_client::AttemptWorkstreamsClient, worker_host_client::WorkerHostClient,
@@ -86,6 +88,7 @@ pub(crate) type RegisteredInputs = AttemptInputsClient<InterceptedService<Channe
 #[derive(Clone)]
 pub(crate) struct CoordinationClients {
     transfers: checkpoints::Transfers,
+    acquisitions: AttemptArtifactsClient<InterceptedService<Channel, HostHeaders>>,
     artifacts: ArtifactTransfersClient<InterceptedService<Channel, HostHeaders>>,
     workstreams: AttemptWorkstreamsClient<InterceptedService<Channel, HostHeaders>>,
     mailbox: AttemptMailboxClient<InterceptedService<Channel, HostHeaders>>,
@@ -271,6 +274,9 @@ pub async fn run(
     .max_decoding_message_size(MAX_MESSAGE_BYTES)
     .max_encoding_message_size(MAX_MESSAGE_BYTES);
     let coordination = CoordinationClients {
+        acquisitions: AttemptArtifactsClient::with_interceptor(channel.clone(), headers.clone())
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES),
         transfers: checkpoints::Transfers::new(channel.clone(), headers.clone()),
         artifacts: ArtifactTransfersClient::with_interceptor(
             options.gateway.clone().connect_lazy(),
@@ -476,6 +482,12 @@ pub async fn run(
                     &shutdown,
                     &cancellation,
                     async {
+                        let input_state = options.state_directory.clone();
+                        let input_attempt = attempt.attempt_id.clone();
+                        let input_checkout = workspace.checkout.path.clone();
+                        tokio::task::spawn_blocking(move || artifact_inputs::Inputs::cleanup(&input_state, &input_attempt, &input_checkout))
+                            .await.map_err(|_| Status::internal("artifact input cleanup failed"))?
+                            .map_err(|_| Status::failed_precondition("artifact input files could not be removed safely"))?;
                         if let Some(directory) = outputs.as_ref().and_then(|outputs| outputs.cleanup_directory()) {
                             let checkout = workspace.checkout.path.clone();
                             let directory = directory.to_owned();

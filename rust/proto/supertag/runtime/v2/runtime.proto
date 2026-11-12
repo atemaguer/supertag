@@ -1469,6 +1469,9 @@ message HarnessRun {
   // The supervising Worker Host can capture selected files from this checkout.
   bool may_capture_artifacts = 9;
   SharedExecutionAccessSummary shared_execution = 10;
+  // Artifact visibility follows the accepted Session/Objective, not the byte digest.
+  bool may_acquire_artifacts = 11;
+  bool may_materialize_artifacts = 12;
 }
 
 message ContextContract {

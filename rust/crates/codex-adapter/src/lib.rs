@@ -113,9 +113,17 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
     } else {
         coordination::Inventory::None
     };
+    let current = questions::Tools {
+        coordination: inventory,
+        capture_artifact: attached.may_capture_artifacts,
+        acquire_artifacts: attached.may_acquire_artifacts,
+        attach_artifacts: attached.may_materialize_artifacts,
+    };
     let tools = previous_tools.unwrap_or(questions::Tools {
         coordination: inventory,
         capture_artifact: attached.checkpoint.is_none() && attached.may_capture_artifacts,
+        acquire_artifacts: attached.checkpoint.is_none() && attached.may_acquire_artifacts,
+        attach_artifacts: attached.checkpoint.is_none() && attached.may_materialize_artifacts,
     });
     let mut questions = questions::Bridge::new(
         (channel, artifact_channel),
@@ -124,7 +132,7 @@ pub async fn run(options: CodexOptions, bootstrap: AdapterBootstrap) -> Result<(
         &attached.attempt_id,
         capabilities,
         tools,
-        attached.may_capture_artifacts,
+        current,
     );
     let outcome = execute(
         &options,

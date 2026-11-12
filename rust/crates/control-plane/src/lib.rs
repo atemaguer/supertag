@@ -1,4 +1,5 @@
 mod approvals;
+mod artifact_acquisitions;
 mod artifact_captures;
 mod budget_pool;
 mod checkpoints;

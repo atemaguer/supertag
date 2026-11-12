@@ -12107,8 +12107,11 @@ type HarnessRun struct {
 	// The supervising Worker Host can capture selected files from this checkout.
 	MayCaptureArtifacts bool                          `protobuf:"varint,9,opt,name=may_capture_artifacts,json=mayCaptureArtifacts,proto3" json:"may_capture_artifacts,omitempty"`
 	SharedExecution     *SharedExecutionAccessSummary `protobuf:"bytes,10,opt,name=shared_execution,json=sharedExecution,proto3" json:"shared_execution,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// Artifact visibility follows the accepted Session/Objective, not the byte digest.
+	MayAcquireArtifacts     bool `protobuf:"varint,11,opt,name=may_acquire_artifacts,json=mayAcquireArtifacts,proto3" json:"may_acquire_artifacts,omitempty"`
+	MayMaterializeArtifacts bool `protobuf:"varint,12,opt,name=may_materialize_artifacts,json=mayMaterializeArtifacts,proto3" json:"may_materialize_artifacts,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *HarnessRun) Reset() {
@@ -12209,6 +12212,20 @@ func (x *HarnessRun) GetSharedExecution() *SharedExecutionAccessSummary {
 		return x.SharedExecution
 	}
 	return nil
+}
+
+func (x *HarnessRun) GetMayAcquireArtifacts() bool {
+	if x != nil {
+		return x.MayAcquireArtifacts
+	}
+	return false
+}
+
+func (x *HarnessRun) GetMayMaterializeArtifacts() bool {
+	if x != nil {
+		return x.MayMaterializeArtifacts
+	}
+	return false
 }
 
 type ContextContract struct {
@@ -18464,7 +18481,7 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x06result\x18\x03 \x01(\tH\x00R\x06result\x88\x01\x01B\t\n" +
 	"\a_result\"T\n" +
 	"\x0eAttemptHistory\x12B\n" +
-	"\aentries\x18\x01 \x03(\v2(.supertag.runtime.v2.AttemptHistoryEntryR\aentries\"\xfb\x04\n" +
+	"\aentries\x18\x01 \x03(\v2(.supertag.runtime.v2.AttemptHistoryEntryR\aentries\"\xeb\x05\n" +
 	"\n" +
 	"HarnessRun\x12-\n" +
 	"\x04task\x18\x01 \x01(\v2\x19.supertag.runtime.v2.TaskR\x04task\x12\x1d\n" +
@@ -18480,7 +18497,9 @@ const file_supertag_runtime_v2_runtime_proto_rawDesc = "" +
 	"\x10remote_workspace\x18\b \x01(\bR\x0fremoteWorkspace\x122\n" +
 	"\x15may_capture_artifacts\x18\t \x01(\bR\x13mayCaptureArtifacts\x12\\\n" +
 	"\x10shared_execution\x18\n" +
-	" \x01(\v21.supertag.runtime.v2.SharedExecutionAccessSummaryR\x0fsharedExecution\"?\n" +
+	" \x01(\v21.supertag.runtime.v2.SharedExecutionAccessSummaryR\x0fsharedExecution\x122\n" +
+	"\x15may_acquire_artifacts\x18\v \x01(\bR\x13mayAcquireArtifacts\x12:\n" +
+	"\x19may_materialize_artifacts\x18\f \x01(\bR\x17mayMaterializeArtifacts\"?\n" +
 	"\x0fContextContract\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\rR\aversion\"\xa7\x01\n" +

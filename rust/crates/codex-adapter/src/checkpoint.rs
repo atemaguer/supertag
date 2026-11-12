@@ -288,10 +288,20 @@ pub(crate) fn coordination_inventory(
     let manifest = serde_json::from_slice::<Manifest>(&checkpoint.payload)
         .ok()?
         .tool_manifest;
-    let capture = manifest.strip_suffix(crate::questions::ARTIFACT_CAPTURE_SUFFIX);
-    let coordination = match capture.unwrap_or(&manifest) {
-        crate::questions::NONE if capture.is_some() => Some(crate::coordination::Inventory::None),
-        crate::questions::OBJECTIVE_ASK if capture.is_some() => {
+    let attach = manifest.strip_suffix(crate::questions::ARTIFACT_ATTACH_SUFFIX);
+    let acquire = attach
+        .unwrap_or(&manifest)
+        .strip_suffix(crate::questions::ARTIFACT_ACQUIRE_SUFFIX);
+    if attach.is_some() && acquire.is_none() {
+        return None;
+    }
+    let remaining = acquire.or(attach).unwrap_or(&manifest);
+    let capture = remaining.strip_suffix(crate::questions::ARTIFACT_CAPTURE_SUFFIX);
+    let coordination = match capture.unwrap_or(remaining) {
+        crate::questions::NONE if capture.is_some() || acquire.is_some() => {
+            Some(crate::coordination::Inventory::None)
+        }
+        crate::questions::OBJECTIVE_ASK if capture.is_some() || acquire.is_some() => {
             Some(crate::coordination::Inventory::Ask)
         }
         crate::questions::FULL_COORDINATION => Some(crate::coordination::Inventory::Workstream),
@@ -313,6 +323,8 @@ pub(crate) fn coordination_inventory(
     Some(crate::questions::Tools {
         coordination,
         capture_artifact: capture.is_some(),
+        acquire_artifacts: acquire.is_some(),
+        attach_artifacts: attach.is_some(),
     })
 }
 

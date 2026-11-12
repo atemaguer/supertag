@@ -16,6 +16,14 @@ pub fn managed_output_directory(attempt_id: &str) -> String {
     format!("outputs/{:x}", Sha256::digest(attempt_id.as_bytes()))
 }
 
+pub fn materialized_artifact_directory(attempt_id: &str, operation_id: &str) -> String {
+    format!(
+        "inputs/{:x}/artifact-{:x}",
+        Sha256::digest(attempt_id.as_bytes()),
+        Sha256::digest(operation_id.as_bytes())
+    )
+}
+
 pub fn validate_capture_request(input: &HarnessCaptureArtifactRequest) -> Result<(), Status> {
     validate_metadata(
         &input.operation_id,
