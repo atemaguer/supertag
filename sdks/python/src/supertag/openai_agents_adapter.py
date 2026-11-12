@@ -42,6 +42,7 @@ class _Harness:
     def __init__(self, channel: Any, pb: Any, token: str) -> None:
         service = pb.DESCRIPTOR.services_by_name["Harness"].full_name
         self.pb = pb
+        self.channel = channel
         self.metadata = (("authorization", f"Bearer {token}"),)
         self.attach = _unary(channel, service, "Attach", pb.HarnessRun)
         self.publish = _unary(channel, service, "Publish", pb.TaskEvent)
@@ -228,7 +229,9 @@ async def _execute(
         raise _AdapterFailure("OpenAI Agents cannot enforce the Task's execution limits")
     if task.HasField("policy_snapshot"):
         snapshot = task.policy_snapshot
-        if any(item.required for context_set in snapshot.context_sets for item in context_set.items):
+        if any(
+            item.required for context_set in snapshot.context_sets for item in context_set.items
+        ):
             raise _AdapterFailure("a required Context Item has no OpenAI Agents resolver")
         if (
             not task.HasField("attempt_execution")
@@ -245,9 +248,14 @@ async def _execute(
     if not workspace.is_dir():
         raise _AdapterFailure("OpenAI Agents workspace is unavailable")
     session_items = _restore(attached, redactor)
-    runner = runner or _OfficialOpenAIAgentsRunner(
-        allow_workspace_read="files:read" in actions, model_provider=model_provider
-    )
+    if runner is None:
+        from ._openai_agents_artifacts import artifact_tools
+
+        runner = _OfficialOpenAIAgentsRunner(
+            allow_workspace_read="files:read" in actions,
+            model_provider=model_provider,
+            tools=artifact_tools(harness.channel, harness.metadata, attached, redactor),
+        )
     instructions = (
         "You are a SuperTag teammate. Use only the tools provided for this Task. "
         "Return a concise response suitable for the requester."

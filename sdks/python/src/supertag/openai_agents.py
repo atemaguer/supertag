@@ -10,7 +10,7 @@ from contextlib import ExitStack, aclosing, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic
-from typing import Any, AsyncIterator, Mapping, Protocol
+from typing import Any, AsyncIterator, Mapping, Protocol, Sequence
 from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
@@ -461,9 +461,16 @@ class _OfficialOpenAIAgentsRun:
 
 
 class _OfficialOpenAIAgentsRunner:
-    def __init__(self, *, allow_workspace_read: bool = True, model_provider: Any = None) -> None:
+    def __init__(
+        self,
+        *,
+        allow_workspace_read: bool = True,
+        model_provider: Any = None,
+        tools: Sequence[Any] = (),
+    ) -> None:
         self._allow_workspace_read = allow_workspace_read
         self._model_provider = model_provider
+        self._tools = tools
 
     def start(
         self,
@@ -489,11 +496,14 @@ class _OfficialOpenAIAgentsRunner:
             return _read_workspace_file(workspace, path)
 
         session = _MemorySession(session_items)
+        tools = (
+            [read_workspace_file, *self._tools] if self._allow_workspace_read else list(self._tools)
+        )
         agent = Agent(
             name=name,
             instructions=instructions,
             model=model,
-            tools=[read_workspace_file] if self._allow_workspace_read else [],
+            tools=tools,
         )
         config = RunConfig(tracing_disabled=True)
         if self._model_provider is not None:
