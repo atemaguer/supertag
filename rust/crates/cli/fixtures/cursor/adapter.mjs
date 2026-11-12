@@ -18,6 +18,9 @@ assert.ok(process.env.CURSOR_API_KEY === "synthetic-cursor-provider-key");
 for (const key of [
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
+  "E2B_API_KEY",
+  "E2B_DOMAIN",
+  "SUPERTAG_E2B_TEMPLATE",
   "SUPERTAG_GATEWAY_TOKEN",
   "SUPERTAG_OPERATOR_TOKEN",
   "SUPERTAG_HOST_TOKEN",

@@ -10,6 +10,11 @@ pub(super) fn normalize_profile(
     supplied: Option<&HarnessExecutionProfile>,
 ) -> Result<HarnessExecutionProfile> {
     let mut profile = supplied.cloned().unwrap_or_default();
+    if profile.remote_file_workspace && profile.allow_unsandboxed_commands {
+        return Err(invalid(
+            "remote file workspace cannot run unsandboxed commands",
+        ));
+    }
     if profile.model_ids.len() > 128
         || profile.model_ids.iter().any(|model| {
             model.is_empty()
@@ -102,6 +107,10 @@ pub(super) fn resolve_attempt(
     harness: HarnessKind,
     profile: &HarnessExecutionProfile,
 ) -> Option<AttemptExecutionSelection> {
+    if profile.remote_file_workspace && (harness != HarnessKind::Cursor || task.workspace.is_none())
+    {
+        return None;
+    }
     if matches!(harness, HarnessKind::Opencode | HarnessKind::Cursor)
         && !profile.allow_unsandboxed_commands
         && task
@@ -131,6 +140,7 @@ pub(super) fn resolve_attempt(
         model_source: source as i32,
         harness_kind: harness as i32,
         effort_applied,
+        remote_file_workspace: profile.remote_file_workspace,
     })
 }
 
@@ -150,4 +160,37 @@ pub(super) fn read_profile(bytes: Option<Vec<u8>>) -> Result<Option<HarnessExecu
                 .map_err(|_| invalid("stored Worker Host execution profile is invalid"))
         })
         .transpose()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use supertag_protocol::v2::WorkspaceSpec;
+
+    #[test]
+    fn remote_file_host_only_reserves_cursor_repository_work_without_commands() {
+        let profile = HarnessExecutionProfile {
+            remote_file_workspace: true,
+            ..Default::default()
+        };
+        let mut task = Task {
+            allowed_actions: vec!["files:read".into(), "files:write".into()],
+            ..Default::default()
+        };
+        assert!(resolve_attempt(&task, HarnessKind::Cursor, &profile).is_none());
+        task.workspace = Some(WorkspaceSpec::default());
+        assert!(resolve_attempt(&task, HarnessKind::Codex, &profile).is_none());
+        assert!(
+            resolve_attempt(&task, HarnessKind::Cursor, &profile)
+                .unwrap()
+                .remote_file_workspace
+        );
+        task.allowed_actions.push("commands:execute".into());
+        assert!(resolve_attempt(&task, HarnessKind::Cursor, &profile).is_none());
+        let invalid = HarnessExecutionProfile {
+            allow_unsandboxed_commands: true,
+            ..profile
+        };
+        assert!(normalize_profile(Some(&invalid)).is_err());
+    }
 }

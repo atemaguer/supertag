@@ -46,6 +46,10 @@ impl InputLane {
         self.deadline.send_replace(deadline);
     }
 
+    pub(super) fn authority(&self) -> (watch::Receiver<Instant>, CancellationToken) {
+        (self.deadline.subscribe(), self.closed.clone())
+    }
+
     pub(super) async fn take(
         &self,
         attempt: InspectAttemptRequest,

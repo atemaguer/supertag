@@ -1,0 +1,474 @@
+import { type ChildProcess, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { create } from "@bufbuild/protobuf";
+import { Code, createClient } from "@connectrpc/connect";
+import { createGrpcTransport, Http2SessionManager } from "@connectrpc/connect-node";
+import {
+  HarnessWorkspace,
+  RemoteWorkspaceProvider,
+  RemoteWorkspaceStageChunkSchema,
+} from "@supertag/worker-sdk/internal/rust-harness";
+import type { SandboxOpts } from "e2b";
+import { afterEach, expect, it, vi } from "vitest";
+import { createE2BWorkspaceHandlers } from "./src/rust-provider/main.ts";
+import {
+  createE2BWorkspaceSession,
+  type E2BWorkspaceSandbox,
+} from "./src/rust-provider/session.ts";
+import { startRemoteWorkspaceTransport } from "./src/rust-provider/transport.ts";
+
+const owner = {
+  hostId: "host",
+  hostGeneration: 5n,
+  taskId: "task",
+  attemptId: "attempt",
+  allocationId: "allocation",
+};
+const cleanups: (() => Promise<void>)[] = [];
+
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+});
+
+function wait(child: ChildProcess) {
+  return new Promise<{ exitCode: number; stdout: string; stderr: string }>((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.setEncoding("utf8").on("data", (text) => {
+      stdout += text;
+    });
+    child.stderr?.setEncoding("utf8").on("data", (text) => {
+      stderr += text;
+    });
+    child.on("error", reject);
+    child.on("close", (code) => resolve({ exitCode: code ?? -1, stdout, stderr }));
+  });
+}
+
+async function fixture() {
+  const roots = new Set<string>();
+  cleanups.push(async () => {
+    for (const root of roots) await rm(root, { recursive: true, force: true });
+  });
+  let alive = false;
+  let metadata: Record<string, string> = {};
+  let mutationExit: number | undefined;
+  const client: E2BWorkspaceSandbox["client"] = {
+    sandboxId: "sandbox-one",
+    files: {
+      async makeDir(path) {
+        await mkdir(path, { recursive: true });
+        return true;
+      },
+      async write(path, data) {
+        await writeFile(path, typeof data === "string" ? data : new Uint8Array(data));
+      },
+      async read(path) {
+        return readFile(path);
+      },
+    },
+    commands: {
+      run: vi.fn(async (command, options) => {
+        if (options?.stdin && mutationExit !== undefined) {
+          const exitCode = mutationExit;
+          mutationExit = undefined;
+          return {
+            pid: 1,
+            async wait() {
+              return { exitCode, stdout: "", stderr: "" };
+            },
+            async kill() {
+              return true;
+            },
+            async sendStdin() {},
+            async closeStdin() {},
+          };
+        }
+        const child = spawn("/bin/sh", ["-c", command], {
+          cwd: options?.cwd,
+          env: { ...process.env, ...options?.envs },
+          signal: options?.signal,
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        const finished = wait(child);
+        if (!options?.stdin) child.stdin?.end();
+        if (options?.background) {
+          return {
+            pid: child.pid ?? 1,
+            wait: () => finished,
+            async kill() {
+              return child.kill("SIGKILL");
+            },
+            async sendStdin(data: string | Uint8Array) {
+              child.stdin?.write(data);
+            },
+            async closeStdin() {
+              child.stdin?.end();
+            },
+          };
+        }
+        return finished;
+      }) as E2BWorkspaceSandbox["client"]["commands"]["run"],
+    },
+    async kill() {
+      alive = false;
+      return true;
+    },
+  };
+  const writeTransfer = vi.fn(async (path: string, bytes: Uint8Array) => {
+    roots.add(dirname(path));
+    await writeFile(path, bytes, { flag: "wx", mode: 0o600 });
+  });
+  const readTransfer = vi.fn(async (path: string) => {
+    const bytes = await readFile(path);
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    });
+  });
+  const factory = {
+    create: vi.fn(async (options: SandboxOpts) => {
+      alive = true;
+      metadata = options.metadata ?? {};
+      return { client, writeTransfer, readTransfer };
+    }),
+  };
+  const inventory = {
+    find: vi.fn(async () => (alive ? [{ sandboxId: client.sandboxId, metadata }] : [])),
+    get: vi.fn(async () => (alive ? { sandboxId: client.sandboxId, metadata } : undefined)),
+    kill: vi.fn(async () => {
+      alive = false;
+    }),
+  };
+  const session = createE2BWorkspaceSession({ factory, inventory, template: "test-template" });
+  return {
+    session,
+    factory,
+    inventory,
+    client,
+    writeTransfer,
+    readTransfer,
+    failMutation(exitCode: number) {
+      mutationExit = exitCode;
+    },
+  };
+}
+
+async function bundle(linkTarget = "a.txt") {
+  const root = await mkdtemp(join(tmpdir(), "supertag-e2b-bundle-"));
+  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  const git = async (...args: string[]) => {
+    const result = await wait(spawn("git", args, { cwd: root }));
+    if (result.exitCode !== 0) throw new Error(result.stderr);
+    return result.stdout.trim();
+  };
+  await git("init", "-q", "--template=");
+  await writeFile(join(root, "a.txt"), "original\n");
+  await writeFile(join(root, ".gitattributes"), "a.txt text eol=crlf\n");
+  await writeFile(join(root, "runner"), "#!/bin/sh\nexit 0\n");
+  await chmod(join(root, "runner"), 0o755);
+  await symlink(linkTarget, join(root, "link"));
+  await git("add", ".");
+  await git(
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.invalid",
+    "-c",
+    "commit.gpgSign=false",
+    "commit",
+    "-qm",
+    "fixture",
+  );
+  const startCommit = await git("rev-parse", "HEAD");
+  const ref = "refs/heads/supertag-deliveries/fixture";
+  await git("update-ref", ref, startCommit);
+  const path = join(root, "source.bundle");
+  await git("bundle", "create", path, ref);
+  const bytes = await readFile(path);
+  return {
+    bytes,
+    header: {
+      startCommit,
+      bundle: {
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        byteLength: BigInt(bytes.length),
+      },
+    },
+  };
+}
+
+function unpack(bytes: Uint8Array) {
+  const input = Buffer.from(bytes);
+  expect(input.subarray(0, 9).toString()).toBe("STWTREE1\n");
+  let offset = 13 + input.readUInt32BE(9);
+  const manifest = JSON.parse(input.subarray(13, offset).toString()) as {
+    entries: { path: string; mode: string; size: number }[];
+  };
+  const entries = manifest.entries.map(({ path, mode, size }) => {
+    const body = input.subarray(offset, offset + size);
+    offset += size;
+    return { path, mode, body: body.toString() };
+  });
+  expect(offset).toBe(input.length);
+  return entries;
+}
+
+it("allocates once with exact ownership, bounded lifetime, and no network or environment", async () => {
+  const { session, factory, inventory } = await fixture();
+  await expect(
+    session.allocate({ owner, timeoutMs: 99_999_999, allowedActions: ["files:read"] }),
+  ).resolves.toEqual({ sandboxId: "sandbox-one" });
+  expect(factory.create).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      template: "test-template",
+      timeoutMs: 3_600_000,
+      allowInternetAccess: false,
+      metadata: {
+        "supertag.hostId": "host",
+        "supertag.hostGeneration": "5",
+        "supertag.taskId": "task",
+        "supertag.attemptId": "attempt",
+        "supertag.allocationId": "allocation",
+      },
+    }),
+  );
+  expect(factory.create.mock.calls[0]?.[0]).not.toHaveProperty("envs");
+  await expect(session.allocate({ owner, timeoutMs: 60_000, allowedActions: [] })).rejects.toThrow(
+    /allocat/i,
+  );
+  await expect(session.stop({ owner: { ...owner, hostGeneration: 6n } })).rejects.toThrow(/owner/i);
+  expect(inventory.kill).not.toHaveBeenCalled();
+  await expect(session.stop({ owner, sandboxId: "sandbox-one" })).resolves.toEqual({
+    state: "stopped",
+    sandboxId: "sandbox-one",
+  });
+});
+
+it("rejects command authority before a sandbox is allocated", async () => {
+  const { session, factory } = await fixture();
+  await expect(
+    session.allocate({
+      owner,
+      timeoutMs: 60_000,
+      allowedActions: ["files:write", "commands:execute"],
+    }),
+  ).rejects.toThrow(/commands/i);
+  expect(factory.create).not.toHaveBeenCalled();
+});
+
+it("stages a pinned bundle, accepts file tools, seals them, and returns exact sorted bytes and modes", async () => {
+  const { session } = await fixture();
+  const { header, bytes } = await bundle();
+  await session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write"],
+  });
+  await session.stage(header, bytes);
+  await expect(session.execute({ kind: "read", path: "a.txt" })).resolves.toMatchObject({
+    text: expect.stringContaining("original"),
+  });
+  await session.execute({ kind: "write", path: "z-last", content: "new content" });
+  await session.execute({ kind: "write", path: ".git ", content: "plain file with a space" });
+  const result = await session.capture();
+  expect(result.tree).toEqual({
+    sha256: createHash("sha256").update(result.bytes).digest("hex"),
+    byteLength: BigInt(result.bytes.byteLength),
+  });
+  expect(unpack(result.bytes)).toEqual([
+    { path: ".git ", mode: "100644", body: "plain file with a space" },
+    { path: ".gitattributes", mode: "100644", body: "a.txt text eol=crlf\n" },
+    { path: "a.txt", mode: "100644", body: "original\n" },
+    { path: "link", mode: "120000", body: "a.txt" },
+    { path: "runner", mode: "100755", body: "#!/bin/sh\nexit 0\n" },
+    { path: "z-last", mode: "100644", body: "new content" },
+  ]);
+  await expect(session.execute({ kind: "write", path: "after", content: "later" })).rejects.toThrow(
+    /staged|sealed/i,
+  );
+  await expect(session.capture()).resolves.toEqual(result);
+  await expect(session.stop({ owner })).resolves.toEqual({
+    state: "stopped",
+    sandboxId: "sandbox-one",
+  });
+}, 15_000);
+
+it("rejects wrong digest before transfer and rejects an unadvertised pin", async () => {
+  const { session, writeTransfer } = await fixture();
+  const { header, bytes } = await bundle();
+  await session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
+  await expect(
+    session.stage({ ...header, bundle: { ...header.bundle, sha256: "0".repeat(64) } }, bytes),
+  ).rejects.toThrow(/digest/i);
+  expect(writeTransfer).not.toHaveBeenCalled();
+  await expect(session.stage({ ...header, startCommit: "0".repeat(40) }, bytes)).rejects.toThrow(
+    /stage/i,
+  );
+  await expect(session.capture()).rejects.toThrow(/staged/i);
+}, 15_000);
+
+it("a lost allocation response is redacted and recovered through exact provider ownership", async () => {
+  const { session, factory, inventory } = await fixture();
+  const createSandbox = factory.create.getMockImplementation();
+  if (!createSandbox) throw new Error("missing fixture factory");
+  factory.create.mockImplementationOnce(async (options) => {
+    await createSandbox(options);
+    throw new Error("provider detail: secret key");
+  });
+  await expect(session.allocate({ owner, timeoutMs: 60_000, allowedActions: [] })).rejects.toThrow(
+    /^E2B Workspace allocation could not be verified$/,
+  );
+  await session.close();
+  expect(inventory.find).not.toHaveBeenCalled();
+  expect(inventory.kill).not.toHaveBeenCalled();
+  const recovery = createE2BWorkspaceSession({ inventory, factory });
+  await expect(recovery.stop({ owner })).resolves.toEqual({
+    state: "stopped",
+    sandboxId: "sandbox-one",
+  });
+  expect(inventory.find).toHaveBeenCalledOnce();
+  expect(inventory.kill).toHaveBeenCalledExactlyOnceWith("sandbox-one");
+});
+
+it("never accepts an unverified sandbox ID as proof while Allocate is in flight", async () => {
+  const { session, factory, inventory } = await fixture();
+  const createSandbox = factory.create.getMockImplementation();
+  if (!createSandbox) throw new Error("missing fixture factory");
+  const started = Promise.withResolvers<void>();
+  const released = Promise.withResolvers<void>();
+  factory.create.mockImplementationOnce(async (options) => {
+    started.resolve();
+    await released.promise;
+    return createSandbox(options);
+  });
+  const allocating = session.allocate({ owner, timeoutMs: 60_000, allowedActions: [] });
+  const cancelled = expect(allocating).rejects.toThrow(/could not be verified/);
+  await started.promise;
+  try {
+    await expect(session.stop({ owner, sandboxId: "unrelated-absent-id" })).rejects.toThrow(
+      /unverified/,
+    );
+    expect(inventory.get).not.toHaveBeenCalled();
+    await expect(session.stop({ owner })).resolves.toEqual({ state: "uncertain" });
+  } finally {
+    released.resolve();
+    await cancelled;
+  }
+  const recovery = createE2BWorkspaceSession({ inventory, factory });
+  await expect(recovery.stop({ owner })).resolves.toEqual({
+    state: "stopped",
+    sandboxId: "sandbox-one",
+  });
+});
+
+it("withholds capture after a failed mutation wrapper and stops an acknowledged sandbox on close", async () => {
+  const { session, inventory, failMutation } = await fixture();
+  const { header, bytes } = await bundle();
+  await session.allocate({
+    owner,
+    timeoutMs: 60_000,
+    allowedActions: ["files:read", "files:write"],
+  });
+  await session.stage(header, bytes);
+  await expect(session.execute({ kind: "read", path: "missing-file" })).resolves.toMatchObject({
+    isError: true,
+  });
+  failMutation(137);
+  await expect(
+    session.execute({ kind: "write", path: "a.txt", content: "in flight" }),
+  ).resolves.toMatchObject({
+    isError: true,
+  });
+  await expect(session.capture()).rejects.toThrow(/could not be captured/);
+  await session.close();
+  expect(inventory.kill).toHaveBeenCalledExactlyOnceWith("sandbox-one");
+}, 15_000);
+
+it("fails staging a pinned bundle with an escaping symlink", async () => {
+  const { session } = await fixture();
+  const { header, bytes } = await bundle("../outside");
+  await session.allocate({ owner, timeoutMs: 60_000, allowedActions: ["files:read"] });
+  await expect(session.stage(header, bytes)).rejects.toThrow(/could not be staged/);
+  await expect(session.capture()).rejects.toThrow(/staged/i);
+  await session.close();
+}, 15_000);
+
+it("wires generated gRPC through production handlers, seals queued edits and proves absence", async () => {
+  const { session, inventory, writeTransfer } = await fixture();
+  const { header, bytes } = await bundle();
+  const token = "workspace-provider-fixture-token";
+  const auth = { headers: { authorization: `Bearer ${token}` } };
+  const server = await startRemoteWorkspaceTransport({
+    ...createE2BWorkspaceHandlers(session),
+    token,
+  });
+  const sessionManager = new Http2SessionManager(server.endpoint);
+  const transport = createGrpcTransport({ baseUrl: server.endpoint, sessionManager });
+  const provider = createClient(RemoteWorkspaceProvider, transport);
+  const workspace = createClient(HarnessWorkspace, transport);
+  try {
+    await expect(
+      provider.allocate(
+        {
+          owner,
+          timeoutMs: 60_000,
+          allowedActions: ["files:read", "files:write"],
+        },
+        auth,
+      ),
+    ).resolves.toMatchObject({ sandboxId: "sandbox-one" });
+    const stageHeader = create(RemoteWorkspaceStageChunkSchema, {
+      part: { case: "header", value: header },
+    });
+    const payload = (value: Uint8Array) =>
+      create(RemoteWorkspaceStageChunkSchema, {
+        part: { case: "payload", value },
+      });
+    const parts = async function* (...messages: (typeof stageHeader)[]) {
+      yield* messages;
+    };
+    await expect(provider.stage(parts(payload(bytes), stageHeader), auth)).rejects.toMatchObject({
+      code: Code.InvalidArgument,
+    });
+    expect(writeTransfer).not.toHaveBeenCalled();
+    await provider.stage(
+      parts(stageHeader, payload(bytes.subarray(0, 10)), payload(bytes.subarray(10))),
+      auth,
+    );
+    await expect(
+      workspace.execute({ operation: { case: "command", value: { command: "true" } } }, auth),
+    ).rejects.toMatchObject({ code: Code.PermissionDenied });
+    await expect(
+      workspace.execute(
+        { operation: { case: "write", value: { path: ".git/config", content: "untrusted" } } },
+        auth,
+      ),
+    ).rejects.toMatchObject({ code: Code.Internal });
+    const edit = (oldText: string, newText: string) =>
+      session.execute({ kind: "edit", path: "a.txt", oldText, newText });
+    const edits = Promise.all([edit("original", "first"), edit("first", "second")]);
+    void edits.catch(() => undefined);
+    const output = [];
+    for await (const part of provider.capture({}, auth)) output.push(part);
+    await edits;
+    expect(output[0]?.part.case).toBe("tree");
+    const collected = Buffer.concat(
+      output.flatMap((part) => (part.part.case === "payload" ? [part.part.value] : [])),
+    );
+    expect(unpack(collected)).toContainEqual({ path: "a.txt", mode: "100644", body: "second\n" });
+    await expect(provider.stop({ owner, sandboxId: "sandbox-one" }, auth)).resolves.toMatchObject({
+      stoppedSandboxId: "sandbox-one",
+    });
+    await session.close();
+    expect(inventory.kill).toHaveBeenCalledExactlyOnceWith("sandbox-one");
+  } finally {
+    sessionManager.abort();
+    await server.close();
+  }
+}, 15_000);

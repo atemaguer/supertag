@@ -357,6 +357,7 @@ async fn contract(url: &str) {
         model_ids: vec!["fixture-model".into()],
         default_model: Some("fixture-model".into()),
         allow_unsandboxed_commands: true,
+        remote_file_workspace: false,
     };
     let claim = store
         .claim_task_with_profile(

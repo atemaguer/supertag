@@ -63,6 +63,10 @@ const (
 	WorkspaceDirectoryName = "supertag.runtime.v2.WorkspaceDirectory"
 	// HarnessName is the fully-qualified name of the Harness service.
 	HarnessName = "supertag.runtime.v2.Harness"
+	// HarnessWorkspaceName is the fully-qualified name of the HarnessWorkspace service.
+	HarnessWorkspaceName = "supertag.runtime.v2.HarnessWorkspace"
+	// RemoteWorkspaceProviderName is the fully-qualified name of the RemoteWorkspaceProvider service.
+	RemoteWorkspaceProviderName = "supertag.runtime.v2.RemoteWorkspaceProvider"
 	// HarnessQuestionsName is the fully-qualified name of the HarnessQuestions service.
 	HarnessQuestionsName = "supertag.runtime.v2.HarnessQuestions"
 	// HarnessWorkstreamsName is the fully-qualified name of the HarnessWorkstreams service.
@@ -346,6 +350,21 @@ const (
 	HarnessReportUsageProcedure = "/supertag.runtime.v2.Harness/ReportUsage"
 	// HarnessCompleteProcedure is the fully-qualified name of the Harness's Complete RPC.
 	HarnessCompleteProcedure = "/supertag.runtime.v2.Harness/Complete"
+	// HarnessWorkspaceExecuteProcedure is the fully-qualified name of the HarnessWorkspace's Execute
+	// RPC.
+	HarnessWorkspaceExecuteProcedure = "/supertag.runtime.v2.HarnessWorkspace/Execute"
+	// RemoteWorkspaceProviderAllocateProcedure is the fully-qualified name of the
+	// RemoteWorkspaceProvider's Allocate RPC.
+	RemoteWorkspaceProviderAllocateProcedure = "/supertag.runtime.v2.RemoteWorkspaceProvider/Allocate"
+	// RemoteWorkspaceProviderStageProcedure is the fully-qualified name of the
+	// RemoteWorkspaceProvider's Stage RPC.
+	RemoteWorkspaceProviderStageProcedure = "/supertag.runtime.v2.RemoteWorkspaceProvider/Stage"
+	// RemoteWorkspaceProviderCaptureProcedure is the fully-qualified name of the
+	// RemoteWorkspaceProvider's Capture RPC.
+	RemoteWorkspaceProviderCaptureProcedure = "/supertag.runtime.v2.RemoteWorkspaceProvider/Capture"
+	// RemoteWorkspaceProviderStopProcedure is the fully-qualified name of the RemoteWorkspaceProvider's
+	// Stop RPC.
+	RemoteWorkspaceProviderStopProcedure = "/supertag.runtime.v2.RemoteWorkspaceProvider/Stop"
 	// HarnessQuestionsAskQuestionProcedure is the fully-qualified name of the HarnessQuestions's
 	// AskQuestion RPC.
 	HarnessQuestionsAskQuestionProcedure = "/supertag.runtime.v2.HarnessQuestions/AskQuestion"
@@ -4053,6 +4072,227 @@ func (UnimplementedHarnessHandler) ReportUsage(context.Context, *connect.Request
 
 func (UnimplementedHarnessHandler) Complete(context.Context, *connect.Request[runtimev2.HarnessCompleteRequest]) (*connect.Response[runtimev2.HarnessCompleteResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.Harness.Complete is not implemented"))
+}
+
+// HarnessWorkspaceClient is a client for the supertag.runtime.v2.HarnessWorkspace service.
+type HarnessWorkspaceClient interface {
+	Execute(context.Context, *connect.Request[runtimev2.HarnessWorkspaceRequest]) (*connect.Response[runtimev2.HarnessWorkspaceResult], error)
+}
+
+// NewHarnessWorkspaceClient constructs a client for the supertag.runtime.v2.HarnessWorkspace
+// service. By default, it uses the Connect protocol with the binary Protobuf Codec, asks for
+// gzipped responses, and sends uncompressed requests. To use the gRPC or gRPC-Web protocols, supply
+// the connect.WithGRPC() or connect.WithGRPCWeb() options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewHarnessWorkspaceClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) HarnessWorkspaceClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	harnessWorkspaceMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HarnessWorkspace").Methods()
+	return &harnessWorkspaceClient{
+		execute: connect.NewClient[runtimev2.HarnessWorkspaceRequest, runtimev2.HarnessWorkspaceResult](
+			httpClient,
+			baseURL+HarnessWorkspaceExecuteProcedure,
+			connect.WithSchema(harnessWorkspaceMethods.ByName("Execute")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// harnessWorkspaceClient implements HarnessWorkspaceClient.
+type harnessWorkspaceClient struct {
+	execute *connect.Client[runtimev2.HarnessWorkspaceRequest, runtimev2.HarnessWorkspaceResult]
+}
+
+// Execute calls supertag.runtime.v2.HarnessWorkspace.Execute.
+func (c *harnessWorkspaceClient) Execute(ctx context.Context, req *connect.Request[runtimev2.HarnessWorkspaceRequest]) (*connect.Response[runtimev2.HarnessWorkspaceResult], error) {
+	return c.execute.CallUnary(ctx, req)
+}
+
+// HarnessWorkspaceHandler is an implementation of the supertag.runtime.v2.HarnessWorkspace service.
+type HarnessWorkspaceHandler interface {
+	Execute(context.Context, *connect.Request[runtimev2.HarnessWorkspaceRequest]) (*connect.Response[runtimev2.HarnessWorkspaceResult], error)
+}
+
+// NewHarnessWorkspaceHandler builds an HTTP handler from the service implementation. It returns the
+// path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewHarnessWorkspaceHandler(svc HarnessWorkspaceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	harnessWorkspaceMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("HarnessWorkspace").Methods()
+	harnessWorkspaceExecuteHandler := connect.NewUnaryHandler(
+		HarnessWorkspaceExecuteProcedure,
+		svc.Execute,
+		connect.WithSchema(harnessWorkspaceMethods.ByName("Execute")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.HarnessWorkspace/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case HarnessWorkspaceExecuteProcedure:
+			harnessWorkspaceExecuteHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedHarnessWorkspaceHandler returns CodeUnimplemented from all methods.
+type UnimplementedHarnessWorkspaceHandler struct{}
+
+func (UnimplementedHarnessWorkspaceHandler) Execute(context.Context, *connect.Request[runtimev2.HarnessWorkspaceRequest]) (*connect.Response[runtimev2.HarnessWorkspaceResult], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.HarnessWorkspace.Execute is not implemented"))
+}
+
+// RemoteWorkspaceProviderClient is a client for the supertag.runtime.v2.RemoteWorkspaceProvider
+// service.
+type RemoteWorkspaceProviderClient interface {
+	Allocate(context.Context, *connect.Request[runtimev2.RemoteWorkspaceAllocateRequest]) (*connect.Response[runtimev2.RemoteWorkspaceAllocation], error)
+	Stage(context.Context) *connect.ClientStreamForClient[runtimev2.RemoteWorkspaceStageChunk, runtimev2.RemoteWorkspaceStageResponse]
+	Capture(context.Context, *connect.Request[runtimev2.RemoteWorkspaceCaptureRequest]) (*connect.ServerStreamForClient[runtimev2.RemoteWorkspaceCaptureChunk], error)
+	Stop(context.Context, *connect.Request[runtimev2.RemoteWorkspaceStopRequest]) (*connect.Response[runtimev2.RemoteWorkspaceStopResponse], error)
+}
+
+// NewRemoteWorkspaceProviderClient constructs a client for the
+// supertag.runtime.v2.RemoteWorkspaceProvider service. By default, it uses the Connect protocol
+// with the binary Protobuf Codec, asks for gzipped responses, and sends uncompressed requests. To
+// use the gRPC or gRPC-Web protocols, supply the connect.WithGRPC() or connect.WithGRPCWeb()
+// options.
+//
+// The URL supplied here should be the base URL for the Connect or gRPC server (for example,
+// http://api.acme.com or https://acme.com/grpc).
+func NewRemoteWorkspaceProviderClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) RemoteWorkspaceProviderClient {
+	baseURL = strings.TrimRight(baseURL, "/")
+	remoteWorkspaceProviderMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("RemoteWorkspaceProvider").Methods()
+	return &remoteWorkspaceProviderClient{
+		allocate: connect.NewClient[runtimev2.RemoteWorkspaceAllocateRequest, runtimev2.RemoteWorkspaceAllocation](
+			httpClient,
+			baseURL+RemoteWorkspaceProviderAllocateProcedure,
+			connect.WithSchema(remoteWorkspaceProviderMethods.ByName("Allocate")),
+			connect.WithClientOptions(opts...),
+		),
+		stage: connect.NewClient[runtimev2.RemoteWorkspaceStageChunk, runtimev2.RemoteWorkspaceStageResponse](
+			httpClient,
+			baseURL+RemoteWorkspaceProviderStageProcedure,
+			connect.WithSchema(remoteWorkspaceProviderMethods.ByName("Stage")),
+			connect.WithClientOptions(opts...),
+		),
+		capture: connect.NewClient[runtimev2.RemoteWorkspaceCaptureRequest, runtimev2.RemoteWorkspaceCaptureChunk](
+			httpClient,
+			baseURL+RemoteWorkspaceProviderCaptureProcedure,
+			connect.WithSchema(remoteWorkspaceProviderMethods.ByName("Capture")),
+			connect.WithClientOptions(opts...),
+		),
+		stop: connect.NewClient[runtimev2.RemoteWorkspaceStopRequest, runtimev2.RemoteWorkspaceStopResponse](
+			httpClient,
+			baseURL+RemoteWorkspaceProviderStopProcedure,
+			connect.WithSchema(remoteWorkspaceProviderMethods.ByName("Stop")),
+			connect.WithClientOptions(opts...),
+		),
+	}
+}
+
+// remoteWorkspaceProviderClient implements RemoteWorkspaceProviderClient.
+type remoteWorkspaceProviderClient struct {
+	allocate *connect.Client[runtimev2.RemoteWorkspaceAllocateRequest, runtimev2.RemoteWorkspaceAllocation]
+	stage    *connect.Client[runtimev2.RemoteWorkspaceStageChunk, runtimev2.RemoteWorkspaceStageResponse]
+	capture  *connect.Client[runtimev2.RemoteWorkspaceCaptureRequest, runtimev2.RemoteWorkspaceCaptureChunk]
+	stop     *connect.Client[runtimev2.RemoteWorkspaceStopRequest, runtimev2.RemoteWorkspaceStopResponse]
+}
+
+// Allocate calls supertag.runtime.v2.RemoteWorkspaceProvider.Allocate.
+func (c *remoteWorkspaceProviderClient) Allocate(ctx context.Context, req *connect.Request[runtimev2.RemoteWorkspaceAllocateRequest]) (*connect.Response[runtimev2.RemoteWorkspaceAllocation], error) {
+	return c.allocate.CallUnary(ctx, req)
+}
+
+// Stage calls supertag.runtime.v2.RemoteWorkspaceProvider.Stage.
+func (c *remoteWorkspaceProviderClient) Stage(ctx context.Context) *connect.ClientStreamForClient[runtimev2.RemoteWorkspaceStageChunk, runtimev2.RemoteWorkspaceStageResponse] {
+	return c.stage.CallClientStream(ctx)
+}
+
+// Capture calls supertag.runtime.v2.RemoteWorkspaceProvider.Capture.
+func (c *remoteWorkspaceProviderClient) Capture(ctx context.Context, req *connect.Request[runtimev2.RemoteWorkspaceCaptureRequest]) (*connect.ServerStreamForClient[runtimev2.RemoteWorkspaceCaptureChunk], error) {
+	return c.capture.CallServerStream(ctx, req)
+}
+
+// Stop calls supertag.runtime.v2.RemoteWorkspaceProvider.Stop.
+func (c *remoteWorkspaceProviderClient) Stop(ctx context.Context, req *connect.Request[runtimev2.RemoteWorkspaceStopRequest]) (*connect.Response[runtimev2.RemoteWorkspaceStopResponse], error) {
+	return c.stop.CallUnary(ctx, req)
+}
+
+// RemoteWorkspaceProviderHandler is an implementation of the
+// supertag.runtime.v2.RemoteWorkspaceProvider service.
+type RemoteWorkspaceProviderHandler interface {
+	Allocate(context.Context, *connect.Request[runtimev2.RemoteWorkspaceAllocateRequest]) (*connect.Response[runtimev2.RemoteWorkspaceAllocation], error)
+	Stage(context.Context, *connect.ClientStream[runtimev2.RemoteWorkspaceStageChunk]) (*connect.Response[runtimev2.RemoteWorkspaceStageResponse], error)
+	Capture(context.Context, *connect.Request[runtimev2.RemoteWorkspaceCaptureRequest], *connect.ServerStream[runtimev2.RemoteWorkspaceCaptureChunk]) error
+	Stop(context.Context, *connect.Request[runtimev2.RemoteWorkspaceStopRequest]) (*connect.Response[runtimev2.RemoteWorkspaceStopResponse], error)
+}
+
+// NewRemoteWorkspaceProviderHandler builds an HTTP handler from the service implementation. It
+// returns the path on which to mount the handler and the handler itself.
+//
+// By default, handlers support the Connect, gRPC, and gRPC-Web protocols with the binary Protobuf
+// and JSON codecs. They also support gzip compression.
+func NewRemoteWorkspaceProviderHandler(svc RemoteWorkspaceProviderHandler, opts ...connect.HandlerOption) (string, http.Handler) {
+	remoteWorkspaceProviderMethods := runtimev2.File_supertag_runtime_v2_runtime_proto.Services().ByName("RemoteWorkspaceProvider").Methods()
+	remoteWorkspaceProviderAllocateHandler := connect.NewUnaryHandler(
+		RemoteWorkspaceProviderAllocateProcedure,
+		svc.Allocate,
+		connect.WithSchema(remoteWorkspaceProviderMethods.ByName("Allocate")),
+		connect.WithHandlerOptions(opts...),
+	)
+	remoteWorkspaceProviderStageHandler := connect.NewClientStreamHandler(
+		RemoteWorkspaceProviderStageProcedure,
+		svc.Stage,
+		connect.WithSchema(remoteWorkspaceProviderMethods.ByName("Stage")),
+		connect.WithHandlerOptions(opts...),
+	)
+	remoteWorkspaceProviderCaptureHandler := connect.NewServerStreamHandler(
+		RemoteWorkspaceProviderCaptureProcedure,
+		svc.Capture,
+		connect.WithSchema(remoteWorkspaceProviderMethods.ByName("Capture")),
+		connect.WithHandlerOptions(opts...),
+	)
+	remoteWorkspaceProviderStopHandler := connect.NewUnaryHandler(
+		RemoteWorkspaceProviderStopProcedure,
+		svc.Stop,
+		connect.WithSchema(remoteWorkspaceProviderMethods.ByName("Stop")),
+		connect.WithHandlerOptions(opts...),
+	)
+	return "/supertag.runtime.v2.RemoteWorkspaceProvider/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case RemoteWorkspaceProviderAllocateProcedure:
+			remoteWorkspaceProviderAllocateHandler.ServeHTTP(w, r)
+		case RemoteWorkspaceProviderStageProcedure:
+			remoteWorkspaceProviderStageHandler.ServeHTTP(w, r)
+		case RemoteWorkspaceProviderCaptureProcedure:
+			remoteWorkspaceProviderCaptureHandler.ServeHTTP(w, r)
+		case RemoteWorkspaceProviderStopProcedure:
+			remoteWorkspaceProviderStopHandler.ServeHTTP(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+}
+
+// UnimplementedRemoteWorkspaceProviderHandler returns CodeUnimplemented from all methods.
+type UnimplementedRemoteWorkspaceProviderHandler struct{}
+
+func (UnimplementedRemoteWorkspaceProviderHandler) Allocate(context.Context, *connect.Request[runtimev2.RemoteWorkspaceAllocateRequest]) (*connect.Response[runtimev2.RemoteWorkspaceAllocation], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.RemoteWorkspaceProvider.Allocate is not implemented"))
+}
+
+func (UnimplementedRemoteWorkspaceProviderHandler) Stage(context.Context, *connect.ClientStream[runtimev2.RemoteWorkspaceStageChunk]) (*connect.Response[runtimev2.RemoteWorkspaceStageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.RemoteWorkspaceProvider.Stage is not implemented"))
+}
+
+func (UnimplementedRemoteWorkspaceProviderHandler) Capture(context.Context, *connect.Request[runtimev2.RemoteWorkspaceCaptureRequest], *connect.ServerStream[runtimev2.RemoteWorkspaceCaptureChunk]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.RemoteWorkspaceProvider.Capture is not implemented"))
+}
+
+func (UnimplementedRemoteWorkspaceProviderHandler) Stop(context.Context, *connect.Request[runtimev2.RemoteWorkspaceStopRequest]) (*connect.Response[runtimev2.RemoteWorkspaceStopResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("supertag.runtime.v2.RemoteWorkspaceProvider.Stop is not implemented"))
 }
 
 // HarnessQuestionsClient is a client for the supertag.runtime.v2.HarnessQuestions service.

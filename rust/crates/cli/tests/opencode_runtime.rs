@@ -806,6 +806,7 @@ async fn opencode_claims_and_runs_the_accepted_role_model() -> Result<()> {
             model_ids: vec![FIXTURE_MODEL.into()],
             default_model: Some(FIXTURE_MODEL.into()),
             allow_unsandboxed_commands: false,
+            remote_file_workspace: false,
         }),
         ..Default::default()
     };

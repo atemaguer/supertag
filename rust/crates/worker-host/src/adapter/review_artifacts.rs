@@ -171,6 +171,7 @@ mod tests {
                 tokio::time::Instant::now() + Duration::from_secs(30),
                 &tokio_util::sync::CancellationToken::new(),
             ),
+            workspace: None,
         }
     }
 

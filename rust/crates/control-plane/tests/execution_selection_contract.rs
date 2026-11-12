@@ -17,6 +17,7 @@ fn profile(models: &[&str], default: Option<&str>, commands: bool) -> HarnessExe
         model_ids: models.iter().map(|model| (*model).into()).collect(),
         default_model: default.map(str::to_owned),
         allow_unsandboxed_commands: commands,
+        remote_file_workspace: false,
     }
 }
 

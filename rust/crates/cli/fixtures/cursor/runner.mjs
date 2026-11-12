@@ -14,6 +14,9 @@ for (const name of [
   "CURSOR_API_KEY",
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
+  "E2B_API_KEY",
+  "E2B_DOMAIN",
+  "SUPERTAG_E2B_TEMPLATE",
   "SUPERTAG_GATEWAY_TOKEN",
   "SUPERTAG_OPERATOR_TOKEN",
   "SUPERTAG_HOST_TOKEN",
@@ -79,15 +82,27 @@ async function runFixture() {
     assert.ok(!request.prompt.includes(key));
     const current = request.prompt.replace(/<supertag-history>[\s\S]*?<\/supertag-history>/gu, "");
     const mode = /fixture:([a-z-]+)/u.exec(current)?.[1];
-    assert.ok(["first", "resume", "baseline", "cancel", "after-cancel"].includes(mode));
+    assert.ok(
+      [
+        "first",
+        "resume",
+        "remote-first",
+        "remote-resume",
+        "baseline",
+        "cancel",
+        "after-cancel",
+      ].includes(mode),
+    );
+    const writes = mode === "first" || mode === "remote-first";
+    const resumes = mode === "resume" || mode === "remote-resume";
     assert.deepEqual(request.tools, ["mcp"]);
     for (const name of ["read", "edit", "shell", "grep", "glob", "ls", "task"])
       assert.ok(request.disallowedTools.includes(name), `native SDK tool ${name} is not denied`);
     assert.equal(request.localCommandTool, undefined);
     const toolNames = request.splitTools.map(({ name }) => name);
     assert.ok(toolNames.includes("read"));
-    assert.equal(toolNames.includes("write"), mode === "first");
-    assert.equal(toolNames.includes("edit"), mode === "first");
+    assert.equal(toolNames.includes("write"), writes);
+    assert.equal(toolNames.includes("edit"), writes);
     assert.equal(toolNames.includes("command"), mode === "first");
 
     const cwd = await realpath(request.workspace);
@@ -101,13 +116,16 @@ async function runFixture() {
     assert.match(agentId, /^agent-[\w-]+$/u);
     const agentsFile = join(request.storeDirectory, "agents.ndjson");
     let restoredFrom;
-    if (["resume", "cancel", "after-cancel"].includes(mode)) {
+    if (["resume", "remote-resume", "cancel", "after-cancel"].includes(mode)) {
       assert.ok(request.resumeAgentId, "expected native Session restore");
       const agents = (await readFile(agentsFile, "utf8")).trim().split("\n").map(JSON.parse);
       const agent = agents.find((entry) => entry.agentId === agentId);
       assert.equal(agent?.cwd, cwd, "restored agent was not retargeted to this native cwd");
       restoredFrom = agent?.fixtureTurn;
-      assert.equal(restoredFrom, mode === "resume" ? "first" : "baseline");
+      assert.equal(
+        restoredFrom,
+        resumes ? (mode === "remote-resume" ? "remote-first" : "first") : "baseline",
+      );
     } else {
       assert.equal(request.resumeAgentId, undefined);
     }
@@ -136,7 +154,7 @@ async function runFixture() {
 
     const existing = await call("read", { file_path: "workspace.txt" });
     assert.equal(existing.isError, false, "admitted Workspace read failed");
-    assert.ok(existing.text.includes(mode === "resume" ? "first-turn-content" : "initial-content"));
+    assert.ok(existing.text.includes(resumes ? "first-turn-content" : "initial-content"));
     assert.equal((await call("read", { file_path: "../outside.txt" })).isError, true);
     const command = await call("command", {
       command:
@@ -148,7 +166,7 @@ async function runFixture() {
       file_path: "workspace.txt",
       content: "first-turn-content\n",
     });
-    assert.equal(write.isError, mode !== "first");
+    assert.equal(write.isError, !writes);
 
     for (const name of ["agents.ndjson", "runs.ndjson", "run_events.ndjson", "checkpoints.ndjson"])
       await writeFile(
@@ -162,7 +180,7 @@ async function runFixture() {
       );
     text(`cursor-stream:${mode} ${key.slice(0, 13)}`);
     text(key.slice(13));
-    if (mode === "first") await waitFor(join(fixture, `release-${process.pid}`));
+    if (writes) await waitFor(join(fixture, `release-${process.pid}`));
     if (mode === "cancel") return;
 
     const usage = {

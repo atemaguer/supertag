@@ -7,6 +7,8 @@
 mod git;
 pub mod packages;
 mod paths;
+mod transfer;
+pub use transfer::{PreparedExport, TransferArtifact};
 
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
@@ -209,6 +211,7 @@ impl Workspace {
                 "Task Attempt was prepared with a different request"
             );
             if prior.ready {
+                transfer::require_restored(&record_dir)?;
                 paths::verify_directory(&prior.checkout.path)?;
                 return Ok(prior.checkout);
             }
@@ -305,6 +308,7 @@ impl Workspace {
             self.verify_delivery(&finalized.delivery)?;
             return Ok(finalized.delivery);
         }
+        transfer::require_restored(&record_dir)?;
         paths::verify_directory(&checkout.path)?;
         let repository = self.repository(cancel).await?;
         let base_tree = repository.tree(&checkout.start_commit, cancel).await?;
@@ -556,7 +560,7 @@ impl Workspace {
                 .inner
                 .root
                 .join("records")
-                .join(id)
+                .join(&id)
                 .join("prepare.json"),
         )?
         .context("Task Attempt has no workspace preparation")?;
@@ -579,6 +583,7 @@ impl Workspace {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
+        transfer::discard_staging(&self.inner.root.join("records").join(id))?;
         Ok(())
     }
 

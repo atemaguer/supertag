@@ -56,6 +56,8 @@ impl Fixture {
         let adapter_module =
             repository.join("packages/runtime/harnesses/cursor/dist/rust-adapter/adapter.js");
         let bridge_module = repository.join("packages/runtime/sdk/dist/rust-harness/index.js");
+        let provider_transport =
+            repository.join("packages/runtime/environments/e2b/dist/rust-provider/transport.js");
         ensure!(
             adapter_module.is_file() && bridge_module.is_file(),
             "build Cursor first: pnpm --filter @supertag/worker-cursor build"
@@ -66,8 +68,14 @@ impl Fixture {
         std::fs::write(&adapter, include_str!("../fixtures/cursor/adapter.mjs"))?;
         std::fs::write(&runner, include_str!("../fixtures/cursor/runner.mjs"))?;
         std::fs::write(
+            root.join("remote-provider.mjs"),
+            include_str!("../fixtures/cursor/remote-provider.mjs"),
+        )?;
+        std::fs::write(
             root.join("modules.json"),
-            serde_json::to_vec(&json!({ "adapter": adapter_module, "bridge": bridge_module }))?,
+            serde_json::to_vec(
+                &json!({ "adapter": adapter_module, "bridge": bridge_module, "providerTransport": provider_transport }),
+            )?,
         )?;
         let source = root.join("source");
         std::fs::create_dir(&source)?;
@@ -101,6 +109,14 @@ impl Fixture {
             .find(|entry| entry["type"] == "started" && entry["mode"] == mode)
             .cloned()
             .with_context(|| format!("Cursor fixture never started {mode}: {trace:?}"))
+    }
+
+    fn provider_trace(&self) -> Result<Vec<Value>> {
+        std::fs::read_to_string(self.root.join("provider-calls.jsonl"))
+            .unwrap_or_default()
+            .lines()
+            .map(|line| Ok(serde_json::from_str(line)?))
+            .collect()
     }
 }
 
@@ -269,6 +285,16 @@ impl<'a> Runtime<'a> {
     }
 
     fn worker(&self, fixture: &Fixture, label: &str, allow_commands: bool) -> Result<Child> {
+        self.worker_with_provider(fixture, label, allow_commands, false)
+    }
+
+    fn worker_with_provider(
+        &self,
+        fixture: &Fixture,
+        label: &str,
+        allow_commands: bool,
+        remote: bool,
+    ) -> Result<Child> {
         let mut command = self.credentials.command(&[
             "worker-host",
             "--gateway",
@@ -300,6 +326,16 @@ impl<'a> Runtime<'a> {
             .stderr(Stdio::piped());
         if allow_commands {
             command.arg("--allow-unsandboxed-commands");
+        }
+        if remote {
+            command
+                .arg("--e2b-workspace-provider")
+                .arg(&fixture.node)
+                .arg("--e2b-workspace-provider-arg")
+                .arg(fixture.root.join("remote-provider.mjs"))
+                .env("E2B_API_KEY", "synthetic-e2b-provider-key")
+                .env("E2B_DOMAIN", "fixture.e2b.invalid")
+                .env("SUPERTAG_E2B_TEMPLATE", "fixture-template");
         }
         Ok(command.spawn()?)
     }
@@ -338,9 +374,10 @@ impl<'a> Runtime<'a> {
                     task.state(),
                     TaskState::Queued | TaskState::Claimed | TaskState::Running
                 ),
-                "Cursor settled before live output: {:?}; fixture: {:?}",
+                "Cursor settled before live output: {:?}; fixture: {:?}; provider: {:?}",
                 task.result,
-                fixture.trace()?
+                fixture.trace()?,
+                fixture.provider_trace()?
             );
             if self
                 .events(id)
@@ -427,6 +464,158 @@ impl<'a> Runtime<'a> {
         assert!(!latest.estimated);
         Ok(())
     }
+}
+
+#[tokio::test]
+async fn cursor_remote_workspace_delivers_and_resumes_from_the_approved_head() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let fixture = Fixture::prepare(directory.path()).await?;
+    let credentials = Credentials::new();
+    let mut runtime = Runtime::start(&fixture.root, &credentials).await?;
+    runtime
+        .tag(
+            &fixture,
+            TAG,
+            HarnessKind::Cursor,
+            &["files:read", "files:write"],
+        )
+        .await?;
+    let first = runtime.submit(TAG, "remote-first").await?;
+    std::fs::write(fixture.root.join("hold-stop"), b"enabled")?;
+    let worker = runtime.worker_with_provider(&fixture, "remote-first", false, true)?;
+    runtime
+        .wait_stream(&fixture, &first.task_id, "remote-first")
+        .await?;
+    let first_call = fixture.started("remote-first")?;
+    let runner = pid(&first_call, "pid")?;
+    std::fs::write(fixture.root.join(format!("release-{runner}")), b"go")?;
+    let deadline = Instant::now() + WAIT;
+    while !fixture
+        .provider_trace()?
+        .iter()
+        .any(|value| value["type"] == "stop-wait")
+    {
+        ensure!(
+            Instant::now() < deadline,
+            "provider never reached held Stop: {:?}",
+            fixture.provider_trace()?
+        );
+        sleep(Duration::from_millis(20)).await;
+    }
+    sqlx::any::install_default_drivers();
+    let mut database = sqlx::AnyConnection::connect(&runtime.database).await?;
+    let before: i64 =
+        sqlx::query_scalar("SELECT lease_expires_at_ms FROM supertag_v2_tasks WHERE task_id=$1")
+            .bind(&first.task_id)
+            .fetch_one(&mut database)
+            .await?;
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        let renewed: i64 = sqlx::query_scalar(
+            "SELECT lease_expires_at_ms FROM supertag_v2_tasks WHERE task_id=$1",
+        )
+        .bind(&first.task_id)
+        .fetch_one(&mut database)
+        .await?;
+        if renewed > before + 500 {
+            break;
+        }
+        ensure!(
+            Instant::now() < deadline,
+            "execution lease did not renew during remote Stop"
+        );
+        sleep(Duration::from_millis(30)).await;
+    }
+    let during_stop = runtime.task(&first.task_id).await?;
+    assert_eq!(during_stop.state(), TaskState::Running);
+    assert!(during_stop.workspace_delivery.is_none());
+    std::fs::remove_file(fixture.root.join("hold-stop"))?;
+    worker_finished(worker, &fixture).await?;
+    gone(runner).await?;
+    let first = runtime
+        .assert_success(&first.task_id, "remote-first")
+        .await?;
+    let first_delivery = first
+        .workspace_delivery
+        .as_ref()
+        .context("remote delivery missing")?;
+    ensure!(first_delivery.committed && first_delivery.changed_files == 1);
+    ensure!(first_delivery.start_commit == fixture.base);
+    runtime.assert_usage(&first).await?;
+    let checkpoint = runtime.checkpoint().await?;
+    runtime.stop().await?;
+
+    let mut runtime = Runtime::start(&fixture.root, &credentials).await?;
+    assert_eq!(runtime.checkpoint().await?, checkpoint);
+    runtime
+        .tag(&fixture, TAG, HarnessKind::Cursor, &["files:read"])
+        .await?;
+    let second = runtime.submit(TAG, "remote-resume").await?;
+    worker_finished(
+        runtime.worker_with_provider(&fixture, "remote-resume", false, true)?,
+        &fixture,
+    )
+    .await?;
+    let second = runtime
+        .assert_success(&second.task_id, "remote-resume")
+        .await?;
+    let delivery = second
+        .workspace_delivery
+        .as_ref()
+        .context("second remote delivery missing")?;
+    assert_eq!(delivery.start_commit, first_delivery.head_commit);
+    assert_eq!(delivery.head_commit, first_delivery.head_commit);
+    assert!(!delivery.committed);
+    let resumed = fixture.started("remote-resume")?;
+    assert_eq!(resumed["agentId"], first_call["agentId"]);
+    assert_eq!(resumed["restoredFrom"], "remote-first");
+    assert_ne!(resumed["cwd"], first_call["cwd"]);
+    assert_eq!(
+        std::fs::read_to_string(fixture.source.join("workspace.txt"))?,
+        "initial-content\n"
+    );
+    assert_eq!(
+        git(&fixture.source, &["rev-parse", "HEAD"]).await?,
+        fixture.base
+    );
+    assert_eq!(git(&fixture.source, &["status", "--porcelain"]).await?, "");
+
+    let trace: Vec<Value> = std::fs::read_to_string(fixture.root.join("provider-calls.jsonl"))?
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<Result<_, _>>()?;
+    let allocations: Vec<_> = trace
+        .iter()
+        .filter(|value| value["type"] == "allocate")
+        .collect();
+    let stages: Vec<_> = trace
+        .iter()
+        .filter(|value| value["type"] == "stage")
+        .collect();
+    let stops: Vec<_> = trace
+        .iter()
+        .filter(|value| value["type"] == "stop")
+        .collect();
+    assert_eq!((allocations.len(), stages.len(), stops.len()), (2, 2, 2));
+    assert_eq!(stages[0]["startCommit"], fixture.base);
+    assert_eq!(stages[0]["before"], "initial-content\n");
+    assert_eq!(stages[1]["startCommit"], first_delivery.head_commit);
+    assert_eq!(stages[1]["before"], "first-turn-content\n");
+    for (allocation, task) in allocations.iter().zip([&first, &second]) {
+        assert_eq!(allocation["owner"]["taskId"], task.task_id);
+        assert_eq!(
+            allocation["owner"]["attemptId"],
+            task.attempt_id.as_deref().unwrap()
+        );
+        let stop = stops
+            .iter()
+            .find(|stop| stop["sandboxId"] == allocation["sandboxId"])
+            .context("allocation never stopped")?;
+        assert_eq!(stop["owner"], allocation["owner"]);
+        assert_eq!(stop["stopped"], true);
+        gone(pid(allocation, "pid")?).await?;
+    }
+    runtime.stop().await
 }
 
 async fn service(mut command: Command) -> Result<(Child, String)> {
@@ -610,5 +799,107 @@ async fn cursor_cancellation_reaps_native_descendant_and_keeps_prior_checkpoint(
         .await?;
     assert_eq!(fixture.started("after-cancel")?["agentId"], call["agentId"]);
     assert_eq!(runtime.checkpoint().await?.0, continuation.task_id);
+    runtime.stop().await
+}
+
+#[tokio::test]
+async fn cursor_remote_lost_allocation_ack_keeps_work_fenced_until_absence_is_confirmed()
+-> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let fixture = Fixture::prepare(directory.path()).await?;
+    std::fs::write(fixture.root.join("lose-allocate-ack"), b"enabled")?;
+    std::fs::write(fixture.root.join("refuse-stop"), b"enabled")?;
+    let credentials = Credentials::new();
+    let mut runtime = Runtime::start(&fixture.root, &credentials).await?;
+    runtime
+        .tag(
+            &fixture,
+            TAG,
+            HarnessKind::Cursor,
+            &["files:read", "files:write"],
+        )
+        .await?;
+    let first = runtime.submit(TAG, "remote-first").await?;
+    for _ in 0..2 {
+        let output = timeout(
+            WAIT,
+            runtime
+                .worker_with_provider(&fixture, "lost-ack", false, true)?
+                .wait_with_output(),
+        )
+        .await??;
+        ensure!(
+            !output.status.success(),
+            "ambiguous remote allocation was treated as stopped"
+        );
+        let error = String::from_utf8_lossy(&output.stderr);
+        ensure!(
+            error.contains("termination could not be confirmed"),
+            "unexpected remote recovery error: {error}; provider: {:?}",
+            fixture.provider_trace()?
+        );
+        ensure!(!error.contains(PROVIDER_KEY) && !error.contains("synthetic-e2b-provider-key"));
+    }
+    ensure!(
+        fixture.trace()?.is_empty(),
+        "native execution started without a prepared sandbox"
+    );
+    assert!(matches!(
+        runtime.task(&first.task_id).await?.state(),
+        TaskState::Running | TaskState::Uncertain
+    ));
+    let follow = runtime.submit(TAG, "remote-first").await?;
+    assert_eq!(
+        runtime.task(&follow.task_id).await?.state(),
+        TaskState::Queued
+    );
+    std::fs::remove_file(fixture.root.join("refuse-stop"))?;
+    let recovered = timeout(
+        WAIT,
+        runtime
+            .worker_with_provider(&fixture, "lost-ack", false, true)?
+            .wait_with_output(),
+    )
+    .await??;
+    ensure!(
+        !recovered.status.success(),
+        "remote stop bypassed the required operator recovery"
+    );
+    ensure!(
+        String::from_utf8_lossy(&recovered.stderr).contains("needs recovery"),
+        "unexpected settled cleanup state: {}; provider: {:?}",
+        String::from_utf8_lossy(&recovered.stderr),
+        fixture.provider_trace()?
+    );
+    let trace = fixture.provider_trace()?;
+    let allocations: Vec<_> = trace
+        .iter()
+        .filter(|value| value["type"] == "allocate")
+        .collect();
+    let stopped: Vec<_> = trace
+        .iter()
+        .filter(|value| value["type"] == "stop")
+        .collect();
+    assert_eq!((allocations.len(), stopped.len()), (1, 1));
+    assert_eq!(allocations[0]["owner"], stopped[0]["owner"]);
+    assert_eq!(allocations[0]["sandboxId"], stopped[0]["sandboxId"]);
+    assert!(!trace.iter().any(|value| {
+        ["stage", "capture", "write"].contains(&value["type"].as_str().unwrap_or(""))
+    }));
+    // A new local Host incarnation must respect the unresolved Session. Start
+    // it after the original generation records its own provider cleanup.
+    worker_finished(
+        runtime.worker_with_provider(&fixture, "blocked-by-lost-ack", false, true)?,
+        &fixture,
+    )
+    .await?;
+    assert_eq!(
+        runtime.task(&follow.task_id).await?.state(),
+        TaskState::Queued
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.source.join("workspace.txt"))?,
+        "initial-content\n"
+    );
     runtime.stop().await
 }

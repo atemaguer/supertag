@@ -125,6 +125,7 @@ impl Harness for HarnessFixture {
             coordination: self.coordination,
             resolved_skills: observed.resolved_skills.clone(),
             history: vec![],
+            remote_workspace: false,
         }))
     }
     async fn confirm_execution_limits(

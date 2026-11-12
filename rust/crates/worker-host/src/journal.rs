@@ -1,6 +1,6 @@
 use std::{
     fs::{self, DirBuilder, File, OpenOptions},
-    io::Write,
+    io::{Read, Write},
     os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
 };
@@ -8,7 +8,12 @@ use std::{
 use crate::workspaces::{PendingWorkspace, PreparedWorkspace};
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
-use supertag_protocol::{MAX_CHECKPOINT_BYTES, v2::SessionCheckpoint};
+use supertag_protocol::{
+    MAX_CHECKPOINT_BYTES,
+    v2::{RemoteWorkspaceOwner, SessionCheckpoint},
+    valid_sha256,
+};
+use supertag_workspaces::TransferArtifact;
 use tempfile::NamedTempFile;
 
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -28,6 +33,53 @@ pub(crate) struct PendingCheckpoint {
     pub format: String,
     pub sha256: String,
     pub uploaded: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub(crate) enum RemoteSandboxState {
+    Allocating,
+    Active { sandbox_id: String },
+    Stopped { sandbox_id: String },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub(crate) struct RemoteSandbox {
+    host_id: String,
+    host_generation: u64,
+    task_id: String,
+    attempt_id: String,
+    allocation_id: String,
+    pub(crate) provider_scope: String,
+    pub(crate) state: RemoteSandboxState,
+}
+
+impl RemoteSandbox {
+    pub(crate) fn owner(&self) -> RemoteWorkspaceOwner {
+        RemoteWorkspaceOwner {
+            host_id: self.host_id.clone(),
+            host_generation: self.host_generation,
+            task_id: self.task_id.clone(),
+            attempt_id: self.attempt_id.clone(),
+            allocation_id: self.allocation_id.clone(),
+        }
+    }
+
+    pub(crate) fn sandbox_id(&self) -> Option<&str> {
+        match &self.state {
+            RemoteSandboxState::Allocating => None,
+            RemoteSandboxState::Active { sandbox_id }
+            | RemoteSandboxState::Stopped { sandbox_id } => Some(sandbox_id),
+        }
+    }
+}
+
+pub(crate) fn valid_sandbox_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 256
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
 #[derive(Deserialize, Serialize)]
@@ -58,6 +110,8 @@ pub(crate) enum Entry {
         waiting_approval_ids: Vec<String>,
         checkpoint: Option<PendingCheckpoint>,
         workspace: Box<PreparedWorkspace>,
+        #[serde(default)]
+        remote_tree: Option<TransferArtifact>,
     },
     Finish {
         #[serde(flatten)]
@@ -215,6 +269,146 @@ impl Journal {
         })
     }
 
+    fn remote_sandbox_path(&self) -> PathBuf {
+        self.directory.join("remote-sandbox.json")
+    }
+
+    pub(crate) fn remote_scratch(&self) -> Result<PathBuf> {
+        let directory = self.directory.join("remote-workspace");
+        match DirBuilder::new().mode(0o700).create(&directory) {
+            Ok(()) => self.sync_directory()?,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+        let metadata = directory.symlink_metadata()?;
+        ensure!(
+            metadata.is_dir()
+                && metadata.mode() & 0o077 == 0
+                && metadata.uid() == unsafe { libc::geteuid() },
+            "sandbox scratch directory must be private"
+        );
+        Ok(directory.canonicalize()?)
+    }
+
+    pub(crate) fn remote_sandbox(&self) -> Result<Option<RemoteSandbox>> {
+        let file = match OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(self.remote_sandbox_path())
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        let metadata = file.metadata()?;
+        ensure!(
+            metadata.is_file()
+                && metadata.mode() & 0o077 == 0
+                && metadata.uid() == unsafe { libc::geteuid() },
+            "sandbox allocation journal must be private"
+        );
+        let mut bytes = Vec::new();
+        file.take(4097).read_to_end(&mut bytes)?;
+        ensure!(
+            bytes.len() <= 4096,
+            "sandbox allocation journal exceeds its limit"
+        );
+        let record: RemoteSandbox =
+            serde_json::from_slice(&bytes).context("read sandbox allocation journal")?;
+        ensure!(
+            record.host_generation > 0
+                && !record.host_id.is_empty()
+                && !record.task_id.is_empty()
+                && !record.attempt_id.is_empty()
+                && uuid::Uuid::parse_str(&record.allocation_id).is_ok()
+                && valid_sha256(&record.provider_scope)
+                && record.sandbox_id().is_none_or(valid_sandbox_id),
+            "invalid sandbox allocation journal"
+        );
+        Ok(Some(record))
+    }
+
+    fn save_remote_sandbox(&self, record: &RemoteSandbox) -> Result<()> {
+        self.write(&self.remote_sandbox_path(), |file| {
+            Ok(serde_json::to_writer(file, record)?)
+        })
+    }
+
+    /// Only a newly persisted intent authorizes allocation. A prior intent may
+    /// have reached the provider even when the host has no sandbox ID yet.
+    pub(crate) fn begin_remote_sandbox(
+        &self,
+        attempt: &Attempt,
+        host_id: &str,
+        host_generation: u64,
+        provider_scope: String,
+    ) -> Result<RemoteSandbox> {
+        ensure!(
+            host_generation > 0 && !host_id.is_empty() && valid_sha256(&provider_scope),
+            "invalid sandbox host identity"
+        );
+        ensure!(
+            matches!(self.load()?, Some(Entry::Executing { attempt: active, .. }) if &active == attempt),
+            "sandbox allocation requires a durable executing Attempt"
+        );
+        ensure!(
+            self.remote_sandbox()?.is_none(),
+            "sandbox allocation already requires recovery"
+        );
+        let record = RemoteSandbox {
+            host_id: host_id.to_owned(),
+            host_generation,
+            task_id: attempt.task_id.clone(),
+            attempt_id: attempt.attempt_id.clone(),
+            allocation_id: uuid::Uuid::new_v4().to_string(),
+            provider_scope,
+            state: RemoteSandboxState::Allocating,
+        };
+        self.save_remote_sandbox(&record)?;
+        Ok(record)
+    }
+
+    pub(crate) fn record_sandbox_active(
+        &self,
+        record: &RemoteSandbox,
+        sandbox_id: String,
+    ) -> Result<RemoteSandbox> {
+        ensure!(
+            record.state == RemoteSandboxState::Allocating
+                && self.remote_sandbox()?.as_ref() == Some(record),
+            "sandbox allocation receipt does not match the journal"
+        );
+        ensure!(valid_sandbox_id(&sandbox_id), "invalid sandbox identity");
+        let record = RemoteSandbox {
+            state: RemoteSandboxState::Active { sandbox_id },
+            ..record.clone()
+        };
+        self.save_remote_sandbox(&record)?;
+        Ok(record)
+    }
+
+    pub(crate) fn record_sandbox_stopped(
+        &self,
+        record: &RemoteSandbox,
+        sandbox_id: String,
+    ) -> Result<RemoteSandbox> {
+        ensure!(
+            self.remote_sandbox()?.as_ref() == Some(record),
+            "sandbox stop receipt does not match the journal"
+        );
+        ensure!(
+            valid_sandbox_id(&sandbox_id)
+                && record.sandbox_id().is_none_or(|prior| prior == sandbox_id),
+            "sandbox stop receipt belongs to another sandbox"
+        );
+        let record = RemoteSandbox {
+            state: RemoteSandboxState::Stopped { sandbox_id },
+            ..record.clone()
+        };
+        self.save_remote_sandbox(&record)?;
+        Ok(record)
+    }
+
     pub(crate) fn write(
         &self,
         path: &Path,
@@ -261,6 +455,22 @@ impl Journal {
     }
 
     pub(crate) fn clear(&self) -> Result<()> {
+        let remote = self.remote_sandbox()?;
+        ensure!(
+            remote
+                .as_ref()
+                .is_none_or(|record| matches!(record.state, RemoteSandboxState::Stopped { .. })),
+            "sandbox cleanup must be confirmed before clearing the Attempt"
+        );
+        match fs::remove_dir_all(self.directory.join("remote-workspace")) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        if remote.is_some() {
+            fs::remove_file(self.remote_sandbox_path())?;
+            self.sync_directory()?;
+        }
         fs::remove_file(self.entry_path())?;
         match fs::remove_file(self.directory.join("checkpoint.bin")) {
             Ok(()) => {}
@@ -279,6 +489,63 @@ impl Journal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lost_allocation_acknowledgement_requires_recovery_before_reuse() -> Result<()> {
+        let state = tempfile::tempdir()?;
+        let attempt = Attempt {
+            task_id: "task".into(),
+            attempt_id: "attempt".into(),
+            lease_token: "lease-secret".into(),
+            execution_selection: None,
+            requires_unsandboxed_commands: false,
+        };
+        let journal = Journal::open(state.path())?;
+        let provider_scope = "a".repeat(64);
+        assert!(
+            journal
+                .begin_remote_sandbox(&attempt, "host", 1, provider_scope.clone())
+                .is_err()
+        );
+        journal.save(&Entry::Executing {
+            attempt: attempt.clone(),
+            prepared: None,
+        })?;
+        let intent = journal.begin_remote_sandbox(&attempt, "host", 7, provider_scope.clone())?;
+        assert!(intent.sandbox_id().is_none());
+        assert!(!fs::read_to_string(journal.remote_sandbox_path())?.contains(&attempt.lease_token));
+        drop(journal);
+
+        let journal = Journal::open(state.path())?;
+        let loaded = journal.remote_sandbox()?.unwrap();
+        assert_eq!(loaded.owner(), intent.owner());
+        assert_eq!(loaded.owner().host_generation, 7);
+        assert_eq!(loaded.provider_scope, provider_scope);
+        assert!(
+            journal
+                .begin_remote_sandbox(&attempt, "host", 7, provider_scope)
+                .is_err()
+        );
+        assert!(journal.clear().is_err());
+        let active = journal.record_sandbox_active(&loaded, "owned-sandbox".into())?;
+        assert!(
+            journal
+                .record_sandbox_active(&loaded, "second-sandbox".into())
+                .is_err()
+        );
+        assert!(
+            journal
+                .record_sandbox_stopped(&active, "other-sandbox".into())
+                .is_err()
+        );
+        assert!(journal.clear().is_err());
+        let stopped = journal.record_sandbox_stopped(&active, "owned-sandbox".into())?;
+        assert_eq!(journal.remote_sandbox()?, Some(stopped));
+        journal.clear()?;
+        assert!(journal.load()?.is_none());
+        assert!(journal.remote_sandbox()?.is_none());
+        Ok(())
+    }
 
     #[test]
     fn presence_sequence_survives_restart_and_rejects_corruption() -> Result<()> {
@@ -315,6 +582,7 @@ mod tests {
                 model_ids: vec!["primary".into(), "secondary".into()],
                 default_model: Some("primary".into()),
                 allow_unsandboxed_commands: false,
+                remote_file_workspace: false,
             }),
             ..Default::default()
         };
@@ -340,6 +608,7 @@ mod tests {
                 model_source: ModelSource::Task as i32,
                 harness_kind: HarnessKind::Codex as i32,
                 effort_applied: Some(true),
+                remote_file_workspace: false,
             }
             .encode_to_vec(),
         );

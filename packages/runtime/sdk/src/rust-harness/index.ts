@@ -1,5 +1,5 @@
 export { spawnOwnedProcess } from "../process-supervision.js";
-export { createWorkspaceToolBridge } from "../split-execution-bridge.js";
+export { createWorkspaceToolBridge, workspaceToolDefinitions } from "../split-execution-bridge.js";
 export { harnessClient, readBootstrap, receipt } from "./client.js";
 export {
   COORDINATION_SERVER,

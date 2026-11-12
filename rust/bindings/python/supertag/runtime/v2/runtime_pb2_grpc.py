@@ -5240,6 +5240,291 @@ class Harness:
             _registered_method=True)
 
 
+class HarnessWorkspaceStub:
+    """The supervising Worker Host supplies the Attempt and its remote Workspace.
+    An adapter cannot select the sandbox, working directory, or environment.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Execute = channel.unary_unary(
+                '/supertag.runtime.v2.HarnessWorkspace/Execute',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessWorkspaceRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessWorkspaceResult.FromString,
+                _registered_method=True)
+
+
+class HarnessWorkspaceServicer:
+    """The supervising Worker Host supplies the Attempt and its remote Workspace.
+    An adapter cannot select the sandbox, working directory, or environment.
+    """
+
+    def Execute(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_HarnessWorkspaceServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Execute': grpc.unary_unary_rpc_method_handler(
+                    servicer.Execute,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessWorkspaceRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessWorkspaceResult.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.HarnessWorkspace', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.HarnessWorkspace', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class HarnessWorkspace:
+    """The supervising Worker Host supplies the Attempt and its remote Workspace.
+    An adapter cannot select the sandbox, working directory, or environment.
+    """
+
+    @staticmethod
+    def Execute(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.HarnessWorkspace/Execute',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessWorkspaceRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.HarnessWorkspaceResult.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class RemoteWorkspaceProviderStub:
+    """Private to a Worker Host and its provider helper. The Harness never receives
+    this service's credentials or sandbox allocation identifiers.
+    """
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.Allocate = channel.unary_unary(
+                '/supertag.runtime.v2.RemoteWorkspaceProvider/Allocate',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceAllocateRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceAllocation.FromString,
+                _registered_method=True)
+        self.Stage = channel.stream_unary(
+                '/supertag.runtime.v2.RemoteWorkspaceProvider/Stage',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStageChunk.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStageResponse.FromString,
+                _registered_method=True)
+        self.Capture = channel.unary_stream(
+                '/supertag.runtime.v2.RemoteWorkspaceProvider/Capture',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCaptureRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCaptureChunk.FromString,
+                _registered_method=True)
+        self.Stop = channel.unary_unary(
+                '/supertag.runtime.v2.RemoteWorkspaceProvider/Stop',
+                request_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStopRequest.SerializeToString,
+                response_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStopResponse.FromString,
+                _registered_method=True)
+
+
+class RemoteWorkspaceProviderServicer:
+    """Private to a Worker Host and its provider helper. The Harness never receives
+    this service's credentials or sandbox allocation identifiers.
+    """
+
+    def Allocate(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Stage(self, request_iterator, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Capture(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def Stop(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_RemoteWorkspaceProviderServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'Allocate': grpc.unary_unary_rpc_method_handler(
+                    servicer.Allocate,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceAllocateRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceAllocation.SerializeToString,
+            ),
+            'Stage': grpc.stream_unary_rpc_method_handler(
+                    servicer.Stage,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStageChunk.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStageResponse.SerializeToString,
+            ),
+            'Capture': grpc.unary_stream_rpc_method_handler(
+                    servicer.Capture,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCaptureRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCaptureChunk.SerializeToString,
+            ),
+            'Stop': grpc.unary_unary_rpc_method_handler(
+                    servicer.Stop,
+                    request_deserializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStopRequest.FromString,
+                    response_serializer=supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStopResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'supertag.runtime.v2.RemoteWorkspaceProvider', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('supertag.runtime.v2.RemoteWorkspaceProvider', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class RemoteWorkspaceProvider:
+    """Private to a Worker Host and its provider helper. The Harness never receives
+    this service's credentials or sandbox allocation identifiers.
+    """
+
+    @staticmethod
+    def Allocate(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.RemoteWorkspaceProvider/Allocate',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceAllocateRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceAllocation.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Stage(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_unary(
+            request_iterator,
+            target,
+            '/supertag.runtime.v2.RemoteWorkspaceProvider/Stage',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStageChunk.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStageResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Capture(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/supertag.runtime.v2.RemoteWorkspaceProvider/Capture',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCaptureRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceCaptureChunk.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def Stop(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/supertag.runtime.v2.RemoteWorkspaceProvider/Stop',
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStopRequest.SerializeToString,
+            supertag_dot_runtime_dot_v2_dot_runtime__pb2.RemoteWorkspaceStopResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
 class HarnessQuestionsStub:
     """The supervising Worker Host supplies the Attempt identity for this call.
     """

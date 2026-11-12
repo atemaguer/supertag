@@ -18,6 +18,7 @@ import {
   restorePortableCursorSessionState,
 } from "../portable-session-state.js";
 import { createCheckpoint, restoreCheckpoint } from "./checkpoint.js";
+import { createRemoteWorkspaceExecutor } from "./remote-workspace.js";
 import { createWorkspace, validateActions } from "./workspace.js";
 
 export interface CursorAdapterOptions {
@@ -128,7 +129,12 @@ export async function runAdapter(
   let outcome: CursorOutcome;
   try {
     cancellation.throwIfAborted();
-    validateActions(task.allowedActions, configuration.allowUnsandboxedCommands ?? false);
+    if ((task.attemptExecution?.remoteFileWorkspace ?? false) !== run.remoteWorkspace)
+      throw new Error("Cursor Workspace placement differs from the accepted Attempt");
+    validateActions(
+      task.allowedActions,
+      run.remoteWorkspace || (configuration.allowUnsandboxedCommands ?? false),
+    );
     const limits = task.executionLimits;
     if (
       run.resolvedSkills.length ||
@@ -155,11 +161,13 @@ export async function runAdapter(
       task.allowedActions,
       configuration.timeoutMs,
       configuration.runnerEntrypoint,
+      run.remoteWorkspace ? createRemoteWorkspaceExecutor(task.allowedActions, bridge) : undefined,
     );
     const { executor, home, nativeWorkspace, runtime, storeDirectory, workspace } = context;
+    const workspaceMode = run.remoteWorkspace ? "remote" : "local";
     try {
       phase = "checkpoint restoration";
-      const restored = restoreCheckpoint(run.checkpoint, task);
+      const restored = restoreCheckpoint(run.checkpoint, task, workspaceMode);
       if (restored)
         await restorePortableCursorSessionState(restored, storeDirectory, nativeWorkspace);
       else await mkdir(storeDirectory, { mode: 0o700 });
@@ -183,7 +191,9 @@ export async function runAdapter(
         const prompt = [
           CURSOR_WORKER_POLICY,
           safeText(task.instructions, secrets),
-          `The Task workspace is ${workspace}. Use the admitted workspace tools for files and commands.`,
+          run.remoteWorkspace
+            ? "Use paths relative to the Task workspace in the admitted file and command tools."
+            : `The Task workspace is ${workspace}. Use the admitted workspace tools for files and commands.`,
           ...(task.workspace
             ? ["SuperTag records changes after the Attempt. Do not push or change other branches."]
             : []),
@@ -266,7 +276,7 @@ export async function runAdapter(
             agentId,
             sensitive,
           );
-          checkpoint = createCheckpoint(task, portable);
+          checkpoint = createCheckpoint(task, portable, workspaceMode);
         } catch {
           await publish(
             "Cursor Session archive unavailable. The next Attempt can replay recorded history.",

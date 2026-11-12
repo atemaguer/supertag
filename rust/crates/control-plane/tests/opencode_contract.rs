@@ -323,6 +323,7 @@ async fn contract(url: &str) {
         model_ids: vec!["openai/fixture-model".into()],
         default_model: Some("openai/fixture-model".into()),
         allow_unsandboxed_commands: false,
+        remote_file_workspace: false,
     };
     let claim = store
         .claim_task_with_profile(

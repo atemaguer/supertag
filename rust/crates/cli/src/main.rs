@@ -207,6 +207,12 @@ enum Command {
         state_directory: PathBuf,
         #[command(flatten)]
         adapter: AdapterOptions,
+        /// Executable for a private E2B workspace provider used by Cursor.
+        #[arg(long)]
+        e2b_workspace_provider: Option<PathBuf>,
+        /// Argument to the E2B provider, such as the compiled helper entrypoint.
+        #[arg(long, requires = "e2b_workspace_provider", allow_hyphen_values = true)]
+        e2b_workspace_provider_arg: Vec<std::ffi::OsString>,
         /// Private host allowlist of Skill packages.
         #[arg(long)]
         skill_catalog: Option<PathBuf>,
@@ -554,6 +560,8 @@ async fn run(command: Command) -> Result<()> {
             gateway,
             state_directory,
             adapter,
+            e2b_workspace_provider,
+            e2b_workspace_provider_arg,
             skill_catalog,
             attempt_timeout_seconds,
             once,
@@ -569,8 +577,25 @@ async fn run(command: Command) -> Result<()> {
                 "this Worker Host's selected harness does not load Skills"
             );
             let provider_model = adapter.provider_model();
-            let execution_profile = adapter.execution_profile()?;
+            let mut execution_profile = adapter.execution_profile()?;
             let workspace = adapter.workspace_mapping();
+            let remote_provider =
+                e2b_workspace_provider.map(|executable| supertag_worker_host::ProviderConfig {
+                    executable,
+                    arguments: e2b_workspace_provider_arg,
+                    api_key: std::env::var("E2B_API_KEY").ok(),
+                    domain: std::env::var("E2B_DOMAIN").ok(),
+                    template: std::env::var("SUPERTAG_E2B_TEMPLATE").ok(),
+                });
+            if remote_provider.is_some() {
+                ensure!(
+                    harness == HarnessKind::Cursor
+                        && workspace.is_some()
+                        && !execution_profile.allow_unsandboxed_commands,
+                    "E2B workspace placement requires Cursor and a named Workspace without unsandboxed commands"
+                );
+                execution_profile.remote_file_workspace = true;
+            }
             let (adapter, adapter_args) = adapter.launch(attempt_timeout_seconds)?;
             let options = HostOptions {
                 gateway: network::endpoint(gateway, false).await?,
@@ -586,6 +611,7 @@ async fn run(command: Command) -> Result<()> {
                 wait_for_recovery,
                 once,
                 workspace,
+                remote_provider,
                 context_catalog: supertag_worker_host::context::ContextCatalog::load(
                     skill_catalog.as_deref(),
                 )?,

@@ -34,6 +34,7 @@ fn report(sequence: u64) -> ReportHostRequest {
             model_ids: vec!["codex-alpha".into(), "codex-beta".into()],
             default_model: Some("codex-alpha".into()),
             allow_unsandboxed_commands: false,
+            remote_file_workspace: false,
         }),
     }
 }

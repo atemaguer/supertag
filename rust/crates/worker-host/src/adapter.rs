@@ -3,6 +3,8 @@ mod limits;
 mod questions;
 mod review_artifacts;
 mod work_sessions;
+mod workspace;
+pub(crate) use workspace::RemoteWorkspace;
 mod workstreams;
 
 use std::{
@@ -64,6 +66,7 @@ struct Bridge {
     state: Arc<Mutex<RunState>>,
     attached: Arc<AtomicBool>,
     inputs: inputs::InputLane,
+    workspace: Option<workspace::RemoteWorkspace>,
 }
 
 #[derive(Default)]
@@ -149,6 +152,7 @@ impl Harness for Bridge {
             coordination: Some(capabilities),
             resolved_skills: self.resolved_skills.clone(),
             history,
+            remote_workspace: self.workspace.is_some(),
         }))
     }
 
@@ -350,10 +354,11 @@ impl Harness for Bridge {
 pub(crate) async fn execute(
     options: &HostOptions,
     assignment: Assignment,
-    (checkpoint, workspace, resolved_skills): (
+    (checkpoint, workspace, resolved_skills, remote_workspace): (
         Option<SessionCheckpoint>,
         Option<&Path>,
         Vec<ResolvedSkill>,
+        Option<workspace::RemoteWorkspace>,
     ),
     (host, inputs, coordination): (RegisteredHost, RegisteredInputs, CoordinationClients),
     host_token: &str,
@@ -378,6 +383,7 @@ pub(crate) async fn execute(
         state: Arc::default(),
         attached: Arc::default(),
         inputs: inputs::InputLane::new(inputs, valid_until, shutdown),
+        workspace: remote_workspace,
     };
     let stop_server = CancellationToken::new();
     let mut server = tokio::spawn(
@@ -391,6 +397,7 @@ pub(crate) async fn execute(
             .add_service(bridge.workstreams_service())
             .add_service(bridge.mailbox_service())
             .add_service(bridge.work_sessions_service())
+            .add_service(bridge.workspace_service())
             .serve_with_incoming_shutdown(
                 TcpListenerStream::new(listener),
                 stop_server.clone().cancelled_owned(),

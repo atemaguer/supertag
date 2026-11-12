@@ -35,11 +35,12 @@ export async function createWorkspace(
   actions: readonly string[],
   timeoutMs: number,
   runnerEntrypoint?: string,
+  remote?: CursorSplitExecutor,
 ) {
   const environment = process.env;
   const scratchPath = environment["SUPERTAG_ADAPTER_STATE_DIRECTORY"] ?? "";
   const workspacePath = environment["SUPERTAG_WORKSPACE_DIRECTORY"] ?? "";
-  if (!isAbsolute(scratchPath) || !isAbsolute(workspacePath))
+  if (!isAbsolute(scratchPath) || (!remote && !isAbsolute(workspacePath)))
     throw new Error("Cursor requires Worker Host-owned execution directories");
   const info = await lstat(scratchPath);
   if (
@@ -49,8 +50,9 @@ export async function createWorkspace(
   )
     throw new Error("Cursor state is not privately owned");
   const scratch = await realpath(scratchPath);
-  const workspace = await realpath(workspacePath);
-  if (!(await lstat(workspace)).isDirectory()) throw new Error("Cursor Workspace is missing");
+  const workspace = remote ? "." : await realpath(workspacePath);
+  if (!remote && !(await lstat(workspace)).isDirectory())
+    throw new Error("Cursor Workspace is missing");
 
   // Cursor's native SDK stays in an empty directory. All file and command access goes
   // through the Attempt's workspace tools, which never inherit the SDK's credentials.
@@ -69,7 +71,7 @@ export async function createWorkspace(
           runnerEntrypoint && spec.command === process.execPath
             ? { ...spec, args: [runnerEntrypoint] }
             : spec,
-        cwd: spec.cwd ?? workspace,
+        cwd: spec.cwd ?? (remote ? nativeWorkspace : workspace),
         environment: { PATH: "/usr/bin:/bin", HOME: commandHome, TMPDIR: join(scratch, "tmp") },
         ...(signal ? { signal } : {}),
         inheritProcessGroup: true,
@@ -79,6 +81,8 @@ export async function createWorkspace(
       });
     },
   };
+  if (remote)
+    return { home, nativeWorkspace, storeDirectory, workspace, runtime, executor: remote };
   const files = createWorkspaceToolBridge({
     environment: {
       rootDirectory: workspace,

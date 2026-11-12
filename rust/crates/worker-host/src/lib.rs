@@ -6,11 +6,14 @@ mod enrollment;
 mod guardian;
 mod journal;
 mod readiness;
+mod remote;
+mod remote_provider;
 mod workspaces;
 
 pub use credentials::{provider_environment, provider_environment_for, validate_opencode_model};
 pub use enrollment::enroll;
 pub use guardian::{ADAPTER_STATE_DIRECTORY, guard_adapter};
+pub use remote_provider::ProviderConfig;
 pub use workspaces::{WORKSPACE_DIRECTORY, WorkspaceMapping};
 
 use std::{ffi::OsString, path::PathBuf, sync::Arc, time::Duration};
@@ -23,8 +26,8 @@ use supertag_protocol::{
     v2::{
         Assignment, AttemptExecutionSelection, ClaimTaskRequest, CommitContextResolutionRequest,
         FinishTaskRequest, HarnessCompleteRequest, HarnessExecutionProfile, HarnessKind,
-        InspectAttemptRequest, RegisterHostRequest, ResolvedSkill, StartTaskRequest, Task,
-        TaskState, attempt_inputs_client::AttemptInputsClient,
+        HostRecord, InspectAttemptRequest, RegisterHostRequest, ResolvedSkill, StartTaskRequest,
+        Task, TaskState, attempt_inputs_client::AttemptInputsClient,
         attempt_mailbox_client::AttemptMailboxClient,
         attempt_work_sessions_client::AttemptWorkSessionsClient,
         attempt_workstreams_client::AttemptWorkstreamsClient, worker_host_client::WorkerHostClient,
@@ -54,6 +57,7 @@ pub struct HostOptions {
     pub wait_for_recovery: bool,
     pub once: bool,
     pub workspace: Option<WorkspaceMapping>,
+    pub remote_provider: Option<ProviderConfig>,
     pub context_catalog: context::ContextCatalog,
 }
 
@@ -118,6 +122,7 @@ impl Attempt {
             .as_ref()
             .and_then(|selection| selection.model.as_ref());
         Ok(execution.harness_kind == options.harness as i32
+            && execution.remote_file_workspace == options.execution_profile.remote_file_workspace
             && model.is_none_or(|model| options.execution_profile.model_ids.contains(model))
             && (!self.requires_unsandboxed_commands
                 || options.execution_profile.allow_unsandboxed_commands))
@@ -157,6 +162,14 @@ pub async fn run(
     );
     provider_environment_for(options.harness, options.provider_model.as_deref())?;
     ensure!(
+        options.execution_profile.remote_file_workspace == options.remote_provider.is_some()
+            && (options.remote_provider.is_none()
+                || (options.harness == HarnessKind::Cursor
+                    && options.workspace.is_some()
+                    && !options.execution_profile.allow_unsandboxed_commands)),
+        "invalid Worker Host remote Workspace profile"
+    );
+    ensure!(
         !matches!(
             options.harness,
             HarnessKind::Opencode | HarnessKind::OpenaiAgents | HarnessKind::Cursor
@@ -192,7 +205,7 @@ pub async fn run(
     let mut registration = WorkerHostClient::new(channel.clone())
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
-    let generation = loop {
+    let registration = loop {
         if shutdown.is_cancelled() {
             return Ok(());
         }
@@ -211,13 +224,13 @@ pub async fn run(
                     !host.revoked && host.generation > 0,
                     "Worker Host registration is inactive"
                 );
-                break host.generation;
+                break host;
             }
             Err(error) if retryable(&error) => wait_for_work(&shutdown).await,
             Err(error) => return Err(error.into()),
         }
     };
-    let headers = HostHeaders(generation.to_string().parse()?);
+    let headers = HostHeaders(registration.generation.to_string().parse()?);
     let inputs = AttemptInputsClient::with_interceptor(
         options.gateway.clone().connect_lazy(),
         headers.clone(),
@@ -319,7 +332,7 @@ pub async fn run(
                     &options,
                     &journal,
                     &workspaces,
-                    (&mut host, &inputs, &coordination, &transfers, &token),
+                    (&mut host, &inputs, &coordination, &transfers, &token, &registration),
                     attempt,
                     &shutdown,
                     || {
@@ -331,6 +344,7 @@ pub async fn run(
                 .await?;
             }
             Entry::Executing { attempt, prepared } => {
+                remote::ensure_stopped(&options, &journal, &attempt, &registration).await?;
                 match resolved(&mut host, &attempt, &token).await {
                     Ok(true) => journal.save(&Entry::Terminal { attempt, prepared })?,
                     Ok(false) if options.wait_for_recovery => {
@@ -360,9 +374,14 @@ pub async fn run(
                 waiting_approval_ids,
                 checkpoint,
                 workspace,
+                remote_tree,
             } => {
                 // This stage is recorded only after the adapter process group was reaped.
                 // Exact finalization can safely resume after a Host restart.
+                with_cleanup_authority(
+                    &mut host, &attempt, &token, &shutdown,
+                    remote::ensure_stopped(&options, &journal, &attempt, &registration),
+                ).await?;
                 let cancellation = shutdown.child_token();
                 let finalization = with_authority(
                     &mut host,
@@ -371,6 +390,10 @@ pub async fn run(
                     &shutdown,
                     &cancellation,
                     async {
+                        if let Some(tree) = &remote_tree {
+                            workspaces.restore_remote(&workspace, tree, &cancellation).await
+                                .map_err(|_| Status::invalid_argument("Remote Workspace output could not be restored safely"))?;
+                        }
                         workspaces
                             .finalize(&workspace, &result, succeeded, &cancellation)
                             .await
@@ -412,6 +435,10 @@ pub async fn run(
                 workspace,
                 prepared,
             } => {
+                with_cleanup_authority(
+                    &mut host, &attempt, &token, &shutdown,
+                    remote::ensure_stopped(&options, &journal, &attempt, &registration),
+                ).await?;
                 let prepared = prepared.or_else(|| {
                     workspace.as_ref().map(|pending| {
                         Box::new(workspaces::PreparedWorkspace {
@@ -674,12 +701,13 @@ async fn run_assignment(
         &CoordinationClients,
         &checkpoints::Transfers,
         &str,
+        &HostRecord,
     ),
     attempt: Attempt,
     shutdown: &CancellationToken,
     ready: impl FnOnce(),
 ) -> Result<()> {
-    let (host, inputs, coordination, transfers, token) = connection;
+    let (host, inputs, coordination, transfers, token, registration) = connection;
     // Starting is durable before requesting authority and never records a launch.
     // A lost start response can therefore be retried using this exact Attempt.
     let can_launch = attempt.can_launch(options)?;
@@ -854,7 +882,7 @@ async fn run_assignment(
             })
     })
     .await;
-    let (workspace, valid_until) = match prepared {
+    let (workspace, mut valid_until) = match prepared {
         Ok(prepared) => prepared,
         Err(error) if retryable(&error) && !shutdown.is_cancelled() => {
             wait_for_work(shutdown).await;
@@ -868,26 +896,75 @@ async fn run_assignment(
             );
         }
     };
-    let assignment = Assignment {
-        task: Some(task),
-        attempt_id: attempt.attempt_id.clone(),
-        lease_token: attempt.lease_token.clone(),
-    };
     journal.save(&Entry::Executing {
         attempt: attempt.clone(),
         prepared: workspace
             .as_ref()
             .map(|prepared| Box::new(prepared.clone())),
     })?;
+    let mut provider = if options.remote_provider.is_some() {
+        let workspace = workspace
+            .as_ref()
+            .context("E2B Attempt has no prepared Workspace")?;
+        let cancel = shutdown.child_token();
+        let prepared = with_authority(host, &attempt, token, shutdown, &cancel, async {
+            remote::prepare(
+                options,
+                journal,
+                workspaces,
+                (&attempt, workspace, &task),
+                registration,
+                &cancel,
+            )
+            .await
+            .map_err(|_| Status::failed_precondition("Remote Workspace could not be prepared"))
+        })
+        .await;
+        match prepared {
+            Ok((provider, expires)) => {
+                valid_until = expires;
+                Some(provider)
+            }
+            Err(_) => {
+                with_cleanup_authority(
+                    host,
+                    &attempt,
+                    token,
+                    shutdown,
+                    remote::ensure_stopped(options, journal, &attempt, registration),
+                )
+                .await?;
+                return save_finish(
+                    journal,
+                    attempt,
+                    adapter::failed("Remote Workspace could not be prepared"),
+                );
+            }
+        }
+    } else {
+        None
+    };
+    let remote_workspace = provider.as_ref().map(|provider| {
+        let (channel, token) = provider.workspace_connection();
+        adapter::RemoteWorkspace::new(channel, token)
+    });
+    let adapter_workspace = workspace
+        .as_ref()
+        .filter(|_| remote_workspace.is_none())
+        .map(|prepared| prepared.checkout.path.as_path());
+    let assignment = Assignment {
+        task: Some(task),
+        attempt_id: attempt.attempt_id.clone(),
+        lease_token: attempt.lease_token.clone(),
+    };
     let outcome = adapter::execute(
         options,
         assignment,
         (
             checkpoint,
-            workspace
-                .as_ref()
-                .map(|prepared| prepared.checkout.path.as_path()),
+            adapter_workspace,
             resolved_skills,
+            remote_workspace,
         ),
         (host.clone(), inputs.clone(), coordination.clone()),
         token,
@@ -900,25 +977,65 @@ async fn run_assignment(
             "Task {} Attempt {} needs recovery",
             attempt.task_id, attempt.attempt_id
         )
-    })?;
-    match workspace {
-        Some(workspace) => {
+    });
+    let saved = async {
+        let mut outcome = outcome?;
+        let remote_tree = if let Some(provider) = provider.as_ref().filter(|_| outcome.succeeded) {
+            let cancel = shutdown.child_token();
+            let captured = with_authority(host, &attempt, token, shutdown, &cancel, async {
+                provider
+                    .capture(
+                        &journal.remote_scratch().map_err(|_| {
+                            Status::internal("Remote Workspace state is unavailable")
+                        })?,
+                        &cancel,
+                    )
+                    .await
+                    .map_err(|_| {
+                        Status::failed_precondition("Remote Workspace output could not be captured")
+                    })
+            })
+            .await;
+            match captured {
+                Ok((tree, _)) => Some(tree),
+                Err(_) => {
+                    outcome =
+                        adapter::failed("Remote Workspace output could not be captured safely");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        if let Some(workspace) = workspace {
             let checkpoint = outcome
                 .checkpoint
                 .map(|checkpoint| journal.stage_checkpoint(checkpoint))
                 .transpose()?;
             journal.save(&Entry::Finalizing {
-                attempt,
+                attempt: attempt.clone(),
                 result: outcome.result,
                 succeeded: outcome.succeeded,
                 objective_signal: outcome.objective_signal,
                 waiting_approval_ids: outcome.waiting_approval_ids,
                 checkpoint,
                 workspace: Box::new(workspace),
+                remote_tree,
             })
+        } else {
+            save_finish(journal, attempt.clone(), outcome)
         }
-        None => save_finish(journal, attempt, outcome),
     }
+    .await;
+    if let Some(provider) = provider.as_mut() {
+        with_cleanup_authority(host, &attempt, token, shutdown, async {
+            let closed = provider.shutdown().await;
+            remote::ensure_stopped(options, journal, &attempt, registration).await?;
+            closed
+        })
+        .await?;
+    }
+    saved
 }
 
 async fn prepare_context(
@@ -1006,6 +1123,69 @@ fn save_finish(journal: &Journal, attempt: Attempt, outcome: HarnessCompleteRequ
     })
 }
 
+async fn renew_running_attempt(
+    host: &mut RegisteredHost,
+    attempt: &Attempt,
+    token: &str,
+) -> Result<Instant, Status> {
+    let sent = Instant::now();
+    let response = host
+        .renew_attempt(
+            request(attempt.inspect(), token)
+                .map_err(|_| Status::internal("invalid authority request"))?,
+        )
+        .await?
+        .into_inner();
+    let task = response
+        .task
+        .as_ref()
+        .ok_or_else(|| Status::data_loss("execution authority has no Task"))?;
+    ensure_attempt(task, attempt)
+        .map_err(|_| Status::data_loss("execution authority has mismatched identity"))?;
+    if task.state() != TaskState::Running {
+        return Err(Status::failed_precondition("execution authority ended"));
+    }
+    let until = sent
+        .checked_add(Duration::from_millis(response.valid_for_ms))
+        .ok_or_else(|| Status::data_loss("invalid authority duration"))?;
+    if until <= Instant::now() {
+        return Err(Status::failed_precondition("execution authority expired"));
+    }
+    Ok(until)
+}
+
+/// Cleanup continues after authority ends. Only renewal stops on cancellation.
+async fn with_cleanup_authority(
+    host: &mut RegisteredHost,
+    attempt: &Attempt,
+    token: &str,
+    shutdown: &CancellationToken,
+    cleanup: impl std::future::Future<Output = Result<()>>,
+) -> Result<()> {
+    let keep_lease = async {
+        let mut pulse = time::interval(Duration::from_secs(2));
+        pulse.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => break,
+                _ = pulse.tick() => {},
+            }
+            match renew_running_attempt(host, attempt, token).await {
+                Ok(_) => {}
+                Err(error) if retryable(&error) => {}
+                Err(_) => break,
+            }
+        }
+    };
+    tokio::pin!(cleanup);
+    tokio::select! {
+        biased;
+        result = &mut cleanup => result,
+        () = keep_lease => cleanup.await,
+    }
+}
+
 /// Keep the execution lease alive during repository preparation and transfer.
 /// The operation must observe `cancel` so native Git is reaped before returning.
 async fn with_authority<T>(
@@ -1016,37 +1196,7 @@ async fn with_authority<T>(
     cancel: &CancellationToken,
     operation: impl std::future::Future<Output = Result<T, Status>>,
 ) -> Result<(T, Instant), Status> {
-    let renew = |host: &mut RegisteredHost| {
-        let mut client = host.clone();
-        let inspection = attempt.inspect();
-        async move {
-            let sent = Instant::now();
-            let response = client
-                .renew_attempt(
-                    request(inspection, token)
-                        .map_err(|_| Status::internal("invalid authority request"))?,
-                )
-                .await?
-                .into_inner();
-            let task = response
-                .task
-                .as_ref()
-                .ok_or_else(|| Status::data_loss("execution authority has no Task"))?;
-            ensure_attempt(task, attempt)
-                .map_err(|_| Status::data_loss("execution authority has mismatched identity"))?;
-            if task.state() != TaskState::Running {
-                return Err(Status::failed_precondition("execution authority ended"));
-            }
-            let until = sent
-                .checked_add(Duration::from_millis(response.valid_for_ms))
-                .ok_or_else(|| Status::data_loss("invalid authority duration"))?;
-            if until <= Instant::now() {
-                return Err(Status::failed_precondition("execution authority expired"));
-            }
-            Ok(until)
-        }
-    };
-    let mut valid_until = renew(host).await?;
+    let mut valid_until = renew_running_attempt(host, attempt, token).await?;
     tokio::pin!(operation);
     let mut interval = time::interval(Duration::from_secs(2));
     interval.tick().await;
@@ -1057,7 +1207,7 @@ async fn with_authority<T>(
             _ = time::sleep_until(valid_until) => break Status::failed_precondition("execution authority expired"),
             result = &mut operation => return result.map(|result| (result, valid_until)),
             _ = interval.tick() => {
-                match time::timeout_at(valid_until, renew(host)).await {
+                match time::timeout_at(valid_until, renew_running_attempt(host, attempt, token)).await {
                     Ok(Ok(until)) => valid_until = until,
                     Ok(Err(error)) if retryable(&error) => {},
                     Ok(Err(error)) => break error,

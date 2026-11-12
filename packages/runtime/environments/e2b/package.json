@@ -18,6 +18,9 @@
     "typecheck": "tsc --build --pretty false"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "2.15.0",
+    "@connectrpc/connect": "2.2.0",
+    "@connectrpc/connect-node": "2.2.0",
     "@supertag/worker-sdk": "workspace:*",
     "e2b": "2.38.3"
   }

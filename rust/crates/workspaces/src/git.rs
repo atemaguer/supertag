@@ -251,6 +251,38 @@ impl Repository {
                 .await?;
             paths::validate_link(&entry.path, &target)?;
         }
+        let checkout = self.checkout_metadata(directory, start, cancel).await?;
+        checkout
+            .command(&["checkout-index", "--all", "--force"], &[], &[], cancel)
+            .await?;
+        // Verify bytes and modes after checkout rather than trusting config, name
+        // normalization, or a successful Git exit to imply the exact pinned tree.
+        let actual = paths::scan(directory, cancel)?;
+        ensure!(
+            actual.len() == entries.len(),
+            "materialized checkout differs from its pinned tree"
+        );
+        for (path, expected) in entries {
+            check_cancelled(cancel)?;
+            let actual = paths::read_checkout_file(directory, path)?;
+            ensure!(
+                actual.mode == expected.mode
+                    && blob_oid(&actual.bytes, self.oid_length) == expected.oid,
+                "materialized file differs from its pinned tree: {path}"
+            );
+        }
+        check_cancelled(cancel)?;
+        Ok(())
+    }
+
+    /// Recreate minimal, trusted Git metadata without reading checkout metadata
+    /// or modifying its file tree. Used when installing a remote tree snapshot.
+    pub(crate) async fn checkout_metadata(
+        &self,
+        directory: &Path,
+        start: &str,
+        cancel: &CancellationToken,
+    ) -> Result<Self> {
         paths::create_private_root(directory)?;
         let git_dir = directory.join(".git");
         initialize(&git_dir, self.oid_length, false)?;
@@ -277,27 +309,8 @@ impl Repository {
         checkout
             .command(&["read-tree", "--reset", start], &[], &[], cancel)
             .await?;
-        checkout
-            .command(&["checkout-index", "--all", "--force"], &[], &[], cancel)
-            .await?;
-        // Verify bytes and modes after checkout rather than trusting config, name
-        // normalization, or a successful Git exit to imply the exact pinned tree.
-        let actual = paths::scan(directory, cancel)?;
-        ensure!(
-            actual.len() == entries.len(),
-            "materialized checkout differs from its pinned tree"
-        );
-        for (path, expected) in entries {
-            check_cancelled(cancel)?;
-            let actual = paths::read_checkout_file(directory, path)?;
-            ensure!(
-                actual.mode == expected.mode
-                    && blob_oid(&actual.bytes, self.oid_length) == expected.oid,
-                "materialized file differs from its pinned tree: {path}"
-            );
-        }
         check_cancelled(cancel)?;
-        Ok(())
+        Ok(checkout)
     }
 
     pub(crate) async fn ignored(

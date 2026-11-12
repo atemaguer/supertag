@@ -160,6 +160,7 @@ impl AdapterOptions {
             model_ids,
             default_model,
             allow_unsandboxed_commands: self.allow_unsandboxed_commands,
+            remote_file_workspace: false,
         })
     }
     pub fn provider_environment(&self) -> Result<&'static [&'static str]> {

@@ -92,6 +92,13 @@ class HostReadinessReason(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     HOST_READINESS_REASON_RECOVERY_REQUIRED: _ClassVar[HostReadinessReason]
     HOST_READINESS_REASON_STOPPING: _ClassVar[HostReadinessReason]
 
+class WorkspaceGrepMode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    WORKSPACE_GREP_MODE_UNSPECIFIED: _ClassVar[WorkspaceGrepMode]
+    WORKSPACE_GREP_MODE_CONTENT: _ClassVar[WorkspaceGrepMode]
+    WORKSPACE_GREP_MODE_FILES_WITH_MATCHES: _ClassVar[WorkspaceGrepMode]
+    WORKSPACE_GREP_MODE_COUNT: _ClassVar[WorkspaceGrepMode]
+
 class LiveInputState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     __slots__ = ()
     LIVE_INPUT_STATE_UNSPECIFIED: _ClassVar[LiveInputState]
@@ -272,6 +279,10 @@ HOST_READINESS_REASON_UNSPECIFIED: HostReadinessReason
 HOST_READINESS_REASON_STARTING: HostReadinessReason
 HOST_READINESS_REASON_RECOVERY_REQUIRED: HostReadinessReason
 HOST_READINESS_REASON_STOPPING: HostReadinessReason
+WORKSPACE_GREP_MODE_UNSPECIFIED: WorkspaceGrepMode
+WORKSPACE_GREP_MODE_CONTENT: WorkspaceGrepMode
+WORKSPACE_GREP_MODE_FILES_WITH_MATCHES: WorkspaceGrepMode
+WORKSPACE_GREP_MODE_COUNT: WorkspaceGrepMode
 LIVE_INPUT_STATE_UNSPECIFIED: LiveInputState
 LIVE_INPUT_STATE_PENDING: LiveInputState
 LIVE_INPUT_STATE_DISPATCHING: LiveInputState
@@ -1050,6 +1061,182 @@ class SetHostDrainingRequest(_message.Message):
     draining: bool
     def __init__(self, host_id: _Optional[str] = ..., draining: _Optional[bool] = ...) -> None: ...
 
+class HarnessWorkspaceRequest(_message.Message):
+    __slots__ = ("read", "write", "edit", "glob", "grep", "list", "command")
+    READ_FIELD_NUMBER: _ClassVar[int]
+    WRITE_FIELD_NUMBER: _ClassVar[int]
+    EDIT_FIELD_NUMBER: _ClassVar[int]
+    GLOB_FIELD_NUMBER: _ClassVar[int]
+    GREP_FIELD_NUMBER: _ClassVar[int]
+    LIST_FIELD_NUMBER: _ClassVar[int]
+    COMMAND_FIELD_NUMBER: _ClassVar[int]
+    read: WorkspaceRead
+    write: WorkspaceWrite
+    edit: WorkspaceEdit
+    glob: WorkspaceGlob
+    grep: WorkspaceGrep
+    list: WorkspaceList
+    command: WorkspaceCommand
+    def __init__(self, read: _Optional[_Union[WorkspaceRead, _Mapping]] = ..., write: _Optional[_Union[WorkspaceWrite, _Mapping]] = ..., edit: _Optional[_Union[WorkspaceEdit, _Mapping]] = ..., glob: _Optional[_Union[WorkspaceGlob, _Mapping]] = ..., grep: _Optional[_Union[WorkspaceGrep, _Mapping]] = ..., list: _Optional[_Union[WorkspaceList, _Mapping]] = ..., command: _Optional[_Union[WorkspaceCommand, _Mapping]] = ...) -> None: ...
+
+class WorkspaceRead(_message.Message):
+    __slots__ = ("path", "offset", "limit")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    OFFSET_FIELD_NUMBER: _ClassVar[int]
+    LIMIT_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    offset: int
+    limit: int
+    def __init__(self, path: _Optional[str] = ..., offset: _Optional[int] = ..., limit: _Optional[int] = ...) -> None: ...
+
+class WorkspaceWrite(_message.Message):
+    __slots__ = ("path", "content")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    CONTENT_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    content: str
+    def __init__(self, path: _Optional[str] = ..., content: _Optional[str] = ...) -> None: ...
+
+class WorkspaceEdit(_message.Message):
+    __slots__ = ("path", "old_text", "new_text", "replace_all")
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    OLD_TEXT_FIELD_NUMBER: _ClassVar[int]
+    NEW_TEXT_FIELD_NUMBER: _ClassVar[int]
+    REPLACE_ALL_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    old_text: str
+    new_text: str
+    replace_all: bool
+    def __init__(self, path: _Optional[str] = ..., old_text: _Optional[str] = ..., new_text: _Optional[str] = ..., replace_all: _Optional[bool] = ...) -> None: ...
+
+class WorkspaceGlob(_message.Message):
+    __slots__ = ("pattern", "path")
+    PATTERN_FIELD_NUMBER: _ClassVar[int]
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    pattern: str
+    path: str
+    def __init__(self, pattern: _Optional[str] = ..., path: _Optional[str] = ...) -> None: ...
+
+class WorkspaceGrep(_message.Message):
+    __slots__ = ("pattern", "path", "glob", "mode", "head_limit", "offset")
+    PATTERN_FIELD_NUMBER: _ClassVar[int]
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    GLOB_FIELD_NUMBER: _ClassVar[int]
+    MODE_FIELD_NUMBER: _ClassVar[int]
+    HEAD_LIMIT_FIELD_NUMBER: _ClassVar[int]
+    OFFSET_FIELD_NUMBER: _ClassVar[int]
+    pattern: str
+    path: str
+    glob: str
+    mode: WorkspaceGrepMode
+    head_limit: int
+    offset: int
+    def __init__(self, pattern: _Optional[str] = ..., path: _Optional[str] = ..., glob: _Optional[str] = ..., mode: _Optional[_Union[WorkspaceGrepMode, str]] = ..., head_limit: _Optional[int] = ..., offset: _Optional[int] = ...) -> None: ...
+
+class WorkspaceList(_message.Message):
+    __slots__ = ("path",)
+    PATH_FIELD_NUMBER: _ClassVar[int]
+    path: str
+    def __init__(self, path: _Optional[str] = ...) -> None: ...
+
+class WorkspaceCommand(_message.Message):
+    __slots__ = ("command", "timeout_ms")
+    COMMAND_FIELD_NUMBER: _ClassVar[int]
+    TIMEOUT_MS_FIELD_NUMBER: _ClassVar[int]
+    command: str
+    timeout_ms: int
+    def __init__(self, command: _Optional[str] = ..., timeout_ms: _Optional[int] = ...) -> None: ...
+
+class HarnessWorkspaceResult(_message.Message):
+    __slots__ = ("text", "is_error")
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    IS_ERROR_FIELD_NUMBER: _ClassVar[int]
+    text: str
+    is_error: bool
+    def __init__(self, text: _Optional[str] = ..., is_error: _Optional[bool] = ...) -> None: ...
+
+class RemoteWorkspaceProviderBootstrap(_message.Message):
+    __slots__ = ("token",)
+    TOKEN_FIELD_NUMBER: _ClassVar[int]
+    token: str
+    def __init__(self, token: _Optional[str] = ...) -> None: ...
+
+class RemoteWorkspaceOwner(_message.Message):
+    __slots__ = ("host_id", "host_generation", "task_id", "attempt_id", "allocation_id")
+    HOST_ID_FIELD_NUMBER: _ClassVar[int]
+    HOST_GENERATION_FIELD_NUMBER: _ClassVar[int]
+    TASK_ID_FIELD_NUMBER: _ClassVar[int]
+    ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    ALLOCATION_ID_FIELD_NUMBER: _ClassVar[int]
+    host_id: str
+    host_generation: int
+    task_id: str
+    attempt_id: str
+    allocation_id: str
+    def __init__(self, host_id: _Optional[str] = ..., host_generation: _Optional[int] = ..., task_id: _Optional[str] = ..., attempt_id: _Optional[str] = ..., allocation_id: _Optional[str] = ...) -> None: ...
+
+class RemoteWorkspaceAllocateRequest(_message.Message):
+    __slots__ = ("owner", "timeout_ms", "allowed_actions")
+    OWNER_FIELD_NUMBER: _ClassVar[int]
+    TIMEOUT_MS_FIELD_NUMBER: _ClassVar[int]
+    ALLOWED_ACTIONS_FIELD_NUMBER: _ClassVar[int]
+    owner: RemoteWorkspaceOwner
+    timeout_ms: int
+    allowed_actions: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, owner: _Optional[_Union[RemoteWorkspaceOwner, _Mapping]] = ..., timeout_ms: _Optional[int] = ..., allowed_actions: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class RemoteWorkspaceAllocation(_message.Message):
+    __slots__ = ("sandbox_id",)
+    SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
+    sandbox_id: str
+    def __init__(self, sandbox_id: _Optional[str] = ...) -> None: ...
+
+class RemoteWorkspaceStageHeader(_message.Message):
+    __slots__ = ("start_commit", "bundle")
+    START_COMMIT_FIELD_NUMBER: _ClassVar[int]
+    BUNDLE_FIELD_NUMBER: _ClassVar[int]
+    start_commit: str
+    bundle: BlobReference
+    def __init__(self, start_commit: _Optional[str] = ..., bundle: _Optional[_Union[BlobReference, _Mapping]] = ...) -> None: ...
+
+class RemoteWorkspaceStageChunk(_message.Message):
+    __slots__ = ("header", "payload")
+    HEADER_FIELD_NUMBER: _ClassVar[int]
+    PAYLOAD_FIELD_NUMBER: _ClassVar[int]
+    header: RemoteWorkspaceStageHeader
+    payload: bytes
+    def __init__(self, header: _Optional[_Union[RemoteWorkspaceStageHeader, _Mapping]] = ..., payload: _Optional[bytes] = ...) -> None: ...
+
+class RemoteWorkspaceStageResponse(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class RemoteWorkspaceCaptureRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
+
+class RemoteWorkspaceCaptureChunk(_message.Message):
+    __slots__ = ("tree", "payload")
+    TREE_FIELD_NUMBER: _ClassVar[int]
+    PAYLOAD_FIELD_NUMBER: _ClassVar[int]
+    tree: BlobReference
+    payload: bytes
+    def __init__(self, tree: _Optional[_Union[BlobReference, _Mapping]] = ..., payload: _Optional[bytes] = ...) -> None: ...
+
+class RemoteWorkspaceStopRequest(_message.Message):
+    __slots__ = ("owner", "sandbox_id")
+    OWNER_FIELD_NUMBER: _ClassVar[int]
+    SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
+    owner: RemoteWorkspaceOwner
+    sandbox_id: str
+    def __init__(self, owner: _Optional[_Union[RemoteWorkspaceOwner, _Mapping]] = ..., sandbox_id: _Optional[str] = ...) -> None: ...
+
+class RemoteWorkspaceStopResponse(_message.Message):
+    __slots__ = ("stopped_sandbox_id",)
+    STOPPED_SANDBOX_ID_FIELD_NUMBER: _ClassVar[int]
+    stopped_sandbox_id: str
+    def __init__(self, stopped_sandbox_id: _Optional[str] = ...) -> None: ...
+
 class HarnessAskQuestionRequest(_message.Message):
     __slots__ = ("operation_id", "text")
     OPERATION_ID_FIELD_NUMBER: _ClassVar[int]
@@ -1539,26 +1726,30 @@ class ExecutionSelection(_message.Message):
     def __init__(self, model: _Optional[str] = ..., effort: _Optional[str] = ...) -> None: ...
 
 class HarnessExecutionProfile(_message.Message):
-    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands")
+    __slots__ = ("model_ids", "default_model", "allow_unsandboxed_commands", "remote_file_workspace")
     MODEL_IDS_FIELD_NUMBER: _ClassVar[int]
     DEFAULT_MODEL_FIELD_NUMBER: _ClassVar[int]
     ALLOW_UNSANDBOXED_COMMANDS_FIELD_NUMBER: _ClassVar[int]
+    REMOTE_FILE_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     model_ids: _containers.RepeatedScalarFieldContainer[str]
     default_model: str
     allow_unsandboxed_commands: bool
-    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ...) -> None: ...
+    remote_file_workspace: bool
+    def __init__(self, model_ids: _Optional[_Iterable[str]] = ..., default_model: _Optional[str] = ..., allow_unsandboxed_commands: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ...) -> None: ...
 
 class AttemptExecutionSelection(_message.Message):
-    __slots__ = ("selection", "model_source", "harness_kind", "effort_applied")
+    __slots__ = ("selection", "model_source", "harness_kind", "effort_applied", "remote_file_workspace")
     SELECTION_FIELD_NUMBER: _ClassVar[int]
     MODEL_SOURCE_FIELD_NUMBER: _ClassVar[int]
     HARNESS_KIND_FIELD_NUMBER: _ClassVar[int]
     EFFORT_APPLIED_FIELD_NUMBER: _ClassVar[int]
+    REMOTE_FILE_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     selection: ExecutionSelection
     model_source: ModelSource
     harness_kind: HarnessKind
     effort_applied: bool
-    def __init__(self, selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., model_source: _Optional[_Union[ModelSource, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., effort_applied: _Optional[bool] = ...) -> None: ...
+    remote_file_workspace: bool
+    def __init__(self, selection: _Optional[_Union[ExecutionSelection, _Mapping]] = ..., model_source: _Optional[_Union[ModelSource, str]] = ..., harness_kind: _Optional[_Union[HarnessKind, str]] = ..., effort_applied: _Optional[bool] = ..., remote_file_workspace: _Optional[bool] = ...) -> None: ...
 
 class GetTaskRequest(_message.Message):
     __slots__ = ("task_id",)
@@ -1839,7 +2030,7 @@ class AttemptHistory(_message.Message):
     def __init__(self, entries: _Optional[_Iterable[_Union[AttemptHistoryEntry, _Mapping]]] = ...) -> None: ...
 
 class HarnessRun(_message.Message):
-    __slots__ = ("task", "attempt_id", "checkpoint", "may_ask_objective_question", "coordination", "resolved_skills", "history")
+    __slots__ = ("task", "attempt_id", "checkpoint", "may_ask_objective_question", "coordination", "resolved_skills", "history", "remote_workspace")
     TASK_FIELD_NUMBER: _ClassVar[int]
     ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
     CHECKPOINT_FIELD_NUMBER: _ClassVar[int]
@@ -1847,6 +2038,7 @@ class HarnessRun(_message.Message):
     COORDINATION_FIELD_NUMBER: _ClassVar[int]
     RESOLVED_SKILLS_FIELD_NUMBER: _ClassVar[int]
     HISTORY_FIELD_NUMBER: _ClassVar[int]
+    REMOTE_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     task: Task
     attempt_id: str
     checkpoint: SessionCheckpoint
@@ -1854,7 +2046,8 @@ class HarnessRun(_message.Message):
     coordination: AttemptCapabilities
     resolved_skills: _containers.RepeatedCompositeFieldContainer[ResolvedSkill]
     history: _containers.RepeatedCompositeFieldContainer[AttemptHistoryEntry]
-    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., checkpoint: _Optional[_Union[SessionCheckpoint, _Mapping]] = ..., may_ask_objective_question: _Optional[bool] = ..., coordination: _Optional[_Union[AttemptCapabilities, _Mapping]] = ..., resolved_skills: _Optional[_Iterable[_Union[ResolvedSkill, _Mapping]]] = ..., history: _Optional[_Iterable[_Union[AttemptHistoryEntry, _Mapping]]] = ...) -> None: ...
+    remote_workspace: bool
+    def __init__(self, task: _Optional[_Union[Task, _Mapping]] = ..., attempt_id: _Optional[str] = ..., checkpoint: _Optional[_Union[SessionCheckpoint, _Mapping]] = ..., may_ask_objective_question: _Optional[bool] = ..., coordination: _Optional[_Union[AttemptCapabilities, _Mapping]] = ..., resolved_skills: _Optional[_Iterable[_Union[ResolvedSkill, _Mapping]]] = ..., history: _Optional[_Iterable[_Union[AttemptHistoryEntry, _Mapping]]] = ..., remote_workspace: _Optional[bool] = ...) -> None: ...
 
 class ContextContract(_message.Message):
     __slots__ = ("type", "version")

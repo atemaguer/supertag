@@ -16,7 +16,8 @@ use supertag_protocol::{
     valid_workspace_id, validate_workspace_delivery,
 };
 use supertag_workspaces::{
-    Checkout, Delivery, FinalizeRequest, Outcome, PrepareRequest, Workspace, WorkspaceConfig,
+    Checkout, Delivery, FinalizeRequest, Outcome, PrepareRequest, PreparedExport, TransferArtifact,
+    Workspace, WorkspaceConfig,
 };
 use tempfile::NamedTempFile;
 use tokio_util::sync::CancellationToken;
@@ -190,6 +191,27 @@ impl Workspaces {
             delivery,
             uploaded: false,
         })
+    }
+
+    pub async fn export_remote(
+        &self,
+        prepared: &PreparedWorkspace,
+        cancel: &CancellationToken,
+    ) -> Result<PreparedExport> {
+        self.open(&prepared.workspace_id, &prepared.checkout.base_commit)?
+            .export_prepared(&prepared.checkout, cancel)
+            .await
+    }
+
+    pub async fn restore_remote(
+        &self,
+        prepared: &PreparedWorkspace,
+        tree: &TransferArtifact,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        self.open(&prepared.workspace_id, &prepared.checkout.base_commit)?
+            .restore_tree(&prepared.checkout, tree, cancel)
+            .await
     }
 
     pub fn verify(&self, pending: &PendingWorkspace) -> Result<WorkspaceDeliveryReference> {
@@ -448,6 +470,7 @@ mod tests {
                 workspace_id: "project".into(),
                 checkout,
             }),
+            remote_tree: None,
         })?;
         drop(journal);
         drop(workspaces);
@@ -461,6 +484,7 @@ mod tests {
             waiting_approval_ids,
             checkpoint,
             workspace,
+            ..
         }) = journal.load()?
         else {
             anyhow::bail!("missing finalization intent")

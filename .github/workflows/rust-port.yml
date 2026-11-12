@@ -94,6 +94,7 @@ jobs:
           pnpm --filter @supertag/worker-claude-code build
           pnpm --filter @supertag/worker-opencode build
           pnpm --filter @supertag/worker-cursor build
+          pnpm --filter @supertag/worker-environment-e2b build
           sh apps/tui/build.sh
           printf 'SUPERTAG_RUST_TEST_NODE=%s\n' "$(command -v node)" >> "$GITHUB_ENV"
           printf 'SUPERTAG_RUST_TEST_AGENTS_PYTHON=%s\n' "$RUNNER_TEMP/supertag-python-runtime/bin/python" >> "$GITHUB_ENV"

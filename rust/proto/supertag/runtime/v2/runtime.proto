@@ -670,6 +670,141 @@ service Harness {
   rpc Complete(HarnessCompleteRequest) returns (HarnessCompleteResponse);
 }
 
+// The supervising Worker Host supplies the Attempt and its remote Workspace.
+// An adapter cannot select the sandbox, working directory, or environment.
+service HarnessWorkspace {
+  rpc Execute(HarnessWorkspaceRequest) returns (HarnessWorkspaceResult);
+}
+
+message HarnessWorkspaceRequest {
+  oneof operation {
+    WorkspaceRead read = 1;
+    WorkspaceWrite write = 2;
+    WorkspaceEdit edit = 3;
+    WorkspaceGlob glob = 4;
+    WorkspaceGrep grep = 5;
+    WorkspaceList list = 6;
+    WorkspaceCommand command = 7;
+  }
+}
+
+message WorkspaceRead {
+  string path = 1;
+  optional uint32 offset = 2;
+  optional uint32 limit = 3;
+}
+
+message WorkspaceWrite {
+  string path = 1;
+  string content = 2;
+}
+
+message WorkspaceEdit {
+  string path = 1;
+  string old_text = 2;
+  string new_text = 3;
+  bool replace_all = 4;
+}
+
+message WorkspaceGlob {
+  string pattern = 1;
+  optional string path = 2;
+}
+
+enum WorkspaceGrepMode {
+  WORKSPACE_GREP_MODE_UNSPECIFIED = 0;
+  WORKSPACE_GREP_MODE_CONTENT = 1;
+  WORKSPACE_GREP_MODE_FILES_WITH_MATCHES = 2;
+  WORKSPACE_GREP_MODE_COUNT = 3;
+}
+
+message WorkspaceGrep {
+  string pattern = 1;
+  optional string path = 2;
+  optional string glob = 3;
+  WorkspaceGrepMode mode = 4;
+  optional uint32 head_limit = 5;
+  optional uint32 offset = 6;
+}
+
+message WorkspaceList {
+  optional string path = 1;
+}
+
+message WorkspaceCommand {
+  string command = 1;
+  optional uint32 timeout_ms = 2;
+}
+
+message HarnessWorkspaceResult {
+  string text = 1;
+  bool is_error = 2;
+}
+
+// Private to a Worker Host and its provider helper. The Harness never receives
+// this service's credentials or sandbox allocation identifiers.
+service RemoteWorkspaceProvider {
+  rpc Allocate(RemoteWorkspaceAllocateRequest) returns (RemoteWorkspaceAllocation);
+  rpc Stage(stream RemoteWorkspaceStageChunk) returns (RemoteWorkspaceStageResponse);
+  rpc Capture(RemoteWorkspaceCaptureRequest) returns (stream RemoteWorkspaceCaptureChunk);
+  rpc Stop(RemoteWorkspaceStopRequest) returns (RemoteWorkspaceStopResponse);
+}
+
+message RemoteWorkspaceProviderBootstrap {
+  string token = 1;
+}
+
+message RemoteWorkspaceOwner {
+  string host_id = 1;
+  uint64 host_generation = 2;
+  string task_id = 3;
+  string attempt_id = 4;
+  string allocation_id = 5;
+}
+
+message RemoteWorkspaceAllocateRequest {
+  RemoteWorkspaceOwner owner = 1;
+  uint32 timeout_ms = 2;
+  repeated string allowed_actions = 3;
+}
+
+message RemoteWorkspaceAllocation {
+  string sandbox_id = 1;
+}
+
+message RemoteWorkspaceStageHeader {
+  string start_commit = 1;
+  BlobReference bundle = 2;
+}
+
+message RemoteWorkspaceStageChunk {
+  oneof part {
+    RemoteWorkspaceStageHeader header = 1;
+    bytes payload = 2;
+  }
+}
+
+message RemoteWorkspaceStageResponse {}
+
+message RemoteWorkspaceCaptureRequest {}
+
+message RemoteWorkspaceCaptureChunk {
+  oneof part {
+    BlobReference tree = 1;
+    bytes payload = 2;
+  }
+}
+
+message RemoteWorkspaceStopRequest {
+  RemoteWorkspaceOwner owner = 1;
+  optional string sandbox_id = 2;
+}
+
+// A sandbox ID is present only after a definitive provider absence check.
+message RemoteWorkspaceStopResponse {
+  optional string stopped_sandbox_id = 1;
+}
+
 // The supervising Worker Host supplies the Attempt identity for this call.
 service HarnessQuestions {
   rpc AskQuestion(HarnessAskQuestionRequest) returns (ObjectiveQuestion);
@@ -1035,6 +1170,7 @@ message HarnessExecutionProfile {
   repeated string model_ids = 1;
   optional string default_model = 2;
   bool allow_unsandboxed_commands = 3;
+  bool remote_file_workspace = 4;
 }
 
 enum ModelSource {
@@ -1049,6 +1185,7 @@ message AttemptExecutionSelection {
   ModelSource model_source = 2;
   HarnessKind harness_kind = 3;
   optional bool effort_applied = 4;
+  bool remote_file_workspace = 5;
 }
 
 message GetTaskRequest {
@@ -1237,6 +1374,7 @@ message HarnessRun {
   repeated ResolvedSkill resolved_skills = 6;
   // Prior turns from the same Session, supplied as untrusted evidence to fresh native runs.
   repeated AttemptHistoryEntry history = 7;
+  bool remote_workspace = 8;
 }
 
 message ContextContract {
